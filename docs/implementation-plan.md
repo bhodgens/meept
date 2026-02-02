@@ -322,11 +322,23 @@ APScheduler integration with fallback scheduler, job definitions, DAG pipeline e
 **Verify**: Memory consolidation runs on schedule. Calendar events listed/created via agent. Pipeline DAG executes steps in dependency order.
 
 ### Phase 7: Plugin System + MCP
-Plugin loading from disk, MCP server management with sanitized tool output.
+Plugin loading from disk, MCP server management with sanitized tool output. Full remote MCP server support.
 
-**Files**: tools/{mcp_manager,mcp_client}.py, plugins/example_plugin/{meept.plugin.json,__init__}.py, config/mcp_servers.json
+**Transports**: Local (stdio), Remote Streamable HTTP (SDK), Remote raw HTTP (no SDK fallback), WebSocket (SDK).
 
-**Verify**: Example plugin loads, tool appears in agent's available tools. MCP server starts and tools work.
+**OAuth 2.1**: SDK's `OAuthClientProvider` with `FileTokenStorage` at `~/.meept/mcp-auth/` (0600 permissions). Supports authorization code + PKCE and client credentials (M2M) flows.
+
+**Auto-reconnection**: Exponential backoff with jitter (1s initial, 30s max, 5 retries). Triggered by SSE listener disconnect (raw mode) or connection errors.
+
+**Server-initiated requests**: GET SSE stream in raw mode (background listener task); SDK handles internally for streamable HTTP and WebSocket.
+
+**Config**: opencode convention with `oauth` field (dict for OAuth config, `false` to disable, absent for default). `headers` for static bearer auth.
+
+**Dependencies**: `httpx-sse>=0.4` (core, raw SSE parsing), `websockets>=16.0` (optional with `mcp`).
+
+**Files**: tools/{mcp_manager,mcp_client,mcp_auth}.py, plugins/example_plugin/{meept.plugin.json,__init__}.py, config/mcp_servers.json
+
+**Verify**: Example plugin loads, tool appears in agent's available tools. Local MCP server starts and tools work. Remote HTTP server connects and discovers tools. OAuth flow triggers and tokens persist. WebSocket server connects. Auto-reconnect fires on disconnect. Raw HTTP fallback works without SDK.
 
 ### Phase 8: Telegram + Web Interface
 Telegram bot (creator-only), FastAPI web UI with OAuth/JWT.

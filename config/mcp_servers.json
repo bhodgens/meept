@@ -1,5 +1,48 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "_comment": "MCP server definitions. Disabled by default. Enable in meept.toml [mcp] section. Format follows opencode convention.",
-  "mcp": {}
+  "mcp": {
+    "_example_local": {
+      "_comment": "Local server via subprocess",
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "environment": {"GITHUB_TOKEN": "..."},
+      "enabled": false
+    },
+    "_example_remote": {
+      "_comment": "Remote server with static auth",
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {"Authorization": "Bearer YOUR_TOKEN"},
+      "timeout": 30000,
+      "enabled": false
+    },
+    "_example_remote_oauth": {
+      "_comment": "Remote server with OAuth 2.1 (requires mcp SDK)",
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "oauth": {
+        "client_name": "meept",
+        "scope": "tools:read tools:execute"
+      },
+      "enabled": false
+    },
+    "_example_remote_m2m": {
+      "_comment": "Remote server with client credentials (M2M)",
+      "type": "remote",
+      "url": "https://mcp.example.com/mcp",
+      "oauth": {
+        "grant_type": "client_credentials",
+        "client_id": "...",
+        "client_secret": "..."
+      },
+      "enabled": false
+    },
+    "_example_websocket": {
+      "_comment": "WebSocket server (requires mcp SDK)",
+      "type": "remote",
+      "url": "wss://mcp.example.com/ws",
+      "enabled": false
+    }
+  }
 }
