@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>meept</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Status bar -->
+    <header id="status-bar">
+      <div id="status-indicator">
+        <span id="status-dot"></span>
+        <span id="status-text">Checking...</span>
+      </div>
+      <div id="daemon-info"></div>
+    </header>
+
+    <!-- Message history -->
+    <main id="messages">
+      <div id="messages-inner">
+        <div class="system-message">
+          Welcome to meept. Type a message below to chat with the daemon.
+        </div>
+      </div>
+    </main>
+
+    <!-- Chat input -->
+    <footer id="chat-bar">
+      <form id="chat-form">
+        <input
+          type="text"
+          id="chat-input"
+          placeholder="Send a message..."
+          autocomplete="off"
+          autofocus
+        />
+        <button type="submit" id="send-btn" title="Send">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1 8L14 1L10 8L14 15L1 8Z" fill="currentColor"/>
+          </svg>
+        </button>
+      </form>
+    </footer>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>

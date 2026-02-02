@@ -1,0 +1,14 @@
+[Unit]
+Description=Meept Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={{PYTHON}} -m meept
+WorkingDirectory={{MEEPT_DIR}}
+Restart=on-failure
+RestartSec=5
+Environment=HOME=%h
+
+[Install]
+WantedBy=default.target

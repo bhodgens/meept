@@ -1,0 +1,8 @@
+{
+  "name": "example_plugin",
+  "version": "0.1.0",
+  "description": "Example plugin demonstrating the Meept plugin interface",
+  "author": "Meept",
+  "entry_point": "__init__",
+  "tools": ["hello_world", "random_number"]
+}

@@ -1,0 +1,99 @@
+# Meept Configuration
+# Copy to ~/.meept/meept.toml and customize
+
+[daemon]
+socket_path = "~/.meept/meept.sock"
+pid_file = "~/.meept/meept.pid"
+log_level = "INFO"
+data_dir = "~/.meept"
+
+[llm]
+# Default model configuration
+default_model = "default"
+
+[llm.models.default]
+base_url = "http://localhost:11434/v1"
+model_id = "llama3.2"
+api_key = ""
+# Cost per 1M tokens (for budget tracking)
+cost_per_million_input = 0.0
+cost_per_million_output = 0.0
+
+# Example: OpenRouter model
+# [llm.models.openrouter]
+# base_url = "https://openrouter.ai/api/v1"
+# model_id = "anthropic/claude-3.5-sonnet"
+# api_key = "${OPENROUTER_API_KEY}"
+# cost_per_million_input = 3.0
+# cost_per_million_output = 15.0
+
+[llm.budget]
+hourly_token_limit = 100000
+daily_token_limit = 1000000
+rate_limit_rpm = 30
+aggressiveness = 0.5  # 0.0 = very conservative, 1.0 = use full budget
+
+[memory]
+data_dir = "~/.meept/memory"
+consolidation_interval_hours = 6
+
+[memory.episodic]
+enabled = true
+max_context_items = 20
+
+[memory.task]
+enabled = true
+# Separate .mv2 files per domain
+domains = ["general", "code", "commands"]
+
+[memory.personality]
+enabled = true
+update_interval_conversations = 10
+
+[security]
+# Input sanitization
+sanitize_inputs = true
+llm_filter_external = false  # Enable LLM-based filtering for untrusted sources
+
+# Action permissions
+require_confirmation_high = true
+require_confirmation_critical = true
+block_financial = true
+
+# Allowed paths for file operations (glob patterns)
+allowed_paths = ["~/*"]
+blocked_paths = ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"]
+
+[scheduler]
+enabled = true
+timezone = "UTC"
+
+[telegram]
+enabled = false
+token = ""
+creator_id = 0  # Telegram user ID of the creator
+
+[web]
+enabled = false
+host = "127.0.0.1"
+port = 8420
+secret_key = ""  # Required for JWT
+
+[mcp]
+enabled = false
+config_file = "~/.meept/mcp_servers.json"
+
+[plugins]
+enabled = true
+directory = "~/.meept/plugins"
+
+[skills]
+enabled = false
+directory = "~/.meept/skills"
+
+[skills.triage]
+enabled = false
+model = "default"           # Use a fast/cheap model for classification
+temperature = 0.1
+max_tokens = 512
+confidence_threshold = 0.5  # Below this, fall back to default agent

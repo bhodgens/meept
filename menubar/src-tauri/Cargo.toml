@@ -1,0 +1,20 @@
+[package]
+name = "meept-menubar"
+version = "0.1.0"
+edition = "2021"
+description = "macOS menubar app for the meept autonomous bot"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full", "net"] }
+dirs = "5"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
