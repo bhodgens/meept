@@ -24,6 +24,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     """Parse arguments and launch the Textual TUI."""
+    # Dispatch clawskills subcommand before TUI setup -- works without daemon.
+    if len(sys.argv) > 1 and sys.argv[1] == "clawskills":
+        from meept.clawskills.cli import handle_clawskills
+
+        handle_clawskills(sys.argv[2:])
+        return
+
     parser = _build_parser()
     args = parser.parse_args()
 

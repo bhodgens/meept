@@ -150,6 +150,19 @@ class SkillsConfig(BaseModel):
     enabled: bool = False
 
 
+class ClawSkillsConfig(BaseModel):
+    """``[clawskills]`` section -- third-party skills from ClawHub."""
+
+    enabled: bool = False
+    registry_url: str = "https://clawhub.ai"
+    install_dir: str = "~/.meept/clawskills"
+    auto_update: bool = False
+    max_installed: int = 50
+    default_risk_level: str = "high"
+    max_iterations: int = 10
+    blocked_slugs: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Top-level aggregator
 # ---------------------------------------------------------------------------
@@ -172,6 +185,7 @@ class MeeptSettings(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     plugins: PluginConfig = Field(default_factory=PluginConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    clawskills: ClawSkillsConfig = Field(default_factory=ClawSkillsConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
 
     def expanded_path(self, raw: str) -> Path:

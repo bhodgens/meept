@@ -103,6 +103,10 @@ class TokenBudget:
 
     def record_usage(self, usage: TokenUsage) -> None:
         """Record a completed API call's token usage."""
+        if usage.total_tokens < 0:
+            logger.warning("Negative token count (%d) -- ignoring", usage.total_tokens)
+            return
+
         now = time.time()
         self._maybe_reset_daily()
 

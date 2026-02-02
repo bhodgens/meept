@@ -24,16 +24,45 @@ log = logging.getLogger(__name__)
 # JSON5 helpers (no external dependency)
 # ---------------------------------------------------------------------------
 
-_LINE_COMMENT_RE = re.compile(r"(?<!:)//.*$", re.MULTILINE)
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 _TRAILING_COMMA_RE = re.compile(r",\s*([\]}])")
 _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")
 
 
 def strip_json5(text: str) -> str:
-    """Strip JSON5-specific syntax (comments, trailing commas) to produce valid JSON."""
+    """Strip JSON5-specific syntax (comments, trailing commas) to produce valid JSON.
+
+    Line comments are removed with a string-aware scan so that ``//``
+    inside quoted strings (e.g. URLs) is preserved.
+    """
     text = _BLOCK_COMMENT_RE.sub("", text)
-    text = _LINE_COMMENT_RE.sub("", text)
+
+    # String-aware line-comment removal: track whether we are inside a
+    # quoted string so that ``//`` inside strings is never stripped.
+    lines: list[str] = []
+    for line in text.splitlines(keepends=True):
+        in_string = False
+        escape_next = False
+        comment_start = -1
+        for i, ch in enumerate(line):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\":
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+            elif ch == "/" and not in_string:
+                if i + 1 < len(line) and line[i + 1] == "/":
+                    comment_start = i
+                    break
+        if comment_start >= 0:
+            lines.append(line[:comment_start] + "\n")
+        else:
+            lines.append(line)
+
+    text = "".join(lines)
     text = _TRAILING_COMMA_RE.sub(r"\1", text)
     return text
 

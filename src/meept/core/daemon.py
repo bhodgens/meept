@@ -190,6 +190,37 @@ class MeeptDaemon:
 
             self._registry.register_instance("skill_registry", skill_registry)
 
+            # Load ClawSkills (third-party, from ClawHub).
+            if getattr(settings, "clawskills", None) and settings.clawskills.enabled:
+                try:
+                    from meept.clawskills.index import ClawSkillIndex
+                    from meept.clawskills.security import ClawSkillSecurityAdapter
+
+                    claw_index = ClawSkillIndex(
+                        base_dir=settings.expanded_path(settings.clawskills.install_dir),
+                    )
+                    claw_index.scan()
+                    self._registry.register_instance("clawskill_index", claw_index)
+
+                    adapter = ClawSkillSecurityAdapter()
+                    blocked = set(settings.clawskills.blocked_slugs)
+                    for name, skill in claw_index.skills.items():
+                        slug = name.removeprefix("claw:")
+                        if slug in blocked:
+                            log.info("daemon: skipping blocked clawskill %s", slug)
+                            continue
+                        skill.instructions = adapter.sanitize_instructions(
+                            skill.instructions, slug,
+                        )
+                        skill.allowed_tools = adapter.validate_allowed_tools(
+                            skill.allowed_tools,
+                        )
+                        skill_registry.register(skill)
+
+                    log.info("daemon: loaded %d clawskill(s)", len(claw_index))
+                except Exception:
+                    log.exception("daemon: failed to load ClawSkills -- skipping")
+
             # Build WorkerFactory with ModelResolver.
             tool_registry = self._registry.get("tool_registry")
             if tool_registry is None:

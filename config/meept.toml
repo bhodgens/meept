@@ -85,3 +85,13 @@ enabled = false
 #   2. ~/.meept/skills/         (user-global)
 #   3. ~/.config/meept/skills/  (system-wide, lowest priority)
 # Model selection uses capability matching from config/models.json5
+
+[clawskills]
+enabled = false
+registry_url = "https://clawhub.ai"
+install_dir = "~/.meept/clawskills"
+auto_update = false                # Automatically update skills on daemon start
+max_installed = 50                 # Maximum number of installed clawskills
+default_risk_level = "high"        # All clawskills are treated as HIGH risk (cannot go lower)
+max_iterations = 10                # Cap agent-loop iterations for clawskills
+blocked_slugs = []                 # Slugs that will never be loaded by the daemon
