@@ -24,6 +24,11 @@ class MessageType(enum.Enum):
     TRIAGE_RESULT = "triage_result"
     SKILL_TASK_START = "skill_task_start"
     SKILL_TASK_COMPLETE = "skill_task_complete"
+    PIPELINE_PROGRESS = "pipeline_progress"
+    PIPELINE_COMPLETE = "pipeline_complete"
+    CHAT_PROGRESS = "chat_progress"
+    SCHEDULE_REQUEST = "schedule_request"
+    SCHEDULE_RESULT = "schedule_result"
 
 
 @dataclass(slots=True)

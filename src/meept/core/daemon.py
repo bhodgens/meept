@@ -67,8 +67,8 @@ class MeeptDaemon:
         await self._start_optional("agent_loop")
         await self._start_optional("scheduler")
 
-        # --- skills subsystem (conditional on skills.enabled) ---
-        await self._start_skills()
+        # --- agent subsystem (conditional on skills.enabled) ---
+        await self._start_agents()
 
         log.info("daemon: ready")
 
@@ -93,7 +93,7 @@ class MeeptDaemon:
         )
 
         # Tear down optional subsystems (ignore missing).
-        for name in ("skill_dispatcher", "scheduler", "agent_loop", "comm_server"):
+        for name in ("front_agent", "scheduler", "agent_loop", "comm_server"):
             component = self._registry.get(name)
             if component is not None and hasattr(component, "stop"):
                 try:
@@ -127,8 +127,8 @@ class MeeptDaemon:
     # Helpers
     # ------------------------------------------------------------------
 
-    async def _start_skills(self) -> None:
-        """Initialise the skills subsystem if enabled in config."""
+    async def _start_agents(self) -> None:
+        """Initialise the FrontAgent + Orchestrator pipeline if skills enabled."""
         try:
             settings = self._config.settings
             if not getattr(settings, "skills", None):
@@ -137,6 +137,10 @@ class MeeptDaemon:
                 log.debug("daemon: skills disabled -- skipping")
                 return
 
+            from meept.agent.front import FrontAgent
+            from meept.agent.orchestrator import Orchestrator
+            from meept.agent.worker_factory import WorkerFactory
+            from meept.scheduler.pipelines import PipelineExecutor
             from meept.skills.loader import SkillLoader
             from meept.skills.registry import SkillRegistry
 
@@ -154,7 +158,6 @@ class MeeptDaemon:
             if settings.skills.triage.enabled:
                 from meept.skills.triage import TriageAgent
 
-                # Use the triage model from config (falls back to default).
                 triage_llm = self._registry.get("llm_client")
                 if triage_llm is not None:
                     triage_agent = TriageAgent(
@@ -164,47 +167,64 @@ class MeeptDaemon:
                     )
                     log.info("daemon: triage agent initialized")
 
-            # Build task executor.
-            from meept.skills.executor import TaskExecutor
+            # Build WorkerFactory.
+            tool_registry = self._registry.get("tool_registry")
+            if tool_registry is None:
+                from meept.tools.interface import ToolRegistry
+                tool_registry = ToolRegistry()
 
-            executor = TaskExecutor(
-                tool_registry=self._registry.get("tool_registry") or __import__("meept.tools.interface", fromlist=["ToolRegistry"]).ToolRegistry(),
+            worker_factory = WorkerFactory(
+                tool_registry=tool_registry,
                 security=self._registry.get("security"),
-                memory_manager=self._registry.get("memory"),
+                memory=self._registry.get("memory"),
                 bus=self._bus,
                 llm_factory=self._registry.get("llm_factory"),
-                budget=self._registry.get("token_budget"),
+                scheduler=self._registry.get("scheduler"),
             )
 
-            # Build dispatcher.
-            from meept.skills.dispatcher import SkillDispatcher
+            # Build PipelineExecutor and Orchestrator.
+            pipeline_executor = PipelineExecutor(bus=self._bus)
+            orchestrator = Orchestrator(
+                pipeline_executor=pipeline_executor,
+                worker_factory=worker_factory,
+                bus=self._bus,
+                skill_registry=skill_registry,
+            )
 
+            self._registry.register_instance("orchestrator", orchestrator)
+
+            # Build FrontAgent.
             default_loop = self._registry.get("agent_loop")
             planner = self._registry.get("planner")
 
-            dispatcher = SkillDispatcher(
-                skill_registry=skill_registry,
+            front_agent = FrontAgent(
+                orchestrator=orchestrator,
                 triage_agent=triage_agent,
-                task_executor=executor,
-                default_loop=default_loop,
                 planner=planner,
+                default_loop=default_loop,
+                skill_registry=skill_registry,
                 bus=self._bus,
             )
 
-            self._registry.register_instance("skill_dispatcher", dispatcher)
+            self._registry.register_instance("front_agent", front_agent)
 
-            # Subscribe the dispatcher to chat requests (replaces direct
+            # Subscribe FrontAgent to chat requests (replaces direct
             # agent_loop subscription when skills are active).
-            self._bus.subscribe("chat.request", dispatcher.handle_chat_request)
+            self._bus.subscribe("chat.request", front_agent.handle_chat_request)
+
+            # Wire scheduler bus subscribers if scheduler is running.
+            scheduler = self._registry.get("scheduler")
+            if scheduler is not None and hasattr(scheduler, "subscribe_to_bus"):
+                await scheduler.subscribe_to_bus()
 
             log.info(
-                "daemon: skills subsystem started (%d skill(s), triage=%s)",
+                "daemon: agent subsystem started (%d skill(s), triage=%s)",
                 len(skill_registry),
                 "on" if triage_agent else "off",
             )
 
         except Exception:
-            log.exception("daemon: failed to start skills subsystem")
+            log.exception("daemon: failed to start agent subsystem")
 
     async def _start_optional(self, name: str) -> None:
         """Start a registered subsystem if its factory exists."""

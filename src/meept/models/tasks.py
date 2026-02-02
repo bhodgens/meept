@@ -56,6 +56,8 @@ class TaskStep:
     depends_on: list[str] = field(default_factory=list)
     status: TaskStatus = TaskStatus.PENDING
     result: Any = None
+    max_retries: int = 0
+    retry_delay: float = 1.0
 
 
 @dataclass(slots=True)

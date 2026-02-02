@@ -91,6 +91,11 @@ directory = "~/.meept/plugins"
 enabled = false
 directory = "~/.meept/skills"
 
+[skills.front_agent]
+model = "default"           # Model for the front agent (fast/cheap preferred)
+temperature = 0.1
+max_tokens = 512
+
 [skills.triage]
 enabled = false
 model = "default"           # Use a fast/cheap model for classification

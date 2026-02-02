@@ -73,6 +73,8 @@ class CommServer:
         self.register_method("security.record_override", self._handle_security_record_override)
         self.register_method("skills.list", self._handle_skills_list)
         self.register_method("skills.triage", self._handle_skills_triage)
+        self.register_method("pipeline.status", self._handle_pipeline_status)
+        self.register_method("scheduler.schedule_agent_task", self._handle_scheduler_agent_task)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -531,5 +533,89 @@ class CommServer:
             return {"error": "Skills triage did not respond in time"}
         finally:
             self._bus.unsubscribe("skills.result", _on_result)
+
+        return result
+
+    async def _handle_pipeline_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Query the status of a running or completed pipeline.
+
+        Expected params::
+
+            {"pipeline_id": "..."}
+
+        Returns pipeline progress information.
+        """
+        pipeline_id = params.get("pipeline_id")
+        if not pipeline_id:
+            raise TypeError("'pipeline_id' param is required")
+
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={"action": "pipeline.status", "pipeline_id": pipeline_id},
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("pipeline.result", _on_result)
+        try:
+            await self._bus.publish("pipeline.status", msg)
+            result = await asyncio.wait_for(result_future, timeout=10.0)
+        except asyncio.TimeoutError:
+            return {"error": "Pipeline status query timed out"}
+        finally:
+            self._bus.unsubscribe("pipeline.result", _on_result)
+
+        return result
+
+    async def _handle_scheduler_agent_task(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Schedule an agent task via the bus.
+
+        Expected params::
+
+            {
+                "task_description": "Check the weather",
+                "trigger": "interval",
+                "trigger_args": {"hours": 6},
+                "skill_hint": "weather"  (optional)
+            }
+        """
+        task_description = params.get("task_description")
+        if not task_description or not isinstance(task_description, str):
+            raise TypeError("'task_description' param is required and must be a non-empty string")
+
+        msg = BusMessage(
+            type=MessageType.SCHEDULE_REQUEST,
+            payload={
+                "action": "add_job",
+                "task_description": task_description,
+                "trigger": params.get("trigger", "date"),
+                "trigger_args": params.get("trigger_args", {}),
+                "skill_hint": params.get("skill_hint"),
+                "name": params.get("name", task_description[:50]),
+            },
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("scheduler.result", _on_result)
+        try:
+            await self._bus.publish("scheduler.add_job", msg)
+            result = await asyncio.wait_for(result_future, timeout=10.0)
+        except asyncio.TimeoutError:
+            raise TimeoutError("Scheduler did not respond in time")
+        finally:
+            self._bus.unsubscribe("scheduler.result", _on_result)
 
         return result

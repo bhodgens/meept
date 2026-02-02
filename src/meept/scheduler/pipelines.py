@@ -32,6 +32,13 @@ class PipelineStep:
     timeout:
         Maximum wall-clock seconds the step is allowed to run before being
         cancelled.
+    max_retries:
+        Maximum number of retry attempts on failure (0 means no retries).
+    retry_delay:
+        Base delay in seconds between retries (exponential backoff applied).
+    context_key:
+        Key under which this step's result is stored in the shared context
+        dict.  Defaults to the step id if not set.
     """
 
     id: str
@@ -39,6 +46,9 @@ class PipelineStep:
     handler: Callable[..., Any]
     depends_on: list[str] = field(default_factory=list)
     timeout: float = 300.0
+    max_retries: int = 0
+    retry_delay: float = 1.0
+    context_key: str | None = None
 
 
 @dataclass(slots=True)
@@ -106,6 +116,8 @@ class PipelineExecutor:
 
     def __init__(self, bus: Any) -> None:
         self._bus = bus
+        self._cancelled = False
+        self._running_tasks: list[asyncio.Task[None]] = []
 
     async def execute(self, pipeline: Pipeline) -> dict[str, dict[str, Any]]:
         """Run all steps in *pipeline* and return a results dict.
@@ -116,7 +128,11 @@ class PipelineExecutor:
             Mapping of ``step_id`` to a result dict with keys ``success``,
             ``result``, ``error``, ``duration``, and ``status``.
         """
+        self._cancelled = False
+        self._running_tasks = []
+
         results: dict[str, dict[str, Any]] = {}
+        context: dict[str, Any] = {}
         step_map: dict[str, PipelineStep] = {s.id: s for s in pipeline.steps}
         # Track completion events so dependents can await them.
         done_events: dict[str, asyncio.Event] = {s.id: asyncio.Event() for s in pipeline.steps}
@@ -131,6 +147,13 @@ class PipelineExecutor:
         await self._publish_progress(pipeline, "started", {})
 
         async def _run_step(step: PipelineStep) -> None:
+            if self._cancelled:
+                results[step.id] = _make_result(
+                    success=False, error="pipeline cancelled", status="cancelled",
+                )
+                done_events[step.id].set()
+                return
+
             # Wait for all dependencies.
             for dep_id in step.depends_on:
                 if dep_id in done_events:
@@ -153,59 +176,91 @@ class PipelineExecutor:
                     )
                     return
 
-            # All dependencies satisfied -- execute.
+            # All dependencies satisfied -- execute with retry support.
             await self._publish_progress(
                 pipeline, "step_started", {"step_id": step.id, "step_name": step.name}
             )
 
-            t0 = time.monotonic()
-            try:
-                res = step.handler()
-                if asyncio.iscoroutine(res):
-                    res = await asyncio.wait_for(res, timeout=step.timeout)
-                duration = time.monotonic() - t0
+            max_attempts = 1 + step.max_retries
+            last_error: str | None = None
+            total_duration = 0.0
 
-                results[step.id] = _make_result(
-                    success=True,
-                    result=res,
-                    duration=duration,
-                )
-                await self._publish_progress(
-                    pipeline,
-                    "step_completed",
-                    {"step_id": step.id, "duration": round(duration, 4)},
-                )
+            for attempt in range(max_attempts):
+                if self._cancelled:
+                    results[step.id] = _make_result(
+                        success=False, error="pipeline cancelled", status="cancelled",
+                    )
+                    done_events[step.id].set()
+                    return
 
-            except asyncio.TimeoutError:
-                duration = time.monotonic() - t0
-                error_msg = f"step {step.id!r} timed out after {step.timeout}s"
-                log.error("pipeline %r: %s", pipeline.id, error_msg)
-                results[step.id] = _make_result(
-                    success=False,
-                    error=error_msg,
-                    duration=duration,
-                    status="timeout",
-                )
-                await self._publish_progress(
-                    pipeline, "step_failed", {"step_id": step.id, "error": error_msg}
-                )
+                if attempt > 0:
+                    delay = step.retry_delay * (2 ** (attempt - 1))
+                    log.info(
+                        "pipeline %r: retrying step %r (attempt %d/%d, delay=%.1fs)",
+                        pipeline.id, step.id, attempt + 1, max_attempts, delay,
+                    )
+                    await self._publish_progress(
+                        pipeline, "step_retrying",
+                        {"step_id": step.id, "attempt": attempt + 1, "delay": delay},
+                    )
+                    await asyncio.sleep(delay)
 
-            except Exception as exc:
-                duration = time.monotonic() - t0
-                error_msg = f"{type(exc).__name__}: {exc}"
-                log.exception("pipeline %r: step %r failed", pipeline.id, step.id)
-                results[step.id] = _make_result(
-                    success=False,
-                    error=error_msg,
-                    duration=duration,
-                    status="failed",
-                )
-                await self._publish_progress(
-                    pipeline, "step_failed", {"step_id": step.id, "error": error_msg}
-                )
+                t0 = time.monotonic()
+                try:
+                    res = step.handler(context)
+                    if asyncio.iscoroutine(res):
+                        res = await asyncio.wait_for(res, timeout=step.timeout)
+                    duration = time.monotonic() - t0
+                    total_duration += duration
 
-            finally:
-                done_events[step.id].set()
+                    # Store result in context under the step's context_key.
+                    ctx_key = step.context_key or step.id
+                    context[ctx_key] = res
+
+                    results[step.id] = _make_result(
+                        success=True,
+                        result=res,
+                        duration=total_duration,
+                    )
+                    await self._publish_progress(
+                        pipeline,
+                        "step_completed",
+                        {"step_id": step.id, "duration": round(total_duration, 4)},
+                    )
+                    done_events[step.id].set()
+                    return  # Success -- exit retry loop.
+
+                except asyncio.TimeoutError:
+                    duration = time.monotonic() - t0
+                    total_duration += duration
+                    last_error = f"step {step.id!r} timed out after {step.timeout}s"
+                    log.error("pipeline %r: %s", pipeline.id, last_error)
+
+                except asyncio.CancelledError:
+                    results[step.id] = _make_result(
+                        success=False, error="pipeline cancelled", status="cancelled",
+                    )
+                    done_events[step.id].set()
+                    return
+
+                except Exception as exc:
+                    duration = time.monotonic() - t0
+                    total_duration += duration
+                    last_error = f"{type(exc).__name__}: {exc}"
+                    log.exception("pipeline %r: step %r failed", pipeline.id, step.id)
+
+            # All attempts exhausted.
+            status = "timeout" if last_error and "timed out" in last_error else "failed"
+            results[step.id] = _make_result(
+                success=False,
+                error=last_error,
+                duration=total_duration,
+                status=status,
+            )
+            await self._publish_progress(
+                pipeline, "step_failed", {"step_id": step.id, "error": last_error}
+            )
+            done_events[step.id].set()
 
         # Validate DAG: check for missing dependency references.
         all_ids = set(step_map)
@@ -219,9 +274,11 @@ class PipelineExecutor:
         # Launch all steps concurrently -- each one internally awaits its deps.
         tasks = [asyncio.create_task(_run_step(s), name=f"pipeline-{pipeline.id}-{s.id}")
                  for s in pipeline.steps]
+        self._running_tasks = tasks
 
         # Wait for every step to finish.
         await asyncio.gather(*tasks, return_exceptions=True)
+        self._running_tasks = []
 
         # Determine overall status.
         all_ok = all(r.get("success", False) for r in results.values())
@@ -232,6 +289,17 @@ class PipelineExecutor:
         )
 
         return results
+
+    def cancel(self) -> None:
+        """Cancel a running pipeline.
+
+        Sets the cancelled flag so new steps will not start, and cancels
+        any currently running asyncio tasks.
+        """
+        self._cancelled = True
+        for task in self._running_tasks:
+            if not task.done():
+                task.cancel()
 
     # ------------------------------------------------------------------
     # Bus helpers
@@ -248,7 +316,7 @@ class PipelineExecutor:
             await self._bus.publish(
                 f"pipeline.{pipeline.id}.{event}",
                 BusMessage(
-                    type=MessageType.STATUS_UPDATE,
+                    type=MessageType.PIPELINE_PROGRESS,
                     payload={
                         "pipeline_id": pipeline.id,
                         "pipeline_name": pipeline.name,

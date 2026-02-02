@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -249,6 +250,86 @@ class MeeptScheduler:
         log.info("scheduler: stopped")
 
     # ------------------------------------------------------------------
+    # Bus subscribers
+    # ------------------------------------------------------------------
+
+    async def subscribe_to_bus(self) -> None:
+        """Subscribe to scheduler RPC topics on the bus.
+
+        Handles ``scheduler.list_jobs`` and ``scheduler.add_job`` messages
+        and publishes responses to ``scheduler.result``.
+        """
+        self._bus.subscribe("scheduler.list_jobs", self._handle_bus_list_jobs)
+        self._bus.subscribe("scheduler.add_job", self._handle_bus_add_job)
+        log.info("scheduler: subscribed to bus topics")
+
+    async def _handle_bus_list_jobs(self, _topic: str, msg: BusMessage) -> None:
+        """Handle a list-jobs request from the bus."""
+        jobs = self.list_jobs()
+        await self._bus.publish(
+            "scheduler.result",
+            BusMessage(
+                type=MessageType.SCHEDULE_RESULT,
+                payload={"jobs": jobs},
+                source="scheduler",
+                reply_to=msg.id,
+            ),
+        )
+
+    async def _handle_bus_add_job(self, _topic: str, msg: BusMessage) -> None:
+        """Handle an add-job request from the bus."""
+        payload = msg.payload
+        name = payload.get("name", "")
+        trigger = payload.get("trigger", "interval")
+        trigger_args = payload.get("trigger_args", {})
+        task_description = payload.get("task_description")
+        max_retries = payload.get("max_retries", 0)
+        retry_delay = payload.get("retry_delay", 1.0)
+
+        job_id = payload.get("job_id") or f"bus-{uuid.uuid4().hex[:8]}"
+
+        try:
+            if task_description:
+                self.add_agent_job(
+                    job_id=job_id,
+                    task_description=task_description,
+                    trigger=trigger,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay,
+                    **trigger_args,
+                )
+            else:
+                # No handler provided via bus -- create a no-op placeholder.
+                self.add_job(
+                    job_id=job_id,
+                    func=lambda: None,
+                    trigger=trigger,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay,
+                    **trigger_args,
+                )
+
+            await self._bus.publish(
+                "scheduler.result",
+                BusMessage(
+                    type=MessageType.SCHEDULE_RESULT,
+                    payload={"success": True, "job_id": job_id, "name": name},
+                    source="scheduler",
+                    reply_to=msg.id,
+                ),
+            )
+        except Exception as exc:
+            await self._bus.publish(
+                "scheduler.result",
+                BusMessage(
+                    type=MessageType.SCHEDULE_RESULT,
+                    payload={"success": False, "error": str(exc)},
+                    source="scheduler",
+                    reply_to=msg.id,
+                ),
+            )
+
+    # ------------------------------------------------------------------
     # Job management
     # ------------------------------------------------------------------
 
@@ -257,6 +338,8 @@ class MeeptScheduler:
         job_id: str,
         func: Callable[..., Any],
         trigger: str,
+        max_retries: int = 0,
+        retry_delay: float = 1.0,
         **trigger_args: Any,
     ) -> str:
         """Add a scheduled job and return its *job_id*.
@@ -269,6 +352,10 @@ class MeeptScheduler:
             The callable to execute.  May be a coroutine function.
         trigger:
             One of ``"cron"``, ``"interval"``, or ``"date"``.
+        max_retries:
+            Number of times to retry on failure (0 = no retries).
+        retry_delay:
+            Base delay in seconds between retries (exponential backoff).
         **trigger_args:
             Keyword arguments forwarded to the trigger constructor (e.g.
             ``hours=6`` for an interval trigger).
@@ -276,7 +363,11 @@ class MeeptScheduler:
         if self._scheduler is None:
             raise RuntimeError("Scheduler has not been started")
 
-        wrapped = self._wrap_handler(job_id, func)
+        wrapped = self._wrap_handler(
+            job_id, func,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+        )
 
         if _HAS_APSCHEDULER:
             trg = _make_trigger(trigger, **trigger_args)
@@ -286,6 +377,61 @@ class MeeptScheduler:
 
         log.info("scheduler: added job %r (trigger=%s)", job_id, trigger)
         return job_id
+
+    def add_agent_job(
+        self,
+        job_id: str,
+        task_description: str,
+        trigger: str,
+        skill_hint: str | None = None,
+        max_retries: int = 0,
+        retry_delay: float = 1.0,
+        **trigger_args: Any,
+    ) -> str:
+        """Add a job that publishes a CHAT_REQUEST when triggered.
+
+        Parameters
+        ----------
+        job_id:
+            Unique identifier for the job.
+        task_description:
+            Text to send as the chat request when the job fires.
+        trigger:
+            Trigger type (``"cron"``, ``"interval"``, or ``"date"``).
+        skill_hint:
+            Optional skill name hint passed in the payload.
+        max_retries:
+            Number of retries on failure.
+        retry_delay:
+            Base retry delay in seconds.
+        **trigger_args:
+            Forwarded to the trigger constructor.
+        """
+        bus = self._bus
+
+        async def _agent_handler() -> None:
+            await bus.publish(
+                "chat.request",
+                BusMessage(
+                    type=MessageType.CHAT_REQUEST,
+                    payload={
+                        "text": task_description,
+                        "conversation_id": f"scheduled-{job_id}",
+                        "scheduled_job_id": job_id,
+                        "skill_hint": skill_hint,
+                    },
+                    source="scheduler",
+                ),
+            )
+
+        return self.add_job(
+            job_id=job_id,
+            func=_agent_handler,
+            trigger=trigger,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            **trigger_args,
+        )
 
     def remove_job(self, job_id: str) -> None:
         """Remove a scheduled job by id."""
@@ -344,21 +490,44 @@ class MeeptScheduler:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _wrap_handler(self, job_id: str, func: Callable[..., Any]) -> Callable[..., Any]:
-        """Wrap *func* so that its result is published to the bus."""
+    def _wrap_handler(
+        self,
+        job_id: str,
+        func: Callable[..., Any],
+        max_retries: int = 0,
+        retry_delay: float = 1.0,
+    ) -> Callable[..., Any]:
+        """Wrap *func* so that its result is published to the bus.
+
+        When *max_retries* > 0, failed executions are retried with
+        exponential backoff before the failure is published.
+        """
         bus = self._bus
 
         async def _wrapped() -> None:
             error: str | None = None
             result: Any = None
-            try:
-                res = func()
-                if asyncio.iscoroutine(res):
-                    res = await res
-                result = res
-            except Exception as exc:
-                error = f"{type(exc).__name__}: {exc}"
-                log.exception("scheduler: job %r failed", job_id)
+            max_attempts = 1 + max_retries
+
+            for attempt in range(max_attempts):
+                if attempt > 0:
+                    delay = retry_delay * (2 ** (attempt - 1))
+                    log.info(
+                        "scheduler: retrying job %r (attempt %d/%d, delay=%.1fs)",
+                        job_id, attempt + 1, max_attempts, delay,
+                    )
+                    await asyncio.sleep(delay)
+
+                try:
+                    res = func()
+                    if asyncio.iscoroutine(res):
+                        res = await res
+                    result = res
+                    error = None
+                    break  # Success.
+                except Exception as exc:
+                    error = f"{type(exc).__name__}: {exc}"
+                    log.exception("scheduler: job %r failed (attempt %d)", job_id, attempt + 1)
 
             payload: dict[str, Any] = {
                 "job_id": job_id,
@@ -371,7 +540,7 @@ class MeeptScheduler:
                 await bus.publish(
                     f"scheduler.job.{job_id}",
                     BusMessage(
-                        type=MessageType.STATUS_UPDATE,
+                        type=MessageType.SCHEDULE_RESULT,
                         payload=payload,
                         source="scheduler",
                     ),

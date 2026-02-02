@@ -1,15 +1,23 @@
-"""Tests for the TaskExecutor."""
+"""Tests for the Orchestrator + WorkerFactory (replaces TaskExecutor tests).
+
+These tests verify that the new Orchestrator and WorkerFactory provide
+equivalent functionality to the old TaskExecutor.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
+from meept.agent.orchestrator import Orchestrator, OrchestratorResult
+from meept.agent.worker_factory import WorkerFactory
+from meept.models.messages import BusMessage
 from meept.models.tasks import TaskPlan, TaskStatus, TaskStep
-from meept.skills.executor import TaskExecutor
-from meept.skills.models import SkillDefinition, TriageResult
+from meept.scheduler.pipelines import PipelineExecutor
+from meept.skills.models import SkillDefinition
+from meept.skills.registry import SkillRegistry
 from meept.tools.interface import Tool, ToolDefinition, ToolParameter, ToolRegistry
 
 
@@ -18,22 +26,24 @@ from meept.tools.interface import Tool, ToolDefinition, ToolParameter, ToolRegis
 # ---------------------------------------------------------------------------
 
 
+class MockBus:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, BusMessage]] = []
+
+    async def publish(self, topic: str, msg: BusMessage) -> None:
+        self.messages.append((topic, msg))
+
+
 @dataclass
 class MockLLMResponse:
     content: str
-    tool_calls: list = None
+    tool_calls: list = field(default_factory=list)
     usage: Any = None
     model: str = "test"
     finish_reason: str = "stop"
 
-    def __post_init__(self):
-        if self.tool_calls is None:
-            self.tool_calls = []
-
 
 class MockLLMClient:
-    """LLM client that returns canned responses."""
-
     def __init__(self, response: str = "Done.") -> None:
         self._response = response
 
@@ -42,8 +52,6 @@ class MockLLMClient:
 
 
 class MockSecurity:
-    """Security manager that allows everything."""
-
     async def check_permission(self, action: str, details: dict | None = None):
         return True, "Allowed"
 
@@ -64,7 +72,6 @@ class _DummyTool(Tool):
 
 
 def _mock_llm_factory(model_name: str) -> MockLLMClient:
-    """LLM factory returning a mock client."""
     return MockLLMClient(response=f"Processed by {model_name}")
 
 
@@ -75,150 +82,161 @@ def _mock_llm_factory(model_name: str) -> MockLLMClient:
 
 @pytest.mark.asyncio
 async def test_execute_with_skill() -> None:
-    """execute_with_skill should create a skill loop and run the message."""
+    """Orchestrator should execute a skill step via WorkerFactory."""
+    bus = MockBus()
     registry = ToolRegistry()
     registry.register(_DummyTool("file_read"))
 
-    executor = TaskExecutor(
+    factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
         llm_factory=_mock_llm_factory,
     )
 
-    skill = SkillDefinition(
+    executor = PipelineExecutor(bus)
+    skill_reg = SkillRegistry()
+    skill_reg.register(SkillDefinition(
         name="test_skill",
         description="A test skill",
         model="test-model",
         system_prompt="You are a test.",
+    ))
+
+    orch = Orchestrator(
+        pipeline_executor=executor,
+        worker_factory=factory,
+        bus=bus,
+        skill_registry=skill_reg,
     )
 
-    result = await executor.execute_with_skill("Test message", skill)
+    step = TaskStep(description="Test message", skill_name="test_skill")
+    result = await orch.execute_single(step)
     assert isinstance(result, str)
     assert len(result) > 0
 
 
 @pytest.mark.asyncio
 async def test_execute_with_skill_error_handling() -> None:
-    """execute_with_skill should handle errors gracefully."""
+    """Error during skill execution should be handled gracefully."""
 
-    def failing_factory(model: str):
-        raise RuntimeError("No model available")
+    class FailingFactory:
+        def create(self, skill=None):
+            return None
 
-    registry = ToolRegistry()
-    executor = TaskExecutor(
-        tool_registry=registry,
-        security=MockSecurity(),
-        llm_factory=failing_factory,
+        def create_handler(self, skill=None, step_description=""):
+            async def _handler(ctx):
+                raise RuntimeError("LLM error")
+            return _handler
+
+    bus = MockBus()
+    executor = PipelineExecutor(bus)
+
+    orch = Orchestrator(
+        pipeline_executor=executor,
+        worker_factory=FailingFactory(),
+        bus=bus,
     )
 
-    skill = SkillDefinition(name="fail_skill", description="Will fail")
+    step = TaskStep(description="Test", skill_name="fail_skill")
+    result = await orch.execute([step])
 
-    # The executor creates a loop with llm_client=None which will fail
-    # at runtime, but the error should be caught.
-    result = await executor.execute_with_skill("Test", skill)
-    assert "error" in result.lower()
+    assert result.success is False
+    assert result.step_results[step.id].success is False
 
 
 @pytest.mark.asyncio
 async def test_execute_plan() -> None:
-    """execute_plan should run each step and return combined results."""
+    """Orchestrator should execute plan steps and return combined results."""
+    bus = MockBus()
     registry = ToolRegistry()
-    executor = TaskExecutor(
+
+    factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
         llm_factory=_mock_llm_factory,
     )
 
-    skill = SkillDefinition(name="skill_a", description="A", model="model-a")
+    skill_reg = SkillRegistry()
+    skill_reg.register(SkillDefinition(name="skill_a", description="A", model="model-a"))
 
-    plan = TaskPlan(
-        description="Test plan",
-        steps=[
-            TaskStep(id="step_1", description="Do A", skill_name="skill_a"),
-            TaskStep(id="step_2", description="Do B", skill_name="skill_a"),
-        ],
+    executor = PipelineExecutor(bus)
+    orch = Orchestrator(
+        pipeline_executor=executor,
+        worker_factory=factory,
+        bus=bus,
+        skill_registry=skill_reg,
     )
 
-    result = await executor.execute_plan(
-        "Complex task",
-        plan,
-        skills={"skill_a": skill},
-    )
+    steps = [
+        TaskStep(id="step_1", description="Do A", skill_name="skill_a"),
+        TaskStep(id="step_2", description="Do B", skill_name="skill_a"),
+    ]
 
-    assert "step_1" in result
-    assert "step_2" in result
-    assert plan.status == TaskStatus.COMPLETED
+    result = await orch.execute(steps)
+
+    assert "step_1" in result.step_results
+    assert "step_2" in result.step_results
+    assert result.step_results["step_1"].success is True
 
 
 @pytest.mark.asyncio
 async def test_execute_plan_without_skills_uses_default() -> None:
-    """Steps without skill_name should use the default loop."""
-
-    class MockDefaultLoop:
-        async def run_once(self, message, conversation_id=None):
-            return f"Default handled: {message}"
-
+    """Steps without skill_name should use the default handler."""
+    bus = MockBus()
     registry = ToolRegistry()
-    executor = TaskExecutor(
+
+    factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
+        llm_factory=_mock_llm_factory,
     )
 
-    plan = TaskPlan(
-        description="Test plan",
-        steps=[
-            TaskStep(id="step_1", description="Simple task"),
-        ],
+    executor = PipelineExecutor(bus)
+    orch = Orchestrator(
+        pipeline_executor=executor,
+        worker_factory=factory,
+        bus=bus,
     )
 
-    result = await executor.execute_plan(
-        "Task",
-        plan,
-        default_loop=MockDefaultLoop(),
-    )
+    steps = [TaskStep(id="step_1", description="Simple task")]
+    result = await orch.execute(steps)
 
-    assert "Default handled" in result
+    assert result.step_results["step_1"].success is True
 
 
 @pytest.mark.asyncio
 async def test_execute_plan_step_failure() -> None:
-    """Failed steps should be marked FAILED but not stop the plan."""
-    registry = ToolRegistry()
+    """Failed steps should be marked FAILED."""
 
-    # Factory that returns a client whose chat raises
-    def broken_factory(model: str):
-        class BrokenClient:
-            async def chat(self, messages, tools=None, **kwargs):
+    class BrokenFactory:
+        def create(self, skill=None):
+            return None
+
+        def create_handler(self, skill=None, step_description=""):
+            async def _handler(ctx):
                 raise RuntimeError("LLM error")
-        return BrokenClient()
+            return _handler
 
-    executor = TaskExecutor(
-        tool_registry=registry,
-        security=MockSecurity(),
-        llm_factory=broken_factory,
+    bus = MockBus()
+    executor = PipelineExecutor(bus)
+
+    orch = Orchestrator(
+        pipeline_executor=executor,
+        worker_factory=BrokenFactory(),
+        bus=bus,
     )
 
-    skill = SkillDefinition(name="broken", description="Broken", model="bad")
+    step = TaskStep(id="step_1", description="Will fail", skill_name="broken")
+    result = await orch.execute([step])
 
-    plan = TaskPlan(
-        description="Test",
-        steps=[
-            TaskStep(id="step_1", description="Will fail", skill_name="broken"),
-        ],
-    )
-
-    result = await executor.execute_plan(
-        "Task", plan, skills={"broken": skill},
-    )
-
-    assert plan.steps[0].status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+    assert step.status == TaskStatus.FAILED
 
 
 @pytest.mark.asyncio
-async def test_create_skill_loop_uses_system_prompt() -> None:
-    """The created loop should use the skill's system prompt."""
+async def test_worker_factory_uses_system_prompt() -> None:
+    """The WorkerFactory should set system_prompt_override from the skill."""
     registry = ToolRegistry()
-    executor = TaskExecutor(
+    factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
         llm_factory=_mock_llm_factory,
@@ -232,7 +250,7 @@ async def test_create_skill_loop_uses_system_prompt() -> None:
         allowed_tools=["file_read"],
     )
 
-    loop = executor._create_skill_loop(skill)
+    loop = factory.create(skill)
     assert loop._system_prompt_override is not None
     assert "Custom system prompt" in loop._system_prompt_override
     assert "Extra instructions" in loop._system_prompt_override
