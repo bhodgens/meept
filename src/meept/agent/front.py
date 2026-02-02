@@ -1,9 +1,11 @@
-"""FrontAgent -- thin entry point that replaces SkillDispatcher.
+"""FrontAgent -- thin entry point that routes chat requests.
 
 The FrontAgent is the bus handler for ``chat.request`` when skills are
-enabled.  It validates input, classifies intent via TriageAgent, decides
-between simple and complex execution paths, and delegates to the
-Orchestrator for pipeline execution.
+enabled.  It validates input, delegates to the Orchestrator for pipeline
+execution, and supports collaborative planning.
+
+Skills are discovered by the LLM via ``skill_find``/``skill_use`` tool
+calls rather than automatic triage classification.
 """
 
 from __future__ import annotations
@@ -24,8 +26,6 @@ class FrontAgent:
     ----------
     orchestrator:
         The :class:`~meept.agent.orchestrator.Orchestrator` for pipeline execution.
-    triage_agent:
-        Optional :class:`~meept.skills.triage.TriageAgent` for intent classification.
     planner:
         Optional :class:`~meept.agent.planner.Planner` for multi-step decomposition.
     default_loop:
@@ -34,34 +34,36 @@ class FrontAgent:
         Optional :class:`~meept.skills.registry.SkillRegistry`.
     bus:
         Internal message bus.
+    model_resolver:
+        Optional :class:`~meept.llm.resolver.ModelResolver` for capability matching.
+    collaborative_planner:
+        Optional collaborative planner for programming tasks.
+    workspace_manager:
+        Optional workspace manager for git workspaces.
     """
 
     def __init__(
         self,
         orchestrator: Any,
-        triage_agent: Any | None = None,
         planner: Any | None = None,
         default_loop: Any | None = None,
         skill_registry: Any | None = None,
         bus: Any | None = None,
+        model_resolver: Any | None = None,
         collaborative_planner: Any | None = None,
         workspace_manager: Any | None = None,
     ) -> None:
         self._orchestrator = orchestrator
-        self._triage = triage_agent
         self._planner = planner
         self._default_loop = default_loop
         self._skill_registry = skill_registry
         self._bus = bus
+        self._model_resolver = model_resolver
         self._collaborative_planner = collaborative_planner
         self._workspace_manager = workspace_manager
 
     async def handle_chat_request(self, message: BusMessage) -> None:
-        """Bus handler for incoming chat requests.
-
-        Replaces the default AgentLoop.handle_chat_request when skills
-        are enabled.
-        """
+        """Bus handler for incoming chat requests."""
         text = message.payload.get("text", "")
         conv_id = message.payload.get("conversation_id")
 
@@ -93,10 +95,12 @@ class FrontAgent:
         """Route a user message through the agent pipeline.
 
         Decision flow:
-        1. Triage (if available): classify intent.
-        2. High-confidence skill match -> 1-step pipeline with skill handler.
-        3. Planner.should_plan() -> decompose -> multi-step pipeline.
-        4. Fallback -> 1-step pipeline with default handler.
+        1. Collaborative planning check (programming/automation tasks).
+        2. Planner.should_plan() -> decompose -> multi-step pipeline.
+        3. Fallback -> default loop or 1-step orchestrator pipeline.
+
+        Skills are discovered by the LLM via tool calls (skill_find,
+        skill_use) rather than automatic triage classification.
 
         Parameters
         ----------
@@ -110,55 +114,7 @@ class FrontAgent:
         str
             The agent's response.
         """
-        triage_result = None
-
-        # Step 1: Triage (if enabled).
-        if self._triage is not None:
-            triage_result = await self._triage.classify(message)
-
-            await self._publish(
-                MessageType.TRIAGE_RESULT,
-                {
-                    "skill_name": triage_result.skill_name,
-                    "confidence": triage_result.confidence,
-                    "reasoning": triage_result.reasoning,
-                    "fallback": triage_result.fallback_to_default,
-                    "conversation_id": conversation_id,
-                },
-            )
-
-            # Step 2: Direct skill execution via 1-step pipeline.
-            if not triage_result.fallback_to_default:
-                skill = None
-                if self._skill_registry is not None:
-                    skill = self._skill_registry.get(triage_result.skill_name)
-
-                if skill is not None:
-                    await self._publish(
-                        MessageType.SKILL_TASK_START,
-                        {
-                            "skill_name": skill.name,
-                            "conversation_id": conversation_id,
-                        },
-                    )
-
-                    step = TaskStep(
-                        description=message,
-                        skill_name=skill.name,
-                    )
-                    result = await self._orchestrator.execute_single(step)
-
-                    await self._publish(
-                        MessageType.SKILL_TASK_COMPLETE,
-                        {
-                            "skill_name": skill.name,
-                            "conversation_id": conversation_id,
-                        },
-                    )
-
-                    return result
-
-        # Step 3a: Collaborative planning check (programming/automation tasks).
+        # Step 1: Collaborative planning check (programming/automation tasks).
         if self._collaborative_planner is not None:
             collab = self._collaborative_planner
 
@@ -183,7 +139,7 @@ class FrontAgent:
 
                 return review.formatted_summary
 
-        # Step 3b: Multi-step planning (if planner available).
+        # Step 2: Multi-step planning (if planner available).
         if self._planner is not None:
             should_plan = getattr(self._planner, "should_plan", None)
             if should_plan is not None:
@@ -209,7 +165,7 @@ class FrontAgent:
                     orch_result = await self._orchestrator.execute(plan.steps)
                     return orch_result.synthesized
 
-        # Step 4: Default fallback -- 1-step pipeline with default handler.
+        # Step 3: Default fallback -- default loop or 1-step pipeline.
         if self._default_loop is not None:
             return await self._default_loop.run_once(message, conversation_id=conversation_id)
 
@@ -222,11 +178,7 @@ class FrontAgent:
     # ------------------------------------------------------------------
 
     async def _handle_plan_followup(self, message: str, conversation_id: str) -> str:
-        """Handle a follow-up message for a pending plan review.
-
-        Classifies the message as approval, rejection, or revision and
-        routes accordingly.
-        """
+        """Handle a follow-up message for a pending plan review."""
         collab = self._collaborative_planner
         action = collab.classify_response(message)
 
@@ -313,7 +265,6 @@ class FrontAgent:
 
         topic_map = {
             MessageType.CHAT_RESPONSE: "chat.response",
-            MessageType.TRIAGE_RESULT: "skills.triage_result",
             MessageType.SKILL_TASK_START: "skills.skill_task_start",
             MessageType.SKILL_TASK_COMPLETE: "skills.skill_task_complete",
             MessageType.CHAT_PROGRESS: "chat.progress",

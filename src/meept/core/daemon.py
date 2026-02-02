@@ -165,45 +165,54 @@ class MeeptDaemon:
             from meept.agent.front import FrontAgent
             from meept.agent.orchestrator import Orchestrator
             from meept.agent.worker_factory import WorkerFactory
+            from meept.llm.providers import load_models_config
+            from meept.llm.resolver import ModelResolver
             from meept.scheduler.pipelines import PipelineExecutor
-            from meept.skills.loader import SkillLoader
+            from meept.skills.discovery import SkillIndex
             from meept.skills.registry import SkillRegistry
 
-            loader = SkillLoader(settings.skills.directory)
-            skill_defs = loader.load_all()
+            # Load models.json5 and create ModelResolver.
+            models_config_path = self._config.models_config_path
+            models_config = load_models_config(models_config_path)
+            model_resolver = ModelResolver(models_config)
+            self._registry.register_instance("model_resolver", model_resolver)
+            log.info("daemon: loaded models config from %s", models_config_path)
 
+            # Discover skills via 3-tier SKILL.md scanning.
+            skill_index = SkillIndex()
+            skill_index.scan()
+            self._registry.register_instance("skill_index", skill_index)
+
+            # Populate the skill registry from discovered skills.
             skill_registry = SkillRegistry()
-            for skill in skill_defs:
+            for skill in skill_index.skills.values():
                 skill_registry.register(skill)
 
             self._registry.register_instance("skill_registry", skill_registry)
 
-            # Build triage agent if triage is enabled.
-            triage_agent = None
-            if settings.skills.triage.enabled:
-                from meept.skills.triage import TriageAgent
-
-                triage_llm = self._registry.get("llm_client")
-                if triage_llm is not None:
-                    triage_agent = TriageAgent(
-                        llm_client=triage_llm,
-                        skills=skill_defs,
-                        confidence_threshold=settings.skills.triage.confidence_threshold,
-                    )
-                    log.info("daemon: triage agent initialized")
-
-            # Build WorkerFactory.
+            # Build WorkerFactory with ModelResolver.
             tool_registry = self._registry.get("tool_registry")
             if tool_registry is None:
                 from meept.tools.interface import ToolRegistry
                 tool_registry = ToolRegistry()
+
+            # Register skill tools (skill_find, skill_use, skill_resource).
+            from meept.tools.builtin.skill_tools import (
+                SkillFindTool,
+                SkillResourceTool,
+                SkillUseTool,
+            )
+
+            tool_registry.register(SkillFindTool(skill_index))
+            tool_registry.register(SkillUseTool(skill_index, model_resolver))
+            tool_registry.register(SkillResourceTool(skill_index))
 
             worker_factory = WorkerFactory(
                 tool_registry=tool_registry,
                 security=self._registry.get("security"),
                 memory=self._registry.get("memory"),
                 bus=self._bus,
-                llm_factory=self._registry.get("llm_factory"),
+                model_resolver=model_resolver,
                 scheduler=self._registry.get("scheduler"),
             )
 
@@ -253,11 +262,11 @@ class MeeptDaemon:
 
             front_agent = FrontAgent(
                 orchestrator=orchestrator,
-                triage_agent=triage_agent,
                 planner=planner,
                 default_loop=default_loop,
                 skill_registry=skill_registry,
                 bus=self._bus,
+                model_resolver=model_resolver,
                 collaborative_planner=collaborative_planner,
                 workspace_manager=workspace_manager,
             )
@@ -274,9 +283,9 @@ class MeeptDaemon:
                 await scheduler.subscribe_to_bus()
 
             log.info(
-                "daemon: agent subsystem started (%d skill(s), triage=%s)",
+                "daemon: agent subsystem started (%d skill(s), resolver=%s)",
                 len(skill_registry),
-                "on" if triage_agent else "off",
+                "active" if model_resolver.default_model else "no-default",
             )
 
         except Exception:

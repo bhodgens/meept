@@ -109,5 +109,8 @@ class ModelConfig(BaseModel):
     cost_per_million_output: float = Field(default=0.0, ge=0.0)
     max_tokens: int = Field(default=4096, gt=0)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    context_limit: int = Field(default=128000, gt=0)
+    capabilities: frozenset[str] = Field(default_factory=frozenset)
+    provider_id: str = ""
 
     model_config = {"frozen": False}

@@ -1,5 +1,5 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "_comment": "MCP server definitions. Disabled by default. Enable in meept.toml [mcp] section.",
-  "servers": {}
+  "_comment": "MCP server definitions. Disabled by default. Enable in meept.toml [mcp] section. Format follows opencode convention.",
+  "mcp": {}
 }

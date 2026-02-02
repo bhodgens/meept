@@ -17,6 +17,8 @@ dependencies = [
     "aiosqlite>=0.20",
     "cryptography>=42.0",
     "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "httpx-sse>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +43,7 @@ cli = [
 ]
 mcp = [
     "mcp>=1.25",
+    "websockets>=16.0",
 ]
 all = [
     "meept[memory,telegram,web,calendar,cli,mcp]",

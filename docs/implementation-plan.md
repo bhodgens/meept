@@ -36,12 +36,13 @@
           │                │                │
    ┌──────┴─────┐  ┌──────┴──────┐  ┌──────┴──────┐
    │   Agent    │  │  Scheduler  │  │  Security   │
-   │ (loop/plan)│  │ (APScheduler│  │ (sanitize/  │
-   │            │  │  +pipelines)│  │  guard/perm)│
-   └──────┬─────┘  └─────────────┘  └─────────────┘
+   │ (front/    │  │ (APScheduler│  │ (sanitize/  │
+   │  orch/     │  │  +pipelines)│  │  guard/perm)│
+   │  workers)  │  └─────────────┘  └─────────────┘
+   └──────┬─────┘
           │
    ┌──────┴──────┐
-   │  LLM Client │ ← OpenAI-compatible, switchable models, token budget
+   │  LLM Client │ ← OpenAI-compatible, JSON5 config, capability matching
    └──────┬──────┘
           │
    ┌──────┴──────────────────┐
@@ -81,6 +82,7 @@ meept/
 │   ├── restrictions.md          # Safety restrictions
 │   ├── purpose.md               # Technical task principles
 │   ├── meept.toml               # Runtime config (TOML)
+│   ├── models.json5             # Model/provider config (JSON5)
 │   └── mcp_servers.json         # MCP server definitions
 ├── src/meept/
 │   ├── __init__.py
@@ -94,7 +96,8 @@ meept/
 │   │   ├── client.py            # Unified OpenAI-compatible client
 │   │   ├── models.py            # ChatMessage, LLMResponse, ModelConfig, TokenUsage
 │   │   ├── budget.py            # Token budget (hourly/daily limits, rate limiting)
-│   │   └── providers.py         # Provider presets (Ollama, OpenRouter, etc.)
+│   │   ├── providers.py         # JSON5 config loading, ModelsConfig, provider definitions
+│   │   └── resolver.py          # ModelResolver: capability-based model selection
 │   ├── memory/
 │   │   ├── manager.py           # Orchestrates episodic + task subsystems
 │   │   ├── episodic.py          # memU integration (conversation, instructions, self)
@@ -124,7 +127,24 @@ meept/
 │   │       ├── shell.py         # Sandboxed shell execution
 │   │       ├── filesystem.py    # Permission-gated file R/W
 │   │       ├── web_search.py    # Web search
-│   │       └── web_fetch.py     # URL content fetching
+│   │       ├── web_fetch.py     # URL content fetching
+│   │       ├── schedule_tool.py # Agent-invocable scheduling
+│   │       └── skill_tools.py   # skill_find, skill_use, skill_resource tools
+│   ├── skills/
+│   │   ├── models.py            # SkillDefinition dataclass (requires, from_parsed)
+│   │   ├── registry.py          # SkillRegistry with capability queries
+│   │   ├── discovery.py         # 3-tier SKILL.md filesystem discovery (SkillIndex)
+│   │   ├── parser.py            # YAML frontmatter + Markdown parser
+│   │   └── tool_filter.py       # FilteredToolRegistry for skill-scoped tools
+│   ├── agent/
+│   │   ├── loop.py              # Main reasoning/action loop
+│   │   ├── planner.py           # Task decomposition & planning
+│   │   ├── executor.py          # Action execution with safety checks
+│   │   ├── front.py             # FrontAgent: entry point, routes chat requests
+│   │   ├── orchestrator.py      # Bridges task plans to PipelineExecutor
+│   │   ├── worker_factory.py    # Creates workers with ModelResolver
+│   │   ├── collaborative_planner.py  # Plan-review-approve workflow
+│   │   └── workspace.py         # Per-task git workspaces
 │   ├── comm/
 │   │   ├── server.py            # Unix socket server (JSON-RPC 2.0)
 │   │   ├── protocol.py          # JsonRpcRequest/Response wire format
@@ -133,10 +153,6 @@ meept/
 │   │       ├── app.py           # FastAPI (disabled by default)
 │   │       ├── auth.py          # OAuth2 + JWT
 │   │       └── routes.py        # API routes
-│   ├── agent/
-│   │   ├── loop.py              # Main reasoning/action loop
-│   │   ├── planner.py           # Task decomposition & planning
-│   │   └── executor.py          # Action execution with safety checks
 │   └── models/
 │       ├── messages.py          # MessageType enum, BusMessage
 │       ├── tasks.py             # Task/Job data models
@@ -174,6 +190,7 @@ meept/
     ├── conftest.py
     ├── test_core/, test_llm/, test_memory/, test_scheduler/
     ├── test_security/, test_tools/, test_comm/, test_agent/
+    ├── test_skills/
 ```
 
 ---
@@ -206,11 +223,25 @@ meept/
 - Plugins: directory with `meept.plugin.json` manifest + Python module exporting `register(registry)`
 - MCP servers: OpenCode-style JSON config, disabled by default, started on demand
 
-### LLM Client
+### LLM Client & Model Configuration
 - Single `LLMClient` class using `httpx.AsyncClient` speaking OpenAI `/v1/chat/completions`
-- `ModelConfig` per model: base_url, model_id, api_key, cost estimate, capabilities
+- **JSON5 configuration** (`config/models.json5`): Providers define base URLs and auth; models nested under providers with `provider/model-id` reference format
+- `ModelConfig` per model: base_url, model_id, api_key, cost estimate, capabilities, context_limit, provider_id
+- **Capability matching**: Models declare `capabilities` tags (e.g. `code`, `reasoning`, `vision`, `tool_use`, `long_context`, `fast`, `cheap`); skills declare `requires` tags; `ModelResolver.resolve_for_skill()` picks cheapest capable model
 - `TokenBudget`: hourly/daily limits, per-minute rate limiting, configurable aggressiveness (0.0-1.0)
-- Model switching at runtime via `client.switch_model(name)`
+- Model switching at runtime via `client.switch_model(config)` or `create_client_from_resolved()`
+- Environment variable expansion (`${VAR}`) in JSON5 config values
+
+### Skills System
+- **SKILL.md format**: YAML frontmatter (name, description, requires, allowed-tools, risk-level, max-iterations) + Markdown body (instructions/examples)
+- **3-tier discovery** (highest priority wins):
+  1. `.meept/skills/` (project-local)
+  2. `~/.meept/skills/` (user-global)
+  3. `~/.config/meept/skills/` (system-wide)
+- **Capability/requires matching**: Skills declare `requires` tags; `ModelResolver` finds cheapest model whose `capabilities` superset covers the requirements
+- **LLM-driven discovery**: No triage agent; LLM discovers and activates skills via `skill_find`, `skill_use`, `skill_resource` tool calls
+- **SkillIndex**: Lazy-loaded filesystem index with shadowing across tiers
+- **SkillRegistry**: In-memory registry with `find_by_capabilities()` and `get_requirements()` queries
 
 ---
 
@@ -219,6 +250,7 @@ meept/
 | Package | Purpose |
 |---------|---------|
 | `httpx` >=0.27 | HTTP client for LLM APIs |
+| `pyyaml` >=6.0 | SKILL.md YAML frontmatter parsing |
 | `memu-py` >=0.1.0 | Episodic memory (memU) |
 | `memvid-sdk` >=2.0.0 | Task memory (memvid .mv2) |
 | `apscheduler` >=3.11 | Job scheduling |
@@ -255,16 +287,16 @@ Unix socket server, JSON-RPC protocol, basic CLI with chat screen.
 ### Phase 3: Security Layer
 Input sanitization pipeline, prompt guard, action permissions, TLS cert generation.
 
-**Files**: security/{sanitizer,prompt_guard,permissions,output_monitor,tls}.py
+**Files**: security/{sanitizer,prompt_guard,permissions,output_monitor,tls,engine,seed_rules}.py
 
 **Verify**: Injection attempts (`ignore previous instructions...`) detected and blocked. Constitution/restrictions loaded and enforced.
 
-### Phase 4: Agent Loop + Tools
-Reasoning loop (plan->execute->observe), task decomposition, built-in tools (shell, filesystem, web).
+### Phase 4: Agent Loop + Tools + Skills
+Reasoning loop (plan->execute->observe), task decomposition, built-in tools (shell, filesystem, web, scheduling, skill discovery). FrontAgent entry point, Orchestrator pipeline execution, WorkerFactory with ModelResolver, CollaborativePlanner with approval workflow, per-task git WorkspaceManager.
 
-**Files**: agent/{loop,planner,executor}.py, tools/{interface,loader}.py, tools/builtin/{shell,filesystem,web_search,web_fetch}.py, models/tasks.py
+**Files**: agent/{loop,planner,executor,front,orchestrator,worker_factory,collaborative_planner,workspace}.py, tools/{interface,loader}.py, tools/builtin/{shell,filesystem,web_search,web_fetch,schedule_tool,skill_tools}.py, skills/{models,registry,discovery,parser,tool_filter}.py, llm/resolver.py, config/models.json5, models/tasks.py
 
-**Verify**: Ask agent to read a file -> plans the action -> checks permissions -> executes -> returns result.
+**Verify**: Ask agent to read a file -> plans the action -> checks permissions -> executes -> returns result. Skills discoverable via skill_find tool. Capability matching selects correct model.
 
 ### Phase 5: Memory Systems
 memU episodic memory, memvid task memory, personality model, consolidation, human export tools.
@@ -273,12 +305,21 @@ memU episodic memory, memvid task memory, personality model, consolidation, huma
 
 **Verify**: Converse, restart daemon, agent recalls prior conversation. Store technical task, search for it. Export as Markdown.
 
-### Phase 6: Scheduler + Calendar
-APScheduler integration, job definitions, pipelines, Google Calendar read/write.
+### Phase 6: Scheduler + Calendar *(substantially complete)*
+APScheduler integration with fallback scheduler, job definitions, DAG pipeline execution, Google Calendar read/write.
+
+**Components implemented**:
+- APScheduler wrapper (`MeeptScheduler`) with fallback for APScheduler-free installs
+- Retry with exponential backoff on job handlers
+- Bus-based RPC (`scheduler.list_jobs`, `scheduler.add_job` subscribers)
+- Agent job publishing (`CHAT_REQUEST` via `add_agent_job`)
+- `schedule_tool`: agents can schedule future work via tool calls
+- `PipelineExecutor`: DAG execution, parallel steps, per-step timeout/retry, cancellation, context passing, bus progress events
+- Built-in maintenance jobs: memory consolidation (6h), personality update (daily), health check (5min), budget reset (midnight UTC)
 
 **Files**: scheduler/{scheduler,jobs,pipelines}.py, calendar/{gcal,auth}.py
 
-**Verify**: Memory consolidation runs on schedule. Calendar events listed/created via agent.
+**Verify**: Memory consolidation runs on schedule. Calendar events listed/created via agent. Pipeline DAG executes steps in dependency order.
 
 ### Phase 7: Plugin System + MCP
 Plugin loading from disk, MCP server management with sanitized tool output.
@@ -313,10 +354,12 @@ launchd/systemd service files, full test suite, README, .env.example.
 ## Verification (End-to-End)
 
 1. `make install && make setup` - installs deps, creates ~/.meept/ config
-2. Edit `~/.meept/meept.toml` with LLM endpoint (e.g. Ollama at localhost:11434)
+2. Edit `~/.meept/models.json5` with LLM endpoint (e.g. Ollama at localhost:11434)
 3. `make start` - daemon starts in background
 4. `make cli` - open TUI, chat with agent, verify LLM responses
 5. Ask agent to remember something, restart daemon, verify recall
 6. Test security: try prompt injection, verify it's blocked
-7. `cd menubar && cargo tauri build` (or `make menubar`) - verify tray icon appears and reflects daemon status
-8. `make test` - all tests pass
+7. Test skill discovery: place SKILL.md in `~/.meept/skills/`, verify `skill_find` returns it
+8. Test capability matching: configure two models with different capabilities, verify correct model selected
+9. `cd menubar && cargo tauri build` (or `make menubar`) - verify tray icon appears and reflects daemon status
+10. `make test` - all tests pass

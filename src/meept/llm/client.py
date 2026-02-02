@@ -296,3 +296,27 @@ class LLMClient:
 
     async def __aexit__(self, *exc: object) -> None:
         await self.close()
+
+
+# ---------------------------------------------------------------------------
+# Factory helpers
+# ---------------------------------------------------------------------------
+
+
+def create_client_from_resolved(
+    config: ModelConfig,
+    budget: TokenBudget | None = None,
+) -> LLMClient:
+    """Create an :class:`LLMClient` from a resolved :class:`ModelConfig`.
+
+    This is the preferred factory function when using the
+    :class:`~meept.llm.resolver.ModelResolver` pipeline.
+
+    Parameters
+    ----------
+    config:
+        A :class:`ModelConfig` (typically produced by ``ModelResolver.resolve_for_skill``).
+    budget:
+        Optional token budget tracker.
+    """
+    return LLMClient(config=config, budget=budget)

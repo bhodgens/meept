@@ -1,4 +1,4 @@
-"""Skill registry -- holds loaded skills with lookup by name."""
+"""Skill registry -- holds loaded skills with lookup by name and capabilities."""
 
 from __future__ import annotations
 
@@ -43,6 +43,36 @@ class SkillRegistry:
     def list_skills(self) -> list[SkillDefinition]:
         """Return all registered skill definitions."""
         return list(self._skills.values())
+
+    def find_by_capabilities(self, capabilities: set[str]) -> list[SkillDefinition]:
+        """Return skills whose ``requires`` are satisfied by *capabilities*.
+
+        Parameters
+        ----------
+        capabilities:
+            The set of capability tags provided by a model.
+
+        Returns
+        -------
+        list[SkillDefinition]
+            Skills where every entry in ``requires`` is present in *capabilities*.
+            Skills with empty ``requires`` are always included.
+        """
+        results: list[SkillDefinition] = []
+        for skill in self._skills.values():
+            if not skill.requires or set(skill.requires) <= capabilities:
+                results.append(skill)
+        return results
+
+    def get_requirements(self, name: str) -> set[str]:
+        """Return the capability requirements for a named skill.
+
+        Returns an empty set if the skill is not found or has no requirements.
+        """
+        skill = self._skills.get(name)
+        if skill is None:
+            return set()
+        return set(skill.requires)
 
     @property
     def names(self) -> list[str]:

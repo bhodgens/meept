@@ -8,6 +8,9 @@ from typing import Any
 import pytest
 
 from meept.agent.worker_factory import WorkerFactory
+from meept.llm.models import ModelConfig
+from meept.llm.providers import ModelsConfig, ModelDefinition, ProviderConfig, ProviderOptions
+from meept.llm.resolver import ModelResolver
 from meept.skills.models import SkillDefinition
 from meept.tools.interface import Tool, ToolDefinition, ToolParameter, ToolRegistry
 
@@ -63,6 +66,25 @@ class _DummyTool(Tool):
         return {"result": f"executed {self._name}"}
 
 
+def _make_resolver() -> ModelResolver:
+    """Create a test ModelResolver."""
+    config = ModelsConfig(
+        model="test/default",
+        providers={
+            "test": ProviderConfig(
+                options=ProviderOptions(baseURL="http://test:11434/v1"),
+                models={
+                    "default": ModelDefinition(
+                        name="default",
+                        capabilities=["code", "tool_use", "reasoning"],
+                    ),
+                },
+            ),
+        },
+    )
+    return ModelResolver(config)
+
+
 def _mock_llm_factory(model_name: str) -> MockLLMClient:
     return MockLLMClient(response=f"Response from {model_name}")
 
@@ -72,8 +94,22 @@ def _mock_llm_factory(model_name: str) -> MockLLMClient:
 # ---------------------------------------------------------------------------
 
 
-def test_create_default_worker() -> None:
-    """Creating a worker without a skill should return a default AgentLoop."""
+def test_create_default_worker_with_resolver() -> None:
+    """Creating a worker without a skill using model_resolver should work."""
+    registry = ToolRegistry()
+    factory = WorkerFactory(
+        tool_registry=registry,
+        security=MockSecurity(),
+        model_resolver=_make_resolver(),
+    )
+
+    loop = factory.create(skill=None)
+    assert loop is not None
+    assert loop._system_prompt_override is None
+
+
+def test_create_default_worker_with_legacy_factory() -> None:
+    """Creating a worker with legacy llm_factory should still work."""
     registry = ToolRegistry()
     factory = WorkerFactory(
         tool_registry=registry,
@@ -92,7 +128,7 @@ def test_create_skill_worker() -> None:
     factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
-        llm_factory=_mock_llm_factory,
+        model_resolver=_make_resolver(),
     )
 
     skill = SkillDefinition(
@@ -100,7 +136,7 @@ def test_create_skill_worker() -> None:
         description="Reviews code",
         system_prompt="You are a code reviewer.",
         instructions="Be thorough.",
-        model="review-model",
+        requires=["code"],
         max_iterations=5,
     )
 
@@ -121,7 +157,7 @@ def test_create_worker_with_filtered_tools() -> None:
     factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
-        llm_factory=_mock_llm_factory,
+        model_resolver=_make_resolver(),
     )
 
     skill = SkillDefinition(
@@ -144,7 +180,7 @@ def test_create_worker_injects_schedule_tool() -> None:
     factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
-        llm_factory=_mock_llm_factory,
+        model_resolver=_make_resolver(),
         scheduler=scheduler,
     )
 
@@ -158,7 +194,7 @@ def test_create_handler_returns_callable() -> None:
     factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
-        llm_factory=_mock_llm_factory,
+        model_resolver=_make_resolver(),
     )
 
     handler = factory.create_handler(skill=None, step_description="Do something")
@@ -172,7 +208,7 @@ async def test_handler_calls_run_once() -> None:
     factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
-        llm_factory=_mock_llm_factory,
+        model_resolver=_make_resolver(),
     )
 
     handler = factory.create_handler(skill=None, step_description="Test task")
@@ -204,17 +240,17 @@ async def test_handler_passes_context() -> None:
     assert "data from A" in result
 
 
-def test_create_worker_handles_llm_factory_failure() -> None:
-    """If llm_factory raises, the worker should still be created."""
-
-    def failing_factory(model: str):
-        raise RuntimeError("No model")
+def test_create_worker_handles_resolver_failure() -> None:
+    """If model_resolver raises, the worker should still be created."""
+    class FailingResolver:
+        def resolve_for_skill(self, skill, current_model=None):
+            raise RuntimeError("No model")
 
     registry = ToolRegistry()
     factory = WorkerFactory(
         tool_registry=registry,
         security=MockSecurity(),
-        llm_factory=failing_factory,
+        model_resolver=FailingResolver(),
     )
 
     loop = factory.create(skill=None)

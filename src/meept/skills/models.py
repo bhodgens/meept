@@ -1,31 +1,33 @@
 """Data models for the skills subsystem.
 
-Defines :class:`SkillDefinition` (loaded from TOML files) and
-:class:`TriageResult` (returned by the triage agent).
+Defines :class:`SkillDefinition` loaded from ``SKILL.md`` files.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from meept.skills.parser import ParsedSkill
 
 
 @dataclass(slots=True)
 class SkillDefinition:
-    """A single skill loaded from a ``.toml`` file.
+    """A single skill definition.
 
     Parameters
     ----------
     name:
-        Unique identifier (e.g. ``"code_review"``).
+        Unique identifier (e.g. ``"code-review"``).
     description:
         Human-readable description of what the skill does.
-    model:
-        Key from ``[llm.models]`` in meept.toml.  ``"default"`` uses the
-        default model.
+    requires:
+        Capability tags that a model must satisfy to run this skill.
     system_prompt:
         Skill-specific system prompt injected into the agent loop.
     instructions:
-        Additional instructions appended after the system prompt.
+        Additional instructions (Markdown body from SKILL.md).
     allowed_tools:
         Subset of tool names this skill may use.  Empty list means *all*.
     temperature:
@@ -34,48 +36,37 @@ class SkillDefinition:
         LLM max_tokens override for this skill.
     risk_level:
         Risk classification: ``"low"``, ``"medium"``, ``"high"``.
-    trigger_keywords:
-        Keywords used by the triage agent for intent matching.
-    examples:
-        Few-shot example messages for triage classification.
     max_iterations:
         Maximum agent-loop iterations for this skill.
+    source_path:
+        Filesystem path the skill was loaded from (if any).
     """
 
     name: str = ""
     description: str = ""
-    model: str = "default"
+    requires: list[str] = field(default_factory=list)
     system_prompt: str = ""
     instructions: str = ""
     allowed_tools: list[str] = field(default_factory=list)
     temperature: float | None = None
     max_tokens: int | None = None
     risk_level: str = "medium"
-    trigger_keywords: list[str] = field(default_factory=list)
-    examples: list[str] = field(default_factory=list)
     max_iterations: int = 10
+    source_path: str = ""
 
-
-@dataclass(slots=True)
-class TriageResult:
-    """Result of the triage agent's intent classification.
-
-    Parameters
-    ----------
-    skill_name:
-        Name of the matched skill, or ``"default"`` for the standard agent.
-    confidence:
-        Classification confidence between 0.0 and 1.0.
-    extracted_params:
-        Parameters extracted from the user message (e.g. file paths).
-    reasoning:
-        Brief explanation of why the skill was chosen.
-    fallback_to_default:
-        When ``True``, the dispatcher should use the default agent loop.
-    """
-
-    skill_name: str = "default"
-    confidence: float = 0.0
-    extracted_params: dict = field(default_factory=dict)
-    reasoning: str = ""
-    fallback_to_default: bool = False
+    @classmethod
+    def from_parsed(cls, parsed: ParsedSkill) -> SkillDefinition:
+        """Construct from a :class:`ParsedSkill` produced by the parser."""
+        meta = parsed.metadata
+        return cls(
+            name=meta.name,
+            description=meta.description,
+            requires=list(meta.requires),
+            instructions=parsed.body,
+            allowed_tools=list(meta.allowed_tools),
+            temperature=meta.temperature,
+            max_tokens=meta.max_tokens,
+            risk_level=meta.risk_level,
+            max_iterations=meta.max_iterations,
+            source_path=str(parsed.source_path) if parsed.source_path else "",
+        )

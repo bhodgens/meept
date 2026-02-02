@@ -20,7 +20,8 @@ def test_load_toml(tmp_config: Path) -> None:
     cfg = MeeptConfig(config_path=tmp_config)
 
     assert cfg.settings.daemon.log_level == "DEBUG"
-    assert cfg.settings.llm.default_model == "test"
+    # Model config now lives in models.json5; LLMConfig.default_model keeps its default.
+    assert cfg.settings.llm.default_model == "default"
     assert cfg.settings.llm.budget.hourly_token_limit == 10000
 
 

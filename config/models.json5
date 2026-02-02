@@ -1,0 +1,52 @@
+{
+  // Default model for general use (provider/model-id format)
+  "model": "ollama/llama3.2",
+
+  // Fast/cheap model for classification, summarization
+  "small_model": "ollama/llama3.2",
+
+  // Providers to skip entirely
+  "disabled_providers": [],
+
+  "providers": {
+    "ollama": {
+      "api": "openai",
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+        "timeout": 120,
+      },
+      "models": {
+        "llama3.2": {
+          "name": "llama3.2",
+          "capabilities": ["code", "tool_use", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 128000,
+          "max_output": 4096,
+          "temperature": 0.7,
+        },
+      },
+    },
+
+    // Example: OpenRouter provider
+    // "openrouter": {
+    //   "api": "openai",
+    //   "options": {
+    //     "baseURL": "https://openrouter.ai/api/v1",
+    //     "apiKey": "${OPENROUTER_API_KEY}",
+    //     "timeout": 120,
+    //   },
+    //   "models": {
+    //     "anthropic/claude-3.5-sonnet": {
+    //       "name": "anthropic/claude-3.5-sonnet",
+    //       "capabilities": ["code", "reasoning", "tool_use", "long_context", "vision"],
+    //       "input_cost": 3.0,
+    //       "output_cost": 15.0,
+    //       "context_limit": 200000,
+    //       "max_output": 8192,
+    //       "temperature": 0.7,
+    //     },
+    //   },
+    // },
+  },
+}

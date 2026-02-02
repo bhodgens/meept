@@ -1,7 +1,7 @@
 """Worker factory -- creates ephemeral skill-specific AgentLoop instances.
 
-Replaces the per-skill loop creation from :class:`TaskExecutor` and adds
-``schedule_job`` tool injection.
+Uses :class:`ModelResolver` for capability-based model selection instead
+of the old ``llm_factory`` callable.
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ class WorkerFactory:
     """Creates ephemeral :class:`AgentLoop` workers for pipeline steps.
 
     Each worker gets a skill-specific system prompt, filtered tools,
-    an injected ``schedule_job`` tool, and the skill's LLM model.
+    an injected ``schedule_job`` tool, and the skill's LLM model
+    resolved via capability matching.
 
     Parameters
     ----------
@@ -32,8 +33,12 @@ class WorkerFactory:
         Shared memory manager (optional).
     bus:
         Internal message bus.
+    model_resolver:
+        :class:`~meept.llm.resolver.ModelResolver` for capability-based
+        model selection.  Replaces the old ``llm_factory`` parameter.
     llm_factory:
-        Callable ``(model_name: str) -> llm_client``.
+        Legacy callable ``(model_name: str) -> llm_client``.  Used as
+        fallback if ``model_resolver`` is not provided.
     scheduler:
         The MeeptScheduler instance (for schedule_job injection).
     """
@@ -44,6 +49,7 @@ class WorkerFactory:
         security: Any,
         memory: Any | None = None,
         bus: Any | None = None,
+        model_resolver: Any | None = None,
         llm_factory: Any | None = None,
         scheduler: Any | None = None,
     ) -> None:
@@ -51,6 +57,7 @@ class WorkerFactory:
         self._security = security
         self._memory = memory
         self._bus = bus
+        self._model_resolver = model_resolver
         self._llm_factory = llm_factory
         self._scheduler = scheduler
 
@@ -72,7 +79,6 @@ class WorkerFactory:
 
         system_prompt: str | None = None
         max_iterations = 10
-        model_name = "default"
         allowed_tools: list[str] | None = None
 
         if skill is not None:
@@ -83,18 +89,29 @@ class WorkerFactory:
                 prompt_parts.append(skill.instructions)
             system_prompt = "\n\n".join(prompt_parts) if prompt_parts else None
             max_iterations = skill.max_iterations
-            model_name = skill.model
             allowed_tools = skill.allowed_tools if skill.allowed_tools else None
 
-        # Create LLM client.
+        # Create LLM client via model_resolver (preferred) or legacy llm_factory.
         llm_client = None
-        if self._llm_factory is not None:
+        if self._model_resolver is not None:
             try:
+                resolved_config = self._model_resolver.resolve_for_skill(skill)
+                from meept.llm.client import create_client_from_resolved
+
+                llm_client = create_client_from_resolved(resolved_config)
+            except Exception:
+                log.warning(
+                    "Could not resolve model for skill %r; worker will need a default client",
+                    skill.name if skill else "(default)",
+                )
+        elif self._llm_factory is not None:
+            try:
+                model_name = "default"
                 llm_client = self._llm_factory(model_name)
             except Exception:
                 log.warning(
-                    "Could not create LLM client for model %r; worker will need a default client",
-                    model_name,
+                    "Could not create LLM client via legacy factory; "
+                    "worker will need a default client",
                 )
 
         # Build filtered tool registry.

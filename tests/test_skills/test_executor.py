@@ -98,7 +98,6 @@ async def test_execute_with_skill() -> None:
     skill_reg.register(SkillDefinition(
         name="test_skill",
         description="A test skill",
-        model="test-model",
         system_prompt="You are a test.",
     ))
 
@@ -157,7 +156,7 @@ async def test_execute_plan() -> None:
     )
 
     skill_reg = SkillRegistry()
-    skill_reg.register(SkillDefinition(name="skill_a", description="A", model="model-a"))
+    skill_reg.register(SkillDefinition(name="skill_a", description="A"))
 
     executor = PipelineExecutor(bus)
     orch = Orchestrator(

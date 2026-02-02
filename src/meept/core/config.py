@@ -86,6 +86,26 @@ class MeeptConfig:
         """Convenience accessor for ``settings.daemon.data_dir`` (expanded)."""
         return Path(self.settings.daemon.data_dir).expanduser().resolve()
 
+    @property
+    def models_config_path(self) -> Path:
+        """Path to the ``models.json5`` configuration file.
+
+        Looks for the file alongside ``meept.toml``, falling back to the
+        shipped default in the config directory.
+        """
+        # Check next to meept.toml first.
+        candidate = self._config_dir / "models.json5"
+        if candidate.exists():
+            return candidate
+
+        # Fall back to user data dir.
+        user_candidate = Path("~/.meept/models.json5").expanduser()
+        if user_candidate.exists():
+            return user_candidate
+
+        # Return the default path (may not exist yet -- providers.py handles that).
+        return candidate
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

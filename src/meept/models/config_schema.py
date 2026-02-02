@@ -133,16 +133,6 @@ class PluginConfig(BaseModel):
     directory: str = "~/.meept/plugins"
 
 
-class TriageConfig(BaseModel):
-    """``[skills.triage]`` section."""
-
-    enabled: bool = False
-    model: str = "default"
-    temperature: float = 0.1
-    max_tokens: int = 512
-    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-
-
 class WorkspaceConfig(BaseModel):
     """``[workspace]`` section."""
 
@@ -158,8 +148,6 @@ class SkillsConfig(BaseModel):
     """``[skills]`` section."""
 
     enabled: bool = False
-    directory: str = "~/.meept/skills"
-    triage: TriageConfig = Field(default_factory=TriageConfig)
 
 
 # ---------------------------------------------------------------------------

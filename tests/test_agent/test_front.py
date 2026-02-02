@@ -11,7 +11,7 @@ from meept.agent.front import FrontAgent
 from meept.agent.orchestrator import OrchestratorResult
 from meept.models.messages import BusMessage, MessageType
 from meept.models.tasks import TaskPlan, TaskStep
-from meept.skills.models import SkillDefinition, TriageResult
+from meept.skills.models import SkillDefinition
 from meept.skills.registry import SkillRegistry
 
 
@@ -40,16 +40,6 @@ class MockDefaultLoop:
         self.last_message = message
         self.last_conv_id = conversation_id
         return self._response
-
-
-class MockTriageAgent:
-    def __init__(self, result: TriageResult) -> None:
-        self._result = result
-        self.call_count = 0
-
-    async def classify(self, message: str) -> TriageResult:
-        self.call_count += 1
-        return self._result
 
 
 class MockOrchestrator:
@@ -91,8 +81,8 @@ class MockPlanner:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_simple_no_triage() -> None:
-    """Without triage, should fall back to default loop."""
+async def test_dispatch_simple_no_planner() -> None:
+    """Without planner, should fall back to default loop."""
     default = MockDefaultLoop(response="Hello")
     orch = MockOrchestrator()
 
@@ -103,54 +93,6 @@ async def test_dispatch_simple_no_triage() -> None:
 
     result = await agent.dispatch("Hi")
     assert result == "Hello"
-    assert default.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_dispatch_skill_via_triage() -> None:
-    """Confident triage should route to orchestrator with skill step."""
-    registry = SkillRegistry()
-    registry.register(SkillDefinition(name="weather", description="Weather"))
-
-    triage = MockTriageAgent(TriageResult(skill_name="weather", confidence=0.9))
-    orch = MockOrchestrator(response="Sunny")
-    default = MockDefaultLoop()
-
-    agent = FrontAgent(
-        orchestrator=orch,
-        triage_agent=triage,
-        default_loop=default,
-        skill_registry=registry,
-    )
-
-    result = await agent.dispatch("What's the weather?")
-    assert result == "Sunny"
-    assert len(orch.single_calls) == 1
-    assert orch.single_calls[0].skill_name == "weather"
-    assert default.call_count == 0
-
-
-@pytest.mark.asyncio
-async def test_dispatch_low_confidence_to_default() -> None:
-    """Low-confidence triage should fall through to default."""
-    registry = SkillRegistry()
-    registry.register(SkillDefinition(name="x", description="X"))
-
-    triage = MockTriageAgent(
-        TriageResult(skill_name="x", confidence=0.2, fallback_to_default=True)
-    )
-    orch = MockOrchestrator()
-    default = MockDefaultLoop(response="Default handled")
-
-    agent = FrontAgent(
-        orchestrator=orch,
-        triage_agent=triage,
-        default_loop=default,
-        skill_registry=registry,
-    )
-
-    result = await agent.dispatch("Maybe?")
-    assert result == "Default handled"
     assert default.call_count == 1
 
 
@@ -236,31 +178,6 @@ async def test_handle_chat_request_rejects_empty() -> None:
 
     assert default.call_count == 0
     assert len(bus.messages) == 0
-
-
-@pytest.mark.asyncio
-async def test_triage_publishes_events() -> None:
-    """Triage and skill events should be published to the bus."""
-    bus = MockBus()
-    registry = SkillRegistry()
-    registry.register(SkillDefinition(name="code", description="Code"))
-
-    triage = MockTriageAgent(TriageResult(skill_name="code", confidence=0.95))
-    orch = MockOrchestrator(response="Done")
-
-    agent = FrontAgent(
-        orchestrator=orch,
-        triage_agent=triage,
-        skill_registry=registry,
-        bus=bus,
-    )
-
-    await agent.dispatch("Write code")
-
-    msg_types = [m.type for _, m in bus.messages]
-    assert MessageType.TRIAGE_RESULT in msg_types
-    assert MessageType.SKILL_TASK_START in msg_types
-    assert MessageType.SKILL_TASK_COMPLETE in msg_types
 
 
 @pytest.mark.asyncio

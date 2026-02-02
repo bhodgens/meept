@@ -1,4 +1,8 @@
-"""Tests for the FrontAgent (replaces SkillDispatcher tests)."""
+"""Tests for the FrontAgent dispatch (replaces old SkillDispatcher tests).
+
+These tests verify that the FrontAgent correctly routes messages through
+the default loop, planner, and orchestrator pipeline (without triage).
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,7 @@ import pytest
 from meept.agent.front import FrontAgent
 from meept.models.messages import BusMessage, MessageType
 from meept.models.tasks import TaskStep
-from meept.skills.models import SkillDefinition, TriageResult
+from meept.skills.models import SkillDefinition
 from meept.skills.registry import SkillRegistry
 
 
@@ -40,18 +44,6 @@ class MockDefaultLoop:
         return self._response
 
 
-class MockTriageAgent:
-    """Triage agent that returns a pre-configured result."""
-
-    def __init__(self, result: TriageResult) -> None:
-        self._result = result
-        self.call_count = 0
-
-    async def classify(self, message: str) -> TriageResult:
-        self.call_count += 1
-        return self._result
-
-
 class MockOrchestrator:
     """Orchestrator that records calls and returns canned results."""
 
@@ -75,93 +67,18 @@ class MockOrchestrator:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_to_default_no_triage() -> None:
-    """Without triage, messages should go to the default loop."""
+async def test_dispatch_to_default() -> None:
+    """Without planner, messages should go to the default loop."""
     default_loop = MockDefaultLoop(response="Hello from default")
     orchestrator = MockOrchestrator()
 
     agent = FrontAgent(
         orchestrator=orchestrator,
-        triage_agent=None,
         default_loop=default_loop,
     )
 
     result = await agent.dispatch("Hello")
     assert result == "Hello from default"
-    assert default_loop.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_dispatch_to_skill_via_triage() -> None:
-    """High-confidence triage should route to the matched skill."""
-    registry = SkillRegistry()
-    skill = SkillDefinition(name="code_review", description="Reviews code")
-    registry.register(skill)
-
-    triage = MockTriageAgent(
-        TriageResult(skill_name="code_review", confidence=0.9)
-    )
-    orchestrator = MockOrchestrator(response="Review complete")
-    default_loop = MockDefaultLoop()
-
-    agent = FrontAgent(
-        orchestrator=orchestrator,
-        triage_agent=triage,
-        default_loop=default_loop,
-        skill_registry=registry,
-    )
-
-    result = await agent.dispatch("Review my code")
-    assert result == "Review complete"
-    assert triage.call_count == 1
-    assert len(orchestrator.calls) == 1
-    assert default_loop.call_count == 0
-
-
-@pytest.mark.asyncio
-async def test_dispatch_fallback_on_low_confidence() -> None:
-    """Low confidence triage should fall back to default."""
-    registry = SkillRegistry()
-    registry.register(SkillDefinition(name="test", description="Test"))
-
-    triage = MockTriageAgent(
-        TriageResult(skill_name="test", confidence=0.3, fallback_to_default=True)
-    )
-    orchestrator = MockOrchestrator()
-    default_loop = MockDefaultLoop(response="Default handled it")
-
-    agent = FrontAgent(
-        orchestrator=orchestrator,
-        triage_agent=triage,
-        default_loop=default_loop,
-        skill_registry=registry,
-    )
-
-    result = await agent.dispatch("Something vague")
-    assert result == "Default handled it"
-    assert default_loop.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_dispatch_fallback_on_unknown_skill() -> None:
-    """Triage returning an unregistered skill should fall back to default."""
-    registry = SkillRegistry()
-
-    triage = MockTriageAgent(
-        TriageResult(skill_name="nonexistent", confidence=0.95)
-    )
-    orchestrator = MockOrchestrator()
-    default_loop = MockDefaultLoop(response="Fallback")
-
-    agent = FrontAgent(
-        orchestrator=orchestrator,
-        triage_agent=triage,
-        default_loop=default_loop,
-        skill_registry=registry,
-    )
-
-    result = await agent.dispatch("Do something")
-    assert result == "Fallback"
     assert default_loop.call_count == 1
 
 
@@ -179,7 +96,6 @@ async def test_handle_chat_request() -> None:
 
     agent = FrontAgent(
         orchestrator=orchestrator,
-        triage_agent=None,
         default_loop=default_loop,
         bus=MockBus(),
     )
@@ -193,7 +109,6 @@ async def test_handle_chat_request() -> None:
     await agent.handle_chat_request(request)
 
     assert default_loop.call_count == 1
-    # Should have published a CHAT_RESPONSE.
     response_msgs = [
         (t, m) for t, m in published
         if m.type == MessageType.CHAT_RESPONSE
@@ -205,26 +120,28 @@ async def test_handle_chat_request() -> None:
 @pytest.mark.asyncio
 async def test_dispatch_with_conversation_id() -> None:
     """Conversation ID should be passed through to the default loop."""
-    registry = SkillRegistry()
-    skill = SkillDefinition(name="test_skill", description="Test")
-    registry.register(skill)
-
-    triage = MockTriageAgent(
-        TriageResult(skill_name="test_skill", confidence=0.9)
-    )
+    default_loop = MockDefaultLoop(response="With conv ID")
     orchestrator = MockOrchestrator()
-    default_loop = MockDefaultLoop()
 
     agent = FrontAgent(
         orchestrator=orchestrator,
-        triage_agent=triage,
         default_loop=default_loop,
-        skill_registry=registry,
     )
 
-    await agent.dispatch("Test", conversation_id="conv123")
+    result = await agent.dispatch("Test", conversation_id="conv123")
+    assert result == "With conv ID"
+    assert default_loop.call_count == 1
 
-    # Orchestrator should have been called (via execute_single for the skill).
+
+@pytest.mark.asyncio
+async def test_dispatch_falls_to_orchestrator() -> None:
+    """Without a default loop, should fall back to orchestrator."""
+    orchestrator = MockOrchestrator(response="Orch response")
+
+    agent = FrontAgent(orchestrator=orchestrator)
+
+    result = await agent.dispatch("Do something")
+    assert result == "Orch response"
     assert len(orchestrator.calls) == 1
 
 
@@ -254,6 +171,5 @@ async def test_dispatch_empty_message_via_bus() -> None:
 
     await agent.handle_chat_request(request)
 
-    # Should not have dispatched or published a response.
     assert default_loop.call_count == 0
     assert len(published) == 0

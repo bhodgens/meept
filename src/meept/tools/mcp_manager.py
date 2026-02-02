@@ -46,25 +46,42 @@ except ImportError:
 class McpServerConfig:
     """Configuration for a single MCP server.
 
+    The format follows the `opencode <https://opencode.ai/docs/mcp-servers/>`_
+    convention.  Servers are either ``"local"`` (subprocess over stdio) or
+    ``"remote"`` (HTTP/SSE endpoint).
+
     Parameters
     ----------
     name:
         Human-readable server identifier (must be unique).
+    type:
+        ``"local"`` for a subprocess-based server, ``"remote"`` for an
+        HTTP/SSE endpoint.
     command:
-        Executable to launch (e.g. ``"npx"``, ``"uvx"``, ``"python"``).
-    args:
-        Command-line arguments passed to *command*.
-    env:
-        Extra environment variables injected into the subprocess.
+        (local only) List whose first element is the executable and
+        remaining elements are arguments, e.g. ``["npx", "-y", "pkg"]``.
+    environment:
+        Extra environment variables injected into the subprocess (local)
+        or ignored (remote).
     enabled:
         Whether the server should be started when the manager boots.
+    timeout:
+        Per-request timeout in milliseconds.  ``None`` means use the
+        default (5 000 ms for local, 30 000 ms for remote).
+    url:
+        (remote only) URL of the remote MCP server.
+    headers:
+        (remote only) Extra HTTP headers sent with every request.
     """
 
     name: str
-    command: str
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
+    type: str = "local"
+    command: list[str] = field(default_factory=list)
+    environment: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
+    timeout: int | None = None
+    url: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +145,22 @@ class McpManager:
     # ------------------------------------------------------------------
 
     def _load_config(self) -> None:
-        """Parse ``mcp_servers.json`` into :class:`McpServerConfig` instances."""
+        """Parse ``mcp_servers.json`` into :class:`McpServerConfig` instances.
+
+        The JSON file uses the opencode convention::
+
+            {
+              "mcp": {
+                "my-server": {
+                  "type": "local",
+                  "command": ["npx", "-y", "my-mcp-command"],
+                  "environment": {"KEY": "value"},
+                  "enabled": true,
+                  "timeout": 5000
+                }
+              }
+            }
+        """
         if not self._config_path.exists():
             log.warning("MCP config not found at %s -- no servers configured", self._config_path)
             return
@@ -139,22 +171,43 @@ class McpManager:
             log.error("Failed to read MCP config %s: %s", self._config_path, exc)
             return
 
-        servers_raw: dict[str, Any] = raw.get("servers", {})
+        servers_raw: dict[str, Any] = raw.get("mcp", {})
         for name, entry in servers_raw.items():
             if not isinstance(entry, dict):
                 log.warning("MCP config: skipping malformed entry %r", name)
                 continue
-            command = entry.get("command")
-            if not command:
-                log.warning("MCP config: server %r has no 'command' -- skipping", name)
-                continue
-            self._configs[name] = McpServerConfig(
-                name=name,
-                command=command,
-                args=entry.get("args", []),
-                env=entry.get("env", {}),
-                enabled=entry.get("enabled", True),
-            )
+
+            server_type = entry.get("type", "local")
+
+            if server_type == "remote":
+                url = entry.get("url")
+                if not url:
+                    log.warning("MCP config: remote server %r has no 'url' -- skipping", name)
+                    continue
+                self._configs[name] = McpServerConfig(
+                    name=name,
+                    type="remote",
+                    url=url,
+                    headers=entry.get("headers", {}),
+                    enabled=entry.get("enabled", True),
+                    timeout=entry.get("timeout"),
+                )
+            else:
+                command = entry.get("command")
+                if not command or not isinstance(command, list) or len(command) == 0:
+                    log.warning(
+                        "MCP config: local server %r has no 'command' array -- skipping",
+                        name,
+                    )
+                    continue
+                self._configs[name] = McpServerConfig(
+                    name=name,
+                    type="local",
+                    command=command,
+                    environment=entry.get("environment", {}),
+                    enabled=entry.get("enabled", True),
+                    timeout=entry.get("timeout"),
+                )
 
         log.info(
             "MCP config: loaded %d server definition(s) from %s",
@@ -185,7 +238,15 @@ class McpManager:
             log.info("MCP server %r is disabled in configuration -- skipping", name)
             return False
 
-        log.info("Starting MCP server %r: %s %s", name, cfg.command, " ".join(cfg.args))
+        if cfg.type == "remote":
+            log.warning(
+                "MCP server %r is remote (url=%s) -- remote transport not yet implemented",
+                name,
+                cfg.url,
+            )
+            return False
+
+        log.info("Starting MCP server %r: %s", name, " ".join(cfg.command))
 
         if _MCP_SDK_AVAILABLE:
             return await self._start_server_sdk(cfg)
@@ -194,10 +255,10 @@ class McpManager:
     async def _start_server_sdk(self, cfg: McpServerConfig) -> bool:
         """Start server using the official MCP SDK."""
         try:
-            env = {**os.environ, **cfg.env} if cfg.env else None
+            env = {**os.environ, **cfg.environment} if cfg.environment else None
             params = StdioServerParameters(
-                command=cfg.command,
-                args=cfg.args,
+                command=cfg.command[0],
+                args=cfg.command[1:],
                 env=env,
             )
 
@@ -234,10 +295,10 @@ class McpManager:
     async def _start_server_raw(self, cfg: McpServerConfig) -> bool:
         """Start server via raw subprocess + JSON-RPC over stdio."""
         try:
-            env = {**os.environ, **cfg.env} if cfg.env else None
+            env = {**os.environ, **cfg.environment} if cfg.environment else None
             process = await asyncio.create_subprocess_exec(
-                cfg.command,
-                *cfg.args,
+                cfg.command[0],
+                *cfg.command[1:],
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -320,6 +381,7 @@ class McpManager:
         Each entry contains:
 
         * ``name`` -- server identifier
+        * ``type`` -- ``"local"`` or ``"remote"``
         * ``running`` -- whether the subprocess is alive
         * ``tool_count`` -- number of tools exposed
         * ``enabled`` -- whether the config entry is enabled
@@ -329,6 +391,7 @@ class McpManager:
             running = self._servers.get(name)
             result.append({
                 "name": name,
+                "type": cfg.type,
                 "running": running.running if running else False,
                 "tool_count": running.tool_count if running else 0,
                 "enabled": cfg.enabled,
@@ -369,6 +432,9 @@ class McpManager:
 
         Returns the raw result dictionary from the server.
 
+        If the server has a ``timeout`` configured (in milliseconds), that
+        value takes precedence over the *timeout* parameter.
+
         Raises
         ------
         ValueError
@@ -379,6 +445,11 @@ class McpManager:
         running = self._servers.get(server_name)
         if running is None or not running.running:
             raise ValueError(f"MCP server {server_name!r} is not running")
+
+        # Honour per-server timeout (stored in milliseconds, convert to seconds).
+        cfg = running.config
+        if cfg.timeout is not None:
+            timeout = cfg.timeout / 1000.0
 
         if _MCP_SDK_AVAILABLE and running.session is not None:
             return await self._invoke_tool_sdk(running, tool_name, arguments, timeout=timeout)

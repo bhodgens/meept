@@ -85,3 +85,37 @@ def test_repr() -> None:
     reg = SkillRegistry()
     reg.register(SkillDefinition(name="test", description="T"))
     assert "test" in repr(reg)
+
+
+def test_find_by_capabilities() -> None:
+    """find_by_capabilities should return skills whose requires are satisfied."""
+    reg = SkillRegistry()
+    reg.register(SkillDefinition(name="code", requires=["code", "reasoning"]))
+    reg.register(SkillDefinition(name="vision", requires=["vision"]))
+    reg.register(SkillDefinition(name="any", requires=[]))
+
+    results = reg.find_by_capabilities({"code", "reasoning"})
+    names = {s.name for s in results}
+    assert "code" in names
+    assert "any" in names
+    assert "vision" not in names
+
+
+def test_find_by_capabilities_empty() -> None:
+    """Empty capabilities should only match skills with empty requires."""
+    reg = SkillRegistry()
+    reg.register(SkillDefinition(name="needs", requires=["code"]))
+    reg.register(SkillDefinition(name="any", requires=[]))
+
+    results = reg.find_by_capabilities(set())
+    assert len(results) == 1
+    assert results[0].name == "any"
+
+
+def test_get_requirements() -> None:
+    """get_requirements should return the requires set for a named skill."""
+    reg = SkillRegistry()
+    reg.register(SkillDefinition(name="test", requires=["code", "reasoning"]))
+
+    assert reg.get_requirements("test") == {"code", "reasoning"}
+    assert reg.get_requirements("unknown") == set()
