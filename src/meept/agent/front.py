@@ -44,6 +44,8 @@ class FrontAgent:
         default_loop: Any | None = None,
         skill_registry: Any | None = None,
         bus: Any | None = None,
+        collaborative_planner: Any | None = None,
+        workspace_manager: Any | None = None,
     ) -> None:
         self._orchestrator = orchestrator
         self._triage = triage_agent
@@ -51,6 +53,8 @@ class FrontAgent:
         self._default_loop = default_loop
         self._skill_registry = skill_registry
         self._bus = bus
+        self._collaborative_planner = collaborative_planner
+        self._workspace_manager = workspace_manager
 
     async def handle_chat_request(self, message: BusMessage) -> None:
         """Bus handler for incoming chat requests.
@@ -154,7 +158,32 @@ class FrontAgent:
 
                     return result
 
-        # Step 3: Multi-step planning (if planner available).
+        # Step 3a: Collaborative planning check (programming/automation tasks).
+        if self._collaborative_planner is not None:
+            collab = self._collaborative_planner
+
+            # Handle follow-up messages for pending plan reviews.
+            if conversation_id and collab.has_pending_review(conversation_id):
+                return await self._handle_plan_followup(message, conversation_id)
+
+            # Check if this is a new programming task.
+            if await collab.is_programming_task(message):
+                review = await collab.plan_and_review(
+                    message, conversation_id or "default",
+                )
+
+                await self._publish(
+                    MessageType.PLAN_REVIEW,
+                    {
+                        "task_id": review.task_id,
+                        "status": review.status,
+                        "conversation_id": conversation_id,
+                    },
+                )
+
+                return review.formatted_summary
+
+        # Step 3b: Multi-step planning (if planner available).
         if self._planner is not None:
             should_plan = getattr(self._planner, "should_plan", None)
             if should_plan is not None:
@@ -189,6 +218,77 @@ class FrontAgent:
         return await self._orchestrator.execute_single(step)
 
     # ------------------------------------------------------------------
+    # Collaborative planning follow-up
+    # ------------------------------------------------------------------
+
+    async def _handle_plan_followup(self, message: str, conversation_id: str) -> str:
+        """Handle a follow-up message for a pending plan review.
+
+        Classifies the message as approval, rejection, or revision and
+        routes accordingly.
+        """
+        collab = self._collaborative_planner
+        action = collab.classify_response(message)
+
+        if action == "approve":
+            plan = await collab.approve(conversation_id)
+
+            await self._publish(
+                MessageType.PLAN_APPROVED,
+                {
+                    "task_id": plan.id,
+                    "conversation_id": conversation_id,
+                },
+            )
+
+            # Execute the approved plan.
+            await self._publish(
+                MessageType.CHAT_PROGRESS,
+                {
+                    "event": "executing_approved_plan",
+                    "steps": len(plan.steps),
+                    "conversation_id": conversation_id,
+                },
+            )
+
+            orch_result = await self._orchestrator.execute(plan.steps)
+
+            # Commit final results to workspace if workspace manager available.
+            if self._workspace_manager is not None and plan.workspace_path:
+                await self._workspace_manager.append_log(
+                    plan.id, f"Execution complete (success={orch_result.success})",
+                )
+                await self._workspace_manager.commit(plan.id, "Execution complete")
+
+            return orch_result.synthesized
+
+        if action == "reject":
+            await collab.reject(conversation_id, reason=message)
+
+            await self._publish(
+                MessageType.PLAN_REJECTED,
+                {
+                    "conversation_id": conversation_id,
+                },
+            )
+
+            return "Plan rejected. Let me know if you'd like to try a different approach."
+
+        # Revision.
+        review = await collab.revise(conversation_id, feedback=message)
+
+        await self._publish(
+            MessageType.PLAN_REVIEW,
+            {
+                "task_id": review.task_id,
+                "status": review.status,
+                "conversation_id": conversation_id,
+            },
+        )
+
+        return review.formatted_summary
+
+    # ------------------------------------------------------------------
     # Bus helpers
     # ------------------------------------------------------------------
 
@@ -218,6 +318,10 @@ class FrontAgent:
             MessageType.SKILL_TASK_COMPLETE: "skills.skill_task_complete",
             MessageType.CHAT_PROGRESS: "chat.progress",
             MessageType.PIPELINE_PROGRESS: "pipeline.progress",
+            MessageType.PLAN_REVIEW: "planning.plan_review",
+            MessageType.PLAN_APPROVED: "planning.plan_approved",
+            MessageType.PLAN_REJECTED: "planning.plan_rejected",
+            MessageType.WORKSPACE_CREATED: "workspace.created",
         }
         topic = topic_map.get(msg_type, f"front_agent.{msg_type.value}")
 

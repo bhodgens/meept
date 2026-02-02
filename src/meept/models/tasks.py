@@ -18,6 +18,7 @@ class TaskStatus(str, enum.Enum):
     """Lifecycle status of a task or step."""
 
     PENDING = "pending"
+    PENDING_APPROVAL = "pending_approval"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -83,6 +84,9 @@ class TaskPlan:
     steps: list[TaskStep] = field(default_factory=list)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     status: TaskStatus = TaskStatus.PENDING
+    workspace_path: str | None = None
+    analysis: str | None = None
+    approved: bool = False
 
 
 @dataclass(slots=True)

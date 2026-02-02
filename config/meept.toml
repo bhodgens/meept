@@ -87,6 +87,14 @@ config_file = "~/.meept/mcp_servers.json"
 enabled = true
 directory = "~/.meept/plugins"
 
+[workspace]
+enabled = true
+base_dir = "~/.meept/workspaces"
+auto_commit = true
+commit_on_plan = true
+commit_on_step = true
+cleanup_completed = false
+
 [skills]
 enabled = false
 directory = "~/.meept/skills"

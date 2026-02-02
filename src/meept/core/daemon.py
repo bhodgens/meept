@@ -197,6 +197,35 @@ class MeeptDaemon:
             default_loop = self._registry.get("agent_loop")
             planner = self._registry.get("planner")
 
+            # Build workspace manager and collaborative planner (if enabled).
+            workspace_manager = None
+            collaborative_planner = None
+            ws_cfg = getattr(settings, "workspace", None)
+            if ws_cfg is not None and ws_cfg.enabled:
+                from meept.agent.workspace import WorkspaceManager
+
+                workspace_manager = WorkspaceManager(
+                    base_dir=Path(ws_cfg.base_dir).expanduser(),
+                    auto_commit=ws_cfg.auto_commit,
+                )
+                self._registry.register_instance("workspace_manager", workspace_manager)
+                log.info("daemon: workspace manager initialized (base_dir=%s)", ws_cfg.base_dir)
+
+                if planner is not None:
+                    from meept.agent.collaborative_planner import CollaborativePlanner
+
+                    collab_llm = self._registry.get("llm_client")
+                    if collab_llm is not None:
+                        collaborative_planner = CollaborativePlanner(
+                            planner=planner,
+                            llm_client=collab_llm,
+                            workspace=workspace_manager,
+                        )
+                        self._registry.register_instance(
+                            "collaborative_planner", collaborative_planner,
+                        )
+                        log.info("daemon: collaborative planner initialized")
+
             front_agent = FrontAgent(
                 orchestrator=orchestrator,
                 triage_agent=triage_agent,
@@ -204,6 +233,8 @@ class MeeptDaemon:
                 default_loop=default_loop,
                 skill_registry=skill_registry,
                 bus=self._bus,
+                collaborative_planner=collaborative_planner,
+                workspace_manager=workspace_manager,
             )
 
             self._registry.register_instance("front_agent", front_agent)

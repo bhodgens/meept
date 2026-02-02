@@ -29,6 +29,10 @@ class MessageType(enum.Enum):
     CHAT_PROGRESS = "chat_progress"
     SCHEDULE_REQUEST = "schedule_request"
     SCHEDULE_RESULT = "schedule_result"
+    PLAN_REVIEW = "plan_review"
+    PLAN_APPROVED = "plan_approved"
+    PLAN_REJECTED = "plan_rejected"
+    WORKSPACE_CREATED = "workspace_created"
 
 
 @dataclass(slots=True)

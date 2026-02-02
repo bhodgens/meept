@@ -143,6 +143,17 @@ class TriageConfig(BaseModel):
     confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class WorkspaceConfig(BaseModel):
+    """``[workspace]`` section."""
+
+    enabled: bool = True
+    base_dir: str = "~/.meept/workspaces"
+    auto_commit: bool = True
+    commit_on_plan: bool = True
+    commit_on_step: bool = True
+    cleanup_completed: bool = False
+
+
 class SkillsConfig(BaseModel):
     """``[skills]`` section."""
 
@@ -173,6 +184,7 @@ class MeeptSettings(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     plugins: PluginConfig = Field(default_factory=PluginConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
 
     def expanded_path(self, raw: str) -> Path:
         """Return *raw* with ``~`` expanded to the real home directory."""
