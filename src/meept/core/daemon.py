@@ -42,6 +42,9 @@ class MeeptDaemon:
         self._registry.register_instance("registry", self._registry)
         self._registry.register_instance("daemon", self)
 
+        # Register factories for optional subsystems.
+        self._register_subsystem_factories()
+
     # ------------------------------------------------------------------
     # Public lifecycle
     # ------------------------------------------------------------------
@@ -126,6 +129,28 @@ class MeeptDaemon:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _register_subsystem_factories(self) -> None:
+        """Register factories for optional subsystems so ``_start_optional`` can create them."""
+        settings = self._config.settings
+
+        # comm_server -- the Unix-socket JSON-RPC interface.
+        from meept.comm.server import CommServer
+
+        socket_path = str(Path(settings.daemon.socket_path).expanduser())
+        self._registry.register(
+            "comm_server",
+            lambda: CommServer(socket_path, self._bus),
+        )
+
+        # scheduler
+        if settings.scheduler.enabled:
+            from meept.scheduler.scheduler import MeeptScheduler
+
+            self._registry.register(
+                "scheduler",
+                lambda: MeeptScheduler(settings.scheduler, self._bus),
+            )
 
     async def _start_agents(self) -> None:
         """Initialise the FrontAgent + Orchestrator pipeline if skills enabled."""

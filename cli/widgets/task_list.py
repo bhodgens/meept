@@ -64,7 +64,7 @@ class TaskListWidget(Static):
 
     def on_mount(self) -> None:
         """Render initial placeholder content."""
-        self.update(self._render_content())
+        self.update(self._build_markup())
 
     def update_tasks(self, tasks: list[dict[str, Any]]) -> None:
         """Replace the current task list and re-render.
@@ -76,9 +76,9 @@ class TaskListWidget(Static):
             for the best UX.
         """
         self._tasks = list(tasks)
-        self.update(self._render_content())
+        self.update(self._build_markup())
 
-    def _render_content(self) -> str:
+    def _build_markup(self) -> str:
         """Build Rich-markup text for the task list."""
         if not self._tasks:
             return (

@@ -83,7 +83,7 @@ class StatusBarWidget(Static):
 
     def on_mount(self) -> None:
         """Render initial disconnected state."""
-        self.update(self._render_content())
+        self.update(self._build_markup())
 
     def update_status(self, data: dict[str, Any]) -> None:
         """Refresh the status bar from daemon data.
@@ -94,9 +94,9 @@ class StatusBarWidget(Static):
             Status dict -- see class docstring for expected keys.
         """
         self._data = data
-        self.update(self._render_content())
+        self.update(self._build_markup())
 
-    def _render_content(self) -> str:
+    def _build_markup(self) -> str:
         """Build a single-line Rich-markup status string."""
         d = self._data
 

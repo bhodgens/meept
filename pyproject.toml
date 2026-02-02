@@ -53,8 +53,8 @@ dev = [
 ]
 
 [project.scripts]
-meept = "meept.__main__:main"
-meept-cli = "cli.__main__:main"
+meept-daemon = "meept.__main__:main"
+meept = "cli.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/meept", "cli"]

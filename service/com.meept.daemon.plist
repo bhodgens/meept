@@ -10,6 +10,7 @@
         <string>{{PYTHON}}</string>
         <string>-m</string>
         <string>meept</string>
+        <string>--foreground</string>
     </array>
 
     <key>WorkingDirectory</key>

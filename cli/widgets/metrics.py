@@ -76,7 +76,7 @@ class MetricsWidget(Static):
 
     def on_mount(self) -> None:
         """Render initial placeholder content."""
-        self.update(self._render_content())
+        self.update(self._build_markup())
 
     def update_metrics(self, data: dict[str, Any]) -> None:
         """Update the display with fresh metrics *data*.
@@ -88,9 +88,9 @@ class MetricsWidget(Static):
             gracefully with sensible defaults.
         """
         self._data = data
-        self.update(self._render_content())
+        self.update(self._build_markup())
 
-    def _render_content(self) -> str:
+    def _build_markup(self) -> str:
         """Build Rich-markup text for the current data."""
         if not self._data:
             return (

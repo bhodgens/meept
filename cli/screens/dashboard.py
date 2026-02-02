@@ -68,14 +68,14 @@ class StatusPanel(Static):
         self._data: dict[str, Any] = {}
 
     def on_mount(self) -> None:
-        self.update(self._render())
+        self.update(self._build_markup())
 
     def update_status(self, data: dict[str, Any]) -> None:
         """Refresh the panel from daemon status *data*."""
         self._data = data
-        self.update(self._render())
+        self.update(self._build_markup())
 
-    def _render(self) -> str:
+    def _build_markup(self) -> str:
         if not self._data:
             return (
                 "[bold underline]Daemon Status[/bold underline]\n\n"
@@ -136,14 +136,14 @@ class RecentTasksPanel(Static):
         self._tasks: list[dict[str, Any]] = []
 
     def on_mount(self) -> None:
-        self.update(self._render())
+        self.update(self._build_markup())
 
     def update_tasks(self, tasks: list[dict[str, Any]]) -> None:
         """Replace the displayed task list."""
         self._tasks = list(tasks)
-        self.update(self._render())
+        self.update(self._build_markup())
 
-    def _render(self) -> str:
+    def _build_markup(self) -> str:
         if not self._tasks:
             return (
                 "[bold underline]Recent Actions[/bold underline]\n\n"

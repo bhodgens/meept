@@ -12,6 +12,7 @@ from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import ScrollableContainer
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Static
 
@@ -266,15 +267,17 @@ class ChatScreen(Screen[None]):
             reply = f"Unexpected error: {exc}"
 
         # Remove the thinking indicator.
-        thinking.remove()
+        if thinking is not None:
+            thinking.remove()
 
         # Display the reply.
         self._append_message(reply, role="assistant")
 
-    def _append_message(self, text: str, *, role: str) -> ChatMessage:
+    def _append_message(self, text: str, *, role: str) -> ChatMessage | None:
         """Add a message to the chat history and scroll to the bottom.
 
-        Returns the widget so callers can manipulate it (e.g. remove it).
+        Returns the widget so callers can manipulate it (e.g. remove it),
+        or ``None`` if the chat history container is no longer in the DOM.
         """
         if role == "user":
             label = "You"
@@ -289,7 +292,10 @@ class ChatScreen(Screen[None]):
             display_text = text
 
         widget = ChatMessage(display_text, classes=role)
-        container = self.query_one("#chat-history", ScrollableContainer)
+        try:
+            container = self.query_one("#chat-history", ScrollableContainer)
+        except NoMatches:
+            return None
         container.mount(widget)
         widget.scroll_visible(animate=False)
         return widget

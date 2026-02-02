@@ -84,7 +84,7 @@ meept/
 │   └── mcp_servers.json         # MCP server definitions
 ├── src/meept/
 │   ├── __init__.py
-│   ├── __main__.py              # Entry: python -m meept
+│   ├── __main__.py              # Entry: meept-daemon / python -m meept
 │   ├── core/
 │   │   ├── daemon.py            # Daemon lifecycle, asyncio event loop
 │   │   ├── bus.py               # In-process async pub/sub message bus
@@ -143,7 +143,7 @@ meept/
 │       ├── memory_types.py      # MemoryItem, MemoryResult, MemoryQuery
 │       └── config_schema.py     # Pydantic/dataclass config schemas
 ├── cli/
-│   ├── __main__.py              # Entry: meept-cli
+│   ├── __main__.py              # Entry: meept
 │   ├── app.py                   # Textual TUI app
 │   ├── screens/
 │   │   ├── dashboard.py         # Metrics, recent tasks, status panels
@@ -243,7 +243,7 @@ Create project scaffolding, daemon lifecycle, message bus, config system, LLM cl
 
 **Files**: pyproject.toml, Makefile, .gitignore, src/meept/{__init__,__main__}.py, core/{daemon,bus,config,registry}.py, llm/{client,models,budget,providers}.py, models/{messages,config_schema}.py, config/{meept.toml,constitution.md,restrictions.md,purpose.md}
 
-**Verify**: `make install && make setup && python -m meept` boots daemon, connects to configured LLM, responds to test prompt via internal bus.
+**Verify**: `make install && make setup && meept-daemon` boots daemon, connects to configured LLM, responds to test prompt via internal bus.
 
 ### Phase 2: Communication Layer
 Unix socket server, JSON-RPC protocol, basic CLI with chat screen.

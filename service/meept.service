@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart={{PYTHON}} -m meept
+ExecStart={{PYTHON}} -m meept --foreground
 WorkingDirectory={{MEEPT_DIR}}
 Restart=on-failure
 RestartSec=5

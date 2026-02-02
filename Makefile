@@ -1,4 +1,31 @@
-.PHONY: install install-dev setup start stop restart cli menubar test lint clean install-service uninstall
+.PHONY: help install install-dev setup start stop restart cli menubar test lint format clean install-service uninstall
+
+help:
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Setup:"
+	@echo "  install          Create venv and install meept"
+	@echo "  install-dev      Create venv and install with dev dependencies"
+	@echo "  setup            Create ~/.meept directory and default config"
+	@echo ""
+	@echo "Daemon:"
+	@echo "  start            Start the daemon (background)"
+	@echo "  stop             Stop the running daemon"
+	@echo "  restart          Stop and restart the daemon"
+	@echo ""
+	@echo "Interfaces:"
+	@echo "  cli              Launch the interactive CLI"
+	@echo "  menubar          Build the Tauri menubar app"
+	@echo ""
+	@echo "Development:"
+	@echo "  test             Run the test suite"
+	@echo "  lint             Check code style with ruff"
+	@echo "  format           Auto-format code with ruff"
+	@echo "  clean            Remove venv, build artifacts, and __pycache__"
+	@echo ""
+	@echo "Service:"
+	@echo "  install-service  Install as a system service (launchd/systemd)"
+	@echo "  uninstall        Remove the system service"
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python
@@ -29,7 +56,7 @@ setup:
 	fi
 
 start: setup
-	$(PYTHON) -m meept --daemon
+	$(PYTHON) -m meept
 
 stop:
 	@if [ -f $(PID) ]; then \

@@ -1,4 +1,4 @@
-"""Entry point for the Meept TUI client (``python -m cli`` / ``meept-cli``)."""
+"""Entry point for the Meept TUI client (``python -m cli`` / ``meept``)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import sys
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="meept-cli",
+        prog="meept",
         description="Meept interactive TUI client",
     )
     default_socket = os.path.join(os.path.expanduser("~"), ".meept", "meept.sock")
@@ -33,7 +33,7 @@ def main() -> None:
     if not os.path.exists(socket_path):
         print(
             f"Error: daemon socket not found at {socket_path}\n"
-            "Is the meept daemon running?  Start it with: meept --daemon",
+            "Is the meept daemon running?  Start it with: meept-daemon",
             file=sys.stderr,
         )
         sys.exit(1)
