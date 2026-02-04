@@ -55,9 +55,13 @@ class ShellTool(Tool):
         self,
         working_dir: Path | None = None,
         default_timeout: float = 30.0,
+        tirith_enabled: bool = False,
+        tirith_binary: str = "tirith",
     ) -> None:
         self._working_dir = working_dir or Path.home()
         self._default_timeout = default_timeout
+        self._tirith_enabled = tirith_enabled
+        self._tirith_binary = tirith_binary
 
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
@@ -111,6 +115,22 @@ class ShellTool(Tool):
                 "result": None,
                 "error": f"Command blocked for safety: {command.split()[0]}",
             }
+
+        # Tirith pre-execution security scan.
+        if self._tirith_enabled:
+            from meept.security.tirith import scan_command
+
+            scan_result = await scan_command(command, self._tirith_binary)
+            if scan_result is not None:
+                if scan_result.blocked:
+                    log.warning("Tirith blocked command: %s", scan_result.message)
+                    return {
+                        "success": False,
+                        "result": None,
+                        "error": f"Blocked by tirith: {scan_result.message}",
+                    }
+                elif scan_result.warning:
+                    log.warning("Tirith warning (continuing): %s", scan_result.message)
 
         log.info("Executing shell command (risk=%s): %s", risk.value, command)
 

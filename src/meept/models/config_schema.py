@@ -93,6 +93,8 @@ class SecurityConfig(BaseModel):
     blocked_paths: list[str] = Field(
         default_factory=lambda: ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"]
     )
+    tirith_enabled: bool = False
+    tirith_binary: str = "tirith"
 
 
 class SchedulerConfig(BaseModel):
