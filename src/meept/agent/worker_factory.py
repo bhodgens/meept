@@ -6,6 +6,7 @@ of the old ``llm_factory`` callable.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable
 
@@ -52,6 +53,9 @@ class WorkerFactory:
         model_resolver: Any | None = None,
         llm_factory: Any | None = None,
         scheduler: Any | None = None,
+        prompt_guard: Any | None = None,
+        output_monitor: Any | None = None,
+        input_sanitizer: Any | None = None,
     ) -> None:
         self._registry = tool_registry
         self._security = security
@@ -60,6 +64,9 @@ class WorkerFactory:
         self._model_resolver = model_resolver
         self._llm_factory = llm_factory
         self._scheduler = scheduler
+        self._prompt_guard = prompt_guard
+        self._output_monitor = output_monitor
+        self._input_sanitizer = input_sanitizer
 
     def create(self, skill: SkillDefinition | None = None) -> Any:
         """Create an ephemeral AgentLoop for *skill*.
@@ -99,6 +106,8 @@ class WorkerFactory:
                 from meept.llm.client import create_client_from_resolved
 
                 llm_client = create_client_from_resolved(resolved_config)
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                raise
             except Exception:
                 log.warning(
                     "Could not resolve model for skill %r; worker will need a default client",
@@ -108,11 +117,19 @@ class WorkerFactory:
             try:
                 model_name = "default"
                 llm_client = self._llm_factory(model_name)
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                raise
             except Exception:
                 log.warning(
                     "Could not create LLM client via legacy factory; "
                     "worker will need a default client",
                 )
+
+        if llm_client is None:
+            raise RuntimeError(
+                f"Cannot create worker for skill {skill.name if skill else '(default)'}: "
+                "no LLM client available. Check model configuration."
+            )
 
         # Build filtered tool registry.
         filtered_registry = FilteredToolRegistry(
@@ -132,6 +149,9 @@ class WorkerFactory:
             bus=self._bus,
             config={"max_iterations": max_iterations},
             system_prompt_override=system_prompt,
+            prompt_guard=self._prompt_guard,
+            output_monitor=self._output_monitor,
+            input_sanitizer=self._input_sanitizer,
         )
 
     def create_handler(

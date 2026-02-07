@@ -98,25 +98,46 @@ class MemoryConsolidator:
             if old_memories:
                 summaries = await self._summarise_memories(old_memories)
                 archived_ids: list[str] = []
+                created_summary_ids: list[str] = []
 
-                for summary in summaries:
-                    topic = summary.get("topic", "misc")
-                    text = summary.get("summary", "")
-                    ids = summary.get("ids", [])
+                try:
+                    for summary in summaries:
+                        topic = summary.get("topic", "misc")
+                        text = summary.get("summary", "")
+                        ids = summary.get("ids", [])
 
-                    if text:
-                        await episodic.store(
-                            content=text,
-                            category=f"summary:{topic}",
-                            metadata={"consolidated_from": ids, "type": "summary"},
-                        )
-                        report["summaries_created"] += 1
+                        if text:
+                            summary_id = await episodic.store(
+                                content=text,
+                                category=f"summary:{topic}",
+                                metadata={"consolidated_from": ids, "type": "summary"},
+                            )
+                            created_summary_ids.append(summary_id)
+                            report["summaries_created"] += 1
 
-                    archived_ids.extend(ids)
+                        archived_ids.extend(ids)
 
-                if archived_ids:
-                    deleted = await episodic.delete_by_ids(archived_ids)
-                    report["episodic_archived"] = deleted
+                    if archived_ids:
+                        deleted = await episodic.delete_by_ids(archived_ids)
+                        report["episodic_archived"] = deleted
+                except Exception:
+                    # Rollback: remove any summaries we already created to
+                    # avoid duplicates on the next consolidation run.
+                    logger.error(
+                        "Consolidation failed mid-operation; rolling back %d created summaries.",
+                        len(created_summary_ids),
+                        exc_info=True,
+                    )
+                    if created_summary_ids:
+                        try:
+                            await episodic.delete_by_ids(created_summary_ids)
+                        except Exception:
+                            logger.error(
+                                "Rollback of summary IDs also failed: %s",
+                                created_summary_ids,
+                                exc_info=True,
+                            )
+                    raise
 
                 logger.info(
                     "Episodic consolidation: archived %d memories, created %d summaries.",

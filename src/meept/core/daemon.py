@@ -70,6 +70,25 @@ class MeeptDaemon:
         await self._start_optional("agent_loop")
         await self._start_optional("scheduler")
 
+        # --- initialize security engine (async SQLite) ---
+        security = self._registry.get("security")
+        if security is not None:
+            try:
+                await security.initialize()
+                log.info("daemon: security engine initialized")
+            except Exception:
+                log.exception("daemon: failed to initialize security engine")
+
+        # --- initialize memory manager ---
+        memory = self._registry.get("memory")
+        if memory is not None:
+            try:
+                data_dir = self._config.data_dir / "memory"
+                await memory.initialize(data_dir)
+                log.info("daemon: memory manager initialized")
+            except Exception:
+                log.exception("daemon: failed to initialize memory manager")
+
         # --- agent subsystem (conditional on skills.enabled) ---
         await self._start_agents()
 
@@ -106,6 +125,22 @@ class MeeptDaemon:
                 except Exception:
                     log.exception("daemon: error stopping %s", name)
 
+        # Close memory manager.
+        memory = self._registry.get("memory")
+        if memory is not None and hasattr(memory, "close"):
+            try:
+                await memory.close()
+            except Exception:
+                log.exception("daemon: error closing memory manager")
+
+        # Close security engine.
+        security = self._registry.get("security")
+        if security is not None and hasattr(security, "close"):
+            try:
+                await security.close()
+            except Exception:
+                log.exception("daemon: error closing security engine")
+
         await self._bus.stop()
         self._cleanup_pid_file()
         log.info("daemon: stopped")
@@ -133,6 +168,7 @@ class MeeptDaemon:
     def _register_subsystem_factories(self) -> None:
         """Register factories for optional subsystems so ``_start_optional`` can create them."""
         settings = self._config.settings
+        data_dir = self._config.data_dir
 
         # comm_server -- the Unix-socket JSON-RPC interface.
         from meept.comm.server import CommServer
@@ -151,6 +187,61 @@ class MeeptDaemon:
                 "scheduler",
                 lambda: MeeptScheduler(settings.scheduler, self._bus),
             )
+
+        # security -- SQLite-backed permission engine.
+        from meept.security.engine import SecurityEngine
+
+        db_path = Path(settings.security.security_db).expanduser()
+        security_engine = SecurityEngine(db_path, config=settings.security)
+        self._registry.register_instance("security", security_engine)
+
+        # Security pipeline components (PromptGuard, OutputMonitor, InputSanitizer).
+        from meept.security.output_monitor import OutputMonitor
+        from meept.security.prompt_guard import PromptGuard
+        from meept.security.sanitizer import InputSanitizer
+
+        prompt_guard = PromptGuard()
+        output_monitor = OutputMonitor()
+        input_sanitizer = InputSanitizer()
+
+        self._registry.register_instance("prompt_guard", prompt_guard)
+        self._registry.register_instance("output_monitor", output_monitor)
+        self._registry.register_instance("input_sanitizer", input_sanitizer)
+
+        # memory -- unified facade over episodic/task/personality subsystems.
+        from meept.memory.manager import MemoryManager
+
+        memory_manager = MemoryManager(
+            config=settings.memory,
+            llm_client=self._registry.get("llm_client"),
+        )
+        self._registry.register_instance("memory", memory_manager)
+
+        # tool_registry -- built-in tools (shell, filesystem, web).
+        # NOTE: PermissionManager is kept for backward-compat with file tools
+        # that use its path-check interface. SecurityEngine is the primary
+        # security authority for all permission decisions.
+        from meept.security.permissions import PermissionManager
+        from meept.tools.builtin.filesystem import FileReadTool, FileWriteTool
+        from meept.tools.builtin.shell import ShellTool
+        from meept.tools.builtin.web_fetch import WebFetchTool
+        from meept.tools.builtin.web_search import WebSearchTool
+        from meept.tools.interface import ToolRegistry
+
+        tool_registry = ToolRegistry()
+        permission_manager = PermissionManager(settings.security)
+
+        tool_registry.register(ShellTool(
+            tirith_enabled=settings.security.tirith_enabled,
+            tirith_binary=settings.security.tirith_binary,
+        ))
+        tool_registry.register(FileReadTool(permission_manager))
+        tool_registry.register(FileWriteTool(permission_manager))
+        tool_registry.register(WebSearchTool())
+        tool_registry.register(WebFetchTool())
+
+        self._registry.register_instance("tool_registry", tool_registry)
+        self._registry.register_instance("permission_manager", permission_manager)
 
     async def _start_agents(self) -> None:
         """Initialise the FrontAgent + Orchestrator pipeline if skills enabled."""
@@ -245,6 +336,9 @@ class MeeptDaemon:
                 bus=self._bus,
                 model_resolver=model_resolver,
                 scheduler=self._registry.get("scheduler"),
+                prompt_guard=self._registry.get("prompt_guard"),
+                output_monitor=self._registry.get("output_monitor"),
+                input_sanitizer=self._registry.get("input_sanitizer"),
             )
 
             # Build PipelineExecutor and Orchestrator.
@@ -312,6 +406,21 @@ class MeeptDaemon:
             scheduler = self._registry.get("scheduler")
             if scheduler is not None and hasattr(scheduler, "subscribe_to_bus"):
                 await scheduler.subscribe_to_bus()
+
+            # Wire bus subscribers for subsystems that handle JSON-RPC requests.
+            memory = self._registry.get("memory")
+            if memory is not None and hasattr(memory, "subscribe_to_bus"):
+                await memory.subscribe_to_bus(self._bus)
+
+            security = self._registry.get("security")
+            if security is not None and hasattr(security, "subscribe_to_bus"):
+                await security.subscribe_to_bus(self._bus)
+
+            if hasattr(skill_registry, "subscribe_to_bus"):
+                await skill_registry.subscribe_to_bus(self._bus)
+
+            if hasattr(orchestrator, "subscribe_to_bus"):
+                await orchestrator.subscribe_to_bus(self._bus)
 
             log.info(
                 "daemon: agent subsystem started (%d skill(s), resolver=%s)",

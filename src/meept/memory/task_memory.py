@@ -182,7 +182,11 @@ class TaskMemory:
             """,
             (item_id, content, domain, meta_json, now_iso),
         )
-        await self._db.commit()
+        try:
+            await self._db.commit()
+        except Exception:
+            logger.error("Failed to commit task memory %s", item_id, exc_info=True)
+            raise
 
         # Also index in memvid when available.
         if self._use_memvid:
@@ -300,7 +304,11 @@ class TaskMemory:
             ids,
         ) as cur:
             deleted = cur.rowcount
-        await self._db.commit()
+        try:
+            await self._db.commit()
+        except Exception:
+            logger.error("Failed to commit deletion of %d task memories", len(ids), exc_info=True)
+            raise
         return deleted
 
     # ------------------------------------------------------------------
@@ -519,7 +527,7 @@ def _sanitise_fts_query(raw: str) -> str:
 
 
 def _normalise_fts_rank(rank: float) -> float:
-    """Map an FTS5 rank (negative, lower = better) to ``[0, 1]``."""
+    """Map an FTS5 rank (negative, more negative = better) to ``[0, 1]``."""
     if rank >= 0:
         return 0.0
-    return 1.0 / (1.0 - rank)
+    return 1.0 / (1.0 + abs(rank))

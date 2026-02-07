@@ -337,10 +337,10 @@ class SecurityEngine:
             if cmd_risk > effective_risk:
                 effective_risk = cmd_risk
                 rule_source = f"command_pattern:{cmd_source}"
-            if cmd_immutable and cmd_risk >= RiskLevel.CRITICAL:
+            if cmd_immutable:
                 decision = PermissionDecision(
                     allowed=False,
-                    reason=f"Command matches immutable CRITICAL rule: {cmd_source}",
+                    reason=f"Command matches immutable rule: {cmd_source}",
                     risk_level=RiskLevel(cmd_risk),
                     rule_source="immutable",
                 )
@@ -407,10 +407,11 @@ class SecurityEngine:
     async def _check_financial(
         self, action: str, details: dict[str, Any],
     ) -> PermissionDecision | None:
-        """Return a deny decision if details describe a financial operation."""
-        if self._config is not None and not getattr(self._config, "block_financial", True):
-            return None
+        """Return a deny decision if details describe a financial operation.
 
+        Financial blocking is ALWAYS active regardless of configuration.
+        This is an immutable safety rule (P6 principle).
+        """
         if self._compiled_financial is None:
             return None
 
@@ -858,6 +859,97 @@ class SecurityEngine:
                 records.append(DecisionRecord(*row))
 
         return records
+
+    # ------------------------------------------------------------------
+    # Bus integration
+    # ------------------------------------------------------------------
+
+    async def subscribe_to_bus(self, bus: Any) -> None:
+        """Subscribe to security-related bus topics."""
+        self._bus = bus
+        bus.subscribe("security.query_log", self._handle_bus_query_log)
+        bus.subscribe("security.get_stats", self._handle_bus_get_stats)
+        bus.subscribe("security.record_override", self._handle_bus_record_override)
+
+    async def _handle_bus_query_log(self, topic: str, msg: Any) -> None:
+        """Handle a security.query_log bus message."""
+        from meept.models.messages import BusMessage, MessageType
+
+        records = await self.query_log(
+            action=msg.payload.get("action_filter"),
+            decision=msg.payload.get("decision_filter"),
+            limit=msg.payload.get("limit", 100),
+            since=msg.payload.get("since"),
+        )
+        serialized = [
+            {
+                "id": r.id,
+                "timestamp": r.timestamp,
+                "action": r.action,
+                "tool_name": r.tool_name,
+                "risk_level": r.risk_level,
+                "decision": r.decision,
+                "reason": r.reason,
+            }
+            for r in records
+        ]
+        await self._bus.publish(
+            "security.result",
+            BusMessage(
+                type=MessageType.STATUS_UPDATE,
+                payload={"records": serialized},
+                source="security",
+                reply_to=msg.id,
+            ),
+        )
+
+    async def _handle_bus_get_stats(self, topic: str, msg: Any) -> None:
+        """Handle a security.get_stats bus message."""
+        from meept.models.messages import BusMessage, MessageType
+
+        stats = await self.get_stats()
+        await self._bus.publish(
+            "security.result",
+            BusMessage(
+                type=MessageType.STATUS_UPDATE,
+                payload={
+                    "total_decisions": stats.total_decisions,
+                    "total_allows": stats.total_allows,
+                    "total_denies": stats.total_denies,
+                    "total_escalations": stats.total_escalations,
+                    "active_overrides": stats.active_overrides,
+                    "top_denied_actions": stats.top_denied_actions,
+                },
+                source="security",
+                reply_to=msg.id,
+            ),
+        )
+
+    async def _handle_bus_record_override(self, topic: str, msg: Any) -> None:
+        """Handle a security.record_override bus message."""
+        from meept.models.messages import BusMessage, MessageType
+
+        override_id = await self.record_override(
+            action=msg.payload.get("action", ""),
+            pattern=msg.payload.get("pattern", "*"),
+            decision=msg.payload.get("decision", "allow"),
+            reason=msg.payload.get("reason", ""),
+            max_uses=msg.payload.get("max_uses", 50),
+            expires_days=msg.payload.get("expires_days", 30),
+        )
+        await self._bus.publish(
+            "security.result",
+            BusMessage(
+                type=MessageType.STATUS_UPDATE,
+                payload={"override_id": override_id, "status": "recorded"},
+                source="security",
+                reply_to=msg.id,
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Audit & stats
+    # ------------------------------------------------------------------
 
     async def get_stats(self) -> SecurityStats:
         """Return aggregate security statistics."""

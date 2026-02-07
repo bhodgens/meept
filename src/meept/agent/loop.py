@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections import OrderedDict
 from typing import Any
 
 from meept.llm.models import ChatMessage, LLMResponse, Role, ToolCall
@@ -24,6 +25,12 @@ from meept.models.messages import BusMessage, MessageType
 from meept.tools.interface import ToolRegistry
 
 log = logging.getLogger(__name__)
+
+# Maximum number of concurrent conversations before LRU eviction.
+_MAX_CONVERSATIONS = 100
+
+# Maximum messages per conversation before pruning (keeps system + last N).
+_MAX_MESSAGES_PER_CONVERSATION = 200
 
 # Default system prompt sections (loaded from config files at runtime,
 # but these serve as fallbacks).
@@ -82,6 +89,9 @@ class AgentLoop:
         bus: Any | None = None,
         config: Any | None = None,
         system_prompt_override: str | None = None,
+        prompt_guard: Any | None = None,
+        output_monitor: Any | None = None,
+        input_sanitizer: Any | None = None,
     ) -> None:
         self._llm = llm_client
         self._registry = tool_registry
@@ -89,6 +99,9 @@ class AgentLoop:
         self._memory = memory_manager
         self._bus = bus
         self._system_prompt_override = system_prompt_override
+        self._prompt_guard = prompt_guard
+        self._output_monitor = output_monitor
+        self._input_sanitizer = input_sanitizer
 
         # Configuration.
         cfg = config or {}
@@ -98,8 +111,8 @@ class AgentLoop:
         self._personality: str = _get_cfg(cfg, "personality", "")
         self._max_iterations: int = int(_get_cfg(cfg, "max_iterations", 10))
 
-        # Conversation state (per-conversation).
-        self._conversations: dict[str, list[ChatMessage]] = {}
+        # Conversation state (per-conversation) with LRU eviction.
+        self._conversations: OrderedDict[str, list[ChatMessage]] = OrderedDict()
 
         # Security context to inject before the next LLM call (set by
         # process_tool_calls when a SecurityEngine provides context).
@@ -139,90 +152,120 @@ class AgentLoop:
         else:
             history.insert(0, system_msg)
 
+        # --- Input sanitization pipeline ---
+        processed_message = user_message
+
+        # Layer 1: Sanitize input (injection pattern detection + structural cleanup).
+        if self._input_sanitizer is not None:
+            san_result = self._input_sanitizer.sanitize(processed_message, source="user")
+            processed_message = san_result.clean_text
+            if san_result.threats_detected:
+                log.warning(
+                    "Input sanitizer detected threats in conv=%s: %s",
+                    conv_id, san_result.threats_detected,
+                )
+
+        # Layer 2: Wrap user input in boundary markers.
+        if self._prompt_guard is not None:
+            processed_message = self._prompt_guard.wrap_user_input(processed_message)
+
         # Append user message.
-        history.append(ChatMessage(role=Role.USER, content=user_message))
+        history.append(ChatMessage(role=Role.USER, content=processed_message))
 
         # Optionally enrich with memory context.
         await self._inject_memory_context(history, user_message, conv_id)
+
+        # Prune conversation if it's grown too large.
+        self._prune_history(history)
 
         # Reasoning loop.
         tools_schema = self._registry.get_openai_tools()
         iteration = 0
 
-        while iteration < self._max_iterations:
-            iteration += 1
-            log.debug("Agent loop iteration %d/%d (conv=%s)", iteration, self._max_iterations, conv_id)
+        try:
+            while iteration < self._max_iterations:
+                iteration += 1
+                log.debug("Agent loop iteration %d/%d (conv=%s)", iteration, self._max_iterations, conv_id)
 
-            # Call the LLM.
-            try:
-                response: LLMResponse = await self._llm.chat(
-                    messages=history,
-                    tools=tools_schema if tools_schema else None,
-                )
-            except Exception:
-                log.error("LLM call failed on iteration %d", iteration, exc_info=True)
-                error_msg = "I encountered an error communicating with the language model. Please try again."
-                history.append(ChatMessage(role=Role.ASSISTANT, content=error_msg))
-                return error_msg
-
-            # Case 1: LLM returned tool calls.
-            if response.tool_calls:
-                # Append the assistant message with tool calls (content may be None).
-                assistant_msg = ChatMessage(
-                    role=Role.ASSISTANT,
-                    content=response.content or "",
-                    tool_calls=response.tool_calls,
-                )
-                history.append(assistant_msg)
-
-                # Publish AGENT_ACTION.
-                await self._publish(
-                    MessageType.AGENT_ACTION,
-                    {
-                        "conversation_id": conv_id,
-                        "iteration": iteration,
-                        "tool_calls": [
-                            {"name": tc.function.name, "arguments": tc.function.arguments}
-                            for tc in response.tool_calls
-                        ],
-                    },
-                )
-
-                # Execute tools.
-                tool_result_messages = await self.process_tool_calls(response.tool_calls)
-                history.extend(tool_result_messages)
-
-                # Publish AGENT_RESULT.
-                await self._publish(
-                    MessageType.AGENT_RESULT,
-                    {
-                        "conversation_id": conv_id,
-                        "iteration": iteration,
-                        "results": [
-                            {"tool_call_id": m.tool_call_id, "content": m.content}
-                            for m in tool_result_messages
-                        ],
-                    },
-                )
-
-                # Inject security context if set by process_tool_calls.
-                if self._pending_security_context:
-                    history.append(
-                        ChatMessage(
-                            role=Role.SYSTEM,
-                            content=self._pending_security_context,
-                        )
+                # Call the LLM.
+                try:
+                    response: LLMResponse = await self._llm.chat(
+                        messages=history,
+                        tools=tools_schema if tools_schema else None,
                     )
-                    self._pending_security_context = None
+                except Exception:
+                    log.error("LLM call failed on iteration %d", iteration, exc_info=True)
+                    error_msg = "I encountered an error communicating with the language model. Please try again."
+                    history.append(ChatMessage(role=Role.ASSISTANT, content=error_msg))
+                    return error_msg
 
-                # Continue the loop so the LLM can decide next action.
-                continue
+                # Case 1: LLM returned tool calls.
+                if response.tool_calls:
+                    # Append the assistant message with tool calls (content may be None).
+                    assistant_msg = ChatMessage(
+                        role=Role.ASSISTANT,
+                        content=response.content or "",
+                        tool_calls=response.tool_calls,
+                    )
+                    history.append(assistant_msg)
 
-            # Case 2: LLM returned a text response (no tool calls) -- done.
-            final_text = response.content or ""
-            history.append(ChatMessage(role=Role.ASSISTANT, content=final_text))
-            log.info("Agent loop complete after %d iteration(s) (conv=%s)", iteration, conv_id)
-            return final_text
+                    # Publish AGENT_ACTION.
+                    await self._publish(
+                        MessageType.AGENT_ACTION,
+                        {
+                            "conversation_id": conv_id,
+                            "iteration": iteration,
+                            "tool_calls": [
+                                {"name": tc.function.name, "arguments": tc.function.arguments}
+                                for tc in response.tool_calls
+                            ],
+                        },
+                    )
+
+                    # Execute tools.
+                    tool_result_messages = await self.process_tool_calls(response.tool_calls)
+                    history.extend(tool_result_messages)
+
+                    # Publish AGENT_RESULT.
+                    await self._publish(
+                        MessageType.AGENT_RESULT,
+                        {
+                            "conversation_id": conv_id,
+                            "iteration": iteration,
+                            "results": [
+                                {"tool_call_id": m.tool_call_id, "content": m.content}
+                                for m in tool_result_messages
+                            ],
+                        },
+                    )
+
+                    # Inject security context if set by process_tool_calls.
+                    if self._pending_security_context:
+                        history.append(
+                            ChatMessage(
+                                role=Role.SYSTEM,
+                                content=self._pending_security_context,
+                            )
+                        )
+                        self._pending_security_context = None
+
+                    # Continue the loop so the LLM can decide next action.
+                    continue
+
+                # Case 2: LLM returned a text response (no tool calls) -- done.
+                final_text = response.content or ""
+
+                # --- Output monitoring pipeline ---
+                final_text = self._monitor_output(final_text)
+
+                history.append(ChatMessage(role=Role.ASSISTANT, content=final_text))
+                log.info("Agent loop complete after %d iteration(s) (conv=%s)", iteration, conv_id)
+                return final_text
+
+        finally:
+            # Always clear pending security context to prevent leaking
+            # to the next turn on error paths.
+            self._pending_security_context = None
 
         # Exhausted iterations.
         exhaust_msg = (
@@ -336,6 +379,13 @@ class AgentLoop:
             except (TypeError, ValueError):
                 content = str(result)
 
+            # Monitor tool output for credential leaks.
+            content = self._monitor_output(content)
+
+            # Wrap tool output in boundary markers.
+            if self._prompt_guard is not None:
+                content = self._prompt_guard.wrap_tool_output(tool_name, content)
+
             results.append(
                 ChatMessage(
                     role=Role.TOOL,
@@ -382,9 +432,47 @@ class AgentLoop:
 
     def _get_or_create_history(self, conversation_id: str) -> list[ChatMessage]:
         """Return the message history for a conversation, creating if needed."""
-        if conversation_id not in self._conversations:
+        if conversation_id in self._conversations:
+            # Move to end (most recently used).
+            self._conversations.move_to_end(conversation_id)
+        else:
+            # Evict oldest conversation if at capacity.
+            if len(self._conversations) >= _MAX_CONVERSATIONS:
+                evicted_id, _ = self._conversations.popitem(last=False)
+                log.debug("Evicted oldest conversation: %s", evicted_id)
             self._conversations[conversation_id] = []
         return self._conversations[conversation_id]
+
+    @staticmethod
+    def _prune_history(history: list[ChatMessage]) -> None:
+        """Trim conversation history if it exceeds the maximum length.
+
+        Preserves the system prompt (index 0) and the most recent messages.
+        """
+        if len(history) <= _MAX_MESSAGES_PER_CONVERSATION:
+            return
+        # Keep system prompt + last N messages.
+        keep = _MAX_MESSAGES_PER_CONVERSATION - 1
+        system_msg = history[0] if history and history[0].role == Role.SYSTEM else None
+        recent = history[-keep:]
+        history.clear()
+        if system_msg is not None:
+            history.append(system_msg)
+        history.extend(recent)
+        log.debug("Pruned conversation history to %d messages", len(history))
+
+    def _monitor_output(self, content: str) -> str:
+        """Run output through the OutputMonitor if configured.
+
+        Returns the (possibly redacted) content.
+        """
+        if self._output_monitor is None:
+            return content
+        safe, issues = self._output_monitor.check_output(content)
+        if not safe:
+            log.warning("Output monitor flagged issues: %s", issues)
+            content = self._output_monitor.redact_sensitive(content)
+        return content
 
     def get_history(self, conversation_id: str) -> list[ChatMessage]:
         """Return a copy of the conversation history (public accessor)."""
@@ -471,7 +559,7 @@ class AgentLoop:
                 return result
             return bool(result), "Permitted" if result else "Denied"
 
-        return True, "Security manager has no check method"
+        return False, "Security manager has no check method -- denied by default"
 
     # ------------------------------------------------------------------
     # Memory integration

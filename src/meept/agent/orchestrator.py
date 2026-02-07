@@ -67,6 +67,52 @@ class Orchestrator:
         self._worker_factory = worker_factory
         self._bus = bus
         self._skill_registry = skill_registry
+        self._pipeline_status: dict[str, dict[str, Any]] = {}
+
+    # ------------------------------------------------------------------
+    # Bus integration
+    # ------------------------------------------------------------------
+
+    async def subscribe_to_bus(self, bus: Any) -> None:
+        """Subscribe to pipeline-related bus topics."""
+        self._bus = bus
+        bus.subscribe("pipeline.status", self._handle_bus_pipeline_status)
+        bus.subscribe("pipeline.*", self._track_pipeline_events)
+
+    async def _handle_bus_pipeline_status(self, topic: str, msg: Any) -> None:
+        """Handle a pipeline.status bus message."""
+        from meept.models.messages import BusMessage, MessageType
+
+        pipeline_id = msg.payload.get("pipeline_id", "")
+        info = self._pipeline_status.get(pipeline_id, {"status": "not_found"})
+        await self._bus.publish(
+            "pipeline.result",
+            BusMessage(
+                type=MessageType.STATUS_UPDATE,
+                payload=info,
+                source="orchestrator",
+                reply_to=msg.id,
+            ),
+        )
+
+    async def _track_pipeline_events(self, topic: str, msg: Any) -> None:
+        """Track pipeline progress/complete events for status queries."""
+        from meept.models.messages import MessageType
+
+        if msg.type == MessageType.PIPELINE_PROGRESS:
+            pid = msg.payload.get("pipeline_id", "")
+            if pid:
+                self._pipeline_status[pid] = {
+                    "status": "running",
+                    "progress": msg.payload,
+                }
+        elif msg.type == MessageType.PIPELINE_COMPLETE:
+            pid = msg.payload.get("pipeline_id", "")
+            if pid:
+                self._pipeline_status[pid] = {
+                    "status": "complete",
+                    "result": msg.payload,
+                }
 
     async def execute(
         self,

@@ -307,6 +307,9 @@ class CollaborativePlanner:
         await self._workspace.append_log(review.task_id, "Plan approved by user")
         await self._workspace.commit(review.task_id, "Plan approved")
 
+        # Remove from pending to prevent memory leak.
+        del self._pending[conversation_id]
+
         return review.plan
 
     async def reject(self, conversation_id: str, reason: str = "") -> None:

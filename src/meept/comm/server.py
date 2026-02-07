@@ -75,6 +75,7 @@ class CommServer:
         self.register_method("skills.triage", self._handle_skills_triage)
         self.register_method("pipeline.status", self._handle_pipeline_status)
         self.register_method("scheduler.schedule_agent_task", self._handle_scheduler_agent_task)
+        self.register_method("security.approve_action", self._handle_security_approve_action)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -572,6 +573,33 @@ class CommServer:
             self._bus.unsubscribe("pipeline.result", _on_result)
 
         return result
+
+    async def _handle_security_approve_action(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Approve or deny a pending confirmation request.
+
+        Expected params::
+
+            {"request_id": "confirm-0", "approved": true}
+
+        Publishes to the bus so the PermissionManager can resolve the future.
+        """
+        request_id = params.get("request_id")
+        if not request_id or not isinstance(request_id, str):
+            raise TypeError("'request_id' param is required and must be a non-empty string")
+
+        approved = bool(params.get("approved", False))
+
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={
+                "action": "security.approve_action",
+                "request_id": request_id,
+                "approved": approved,
+            },
+            source="comm.rpc",
+        )
+        await self._bus.publish("security.approve_action", msg)
+        return {"status": "resolved", "request_id": request_id, "approved": approved}
 
     async def _handle_scheduler_agent_task(self, params: dict[str, Any]) -> dict[str, Any]:
         """Schedule an agent task via the bus.

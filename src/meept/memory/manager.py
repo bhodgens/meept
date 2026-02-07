@@ -40,6 +40,7 @@ class MemoryManager:
         self._task: TaskMemory | None = None
         self._personality: PersonalityModel | None = None
         self._data_dir: Path | None = None
+        self._bus: Any | None = None
         self._initialized: bool = False
 
     # ------------------------------------------------------------------
@@ -317,6 +318,81 @@ class MemoryManager:
     def config(self) -> MemoryConfig:
         """The memory configuration this manager was built with."""
         return self._config
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Bus integration
+    # ------------------------------------------------------------------
+
+    async def subscribe_to_bus(self, bus: Any) -> None:
+        """Subscribe to memory-related bus topics."""
+        self._bus = bus
+        bus.subscribe("memory.query", self._handle_bus_query)
+        bus.subscribe("memory.export", self._handle_bus_export)
+
+    async def _handle_bus_query(self, topic: str, msg: Any) -> None:
+        """Handle a memory.query bus message and publish results."""
+        if self._bus is None:
+            logger.warning("memory bus query received but bus not connected")
+            return
+
+        from meept.models.messages import BusMessage, MessageType
+
+        query = msg.payload.get("query", "")
+        memory_type = msg.payload.get("type")
+        limit = msg.payload.get("limit", 10)
+        results = await self.search(query, memory_type=memory_type, limit=limit)
+        serialized = [
+            {
+                "id": r.item.id,
+                "content": r.item.content,
+                "type": r.item.memory_type.value,
+                "relevance": r.relevance_score,
+                "timestamp": r.item.created_at.isoformat(timespec="seconds"),
+            }
+            for r in results
+        ]
+        await self._bus.publish(
+            "memory.result",
+            BusMessage(
+                type=MessageType.MEMORY_RESULT,
+                payload={"results": serialized, "total": len(serialized)},
+                source="memory",
+                reply_to=msg.id,
+            ),
+        )
+
+    async def _handle_bus_export(self, topic: str, msg: Any) -> None:
+        """Handle a memory.export bus message and publish completion."""
+        if self._bus is None:
+            logger.warning("memory bus export received but bus not connected")
+            return
+
+        from meept.memory.export import MemoryExporter
+        from meept.models.messages import BusMessage, MessageType
+
+        exporter = MemoryExporter(self)
+        fmt = msg.payload.get("format", "markdown")
+        output_dir = Path(msg.payload.get("output_dir", "~/.meept/exports")).expanduser()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        if fmt == "json":
+            path = await exporter.export_json(output_dir / "export.json")
+        else:
+            path = await exporter.export_markdown(output_dir / "export.md")
+
+        await self._bus.publish(
+            "memory.result",
+            BusMessage(
+                type=MessageType.MEMORY_RESULT,
+                payload={"status": "export_complete", "path": str(path)},
+                source="memory",
+                reply_to=msg.id,
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Cleanup

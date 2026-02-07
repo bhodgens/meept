@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from meept.models.messages import BusMessage, MessageType
@@ -92,6 +94,11 @@ class _FallbackScheduler:
         id: str | None = None,  # noqa: A002
         **trigger_args: Any,
     ) -> _FallbackJob:
+        if trigger == "cron":
+            raise ValueError(
+                "Cron triggers are not supported without apscheduler. "
+                "Install apscheduler or use an interval trigger instead."
+            )
         job_id = id or f"fallback-{len(self._jobs)}"
         job = _FallbackJob(job_id, func, trigger, **trigger_args)
         self._jobs[job_id] = job
@@ -156,12 +163,10 @@ class _FallbackScheduler:
                 + ta.get("minutes", 0) * 60
                 + ta.get("hours", 0) * 3600
             ) or 60.0
-        # cron -> degrade to 1-hour interval
-        log.warning(
-            "fallback scheduler: cron trigger for job %r degraded to 1-hour interval",
-            job.id,
+        raise ValueError(
+            f"Cron trigger for job {job.id!r} is not supported without apscheduler. "
+            f"Install apscheduler or use an interval trigger instead."
         )
-        return 3600.0
 
     @staticmethod
     async def _invoke(job: _FallbackJob) -> None:
@@ -213,11 +218,13 @@ class MeeptScheduler:
         The application :class:`~meept.core.bus.MessageBus`.
     """
 
-    def __init__(self, config: Any, bus: Any) -> None:
+    def __init__(self, config: Any, bus: Any, data_dir: Path | None = None) -> None:
         self._config = config
         self._bus = bus
         self._scheduler: AsyncIOScheduler | _FallbackScheduler | None = None
         self._started = False
+        self._data_dir = data_dir
+        self._persisted_jobs: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -236,6 +243,10 @@ class MeeptScheduler:
 
         self._scheduler.start()
         self._started = True
+
+        # Restore persisted jobs.
+        self._load_persisted_jobs()
+
         log.info(
             "scheduler: started (%s)",
             "apscheduler" if _HAS_APSCHEDULER else "fallback",
@@ -424,7 +435,7 @@ class MeeptScheduler:
                 ),
             )
 
-        return self.add_job(
+        result = self.add_job(
             job_id=job_id,
             func=_agent_handler,
             trigger=trigger,
@@ -433,11 +444,25 @@ class MeeptScheduler:
             **trigger_args,
         )
 
+        # Persist so this job survives restarts.
+        self._persist_job(job_id, {
+            "type": "agent",
+            "task_description": task_description,
+            "trigger": trigger,
+            "trigger_args": trigger_args,
+            "skill_hint": skill_hint,
+            "max_retries": max_retries,
+            "retry_delay": retry_delay,
+        })
+
+        return result
+
     def remove_job(self, job_id: str) -> None:
         """Remove a scheduled job by id."""
         if self._scheduler is None:
             raise RuntimeError("Scheduler has not been started")
         self._scheduler.remove_job(job_id)
+        self._unpersist_job(job_id)
         log.info("scheduler: removed job %r", job_id)
 
     def list_jobs(self) -> list[dict[str, Any]]:
@@ -489,6 +514,67 @@ class MeeptScheduler:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Job persistence
+    # ------------------------------------------------------------------
+
+    @property
+    def _jobs_file(self) -> Path | None:
+        if self._data_dir is None:
+            return None
+        return self._data_dir / "scheduled_jobs.json"
+
+    def _persist_job(self, job_id: str, definition: dict[str, Any]) -> None:
+        """Save a job definition so it can be restored after restart."""
+        self._persisted_jobs[job_id] = definition
+        self._write_jobs_file()
+
+    def _unpersist_job(self, job_id: str) -> None:
+        """Remove a persisted job definition."""
+        self._persisted_jobs.pop(job_id, None)
+        self._write_jobs_file()
+
+    def _write_jobs_file(self) -> None:
+        path = self._jobs_file
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(self._persisted_jobs, indent=2), encoding="utf-8")
+        except Exception:
+            log.warning("scheduler: failed to write jobs file %s", path, exc_info=True)
+
+    def _load_persisted_jobs(self) -> None:
+        """Restore previously persisted jobs."""
+        path = self._jobs_file
+        if path is None or not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return
+            for job_id, defn in data.items():
+                if not isinstance(defn, dict):
+                    continue
+                job_type = defn.get("type", "")
+                if job_type == "agent":
+                    try:
+                        self.add_agent_job(
+                            job_id=job_id,
+                            task_description=defn["task_description"],
+                            trigger=defn.get("trigger", "interval"),
+                            skill_hint=defn.get("skill_hint"),
+                            max_retries=defn.get("max_retries", 0),
+                            retry_delay=defn.get("retry_delay", 1.0),
+                            **defn.get("trigger_args", {}),
+                        )
+                        log.info("scheduler: restored persisted job %r", job_id)
+                    except Exception:
+                        log.warning("scheduler: failed to restore job %r", job_id, exc_info=True)
+            self._persisted_jobs = data
+        except Exception:
+            log.warning("scheduler: failed to load jobs file %s", path, exc_info=True)
 
     def _wrap_handler(
         self,

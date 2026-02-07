@@ -9,6 +9,7 @@ as a monolith.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -128,6 +129,8 @@ class Planner:
 
         try:
             response = await self._llm.chat(messages)
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
         except Exception:
             log.warning("LLM call failed during planning; falling back to single step", exc_info=True)
             return self._single_step(task_description)

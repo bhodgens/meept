@@ -114,6 +114,18 @@ class FrontAgent:
         str
             The agent's response.
         """
+        try:
+            return await self._dispatch_inner(message, conversation_id)
+        except Exception:
+            log.exception("FrontAgent: unhandled error in dispatch")
+            return "I encountered an unexpected error processing your request. Please try again."
+
+    async def _dispatch_inner(
+        self,
+        message: str,
+        conversation_id: str | None = None,
+    ) -> str:
+        """Internal dispatch logic (separated for error handling)."""
         # Step 1: Collaborative planning check (programming/automation tasks).
         if self._collaborative_planner is not None:
             collab = self._collaborative_planner
@@ -151,18 +163,18 @@ class FrontAgent:
                     needs_plan = should_plan(message)
 
                 if needs_plan:
-                    plan = await self._planner.decompose(message)
+                    steps = await self._planner.decompose(message)
 
                     await self._publish(
                         MessageType.CHAT_PROGRESS,
                         {
                             "event": "planning_complete",
-                            "steps": len(plan.steps),
+                            "steps": len(steps),
                             "conversation_id": conversation_id,
                         },
                     )
 
-                    orch_result = await self._orchestrator.execute(plan.steps)
+                    orch_result = await self._orchestrator.execute(steps)
                     return orch_result.synthesized
 
         # Step 3: Default fallback -- default loop or 1-step pipeline.

@@ -184,7 +184,11 @@ class EpisodicMemory:
             """,
             (item_id, content, category, meta_json, now_iso, embedding_text),
         )
-        await self._db.commit()
+        try:
+            await self._db.commit()
+        except Exception:
+            logger.error("Failed to commit episodic memory %s", item_id, exc_info=True)
+            raise
 
         # Also index in memu when available.
         if self._use_memu and self._memu_store is not None:
@@ -319,7 +323,11 @@ class EpisodicMemory:
             ids,
         ) as cur:
             deleted = cur.rowcount
-        await self._db.commit()
+        try:
+            await self._db.commit()
+        except Exception:
+            logger.error("Failed to commit deletion of %d episodic memories", len(ids), exc_info=True)
+            raise
 
         # Also remove from memu index.
         if self._use_memu and self._memu_store is not None:
@@ -481,9 +489,10 @@ def _sanitise_fts_query(raw: str) -> str:
 def _normalise_fts_rank(rank: float) -> float:
     """Map an FTS5 ``rank`` value to ``[0.0, 1.0]``.
 
-    FTS5 rank values are negative (more negative = better match).  We use a
-    simple sigmoid-style mapping: ``score = 1 / (1 - rank)``.
+    FTS5 rank values are negative (more negative = better match).  We map
+    via ``score = 1 / (1 + abs(rank))`` so that more-negative ranks produce
+    higher scores (closer to 1.0).
     """
     if rank >= 0:
         return 0.0
-    return 1.0 / (1.0 - rank)
+    return 1.0 / (1.0 + abs(rank))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterator
+from typing import Any, Iterator
 
 from meept.skills.models import SkillDefinition
 
@@ -73,6 +73,71 @@ class SkillRegistry:
         if skill is None:
             return set()
         return set(skill.requires)
+
+    # ------------------------------------------------------------------
+    # Bus integration
+    # ------------------------------------------------------------------
+
+    async def subscribe_to_bus(self, bus: Any) -> None:
+        """Subscribe to skills-related bus topics."""
+        self._bus = bus
+        bus.subscribe("skills.list", self._handle_bus_list)
+        bus.subscribe("skills.triage", self._handle_bus_triage)
+
+    async def _handle_bus_list(self, topic: str, msg: Any) -> None:
+        """Handle a skills.list bus message."""
+        from meept.models.messages import BusMessage, MessageType
+
+        skills = self.list_skills()
+        serialized = [
+            {
+                "name": s.name,
+                "description": s.description,
+                "requires": s.requires,
+                "risk_level": s.risk_level,
+            }
+            for s in skills
+        ]
+        await self._bus.publish(
+            "skills.result",
+            BusMessage(
+                type=MessageType.STATUS_UPDATE,
+                payload={"skills": serialized},
+                source="skills",
+                reply_to=msg.id,
+            ),
+        )
+
+    async def _handle_bus_triage(self, topic: str, msg: Any) -> None:
+        """Handle a skills.triage bus message with keyword matching."""
+        from meept.models.messages import BusMessage, MessageType
+
+        message = msg.payload.get("message", "").lower()
+        scored: list[tuple[SkillDefinition, int]] = []
+        for skill in self.list_skills():
+            score = 0
+            words = message.split()
+            for word in words:
+                if word in skill.name.lower():
+                    score += 3
+                if word in skill.description.lower():
+                    score += 1
+            if score > 0:
+                scored.append((skill, score))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        best = [
+            {"name": s.name, "description": s.description, "score": sc}
+            for s, sc in scored[:5]
+        ]
+        await self._bus.publish(
+            "skills.result",
+            BusMessage(
+                type=MessageType.STATUS_UPDATE,
+                payload={"matches": best, "message": message},
+                source="skills",
+                reply_to=msg.id,
+            ),
+        )
 
     @property
     def names(self) -> list[str]:

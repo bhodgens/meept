@@ -202,12 +202,16 @@ meept/
 - Methods: `chat`, `status`, `memory.query`, `memory.export`, `scheduler.list_jobs`, `scheduler.add_job`, `config.reload`
 - TLS optional for TCP (web interface); Unix socket handles local security via file permissions
 
-### Memory (Hybrid)
-- **Episodic (memU)**: Conversation history, instructions, self-model. Stores as human-readable Markdown. LLM-based retrieval (92% accuracy). **SQLite metadata store** (file-based, zero-config persistence via custom adapter wrapping memU's metadata layer).
-- **Task (memvid)**: Technical tasks, code, command outputs. `.mv2` binary format, sub-0.1ms search. Separate files per domain.
+### Memory (SQLite-Primary with Optional Acceleration)
+
+- **Architecture**: SQLite+FTS5 is the canonical, primary store for all memory subsystems. All content and metadata live in SQLite tables, providing zero-config persistence and full-text keyword search out of the box.
+- **Optional acceleration**: memU (episodic) and memvid (task) are optional extras (`pip install meept[memory]`) that layer vector similarity search on top of the SQLite store when installed. Without them, FTS5 keyword search is used.
+- **Episodic**: Conversation history, instructions, self-model. Stored in SQLite with FTS5 indexing. When memU is installed, provides LLM-based retrieval with higher recall.
+- **Task**: Technical tasks, code, command outputs. Stored in SQLite with FTS5 per domain. When memvid is installed, provides sub-0.1ms vector search.
 - **Personality**: Evolving self-model updated via LLM summarization of interactions.
 - **Consolidation**: Scheduled job (every 6h) summarizes/compresses old memories.
 - **Export**: CLI command to dump memories as Markdown or JSON for human review.
+- **Bus integration**: MemoryManager subscribes to `memory.query` and `memory.export` bus topics, enabling JSON-RPC access from frontends.
 
 ### Security
 - **Layer 1**: Regex pattern detection for known injection patterns (fast, zero cost)
@@ -251,8 +255,8 @@ meept/
 |---------|---------|
 | `httpx` >=0.27 | HTTP client for LLM APIs |
 | `pyyaml` >=6.0 | SKILL.md YAML frontmatter parsing |
-| `memu-py` >=0.1.0 | Episodic memory (memU) |
-| `memvid-sdk` >=2.0.0 | Task memory (memvid .mv2) |
+| `memu-py` >=0.1.0 | Episodic memory (memU) -- **optional extra** (`meept[memory]`), falls back to SQLite+FTS5 |
+| `memvid-sdk` >=2.0.0 | Task memory (memvid .mv2) -- **optional extra** (`meept[memory]`), falls back to SQLite+FTS5 |
 | `apscheduler` >=3.11 | Job scheduling |
 | `google-api-python-client` >=2.100 | Google Calendar |
 | `google-auth-oauthlib` >=1.0 | Google OAuth 2.0 |
@@ -268,45 +272,103 @@ meept/
 
 ---
 
+## Implementation Status Summary
+
+*Last assessed: 2026-02-04*
+
+| Phase | Feature | Completion | Notes |
+|-------|---------|------------|-------|
+| 1 | Foundation | 95% | All files implemented, daemon boots |
+| 2 | Communication Layer | 85% | Protocol + CLI exist; JSON-RPC bus subscribers wired for memory, security, skills, pipeline |
+| 3 | Security Layer | 95% | Exceeds plan scope (added Tirith, SQLite engine) |
+| 4 | Agent Loop + Tools + Skills | 90% | All subsystems present; ClawSkills added beyond plan |
+| 5 | Memory Systems | 80% | SQLite-primary architecture adopted; bus subscribers wired |
+| 6 | Scheduler + Calendar | 90% | Substantially complete as noted originally |
+| 7 | Plugin System + MCP | 85% | Multi-transport MCP, OAuth 2.1 implemented |
+| 8 | Telegram + Web Interface | 60% | Files exist; integration incomplete |
+| 9 | Menubar + CLI Dashboard | 40% | CLI done; Tauri menubar barely scaffolded |
+| 10 | Service + Tests + Polish | 65% | 50 test files, service templates exist |
+| **Overall** | | **~80%** | |
+
+### Resolved: Memory Architecture (Option B Adopted)
+
+The original plan described memU/memvid as primary backends. The implementation instead uses **SQLite+FTS5 as the canonical primary store** with memU/memvid as optional acceleration layers (`pip install meept[memory]`). This decision has been formally adopted as the design direction (Option B: SQLite-primary) for the following reasons:
+
+- **Zero-config persistence**: SQLite requires no external services and works everywhere.
+- **Graceful degradation**: The system functions fully without memU/memvid installed.
+- **Optional acceleration**: When memU/memvid are installed, they layer vector similarity search on top of SQLite for higher recall, without changing the storage model.
+
+The Key Design Decisions section above has been updated to reflect this architecture.
+
+### Unplanned Addition: ClawSkills Module
+
+`src/meept/clawskills/` (1,249 lines) was implemented but does not appear in the original plan. Provides skill installation, indexing, and security validation for an external ClawSkills ecosystem.
+
+---
+
 ## Implementation Phases
 
-### Phase 1: Foundation
+### Phase 1: Foundation -- 95%
 Create project scaffolding, daemon lifecycle, message bus, config system, LLM client with token budget.
+
+**Status**: All planned files exist and are substantially implemented. Core daemon lifecycle, async message bus, TOML+Markdown config loading, LLM client with httpx, token budgeting, and JSON5 provider configuration are all functional. ~985 lines in the LLM subsystem alone.
 
 **Files**: pyproject.toml, Makefile, .gitignore, src/meept/{__init__,__main__}.py, core/{daemon,bus,config,registry}.py, llm/{client,models,budget,providers}.py, models/{messages,config_schema}.py, config/{meept.toml,constitution.md,restrictions.md,purpose.md}
 
 **Verify**: `make install && make setup && meept-daemon` boots daemon, connects to configured LLM, responds to test prompt via internal bus.
 
-### Phase 2: Communication Layer
+**Remaining**: End-to-end boot verification; config reload edge cases.
+
+### Phase 2: Communication Layer -- 75%
 Unix socket server, JSON-RPC protocol, basic CLI with chat screen.
+
+**Status**: JSON-RPC 2.0 wire format (protocol.py) is implemented. Unix socket server exists. CLI is implemented (~1,950 lines) with Textual TUI, chat screen, and widget framework. However, not all planned JSON-RPC methods (`chat`, `status`, `memory.query`, `memory.export`, `scheduler.list_jobs`, `scheduler.add_job`, `config.reload`) appear to be fully wired through the socket server to their respective subsystem handlers.
 
 **Files**: comm/{server,protocol}.py, cli/{__init__,__main__,app}.py, cli/screens/chat.py
 
 **Verify**: `make cli` opens TUI, type messages, receive LLM responses through daemon.
 
-### Phase 3: Security Layer
+**Remaining**: Full JSON-RPC method wiring; connection stability testing; reconnect handling.
+
+### Phase 3: Security Layer -- 95%
 Input sanitization pipeline, prompt guard, action permissions, TLS cert generation.
 
-**Files**: security/{sanitizer,prompt_guard,permissions,output_monitor,tls,engine,seed_rules}.py
+**Status**: All planned files exist plus significant additions. 2,384 lines of security code. Notable additions beyond plan: `tirith.py` (pre-execution shell command security scanning), `engine.py` (SQLite-backed permission engine with audit logging), `seed_rules.py` (pre-populated risk rules for tools, paths, commands, financial patterns). The security system exceeds the original plan's scope.
+
+**Files**: security/{sanitizer,prompt_guard,permissions,output_monitor,tls,engine,seed_rules,tirith}.py
 
 **Verify**: Injection attempts (`ignore previous instructions...`) detected and blocked. Constitution/restrictions loaded and enforced.
 
-### Phase 4: Agent Loop + Tools + Skills
+**Remaining**: Comprehensive adversarial testing; edge case coverage for novel injection patterns.
+
+### Phase 4: Agent Loop + Tools + Skills -- 90%
 Reasoning loop (plan->execute->observe), task decomposition, built-in tools (shell, filesystem, web, scheduling, skill discovery). FrontAgent entry point, Orchestrator pipeline execution, WorkerFactory with ModelResolver, CollaborativePlanner with approval workflow, per-task git WorkspaceManager.
 
-**Files**: agent/{loop,planner,executor,front,orchestrator,worker_factory,collaborative_planner,workspace}.py, tools/{interface,loader}.py, tools/builtin/{shell,filesystem,web_search,web_fetch,schedule_tool,skill_tools}.py, skills/{models,registry,discovery,parser,tool_filter}.py, llm/resolver.py, config/models.json5, models/tasks.py
+**Status**: All planned files exist. Agent subsystem: 2,506 lines across 8 files. Tool subsystem: 2,222 lines including all 6 built-in tools. Skills subsystem: 531 lines plus additional executor.py and dispatcher.py (not in original plan). The agent loop injects memory context before each LLM turn via `_inject_memory_context()`. DAG-based task execution, skill resolution, and context management are implemented.
+
+**Files**: agent/{loop,planner,executor,front,orchestrator,worker_factory,collaborative_planner,workspace}.py, tools/{interface,loader}.py, tools/builtin/{shell,filesystem,web_search,web_fetch,schedule_tool,skill_tools}.py, skills/{models,registry,discovery,parser,tool_filter,executor,dispatcher}.py, llm/resolver.py, config/models.json5, models/tasks.py
 
 **Verify**: Ask agent to read a file -> plans the action -> checks permissions -> executes -> returns result. Skills discoverable via skill_find tool. Capability matching selects correct model.
 
-### Phase 5: Memory Systems
+**Remaining**: Full end-to-end integration testing of plan->execute->observe cycle; multi-step task chaining verification.
+
+### Phase 5: Memory Systems -- 70%
 memU episodic memory, memvid task memory, personality model, consolidation, human export tools.
+
+**Status**: All planned files exist and are substantial (2,303 lines total): manager.py (399), episodic.py (490), task_memory.py (526), personality.py (252), consolidation.py (255), export.py (251), memory_types.py (130). Personality evolution, consolidation scheduling, and Markdown/JSON export all work.
+
+**However, the architecture deviates significantly from the plan** (see Critical Note above). memU and memvid are optional extras, not core dependencies. SQLite+FTS5 is the primary store and search engine. The planned "human-readable Markdown" runtime storage and "LLM-based retrieval (92% accuracy)" via memU are not active in a default installation. The Memory (Hybrid) design in the Key Design Decisions section does not accurately describe what was built.
 
 **Files**: memory/{manager,episodic,task_memory,personality,consolidation,export}.py, models/memory_types.py
 
 **Verify**: Converse, restart daemon, agent recalls prior conversation. Store technical task, search for it. Export as Markdown.
 
-### Phase 6: Scheduler + Calendar *(substantially complete)*
+**Remaining**: Test LLM-based retrieval quality when memU IS installed. Verify cross-restart memory persistence end-to-end.
+
+### Phase 6: Scheduler + Calendar -- 90% *(substantially complete)*
 APScheduler integration with fallback scheduler, job definitions, DAG pipeline execution, Google Calendar read/write.
+
+**Status**: All planned components implemented (1,076 lines for scheduler). The phase was already marked as substantially complete in the original plan.
 
 **Components implemented**:
 - APScheduler wrapper (`MeeptScheduler`) with fallback for APScheduler-free installs
@@ -321,8 +383,12 @@ APScheduler integration with fallback scheduler, job definitions, DAG pipeline e
 
 **Verify**: Memory consolidation runs on schedule. Calendar events listed/created via agent. Pipeline DAG executes steps in dependency order.
 
-### Phase 7: Plugin System + MCP
+**Remaining**: Google Calendar end-to-end OAuth flow testing; pipeline error recovery edge cases.
+
+### Phase 7: Plugin System + MCP -- 85%
 Plugin loading from disk, MCP server management with sanitized tool output. Full remote MCP server support.
+
+**Status**: MCP manager, client, and auth files exist. Multiple transport support implemented: Local (stdio), Remote Streamable HTTP, Remote raw HTTP fallback, WebSocket. OAuth 2.1 with PKCE and client credentials flows. Auto-reconnection with exponential backoff. Plugin framework with manifest-based discovery.
 
 **Transports**: Local (stdio), Remote Streamable HTTP (SDK), Remote raw HTTP (no SDK fallback), WebSocket (SDK).
 
@@ -340,26 +406,40 @@ Plugin loading from disk, MCP server management with sanitized tool output. Full
 
 **Verify**: Example plugin loads, tool appears in agent's available tools. Local MCP server starts and tools work. Remote HTTP server connects and discovers tools. OAuth flow triggers and tokens persist. WebSocket server connects. Auto-reconnect fires on disconnect. Raw HTTP fallback works without SDK.
 
-### Phase 8: Telegram + Web Interface
+**Remaining**: Example plugin documentation; third-party plugin testing; MCP output sanitization verification.
+
+### Phase 8: Telegram + Web Interface -- 60%
 Telegram bot (creator-only), FastAPI web UI with OAuth/JWT.
+
+**Status**: All planned files exist (telegram_bot.py, web/app.py, web/auth.py, web/routes.py). Basic structure is in place but end-to-end integration between frontends and the daemon's JSON-RPC server is incomplete. The Telegram bot and web interface have routing and auth scaffolding but lack full message flow testing through the daemon.
 
 **Files**: comm/telegram_bot.py, comm/web/{app,auth,routes}.py
 
 **Verify**: Telegram message -> response. Web login -> chat via browser.
 
-### Phase 9: Menubar + CLI Dashboard
+**Remaining**: Full Telegram message->daemon->LLM->response flow; Web UI OAuth login flow; WebSocket or SSE streaming for real-time chat; frontend polish.
+
+### Phase 9: Menubar + CLI Dashboard -- 40%
 Tauri menubar app (system tray with popover UI showing status/metrics/chat), full CLI dashboard.
+
+**Status**: The CLI dashboard portion is largely complete (~1,950 lines) with Textual TUI screens (dashboard, chat, memory browser, tasks) and widgets (metrics, task list, status bar). The Tauri macOS menubar app is **barely scaffolded** -- minimal Python backend exists but the Rust/JS frontend (main.rs, index.html, main.js, style.css) and Tauri configuration (Cargo.toml, tauri.conf.json, tray icons) have not been built.
 
 **Files**: menubar/src-tauri/{Cargo.toml,src/main.rs,tauri.conf.json,icons/}, menubar/src/{index.html,main.js,style.css}, menubar/package.json, cli/screens/{dashboard,memory_browser,tasks}.py, cli/widgets/{metrics,task_list,status_bar}.py
 
 **Verify**: Menubar tray icon shows green on task completion, orange when input needed. Popover shows live status. Dashboard displays metrics.
 
-### Phase 10: Service + Tests + Polish
+**Remaining**: Entire Tauri app build (Rust backend, JS frontend, tray icons, IPC to daemon). CLI dashboard integration testing with live daemon.
+
+### Phase 10: Service + Tests + Polish -- 65%
 launchd/systemd service files, full test suite, README, .env.example.
+
+**Status**: Service file templates exist (meept.service at 12 lines, com.meept.daemon.plist at 21 lines) but require variable substitution and installation scripting. Test suite has 50 files covering all major subsystems (core, llm, memory, scheduler, security, tools, comm, agent, skills, clawskills). README exists. Overall test pass rate and coverage depth have not been independently verified.
 
 **Files**: service/{com.meept.daemon.plist,meept.service}, .env.example, tests/**, README.md
 
 **Verify**: `make install-service` -> meept runs at login. `make test` passes. `make uninstall` cleans up.
+
+**Remaining**: `make install-service` / `make uninstall` automation; full CI test pass verification; .env.example completeness; README accuracy review.
 
 ---
 

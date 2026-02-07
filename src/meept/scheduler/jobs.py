@@ -11,6 +11,9 @@ from typing import Any, Callable
 log = logging.getLogger(__name__)
 
 
+_DEFAULT_JOB_TIMEOUT: float = 300.0
+
+
 @dataclass(slots=True)
 class JobDefinition:
     """Declarative description of a scheduled job.
@@ -35,6 +38,8 @@ class JobDefinition:
         Extra keyword arguments passed to the handler when invoked.
     enabled:
         Whether the job should be registered on startup.
+    timeout:
+        Maximum execution time in seconds before the handler is cancelled.
     """
 
     id: str
@@ -45,6 +50,7 @@ class JobDefinition:
     handler: str
     handler_args: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
+    timeout: float = _DEFAULT_JOB_TIMEOUT
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +179,21 @@ def create_job_handler(
 
         log.debug("jobs: executing %s.%s(%s)", component_name, operation or "__call__", kwargs)
 
-        result = target(**kwargs)
-        if asyncio.iscoroutine(result):
-            result = await result
+        try:
+            result = target(**kwargs)
+            if asyncio.iscoroutine(result):
+                result = await asyncio.wait_for(result, timeout=job_def.timeout)
+        except asyncio.TimeoutError:
+            log.error(
+                "jobs: handler for %r timed out after %.0fs",
+                job_def.id,
+                job_def.timeout,
+            )
+            return {
+                "job_id": job_def.id,
+                "status": "timeout",
+                "reason": f"handler exceeded {job_def.timeout}s timeout",
+            }
 
         return {
             "job_id": job_def.id,

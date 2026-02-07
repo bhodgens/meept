@@ -119,10 +119,17 @@ class ActionExecutor:
                 "error": f"Permission denied: {reason}",
             }
 
-        # 3. Execute.
+        # 3. Execute with argument validation.
         log.info("Executing tool: %s (args=%s)", tool_name, _summarise_args(arguments))
         try:
             result = await tool.execute(**arguments)
+        except TypeError as exc:
+            log.warning("Tool %s received invalid arguments: %s", tool_name, exc)
+            return {
+                "success": False,
+                "result": None,
+                "error": f"Invalid arguments for tool '{tool_name}': {exc}",
+            }
         except Exception as exc:
             log.error("Tool %s raised an exception: %s", tool_name, exc, exc_info=True)
             return {

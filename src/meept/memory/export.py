@@ -62,7 +62,7 @@ class MemoryExporter:
         if memory_type in (None, "episodic", MemoryType.EPISODIC):
             episodic = self._manager.episodic
             if episodic is not None:
-                results = await episodic.get_recent(limit=10_000)
+                results = await self._get_all_paginated(episodic)
                 sections.append(self._render_section_md("Episodic Memories", results))
 
         # -- Task --
@@ -133,7 +133,7 @@ class MemoryExporter:
         if memory_type in (None, "episodic", MemoryType.EPISODIC):
             episodic = self._manager.episodic
             if episodic is not None:
-                results = await episodic.get_recent(limit=10_000)
+                results = await self._get_all_paginated(episodic)
                 export_data["episodic"] = [
                     self._result_to_dict(r) for r in results
                 ]
@@ -184,6 +184,37 @@ class MemoryExporter:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    _EXPORT_PAGE_SIZE = 500
+
+    async def _get_all_paginated(self, subsystem: Any) -> list[MemoryResult]:
+        """Fetch all memories from *subsystem* in pages to avoid OOM.
+
+        Calls ``get_recent(limit=page_size)`` in successive pages, using
+        the oldest timestamp in each batch to fetch the next page.
+        """
+        all_results: list[MemoryResult] = []
+        page_size = self._EXPORT_PAGE_SIZE
+        seen_ids: set[str] = set()
+
+        # First page: most recent.
+        batch = await subsystem.get_recent(limit=page_size)
+        while batch:
+            new_in_batch = 0
+            for r in batch:
+                if r.item.id not in seen_ids:
+                    all_results.append(r)
+                    seen_ids.add(r.item.id)
+                    new_in_batch += 1
+            if new_in_batch == 0 or len(batch) < page_size:
+                break
+            # Next page: items older than the oldest in this batch.
+            oldest_ts = min(r.item.created_at for r in batch)
+            if hasattr(subsystem, "get_old_memories"):
+                batch = await subsystem.get_old_memories(oldest_ts, limit=page_size)
+            else:
+                break
+        return all_results
 
     async def _get_all_task_memories(self) -> list[MemoryResult]:
         """Retrieve all task memories across domains via search fallback.
