@@ -79,6 +79,10 @@ func New(cfg *Config) (*Daemon, error) {
 		SocketPath: cfg.SocketPath,
 	}, msgBus, logger)
 
+	// Register proxy handlers for Python agent integration
+	proxy := rpc.NewProxyHandler(msgBus)
+	proxy.RegisterProxyMethods(rpcServer)
+
 	// Register RPC server as a component
 	reg.Register(rpcServer)
 
