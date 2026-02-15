@@ -16,6 +16,7 @@ import (
 	"github.com/caimlas/meept/internal/registry"
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // Daemon manages the meept daemon lifecycle.
@@ -33,11 +34,18 @@ type Daemon struct {
 
 // Config holds daemon configuration.
 type Config struct {
-	SocketPath     string
-	PIDFile        string
-	StateDir       string
+	SocketPath      string
+	PIDFile         string
+	StateDir        string
 	ShutdownTimeout time.Duration
-	LogLevel       slog.Level
+	LogLevel        slog.Level
+
+	// Security settings
+	AllowedPaths              []string
+	BlockedPaths              []string
+	BlockFinancial            bool
+	RequireConfirmationHigh   bool
+	RequireConfirmationCritical bool
 }
 
 // DefaultConfig returns the default daemon configuration.
@@ -82,6 +90,17 @@ func New(cfg *Config) (*Daemon, error) {
 	// Register proxy handlers for Python agent integration
 	proxy := rpc.NewProxyHandler(msgBus)
 	proxy.RegisterProxyMethods(rpcServer)
+
+	// Register security handlers (Go-native, high-performance)
+	securityCfg := security.Config{
+		AllowedPaths:              cfg.AllowedPaths,
+		BlockedPaths:              cfg.BlockedPaths,
+		BlockFinancial:            cfg.BlockFinancial,
+		RequireConfirmationHigh:   cfg.RequireConfirmationHigh,
+		RequireConfirmationCritical: cfg.RequireConfirmationCritical,
+	}
+	securityHandler := rpc.NewSecurityHandler(securityCfg)
+	securityHandler.RegisterSecurityMethods(rpcServer)
 
 	// Register RPC server as a component
 	reg.Register(rpcServer)

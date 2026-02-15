@@ -141,6 +141,95 @@ class GoDaemonClient:
         """Get bus statistics."""
         return await self.call("bus.stats")
 
+    # Security methods (Go-native, high-performance)
+
+    async def check_permission(
+        self, action: str, details: dict[str, str]
+    ) -> dict[str, Any]:
+        """Check if an action is permitted.
+
+        Parameters
+        ----------
+        action:
+            Action type (e.g., "file_read", "shell_execute").
+        details:
+            Action-specific details (e.g., {"path": "/tmp/foo"}).
+
+        Returns
+        -------
+        dict
+            Result with keys: allowed, reason, effective_risk, needs_confirm.
+        """
+        return await self.call(
+            "security.check_permission", {"action": action, "details": details}
+        )
+
+    async def check_path(self, path: str) -> bool:
+        """Check if a path is allowed.
+
+        Parameters
+        ----------
+        path:
+            The file path to check.
+
+        Returns
+        -------
+        bool
+            True if the path is allowed.
+        """
+        result = await self.call("security.check_path", {"path": path})
+        return result.get("allowed", False)
+
+    async def evaluate_shell_risk(self, command: str) -> str:
+        """Evaluate the risk level of a shell command.
+
+        Parameters
+        ----------
+        command:
+            The shell command to evaluate.
+
+        Returns
+        -------
+        str
+            Risk level: "SAFE", "LOW", "MEDIUM", "HIGH", or "CRITICAL".
+        """
+        result = await self.call("security.evaluate_shell_risk", {"command": command})
+        return result.get("risk_level", "UNKNOWN")
+
+    async def is_financial(self, text: str) -> bool:
+        """Check if text contains financial operations.
+
+        Parameters
+        ----------
+        text:
+            The text to check.
+
+        Returns
+        -------
+        bool
+            True if financial operations are detected.
+        """
+        result = await self.call("security.is_financial", {"text": text})
+        return result.get("is_financial", False)
+
+    async def check_permission_batch(
+        self, checks: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Check multiple permissions in a single call.
+
+        Parameters
+        ----------
+        checks:
+            List of dicts with "action" and "details" keys.
+
+        Returns
+        -------
+        list
+            List of results, one per check.
+        """
+        result = await self.call("security.check_batch", {"checks": checks})
+        return result.get("results", [])
+
     async def __aenter__(self) -> GoDaemonClient:
         await self.connect()
         return self

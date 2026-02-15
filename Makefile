@@ -26,6 +26,14 @@ help:
 	@echo "Service:"
 	@echo "  install-service  Install as a system service (launchd/systemd)"
 	@echo "  uninstall        Remove the system service"
+	@echo ""
+	@echo "Go Daemon:"
+	@echo "  go-build         Build the Go daemon binary"
+	@echo "  go-test          Run Go unit tests"
+	@echo "  go-bench         Run Go benchmarks"
+	@echo "  go-daemon        Build and run Go daemon (foreground)"
+	@echo "  go-daemon-debug  Run Go daemon with debug logging"
+	@echo "  go-clean         Remove Go build artifacts"
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python
@@ -158,7 +166,7 @@ self-regression:
 	$(MAKE) test && $(PYTHON) -m meept.selfimprove.cli regression-check
 
 # =============================================================================
-# Go Daemon (Phase 1 - experimental)
+# Go Daemon (high-performance backend)
 # =============================================================================
 
 GO_BIN := bin/meept-daemon
@@ -166,15 +174,33 @@ GO_BIN := bin/meept-daemon
 go-build:
 	@echo "Building Go daemon..."
 	go build -o $(GO_BIN) ./cmd/meept-daemon
-	@echo "Built $(GO_BIN)"
+	@echo "Built $(GO_BIN) ($$(du -h $(GO_BIN) | cut -f1))"
 
 go-test:
 	@echo "Running Go tests..."
-	go test ./...
+	go test ./... -short
+
+go-test-verbose:
+	@echo "Running Go tests (verbose)..."
+	go test ./... -v
+
+go-bench:
+	@echo "Running Go benchmarks..."
+	go test ./pkg/security/... -bench=. -benchmem
+	go test ./internal/rpc/... -bench=. -benchmem
 
 go-daemon: go-build setup
 	@echo "Starting Go daemon..."
 	$(GO_BIN) --foreground
 
+go-daemon-debug: go-build setup
+	@echo "Starting Go daemon (debug mode)..."
+	$(GO_BIN) --foreground --log-level debug
+
 go-clean:
 	rm -rf bin/ go.sum
+
+go-lint:
+	@echo "Running Go linter..."
+	@which golangci-lint > /dev/null 2>&1 || (echo "Install golangci-lint first" && exit 1)
+	golangci-lint run ./...
