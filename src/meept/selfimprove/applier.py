@@ -121,26 +121,52 @@ class ChangeApplier:
 
             try:
                 content = target_file.read_text(encoding="utf-8")
+                lines = content.split("\n")
+                original_stripped = patch.original_content.strip()
+                new_stripped = patch.new_content.strip()
 
-                # Apply patch with fuzzy matching
-                if patch.original_content.strip() in content:
-                    content = content.replace(
-                        patch.original_content.strip(),
-                        patch.new_content.strip(),
-                    )
-                    target_file.write_text(content, encoding="utf-8")
-                    modified_files.append(patch.file_path)
-                    log.debug("applier: modified %s", patch.file_path)
-                else:
-                    log.warning(
-                        "applier: original content not found in %s",
-                        patch.file_path,
-                    )
+                applied = False
+
+                # Try exact line match first
+                if patch.start_line > 0 and patch.end_line <= len(lines):
+                    original_lines = lines[patch.start_line - 1 : patch.end_line]
+                    original_content = "\n".join(original_lines)
+
+                    if original_content.strip() == original_stripped:
+                        # Exact match - apply by replacing lines
+                        new_lines = patch.new_content.split("\n")
+                        lines[patch.start_line - 1 : patch.end_line] = new_lines
+                        content = "\n".join(lines)
+                        applied = True
+                        log.debug("applier: exact match, replacing lines %d-%d in %s",
+                                  patch.start_line, patch.end_line, patch.file_path)
+
+                # Fall back to fuzzy content matching
+                if not applied and original_stripped in content:
+                    occurrences = content.count(original_stripped)
+                    if occurrences > 1:
+                        log.warning("applier: original content appears %d times in %s",
+                                    occurrences, patch.file_path)
+                    content = content.replace(original_stripped, new_stripped, 1)
+                    applied = True
+                    log.debug("applier: fuzzy match applied to %s", patch.file_path)
+
+                if not applied:
+                    log.warning("applier: original content not found in %s", patch.file_path)
+                    continue
+
+                # Verify the patch was applied
+                if new_stripped not in content:
+                    raise RuntimeError(f"Patch verification failed for {patch.file_path}")
+
+                target_file.write_text(content, encoding="utf-8")
+                modified_files.append(patch.file_path)
 
             except Exception as exc:
                 log.error("applier: failed to modify %s: %s", patch.file_path, exc)
                 # Rollback any changes made so far
-                await self._git("checkout", "--", *modified_files)
+                if modified_files:
+                    await self._git("checkout", "--", *modified_files)
                 raise RuntimeError(f"Failed to apply patch to {patch.file_path}") from exc
 
         if not modified_files:

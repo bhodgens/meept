@@ -252,6 +252,11 @@ class RootCauseAnalyzer:
             from meept.llm.models import ModelConfig
 
             api_key = os.environ.get(self._config.api_key_env, "")
+            if not api_key:
+                raise RuntimeError(
+                    f"AI-infra API key not found. Set {self._config.api_key_env} environment variable."
+                )
+
             config = ModelConfig(
                 base_url=self._config.base_url,
                 model_id=self._config.analysis_model,
@@ -260,6 +265,7 @@ class RootCauseAnalyzer:
                 temperature=0.3,
             )
             self._llm_client = LLMClient(config)
+            log.info("analyzer: created LLM client for %s", self._config.analysis_model)
 
         from meept.llm.models import ChatMessage, Role
 

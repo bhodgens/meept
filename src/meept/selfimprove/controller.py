@@ -6,6 +6,7 @@ application of fixes in a complete improvement cycle.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -63,7 +64,8 @@ class SelfImproveController:
         self._validator = FixValidator(config.sandbox, config.safety, project_root)
         self._applier = ChangeApplier(config.safety, project_root, bus)
 
-        # State
+        # State (protected by _state_lock)
+        self._state_lock = asyncio.Lock()
         self._current_cycle: ImprovementCycle | None = None
         self._cycles: list[ImprovementCycle] = []
         self._issues: list[Issue] = []
@@ -71,6 +73,22 @@ class SelfImproveController:
         self._fixes: list[ProposedFix] = []
         self._validations: list[ValidationResult] = []
         self._applied: list[AppliedFix] = []
+        self._initialized = False
+
+        # Error tracking for circuit breaker
+        self._failure_counts: dict[str, int] = {}  # issue_id -> failure count
+        self._max_failures_per_issue = 3
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 5  # Circuit breaker threshold
+
+    async def initialize(self) -> None:
+        """Initialize the controller by loading persisted state."""
+        if self._initialized:
+            return
+        await self._load_state()
+        self._initialized = True
+        log.info("controller: initialized, loaded %d cycles, %d issues, %d fixes",
+                 len(self._cycles), len(self._issues), len(self._fixes))
 
     async def run_full_cycle(
         self,
@@ -88,6 +106,9 @@ class SelfImproveController:
         ImprovementCycle
             The completed cycle record.
         """
+        # Ensure controller is initialized
+        await self.initialize()
+
         cycle_id = f"cycle-{uuid.uuid4().hex[:8]}"
         self._current_cycle = ImprovementCycle(id=cycle_id)
 
@@ -116,12 +137,25 @@ class SelfImproveController:
             })
 
             for issue in self._issues[:self._config.max_iterations_per_cycle]:
+                # Check circuit breaker
+                if self._check_circuit_breaker():
+                    log.warning("controller: stopping analysis due to circuit breaker")
+                    break
+
+                # Skip issues that have failed too many times
+                if self._should_skip_issue(issue.id):
+                    log.info("controller: skipping issue %s (failed %d times)",
+                             issue.id, self._failure_counts.get(issue.id, 0))
+                    continue
+
                 try:
                     analysis = await self._analyzer.analyze(issue)
                     self._analyses.append(analysis)
                     self._current_cycle.issues_analyzed += 1
+                    self._record_success(issue.id)
                 except Exception:
                     log.exception("controller: failed to analyze issue %s", issue.id)
+                    self._record_failure(issue.id)
 
             if not self._analyses:
                 log.warning("controller: no analyses completed")
@@ -138,13 +172,26 @@ class SelfImproveController:
             })
 
             for analysis in self._analyses[:self._config.max_fixes_per_cycle]:
+                # Check circuit breaker
+                if self._check_circuit_breaker():
+                    log.warning("controller: stopping generation due to circuit breaker")
+                    break
+
+                # Skip analyses for issues that have failed too many times
+                if self._should_skip_issue(analysis.issue_id):
+                    log.info("controller: skipping generation for %s (failed %d times)",
+                             analysis.issue_id, self._failure_counts.get(analysis.issue_id, 0))
+                    continue
+
                 try:
                     fix = await self._generator.generate(analysis)
                     if fix is not None:
                         self._fixes.append(fix)
                         self._current_cycle.fixes_generated += 1
+                        self._record_success(analysis.issue_id)
                 except Exception:
                     log.exception("controller: failed to generate fix for %s", analysis.issue_id)
+                    self._record_failure(analysis.issue_id)
 
             if not self._fixes:
                 log.warning("controller: no fixes generated")
@@ -221,6 +268,7 @@ class SelfImproveController:
                 self._current_cycle.fixes_applied,
             )
 
+            await self._save_state()
             await self._publish_status("completed", self._current_cycle.to_dict())
             return self._current_cycle
 
@@ -231,6 +279,7 @@ class SelfImproveController:
                 self._current_cycle.error = str(exc)
                 self._current_cycle.completed_at = datetime.now(UTC).isoformat()
                 self._cycles.append(self._current_cycle)
+            await self._save_state()
             await self._publish_status("failed", {"cycle_id": cycle_id, "error": str(exc)})
             raise
 
@@ -305,6 +354,30 @@ class SelfImproveController:
         """Stop the controller (called during daemon shutdown)."""
         await self.cleanup()
 
+    def _record_failure(self, issue_id: str) -> None:
+        """Record a failure for an issue."""
+        self._failure_counts[issue_id] = self._failure_counts.get(issue_id, 0) + 1
+        self._consecutive_failures += 1
+        log.debug("controller: recorded failure for %s (count=%d, consecutive=%d)",
+                  issue_id, self._failure_counts[issue_id], self._consecutive_failures)
+
+    def _record_success(self, issue_id: str) -> None:
+        """Record a success, resetting the consecutive failure counter."""
+        self._consecutive_failures = 0
+        # Don't reset per-issue failures - they're historical
+
+    def _should_skip_issue(self, issue_id: str) -> bool:
+        """Check if an issue should be skipped due to repeated failures."""
+        return self._failure_counts.get(issue_id, 0) >= self._max_failures_per_issue
+
+    def _check_circuit_breaker(self) -> bool:
+        """Check if the circuit breaker has tripped (too many consecutive failures)."""
+        if self._consecutive_failures >= self._max_consecutive_failures:
+            log.warning("controller: circuit breaker tripped after %d consecutive failures",
+                        self._consecutive_failures)
+            return True
+        return False
+
     def get_status(self) -> dict[str, Any]:
         """Get current status."""
         return {
@@ -314,6 +387,9 @@ class SelfImproveController:
             "fixes_count": len(self._fixes),
             "validations_count": len(self._validations),
             "applied_count": len(self._applied),
+            "consecutive_failures": self._consecutive_failures,
+            "circuit_breaker_tripped": self._check_circuit_breaker(),
+            "failed_issues": {k: v for k, v in self._failure_counts.items() if v > 0},
             "pending_approvals": list(self._applier.pending_approvals.keys()),
             "cycles_completed": len(self._cycles),
         }
@@ -334,31 +410,65 @@ class SelfImproveController:
 
     async def _save_state(self) -> None:
         """Save current state to disk."""
-        data_dir = self._config.data_path
-        data_dir.mkdir(parents=True, exist_ok=True)
+        async with self._state_lock:
+            data_dir = self._config.data_path
+            data_dir.mkdir(parents=True, exist_ok=True)
 
-        state = {
-            "issues": [i.to_dict() for i in self._issues],
-            "analyses": [a.to_dict() for a in self._analyses],
-            "fixes": [f.to_dict() for f in self._fixes],
-            "validations": [v.to_dict() for v in self._validations],
-            "applied": [a.to_dict() for a in self._applied],
-            "cycles": [c.to_dict() for c in self._cycles],
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
+            state = {
+                "issues": [i.to_dict() for i in self._issues],
+                "analyses": [a.to_dict() for a in self._analyses],
+                "fixes": [f.to_dict() for f in self._fixes],
+                "validations": [v.to_dict() for v in self._validations],
+                "applied": [a.to_dict() for a in self._applied],
+                "cycles": [c.to_dict() for c in self._cycles],
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
 
-        state_file = data_dir / "state.json"
-        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            state_file = data_dir / "state.json"
+            state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            log.debug("controller: saved state to %s", state_file)
 
     async def _load_state(self) -> None:
         """Load state from disk."""
         state_file = self._config.data_path / "state.json"
         if not state_file.exists():
+            log.debug("controller: no state file found at %s", state_file)
             return
 
         try:
-            state = json.loads(state_file.read_text(encoding="utf-8"))
-            # TODO: Deserialize state
+            async with self._state_lock:
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+
+                # Deserialize issues
+                self._issues = [
+                    Issue.from_dict(d) for d in state.get("issues", [])
+                ]
+
+                # Deserialize analyses
+                self._analyses = [
+                    RootCauseAnalysis.from_dict(d) for d in state.get("analyses", [])
+                ]
+
+                # Deserialize fixes
+                self._fixes = [
+                    ProposedFix.from_dict(d) for d in state.get("fixes", [])
+                ]
+
+                # Deserialize validations
+                self._validations = [
+                    ValidationResult.from_dict(d) for d in state.get("validations", [])
+                ]
+
+                # Deserialize applied fixes
+                self._applied = [
+                    AppliedFix.from_dict(d) for d in state.get("applied", [])
+                ]
+
+                # Deserialize cycles
+                self._cycles = [
+                    ImprovementCycle.from_dict(d) for d in state.get("cycles", [])
+                ]
+
             log.info("controller: loaded state from %s", state_file)
         except Exception:
             log.exception("controller: failed to load state")
@@ -368,6 +478,9 @@ class SelfImproveController:
         from meept.models.messages import BusMessage, MessageType
 
         self._bus = bus
+
+        # Initialize state before handling any requests
+        await self.initialize()
 
         async def _on_detect(topic: str, msg: BusMessage) -> None:
             try:

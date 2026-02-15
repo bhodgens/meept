@@ -428,9 +428,32 @@ class MeeptDaemon:
                 try:
                     from meept.selfimprove.controller import SelfImproveController
 
+                    # Try to get or create an LLM client for selfimprove
+                    selfimprove_llm = None
+                    if selfimprove_cfg.ai_infra.enabled:
+                        import os
+                        api_key = os.environ.get(selfimprove_cfg.ai_infra.api_key_env, "")
+                        if api_key:
+                            from meept.llm.client import LLMClient
+                            from meept.llm.models import ModelConfig
+                            llm_config = ModelConfig(
+                                base_url=selfimprove_cfg.ai_infra.base_url,
+                                model_id=selfimprove_cfg.ai_infra.analysis_model,
+                                api_key=api_key,
+                                max_tokens=4096,
+                                temperature=0.3,
+                            )
+                            selfimprove_llm = LLMClient(llm_config)
+                            log.info("daemon: created LLM client for selfimprove (model=%s)",
+                                     selfimprove_cfg.ai_infra.analysis_model)
+                        else:
+                            log.warning("daemon: selfimprove ai-infra enabled but %s not set",
+                                        selfimprove_cfg.ai_infra.api_key_env)
+
                     selfimprove_controller = SelfImproveController(
                         config=selfimprove_cfg,
                         bus=self._bus,
+                        llm_client=selfimprove_llm,
                         project_root=self._config.data_dir.parent,
                     )
                     self._registry.register_instance(
@@ -439,6 +462,27 @@ class MeeptDaemon:
 
                     # Subscribe to bus events for RPC dispatch.
                     await selfimprove_controller.subscribe_to_bus(self._bus)
+
+                    # Schedule automatic improvement cycles if configured
+                    if selfimprove_cfg.auto_run_interval_hours > 0:
+                        scheduler = self._registry.get("scheduler")
+                        if scheduler is not None:
+                            async def _run_selfimprove_cycle():
+                                try:
+                                    await selfimprove_controller.run_full_cycle(interactive=False)
+                                except Exception:
+                                    log.exception("daemon: scheduled selfimprove cycle failed")
+
+                            scheduler.add_job(
+                                _run_selfimprove_cycle,
+                                trigger="interval",
+                                hours=selfimprove_cfg.auto_run_interval_hours,
+                                id="selfimprove_auto_cycle",
+                                name="Self-improvement auto-cycle",
+                                replace_existing=True,
+                            )
+                            log.info("daemon: scheduled selfimprove cycle every %d hours",
+                                     selfimprove_cfg.auto_run_interval_hours)
 
                     log.info("daemon: self-improvement subsystem initialized")
                 except Exception:

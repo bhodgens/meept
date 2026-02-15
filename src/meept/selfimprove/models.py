@@ -98,6 +98,24 @@ class Issue:
             "metadata": self.metadata,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Issue:
+        """Deserialize from a JSON-compatible dict."""
+        return cls(
+            id=data["id"],
+            source=IssueSource(data["source"]),
+            severity=IssueSeverity(data["severity"]),
+            title=data["title"],
+            description=data["description"],
+            file_path=data.get("file_path"),
+            line_number=data.get("line_number"),
+            test_name=data.get("test_name"),
+            error_type=data.get("error_type"),
+            stack_trace=data.get("stack_trace"),
+            timestamp=data.get("timestamp", datetime.now(UTC).isoformat()),
+            metadata=data.get("metadata", {}),
+        )
+
 
 @dataclass(slots=True)
 class RootCauseAnalysis:
@@ -153,6 +171,22 @@ class RootCauseAnalysis:
             "model_used": self.model_used,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RootCauseAnalysis:
+        """Deserialize from a JSON-compatible dict."""
+        return cls(
+            issue_id=data["issue_id"],
+            root_cause=data["root_cause"],
+            affected_files=data.get("affected_files", []),
+            affected_functions=data.get("affected_functions", []),
+            confidence=data.get("confidence", 0.0),
+            reasoning=data.get("reasoning", ""),
+            suggested_approach=data.get("suggested_approach", ""),
+            related_issues=data.get("related_issues", []),
+            timestamp=data.get("timestamp", datetime.now(UTC).isoformat()),
+            model_used=data.get("model_used", ""),
+        )
+
 
 @dataclass(slots=True)
 class FilePatch:
@@ -191,6 +225,18 @@ class FilePatch:
             "end_line": self.end_line,
             "description": self.description,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FilePatch:
+        """Deserialize from a JSON-compatible dict."""
+        return cls(
+            file_path=data["file_path"],
+            original_content=data["original_content"],
+            new_content=data["new_content"],
+            start_line=data["start_line"],
+            end_line=data["end_line"],
+            description=data.get("description", ""),
+        )
 
 
 @dataclass(slots=True)
@@ -255,6 +301,24 @@ class ProposedFix:
             "model_used": self.model_used,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProposedFix:
+        """Deserialize from a JSON-compatible dict."""
+        return cls(
+            id=data["id"],
+            issue_ids=data.get("issue_ids", []),
+            title=data["title"],
+            description=data.get("description", ""),
+            patches=[FilePatch.from_dict(p) for p in data.get("patches", [])],
+            risk_level=RiskLevel(data.get("risk_level", "medium")),
+            confidence=data.get("confidence", 0.0),
+            reasoning=data.get("reasoning", ""),
+            tests_to_run=data.get("tests_to_run", []),
+            rollback_instructions=data.get("rollback_instructions", ""),
+            timestamp=data.get("timestamp", datetime.now(UTC).isoformat()),
+            model_used=data.get("model_used", ""),
+        )
+
 
 @dataclass(slots=True)
 class ValidationResult:
@@ -310,6 +374,22 @@ class ValidationResult:
             "timestamp": self.timestamp,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ValidationResult:
+        """Deserialize from a JSON-compatible dict."""
+        return cls(
+            fix_id=data["fix_id"],
+            success=data.get("success", False),
+            tests_run=data.get("tests_run", 0),
+            tests_passed=data.get("tests_passed", 0),
+            tests_failed=data.get("tests_failed", 0),
+            test_output=data.get("test_output", ""),
+            error_message=data.get("error_message", ""),
+            worktree_path=data.get("worktree_path", ""),
+            duration_seconds=data.get("duration_seconds", 0.0),
+            timestamp=data.get("timestamp", datetime.now(UTC).isoformat()),
+        )
+
 
 @dataclass(slots=True)
 class AppliedFix:
@@ -362,6 +442,22 @@ class AppliedFix:
             ),
             "rollback_hash": self.rollback_hash,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AppliedFix:
+        """Deserialize from a JSON-compatible dict."""
+        val_data = data.get("validation_result")
+        return cls(
+            fix_id=data["fix_id"],
+            commit_hash=data["commit_hash"],
+            commit_message=data.get("commit_message", ""),
+            branch=data.get("branch", "main"),
+            files_modified=data.get("files_modified", []),
+            approved_by=data.get("approved_by", ""),
+            applied_at=data.get("applied_at", datetime.now(UTC).isoformat()),
+            validation_result=ValidationResult.from_dict(val_data) if val_data else None,
+            rollback_hash=data.get("rollback_hash", ""),
+        )
 
 
 @dataclass(slots=True)
@@ -417,3 +513,19 @@ class ImprovementCycle:
             "status": self.status,
             "error": self.error,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ImprovementCycle:
+        """Deserialize from a JSON-compatible dict."""
+        return cls(
+            id=data["id"],
+            started_at=data.get("started_at", datetime.now(UTC).isoformat()),
+            completed_at=data.get("completed_at"),
+            issues_detected=data.get("issues_detected", 0),
+            issues_analyzed=data.get("issues_analyzed", 0),
+            fixes_generated=data.get("fixes_generated", 0),
+            fixes_validated=data.get("fixes_validated", 0),
+            fixes_applied=data.get("fixes_applied", 0),
+            status=data.get("status", "running"),
+            error=data.get("error", ""),
+        )

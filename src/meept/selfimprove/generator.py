@@ -260,6 +260,11 @@ class PatchGenerator:
             from meept.llm.models import ModelConfig
 
             api_key = os.environ.get(self._ai_config.api_key_env, "")
+            if not api_key:
+                raise RuntimeError(
+                    f"AI-infra API key not found. Set {self._ai_config.api_key_env} environment variable."
+                )
+
             config = ModelConfig(
                 base_url=self._ai_config.base_url,
                 model_id=self._ai_config.generation_model,
@@ -268,6 +273,7 @@ class PatchGenerator:
                 temperature=0.2,
             )
             self._llm_client = LLMClient(config)
+            log.info("generator: created LLM client for %s", self._ai_config.generation_model)
 
         from meept.llm.models import ChatMessage, Role
 
