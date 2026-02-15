@@ -77,6 +77,15 @@ class CommServer:
         self.register_method("scheduler.schedule_agent_task", self._handle_scheduler_agent_task)
         self.register_method("security.approve_action", self._handle_security_approve_action)
 
+        # Self-improvement RPC methods.
+        self.register_method("selfimprove.detect", self._handle_selfimprove_detect)
+        self.register_method("selfimprove.analyze", self._handle_selfimprove_analyze)
+        self.register_method("selfimprove.generate", self._handle_selfimprove_generate)
+        self.register_method("selfimprove.validate", self._handle_selfimprove_validate)
+        self.register_method("selfimprove.apply", self._handle_selfimprove_apply)
+        self.register_method("selfimprove.status", self._handle_selfimprove_status)
+        self.register_method("selfimprove.cycle", self._handle_selfimprove_cycle)
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -645,5 +654,251 @@ class CommServer:
             raise TimeoutError("Scheduler did not respond in time")
         finally:
             self._bus.unsubscribe("scheduler.result", _on_result)
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Self-improvement RPC handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_selfimprove_detect(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Trigger issue detection and return discovered issues.
+
+        Expected params::
+
+            {"sources": ["pytest", "logs", "mypy"]}  (optional)
+
+        Returns::
+
+            {"issues": [...], "count": N}
+        """
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={"action": "selfimprove.detect", **params},
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("selfimprove.result", _on_result)
+        try:
+            await self._bus.publish("selfimprove.detect", msg)
+            result = await asyncio.wait_for(result_future, timeout=60.0)
+        except asyncio.TimeoutError:
+            return {"issues": [], "error": "Detection timed out"}
+        finally:
+            self._bus.unsubscribe("selfimprove.result", _on_result)
+
+        return result
+
+    async def _handle_selfimprove_analyze(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Run root cause analysis on detected issues.
+
+        Expected params::
+
+            {"issue_ids": ["issue-1", "issue-2"]}  (optional, analyzes all if omitted)
+
+        Returns::
+
+            {"analyses": [...], "count": N}
+        """
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={"action": "selfimprove.analyze", **params},
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("selfimprove.result", _on_result)
+        try:
+            await self._bus.publish("selfimprove.analyze", msg)
+            result = await asyncio.wait_for(result_future, timeout=120.0)
+        except asyncio.TimeoutError:
+            return {"analyses": [], "error": "Analysis timed out"}
+        finally:
+            self._bus.unsubscribe("selfimprove.result", _on_result)
+
+        return result
+
+    async def _handle_selfimprove_generate(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Generate fix proposals for analyzed issues.
+
+        Expected params::
+
+            {"analysis_ids": ["analysis-1"]}  (optional)
+
+        Returns::
+
+            {"fixes": [...], "count": N}
+        """
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={"action": "selfimprove.generate", **params},
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("selfimprove.result", _on_result)
+        try:
+            await self._bus.publish("selfimprove.generate", msg)
+            result = await asyncio.wait_for(result_future, timeout=120.0)
+        except asyncio.TimeoutError:
+            return {"fixes": [], "error": "Generation timed out"}
+        finally:
+            self._bus.unsubscribe("selfimprove.result", _on_result)
+
+        return result
+
+    async def _handle_selfimprove_validate(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Validate proposed fixes in sandbox.
+
+        Expected params::
+
+            {"fix_ids": ["fix-1"]}  (optional)
+
+        Returns::
+
+            {"validations": [...], "passed": N, "failed": N}
+        """
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={"action": "selfimprove.validate", **params},
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("selfimprove.result", _on_result)
+        try:
+            await self._bus.publish("selfimprove.validate", msg)
+            result = await asyncio.wait_for(result_future, timeout=300.0)
+        except asyncio.TimeoutError:
+            return {"validations": [], "error": "Validation timed out"}
+        finally:
+            self._bus.unsubscribe("selfimprove.result", _on_result)
+
+        return result
+
+    async def _handle_selfimprove_apply(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Apply validated fixes.
+
+        Expected params::
+
+            {"fix_ids": ["fix-1"], "require_approval": true}
+
+        Returns::
+
+            {"applied": [...], "count": N}
+        """
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={"action": "selfimprove.apply", **params},
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("selfimprove.result", _on_result)
+        try:
+            await self._bus.publish("selfimprove.apply", msg)
+            result = await asyncio.wait_for(result_future, timeout=60.0)
+        except asyncio.TimeoutError:
+            return {"applied": [], "error": "Apply timed out"}
+        finally:
+            self._bus.unsubscribe("selfimprove.result", _on_result)
+
+        return result
+
+    async def _handle_selfimprove_status(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Get current self-improvement status.
+
+        Returns::
+
+            {"state": "idle|detecting|analyzing|...", "current_cycle": {...}}
+        """
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={"action": "selfimprove.status"},
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("selfimprove.result", _on_result)
+        try:
+            await self._bus.publish("selfimprove.status", msg)
+            result = await asyncio.wait_for(result_future, timeout=10.0)
+        except asyncio.TimeoutError:
+            return {"state": "unknown", "error": "Status query timed out"}
+        finally:
+            self._bus.unsubscribe("selfimprove.result", _on_result)
+
+        return result
+
+    async def _handle_selfimprove_cycle(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Run a full self-improvement cycle.
+
+        Expected params::
+
+            {"interactive": false, "auto_apply": false}
+
+        Returns::
+
+            {"cycle_id": "...", "status": "started|completed|failed"}
+        """
+        msg = BusMessage(
+            type=MessageType.STATUS_UPDATE,
+            payload={"action": "selfimprove.cycle", **params},
+            source="comm.rpc",
+        )
+
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+
+        async def _on_result(topic: str, bus_msg: BusMessage) -> None:
+            if bus_msg.reply_to == msg.id and not result_future.done():
+                result_future.set_result(bus_msg.payload)
+
+        self._bus.subscribe("selfimprove.result", _on_result)
+        try:
+            await self._bus.publish("selfimprove.cycle", msg)
+            # Full cycle can take a long time
+            result = await asyncio.wait_for(result_future, timeout=600.0)
+        except asyncio.TimeoutError:
+            return {"status": "timeout", "error": "Cycle timed out after 10 minutes"}
+        finally:
+            self._bus.unsubscribe("selfimprove.result", _on_result)
 
         return result

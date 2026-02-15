@@ -95,3 +95,57 @@ max_installed = 50                 # Maximum number of installed clawskills
 default_risk_level = "high"        # All clawskills are treated as HIGH risk (cannot go lower)
 max_iterations = 10                # Cap agent-loop iterations for clawskills
 blocked_slugs = []                 # Slugs that will never be loaded by the daemon
+
+[selfimprove]
+enabled = false
+data_dir = "~/.meept/selfimprove"
+max_iterations_per_cycle = 5       # Max improvement iterations per run
+max_fixes_per_cycle = 10           # Max fixes to apply per cycle
+auto_run_interval_hours = 0        # 0 = manual only, >0 = auto-run interval
+
+[selfimprove.ai_infra]
+enabled = false
+base_url = "http://localhost:8100"
+api_key_env = "MEEPT_AI_INFRA_KEY"
+analysis_model = "claude-opus-4-5-20251101"     # Deep reasoning for root cause
+generation_model = "claude-sonnet-4-5-20241022" # Fast code generation
+review_model = "claude-opus-4-5-20251101"       # Thorough code review
+timeout_seconds = 120.0
+max_retries = 3
+
+[selfimprove.sandbox]
+worktree_dir = "~/.meept/selfimprove/worktrees"
+cleanup_on_success = true
+cleanup_on_failure = false         # Keep failed worktrees for debugging
+max_worktrees = 5
+test_timeout_seconds = 300.0
+
+[selfimprove.safety]
+require_human_approval = true      # Always require human approval before applying
+max_files_per_fix = 10
+max_lines_changed_per_fix = 500
+blocked_paths = [
+    "src/meept/selfimprove/*",     # Cannot modify itself (bootstrap problem)
+    "src/meept/security/*",        # Cannot modify security engine
+    ".git/*",                      # Cannot touch git internals
+    "*.toml",                      # Cannot modify config files
+    "*.json5",                     # Cannot modify model configs
+    "**/*credentials*",
+    "**/*secret*",
+    "**/.env*",
+]
+allowed_risk_levels = ["low", "medium", "high"]
+block_critical_risk = true
+require_tests_pass = true
+min_confidence_threshold = 0.7
+
+[selfimprove.detection]
+scan_pytest = true
+scan_runtime_logs = true
+scan_type_check = true
+scan_lint = true
+log_file = "~/.meept/meept.log"
+log_lookback_hours = 24
+pytest_args = ["-v", "--tb=short"]
+mypy_args = ["--ignore-missing-imports"]
+ruff_args = []

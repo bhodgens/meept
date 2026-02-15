@@ -1,0 +1,104 @@
+# Tester Daemon Configuration
+# This instance runs the self-improvement tester with ai-infra LLM
+
+[daemon]
+socket_path = "~/.meept/tester/meept.sock"
+pid_file = "~/.meept/tester/meept.pid"
+log_level = "DEBUG"
+data_dir = "~/.meept/tester"
+
+[llm.budget]
+hourly_token_limit = 500000
+daily_token_limit = 5000000
+rate_limit_rpm = 60
+aggressiveness = 0.8
+
+[memory]
+data_dir = "~/.meept/tester/memory"
+consolidation_interval_hours = 24
+
+[memory.episodic]
+enabled = true
+max_context_items = 50
+
+[security]
+sanitize_inputs = true
+llm_filter_external = false
+require_confirmation_high = false
+require_confirmation_critical = true
+block_financial = true
+
+[scheduler]
+enabled = false
+
+[telegram]
+enabled = false
+
+[web]
+enabled = false
+
+[mcp]
+enabled = false
+
+[plugins]
+enabled = false
+
+[workspace]
+enabled = true
+base_dir = "~/.meept/tester/workspaces"
+auto_commit = true
+
+[skills]
+enabled = false
+
+[clawskills]
+enabled = false
+
+[selfimprove]
+enabled = true
+data_dir = "~/.meept/tester/selfimprove"
+max_iterations_per_cycle = 10
+max_fixes_per_cycle = 20
+auto_run_interval_hours = 0
+
+[selfimprove.ai_infra]
+enabled = true
+base_url = "http://localhost:8100"
+api_key_env = "MEEPT_AI_INFRA_KEY"
+analysis_model = "claude-opus-4-5-20251101"
+generation_model = "claude-sonnet-4-5-20241022"
+review_model = "claude-opus-4-5-20251101"
+timeout_seconds = 180.0
+max_retries = 3
+
+[selfimprove.sandbox]
+worktree_dir = "~/.meept/tester/selfimprove/worktrees"
+cleanup_on_success = true
+cleanup_on_failure = false
+max_worktrees = 10
+test_timeout_seconds = 600.0
+
+[selfimprove.safety]
+require_human_approval = false  # Tester can auto-apply for testing
+max_files_per_fix = 20
+max_lines_changed_per_fix = 1000
+blocked_paths = [
+    "src/meept/selfimprove/*",
+    "src/meept/security/*",
+    ".git/*",
+    "**/*credentials*",
+    "**/*secret*",
+    "**/.env*",
+]
+allowed_risk_levels = ["low", "medium", "high"]
+block_critical_risk = true
+require_tests_pass = true
+min_confidence_threshold = 0.6
+
+[selfimprove.detection]
+scan_pytest = true
+scan_runtime_logs = true
+scan_type_check = true
+scan_lint = true
+log_file = "~/.meept/subject/meept.log"
+log_lookback_hours = 48

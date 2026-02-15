@@ -1,0 +1,66 @@
+{
+    // AI-Infra connection settings for the self-improvement system
+    // This connects to the local ai-infra service at ~/git/ai-infra/
+
+    "service": {
+        "base_url": "http://localhost:8100",
+        
+        // API key is stored in environment variable
+        "api_key_env": "MEEPT_AI_INFRA_KEY",
+        
+        // Timeout settings
+        "timeout_seconds": 120.0,
+        "max_retries": 3,
+        "retry_backoff_base": 2.0
+    },
+
+    // Model selection for different tasks
+    "models": {
+        // Deep reasoning for root cause analysis
+        "analysis": {
+            "model_id": "claude-opus-4-5-20251101",
+            "temperature": 0.3,
+            "max_tokens": 4096,
+            "description": "Used for thorough issue analysis and root cause identification"
+        },
+        
+        // Fast code generation for creating patches
+        "generation": {
+            "model_id": "claude-sonnet-4-5-20241022",
+            "temperature": 0.2,
+            "max_tokens": 4096,
+            "description": "Used for fast, accurate code generation"
+        },
+        
+        // Thorough code review before applying
+        "review": {
+            "model_id": "claude-opus-4-5-20251101",
+            "temperature": 0.3,
+            "max_tokens": 2048,
+            "description": "Used for final code review before applying fixes"
+        }
+    },
+
+    // Authentication endpoints
+    "auth": {
+        "token_endpoint": "/auth/api-tokens",
+        "token_prefix": "ainfra_",
+        
+        // Token format: ainfra_<random32chars>
+        // Create via: POST http://localhost:8100/auth/api-tokens
+    },
+
+    // API endpoints
+    "endpoints": {
+        "chat": "/claude/v1/chat/completions",
+        "tools": "/claude/v1/tools/config",
+        "health": "/health"
+    },
+
+    // Usage tracking
+    "tracking": {
+        "log_requests": true,
+        "log_tokens": true,
+        "max_daily_cost_usd": 50.0
+    }
+}

@@ -1,4 +1,4 @@
-.PHONY: help install install-dev setup start stop restart cli menubar test lint format clean install-service uninstall
+.PHONY: help install install-dev setup start stop restart cli menubar test lint format clean install-service uninstall self-improve-detect self-improve-analyze self-improve-fix self-improve-validate self-improve-apply self-improve self-improve-status self-regression
 
 help:
 	@echo "Usage: make [target]"
@@ -121,3 +121,38 @@ uninstall:
 			;; \
 	esac
 	@echo "Service uninstalled (data preserved at $(MEEPT_HOME))"
+
+# =============================================================================
+# Self-Improvement System
+# =============================================================================
+
+self-improve-detect:
+	@echo "Detecting issues..."
+	$(PYTHON) -m meept.selfimprove.cli detect
+
+self-improve-analyze:
+	@echo "Analyzing root causes..."
+	$(PYTHON) -m meept.selfimprove.cli analyze
+
+self-improve-fix:
+	@echo "Generating fixes..."
+	$(PYTHON) -m meept.selfimprove.cli generate-fixes
+
+self-improve-validate:
+	@echo "Validating fixes in sandbox..."
+	$(PYTHON) -m meept.selfimprove.cli validate
+
+self-improve-apply:
+	@echo "Applying validated fixes (requires approval)..."
+	$(PYTHON) -m meept.selfimprove.cli apply --require-approval
+
+self-improve:
+	@echo "Running full self-improvement cycle..."
+	$(PYTHON) -m meept.selfimprove.cli full-cycle --interactive
+
+self-improve-status:
+	$(PYTHON) -m meept.selfimprove.cli status
+
+self-regression:
+	@echo "Running regression tests after self-modification..."
+	$(MAKE) test && $(PYTHON) -m meept.selfimprove.cli regression-check

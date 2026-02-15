@@ -115,7 +115,7 @@ class MeeptDaemon:
         )
 
         # Tear down optional subsystems (ignore missing).
-        for name in ("front_agent", "scheduler", "agent_loop", "comm_server"):
+        for name in ("selfimprove_controller", "front_agent", "scheduler", "agent_loop", "comm_server"):
             component = self._registry.get(name)
             if component is not None and hasattr(component, "stop"):
                 try:
@@ -421,6 +421,28 @@ class MeeptDaemon:
 
             if hasattr(orchestrator, "subscribe_to_bus"):
                 await orchestrator.subscribe_to_bus(self._bus)
+
+            # --- self-improvement subsystem (optional) ---
+            selfimprove_cfg = getattr(settings, "selfimprove", None)
+            if selfimprove_cfg is not None and selfimprove_cfg.enabled:
+                try:
+                    from meept.selfimprove.controller import SelfImproveController
+
+                    selfimprove_controller = SelfImproveController(
+                        config=selfimprove_cfg,
+                        bus=self._bus,
+                        project_root=self._config.data_dir.parent,
+                    )
+                    self._registry.register_instance(
+                        "selfimprove_controller", selfimprove_controller,
+                    )
+
+                    # Subscribe to bus events for RPC dispatch.
+                    await selfimprove_controller.subscribe_to_bus(self._bus)
+
+                    log.info("daemon: self-improvement subsystem initialized")
+                except Exception:
+                    log.exception("daemon: failed to initialize self-improvement subsystem")
 
             log.info(
                 "daemon: agent subsystem started (%d skill(s), resolver=%s)",

@@ -1,0 +1,60 @@
+# Subject Daemon Configuration
+# This instance is the meept being tested/debugged
+
+[daemon]
+socket_path = "~/.meept/subject/meept.sock"
+pid_file = "~/.meept/subject/meept.pid"
+log_level = "DEBUG"
+data_dir = "~/.meept/subject"
+
+[llm.budget]
+hourly_token_limit = 100000
+daily_token_limit = 1000000
+rate_limit_rpm = 30
+aggressiveness = 0.5
+
+[memory]
+data_dir = "~/.meept/subject/memory"
+consolidation_interval_hours = 6
+
+[memory.episodic]
+enabled = true
+max_context_items = 20
+
+[security]
+sanitize_inputs = true
+llm_filter_external = false
+require_confirmation_high = true
+require_confirmation_critical = true
+block_financial = true
+
+[scheduler]
+enabled = true
+timezone = "UTC"
+
+[telegram]
+enabled = false
+
+[web]
+enabled = false
+
+[mcp]
+enabled = false
+
+[plugins]
+enabled = true
+directory = "~/.meept/subject/plugins"
+
+[workspace]
+enabled = true
+base_dir = "~/.meept/subject/workspaces"
+auto_commit = true
+
+[skills]
+enabled = true
+
+[clawskills]
+enabled = false
+
+[selfimprove]
+enabled = false  # Subject doesn't self-improve, that's the tester's job
