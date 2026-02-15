@@ -46,3 +46,7 @@ menubar/node_modules/
 *.mv2
 *.db
 *.sqlite
+
+# Go
+bin/
+*.exe

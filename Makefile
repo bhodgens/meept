@@ -1,4 +1,4 @@
-.PHONY: help install install-dev setup start stop restart cli menubar test lint format clean install-service uninstall self-improve-detect self-improve-analyze self-improve-fix self-improve-validate self-improve-apply self-improve self-improve-status self-regression
+.PHONY: help install install-dev setup start stop restart cli menubar test lint format clean install-service uninstall self-improve-detect self-improve-analyze self-improve-fix self-improve-validate self-improve-apply self-improve self-improve-status self-regression go-build go-test go-daemon go-clean
 
 help:
 	@echo "Usage: make [target]"
@@ -156,3 +156,25 @@ self-improve-status:
 self-regression:
 	@echo "Running regression tests after self-modification..."
 	$(MAKE) test && $(PYTHON) -m meept.selfimprove.cli regression-check
+
+# =============================================================================
+# Go Daemon (Phase 1 - experimental)
+# =============================================================================
+
+GO_BIN := bin/meept-daemon
+
+go-build:
+	@echo "Building Go daemon..."
+	go build -o $(GO_BIN) ./cmd/meept-daemon
+	@echo "Built $(GO_BIN)"
+
+go-test:
+	@echo "Running Go tests..."
+	go test ./...
+
+go-daemon: go-build setup
+	@echo "Starting Go daemon..."
+	$(GO_BIN) --foreground
+
+go-clean:
+	rm -rf bin/ go.sum
