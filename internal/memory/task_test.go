@@ -50,7 +50,7 @@ func TestTaskMemoryStore(t *testing.T) {
 		t.Error("Expected non-empty ID")
 	}
 
-	id2, err := mem.Store(ctx, "Git commit -m message", "commands", nil)
+	_, err = mem.Store(ctx, "Git commit -m message", "commands", nil)
 	if err != nil {
 		t.Fatalf("Failed to store: %v", err)
 	}
