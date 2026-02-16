@@ -1,0 +1,289 @@
+package agent
+
+import (
+	"strings"
+)
+
+// Default prompt sections (used as fallbacks).
+const (
+	DefaultConstitution = `You are Meept, an autonomous assistant. Serve your creator honestly and transparently. Respect boundaries, minimise harm, and learn from past interactions.`
+
+	DefaultRestrictions = `Never execute financial transactions. Never exfiltrate credentials. Never attempt self-replication. Only connect to explicitly configured endpoints.`
+
+	DefaultPurpose = `Break complex tasks into steps. Verify results after every action. Use the right tool for each job. Communicate status proactively.`
+)
+
+// PromptConfig holds configuration for building system prompts.
+type PromptConfig struct {
+	Constitution string
+	Restrictions string
+	Purpose      string
+	Personality  string
+}
+
+// DefaultPromptConfig returns a PromptConfig with default values.
+func DefaultPromptConfig() PromptConfig {
+	return PromptConfig{
+		Constitution: DefaultConstitution,
+		Restrictions: DefaultRestrictions,
+		Purpose:      DefaultPurpose,
+		Personality:  "",
+	}
+}
+
+// ToolDescription describes a tool for the system prompt.
+type ToolDescription struct {
+	Name        string
+	Description string
+	Parameters  []ToolParameter
+}
+
+// ToolParameter describes a parameter for a tool.
+type ToolParameter struct {
+	Name     string
+	Type     string
+	Required bool
+}
+
+// PromptBuilder provides a fluent API for building system prompts.
+type PromptBuilder struct {
+	constitution   string
+	restrictions   string
+	purpose        string
+	personality    string
+	tools          []ToolDescription
+	memoryContext  string
+	userPrefs      map[string]string
+	customSections []promptSection
+}
+
+type promptSection struct {
+	title   string
+	content string
+}
+
+// NewPromptBuilder creates a new PromptBuilder with default values.
+func NewPromptBuilder() *PromptBuilder {
+	cfg := DefaultPromptConfig()
+	return &PromptBuilder{
+		constitution: cfg.Constitution,
+		restrictions: cfg.Restrictions,
+		purpose:      cfg.Purpose,
+		personality:  cfg.Personality,
+		tools:        make([]ToolDescription, 0),
+		userPrefs:    make(map[string]string),
+	}
+}
+
+// NewPromptBuilderFromConfig creates a PromptBuilder from a configuration.
+func NewPromptBuilderFromConfig(cfg PromptConfig) *PromptBuilder {
+	return &PromptBuilder{
+		constitution: cfg.Constitution,
+		restrictions: cfg.Restrictions,
+		purpose:      cfg.Purpose,
+		personality:  cfg.Personality,
+		tools:        make([]ToolDescription, 0),
+		userPrefs:    make(map[string]string),
+	}
+}
+
+// WithConstitution sets the constitution (core identity and values).
+func (b *PromptBuilder) WithConstitution(constitution string) *PromptBuilder {
+	b.constitution = constitution
+	return b
+}
+
+// WithRestrictions sets the safety restrictions.
+func (b *PromptBuilder) WithRestrictions(restrictions string) *PromptBuilder {
+	b.restrictions = restrictions
+	return b
+}
+
+// WithPurpose sets the purpose and task principles.
+func (b *PromptBuilder) WithPurpose(purpose string) *PromptBuilder {
+	b.purpose = purpose
+	return b
+}
+
+// WithPersonality sets the personality traits.
+func (b *PromptBuilder) WithPersonality(personality string) *PromptBuilder {
+	b.personality = personality
+	return b
+}
+
+// WithTools sets the available tools.
+func (b *PromptBuilder) WithTools(tools []ToolDescription) *PromptBuilder {
+	b.tools = tools
+	return b
+}
+
+// AddTool adds a single tool to the available tools.
+func (b *PromptBuilder) AddTool(tool ToolDescription) *PromptBuilder {
+	b.tools = append(b.tools, tool)
+	return b
+}
+
+// WithMemoryContext sets the memory context to inject.
+func (b *PromptBuilder) WithMemoryContext(context string) *PromptBuilder {
+	b.memoryContext = context
+	return b
+}
+
+// WithUserPreferences sets user preferences.
+func (b *PromptBuilder) WithUserPreferences(prefs map[string]string) *PromptBuilder {
+	b.userPrefs = prefs
+	return b
+}
+
+// AddUserPreference adds a single user preference.
+func (b *PromptBuilder) AddUserPreference(key, value string) *PromptBuilder {
+	b.userPrefs[key] = value
+	return b
+}
+
+// AddSection adds a custom section to the prompt.
+func (b *PromptBuilder) AddSection(title, content string) *PromptBuilder {
+	b.customSections = append(b.customSections, promptSection{title: title, content: content})
+	return b
+}
+
+// Build constructs the complete system prompt.
+func (b *PromptBuilder) Build() string {
+	var sections []string
+
+	// Constitution
+	if b.constitution != "" {
+		sections = append(sections, "# Constitution", b.constitution)
+	}
+
+	// Safety Restrictions
+	if b.restrictions != "" {
+		sections = append(sections, "\n# Safety Restrictions", b.restrictions)
+	}
+
+	// Purpose & Task Principles
+	if b.purpose != "" {
+		sections = append(sections, "\n# Purpose & Task Principles", b.purpose)
+	}
+
+	// Personality
+	if b.personality != "" {
+		sections = append(sections, "\n# Personality", b.personality)
+	}
+
+	// User Preferences
+	if len(b.userPrefs) > 0 {
+		sections = append(sections, "\n# User Preferences")
+		for key, value := range b.userPrefs {
+			sections = append(sections, "- "+key+": "+value)
+		}
+	}
+
+	// Memory Context
+	if b.memoryContext != "" {
+		sections = append(sections, "\n# Relevant Context from Memory", b.memoryContext)
+	}
+
+	// Available Tools
+	if len(b.tools) > 0 {
+		sections = append(sections, "\n# Available Tools")
+		for _, tool := range b.tools {
+			sections = append(sections, formatToolDescription(tool))
+		}
+	}
+
+	// Custom Sections
+	for _, section := range b.customSections {
+		sections = append(sections, "\n# "+section.title, section.content)
+	}
+
+	return strings.Join(sections, "\n")
+}
+
+// formatToolDescription formats a single tool for the system prompt.
+func formatToolDescription(tool ToolDescription) string {
+	var params []string
+	for _, p := range tool.Parameters {
+		paramStr := p.Name + ": " + p.Type
+		if !p.Required {
+			paramStr += " (optional)"
+		}
+		params = append(params, paramStr)
+	}
+
+	paramList := strings.Join(params, ", ")
+	return "- **" + tool.Name + "**(" + paramList + "): " + tool.Description
+}
+
+// BuildSystemPrompt is a convenience function that builds a system prompt
+// from configuration and optional components.
+func BuildSystemPrompt(cfg PromptConfig, tools []ToolDescription, memoryContext string) string {
+	builder := NewPromptBuilderFromConfig(cfg)
+	if len(tools) > 0 {
+		builder.WithTools(tools)
+	}
+	if memoryContext != "" {
+		builder.WithMemoryContext(memoryContext)
+	}
+	return builder.Build()
+}
+
+// BuildSystemPromptWithOverride builds a prompt but uses an override if provided.
+// This allows complete replacement of the default prompt structure.
+func BuildSystemPromptWithOverride(override string, tools []ToolDescription) string {
+	if override == "" {
+		return BuildSystemPrompt(DefaultPromptConfig(), tools, "")
+	}
+
+	// When using override, just append tools section
+	if len(tools) == 0 {
+		return override
+	}
+
+	var sections []string
+	sections = append(sections, override)
+	sections = append(sections, "\n# Available Tools")
+	for _, tool := range tools {
+		sections = append(sections, formatToolDescription(tool))
+	}
+
+	return strings.Join(sections, "\n")
+}
+
+// ToolsFromDefinitions converts LLM tool definitions to ToolDescriptions.
+// This bridges the gap between llm.ToolDefinition and the prompt builder.
+func ToolsFromDefinitions(definitions []ToolDefinitionInfo) []ToolDescription {
+	tools := make([]ToolDescription, len(definitions))
+	for i, def := range definitions {
+		tools[i] = ToolDescription{
+			Name:        def.Name,
+			Description: def.Description,
+			Parameters:  make([]ToolParameter, 0),
+		}
+
+		// Convert parameters
+		for _, param := range def.Parameters {
+			tools[i].Parameters = append(tools[i].Parameters, ToolParameter{
+				Name:     param.Name,
+				Type:     param.Type,
+				Required: param.Required,
+			})
+		}
+	}
+	return tools
+}
+
+// ToolDefinitionInfo holds information about a tool for prompt building.
+// This is separate from llm.ToolDefinition to avoid circular dependencies.
+type ToolDefinitionInfo struct {
+	Name        string
+	Description string
+	Parameters  []ToolParameterInfo
+}
+
+// ToolParameterInfo holds information about a tool parameter.
+type ToolParameterInfo struct {
+	Name     string
+	Type     string
+	Required bool
+}

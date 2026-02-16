@@ -10,13 +10,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/daemon"
 )
 
 var (
-	version = "0.2.0-go"
+	version = "0.3.0-go"
 
 	// Flags
+	configPath string
 	socketPath string
 	stateDir   string
 	foreground bool
@@ -34,6 +36,7 @@ func main() {
 	homeDir, _ := os.UserHomeDir()
 	defaultStateDir := filepath.Join(homeDir, ".meept")
 
+	rootCmd.Flags().StringVarP(&configPath, "config", "c", "", "Config file path (default: ~/.meept/meept.toml)")
 	rootCmd.Flags().StringVarP(&socketPath, "socket", "s", "", "Unix socket path (default: ~/.meept/meept.sock)")
 	rootCmd.Flags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
 	rootCmd.Flags().BoolVarP(&foreground, "foreground", "f", true, "Run in foreground")
@@ -61,23 +64,54 @@ func main() {
 }
 
 func runDaemon(cmd *cobra.Command, args []string) error {
-	cfg := daemon.DefaultConfig()
+	// Load configuration from TOML file
+	var appCfg *config.Config
+	var err error
 
+	if configPath != "" {
+		appCfg, err = config.Load(configPath)
+	} else {
+		appCfg, err = config.LoadDefault()
+	}
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Build daemon config from app config
+	daemonCfg := &daemon.Config{
+		SocketPath:                  appCfg.Daemon.SocketPath,
+		PIDFile:                     appCfg.Daemon.PIDFile,
+		StateDir:                    appCfg.Daemon.DataDir,
+		ShutdownTimeout:             appCfg.ShutdownTimeout(),
+		LogLevel:                    config.ParseLogLevel(appCfg.Daemon.LogLevel),
+		AllowedPaths:                appCfg.Security.AllowedPaths,
+		BlockedPaths:                appCfg.Security.BlockedPaths,
+		BlockFinancial:              appCfg.Security.BlockFinancial,
+		RequireConfirmationHigh:     appCfg.Security.RequireConfirmationHigh,
+		RequireConfirmationCritical: appCfg.Security.RequireConfirmationCritical,
+	}
+
+	// Override with command-line flags
 	if stateDir != "" {
-		cfg.StateDir = stateDir
-		cfg.SocketPath = filepath.Join(stateDir, "meept.sock")
-		cfg.PIDFile = filepath.Join(stateDir, "meept.pid")
+		daemonCfg.StateDir = stateDir
+		daemonCfg.SocketPath = filepath.Join(stateDir, "meept.sock")
+		daemonCfg.PIDFile = filepath.Join(stateDir, "meept.pid")
 	}
 
 	if socketPath != "" {
-		cfg.SocketPath = socketPath
+		daemonCfg.SocketPath = socketPath
 	}
 
 	if debug {
-		cfg.LogLevel = slog.LevelDebug
+		daemonCfg.LogLevel = slog.LevelDebug
 	}
 
-	d, err := daemon.New(cfg)
+	// Ensure data directory exists
+	if err := config.EnsureDataDir(appCfg); err != nil {
+		return err
+	}
+
+	d, err := daemon.New(daemonCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create daemon: %w", err)
 	}

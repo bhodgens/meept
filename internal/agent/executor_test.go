@@ -1,0 +1,523 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/pkg/security"
+)
+
+func TestExecutionResult(t *testing.T) {
+	t.Run("ToJSON success", func(t *testing.T) {
+		result := &ExecutionResult{
+			ToolCallID: "call_123",
+			Success:    true,
+			Result:     map[string]string{"key": "value"},
+		}
+
+		jsonStr := result.ToJSON()
+		if jsonStr == "" {
+			t.Error("expected non-empty JSON")
+		}
+
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+			t.Errorf("failed to parse JSON: %v", err)
+		}
+
+		if parsed["success"] != true {
+			t.Error("expected success=true")
+		}
+	})
+
+	t.Run("ToJSON error", func(t *testing.T) {
+		result := &ExecutionResult{
+			ToolCallID: "call_456",
+			Success:    false,
+			Error:      "something went wrong",
+		}
+
+		jsonStr := result.ToJSON()
+
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+			t.Errorf("failed to parse JSON: %v", err)
+		}
+
+		if parsed["success"] != false {
+			t.Error("expected success=false")
+		}
+
+		if parsed["error"] != "something went wrong" {
+			t.Error("expected error message")
+		}
+	})
+
+	t.Run("ToChatMessage", func(t *testing.T) {
+		result := &ExecutionResult{
+			ToolCallID: "call_789",
+			Success:    true,
+			Result:     "test result",
+		}
+
+		msg := result.ToChatMessage()
+
+		if msg.Role != llm.RoleTool {
+			t.Errorf("expected role=%s, got %s", llm.RoleTool, msg.Role)
+		}
+
+		if msg.ToolCallID != "call_789" {
+			t.Errorf("expected tool_call_id='call_789', got '%s'", msg.ToolCallID)
+		}
+
+		if msg.Content == "" {
+			t.Error("expected non-empty content")
+		}
+	})
+}
+
+func TestPlaceholderToolRegistry(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+
+	// Register a mock tool
+	mockTool := NewMockTool("test_tool", "A test tool", nil)
+	registry.Register(mockTool)
+
+	// Get the tool
+	tool := registry.Get("test_tool")
+	if tool == nil {
+		t.Fatal("expected to find registered tool")
+	}
+
+	if tool.Name() != "test_tool" {
+		t.Errorf("expected name='test_tool', got '%s'", tool.Name())
+	}
+
+	// Get non-existent tool
+	missing := registry.Get("missing_tool")
+	if missing != nil {
+		t.Error("expected nil for missing tool")
+	}
+
+	// List tools
+	tools := registry.List()
+	if len(tools) != 1 {
+		t.Errorf("expected 1 tool, got %d", len(tools))
+	}
+}
+
+func TestMockTool(t *testing.T) {
+	// Test with default behavior
+	tool := NewMockTool("default_tool", "Default behavior", nil)
+
+	result, err := tool.Execute(context.Background(), nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	resultMap, ok := result.(map[string]any)
+	if !ok {
+		t.Fatal("expected map result")
+	}
+
+	if resultMap["mock"] != true {
+		t.Error("expected mock=true")
+	}
+
+	// Test with custom behavior
+	customTool := NewMockTool("custom_tool", "Custom behavior", func(ctx context.Context, args map[string]any) (any, error) {
+		return args["input"], nil
+	})
+
+	result, err = customTool.Execute(context.Background(), map[string]any{"input": "test"})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if result != "test" {
+		t.Errorf("expected 'test', got '%v'", result)
+	}
+}
+
+func TestExecutorNoRegistry(t *testing.T) {
+	executor := NewExecutor(nil, nil)
+
+	toolCall := llm.ToolCall{
+		ID:   "call_123",
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name:      "any_tool",
+			Arguments: "{}",
+		},
+	}
+
+	result := executor.Execute(context.Background(), toolCall)
+
+	if result.Success {
+		t.Error("expected failure when no registry")
+	}
+
+	if result.Error != "tool registry not configured" {
+		t.Errorf("unexpected error: %s", result.Error)
+	}
+}
+
+func TestExecutorUnknownTool(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	executor := NewExecutor(registry, nil)
+
+	toolCall := llm.ToolCall{
+		ID:   "call_123",
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name:      "unknown_tool",
+			Arguments: "{}",
+		},
+	}
+
+	result := executor.Execute(context.Background(), toolCall)
+
+	if result.Success {
+		t.Error("expected failure for unknown tool")
+	}
+
+	if result.Error != "unknown tool: unknown_tool" {
+		t.Errorf("unexpected error: %s", result.Error)
+	}
+}
+
+func TestExecutorInvalidArguments(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("test_tool", "Test", nil))
+	executor := NewExecutor(registry, nil)
+
+	toolCall := llm.ToolCall{
+		ID:   "call_123",
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name:      "test_tool",
+			Arguments: "not valid json",
+		},
+	}
+
+	result := executor.Execute(context.Background(), toolCall)
+
+	if result.Success {
+		t.Error("expected failure for invalid JSON")
+	}
+
+	if result.Error == "" {
+		t.Error("expected error message")
+	}
+}
+
+func TestExecutorSuccess(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("echo", "Echo tool", func(ctx context.Context, args map[string]any) (any, error) {
+		return map[string]any{
+			"echoed": args["message"],
+		}, nil
+	}))
+
+	executor := NewExecutor(registry, nil)
+
+	toolCall := llm.ToolCall{
+		ID:   "call_123",
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name:      "echo",
+			Arguments: `{"message": "hello"}`,
+		},
+	}
+
+	result := executor.Execute(context.Background(), toolCall)
+
+	if !result.Success {
+		t.Errorf("expected success, got error: %s", result.Error)
+	}
+
+	resultMap, ok := result.Result.(map[string]any)
+	if !ok {
+		t.Fatal("expected map result")
+	}
+
+	if resultMap["echoed"] != "hello" {
+		t.Errorf("expected echoed='hello', got '%v'", resultMap["echoed"])
+	}
+}
+
+func TestExecutorToolError(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("failing_tool", "Fails", func(ctx context.Context, args map[string]any) (any, error) {
+		return nil, errors.New("intentional failure")
+	}))
+
+	executor := NewExecutor(registry, nil)
+
+	toolCall := llm.ToolCall{
+		ID:   "call_123",
+		Type: "function",
+		Function: llm.ToolCallFunction{
+			Name:      "failing_tool",
+			Arguments: "{}",
+		},
+	}
+
+	result := executor.Execute(context.Background(), toolCall)
+
+	if result.Success {
+		t.Error("expected failure")
+	}
+
+	if result.Error != "tool execution failed: intentional failure" {
+		t.Errorf("unexpected error: %s", result.Error)
+	}
+}
+
+func TestExecutorWithSecurity(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("file_read", "Read file", func(ctx context.Context, args map[string]any) (any, error) {
+		return map[string]any{"content": "file content"}, nil
+	}))
+
+	// Create security checker that blocks certain paths
+	// Note: The security checker uses prefix matching for directory paths,
+	// so /home allows anything under /home/
+	securityCfg := security.Config{
+		BlockedPaths:   []string{"/etc"},
+		AllowedPaths:   []string{"/home"},
+		BlockFinancial: true,
+	}
+	checker := security.NewPermissionChecker(securityCfg)
+
+	executor := NewExecutor(registry, checker)
+
+	t.Run("allowed path", func(t *testing.T) {
+		toolCall := llm.ToolCall{
+			ID:   "call_allowed",
+			Type: "function",
+			Function: llm.ToolCallFunction{
+				Name:      "file_read",
+				Arguments: `{"path": "/home/user/file.txt"}`,
+			},
+		}
+
+		result := executor.Execute(context.Background(), toolCall)
+		if !result.Success {
+			t.Errorf("expected success, got error: %s", result.Error)
+		}
+	})
+
+	t.Run("blocked path", func(t *testing.T) {
+		toolCall := llm.ToolCall{
+			ID:   "call_blocked",
+			Type: "function",
+			Function: llm.ToolCallFunction{
+				Name:      "file_read",
+				Arguments: `{"path": "/etc/passwd"}`,
+			},
+		}
+
+		result := executor.Execute(context.Background(), toolCall)
+		if result.Success {
+			t.Error("expected failure for blocked path")
+		}
+	})
+}
+
+func TestExecuteAll(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("tool1", "Tool 1", func(ctx context.Context, args map[string]any) (any, error) {
+		return "result1", nil
+	}))
+	registry.Register(NewMockTool("tool2", "Tool 2", func(ctx context.Context, args map[string]any) (any, error) {
+		return "result2", nil
+	}))
+
+	executor := NewExecutor(registry, nil, WithParallelism(2))
+
+	toolCalls := []llm.ToolCall{
+		{
+			ID:       "call_1",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "tool1", Arguments: "{}"},
+		},
+		{
+			ID:       "call_2",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "tool2", Arguments: "{}"},
+		},
+	}
+
+	results := executor.ExecuteAll(context.Background(), toolCalls)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	for i, result := range results {
+		if !result.Success {
+			t.Errorf("result %d failed: %s", i, result.Error)
+		}
+	}
+}
+
+func TestExecuteAllContextCancellation(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("slow_tool", "Slow", func(ctx context.Context, args map[string]any) (any, error) {
+		select {
+		case <-time.After(5 * time.Second):
+			return "done", nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}))
+
+	executor := NewExecutor(registry, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	toolCalls := []llm.ToolCall{
+		{
+			ID:       "call_1",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "slow_tool", Arguments: "{}"},
+		},
+	}
+
+	results := executor.ExecuteAll(ctx, toolCalls)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	// Result should indicate failure due to context cancellation
+	if results[0].Success {
+		t.Error("expected failure due to context cancellation")
+	}
+}
+
+func TestExecuteSequential(t *testing.T) {
+	executionOrder := make([]string, 0)
+	mu := new(struct {
+		order []string
+	})
+	mu.order = executionOrder
+
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("first", "First", func(ctx context.Context, args map[string]any) (any, error) {
+		mu.order = append(mu.order, "first")
+		return "first", nil
+	}))
+	registry.Register(NewMockTool("second", "Second", func(ctx context.Context, args map[string]any) (any, error) {
+		mu.order = append(mu.order, "second")
+		return "second", nil
+	}))
+
+	executor := NewExecutor(registry, nil)
+
+	toolCalls := []llm.ToolCall{
+		{
+			ID:       "call_1",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "first", Arguments: "{}"},
+		},
+		{
+			ID:       "call_2",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "second", Arguments: "{}"},
+		},
+	}
+
+	results := executor.ExecuteSequential(context.Background(), toolCalls)
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	for _, result := range results {
+		if !result.Success {
+			t.Errorf("unexpected failure: %s", result.Error)
+		}
+	}
+}
+
+func TestResultsToChatMessages(t *testing.T) {
+	results := []*ExecutionResult{
+		{ToolCallID: "call_1", Success: true, Result: "result1"},
+		{ToolCallID: "call_2", Success: false, Error: "error2"},
+	}
+
+	messages := ResultsToChatMessages(results)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+
+	for i, msg := range messages {
+		if msg.Role != llm.RoleTool {
+			t.Errorf("message %d: expected role=tool, got %s", i, msg.Role)
+		}
+		if msg.ToolCallID == "" {
+			t.Errorf("message %d: expected tool_call_id", i)
+		}
+		if msg.Content == "" {
+			t.Errorf("message %d: expected content", i)
+		}
+	}
+}
+
+func TestToolActionMap(t *testing.T) {
+	// Verify the action map contains expected mappings
+	expectedMappings := map[string]string{
+		"shell":          "shell_execute",
+		"file_read":      "file_read",
+		"file_write":     "file_write",
+		"file_delete":    "file_delete",
+		"list_directory": "file_read",
+		"web_search":     "network_request",
+		"web_fetch":      "network_request",
+	}
+
+	for tool, expectedAction := range expectedMappings {
+		action, ok := ToolActionMap[tool]
+		if !ok {
+			t.Errorf("missing mapping for tool: %s", tool)
+			continue
+		}
+		if action != expectedAction {
+			t.Errorf("tool %s: expected action=%s, got %s", tool, expectedAction, action)
+		}
+	}
+}
+
+func TestSummarizeArgs(t *testing.T) {
+	t.Run("short args", func(t *testing.T) {
+		args := map[string]any{"key": "value"}
+		summary := summarizeArgs(args)
+		if summary == "" {
+			t.Error("expected non-empty summary")
+		}
+		if len(summary) > 200 {
+			t.Error("summary should not exceed 200 chars")
+		}
+	})
+
+	t.Run("long args", func(t *testing.T) {
+		longValue := make([]byte, 1000)
+		for i := range longValue {
+			longValue[i] = 'x'
+		}
+		args := map[string]any{"key": string(longValue)}
+
+		summary := summarizeArgs(args)
+		if len(summary) > 203 { // 200 + "..."
+			t.Errorf("summary too long: %d chars", len(summary))
+		}
+	})
+}
