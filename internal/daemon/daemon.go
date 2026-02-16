@@ -102,6 +102,10 @@ func New(cfg *Config) (*Daemon, error) {
 	securityHandler := rpc.NewSecurityHandler(securityCfg)
 	securityHandler.RegisterSecurityMethods(rpcServer)
 
+	// Register dev handlers (model switching, testing, etc.)
+	devHandler := rpc.NewDevHandler()
+	devHandler.RegisterDevMethods(rpcServer)
+
 	// Register RPC server as a component
 	reg.Register(rpcServer)
 

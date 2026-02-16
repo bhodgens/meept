@@ -52,6 +52,7 @@ Manage daemon:
 	rootCmd.AddCommand(newMemoryCmd())
 	rootCmd.AddCommand(newClawSkillsCmd())
 	rootCmd.AddCommand(newSelfImproveCmd())
+	rootCmd.AddCommand(newDevCmd())
 	rootCmd.AddCommand(newVersionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
