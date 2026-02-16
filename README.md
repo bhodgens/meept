@@ -282,10 +282,14 @@ The internal `MessageBus` decouples all frontends from the agent pipeline via as
 
 All configuration lives in `~/.meept/meept.toml` with model definitions in `config/models.json5`.
 
+### Main Config: `~/.meept/meept.toml`
+
 ```toml
 [daemon]
 socket_path = "~/.meept/meept.sock"
+pid_file = "~/.meept/meept.pid"
 log_level = "INFO"
+data_dir = "~/.meept"
 
 [llm.budget]
 hourly_token_limit = 100000
@@ -293,34 +297,186 @@ daily_token_limit = 1000000
 rate_limit_rpm = 30
 aggressiveness = 0.5    # 0.0 = conservative, 1.0 = use full budget
 
-[security]
-sanitize_inputs = true
-require_confirmation_high = true
-require_confirmation_critical = true
-allowed_paths = ["~/*"]
-blocked_paths = ["~/.ssh/*", "~/.gnupg/*"]
-
-[skills]
-enabled = true
-
-[clawskills]
-enabled = false
-registry_url = "https://clawhub.ai"
-install_dir = "~/.meept/clawskills"
-blocked_slugs = []
-
 [memory]
 data_dir = "~/.meept/memory"
+consolidation_interval_hours = 6
+
+[memory.episodic]
+enabled = true
+max_context_items = 20
+
+[memory.task]
+enabled = true
+domains = ["general", "code", "commands"]
+
+[memory.personality]
+enabled = true
+update_interval_conversations = 10
+
+[security]
+sanitize_inputs = true
+llm_filter_external = false
+require_confirmation_high = true
+require_confirmation_critical = true
+block_financial = true
+allowed_paths = ["~/*"]
+blocked_paths = ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"]
 
 [scheduler]
 enabled = true
 timezone = "UTC"
 
+[telegram]
+enabled = false
+token = ""
+creator_id = 0
+
+[web]
+enabled = false
+host = "127.0.0.1"
+port = 8420
+secret_key = ""
+
+[mcp]
+enabled = false
+config_file = "~/.meept/mcp_servers.json"
+
+[plugins]
+enabled = true
+directory = "~/.meept/plugins"
+
 [workspace]
 enabled = true
 base_dir = "~/.meept/workspaces"
 auto_commit = true
+commit_on_plan = true
+commit_on_step = true
+cleanup_completed = false
+
+[skills]
+enabled = false
+
+[clawskills]
+enabled = false
+registry_url = "https://clawhub.ai"
+install_dir = "~/.meept/clawskills"
+auto_update = false
+max_installed = 50
+default_risk_level = "high"
+max_iterations = 10
+blocked_slugs = []
+
+[selfimprove]
+enabled = false
+data_dir = "~/.meept/selfimprove"
+max_iterations_per_cycle = 5
+max_fixes_per_cycle = 10
+auto_run_interval_hours = 0
+
+[selfimprove.safety]
+require_human_approval = true
+max_files_per_fix = 10
+max_lines_changed_per_fix = 500
+require_tests_pass = true
+min_confidence_threshold = 0.7
 ```
+
+### Models Config: `config/models.json5`
+
+```json5
+{
+  // Default model (provider/model-id format)
+  "model": "ollama/llama3.2",
+  "small_model": "ollama/llama3.2",
+  "disabled_providers": [],
+
+  "providers": {
+    "ollama": {
+      "api": "openai",
+      "options": {
+        "baseURL": "http://localhost:11434/v1",
+        "timeout": 120,
+      },
+      "models": {
+        "llama3.2": {
+          "name": "llama3.2",
+          "capabilities": ["code", "tool_use", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 128000,
+          "max_output": 4096,
+          "temperature": 0.7,
+        },
+      },
+    },
+
+    // Example: OpenRouter
+    // "openrouter": {
+    //   "api": "openai",
+    //   "options": {
+    //     "baseURL": "https://openrouter.ai/api/v1",
+    //     "apiKey": "${OPENROUTER_API_KEY}",
+    //   },
+    //   "models": { ... },
+    // },
+  },
+}
+```
+
+### MCP Servers: `~/.meept/mcp_servers.json`
+
+```json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "command": ["mcp-server-filesystem", "/path/to/allow"]
+    },
+    {
+      "name": "fetch",
+      "url": "http://localhost:8080",
+      "type": "http"
+    }
+  ]
+}
+```
+
+### Environment Variables
+
+```bash
+# API Keys (referenced in models.json5 with ${VAR} syntax)
+export OPENROUTER_API_KEY="..."
+export ANTHROPIC_API_KEY="..."
+export OPENAI_API_KEY="..."
+
+# Telegram bot
+export TELEGRAM_BOT_TOKEN="..."
+```
+
+### Key Directories
+
+| Path | Purpose |
+|------|---------|
+| `~/.meept/` | Main data directory |
+| `~/.meept/meept.toml` | Configuration |
+| `~/.meept/meept.sock` | Unix socket for RPC |
+| `~/.meept/memory/` | Memory storage |
+| `~/.meept/skills/` | User skills |
+| `~/.meept/clawskills/` | Third-party skills |
+| `~/.meept/workspaces/` | Git workspaces for tasks |
+| `~/.meept/plugins/` | Custom plugins |
+
+### Security Settings
+
+| Setting | Description |
+|---------|-------------|
+| `sanitize_inputs` | Enable prompt injection defense |
+| `require_confirmation_high` | Confirm HIGH risk actions |
+| `require_confirmation_critical` | Confirm CRITICAL actions |
+| `allowed_paths` | Glob patterns for allowed file access |
+| `blocked_paths` | Glob patterns for blocked paths |
+
+**Risk levels**: SAFE < LOW < MEDIUM < HIGH < CRITICAL
 
 ## Project Structure
 
@@ -359,16 +515,46 @@ pip install meept[cli]         # Textual TUI
 
 ## Quick Start
 
+### Python (pip install)
+
 ```bash
-# 1. Start the daemon
+# 1. Install
+pip install meept
+
+# 2. Start the daemon (foreground for debugging)
 meept-daemon --foreground
 
-# 2. In another terminal, launch the TUI
+# 3. In another terminal, launch the TUI
 meept
 
-# 3. Or use clawskills without the daemon
+# 4. Or use clawskills without the daemon
 meept clawskills search "code review"
 meept clawskills install gifgrep
+```
+
+### Go (from source)
+
+```bash
+# 1. Build all binaries
+make go-build-all
+
+# 2. Start the daemon
+./bin/meept-daemon --foreground
+
+# 3. In another terminal, launch the CLI
+./bin/meept status
+./bin/meept chat
+```
+
+### Using Make
+
+```bash
+make install-dev    # Install Python with dev deps
+make setup          # Create ~/.meept directory structure
+make go-build-all   # Build all Go binaries
+make go-daemon      # Build and run Go daemon
+make test           # Run Python tests
+make go-test        # Run Go tests
 ```
 
 ## Skill Discovery Hierarchy
