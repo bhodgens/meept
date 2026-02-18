@@ -26,13 +26,19 @@ type RPCClient struct {
 	connected  bool
 	timeout    time.Duration
 	nextID     int64
+
+	// Reconnection settings
+	maxRetries    int
+	retryInterval time.Duration
 }
 
 // NewRPCClient creates a new RPC client.
 func NewRPCClient(socketPath string) *RPCClient {
 	return &RPCClient{
-		socketPath: socketPath,
-		timeout:    30 * time.Second,
+		socketPath:    socketPath,
+		timeout:       120 * time.Second, // Match server's chat timeout
+		maxRetries:    3,
+		retryInterval: 500 * time.Millisecond,
 	}
 }
 
@@ -81,7 +87,59 @@ func (c *RPCClient) IsConnected() bool {
 }
 
 // Call makes an RPC call and returns the result.
+// It will attempt to reconnect on connection errors.
 func (c *RPCClient) Call(method string, params any) (json.RawMessage, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		result, err := c.callOnce(method, params)
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+
+		// Check if this is a connection error that warrants retry
+		if !c.isConnectionError(err) {
+			return nil, err
+		}
+
+		// Try to reconnect
+		if attempt < c.maxRetries {
+			c.mu.Lock()
+			c.connected = false
+			if c.conn != nil {
+				c.conn.Close()
+			}
+			c.mu.Unlock()
+
+			time.Sleep(c.retryInterval)
+
+			if err := c.Connect(); err != nil {
+				lastErr = fmt.Errorf("reconnect failed: %w", err)
+				continue
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("call failed after %d attempts: %w", c.maxRetries+1, lastErr)
+}
+
+// isConnectionError returns true if the error suggests connection issues.
+func (c *RPCClient) isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "failed to write") ||
+		strings.Contains(errStr, "failed to read") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "not connected")
+}
+
+// callOnce makes a single RPC call attempt.
+func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -120,25 +178,25 @@ func (c *RPCClient) Call(method string, params any) (json.RawMessage, error) {
 	_, err = fmt.Fprintf(c.writer, "%d\n", len(reqData))
 	if err != nil {
 		c.connected = false
-		return nil, fmt.Errorf("failed to write length: %w", err)
+		return nil, fmt.Errorf("failed to write request: %w", err)
 	}
 
 	_, err = c.writer.Write(reqData)
 	if err != nil {
 		c.connected = false
-		return nil, fmt.Errorf("failed to write request: %w", err)
+		return nil, fmt.Errorf("failed to write request body: %w", err)
 	}
 
 	// Read response
 	lengthLine, err := c.reader.ReadString('\n')
 	if err != nil {
 		c.connected = false
-		return nil, fmt.Errorf("failed to read response length: %w", err)
+		return nil, fmt.Errorf("failed to read response (daemon may be busy or disconnected): %w", err)
 	}
 
 	length, err := strconv.Atoi(strings.TrimSpace(lengthLine))
 	if err != nil {
-		return nil, fmt.Errorf("invalid response length: %w", err)
+		return nil, fmt.Errorf("invalid response format: %w", err)
 	}
 
 	if length <= 0 || length > 10*1024*1024 {
@@ -149,13 +207,13 @@ func (c *RPCClient) Call(method string, params any) (json.RawMessage, error) {
 	_, err = io.ReadFull(c.reader, respData)
 	if err != nil {
 		c.connected = false
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	// Parse response
 	var resp models.JSONRPCResponse
 	if err := json.Unmarshal(respData, &resp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if resp.Error != nil {
@@ -242,4 +300,70 @@ func (c *RPCClient) QueryMemory(query string, limit int) (*types.MemoryQueryResp
 	}
 
 	return &resp, nil
+}
+
+// ListWorkers gets the list of active agent workers.
+func (c *RPCClient) ListWorkers() (*types.WorkerListResponse, error) {
+	result, err := c.Call("agent.workers.list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.WorkerListResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse workers response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// CreateSession creates a new session.
+func (c *RPCClient) CreateSession(name string) (*types.Session, error) {
+	params := map[string]string{"name": name}
+	result, err := c.Call("session.create", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.Session
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse session response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// ListSessions gets all sessions.
+func (c *RPCClient) ListSessions() (*types.SessionListResponse, error) {
+	result, err := c.Call("session.list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.SessionListResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse sessions response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// AttachSession attaches a client to a session.
+func (c *RPCClient) AttachSession(sessionID, clientID string) error {
+	params := map[string]string{
+		"session_id": sessionID,
+		"client_id":  clientID,
+	}
+	_, err := c.Call("session.attach", params)
+	return err
+}
+
+// DetachSession detaches a client from a session.
+func (c *RPCClient) DetachSession(sessionID, clientID string) error {
+	params := map[string]string{
+		"session_id": sessionID,
+		"client_id":  clientID,
+	}
+	_, err := c.Call("session.detach", params)
+	return err
 }

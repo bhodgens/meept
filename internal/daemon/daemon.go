@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/registry"
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/pkg/models"
@@ -21,11 +22,13 @@ import (
 
 // Daemon manages the meept daemon lifecycle.
 type Daemon struct {
-	config   *Config
-	bus      *bus.MessageBus
-	registry *registry.Registry
-	rpc      *rpc.Server
-	logger   *slog.Logger
+	config     *Config
+	fullConfig *config.Config // Full configuration loaded from file
+	bus        *bus.MessageBus
+	registry   *registry.Registry
+	rpc        *rpc.Server
+	components *Components // Agent, tools, LLM, etc.
+	logger     *slog.Logger
 
 	status    models.DaemonStatus
 	startTime time.Time
@@ -76,6 +79,13 @@ func New(cfg *Config) (*Daemon, error) {
 	opts := &slog.HandlerOptions{Level: cfg.LogLevel}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, opts))
 
+	// Load full configuration
+	fullCfg, err := config.LoadDefault()
+	if err != nil {
+		logger.Warn("Failed to load config, using defaults", "error", err)
+		fullCfg = config.DefaultConfig()
+	}
+
 	// Create message bus
 	msgBus := bus.New(nil, logger)
 
@@ -87,7 +97,7 @@ func New(cfg *Config) (*Daemon, error) {
 		SocketPath: cfg.SocketPath,
 	}, msgBus, logger)
 
-	// Register proxy handlers for Python agent integration
+	// Register proxy handlers that forward to bus subscribers
 	proxy := rpc.NewProxyHandler(msgBus)
 	proxy.RegisterProxyMethods(rpcServer)
 
@@ -109,14 +119,22 @@ func New(cfg *Config) (*Daemon, error) {
 	// Register RPC server as a component
 	reg.Register(rpcServer)
 
+	// Create agent components (LLM, tools, agent loop, chat handler)
+	components, err := NewComponents(fullCfg, msgBus, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create components: %w", err)
+	}
+
 	return &Daemon{
-		config:   cfg,
-		bus:      msgBus,
-		registry: reg,
-		rpc:      rpcServer,
-		logger:   logger,
-		status:   models.StatusStopped,
-		pidFile:  cfg.PIDFile,
+		config:     cfg,
+		fullConfig: fullCfg,
+		bus:        msgBus,
+		registry:   reg,
+		rpc:        rpcServer,
+		components: components,
+		logger:     logger,
+		status:     models.StatusStopped,
+		pidFile:    cfg.PIDFile,
 	}, nil
 }
 
@@ -137,9 +155,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	defer d.removePIDFile()
 
-	// Start all components
+	// Start all registry components (RPC server, etc.)
 	if err := d.registry.StartAll(ctx); err != nil {
 		return fmt.Errorf("failed to start components: %w", err)
+	}
+
+	// Start agent components (chat handler, status handler, etc.)
+	if d.components != nil {
+		if err := d.components.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start agent components: %w", err)
+		}
+		d.logger.Info("daemon: agent components started",
+			"tools", d.components.ToolRegistry.Count(),
+			"llm_configured", d.components.LLMClient != nil,
+		)
 	}
 
 	d.status = models.StatusRunning
@@ -184,7 +213,14 @@ func (d *Daemon) shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), d.config.ShutdownTimeout)
 	defer cancel()
 
-	// Stop all components
+	// Stop agent components first
+	if d.components != nil {
+		if err := d.components.Stop(ctx); err != nil {
+			d.logger.Error("daemon: agent component shutdown errors", "error", err)
+		}
+	}
+
+	// Stop registry components (RPC server, etc.)
 	if err := d.registry.StopAll(ctx); err != nil {
 		d.logger.Error("daemon: shutdown errors", "error", err)
 	}
@@ -266,4 +302,9 @@ func (d *Daemon) Registry() *registry.Registry {
 // RPC returns the RPC server.
 func (d *Daemon) RPC() *rpc.Server {
 	return d.rpc
+}
+
+// Components returns the agent components.
+func (d *Daemon) Components() *Components {
+	return d.components
 }

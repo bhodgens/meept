@@ -53,6 +53,17 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("skills.list", p.makeProxy("skills.list", "skills.result", 10*time.Second))
 	server.RegisterHandler("skills.triage", p.makeProxy("skills.triage", "skills.result", 10*time.Second))
 
+	// Agent/Worker methods
+	server.RegisterHandler("agent.workers.list", p.makeProxy("agent.workers.list", "agent.workers.result", 10*time.Second))
+
+	// Session methods
+	server.RegisterHandler("session.create", p.makeProxy("session.create", "session.result", 10*time.Second))
+	server.RegisterHandler("session.list", p.makeProxy("session.list", "session.result", 10*time.Second))
+	server.RegisterHandler("session.get", p.makeProxy("session.get", "session.result", 10*time.Second))
+	server.RegisterHandler("session.attach", p.makeProxy("session.attach", "session.result", 10*time.Second))
+	server.RegisterHandler("session.detach", p.makeProxy("session.detach", "session.result", 10*time.Second))
+	server.RegisterHandler("session.delete", p.makeProxy("session.delete", "session.result", 10*time.Second))
+
 	// Pipeline methods
 	server.RegisterHandler("pipeline.status", p.makeProxy("pipeline.status", "pipeline.result", 10*time.Second))
 

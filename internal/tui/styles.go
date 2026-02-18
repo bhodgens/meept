@@ -52,8 +52,10 @@ type Styles struct {
 	TableSelected lipgloss.Style
 
 	// Tab styles
-	Tab       lipgloss.Style
-	ActiveTab lipgloss.Style
+	Tab                  lipgloss.Style
+	ActiveTab            lipgloss.Style
+	CommandModeTab       lipgloss.Style
+	CommandModeIndicator lipgloss.Style
 
 	// Help
 	HelpKey   lipgloss.Style
@@ -169,6 +171,18 @@ func DefaultStyles() *Styles {
 		Foreground(ColorPrimary).
 		Bold(true).
 		Underline(true)
+
+	s.CommandModeTab = lipgloss.NewStyle().
+		Padding(0, 2).
+		Foreground(ColorAccent).
+		Bold(true).
+		Background(lipgloss.Color("#374151"))
+
+	s.CommandModeIndicator = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(ColorAccent).
+		Bold(true).
+		Padding(0, 1)
 
 	// Help styles
 	s.HelpKey = lipgloss.NewStyle().

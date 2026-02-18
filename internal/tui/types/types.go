@@ -138,3 +138,36 @@ func TruncateString(s string, maxLen int) string {
 	}
 	return s[:maxLen-3] + "..."
 }
+
+// WorkerListResponse represents the agent workers list response.
+type WorkerListResponse struct {
+	Workers []Worker `json:"workers"`
+	Count   int      `json:"count"`
+}
+
+// Worker represents an active agent worker.
+type Worker struct {
+	ID             string `json:"id"`
+	ConversationID string `json:"conversation_id"`
+	RequestID      string `json:"request_id"`
+	State          string `json:"state"` // "processing", "executing_tool", "completed", "error"
+	StartTime      string `json:"start_time"`
+	LastActivity   string `json:"last_activity"`
+	CurrentTool    string `json:"current_tool,omitempty"`
+}
+
+// Session represents a conversation session that can be shared by multiple clients.
+type Session struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	ConversationID  string   `json:"conversation_id"`
+	CreatedAt       string   `json:"created_at"`
+	LastActivity    string   `json:"last_activity"`
+	AttachedClients []string `json:"attached_clients"`
+	WorkerIDs       []string `json:"worker_ids,omitempty"`
+}
+
+// SessionListResponse represents the session list RPC response.
+type SessionListResponse struct {
+	Sessions []Session `json:"sessions"`
+}

@@ -20,8 +20,8 @@ func TestNewRPCClient(t *testing.T) {
 	if client.socketPath != "/tmp/test.sock" {
 		t.Errorf("expected socket path /tmp/test.sock, got %s", client.socketPath)
 	}
-	if client.timeout != 30*time.Second {
-		t.Errorf("expected timeout 30s, got %v", client.timeout)
+	if client.timeout != 120*time.Second {
+		t.Errorf("expected timeout 120s, got %v", client.timeout)
 	}
 }
 

@@ -228,13 +228,35 @@ func (s *Server) registerBuiltinHandlers() {
 		return "pong", nil
 	})
 
-	// Get daemon status
-	s.RegisterHandler("daemon.status", func(ctx context.Context, params json.RawMessage) (any, error) {
+	// Get daemon status (both names for compatibility)
+	statusHandler := func(ctx context.Context, params json.RawMessage) (any, error) {
+		// Get bus stats for additional info
+		busStats := s.bus.Stats()
+
+		// Count registered handlers
+		s.mu.RLock()
+		methods := make([]string, 0, len(s.handlers))
+		for method := range s.handlers {
+			methods = append(methods, method)
+		}
+		s.mu.RUnlock()
+
 		return map[string]any{
-			"status":  "running",
-			"version": "0.2.0-go",
+			"status":             "running",
+			"version":            "0.2.0-go",
+			"uptime_seconds":     0.0, // TODO: track actual uptime
+			"model":              "",
+			"default_model":      "",
+			"tokens_used":        0,
+			"tokens_remaining":   100000,
+			"budget_used":        0.0,
+			"budget_remaining":   10.0,
+			"registered_methods": methods,
+			"bus_subscribers":    busStats["_total"],
 		}, nil
-	})
+	}
+	s.RegisterHandler("status", statusHandler)
+	s.RegisterHandler("daemon.status", statusHandler)
 
 	// Bus publish
 	s.RegisterHandler("bus.publish", func(ctx context.Context, params json.RawMessage) (any, error) {
