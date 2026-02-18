@@ -1,15 +1,35 @@
 {
   // Default model for general use (provider/model-id format)
-  "model": "gala/dolphin-mistral-7b",
+  "model": "gala-mlx/lfm-thinking",
 
   // Fast/cheap model for classification, summarization
-  "small_model": "gala/dolphin-mistral-7b",
+  "small_model": "gala-mlx/lfm-thinking",
 
   // Providers to skip entirely
   "disabled_providers": [],
 
   "providers": {
-    "gala": {
+    "gala-mlx": {
+      "api": "openai",
+      "options": {
+        "baseURL": "http://gala/api/mlx",
+        "apiKey": "${GALA_API_KEY}",
+        "timeout": 120,
+      },
+      "models": {
+        "lfm-thinking": {
+          "name": "LFM2.5-1.2B-Thinking-MLX-bf16",
+          "capabilities": ["completion", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 2048,
+          "temperature": 0.7,
+        },
+      },
+    },
+
+    "gala-llama": {
       "api": "openai",
       "options": {
         "baseURL": "http://gala/llama/v1",

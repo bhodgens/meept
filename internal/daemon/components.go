@@ -4,8 +4,10 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
@@ -41,13 +43,22 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		Logger: logger,
 	}
 
-	// Load models configuration
-	modelsCfg, err := config.LoadModelsConfigDefault()
+	// Load models configuration - fail explicitly if not found
+	modelsCfg, configPath, err := loadModelsConfigWithPath(logger)
 	if err != nil {
-		// If no models config, create a default with environment variables
-		logger.Warn("Failed to load models config, using defaults", "error", err)
-		modelsCfg = createDefaultModelsConfig()
+		logger.Error("FATAL: Failed to load models configuration",
+			"error", err,
+			"searched_paths", []string{"config/models.json5", "~/.meept/models.json5"},
+			"hint", "Copy config/models.json5 to ~/.meept/models.json5 or run daemon from project directory",
+		)
+		return nil, fmt.Errorf("models configuration required: %w", err)
 	}
+	logger.Info("Loaded models configuration",
+		"path", configPath,
+		"default_model", modelsCfg.Model,
+		"small_model", modelsCfg.SmallModel,
+		"providers", getProviderNames(modelsCfg),
+	)
 	c.ModelsConfig = modelsCfg
 
 	// Create security checker
@@ -61,15 +72,19 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	c.SecurityChecker = security.NewPermissionChecker(secCfg)
 
 	// Create LLM client
-	llmCfg := createLLMConfig(modelsCfg)
+	llmCfg := createLLMConfig(modelsCfg, logger)
 	if llmCfg != nil {
 		c.LLMClient = llm.NewClient(llmCfg, llm.WithLogger(logger))
-		logger.Info("LLM client created",
+		logger.Info("LLM client initialized successfully",
+			"provider", llmCfg.ProviderID,
 			"model", llmCfg.ModelID,
 			"base_url", llmCfg.BaseURL,
 		)
 	} else {
-		logger.Warn("No LLM configured - chat will not work")
+		logger.Error("FATAL: No LLM configured - chat will not work",
+			"hint", "Check models.json5 configuration and ensure model exists",
+		)
+		return nil, fmt.Errorf("LLM configuration required but model resolution failed")
 	}
 
 	// Create tool registry with builtin tools
@@ -155,57 +170,114 @@ func (c *Components) Stop(ctx context.Context) error {
 	return lastErr
 }
 
-// createDefaultModelsConfig creates a minimal models config from environment.
-func createDefaultModelsConfig() *config.ModelsConfig {
-	return &config.ModelsConfig{
-		Model:      "gpt-4o",
-		SmallModel: "gpt-4o-mini",
-		Providers: map[string]config.Provider{
-			"openai": {
-				API: "openai",
-				Options: config.ProviderOptions{
-					BaseURL: "https://api.openai.com",
-					APIKey:  os.Getenv("OPENAI_API_KEY"),
-				},
-				Models: map[string]config.Model{
-					"gpt-4o": {
-						Name:         "gpt-4o",
-						Capabilities: []string{"chat", "code", "tool_use"},
-						ContextLimit: 128000,
-						MaxOutput:    4096,
-						Temperature:  0.7,
-					},
-				},
-			},
-		},
+// loadModelsConfigWithPath loads models config and returns the path it was loaded from.
+func loadModelsConfigWithPath(logger *slog.Logger) (*config.ModelsConfig, string, error) {
+	// Try project-local first
+	localPath := "config/models.json5"
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Debug("Found models config", "path", localPath)
+		cfg, err := config.LoadModelsConfig(localPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to load %s: %w", localPath, err)
+		}
+		return cfg, localPath, nil
 	}
+
+	// Try user home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	homePath := filepath.Join(homeDir, ".meept", "models.json5")
+	if _, err := os.Stat(homePath); err == nil {
+		logger.Debug("Found models config", "path", homePath)
+		cfg, err := config.LoadModelsConfig(homePath)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to load %s: %w", homePath, err)
+		}
+		return cfg, homePath, nil
+	}
+
+	return nil, "", fmt.Errorf("models.json5 not found in config/ or ~/.meept/")
+}
+
+// getProviderNames returns a list of configured provider names.
+func getProviderNames(cfg *config.ModelsConfig) []string {
+	names := make([]string, 0, len(cfg.Providers))
+	for name := range cfg.Providers {
+		names = append(names, name)
+	}
+	return names
 }
 
 // createLLMConfig creates an LLM model config from the models configuration.
-func createLLMConfig(cfg *config.ModelsConfig) *llm.ModelConfig {
+// Returns the config and logs detailed information about the resolution.
+func createLLMConfig(cfg *config.ModelsConfig, logger *slog.Logger) *llm.ModelConfig {
 	if cfg == nil {
+		logger.Error("Cannot create LLM config: models configuration is nil")
 		return nil
 	}
 
 	// Find the default model
-	modelID := cfg.Model
-	if modelID == "" {
+	modelRef := cfg.Model
+	if modelRef == "" {
+		logger.Error("Cannot create LLM config: no default model specified in config")
 		return nil
+	}
+
+	logger.Info("Resolving model", "model_ref", modelRef)
+
+	// Parse provider/model format
+	var targetProvider, targetModel string
+	if parts := splitModelRef(modelRef); len(parts) == 2 {
+		targetProvider = parts[0]
+		targetModel = parts[1]
+		logger.Debug("Parsed model reference", "provider", targetProvider, "model", targetModel)
+	} else {
+		targetModel = modelRef
+		logger.Debug("Model reference has no provider prefix, searching all providers", "model", targetModel)
 	}
 
 	// Search for the model in providers
 	for providerID, provider := range cfg.Providers {
+		// If provider is specified, only check that provider
+		if targetProvider != "" && providerID != targetProvider {
+			continue
+		}
+
 		for id, model := range provider.Models {
-			if id == modelID || model.Name == modelID {
+			if id == targetModel || model.Name == targetModel {
 				caps := make(map[string]bool)
 				for _, cap := range model.Capabilities {
 					caps[cap] = true
 				}
 
+				apiKey := provider.Options.APIKey
+				hasKey := apiKey != "" && apiKey != "${GALA_API_KEY}" // Check for unexpanded env var
+
+				logger.Info("Resolved model configuration",
+					"provider", providerID,
+					"model_id", id,
+					"model_name", model.Name,
+					"base_url", provider.Options.BaseURL,
+					"has_api_key", hasKey,
+					"capabilities", model.Capabilities,
+					"context_limit", model.ContextLimit,
+					"max_output", model.MaxOutput,
+				)
+
+				if !hasKey {
+					logger.Warn("API key not set or not expanded",
+						"expected_env", "GALA_API_KEY",
+						"hint", "Set GALA_API_KEY environment variable",
+					)
+				}
+
 				return &llm.ModelConfig{
 					BaseURL:              provider.Options.BaseURL,
-					ModelID:              id,
-					APIKey:               provider.Options.APIKey,
+					ModelID:              model.Name, // Use the actual model name, not the config key
+					APIKey:               apiKey,
 					CostPerMillionInput:  model.InputCost,
 					CostPerMillionOutput: model.OutputCost,
 					MaxTokens:            model.MaxOutput,
@@ -218,7 +290,29 @@ func createLLMConfig(cfg *config.ModelsConfig) *llm.ModelConfig {
 		}
 	}
 
+	// Model not found - log all available models
+	var available []string
+	for providerID, provider := range cfg.Providers {
+		for id := range provider.Models {
+			available = append(available, providerID+"/"+id)
+		}
+	}
+	logger.Error("Model not found in any provider",
+		"requested", modelRef,
+		"available_models", available,
+	)
+
 	return nil
+}
+
+// splitModelRef splits "provider/model" into parts.
+func splitModelRef(ref string) []string {
+	for i, c := range ref {
+		if c == '/' {
+			return []string{ref[:i], ref[i+1:]}
+		}
+	}
+	return []string{ref}
 }
 
 // registerBuiltinTools registers all builtin tools with the registry.
