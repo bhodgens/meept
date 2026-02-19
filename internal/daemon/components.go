@@ -31,7 +31,7 @@ type Components struct {
 	AgentLoop       *agent.AgentLoop
 	ChatHandler     *agent.ChatHandler
 	StatusHandler   *StatusHandler
-	SessionStore    *session.Store
+	SessionStore    session.Store
 	SessionHandler  *session.Handler
 	Logger          *slog.Logger
 }
@@ -114,8 +114,16 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Create status handler
 	c.StatusHandler = NewStatusHandler(msgBus, logger)
 
-	// Create session store and handler
-	c.SessionStore = session.NewStore(logger)
+	// Create session store (SQLite-backed for persistence)
+	sessionsDB := filepath.Join(cfg.Daemon.DataDir, "sessions.db")
+	sessionStore, err := session.NewSQLiteStore(sessionsDB, logger)
+	if err != nil {
+		// Fall back to in-memory store if SQLite fails
+		logger.Warn("Failed to create SQLite session store, using in-memory", "error", err)
+		c.SessionStore = session.NewMemoryStore(logger)
+	} else {
+		c.SessionStore = sessionStore
+	}
 	c.SessionHandler = session.NewHandler(c.SessionStore, msgBus, logger)
 
 	return c, nil
@@ -159,6 +167,12 @@ func (c *Components) Stop(ctx context.Context) error {
 
 	if c.SessionHandler != nil {
 		if err := c.SessionHandler.Stop(ctx); err != nil {
+			lastErr = err
+		}
+	}
+
+	if c.SessionStore != nil {
+		if err := c.SessionStore.Close(); err != nil {
 			lastErr = err
 		}
 	}

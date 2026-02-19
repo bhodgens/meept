@@ -1,0 +1,35 @@
+// Meept TUI Client Configuration
+// Copy to ~/.meept/client.json5 to customize
+{
+  // Keyboard shortcuts configuration
+  "keybindings": {
+    // Key to enter command mode (opens command palette)
+    "command_mode": "ctrl+x",
+
+    // Key to quit the application
+    "quit": "ctrl+c",
+
+    // Keys within command palette
+    "command_palette": {
+      // View switching
+      "view_chat": "1",
+      "view_status": "2",
+      "view_tasks": "3",
+      "view_memory": "4",
+
+      // UI controls
+      "sidebar": "y",      // Toggle sidebar (changed from 's')
+      "sessions": "s",     // Open session picker (new)
+      "copy_mode": "c"     // Enable text selection mode
+    }
+  },
+
+  // Session behavior configuration
+  "session": {
+    // Automatically resume the most recent session on startup
+    "auto_resume": true,
+
+    // Default name for new sessions (if not specified)
+    "default_name": "default"
+  }
+}

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/tui/types"
@@ -17,15 +18,20 @@ import (
 )
 
 // RPCClient is a JSON-RPC client for communicating with the meept daemon.
+// It uses a split-lock design to prevent UI blocking:
+// - connMu protects connection state changes (connect/disconnect)
+// - callMu serializes RPC calls to prevent interleaving
+// - connected is an atomic bool for lock-free status checks
 type RPCClient struct {
 	socketPath string
 	conn       net.Conn
 	reader     *bufio.Reader
 	writer     io.Writer
-	mu         sync.Mutex
-	connected  bool
+	connMu     sync.Mutex    // Protects conn, reader, writer during connect/disconnect
+	callMu     sync.Mutex    // Serializes RPC calls (prevents request/response interleaving)
+	connected  atomic.Bool   // Lock-free connection status for UI queries
 	timeout    time.Duration
-	nextID     int64
+	nextID     atomic.Int64 // Thread-safe ID generation
 
 	// Reconnection settings
 	maxRetries    int
@@ -44,10 +50,10 @@ func NewRPCClient(socketPath string) *RPCClient {
 
 // Connect establishes a connection to the daemon.
 func (c *RPCClient) Connect() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 
-	if c.connected {
+	if c.connected.Load() {
 		return nil
 	}
 
@@ -59,20 +65,20 @@ func (c *RPCClient) Connect() error {
 	c.conn = conn
 	c.reader = bufio.NewReader(conn)
 	c.writer = conn
-	c.connected = true
+	c.connected.Store(true)
 	return nil
 }
 
 // Close closes the connection.
 func (c *RPCClient) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 
-	if !c.connected {
+	if !c.connected.Load() {
 		return nil
 	}
 
-	c.connected = false
+	c.connected.Store(false)
 	if c.conn != nil {
 		return c.conn.Close()
 	}
@@ -80,10 +86,9 @@ func (c *RPCClient) Close() error {
 }
 
 // IsConnected returns whether the client is connected.
+// This is lock-free to allow UI rendering without blocking on RPC calls.
 func (c *RPCClient) IsConnected() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.connected
+	return c.connected.Load()
 }
 
 // Call makes an RPC call and returns the result.
@@ -106,12 +111,12 @@ func (c *RPCClient) Call(method string, params any) (json.RawMessage, error) {
 
 		// Try to reconnect
 		if attempt < c.maxRetries {
-			c.mu.Lock()
-			c.connected = false
+			c.connMu.Lock()
+			c.connected.Store(false)
 			if c.conn != nil {
 				c.conn.Close()
 			}
-			c.mu.Unlock()
+			c.connMu.Unlock()
 
 			time.Sleep(c.retryInterval)
 
@@ -139,19 +144,18 @@ func (c *RPCClient) isConnectionError(err error) bool {
 }
 
 // callOnce makes a single RPC call attempt.
+// Uses split-lock design: connMu briefly to get conn references, callMu to serialize calls.
 func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if !c.connected {
+	// Fast path: check connection status without lock
+	if !c.connected.Load() {
 		return nil, fmt.Errorf("not connected to daemon")
 	}
 
-	// Build request
-	c.nextID++
+	// Build request outside of any lock
+	reqID := c.nextID.Add(1)
 	req := models.JSONRPCRequest{
 		JSONRPC: "2.0",
-		ID:      c.nextID,
+		ID:      reqID,
 		Method:  method,
 	}
 
@@ -163,34 +167,55 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 		req.Params = paramsData
 	}
 
-	// Marshal request
+	// Marshal request outside of lock
 	reqData, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	// Serialize RPC calls to prevent request/response interleaving
+	c.callMu.Lock()
+	defer c.callMu.Unlock()
+
+	// Re-check connection status after acquiring lock
+	if !c.connected.Load() {
+		return nil, fmt.Errorf("not connected to daemon")
+	}
+
+	// Get connection references under connMu (brief hold)
+	c.connMu.Lock()
+	conn := c.conn
+	reader := c.reader
+	writer := c.writer
+	c.connMu.Unlock()
+
+	if conn == nil {
+		c.connected.Store(false)
+		return nil, fmt.Errorf("not connected to daemon")
+	}
+
 	// Set deadline
-	if err := c.conn.SetDeadline(time.Now().Add(c.timeout)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(c.timeout)); err != nil {
 		return nil, fmt.Errorf("failed to set deadline: %w", err)
 	}
 
 	// Write length-prefixed frame
-	_, err = fmt.Fprintf(c.writer, "%d\n", len(reqData))
+	_, err = fmt.Fprintf(writer, "%d\n", len(reqData))
 	if err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return nil, fmt.Errorf("failed to write request: %w", err)
 	}
 
-	_, err = c.writer.Write(reqData)
+	_, err = writer.Write(reqData)
 	if err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return nil, fmt.Errorf("failed to write request body: %w", err)
 	}
 
 	// Read response
-	lengthLine, err := c.reader.ReadString('\n')
+	lengthLine, err := reader.ReadString('\n')
 	if err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return nil, fmt.Errorf("failed to read response (daemon may be busy or disconnected): %w", err)
 	}
 
@@ -204,9 +229,9 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 	}
 
 	respData := make([]byte, length)
-	_, err = io.ReadFull(c.reader, respData)
+	_, err = io.ReadFull(reader, respData)
 	if err != nil {
-		c.connected = false
+		c.connected.Store(false)
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
@@ -225,8 +250,8 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 
 // SetTimeout sets the RPC call timeout.
 func (c *RPCClient) SetTimeout(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 	c.timeout = d
 }
 
@@ -365,5 +390,27 @@ func (c *RPCClient) DetachSession(sessionID, clientID string) error {
 		"client_id":  clientID,
 	}
 	_, err := c.Call("session.detach", params)
+	return err
+}
+
+// GetMostRecentSession gets the most recently active session.
+func (c *RPCClient) GetMostRecentSession() (*types.Session, error) {
+	result, err := c.Call("session.get_most_recent", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.Session
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse session response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// DeleteSession deletes a session by ID.
+func (c *RPCClient) DeleteSession(sessionID string) error {
+	params := map[string]string{"id": sessionID}
+	_, err := c.Call("session.delete", params)
 	return err
 }

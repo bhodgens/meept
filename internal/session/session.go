@@ -25,26 +25,32 @@ type Session struct {
 	WorkerIDs      []string  `json:"worker_ids,omitempty"`
 }
 
-// Store manages sessions with thread-safe operations.
-type Store struct {
+// MemoryStore manages sessions with thread-safe operations (in-memory, non-persistent).
+type MemoryStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	logger   *slog.Logger
 }
 
-// NewStore creates a new session store.
-func NewStore(logger *slog.Logger) *Store {
+// NewStore creates a new in-memory session store.
+// Deprecated: Use NewSQLiteStore for persistent sessions.
+func NewStore(logger *slog.Logger) *MemoryStore {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Store{
+	return &MemoryStore{
 		sessions: make(map[string]*Session),
 		logger:   logger,
 	}
 }
 
+// NewMemoryStore creates a new in-memory session store.
+func NewMemoryStore(logger *slog.Logger) *MemoryStore {
+	return NewStore(logger)
+}
+
 // Create creates a new session.
-func (s *Store) Create(name string) *Session {
+func (s *MemoryStore) Create(name string) *Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -65,14 +71,41 @@ func (s *Store) Create(name string) *Session {
 }
 
 // Get returns a session by ID.
-func (s *Store) Get(id string) *Session {
+func (s *MemoryStore) Get(id string) *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.sessions[id]
 }
 
+// GetByConversationID retrieves a session by its conversation ID.
+func (s *MemoryStore) GetByConversationID(conversationID string) *Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, session := range s.sessions {
+		if session.ConversationID == conversationID {
+			return session
+		}
+	}
+	return nil
+}
+
+// GetMostRecent returns the most recently active session.
+func (s *MemoryStore) GetMostRecent() *Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var mostRecent *Session
+	for _, session := range s.sessions {
+		if mostRecent == nil || session.LastActivity.After(mostRecent.LastActivity) {
+			mostRecent = session
+		}
+	}
+	return mostRecent
+}
+
 // List returns all sessions.
-func (s *Store) List() []*Session {
+func (s *MemoryStore) List() []*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -84,7 +117,7 @@ func (s *Store) List() []*Session {
 }
 
 // Delete removes a session.
-func (s *Store) Delete(id string) bool {
+func (s *MemoryStore) Delete(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -98,7 +131,7 @@ func (s *Store) Delete(id string) bool {
 }
 
 // Attach adds a client to a session.
-func (s *Store) Attach(sessionID, clientID string) error {
+func (s *MemoryStore) Attach(sessionID, clientID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,7 +154,7 @@ func (s *Store) Attach(sessionID, clientID string) error {
 }
 
 // Detach removes a client from a session.
-func (s *Store) Detach(sessionID, clientID string) error {
+func (s *MemoryStore) Detach(sessionID, clientID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -143,7 +176,7 @@ func (s *Store) Detach(sessionID, clientID string) error {
 }
 
 // UpdateActivity updates the last activity timestamp.
-func (s *Store) UpdateActivity(sessionID string) {
+func (s *MemoryStore) UpdateActivity(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -152,16 +185,66 @@ func (s *Store) UpdateActivity(sessionID string) {
 	}
 }
 
+// AddWorker adds a worker ID to a session.
+func (s *MemoryStore) AddWorker(sessionID, workerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	for _, w := range session.WorkerIDs {
+		if w == workerID {
+			return nil
+		}
+	}
+
+	session.WorkerIDs = append(session.WorkerIDs, workerID)
+	session.LastActivity = time.Now()
+	return nil
+}
+
+// RemoveWorker removes a worker ID from a session.
+func (s *MemoryStore) RemoveWorker(sessionID, workerID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	for i, w := range session.WorkerIDs {
+		if w == workerID {
+			session.WorkerIDs = append(session.WorkerIDs[:i], session.WorkerIDs[i+1:]...)
+			session.LastActivity = time.Now()
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// Close is a no-op for in-memory store.
+func (s *MemoryStore) Close() error {
+	return nil
+}
+
+// Ensure MemoryStore implements Store interface.
+var _ Store = (*MemoryStore)(nil)
+
 // Handler handles session-related RPC requests via the message bus.
 type Handler struct {
-	store  *Store
+	store  Store
 	bus    *bus.MessageBus
 	logger *slog.Logger
 	cancel context.CancelFunc
 }
 
 // NewHandler creates a new session handler.
-func NewHandler(store *Store, msgBus *bus.MessageBus, logger *slog.Logger) *Handler {
+func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -181,6 +264,7 @@ func (h *Handler) Start(ctx context.Context) error {
 		"session.create",
 		"session.list",
 		"session.get",
+		"session.get_most_recent",
 		"session.attach",
 		"session.detach",
 		"session.delete",
@@ -231,6 +315,8 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleList(msg)
 	case "session.get":
 		response, err = h.handleGet(msg)
+	case "session.get_most_recent":
+		response, err = h.handleGetMostRecent(msg)
 	case "session.attach":
 		response, err = h.handleAttach(msg)
 	case "session.detach":
@@ -276,6 +362,15 @@ func (h *Handler) handleGet(msg *models.BusMessage) (any, error) {
 	session := h.store.Get(params.ID)
 	if session == nil {
 		return nil, fmt.Errorf("session not found: %s", params.ID)
+	}
+	return session, nil
+}
+
+// handleGetMostRecent gets the most recently active session.
+func (h *Handler) handleGetMostRecent(msg *models.BusMessage) (any, error) {
+	session := h.store.GetMostRecent()
+	if session == nil {
+		return nil, fmt.Errorf("no sessions found")
 	}
 	return session, nil
 }

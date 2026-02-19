@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/caimlas/meept/internal/tui/types"
 )
 
 // FocusedElement represents which element has focus in the chat view.
@@ -51,6 +53,7 @@ type ChatModel struct {
 	viewport       viewport.Model
 	textarea       textarea.Model
 	conversationID string
+	sessionID      string // Linked to daemon session
 	width          int
 	height         int
 	loading        bool
@@ -524,21 +527,26 @@ func (m *ChatModel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 }
 
 func (m *ChatModel) handleContextMenuKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "c", "1":
-		// Copy message (or selected text)
+	key := msg.String()
+
+	// Any unrecognized key dismisses the menu
+	defer func() {
+		if key != "c" && key != "1" && key != "e" && key != "2" && key != "s" && key != "3" {
+			m.showContextMenu = false
+		}
+	}()
+
+	switch key {
+	case "c", "1", "y": // 'y' for yank (vim-style)
+		// Copy message content
 		if m.selectedMsgIdx >= 0 && m.selectedMsgIdx < len(m.messages) {
 			msgContent := m.messages[m.selectedMsgIdx].Content
-			// If user had text selection (from drag), terminal handles it
-			// Otherwise copy full message via OSC52 or system clipboard
-			if !m.hasTextSelection {
-				// Return command to copy full message
-				m.showContextMenu = false
-				return func() tea.Msg {
-					return CopyToClipboardMsg{Text: msgContent}
-				}
+			m.showContextMenu = false
+			m.selectedMsgIdx = -1
+			m.updateViewport()
+			return func() tea.Msg {
+				return CopyToClipboardMsg{Text: msgContent}
 			}
-			// User has native text selection - just dismiss, terminal handles copy
 		}
 		m.showContextMenu = false
 		return nil
@@ -561,7 +569,7 @@ func (m *ChatModel) handleContextMenuKey(msg tea.KeyMsg) tea.Cmd {
 		m.showContextMenu = false
 		return nil
 
-	case "esc", "q":
+	case "esc", "q", "enter":
 		m.showContextMenu = false
 		return nil
 	}
@@ -769,16 +777,12 @@ func (m *ChatModel) View() string {
 		menuStyle := lipgloss.NewStyle().
 			Background(lipgloss.Color("#1F2937")).
 			Foreground(lipgloss.Color("#E5E7EB")).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#7C3AED")).
-			Padding(0, 1)
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(lipgloss.Color("#10B981")).
+			Padding(0, 2).
+			Bold(true)
 
-		var menuText string
-		if m.hasTextSelection {
-			menuText = "[c] Copy selected  [e] Expand  [s] Shrink  [Esc] Cancel"
-		} else {
-			menuText = "[c] Copy message  [e] Expand  [s] Shrink  [Esc] Cancel"
-		}
+		menuText := "  [c/y] Copy  │  [e] Expand  │  [s] Shrink  │  [Esc] Close  "
 
 		menu := menuStyle.Render(menuText)
 		b.WriteString(menu)
@@ -810,6 +814,7 @@ func (m *ChatModel) View() string {
 func (m *ChatModel) Reset() {
 	m.messages = []ChatMessage{}
 	m.conversationID = generateConversationID()
+	m.sessionID = ""
 	m.textarea.Reset()
 	m.pendingMsgIdx = -1
 	m.selectedMsgIdx = -1
@@ -817,5 +822,18 @@ func (m *ChatModel) Reset() {
 	m.historyIdx = -1
 	m.savedInput = ""
 	m.hasTextSelection = false
+	m.updateViewport()
+}
+
+// SetSession links the chat to a daemon session.
+func (m *ChatModel) SetSession(session *types.Session) {
+	if session == nil {
+		m.sessionID = ""
+		return
+	}
+
+	m.sessionID = session.ID
+	m.conversationID = session.ConversationID
+	m.messages = []ChatMessage{}
 	m.updateViewport()
 }

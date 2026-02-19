@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/caimlas/meept/internal/tui/models"
+	"github.com/caimlas/meept/internal/tui/types"
 )
 
 // ViewType represents the different views in the TUI.
@@ -23,8 +27,7 @@ const (
 	ViewMemory
 )
 
-// commandModeTimeout is how long command mode stays active before auto-canceling.
-const commandModeTimeout = 2 * time.Second
+// Note: Command mode timeout removed - now using modal that stays open until dismissed
 
 // AppFocus tracks which component has focus.
 type AppFocus int
@@ -57,12 +60,26 @@ type App struct {
 	// Key bindings
 	keys KeyMap
 
-	// Command mode state (Ctrl+X prefix)
-	commandMode     bool      // true when Ctrl+X prefix is active
-	commandModeTime time.Time // when command mode was activated
+	// Client configuration
+	clientConfig *ClientConfig
+
+	// Modal state
+	activeModal    ModalType
+	commandPalette *Modal
+	sessionPicker  *SessionPickerModal
+
+	// Current session
+	currentSession *types.Session
+
+	// Copy mode - disables mouse capture for native text selection
+	copyMode bool
 
 	// Project directory
 	projectDir string
+
+	// Status message (for clipboard feedback)
+	statusMessage     string
+	statusMessageTime time.Time
 
 	// Error state
 	err error
@@ -108,42 +125,78 @@ func NewApp(socketPath string) *App {
 	rpc := NewRPCClient(socketPath)
 	styles := DefaultStyles()
 
+	// Load client configuration
+	clientConfig, _ := LoadClientConfig()
+
 	// Get current working directory for display
 	projectDir, _ := os.Getwd()
 
-	return &App{
-		styles:      styles,
-		rpc:         rpc,
-		currentView: ViewChat,
-		chat:        models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage),
-		status:      models.NewStatusModel(rpc),
-		tasks:       models.NewTasksModel(rpc),
-		memory:      models.NewMemoryModel(rpc),
-		sidebar:     NewSidebarModel(rpc, styles),
-		keys:        DefaultKeyMap(),
-		projectDir:  projectDir,
+	app := &App{
+		styles:       styles,
+		rpc:          rpc,
+		currentView:  ViewChat,
+		chat:         models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage),
+		status:       models.NewStatusModel(rpc),
+		tasks:        models.NewTasksModel(rpc),
+		memory:       models.NewMemoryModel(rpc),
+		sidebar:      NewSidebarModel(rpc, styles),
+		keys:         DefaultKeyMap(),
+		clientConfig: clientConfig,
+		projectDir:   projectDir,
+		activeModal:  ModalNone,
 	}
+
+	// Create modals
+	app.commandPalette = CommandPaletteModal(styles, clientConfig)
+	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
+
+	return app
 }
 
 // Init initializes the application.
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.connectDaemon,
+		a.loadSession,
 		tea.EnterAltScreen,
 		tea.SetWindowTitle("Meept"),
-		tea.EnableMouseCellMotion,
+		// Use EnableMouseAllMotion for better compatibility but let shift bypass for selection
+		// Note: Hold Shift while dragging to select text in most terminals
+		tea.EnableMouseAllMotion,
 	)
 }
 
-// commandModeTimeoutMsg is sent when command mode times out.
-type commandModeTimeoutMsg struct{}
+// loadSession attempts to load or create a session.
+func (a *App) loadSession() tea.Msg {
+	// Wait for connection first - this will be called after connectDaemon
+	if !a.rpc.IsConnected() {
+		return nil
+	}
 
-// tickCommandMode returns a command that sends a timeout message after the timeout duration.
-func (a *App) tickCommandMode() tea.Cmd {
-	return tea.Tick(commandModeTimeout, func(t time.Time) tea.Msg {
-		return commandModeTimeoutMsg{}
-	})
+	// Try to auto-resume if enabled
+	if a.clientConfig.Session.AutoResume {
+		session, err := a.rpc.GetMostRecentSession()
+		if err == nil && session != nil {
+			return SessionLoadedMsg{Session: session, IsNew: false}
+		}
+	}
+
+	// Create a new session
+	session, err := a.rpc.CreateSession(a.clientConfig.Session.DefaultName)
+	if err != nil {
+		return SessionLoadedMsg{Session: nil, Err: err}
+	}
+
+	return SessionLoadedMsg{Session: session, IsNew: true}
 }
+
+// SessionLoadedMsg indicates a session was loaded or created.
+type SessionLoadedMsg struct {
+	Session *types.Session
+	IsNew   bool
+	Err     error
+}
+
 
 // connectDaemon is a command that connects to the daemon.
 func (a *App) connectDaemon() tea.Msg {
@@ -191,14 +244,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.memory.SetSize(mainWidth, msg.Height-4)
 		return a, nil
 
-	case commandModeTimeoutMsg:
-		// Only timeout if still in command mode and enough time has passed
-		if a.commandMode && time.Since(a.commandModeTime) >= commandModeTimeout {
-			a.commandMode = false
-		}
-		return a, nil
-
 	case tea.MouseMsg:
+		// In copy mode or modal open, ignore mouse events
+		if a.copyMode || a.activeModal != ModalNone {
+			return a, nil
+		}
+
 		// Handle mouse clicks on tab bar (first row)
 		if msg.Type == tea.MouseLeft && msg.Y == 0 {
 			// Calculate which tab was clicked based on X position
@@ -236,46 +287,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		}
 
-		// Check for Ctrl+X prefix to enter command mode
-		if key.Matches(msg, a.keys.Command) {
-			a.commandMode = true
-			a.commandModeTime = time.Now()
-			return a, a.tickCommandMode()
+		// Handle modal key input first
+		if a.activeModal != ModalNone {
+			return a.handleModalKey(msg)
 		}
 
-		// In command mode, process UI shortcuts
-		if a.commandMode {
-			a.commandMode = false // Exit command mode after any key
-			switch msg.String() {
-			case "1":
-				a.currentView = ViewChat
-				return a, a.initCurrentView()
-			case "2":
-				a.currentView = ViewStatus
-				return a, a.initCurrentView()
-			case "3":
-				a.currentView = ViewTasks
-				return a, a.initCurrentView()
-			case "4":
-				a.currentView = ViewMemory
-				return a, a.initCurrentView()
-			case "s":
-				// Toggle sidebar
-				a.sidebar.Toggle()
-				// Trigger resize to recalculate layout
-				return a, func() tea.Msg {
-					return tea.WindowSizeMsg{Width: a.width, Height: a.height}
-				}
-			case "esc":
-				// Just exit command mode, already done above
-				return a, nil
-			default:
-				// Unknown command, just exit command mode
-				return a, nil
+		// Check for Ctrl+X to open command palette
+		if key.Matches(msg, a.keys.Command) {
+			a.activeModal = ModalCommandPalette
+			a.commandPalette.Show()
+			return a, nil
+		}
+
+		// Exit copy mode on any key press
+		if a.copyMode {
+			a.copyMode = false
+			a.statusMessage = ""
+			return a, func() tea.Msg {
+				enableMouseTracking()
+				return nil
 			}
 		}
 
-		// Not in command mode - delegate based on focus
+		// Not in modal mode - delegate based on focus
 		if a.appFocus == FocusSidebar && a.sidebar.IsVisible() {
 			cmd := a.sidebar.Update(msg)
 			return a, cmd
@@ -284,8 +318,55 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ConnectSuccessMsg:
 		a.err = nil
-		// Initialize the current view and sidebar
-		return a, tea.Batch(a.initCurrentView(), a.sidebar.Init())
+		// Initialize the current view, sidebar, and load session
+		return a, tea.Batch(a.initCurrentView(), a.sidebar.Init(), a.loadSession)
+
+	case SessionLoadedMsg:
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("Session error: %v", msg.Err)
+			a.statusMessageTime = time.Now()
+		} else if msg.Session != nil {
+			a.currentSession = msg.Session
+			a.chat.SetSession(msg.Session)
+			if msg.IsNew {
+				a.statusMessage = fmt.Sprintf("Created session: %s", msg.Session.Name)
+			} else {
+				a.statusMessage = fmt.Sprintf("Resumed session: %s", msg.Session.Name)
+			}
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+		}
+		return a, nil
+
+	case SessionListMsg:
+		// Update session picker with session list
+		if msg.Err == nil {
+			a.sessionPicker.SetSessions(msg.Sessions)
+		}
+		return a, nil
+
+	case SessionSwitchMsg:
+		// Switch to selected session
+		if msg.Session != nil {
+			a.currentSession = msg.Session
+			a.chat.SetSession(msg.Session)
+			a.statusMessage = fmt.Sprintf("Switched to: %s", msg.Session.Name)
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+		}
+		return a, nil
+
+	case SessionCreateMsg:
+		// Create a new session
+		return a, a.createSession(msg.Name)
+
+	case SessionDeleteMsg:
+		// Delete a session
+		return a, a.deleteSession(msg.SessionID)
 
 	case SidebarDataMsg:
 		// Delegate to sidebar
@@ -312,6 +393,36 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ConnectErrorMsg:
 		a.err = msg.Err
 		return a, nil
+
+	case models.CopyToClipboardMsg:
+		// Handle clipboard copy request from chat view
+		return a, doCopy(msg.Text)
+
+	case CopySuccessMsg:
+		// Show success feedback
+		preview := msg.Text
+		if len(preview) > 30 {
+			preview = preview[:30] + "..."
+		}
+		a.statusMessage = fmt.Sprintf("Copied: %s", preview)
+		a.statusMessageTime = time.Now()
+		// Clear message after 2 seconds
+		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+
+	case CopyErrorMsg:
+		a.statusMessage = fmt.Sprintf("Copy failed: %v", msg.Err)
+		a.statusMessageTime = time.Now()
+		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+
+	case StatusMessageClearMsg:
+		if time.Since(a.statusMessageTime) >= 2*time.Second {
+			a.statusMessage = ""
+		}
+		return a, nil
 	}
 
 	// Delegate to current view
@@ -333,6 +444,90 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
+// handleModalKey processes key input when a modal is active.
+func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	keyStr := msg.String()
+
+	switch a.activeModal {
+	case ModalCommandPalette:
+		action := a.commandPalette.HandleKey(keyStr)
+		if !a.commandPalette.IsVisible() {
+			a.activeModal = ModalNone
+		}
+
+		// Handle command palette actions
+		keys := a.clientConfig.Keybindings.CommandPalette
+		switch action {
+		case keys.ViewChat:
+			a.currentView = ViewChat
+			return a, a.initCurrentView()
+		case keys.ViewStatus:
+			a.currentView = ViewStatus
+			return a, a.initCurrentView()
+		case keys.ViewTasks:
+			a.currentView = ViewTasks
+			return a, a.initCurrentView()
+		case keys.ViewMemory:
+			a.currentView = ViewMemory
+			return a, a.initCurrentView()
+		case keys.Sidebar:
+			a.sidebar.Toggle()
+			return a, func() tea.Msg {
+				return tea.WindowSizeMsg{Width: a.width, Height: a.height}
+			}
+		case keys.Sessions:
+			a.activeModal = ModalSessionPicker
+			a.sessionPicker.Show()
+			return a, a.sessionPicker.RefreshSessions()
+		case keys.CopyMode:
+			a.copyMode = true
+			a.statusMessage = "COPY MODE: Select text with mouse, Cmd+C to copy, any key to exit"
+			a.statusMessageTime = time.Now()
+			return a, func() tea.Msg {
+				disableMouseTracking()
+				return nil
+			}
+		}
+		return a, nil
+
+	case ModalSessionPicker:
+		cmd := a.sessionPicker.HandleKey(keyStr)
+		if !a.sessionPicker.IsVisible() {
+			a.activeModal = ModalNone
+		}
+		return a, cmd
+	}
+
+	return a, nil
+}
+
+// createSession creates a new session via RPC.
+func (a *App) createSession(name string) tea.Cmd {
+	return func() tea.Msg {
+		session, err := a.rpc.CreateSession(name)
+		if err != nil {
+			return SessionLoadedMsg{Session: nil, Err: err}
+		}
+		return SessionSwitchMsg{Session: session}
+	}
+}
+
+// deleteSession deletes a session via RPC.
+func (a *App) deleteSession(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		err := a.rpc.DeleteSession(sessionID)
+		if err != nil {
+			// Just refresh the list to show current state
+		}
+		// Refresh session list
+		resp, _ := a.rpc.ListSessions()
+		if resp != nil {
+			return SessionListMsg{Sessions: resp.Sessions}
+		}
+		return SessionListMsg{Sessions: nil}
+	}
+}
+
 // initCurrentView returns a command to initialize the current view.
 func (a *App) initCurrentView() tea.Cmd {
 	switch a.currentView {
@@ -352,6 +547,11 @@ func (a *App) initCurrentView() tea.Cmd {
 func (a *App) View() string {
 	if a.width == 0 || a.height == 0 {
 		return "Loading..."
+	}
+
+	// Render modal overlay if active
+	if a.activeModal != ModalNone {
+		return a.renderModalOverlay()
 	}
 
 	var b strings.Builder
@@ -392,6 +592,17 @@ func (a *App) View() string {
 	return b.String()
 }
 
+// renderModalOverlay renders the active modal centered on a dimmed background.
+func (a *App) renderModalOverlay() string {
+	switch a.activeModal {
+	case ModalCommandPalette:
+		return a.commandPalette.View(a.width, a.height)
+	case ModalSessionPicker:
+		return a.sessionPicker.View(a.width, a.height)
+	}
+	return ""
+}
+
 func (a *App) renderTabs() string {
 	tabs := []struct {
 		name string
@@ -409,45 +620,40 @@ func (a *App) renderTabs() string {
 		if t.view == a.currentView {
 			style = a.styles.ActiveTab
 		}
-		// In command mode, highlight all tabs to show they're selectable
-		if a.commandMode {
-			style = a.styles.CommandModeTab
-		}
 		label := fmt.Sprintf("[%d] %s", i+1, t.name)
 		renderedTabs = append(renderedTabs, style.Render(label))
 	}
 
 	tabLine := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
 
-	// Add command mode indicator
-	var indicator string
-	if a.commandMode {
-		indicator = a.styles.CommandModeIndicator.Render(" Ctrl+X ")
+	// Add session indicator if we have one
+	var sessionIndicator string
+	if a.currentSession != nil {
+		sessionIndicator = a.styles.Muted.Render(" [" + a.currentSession.Name + "]")
 	}
 
 	// Add separator
-	separatorWidth := max(0, a.width-lipgloss.Width(tabLine)-lipgloss.Width(indicator))
+	separatorWidth := max(0, a.width-lipgloss.Width(tabLine)-lipgloss.Width(sessionIndicator))
 	separator := strings.Repeat("-", separatorWidth)
 
 	return lipgloss.NewStyle().
 		Width(a.width).
-		Render(tabLine + a.styles.Muted.Render(separator) + indicator)
+		Render(tabLine + a.styles.Muted.Render(separator) + sessionIndicator)
 }
 
 func (a *App) renderStatusBar() string {
 	var left string
-	if a.commandMode {
-		// Show available commands in command mode
-		left = a.styles.CommandModeIndicator.Render(" Ctrl+X: ") +
-			a.styles.HelpKey.Render("1") + a.styles.HelpValue.Render("-Chat ") +
-			a.styles.HelpKey.Render("2") + a.styles.HelpValue.Render("-Status ") +
-			a.styles.HelpKey.Render("3") + a.styles.HelpValue.Render("-Tasks ") +
-			a.styles.HelpKey.Render("4") + a.styles.HelpValue.Render("-Memory ") +
-			a.styles.HelpKey.Render("s") + a.styles.HelpValue.Render("-Sidebar ") +
-			a.styles.HelpKey.Render("Esc") + a.styles.HelpValue.Render("-Cancel")
+
+	// Show status message if present
+	if a.statusMessage != "" {
+		left = a.styles.StatusRunning.Render(a.statusMessage)
+	} else if a.copyMode {
+		left = a.styles.CommandModeIndicator.Render(" COPY MODE ") +
+			a.styles.HelpValue.Render("Select text with mouse | Press any key to exit")
 	} else {
-		left = a.styles.HelpKey.Render("Ctrl+X") + a.styles.HelpValue.Render(" command") + " | " +
-			a.styles.HelpKey.Render("Ctrl+C") + a.styles.HelpValue.Render(" quit")
+		left = a.styles.HelpKey.Render("Ctrl+X") + a.styles.HelpValue.Render(" menu") + " | " +
+			a.styles.HelpKey.Render("Ctrl+C") + a.styles.HelpValue.Render(" quit") + " | " +
+			a.styles.Muted.Render("Shift+drag to select")
 	}
 
 	// Connection status
@@ -496,4 +702,76 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// copyToClipboard copies text to the system clipboard using OSC52 and fallback methods.
+func copyToClipboard(text string) error {
+	// Try OSC52 first (works in most modern terminals)
+	// This writes directly to terminal and should work even over SSH
+	encoded := base64.StdEncoding.EncodeToString([]byte(text))
+	osc52 := fmt.Sprintf("\x1b]52;c;%s\x07", encoded)
+	fmt.Print(osc52)
+
+	// Also try platform-specific clipboard as backup
+	switch runtime.GOOS {
+	case "darwin":
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		_ = cmd.Run() // Ignore error, OSC52 might have worked
+	case "linux":
+		// Try xclip first, then xsel
+		if cmd := exec.Command("xclip", "-selection", "clipboard"); cmd != nil {
+			cmd.Stdin = strings.NewReader(text)
+			if err := cmd.Run(); err == nil {
+				return nil
+			}
+		}
+		if cmd := exec.Command("xsel", "--clipboard", "--input"); cmd != nil {
+			cmd.Stdin = strings.NewReader(text)
+			_ = cmd.Run()
+		}
+	}
+	return nil
+}
+
+// CopySuccessMsg indicates clipboard copy succeeded.
+type CopySuccessMsg struct {
+	Text string
+}
+
+// CopyErrorMsg indicates clipboard copy failed.
+type CopyErrorMsg struct {
+	Err error
+}
+
+// doCopy is a command that copies text to clipboard.
+func doCopy(text string) tea.Cmd {
+	return func() tea.Msg {
+		if err := copyToClipboard(text); err != nil {
+			return CopyErrorMsg{Err: err}
+		}
+		return CopySuccessMsg{Text: text}
+	}
+}
+
+// StatusMessageClearMsg clears the status message.
+type StatusMessageClearMsg struct{}
+
+// disableMouseTracking sends escape sequences to disable mouse tracking.
+// This allows native terminal text selection to work.
+func disableMouseTracking() tea.Msg {
+	// Send escape sequences to disable various mouse modes:
+	// \x1b[?1000l - disable normal tracking
+	// \x1b[?1002l - disable button event tracking
+	// \x1b[?1003l - disable all motion tracking
+	// \x1b[?1006l - disable SGR extended mode
+	fmt.Print("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l")
+	return nil
+}
+
+// enableMouseTracking re-enables mouse tracking.
+func enableMouseTracking() tea.Msg {
+	// Re-enable mouse tracking modes
+	fmt.Print("\x1b[?1003h\x1b[?1006h")
+	return nil
 }

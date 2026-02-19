@@ -17,21 +17,28 @@ func createTestApp() *App {
 	// Create a real RPC client pointing to a non-existent socket
 	rpc := NewRPCClient("/tmp/meept-test-nonexistent.sock")
 	styles := DefaultStyles()
+	clientConfig := DefaultClientConfig()
+
 	app := &App{
-		styles:      styles,
-		rpc:         rpc,
-		currentView: ViewChat,
-		keys:        DefaultKeyMap(),
-		sidebar:     NewSidebarModel(rpc, styles),
-		width:       80,
-		height:      24,
-		projectDir:  "/test/project",
+		styles:       styles,
+		rpc:          rpc,
+		currentView:  ViewChat,
+		keys:         DefaultKeyMap(),
+		sidebar:      NewSidebarModel(rpc, styles),
+		clientConfig: clientConfig,
+		width:        80,
+		height:       24,
+		projectDir:   "/test/project",
+		activeModal:  ModalNone,
 	}
 	// Initialize sub-models
 	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage)
 	app.status = models.NewStatusModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
+	// Create modals
+	app.commandPalette = CommandPaletteModal(styles, clientConfig)
+	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	// Set sizes on sub-models
 	app.chat.SetSize(app.width-2, app.height-4)
 	app.status.SetSize(app.width-2, app.height-4)
@@ -49,7 +56,7 @@ func TestApp_Init(t *testing.T) {
 	}
 }
 
-func TestApp_ViewSwitching_CommandMode(t *testing.T) {
+func TestApp_ViewSwitching_Modal(t *testing.T) {
 	tests := []struct {
 		name         string
 		key          string
@@ -65,9 +72,9 @@ func TestApp_ViewSwitching_CommandMode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			app := createTestApp()
 
-			// Enter command mode
-			app.commandMode = true
-			app.commandModeTime = time.Now()
+			// Open command palette
+			app.activeModal = ModalCommandPalette
+			app.commandPalette.Show()
 
 			// Send the key
 			msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
@@ -77,38 +84,41 @@ func TestApp_ViewSwitching_CommandMode(t *testing.T) {
 			if newApp.currentView != tt.expectedView {
 				t.Errorf("expected view %d, got %d", tt.expectedView, newApp.currentView)
 			}
-			if newApp.commandMode {
-				t.Error("expected command mode to be disabled after key press")
+			if newApp.activeModal != ModalNone {
+				t.Error("expected modal to be closed after selection")
 			}
 		})
 	}
 }
 
-func TestApp_CommandMode_Timeout(t *testing.T) {
+func TestApp_CommandPalette_Open(t *testing.T) {
 	app := createTestApp()
-	app.commandMode = true
-	app.commandModeTime = time.Now().Add(-3 * time.Second) // Simulate timeout passed
 
-	// Send timeout message
-	newModel, _ := app.Update(commandModeTimeoutMsg{})
+	// Send Ctrl+X to open command palette
+	msg := tea.KeyMsg{Type: tea.KeyCtrlX}
+	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
-	if newApp.commandMode {
-		t.Error("expected command mode to be disabled after timeout")
+	if newApp.activeModal != ModalCommandPalette {
+		t.Error("expected command palette to be open")
+	}
+	if !newApp.commandPalette.IsVisible() {
+		t.Error("expected command palette to be visible")
 	}
 }
 
-func TestApp_CommandMode_NoTimeout_RecentActivation(t *testing.T) {
+func TestApp_CommandPalette_EscapeCloses(t *testing.T) {
 	app := createTestApp()
-	app.commandMode = true
-	app.commandModeTime = time.Now() // Just activated
+	app.activeModal = ModalCommandPalette
+	app.commandPalette.Show()
 
-	// Send timeout message (should not timeout yet)
-	newModel, _ := app.Update(commandModeTimeoutMsg{})
+	// Send escape
+	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
-	if !newApp.commandMode {
-		t.Error("expected command mode to still be active (timeout not reached)")
+	if newApp.activeModal != ModalNone {
+		t.Error("expected modal to be closed after escape")
 	}
 }
 
@@ -155,19 +165,6 @@ func TestApp_RenderTabs(t *testing.T) {
 	}
 }
 
-func TestApp_RenderTabs_CommandMode(t *testing.T) {
-	app := createTestApp()
-	app.commandMode = true
-	app.commandModeTime = time.Now()
-
-	tabs := app.renderTabs()
-
-	// Check that command mode indicator is present
-	if !strings.Contains(tabs, "Ctrl+X") {
-		t.Error("expected command mode indicator in tabs")
-	}
-}
-
 func TestApp_RenderStatusBar(t *testing.T) {
 	app := createTestApp()
 
@@ -180,22 +177,6 @@ func TestApp_RenderStatusBar(t *testing.T) {
 	// Disconnected client should show disconnected
 	if !strings.Contains(statusBar, "disconnected") {
 		t.Error("expected disconnected status in status bar")
-	}
-}
-
-func TestApp_RenderStatusBar_CommandMode(t *testing.T) {
-	app := createTestApp()
-	app.commandMode = true
-	app.commandModeTime = time.Now()
-
-	statusBar := app.renderStatusBar()
-
-	// Check that command mode help is shown
-	expectedHints := []string{"Chat", "Status", "Tasks", "Memory", "Sidebar", "Cancel"}
-	for _, hint := range expectedHints {
-		if !strings.Contains(statusBar, hint) {
-			t.Errorf("expected %q hint in command mode status bar", hint)
-		}
 	}
 }
 
@@ -245,10 +226,10 @@ func TestApp_SidebarToggle(t *testing.T) {
 	app := createTestApp()
 	initialVisible := app.sidebar.IsVisible()
 
-	// Enter command mode and toggle sidebar
-	app.commandMode = true
-	app.commandModeTime = time.Now()
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}
+	// Open command palette and toggle sidebar
+	app.activeModal = ModalCommandPalette
+	app.commandPalette.Show()
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")} // 'y' for sidebar in new keybindings
 	app.Update(msg)
 
 	if app.sidebar.IsVisible() == initialVisible {
@@ -256,37 +237,197 @@ func TestApp_SidebarToggle(t *testing.T) {
 	}
 }
 
-func TestApp_EscapeCommandMode(t *testing.T) {
+func TestApp_CopyModeToggle(t *testing.T) {
 	app := createTestApp()
-	app.commandMode = true
-	app.commandModeTime = time.Now()
 
-	// Send escape
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
-	newModel, _ := app.Update(msg)
+	// Open command palette
+	app.activeModal = ModalCommandPalette
+	app.commandPalette.Show()
+
+	// Toggle copy mode with 'c'
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")}
+	newModel, cmd := app.Update(msg)
 	newApp := newModel.(*App)
 
-	if newApp.commandMode {
-		t.Error("expected escape to exit command mode")
+	if !newApp.copyMode {
+		t.Error("expected copy mode to be enabled")
+	}
+	if newApp.activeModal != ModalNone {
+		t.Error("expected modal to be closed")
+	}
+	if cmd == nil {
+		t.Error("expected command to disable mouse")
+	}
+	if newApp.statusMessage == "" {
+		t.Error("expected status message to be set")
 	}
 }
 
-func TestApp_UnknownCommandModeKey(t *testing.T) {
+func TestApp_CopyModeExitOnKeyPress(t *testing.T) {
 	app := createTestApp()
-	app.commandMode = true
-	app.commandModeTime = time.Now()
+	app.copyMode = true
+	app.statusMessage = "Copy mode ON"
 
-	// Send unknown key in command mode
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")}
+	// Any key should exit copy mode
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}
+	newModel, cmd := app.Update(msg)
+	newApp := newModel.(*App)
+
+	if newApp.copyMode {
+		t.Error("expected copy mode to be disabled")
+	}
+	if newApp.statusMessage != "" {
+		t.Error("expected status message to be cleared")
+	}
+	if cmd == nil {
+		t.Error("expected command to re-enable mouse")
+	}
+}
+
+func TestApp_CopySuccessMessage(t *testing.T) {
+	app := createTestApp()
+
+	// Simulate copy success
+	newModel, cmd := app.Update(CopySuccessMsg{Text: "test text"})
+	newApp := newModel.(*App)
+
+	if !strings.Contains(newApp.statusMessage, "Copied") {
+		t.Error("expected status message to contain 'Copied'")
+	}
+	if cmd == nil {
+		t.Error("expected command to clear message after timeout")
+	}
+}
+
+func TestApp_CopySuccessMessageTruncation(t *testing.T) {
+	app := createTestApp()
+
+	// Simulate copy success with long text
+	longText := strings.Repeat("a", 100)
+	newModel, _ := app.Update(CopySuccessMsg{Text: longText})
+	newApp := newModel.(*App)
+
+	if !strings.Contains(newApp.statusMessage, "...") {
+		t.Error("expected long text to be truncated with '...'")
+	}
+}
+
+func TestApp_CopyErrorMessage(t *testing.T) {
+	app := createTestApp()
+
+	// Simulate copy error
+	newModel, cmd := app.Update(CopyErrorMsg{Err: &testError{"copy failed"}})
+	newApp := newModel.(*App)
+
+	if !strings.Contains(newApp.statusMessage, "Copy failed") {
+		t.Error("expected status message to contain error")
+	}
+	if cmd == nil {
+		t.Error("expected command to clear message after timeout")
+	}
+}
+
+func TestApp_StatusMessageClear(t *testing.T) {
+	app := createTestApp()
+	app.statusMessage = "old message"
+	app.statusMessageTime = time.Now().Add(-3 * time.Second) // Simulate timeout
+
+	newModel, _ := app.Update(StatusMessageClearMsg{})
+	newApp := newModel.(*App)
+
+	if newApp.statusMessage != "" {
+		t.Error("expected status message to be cleared")
+	}
+}
+
+func TestApp_StatusMessageNoEarlyClear(t *testing.T) {
+	app := createTestApp()
+	app.statusMessage = "recent message"
+	app.statusMessageTime = time.Now() // Just set
+
+	newModel, _ := app.Update(StatusMessageClearMsg{})
+	newApp := newModel.(*App)
+
+	if newApp.statusMessage != "recent message" {
+		t.Error("expected status message to remain (timeout not reached)")
+	}
+}
+
+func TestApp_RenderStatusBar_CopyMode(t *testing.T) {
+	app := createTestApp()
+	app.copyMode = true
+
+	statusBar := app.renderStatusBar()
+
+	if !strings.Contains(statusBar, "COPY MODE") {
+		t.Error("expected COPY MODE indicator in status bar")
+	}
+	if !strings.Contains(statusBar, "Select text") {
+		t.Error("expected selection hint in status bar")
+	}
+}
+
+func TestApp_RenderStatusBar_WithStatusMessage(t *testing.T) {
+	app := createTestApp()
+	app.statusMessage = "Test status message"
+	app.statusMessageTime = time.Now()
+
+	statusBar := app.renderStatusBar()
+
+	if !strings.Contains(statusBar, "Test status message") {
+		t.Error("expected status message in status bar")
+	}
+}
+
+func TestApp_RenderStatusBar_ShiftDragHint(t *testing.T) {
+	app := createTestApp()
+
+	statusBar := app.renderStatusBar()
+
+	if !strings.Contains(statusBar, "Shift+drag") {
+		t.Error("expected Shift+drag hint in status bar")
+	}
+}
+
+func TestApp_HandleCopyToClipboardMsg(t *testing.T) {
+	app := createTestApp()
+
+	// Send CopyToClipboardMsg
+	_, cmd := app.Update(models.CopyToClipboardMsg{Text: "test content"})
+
+	if cmd == nil {
+		t.Error("expected copy command to be returned")
+	}
+}
+
+func TestApp_ModalOverlayRendering(t *testing.T) {
+	app := createTestApp()
+	app.activeModal = ModalCommandPalette
+	app.commandPalette.Show()
+
+	// When modal is active, View() should return modal overlay
+	view := app.View()
+
+	// Should contain modal content
+	if !strings.Contains(view, "Command Palette") {
+		t.Error("expected modal content in view when modal is active")
+	}
+}
+
+func TestApp_SessionPickerModal(t *testing.T) {
+	app := createTestApp()
+
+	// Open command palette first
+	app.activeModal = ModalCommandPalette
+	app.commandPalette.Show()
+
+	// Press 's' to open session picker
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
-	if newApp.commandMode {
-		t.Error("expected unknown key to exit command mode")
-	}
-	// View should remain unchanged
-	if newApp.currentView != ViewChat {
-		t.Error("expected view to remain unchanged")
+	if newApp.activeModal != ModalSessionPicker {
+		t.Error("expected session picker to be open")
 	}
 }
 
@@ -317,8 +458,8 @@ func TestApp_WithTeatest_BasicRender(t *testing.T) {
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
-// TestApp_WithTeatest_ViewSwitch demonstrates switching views with teatest.
-func TestApp_WithTeatest_ViewSwitch(t *testing.T) {
+// TestApp_WithTeatest_CommandPalette demonstrates opening command palette with teatest.
+func TestApp_WithTeatest_CommandPalette(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping teatest in short mode")
 	}
@@ -327,19 +468,14 @@ func TestApp_WithTeatest_ViewSwitch(t *testing.T) {
 
 	tm := teatest.NewTestModel(t, app, teatest.WithInitialTermSize(80, 24))
 
-	// Enter command mode
+	// Open command palette with Ctrl+X
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlX})
 
-	// Small delay for command mode to activate
-	time.Sleep(50 * time.Millisecond)
-
-	// Switch to status view
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
-
-	// Wait for status view indicators
+	// Wait for command palette to appear
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 		s := string(out)
-		return strings.Contains(s, "Status") || strings.Contains(s, "Loading")
+		return strings.Contains(s, "Command Palette") ||
+			strings.Contains(s, "Chat") // Modal content
 	}, teatest.WithDuration(2*time.Second))
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})

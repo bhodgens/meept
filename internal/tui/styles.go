@@ -64,6 +64,13 @@ type Styles struct {
 	// Progress bar
 	ProgressBar  lipgloss.Style
 	ProgressFull lipgloss.Style
+
+	// Modal styles
+	ModalOverlay      lipgloss.Style
+	ModalBox          lipgloss.Style
+	ModalTitle        lipgloss.Style
+	ModalItem         lipgloss.Style
+	ModalItemSelected lipgloss.Style
 }
 
 // DefaultStyles returns the default style set.
@@ -198,6 +205,31 @@ func DefaultStyles() *Styles {
 
 	s.ProgressFull = lipgloss.NewStyle().
 		Background(ColorPrimary)
+
+	// Modal styles
+	s.ModalOverlay = lipgloss.NewStyle().
+		Background(lipgloss.Color("#000000"))
+
+	s.ModalBox = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorAccent).
+		Padding(1, 2).
+		Background(lipgloss.Color("#1F2937"))
+
+	s.ModalTitle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(ColorAccent).
+		MarginBottom(1)
+
+	s.ModalItem = lipgloss.NewStyle().
+		PaddingLeft(2).
+		Foreground(ColorForeground)
+
+	s.ModalItemSelected = lipgloss.NewStyle().
+		PaddingLeft(2).
+		Background(lipgloss.Color("#374151")).
+		Foreground(ColorAccent).
+		Bold(true)
 
 	return s
 }
