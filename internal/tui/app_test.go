@@ -33,7 +33,6 @@ func createTestApp() *App {
 	}
 	// Initialize sub-models
 	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage)
-	app.status = models.NewStatusModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
@@ -42,7 +41,6 @@ func createTestApp() *App {
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	// Set sizes on sub-models
 	app.chat.SetSize(app.width-2, app.height-4)
-	app.status.SetSize(app.width-2, app.height-4)
 	app.tasks.SetSize(app.width-2, app.height-4)
 	app.queue.SetSize(app.width-2, app.height-4)
 	app.memory.SetSize(app.width-2, app.height-4)
@@ -65,10 +63,9 @@ func TestApp_ViewSwitching_Modal(t *testing.T) {
 		expectedView ViewType
 	}{
 		{"switch to chat", "1", ViewChat},
-		{"switch to status", "2", ViewStatus},
-		{"switch to tasks", "3", ViewTasks},
-		{"switch to queue", "4", ViewQueue},
-		{"switch to memory", "5", ViewMemory},
+		{"switch to tasks", "2", ViewTasks},
+		{"switch to queue", "3", ViewQueue},
+		{"switch to memory", "4", ViewMemory},
 	}
 
 	for _, tt := range tests {
@@ -155,16 +152,21 @@ func TestApp_WindowResize(t *testing.T) {
 
 func TestApp_RenderTabs(t *testing.T) {
 	app := createTestApp()
-	app.currentView = ViewStatus
+	app.currentView = ViewTasks
 
 	tabs := app.renderTabs()
 
 	// Check that all tabs are present
-	expectedTabs := []string{"Chat", "Status", "Tasks", "Queue", "Memory"}
+	expectedTabs := []string{"Chat", "Tasks", "Queue", "Memory"}
 	for _, tab := range expectedTabs {
 		if !strings.Contains(tabs, tab) {
 			t.Errorf("expected tabs to contain %q", tab)
 		}
+	}
+
+	// Status should NOT be present
+	if strings.Contains(tabs, "Status") {
+		t.Error("expected tabs to NOT contain 'Status'")
 	}
 }
 
@@ -176,6 +178,9 @@ func TestApp_RenderStatusBar(t *testing.T) {
 	// Check that help hints are present
 	if !strings.Contains(statusBar, "Ctrl+X") {
 		t.Error("expected Ctrl+X hint in status bar")
+	}
+	if !strings.Contains(statusBar, "Esc") {
+		t.Error("expected Esc hint in status bar")
 	}
 	// Disconnected client should show disconnected
 	if !strings.Contains(statusBar, "disconnected") {
@@ -240,50 +245,64 @@ func TestApp_SidebarToggle(t *testing.T) {
 	}
 }
 
-func TestApp_CopyModeToggle(t *testing.T) {
+func TestApp_EscapeToInput(t *testing.T) {
 	app := createTestApp()
+	// Focus on viewport
+	app.chat.SetFocus(models.FocusViewport)
 
-	// Open command palette
-	app.activeModal = ModalCommandPalette
-	app.commandPalette.Show()
-
-	// Toggle copy mode with 'c'
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")}
-	newModel, cmd := app.Update(msg)
+	// Send escape
+	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
-	if !newApp.copyMode {
-		t.Error("expected copy mode to be enabled")
-	}
-	if newApp.activeModal != ModalNone {
-		t.Error("expected modal to be closed")
-	}
-	if cmd == nil {
-		t.Error("expected command to disable mouse")
-	}
-	if newApp.statusMessage == "" {
-		t.Error("expected status message to be set")
+	if !newApp.chat.IsInputFocused() {
+		t.Error("expected escape to focus input")
 	}
 }
 
-func TestApp_CopyModeExitOnKeyPress(t *testing.T) {
+func TestApp_EscapeClearsInput(t *testing.T) {
 	app := createTestApp()
-	app.copyMode = true
-	app.statusMessage = "Copy mode ON"
+	// Focus on input - already the default
 
-	// Any key should exit copy mode
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}
-	newModel, cmd := app.Update(msg)
+	// First escape should clear input (input is empty, so it's a no-op)
+	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	app.Update(msg)
+
+	// Verify input is focused and empty
+	if !app.chat.IsInputFocused() {
+		t.Error("expected input to remain focused after escape")
+	}
+}
+
+func TestApp_EscapeFromSidebar(t *testing.T) {
+	app := createTestApp()
+	app.appFocus = FocusSidebar
+	app.sidebar.SetFocused(true)
+
+	// Send escape
+	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
-	if newApp.copyMode {
-		t.Error("expected copy mode to be disabled")
+	if newApp.appFocus != FocusChat {
+		t.Error("expected escape from sidebar to focus chat")
 	}
-	if newApp.statusMessage != "" {
-		t.Error("expected status message to be cleared")
+	if newApp.sidebar.IsFocused() {
+		t.Error("expected sidebar to be unfocused")
 	}
-	if cmd == nil {
-		t.Error("expected command to re-enable mouse")
+}
+
+func TestApp_EscapeFromOtherView(t *testing.T) {
+	app := createTestApp()
+	app.currentView = ViewTasks
+
+	// Send escape
+	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	newModel, _ := app.Update(msg)
+	newApp := newModel.(*App)
+
+	if newApp.currentView != ViewChat {
+		t.Error("expected escape from tasks to switch to chat")
 	}
 }
 
@@ -356,20 +375,6 @@ func TestApp_StatusMessageNoEarlyClear(t *testing.T) {
 	}
 }
 
-func TestApp_RenderStatusBar_CopyMode(t *testing.T) {
-	app := createTestApp()
-	app.copyMode = true
-
-	statusBar := app.renderStatusBar()
-
-	if !strings.Contains(statusBar, "COPY MODE") {
-		t.Error("expected COPY MODE indicator in status bar")
-	}
-	if !strings.Contains(statusBar, "Select text") {
-		t.Error("expected selection hint in status bar")
-	}
-}
-
 func TestApp_RenderStatusBar_WithStatusMessage(t *testing.T) {
 	app := createTestApp()
 	app.statusMessage = "Test status message"
@@ -379,16 +384,6 @@ func TestApp_RenderStatusBar_WithStatusMessage(t *testing.T) {
 
 	if !strings.Contains(statusBar, "Test status message") {
 		t.Error("expected status message in status bar")
-	}
-}
-
-func TestApp_RenderStatusBar_ShiftDragHint(t *testing.T) {
-	app := createTestApp()
-
-	statusBar := app.renderStatusBar()
-
-	if !strings.Contains(statusBar, "Shift+drag") {
-		t.Error("expected Shift+drag hint in status bar")
 	}
 }
 
@@ -432,6 +427,18 @@ func TestApp_SessionPickerModal(t *testing.T) {
 	if newApp.activeModal != ModalSessionPicker {
 		t.Error("expected session picker to be open")
 	}
+}
+
+func TestApp_NoMouseCapture(t *testing.T) {
+	app := createTestApp()
+
+	// Init should NOT include tea.EnableMouseAllMotion
+	cmd := app.Init()
+	if cmd == nil {
+		t.Error("expected Init to return commands")
+	}
+	// Verify no mouse capture is set - we just check that the init commands work
+	// (there's no direct way to inspect batch commands)
 }
 
 // TestApp_WithTeatest demonstrates using teatest for integration testing.

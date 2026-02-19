@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/caimlas/meept/internal/tui/types"
 )
 
 // MockChatRPCClient implements RPCClient for chat testing.
@@ -15,13 +17,21 @@ type MockChatRPCClient struct {
 	ChatResponse string
 	ChatError    error
 	ChatCalls    []string // Records messages sent
+
+	// Message persistence tracking
+	SavedMessages      map[string][]types.SessionMessage
+	GetMessagesResp    *types.SessionMessagesResponse
+	GetMessagesErr     error
+	UpdatedDescriptions map[string]string
 }
 
 func NewMockChatRPCClient() *MockChatRPCClient {
 	return &MockChatRPCClient{
-		connected:    true,
-		ChatResponse: "Hello! How can I help you?",
-		ChatCalls:    make([]string, 0),
+		connected:           true,
+		ChatResponse:        "Hello! How can I help you?",
+		ChatCalls:           make([]string, 0),
+		SavedMessages:       make(map[string][]types.SessionMessage),
+		UpdatedDescriptions: make(map[string]string),
 	}
 }
 
@@ -38,6 +48,26 @@ func (m *MockChatRPCClient) Chat(message, conversationID string) (string, error)
 
 func (m *MockChatRPCClient) IsConnected() bool {
 	return m.connected
+}
+
+func (m *MockChatRPCClient) SaveSessionMessages(sessionID string, msgs []types.SessionMessage) error {
+	m.SavedMessages[sessionID] = append(m.SavedMessages[sessionID], msgs...)
+	return nil
+}
+
+func (m *MockChatRPCClient) GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error) {
+	if m.GetMessagesErr != nil {
+		return nil, m.GetMessagesErr
+	}
+	if m.GetMessagesResp != nil {
+		return m.GetMessagesResp, nil
+	}
+	return &types.SessionMessagesResponse{Messages: nil, Total: 0}, nil
+}
+
+func (m *MockChatRPCClient) UpdateSessionDescription(sessionID, description string) error {
+	m.UpdatedDescriptions[sessionID] = description
+	return nil
 }
 
 func newTestChatModel() *ChatModel {
@@ -65,6 +95,15 @@ func TestChatModel_NewChatModel(t *testing.T) {
 	}
 	if model.pendingMsgIdx != -1 {
 		t.Error("expected no pending message initially")
+	}
+	if model.sessionMessages == nil {
+		t.Error("expected sessionMessages map to be initialized")
+	}
+	if model.sessionHistory == nil {
+		t.Error("expected sessionHistory map to be initialized")
+	}
+	if model.dirtyMessages == nil {
+		t.Error("expected dirtyMessages map to be initialized")
 	}
 }
 
@@ -103,6 +142,10 @@ func TestChatModel_SendMessage(t *testing.T) {
 	model := NewChatModel(mock, userStyle, userStyle, userStyle)
 	model.SetSize(80, 24)
 	model.Init()
+
+	// Set a session so history tracking works
+	session := &types.Session{ID: "sess-1", Name: "Test", ConversationID: "conv-1"}
+	model.SetSession(session)
 
 	// Type a message
 	model.textarea.SetValue("Hello world")
@@ -149,6 +192,11 @@ func TestChatModel_SendMessage(t *testing.T) {
 	if model.textarea.Value() != "" {
 		t.Error("expected textarea to be cleared after send")
 	}
+
+	// Check dirty messages were tracked
+	if len(model.dirtyMessages["sess-1"]) != 1 {
+		t.Errorf("expected 1 dirty message, got %d", len(model.dirtyMessages["sess-1"]))
+	}
 }
 
 func TestChatModel_SendEmptyMessage(t *testing.T) {
@@ -187,6 +235,7 @@ func TestChatModel_ReceiveResponse(t *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)
 	model.Init()
+	model.sessionID = "sess-1"
 	model.loading = true
 	model.pendingMsgIdx = len(model.messages)
 	model.messages = append(model.messages, ChatMessage{
@@ -316,59 +365,78 @@ func TestChatModel_SetFocus(t *testing.T) {
 	}
 }
 
-func TestChatModel_InputHistory(t *testing.T) {
+func TestChatModel_InputHistory_PerSession(t *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)
 	model.Init()
 
-	// Add to history
+	// Set session 1
+	session1 := &types.Session{ID: "sess-1", Name: "Session 1", ConversationID: "conv-1"}
+	model.SetSession(session1)
+
+	// Add to history in session 1
 	model.addToHistory("first message")
 	model.addToHistory("second message")
-	model.addToHistory("third message")
 
-	if len(model.inputHistory) != 3 {
-		t.Errorf("expected 3 history items, got %d", len(model.inputHistory))
+	history1 := model.sessionHistory["sess-1"]
+	if len(history1) != 2 {
+		t.Errorf("expected 2 history items in sess-1, got %d", len(history1))
 	}
 
-	// Navigate up through history
+	// Switch to session 2
+	session2 := &types.Session{ID: "sess-2", Name: "Session 2", ConversationID: "conv-2"}
+	model.SetSession(session2)
+
+	// Add to history in session 2
+	model.addToHistory("session 2 message")
+
+	history2 := model.sessionHistory["sess-2"]
+	if len(history2) != 1 {
+		t.Errorf("expected 1 history item in sess-2, got %d", len(history2))
+	}
+
+	// Verify session 1 history is preserved
+	history1 = model.sessionHistory["sess-1"]
+	if len(history1) != 2 {
+		t.Errorf("expected session 1 history to be preserved, got %d items", len(history1))
+	}
+
+	// Navigate history in session 2
 	model.navigateHistory(-1)
-	if model.historyIdx != 2 {
-		t.Errorf("expected historyIdx 2, got %d", model.historyIdx)
+	if model.historyIdx != 0 {
+		t.Errorf("expected historyIdx 0, got %d", model.historyIdx)
 	}
-	if model.textarea.Value() != "third message" {
-		t.Errorf("expected 'third message', got '%s'", model.textarea.Value())
+	if model.textarea.Value() != "session 2 message" {
+		t.Errorf("expected 'session 2 message', got '%s'", model.textarea.Value())
 	}
 
+	// Switch back to session 1 and navigate
+	model.SetSession(session1)
 	model.navigateHistory(-1)
 	if model.textarea.Value() != "second message" {
 		t.Errorf("expected 'second message', got '%s'", model.textarea.Value())
-	}
-
-	// Navigate down
-	model.navigateHistory(1)
-	if model.textarea.Value() != "third message" {
-		t.Errorf("expected 'third message', got '%s'", model.textarea.Value())
 	}
 }
 
 func TestChatModel_InputHistoryDuplicates(t *testing.T) {
 	model := newTestChatModel()
+	model.sessionID = "sess-1"
 
 	model.addToHistory("same message")
 	model.addToHistory("same message")
 
-	if len(model.inputHistory) != 1 {
-		t.Errorf("expected 1 history item (no duplicates), got %d", len(model.inputHistory))
+	if len(model.sessionHistory["sess-1"]) != 1 {
+		t.Errorf("expected 1 history item (no duplicates), got %d", len(model.sessionHistory["sess-1"]))
 	}
 }
 
 func TestChatModel_InputHistoryEmpty(t *testing.T) {
 	model := newTestChatModel()
+	model.sessionID = "sess-1"
 
-	initialLen := len(model.inputHistory)
 	model.addToHistory("")
 
-	if len(model.inputHistory) != initialLen {
+	if len(model.sessionHistory["sess-1"]) != 0 {
 		t.Error("expected empty string not to be added to history")
 	}
 }
@@ -401,64 +469,92 @@ func TestChatModel_View(t *testing.T) {
 	if view == "" {
 		t.Error("expected non-empty view")
 	}
+
+	// Should contain the session header
+	if !strings.Contains(view, "New Session") {
+		t.Error("expected 'New Session' in header when no description")
+	}
 }
 
-func TestChatModel_ViewWithContextMenu(t *testing.T) {
+func TestChatModel_ViewWithDescription(t *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)
 	model.Init()
-	model.addMessage("user", "test message")
-	model.selectedMsgIdx = 1
-	model.showContextMenu = true
+	model.sessionDescription = "Test Description"
 
 	view := model.View()
-
-	// Should contain context menu
-	if !strings.Contains(view, "Copy") {
-		t.Error("expected context menu in view")
+	if !strings.Contains(view, "Test Description") {
+		t.Error("expected session description in header")
 	}
 }
 
-func TestChatModel_HandleContextMenuKey(t *testing.T) {
-	model := newTestChatModel()
-	model.SetSize(80, 24)
-	model.Init()
-	model.addMessage("user", "test message")
-	model.selectedMsgIdx = 1
-	model.showContextMenu = true
-
-	// Press escape to close menu
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("esc")}
-	model.handleContextMenuKey(msg)
-
-	if model.showContextMenu {
-		t.Error("expected context menu to be closed")
-	}
-}
-
-func TestChatModel_ExpandCollapseMessage(t *testing.T) {
+func TestChatModel_ExpandMessage(t *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)
 	model.Init()
 	model.addMessage("assistant", strings.Repeat("long message\n", 20))
+	model.SetFocus(FocusViewport)
 	model.selectedMsgIdx = 1
-	model.showContextMenu = true
 
-	// Expand message
+	// Expand message via 'e' key in viewport
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")}
-	model.handleContextMenuKey(msg)
+	model.Update(msg)
 
 	if model.messages[1].State != MessageExpanded {
 		t.Error("expected message to be expanded")
 	}
+}
 
-	// Collapse message
-	model.showContextMenu = true
-	msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}
-	model.handleContextMenuKey(msg)
+func TestChatModel_CopySelectedMessage(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+	model.Init()
+	model.addMessage("user", "copy this text")
+	model.SetFocus(FocusViewport)
+	model.selectedMsgIdx = 1
 
-	if model.messages[1].State != MessageCollapsed {
-		t.Error("expected message to be collapsed")
+	// Press 'c' to copy
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")}
+	cmd := model.Update(msg)
+
+	if cmd == nil {
+		t.Error("expected copy command to be returned")
+	}
+	if model.selectedMsgIdx != -1 {
+		t.Error("expected message to be deselected after copy")
+	}
+}
+
+func TestChatModel_MessageSelection(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+	model.Init()
+	model.addMessage("user", "msg1")
+	model.addMessage("assistant", "msg2")
+	model.SetFocus(FocusViewport)
+
+	// Select first message with down
+	model.selectNextMessage()
+	if model.selectedMsgIdx != 0 {
+		t.Errorf("expected selectedMsgIdx 0, got %d", model.selectedMsgIdx)
+	}
+
+	// Move to next
+	model.selectNextMessage()
+	if model.selectedMsgIdx != 1 {
+		t.Errorf("expected selectedMsgIdx 1, got %d", model.selectedMsgIdx)
+	}
+
+	// Move to next (includes the welcome message at 0, user at 1, assistant at 2)
+	model.selectNextMessage()
+	if model.selectedMsgIdx != 2 {
+		t.Errorf("expected selectedMsgIdx 2, got %d", model.selectedMsgIdx)
+	}
+
+	// Move back up
+	model.selectPreviousMessage()
+	if model.selectedMsgIdx != 1 {
+		t.Errorf("expected selectedMsgIdx 1, got %d", model.selectedMsgIdx)
 	}
 }
 
@@ -469,6 +565,7 @@ func TestChatModel_Reset(t *testing.T) {
 	model.addMessage("user", "test")
 	model.textarea.SetValue("unsent text")
 	model.selectedMsgIdx = 1
+	model.sessionDescription = "test desc"
 	originalConvID := model.conversationID
 
 	model.Reset()
@@ -485,6 +582,9 @@ func TestChatModel_Reset(t *testing.T) {
 	if model.conversationID == originalConvID {
 		t.Error("expected new conversation ID")
 	}
+	if model.sessionDescription != "" {
+		t.Error("expected session description to be cleared")
+	}
 }
 
 func TestChatModel_ViewportNavigation(t *testing.T) {
@@ -492,7 +592,7 @@ func TestChatModel_ViewportNavigation(t *testing.T) {
 	model.SetSize(80, 24)
 	model.SetFocus(FocusViewport)
 
-	// Test up/down navigation
+	// Test up/down navigation (now selects messages)
 	upMsg := tea.KeyMsg{Type: tea.KeyUp}
 	model.Update(upMsg)
 
@@ -509,41 +609,118 @@ func TestChatModel_ViewportNavigation(t *testing.T) {
 	// No assertions needed - just checking no panics
 }
 
-func TestChatModel_EscapeDeselects(t *testing.T) {
+func TestChatModel_HandleEscape_DeselectsMessage(t *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)
 	model.Init()
 	model.addMessage("user", "test")
 	model.selectedMsgIdx = 1
-	model.hasTextSelection = true
 
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
-	model.Update(msg)
+	model.HandleEscape()
 
 	if model.selectedMsgIdx != -1 {
 		t.Error("expected selection to be cleared")
 	}
-	if model.hasTextSelection {
-		t.Error("expected text selection to be cleared")
-	}
 }
 
-func TestChatModel_EscapeResetsHistory(t *testing.T) {
+func TestChatModel_HandleEscape_ResetsHistory(t *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)
-	model.addToHistory("old message")
+	model.sessionID = "sess-1"
+	model.sessionHistory["sess-1"] = []string{"old message"}
 	model.savedInput = "current input"
 	model.historyIdx = 0
 	model.textarea.SetValue("old message")
 
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
-	model.Update(msg)
+	model.HandleEscape()
 
 	if model.historyIdx != -1 {
 		t.Error("expected history index to be reset")
 	}
 	if model.textarea.Value() != "current input" {
 		t.Error("expected textarea to restore saved input")
+	}
+}
+
+func TestChatModel_HandleEscape_FocusesInput(t *testing.T) {
+	model := newTestChatModel()
+	model.SetFocus(FocusViewport)
+
+	model.HandleEscape()
+
+	if model.focused != FocusInput {
+		t.Error("expected focus to return to input")
+	}
+}
+
+func TestChatModel_HandleEscape_ClearsInput(t *testing.T) {
+	model := newTestChatModel()
+	model.SetFocus(FocusInput)
+	model.textarea.SetValue("some text")
+
+	model.HandleEscape()
+
+	if model.textarea.Value() != "" {
+		t.Error("expected input to be cleared")
+	}
+}
+
+func TestChatModel_SessionPersistence(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	// Set session 1 and add messages
+	session1 := &types.Session{ID: "sess-1", Name: "Session 1", ConversationID: "conv-1"}
+	model.SetSession(session1)
+	model.addMessage("user", "hello from session 1")
+	model.addMessage("assistant", "reply in session 1")
+
+	// Switch to session 2
+	session2 := &types.Session{ID: "sess-2", Name: "Session 2", ConversationID: "conv-2"}
+	model.SetSession(session2)
+
+	// Session 2 should start empty
+	if len(model.messages) != 0 {
+		t.Errorf("expected 0 messages in new session, got %d", len(model.messages))
+	}
+
+	// Add messages to session 2
+	model.addMessage("user", "hello from session 2")
+
+	// Switch back to session 1
+	model.SetSession(session1)
+
+	// Session 1 messages should be restored
+	if len(model.messages) != 2 {
+		t.Errorf("expected 2 messages restored for session 1, got %d", len(model.messages))
+	}
+	if model.messages[0].Content != "hello from session 1" {
+		t.Error("expected first message to be 'hello from session 1'")
+	}
+
+	// Switch back to session 2
+	model.SetSession(session2)
+
+	// Session 2 messages should be restored
+	if len(model.messages) != 1 {
+		t.Errorf("expected 1 message restored for session 2, got %d", len(model.messages))
+	}
+	if model.messages[0].Content != "hello from session 2" {
+		t.Error("expected message to be 'hello from session 2'")
+	}
+}
+
+func TestChatModel_IsInputFocused(t *testing.T) {
+	model := newTestChatModel()
+
+	model.SetFocus(FocusInput)
+	if !model.IsInputFocused() {
+		t.Error("expected IsInputFocused true when focused on input")
+	}
+
+	model.SetFocus(FocusViewport)
+	if model.IsInputFocused() {
+		t.Error("expected IsInputFocused false when focused on viewport")
 	}
 }
 
@@ -588,6 +765,194 @@ func TestChatModel_FormatMessage(t *testing.T) {
 				t.Errorf("expected ~%d lines, got %d", tt.expected, lines)
 			}
 		})
+	}
+}
+
+func TestChatModel_ExtractDescription(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Hello how are you doing today", "Hello how are you doing today"},
+		{"This is a very long sentence with many words that should be truncated", "This is a very long sentence with..."},
+		{"Short", "Short"},
+		{"One two three", "One two three"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := extractDescription(tt.input)
+			if result != tt.expected {
+				t.Errorf("extractDescription(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestChatModel_AutoDescription(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	userStyle := lipgloss.NewStyle()
+	model := NewChatModel(mock, userStyle, userStyle, userStyle)
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+
+	// Add first user message
+	model.addMessage("user", "What is the weather like today")
+	model.loading = true
+	model.pendingMsgIdx = len(model.messages)
+	model.messages = append(model.messages, ChatMessage{Role: "pending", Content: "Sending..."})
+
+	// Receive first response - should trigger auto-description
+	responseMsg := ChatResponseMsg{Reply: "The weather is sunny!", Err: nil}
+	cmd := model.Update(responseMsg)
+
+	if model.sessionDescription == "" {
+		t.Error("expected session description to be generated")
+	}
+	if !strings.Contains(model.sessionDescription, "What is the weather") {
+		t.Errorf("expected description from first message, got %q", model.sessionDescription)
+	}
+	if cmd == nil {
+		t.Error("expected command batch (flush + description)")
+	}
+}
+
+func TestChatModel_NoAutoDescriptionOnSecondExchange(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	userStyle := lipgloss.NewStyle()
+	model := NewChatModel(mock, userStyle, userStyle, userStyle)
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+	model.sessionDescription = "Already set"
+
+	// Add two exchanges
+	model.addMessage("user", "First message")
+	model.addMessage("assistant", "First response")
+	model.addMessage("user", "Second message")
+	model.loading = true
+	model.pendingMsgIdx = len(model.messages)
+	model.messages = append(model.messages, ChatMessage{Role: "pending", Content: "Sending..."})
+
+	responseMsg := ChatResponseMsg{Reply: "Second response", Err: nil}
+	model.Update(responseMsg)
+
+	// Description should remain unchanged
+	if model.sessionDescription != "Already set" {
+		t.Error("expected description not to change on subsequent exchanges")
+	}
+}
+
+func TestChatModel_FlushMessages(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	userStyle := lipgloss.NewStyle()
+	model := NewChatModel(mock, userStyle, userStyle, userStyle)
+	model.SetSize(80, 24)
+	model.sessionID = "sess-1"
+
+	// Track some dirty messages
+	model.trackDirtyMessage("user", "hello")
+	model.trackDirtyMessage("assistant", "hi there")
+
+	if len(model.dirtyMessages["sess-1"]) != 2 {
+		t.Errorf("expected 2 dirty messages, got %d", len(model.dirtyMessages["sess-1"]))
+	}
+
+	// Flush
+	cmd := model.flushMessages()
+	if cmd == nil {
+		t.Error("expected flush command")
+	}
+
+	// After calling flushMessages, dirty buffer should be cleared
+	if len(model.dirtyMessages["sess-1"]) != 0 {
+		t.Errorf("expected dirty messages to be cleared, got %d", len(model.dirtyMessages["sess-1"]))
+	}
+
+	// Execute the command
+	msg := cmd()
+	result, ok := msg.(FlushResultMsg)
+	if !ok {
+		t.Fatalf("expected FlushResultMsg, got %T", msg)
+	}
+	if result.Err != nil {
+		t.Errorf("expected no error, got %v", result.Err)
+	}
+
+	// Check mock received the messages
+	if len(mock.SavedMessages["sess-1"]) != 2 {
+		t.Errorf("expected 2 saved messages, got %d", len(mock.SavedMessages["sess-1"]))
+	}
+}
+
+func TestChatModel_SessionLoadFromServer(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	// Populate server response in mock
+	mock := model.rpc.(*MockChatRPCClient)
+	mock.GetMessagesResp = &types.SessionMessagesResponse{
+		Messages: []types.SessionMessage{
+			{ID: 1, SessionID: "sess-1", Role: "user", Content: "saved user msg", Timestamp: "2026-01-01T00:00:00Z"},
+			{ID: 2, SessionID: "sess-1", Role: "assistant", Content: "saved assistant msg", Timestamp: "2026-01-01T00:01:00Z"},
+		},
+		Total: 2,
+	}
+
+	// Switch to session - should trigger server load
+	session := &types.Session{ID: "sess-1", Name: "Test", ConversationID: "conv-1"}
+	cmd := model.SetSession(session)
+
+	if cmd == nil {
+		t.Fatal("expected command to load messages from server")
+	}
+
+	// Execute the command
+	msg := cmd()
+	loadedMsg, ok := msg.(SessionMessagesLoadedMsg)
+	if !ok {
+		t.Fatalf("expected SessionMessagesLoadedMsg, got %T", msg)
+	}
+
+	if loadedMsg.Err != nil {
+		t.Fatalf("expected no error, got %v", loadedMsg.Err)
+	}
+	if len(loadedMsg.Messages) != 2 {
+		t.Errorf("expected 2 messages, got %d", len(loadedMsg.Messages))
+	}
+
+	// Feed the loaded message back to the model
+	model.Update(loadedMsg)
+
+	// Check messages were loaded
+	if len(model.messages) != 2 {
+		t.Errorf("expected 2 messages after load, got %d", len(model.messages))
+	}
+	if model.messages[0].Content != "saved user msg" {
+		t.Error("expected first message to be 'saved user msg'")
+	}
+
+	// Check history was populated
+	if len(model.sessionHistory["sess-1"]) != 1 {
+		t.Errorf("expected 1 history entry from loaded user message, got %d", len(model.sessionHistory["sess-1"]))
+	}
+}
+
+func TestChatModel_OrangeHeader(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	// Default: "New Session"
+	view := model.View()
+	if !strings.Contains(view, "New Session") {
+		t.Error("expected 'New Session' in header")
+	}
+
+	// With description
+	model.sessionDescription = "My Chat Topic"
+	view = model.View()
+	if !strings.Contains(view, "My Chat Topic") {
+		t.Error("expected description in header")
 	}
 }
 

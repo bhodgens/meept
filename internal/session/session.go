@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -16,19 +17,21 @@ import (
 // Session represents an active conversation session that can be shared
 // by multiple clients.
 type Session struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	ConversationID string    `json:"conversation_id"`
-	CreatedAt      time.Time `json:"created_at"`
-	LastActivity   time.Time `json:"last_activity"`
-	AttachedClients []string `json:"attached_clients"`
-	WorkerIDs      []string  `json:"worker_ids,omitempty"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description,omitempty"`
+	ConversationID  string    `json:"conversation_id"`
+	CreatedAt       time.Time `json:"created_at"`
+	LastActivity    time.Time `json:"last_activity"`
+	AttachedClients []string  `json:"attached_clients"`
+	WorkerIDs       []string  `json:"worker_ids,omitempty"`
 }
 
 // MemoryStore manages sessions with thread-safe operations (in-memory, non-persistent).
 type MemoryStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
+	messages map[string][]Message // sessionID -> messages
 	logger   *slog.Logger
 }
 
@@ -40,6 +43,7 @@ func NewStore(logger *slog.Logger) *MemoryStore {
 	}
 	return &MemoryStore{
 		sessions: make(map[string]*Session),
+		messages: make(map[string][]Message),
 		logger:   logger,
 	}
 }
@@ -104,15 +108,32 @@ func (s *MemoryStore) GetMostRecent() *Session {
 	return mostRecent
 }
 
-// List returns all sessions.
+// List returns all sessions that have assistant responses.
 func (s *MemoryStore) List() []*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	sessions := make([]*Session, 0, len(s.sessions))
 	for _, session := range s.sessions {
-		sessions = append(sessions, session)
+		// Filter: only include sessions with at least one assistant message
+		msgs := s.messages[session.ID]
+		hasResponse := false
+		for _, msg := range msgs {
+			if msg.Role == "assistant" {
+				hasResponse = true
+				break
+			}
+		}
+		if hasResponse {
+			sessions = append(sessions, session)
+		}
 	}
+
+	// Sort by last activity descending
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+	})
+
 	return sessions
 }
 
@@ -126,6 +147,7 @@ func (s *MemoryStore) Delete(id string) bool {
 	}
 
 	delete(s.sessions, id)
+	delete(s.messages, id)
 	s.logger.Info("Session deleted", "id", id)
 	return true
 }
@@ -227,6 +249,76 @@ func (s *MemoryStore) RemoveWorker(sessionID, workerID string) error {
 	return nil
 }
 
+// SaveMessages batch-inserts messages for a session.
+func (s *MemoryStore) SaveMessages(sessionID string, messages []Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.sessions[sessionID]; !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	existing := s.messages[sessionID]
+	nextID := int64(len(existing) + 1)
+	for i := range messages {
+		messages[i].ID = nextID + int64(i)
+		messages[i].SessionID = sessionID
+	}
+	s.messages[sessionID] = append(existing, messages...)
+	return nil
+}
+
+// GetMessages retrieves messages for a session with pagination.
+func (s *MemoryStore) GetMessages(sessionID string, offset, limit int) ([]Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	msgs := s.messages[sessionID]
+	if offset >= len(msgs) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(msgs) {
+		end = len(msgs)
+	}
+	result := make([]Message, end-offset)
+	copy(result, msgs[offset:end])
+	return result, nil
+}
+
+// GetMessageCount returns the number of messages in a session.
+func (s *MemoryStore) GetMessageCount(sessionID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.messages[sessionID]), nil
+}
+
+// UpdateDescription updates a session's description.
+func (s *MemoryStore) UpdateDescription(sessionID, description string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.Description = description
+	return nil
+}
+
+// HasResponses checks if a session has any assistant messages.
+func (s *MemoryStore) HasResponses(sessionID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, msg := range s.messages[sessionID] {
+		if msg.Role == "assistant" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Close is a no-op for in-memory store.
 func (s *MemoryStore) Close() error {
 	return nil
@@ -268,6 +360,9 @@ func (h *Handler) Start(ctx context.Context) error {
 		"session.attach",
 		"session.detach",
 		"session.delete",
+		"session.messages.save",
+		"session.messages.get",
+		"session.update_description",
 	}
 
 	for _, topic := range topics {
@@ -323,6 +418,12 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleDetach(msg)
 	case "session.delete":
 		response, err = h.handleDelete(msg)
+	case "session.messages.save":
+		response, err = h.handleSaveMessages(msg)
+	case "session.messages.get":
+		response, err = h.handleGetMessages(msg)
+	case "session.update_description":
+		response, err = h.handleUpdateDescription(msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -423,6 +524,68 @@ func (h *Handler) handleDelete(msg *models.BusMessage) (any, error) {
 	}
 
 	return map[string]string{"status": "deleted"}, nil
+}
+
+// handleSaveMessages saves messages for a session.
+func (h *Handler) handleSaveMessages(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string    `json:"session_id"`
+		Messages  []Message `json:"messages"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	if err := h.store.SaveMessages(params.SessionID, params.Messages); err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"status": "saved"}, nil
+}
+
+// handleGetMessages retrieves messages for a session.
+func (h *Handler) handleGetMessages(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+		Offset    int    `json:"offset"`
+		Limit     int    `json:"limit"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	if params.Limit <= 0 {
+		params.Limit = 1000
+	}
+
+	messages, err := h.store.GetMessages(params.SessionID, params.Offset, params.Limit)
+	if err != nil {
+		return nil, err
+	}
+
+	count, _ := h.store.GetMessageCount(params.SessionID)
+
+	return map[string]any{
+		"messages": messages,
+		"total":    count,
+	}, nil
+}
+
+// handleUpdateDescription updates a session's description.
+func (h *Handler) handleUpdateDescription(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID   string `json:"session_id"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	if err := h.store.UpdateDescription(params.SessionID, params.Description); err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"status": "updated"}, nil
 }
 
 // sendResponse publishes a response to the bus.

@@ -24,7 +24,7 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
 		logger = slog.Default()
 	}
 
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=ON")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -57,10 +57,33 @@ func (s *SQLiteStore) migrate() error {
 
 	CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC);
 	CREATE INDEX IF NOT EXISTS idx_sessions_conversation_id ON sessions(conversation_id);
+
+	CREATE TABLE IF NOT EXISTS session_messages (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id  TEXT NOT NULL,
+		role        TEXT NOT NULL,
+		content     TEXT NOT NULL,
+		timestamp   TEXT NOT NULL,
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_session_messages_session ON session_messages(session_id, id);
 	`
 
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Add description column if not present (migration for existing databases)
+	_, err := s.db.Exec("ALTER TABLE sessions ADD COLUMN description TEXT DEFAULT ''")
+	if err != nil {
+		// Ignore "duplicate column" error - column already exists
+		if err.Error() != "duplicate column name: description" {
+			s.logger.Debug("Description column migration note", "info", err.Error())
+		}
+	}
+
+	return nil
 }
 
 // Create creates a new session with the given name.
@@ -86,8 +109,8 @@ func (s *SQLiteStore) Create(name string) *Session {
 	workersJSON, _ := json.Marshal(session.WorkerIDs)
 
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		session.ID,
 		session.Name,
 		session.ConversationID,
@@ -95,6 +118,7 @@ func (s *SQLiteStore) Create(name string) *Session {
 		session.LastActivity.Format(time.RFC3339),
 		string(attachedJSON),
 		string(workersJSON),
+		"",
 	)
 
 	if err != nil {
@@ -128,7 +152,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`)
@@ -138,7 +162,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 
 func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -148,12 +172,13 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 
 func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 	var (
-		id, name, convID      string
-		createdAt, lastActivity string
-		attachedJSON, workersJSON string
+		id, name, convID            string
+		createdAt, lastActivity     string
+		attachedJSON, workersJSON   string
+		description                 sql.NullString
 	)
 
-	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON)
+	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -165,6 +190,10 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		ID:             id,
 		Name:           name,
 		ConversationID: convID,
+	}
+
+	if description.Valid {
+		session.Description = description.String
 	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -180,30 +209,39 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 	return session
 }
 
-// List returns all sessions ordered by last activity.
+// List returns all sessions that have at least one assistant response, ordered by last activity.
 func (s *SQLiteStore) List() []*Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids
-		FROM sessions
-		ORDER BY last_activity DESC`)
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description
+		FROM sessions s
+		WHERE EXISTS (
+			SELECT 1 FROM session_messages sm
+			WHERE sm.session_id = s.id AND sm.role = 'assistant'
+		)
+		ORDER BY s.last_activity DESC`)
 	if err != nil {
 		s.logger.Error("Failed to list sessions", "error", err)
 		return nil
 	}
 	defer rows.Close()
 
+	return s.scanSessionRows(rows)
+}
+
+func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 	var sessions []*Session
 	for rows.Next() {
 		var (
-			id, name, convID        string
-			createdAt, lastActivity string
+			id, name, convID          string
+			createdAt, lastActivity   string
 			attachedJSON, workersJSON string
+			description               sql.NullString
 		)
 
-		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON); err != nil {
+		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description); err != nil {
 			s.logger.Error("Failed to scan session row", "error", err)
 			continue
 		}
@@ -212,6 +250,10 @@ func (s *SQLiteStore) List() []*Session {
 			ID:             id,
 			Name:           name,
 			ConversationID: convID,
+		}
+
+		if description.Valid {
+			session.Description = description.String
 		}
 
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -343,6 +385,114 @@ func (s *SQLiteStore) RemoveWorker(sessionID, workerID string) error {
 	return nil
 }
 
+// SaveMessages batch-inserts messages for a session in a transaction.
+func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO session_messages (session_id, role, content, timestamp)
+		VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, msg := range messages {
+		_, err := stmt.Exec(sessionID, msg.Role, msg.Content, msg.Timestamp.Format(time.RFC3339))
+		if err != nil {
+			return fmt.Errorf("failed to insert message: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetMessages retrieves messages for a session with pagination, ordered by id.
+func (s *SQLiteStore) GetMessages(sessionID string, offset, limit int) ([]Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, session_id, role, content, timestamp
+		FROM session_messages
+		WHERE session_id = ?
+		ORDER BY id
+		LIMIT ? OFFSET ?`, sessionID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query messages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var msg Message
+		var ts string
+		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content, &ts); err != nil {
+			return nil, fmt.Errorf("failed to scan message: %w", err)
+		}
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			msg.Timestamp = t
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+// GetMessageCount returns the number of messages in a session.
+func (s *SQLiteStore) GetMessageCount(sessionID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM session_messages WHERE session_id = ?", sessionID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count messages: %w", err)
+	}
+	return count, nil
+}
+
+// UpdateDescription updates a session's description.
+func (s *SQLiteStore) UpdateDescription(sessionID, description string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec("UPDATE sessions SET description = ? WHERE id = ?", description, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update description: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// HasResponses checks if a session has any assistant messages.
+func (s *SQLiteStore) HasResponses(sessionID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var exists bool
+	err := s.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM session_messages
+			WHERE session_id = ? AND role = 'assistant'
+		)`, sessionID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check responses: %w", err)
+	}
+	return exists, nil
+}
+
 // Close closes the database connection.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
@@ -351,7 +501,7 @@ func (s *SQLiteStore) Close() error {
 // getByColumnUnsafe is like getByColumn but assumes the lock is already held.
 func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -367,12 +517,13 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 
 	_, err := s.db.Exec(`
 		UPDATE sessions
-		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?
+		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?
 		WHERE id = ?`,
 		session.Name,
 		string(attachedJSON),
 		string(workersJSON),
 		now,
+		session.Description,
 		session.ID,
 	)
 

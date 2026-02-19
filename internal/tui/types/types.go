@@ -160,11 +160,27 @@ type Worker struct {
 type Session struct {
 	ID              string   `json:"id"`
 	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
 	ConversationID  string   `json:"conversation_id"`
 	CreatedAt       string   `json:"created_at"`
 	LastActivity    string   `json:"last_activity"`
 	AttachedClients []string `json:"attached_clients"`
 	WorkerIDs       []string `json:"worker_ids,omitempty"`
+}
+
+// SessionMessage represents a chat message persisted on the server.
+type SessionMessage struct {
+	ID        int64  `json:"id"`
+	SessionID string `json:"session_id"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+}
+
+// SessionMessagesResponse represents the response from getting session messages.
+type SessionMessagesResponse struct {
+	Messages []SessionMessage `json:"messages"`
+	Total    int              `json:"total"`
 }
 
 // SessionListResponse represents the session list RPC response.

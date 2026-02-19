@@ -6,7 +6,7 @@ import (
 
 // Color palette for dark theme
 var (
-	ColorPrimary    = lipgloss.Color("#7C3AED") // Purple
+	ColorPrimary    = lipgloss.Color("#F97316") // Orange
 	ColorSecondary  = lipgloss.Color("#10B981") // Green
 	ColorAccent     = lipgloss.Color("#F59E0B") // Amber
 	ColorError      = lipgloss.Color("#EF4444") // Red

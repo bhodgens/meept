@@ -48,6 +48,7 @@ type SidebarStatusData struct {
 	ConversationCnt int
 	MemoryCount     int
 	ActiveWorkers   int
+	PendingTasks    int
 }
 
 // SidebarWorkerItem represents a worker shown in the sidebar.
@@ -198,6 +199,11 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 						Created: w.StartTime,
 					})
 				}
+			}
+
+			// Fetch pending task count from task registry
+			if taskResp, err := s.rpc.ListTasks("pending", 100); err == nil {
+				status.PendingTasks = len(taskResp.Tasks)
 			}
 		}
 
@@ -371,16 +377,12 @@ func (s *SidebarModel) renderStatusPanel() string {
 					b.WriteString("\n")
 				}
 
-				b.WriteString(labelStyle.Render("  Convos:"))
-				b.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.statusData.ConversationCnt)))
-				b.WriteString("\n")
-
-				b.WriteString(labelStyle.Render("  Memory:"))
-				b.WriteString(valueStyle.Render(fmt.Sprintf("%d items", s.statusData.MemoryCount)))
-				b.WriteString("\n")
-
-				b.WriteString(labelStyle.Render("  Workers:"))
+				b.WriteString(labelStyle.Render("  Agents:"))
 				b.WriteString(valueStyle.Render(fmt.Sprintf("%d active", s.statusData.ActiveWorkers)))
+				b.WriteString("\n")
+
+				b.WriteString(labelStyle.Render("  Tasks:"))
+				b.WriteString(valueStyle.Render(fmt.Sprintf("%d pending", s.statusData.PendingTasks)))
 				b.WriteString("\n")
 			}
 		}

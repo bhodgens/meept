@@ -25,13 +25,11 @@ type KeybindingsConfig struct {
 // CommandPaletteKeys defines keys for command palette actions.
 type CommandPaletteKeys struct {
 	ViewChat   string `json:"view_chat"`   // Switch to chat view (default: "1")
-	ViewStatus string `json:"view_status"` // Switch to status view (default: "2")
-	ViewTasks  string `json:"view_tasks"`  // Switch to tasks view (default: "3")
-	ViewQueue  string `json:"view_queue"`  // Switch to queue view (default: "4")
-	ViewMemory string `json:"view_memory"` // Switch to memory view (default: "5")
+	ViewTasks  string `json:"view_tasks"`  // Switch to tasks view (default: "2")
+	ViewQueue  string `json:"view_queue"`  // Switch to queue view (default: "3")
+	ViewMemory string `json:"view_memory"` // Switch to memory view (default: "4")
 	Sidebar    string `json:"sidebar"`     // Toggle sidebar (default: "y")
 	Sessions   string `json:"sessions"`    // Open session picker (default: "s")
-	CopyMode   string `json:"copy_mode"`   // Toggle copy mode (default: "c")
 }
 
 // SessionConfig defines session behavior settings.
@@ -48,13 +46,11 @@ func DefaultClientConfig() *ClientConfig {
 			Quit:        "ctrl+c",
 			CommandPalette: CommandPaletteKeys{
 				ViewChat:   "1",
-				ViewStatus: "2",
-				ViewTasks:  "3",
-				ViewQueue:  "4",
-				ViewMemory: "5",
+				ViewTasks:  "2",
+				ViewQueue:  "3",
+				ViewMemory: "4",
 				Sidebar:    "y",
 				Sessions:   "s",
-				CopyMode:   "c",
 			},
 		},
 		Session: SessionConfig{

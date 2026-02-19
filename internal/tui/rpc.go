@@ -415,6 +415,46 @@ func (c *RPCClient) DeleteSession(sessionID string) error {
 	return err
 }
 
+// SaveSessionMessages saves messages for a session.
+func (c *RPCClient) SaveSessionMessages(sessionID string, messages []types.SessionMessage) error {
+	params := map[string]any{
+		"session_id": sessionID,
+		"messages":   messages,
+	}
+	_, err := c.Call("session.messages.save", params)
+	return err
+}
+
+// GetSessionMessages retrieves messages for a session with pagination.
+func (c *RPCClient) GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error) {
+	params := map[string]any{
+		"session_id": sessionID,
+		"offset":     offset,
+		"limit":      limit,
+	}
+	result, err := c.Call("session.messages.get", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.SessionMessagesResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse session messages response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// UpdateSessionDescription updates a session's description.
+func (c *RPCClient) UpdateSessionDescription(sessionID, description string) error {
+	params := map[string]string{
+		"session_id":  sessionID,
+		"description": description,
+	}
+	_, err := c.Call("session.update_description", params)
+	return err
+}
+
 // ============================================================================
 // Task Methods
 // ============================================================================

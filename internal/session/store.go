@@ -1,5 +1,16 @@
 package session
 
+import "time"
+
+// Message represents a chat message persisted in a session.
+type Message struct {
+	ID        int64     `json:"id"`
+	SessionID string    `json:"session_id"`
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 // Store defines the interface for session persistence.
 type Store interface {
 	// Create creates a new session with the given name.
@@ -34,6 +45,21 @@ type Store interface {
 
 	// RemoveWorker removes a worker ID from a session.
 	RemoveWorker(sessionID, workerID string) error
+
+	// SaveMessages batch-inserts messages for a session.
+	SaveMessages(sessionID string, messages []Message) error
+
+	// GetMessages retrieves messages for a session with pagination.
+	GetMessages(sessionID string, offset, limit int) ([]Message, error)
+
+	// GetMessageCount returns the number of messages in a session.
+	GetMessageCount(sessionID string) (int, error)
+
+	// UpdateDescription updates a session's description.
+	UpdateDescription(sessionID, description string) error
+
+	// HasResponses checks if a session has any assistant messages.
+	HasResponses(sessionID string) (bool, error)
 
 	// Close closes the store and releases resources.
 	Close() error
