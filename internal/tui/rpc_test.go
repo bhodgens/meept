@@ -23,6 +23,10 @@ func TestNewRPCClient(t *testing.T) {
 	if client.timeout != 120*time.Second {
 		t.Errorf("expected timeout 120s, got %v", client.timeout)
 	}
+	// Verify atomic bool starts as false
+	if client.connected.Load() {
+		t.Error("expected connected atomic to be false initially")
+	}
 }
 
 func TestRPCClientConnectError(t *testing.T) {
@@ -38,6 +42,51 @@ func TestRPCClientIsConnected(t *testing.T) {
 	if client.IsConnected() {
 		t.Error("expected IsConnected to return false before connect")
 	}
+}
+
+func TestRPCClientIsConnectedLockFree(t *testing.T) {
+	// Verify IsConnected doesn't block even when locks are held
+	// Use shorter socket path to avoid macOS path length limits
+	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("meept-test-%d.sock", time.Now().UnixNano()))
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer listener.Close()
+	defer os.Remove(sockPath)
+
+	// Start a simple accept loop
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	client := NewRPCClient(sockPath)
+	if err := client.Connect(); err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer client.Close()
+
+	// Hold the connMu lock (simulating connect/disconnect operation)
+	client.connMu.Lock()
+
+	// IsConnected should still work (lock-free)
+	done := make(chan bool, 1)
+	go func() {
+		_ = client.IsConnected() // Should not block
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Good - didn't block
+	case <-time.After(100 * time.Millisecond):
+		t.Error("IsConnected blocked when connMu was held")
+	}
+
+	client.connMu.Unlock()
 }
 
 func TestRPCClientCallNotConnected(t *testing.T) {

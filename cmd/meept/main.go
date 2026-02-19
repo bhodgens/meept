@@ -24,19 +24,35 @@ func main() {
 	defaultSocket := filepath.Join(defaultStateDir, "meept.sock")
 
 	rootCmd := &cobra.Command{
-		Use:   "meept",
+		Use:   "meept [message]",
 		Short: "Meept AI assistant",
-		Long: `Meept is an AI assistant with task orchestration, memory, and skill capabilities.
+		Long: `Meept is an AI assistant with multi-agent task orchestration, memory, and skill capabilities.
 
-Start chatting:
-  meept chat "What's the weather like?"
-  meept chat  # Interactive TUI mode
+Running 'meept' without arguments launches the interactive TUI.
+Running 'meept "message"' sends a single message and prints the response.
 
-Manage daemon:
-  meept daemon start
-  meept daemon stop
-  meept status`,
+Examples:
+  meept                                  # Interactive TUI
+  meept "What's the weather like?"       # Single message
+  meept chat "message"                   # Explicit chat subcommand
+
+Core Commands:
+  meept status                           # Check daemon status
+  meept daemon start/stop                # Manage daemon
+  meept chat                             # Interactive chat
+
+Multi-Agent Orchestration:
+  meept task list/create/get/delete      # Manage background tasks
+  meept queue status/list/retry          # View job queue
+  meept workers                          # Manage worker pool
+
+Memory & Skills:
+  meept memory                           # Search memory
+  meept jobs                             # View scheduled jobs
+  meept clawskills                       # Manage third-party skills`,
 		SilenceUsage: true,
+		Args:         cobra.MaximumNArgs(1),
+		RunE:         runChat, // Default to chat when no subcommand
 	}
 
 	// Global flags
@@ -50,10 +66,14 @@ Manage daemon:
 	rootCmd.AddCommand(newDaemonCmd())
 	rootCmd.AddCommand(newJobsCmd())
 	rootCmd.AddCommand(newMemoryCmd())
+	rootCmd.AddCommand(newTaskCmd())
+	rootCmd.AddCommand(newQueueCmd())
+	rootCmd.AddCommand(newWorkersCmd())
 	rootCmd.AddCommand(newClawSkillsCmd())
 	rootCmd.AddCommand(newSelfImproveCmd())
 	rootCmd.AddCommand(newDevCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newHelpCmd(rootCmd))
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -66,6 +86,28 @@ func newVersionCmd() *cobra.Command {
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("meept version %s\n", version)
+		},
+	}
+}
+
+func newHelpCmd(root *cobra.Command) *cobra.Command {
+	return &cobra.Command{
+		Use:   "help [command]",
+		Short: "Help about any command",
+		Long:  "Display help information about meept and its subcommands.",
+		Run: func(cmd *cobra.Command, args []string) {
+			if len(args) == 0 {
+				root.Help()
+				return
+			}
+			// Find the subcommand
+			target, _, err := root.Find(args)
+			if err != nil || target == nil {
+				fmt.Printf("Unknown command: %s\n", args[0])
+				root.Help()
+				return
+			}
+			target.Help()
 		},
 	}
 }

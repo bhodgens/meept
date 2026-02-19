@@ -1,20 +1,49 @@
 {
   // Default model for general use (provider/model-id format)
-  "model": "gala-mlx/lfm-thinking",
+  "model": "zai/glm-4.7",
 
   // Fast/cheap model for classification, summarization
-  "small_model": "gala-mlx/lfm-thinking",
+  "small_model": "zai/glm-4.5-air",
 
   // Providers to skip entirely
   "disabled_providers": [],
 
   "providers": {
+    "zai": {
+      "api": "openai",
+      "options": {
+        "baseURL": "https://api.z.ai/api/coding/paas/v4",
+        "apiKey": "${ZAI_API_KEY}",
+        "timeout": 120
+      },
+      "models": {
+        "glm-4.7": {
+          "name": "glm-4.7",
+          "capabilities": ["completion", "code", "reasoning", "tool_use"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 128000,
+          "max_output": 8192,
+          "temperature": 0.7
+        },
+        "glm-4.5-air": {
+          "name": "glm-4.5-air",
+          "capabilities": ["completion", "code", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 32000,
+          "max_output": 4096,
+          "temperature": 0.7
+        }
+      }
+    },
+
     "gala-mlx": {
       "api": "openai",
       "options": {
         "baseURL": "http://gala/api/mlx",
         "apiKey": "${GALA_API_KEY}",
-        "timeout": 120,
+        "timeout": 120
       },
       "models": {
         "lfm-thinking": {
@@ -24,9 +53,9 @@
           "output_cost": 0.0,
           "context_limit": 8192,
           "max_output": 2048,
-          "temperature": 0.7,
-        },
-      },
+          "temperature": 0.7
+        }
+      }
     },
 
     "gala-llama": {
@@ -34,7 +63,7 @@
       "options": {
         "baseURL": "http://gala/llama/v1",
         "apiKey": "${GALA_API_KEY}",
-        "timeout": 120,
+        "timeout": 120
       },
       "models": {
         "dolphin-mistral-7b": {
@@ -44,16 +73,16 @@
           "output_cost": 0.0,
           "context_limit": 32768,
           "max_output": 4096,
-          "temperature": 0.7,
-        },
-      },
+          "temperature": 0.7
+        }
+      }
     },
 
     "ollama": {
       "api": "openai",
       "options": {
         "baseURL": "http://localhost:11434/v1",
-        "timeout": 120,
+        "timeout": 120
       },
       "models": {
         "llama3.2": {
@@ -63,7 +92,7 @@
           "output_cost": 0.0,
           "context_limit": 128000,
           "max_output": 4096,
-          "temperature": 0.7,
+          "temperature": 0.7
         },
         "qwen2.5-coder": {
           "name": "qwen2.5-coder",
@@ -72,30 +101,9 @@
           "output_cost": 0.0,
           "context_limit": 32768,
           "max_output": 8192,
-          "temperature": 0.7,
-        },
-      },
-    },
-
-    // Example: OpenRouter provider (uncomment to enable)
-    // "openrouter": {
-    //   "api": "openai",
-    //   "options": {
-    //     "baseURL": "https://openrouter.ai/api/v1",
-    //     "apiKey": "${OPENROUTER_API_KEY}",
-    //     "timeout": 120,
-    //   },
-    //   "models": {
-    //     "claude-3.5-sonnet": {
-    //       "name": "anthropic/claude-3.5-sonnet",
-    //       "capabilities": ["code", "reasoning", "tool_use", "long_context", "vision"],
-    //       "input_cost": 3.0,
-    //       "output_cost": 15.0,
-    //       "context_limit": 200000,
-    //       "max_output": 8192,
-    //       "temperature": 0.7,
-    //     },
-    //   },
-    // },
-  },
+          "temperature": 0.7
+        }
+      }
+    }
+  }
 }

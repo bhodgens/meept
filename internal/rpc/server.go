@@ -9,9 +9,17 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/pkg/models"
+)
+
+// Connection timeouts
+const (
+	readIdleTimeout  = 5 * time.Minute  // Max time waiting for a request
+	writeTimeout     = 30 * time.Second // Max time to write response
+	operationTimeout = 10 * time.Minute // Max time for a single RPC operation
 )
 
 // Handler is a function that handles an RPC method.
@@ -163,7 +171,10 @@ func (s *Server) acceptLoop() {
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
+	// Create connection-scoped context that cancels when we return
+	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
+		cancel() // Signal all handlers to stop
 		conn.Close()
 		s.connMu.Lock()
 		delete(s.conns, conn)
@@ -175,26 +186,62 @@ func (s *Server) handleConnection(conn net.Conn) {
 	writer := NewFrameWriter(conn)
 
 	for s.running.Load() {
+		// Set read deadline to detect client disconnects
+		if err := conn.SetReadDeadline(time.Now().Add(readIdleTimeout)); err != nil {
+			s.logger.Debug("rpc: failed to set read deadline", "error", err)
+			return
+		}
+
 		req, err := reader.ReadRequest()
 		if err != nil {
 			if s.running.Load() {
-				s.logger.Debug("rpc: read error", "error", err)
+				// Don't log timeout as error - it's expected idle behavior
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					s.logger.Debug("rpc: client idle timeout, closing connection")
+				} else {
+					s.logger.Debug("rpc: read error", "error", err)
+				}
 			}
 			return
 		}
 
-		// Process request
-		resp := s.dispatch(req)
+		// Clear read deadline during processing
+		conn.SetReadDeadline(time.Time{})
+
+		// Process request with connection-scoped context
+		resp := s.dispatch(ctx, req)
+
+		// Check if context was cancelled (client disconnected) before writing
+		if ctx.Err() != nil {
+			s.logger.Debug("rpc: client disconnected during request processing",
+				"method", req.Method,
+				"id", req.ID)
+			return
+		}
+
+		// Set write deadline before attempting to write response
+		if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+			s.logger.Debug("rpc: failed to set write deadline", "error", err)
+			return
+		}
 
 		// Write response
 		if err := writer.WriteResponse(resp); err != nil {
-			s.logger.Error("rpc: write error", "error", err)
+			// Log at debug level for broken pipe - it's expected when client disconnects
+			if s.running.Load() {
+				s.logger.Debug("rpc: write error (client may have disconnected)",
+					"error", err,
+					"method", req.Method)
+			}
 			return
 		}
+
+		// Clear write deadline
+		conn.SetWriteDeadline(time.Time{})
 	}
 }
 
-func (s *Server) dispatch(req *models.JSONRPCRequest) *models.JSONRPCResponse {
+func (s *Server) dispatch(ctx context.Context, req *models.JSONRPCRequest) *models.JSONRPCResponse {
 	s.mu.RLock()
 	handler, ok := s.handlers[req.Method]
 	s.mu.RUnlock()
@@ -208,9 +255,22 @@ func (s *Server) dispatch(req *models.JSONRPCRequest) *models.JSONRPCResponse {
 		)
 	}
 
-	ctx := context.Background()
-	result, err := handler(ctx, req.Params)
+	// Create a timeout context for this specific operation
+	// This ensures handlers don't run forever even if connection stays open
+	opCtx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+
+	result, err := handler(opCtx, req.Params)
 	if err != nil {
+		// Check if the error is due to context cancellation
+		if ctx.Err() != nil {
+			return MakeErrorResponse(
+				req.ID,
+				models.ErrCodeInternal,
+				"request cancelled: client disconnected",
+				nil,
+			)
+		}
 		return MakeErrorResponse(
 			req.ID,
 			models.ErrCodeInternal,

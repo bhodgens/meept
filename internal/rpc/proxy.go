@@ -64,6 +64,32 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("session.detach", p.makeProxy("session.detach", "session.result", 10*time.Second))
 	server.RegisterHandler("session.delete", p.makeProxy("session.delete", "session.result", 10*time.Second))
 
+	// Task methods
+	server.RegisterHandler("task.create", p.makeProxy("task.create", "task.result", 10*time.Second))
+	server.RegisterHandler("task.get", p.makeProxy("task.get", "task.result", 10*time.Second))
+	server.RegisterHandler("task.list", p.makeProxy("task.list", "task.result", 10*time.Second))
+	server.RegisterHandler("task.update", p.makeProxy("task.update", "task.result", 10*time.Second))
+	server.RegisterHandler("task.delete", p.makeProxy("task.delete", "task.result", 10*time.Second))
+	server.RegisterHandler("task.link", p.makeProxy("task.link", "task.result", 10*time.Second))
+	server.RegisterHandler("task.unlink", p.makeProxy("task.unlink", "task.result", 10*time.Second))
+
+	// Queue methods
+	server.RegisterHandler("queue.enqueue", p.makeProxy("queue.enqueue", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.claim", p.makeProxy("queue.claim", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.complete", p.makeProxy("queue.complete", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.fail", p.makeProxy("queue.fail", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.retry", p.makeProxy("queue.retry", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.get", p.makeProxy("queue.get", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.list", p.makeProxy("queue.list", "queue.result", 10*time.Second))
+	server.RegisterHandler("queue.stats", p.makeProxy("queue.stats", "queue.result", 10*time.Second))
+
+	// Worker methods
+	server.RegisterHandler("worker.add", p.makeProxy("worker.add", "worker.result", 10*time.Second))
+	server.RegisterHandler("worker.remove", p.makeProxy("worker.remove", "worker.result", 10*time.Second))
+	server.RegisterHandler("worker.list", p.makeProxy("worker.list", "worker.result", 10*time.Second))
+	server.RegisterHandler("worker.stats", p.makeProxy("worker.stats", "worker.result", 10*time.Second))
+	server.RegisterHandler("worker.scale", p.makeProxy("worker.scale", "worker.result", 10*time.Second))
+
 	// Pipeline methods
 	server.RegisterHandler("pipeline.status", p.makeProxy("pipeline.status", "pipeline.result", 10*time.Second))
 
@@ -100,14 +126,36 @@ func (p *ProxyHandler) makeProxy(requestTopic, responseTopic string, timeout tim
 		sub := p.bus.Subscribe(msgID, responseTopic)
 		defer p.bus.Unsubscribe(sub)
 
+		// Done channel signals watcher goroutine to exit
+		done := make(chan struct{})
+		defer close(done)
+
 		// Start goroutine to watch for responses
+		// This goroutine is context-aware and will exit when:
+		// 1. A matching response is received
+		// 2. The subscription channel is closed
+		// 3. The context is cancelled (client disconnected)
+		// 4. The done channel is closed (function returns)
 		go func() {
-			for resp := range sub.Channel {
-				if resp.ReplyTo == msgID {
-					select {
-					case respChan <- resp:
-					default:
+			for {
+				select {
+				case resp, ok := <-sub.Channel:
+					if !ok {
+						// Subscription channel closed
+						return
 					}
+					if resp.ReplyTo == msgID {
+						select {
+						case respChan <- resp:
+						default:
+						}
+						return
+					}
+				case <-ctx.Done():
+					// Context cancelled (client disconnected)
+					return
+				case <-done:
+					// Parent function returning
 					return
 				}
 			}

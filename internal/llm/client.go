@@ -223,7 +223,13 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
 	}
 
-	url := strings.TrimSuffix(c.config.BaseURL, "/") + "/v1/chat/completions"
+	// Build URL - baseURL should be the full API base (e.g., http://host/v1 or http://host/api)
+	// We just append /chat/completions to whatever baseURL is configured
+	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
+	url := baseURL + "/chat/completions"
+
+	c.logger.Debug("Making LLM request", "url", url, "model", c.config.ModelID)
+
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, &ClientError{Message: "failed to create request", Cause: err}
@@ -246,6 +252,8 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		return nil, &ClientError{Message: "failed to read response", Cause: err}
 	}
 
+	c.logger.Debug("LLM response received", "status", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"))
+
 	// Check for retryable status codes
 	if retryableStatusCodes[resp.StatusCode] {
 		detail := string(respBody)
@@ -267,6 +275,16 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 	// Parse response
 	var chatResp ChatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		preview := string(respBody)
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		c.logger.Error("Failed to parse LLM response",
+			"error", err,
+			"status", resp.StatusCode,
+			"content_type", resp.Header.Get("Content-Type"),
+			"body_preview", preview,
+		)
 		return nil, &ClientError{Message: "failed to parse response", Cause: err}
 	}
 

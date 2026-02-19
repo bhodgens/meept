@@ -171,3 +171,99 @@ type Session struct {
 type SessionListResponse struct {
 	Sessions []Session `json:"sessions"`
 }
+
+// Task represents a background task that can spawn multiple jobs.
+type Task struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description,omitempty"`
+	ProjectDir     string   `json:"project_dir,omitempty"`
+	WorkspaceDir   string   `json:"workspace_dir,omitempty"`
+	State          string   `json:"state"` // pending, planning, executing, testing, completed, failed, cancelled
+	GitRepo        string   `json:"git_repo,omitempty"`
+	MemvidZone     string   `json:"memvid_zone,omitempty"`
+	TotalJobs      int      `json:"total_jobs"`
+	CompletedJobs  int      `json:"completed_jobs"`
+	FailedJobs     int      `json:"failed_jobs"`
+	LinkedSessions []string `json:"linked_sessions,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
+}
+
+// Progress returns the task completion percentage.
+func (t *Task) Progress() float64 {
+	if t.TotalJobs == 0 {
+		return 0
+	}
+	return float64(t.CompletedJobs) / float64(t.TotalJobs) * 100
+}
+
+// TaskListResponse represents the task list RPC response.
+type TaskListResponse struct {
+	Tasks []Task `json:"tasks"`
+}
+
+// QueueJob represents a job in the queue.
+type QueueJob struct {
+	ID           string   `json:"id"`
+	TaskID       string   `json:"task_id,omitempty"`
+	Type         string   `json:"type"` // one_off, project_task
+	Priority     int      `json:"priority"` // 1=low, 2=normal, 3=high, 4=urgent
+	State        string   `json:"state"` // pending, claimed, processing, completed, failed, dead
+	RequiredCaps []string `json:"required_caps,omitempty"`
+	MaxRetries   int      `json:"max_retries"`
+	RetryCount   int      `json:"retry_count"`
+	ClaimedBy    string   `json:"claimed_by,omitempty"`
+	Error        string   `json:"error,omitempty"`
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
+}
+
+// QueueStats represents queue statistics.
+type QueueStats struct {
+	Pending    int `json:"pending"`
+	Claimed    int `json:"claimed"`
+	Processing int `json:"processing"`
+	Completed  int `json:"completed"`
+	Failed     int `json:"failed"`
+	Dead       int `json:"dead"`
+}
+
+// QueueStatsResponse represents the queue stats RPC response.
+type QueueStatsResponse struct {
+	ByState    map[string]int `json:"by_state"`
+	ByPriority map[string]int `json:"by_priority"`
+	DeadCount  int            `json:"dead_count"`
+}
+
+// QueueJobListResponse represents the queue job list RPC response.
+type QueueJobListResponse struct {
+	Jobs []QueueJob `json:"jobs"`
+}
+
+// PoolWorker represents a worker in the worker pool.
+type PoolWorker struct {
+	ID           string   `json:"id"`
+	State        string   `json:"state"` // idle, claiming, processing, complete, error, stopping, stopped
+	Capabilities []string `json:"capabilities"`
+	StartTime    string   `json:"start_time"`
+	LastActive   string   `json:"last_active"`
+	JobsComplete int      `json:"jobs_complete"`
+	JobsFailed   int      `json:"jobs_failed"`
+	CurrentJobID string   `json:"current_job_id,omitempty"`
+}
+
+// WorkerPoolStats represents worker pool statistics.
+type WorkerPoolStats struct {
+	TotalWorkers int          `json:"total_workers"`
+	IdleWorkers  int          `json:"idle_workers"`
+	BusyWorkers  int          `json:"busy_workers"`
+	ErrorWorkers int          `json:"error_workers"`
+	WorkerStats  []PoolWorker `json:"worker_stats"`
+}
+
+// WorkerPoolResponse represents the worker pool RPC response.
+type WorkerPoolResponse struct {
+	Workers []PoolWorker `json:"workers"`
+	Stats   WorkerPoolStats `json:"stats"`
+}

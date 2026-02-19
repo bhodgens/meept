@@ -13,6 +13,9 @@ type Config struct {
 	Memory      MemoryConfig      `toml:"memory"`
 	Security    SecurityConfig    `toml:"security"`
 	Scheduler   SchedulerConfig   `toml:"scheduler"`
+	Queue       QueueConfig       `toml:"queue"`
+	Workers     WorkersConfig     `toml:"workers"`
+	Isolation   IsolationConfig   `toml:"isolation"`
 	Telegram    TelegramConfig    `toml:"telegram"`
 	Web         WebConfig         `toml:"web"`
 	MCP         MCPConfig         `toml:"mcp"`
@@ -86,6 +89,26 @@ type SecurityConfig struct {
 type SchedulerConfig struct {
 	Enabled  bool   `toml:"enabled"`
 	Timezone string `toml:"timezone"`
+}
+
+// QueueConfig holds job queue settings.
+type QueueConfig struct {
+	DBPath     string `toml:"db_path"`
+	MaxRetries int    `toml:"max_retries"`
+}
+
+// WorkersConfig holds worker pool settings.
+type WorkersConfig struct {
+	PoolSize           int      `toml:"pool_size"`
+	IdleTimeoutSeconds int      `toml:"idle_timeout_seconds"`
+	DefaultCaps        []string `toml:"default_caps"`
+}
+
+// IsolationConfig holds task isolation settings.
+type IsolationConfig struct {
+	BaseDir     string `toml:"base_dir"`
+	AutoGitInit bool   `toml:"auto_git_init"`
+	AutoTest    bool   `toml:"auto_test"`
 }
 
 // TelegramConfig holds Telegram bot settings.
@@ -246,6 +269,20 @@ func DefaultConfig() *Config {
 		Scheduler: SchedulerConfig{
 			Enabled:  true,
 			Timezone: "UTC",
+		},
+		Queue: QueueConfig{
+			DBPath:     "~/.meept/queue.db",
+			MaxRetries: 3,
+		},
+		Workers: WorkersConfig{
+			PoolSize:           4,
+			IdleTimeoutSeconds: 300,
+			DefaultCaps:        []string{"code", "reasoning"},
+		},
+		Isolation: IsolationConfig{
+			BaseDir:     "~/.meept/sandboxes",
+			AutoGitInit: true,
+			AutoTest:    true,
 		},
 		Telegram: TelegramConfig{
 			Enabled:   false,

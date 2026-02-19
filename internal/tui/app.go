@@ -24,6 +24,7 @@ const (
 	ViewChat ViewType = iota
 	ViewStatus
 	ViewTasks
+	ViewQueue
 	ViewMemory
 )
 
@@ -49,6 +50,7 @@ type App struct {
 	chat   *models.ChatModel
 	status *models.StatusModel
 	tasks  *models.TasksModel
+	queue  *models.QueueModel
 	memory *models.MemoryModel
 
 	// Sidebar
@@ -138,6 +140,7 @@ func NewApp(socketPath string) *App {
 		chat:         models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage),
 		status:       models.NewStatusModel(rpc),
 		tasks:        models.NewTasksModel(rpc),
+		queue:        models.NewQueueModel(rpc),
 		memory:       models.NewMemoryModel(rpc),
 		sidebar:      NewSidebarModel(rpc, styles),
 		keys:         DefaultKeyMap(),
@@ -241,6 +244,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.chat.SetSize(mainWidth, msg.Height-4) // Account for tabs and status bar
 		a.status.SetSize(mainWidth, msg.Height-4)
 		a.tasks.SetSize(mainWidth, msg.Height-4)
+		a.queue.SetSize(mainWidth, msg.Height-4)
 		a.memory.SetSize(mainWidth, msg.Height-4)
 		return a, nil
 
@@ -253,9 +257,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle mouse clicks on tab bar (first row)
 		if msg.Type == tea.MouseLeft && msg.Y == 0 {
 			// Calculate which tab was clicked based on X position
-			// Tab layout: "[1] Chat  [2] Status  [3] Tasks  [4] Memory"
+			// Tab layout: "[1] Chat  [2] Status  [3] Tasks  [4] Queue  [5] Memory"
 			// Approximate positions (accounting for padding):
-			tabWidths := []int{10, 12, 11, 12} // "[1] Chat", "[2] Status", "[3] Tasks", "[4] Memory"
+			tabWidths := []int{10, 12, 11, 11, 12} // "[1] Chat", "[2] Status", "[3] Tasks", "[4] Queue", "[5] Memory"
 			x := msg.X
 			cumWidth := 0
 			for i, w := range tabWidths {
@@ -275,6 +279,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = a.status.Update(msg)
 		case ViewTasks:
 			cmd = a.tasks.Update(msg)
+		case ViewQueue:
+			cmd = a.queue.Update(msg)
 		case ViewMemory:
 			cmd = a.memory.Update(msg)
 		}
@@ -434,6 +440,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = a.status.Update(msg)
 	case ViewTasks:
 		cmd = a.tasks.Update(msg)
+	case ViewQueue:
+		cmd = a.queue.Update(msg)
 	case ViewMemory:
 		cmd = a.memory.Update(msg)
 	}
@@ -466,6 +474,9 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, a.initCurrentView()
 		case keys.ViewTasks:
 			a.currentView = ViewTasks
+			return a, a.initCurrentView()
+		case keys.ViewQueue:
+			a.currentView = ViewQueue
 			return a, a.initCurrentView()
 		case keys.ViewMemory:
 			a.currentView = ViewMemory
@@ -537,6 +548,8 @@ func (a *App) initCurrentView() tea.Cmd {
 		return a.status.Init()
 	case ViewTasks:
 		return a.tasks.Init()
+	case ViewQueue:
+		return a.queue.Init()
 	case ViewMemory:
 		return a.memory.Init()
 	}
@@ -572,6 +585,8 @@ func (a *App) View() string {
 			mainView = a.status.View()
 		case ViewTasks:
 			mainView = a.tasks.View()
+		case ViewQueue:
+			mainView = a.queue.View()
 		case ViewMemory:
 			mainView = a.memory.View()
 		}
@@ -611,6 +626,7 @@ func (a *App) renderTabs() string {
 		{"Chat", ViewChat},
 		{"Status", ViewStatus},
 		{"Tasks", ViewTasks},
+		{"Queue", ViewQueue},
 		{"Memory", ViewMemory},
 	}
 

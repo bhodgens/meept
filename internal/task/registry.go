@@ -1,0 +1,551 @@
+package task
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/models"
+)
+
+// Registry manages tasks and provides a unified API.
+type Registry struct {
+	store  *Store
+	bus    *bus.MessageBus
+	logger *slog.Logger
+
+	mu     sync.RWMutex
+	closed bool
+}
+
+// NewRegistry creates a new task registry.
+func NewRegistry(dbPath string, msgBus *bus.MessageBus, logger *slog.Logger) (*Registry, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	store, err := NewStore(dbPath, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create store: %w", err)
+	}
+
+	reg := &Registry{
+		store:  store,
+		bus:    msgBus,
+		logger: logger,
+	}
+
+	logger.Info("Task registry initialized", "path", dbPath)
+	return reg, nil
+}
+
+// Create creates a new task.
+func (r *Registry) Create(ctx context.Context, name, description string) (*Task, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return nil, fmt.Errorf("registry is closed")
+	}
+
+	task := NewTask(name, description)
+	if err := r.store.Create(task); err != nil {
+		return nil, err
+	}
+
+	r.publishEvent("task.create", map[string]any{
+		"task_id": task.ID,
+		"name":    task.Name,
+	})
+
+	return task, nil
+}
+
+// Get retrieves a task by ID.
+func (r *Registry) Get(ctx context.Context, taskID string) (*Task, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.store.GetByID(taskID)
+}
+
+// Update updates a task.
+func (r *Registry) Update(ctx context.Context, task *Task) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	if err := r.store.Update(task); err != nil {
+		return err
+	}
+
+	r.publishEvent("task.update", map[string]any{
+		"task_id": task.ID,
+		"state":   task.State.String(),
+	})
+
+	return nil
+}
+
+// Delete removes a task.
+func (r *Registry) Delete(ctx context.Context, taskID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	if err := r.store.Delete(taskID); err != nil {
+		return err
+	}
+
+	r.publishEvent("task.delete", map[string]any{
+		"task_id": taskID,
+	})
+
+	return nil
+}
+
+// List returns all tasks, optionally filtered by state.
+func (r *Registry) List(ctx context.Context, state *TaskState, limit int) ([]*Task, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 100
+	}
+	return r.store.List(state, limit)
+}
+
+// ListActive returns all active tasks.
+func (r *Registry) ListActive(ctx context.Context) ([]*Task, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.store.ListActive()
+}
+
+// ListSummaries returns lightweight summaries of all tasks.
+func (r *Registry) ListSummaries(ctx context.Context, limit int) ([]TaskSummary, error) {
+	tasks, err := r.List(ctx, nil, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	summaries := make([]TaskSummary, len(tasks))
+	for i, t := range tasks {
+		summaries[i] = t.Summary()
+	}
+	return summaries, nil
+}
+
+// UpdateState changes a task's state.
+func (r *Registry) UpdateState(ctx context.Context, taskID string, state TaskState) error {
+	task, err := r.Get(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	task.SetState(state)
+	return r.Update(ctx, task)
+}
+
+// LinkSession links a session to a task.
+func (r *Registry) LinkSession(ctx context.Context, taskID, sessionID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	// Verify task exists
+	task, err := r.store.GetByID(taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	if err := r.store.LinkSession(taskID, sessionID); err != nil {
+		return err
+	}
+
+	r.publishEvent("task.link", map[string]any{
+		"task_id":    taskID,
+		"session_id": sessionID,
+	})
+
+	return nil
+}
+
+// UnlinkSession removes a session-task link.
+func (r *Registry) UnlinkSession(ctx context.Context, taskID, sessionID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return fmt.Errorf("registry is closed")
+	}
+
+	if err := r.store.UnlinkSession(taskID, sessionID); err != nil {
+		return err
+	}
+
+	r.publishEvent("task.unlink", map[string]any{
+		"task_id":    taskID,
+		"session_id": sessionID,
+	})
+
+	return nil
+}
+
+// GetLinkedSessions returns sessions linked to a task.
+func (r *Registry) GetLinkedSessions(ctx context.Context, taskID string) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.store.GetLinkedSessions(taskID)
+}
+
+// GetTasksForSession returns tasks linked to a session.
+func (r *Registry) GetTasksForSession(ctx context.Context, sessionID string) ([]*Task, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.store.GetTasksForSession(sessionID)
+}
+
+// IncrementJobCount increments the total job count for a task.
+func (r *Registry) IncrementJobCount(ctx context.Context, taskID string) error {
+	task, err := r.Get(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	task.IncrementJobs()
+	return r.Update(ctx, task)
+}
+
+// CompleteJob marks a job as completed for a task.
+func (r *Registry) CompleteJob(ctx context.Context, taskID string) error {
+	task, err := r.Get(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	task.CompleteJob()
+
+	// Auto-complete task if all jobs done
+	if task.CompletedJobs == task.TotalJobs && task.TotalJobs > 0 {
+		task.SetState(StateCompleted)
+	}
+
+	return r.Update(ctx, task)
+}
+
+// FailJob marks a job as failed for a task.
+func (r *Registry) FailJob(ctx context.Context, taskID string) error {
+	task, err := r.Get(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	task.FailJob()
+	return r.Update(ctx, task)
+}
+
+// Close closes the registry.
+func (r *Registry) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.closed {
+		return nil
+	}
+
+	r.closed = true
+	return r.store.Close()
+}
+
+func (r *Registry) publishEvent(topic string, data map[string]any) {
+	if r.bus == nil {
+		return
+	}
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "task-registry", data)
+	if err != nil {
+		r.logger.Error("Failed to create bus message", "error", err)
+		return
+	}
+
+	r.bus.Publish(topic, msg)
+}
+
+// Handler handles task-related requests on the message bus.
+type Handler struct {
+	registry *Registry
+	bus      *bus.MessageBus
+	logger   *slog.Logger
+	cancel   context.CancelFunc
+}
+
+// NewHandler creates a new task handler.
+func NewHandler(registry *Registry, msgBus *bus.MessageBus, logger *slog.Logger) *Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Handler{
+		registry: registry,
+		bus:      msgBus,
+		logger:   logger,
+	}
+}
+
+// Start begins listening for task requests.
+func (h *Handler) Start(ctx context.Context) error {
+	ctx, h.cancel = context.WithCancel(ctx)
+
+	topics := []string{
+		"task.create",
+		"task.get",
+		"task.update",
+		"task.delete",
+		"task.list",
+		"task.link",
+		"task.unlink",
+	}
+
+	for _, topic := range topics {
+		sub := h.bus.Subscribe("task-handler-"+topic, topic)
+		go h.handleTopic(ctx, sub, topic)
+	}
+
+	h.logger.Info("Task handler started")
+	return nil
+}
+
+// Stop stops the handler.
+func (h *Handler) Stop(ctx context.Context) error {
+	if h.cancel != nil {
+		h.cancel()
+	}
+	return nil
+}
+
+func (h *Handler) handleTopic(ctx context.Context, sub *bus.Subscriber, topic string) {
+	for {
+		select {
+		case <-ctx.Done():
+			h.bus.Unsubscribe(sub)
+			return
+		case msg, ok := <-sub.Channel:
+			if !ok {
+				return
+			}
+			h.handleMessage(ctx, topic, msg)
+		}
+	}
+}
+
+func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.BusMessage) {
+	var response any
+	var err error
+
+	switch topic {
+	case "task.create":
+		response, err = h.handleCreate(ctx, msg)
+	case "task.get":
+		response, err = h.handleGet(ctx, msg)
+	case "task.update":
+		response, err = h.handleUpdate(ctx, msg)
+	case "task.list":
+		response, err = h.handleList(ctx, msg)
+	case "task.delete":
+		response, err = h.handleDelete(ctx, msg)
+	case "task.link":
+		response, err = h.handleLink(ctx, msg)
+	case "task.unlink":
+		response, err = h.handleUnlink(ctx, msg)
+	default:
+		err = fmt.Errorf("unknown topic: %s", topic)
+	}
+
+	h.sendResponse(msg.ID, "task.result", response, err)
+}
+
+func (h *Handler) handleCreate(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	return h.registry.Create(ctx, params.Name, params.Description)
+}
+
+func (h *Handler) handleUpdate(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		ID          string `json:"id"`
+		Name        string `json:"name,omitempty"`
+		Description string `json:"description,omitempty"`
+		State       string `json:"state,omitempty"`
+		ProjectDir  string `json:"project_dir,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	task, err := h.registry.Get(ctx, params.ID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task not found: %s", params.ID)
+	}
+
+	if params.Name != "" {
+		task.Name = params.Name
+	}
+	if params.Description != "" {
+		task.Description = params.Description
+	}
+	if params.State != "" {
+		task.State = TaskState(params.State)
+	}
+	if params.ProjectDir != "" {
+		task.ProjectDir = params.ProjectDir
+	}
+
+	if err := h.registry.Update(ctx, task); err != nil {
+		return nil, err
+	}
+
+	return task, nil
+}
+
+func (h *Handler) handleGet(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	return h.registry.Get(ctx, params.ID)
+}
+
+func (h *Handler) handleList(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		State string `json:"state,omitempty"`
+		Limit int    `json:"limit,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	var state *TaskState
+	if params.State != "" {
+		s := TaskState(params.State)
+		state = &s
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	return h.registry.List(ctx, state, limit)
+}
+
+func (h *Handler) handleDelete(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	if err := h.registry.Delete(ctx, params.ID); err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"status": "deleted"}, nil
+}
+
+func (h *Handler) handleLink(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	if err := h.registry.LinkSession(ctx, params.TaskID, params.SessionID); err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"status": "linked"}, nil
+}
+
+func (h *Handler) handleUnlink(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	if err := h.registry.UnlinkSession(ctx, params.TaskID, params.SessionID); err != nil {
+		return nil, err
+	}
+
+	return map[string]string{"status": "unlinked"}, nil
+}
+
+func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {
+	var payload []byte
+
+	if err != nil {
+		payload, _ = json.Marshal(map[string]string{"error": err.Error()})
+	} else {
+		payload, _ = json.Marshal(response)
+	}
+
+	msg := &models.BusMessage{
+		ID:        fmt.Sprintf("task-resp-%d", time.Now().UnixNano()),
+		Type:      models.MessageTypeResponse,
+		Topic:     topic,
+		Source:    "task-handler",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+		ReplyTo:   replyTo,
+	}
+
+	h.bus.Publish(topic, msg)
+}

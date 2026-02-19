@@ -414,3 +414,174 @@ func (c *RPCClient) DeleteSession(sessionID string) error {
 	_, err := c.Call("session.delete", params)
 	return err
 }
+
+// ============================================================================
+// Task Methods
+// ============================================================================
+
+// CreateTask creates a new task.
+func (c *RPCClient) CreateTask(name, description string) (*types.Task, error) {
+	params := map[string]string{
+		"name":        name,
+		"description": description,
+	}
+	result, err := c.Call("task.create", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.Task
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse task response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// GetTask retrieves a task by ID.
+func (c *RPCClient) GetTask(taskID string) (*types.Task, error) {
+	params := map[string]string{"id": taskID}
+	result, err := c.Call("task.get", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.Task
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse task response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// ListTasks gets all tasks.
+func (c *RPCClient) ListTasks(state string, limit int) (*types.TaskListResponse, error) {
+	params := map[string]any{
+		"state": state,
+		"limit": limit,
+	}
+	result, err := c.Call("task.list", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.TaskListResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse tasks response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// DeleteTask deletes a task by ID.
+func (c *RPCClient) DeleteTask(taskID string) error {
+	params := map[string]string{"id": taskID}
+	_, err := c.Call("task.delete", params)
+	return err
+}
+
+// LinkTaskSession links a session to a task.
+func (c *RPCClient) LinkTaskSession(taskID, sessionID string) error {
+	params := map[string]string{
+		"task_id":    taskID,
+		"session_id": sessionID,
+	}
+	_, err := c.Call("task.link", params)
+	return err
+}
+
+// UnlinkTaskSession removes a session-task link.
+func (c *RPCClient) UnlinkTaskSession(taskID, sessionID string) error {
+	params := map[string]string{
+		"task_id":    taskID,
+		"session_id": sessionID,
+	}
+	_, err := c.Call("task.unlink", params)
+	return err
+}
+
+// ============================================================================
+// Queue Methods
+// ============================================================================
+
+// GetQueueStats gets queue statistics.
+func (c *RPCClient) GetQueueStats() (*types.QueueStatsResponse, error) {
+	result, err := c.Call("queue.stats", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.QueueStatsResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse queue stats response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// ListQueueJobs gets jobs in a given state.
+func (c *RPCClient) ListQueueJobs(state string, limit int) (*types.QueueJobListResponse, error) {
+	params := map[string]any{
+		"state": state,
+		"limit": limit,
+	}
+	result, err := c.Call("queue.list", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.QueueJobListResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse queue jobs response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// RetryQueueJob retries a failed job.
+func (c *RPCClient) RetryQueueJob(jobID string) error {
+	params := map[string]string{"job_id": jobID}
+	_, err := c.Call("queue.retry", params)
+	return err
+}
+
+// ============================================================================
+// Worker Pool Methods
+// ============================================================================
+
+// GetWorkerPoolStats gets worker pool statistics.
+func (c *RPCClient) GetWorkerPoolStats() (*types.WorkerPoolStats, error) {
+	result, err := c.Call("worker.stats", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.WorkerPoolStats
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse worker pool stats response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// ListPoolWorkers gets all workers in the pool.
+func (c *RPCClient) ListPoolWorkers() (*types.WorkerPoolResponse, error) {
+	result, err := c.Call("worker.list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.WorkerPoolResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse workers response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// ScaleWorkerPool adjusts the number of workers.
+func (c *RPCClient) ScaleWorkerPool(targetCount int) error {
+	params := map[string]int{"target_count": targetCount}
+	_, err := c.Call("worker.scale", params)
+	return err
+}

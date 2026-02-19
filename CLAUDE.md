@@ -25,6 +25,9 @@ go tool cover -html=coverage.out
 # Run tests with race detection
 go test -race ./...
 
+# TUI testing with agent-tui (https://lib.rs/crates/agent-tui)
+agent-tui ./bin/meept chat
+
 # Start daemon (foreground)
 ./bin/meept-daemon -f
 

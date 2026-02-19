@@ -27,7 +27,8 @@ type CommandPaletteKeys struct {
 	ViewChat   string `json:"view_chat"`   // Switch to chat view (default: "1")
 	ViewStatus string `json:"view_status"` // Switch to status view (default: "2")
 	ViewTasks  string `json:"view_tasks"`  // Switch to tasks view (default: "3")
-	ViewMemory string `json:"view_memory"` // Switch to memory view (default: "4")
+	ViewQueue  string `json:"view_queue"`  // Switch to queue view (default: "4")
+	ViewMemory string `json:"view_memory"` // Switch to memory view (default: "5")
 	Sidebar    string `json:"sidebar"`     // Toggle sidebar (default: "y")
 	Sessions   string `json:"sessions"`    // Open session picker (default: "s")
 	CopyMode   string `json:"copy_mode"`   // Toggle copy mode (default: "c")
@@ -49,7 +50,8 @@ func DefaultClientConfig() *ClientConfig {
 				ViewChat:   "1",
 				ViewStatus: "2",
 				ViewTasks:  "3",
-				ViewMemory: "4",
+				ViewQueue:  "4",
+				ViewMemory: "5",
 				Sidebar:    "y",
 				Sessions:   "s",
 				CopyMode:   "c",

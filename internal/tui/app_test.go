@@ -35,6 +35,7 @@ func createTestApp() *App {
 	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage)
 	app.status = models.NewStatusModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
+	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
 	// Create modals
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
@@ -43,6 +44,7 @@ func createTestApp() *App {
 	app.chat.SetSize(app.width-2, app.height-4)
 	app.status.SetSize(app.width-2, app.height-4)
 	app.tasks.SetSize(app.width-2, app.height-4)
+	app.queue.SetSize(app.width-2, app.height-4)
 	app.memory.SetSize(app.width-2, app.height-4)
 	return app
 }
@@ -65,7 +67,8 @@ func TestApp_ViewSwitching_Modal(t *testing.T) {
 		{"switch to chat", "1", ViewChat},
 		{"switch to status", "2", ViewStatus},
 		{"switch to tasks", "3", ViewTasks},
-		{"switch to memory", "4", ViewMemory},
+		{"switch to queue", "4", ViewQueue},
+		{"switch to memory", "5", ViewMemory},
 	}
 
 	for _, tt := range tests {
@@ -157,7 +160,7 @@ func TestApp_RenderTabs(t *testing.T) {
 	tabs := app.renderTabs()
 
 	// Check that all tabs are present
-	expectedTabs := []string{"Chat", "Status", "Tasks", "Memory"}
+	expectedTabs := []string{"Chat", "Status", "Tasks", "Queue", "Memory"}
 	for _, tab := range expectedTabs {
 		if !strings.Contains(tabs, tab) {
 			t.Errorf("expected tabs to contain %q", tab)

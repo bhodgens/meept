@@ -15,6 +15,7 @@ type SidebarPanel int
 
 const (
 	PanelStatus SidebarPanel = iota
+	PanelWorkers
 	PanelTasks
 	PanelMemory
 )
@@ -33,6 +34,7 @@ type SidebarModel struct {
 	statusData  *SidebarStatusData
 	tasksData   []SidebarTaskItem
 	memoryData  []SidebarMemoryItem
+	workersData []SidebarWorkerItem
 
 	// Loading/error state
 	loading bool
@@ -46,6 +48,14 @@ type SidebarStatusData struct {
 	ConversationCnt int
 	MemoryCount     int
 	ActiveWorkers   int
+}
+
+// SidebarWorkerItem represents a worker shown in the sidebar.
+type SidebarWorkerItem struct {
+	ID           string
+	State        string
+	CurrentJobID string
+	Capabilities []string
 }
 
 // SidebarTaskItem represents a task shown in the sidebar.
@@ -70,7 +80,7 @@ func NewSidebarModel(rpc *RPCClient, styles *Styles) *SidebarModel {
 		rpc:           rpc,
 		styles:        styles,
 		expandedPanel: PanelStatus,
-		visible:       false,
+		visible:       true, // Visible by default
 	}
 }
 
@@ -123,10 +133,11 @@ func (s *SidebarModel) Init() tea.Cmd {
 
 // SidebarDataMsg carries refreshed sidebar data.
 type SidebarDataMsg struct {
-	Status *SidebarStatusData
-	Tasks  []SidebarTaskItem
-	Memory []SidebarMemoryItem
-	Err    error
+	Status  *SidebarStatusData
+	Workers []SidebarWorkerItem
+	Tasks   []SidebarTaskItem
+	Memory  []SidebarMemoryItem
+	Err     error
 }
 
 func (s *SidebarModel) refreshData() tea.Cmd {
@@ -137,6 +148,7 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 		}
 
 		var tasks []SidebarTaskItem
+		var workers []SidebarWorkerItem
 
 		if s.rpc.IsConnected() {
 			// Try to get status info
@@ -146,11 +158,26 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 				status.MemoryCount = statusResp.TokensUsed        // Use tokens as proxy for activity
 			}
 
-			// Fetch active workers
-			if workersResp, err := s.rpc.ListWorkers(); err == nil {
-				status.ActiveWorkers = workersResp.Count
+			// Fetch worker pool stats and workers
+			if poolResp, err := s.rpc.ListPoolWorkers(); err == nil {
+				for _, w := range poolResp.Workers {
+					workers = append(workers, SidebarWorkerItem{
+						ID:           w.ID,
+						State:        w.State,
+						CurrentJobID: w.CurrentJobID,
+						Capabilities: w.Capabilities,
+					})
+				}
+				status.ActiveWorkers = len(workers)
+			} else {
+				// Fallback to old workers API
+				if workersResp, err := s.rpc.ListWorkers(); err == nil {
+					status.ActiveWorkers = workersResp.Count
+				}
+			}
 
-				// Convert workers to task items for display
+			// Fetch active agent workers for tasks panel
+			if workersResp, err := s.rpc.ListWorkers(); err == nil {
 				for _, w := range workersResp.Workers {
 					taskStatus := "running"
 					if w.State == "completed" {
@@ -175,9 +202,10 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 		}
 
 		return SidebarDataMsg{
-			Status: status,
-			Tasks:  tasks,
-			Memory: nil, // TODO: Fetch from RPC when available
+			Status:  status,
+			Workers: workers,
+			Tasks:   tasks,
+			Memory:  nil, // TODO: Fetch from RPC when available
 		}
 	}
 }
@@ -196,6 +224,7 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		s.err = nil
 		s.statusData = msg.Status
+		s.workersData = msg.Workers
 		s.tasksData = msg.Tasks
 		s.memoryData = msg.Memory
 		return nil
@@ -260,6 +289,8 @@ func (s *SidebarModel) View() string {
 
 	// Render panels
 	b.WriteString(s.renderStatusPanel())
+	b.WriteString("\n")
+	b.WriteString(s.renderWorkersPanel())
 	b.WriteString("\n")
 	b.WriteString(s.renderTasksPanel())
 	b.WriteString("\n")
@@ -351,6 +382,74 @@ func (s *SidebarModel) renderStatusPanel() string {
 				b.WriteString(labelStyle.Render("  Workers:"))
 				b.WriteString(valueStyle.Render(fmt.Sprintf("%d active", s.statusData.ActiveWorkers)))
 				b.WriteString("\n")
+			}
+		}
+	}
+
+	return b.String()
+}
+
+func (s *SidebarModel) renderWorkersPanel() string {
+	var b strings.Builder
+
+	b.WriteString(s.renderPanelHeader("Workers", PanelWorkers))
+	b.WriteString("\n")
+
+	if s.expandedPanel == PanelWorkers {
+		if len(s.workersData) == 0 {
+			b.WriteString(s.styles.Muted.Render("  No workers"))
+			b.WriteString("\n")
+		} else {
+			for i, worker := range s.workersData {
+				if i >= 6 { // Limit display
+					b.WriteString(s.styles.Muted.Render(fmt.Sprintf("  +%d more...", len(s.workersData)-6)))
+					b.WriteString("\n")
+					break
+				}
+
+				// State indicator
+				stateIcon := "○"
+				stateStyle := s.styles.Muted
+				switch worker.State {
+				case "idle":
+					stateIcon = "○"
+					stateStyle = s.styles.Muted
+				case "claiming":
+					stateIcon = "◐"
+					stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+				case "processing":
+					stateIcon = "●"
+					stateStyle = s.styles.StatusRunning
+				case "error":
+					stateIcon = "✗"
+					stateStyle = s.styles.Error
+				}
+
+				// Worker ID (shortened)
+				workerID := worker.ID
+				maxIDLen := s.width - 10
+				if len(workerID) > maxIDLen {
+					workerID = workerID[:maxIDLen-3] + "..."
+				}
+
+				b.WriteString(fmt.Sprintf("  %s %s",
+					stateStyle.Render(stateIcon),
+					s.styles.Paragraph.Render(workerID),
+				))
+				b.WriteString("\n")
+
+				// Show current job if processing
+				if worker.State == "processing" && worker.CurrentJobID != "" {
+					jobID := worker.CurrentJobID
+					maxJobLen := s.width - 12
+					if len(jobID) > maxJobLen {
+						jobID = jobID[:maxJobLen-3] + "..."
+					}
+					b.WriteString(fmt.Sprintf("    %s",
+						s.styles.Muted.Render(jobID),
+					))
+					b.WriteString("\n")
+				}
 			}
 		}
 	}

@@ -1,0 +1,321 @@
+package queue
+
+import (
+	"context"
+	"encoding/json"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/models"
+)
+
+func newTestQueue(t *testing.T) (*PersistentQueue, *bus.MessageBus) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "queue.db")
+
+	msgBus := bus.New(nil, nil)
+	q, err := NewPersistentQueue(dbPath, msgBus, nil)
+	if err != nil {
+		t.Fatalf("failed to create queue: %v", err)
+	}
+	t.Cleanup(func() { q.Close() })
+	return q, msgBus
+}
+
+func TestPersistentQueue_EnqueueAndGet(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	job, err := NewJob(JobTypeOneOff, map[string]string{"prompt": "hello"})
+	if err != nil {
+		t.Fatalf("NewJob failed: %v", err)
+	}
+
+	if err := q.Enqueue(ctx, job); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	got, err := q.Get(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected job, got nil")
+	}
+	if got.State != StatePending {
+		t.Errorf("expected state %q, got %q", StatePending, got.State)
+	}
+}
+
+func TestPersistentQueue_ClaimAndComplete(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
+	q.Enqueue(ctx, job)
+
+	claimed, err := q.Claim(ctx, "worker-1", nil)
+	if err != nil {
+		t.Fatalf("Claim failed: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected to claim a job")
+	}
+	if claimed.ID != job.ID {
+		t.Errorf("expected job %q, got %q", job.ID, claimed.ID)
+	}
+
+	if err := q.Complete(ctx, job.ID, map[string]string{"result": "done"}); err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+
+	got, _ := q.Get(ctx, job.ID)
+	if got.State != StateCompleted {
+		t.Errorf("expected state %q, got %q", StateCompleted, got.State)
+	}
+}
+
+func TestPersistentQueue_ClaimEmpty(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	claimed, err := q.Claim(ctx, "worker-1", nil)
+	if err != nil {
+		t.Fatalf("Claim on empty queue failed: %v", err)
+	}
+	if claimed != nil {
+		t.Error("expected nil from empty queue")
+	}
+}
+
+func TestPersistentQueue_FailAndRetry(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
+	q.Enqueue(ctx, job)
+	q.Claim(ctx, "worker-1", nil)
+
+	if err := q.Fail(ctx, job.ID, errForTest("something broke")); err != nil {
+		t.Fatalf("Fail failed: %v", err)
+	}
+
+	got, _ := q.Get(ctx, job.ID)
+	if got.State != StateFailed {
+		t.Errorf("expected state %q, got %q", StateFailed, got.State)
+	}
+
+	if err := q.Retry(ctx, job.ID); err != nil {
+		t.Fatalf("Retry failed: %v", err)
+	}
+
+	got, _ = q.Get(ctx, job.ID)
+	if got.State != StatePending {
+		t.Errorf("expected state %q after retry, got %q", StatePending, got.State)
+	}
+}
+
+func TestPersistentQueue_ListByState(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	j1, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "1"})
+	j2, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "2"})
+	j3, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "3"})
+
+	q.Enqueue(ctx, j1)
+	q.Enqueue(ctx, j2)
+	q.Enqueue(ctx, j3)
+
+	// Complete one
+	q.Claim(ctx, "w1", nil)
+	q.Complete(ctx, j1.ID, nil)
+
+	pending, err := q.ListByState(ctx, StatePending, 10)
+	if err != nil {
+		t.Fatalf("ListByState failed: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Errorf("expected 2 pending, got %d", len(pending))
+	}
+}
+
+func TestPersistentQueue_Stats(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	j1, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "1"})
+	j2, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "2"})
+	q.Enqueue(ctx, j1)
+	q.Enqueue(ctx, j2)
+
+	stats, err := q.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats failed: %v", err)
+	}
+	if stats.ByState[StatePending] != 2 {
+		t.Errorf("expected 2 pending in stats, got %d", stats.ByState[StatePending])
+	}
+}
+
+func TestPersistentQueue_ClosedOperations(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	q.Close()
+
+	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
+	if err := q.Enqueue(ctx, job); err == nil {
+		t.Error("expected error on closed queue")
+	}
+
+	_, err := q.Claim(ctx, "w1", nil)
+	if err == nil {
+		t.Error("expected error on closed queue claim")
+	}
+}
+
+func TestPersistentQueue_ListByTaskID(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	j1, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "1"})
+	j1.WithTaskID("task-123")
+	j2, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "2"})
+	j2.WithTaskID("task-123")
+	j3, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "3"})
+
+	q.Enqueue(ctx, j1)
+	q.Enqueue(ctx, j2)
+	q.Enqueue(ctx, j3)
+
+	jobs, err := q.ListByTaskID(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("ListByTaskID failed: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Errorf("expected 2 jobs for task, got %d", len(jobs))
+	}
+}
+
+func TestJob_Predicates(t *testing.T) {
+	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
+
+	if !job.IsPending() {
+		t.Error("new job should be pending")
+	}
+	if job.IsComplete() {
+		t.Error("new job should not be complete")
+	}
+	if !job.CanRetry() {
+		t.Error("new job should be retryable")
+	}
+
+	job.RetryCount = job.MaxRetries
+	if job.CanRetry() {
+		t.Error("job at max retries should not be retryable")
+	}
+}
+
+func TestJob_CanBeClaimedBy(t *testing.T) {
+	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
+
+	// No required caps: any worker can claim
+	if !job.CanBeClaimedBy(nil) {
+		t.Error("job with no caps should be claimable by any worker")
+	}
+
+	job.WithRequiredCaps([]string{"code", "reasoning"})
+
+	if job.CanBeClaimedBy([]string{"code"}) {
+		t.Error("worker missing 'reasoning' should not be able to claim")
+	}
+	if !job.CanBeClaimedBy([]string{"code", "reasoning", "extra"}) {
+		t.Error("worker with all required caps should be able to claim")
+	}
+}
+
+func TestJob_Priority(t *testing.T) {
+	tests := []struct {
+		priority Priority
+		expected string
+	}{
+		{PriorityLow, "low"},
+		{PriorityNormal, "normal"},
+		{PriorityHigh, "high"},
+		{PriorityUrgent, "urgent"},
+		{Priority(99), "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			if got := tt.priority.String(); got != tt.expected {
+				t.Errorf("Priority(%d).String() = %q, want %q", tt.priority, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestHandler_StatsViaBus tests the queue handler's stats endpoint via the bus.
+func TestHandler_StatsViaBus(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "queue.db")
+
+	msgBus := bus.New(nil, nil)
+	q, err := NewPersistentQueue(dbPath, msgBus, nil)
+	if err != nil {
+		t.Fatalf("failed to create queue: %v", err)
+	}
+	defer q.Close()
+
+	// Pre-enqueue a job
+	ctx := context.Background()
+	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
+	q.Enqueue(ctx, job)
+
+	handler := NewHandler(q, msgBus, nil)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	handler.Start(ctx)
+	defer handler.Stop(ctx)
+
+	respSub := msgBus.Subscribe("test-stats", "queue.result")
+
+	statsPayload, _ := json.Marshal(map[string]any{})
+	statsMsg := &models.BusMessage{
+		ID:        "test-stats-1",
+		Type:      models.MessageTypeRequest,
+		Topic:     "queue.stats",
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   statsPayload,
+	}
+
+	msgBus.Publish("queue.stats", statsMsg)
+
+	select {
+	case resp := <-respSub.Channel:
+		var result map[string]any
+		json.Unmarshal(resp.Payload, &result)
+		if _, hasErr := result["error"]; hasErr {
+			t.Errorf("got error: %s", string(resp.Payload))
+		}
+		byState, ok := result["by_state"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected by_state map, got %T", result["by_state"])
+		}
+		pending, _ := byState["pending"].(float64)
+		if pending < 1 {
+			t.Errorf("expected at least 1 pending, got %.0f", pending)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for stats response")
+	}
+}
+
+type errForTest string
+
+func (e errForTest) Error() string { return string(e) }

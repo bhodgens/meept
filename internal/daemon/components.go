@@ -14,9 +14,12 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
+	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -33,6 +36,16 @@ type Components struct {
 	StatusHandler   *StatusHandler
 	SessionStore    session.Store
 	SessionHandler  *session.Handler
+
+	// Multi-agent orchestration components
+	Queue           queue.Queue
+	QueueHandler    *queue.Handler
+	TaskRegistry    *task.Registry
+	TaskHandler     *task.Handler
+	WorkerPool      *worker.Pool
+	WorkerHandler   *worker.Handler
+	JobProcessor    worker.JobProcessor
+
 	Logger          *slog.Logger
 }
 
@@ -126,6 +139,50 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 	c.SessionHandler = session.NewHandler(c.SessionStore, msgBus, logger)
 
+	// Create job queue
+	queueDB := cfg.Queue.DBPath
+	if queueDB == "" {
+		queueDB = filepath.Join(cfg.Daemon.DataDir, "queue.db")
+	}
+	jobQueue, err := queue.NewPersistentQueue(queueDB, msgBus, logger)
+	if err != nil {
+		logger.Warn("Failed to create job queue", "error", err)
+	} else {
+		c.Queue = jobQueue
+		c.QueueHandler = queue.NewHandler(jobQueue, msgBus, logger)
+	}
+
+	// Create task registry
+	tasksDB := filepath.Join(cfg.Daemon.DataDir, "tasks.db")
+	taskRegistry, err := task.NewRegistry(tasksDB, msgBus, logger)
+	if err != nil {
+		logger.Warn("Failed to create task registry", "error", err)
+	} else {
+		c.TaskRegistry = taskRegistry
+		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
+	}
+
+	// Create job processor that uses the agent loop
+	c.JobProcessor = NewAgentJobProcessor(c.AgentLoop, logger)
+
+	// Create worker pool
+	if c.Queue != nil && c.JobProcessor != nil {
+		workerPool, err := worker.NewPool(worker.PoolConfig{
+			Queue:       c.Queue,
+			Processor:   c.JobProcessor,
+			MessageBus:  msgBus,
+			Logger:      logger,
+			DefaultCaps: cfg.Workers.DefaultCaps,
+			IdleTimeout: time.Duration(cfg.Workers.IdleTimeoutSeconds) * time.Second,
+		})
+		if err != nil {
+			logger.Warn("Failed to create worker pool", "error", err)
+		} else {
+			c.WorkerPool = workerPool
+			c.WorkerHandler = worker.NewHandler(workerPool, msgBus, logger)
+		}
+	}
+
 	return c, nil
 }
 
@@ -146,12 +203,71 @@ func (c *Components) Start(ctx context.Context) error {
 		return err
 	}
 
+	// Start queue handler
+	if c.QueueHandler != nil {
+		if err := c.QueueHandler.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start queue handler", "error", err)
+		}
+	}
+
+	// Start task handler
+	if c.TaskHandler != nil {
+		if err := c.TaskHandler.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start task handler", "error", err)
+		}
+	}
+
+	// Start worker handler
+	if c.WorkerHandler != nil {
+		if err := c.WorkerHandler.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start worker handler", "error", err)
+		}
+	}
+
+	// Start worker pool
+	if c.WorkerPool != nil {
+		poolSize := c.Config.Workers.PoolSize
+		if poolSize <= 0 {
+			poolSize = 4
+		}
+		if err := c.WorkerPool.Start(ctx, poolSize); err != nil {
+			c.Logger.Error("Failed to start worker pool", "error", err)
+		}
+	}
+
 	return nil
 }
 
 // Stop stops all components.
 func (c *Components) Stop(ctx context.Context) error {
 	var lastErr error
+
+	// Stop worker pool first to prevent new work
+	if c.WorkerPool != nil {
+		if err := c.WorkerPool.Stop(ctx); err != nil {
+			c.Logger.Error("Failed to stop worker pool", "error", err)
+			lastErr = err
+		}
+	}
+
+	// Stop handlers
+	if c.WorkerHandler != nil {
+		if err := c.WorkerHandler.Stop(ctx); err != nil {
+			lastErr = err
+		}
+	}
+
+	if c.TaskHandler != nil {
+		if err := c.TaskHandler.Stop(ctx); err != nil {
+			lastErr = err
+		}
+	}
+
+	if c.QueueHandler != nil {
+		if err := c.QueueHandler.Stop(ctx); err != nil {
+			lastErr = err
+		}
+	}
 
 	if c.ChatHandler != nil {
 		if err := c.ChatHandler.Stop(ctx); err != nil {
@@ -167,6 +283,19 @@ func (c *Components) Stop(ctx context.Context) error {
 
 	if c.SessionHandler != nil {
 		if err := c.SessionHandler.Stop(ctx); err != nil {
+			lastErr = err
+		}
+	}
+
+	// Close stores
+	if c.TaskRegistry != nil {
+		if err := c.TaskRegistry.Close(); err != nil {
+			lastErr = err
+		}
+	}
+
+	if c.Queue != nil {
+		if err := c.Queue.Close(); err != nil {
 			lastErr = err
 		}
 	}
@@ -421,3 +550,65 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 
 	h.bus.Publish("status.response", respMsg)
 }
+
+// AgentJobProcessor processes jobs using the agent loop.
+type AgentJobProcessor struct {
+	agentLoop *agent.AgentLoop
+	logger    *slog.Logger
+}
+
+// NewAgentJobProcessor creates a new agent job processor.
+func NewAgentJobProcessor(agentLoop *agent.AgentLoop, logger *slog.Logger) *AgentJobProcessor {
+	return &AgentJobProcessor{
+		agentLoop: agentLoop,
+		logger:    logger,
+	}
+}
+
+// Process executes a job using the agent loop.
+func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, error) {
+	// Parse the job payload
+	var payload struct {
+		Prompt    string `json:"prompt"`
+		SessionID string `json:"session_id,omitempty"`
+	}
+
+	if err := json.Unmarshal(job.Payload, &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse job payload: %w", err)
+	}
+
+	if payload.Prompt == "" {
+		return nil, fmt.Errorf("job payload missing prompt")
+	}
+
+	p.logger.Info("Processing job", "job_id", job.ID, "prompt_len", len(payload.Prompt))
+
+	if p.agentLoop == nil {
+		return nil, fmt.Errorf("agent loop not configured")
+	}
+
+	// Use session ID as conversation ID if provided, otherwise use job ID
+	conversationID := payload.SessionID
+	if conversationID == "" {
+		conversationID = job.ID
+	}
+
+	// Execute using agent loop
+	response, err := p.agentLoop.RunOnce(ctx, payload.Prompt, conversationID)
+	if err != nil {
+		p.logger.Error("Agent loop execution failed", "job_id", job.ID, "error", err)
+		return nil, fmt.Errorf("agent execution failed: %w", err)
+	}
+
+	result := map[string]any{
+		"job_id":     job.ID,
+		"response":   response,
+		"status":     "completed",
+		"session_id": payload.SessionID,
+	}
+
+	return result, nil
+}
+
+// Ensure AgentJobProcessor implements worker.JobProcessor
+var _ worker.JobProcessor = (*AgentJobProcessor)(nil)
