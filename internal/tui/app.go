@@ -406,6 +406,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMessage = ""
 		}
 		return a, nil
+
+	case models.SessionDescriptionUpdatedMsg:
+		// Update the app-level session description so tab bar and picker reflect it
+		if a.currentSession != nil && msg.SessionID == a.currentSession.ID {
+			a.currentSession.Description = msg.Description
+		}
+		// Still delegate to chat model
 	}
 
 	// Delegate to current view
@@ -604,7 +611,11 @@ func (a *App) renderTabs() string {
 	// Add session indicator if we have one
 	var sessionIndicator string
 	if a.currentSession != nil {
-		sessionIndicator = a.styles.Muted.Render(" [" + a.currentSession.Name + "]")
+		sessionLabel := a.currentSession.Description
+		if sessionLabel == "" {
+			sessionLabel = a.currentSession.Name
+		}
+		sessionIndicator = a.styles.Muted.Render(" [" + sessionLabel + "]")
 	}
 
 	// Add separator

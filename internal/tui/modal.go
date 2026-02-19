@@ -250,7 +250,10 @@ func (s *SessionPickerModal) rebuildItems() {
 			key = "" // No shortcut for sessions beyond 9
 		}
 
-		label := sess.Name
+		label := sess.Description
+		if label == "" {
+			label = sess.Name
+		}
 		if len(sess.AttachedClients) > 0 {
 			label += fmt.Sprintf(" (%d attached)", len(sess.AttachedClients))
 		}
@@ -327,8 +330,11 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 				lastActivity = formatRelativeTime(t)
 			}
 
-			// Truncate name if too long
-			name := sess.Name
+			// Prefer description over name for display
+			name := sess.Description
+			if name == "" {
+				name = sess.Name
+			}
 			maxNameLen := s.width - 20
 			if len(name) > maxNameLen {
 				name = name[:maxNameLen-3] + "..."
