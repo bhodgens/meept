@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -370,6 +371,11 @@ func (c *RPCClient) ListSessions() (*types.SessionListResponse, error) {
 		return nil, fmt.Errorf("failed to parse sessions response: %w", err)
 	}
 
+	// Debug: log session descriptions to verify they're being returned
+	for _, s := range resp.Sessions {
+		slog.Debug("ListSessions result", "id", s.ID, "name", s.Name, "description", s.Description)
+	}
+
 	return &resp, nil
 }
 
@@ -453,6 +459,25 @@ func (c *RPCClient) UpdateSessionDescription(sessionID, description string) erro
 	}
 	_, err := c.Call("session.update_description", params)
 	return err
+}
+
+// GenerateSessionDescription uses LLM to generate a session description.
+func (c *RPCClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
+	params := map[string]string{
+		"session_id":    sessionID,
+		"first_message": firstMessage,
+		"project_name":  projectName,
+	}
+	result, err := c.Call("session.generate_description", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.GenerateDescriptionResult
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // ============================================================================

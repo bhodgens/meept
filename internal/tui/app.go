@@ -15,6 +15,7 @@ import (
 
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
+	"github.com/caimlas/meept/internal/tui/viz"
 )
 
 // ViewType represents the different views in the TUI.
@@ -135,7 +136,7 @@ func NewApp(socketPath string) *App {
 		tasks:        models.NewTasksModel(rpc),
 		queue:        models.NewQueueModel(rpc),
 		memory:       models.NewMemoryModel(rpc),
-		sidebar:      NewSidebarModel(rpc, styles),
+		sidebar:      NewSidebarModel(rpc, styles, clientConfig.Rendering.SidebarAnimation),
 		keys:         DefaultKeyMap(),
 		clientConfig: clientConfig,
 		projectDir:   projectDir,
@@ -375,6 +376,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Delegate to sidebar
 		return a, a.sidebar.Update(msg)
 
+	case viz.VizTickMsg:
+		// Forward viz tick to sidebar
+		if a.sidebar.IsVisible() {
+			return a, a.sidebar.Update(msg)
+		}
+		return a, nil
+
 	case models.ChatFocusSidebarMsg:
 		// Chat wants to move focus to sidebar
 		if a.sidebar.IsVisible() {
@@ -431,6 +439,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update the app-level session description so tab bar and picker reflect it
 		if a.currentSession != nil && msg.SessionID == a.currentSession.ID {
 			a.currentSession.Description = msg.Description
+			a.setTerminalTitle()
 		}
 		// Still delegate to chat model
 	}
@@ -489,6 +498,9 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalSessionPicker
 			a.sessionPicker.Show()
 			return a, a.sessionPicker.RefreshSessions()
+		case keys.NewSession:
+			// Create a new session directly with default name
+			return a, a.createSession(a.clientConfig.Session.DefaultName)
 		case keys.RenameSession:
 			// Rename current session
 			if a.currentSession != nil {
@@ -706,8 +718,13 @@ func (a *App) renderHeader() string {
 // setTerminalTitle sets the terminal tab/window title using OSC escape sequence.
 func (a *App) setTerminalTitle() {
 	title := "meept"
-	if a.currentSession != nil && a.currentSession.Name != "" && a.currentSession.Name != "default" {
-		title = "meept - " + a.currentSession.Name
+	if a.currentSession != nil {
+		// Prefer description over name for the title
+		if a.currentSession.Description != "" {
+			title = "meept - " + a.currentSession.Description
+		} else if a.currentSession.Name != "" && a.currentSession.Name != "default" {
+			title = "meept - " + a.currentSession.Name
+		}
 	}
 	// OSC 0 sets window/tab title: \033]0;title\007
 	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title)

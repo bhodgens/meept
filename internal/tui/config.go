@@ -34,6 +34,7 @@ type RenderingConfig struct {
 	Theme              string `json:"theme"`               // Syntax theme (default: "monokai")
 	WordWrap           bool   `json:"word_wrap"`           // Enable word wrap (default: true)
 	ShowHeader         bool   `json:"show_header"`         // Show header bar with session info (default: true)
+	SidebarAnimation   bool   `json:"sidebar_animation"`   // Enable animated dispatch visualization in sidebar (default: true)
 }
 
 // KeybindingsConfig defines customizable key bindings.
@@ -51,6 +52,7 @@ type CommandPaletteKeys struct {
 	ViewMemory    string `json:"view_memory"`    // Switch to memory view (default: "4")
 	Sidebar       string `json:"sidebar"`        // Toggle sidebar (default: "y")
 	Sessions      string `json:"sessions"`       // Open session picker (default: "s")
+	NewSession    string `json:"new_session"`    // Create new session (default: "n")
 	RenameSession string `json:"rename_session"` // Rename current session (default: "r")
 }
 
@@ -73,6 +75,7 @@ func DefaultClientConfig() *ClientConfig {
 				ViewMemory:    "4",
 				Sidebar:       "y",
 				Sessions:      "s",
+				NewSession:    "n",
 				RenameSession: "r",
 			},
 		},
@@ -91,6 +94,7 @@ func DefaultClientConfig() *ClientConfig {
 			Theme:              "monokai",
 			WordWrap:           true,
 			ShowHeader:         true,
+			SidebarAnimation:   true,
 		},
 	}
 }

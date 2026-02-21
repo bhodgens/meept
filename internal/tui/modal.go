@@ -180,6 +180,7 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 		{Key: keys.ViewMemory, Label: "memory", Description: "switch to memory view"},
 		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
 		{Key: keys.Sessions, Label: "sessions...", Description: "manage sessions"},
+		{Key: keys.NewSession, Label: "new session", Description: "create a new session"},
 		{Key: keys.RenameSession, Label: "edit description", Description: "edit session description"},
 	})
 
@@ -301,11 +302,19 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 			Width(s.width - 8)
 		input := s.inputBuffer
 		if input == "" {
-			input = s.clientConfig.Session.DefaultName
+			// Show placeholder in muted style
+			placeholder := s.styles.Muted.Render(s.clientConfig.Session.DefaultName)
+			b.WriteString(inputStyle.Render(placeholder + "█"))
+		} else {
+			b.WriteString(inputStyle.Render(input + "█"))
 		}
-		b.WriteString(inputStyle.Render(input + "█"))
 		b.WriteString("\n\n")
-		b.WriteString(s.styles.Muted.Render("enter to create, esc to cancel"))
+		hint := "enter to create"
+		if s.inputBuffer == "" {
+			hint += fmt.Sprintf(" (uses '%s')", s.clientConfig.Session.DefaultName)
+		}
+		hint += ", esc to cancel"
+		b.WriteString(s.styles.Muted.Render(hint))
 	} else if len(s.sessions) == 0 {
 		// No sessions
 		b.WriteString(s.styles.Muted.Render("no sessions found"))
@@ -482,10 +491,16 @@ func (s *SessionPickerModal) handleInputKey(key string) tea.Cmd {
 	case "esc":
 		s.inputMode = false
 		s.inputBuffer = ""
-	case "backspace":
+	case "backspace", "ctrl+h":
 		if len(s.inputBuffer) > 0 {
 			s.inputBuffer = s.inputBuffer[:len(s.inputBuffer)-1]
 		}
+	case "ctrl+u":
+		// Clear the entire input
+		s.inputBuffer = ""
+	case "left", "right", "up", "down", "tab":
+		// Ignore navigation keys in input mode
+		return nil
 	default:
 		// Append printable characters
 		if len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
@@ -604,24 +619,67 @@ func (m *SessionRenameModal) View(screenW, screenH int) string {
 
 // HandleKey processes key input for the rename modal.
 func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
+	// When input field is focused (selected == 0), handle text input keys first
+	if m.selected == 0 {
+		switch key {
+		case "backspace", "ctrl+h":
+			if len(m.inputBuffer) > 0 {
+				m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
+			}
+			return nil
+		case "ctrl+u":
+			// Clear the entire input
+			m.inputBuffer = ""
+			return nil
+		case "tab":
+			m.selected = 1
+			return nil
+		case "shift+tab":
+			m.selected = 2
+			return nil
+		case "enter":
+			// Submit the current input
+			name := m.inputBuffer
+			sessionID := m.sessionID
+			m.Hide()
+			return func() tea.Msg {
+				return SessionRenameMsg{SessionID: sessionID, NewName: name}
+			}
+		case "esc":
+			m.Hide()
+			return nil
+		case "left", "right", "up", "down":
+			// Ignore arrow keys in input mode - don't change selection
+			return nil
+		default:
+			// Append printable characters
+			if len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
+				m.inputBuffer += key
+			}
+			return nil
+		}
+	}
+
+	// Button navigation (when not in input field)
 	switch key {
 	case "tab":
 		m.selected = (m.selected + 1) % 3
 	case "shift+tab":
 		m.selected = (m.selected + 2) % 3
 	case "left":
-		if m.selected > 0 {
+		if m.selected > 1 {
 			m.selected--
+		} else if m.selected == 1 {
+			m.selected = 0 // Go back to input
 		}
 	case "right":
 		if m.selected < 2 {
 			m.selected++
 		}
+	case "up":
+		m.selected = 0 // Go back to input
 	case "enter":
 		switch m.selected {
-		case 0:
-			// Focus on input, move to ok button
-			m.selected = 1
 		case 1:
 			// Ok button - submit
 			name := m.inputBuffer
@@ -636,13 +694,10 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 		}
 	case "esc":
 		m.Hide()
-	case "backspace":
-		if m.selected == 0 && len(m.inputBuffer) > 0 {
-			m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
-		}
 	default:
-		// Append printable characters to input when focused on input field
-		if m.selected == 0 && len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
+		// If user starts typing while on a button, go back to input and type
+		if len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
+			m.selected = 0
 			m.inputBuffer += key
 		}
 	}
