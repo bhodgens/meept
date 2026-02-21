@@ -11,6 +11,8 @@ type Config struct {
 	Daemon      DaemonConfig      `toml:"daemon"`
 	LLM         LLMConfig         `toml:"llm"`
 	Memory      MemoryConfig      `toml:"memory"`
+	Memvid      MemvidConfig      `toml:"memvid"`
+	MultiAgent  MultiAgentConfig  `toml:"multiagent"`
 	Security    SecurityConfig    `toml:"security"`
 	Scheduler   SchedulerConfig   `toml:"scheduler"`
 	Queue       QueueConfig       `toml:"queue"`
@@ -47,8 +49,20 @@ type BudgetConfig struct {
 	Aggressiveness   float64 `toml:"aggressiveness"`
 }
 
+// MemoryBackend defines the storage backend for memory.
+type MemoryBackend string
+
+const (
+	// MemoryBackendMemvid uses the memvid service as the primary backend.
+	MemoryBackendMemvid MemoryBackend = "memvid"
+	// MemoryBackendSQLite uses local SQLite as the backend.
+	MemoryBackendSQLite MemoryBackend = "sqlite"
+)
+
 // MemoryConfig holds memory subsystem settings.
 type MemoryConfig struct {
+	// Backend specifies the storage backend: "memvid" (default) or "sqlite"
+	Backend                    MemoryBackend       `toml:"backend"`
 	DataDir                    string              `toml:"data_dir"`
 	ConsolidationIntervalHours int                 `toml:"consolidation_interval_hours"`
 	Episodic                   EpisodicConfig      `toml:"episodic"`
@@ -72,6 +86,23 @@ type TaskMemoryConfig struct {
 type PersonalityConfig struct {
 	Enabled                    bool `toml:"enabled"`
 	UpdateIntervalConversations int  `toml:"update_interval_conversations"`
+}
+
+// MemvidConfig holds memvid service settings.
+type MemvidConfig struct {
+	Enabled   bool   `toml:"enabled"`
+	Endpoint  string `toml:"endpoint"`
+	DataDir   string `toml:"data_dir"`
+	Timeout   int    `toml:"timeout_seconds"`
+}
+
+// MultiAgentConfig holds multi-agent orchestration settings.
+type MultiAgentConfig struct {
+	Enabled            bool   `toml:"enabled"`
+	DispatcherModel    string `toml:"dispatcher_model"`
+	DefaultModel       string `toml:"default_model"`
+	MaxMemoryRefs      int    `toml:"max_memory_refs"`
+	ContextSearchLimit int    `toml:"context_search_limit"`
 }
 
 // SecurityConfig holds security settings.
@@ -242,6 +273,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Memory: MemoryConfig{
+			Backend:                    MemoryBackendMemvid, // Default to memvid, fallback to sqlite
 			DataDir:                    "~/.meept/memory",
 			ConsolidationIntervalHours: 6,
 			Episodic: EpisodicConfig{
@@ -256,6 +288,19 @@ func DefaultConfig() *Config {
 				Enabled:                    true,
 				UpdateIntervalConversations: 10,
 			},
+		},
+		Memvid: MemvidConfig{
+			Enabled:  false,
+			Endpoint: "http://localhost:8765",
+			DataDir:  "~/.meept/memvid",
+			Timeout:  30,
+		},
+		MultiAgent: MultiAgentConfig{
+			Enabled:            false,
+			DispatcherModel:    "", // Use default
+			DefaultModel:       "",
+			MaxMemoryRefs:      20,
+			ContextSearchLimit: 10,
 		},
 		Security: SecurityConfig{
 			SanitizeInputs:              true,

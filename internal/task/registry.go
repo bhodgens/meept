@@ -277,6 +277,11 @@ func (r *Registry) FailJob(ctx context.Context, taskID string) error {
 }
 
 // Close closes the registry.
+// Store returns the underlying task store.
+func (r *Registry) Store() *Store {
+	return r.store
+}
+
 func (r *Registry) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

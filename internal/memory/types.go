@@ -34,6 +34,14 @@ type Memory struct {
 	CreatedAt time.Time `json:"created_at"`
 	// UpdatedAt is when the memory was last modified.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+
+	// Agent attribution fields (for multi-agent orchestration)
+	// AgentID identifies which agent created this memory.
+	AgentID string `json:"agent_id,omitempty"`
+	// SessionID is the conversation session this memory belongs to.
+	SessionID string `json:"session_id,omitempty"`
+	// TaskID is the task this memory was created during.
+	TaskID string `json:"task_id,omitempty"`
 }
 
 // MemoryResult is a memory item returned from a search with relevance info.

@@ -14,6 +14,8 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/memory"
+	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/task"
@@ -45,6 +47,14 @@ type Components struct {
 	WorkerPool      *worker.Pool
 	WorkerHandler   *worker.Handler
 	JobProcessor    worker.JobProcessor
+
+	// Memory
+	MemoryManager   *memory.Manager
+
+	// Memvid and multi-agent
+	MemvidClient    *memvid.Client
+	AgentRegistry   *agent.AgentRegistry
+	Dispatcher      *agent.Dispatcher
 
 	Logger          *slog.Logger
 }
@@ -127,6 +137,34 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Create status handler
 	c.StatusHandler = NewStatusHandler(msgBus, logger)
 
+	// Create memory manager
+	c.MemoryManager = memory.NewManager(memory.ManagerConfig{
+		Config:       cfg.Memory,
+		MemvidConfig: cfg.Memvid,
+		Logger:       logger.With("component", "memory"),
+	})
+	if err := c.MemoryManager.Initialize(context.Background()); err != nil {
+		logger.Error("Failed to initialize memory manager", "error", err)
+		// Non-fatal: daemon can run without memory
+	} else {
+		logger.Info("Memory manager initialized",
+			"backend", c.MemoryManager.Backend(),
+		)
+	}
+
+	// Store the memvid client from memory manager if active, or create standalone
+	if c.MemoryManager.IsMemvidActive() {
+		c.MemvidClient = c.MemoryManager.MemvidClient()
+		logger.Info("Using memvid client from memory manager", "endpoint", cfg.Memvid.Endpoint)
+	} else if cfg.Memvid.Enabled {
+		c.MemvidClient = memvid.NewClient(memvid.ClientConfig{
+			Endpoint: cfg.Memvid.Endpoint,
+			Zone:     "default",
+			Timeout:  time.Duration(cfg.Memvid.Timeout) * time.Second,
+		})
+		logger.Info("Standalone memvid client initialized", "endpoint", cfg.Memvid.Endpoint)
+	}
+
 	// Create session store (SQLite-backed for persistence)
 	sessionsDB := filepath.Join(cfg.Daemon.DataDir, "sessions.db")
 	sessionStore, err := session.NewSQLiteStore(sessionsDB, logger)
@@ -152,7 +190,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		c.QueueHandler = queue.NewHandler(jobQueue, msgBus, logger)
 	}
 
-	// Create task registry
+	// Create task registry (before agent registry so task store can be shared)
 	tasksDB := filepath.Join(cfg.Daemon.DataDir, "tasks.db")
 	taskRegistry, err := task.NewRegistry(tasksDB, msgBus, logger)
 	if err != nil {
@@ -160,6 +198,37 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	} else {
 		c.TaskRegistry = taskRegistry
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
+	}
+
+	// Create agent registry if multi-agent is enabled
+	if cfg.MultiAgent.Enabled {
+		toolAdapter := agent.NewToolRegistryAdapter(c.ToolRegistry)
+
+		var taskStore *task.Store
+		if c.TaskRegistry != nil {
+			taskStore = c.TaskRegistry.Store()
+		}
+
+		c.AgentRegistry = agent.NewAgentRegistry(agent.RegistryConfig{
+			MemvidClient:    c.MemvidClient,
+			TaskStore:       taskStore,
+			LLMClient:       c.LLMClient,
+			MessageBus:      msgBus,
+			SecurityChecker: c.SecurityChecker,
+			ToolRegistry:    toolAdapter,
+			Logger:          logger,
+		})
+		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
+
+		// Create dispatcher
+		c.Dispatcher = agent.NewDispatcher(agent.DispatcherConfig{
+			Registry:     c.AgentRegistry,
+			MemvidClient: c.MemvidClient,
+			MemoryMgr:    c.MemoryManager,
+			TaskStore:    taskStore,
+			Logger:       logger.With("component", "dispatcher"),
+		})
+		logger.Info("Dispatcher initialized")
 	}
 
 	// Create job processor that uses the agent loop
@@ -306,8 +375,19 @@ func (c *Components) Stop(ctx context.Context) error {
 		}
 	}
 
+	if c.MemoryManager != nil {
+		if err := c.MemoryManager.Close(); err != nil {
+			c.Logger.Error("Failed to close memory manager", "error", err)
+			lastErr = err
+		}
+	}
+
 	if c.LLMClient != nil {
 		c.LLMClient.Close()
+	}
+
+	if c.AgentRegistry != nil {
+		c.AgentRegistry.Close()
 	}
 
 	return lastErr

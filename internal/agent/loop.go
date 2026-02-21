@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -62,6 +65,10 @@ type AgentLoop struct {
 	bus      *bus.MessageBus
 	logger   *slog.Logger
 
+	// Memory for context injection
+	memvid    *memvid.Client
+	taskStore *task.Store
+
 	// Configuration
 	config AgentConfig
 
@@ -70,6 +77,9 @@ type AgentLoop struct {
 
 	// Prompt building
 	promptBuilder *PromptBuilder
+
+	// Agent identity
+	agentID string
 }
 
 // LoopOption is a functional option for configuring an AgentLoop.
@@ -114,6 +124,27 @@ func WithLoopLogger(logger *slog.Logger) LoopOption {
 func WithAgentConfig(config AgentConfig) LoopOption {
 	return func(l *AgentLoop) {
 		l.config = config
+	}
+}
+
+// WithMemvidClient sets the memvid client for memory injection.
+func WithMemvidClient(client *memvid.Client) LoopOption {
+	return func(l *AgentLoop) {
+		l.memvid = client
+	}
+}
+
+// WithAgentID sets the agent identifier.
+func WithAgentID(id string) LoopOption {
+	return func(l *AgentLoop) {
+		l.agentID = id
+	}
+}
+
+// WithTaskStore sets the task store for inherited memory fetching.
+func WithTaskStore(store *task.Store) LoopOption {
+	return func(l *AgentLoop) {
+		l.taskStore = store
 	}
 }
 
@@ -268,6 +299,215 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 // HandleMessage processes a single message without conversation context.
 func (l *AgentLoop) HandleMessage(ctx context.Context, message string) (string, error) {
 	return l.RunOnce(ctx, message, generateConversationID())
+}
+
+// RunWithTask processes a task through the agent loop with memory context injection.
+func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, error) {
+	if l.llm == nil {
+		return "", ErrNoLLMClient
+	}
+
+	// Use first linked session or task ID as conversation ID
+	conversationID := t.ID
+	if len(t.LinkedSessions) > 0 {
+		conversationID = t.LinkedSessions[0]
+	}
+
+	// Get or create conversation
+	conv := l.conversations.Get(conversationID)
+
+	// Build context parts from memory
+	contextParts := l.buildMemoryContext(ctx, t)
+
+	// Build system prompt with injected context
+	systemPrompt := l.buildSystemPromptWithContext(contextParts)
+	conv.SetSystemPrompt(systemPrompt)
+
+	// Build user message from task
+	userMessage := l.buildTaskMessage(t)
+	conv.AddUserMessage(userMessage)
+
+	// Truncate if needed
+	conv.Truncate()
+
+	// Run reasoning cycle
+	response, err := l.reasoningCycle(ctx, conv, conversationID)
+	if err != nil {
+		l.logger.Error("Task reasoning cycle failed",
+			"task", t.ID,
+			"error", err,
+		)
+		errorMsg := "I encountered an error during processing. Please try again."
+		conv.AddAssistantMessage(errorMsg)
+		return errorMsg, err
+	}
+
+	// Add final response to conversation
+	conv.AddAssistantMessage(response)
+
+	// Record memory of this task execution
+	if l.memvid != nil {
+		go l.recordTaskExecution(context.Background(), t, response)
+	}
+
+	return response, nil
+}
+
+// buildMemoryContext fetches and formats memory context for the task.
+func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []string {
+	var parts []string
+
+	// Fetch inherited memories from parent task
+	if l.memvid != nil && l.taskStore != nil && t.InheritedFrom != "" {
+		parentTask, err := l.taskStore.GetByID(t.InheritedFrom)
+		if err != nil {
+			l.logger.Warn("Failed to fetch parent task", "parent", t.InheritedFrom, "error", err)
+		} else if parentTask != nil && len(parentTask.CreatedMemories) > 0 {
+			inherited, err := l.memvid.GetByIDs(ctx, parentTask.CreatedMemories)
+			if err != nil {
+				l.logger.Warn("Failed to fetch inherited memories", "error", err)
+			} else {
+				for _, m := range inherited {
+					parts = append(parts, formatMemoryForPrompt(m))
+				}
+			}
+		}
+	}
+
+	// Fetch explicit memory refs
+	if l.memvid != nil && len(t.MemoryRefs) > 0 {
+		memories, err := l.memvid.GetByIDs(ctx, t.MemoryRefs)
+		if err != nil {
+			l.logger.Warn("Failed to fetch memory refs", "error", err)
+		} else {
+			for _, m := range memories {
+				parts = append(parts, formatMemoryForPrompt(m))
+			}
+		}
+	}
+
+	// Auto-search additional context
+	if l.memvid != nil && t.HasContextQuery() {
+		results, err := l.memvid.Search(ctx, t.ContextQuery, 5)
+		if err != nil {
+			l.logger.Warn("Failed to search memory context", "error", err)
+		} else {
+			for _, r := range results {
+				parts = append(parts, formatMemoryForPrompt(r.Memory))
+			}
+		}
+	}
+
+	return parts
+}
+
+// buildSystemPromptWithContext constructs system prompt with injected memory context.
+func (l *AgentLoop) buildSystemPromptWithContext(contextParts []string) string {
+	// Use override if set
+	if l.config.SystemPromptOveride != "" {
+		return l.buildSystemPromptWithOverride()
+	}
+
+	// Build from components
+	builder := NewPromptBuilderFromConfig(PromptConfig{
+		Constitution: l.config.Constitution,
+		Restrictions: l.config.Restrictions,
+		Purpose:      l.config.Purpose,
+		Personality:  l.config.Personality,
+	})
+
+	// Add memory context section if present
+	if len(contextParts) > 0 {
+		contextSection := "## Relevant Context\n\n"
+		for _, part := range contextParts {
+			contextSection += "- " + part + "\n"
+		}
+		contextSection += "\n---\n"
+		builder.AddSection("context", contextSection)
+	}
+
+	// Add tool descriptions if registry is available
+	if l.registry != nil {
+		tools := l.registry.List()
+		for _, tool := range tools {
+			builder.AddTool(ToolDescription{
+				Name:        tool.Name(),
+				Description: tool.Description(),
+			})
+		}
+	}
+
+	return builder.Build()
+}
+
+// buildTaskMessage constructs the user message from a task.
+func (l *AgentLoop) buildTaskMessage(t *task.Task) string {
+	var sb strings.Builder
+
+	// Add task ID reference
+	sb.WriteString(fmt.Sprintf("[Task: %s]\n\n", t.ID))
+
+	// Add task name and description
+	sb.WriteString(t.Name)
+	if t.Description != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(t.Description)
+	}
+
+	return sb.String()
+}
+
+// recordTaskExecution stores the task execution result in memory.
+func (l *AgentLoop) recordTaskExecution(ctx context.Context, t *task.Task, response string) {
+	if l.memvid == nil {
+		return
+	}
+
+	content := fmt.Sprintf("Task: %s\nAgent: %s\nOutcome: %s",
+		t.Name,
+		l.agentID,
+		truncateForMemory(response, 500),
+	)
+
+	metadata := map[string]any{
+		"task_id":   t.ID,
+		"agent_id":  l.agentID,
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Store in task-specific zone
+	zone := "task"
+	if t.MemvidZone != "" {
+		zone = t.MemvidZone
+	}
+
+	taskClient := l.memvid.WithZone(zone)
+	memoryID, err := taskClient.Store(ctx, content, metadata)
+	if err != nil {
+		l.logger.Warn("Failed to record task execution", "error", err)
+		return
+	}
+
+	// Record the created memory ID
+	t.AddCreatedMemory(memoryID)
+	l.logger.Debug("Recorded task execution", "task", t.ID, "memory", memoryID)
+}
+
+// formatMemoryForPrompt formats a memory for inclusion in the prompt.
+func formatMemoryForPrompt(m memvid.Memory) string {
+	content := m.Content
+	if len(content) > 300 {
+		content = content[:297] + "..."
+	}
+	return content
+}
+
+// truncateForMemory truncates content for memory storage.
+func truncateForMemory(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 
 // executeToolCalls executes tool calls using the executor.

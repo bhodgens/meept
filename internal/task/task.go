@@ -49,6 +49,18 @@ type Task struct {
 	TotalJobs     int `json:"total_jobs"`
 	CompletedJobs int `json:"completed_jobs"`
 	FailedJobs    int `json:"failed_jobs"`
+
+	// Memory context for agent continuity
+	// MemoryRefs are explicit memory IDs passed to the agent.
+	MemoryRefs []string `json:"memory_refs,omitempty"`
+	// ContextQuery is an auto-search query for additional context.
+	ContextQuery string `json:"context_query,omitempty"`
+	// InheritedFrom is the parent task ID this task was derived from.
+	InheritedFrom string `json:"inherited_from,omitempty"`
+	// CreatedMemories are memory IDs created during task execution.
+	CreatedMemories []string `json:"created_memories,omitempty"`
+	// AssignedAgent is the agent ID assigned to this task.
+	AssignedAgent string `json:"assigned_agent,omitempty"`
 }
 
 // NewTask creates a new task with default values.
@@ -184,6 +196,62 @@ func (t *Task) Summary() TaskSummary {
 		LinkedSessions: len(t.LinkedSessions),
 		UpdatedAt:      t.UpdatedAt,
 	}
+}
+
+// WithMemoryRefs sets explicit memory references for context.
+func (t *Task) WithMemoryRefs(refs []string) *Task {
+	t.MemoryRefs = refs
+	return t
+}
+
+// WithContextQuery sets the auto-search query for additional context.
+func (t *Task) WithContextQuery(query string) *Task {
+	t.ContextQuery = query
+	return t
+}
+
+// WithInheritedFrom sets the parent task ID.
+func (t *Task) WithInheritedFrom(parentID string) *Task {
+	t.InheritedFrom = parentID
+	return t
+}
+
+// WithAssignedAgent sets the assigned agent.
+func (t *Task) WithAssignedAgent(agentID string) *Task {
+	t.AssignedAgent = agentID
+	return t
+}
+
+// AddMemoryRef adds a memory reference to the task.
+func (t *Task) AddMemoryRef(ref string) {
+	for _, r := range t.MemoryRefs {
+		if r == ref {
+			return // Already exists
+		}
+	}
+	t.MemoryRefs = append(t.MemoryRefs, ref)
+	t.UpdatedAt = time.Now().UTC()
+}
+
+// AddCreatedMemory records a memory created during execution.
+func (t *Task) AddCreatedMemory(memoryID string) {
+	for _, m := range t.CreatedMemories {
+		if m == memoryID {
+			return // Already exists
+		}
+	}
+	t.CreatedMemories = append(t.CreatedMemories, memoryID)
+	t.UpdatedAt = time.Now().UTC()
+}
+
+// HasMemoryRefs returns true if the task has memory references.
+func (t *Task) HasMemoryRefs() bool {
+	return len(t.MemoryRefs) > 0
+}
+
+// HasContextQuery returns true if the task has a context query.
+func (t *Task) HasContextQuery() bool {
+	return t.ContextQuery != ""
 }
 
 func generateTaskID() string {

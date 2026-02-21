@@ -57,11 +57,17 @@ func (s *Store) migrate() error {
 		completed_jobs INTEGER DEFAULT 0,
 		failed_jobs    INTEGER DEFAULT 0,
 		created_at     TEXT NOT NULL,
-		updated_at     TEXT NOT NULL
+		updated_at     TEXT NOT NULL,
+		memory_refs       TEXT,
+		context_query     TEXT,
+		inherited_from    TEXT,
+		created_memories  TEXT,
+		assigned_agent    TEXT
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_state ON tasks(state);
 	CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_tasks_assigned_agent ON tasks(assigned_agent);
 
 	CREATE TABLE IF NOT EXISTS session_tasks (
 		session_id TEXT NOT NULL,
@@ -76,7 +82,25 @@ func (s *Store) migrate() error {
 	`
 
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Add columns if they don't exist (for migrations)
+	migrations := []string{
+		"ALTER TABLE tasks ADD COLUMN memory_refs TEXT",
+		"ALTER TABLE tasks ADD COLUMN context_query TEXT",
+		"ALTER TABLE tasks ADD COLUMN inherited_from TEXT",
+		"ALTER TABLE tasks ADD COLUMN created_memories TEXT",
+		"ALTER TABLE tasks ADD COLUMN assigned_agent TEXT",
+	}
+
+	for _, m := range migrations {
+		// Ignore errors - column may already exist
+		s.db.Exec(m)
+	}
+
+	return nil
 }
 
 // Create inserts a new task.
@@ -86,11 +110,15 @@ func (s *Store) Create(task *Task) error {
 		metadataJSON = string(task.Metadata)
 	}
 
+	memoryRefsJSON := encodeStringSlice(task.MemoryRefs)
+	createdMemoriesJSON := encodeStringSlice(task.CreatedMemories)
+
 	_, err := s.db.Exec(`
 		INSERT INTO tasks (id, name, description, project_dir, workspace_dir, state,
 		                   git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-		                   failed_jobs, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   failed_jobs, created_at, updated_at, memory_refs, context_query,
+		                   inherited_from, created_memories, assigned_agent)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.ID,
 		task.Name,
 		nullableString(task.Description),
@@ -105,6 +133,11 @@ func (s *Store) Create(task *Task) error {
 		task.FailedJobs,
 		task.CreatedAt.Format(time.RFC3339),
 		task.UpdatedAt.Format(time.RFC3339),
+		nullableString(memoryRefsJSON),
+		nullableString(task.ContextQuery),
+		nullableString(task.InheritedFrom),
+		nullableString(createdMemoriesJSON),
+		nullableString(task.AssignedAgent),
 	)
 
 	if err != nil {
@@ -121,7 +154,8 @@ func (s *Store) GetByID(id string) (*Task, error) {
 	row := s.db.QueryRow(`
 		SELECT id, name, description, project_dir, workspace_dir, state,
 		       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-		       failed_jobs, created_at, updated_at
+		       failed_jobs, created_at, updated_at, memory_refs, context_query,
+		       inherited_from, created_memories, assigned_agent
 		FROM tasks WHERE id = ?`, id)
 
 	task, err := s.scanTask(row)
@@ -148,12 +182,17 @@ func (s *Store) Update(task *Task) error {
 		metadataJSON = string(task.Metadata)
 	}
 
+	memoryRefsJSON := encodeStringSlice(task.MemoryRefs)
+	createdMemoriesJSON := encodeStringSlice(task.CreatedMemories)
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
 		UPDATE tasks
 		SET name = ?, description = ?, project_dir = ?, workspace_dir = ?, state = ?,
 		    git_repo = ?, memvid_zone = ?, metadata = ?, total_jobs = ?,
-		    completed_jobs = ?, failed_jobs = ?, updated_at = ?
+		    completed_jobs = ?, failed_jobs = ?, updated_at = ?,
+		    memory_refs = ?, context_query = ?, inherited_from = ?,
+		    created_memories = ?, assigned_agent = ?
 		WHERE id = ?`,
 		task.Name,
 		nullableString(task.Description),
@@ -167,6 +206,11 @@ func (s *Store) Update(task *Task) error {
 		task.CompletedJobs,
 		task.FailedJobs,
 		now,
+		nullableString(memoryRefsJSON),
+		nullableString(task.ContextQuery),
+		nullableString(task.InheritedFrom),
+		nullableString(createdMemoriesJSON),
+		nullableString(task.AssignedAgent),
 		task.ID,
 	)
 
@@ -203,7 +247,8 @@ func (s *Store) List(state *TaskState, limit int) ([]*Task, error) {
 		rows, err = s.db.Query(`
 			SELECT id, name, description, project_dir, workspace_dir, state,
 			       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-			       failed_jobs, created_at, updated_at
+			       failed_jobs, created_at, updated_at, memory_refs, context_query,
+			       inherited_from, created_memories, assigned_agent
 			FROM tasks
 			WHERE state = ?
 			ORDER BY updated_at DESC
@@ -212,7 +257,8 @@ func (s *Store) List(state *TaskState, limit int) ([]*Task, error) {
 		rows, err = s.db.Query(`
 			SELECT id, name, description, project_dir, workspace_dir, state,
 			       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-			       failed_jobs, created_at, updated_at
+			       failed_jobs, created_at, updated_at, memory_refs, context_query,
+			       inherited_from, created_memories, assigned_agent
 			FROM tasks
 			ORDER BY updated_at DESC
 			LIMIT ?`, limit)
@@ -241,7 +287,8 @@ func (s *Store) ListActive() ([]*Task, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, description, project_dir, workspace_dir, state,
 		       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
-		       failed_jobs, created_at, updated_at
+		       failed_jobs, created_at, updated_at, memory_refs, context_query,
+		       inherited_from, created_memories, assigned_agent
 		FROM tasks
 		WHERE state IN ('pending', 'planning', 'executing', 'testing')
 		ORDER BY updated_at DESC`)
@@ -318,7 +365,8 @@ func (s *Store) GetTasksForSession(sessionID string) ([]*Task, error) {
 	rows, err := s.db.Query(`
 		SELECT t.id, t.name, t.description, t.project_dir, t.workspace_dir, t.state,
 		       t.git_repo, t.memvid_zone, t.metadata, t.total_jobs, t.completed_jobs,
-		       t.failed_jobs, t.created_at, t.updated_at
+		       t.failed_jobs, t.created_at, t.updated_at, t.memory_refs, t.context_query,
+		       t.inherited_from, t.created_memories, t.assigned_agent
 		FROM tasks t
 		JOIN session_tasks st ON t.id = st.task_id
 		WHERE st.session_id = ?
@@ -354,11 +402,16 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 		totalJobs, completedJobs int
 		failedJobs               int
 		createdAt, updatedAt     string
+		memoryRefs, contextQuery sql.NullString
+		inheritedFrom            sql.NullString
+		createdMemories          sql.NullString
+		assignedAgent            sql.NullString
 	)
 
 	err := row.Scan(&id, &name, &description, &projectDir, &workspaceDir, &state,
 		&gitRepo, &memvidZone, &metadata, &totalJobs, &completedJobs,
-		&failedJobs, &createdAt, &updatedAt)
+		&failedJobs, &createdAt, &updatedAt, &memoryRefs, &contextQuery,
+		&inheritedFrom, &createdMemories, &assignedAgent)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -368,7 +421,8 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 
 	return s.buildTask(id, name, state, description, projectDir, workspaceDir,
 		gitRepo, memvidZone, metadata, totalJobs, completedJobs, failedJobs,
-		createdAt, updatedAt)
+		createdAt, updatedAt, memoryRefs, contextQuery, inheritedFrom,
+		createdMemories, assignedAgent)
 }
 
 func (s *Store) scanTaskRows(rows *sql.Rows) (*Task, error) {
@@ -380,24 +434,31 @@ func (s *Store) scanTaskRows(rows *sql.Rows) (*Task, error) {
 		totalJobs, completedJobs int
 		failedJobs               int
 		createdAt, updatedAt     string
+		memoryRefs, contextQuery sql.NullString
+		inheritedFrom            sql.NullString
+		createdMemories          sql.NullString
+		assignedAgent            sql.NullString
 	)
 
 	err := rows.Scan(&id, &name, &description, &projectDir, &workspaceDir, &state,
 		&gitRepo, &memvidZone, &metadata, &totalJobs, &completedJobs,
-		&failedJobs, &createdAt, &updatedAt)
+		&failedJobs, &createdAt, &updatedAt, &memoryRefs, &contextQuery,
+		&inheritedFrom, &createdMemories, &assignedAgent)
 	if err != nil {
 		return nil, err
 	}
 
 	return s.buildTask(id, name, state, description, projectDir, workspaceDir,
 		gitRepo, memvidZone, metadata, totalJobs, completedJobs, failedJobs,
-		createdAt, updatedAt)
+		createdAt, updatedAt, memoryRefs, contextQuery, inheritedFrom,
+		createdMemories, assignedAgent)
 }
 
 func (s *Store) buildTask(id, name, state string,
 	description, projectDir, workspaceDir, gitRepo, memvidZone, metadata sql.NullString,
 	totalJobs, completedJobs, failedJobs int,
-	createdAt, updatedAt string) (*Task, error) {
+	createdAt, updatedAt string,
+	memoryRefs, contextQuery, inheritedFrom, createdMemories, assignedAgent sql.NullString) (*Task, error) {
 
 	task := &Task{
 		ID:            id,
@@ -426,6 +487,21 @@ func (s *Store) buildTask(id, name, state string,
 	if metadata.Valid {
 		task.Metadata = json.RawMessage(metadata.String)
 	}
+	if memoryRefs.Valid {
+		task.MemoryRefs = decodeStringSlice(memoryRefs.String)
+	}
+	if contextQuery.Valid {
+		task.ContextQuery = contextQuery.String
+	}
+	if inheritedFrom.Valid {
+		task.InheritedFrom = inheritedFrom.String
+	}
+	if createdMemories.Valid {
+		task.CreatedMemories = decodeStringSlice(createdMemories.String)
+	}
+	if assignedAgent.Valid {
+		task.AssignedAgent = assignedAgent.String
+	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		task.CreatedAt = t
@@ -442,4 +518,25 @@ func nullableString(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+// encodeStringSlice encodes a string slice as JSON.
+func encodeStringSlice(slice []string) string {
+	if len(slice) == 0 {
+		return ""
+	}
+	data, _ := json.Marshal(slice)
+	return string(data)
+}
+
+// decodeStringSlice decodes a JSON string slice.
+func decodeStringSlice(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var slice []string
+	if err := json.Unmarshal([]byte(s), &slice); err != nil {
+		return nil
+	}
+	return slice
 }

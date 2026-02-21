@@ -316,8 +316,15 @@ func (w *Worker) emitTransition(from, to State, jobID string, err error) {
 	select {
 	case w.stateChanges <- transition:
 	default:
-		// Channel full, log but don't block
-		w.logger.Debug("State change channel full", "worker", w.ID, "transition", transition)
+		// Channel full, drain oldest and retry
+		select {
+		case <-w.stateChanges:
+		default:
+		}
+		select {
+		case w.stateChanges <- transition:
+		default:
+		}
 	}
 }
 
