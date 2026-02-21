@@ -513,6 +513,31 @@ func (c *RPCClient) ListTasks(state string, limit int) (*types.TaskListResponse,
 	return &resp, nil
 }
 
+// ListTasksExtended gets all tasks with memory context fields.
+func (c *RPCClient) ListTasksExtended() (*types.TaskExtendedListResponse, error) {
+	result, err := c.Call("task.list_extended", nil)
+	if err != nil {
+		// Fallback to regular task list and convert
+		regularResp, fallbackErr := c.ListTasks("", 100)
+		if fallbackErr != nil {
+			return nil, err // Return original error
+		}
+		// Convert Task to TaskExtended
+		extended := make([]types.TaskExtended, len(regularResp.Tasks))
+		for i, t := range regularResp.Tasks {
+			extended[i] = types.TaskExtended{Task: t}
+		}
+		return &types.TaskExtendedListResponse{Tasks: extended}, nil
+	}
+
+	var resp types.TaskExtendedListResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse tasks extended response: %w", err)
+	}
+
+	return &resp, nil
+}
+
 // DeleteTask deletes a task by ID.
 func (c *RPCClient) DeleteTask(taskID string) error {
 	params := map[string]string{"id": taskID}

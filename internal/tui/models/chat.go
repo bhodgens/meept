@@ -11,7 +11,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/caimlas/meept/internal/tui/render"
 	"github.com/caimlas/meept/internal/tui/types"
+	"github.com/caimlas/meept/internal/tui/vim"
 )
 
 // FocusedElement represents which element has focus in the chat view.
@@ -47,6 +49,11 @@ type ChatMessage struct {
 	Content   string
 	Timestamp time.Time
 	State     MessageState
+
+	// Rendering cache
+	rendered    string // Cached rendered output
+	renderedAt  int    // Width when rendered
+	hasMarkdown bool   // Detected markdown
 }
 
 // ChatModel is the model for the chat view.
@@ -87,6 +94,13 @@ type ChatModel struct {
 	// Session header data
 	sessionDescription string
 
+	// Markdown rendering
+	mdRenderer     *render.MarkdownRenderer
+	renderMarkdown bool // Whether to render markdown
+
+	// Vim mode
+	vimState *vim.State
+
 	// Styles
 	userStyle       lipgloss.Style
 	assistantStyle  lipgloss.Style
@@ -121,6 +135,12 @@ func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss
 	vp := viewport.New(80, 20)
 	vp.SetContent("")
 
+	// Initialize markdown renderer (will be resized on first SetSize)
+	mdRenderer, _ := render.NewMarkdownRenderer(80, true)
+
+	// Initialize vim state (disabled by default)
+	vimState := vim.NewState()
+
 	return &ChatModel{
 		rpc:             rpc,
 		messages:        []ChatMessage{},
@@ -134,6 +154,9 @@ func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss
 		sessionMessages: make(map[string][]ChatMessage),
 		sessionHistory:  make(map[string][]string),
 		dirtyMessages:   make(map[string][]ChatMessage),
+		mdRenderer:      mdRenderer,
+		renderMarkdown:  true, // Enable markdown by default
+		vimState:        vimState,
 		userStyle:       userStyle,
 		assistantStyle:  assistantStyle,
 		systemStyle:     systemStyle,
@@ -174,6 +197,17 @@ func (m *ChatModel) SetSize(width, height int) {
 	m.textarea.SetWidth(width - 4)
 	m.viewport.Width = width - 2
 	m.viewport.Height = viewportHeight
+
+	// Update markdown renderer width
+	if m.mdRenderer != nil {
+		_ = m.mdRenderer.SetWidth(width - 8) // Account for padding
+	}
+
+	// Invalidate render cache when width changes
+	for i := range m.messages {
+		m.messages[i].rendered = ""
+		m.messages[i].renderedAt = 0
+	}
 }
 
 // Init initializes the chat model.
@@ -616,7 +650,7 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 		prefix = ""
 	}
 
-	content := prefix + msg.Content
+	content := msg.Content
 
 	// Handle collapsed state
 	if msg.State == MessageCollapsed {
@@ -624,11 +658,23 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 		if len(lines) > collapsedLineCount {
 			// Show last N lines with indicator
 			collapsedLines := lines[len(lines)-collapsedLineCount:]
-			return fmt.Sprintf("... [%d lines hidden] ...\n%s", len(lines)-collapsedLineCount, strings.Join(collapsedLines, "\n"))
+			content = fmt.Sprintf("... [%d lines hidden] ...\n%s", len(lines)-collapsedLineCount, strings.Join(collapsedLines, "\n"))
 		}
 	}
 
-	return formatMessage(content, m.width-6)
+	// Try markdown rendering for assistant messages
+	if m.renderMarkdown && m.mdRenderer != nil && msg.Role == "assistant" {
+		// Check if markdown is detected
+		if render.DetectMarkdown(content) {
+			rendered, err := m.mdRenderer.Render(content)
+			if err == nil {
+				return prefix + rendered
+			}
+		}
+	}
+
+	// Fallback to plain text with word wrap
+	return prefix + formatMessage(content, m.width-6)
 }
 
 func (m *ChatModel) sendMessage(text string) tea.Cmd {
@@ -926,12 +972,43 @@ func formatMessage(text string, width int) string {
 func (m *ChatModel) View() string {
 	var b strings.Builder
 
-	// Orange session header bar
+	// Orange session header bar with optional vim mode indicator
 	desc := m.sessionDescription
 	if desc == "" {
 		desc = "New Session"
 	}
-	headerBar := m.headerStyle.Width(m.width - 2).Render(desc)
+
+	// Add vim mode indicator if enabled
+	headerContent := desc
+	if m.vimState != nil && m.vimState.Enabled {
+		modeStr := m.vimState.Mode.String()
+		modeStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("#374151")).
+			Foreground(lipgloss.Color("#E5E7EB")).
+			Bold(true).
+			Padding(0, 1)
+
+		// Adjust color based on mode
+		switch m.vimState.Mode {
+		case vim.ModeInsert:
+			modeStyle = modeStyle.Background(lipgloss.Color("#10B981"))
+		case vim.ModeVisual:
+			modeStyle = modeStyle.Background(lipgloss.Color("#8B5CF6"))
+		case vim.ModeCommand:
+			modeStyle = modeStyle.Background(lipgloss.Color("#3B82F6"))
+		}
+
+		// Calculate available width for description
+		modeWidth := len(modeStr) + 2 // +2 for padding
+		descWidth := m.width - 4 - modeWidth - 3
+		if len(desc) > descWidth && descWidth > 3 {
+			desc = desc[:descWidth-3] + "..."
+		}
+
+		headerContent = desc + " " + modeStyle.Render(modeStr)
+	}
+
+	headerBar := m.headerStyle.Width(m.width - 2).Render(headerContent)
 	b.WriteString(headerBar)
 	b.WriteString("\n")
 
@@ -1045,4 +1122,70 @@ func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 	}
 
 	return flushCmd
+}
+
+// VimState returns the vim state for external access.
+func (m *ChatModel) VimState() *vim.State {
+	return m.vimState
+}
+
+// EnableVim enables vim keybindings.
+func (m *ChatModel) EnableVim() {
+	if m.vimState != nil {
+		m.vimState.Enable()
+	}
+}
+
+// DisableVim disables vim keybindings.
+func (m *ChatModel) DisableVim() {
+	if m.vimState != nil {
+		m.vimState.Disable()
+	}
+}
+
+// ToggleVim toggles vim keybindings.
+func (m *ChatModel) ToggleVim() {
+	if m.vimState != nil {
+		m.vimState.Toggle()
+	}
+}
+
+// SetVimConfig applies vim configuration.
+func (m *ChatModel) SetVimConfig(cfg VimConfig) {
+	if m.vimState != nil {
+		m.vimState.Enabled = cfg.Enabled
+		if cfg.EscapeInsert != "" {
+			m.vimState.EscapeSequence = cfg.EscapeInsert
+		}
+		if cfg.Leader != "" {
+			m.vimState.LeaderKey = cfg.Leader
+		}
+	}
+}
+
+// VimConfig holds vim configuration for the chat model.
+type VimConfig struct {
+	Enabled      bool
+	EscapeInsert string
+	Leader       string
+}
+
+// ToggleMarkdown toggles markdown rendering.
+func (m *ChatModel) ToggleMarkdown() {
+	m.renderMarkdown = !m.renderMarkdown
+	// Invalidate cache
+	for i := range m.messages {
+		m.messages[i].rendered = ""
+	}
+	m.updateViewport()
+}
+
+// SetMarkdownEnabled enables or disables markdown rendering.
+func (m *ChatModel) SetMarkdownEnabled(enabled bool) {
+	m.renderMarkdown = enabled
+	// Invalidate cache
+	for i := range m.messages {
+		m.messages[i].rendered = ""
+	}
+	m.updateViewport()
 }

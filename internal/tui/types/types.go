@@ -280,6 +280,64 @@ type WorkerPoolStats struct {
 
 // WorkerPoolResponse represents the worker pool RPC response.
 type WorkerPoolResponse struct {
-	Workers []PoolWorker `json:"workers"`
+	Workers []PoolWorker    `json:"workers"`
 	Stats   WorkerPoolStats `json:"stats"`
+}
+
+// AgentActivity represents real-time agent execution state.
+type AgentActivity struct {
+	AgentID      string     `json:"agent_id"`
+	AgentName    string     `json:"agent_name"`
+	Role         string     `json:"role"` // dispatcher, executor, reviewer
+	Iteration    int        `json:"iteration"`
+	MaxIter      int        `json:"max_iterations"`
+	ToolCalls    []ToolCall `json:"tool_calls"`
+	MemoryRefs   int        `json:"memory_refs"`
+	Inherited    int        `json:"inherited_memories"`
+	State        string     `json:"state"` // reasoning, tool_exec, waiting, completed
+	TaskID       string     `json:"task_id,omitempty"`
+	SessionID    string     `json:"session_id,omitempty"`
+	StartedAt    string     `json:"started_at"`
+	LastActivity string     `json:"last_activity"`
+}
+
+// ToolCall represents a single tool invocation.
+type ToolCall struct {
+	Name      string `json:"name"`
+	Args      string `json:"args"`   // Truncated for display
+	State     string `json:"state"`  // pending, running, done, error
+	Result    string `json:"result"` // Truncated
+	StartedAt string `json:"started_at,omitempty"`
+	Duration  string `json:"duration,omitempty"`
+}
+
+// AgentActivityResponse represents the agent activity RPC response.
+type AgentActivityResponse struct {
+	Activities []AgentActivity `json:"activities"`
+}
+
+// BusEvent represents a message bus event for real-time updates.
+type BusEvent struct {
+	Topic     string `json:"topic"`
+	Type      string `json:"type"` // event, request, response
+	Source    string `json:"source"`
+	Timestamp string `json:"timestamp"`
+	Payload   any    `json:"payload"`
+}
+
+// TaskExtended represents a task with memory context fields.
+type TaskExtended struct {
+	Task
+
+	// Memory context for agent continuity
+	MemoryRefs      []string `json:"memory_refs,omitempty"`
+	ContextQuery    string   `json:"context_query,omitempty"`
+	InheritedFrom   string   `json:"inherited_from,omitempty"`
+	CreatedMemories []string `json:"created_memories,omitempty"`
+	AssignedAgent   string   `json:"assigned_agent,omitempty"`
+}
+
+// TaskExtendedListResponse represents the extended task list response.
+type TaskExtendedListResponse struct {
+	Tasks []TaskExtended `json:"tasks"`
 }

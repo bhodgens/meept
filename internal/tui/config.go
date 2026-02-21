@@ -13,6 +13,26 @@ import (
 type ClientConfig struct {
 	Keybindings KeybindingsConfig `json:"keybindings"`
 	Session     SessionConfig     `json:"session"`
+	Vim         VimConfig         `json:"vim"`
+	Rendering   RenderingConfig   `json:"rendering"`
+}
+
+// VimConfig defines vim mode settings.
+type VimConfig struct {
+	Enabled      bool              `json:"enabled"`       // Enable vim keybindings (default: false)
+	EscapeInsert string            `json:"escape_insert"` // Escape sequence from insert mode (default: "jk")
+	Leader       string            `json:"leader"`        // Leader key (default: " ")
+	Normal       map[string]string `json:"normal"`        // Custom normal mode bindings
+	Insert       map[string]string `json:"insert"`        // Custom insert mode bindings
+	Visual       map[string]string `json:"visual"`        // Custom visual mode bindings
+}
+
+// RenderingConfig defines rendering settings.
+type RenderingConfig struct {
+	Markdown           bool   `json:"markdown"`            // Enable markdown rendering (default: true)
+	SyntaxHighlighting bool   `json:"syntax_highlighting"` // Enable syntax highlighting (default: true)
+	Theme              string `json:"theme"`               // Syntax theme (default: "monokai")
+	WordWrap           bool   `json:"word_wrap"`           // Enable word wrap (default: true)
 }
 
 // KeybindingsConfig defines customizable key bindings.
@@ -56,6 +76,17 @@ func DefaultClientConfig() *ClientConfig {
 		Session: SessionConfig{
 			AutoResume:  true,
 			DefaultName: "default",
+		},
+		Vim: VimConfig{
+			Enabled:      false,
+			EscapeInsert: "jk",
+			Leader:       " ",
+		},
+		Rendering: RenderingConfig{
+			Markdown:           true,
+			SyntaxHighlighting: true,
+			Theme:              "monokai",
+			WordWrap:           true,
 		},
 	}
 }

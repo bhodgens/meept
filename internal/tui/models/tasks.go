@@ -13,20 +13,45 @@ import (
 
 // TasksModel is the model for the tasks view.
 type TasksModel struct {
-	rpc          TasksRPCClient
-	jobs         []types.Job
-	table        table.Model
-	selectedJob  *types.Job
-	width        int
-	height       int
-	loading      bool
-	err          error
-	showingHelp  bool
+	rpc            TasksRPCClient
+	jobs           []types.Job
+	tasks          []types.TaskExtended
+	table          table.Model
+	selectedJob    *types.Job
+	selectedTask   *types.TaskExtended
+	width          int
+	height         int
+	loading        bool
+	err            error
+	showingHelp    bool
+	showingDetail  bool        // Task detail modal
+	viewMode       TaskViewMode // jobs vs tasks
+	filter         TaskFilter
 }
+
+// TaskViewMode selects between jobs and tasks view.
+type TaskViewMode int
+
+const (
+	ViewModeJobs TaskViewMode = iota
+	ViewModeTasks
+)
+
+// TaskFilter defines filter options.
+type TaskFilter int
+
+const (
+	FilterAll TaskFilter = iota
+	FilterActive
+	FilterMine
+	FilterCompleted
+	FilterFailed
+)
 
 // TasksRPCClient interface for the tasks model.
 type TasksRPCClient interface {
 	ListJobs() (*types.JobListResponse, error)
+	ListTasksExtended() (*types.TaskExtendedListResponse, error)
 	IsConnected() bool
 }
 
@@ -61,8 +86,24 @@ func NewTasksModel(rpc TasksRPCClient) *TasksModel {
 	t.SetStyles(s)
 
 	return &TasksModel{
-		rpc:   rpc,
-		table: t,
+		rpc:      rpc,
+		table:    t,
+		viewMode: ViewModeTasks, // Default to tasks view
+		filter:   FilterAll,
+	}
+}
+
+// SetViewMode switches between jobs and tasks view.
+func (m *TasksModel) SetViewMode(mode TaskViewMode) {
+	m.viewMode = mode
+	m.loading = true
+}
+
+// SetFilter sets the task filter.
+func (m *TasksModel) SetFilter(filter TaskFilter) {
+	m.filter = filter
+	if m.viewMode == ViewModeTasks {
+		m.updateTasksTable()
 	}
 }
 
@@ -78,8 +119,16 @@ func (m *TasksModel) SetSize(width, height int) {
 	}
 	m.table.SetHeight(tableHeight)
 
-	// Update column widths based on available space
-	colWidth := (width - 20) / 4
+	// Update column widths based on view mode
+	if m.viewMode == ViewModeTasks {
+		m.setTasksColumns()
+	} else {
+		m.setJobsColumns()
+	}
+}
+
+func (m *TasksModel) setJobsColumns() {
+	colWidth := (m.width - 20) / 4
 	if colWidth < 10 {
 		colWidth = 10
 	}
@@ -91,14 +140,47 @@ func (m *TasksModel) SetSize(width, height int) {
 	})
 }
 
+func (m *TasksModel) setTasksColumns() {
+	// Task view columns: Name | State | Agent | Progress | Memory | Updated
+	available := m.width - 10 // borders/padding
+	nameW := available * 25 / 100
+	stateW := 8
+	agentW := 12
+	progressW := 12
+	memoryW := 10
+	updatedW := 10
+
+	if nameW < 15 {
+		nameW = 15
+	}
+
+	m.table.SetColumns([]table.Column{
+		{Title: "Name", Width: nameW},
+		{Title: "State", Width: stateW},
+		{Title: "Agent", Width: agentW},
+		{Title: "Progress", Width: progressW},
+		{Title: "Memory", Width: memoryW},
+		{Title: "Updated", Width: updatedW},
+	})
+}
+
 // JobsUpdateMsg carries the jobs update.
 type JobsUpdateMsg struct {
 	Jobs []types.Job
 	Err  error
 }
 
+// TasksUpdateMsg carries the tasks update.
+type TasksUpdateMsg struct {
+	Tasks []types.TaskExtended
+	Err   error
+}
+
 // Init initializes the tasks model.
 func (m *TasksModel) Init() tea.Cmd {
+	if m.viewMode == ViewModeTasks {
+		return m.fetchTasks
+	}
 	return m.fetchJobs
 }
 
@@ -108,6 +190,14 @@ func (m *TasksModel) fetchJobs() tea.Msg {
 		return JobsUpdateMsg{Err: err}
 	}
 	return JobsUpdateMsg{Jobs: resp.Jobs}
+}
+
+func (m *TasksModel) fetchTasks() tea.Msg {
+	resp, err := m.rpc.ListTasksExtended()
+	if err != nil {
+		return TasksUpdateMsg{Err: err}
+	}
+	return TasksUpdateMsg{Tasks: resp.Tasks}
 }
 
 // Update handles messages for the tasks view.
@@ -124,7 +214,28 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 		m.updateTable()
 		return nil
 
+	case TasksUpdateMsg:
+		m.loading = false
+		if msg.Err != nil {
+			m.err = msg.Err
+			return nil
+		}
+		m.err = nil
+		m.tasks = msg.Tasks
+		m.updateTasksTable()
+		return nil
+
 	case tea.KeyMsg:
+		// Handle detail modal first
+		if m.showingDetail {
+			if msg.String() == "esc" || msg.String() == "q" {
+				m.showingDetail = false
+				return nil
+			}
+			// Other keys in modal could be handled here
+			return nil
+		}
+
 		if m.showingHelp {
 			m.showingHelp = false
 			return nil
@@ -134,33 +245,76 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 		case "r":
 			// Refresh
 			m.loading = true
+			if m.viewMode == ViewModeTasks {
+				return m.fetchTasks
+			}
 			return m.fetchJobs
 
 		case "?":
 			m.showingHelp = true
 			return nil
 
+		case "tab":
+			// Toggle view mode
+			if m.viewMode == ViewModeJobs {
+				m.viewMode = ViewModeTasks
+				m.setTasksColumns()
+				m.loading = true
+				return m.fetchTasks
+			} else {
+				m.viewMode = ViewModeJobs
+				m.setJobsColumns()
+				m.loading = true
+				return m.fetchJobs
+			}
+
+		case "f":
+			// Cycle through filters
+			m.filter = (m.filter + 1) % 5
+			if m.viewMode == ViewModeTasks {
+				m.updateTasksTable()
+			}
+			return nil
+
 		case "enter":
-			// Select job for detail view
-			if len(m.jobs) > 0 {
-				idx := m.table.Cursor()
-				if idx >= 0 && idx < len(m.jobs) {
-					m.selectedJob = &m.jobs[idx]
+			// Open detail modal
+			if m.viewMode == ViewModeTasks {
+				if len(m.tasks) > 0 {
+					idx := m.table.Cursor()
+					filtered := m.filterTasks()
+					if idx >= 0 && idx < len(filtered) {
+						m.selectedTask = &filtered[idx]
+						m.showingDetail = true
+					}
+				}
+			} else {
+				if len(m.jobs) > 0 {
+					idx := m.table.Cursor()
+					if idx >= 0 && idx < len(m.jobs) {
+						m.selectedJob = &m.jobs[idx]
+					}
 				}
 			}
 			return nil
 
 		case "esc":
 			m.selectedJob = nil
+			m.selectedTask = nil
+			m.showingDetail = false
 			return nil
 
 		case "up", "down", "j", "k":
 			// Let table handle navigation
 			var cmd tea.Cmd
 			m.table, cmd = m.table.Update(msg)
-			// Update selected job as we navigate
-			if len(m.jobs) > 0 {
-				idx := m.table.Cursor()
+			// Update selection as we navigate
+			idx := m.table.Cursor()
+			if m.viewMode == ViewModeTasks {
+				filtered := m.filterTasks()
+				if idx >= 0 && idx < len(filtered) {
+					m.selectedTask = &filtered[idx]
+				}
+			} else {
 				if idx >= 0 && idx < len(m.jobs) {
 					m.selectedJob = &m.jobs[idx]
 				}
@@ -211,30 +365,163 @@ func (m *TasksModel) updateTable() {
 	m.table.SetRows(rows)
 }
 
+func (m *TasksModel) filterTasks() []types.TaskExtended {
+	if m.filter == FilterAll {
+		return m.tasks
+	}
+
+	var filtered []types.TaskExtended
+	for _, t := range m.tasks {
+		switch m.filter {
+		case FilterActive:
+			if t.State == "executing" || t.State == "planning" || t.State == "pending" {
+				filtered = append(filtered, t)
+			}
+		case FilterCompleted:
+			if t.State == "completed" {
+				filtered = append(filtered, t)
+			}
+		case FilterFailed:
+			if t.State == "failed" || t.State == "cancelled" {
+				filtered = append(filtered, t)
+			}
+		case FilterMine:
+			// TODO: Compare with current user/agent
+			if t.AssignedAgent != "" {
+				filtered = append(filtered, t)
+			}
+		default:
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
+func (m *TasksModel) updateTasksTable() {
+	tasks := m.filterTasks()
+	rows := make([]table.Row, len(tasks))
+
+	for i, task := range tasks {
+		// State with icon
+		stateIcon := m.getStateIcon(task.State)
+
+		// Agent name (truncated)
+		agent := task.AssignedAgent
+		if agent == "" {
+			agent = "-"
+		}
+
+		// Progress bar
+		progress := m.renderProgressBar(task.CompletedJobs, task.TotalJobs, 8)
+
+		// Memory indicators: ⚡refs ⬅inherited
+		memRefs := len(task.MemoryRefs)
+		inherited := 0
+		if task.InheritedFrom != "" {
+			inherited = 1 // Simplified; could count actual memories
+		}
+		memory := fmt.Sprintf("⚡%d⬅%d", memRefs, inherited)
+
+		// Updated time
+		updated := m.formatTimeAgo(task.UpdatedAt)
+
+		// Name (truncated)
+		name := task.Name
+		if name == "" {
+			name = types.TruncateString(task.ID, 15)
+		}
+
+		rows[i] = table.Row{
+			types.TruncateString(name, 20),
+			stateIcon,
+			types.TruncateString(agent, 10),
+			progress,
+			memory,
+			updated,
+		}
+	}
+	m.table.SetRows(rows)
+}
+
+func (m *TasksModel) getStateIcon(state string) string {
+	switch state {
+	case "pending":
+		return "○ pend"
+	case "planning":
+		return "◐ plan"
+	case "executing":
+		return "● exec"
+	case "testing":
+		return "◑ test"
+	case "completed":
+		return "✓ done"
+	case "failed":
+		return "✗ fail"
+	case "cancelled":
+		return "⊘ stop"
+	default:
+		return "? " + types.TruncateString(state, 4)
+	}
+}
+
+func (m *TasksModel) renderProgressBar(completed, total, width int) string {
+	if total == 0 {
+		return strings.Repeat("░", width)
+	}
+
+	filledWidth := (completed * width) / total
+	emptyWidth := width - filledWidth
+
+	if filledWidth > width {
+		filledWidth = width
+		emptyWidth = 0
+	}
+
+	bar := strings.Repeat("█", filledWidth) + strings.Repeat("░", emptyWidth)
+	return fmt.Sprintf("%s %d/%d", bar, completed, total)
+}
+
+func (m *TasksModel) formatTimeAgo(timestamp string) string {
+	// Simplified time formatting
+	// In production, parse the timestamp and calculate relative time
+	if timestamp == "" {
+		return "n/a"
+	}
+	// Just return last few chars for now
+	if len(timestamp) > 5 {
+		return types.TruncateString(timestamp[len(timestamp)-8:], 8)
+	}
+	return timestamp
+}
+
 // View renders the tasks view.
 func (m *TasksModel) View() string {
+	// Task detail modal overlay
+	if m.showingDetail && m.selectedTask != nil {
+		return m.renderTaskDetailModal()
+	}
+
 	if m.showingHelp {
 		return m.renderHelp()
 	}
 
-	if m.loading && len(m.jobs) == 0 {
+	// Check for loading/error based on view mode
+	isEmpty := (m.viewMode == ViewModeTasks && len(m.tasks) == 0) ||
+		(m.viewMode == ViewModeJobs && len(m.jobs) == 0)
+
+	if m.loading && isEmpty {
 		return m.renderLoading()
 	}
 
-	if m.err != nil && len(m.jobs) == 0 {
+	if m.err != nil && isEmpty {
 		return m.renderError()
 	}
 
 	var b strings.Builder
 
-	// Title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
-		MarginBottom(1)
-
-	b.WriteString(titleStyle.Render("Scheduled Jobs"))
-	b.WriteString("\n\n")
+	// Header with view mode toggle and filter
+	b.WriteString(m.renderHeader())
+	b.WriteString("\n")
 
 	// Table
 	tableStyle := lipgloss.NewStyle().
@@ -244,8 +531,10 @@ func (m *TasksModel) View() string {
 	b.WriteString(tableStyle.Render(m.table.View()))
 	b.WriteString("\n")
 
-	// Detail panel
-	if m.selectedJob != nil {
+	// Detail panel (preview, not full modal)
+	if m.viewMode == ViewModeTasks && m.selectedTask != nil {
+		b.WriteString(m.renderTaskPreview())
+	} else if m.viewMode == ViewModeJobs && m.selectedJob != nil {
 		b.WriteString(m.renderJobDetail())
 	} else {
 		b.WriteString(m.renderEmptyDetail())
@@ -256,9 +545,123 @@ func (m *TasksModel) View() string {
 		Foreground(lipgloss.Color("#6B7280")).
 		MarginTop(1)
 
-	b.WriteString(hintStyle.Render("r: refresh | enter: select | ?: help"))
+	if m.viewMode == ViewModeTasks {
+		b.WriteString(hintStyle.Render("r: refresh | tab: jobs view | f: filter | enter: details | ?: help"))
+	} else {
+		b.WriteString(hintStyle.Render("r: refresh | tab: tasks view | enter: select | ?: help"))
+	}
 
 	return b.String()
+}
+
+func (m *TasksModel) renderHeader() string {
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#7C3AED"))
+
+	modeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Background(lipgloss.Color("#1F2937")).
+		Padding(0, 1)
+
+	activeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#7C3AED")).
+		Bold(true).
+		Padding(0, 1)
+
+	filterStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F59E0B")).
+		Padding(0, 1)
+
+	var title string
+	var tabs string
+
+	if m.viewMode == ViewModeTasks {
+		title = titleStyle.Render("Tasks")
+		tabs = activeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs")
+	} else {
+		title = titleStyle.Render("Scheduled Jobs")
+		tabs = modeStyle.Render("Tasks") + " " + activeStyle.Render("Jobs")
+	}
+
+	// Filter indicator
+	filterText := ""
+	if m.viewMode == ViewModeTasks {
+		switch m.filter {
+		case FilterAll:
+			filterText = filterStyle.Render("[All]")
+		case FilterActive:
+			filterText = filterStyle.Render("[Active]")
+		case FilterMine:
+			filterText = filterStyle.Render("[Mine]")
+		case FilterCompleted:
+			filterText = filterStyle.Render("[Completed]")
+		case FilterFailed:
+			filterText = filterStyle.Render("[Failed]")
+		}
+	}
+
+	// Layout: Title [tabs] [filter]
+	header := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		title,
+		"  ",
+		tabs,
+		"  ",
+		filterText,
+	)
+
+	return header
+}
+
+func (m *TasksModel) renderTaskPreview() string {
+	task := m.selectedTask
+	if task == nil {
+		return m.renderEmptyDetail()
+	}
+
+	panelStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7C3AED")).
+		Padding(0, 1).
+		Width(m.width - 4)
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Width(12)
+
+	valueStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#E5E7EB"))
+
+	memStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F59E0B"))
+
+	// Quick preview
+	var content strings.Builder
+
+	content.WriteString(labelStyle.Render("ID:"))
+	content.WriteString(valueStyle.Render(types.TruncateString(task.ID, 40)))
+	content.WriteString("\n")
+
+	if task.Description != "" {
+		content.WriteString(labelStyle.Render("Desc:"))
+		content.WriteString(valueStyle.Render(types.TruncateString(task.Description, 50)))
+		content.WriteString("\n")
+	}
+
+	// Memory context summary
+	memRefs := len(task.MemoryRefs)
+	createdMems := len(task.CreatedMemories)
+	inherited := ""
+	if task.InheritedFrom != "" {
+		inherited = fmt.Sprintf("from %s", types.TruncateString(task.InheritedFrom, 20))
+	}
+
+	content.WriteString(labelStyle.Render("Memory:"))
+	content.WriteString(memStyle.Render(fmt.Sprintf("⚡%d refs  📝%d created  %s", memRefs, createdMems, inherited)))
+
+	return panelStyle.Render(content.String())
 }
 
 func (m *TasksModel) renderLoading() string {
@@ -372,6 +775,186 @@ func (m *TasksModel) renderEmptyDetail() string {
 	return panelStyle.Render(content)
 }
 
+func (m *TasksModel) renderTaskDetailModal() string {
+	task := m.selectedTask
+	if task == nil {
+		return ""
+	}
+
+	// Modal style - centered overlay
+	modalWidth := m.width - 8
+	if modalWidth > 80 {
+		modalWidth = 80
+	}
+
+	modalStyle := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color("#7C3AED")).
+		Padding(1, 2).
+		Width(modalWidth)
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#7C3AED")).
+		MarginBottom(1)
+
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F59E0B")).
+		Bold(true).
+		MarginTop(1)
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Width(14)
+
+	valueStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#E5E7EB"))
+
+	statusColor := m.getStateColor(task.State)
+	statusStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(statusColor)).
+		Bold(true)
+
+	var content strings.Builder
+
+	// Title
+	name := task.Name
+	if name == "" {
+		name = task.ID
+	}
+	content.WriteString(titleStyle.Render("Task: " + types.TruncateString(name, 50)))
+	content.WriteString("\n\n")
+
+	// Basic info
+	content.WriteString(labelStyle.Render("ID:"))
+	content.WriteString(valueStyle.Render(task.ID))
+	content.WriteString("\n")
+
+	content.WriteString(labelStyle.Render("State:"))
+	content.WriteString(statusStyle.Render(m.getStateIcon(task.State)))
+	content.WriteString("\n")
+
+	if task.AssignedAgent != "" {
+		content.WriteString(labelStyle.Render("Agent:"))
+		content.WriteString(valueStyle.Render(task.AssignedAgent))
+		content.WriteString("\n")
+	}
+
+	content.WriteString(labelStyle.Render("Created:"))
+	content.WriteString(valueStyle.Render(task.CreatedAt))
+	content.WriteString("\n")
+
+	content.WriteString(labelStyle.Render("Updated:"))
+	content.WriteString(valueStyle.Render(task.UpdatedAt))
+	content.WriteString("\n\n")
+
+	// Progress section
+	content.WriteString(labelStyle.Render("Progress:"))
+	progress := m.renderProgressBar(task.CompletedJobs, task.TotalJobs, 20)
+	percent := float64(0)
+	if task.TotalJobs > 0 {
+		percent = float64(task.CompletedJobs) / float64(task.TotalJobs) * 100
+	}
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%s (%.0f%%)", progress, percent)))
+	content.WriteString("\n")
+
+	completedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
+	failedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+	pendingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+
+	pending := task.TotalJobs - task.CompletedJobs - task.FailedJobs
+	if pending < 0 {
+		pending = 0
+	}
+
+	content.WriteString("              ")
+	content.WriteString(completedStyle.Render(fmt.Sprintf("✓ %d completed", task.CompletedJobs)))
+	content.WriteString("  ")
+	content.WriteString(pendingStyle.Render(fmt.Sprintf("○ %d pending", pending)))
+	content.WriteString("  ")
+	content.WriteString(failedStyle.Render(fmt.Sprintf("✗ %d failed", task.FailedJobs)))
+	content.WriteString("\n")
+
+	// Memory Context section
+	content.WriteString("\n")
+	content.WriteString(sectionStyle.Render("─── Memory Context ───"))
+	content.WriteString("\n")
+
+	if task.InheritedFrom != "" {
+		content.WriteString(labelStyle.Render("Inherited:"))
+		content.WriteString(valueStyle.Render(task.InheritedFrom))
+		content.WriteString("\n")
+	}
+
+	if len(task.MemoryRefs) > 0 {
+		content.WriteString(labelStyle.Render("Memory refs:"))
+		refs := strings.Join(task.MemoryRefs, ", ")
+		if len(refs) > 50 {
+			refs = refs[:47] + "..."
+		}
+		content.WriteString(valueStyle.Render(refs))
+		content.WriteString("\n")
+	}
+
+	if task.ContextQuery != "" {
+		content.WriteString(labelStyle.Render("Query:"))
+		content.WriteString(valueStyle.Render(fmt.Sprintf("\"%s\"", task.ContextQuery)))
+		content.WriteString("\n")
+	}
+
+	if len(task.CreatedMemories) > 0 {
+		content.WriteString(labelStyle.Render("Created:"))
+		mems := strings.Join(task.CreatedMemories, ", ")
+		if len(mems) > 50 {
+			mems = mems[:47] + "..."
+		}
+		content.WriteString(valueStyle.Render(mems))
+		content.WriteString("\n")
+	}
+
+	// Linked Sessions section
+	if len(task.LinkedSessions) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("─── Linked Sessions ───"))
+		content.WriteString("\n")
+		for _, sess := range task.LinkedSessions {
+			content.WriteString("  • ")
+			content.WriteString(valueStyle.Render(sess))
+			content.WriteString("\n")
+		}
+	}
+
+	// Footer
+	content.WriteString("\n")
+	footerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Italic(true)
+	content.WriteString(footerStyle.Render("[Esc/q] close"))
+
+	return modalStyle.Render(content.String())
+}
+
+func (m *TasksModel) getStateColor(state string) string {
+	switch state {
+	case "pending":
+		return "#6B7280" // Gray
+	case "planning":
+		return "#F59E0B" // Amber
+	case "executing":
+		return "#3B82F6" // Blue
+	case "testing":
+		return "#8B5CF6" // Purple
+	case "completed":
+		return "#10B981" // Green
+	case "failed":
+		return "#EF4444" // Red
+	case "cancelled":
+		return "#6B7280" // Gray
+	default:
+		return "#6B7280"
+	}
+}
+
 func (m *TasksModel) renderHelp() string {
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -384,6 +967,11 @@ func (m *TasksModel) renderHelp() string {
 		Foreground(lipgloss.Color("#7C3AED")).
 		MarginBottom(1)
 
+	sectionStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F59E0B")).
+		Bold(true).
+		MarginTop(1)
+
 	keyStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#F59E0B")).
 		Bold(true).
@@ -393,12 +981,31 @@ func (m *TasksModel) renderHelp() string {
 		Foreground(lipgloss.Color("#E5E7EB"))
 
 	content := titleStyle.Render("Tasks View Help") + "\n\n"
+
+	content += sectionStyle.Render("Navigation") + "\n"
 	content += keyStyle.Render("up/k") + descStyle.Render("Move cursor up") + "\n"
 	content += keyStyle.Render("down/j") + descStyle.Render("Move cursor down") + "\n"
-	content += keyStyle.Render("enter") + descStyle.Render("Select job for detail") + "\n"
-	content += keyStyle.Render("esc") + descStyle.Render("Clear selection") + "\n"
-	content += keyStyle.Render("r") + descStyle.Render("Refresh job list") + "\n"
+	content += keyStyle.Render("enter") + descStyle.Render("Open task detail modal") + "\n"
+	content += keyStyle.Render("esc") + descStyle.Render("Close modal / clear selection") + "\n"
+
+	content += "\n" + sectionStyle.Render("View Controls") + "\n"
+	content += keyStyle.Render("tab") + descStyle.Render("Toggle between Tasks/Jobs views") + "\n"
+	content += keyStyle.Render("f") + descStyle.Render("Cycle through filters (All/Active/Mine/Done/Failed)") + "\n"
+	content += keyStyle.Render("r") + descStyle.Render("Refresh data") + "\n"
 	content += keyStyle.Render("?") + descStyle.Render("Toggle this help") + "\n"
+
+	content += "\n" + sectionStyle.Render("Memory Indicators") + "\n"
+	content += keyStyle.Render("⚡N") + descStyle.Render("N memory references") + "\n"
+	content += keyStyle.Render("⬅N") + descStyle.Render("N inherited memories") + "\n"
+	content += keyStyle.Render("📝N") + descStyle.Render("N memories created") + "\n"
+
+	content += "\n" + sectionStyle.Render("State Icons") + "\n"
+	content += keyStyle.Render("○") + descStyle.Render("Pending") + "\n"
+	content += keyStyle.Render("◐") + descStyle.Render("Planning") + "\n"
+	content += keyStyle.Render("●") + descStyle.Render("Executing") + "\n"
+	content += keyStyle.Render("✓") + descStyle.Render("Completed") + "\n"
+	content += keyStyle.Render("✗") + descStyle.Render("Failed") + "\n"
+
 	content += "\n"
 	content += lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Press any key to close")
 
