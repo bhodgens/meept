@@ -115,6 +115,11 @@ func expandConfigPaths(cfg *Config) {
 	cfg.SelfImprove.Sandbox.WorktreeDir = expandPath(cfg.SelfImprove.Sandbox.WorktreeDir)
 	cfg.SelfImprove.Detection.LogFile = expandPath(cfg.SelfImprove.Detection.LogFile)
 
+	// Expand shadow paths
+	cfg.Shadow.DataDir = expandPath(cfg.Shadow.DataDir)
+	cfg.Shadow.Export.OutputDir = expandPath(cfg.Shadow.Export.OutputDir)
+	cfg.Shadow.Adapters.AdapterDir = expandPath(cfg.Shadow.Adapters.AdapterDir)
+
 	// Expand allowed/blocked paths
 	for i, p := range cfg.Security.AllowedPaths {
 		cfg.Security.AllowedPaths[i] = expandPath(p)

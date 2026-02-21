@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/caimlas/meept/internal/tui/types"
+	"github.com/caimlas/meept/internal/tui/viz"
 )
 
 // SidebarPanel represents a collapsible panel in the sidebar.
@@ -37,6 +38,10 @@ type SidebarModel struct {
 	tasksData         []SidebarTaskItem
 	memoryData        []SidebarMemoryItem
 	workersData       []SidebarWorkerItem
+
+	// Dispatch visualization
+	viz            *viz.DispatchViz
+	animationEnabled bool
 
 	// Loading/error state
 	loading bool
@@ -97,19 +102,29 @@ type SidebarToolCall struct {
 }
 
 // NewSidebarModel creates a new sidebar model.
-func NewSidebarModel(rpc *RPCClient, styles *Styles) *SidebarModel {
-	return &SidebarModel{
-		rpc:           rpc,
-		styles:        styles,
-		expandedPanel: PanelStatus,
-		visible:       true, // Visible by default
+func NewSidebarModel(rpc *RPCClient, styles *Styles, animationEnabled bool) *SidebarModel {
+	s := &SidebarModel{
+		rpc:              rpc,
+		styles:           styles,
+		expandedPanel:    PanelStatus,
+		visible:          true, // Visible by default
+		animationEnabled: animationEnabled,
 	}
+	if animationEnabled {
+		s.viz = viz.NewDispatchViz(30) // Default width
+	}
+	return s
 }
 
 // SetSize updates the sidebar dimensions.
 func (s *SidebarModel) SetSize(width, height int) {
 	s.width = width
 	s.height = height
+	// Update viz width to match sidebar content area
+	// Account for: border (2) + padding (2) + small margin (2) = 6
+	if s.viz != nil && width > 8 {
+		s.viz.SetSize(width - 6)
+	}
 }
 
 // SetVisible shows or hides the sidebar.
@@ -149,6 +164,10 @@ func (s *SidebarModel) IsFocused() bool {
 func (s *SidebarModel) Init() tea.Cmd {
 	if !s.visible {
 		return nil
+	}
+	// Initialize data refresh and optionally visualization tick
+	if s.animationEnabled && s.viz != nil {
+		return tea.Batch(s.refreshData(), s.viz.Init())
 	}
 	return s.refreshData()
 }
@@ -286,6 +305,16 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 		s.workersData = msg.Workers
 		s.tasksData = msg.Tasks
 		s.memoryData = msg.Memory
+
+		// Sync visualization with data
+		s.syncVizWithData()
+		return nil
+
+	case viz.VizTickMsg:
+		// Forward tick to visualization and return next tick command
+		if s.animationEnabled && s.viz != nil && s.visible {
+			return s.viz.Update(msg)
+		}
 		return nil
 
 	case tea.KeyMsg:
@@ -297,20 +326,40 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			// Cycle focus back to chat
 			s.focused = false
 			return func() tea.Msg { return SidebarFocusChatMsg{} }
-		case "up", "k":
-			if s.expandedPanel > 0 {
-				s.expandedPanel--
-			}
-			return nil
-		case "down", "j":
-			if s.expandedPanel < PanelMemory {
-				s.expandedPanel++
-			}
-			return nil
 		}
 	}
 
 	return nil
+}
+
+// syncVizWithData synchronizes the visualization with current agent/worker data.
+func (s *SidebarModel) syncVizWithData() {
+	if !s.animationEnabled || s.viz == nil {
+		return
+	}
+
+	// Convert agent activity to viz data
+	var agents []viz.AgentActivityData
+	for _, a := range s.agentActivityData {
+		agents = append(agents, viz.AgentActivityData{
+			AgentID:   a.AgentID,
+			AgentName: a.AgentName,
+			State:     a.State,
+			Progress:  float64(a.Iteration) / float64(a.MaxIter),
+		})
+	}
+
+	// Convert workers to viz data
+	var workers []viz.WorkerData
+	for _, w := range s.workersData {
+		workers = append(workers, viz.WorkerData{
+			ID:           w.ID,
+			State:        w.State,
+			CurrentJobID: w.CurrentJobID,
+		})
+	}
+
+	s.viz.SyncWithData(agents, workers)
 }
 
 // View renders the sidebar.
@@ -337,6 +386,7 @@ func (s *SidebarModel) View() string {
 	containerStyle := lipgloss.NewStyle().
 		Width(s.width - 2).
 		Height(innerHeight).
+		MaxHeight(innerHeight).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1)
@@ -348,7 +398,7 @@ func (s *SidebarModel) View() string {
 		Width(s.width - 6).
 		Align(lipgloss.Center)
 
-	b.WriteString(titleStyle.Render("Sidebar"))
+	b.WriteString(titleStyle.Render("sidebar"))
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("─", s.width-6))
 	b.WriteString("\n\n")
@@ -364,23 +414,30 @@ func (s *SidebarModel) View() string {
 	b.WriteString("\n")
 	b.WriteString(s.renderMemoryPanel())
 
-	// Help hint at bottom
-	hintStyle := lipgloss.NewStyle().
-		Foreground(ColorMuted).
-		Width(s.width - 6).
-		Align(lipgloss.Center)
+	// Calculate space used by panels
+	panelsContent := b.String()
+	panelsLines := strings.Count(panelsContent, "\n") + 1
 
-	// Calculate remaining space for hint
-	content := b.String()
-	contentLines := strings.Count(content, "\n")
-	remainingLines := s.height - contentLines - 4
-	if remainingLines > 1 {
-		b.WriteString(strings.Repeat("\n", remainingLines-1))
-		hint := "j/k: navigate"
-		if s.focused {
-			hint = "j/k: navigate | Tab: focus chat"
+	// Calculate viz height (approximately square based on width)
+	vizHeight := 0
+	if s.animationEnabled && s.viz != nil {
+		vizHeight = s.viz.Height()
+	}
+
+	// Calculate remaining space for viz
+	remainingLines := innerHeight - panelsLines
+
+	// Render visualization at bottom if we have space and animation is enabled
+	if s.animationEnabled && s.viz != nil && remainingLines >= vizHeight {
+		// Add spacing before viz
+		spacingBeforeViz := remainingLines - vizHeight
+		if spacingBeforeViz > 0 {
+			b.WriteString(strings.Repeat("\n", spacingBeforeViz))
 		}
-		b.WriteString(hintStyle.Render(hint))
+		b.WriteString(s.viz.View())
+	} else if remainingLines > 0 {
+		// Just add spacing if no room for viz
+		b.WriteString(strings.Repeat("\n", remainingLines))
 	}
 
 	return containerStyle.Render(b.String())

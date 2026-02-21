@@ -26,6 +26,7 @@ type Config struct {
 	Skills      SkillsConfig      `toml:"skills"`
 	ClawSkills  ClawSkillsConfig  `toml:"clawskills"`
 	SelfImprove SelfImproveConfig `toml:"selfimprove"`
+	Shadow      ShadowConfig      `toml:"shadow"`
 }
 
 // DaemonConfig holds daemon-specific settings.
@@ -255,6 +256,114 @@ type DetectionConfig struct {
 	RuffArgs          []string `toml:"ruff_args"`
 }
 
+// ShadowConfig holds shadow training settings.
+type ShadowConfig struct {
+	Enabled   bool                    `toml:"enabled"`
+	DataDir   string                  `toml:"data_dir"`
+	Shadowing ShadowShadowingConfig   `toml:"shadowing"`
+	Teacher   ShadowTeacherConfig     `toml:"teacher"`
+	Quality   ShadowQualityConfig     `toml:"quality"`
+	Examples  ShadowExamplesConfig    `toml:"examples"`
+	Export    ShadowExportConfig      `toml:"export"`
+	Adapters  ShadowAdaptersConfig    `toml:"adapters"`
+}
+
+// ShadowShadowingConfig controls when and how responses are shadowed.
+type ShadowShadowingConfig struct {
+	Mode          string   `toml:"mode"`
+	MinComplexity string   `toml:"min_complexity"`
+	Domains       []string `toml:"domains"`
+	TaskTypes     []string `toml:"task_types"`
+	SampleRate    float64  `toml:"sample_rate"`
+	QueueSize     int      `toml:"queue_size"`
+	WorkerCount   int      `toml:"worker_count"`
+}
+
+// ShadowTeacherConfig configures the teacher model.
+type ShadowTeacherConfig struct {
+	Model             string  `toml:"model"`
+	FallbackModel     string  `toml:"fallback_model"`
+	Temperature       float64 `toml:"temperature"`
+	MaxTokens         int     `toml:"max_tokens"`
+	TimeoutSeconds    int     `toml:"timeout_seconds"`
+	MaxDailyQueries   int     `toml:"max_daily_queries"`
+	MaxDailyCost      float64 `toml:"max_daily_cost"`
+	RequestsPerMinute int     `toml:"requests_per_minute"`
+}
+
+// ShadowQualityConfig configures quality scoring.
+type ShadowQualityConfig struct {
+	Method               string                       `toml:"method"`
+	HighQualityThreshold float64                      `toml:"high_quality_threshold"`
+	TrainableThreshold   float64                      `toml:"trainable_threshold"`
+	PreferenceMargin     float64                      `toml:"preference_margin"`
+	HeuristicWeights     ShadowHeuristicWeightsConfig `toml:"heuristic_weights"`
+	EvalPromptTemplate   string                       `toml:"eval_prompt_template"`
+}
+
+// ShadowHeuristicWeightsConfig defines scoring dimension weights.
+type ShadowHeuristicWeightsConfig struct {
+	Relevance    float64 `toml:"relevance"`
+	Completeness float64 `toml:"completeness"`
+	Correctness  float64 `toml:"correctness"`
+	Style        float64 `toml:"style"`
+}
+
+// ShadowExamplesConfig configures few-shot example management.
+type ShadowExamplesConfig struct {
+	Enabled          bool    `toml:"enabled"`
+	MaxPerCategory   int     `toml:"max_per_category"`
+	MinQuality       float64 `toml:"min_quality"`
+	DefaultCount     int     `toml:"default_count"`
+	MaxCount         int     `toml:"max_count"`
+	SimilarityWeight float64 `toml:"similarity_weight"`
+	RecencyWeight    float64 `toml:"recency_weight"`
+	QualityWeight    float64 `toml:"quality_weight"`
+	MaxContextTokens int     `toml:"max_context_tokens"`
+}
+
+// ShadowExportConfig configures training data export.
+type ShadowExportConfig struct {
+	OutputDir                string   `toml:"output_dir"`
+	Formats                  []string `toml:"formats"`
+	MinRecords               int      `toml:"min_records"`
+	IncludeLowQuality        bool     `toml:"include_low_quality"`
+	Deduplicate              bool     `toml:"deduplicate"`
+	DedupSimilarityThreshold float64  `toml:"dedup_similarity_threshold"`
+}
+
+// ShadowAdaptersConfig configures adapter management.
+type ShadowAdaptersConfig struct {
+	Enabled        bool               `toml:"enabled"`
+	OllamaEndpoint string             `toml:"ollama_endpoint"`
+	AutoTrain      bool               `toml:"auto_train"`
+	TrainThreshold int                `toml:"train_threshold"`
+	TrainSchedule  string             `toml:"train_schedule"`
+	AdapterDir     string             `toml:"adapter_dir"`
+	LoRA           ShadowLoRAConfig   `toml:"lora"`
+	DPO            ShadowDPOConfig    `toml:"dpo"`
+}
+
+// ShadowLoRAConfig configures LoRA training parameters.
+type ShadowLoRAConfig struct {
+	Rank                 int      `toml:"rank"`
+	Alpha                int      `toml:"alpha"`
+	Dropout              float64  `toml:"dropout"`
+	TargetModules        []string `toml:"target_modules"`
+	LearningRate         float64  `toml:"learning_rate"`
+	Epochs               int      `toml:"epochs"`
+	BatchSize            int      `toml:"batch_size"`
+	GradientAccumulation int      `toml:"gradient_accumulation"`
+	WarmupRatio          float64  `toml:"warmup_ratio"`
+	MaxGradNorm          float64  `toml:"max_grad_norm"`
+}
+
+// ShadowDPOConfig configures DPO training parameters.
+type ShadowDPOConfig struct {
+	Beta     float64 `toml:"beta"`
+	LossType string  `toml:"loss_type"`
+}
+
 // DefaultConfig returns a configuration with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
@@ -412,6 +521,85 @@ func DefaultConfig() *Config {
 				PytestArgs:       []string{"-v", "--tb=short"},
 				MypyArgs:         []string{"--ignore-missing-imports"},
 				RuffArgs:         []string{},
+			},
+		},
+		Shadow: ShadowConfig{
+			Enabled: false,
+			DataDir: "~/.meept/shadow",
+			Shadowing: ShadowShadowingConfig{
+				Mode:          "async",
+				MinComplexity: "moderate",
+				Domains:       []string{},
+				TaskTypes:     []string{},
+				SampleRate:    0.5,
+				QueueSize:     1000,
+				WorkerCount:   2,
+			},
+			Teacher: ShadowTeacherConfig{
+				Model:             "",
+				FallbackModel:     "",
+				Temperature:       0.0,
+				MaxTokens:         4096,
+				TimeoutSeconds:    120,
+				MaxDailyQueries:   500,
+				MaxDailyCost:      10.0,
+				RequestsPerMinute: 30,
+			},
+			Quality: ShadowQualityConfig{
+				Method:               "hybrid",
+				HighQualityThreshold: 0.85,
+				TrainableThreshold:   0.6,
+				PreferenceMargin:     0.1,
+				HeuristicWeights: ShadowHeuristicWeightsConfig{
+					Relevance:    0.30,
+					Completeness: 0.25,
+					Correctness:  0.35,
+					Style:        0.10,
+				},
+				EvalPromptTemplate: "",
+			},
+			Examples: ShadowExamplesConfig{
+				Enabled:          true,
+				MaxPerCategory:   100,
+				MinQuality:       0.8,
+				DefaultCount:     3,
+				MaxCount:         5,
+				SimilarityWeight: 0.7,
+				RecencyWeight:    0.2,
+				QualityWeight:    0.1,
+				MaxContextTokens: 2000,
+			},
+			Export: ShadowExportConfig{
+				OutputDir:                "~/.meept/shadow/exports",
+				Formats:                  []string{"jsonl", "dpo"},
+				MinRecords:               100,
+				IncludeLowQuality:        false,
+				Deduplicate:              true,
+				DedupSimilarityThreshold: 0.95,
+			},
+			Adapters: ShadowAdaptersConfig{
+				Enabled:        false,
+				OllamaEndpoint: "http://localhost:11434",
+				AutoTrain:      false,
+				TrainThreshold: 500,
+				TrainSchedule:  "",
+				AdapterDir:     "~/.meept/shadow/adapters",
+				LoRA: ShadowLoRAConfig{
+					Rank:                 16,
+					Alpha:                32,
+					Dropout:              0.05,
+					TargetModules:        []string{"q_proj", "v_proj", "k_proj", "o_proj"},
+					LearningRate:         2e-4,
+					Epochs:               3,
+					BatchSize:            4,
+					GradientAccumulation: 4,
+					WarmupRatio:          0.03,
+					MaxGradNorm:          1.0,
+				},
+				DPO: ShadowDPOConfig{
+					Beta:     0.1,
+					LossType: "sigmoid",
+				},
 			},
 		},
 	}

@@ -31,5 +31,26 @@
 
     // Default name for new sessions (if not specified)
     "default_name": "default"
+  },
+
+  // Rendering options
+  "rendering": {
+    // Enable markdown rendering in chat messages
+    "markdown": true,
+
+    // Enable syntax highlighting in code blocks
+    "syntax_highlighting": true,
+
+    // Syntax highlighting theme (e.g., "monokai", "dracula")
+    "theme": "monokai",
+
+    // Enable word wrap for long lines
+    "word_wrap": true,
+
+    // Show header bar with session info
+    "show_header": true,
+
+    // Enable animated dispatch visualization in sidebar
+    "sidebar_animation": true
   }
 }
