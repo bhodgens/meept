@@ -60,13 +60,16 @@ type AgentSpec struct {
 
 // BaselineTools are the tools available to all agents.
 var BaselineTools = []string{
-	"memory.store",
-	"memory.search",
-	"memory.get_context",
-	"task.create",
-	"task.query",
-	"task.update",
-	"platform.status",
+	"memory_store",
+	"memory_search",
+	"memory_get_context",
+	"task_create",
+	"task_get",
+	"task_list",
+	"task_update",
+	"platform_status",
+	"platform_agents",
+	"platform_tools",
 }
 
 // DispatcherSpec returns the spec for the dispatcher agent.
@@ -84,8 +87,7 @@ func DispatcherSpec() *AgentSpec {
 Always include relevant memory_refs when creating tasks to provide context continuity.`,
 		Model: "", // Use default model
 		AdditionalTools: []string{
-			"classify_intent",
-			"delegate",
+			// NOTE: classify_intent and delegate tools do not exist yet
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    3,
@@ -106,7 +108,7 @@ func ChatAgentSpec() *AgentSpec {
 		Model:   "",
 		AdditionalTools: []string{
 			"web_fetch",
-			"web_search",
+			// NOTE: web_search tool does not exist yet
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -121,12 +123,12 @@ func CoderAgentSpec() *AgentSpec {
 		Purpose: "You are a coding specialist. You can read, write, and modify files, execute shell commands, and work with MCP servers.",
 		Model:   "",
 		AdditionalTools: []string{
-			"exec_tool",
 			"file_read",
 			"file_write",
 			"file_delete",
 			"list_directory",
 			"shell_execute",
+			// NOTE: exec_tool does not exist yet
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -141,11 +143,10 @@ func DebuggerAgentSpec() *AgentSpec {
 		Purpose: "You are a debugging specialist. You diagnose issues, trace problems, and help fix bugs in code.",
 		Model:   "",
 		AdditionalTools: []string{
-			"exec_tool",
 			"file_read",
 			"file_write",
 			"shell_execute",
-			"run_tests",
+			// NOTE: exec_tool and run_tests do not exist yet
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -160,8 +161,7 @@ func PlannerAgentSpec() *AgentSpec {
 		Purpose: "You are a planning specialist. You decompose complex tasks into smaller subtasks and create execution plans.",
 		Model:   "", // Use reasoning model if available
 		AdditionalTools: []string{
-			"decompose_task",
-			"create_subtasks",
+			// NOTE: decompose_task and create_subtasks tools do not exist yet
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    5,
@@ -181,9 +181,8 @@ func AnalystAgentSpec() *AgentSpec {
 		Purpose: "You are an analysis specialist. You research topics, summarize information, and provide insights.",
 		Model:   "",
 		AdditionalTools: []string{
-			"web_search",
 			"web_fetch",
-			"summarize",
+			// NOTE: web_search and summarize tools do not exist yet
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -198,12 +197,8 @@ func CommitterAgentSpec() *AgentSpec {
 		Purpose: "You are a git operations specialist. You handle commits, branches, and repository management.",
 		Model:   "", // Use cheap model
 		AdditionalTools: []string{
-			"git_status",
-			"git_add",
-			"git_commit",
-			"git_push",
-			"git_branch",
-			"git_log",
+			"shell_execute", // Use shell_execute for git commands
+			// NOTE: git_* tools do not exist yet
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    5,
@@ -223,9 +218,7 @@ func SchedulerAgentSpec() *AgentSpec {
 		Purpose: "You are a scheduling specialist. You create, manage, and cancel scheduled tasks and reminders.",
 		Model:   "", // Use cheap model
 		AdditionalTools: []string{
-			"schedule",
-			"list_jobs",
-			"cancel_job",
+			// NOTE: schedule, list_jobs, and cancel_job tools do not exist yet
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    3,

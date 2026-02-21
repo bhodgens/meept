@@ -7,18 +7,20 @@ const BaselineCapabilities = `# Platform Capabilities
 You have access to the following shared capabilities:
 
 ## Memory
-- memory.store: Save information for future reference
-- memory.search: Find relevant past context
-- memory.get_context: Get contextually relevant memories
+- memory_store: Save information for future reference
+- memory_search: Find relevant past context
+- memory_get_context: Get contextually relevant memories
 
 ## Tasks
-- task.create: Create tasks for tracking work
-- task.query: Check task status and details
-- task.update: Update task progress and state
+- task_create: Create tasks for tracking work
+- task_get: Get task details by ID
+- task_list: List tasks by state
+- task_update: Update task progress and state
 
 ## Platform
-- platform.status: Check system health
-- platform.agents: List available specialist agents
+- platform_status: Check system health
+- platform_agents: List available specialist agents
+- platform_tools: List available tools
 `
 
 // BaselineGuidelines provides common behavioral guidelines for all agents.

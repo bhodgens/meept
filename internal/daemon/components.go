@@ -110,9 +110,8 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		return nil, fmt.Errorf("LLM configuration required but model resolution failed")
 	}
 
-	// Create tool registry with builtin tools
+	// Create tool registry (builtin tools registered after all dependencies are available)
 	c.ToolRegistry = tools.NewRegistry(logger)
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, logger)
 
 	// Create agent loop
 	agentOpts := []agent.LoopOption{
@@ -200,6 +199,13 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
 	}
 
+	// Register builtin tools now that all dependencies are available
+	var taskStore *task.Store
+	if c.TaskRegistry != nil {
+		taskStore = c.TaskRegistry.Store()
+	}
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.MemoryManager, taskStore, logger)
+
 	// Create agent registry if multi-agent is enabled
 	if cfg.MultiAgent.Enabled {
 		toolAdapter := agent.NewToolRegistryAdapter(c.ToolRegistry)
@@ -229,6 +235,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			Logger:       logger.With("component", "dispatcher"),
 		})
 		logger.Info("Dispatcher initialized")
+
+		// Register platform tools now that agent registry is available
+		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, logger)
 	}
 
 	// Create job processor that uses the agent loop
@@ -539,7 +548,13 @@ func splitModelRef(ref string) []string {
 }
 
 // registerBuiltinTools registers all builtin tools with the registry.
-func registerBuiltinTools(registry *tools.Registry, checker *security.PermissionChecker, logger *slog.Logger) {
+func registerBuiltinTools(
+	registry *tools.Registry,
+	checker *security.PermissionChecker,
+	memoryMgr *memory.Manager,
+	taskStore *task.Store,
+	logger *slog.Logger,
+) {
 	// Filesystem tools
 	registry.Register(builtin.NewReadFileTool(checker))
 	registry.Register(builtin.NewWriteFileTool(checker))
@@ -553,7 +568,54 @@ func registerBuiltinTools(registry *tools.Registry, checker *security.Permission
 	// Web fetch tool
 	registry.Register(builtin.NewWebFetchTool(30*time.Second, 100000))
 
+	// Memory tools (only if memory manager is available)
+	if memoryMgr != nil {
+		registry.Register(builtin.NewMemoryStoreTool(memoryMgr))
+		registry.Register(builtin.NewMemorySearchTool(memoryMgr))
+		registry.Register(builtin.NewMemoryGetContextTool(memoryMgr))
+		logger.Debug("Registered memory tools")
+	}
+
+	// Task tools (only if task store is available)
+	if taskStore != nil {
+		registry.Register(builtin.NewTaskCreateTool(taskStore))
+		registry.Register(builtin.NewTaskGetTool(taskStore))
+		registry.Register(builtin.NewTaskListTool(taskStore))
+		registry.Register(builtin.NewTaskUpdateTool(taskStore))
+		logger.Debug("Registered task tools")
+	}
+
 	logger.Info("Registered builtin tools", "count", registry.Count())
+}
+
+// registerPlatformTools registers platform introspection tools.
+// Called after AgentRegistry is created since platform_agents needs it.
+func registerPlatformTools(
+	registry *tools.Registry,
+	agentRegistry *agent.AgentRegistry,
+	statusHandler *StatusHandler,
+	logger *slog.Logger,
+) {
+	// Platform status tool - uses StatusHandler.getStatus
+	var statusFunc func() map[string]any
+	if statusHandler != nil {
+		statusFunc = func() map[string]any {
+			return map[string]any{
+				"status":         "running",
+				"uptime_seconds": time.Since(statusHandler.startTime).Seconds(),
+				"version":        "0.2.0-go",
+			}
+		}
+	}
+	registry.Register(builtin.NewPlatformStatusTool(statusFunc))
+
+	// Platform agents tool
+	registry.Register(builtin.NewPlatformAgentsTool(agentRegistry))
+
+	// Platform tools tool
+	registry.Register(builtin.NewPlatformToolsTool(registry))
+
+	logger.Debug("Registered platform tools")
 }
 
 // StatusHandler handles status.request messages on the bus.
