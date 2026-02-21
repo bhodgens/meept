@@ -65,6 +65,7 @@ type App struct {
 	activeModal    ModalType
 	commandPalette *Modal
 	sessionPicker  *SessionPickerModal
+	sessionRename  *SessionRenameModal
 
 	// Current session
 	currentSession *types.Session
@@ -144,6 +145,7 @@ func NewApp(socketPath string) *App {
 	// Create modals
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
+	app.sessionRename = NewSessionRenameModal(styles)
 
 	return app
 }
@@ -214,6 +216,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 
+		// Calculate reserved height for chrome (header + status bar)
+		chromeHeight := 1 // status bar
+		if a.clientConfig.Rendering.ShowHeader {
+			chromeHeight = 2 // header + status bar
+		}
+
 		// Calculate sidebar width (30% of screen when visible, max 40 chars)
 		sidebarWidth := 0
 		if a.sidebar.IsVisible() {
@@ -225,14 +233,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sidebarWidth = 20
 			}
 		}
-		a.sidebar.SetSize(sidebarWidth, msg.Height-4)
+		a.sidebar.SetSize(sidebarWidth, msg.Height-chromeHeight)
 
 		// Update sub-models with remaining width
 		mainWidth := msg.Width - sidebarWidth
-		a.chat.SetSize(mainWidth, msg.Height-4) // Account for tabs and status bar
-		a.tasks.SetSize(mainWidth, msg.Height-4)
-		a.queue.SetSize(mainWidth, msg.Height-4)
-		a.memory.SetSize(mainWidth, msg.Height-4)
+		a.chat.SetSize(mainWidth, msg.Height-chromeHeight)
+		a.tasks.SetSize(mainWidth, msg.Height-chromeHeight)
+		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
+		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)
 		return a, nil
 
 	case tea.KeyMsg:
@@ -302,6 +310,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMessageTime = time.Now()
 		} else if msg.Session != nil {
 			a.currentSession = msg.Session
+			a.setTerminalTitle()
 			sessionCmd := a.chat.SetSession(msg.Session)
 			if msg.IsNew {
 				a.statusMessage = fmt.Sprintf("Created session: %s", msg.Session.Name)
@@ -330,6 +339,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Switch to selected session
 		if msg.Session != nil {
 			a.currentSession = msg.Session
+			a.setTerminalTitle()
 			sessionCmd := a.chat.SetSession(msg.Session)
 			a.statusMessage = fmt.Sprintf("Switched to: %s", msg.Session.Name)
 			a.statusMessageTime = time.Now()
@@ -350,6 +360,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SessionDeleteMsg:
 		// Delete a session
 		return a, a.deleteSession(msg.SessionID)
+
+	case OpenRenameModalMsg:
+		// Open rename modal for a session
+		a.activeModal = ModalSessionRename
+		a.sessionRename.Show(msg.SessionID, msg.CurrentName)
+		return a, nil
+
+	case SessionRenameMsg:
+		// Rename a session (update description)
+		return a, a.renameSession(msg.SessionID, msg.NewName)
 
 	case SidebarDataMsg:
 		// Delegate to sidebar
@@ -469,12 +489,30 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalSessionPicker
 			a.sessionPicker.Show()
 			return a, a.sessionPicker.RefreshSessions()
+		case keys.RenameSession:
+			// Rename current session
+			if a.currentSession != nil {
+				currentName := a.currentSession.Description
+				if currentName == "" {
+					currentName = a.currentSession.Name
+				}
+				a.activeModal = ModalSessionRename
+				a.sessionRename.Show(a.currentSession.ID, currentName)
+			}
+			return a, nil
 		}
 		return a, nil
 
 	case ModalSessionPicker:
 		cmd := a.sessionPicker.HandleKey(keyStr)
 		if !a.sessionPicker.IsVisible() {
+			a.activeModal = ModalNone
+		}
+		return a, cmd
+
+	case ModalSessionRename:
+		cmd := a.sessionRename.HandleKey(keyStr)
+		if !a.sessionRename.IsVisible() {
 			a.activeModal = ModalNone
 		}
 		return a, cmd
@@ -510,6 +548,21 @@ func (a *App) deleteSession(sessionID string) tea.Cmd {
 	}
 }
 
+// renameSession renames a session via RPC (updates description).
+func (a *App) renameSession(sessionID, newName string) tea.Cmd {
+	return func() tea.Msg {
+		err := a.rpc.UpdateSessionDescription(sessionID, newName)
+		if err != nil {
+			return CopyErrorMsg{Err: err} // Reuse error display
+		}
+		// Return message to update UI
+		return models.SessionDescriptionUpdatedMsg{
+			SessionID:   sessionID,
+			Description: newName,
+		}
+	}
+}
+
 // initCurrentView returns a command to initialize the current view.
 func (a *App) initCurrentView() tea.Cmd {
 	switch a.currentView {
@@ -538,9 +591,11 @@ func (a *App) View() string {
 
 	var b strings.Builder
 
-	// Render tabs
-	b.WriteString(a.renderTabs())
-	b.WriteString("\n")
+	// Render header bar (orange with session info) if enabled
+	if a.clientConfig.Rendering.ShowHeader {
+		b.WriteString(a.renderHeader())
+		b.WriteString("\n")
+	}
 
 	// Render main content area (view + optional sidebar)
 	var mainView string
@@ -581,8 +636,81 @@ func (a *App) renderModalOverlay() string {
 		return a.commandPalette.View(a.width, a.height)
 	case ModalSessionPicker:
 		return a.sessionPicker.View(a.width, a.height)
+	case ModalSessionRename:
+		return a.sessionRename.View(a.width, a.height)
 	}
 	return ""
+}
+
+func (a *App) renderHeader() string {
+	// Check if header is disabled
+	if !a.clientConfig.Rendering.ShowHeader {
+		return ""
+	}
+
+	// Ensure we have a valid width
+	width := a.width
+	if width < 20 {
+		width = 80 // fallback
+	}
+
+	// Session name - hide "default"
+	sessionName := ""
+	if a.currentSession != nil && a.currentSession.Name != "" && a.currentSession.Name != "default" {
+		sessionName = a.currentSession.Name
+	}
+
+	// Session description (always show if present)
+	desc := ""
+	if a.currentSession != nil && a.currentSession.Description != "" {
+		desc = a.currentSession.Description
+	}
+
+	// Build header content
+	var content string
+	if sessionName != "" && desc != "" {
+		// Both name and description
+		maxDescWidth := width - len(sessionName) - 5
+		if maxDescWidth > 10 && len(desc) > maxDescWidth {
+			desc = desc[:maxDescWidth-3] + "..."
+		}
+		content = sessionName + " │ " + desc
+	} else if sessionName != "" {
+		// Just session name
+		content = sessionName
+	} else if desc != "" {
+		// Just description (for "default" session)
+		if len(desc) > width-2 {
+			desc = desc[:width-5] + "..."
+		}
+		content = desc
+	} else {
+		// Nothing to show
+		content = "meept"
+	}
+
+	// Pad content to fill width
+	if len(content) < width {
+		content = content + strings.Repeat(" ", width-len(content))
+	} else if len(content) > width {
+		content = content[:width]
+	}
+
+	// Orange background, black text - render to exact width
+	return a.styles.HeaderBar.
+		Width(width).
+		MaxWidth(width).
+		Render(content)
+}
+
+// setTerminalTitle sets the terminal tab/window title using OSC escape sequence.
+func (a *App) setTerminalTitle() {
+	title := "meept"
+	if a.currentSession != nil && a.currentSession.Name != "" && a.currentSession.Name != "default" {
+		title = "meept - " + a.currentSession.Name
+	}
+	// OSC 0 sets window/tab title: \033]0;title\007
+	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title)
 }
 
 func (a *App) renderTabs() string {
@@ -608,65 +736,50 @@ func (a *App) renderTabs() string {
 
 	tabLine := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
 
-	// Add session indicator if we have one
-	var sessionIndicator string
-	if a.currentSession != nil {
-		sessionLabel := a.currentSession.Description
-		if sessionLabel == "" {
-			sessionLabel = a.currentSession.Name
-		}
-		sessionIndicator = a.styles.Muted.Render(" [" + sessionLabel + "]")
-	}
-
-	// Add separator
-	separatorWidth := max(0, a.width-lipgloss.Width(tabLine)-lipgloss.Width(sessionIndicator))
-	separator := strings.Repeat("-", separatorWidth)
+	// Add separator to fill width
+	separatorWidth := max(0, a.width-lipgloss.Width(tabLine))
+	separator := strings.Repeat("─", separatorWidth)
 
 	return lipgloss.NewStyle().
 		Width(a.width).
-		Render(tabLine + a.styles.Muted.Render(separator) + sessionIndicator)
+		Render(tabLine + a.styles.Muted.Render(separator))
 }
 
 func (a *App) renderStatusBar() string {
-	var left string
-
-	// Show status message if present
-	if a.statusMessage != "" {
-		left = a.styles.StatusRunning.Render(a.statusMessage)
-	} else {
-		left = a.styles.HelpKey.Render("Ctrl+X") + a.styles.HelpValue.Render(" menu") + " | " +
-			a.styles.HelpKey.Render("Ctrl+C") + a.styles.HelpValue.Render(" quit") + " | " +
-			a.styles.HelpKey.Render("Esc") + a.styles.HelpValue.Render(" focus input")
-	}
-
 	// Connection status
-	connectionStatus := "disconnected"
+	connectionStatus := "●"
 	statusStyle := a.styles.StatusStopped
 	if a.rpc.IsConnected() {
-		connectionStatus = "connected"
 		statusStyle = a.styles.StatusRunning
 	}
 
-	// Project directory (shortened if necessary)
+	// Project directory (shortened)
 	projectDisplay := a.projectDir
-	maxProjectLen := 30
+	maxProjectLen := 25
 	if len(projectDisplay) > maxProjectLen {
 		projectDisplay = "..." + projectDisplay[len(projectDisplay)-maxProjectLen+3:]
 	}
 
-	right := a.styles.Muted.Render(projectDisplay) + " | " + statusStyle.Render(connectionStatus)
+	// Build single line: status dot | keybindings | directory
+	var parts []string
 
-	// Calculate spacing
-	leftWidth := lipgloss.Width(left)
-	rightWidth := lipgloss.Width(right)
-	spacing := a.width - leftWidth - rightWidth
-	if spacing < 0 {
-		spacing = 0
+	// Status message takes priority if present
+	if a.statusMessage != "" {
+		parts = append(parts, a.styles.StatusRunning.Render(a.statusMessage))
+	} else {
+		parts = append(parts, statusStyle.Render(connectionStatus))
+		parts = append(parts, a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"))
+		parts = append(parts, a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"))
+		parts = append(parts, a.styles.HelpKey.Render("Esc")+" "+a.styles.HelpValue.Render("input"))
+		parts = append(parts, a.styles.Muted.Render(projectDisplay))
 	}
+
+	content := strings.Join(parts, " │ ")
 
 	return a.styles.StatusBar.
 		Width(a.width).
-		Render(left + strings.Repeat(" ", spacing) + right)
+		MaxWidth(a.width).
+		Render(content)
 }
 
 func (a *App) renderError() string {

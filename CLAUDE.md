@@ -115,6 +115,36 @@ Three-tier with priority shadowing:
 ~/.meept/clawskills/        # Third-party (claw: prefix)
 ```
 
+## Multi-Agent Architecture
+
+Meept uses a multi-agent architecture where specialist agents handle different types of tasks:
+
+| Agent ID | Role | Purpose |
+|----------|------|---------|
+| `dispatcher` | Dispatcher | Intake, classify, route to specialists |
+| `chat` | Executor | General conversation |
+| `coder` | Executor | File ops, shell, coding tasks |
+| `debugger` | Executor | Troubleshooting, bug fixing |
+| `planner` | Executor | Task decomposition, planning |
+| `analyst` | Executor | Research, data analysis |
+| `committer` | Executor | Git operations |
+| `scheduler` | Executor | Job scheduling |
+
+### Coworker Awareness
+
+Agents discover and delegate to each other using platform tools:
+- `platform_agents`: List available agents and their capabilities
+- `platform_status`: Get platform health status
+- `platform_tools`: List registered tools
+- `delegate_task`: Route a task to a specific agent
+
+### Job Queue Routing
+
+Jobs can be targeted to specific agents via `agent_id`:
+- If `agent_id` is set, only that agent can claim the job
+- If `agent_id` is empty, any agent with matching capabilities can claim
+- Jobs are prioritized by: targeted agent match > priority > creation time
+
 ## Code Conventions
 
 - Go 1.22+
@@ -123,6 +153,11 @@ Three-tier with priority shadowing:
 - Context propagation throughout
 - Interfaces for testability
 - Table-driven tests
+
+## UI Conventions
+
+- **All UI element text must be explicitly lowercase** (e.g., "switch" not "Switch", "ok" not "OK")
+- This applies to: button labels, menu items, tooltips, status messages, dialog titles, hints
 
 ## Project Structure
 
@@ -153,6 +188,16 @@ config/            # Configuration templates
 tests/             # Integration tests
 archive/           # Legacy Python code (reference only)
 ```
+
+## Documentation Maintenance
+
+**IMPORTANT**: When making changes to the implementation, always update related documentation to stay in sync:
+
+1. **diagram.md**: Update architecture diagrams when adding/modifying components, agents, tools, or data flows
+2. **CLAUDE.md**: Update this file when changing architecture patterns, adding new agents, or modifying key behaviors
+3. **Code comments**: Keep inline documentation accurate when modifying function signatures or behavior
+
+Documentation should always reflect the current implementation state. If you add a new agent, tool, or architectural component, document it immediately.
 
 ## Legacy Python
 

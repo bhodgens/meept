@@ -12,10 +12,13 @@ import (
 
 // MockTasksRPCClient implements TasksRPCClient for testing.
 type MockTasksRPCClient struct {
-	connected    bool
-	JobsResponse *types.JobListResponse
-	JobsError    error
-	JobsCalls    int
+	connected             bool
+	JobsResponse          *types.JobListResponse
+	JobsError             error
+	JobsCalls             int
+	TasksExtendedResponse *types.TaskExtendedListResponse
+	TasksExtendedError    error
+	TasksExtendedCalls    int
 }
 
 func NewMockTasksRPCClient() *MockTasksRPCClient {
@@ -50,6 +53,17 @@ func NewMockTasksRPCClient() *MockTasksRPCClient {
 				},
 			},
 		},
+		TasksExtendedResponse: &types.TaskExtendedListResponse{
+			Tasks: []types.TaskExtended{
+				{
+					Task: types.Task{
+						ID:    "task-1",
+						Name:  "Test Task",
+						State: "pending",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -59,6 +73,14 @@ func (m *MockTasksRPCClient) ListJobs() (*types.JobListResponse, error) {
 		return nil, m.JobsError
 	}
 	return m.JobsResponse, nil
+}
+
+func (m *MockTasksRPCClient) ListTasksExtended() (*types.TaskExtendedListResponse, error) {
+	m.TasksExtendedCalls++
+	if m.TasksExtendedError != nil {
+		return nil, m.TasksExtendedError
+	}
+	return m.TasksExtendedResponse, nil
 }
 
 func (m *MockTasksRPCClient) IsConnected() bool {

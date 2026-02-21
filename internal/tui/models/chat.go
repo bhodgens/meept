@@ -119,6 +119,7 @@ type RPCClient interface {
 	SaveSessionMessages(sessionID string, msgs []types.SessionMessage) error
 	GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error)
 	UpdateSessionDescription(sessionID, description string) error
+	GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error)
 }
 
 // NewChatModel creates a new chat model.
@@ -189,10 +190,17 @@ func (m *ChatModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 
-	// Textarea at bottom (3 lines), header bar (1 line)
-	inputHeight := 3
-	headerHeight := 1
-	viewportHeight := height - inputHeight - headerHeight - 2 // 2 for padding
+	// Calculate viewport height to fit total in 'height' lines
+	// Chat View renders:
+	// - viewport with border: viewportHeight + 2 lines
+	// - newline: 1 line (between viewport and input)
+	// - input with border: 3 + 2 = 5 lines
+	// Total: viewportHeight + 2 + 1 + 5 = viewportHeight + 8
+	// So: viewportHeight = height - 8
+	viewportHeight := height - 8
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
 
 	m.textarea.SetWidth(width - 4)
 	m.viewport.Width = width - 2
@@ -740,6 +748,7 @@ func (m *ChatModel) flushMessages() tea.Cmd {
 }
 
 // maybeGenerateDescription generates a session description from the first user message.
+// Uses LLM-based summarization via the daemon for intelligent categorization.
 func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 	if m.sessionID == "" || m.sessionDescription != "" || !m.rpc.IsConnected() {
 		return nil
@@ -765,16 +774,22 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 		return nil
 	}
 
-	// Extract first 4-7 words
-	desc := extractDescription(firstUserContent)
-	m.sessionDescription = desc
-
 	sessionID := m.sessionID
 	rpc := m.rpc
 
+	// Set a temporary description while LLM generates
+	m.sessionDescription = "summarizing..."
+
 	return func() tea.Msg {
-		_ = rpc.UpdateSessionDescription(sessionID, desc)
-		return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: desc}
+		// Try LLM-based generation first
+		result, err := rpc.GenerateSessionDescription(sessionID, firstUserContent, "")
+		if err != nil {
+			// Fallback to simple extraction
+			desc := extractDescription(firstUserContent)
+			_ = rpc.UpdateSessionDescription(sessionID, desc)
+			return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: desc}
+		}
+		return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: result.Description}
 	}
 }
 
@@ -972,55 +987,16 @@ func formatMessage(text string, width int) string {
 func (m *ChatModel) View() string {
 	var b strings.Builder
 
-	// Orange session header bar with optional vim mode indicator
-	desc := m.sessionDescription
-	if desc == "" {
-		desc = "New Session"
-	}
-
-	// Add vim mode indicator if enabled
-	headerContent := desc
-	if m.vimState != nil && m.vimState.Enabled {
-		modeStr := m.vimState.Mode.String()
-		modeStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("#374151")).
-			Foreground(lipgloss.Color("#E5E7EB")).
-			Bold(true).
-			Padding(0, 1)
-
-		// Adjust color based on mode
-		switch m.vimState.Mode {
-		case vim.ModeInsert:
-			modeStyle = modeStyle.Background(lipgloss.Color("#10B981"))
-		case vim.ModeVisual:
-			modeStyle = modeStyle.Background(lipgloss.Color("#8B5CF6"))
-		case vim.ModeCommand:
-			modeStyle = modeStyle.Background(lipgloss.Color("#3B82F6"))
-		}
-
-		// Calculate available width for description
-		modeWidth := len(modeStr) + 2 // +2 for padding
-		descWidth := m.width - 4 - modeWidth - 3
-		if len(desc) > descWidth && descWidth > 3 {
-			desc = desc[:descWidth-3] + "..."
-		}
-
-		headerContent = desc + " " + modeStyle.Render(modeStr)
-	}
-
-	headerBar := m.headerStyle.Width(m.width - 2).Render(headerContent)
-	b.WriteString(headerBar)
-	b.WriteString("\n")
-
 	// Chat history viewport with focus-dependent border
 	viewportBorder := m.unfocusedBorder
 	if m.focused == FocusViewport {
 		viewportBorder = m.focusedBorder
 	}
 
+	// Height sets inner content height; border adds 2 more lines
 	viewportStyle := viewportBorder.
 		Width(m.width - 2).
-		Height(m.viewport.Height + 2)
+		Height(m.viewport.Height)
 
 	b.WriteString(viewportStyle.Render(m.viewport.View()))
 	b.WriteString("\n")

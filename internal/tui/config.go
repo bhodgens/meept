@@ -33,6 +33,7 @@ type RenderingConfig struct {
 	SyntaxHighlighting bool   `json:"syntax_highlighting"` // Enable syntax highlighting (default: true)
 	Theme              string `json:"theme"`               // Syntax theme (default: "monokai")
 	WordWrap           bool   `json:"word_wrap"`           // Enable word wrap (default: true)
+	ShowHeader         bool   `json:"show_header"`         // Show header bar with session info (default: true)
 }
 
 // KeybindingsConfig defines customizable key bindings.
@@ -44,12 +45,13 @@ type KeybindingsConfig struct {
 
 // CommandPaletteKeys defines keys for command palette actions.
 type CommandPaletteKeys struct {
-	ViewChat   string `json:"view_chat"`   // Switch to chat view (default: "1")
-	ViewTasks  string `json:"view_tasks"`  // Switch to tasks view (default: "2")
-	ViewQueue  string `json:"view_queue"`  // Switch to queue view (default: "3")
-	ViewMemory string `json:"view_memory"` // Switch to memory view (default: "4")
-	Sidebar    string `json:"sidebar"`     // Toggle sidebar (default: "y")
-	Sessions   string `json:"sessions"`    // Open session picker (default: "s")
+	ViewChat      string `json:"view_chat"`      // Switch to chat view (default: "1")
+	ViewTasks     string `json:"view_tasks"`     // Switch to tasks view (default: "2")
+	ViewQueue     string `json:"view_queue"`     // Switch to queue view (default: "3")
+	ViewMemory    string `json:"view_memory"`    // Switch to memory view (default: "4")
+	Sidebar       string `json:"sidebar"`        // Toggle sidebar (default: "y")
+	Sessions      string `json:"sessions"`       // Open session picker (default: "s")
+	RenameSession string `json:"rename_session"` // Rename current session (default: "r")
 }
 
 // SessionConfig defines session behavior settings.
@@ -65,12 +67,13 @@ func DefaultClientConfig() *ClientConfig {
 			CommandMode: "ctrl+x",
 			Quit:        "ctrl+c",
 			CommandPalette: CommandPaletteKeys{
-				ViewChat:   "1",
-				ViewTasks:  "2",
-				ViewQueue:  "3",
-				ViewMemory: "4",
-				Sidebar:    "y",
-				Sessions:   "s",
+				ViewChat:      "1",
+				ViewTasks:     "2",
+				ViewQueue:     "3",
+				ViewMemory:    "4",
+				Sidebar:       "y",
+				Sessions:      "s",
+				RenameSession: "r",
 			},
 		},
 		Session: SessionConfig{
@@ -87,6 +90,7 @@ func DefaultClientConfig() *ClientConfig {
 			SyntaxHighlighting: true,
 			Theme:              "monokai",
 			WordWrap:           true,
+			ShowHeader:         true,
 		},
 	}
 }

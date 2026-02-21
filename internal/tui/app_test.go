@@ -175,16 +175,19 @@ func TestApp_RenderStatusBar(t *testing.T) {
 
 	statusBar := app.renderStatusBar()
 
-	// Check that help hints are present
-	if !strings.Contains(statusBar, "Ctrl+X") {
-		t.Error("expected Ctrl+X hint in status bar")
+	// Check that help hints are present (^X menu format)
+	if !strings.Contains(statusBar, "^X") {
+		t.Error("expected ^X hint in status bar")
+	}
+	if !strings.Contains(statusBar, "menu") {
+		t.Error("expected menu hint in status bar")
 	}
 	if !strings.Contains(statusBar, "Esc") {
 		t.Error("expected Esc hint in status bar")
 	}
-	// Disconnected client should show disconnected
-	if !strings.Contains(statusBar, "disconnected") {
-		t.Error("expected disconnected status in status bar")
+	// Status indicator dot should be present
+	if !strings.Contains(statusBar, "●") {
+		t.Error("expected status indicator in status bar")
 	}
 }
 
@@ -406,8 +409,8 @@ func TestApp_ModalOverlayRendering(t *testing.T) {
 	// When modal is active, View() should return modal overlay
 	view := app.View()
 
-	// Should contain modal content
-	if !strings.Contains(view, "Command Palette") {
+	// Should contain modal content (lowercase per UI conventions)
+	if !strings.Contains(view, "command palette") {
 		t.Error("expected modal content in view when modal is active")
 	}
 }
@@ -481,11 +484,11 @@ func TestApp_WithTeatest_CommandPalette(t *testing.T) {
 	// Open command palette with Ctrl+X
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlX})
 
-	// Wait for command palette to appear
+	// Wait for command palette to appear (lowercase per UI conventions)
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 		s := string(out)
-		return strings.Contains(s, "Command Palette") ||
-			strings.Contains(s, "Chat") // Modal content
+		return strings.Contains(s, "command palette") ||
+			strings.Contains(s, "chat") // Modal content
 	}, teatest.WithDuration(2*time.Second))
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})

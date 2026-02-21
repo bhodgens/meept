@@ -327,9 +327,16 @@ func (s *SidebarModel) View() string {
 		borderColor = ColorPrimary
 	}
 
+	// Height is the total visual height including border (2 lines for top+bottom)
+	// So inner content height should be s.height - 2
+	innerHeight := s.height - 2
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
+
 	containerStyle := lipgloss.NewStyle().
 		Width(s.width - 2).
-		Height(s.height).
+		Height(innerHeight).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1)

@@ -19,6 +19,7 @@ const (
 	ModalCommandPalette
 	ModalSessionPicker
 	ModalNewSession
+	ModalSessionRename
 )
 
 // ModalItem represents an item in a modal menu.
@@ -129,7 +130,7 @@ func (m *Modal) renderContent() string {
 	// Footer hint
 	b.WriteString("\n")
 	hintStyle := m.styles.Muted.Align(lipgloss.Center).Width(m.width - 4)
-	b.WriteString(hintStyle.Render("Press key or Esc to cancel"))
+	b.WriteString(hintStyle.Render("press key or esc to cancel"))
 
 	return boxStyle.Render(b.String())
 }
@@ -169,16 +170,17 @@ func (m *Modal) HandleKey(key string) string {
 
 // CommandPaletteModal creates a command palette modal with standard items.
 func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
-	m := NewModal("Command Palette", styles)
+	m := NewModal("command palette", styles)
 	keys := config.Keybindings.CommandPalette
 
 	m.SetItems([]ModalItem{
-		{Key: keys.ViewChat, Label: "Chat", Description: "Switch to chat view"},
-		{Key: keys.ViewTasks, Label: "Tasks", Description: "Switch to tasks view"},
-		{Key: keys.ViewQueue, Label: "Queue", Description: "Switch to queue view"},
-		{Key: keys.ViewMemory, Label: "Memory", Description: "Switch to memory view"},
-		{Key: keys.Sidebar, Label: "Toggle Sidebar", Description: "Show/hide sidebar"},
-		{Key: keys.Sessions, Label: "Sessions...", Description: "Manage sessions"},
+		{Key: keys.ViewChat, Label: "chat", Description: "switch to chat view"},
+		{Key: keys.ViewTasks, Label: "tasks", Description: "switch to tasks view"},
+		{Key: keys.ViewQueue, Label: "queue", Description: "switch to queue view"},
+		{Key: keys.ViewMemory, Label: "memory", Description: "switch to memory view"},
+		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
+		{Key: keys.Sessions, Label: "sessions...", Description: "manage sessions"},
+		{Key: keys.RenameSession, Label: "edit description", Description: "edit session description"},
 	})
 
 	return m
@@ -196,8 +198,8 @@ type SessionPickerModal struct {
 
 // NewSessionPickerModal creates a new session picker modal.
 func NewSessionPickerModal(styles *Styles, rpc *RPCClient, config *ClientConfig) *SessionPickerModal {
-	m := NewModal("Sessions", styles)
-	m.width = 55
+	m := NewModal("sessions", styles)
+	m.width = 75
 
 	return &SessionPickerModal{
 		Modal:        m,
@@ -290,7 +292,7 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 
 	if s.inputMode {
 		// New session input mode
-		b.WriteString(s.styles.Paragraph.Render("Enter session name:"))
+		b.WriteString(s.styles.Paragraph.Render("enter session name:"))
 		b.WriteString("\n")
 		inputStyle := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -303,13 +305,13 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 		}
 		b.WriteString(inputStyle.Render(input + "█"))
 		b.WriteString("\n\n")
-		b.WriteString(s.styles.Muted.Render("Enter to create, Esc to cancel"))
+		b.WriteString(s.styles.Muted.Render("enter to create, esc to cancel"))
 	} else if len(s.sessions) == 0 {
 		// No sessions
-		b.WriteString(s.styles.Muted.Render("No sessions found"))
+		b.WriteString(s.styles.Muted.Render("no sessions found"))
 		b.WriteString("\n\n")
 		b.WriteString(s.styles.HelpKey.Render("[n]"))
-		b.WriteString(s.styles.HelpValue.Render(" Create new session"))
+		b.WriteString(s.styles.HelpValue.Render(" create new session"))
 	} else {
 		// Session list
 		for i, sess := range s.sessions {
@@ -330,17 +332,30 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 				lastActivity = formatRelativeTime(t)
 			}
 
-			// Prefer description over name for display
-			name := sess.Description
-			if name == "" {
-				name = sess.Name
-			}
-			maxNameLen := s.width - 20
+			// Show both name and description
+			// Name on the left (truncated), description on the right (truncated), time at far right
+			maxNameLen := 20
+			maxDescLen := s.width - maxNameLen - 15 // 15 for time + spacing
+
+			name := sess.Name
 			if len(name) > maxNameLen {
 				name = name[:maxNameLen-3] + "..."
 			}
 
-			line := fmt.Sprintf("%s%-*s %s", pointer, maxNameLen, name, s.styles.Muted.Render(lastActivity))
+			desc := sess.Description
+			if desc == "" {
+				desc = "(no description)"
+			}
+			if len(desc) > maxDescLen {
+				desc = desc[:maxDescLen-3] + "..."
+			}
+
+			// Format: pointer + name (fixed width) + description + time
+			namePart := fmt.Sprintf("%-*s", maxNameLen, name)
+			descPart := s.styles.Muted.Render(fmt.Sprintf("%-*s", maxDescLen, desc))
+			timePart := s.styles.Muted.Render(lastActivity)
+
+			line := fmt.Sprintf("%s%s  %s  %s", pointer, namePart, descPart, timePart)
 			b.WriteString(style.Render(line))
 			b.WriteString("\n")
 		}
@@ -350,10 +365,11 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 		b.WriteString(s.styles.Muted.Render(strings.Repeat("─", s.width-4)))
 		b.WriteString("\n")
 		actions := []string{
-			s.styles.HelpKey.Render("[Enter]") + s.styles.HelpValue.Render(" Switch"),
-			s.styles.HelpKey.Render("[n]") + s.styles.HelpValue.Render(" New"),
-			s.styles.HelpKey.Render("[d]") + s.styles.HelpValue.Render(" Delete"),
-			s.styles.HelpKey.Render("[Esc]") + s.styles.HelpValue.Render(" Cancel"),
+			s.styles.HelpKey.Render("[enter]") + s.styles.HelpValue.Render(" switch"),
+			s.styles.HelpKey.Render("[n]") + s.styles.HelpValue.Render(" new"),
+			s.styles.HelpKey.Render("[r]") + s.styles.HelpValue.Render(" edit"),
+			s.styles.HelpKey.Render("[d]") + s.styles.HelpValue.Render(" delete"),
+			s.styles.HelpKey.Render("[esc]") + s.styles.HelpValue.Render(" cancel"),
 		}
 		b.WriteString(strings.Join(actions, "  "))
 	}
@@ -375,6 +391,12 @@ type SessionCreateMsg struct {
 // SessionDeleteMsg indicates a session deletion request.
 type SessionDeleteMsg struct {
 	SessionID string
+}
+
+// OpenRenameModalMsg indicates the rename modal should be opened.
+type OpenRenameModalMsg struct {
+	SessionID   string
+	CurrentName string
 }
 
 // HandleKey processes key input for the session picker.
@@ -404,6 +426,19 @@ func (s *SessionPickerModal) HandleKey(key string) tea.Cmd {
 	case "n":
 		s.inputMode = true
 		s.inputBuffer = ""
+	case "r":
+		if s.selected >= 0 && s.selected < len(s.sessions) {
+			sess := s.sessions[s.selected]
+			s.Hide()
+			// Return a message to open rename modal with current session info
+			return func() tea.Msg {
+				currentName := sess.Description
+				if currentName == "" {
+					currentName = sess.Name
+				}
+				return OpenRenameModalMsg{SessionID: sess.ID, CurrentName: currentName}
+			}
+		}
 	case "d":
 		if s.selected >= 0 && s.selected < len(s.sessions) {
 			sess := s.sessions[s.selected]
@@ -455,6 +490,160 @@ func (s *SessionPickerModal) handleInputKey(key string) tea.Cmd {
 		// Append printable characters
 		if len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
 			s.inputBuffer += key
+		}
+	}
+	return nil
+}
+
+// SessionRenameMsg indicates a session rename request.
+type SessionRenameMsg struct {
+	SessionID string
+	NewName   string
+}
+
+// SessionRenameModal is a modal for renaming a session.
+type SessionRenameModal struct {
+	visible     bool
+	sessionID   string
+	sessionName string
+	inputBuffer string
+	selected    int // 0 = input, 1 = ok, 2 = cancel
+	styles      *Styles
+	width       int
+}
+
+// NewSessionRenameModal creates a new session rename modal.
+func NewSessionRenameModal(styles *Styles) *SessionRenameModal {
+	return &SessionRenameModal{
+		visible:  false,
+		selected: 0,
+		styles:   styles,
+		width:    50,
+	}
+}
+
+// Show shows the rename modal for a session.
+func (m *SessionRenameModal) Show(sessionID, currentName string) {
+	m.visible = true
+	m.sessionID = sessionID
+	m.sessionName = currentName
+	m.inputBuffer = currentName
+	m.selected = 0
+}
+
+// Hide hides the modal.
+func (m *SessionRenameModal) Hide() {
+	m.visible = false
+}
+
+// IsVisible returns whether the modal is visible.
+func (m *SessionRenameModal) IsVisible() bool {
+	return m.visible
+}
+
+// View renders the session rename modal.
+func (m *SessionRenameModal) View(screenW, screenH int) string {
+	if !m.visible {
+		return ""
+	}
+
+	var b strings.Builder
+
+	// Modal box style
+	boxStyle := m.styles.ModalBox.Width(m.width)
+
+	// Title
+	titleStyle := m.styles.ModalTitle.Width(m.width - 4)
+	b.WriteString(titleStyle.Render("edit session description"))
+	b.WriteString("\n")
+
+	// Separator
+	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.width-4)))
+	b.WriteString("\n\n")
+
+	// Input field
+	b.WriteString(m.styles.Paragraph.Render("description:"))
+	b.WriteString("\n")
+	inputStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorAccent).
+		Padding(0, 1).
+		Width(m.width - 8)
+	if m.selected == 0 {
+		inputStyle = inputStyle.BorderForeground(ColorPrimary)
+	}
+	input := m.inputBuffer + "█"
+	b.WriteString(inputStyle.Render(input))
+	b.WriteString("\n\n")
+
+	// Buttons
+	okStyle := m.styles.ModalItem
+	cancelStyle := m.styles.ModalItem
+	if m.selected == 1 {
+		okStyle = m.styles.ModalItemSelected
+	}
+	if m.selected == 2 {
+		cancelStyle = m.styles.ModalItemSelected
+	}
+
+	okBtn := okStyle.Render("  [ ok ]  ")
+	cancelBtn := cancelStyle.Render("  [ cancel ]  ")
+	buttons := lipgloss.JoinHorizontal(lipgloss.Center, okBtn, "    ", cancelBtn)
+	buttonLine := lipgloss.NewStyle().Width(m.width - 4).Align(lipgloss.Center)
+	b.WriteString(buttonLine.Render(buttons))
+	b.WriteString("\n")
+
+	// Footer hint
+	b.WriteString("\n")
+	hintStyle := m.styles.Muted.Align(lipgloss.Center).Width(m.width - 4)
+	b.WriteString(hintStyle.Render("tab to switch · enter to confirm · esc to cancel"))
+
+	content := boxStyle.Render(b.String())
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, content)
+}
+
+// HandleKey processes key input for the rename modal.
+func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
+	switch key {
+	case "tab":
+		m.selected = (m.selected + 1) % 3
+	case "shift+tab":
+		m.selected = (m.selected + 2) % 3
+	case "left":
+		if m.selected > 0 {
+			m.selected--
+		}
+	case "right":
+		if m.selected < 2 {
+			m.selected++
+		}
+	case "enter":
+		switch m.selected {
+		case 0:
+			// Focus on input, move to ok button
+			m.selected = 1
+		case 1:
+			// Ok button - submit
+			name := m.inputBuffer
+			sessionID := m.sessionID
+			m.Hide()
+			return func() tea.Msg {
+				return SessionRenameMsg{SessionID: sessionID, NewName: name}
+			}
+		case 2:
+			// Cancel button
+			m.Hide()
+		}
+	case "esc":
+		m.Hide()
+	case "backspace":
+		if m.selected == 0 && len(m.inputBuffer) > 0 {
+			m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
+		}
+	default:
+		// Append printable characters to input when focused on input field
+		if m.selected == 0 && len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
+			m.inputBuffer += key
 		}
 	}
 	return nil
