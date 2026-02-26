@@ -2,9 +2,9 @@ package shadow
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"math"
-	"sort"
 	"strings"
 	"time"
 )
@@ -14,6 +14,16 @@ type Selector struct {
 	store  ExamplesStore
 	config *ExamplesConfig
 	logger *slog.Logger
+
+	// IDF weights for TF-IDF embeddings (computed lazily)
+	idfWeights map[string]float64
+	docCount   int
+}
+
+// TFIDFEmbedding represents a sparse TF-IDF embedding.
+type TFIDFEmbedding struct {
+	Terms   map[string]float64 `json:"terms"`
+	Norm    float64            `json:"norm"`
 }
 
 // SelectorOption is a functional option for Selector.
@@ -48,6 +58,7 @@ type ScoredExample struct {
 	RecencyScore    float64
 	QualityScore    float64
 	TotalScore      float64
+	MMRScore        float64 // Maximal Marginal Relevance score
 }
 
 // SelectExamples selects the most relevant examples for the given query.
@@ -76,13 +87,8 @@ func (s *Selector) SelectExamples(ctx context.Context, query string, domain Doma
 	// Score each candidate
 	scored := s.scoreExamples(candidates, query)
 
-	// Sort by total score descending
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].TotalScore > scored[j].TotalScore
-	})
-
-	// Select top N within token budget
-	selected := s.selectWithinBudget(scored, count)
+	// Apply MMR for diversity
+	selected := s.selectWithMMR(scored, query, count)
 
 	// Update usage counts asynchronously
 	go s.updateUsageCounts(context.Background(), selected)
@@ -129,8 +135,16 @@ func (s *Selector) scoreExamples(candidates []*FewShotExample, query string) []*
 	for i, example := range candidates {
 		se := &ScoredExample{Example: example}
 
-		// Similarity score (text-based)
-		se.SimilarityScore = s.computeSimilarity(query, example.UserMessage)
+		// Try embedding-based similarity first, fall back to text-based
+		embSim := s.computeEmbeddingSimilarity(query, example)
+		textSim := s.computeSimilarity(query, example.UserMessage)
+
+		// Combine embedding and text similarity (prefer embedding if available)
+		if embSim > 0 {
+			se.SimilarityScore = embSim*0.7 + textSim*0.3
+		} else {
+			se.SimilarityScore = textSim
+		}
 
 		// Recency score (decay over time)
 		age := now.Sub(example.CreatedAt)
@@ -245,6 +259,82 @@ func (s *Selector) selectWithinBudget(scored []*ScoredExample, maxCount int) []*
 	return selected
 }
 
+// selectWithMMR uses Maximal Marginal Relevance to select diverse examples.
+// MMR balances relevance to the query with diversity from already-selected examples.
+// lambda controls the trade-off: 1.0 = pure relevance, 0.0 = pure diversity
+func (s *Selector) selectWithMMR(scored []*ScoredExample, query string, maxCount int) []*FewShotExample {
+	if len(scored) == 0 {
+		return nil
+	}
+
+	lambda := 0.7 // Balance between relevance and diversity
+	maxTokens := s.config.MaxContextTokens
+	totalTokens := 0
+
+	var selected []*FewShotExample
+	var selectedEmbeddings []*TFIDFEmbedding
+	remaining := make([]*ScoredExample, len(scored))
+	copy(remaining, scored)
+
+	// Compute query embedding once (used for diversity calculation)
+	_ = s.ComputeEmbedding(query)
+
+	for len(selected) < maxCount && len(remaining) > 0 {
+		bestIdx := -1
+		bestMMR := -1.0
+
+		for i, candidate := range remaining {
+			if candidate == nil {
+				continue
+			}
+
+			// Check token budget
+			exampleTokens := (len(candidate.Example.UserMessage) + len(candidate.Example.AssistantResponse)) / 4
+			if totalTokens+exampleTokens > maxTokens {
+				continue
+			}
+
+			// Relevance score (similarity to query)
+			relevance := candidate.TotalScore
+
+			// Diversity score (max similarity to any already selected)
+			maxSim := 0.0
+			candEmb := s.ComputeEmbedding(candidate.Example.UserMessage)
+			for _, selEmb := range selectedEmbeddings {
+				sim := CosineSimilarity(candEmb, selEmb)
+				if sim > maxSim {
+					maxSim = sim
+				}
+			}
+
+			// MMR score: lambda * relevance - (1 - lambda) * max_similarity_to_selected
+			mmr := lambda*relevance - (1-lambda)*maxSim
+
+			if mmr > bestMMR {
+				bestMMR = mmr
+				bestIdx = i
+			}
+		}
+
+		if bestIdx < 0 {
+			break // No more candidates fit
+		}
+
+		// Add the best candidate
+		best := remaining[bestIdx]
+		selected = append(selected, best.Example)
+		selectedEmbeddings = append(selectedEmbeddings, s.ComputeEmbedding(best.Example.UserMessage))
+
+		exampleTokens := (len(best.Example.UserMessage) + len(best.Example.AssistantResponse)) / 4
+		totalTokens += exampleTokens
+
+		// Remove from remaining
+		remaining[bestIdx] = nil
+	}
+
+	return selected
+}
+
 func (s *Selector) updateUsageCounts(ctx context.Context, examples []*FewShotExample) {
 	for _, example := range examples {
 		if err := s.store.IncrementUsage(ctx, example.ID); err != nil {
@@ -350,4 +440,129 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(digits)
+}
+
+// ComputeEmbedding computes a TF-IDF embedding for the given text.
+func (s *Selector) ComputeEmbedding(text string) *TFIDFEmbedding {
+	tokens := tokenize(text)
+	if len(tokens) == 0 {
+		return &TFIDFEmbedding{Terms: make(map[string]float64)}
+	}
+
+	// Compute term frequencies
+	tf := make(map[string]int)
+	for _, t := range tokens {
+		tf[t]++
+	}
+
+	// Compute TF-IDF weights
+	embedding := &TFIDFEmbedding{Terms: make(map[string]float64)}
+	var normSquared float64
+
+	for term, count := range tf {
+		// TF: log-normalized frequency
+		termFreq := 1.0 + math.Log(float64(count))
+
+		// IDF: use precomputed or default
+		idf := 1.0
+		if s.idfWeights != nil {
+			if w, ok := s.idfWeights[term]; ok {
+				idf = w
+			}
+		}
+
+		weight := termFreq * idf
+		embedding.Terms[term] = weight
+		normSquared += weight * weight
+	}
+
+	embedding.Norm = math.Sqrt(normSquared)
+	return embedding
+}
+
+// CosineSimilarity computes the cosine similarity between two embeddings.
+func CosineSimilarity(a, b *TFIDFEmbedding) float64 {
+	if a == nil || b == nil || a.Norm == 0 || b.Norm == 0 {
+		return 0
+	}
+
+	// Dot product
+	var dot float64
+	for term, weightA := range a.Terms {
+		if weightB, ok := b.Terms[term]; ok {
+			dot += weightA * weightB
+		}
+	}
+
+	return dot / (a.Norm * b.Norm)
+}
+
+// EmbeddingToJSON serializes an embedding to JSON.
+func EmbeddingToJSON(e *TFIDFEmbedding) string {
+	if e == nil {
+		return ""
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// EmbeddingFromJSON deserializes an embedding from JSON.
+func EmbeddingFromJSON(data string) *TFIDFEmbedding {
+	if data == "" {
+		return nil
+	}
+	var e TFIDFEmbedding
+	if err := json.Unmarshal([]byte(data), &e); err != nil {
+		return nil
+	}
+	return &e
+}
+
+// UpdateIDF updates the IDF weights based on a corpus of documents.
+func (s *Selector) UpdateIDF(documents []string) {
+	if len(documents) == 0 {
+		return
+	}
+
+	// Count document frequency for each term
+	docFreq := make(map[string]int)
+	for _, doc := range documents {
+		seen := make(map[string]bool)
+		for _, term := range tokenize(doc) {
+			if !seen[term] {
+				docFreq[term]++
+				seen[term] = true
+			}
+		}
+	}
+
+	// Compute IDF weights
+	s.docCount = len(documents)
+	s.idfWeights = make(map[string]float64)
+	for term, df := range docFreq {
+		// IDF with smoothing: log((N+1)/(df+1)) + 1
+		s.idfWeights[term] = math.Log(float64(s.docCount+1)/float64(df+1)) + 1.0
+	}
+}
+
+// computeEmbeddingSimilarity computes similarity using embeddings if available.
+func (s *Selector) computeEmbeddingSimilarity(query string, example *FewShotExample) float64 {
+	// Compute query embedding
+	queryEmb := s.ComputeEmbedding(query)
+
+	// Try to use stored embedding
+	var exampleEmb *TFIDFEmbedding
+	if example.EmbeddingJSON != "" {
+		exampleEmb = EmbeddingFromJSON(example.EmbeddingJSON)
+	}
+
+	// Fall back to computing embedding if not stored
+	if exampleEmb == nil {
+		exampleEmb = s.ComputeEmbedding(example.UserMessage)
+	}
+
+	return CosineSimilarity(queryEmb, exampleEmb)
 }

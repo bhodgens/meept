@@ -236,6 +236,13 @@ func (s *Scorer) scoreCorrectness(response string, domain Domain) float64 {
 			score += 0.1
 		}
 
+		// Extract and validate code blocks
+		codeBlocks := extractCodeBlocks(response)
+		for _, block := range codeBlocks {
+			validity := validateCodeBlock(block)
+			score += validity * 0.1 // Bonus for valid code blocks
+		}
+
 	case DomainGeneral:
 		// Check for hedging language (indicates uncertainty)
 		hedgePatterns := []string{
@@ -252,9 +259,293 @@ func (s *Scorer) scoreCorrectness(response string, domain Domain) float64 {
 			}
 		}
 		score -= float64(hedgeCount) * 0.05
+
+		// Check for factual consistency markers
+		factualScore := checkFactualConsistency(response)
+		score += factualScore * 0.1
+
+	case DomainDebugging:
+		// Check for debugging-specific quality indicators
+		debugPatterns := []string{
+			"root cause",
+			"solution",
+			"fix",
+			"error occurs",
+			"stack trace shows",
+		}
+		debugMatches := 0
+		for _, pattern := range debugPatterns {
+			if strings.Contains(strings.ToLower(response), pattern) {
+				debugMatches++
+			}
+		}
+		score += float64(debugMatches) * 0.03
+
+	case DomainPlanning:
+		// Check for planning-specific quality indicators
+		if hasNumberedSteps(response) {
+			score += 0.1
+		}
+		if hasEstimates(response) {
+			score += 0.05
+		}
 	}
 
 	return clamp(score, 0, 1)
+}
+
+// extractCodeBlocks extracts code blocks from markdown-formatted text.
+func extractCodeBlocks(text string) []codeBlock {
+	var blocks []codeBlock
+	lines := strings.Split(text, "\n")
+	var currentBlock []string
+	var language string
+	inBlock := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			if inBlock {
+				// End of block
+				blocks = append(blocks, codeBlock{
+					language: language,
+					code:     strings.Join(currentBlock, "\n"),
+				})
+				currentBlock = nil
+				inBlock = false
+			} else {
+				// Start of block
+				inBlock = true
+				language = strings.TrimPrefix(trimmed, "```")
+			}
+		} else if inBlock {
+			currentBlock = append(currentBlock, line)
+		}
+	}
+
+	return blocks
+}
+
+type codeBlock struct {
+	language string
+	code     string
+}
+
+// validateCodeBlock performs static validation on a code block.
+// Returns a score from 0.0 to 1.0 indicating validity.
+func validateCodeBlock(block codeBlock) float64 {
+	code := strings.TrimSpace(block.code)
+	if code == "" {
+		return 0
+	}
+
+	score := 0.5 // Base score for having code
+
+	// Check balanced delimiters
+	if hasBalancedBrackets(code) {
+		score += 0.2
+	}
+
+	// Language-specific checks
+	lang := strings.ToLower(block.language)
+	switch lang {
+	case "go", "golang":
+		score += validateGoCode(code)
+	case "python", "py":
+		score += validatePythonCode(code)
+	case "javascript", "js", "typescript", "ts":
+		score += validateJSCode(code)
+	default:
+		// Generic checks for unknown languages
+		score += validateGenericCode(code)
+	}
+
+	return clamp(score, 0, 1)
+}
+
+// validateGoCode performs Go-specific syntax checks.
+func validateGoCode(code string) float64 {
+	score := 0.0
+
+	// Check for common Go patterns
+	if strings.Contains(code, "func ") {
+		score += 0.1
+	}
+	if strings.Contains(code, "package ") || !strings.Contains(code, "\n") {
+		// Single-line snippets don't need package declaration
+		score += 0.05
+	}
+	if strings.Contains(code, "if err != nil") {
+		score += 0.05 // Proper error handling pattern
+	}
+
+	// Check for syntax errors
+	syntaxErrors := []string{
+		"func()", // Missing function name (usually)
+		":= =",   // Double assignment
+	}
+	for _, err := range syntaxErrors {
+		if strings.Contains(code, err) {
+			score -= 0.1
+		}
+	}
+
+	return score
+}
+
+// validatePythonCode performs Python-specific syntax checks.
+func validatePythonCode(code string) float64 {
+	score := 0.0
+
+	// Check for common Python patterns
+	if strings.Contains(code, "def ") || strings.Contains(code, "class ") {
+		score += 0.1
+	}
+
+	// Check indentation consistency
+	lines := strings.Split(code, "\n")
+	hasConsistentIndent := true
+	for _, line := range lines {
+		if len(line) > 0 && line[0] == ' ' {
+			// Check if indentation is multiple of 4
+			spaces := 0
+			for _, c := range line {
+				if c == ' ' {
+					spaces++
+				} else {
+					break
+				}
+			}
+			if spaces%4 != 0 && spaces%2 != 0 {
+				hasConsistentIndent = false
+				break
+			}
+		}
+	}
+	if hasConsistentIndent {
+		score += 0.1
+	}
+
+	return score
+}
+
+// validateJSCode performs JavaScript/TypeScript-specific syntax checks.
+func validateJSCode(code string) float64 {
+	score := 0.0
+
+	// Check for common JS patterns
+	patterns := []string{"function", "const ", "let ", "var ", "=>", "async "}
+	for _, p := range patterns {
+		if strings.Contains(code, p) {
+			score += 0.05
+			break
+		}
+	}
+
+	// Check for semicolons (optional but common)
+	if strings.Contains(code, ";") {
+		score += 0.02
+	}
+
+	return score
+}
+
+// validateGenericCode performs generic code validation.
+func validateGenericCode(code string) float64 {
+	score := 0.0
+
+	// Check for common programming patterns
+	patterns := []string{"=", "(", ")", "{", "}"}
+	for _, p := range patterns {
+		if strings.Contains(code, p) {
+			score += 0.02
+		}
+	}
+
+	// Penalize obvious non-code
+	if strings.Count(code, " ") > len(code)/2 {
+		// Mostly spaces - probably not code
+		score -= 0.1
+	}
+
+	return score
+}
+
+// checkFactualConsistency checks for internal consistency in factual statements.
+// Returns a score from 0.0 to 0.5.
+func checkFactualConsistency(response string) float64 {
+	score := 0.0
+
+	// Check for self-contradiction patterns
+	contradictions := []struct {
+		a, b string
+	}{
+		{"is true", "is false"},
+		{"always", "never"},
+		{"can", "cannot"},
+		{"will", "won't"},
+	}
+
+	sentences := strings.Split(response, ".")
+	for _, contra := range contradictions {
+		hasA, hasB := false, false
+		for _, sent := range sentences {
+			lower := strings.ToLower(sent)
+			if strings.Contains(lower, contra.a) {
+				hasA = true
+			}
+			if strings.Contains(lower, contra.b) {
+				hasB = true
+			}
+		}
+		if hasA && hasB {
+			score -= 0.1 // Potential contradiction
+		}
+	}
+
+	// Check for citation/reference patterns (positive indicator)
+	citationPatterns := []string{
+		"according to",
+		"based on",
+		"documentation states",
+		"as shown in",
+	}
+	for _, pattern := range citationPatterns {
+		if strings.Contains(strings.ToLower(response), pattern) {
+			score += 0.1
+			break
+		}
+	}
+
+	return clamp(score, -0.2, 0.5)
+}
+
+// hasNumberedSteps checks if response contains numbered steps.
+func hasNumberedSteps(response string) bool {
+	// Check for patterns like "1.", "2.", "Step 1", etc.
+	patterns := []string{"1.", "2.", "Step 1", "First,", "Second,", "Third,"}
+	for _, p := range patterns {
+		if strings.Contains(response, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasEstimates checks if response contains time/effort estimates.
+func hasEstimates(response string) bool {
+	patterns := []string{
+		"hour", "minute", "day", "week",
+		"estimate", "approximately", "about",
+		"~", "roughly",
+	}
+	lower := strings.ToLower(response)
+	for _, p := range patterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Scorer) scoreStyle(response string) float64 {

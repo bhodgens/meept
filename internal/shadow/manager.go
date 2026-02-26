@@ -29,6 +29,13 @@ type Manager struct {
 	selector *Selector
 	exporter *Exporter
 
+	// Metrics
+	metrics *Metrics
+
+	// Auto-train
+	autoTrainStop chan struct{}
+	autoTrainDone chan struct{}
+
 	// Synchronization
 	mu sync.RWMutex
 }
@@ -51,8 +58,9 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	}
 
 	m := &Manager{
-		config: cfg.Config,
-		logger: cfg.Logger,
+		config:  cfg.Config,
+		logger:  cfg.Logger,
+		metrics: NewMetrics(),
 	}
 
 	if !cfg.Config.Enabled {
@@ -129,6 +137,11 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		"teacher_model", cfg.Config.Teacher.Model,
 	)
 
+	// Start auto-train background check if enabled
+	if cfg.Config.Adapters.AutoTrain && cfg.Config.Adapters.TrainThreshold > 0 {
+		m.startAutoTrainChecker()
+	}
+
 	return m, nil
 }
 
@@ -195,6 +208,11 @@ func (m *Manager) ProcessRecord(ctx context.Context, record *ShadowRecord) error
 		if err := m.examplesStore.SaveExample(ctx, example); err != nil {
 			m.logger.Warn("Failed to save example", "error", err)
 		}
+	}
+
+	// Record metrics
+	if m.metrics != nil {
+		m.metrics.RecordCollected(record.QualityScore, record.IsHighQuality)
 	}
 
 	m.logger.Debug("Shadow record processed",
@@ -503,6 +521,21 @@ func (m *Manager) Config() *Config {
 	return m.config
 }
 
+// Metrics returns the current metrics snapshot.
+func (m *Manager) Metrics() *MetricsSnapshot {
+	if m.metrics == nil {
+		return &MetricsSnapshot{}
+	}
+	return m.metrics.Snapshot()
+}
+
+// ResetMetrics resets all metrics counters.
+func (m *Manager) ResetMetrics() {
+	if m.metrics != nil {
+		m.metrics.Reset()
+	}
+}
+
 // CaptureToolInteraction captures a tool-use interaction for shadow training.
 // This is called when the LLM returns tool calls, capturing the intermediate step.
 func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID string) {
@@ -566,8 +599,100 @@ func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID str
 	}
 }
 
+// startAutoTrainChecker starts a background goroutine that periodically checks
+// if enough preference pairs are available to trigger training.
+func (m *Manager) startAutoTrainChecker() {
+	m.autoTrainStop = make(chan struct{})
+	m.autoTrainDone = make(chan struct{})
+
+	// Parse schedule or use default (check every hour)
+	checkInterval := time.Hour
+	if m.config.Adapters.TrainSchedule != "" {
+		// Simple parsing: "1h", "30m", "24h"
+		if d, err := time.ParseDuration(m.config.Adapters.TrainSchedule); err == nil {
+			checkInterval = d
+		}
+	}
+
+	m.logger.Info("Auto-train checker started",
+		"interval", checkInterval,
+		"threshold", m.config.Adapters.TrainThreshold,
+	)
+
+	go func() {
+		defer close(m.autoTrainDone)
+		ticker := time.NewTicker(checkInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-m.autoTrainStop:
+				return
+			case <-ticker.C:
+				m.checkAutoTrain()
+			}
+		}
+	}()
+}
+
+// checkAutoTrain checks if training threshold is met and triggers training if so.
+func (m *Manager) checkAutoTrain() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	count, err := m.GetPreferencePairCount(ctx)
+	if err != nil {
+		m.logger.Warn("Auto-train check failed", "error", err)
+		return
+	}
+
+	threshold := m.config.Adapters.TrainThreshold
+	if count >= threshold {
+		m.logger.Info("Auto-train threshold met",
+			"pairs", count,
+			"threshold", threshold,
+		)
+
+		// Export DPO data for training
+		timestamp := time.Now().Format("20060102-150405")
+		outputPath := filepath.Join(expandPath(m.config.Export.OutputDir), fmt.Sprintf("auto_dpo_%s.jsonl", timestamp))
+
+		result, err := m.Export(ctx, ExportOptions{
+			Format:         FormatDPO,
+			OutputPath:     outputPath,
+			MarkAsExported: true,
+		})
+		if err != nil {
+			m.logger.Error("Auto-train export failed", "error", err)
+			return
+		}
+
+		m.logger.Info("Auto-train data exported",
+			"records", result.RecordsExported,
+			"path", result.OutputPath,
+		)
+
+		// Note: Actual training execution would be triggered here if a trainer is configured.
+		// For now, we just export the data and log that training should be triggered.
+		// The actual training is handled by the CLI 'shadow adapters train' command.
+	}
+}
+
+// StopAutoTrain stops the auto-train checker goroutine.
+func (m *Manager) StopAutoTrain() {
+	if m.autoTrainStop != nil {
+		close(m.autoTrainStop)
+		<-m.autoTrainDone
+		m.autoTrainStop = nil
+		m.autoTrainDone = nil
+	}
+}
+
 // Close closes all resources.
 func (m *Manager) Close() error {
+	// Stop auto-train checker first
+	m.StopAutoTrain()
+
 	var lastErr error
 
 	if m.trainingStore != nil {

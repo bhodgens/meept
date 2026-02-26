@@ -29,6 +29,13 @@ type Exporter struct {
 	logger *slog.Logger
 }
 
+// dedupState holds state for semantic deduplication during export.
+type dedupState struct {
+	seenHashes     map[string]bool
+	seenTokenSets  []map[string]int
+	threshold      float64
+}
+
 // ExporterOption is a functional option for Exporter.
 type ExporterOption func(*Exporter)
 
@@ -148,17 +155,23 @@ func (e *Exporter) exportJSONL(ctx context.Context, writer *bufio.Writer, opts E
 		return 0, err
 	}
 
-	seenHashes := make(map[string]bool)
+	// Use semantic deduplication with threshold
+	dedup := newDedupState(e.config.DedupSimilarityThreshold)
 	count := 0
 
 	for _, record := range records {
-		// Deduplication
+		// Deduplication using semantic similarity
 		if e.config.Deduplicate {
-			hash := hashRecord(record)
-			if seenHashes[hash] {
+			// Build text for dedup from user messages
+			var dedupText string
+			for _, msg := range record.Messages {
+				if msg.Role == "user" {
+					dedupText += msg.Content + " "
+				}
+			}
+			if dedup.isDuplicate(dedupText) {
 				continue
 			}
-			seenHashes[hash] = true
 		}
 
 		// Build JSONL entry
@@ -201,18 +214,19 @@ func (e *Exporter) exportDPO(ctx context.Context, writer *bufio.Writer, opts Exp
 		return 0, nil, err
 	}
 
-	seenHashes := make(map[string]bool)
+	// Use semantic deduplication with threshold
+	dedup := newDedupState(e.config.DedupSimilarityThreshold)
 	count := 0
 	var exportedIDs []string
 
 	for _, pair := range pairs {
-		// Deduplication
+		// Deduplication using semantic similarity
 		if e.config.Deduplicate {
-			hash := hashPair(pair)
-			if seenHashes[hash] {
+			// Build text for dedup from prompt
+			dedupText := formatPrompt(pair.PromptMessages)
+			if dedup.isDuplicate(dedupText) {
 				continue
 			}
-			seenHashes[hash] = true
 		}
 
 		// Build DPO format
@@ -254,17 +268,22 @@ func (e *Exporter) exportOpenAI(ctx context.Context, writer *bufio.Writer, opts 
 		return 0, err
 	}
 
-	seenHashes := make(map[string]bool)
+	// Use semantic deduplication with threshold
+	dedup := newDedupState(e.config.DedupSimilarityThreshold)
 	count := 0
 
 	for _, record := range records {
-		// Deduplication
+		// Deduplication using semantic similarity
 		if e.config.Deduplicate {
-			hash := hashRecord(record)
-			if seenHashes[hash] {
+			var dedupText string
+			for _, msg := range record.Messages {
+				if msg.Role == "user" {
+					dedupText += msg.Content + " "
+				}
+			}
+			if dedup.isDuplicate(dedupText) {
 				continue
 			}
-			seenHashes[hash] = true
 		}
 
 		// Build OpenAI fine-tuning format
@@ -317,17 +336,22 @@ func (e *Exporter) exportAlpaca(ctx context.Context, writer *bufio.Writer, opts 
 		return 0, err
 	}
 
-	seenHashes := make(map[string]bool)
+	// Use semantic deduplication with threshold
+	dedup := newDedupState(e.config.DedupSimilarityThreshold)
 	count := 0
 
 	for _, record := range records {
-		// Deduplication
+		// Deduplication using semantic similarity
 		if e.config.Deduplicate {
-			hash := hashRecord(record)
-			if seenHashes[hash] {
+			var dedupText string
+			for _, msg := range record.Messages {
+				if msg.Role == "user" {
+					dedupText += msg.Content + " "
+				}
+			}
+			if dedup.isDuplicate(dedupText) {
 				continue
 			}
-			seenHashes[hash] = true
 		}
 
 		// Get last user message as instruction
@@ -445,6 +469,136 @@ func hashPair(pair *PreferencePair) string {
 		content = content[:100]
 	}
 	return content
+}
+
+// newDedupState creates a new deduplication state with the given similarity threshold.
+func newDedupState(threshold float64) *dedupState {
+	return &dedupState{
+		seenHashes:    make(map[string]bool),
+		seenTokenSets: make([]map[string]int, 0),
+		threshold:     threshold,
+	}
+}
+
+// isDuplicate checks if the given text is semantically similar to any previously seen text.
+// It uses both hash-based and token-based Jaccard similarity.
+func (d *dedupState) isDuplicate(text string) bool {
+	// Quick hash check first
+	hash := textHash(text)
+	if d.seenHashes[hash] {
+		return true
+	}
+
+	// Tokenize for semantic similarity
+	tokens := tokenizeForDedup(text)
+	tokenSet := make(map[string]int)
+	for _, t := range tokens {
+		tokenSet[t]++
+	}
+
+	// Check semantic similarity against all seen token sets
+	for _, seen := range d.seenTokenSets {
+		sim := jaccardSimilarity(tokenSet, seen)
+		if sim >= d.threshold {
+			return true
+		}
+	}
+
+	// Not a duplicate - add to seen sets
+	d.seenHashes[hash] = true
+	d.seenTokenSets = append(d.seenTokenSets, tokenSet)
+	return false
+}
+
+// textHash generates a hash fingerprint from text.
+func textHash(text string) string {
+	// Use first 100 chars as fingerprint
+	if len(text) > 100 {
+		text = text[:100]
+	}
+	return text
+}
+
+// tokenizeForDedup tokenizes text for deduplication similarity comparison.
+func tokenizeForDedup(text string) []string {
+	// Simple whitespace tokenization with lowercasing
+	text = toLowerString(text)
+	var tokens []string
+	var current []byte
+
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
+			current = append(current, c)
+		} else if len(current) > 0 {
+			if len(current) >= 3 { // Skip very short tokens
+				tokens = append(tokens, string(current))
+			}
+			current = current[:0]
+		}
+	}
+	if len(current) >= 3 {
+		tokens = append(tokens, string(current))
+	}
+
+	return tokens
+}
+
+// toLowerString converts a string to lowercase without using strings package.
+func toLowerString(s string) string {
+	b := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b[i] = c
+	}
+	return string(b)
+}
+
+// jaccardSimilarity computes the Jaccard similarity between two token multisets.
+func jaccardSimilarity(a, b map[string]int) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+
+	intersection := 0
+	union := 0
+
+	// Count all unique tokens
+	allTokens := make(map[string]bool)
+	for t := range a {
+		allTokens[t] = true
+	}
+	for t := range b {
+		allTokens[t] = true
+	}
+
+	for t := range allTokens {
+		countA := a[t]
+		countB := b[t]
+
+		// Min for intersection
+		if countA < countB {
+			intersection += countA
+		} else {
+			intersection += countB
+		}
+
+		// Max for union
+		if countA > countB {
+			union += countA
+		} else {
+			union += countB
+		}
+	}
+
+	if union == 0 {
+		return 0
+	}
+
+	return float64(intersection) / float64(union)
 }
 
 func expandPath(path string) string {

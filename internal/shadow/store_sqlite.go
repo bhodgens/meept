@@ -19,6 +19,13 @@ var (
 	_ AdaptersStore = (*SQLiteAdaptersStore)(nil)
 )
 
+// Schema version constants
+const (
+	TrainingStoreSchemaVersion = 2
+	ExamplesStoreSchemaVersion = 2
+	AdaptersStoreSchemaVersion = 1
+)
+
 // SQLiteTrainingStore implements TrainingStore using SQLite.
 type SQLiteTrainingStore struct {
 	db *sql.DB
@@ -45,6 +52,49 @@ func NewSQLiteTrainingStore(dbPath string) (*SQLiteTrainingStore, error) {
 }
 
 func (s *SQLiteTrainingStore) migrate() error {
+	// Create schema version table
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_version (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			version INTEGER NOT NULL,
+			migrated_at TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create schema_version table: %w", err)
+	}
+
+	// Get current version
+	currentVersion := 0
+	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
+	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
+
+	// Run migrations based on version
+	if currentVersion < 1 {
+		if err := s.migrateToV1(); err != nil {
+			return fmt.Errorf("migration to v1 failed: %w", err)
+		}
+	}
+
+	if currentVersion < 2 {
+		if err := s.migrateToV2(); err != nil {
+			return fmt.Errorf("migration to v2 failed: %w", err)
+		}
+	}
+
+	// Update version
+	_, err = s.db.Exec(`
+		INSERT OR REPLACE INTO schema_version (id, version, migrated_at)
+		VALUES (1, ?, ?)
+	`, TrainingStoreSchemaVersion, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("failed to update schema version: %w", err)
+	}
+
+	return nil
+}
+
+func (s *SQLiteTrainingStore) migrateToV1() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS shadow_records (
 		id TEXT PRIMARY KEY,
@@ -94,6 +144,33 @@ func (s *SQLiteTrainingStore) migrate() error {
 	`
 	_, err := s.db.Exec(schema)
 	return err
+}
+
+func (s *SQLiteTrainingStore) migrateToV2() error {
+	// Add any V2 schema changes here
+	// Example: Add metadata column to shadow_records if it doesn't exist
+	_, err := s.db.Exec(`
+		ALTER TABLE shadow_records ADD COLUMN metadata_json TEXT DEFAULT '';
+	`)
+	// Ignore error if column already exists
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		// Only return error if it's not a "duplicate column" error
+		_ = err // Ignore column already exists errors
+	}
+
+	// Add export tracking
+	_, err = s.db.Exec(`
+		ALTER TABLE shadow_records ADD COLUMN exported_at TEXT;
+	`)
+	// Ignore if already exists
+	_ = err
+
+	// Create index for export tracking
+	_, _ = s.db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_shadow_records_exported ON shadow_records(exported_at);
+	`)
+
+	return nil
 }
 
 // SaveRecord saves a shadow record.
@@ -580,6 +657,49 @@ func NewSQLiteExamplesStore(dbPath string) (*SQLiteExamplesStore, error) {
 }
 
 func (s *SQLiteExamplesStore) migrate() error {
+	// Create schema version table
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_version (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			version INTEGER NOT NULL,
+			migrated_at TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create schema_version table: %w", err)
+	}
+
+	// Get current version
+	currentVersion := 0
+	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
+	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
+
+	// Run migrations based on version
+	if currentVersion < 1 {
+		if err := s.migrateToV1(); err != nil {
+			return fmt.Errorf("migration to v1 failed: %w", err)
+		}
+	}
+
+	if currentVersion < 2 {
+		if err := s.migrateToV2(); err != nil {
+			return fmt.Errorf("migration to v2 failed: %w", err)
+		}
+	}
+
+	// Update version
+	_, err = s.db.Exec(`
+		INSERT OR REPLACE INTO schema_version (id, version, migrated_at)
+		VALUES (1, ?, ?)
+	`, ExamplesStoreSchemaVersion, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("failed to update schema version: %w", err)
+	}
+
+	return nil
+}
+
+func (s *SQLiteExamplesStore) migrateToV1() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS fewshot_examples (
 		id TEXT PRIMARY KEY,
@@ -619,6 +739,23 @@ func (s *SQLiteExamplesStore) migrate() error {
 	`
 	_, err := s.db.Exec(schema)
 	return err
+}
+
+func (s *SQLiteExamplesStore) migrateToV2() error {
+	// Add tags column for categorization
+	_, err := s.db.Exec(`
+		ALTER TABLE fewshot_examples ADD COLUMN tags TEXT DEFAULT '';
+	`)
+	// Ignore if already exists
+	_ = err
+
+	// Add last_used_at for recency tracking
+	_, err = s.db.Exec(`
+		ALTER TABLE fewshot_examples ADD COLUMN last_used_at TEXT;
+	`)
+	_ = err
+
+	return nil
 }
 
 // SaveExample saves a few-shot example.
@@ -923,6 +1060,43 @@ func NewSQLiteAdaptersStore(dbPath string) (*SQLiteAdaptersStore, error) {
 }
 
 func (s *SQLiteAdaptersStore) migrate() error {
+	// Create schema version table
+	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_version (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			version INTEGER NOT NULL,
+			migrated_at TEXT NOT NULL
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create schema_version table: %w", err)
+	}
+
+	// Get current version
+	currentVersion := 0
+	row := s.db.QueryRow("SELECT version FROM schema_version WHERE id = 1")
+	_ = row.Scan(&currentVersion) // Ignore error - table might be empty
+
+	// Run migrations based on version
+	if currentVersion < 1 {
+		if err := s.migrateToV1(); err != nil {
+			return fmt.Errorf("migration to v1 failed: %w", err)
+		}
+	}
+
+	// Update version
+	_, err = s.db.Exec(`
+		INSERT OR REPLACE INTO schema_version (id, version, migrated_at)
+		VALUES (1, ?, ?)
+	`, AdaptersStoreSchemaVersion, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("failed to update schema version: %w", err)
+	}
+
+	return nil
+}
+
+func (s *SQLiteAdaptersStore) migrateToV1() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS adapters (
 		id TEXT PRIMARY KEY,
