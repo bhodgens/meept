@@ -15,9 +15,10 @@ import (
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
-	loop   *AgentLoop
-	bus    *bus.MessageBus
-	logger *slog.Logger
+	loop       *AgentLoop
+	dispatcher *Dispatcher // Optional: if set, routes through multi-agent dispatch
+	bus        *bus.MessageBus
+	logger     *slog.Logger
 
 	// Worker tracking
 	workers   map[string]*Worker
@@ -53,15 +54,17 @@ type ChatResponse struct {
 }
 
 // NewChatHandler creates a new ChatHandler.
-func NewChatHandler(loop *AgentLoop, msgBus *bus.MessageBus, logger *slog.Logger) *ChatHandler {
+// The dispatcher parameter is optional; if nil, requests go directly to the loop.
+func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, msgBus *bus.MessageBus, logger *slog.Logger) *ChatHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &ChatHandler{
-		loop:    loop,
-		bus:     msgBus,
-		logger:  logger,
-		workers: make(map[string]*Worker),
+		loop:       loop,
+		dispatcher: dispatcher,
+		bus:        msgBus,
+		logger:     logger,
+		workers:    make(map[string]*Worker),
 	}
 }
 
@@ -204,14 +207,35 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// Publish worker started event
 	h.publishWorkerEvent("worker.started", worker)
 
-	// Process the message through the agent loop
+	// Process the message
 	h.logger.Info("Processing chat message",
 		"worker", workerID,
 		"conversation", conversationID,
 		"message_length", len(req.Message),
+		"use_dispatcher", h.dispatcher != nil,
 	)
 
-	reply, err := h.loop.RunOnce(ctx, req.Message, conversationID)
+	var reply string
+	var err error
+
+	if h.dispatcher != nil {
+		// Multi-agent mode: classify and route through dispatcher
+		result, dispatchErr := h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
+		if dispatchErr != nil {
+			h.logger.Error("Dispatch failed", "error", dispatchErr)
+			err = dispatchErr
+		} else {
+			h.logger.Debug("Dispatched to agent",
+				"agent", result.AgentID,
+				"intent", result.Intent.Type,
+				"confidence", result.Intent.Confidence,
+			)
+			reply, err = h.dispatcher.RouteToAgent(ctx, result, conversationID)
+		}
+	} else {
+		// Direct mode: send to standalone agent loop
+		reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)
+	}
 
 	// Update worker state
 	worker.LastActivity = time.Now()

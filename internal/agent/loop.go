@@ -60,13 +60,14 @@ type AgentLoop struct {
 	mu sync.RWMutex
 
 	// Core components
-	llm      *llm.Client
-	executor *Executor
-	registry ToolRegistry
-	security *security.PermissionChecker
+	llm          llm.Chatter // Interface for LLM operations (Client or ProviderManager)
+	llmClient    *llm.Client // Concrete client for config access (may be nil if using ProviderManager)
+	executor     *Executor
+	registry     ToolRegistry
+	security     *security.PermissionChecker
 	securityOrch *intsecurity.Orchestrator
-	bus      *bus.MessageBus
-	logger   *slog.Logger
+	bus          *bus.MessageBus
+	logger       *slog.Logger
 
 	// Memory for context injection
 	memvid    *memvid.Client
@@ -74,6 +75,9 @@ type AgentLoop struct {
 
 	// Shadow training for few-shot example injection
 	shadowMgr *shadow.Manager
+
+	// Learning pipeline for JUDGE/DISTILL/CONSOLIDATE
+	learningPipeline LearningPipeline
 
 	// Configuration
 	config AgentConfig
@@ -88,13 +92,82 @@ type AgentLoop struct {
 	agentID string
 }
 
+// LearningPipeline is the interface for the learning pipeline.
+type LearningPipeline interface {
+	Judge(ctx context.Context, trajectory Trajectory) (*JudgmentResult, error)
+	Distill(ctx context.Context, trajectory Trajectory, judgment *JudgmentResult) ([]*LearnedPattern, error)
+	StorePattern(ctx context.Context, pattern *LearnedPattern) error
+	Retrieve(ctx context.Context, query string, domain string, k int) ([]*LearnedPattern, error)
+}
+
+// Trajectory represents a sequence of actions and their outcome (for learning).
+type Trajectory struct {
+	ID        string
+	SessionID string
+	Domain    string
+	Steps     []TrajectoryStep
+	Outcome   TrajectoryOutcome
+}
+
+// TrajectoryStep represents a single step in a trajectory.
+type TrajectoryStep struct {
+	Action    string
+	Input     string
+	Output    string
+	Success   bool
+}
+
+// TrajectoryOutcome represents the outcome of a trajectory.
+type TrajectoryOutcome struct {
+	Success       bool
+	Quality       float64
+	Feedback      string
+	TaskCompleted bool
+}
+
+// JudgmentResult represents the result of evaluating a trajectory.
+type JudgmentResult struct {
+	Quality     float64
+	ShouldLearn bool
+	Reason      string
+}
+
+// LearnedPattern represents a pattern extracted from successful trajectories.
+type LearnedPattern struct {
+	ID          string
+	Type        string
+	Domain      string
+	Description string
+	Pattern     string
+	Confidence  float64
+}
+
 // LoopOption is a functional option for configuring an AgentLoop.
 type LoopOption func(*AgentLoop)
 
-// WithLLMClient sets the LLM client.
+// WithLLMClient sets the LLM client (concrete type for backward compatibility).
 func WithLLMClient(client *llm.Client) LoopOption {
 	return func(l *AgentLoop) {
 		l.llm = client
+		l.llmClient = client
+	}
+}
+
+// WithLLMChatter sets the LLM chatter interface (supports Client or ProviderManager).
+func WithLLMChatter(chatter llm.Chatter) LoopOption {
+	return func(l *AgentLoop) {
+		l.llm = chatter
+		// Try to extract concrete client for config access
+		if client, ok := chatter.(*llm.Client); ok {
+			l.llmClient = client
+		}
+	}
+}
+
+// WithLearningPipeline sets the learning pipeline for pattern extraction.
+func WithLearningPipeline(lp LearningPipeline) LoopOption {
+	return func(l *AgentLoop) {
+		l.learningPipeline = lp
 	}
 }
 
@@ -271,9 +344,118 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		}
 	}
 
+	// Trigger learning pipeline if available and response was successful
+	if l.learningPipeline != nil && err == nil {
+		go l.triggerLearning(context.Background(), conv, conversationID, finalResponse)
+	}
+
 	// Add final response to conversation
 	conv.AddAssistantMessage(finalResponse)
 	return finalResponse, nil
+}
+
+// triggerLearning runs the JUDGE/DISTILL learning pipeline asynchronously.
+func (l *AgentLoop) triggerLearning(ctx context.Context, conv *Conversation, conversationID string, response string) {
+	// Build trajectory from conversation
+	trajectory := l.buildTrajectory(conv, conversationID, response)
+	if len(trajectory.Steps) == 0 {
+		return // Nothing to learn from
+	}
+
+	// Judge the trajectory
+	judgment, err := l.learningPipeline.Judge(ctx, trajectory)
+	if err != nil {
+		l.logger.Debug("Learning judgment failed", "error", err)
+		return
+	}
+
+	// Only distill if the judgment indicates we should learn
+	if !judgment.ShouldLearn {
+		l.logger.Debug("Trajectory not suitable for learning",
+			"reason", judgment.Reason,
+			"quality", judgment.Quality,
+		)
+		return
+	}
+
+	// Distill patterns
+	patterns, err := l.learningPipeline.Distill(ctx, trajectory, judgment)
+	if err != nil {
+		l.logger.Debug("Learning distillation failed", "error", err)
+		return
+	}
+
+	// Store learned patterns
+	for _, pattern := range patterns {
+		if err := l.learningPipeline.StorePattern(ctx, pattern); err != nil {
+			l.logger.Debug("Failed to store pattern", "error", err)
+		}
+	}
+
+	if len(patterns) > 0 {
+		l.logger.Info("Learned patterns from conversation",
+			"conversation", conversationID,
+			"patterns", len(patterns),
+		)
+	}
+}
+
+// buildTrajectory constructs a trajectory from the conversation history.
+func (l *AgentLoop) buildTrajectory(conv *Conversation, conversationID string, response string) Trajectory {
+	messages := conv.GetMessages()
+
+	trajectory := Trajectory{
+		ID:        conversationID,
+		SessionID: conversationID,
+		Domain:    l.classifyDomain(messages),
+		Steps:     make([]TrajectoryStep, 0),
+		Outcome: TrajectoryOutcome{
+			Success:       true, // We only trigger learning on success
+			Quality:       0.7,  // Default quality, may be refined by Judge
+			TaskCompleted: true,
+		},
+	}
+
+	// Extract steps from messages
+	for _, msg := range messages {
+		if msg.Role == llm.RoleUser {
+			trajectory.Steps = append(trajectory.Steps, TrajectoryStep{
+				Action:  "user_input",
+				Input:   msg.Content,
+				Success: true,
+			})
+		} else if msg.Role == llm.RoleAssistant {
+			trajectory.Steps = append(trajectory.Steps, TrajectoryStep{
+				Action:  "assistant_response",
+				Output:  msg.Content,
+				Success: true,
+			})
+		}
+	}
+
+	return trajectory
+}
+
+// classifyDomain determines the domain of a conversation based on content.
+func (l *AgentLoop) classifyDomain(messages []llm.ChatMessage) string {
+	var text string
+	for _, msg := range messages {
+		text += " " + msg.Content
+	}
+
+	// Simple keyword-based classification
+	codeKeywords := []string{"code", "function", "class", "variable", "bug", "compile", "syntax"}
+	planningKeywords := []string{"plan", "step", "strategy", "approach", "design"}
+	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "error"}
+
+	if containsAnyKeyword(text, codeKeywords) {
+		return "code"
+	} else if containsAnyKeyword(text, debuggingKeywords) {
+		return "debugging"
+	} else if containsAnyKeyword(text, planningKeywords) {
+		return "planning"
+	}
+	return "general"
 }
 
 // reasoningCycle runs the main reasoning loop with tool execution.
@@ -330,8 +512,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Capture tool-use interaction for shadow training
 			if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
 				modelID := ""
-				if l.llm != nil {
-					modelID = l.llm.Config().ModelID
+				if l.llmClient != nil {
+					modelID = l.llmClient.Config().ModelID
 				}
 				go l.shadowMgr.CaptureToolInteraction(
 					context.Background(),
@@ -366,8 +548,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Capture interaction for shadow training
 		if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
 			modelID := ""
-			if l.llm != nil {
-				modelID = l.llm.Config().ModelID
+			if l.llmClient != nil {
+				modelID = l.llmClient.Config().ModelID
 			}
 			go l.shadowMgr.CaptureInteraction(
 				context.Background(),
@@ -871,6 +1053,24 @@ func (l *AgentLoop) GetConfig() AgentConfig {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.config
+}
+
+// SetMemvidClient sets the memvid client after construction.
+// This allows wiring the client after the loop is created when
+// dependencies are initialized in a specific order.
+func (l *AgentLoop) SetMemvidClient(client *memvid.Client) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.memvid = client
+}
+
+// SetTaskStore sets the task store after construction.
+// This allows wiring the store after the loop is created when
+// dependencies are initialized in a specific order.
+func (l *AgentLoop) SetTaskStore(store *task.Store) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.taskStore = store
 }
 
 // generateConversationID creates a new conversation ID.

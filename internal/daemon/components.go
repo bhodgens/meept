@@ -18,6 +18,8 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/queue"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/scheduler"
+	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
@@ -65,8 +67,17 @@ type Components struct {
 	// Shadow training
 	ShadowManager   *shadow.Manager
 
+	// Learning pipeline
+	LearningPipeline *selfimprove.LearningPipeline
+
+	// LLM provider manager (for multi-provider failover)
+	LLMProvider     llm.Chatter
+
 	// MCP integration
 	MCPManager      *mcp.Manager
+
+	// Scheduler with job dependencies
+	Scheduler       *scheduler.Scheduler
 
 	// Skills
 	SkillRegistry   *skills.Registry
@@ -165,12 +176,51 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 	}
 
+	// Create multi-provider LLM manager if multiple providers configured
+	providerCount := len(modelsCfg.Providers)
+	if providerCount > 1 {
+		providerConfigs := buildProviderConfigs(modelsCfg, logger)
+		if len(providerConfigs) > 1 {
+			pmCfg := llm.ProviderManagerConfig{
+				Providers: providerConfigs,
+				Logger:    logger.With("component", "provider-manager"),
+			}
+			c.LLMProvider = llm.NewProviderManager(pmCfg)
+			logger.Info("Multi-provider LLM manager initialized",
+				"providers", len(providerConfigs),
+			)
+		}
+	}
+	// Fall back to single client if no provider manager
+	if c.LLMProvider == nil && c.LLMClient != nil {
+		c.LLMProvider = c.LLMClient
+	}
+
+	// Create learning pipeline
+	if cfg.SelfImprove.Enabled {
+		lpCfg := selfimprove.DefaultLearningConfig()
+		dataDir := cfg.SelfImprove.DataDir
+		if dataDir == "" {
+			dataDir = filepath.Join(cfg.Daemon.DataDir, "learning")
+		}
+		c.LearningPipeline = selfimprove.NewLearningPipeline(lpCfg, c.LLMClient, dataDir, logger.With("component", "learning"))
+		if err := c.LearningPipeline.Initialize(context.Background()); err != nil {
+			logger.Error("Failed to initialize learning pipeline", "error", err)
+			c.LearningPipeline = nil
+		} else {
+			logger.Info("Learning pipeline initialized", "data_dir", dataDir)
+		}
+	}
+
 	// Create agent loop
 	agentOpts := []agent.LoopOption{
 		agent.WithMessageBus(msgBus),
 		agent.WithLoopLogger(logger),
 	}
-	if c.LLMClient != nil {
+	// Use provider manager if available, otherwise use client directly
+	if c.LLMProvider != nil {
+		agentOpts = append(agentOpts, agent.WithLLMChatter(c.LLMProvider))
+	} else if c.LLMClient != nil {
 		agentOpts = append(agentOpts, agent.WithLLMClient(c.LLMClient))
 	}
 	if c.SecurityChecker != nil {
@@ -188,8 +238,15 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		agentOpts = append(agentOpts, agent.WithShadowManager(c.ShadowManager))
 		logger.Info("Agent loop configured with shadow training")
 	}
+	// Wire learning pipeline for pattern extraction
+	if c.LearningPipeline != nil {
+		lpAdapter := &learningPipelineAdapter{pipeline: c.LearningPipeline}
+		agentOpts = append(agentOpts, agent.WithLearningPipeline(lpAdapter))
+		logger.Info("Agent loop configured with learning pipeline")
+	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
+	// Note: memvid and taskStore are wired AFTER their initialization below
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
 
 	// Chat handler created later after dispatcher (if multi-agent enabled)
@@ -303,6 +360,16 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		taskStore = c.TaskRegistry.Store()
 	}
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, logger)
+
+	// Wire memvid client and task store to the main agent loop now that they're available
+	if c.MemvidClient != nil {
+		c.AgentLoop.SetMemvidClient(c.MemvidClient)
+		logger.Debug("Wired memvid client to main agent loop")
+	}
+	if taskStore != nil {
+		c.AgentLoop.SetTaskStore(taskStore)
+		logger.Debug("Wired task store to main agent loop")
+	}
 
 	// Create agent registry if multi-agent is enabled
 	if cfg.MultiAgent.Enabled {
@@ -514,6 +581,14 @@ func (c *Components) Stop(ctx context.Context) error {
 		}
 	}
 
+	// Close learning pipeline
+	if c.LearningPipeline != nil {
+		if err := c.LearningPipeline.Close(); err != nil {
+			c.Logger.Error("Failed to close learning pipeline", "error", err)
+			lastErr = err
+		}
+	}
+
 	// Stop all MCP server connections
 	if c.MCPManager != nil {
 		c.MCPManager.StopAll()
@@ -666,6 +741,7 @@ func splitModelRef(ref string) []string {
 	}
 	return []string{ref}
 }
+
 
 // createSecurityOrchestrator creates a security orchestrator from configuration.
 func createSecurityOrchestrator(cfg *config.Config, logger *slog.Logger) *intsecurity.Orchestrator {
@@ -886,6 +962,195 @@ func findDot(s string) int {
 		}
 	}
 	return -1
+}
+
+// buildProviderConfigs converts ModelsConfig providers to LLM ModelConfig slice.
+func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.ModelConfig {
+	if cfg == nil || len(cfg.Providers) == 0 {
+		return nil
+	}
+
+	// Build a set of disabled providers
+	disabled := make(map[string]bool)
+	for _, p := range cfg.DisabledProviders {
+		disabled[p] = true
+	}
+
+	var configs []*llm.ModelConfig
+	priority := 0
+
+	for providerID, provider := range cfg.Providers {
+		if disabled[providerID] {
+			logger.Debug("Skipping disabled provider", "provider", providerID)
+			continue
+		}
+
+		// Skip if no API key
+		if provider.Options.APIKey == "" {
+			logger.Debug("Skipping provider without API key", "provider", providerID)
+			continue
+		}
+
+		// Get the first model from this provider (or the default model)
+		for modelID, model := range provider.Models {
+			caps := make(map[string]bool)
+			for _, cap := range model.Capabilities {
+				caps[cap] = true
+			}
+
+			configs = append(configs, &llm.ModelConfig{
+				ProviderID:           providerID,
+				BaseURL:              provider.Options.BaseURL,
+				ModelID:              model.Name,
+				APIKey:               provider.Options.APIKey,
+				CostPerMillionInput:  model.InputCost,
+				CostPerMillionOutput: model.OutputCost,
+				MaxTokens:            model.MaxOutput,
+				Temperature:          model.Temperature,
+				ContextLimit:         model.ContextLimit,
+				Capabilities:         caps,
+			})
+
+			logger.Debug("Added provider config",
+				"provider", providerID,
+				"model", modelID,
+				"priority", priority,
+			)
+			priority++
+			break // Only use first model per provider for failover
+		}
+	}
+
+	return configs
+}
+
+// learningPipelineAdapter wraps selfimprove.LearningPipeline to implement agent.LearningPipeline.
+type learningPipelineAdapter struct {
+	pipeline *selfimprove.LearningPipeline
+}
+
+func (a *learningPipelineAdapter) Judge(ctx context.Context, trajectory agent.Trajectory) (*agent.JudgmentResult, error) {
+	// Convert agent.Trajectory to selfimprove.Trajectory
+	steps := make([]selfimprove.TrajectoryStep, len(trajectory.Steps))
+	for i, s := range trajectory.Steps {
+		steps[i] = selfimprove.TrajectoryStep{
+			Action:  s.Action,
+			Input:   s.Input,
+			Output:  s.Output,
+			Success: s.Success,
+		}
+	}
+
+	siTrajectory := selfimprove.Trajectory{
+		ID:        trajectory.ID,
+		SessionID: trajectory.SessionID,
+		Domain:    trajectory.Domain,
+		Steps:     steps,
+		Outcome: selfimprove.TrajectoryOutcome{
+			Success:       trajectory.Outcome.Success,
+			Quality:       trajectory.Outcome.Quality,
+			Feedback:      trajectory.Outcome.Feedback,
+			TaskCompleted: trajectory.Outcome.TaskCompleted,
+		},
+	}
+
+	result, err := a.pipeline.Judge(ctx, siTrajectory)
+	if err != nil {
+		return nil, err
+	}
+
+	return &agent.JudgmentResult{
+		Quality:     result.Quality,
+		ShouldLearn: result.ShouldStore,
+		Reason:      result.Reason,
+	}, nil
+}
+
+func (a *learningPipelineAdapter) Distill(ctx context.Context, trajectory agent.Trajectory, judgment *agent.JudgmentResult) ([]*agent.LearnedPattern, error) {
+	// Convert agent.Trajectory to selfimprove.Trajectory
+	steps := make([]selfimprove.TrajectoryStep, len(trajectory.Steps))
+	for i, s := range trajectory.Steps {
+		steps[i] = selfimprove.TrajectoryStep{
+			Action:  s.Action,
+			Input:   s.Input,
+			Output:  s.Output,
+			Success: s.Success,
+		}
+	}
+
+	siTrajectory := selfimprove.Trajectory{
+		ID:        trajectory.ID,
+		SessionID: trajectory.SessionID,
+		Domain:    trajectory.Domain,
+		Steps:     steps,
+		Outcome: selfimprove.TrajectoryOutcome{
+			Success:       trajectory.Outcome.Success,
+			Quality:       trajectory.Outcome.Quality,
+			Feedback:      trajectory.Outcome.Feedback,
+			TaskCompleted: trajectory.Outcome.TaskCompleted,
+		},
+	}
+
+	siJudgment := &selfimprove.JudgmentResult{
+		Quality:          judgment.Quality,
+		Correctness:      judgment.Quality,     // Approximate from Quality
+		Efficiency:       judgment.Quality,     // Approximate from Quality
+		Generalizability: 0.7,                  // Default: assume moderate generalizability
+		ShouldStore:      judgment.ShouldLearn,
+		Reason:           judgment.Reason,
+	}
+
+	patterns, err := a.pipeline.Distill(ctx, siTrajectory, siJudgment)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*agent.LearnedPattern, len(patterns))
+	for i, p := range patterns {
+		result[i] = &agent.LearnedPattern{
+			ID:          p.ID,
+			Type:        string(p.Type),
+			Domain:      p.Domain,
+			Description: p.Description,
+			Pattern:     p.Pattern,
+			Confidence:  p.Confidence,
+		}
+	}
+
+	return result, nil
+}
+
+func (a *learningPipelineAdapter) StorePattern(ctx context.Context, pattern *agent.LearnedPattern) error {
+	siPattern := &selfimprove.LearnedPattern{
+		ID:          pattern.ID,
+		Type:        selfimprove.PatternType(pattern.Type),
+		Domain:      pattern.Domain,
+		Description: pattern.Description,
+		Pattern:     pattern.Pattern,
+		Confidence:  pattern.Confidence,
+	}
+	return a.pipeline.StorePattern(ctx, siPattern)
+}
+
+func (a *learningPipelineAdapter) Retrieve(ctx context.Context, query string, domain string, k int) ([]*agent.LearnedPattern, error) {
+	patterns, err := a.pipeline.Retrieve(ctx, query, domain, k)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*agent.LearnedPattern, len(patterns))
+	for i, p := range patterns {
+		result[i] = &agent.LearnedPattern{
+			ID:          p.ID,
+			Type:        string(p.Type),
+			Domain:      p.Domain,
+			Description: p.Description,
+			Pattern:     p.Pattern,
+			Confidence:  p.Confidence,
+		}
+	}
+
+	return result, nil
 }
 
 // initializeSkills sets up the skills system.

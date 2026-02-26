@@ -111,7 +111,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 		// Not a valid skill, fall through to normal routing
 	}
 
-	// 1. Search memory for relevant context
+	// 1. Search memory for relevant context using graph-aware search
 	var memoryContext []memory.MemoryResult
 	if d.memvid != nil && d.memvid.IsAvailable(ctx) {
 		results, err := d.memvid.Search(ctx, input, 10)
@@ -131,13 +131,23 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 			}
 		}
 	} else if d.memoryMgr != nil {
-		// Fallback to local memory manager
-		results, err := d.memoryMgr.Search(ctx, memory.MemoryQuery{
+		// Use graph-aware search for better ranking (alpha=0.3 = 30% PageRank influence)
+		results, err := d.memoryMgr.SearchWithGraph(ctx, memory.MemoryQuery{
 			Query: input,
 			Limit: 10,
-		})
+		}, 0.3)
 		if err != nil {
-			d.logger.Warn("Local memory search failed", "error", err)
+			d.logger.Warn("Graph-aware memory search failed, falling back", "error", err)
+			// Fallback to regular search
+			results, err = d.memoryMgr.Search(ctx, memory.MemoryQuery{
+				Query: input,
+				Limit: 10,
+			})
+			if err != nil {
+				d.logger.Warn("Local memory search failed", "error", err)
+			} else {
+				memoryContext = results
+			}
 		} else {
 			memoryContext = results
 		}
