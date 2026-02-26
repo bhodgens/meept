@@ -1,0 +1,253 @@
+package mcp
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+
+	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/internal/tools/mcp/transport"
+)
+
+// ServerConfig defines the configuration for an MCP server.
+type ServerConfig struct {
+	Name    string            `json:"name"`
+	Command []string          `json:"command,omitempty"` // For stdio transport
+	URL     string            `json:"url,omitempty"`     // For HTTP transport
+	Type    string            `json:"type,omitempty"`    // "stdio" or "http"
+	Env     map[string]string `json:"env,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"` // For HTTP transport
+}
+
+// Manager manages multiple MCP client connections.
+type Manager struct {
+	mu      sync.RWMutex
+	clients map[string]*Client
+	logger  *slog.Logger
+}
+
+// NewManager creates a new MCP manager.
+func NewManager(logger *slog.Logger) *Manager {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Manager{
+		clients: make(map[string]*Client),
+		logger:  logger.With("component", "mcp-manager"),
+	}
+}
+
+// StartServer starts an MCP server connection.
+func (m *Manager) StartServer(ctx context.Context, cfg ServerConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if cfg.Name == "" {
+		return fmt.Errorf("server name is required")
+	}
+
+	// Check if already running
+	if _, exists := m.clients[cfg.Name]; exists {
+		return fmt.Errorf("server %q already running", cfg.Name)
+	}
+
+	// Create transport based on config
+	var trans transport.Transport
+	transportType := cfg.Type
+	if transportType == "" {
+		// Infer type from config
+		if len(cfg.Command) > 0 {
+			transportType = "stdio"
+		} else if cfg.URL != "" {
+			transportType = "http"
+		} else {
+			return fmt.Errorf("server %q: must specify command (stdio) or url (http)", cfg.Name)
+		}
+	}
+
+	transportCfg := transport.DefaultConfig()
+	if cfg.Env != nil {
+		transportCfg.Environment = cfg.Env
+	}
+
+	switch transportType {
+	case "stdio":
+		if len(cfg.Command) == 0 {
+			return fmt.Errorf("server %q: stdio transport requires command", cfg.Name)
+		}
+		cmd := cfg.Command[0]
+		args := cfg.Command[1:]
+		trans = transport.NewStdioTransport(cmd, args, transportCfg)
+
+	case "http":
+		if cfg.URL == "" {
+			return fmt.Errorf("server %q: http transport requires url", cfg.Name)
+		}
+		trans = transport.NewHTTPTransport(cfg.URL, cfg.Headers, transportCfg)
+
+	default:
+		return fmt.Errorf("server %q: unknown transport type %q", cfg.Name, transportType)
+	}
+
+	// Create client
+	client := NewClient(cfg.Name, trans, m.logger)
+
+	// Connect
+	if err := client.Connect(ctx); err != nil {
+		return fmt.Errorf("server %q: failed to connect: %w", cfg.Name, err)
+	}
+
+	m.clients[cfg.Name] = client
+	m.logger.Info("started MCP server",
+		"name", cfg.Name,
+		"type", transportType,
+		"tools", len(client.ListTools()),
+	)
+
+	return nil
+}
+
+// StopServer stops a specific MCP server connection.
+func (m *Manager) StopServer(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	client, exists := m.clients[name]
+	if !exists {
+		return fmt.Errorf("server %q not found", name)
+	}
+
+	if err := client.Close(); err != nil {
+		m.logger.Error("error closing MCP client", "name", name, "error", err)
+	}
+
+	delete(m.clients, name)
+	m.logger.Info("stopped MCP server", "name", name)
+
+	return nil
+}
+
+// StopAll stops all MCP server connections.
+func (m *Manager) StopAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for name, client := range m.clients {
+		if err := client.Close(); err != nil {
+			m.logger.Error("error closing MCP client", "name", name, "error", err)
+		}
+		m.logger.Debug("stopped MCP server", "name", name)
+	}
+
+	m.clients = make(map[string]*Client)
+	m.logger.Info("stopped all MCP servers")
+}
+
+// GetClient returns the client for a specific server.
+func (m *Manager) GetClient(name string) *Client {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.clients[name]
+}
+
+// ListServers returns the names of all connected servers.
+func (m *Manager) ListServers() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	names := make([]string, 0, len(m.clients))
+	for name := range m.clients {
+		names = append(names, name)
+	}
+	return names
+}
+
+// AllTools returns tool information from all connected servers.
+// The returned ToolInfo structs have names prefixed with "servername.".
+func (m *Manager) AllTools() []ToolInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var allTools []ToolInfo
+	for _, client := range m.clients {
+		tools := client.ListTools()
+		// Prefix tool names with server name
+		for _, t := range tools {
+			prefixedTool := ToolInfo{
+				Name:        fmt.Sprintf("%s.%s", client.Name(), t.Name),
+				Description: t.Description,
+				InputSchema: t.InputSchema,
+			}
+			allTools = append(allTools, prefixedTool)
+		}
+	}
+	return allTools
+}
+
+// AllLLMDefinitions returns LLM tool definitions from all connected servers.
+func (m *Manager) AllLLMDefinitions() []llm.ToolDefinition {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var allDefs []llm.ToolDefinition
+	for _, client := range m.clients {
+		defs := client.ToLLMDefinitions()
+		allDefs = append(allDefs, defs...)
+	}
+	return allDefs
+}
+
+// CallTool routes a tool call to the appropriate MCP server.
+// The toolName must be in the format "servername.toolname".
+func (m *Manager) CallTool(ctx context.Context, fullName string, args map[string]any) (*tools.ToolResult, error) {
+	// Parse server name from full tool name
+	parts := strings.SplitN(fullName, ".", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid tool name %q: must be in format 'server.tool'", fullName)
+	}
+
+	serverName := parts[0]
+	toolName := parts[1]
+
+	m.mu.RLock()
+	client, exists := m.clients[serverName]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("MCP server %q not found", serverName)
+	}
+
+	if !client.IsConnected() {
+		return nil, fmt.Errorf("MCP server %q is not connected", serverName)
+	}
+
+	m.logger.Debug("calling MCP tool",
+		"server", serverName,
+		"tool", toolName,
+		"args", args,
+	)
+
+	return client.CallTool(ctx, toolName, args)
+}
+
+// ServerCount returns the number of connected servers.
+func (m *Manager) ServerCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.clients)
+}
+
+// IsServerConnected checks if a specific server is connected.
+func (m *Manager) IsServerConnected(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	client, exists := m.clients[name]
+	if !exists {
+		return false
+	}
+	return client.IsConnected()
+}

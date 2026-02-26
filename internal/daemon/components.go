@@ -18,9 +18,11 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
+	"github.com/caimlas/meept/internal/tools/mcp"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -55,6 +57,12 @@ type Components struct {
 	MemvidClient    *memvid.Client
 	AgentRegistry   *agent.AgentRegistry
 	Dispatcher      *agent.Dispatcher
+
+	// Shadow training
+	ShadowManager   *shadow.Manager
+
+	// MCP integration
+	MCPManager      *mcp.Manager
 
 	Logger          *slog.Logger
 }
@@ -113,6 +121,25 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Create tool registry (builtin tools registered after all dependencies are available)
 	c.ToolRegistry = tools.NewRegistry(logger)
 
+	// Create shadow training manager early (before agent loop) so it can be injected
+	if cfg.Shadow.Enabled {
+		shadowCfg := convertShadowConfig(cfg.Shadow)
+		shadowMgr, err := shadow.NewManager(shadow.ManagerConfig{
+			Config:     shadowCfg,
+			PrimaryLLM: c.LLMClient,
+			Logger:     logger.With("component", "shadow"),
+		})
+		if err != nil {
+			logger.Error("Failed to create shadow manager", "error", err)
+		} else {
+			c.ShadowManager = shadowMgr
+			logger.Info("Shadow training manager initialized",
+				"data_dir", shadowCfg.DataDir,
+				"teacher_model", shadowCfg.Teacher.Model,
+			)
+		}
+	}
+
 	// Create agent loop
 	agentOpts := []agent.LoopOption{
 		agent.WithMessageBus(msgBus),
@@ -128,10 +155,15 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		adapter := agent.NewToolRegistryAdapter(c.ToolRegistry)
 		agentOpts = append(agentOpts, agent.WithToolRegistry(adapter))
 	}
+	if c.ShadowManager != nil {
+		agentOpts = append(agentOpts, agent.WithShadowManager(c.ShadowManager))
+		logger.Info("Agent loop configured with shadow training")
+	}
+	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
+	agentOpts = append(agentOpts, agent.WithAgentID("default"))
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
 
-	// Create chat handler
-	c.ChatHandler = agent.NewChatHandler(c.AgentLoop, msgBus, logger)
+	// Chat handler created later after dispatcher (if multi-agent enabled)
 
 	// Create status handler
 	c.StatusHandler = NewStatusHandler(msgBus, logger)
@@ -174,7 +206,17 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	} else {
 		c.SessionStore = sessionStore
 	}
-	c.SessionHandler = session.NewHandler(c.SessionStore, msgBus, logger)
+
+	// Create session handler with summarizer if LLM is available
+	sessionOpts := []session.HandlerOption{}
+	if c.LLMClient != nil {
+		summarizer := session.NewSummarizer(c.LLMClient, logger.With("component", "summarizer"))
+		sessionOpts = append(sessionOpts, session.WithSummarizer(summarizer))
+		logger.Info("Session summarizer enabled with LLM client")
+	} else {
+		logger.Warn("Session summarizer disabled - no LLM client available")
+	}
+	c.SessionHandler = session.NewHandler(c.SessionStore, msgBus, logger.With("component", "session"), sessionOpts...)
 
 	// Create job queue
 	queueDB := cfg.Queue.DBPath
@@ -197,6 +239,33 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	} else {
 		c.TaskRegistry = taskRegistry
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
+	}
+
+	// Initialize MCP manager and register MCP tools
+	if cfg.MCP.Enabled {
+		c.MCPManager = mcp.NewManager(logger.With("component", "mcp"))
+
+		// Load MCP servers config
+		mcpCfg, err := config.LoadMCPConfig(cfg.MCP.ConfigFile)
+		if err != nil {
+			logger.Warn("Failed to load MCP config", "error", err, "path", cfg.MCP.ConfigFile)
+		} else if len(mcpCfg.Servers) > 0 {
+			logger.Info("Starting MCP servers", "count", len(mcpCfg.Servers))
+			for _, serverCfg := range mcpCfg.Servers {
+				if err := c.MCPManager.StartServer(context.Background(), serverCfg); err != nil {
+					logger.Error("Failed to start MCP server",
+						"name", serverCfg.Name,
+						"error", err,
+					)
+					continue
+				}
+			}
+
+			// Register MCP tools with the tool registry
+			registerMCPTools(c.ToolRegistry, c.MCPManager, logger)
+		} else {
+			logger.Info("MCP enabled but no servers configured")
+		}
 	}
 
 	// Register builtin tools now that all dependencies are available
@@ -238,6 +307,13 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, logger)
+
+		// Create chat handler with dispatcher for multi-agent routing
+		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, msgBus, logger)
+		logger.Info("ChatHandler initialized with dispatcher")
+	} else {
+		// Create chat handler without dispatcher (single-agent mode)
+		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, msgBus, logger)
 	}
 
 	// Create job processor that uses the agent loop
@@ -399,6 +475,18 @@ func (c *Components) Stop(ctx context.Context) error {
 		c.AgentRegistry.Close()
 	}
 
+	if c.ShadowManager != nil {
+		if err := c.ShadowManager.Close(); err != nil {
+			c.Logger.Error("Failed to close shadow manager", "error", err)
+			lastErr = err
+		}
+	}
+
+	// Stop all MCP server connections
+	if c.MCPManager != nil {
+		c.MCPManager.StopAll()
+	}
+
 	return lastErr
 }
 
@@ -547,6 +635,89 @@ func splitModelRef(ref string) []string {
 	return []string{ref}
 }
 
+// convertShadowConfig converts config.ShadowConfig to shadow.Config.
+func convertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
+	return &shadow.Config{
+		Enabled: cfg.Enabled,
+		DataDir: cfg.DataDir,
+		Shadowing: shadow.ShadowingConfig{
+			Mode:          shadow.ShadowMode(cfg.Shadowing.Mode),
+			MinComplexity: shadow.Complexity(cfg.Shadowing.MinComplexity),
+			Domains:       cfg.Shadowing.Domains,
+			TaskTypes:     cfg.Shadowing.TaskTypes,
+			SampleRate:    cfg.Shadowing.SampleRate,
+			QueueSize:     cfg.Shadowing.QueueSize,
+			WorkerCount:   cfg.Shadowing.WorkerCount,
+		},
+		Teacher: shadow.TeacherConfig{
+			Model:             cfg.Teacher.Model,
+			FallbackModel:     cfg.Teacher.FallbackModel,
+			Temperature:       cfg.Teacher.Temperature,
+			MaxTokens:         cfg.Teacher.MaxTokens,
+			TimeoutSeconds:    cfg.Teacher.TimeoutSeconds,
+			MaxDailyQueries:   cfg.Teacher.MaxDailyQueries,
+			MaxDailyCost:      cfg.Teacher.MaxDailyCost,
+			RequestsPerMinute: cfg.Teacher.RequestsPerMinute,
+		},
+		Quality: shadow.QualityConfig{
+			Method:               shadow.QualityMethod(cfg.Quality.Method),
+			HighQualityThreshold: cfg.Quality.HighQualityThreshold,
+			TrainableThreshold:   cfg.Quality.TrainableThreshold,
+			PreferenceMargin:     cfg.Quality.PreferenceMargin,
+			HeuristicWeights: shadow.HeuristicWeights{
+				Relevance:    cfg.Quality.HeuristicWeights.Relevance,
+				Completeness: cfg.Quality.HeuristicWeights.Completeness,
+				Correctness:  cfg.Quality.HeuristicWeights.Correctness,
+				Style:        cfg.Quality.HeuristicWeights.Style,
+			},
+			EvalPromptTemplate: cfg.Quality.EvalPromptTemplate,
+		},
+		Examples: shadow.ExamplesConfig{
+			Enabled:          cfg.Examples.Enabled,
+			MaxPerCategory:   cfg.Examples.MaxPerCategory,
+			MinQuality:       cfg.Examples.MinQuality,
+			DefaultCount:     cfg.Examples.DefaultCount,
+			MaxCount:         cfg.Examples.MaxCount,
+			SimilarityWeight: cfg.Examples.SimilarityWeight,
+			RecencyWeight:    cfg.Examples.RecencyWeight,
+			QualityWeight:    cfg.Examples.QualityWeight,
+			MaxContextTokens: cfg.Examples.MaxContextTokens,
+		},
+		Export: shadow.ExportConfig{
+			OutputDir:                cfg.Export.OutputDir,
+			Formats:                  cfg.Export.Formats,
+			MinRecords:               cfg.Export.MinRecords,
+			IncludeLowQuality:        cfg.Export.IncludeLowQuality,
+			Deduplicate:              cfg.Export.Deduplicate,
+			DedupSimilarityThreshold: cfg.Export.DedupSimilarityThreshold,
+		},
+		Adapters: shadow.AdaptersConfig{
+			Enabled:        cfg.Adapters.Enabled,
+			OllamaEndpoint: cfg.Adapters.OllamaEndpoint,
+			AutoTrain:      cfg.Adapters.AutoTrain,
+			TrainThreshold: cfg.Adapters.TrainThreshold,
+			TrainSchedule:  cfg.Adapters.TrainSchedule,
+			AdapterDir:     cfg.Adapters.AdapterDir,
+			LoRA: shadow.LoRAConfig{
+				Rank:                 cfg.Adapters.LoRA.Rank,
+				Alpha:                cfg.Adapters.LoRA.Alpha,
+				Dropout:              cfg.Adapters.LoRA.Dropout,
+				TargetModules:        cfg.Adapters.LoRA.TargetModules,
+				LearningRate:         cfg.Adapters.LoRA.LearningRate,
+				Epochs:               cfg.Adapters.LoRA.Epochs,
+				BatchSize:            cfg.Adapters.LoRA.BatchSize,
+				GradientAccumulation: cfg.Adapters.LoRA.GradientAccumulation,
+				WarmupRatio:          cfg.Adapters.LoRA.WarmupRatio,
+				MaxGradNorm:          cfg.Adapters.LoRA.MaxGradNorm,
+			},
+			DPO: shadow.DPOConfig{
+				Beta:     cfg.Adapters.DPO.Beta,
+				LossType: cfg.Adapters.DPO.LossType,
+			},
+		},
+	}
+}
+
 // registerBuiltinTools registers all builtin tools with the registry.
 func registerBuiltinTools(
 	registry *tools.Registry,
@@ -615,7 +786,52 @@ func registerPlatformTools(
 	// Platform tools tool
 	registry.Register(builtin.NewPlatformToolsTool(registry))
 
+	// Delegate task tool (for multi-agent routing)
+	registry.Register(builtin.NewDelegateTaskTool(agentRegistry))
+
 	logger.Debug("Registered platform tools")
+}
+
+// registerMCPTools registers all tools from MCP servers with the tool registry.
+func registerMCPTools(
+	registry *tools.Registry,
+	mcpManager *mcp.Manager,
+	logger *slog.Logger,
+) {
+	if mcpManager == nil {
+		return
+	}
+
+	// Get all LLM tool definitions from MCP servers
+	defs := mcpManager.AllLLMDefinitions()
+	if len(defs) == 0 {
+		logger.Debug("No MCP tools to register")
+		return
+	}
+
+	// Register each tool
+	for _, def := range defs {
+		// Extract server name from the prefixed tool name
+		serverName := ""
+		if idx := findDot(def.Function.Name); idx > 0 {
+			serverName = def.Function.Name[:idx]
+		}
+
+		tool := mcp.NewMCPTool(def, mcpManager, serverName)
+		registry.Register(tool)
+	}
+
+	logger.Info("Registered MCP tools", "count", len(defs))
+}
+
+// findDot finds the index of the first dot in a string.
+func findDot(s string) int {
+	for i, c := range s {
+		if c == '.' {
+			return i
+		}
+	}
+	return -1
 }
 
 // StatusHandler handles status.request messages on the bus.

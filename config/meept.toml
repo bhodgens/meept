@@ -65,6 +65,23 @@ secret_key = ""  # Required for JWT
 [mcp]
 enabled = false
 config_file = "~/.meept/mcp_servers.json"
+# MCP servers are configured in a separate JSON file.
+# Example mcp_servers.json:
+# {
+#   "servers": [
+#     {
+#       "name": "filesystem",
+#       "type": "stdio",
+#       "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+#     },
+#     {
+#       "name": "remote-api",
+#       "type": "http",
+#       "url": "https://mcp.example.com/api",
+#       "headers": {"Authorization": "Bearer ${MCP_API_KEY}"}
+#     }
+#   ]
+# }
 
 [plugins]
 enabled = true
