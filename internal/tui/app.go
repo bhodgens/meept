@@ -777,7 +777,7 @@ func (a *App) renderStatusBar() string {
 		projectDisplay = "..." + projectDisplay[len(projectDisplay)-maxProjectLen+3:]
 	}
 
-	// Build single line: status dot | keybindings | directory
+	// Build single line: status dot | context-sensitive keybindings | directory
 	var parts []string
 
 	// Status message takes priority if present
@@ -785,9 +785,9 @@ func (a *App) renderStatusBar() string {
 		parts = append(parts, a.styles.StatusRunning.Render(a.statusMessage))
 	} else {
 		parts = append(parts, statusStyle.Render(connectionStatus))
-		parts = append(parts, a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"))
-		parts = append(parts, a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"))
-		parts = append(parts, a.styles.HelpKey.Render("Esc")+" "+a.styles.HelpValue.Render("input"))
+		// Add context-sensitive quick actions
+		quickActions := a.getQuickActions()
+		parts = append(parts, quickActions...)
 		parts = append(parts, a.styles.Muted.Render(projectDisplay))
 	}
 
@@ -797,6 +797,60 @@ func (a *App) renderStatusBar() string {
 		Width(a.width).
 		MaxWidth(a.width).
 		Render(content)
+}
+
+// getQuickActions returns context-sensitive keybinding hints based on current view and mode.
+func (a *App) getQuickActions() []string {
+	var actions []string
+
+	// Always show menu and quit
+	actions = append(actions, a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"))
+	actions = append(actions, a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"))
+
+	switch a.currentView {
+	case ViewChat:
+		// Chat view actions depend on chat mode
+		if a.chat != nil {
+			chatMode := a.chat.GetMode()
+			switch chatMode {
+			case "insert":
+				actions = append(actions, a.styles.HelpKey.Render("Esc")+" "+a.styles.HelpValue.Render("normal"))
+				actions = append(actions, a.styles.HelpKey.Render("Enter")+" "+a.styles.HelpValue.Render("send"))
+			case "visual":
+				actions = append(actions, a.styles.HelpKey.Render("Esc")+" "+a.styles.HelpValue.Render("normal"))
+				actions = append(actions, a.styles.HelpKey.Render("y")+" "+a.styles.HelpValue.Render("copy"))
+			default: // normal mode
+				actions = append(actions, a.styles.HelpKey.Render("i")+" "+a.styles.HelpValue.Render("insert"))
+				actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("scroll"))
+				actions = append(actions, a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"))
+			}
+		} else {
+			actions = append(actions, a.styles.HelpKey.Render("Esc")+" "+a.styles.HelpValue.Render("input"))
+		}
+
+	case ViewTasks:
+		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))
+		actions = append(actions, a.styles.HelpKey.Render("Enter")+" "+a.styles.HelpValue.Render("details"))
+		actions = append(actions, a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"))
+		actions = append(actions, a.styles.HelpKey.Render("Tab")+" "+a.styles.HelpValue.Render("toggle view"))
+
+	case ViewQueue:
+		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))
+		actions = append(actions, a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"))
+		actions = append(actions, a.styles.HelpKey.Render("Tab")+" "+a.styles.HelpValue.Render("toggle view"))
+
+	case ViewMemory:
+		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))
+		actions = append(actions, a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"))
+		actions = append(actions, a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"))
+	}
+
+	// Add sidebar toggle hint if sidebar is hidden
+	if !a.sidebar.IsVisible() {
+		actions = append(actions, a.styles.HelpKey.Render("^X y")+" "+a.styles.HelpValue.Render("sidebar"))
+	}
+
+	return actions
 }
 
 func (a *App) renderError() string {

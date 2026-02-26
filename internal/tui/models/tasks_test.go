@@ -257,6 +257,7 @@ func TestTasksModel_SelectJob(t *testing.T) {
 	mock := NewMockTasksRPCClient()
 	model := NewTasksModel(mock)
 	model.SetSize(80, 24)
+	model.viewMode = ViewModeJobs // Switch to jobs mode
 	model.jobs = mock.JobsResponse.Jobs
 	model.updateTable()
 
@@ -389,6 +390,7 @@ func TestTasksModel_ViewLoadingWithExistingJobs(t *testing.T) {
 	mock := NewMockTasksRPCClient()
 	model := NewTasksModel(mock)
 	model.SetSize(80, 24)
+	model.viewMode = ViewModeJobs // Switch to jobs mode
 	model.loading = true
 	model.jobs = mock.JobsResponse.Jobs
 
@@ -420,6 +422,7 @@ func TestTasksModel_ViewErrorWithExistingJobs(t *testing.T) {
 	mock := NewMockTasksRPCClient()
 	model := NewTasksModel(mock)
 	model.SetSize(80, 24)
+	model.viewMode = ViewModeJobs // Switch to jobs mode
 	model.err = errors.New("test error")
 	model.jobs = mock.JobsResponse.Jobs
 
@@ -451,6 +454,7 @@ func TestTasksModel_ViewWithJobs(t *testing.T) {
 	mock := NewMockTasksRPCClient()
 	model := NewTasksModel(mock)
 	model.SetSize(80, 24)
+	model.viewMode = ViewModeJobs // Switch to jobs mode
 	model.jobs = mock.JobsResponse.Jobs
 	model.updateTable()
 
@@ -468,6 +472,7 @@ func TestTasksModel_ViewWithSelectedJob(t *testing.T) {
 	mock := NewMockTasksRPCClient()
 	model := NewTasksModel(mock)
 	model.SetSize(80, 24)
+	model.viewMode = ViewModeJobs // Switch to jobs mode
 	model.jobs = mock.JobsResponse.Jobs
 	model.selectedJob = &model.jobs[0]
 	model.updateTable()

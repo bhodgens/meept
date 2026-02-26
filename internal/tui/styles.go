@@ -57,6 +57,9 @@ type Styles struct {
 	CommandModeTab       lipgloss.Style
 	CommandModeIndicator lipgloss.Style
 
+	// Header bar
+	HeaderBar lipgloss.Style
+
 	// Help
 	HelpKey   lipgloss.Style
 	HelpValue lipgloss.Style
@@ -188,6 +191,13 @@ func DefaultStyles() *Styles {
 	s.CommandModeIndicator = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(ColorAccent).
+		Bold(true).
+		Padding(0, 1)
+
+	// Header bar (orange background, black text)
+	s.HeaderBar = lipgloss.NewStyle().
+		Background(ColorPrimary).
+		Foreground(lipgloss.Color("#000000")).
 		Bold(true).
 		Padding(0, 1)
 

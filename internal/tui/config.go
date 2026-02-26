@@ -29,12 +29,22 @@ type VimConfig struct {
 
 // RenderingConfig defines rendering settings.
 type RenderingConfig struct {
-	Markdown           bool   `json:"markdown"`            // Enable markdown rendering (default: true)
-	SyntaxHighlighting bool   `json:"syntax_highlighting"` // Enable syntax highlighting (default: true)
-	Theme              string `json:"theme"`               // Syntax theme (default: "monokai")
-	WordWrap           bool   `json:"word_wrap"`           // Enable word wrap (default: true)
-	ShowHeader         bool   `json:"show_header"`         // Show header bar with session info (default: true)
-	SidebarAnimation   bool   `json:"sidebar_animation"`   // Enable animated dispatch visualization in sidebar (default: true)
+	Markdown           bool          `json:"markdown"`            // Enable markdown rendering (default: true)
+	SyntaxHighlighting bool          `json:"syntax_highlighting"` // Enable syntax highlighting (default: true)
+	Theme              string        `json:"theme"`               // Syntax theme (default: "monokai")
+	WordWrap           bool          `json:"word_wrap"`           // Enable word wrap (default: true)
+	ShowHeader         bool          `json:"show_header"`         // Show header bar with session info (default: true)
+	SidebarAnimation   bool          `json:"sidebar_animation"`   // Enable animated dispatch visualization in sidebar (default: true)
+	Sidebar            SidebarConfig `json:"sidebar"`             // Sidebar panel configuration
+}
+
+// SidebarConfig defines sidebar panel settings.
+type SidebarConfig struct {
+	ShowMetrics      bool `json:"show_metrics"`       // Show metrics sparklines panel (default: true)
+	ShowActivityFeed bool `json:"show_activity_feed"` // Show activity feed panel (default: true)
+	DefaultPanel     int  `json:"default_panel"`      // Default expanded panel index (0=status, default: 0)
+	MetricsHistory   int  `json:"metrics_history"`    // Number of data points for sparklines (default: 30)
+	ActivityFeedSize int  `json:"activity_feed_size"` // Max events in activity feed (default: 50)
 }
 
 // KeybindingsConfig defines customizable key bindings.
@@ -95,6 +105,13 @@ func DefaultClientConfig() *ClientConfig {
 			WordWrap:           true,
 			ShowHeader:         true,
 			SidebarAnimation:   true,
+			Sidebar: SidebarConfig{
+				ShowMetrics:      true,
+				ShowActivityFeed: true,
+				DefaultPanel:     0,
+				MetricsHistory:   30,
+				ActivityFeedSize: 50,
+			},
 		},
 	}
 }

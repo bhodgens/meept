@@ -1105,6 +1105,30 @@ func (m *ChatModel) VimState() *vim.State {
 	return m.vimState
 }
 
+// GetMode returns the current vim mode as a string for quick actions display.
+// Returns "normal", "insert", "visual", or "command" if vim is enabled, otherwise empty string.
+func (m *ChatModel) GetMode() string {
+	if m.vimState == nil || !m.vimState.Enabled {
+		// When vim is disabled, return mode based on focus
+		if m.focused == FocusInput {
+			return "insert"
+		}
+		return "normal"
+	}
+	switch m.vimState.Mode {
+	case vim.ModeNormal:
+		return "normal"
+	case vim.ModeInsert:
+		return "insert"
+	case vim.ModeVisual:
+		return "visual"
+	case vim.ModeCommand:
+		return "command"
+	default:
+		return "normal"
+	}
+}
+
 // EnableVim enables vim keybindings.
 func (m *ChatModel) EnableVim() {
 	if m.vimState != nil {

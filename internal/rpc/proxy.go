@@ -14,8 +14,28 @@ import (
 // ProxyHandler forwards RPC requests to the message bus and waits for responses.
 // This enables Python agents to handle RPC methods by subscribing to bus topics.
 type ProxyHandler struct {
-	bus     *bus.MessageBus
-	pending sync.Map // map[string]chan *models.BusMessage
+	bus           *bus.MessageBus
+	pending       sync.Map // map[string]chan *models.BusMessage
+	subscriptions sync.Map // map[string]*busSubscription for TUI event streaming
+}
+
+// busSubscription holds state for a bus subscription.
+type busSubscription struct {
+	ID         string
+	Topics     []string
+	Subscriber *bus.Subscriber
+	Events     []*busEventRecord
+	MaxEvents  int
+	mu         sync.Mutex
+}
+
+// busEventRecord is an event captured for polling.
+type busEventRecord struct {
+	Topic     string    `json:"topic"`
+	Type      string    `json:"type"`
+	Source    string    `json:"source"`
+	Timestamp time.Time `json:"timestamp"`
+	Payload   any       `json:"payload"`
 }
 
 // NewProxyHandler creates a new proxy handler.
@@ -107,6 +127,11 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("selfimprove.apply", p.makeProxy("selfimprove.apply", "selfimprove.result", 60*time.Second))
 	server.RegisterHandler("selfimprove.status", p.makeProxy("selfimprove.status", "selfimprove.result", 10*time.Second))
 	server.RegisterHandler("selfimprove.cycle", p.makeProxy("selfimprove.cycle", "selfimprove.result", 600*time.Second))
+
+	// Bus subscription methods for TUI event streaming
+	server.RegisterHandler("bus.subscribe", p.handleBusSubscribe)
+	server.RegisterHandler("bus.poll", p.handleBusPoll)
+	server.RegisterHandler("bus.unsubscribe", p.handleBusUnsubscribe)
 }
 
 // makeProxy creates a handler that forwards to requestTopic and waits on responseTopic.
@@ -203,4 +228,142 @@ func (p *ProxyHandler) makeFireAndForget(topic string) Handler {
 			"delivered": delivered,
 		}, nil
 	}
+}
+
+// handleBusSubscribe creates a subscription to one or more bus topics.
+func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMessage) (any, error) {
+	var req struct {
+		Topics []string `json:"topics"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	if len(req.Topics) == 0 {
+		return nil, fmt.Errorf("no topics specified")
+	}
+
+	// Create subscription ID
+	subID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
+
+	// Create internal subscription state
+	sub := &busSubscription{
+		ID:        subID,
+		Topics:    req.Topics,
+		Events:    make([]*busEventRecord, 0),
+		MaxEvents: 100, // Keep last 100 events
+	}
+
+	// Subscribe to all topics (using wildcard support)
+	// We use a combined subscriber that receives all matching topics
+	combinedTopic := "tui.sub." + subID
+	subscriber := p.bus.Subscribe(subID, combinedTopic)
+	sub.Subscriber = subscriber
+
+	// Start goroutine to collect events from all topics
+	go func() {
+		for _, topic := range req.Topics {
+			topicSub := p.bus.Subscribe(subID+"-"+topic, topic)
+			go func(ts *bus.Subscriber) {
+				for msg := range ts.Channel {
+					sub.mu.Lock()
+					event := &busEventRecord{
+						Topic:     msg.Topic,
+						Type:      string(msg.Type),
+						Source:    msg.Source,
+						Timestamp: time.Now(),
+					}
+					// Parse payload
+					if msg.Payload != nil {
+						var payload any
+						if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+							event.Payload = payload
+						}
+					}
+					sub.Events = append(sub.Events, event)
+					// Trim to max size
+					if len(sub.Events) > sub.MaxEvents {
+						sub.Events = sub.Events[len(sub.Events)-sub.MaxEvents:]
+					}
+					sub.mu.Unlock()
+				}
+			}(topicSub)
+		}
+	}()
+
+	p.subscriptions.Store(subID, sub)
+
+	return map[string]any{
+		"subscription_id": subID,
+		"topics":          req.Topics,
+	}, nil
+}
+
+// handleBusPoll returns events since the last poll.
+func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage) (any, error) {
+	var req struct {
+		SubscriptionID string `json:"subscription_id"`
+		Since          string `json:"since"` // RFC3339 timestamp
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	subVal, ok := p.subscriptions.Load(req.SubscriptionID)
+	if !ok {
+		return nil, fmt.Errorf("subscription not found: %s", req.SubscriptionID)
+	}
+
+	sub := subVal.(*busSubscription)
+
+	// Parse since timestamp
+	var since time.Time
+	if req.Since != "" {
+		var err error
+		since, err = time.Parse(time.RFC3339Nano, req.Since)
+		if err != nil {
+			since = time.Time{} // Return all events if parsing fails
+		}
+	}
+
+	// Collect events since timestamp
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+
+	events := make([]*busEventRecord, 0)
+	for _, e := range sub.Events {
+		if e.Timestamp.After(since) {
+			events = append(events, e)
+		}
+	}
+
+	return map[string]any{
+		"events": events,
+	}, nil
+}
+
+// handleBusUnsubscribe removes a subscription.
+func (p *ProxyHandler) handleBusUnsubscribe(ctx context.Context, params json.RawMessage) (any, error) {
+	var req struct {
+		SubscriptionID string `json:"subscription_id"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	subVal, ok := p.subscriptions.Load(req.SubscriptionID)
+	if !ok {
+		return nil, fmt.Errorf("subscription not found: %s", req.SubscriptionID)
+	}
+
+	sub := subVal.(*busSubscription)
+	if sub.Subscriber != nil {
+		p.bus.Unsubscribe(sub.Subscriber)
+	}
+
+	p.subscriptions.Delete(req.SubscriptionID)
+
+	return map[string]any{
+		"status": "unsubscribed",
+	}, nil
 }

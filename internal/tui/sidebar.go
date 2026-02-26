@@ -3,10 +3,12 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/viz"
 )
@@ -20,6 +22,8 @@ const (
 	PanelWorkers
 	PanelTasks
 	PanelMemory
+	PanelMetrics
+	PanelActivityFeed
 )
 
 // SidebarModel is the model for the expandable sidebar.
@@ -39,6 +43,16 @@ type SidebarModel struct {
 	memoryData        []SidebarMemoryItem
 	workersData       []SidebarWorkerItem
 
+	// Metrics data for sparklines
+	metricsCollector *MetricsCollector
+	queueSparkline   *components.Sparkline
+	workersSparkline *components.Sparkline
+	agentsSparkline  *components.Sparkline
+
+	// Activity feed data
+	eventStream  *EventStream
+	activityFeed []ActivityFeedItem
+
 	// Dispatch visualization
 	viz            *viz.DispatchViz
 	animationEnabled bool
@@ -46,6 +60,13 @@ type SidebarModel struct {
 	// Loading/error state
 	loading bool
 	err     error
+}
+
+// ActivityFeedItem represents a single item in the activity feed.
+type ActivityFeedItem struct {
+	Timestamp time.Time
+	Topic     string
+	Summary   string
 }
 
 // SidebarStatusData contains daemon status info for the sidebar.
@@ -109,10 +130,23 @@ func NewSidebarModel(rpc *RPCClient, styles *Styles, animationEnabled bool) *Sid
 		expandedPanel:    PanelStatus,
 		visible:          true, // Visible by default
 		animationEnabled: animationEnabled,
+		activityFeed:     make([]ActivityFeedItem, 0),
 	}
 	if animationEnabled {
 		s.viz = viz.NewDispatchViz(30) // Default width
 	}
+
+	// Initialize sparklines
+	s.queueSparkline = components.NewSparkline("queue", 20)
+	s.workersSparkline = components.NewSparkline("workers", 20)
+	s.agentsSparkline = components.NewSparkline("agents", 20)
+
+	// Initialize metrics collector
+	s.metricsCollector = NewMetricsCollector(rpc, 30)
+
+	// Initialize event stream
+	s.eventStream = NewEventStream(rpc, nil)
+
 	return s
 }
 
@@ -124,6 +158,20 @@ func (s *SidebarModel) SetSize(width, height int) {
 	// Account for: border (2) + padding (2) + small margin (2) = 6
 	if s.viz != nil && width > 8 {
 		s.viz.SetSize(width - 6)
+	}
+	// Update sparkline widths
+	sparklineWidth := width - 14 // Account for label + padding
+	if sparklineWidth < 5 {
+		sparklineWidth = 5
+	}
+	if s.queueSparkline != nil {
+		s.queueSparkline.SetWidth(sparklineWidth)
+	}
+	if s.workersSparkline != nil {
+		s.workersSparkline.SetWidth(sparklineWidth)
+	}
+	if s.agentsSparkline != nil {
+		s.agentsSparkline.SetWidth(sparklineWidth)
 	}
 }
 
@@ -160,16 +208,35 @@ func (s *SidebarModel) IsFocused() bool {
 	return s.focused
 }
 
+// SidebarRefreshTick signals time for sidebar data refresh.
+type SidebarRefreshTick struct{}
+
 // Init initializes the sidebar.
 func (s *SidebarModel) Init() tea.Cmd {
 	if !s.visible {
 		return nil
 	}
-	// Initialize data refresh and optionally visualization tick
+	// Initialize data refresh, periodic tick, and optionally visualization tick
+	cmds := []tea.Cmd{s.refreshData(), s.scheduleRefresh()}
 	if s.animationEnabled && s.viz != nil {
-		return tea.Batch(s.refreshData(), s.viz.Init())
+		cmds = append(cmds, s.viz.Init())
 	}
-	return s.refreshData()
+	// Start metrics collector
+	if s.metricsCollector != nil {
+		cmds = append(cmds, s.metricsCollector.Start())
+	}
+	// Start event stream
+	if s.eventStream != nil {
+		cmds = append(cmds, s.eventStream.Start())
+	}
+	return tea.Batch(cmds...)
+}
+
+// scheduleRefresh schedules the next periodic refresh.
+func (s *SidebarModel) scheduleRefresh() tea.Cmd {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+		return SidebarRefreshTick{}
+	})
 }
 
 // SidebarDataMsg carries refreshed sidebar data.
@@ -293,6 +360,13 @@ type SidebarFocusChatMsg struct{}
 // Update handles messages for the sidebar.
 func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case SidebarRefreshTick:
+		// Periodic refresh - only if visible
+		if s.visible {
+			return tea.Batch(s.refreshData(), s.scheduleRefresh())
+		}
+		return s.scheduleRefresh() // Keep scheduling even if not visible
+
 	case SidebarDataMsg:
 		s.loading = false
 		if msg.Err != nil {
@@ -317,6 +391,37 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 
+	case MetricsTickMsg:
+		// Forward to metrics collector
+		if s.metricsCollector != nil && s.visible {
+			return s.metricsCollector.Update(msg)
+		}
+		return nil
+
+	case MetricsDataMsg:
+		// Update sparklines with new metrics
+		if s.metricsCollector != nil {
+			cmd := s.metricsCollector.Update(msg)
+			s.updateSparklines()
+			return cmd
+		}
+		return nil
+
+	case EventStreamTickMsg:
+		// Forward to event stream
+		if s.eventStream != nil && s.visible {
+			return s.eventStream.Update(msg)
+		}
+		return nil
+
+	case EventStreamDataMsg:
+		// Update activity feed with new events
+		if s.eventStream != nil {
+			s.eventStream.Update(msg)
+			s.updateActivityFeed()
+		}
+		return nil
+
 	case tea.KeyMsg:
 		if !s.visible || !s.focused {
 			return nil
@@ -330,6 +435,72 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 	}
 
 	return nil
+}
+
+// updateSparklines updates sparklines with metrics collector data.
+func (s *SidebarModel) updateSparklines() {
+	if s.metricsCollector == nil {
+		return
+	}
+
+	// Update queue sparkline
+	queueData := s.metricsCollector.QueueDepthHistory()
+	s.queueSparkline.SetData(queueData)
+
+	// Update workers sparkline
+	workersData := s.metricsCollector.WorkersBusyHistory()
+	s.workersSparkline.SetData(workersData)
+
+	// Update agents sparkline
+	agentsData := s.metricsCollector.AgentsActiveHistory()
+	s.agentsSparkline.SetData(agentsData)
+}
+
+// updateActivityFeed updates the activity feed with recent events.
+func (s *SidebarModel) updateActivityFeed() {
+	if s.eventStream == nil {
+		return
+	}
+
+	// Get recent events
+	events := s.eventStream.RecentEvents(10)
+
+	// Convert to activity feed items
+	s.activityFeed = make([]ActivityFeedItem, len(events))
+	for i, e := range events {
+		// Summarize the event
+		summary := summarizeEvent(e.Topic, e.Payload)
+		s.activityFeed[i] = ActivityFeedItem{
+			Timestamp: e.Timestamp,
+			Topic:     e.Topic,
+			Summary:   summary,
+		}
+	}
+}
+
+// summarizeEvent creates a brief summary of a bus event.
+func summarizeEvent(topic string, payload any) string {
+	// Extract topic suffix for display
+	parts := strings.Split(topic, ".")
+	action := parts[len(parts)-1]
+
+	// Try to extract key info from payload
+	if payloadMap, ok := payload.(map[string]any); ok {
+		if status, ok := payloadMap["status"].(string); ok {
+			return action + " - " + status
+		}
+		if state, ok := payloadMap["state"].(string); ok {
+			return action + " - " + state
+		}
+		if id, ok := payloadMap["id"].(string); ok {
+			if len(id) > 8 {
+				id = id[:8]
+			}
+			return action + " " + id
+		}
+	}
+
+	return action
 }
 
 // syncVizWithData synchronizes the visualization with current agent/worker data.
@@ -413,6 +584,10 @@ func (s *SidebarModel) View() string {
 	b.WriteString(s.renderTasksPanel())
 	b.WriteString("\n")
 	b.WriteString(s.renderMemoryPanel())
+	b.WriteString("\n")
+	b.WriteString(s.renderMetricsPanel())
+	b.WriteString("\n")
+	b.WriteString(s.renderActivityFeedPanel())
 
 	// Calculate space used by panels
 	panelsContent := b.String()
@@ -770,6 +945,118 @@ func (s *SidebarModel) renderMemoryPanel() string {
 				b.WriteString(fmt.Sprintf("  %s %s",
 					typeStyle.Render(fmt.Sprintf("[%s]", mem.Type)),
 					s.styles.Paragraph.Render(preview),
+				))
+				b.WriteString("\n")
+			}
+		}
+	}
+
+	return b.String()
+}
+
+func (s *SidebarModel) renderMetricsPanel() string {
+	var b strings.Builder
+
+	b.WriteString(s.renderPanelHeader("Metrics", PanelMetrics))
+	b.WriteString("\n")
+
+	if s.expandedPanel == PanelMetrics {
+		// Sparkline style
+		sparkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4"))
+		labelStyle := lipgloss.NewStyle().
+			Foreground(ColorMuted).
+			Width(10)
+
+		// Queue depth sparkline
+		s.queueSparkline.SetStyle(sparkStyle)
+		b.WriteString("  ")
+		b.WriteString(labelStyle.Render("queue:"))
+		b.WriteString(s.queueSparkline.View())
+		b.WriteString("\n")
+
+		// Workers busy sparkline
+		workerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
+		s.workersSparkline.SetStyle(workerStyle)
+		b.WriteString("  ")
+		b.WriteString(labelStyle.Render("workers:"))
+		b.WriteString(s.workersSparkline.View())
+		b.WriteString("\n")
+
+		// Active agents sparkline
+		agentStyle := lipgloss.NewStyle().Foreground(ColorAccent)
+		s.agentsSparkline.SetStyle(agentStyle)
+		b.WriteString("  ")
+		b.WriteString(labelStyle.Render("agents:"))
+		b.WriteString(s.agentsSparkline.View())
+		b.WriteString("\n")
+
+		// Current values
+		if snapshot := s.metricsCollector.LatestSnapshot(); snapshot != nil {
+			valueStyle := lipgloss.NewStyle().Foreground(ColorForeground)
+			b.WriteString("  ")
+			b.WriteString(s.styles.Muted.Render("current: "))
+			b.WriteString(valueStyle.Render(fmt.Sprintf("q:%d w:%d a:%d",
+				snapshot.QueueDepth,
+				snapshot.WorkersBusy,
+				snapshot.AgentsActive,
+			)))
+			b.WriteString("\n")
+		}
+	}
+
+	return b.String()
+}
+
+func (s *SidebarModel) renderActivityFeedPanel() string {
+	var b strings.Builder
+
+	b.WriteString(s.renderPanelHeader("Activity", PanelActivityFeed))
+	b.WriteString("\n")
+
+	if s.expandedPanel == PanelActivityFeed {
+		if len(s.activityFeed) == 0 {
+			b.WriteString(s.styles.Muted.Render("  No recent activity"))
+			b.WriteString("\n")
+		} else {
+			for i, item := range s.activityFeed {
+				if i >= 8 { // Limit display to 8 items
+					break
+				}
+
+				// Format timestamp
+				timeStr := item.Timestamp.Format("15:04:05")
+
+				// Topic color based on category
+				topicStyle := s.styles.Muted
+				topicParts := strings.Split(item.Topic, ".")
+				if len(topicParts) > 0 {
+					switch topicParts[0] {
+					case "agent":
+						topicStyle = lipgloss.NewStyle().Foreground(ColorAccent)
+					case "task":
+						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6"))
+					case "queue":
+						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4"))
+					case "worker":
+						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
+					case "memory":
+						topicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#EC4899"))
+					}
+				}
+
+				// Truncate summary
+				summary := item.Summary
+				maxSummaryLen := s.width - 18 // Account for timestamp and spacing
+				if maxSummaryLen < 5 {
+					maxSummaryLen = 5
+				}
+				if len(summary) > maxSummaryLen {
+					summary = summary[:maxSummaryLen-3] + "..."
+				}
+
+				b.WriteString(fmt.Sprintf("  %s %s",
+					s.styles.Muted.Render(timeStr),
+					topicStyle.Render(summary),
 				))
 				b.WriteString("\n")
 			}

@@ -168,6 +168,13 @@ type Session struct {
 	WorkerIDs       []string `json:"worker_ids,omitempty"`
 }
 
+// GenerateDescriptionResult is the result of LLM-based session description generation.
+type GenerateDescriptionResult struct {
+	SessionID   string `json:"session_id"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+}
+
 // SessionMessage represents a chat message persisted on the server.
 type SessionMessage struct {
 	ID        int64  `json:"id"`
