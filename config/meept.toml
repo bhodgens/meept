@@ -33,6 +33,17 @@ domains = ["general", "code", "commands"]
 enabled = true
 update_interval_conversations = 10
 
+# Multi-agent system with TOML-based agent definitions
+# and recombinant prompt components
+[agents]
+enabled = false
+config_dirs = ["~/.meept/agents", "config/agents"]  # Agent definition search paths
+prompts_dir = "config/prompts"                       # Base directory for prompt components
+default_model = ""                                   # Empty = use llm.default_model
+dispatcher_id = "dispatcher"                         # Agent that handles intake/routing
+# Agent definitions are in config/agents/*.toml
+# Prompt components are in config/prompts/{base,dispatcher,specialist,conditional,chat,capabilities}/*.md
+
 [security]
 # Input sanitization
 sanitize_inputs = true

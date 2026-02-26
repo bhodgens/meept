@@ -1,0 +1,65 @@
+# Core agents - always loaded
+# These agents form the foundation of the multi-agent system.
+
+[[agent]]
+id = "dispatcher"
+name = "Dispatcher"
+role = "dispatcher"
+description = "Intake agent that classifies user intent and routes to specialists"
+model = ""  # Empty = use default model
+enabled = true
+
+# Tools beyond baseline (all agents get memory.*, task.*, platform.*)
+additional_tools = ["delegate_task"]
+
+# Capabilities required for model selection
+capabilities = ["reasoning"]
+
+# Prompt composition - references to prompt components
+prompt_components = [
+    "base.constitution",
+    "base.restrictions",
+    "dispatcher.purpose",
+    "dispatcher.routing_rules",
+    "capabilities.memory",
+    "capabilities.platform",
+]
+
+# Constraints
+[agent.constraints]
+max_iterations = 5
+timeout_seconds = 60
+max_tokens_per_turn = 2048
+max_memory_refs = 10
+
+# ---
+
+[[agent]]
+id = "chat"
+name = "Chat"
+role = "conversational"
+description = "Conversational agent for casual chat - delegates tool-requiring tasks to specialists"
+model = ""
+enabled = true
+
+# NO heavy tool access - chat delegates everything requiring tools
+additional_tools = ["web_fetch"]
+
+# Can delegate to other agents
+can_delegate = true
+
+capabilities = []
+
+prompt_components = [
+    "base.constitution",
+    "base.restrictions",
+    "chat.personality",
+    "chat.delegation_rules",
+    "capabilities.memory",
+]
+
+[agent.constraints]
+max_iterations = 3
+timeout_seconds = 60
+max_tokens_per_turn = 4096
+max_memory_refs = 10

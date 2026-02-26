@@ -13,6 +13,7 @@ type Config struct {
 	Memory      MemoryConfig      `toml:"memory"`
 	Memvid      MemvidConfig      `toml:"memvid"`
 	MultiAgent  MultiAgentConfig  `toml:"multiagent"`
+	Agents      AgentsConfig      `toml:"agents"`
 	Security    SecurityConfig    `toml:"security"`
 	Scheduler   SchedulerConfig   `toml:"scheduler"`
 	Queue       QueueConfig       `toml:"queue"`
@@ -104,6 +105,25 @@ type MultiAgentConfig struct {
 	DefaultModel       string `toml:"default_model"`
 	MaxMemoryRefs      int    `toml:"max_memory_refs"`
 	ContextSearchLimit int    `toml:"context_search_limit"`
+}
+
+// AgentsConfig holds agent configuration settings.
+type AgentsConfig struct {
+	// Enabled enables the multi-agent system with TOML-based agent definitions.
+	Enabled bool `toml:"enabled"`
+
+	// ConfigDirs are directories to search for agent definition TOML files.
+	// Searched in order; later directories override earlier ones.
+	ConfigDirs []string `toml:"config_dirs"`
+
+	// PromptsDir is the base directory for prompt components.
+	PromptsDir string `toml:"prompts_dir"`
+
+	// DefaultModel is the fallback model for agents that don't specify one.
+	DefaultModel string `toml:"default_model"`
+
+	// DispatcherID is the agent ID that handles intake/routing.
+	DispatcherID string `toml:"dispatcher_id"`
 }
 
 // SecurityConfig holds security settings.
@@ -425,6 +445,13 @@ func DefaultConfig() *Config {
 			DefaultModel:       "",
 			MaxMemoryRefs:      20,
 			ContextSearchLimit: 10,
+		},
+		Agents: AgentsConfig{
+			Enabled:      false,
+			ConfigDirs:   []string{"~/.meept/agents", "config/agents"},
+			PromptsDir:   "config/prompts",
+			DefaultModel: "", // Empty = use llm.default_model
+			DispatcherID: "dispatcher",
 		},
 		Security: SecurityConfig{
 			SanitizeInputs:              true,
