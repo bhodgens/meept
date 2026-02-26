@@ -13,13 +13,36 @@ import (
 
 // ToolActionMap maps tool names to permission action categories.
 var ToolActionMap = map[string]string{
+	// File operations
 	"shell":          "shell_execute",
 	"file_read":      "file_read",
 	"file_write":     "file_write",
 	"file_delete":    "file_delete",
 	"list_directory": "file_read",
-	"web_search":     "network_request",
-	"web_fetch":      "network_request",
+
+	// Network operations
+	"web_search": "network_request",
+	"web_fetch":  "network_request",
+
+	// Memory operations
+	"memory_search":      "memory_read",
+	"memory_get_context": "memory_read",
+	"memory_store":       "memory_write",
+	"memory_delete":      "memory_write",
+
+	// Platform introspection (read-only, safe)
+	"platform_status": "platform_read",
+	"platform_agents": "platform_read",
+	"platform_tools":  "platform_read",
+
+	// Task management
+	"task_create": "task_write",
+	"task_get":    "task_read",
+	"task_list":   "task_read",
+	"task_update": "task_write",
+
+	// Agent delegation
+	"delegate_task": "agent_delegate",
 }
 
 // Tool represents a tool that can be executed by the agent.
@@ -76,6 +99,7 @@ type Executor struct {
 	security    *security.PermissionChecker
 	logger      *slog.Logger
 	parallelism int
+	agentID     string // Identifier for the agent/worker using this executor
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -94,6 +118,13 @@ func WithParallelism(n int) ExecutorOption {
 		if n > 0 {
 			e.parallelism = n
 		}
+	}
+}
+
+// WithExecutorAgentID sets an identifier for logging which agent/worker is executing.
+func WithExecutorAgentID(id string) ExecutorOption {
+	return func(e *Executor) {
+		e.agentID = id
 	}
 }
 
@@ -155,6 +186,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		result := e.checkPermission(toolName, args)
 		if !result.Allowed {
 			e.logger.Info("Tool blocked by security",
+				"agent", e.agentID,
 				"tool", toolName,
 				"reason", result.Reason,
 				"risk", result.EffectiveRisk.String(),
@@ -179,6 +211,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 
 	// Execute the tool
 	e.logger.Info("Executing tool",
+		"agent", e.agentID,
 		"tool", toolName,
 		"args_summary", summarizeArgs(args),
 	)
@@ -186,6 +219,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	result, err := tool.Execute(ctx, args)
 	if err != nil {
 		e.logger.Error("Tool execution failed",
+			"agent", e.agentID,
 			"tool", toolName,
 			"error", err,
 		)
@@ -385,4 +419,72 @@ func (t *MockTool) Execute(ctx context.Context, args map[string]any) (any, error
 		return t.executeFunc(ctx, args)
 	}
 	return map[string]any{"success": true, "mock": true}, nil
+}
+
+// FilteredToolRegistry wraps a ToolRegistry and only exposes a subset of tools.
+type FilteredToolRegistry struct {
+	parent  ToolRegistry
+	allowed map[string]bool
+}
+
+// NewFilteredToolRegistry creates a tool registry that filters tools by allowed names.
+// If allowedTools is empty, all tools from the parent are allowed.
+func NewFilteredToolRegistry(parent ToolRegistry, allowedTools []string) *FilteredToolRegistry {
+	allowed := make(map[string]bool)
+	for _, name := range allowedTools {
+		allowed[name] = true
+	}
+	return &FilteredToolRegistry{
+		parent:  parent,
+		allowed: allowed,
+	}
+}
+
+// Get retrieves a tool by name, returning nil if not in the allowed set.
+func (r *FilteredToolRegistry) Get(name string) Tool {
+	if len(r.allowed) > 0 && !r.allowed[name] {
+		return nil
+	}
+	return r.parent.Get(name)
+}
+
+// List returns only allowed tools.
+func (r *FilteredToolRegistry) List() []Tool {
+	all := r.parent.List()
+	if len(r.allowed) == 0 {
+		return all
+	}
+
+	filtered := make([]Tool, 0)
+	for _, t := range all {
+		if r.allowed[t.Name()] {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
+// GetDefinitions returns tool definitions for only allowed tools.
+func (r *FilteredToolRegistry) GetDefinitions() []llm.ToolDefinition {
+	all := r.parent.GetDefinitions()
+	if len(r.allowed) == 0 {
+		return all
+	}
+
+	filtered := make([]llm.ToolDefinition, 0)
+	for _, def := range all {
+		if r.allowed[def.Function.Name] {
+			filtered = append(filtered, def)
+		}
+	}
+	return filtered
+}
+
+// FilterToolsForSkill creates a filtered tool registry based on a skill's allowed-tools.
+// This is used when executing skills that have restricted tool access.
+func FilterToolsForSkill(registry ToolRegistry, allowedTools []string) ToolRegistry {
+	if len(allowedTools) == 0 {
+		return registry // No filtering needed
+	}
+	return NewFilteredToolRegistry(registry, allowedTools)
 }

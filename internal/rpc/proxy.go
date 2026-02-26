@@ -51,6 +51,8 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 
 	// Skills methods
 	server.RegisterHandler("skills.list", p.makeProxy("skills.list", "skills.result", 10*time.Second))
+	server.RegisterHandler("skills.get", p.makeProxy("skills.get", "skills.result", 10*time.Second))
+	server.RegisterHandler("skills.execute", p.makeProxy("skills.execute", "skills.result", 120*time.Second))
 	server.RegisterHandler("skills.triage", p.makeProxy("skills.triage", "skills.result", 10*time.Second))
 
 	// Agent/Worker methods
@@ -66,6 +68,7 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("session.messages.save", p.makeProxy("session.messages.save", "session.result", 10*time.Second))
 	server.RegisterHandler("session.messages.get", p.makeProxy("session.messages.get", "session.result", 10*time.Second))
 	server.RegisterHandler("session.update_description", p.makeProxy("session.update_description", "session.result", 10*time.Second))
+	server.RegisterHandler("session.generate_description", p.makeProxy("session.generate_description", "session.result", 20*time.Second))
 
 	// Task methods
 	server.RegisterHandler("task.create", p.makeProxy("task.create", "task.result", 10*time.Second))

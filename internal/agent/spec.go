@@ -56,6 +56,10 @@ type AgentSpec struct {
 	Constraints AgentConstraints `json:"constraints"`
 	// SystemPromptSections are additional prompt sections for this agent.
 	SystemPromptSections []string `json:"system_prompt_sections,omitempty"`
+	// AvailableSkills lists skill names this agent can invoke.
+	AvailableSkills []string `json:"available_skills,omitempty"`
+	// SkillTriggers maps keywords to skill names for automatic invocation.
+	SkillTriggers map[string]string `json:"skill_triggers,omitempty"`
 }
 
 // BaselineTools are the tools available to all agents.
@@ -80,19 +84,38 @@ func DispatcherSpec() *AgentSpec {
 		Role: RoleDispatcher,
 		Purpose: `You are the intake agent for meept. Your role is to:
 1. Understand the user's intent from their message
-2. Search memory for relevant context
-3. Create a task with appropriate memory references
-4. Route to the best specialist agent
+2. Search memory for relevant context using memory_search
+3. Discover available specialist agents using platform_agents
+4. Create a task with task_create and route to the best specialist agent
+
+## Coworker Awareness
+Use platform_agents to discover available specialist agents. Each agent has:
+- ID: The unique identifier used for routing (e.g., "coder", "planner", "analyst")
+- Name: Human-readable name
+- Role: Either "executor" (does work) or "dispatcher" (routes work)
+- Purpose: What this agent specializes in
+
+Common specialists:
+- coder: File operations, shell commands, coding tasks
+- planner: Breaking complex tasks into steps, project planning
+- analyst: Data analysis, research, investigation
+- debugger: Troubleshooting, error analysis, fixing bugs
+- committer: Git operations, commits, PR management
+- scheduler: Job scheduling, recurring tasks
+
+## Task Routing
+When creating a task, specify the target agent in the task metadata.
+Include relevant memory_refs to provide context continuity to the specialist.
 
 Always include relevant memory_refs when creating tasks to provide context continuity.`,
 		Model: "", // Use default model
 		AdditionalTools: []string{
-			// NOTE: classify_intent and delegate tools do not exist yet
+			"delegate_task",
 		},
 		Constraints: AgentConstraints{
-			MaxIterations:    3,
-			Timeout:          30 * time.Second,
-			MaxTokensPerTurn: 1024,
+			MaxIterations:    5,
+			Timeout:          60 * time.Second,
+			MaxTokensPerTurn: 2048,
 			MaxMemoryRefs:    10,
 		},
 	}
@@ -266,4 +289,22 @@ func (s *AgentSpec) AllTools() []string {
 	tools = append(tools, BaselineTools...)
 	tools = append(tools, s.AdditionalTools...)
 	return tools
+}
+
+// HasSkill checks if the agent spec includes a specific skill.
+func (s *AgentSpec) HasSkill(skillName string) bool {
+	for _, sk := range s.AvailableSkills {
+		if sk == skillName {
+			return true
+		}
+	}
+	return false
+}
+
+// GetSkillForTrigger returns the skill name for a trigger keyword, or empty string if not found.
+func (s *AgentSpec) GetSkillForTrigger(keyword string) string {
+	if s.SkillTriggers == nil {
+		return ""
+	}
+	return s.SkillTriggers[keyword]
 }

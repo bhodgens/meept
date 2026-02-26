@@ -1,6 +1,11 @@
 // Package prompts provides system prompt templates for agents.
 package prompts
 
+import (
+	"fmt"
+	"strings"
+)
+
 // BaselineCapabilities is the shared capabilities section for all agents.
 const BaselineCapabilities = `# Platform Capabilities
 
@@ -58,3 +63,63 @@ const ToolUsageGuidelines = `# Tool Usage
 func BuildBaselinePrompt() string {
 	return BaselineCapabilities + "\n" + BaselineGuidelines + "\n" + MemoryInstructions + "\n" + ToolUsageGuidelines
 }
+
+// SkillInfo holds information about a skill for prompt building.
+type SkillInfo struct {
+	Name        string
+	Description string
+	Requires    []string
+	Tags        []string
+	Examples    []string
+}
+
+// BuildSkillsPromptSection builds a prompt section describing available skills.
+func BuildSkillsPromptSection(skills []SkillInfo) string {
+	if len(skills) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Available Skills\n\n")
+	sb.WriteString("You can invoke the following skills using the /skill-name format:\n\n")
+
+	for _, skill := range skills {
+		sb.WriteString(fmt.Sprintf("## /%s\n", skill.Name))
+		if skill.Description != "" {
+			sb.WriteString(fmt.Sprintf("%s\n", skill.Description))
+		}
+
+		if len(skill.Requires) > 0 {
+			sb.WriteString(fmt.Sprintf("Requires: %s\n", strings.Join(skill.Requires, ", ")))
+		}
+
+		if len(skill.Tags) > 0 {
+			sb.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(skill.Tags, ", ")))
+		}
+
+		if len(skill.Examples) > 0 {
+			sb.WriteString("\nExamples:\n")
+			for _, ex := range skill.Examples {
+				sb.WriteString(fmt.Sprintf("  - %s\n", ex))
+			}
+		}
+
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("To invoke a skill, use: /<skill-name> <input>\n")
+	sb.WriteString("Example: /code-review Check my Python function for bugs\n")
+
+	return sb.String()
+}
+
+// SkillsInstructions provides instructions for skill usage.
+const SkillsInstructions = `# Skill Usage
+
+When a user invokes a skill with /skill-name:
+1. The skill is executed with its specialized instructions
+2. The skill may have restricted tool access
+3. Results are returned directly to the user
+
+You can suggest skills to users when appropriate for their task.
+`

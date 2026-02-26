@@ -182,7 +182,9 @@ type WorkspaceConfig struct {
 
 // SkillsConfig holds skills settings.
 type SkillsConfig struct {
-	Enabled bool `toml:"enabled"`
+	Enabled     bool     `toml:"enabled"`
+	SearchPaths []string `toml:"search_paths"` // Additional skill directories beyond defaults
+	AutoReload  bool     `toml:"auto_reload"`  // Watch for skill file changes
 }
 
 // ClawSkillsConfig holds ClawSkills settings.
@@ -466,7 +468,9 @@ func DefaultConfig() *Config {
 			CleanupCompleted: false,
 		},
 		Skills: SkillsConfig{
-			Enabled: false,
+			Enabled:     false,
+			SearchPaths: []string{},
+			AutoReload:  false,
 		},
 		ClawSkills: ClawSkillsConfig{
 			Enabled:          false,

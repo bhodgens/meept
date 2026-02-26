@@ -97,11 +97,18 @@ cleanup_completed = false
 
 [skills]
 enabled = false
+search_paths = []     # Additional skill directories beyond defaults
+auto_reload = false   # Watch for skill file changes (not yet implemented)
 # Skills are discovered via 3-tier SKILL.md scanning:
 #   1. .meept/skills/           (project-local, highest priority)
 #   2. ~/.meept/skills/         (user-global)
 #   3. ~/.config/meept/skills/  (system-wide, lowest priority)
 # Model selection uses capability matching from config/models.json5
+#
+# Invoke skills with: /skill-name <input>
+# List skills with: meept skills list
+# Show skill details: meept skills show <name>
+# Run a skill: meept skills run <name> <input>
 
 [clawskills]
 enabled = false

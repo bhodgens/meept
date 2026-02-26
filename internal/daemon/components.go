@@ -19,6 +19,7 @@ import (
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
+	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
@@ -33,6 +34,7 @@ type Components struct {
 	Config          *config.Config
 	ModelsConfig    *config.ModelsConfig
 	LLMClient       *llm.Client
+	LLMResolver     *llm.Resolver
 	ToolRegistry    *tools.Registry
 	SecurityChecker *security.PermissionChecker
 	AgentLoop       *agent.AgentLoop
@@ -63,6 +65,10 @@ type Components struct {
 
 	// MCP integration
 	MCPManager      *mcp.Manager
+
+	// Skills
+	SkillRegistry   *skills.Registry
+	SkillExecutor   *skills.Executor
 
 	Logger          *slog.Logger
 }
@@ -120,6 +126,20 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Create tool registry (builtin tools registered after all dependencies are available)
 	c.ToolRegistry = tools.NewRegistry(logger)
+
+	// Create LLM resolver for skill model resolution
+	providersCfg, err := llm.LoadProvidersConfigDefault()
+	if err != nil {
+		logger.Warn("Failed to load providers config for resolver", "error", err)
+	} else {
+		c.LLMResolver = llm.NewResolver(providersCfg, logger.With("component", "resolver"))
+		logger.Debug("LLM resolver initialized")
+	}
+
+	// Initialize skills system
+	if cfg.Skills.Enabled {
+		c.initializeSkills(cfg, logger)
+	}
 
 	// Create shadow training manager early (before agent loop) so it can be injected
 	if cfg.Shadow.Enabled {
@@ -297,11 +317,13 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 		// Create dispatcher
 		c.Dispatcher = agent.NewDispatcher(agent.DispatcherConfig{
-			Registry:     c.AgentRegistry,
-			MemvidClient: c.MemvidClient,
-			MemoryMgr:    c.MemoryManager,
-			TaskStore:    taskStore,
-			Logger:       logger.With("component", "dispatcher"),
+			Registry:      c.AgentRegistry,
+			MemvidClient:  c.MemvidClient,
+			MemoryMgr:     c.MemoryManager,
+			TaskStore:     taskStore,
+			SkillRegistry: c.SkillRegistry,
+			SkillExecutor: c.SkillExecutor,
+			Logger:        logger.With("component", "dispatcher"),
 		})
 		logger.Info("Dispatcher initialized")
 
@@ -832,6 +854,55 @@ func findDot(s string) int {
 		}
 	}
 	return -1
+}
+
+// initializeSkills sets up the skills system.
+func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
+	// Build discovery options
+	discoveryOpts := []skills.DiscoveryOption{
+		skills.WithDiscoveryLogger(logger.With("component", "skills-discovery")),
+	}
+
+	// Add custom search paths if configured
+	if len(cfg.Skills.SearchPaths) > 0 {
+		customTiers := make([]skills.DiscoveryTier, len(cfg.Skills.SearchPaths))
+		for i, path := range cfg.Skills.SearchPaths {
+			customTiers[i] = skills.DiscoveryTier{
+				Path:     path,
+				Priority: skills.PriorityUser, // Same priority as user-global
+			}
+		}
+		discoveryOpts = append(discoveryOpts, skills.WithTiers(
+			append(skills.DefaultTiers(), customTiers...),
+		))
+	}
+
+	// Create discovery and registry
+	discovery := skills.NewDiscovery(discoveryOpts...)
+	c.SkillRegistry = skills.NewRegistry(
+		skills.WithRegistryLogger(logger.With("component", "skills-registry")),
+	)
+
+	// Discover and register skills
+	discovered, err := discovery.Discover()
+	if err != nil {
+		logger.Warn("Skill discovery failed", "error", err)
+	} else {
+		c.SkillRegistry.RegisterAll(discovered)
+		logger.Info("Skills loaded", "count", len(discovered))
+	}
+
+	// Create executor if we have a resolver
+	if c.LLMResolver != nil {
+		c.SkillExecutor = skills.NewExecutor(
+			c.LLMResolver,
+			skills.WithExecutorLogger(logger.With("component", "skills-executor")),
+			skills.WithClient(c.LLMClient),
+		)
+		logger.Debug("Skills executor initialized")
+	} else {
+		logger.Warn("Skills executor not created - no LLM resolver available")
+	}
 }
 
 // StatusHandler handles status.request messages on the bus.

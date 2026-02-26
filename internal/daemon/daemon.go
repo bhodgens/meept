@@ -125,6 +125,15 @@ func New(cfg *Config) (*Daemon, error) {
 		return nil, fmt.Errorf("failed to create components: %w", err)
 	}
 
+	// Register skills handlers (both direct and bus-based)
+	if fullCfg.Skills.Enabled && components.SkillRegistry != nil {
+		rpc.RegisterSkillsHandlers(rpcServer, components.SkillRegistry, components.SkillExecutor)
+		logger.Info("Skills RPC handlers registered",
+			"skill_count", components.SkillRegistry.Count(),
+			"executor_available", components.SkillExecutor != nil,
+		)
+	}
+
 	return &Daemon{
 		config:     cfg,
 		fullConfig: fullCfg,

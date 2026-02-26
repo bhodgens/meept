@@ -10,6 +10,7 @@ import (
 
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -45,12 +46,14 @@ type DispatchResult struct {
 
 // Dispatcher handles intake classification and routing of requests.
 type Dispatcher struct {
-	registry    *AgentRegistry
-	memvid      *memvid.Client
-	memoryMgr   *memory.Manager
-	taskStore   *task.Store
-	logger      *slog.Logger
-	classifiers []IntentClassifier
+	registry      *AgentRegistry
+	memvid        *memvid.Client
+	memoryMgr     *memory.Manager
+	taskStore     *task.Store
+	skillRegistry *skills.Registry
+	skillExecutor *skills.Executor
+	logger        *slog.Logger
+	classifiers   []IntentClassifier
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -60,11 +63,13 @@ type IntentClassifier interface {
 
 // DispatcherConfig holds configuration for creating a Dispatcher.
 type DispatcherConfig struct {
-	Registry     *AgentRegistry
-	MemvidClient *memvid.Client
-	MemoryMgr    *memory.Manager
-	TaskStore    *task.Store
-	Logger       *slog.Logger
+	Registry      *AgentRegistry
+	MemvidClient  *memvid.Client
+	MemoryMgr     *memory.Manager
+	TaskStore     *task.Store
+	SkillRegistry *skills.Registry
+	SkillExecutor *skills.Executor
+	Logger        *slog.Logger
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -74,11 +79,13 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	}
 
 	d := &Dispatcher{
-		registry:  cfg.Registry,
-		memvid:    cfg.MemvidClient,
-		memoryMgr: cfg.MemoryMgr,
-		taskStore: cfg.TaskStore,
-		logger:    cfg.Logger,
+		registry:      cfg.Registry,
+		memvid:        cfg.MemvidClient,
+		memoryMgr:     cfg.MemoryMgr,
+		taskStore:     cfg.TaskStore,
+		skillRegistry: cfg.SkillRegistry,
+		skillExecutor: cfg.SkillExecutor,
+		logger:        cfg.Logger,
 	}
 
 	// Add default keyword-based classifier
@@ -90,6 +97,19 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 // ClassifyAndRoute is the main entry point for the dispatcher.
 func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, sessionID string) (*DispatchResult, error) {
 	d.logger.Debug("Dispatching request", "session", sessionID, "input_len", len(input))
+
+	// Check for explicit skill invocation (/skill-name)
+	if strings.HasPrefix(input, "/") {
+		skillName, skillInput := d.parseSkillInvocation(input)
+		if skill := d.getSkill(skillName); skill != nil {
+			d.logger.Info("Skill invocation detected",
+				"skill", skillName,
+				"session", sessionID,
+			)
+			return d.executeSkill(ctx, skill, skillInput, sessionID)
+		}
+		// Not a valid skill, fall through to normal routing
+	}
 
 	// 1. Search memory for relevant context
 	var memoryContext []memory.MemoryResult
@@ -426,4 +446,69 @@ func (i *Intent) MarshalJSON() ([]byte, error) {
 	}{
 		Alias: (*Alias)(i),
 	})
+}
+
+// parseSkillInvocation extracts skill name and input from a /skill-name invocation.
+func (d *Dispatcher) parseSkillInvocation(input string) (string, string) {
+	// Remove leading slash
+	input = strings.TrimPrefix(input, "/")
+
+	// Split on first whitespace
+	parts := strings.SplitN(input, " ", 2)
+	skillName := parts[0]
+	skillInput := ""
+	if len(parts) > 1 {
+		skillInput = strings.TrimSpace(parts[1])
+	}
+
+	return skillName, skillInput
+}
+
+// getSkill retrieves a skill by name from the registry.
+func (d *Dispatcher) getSkill(name string) *skills.Skill {
+	if d.skillRegistry == nil {
+		return nil
+	}
+	return d.skillRegistry.Get(name)
+}
+
+// executeSkill executes a skill and returns a dispatch result.
+func (d *Dispatcher) executeSkill(ctx context.Context, skill *skills.Skill, input string, sessionID string) (*DispatchResult, error) {
+	if d.skillExecutor == nil {
+		return nil, fmt.Errorf("skill executor not configured")
+	}
+
+	// Execute the skill
+	result, err := d.skillExecutor.Execute(ctx, skill, input)
+	if err != nil {
+		d.logger.Error("Skill execution failed",
+			"skill", skill.Name,
+			"error", err,
+		)
+		return nil, fmt.Errorf("skill execution failed: %w", err)
+	}
+
+	// Build dispatch result with skill response
+	intent := &Intent{
+		Type:       "skill",
+		Confidence: 1.0,
+		AgentType:  "skill:" + skill.Name,
+		Summary:    fmt.Sprintf("Executed skill: %s", skill.Name),
+	}
+
+	return &DispatchResult{
+		AgentID:  "skill:" + skill.Name,
+		Intent:   intent,
+		Response: result.Content,
+	}, nil
+}
+
+// GetSkillRegistry returns the skill registry for external access.
+func (d *Dispatcher) GetSkillRegistry() *skills.Registry {
+	return d.skillRegistry
+}
+
+// GetSkillExecutor returns the skill executor for external access.
+func (d *Dispatcher) GetSkillExecutor() *skills.Executor {
+	return d.skillExecutor
 }
