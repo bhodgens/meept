@@ -329,22 +329,37 @@ var _ Store = (*MemoryStore)(nil)
 
 // Handler handles session-related RPC requests via the message bus.
 type Handler struct {
-	store  Store
-	bus    *bus.MessageBus
-	logger *slog.Logger
-	cancel context.CancelFunc
+	store      Store
+	bus        *bus.MessageBus
+	logger     *slog.Logger
+	cancel     context.CancelFunc
+	summarizer *Summarizer
+}
+
+// HandlerOption configures the session handler.
+type HandlerOption func(*Handler)
+
+// WithSummarizer sets the summarizer for LLM-based description generation.
+func WithSummarizer(s *Summarizer) HandlerOption {
+	return func(h *Handler) {
+		h.summarizer = s
+	}
 }
 
 // NewHandler creates a new session handler.
-func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger) *Handler {
+func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger, opts ...HandlerOption) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{
+	h := &Handler{
 		store:  store,
 		bus:    msgBus,
 		logger: logger,
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Start begins listening for session requests.
@@ -363,6 +378,7 @@ func (h *Handler) Start(ctx context.Context) error {
 		"session.messages.save",
 		"session.messages.get",
 		"session.update_description",
+		"session.generate_description",
 	}
 
 	for _, topic := range topics {
@@ -424,6 +440,8 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleGetMessages(msg)
 	case "session.update_description":
 		response, err = h.handleUpdateDescription(msg)
+	case "session.generate_description":
+		response, err = h.handleGenerateDescription(msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -586,6 +604,90 @@ func (h *Handler) handleUpdateDescription(msg *models.BusMessage) (any, error) {
 	}
 
 	return map[string]string{"status": "updated"}, nil
+}
+
+// handleGenerateDescription generates a description using LLM summarization.
+func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error) {
+	h.logger.Info("Generate description request received")
+
+	var params struct {
+		SessionID    string `json:"session_id"`
+		FirstMessage string `json:"first_message"`
+		ProjectName  string `json:"project_name,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		h.logger.Error("Failed to unmarshal generate description params", "error", err)
+		return nil, err
+	}
+
+	h.logger.Debug("Generate description params",
+		"session_id", params.SessionID,
+		"first_message_len", len(params.FirstMessage),
+		"project_name", params.ProjectName,
+	)
+
+	if params.SessionID == "" || params.FirstMessage == "" {
+		h.logger.Warn("Missing required params for generate description",
+			"has_session_id", params.SessionID != "",
+			"has_first_message", params.FirstMessage != "",
+		)
+		return nil, fmt.Errorf("session_id and first_message are required")
+	}
+
+	var description string
+	if h.summarizer != nil {
+		h.logger.Info("Using LLM-based summarization",
+			"session_id", params.SessionID,
+		)
+		// Use LLM-based summarization
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		desc, err := h.summarizer.GenerateDescription(ctx, SummarizeRequest{
+			FirstMessage: params.FirstMessage,
+			ProjectName:  params.ProjectName,
+		})
+		if err != nil {
+			h.logger.Warn("Summarization failed, using fallback",
+				"error", err,
+				"session_id", params.SessionID,
+			)
+			description = extractSimple(params.FirstMessage)
+		} else {
+			h.logger.Info("LLM summarization succeeded",
+				"session_id", params.SessionID,
+				"description", desc,
+			)
+			description = desc
+		}
+	} else {
+		h.logger.Warn("No summarizer available, using simple extraction",
+			"session_id", params.SessionID,
+		)
+		// Fallback to simple extraction
+		description = extractSimple(params.FirstMessage)
+	}
+
+	// Save the generated description
+	if err := h.store.UpdateDescription(params.SessionID, description); err != nil {
+		h.logger.Error("Failed to save generated description",
+			"error", err,
+			"session_id", params.SessionID,
+			"description", description,
+		)
+		return nil, err
+	}
+
+	h.logger.Info("Session description generated and saved",
+		"session_id", params.SessionID,
+		"description", description,
+	)
+
+	return map[string]string{
+		"session_id":  params.SessionID,
+		"description": description,
+		"status":      "generated",
+	}, nil
 }
 
 // sendResponse publishes a response to the bus.

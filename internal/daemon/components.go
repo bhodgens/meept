@@ -436,6 +436,47 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 	}
 
+	// Create scheduler with job dependencies for extended job types
+	if cfg.Scheduler.Enabled {
+		schedOpts := []scheduler.Option{
+			scheduler.WithDataDir(cfg.Daemon.DataDir),
+			scheduler.WithLogger(logger.With("component", "scheduler")),
+		}
+
+		// Build job dependencies for optimization, security, and learning jobs
+		jobDeps := &scheduler.JobDependencies{
+			Bus: msgBus,
+		}
+		if c.MemoryManager != nil {
+			jobDeps.MemoryManager = &scheduler.MemoryOptimizerAdapter{
+				UpdateMetricsFn: c.MemoryManager.UpdateGraphMetrics,
+				ConsolidateFn: func(ctx context.Context) error {
+					_, err := c.MemoryManager.Consolidate(ctx)
+					return err
+				},
+			}
+		}
+		if c.LearningPipeline != nil {
+			jobDeps.LearningPipeline = &scheduler.LearningConsolidatorAdapter{
+				ConsolidateFn: func(ctx context.Context) error {
+					_, err := c.LearningPipeline.Consolidate(ctx)
+					return err
+				},
+			}
+		}
+		schedOpts = append(schedOpts, scheduler.WithJobDependencies(jobDeps))
+
+		sched, err := scheduler.NewScheduler(cfg.Scheduler, msgBus, schedOpts...)
+		if err != nil {
+			logger.Warn("Failed to create scheduler", "error", err)
+		} else {
+			c.Scheduler = sched
+			logger.Info("Scheduler initialized",
+				"timezone", cfg.Scheduler.Timezone,
+			)
+		}
+	}
+
 	return c, nil
 }
 
@@ -488,6 +529,13 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start scheduler
+	if c.Scheduler != nil {
+		if err := c.Scheduler.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start scheduler", "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -495,7 +543,15 @@ func (c *Components) Start(ctx context.Context) error {
 func (c *Components) Stop(ctx context.Context) error {
 	var lastErr error
 
-	// Stop worker pool first to prevent new work
+	// Stop scheduler first to prevent new job executions
+	if c.Scheduler != nil {
+		if err := c.Scheduler.Stop(ctx); err != nil {
+			c.Logger.Error("Failed to stop scheduler", "error", err)
+			lastErr = err
+		}
+	}
+
+	// Stop worker pool to prevent new work
 	if c.WorkerPool != nil {
 		if err := c.WorkerPool.Stop(ctx); err != nil {
 			c.Logger.Error("Failed to stop worker pool", "error", err)

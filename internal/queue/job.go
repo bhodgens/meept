@@ -55,6 +55,7 @@ const (
 type Job struct {
 	ID           string          `json:"id"`
 	TaskID       string          `json:"task_id,omitempty"`   // Parent task (null for standalone)
+	AgentID      string          `json:"agent_id,omitempty"`  // Target agent (e.g., "coder", "planner")
 	Type         JobType         `json:"type"`
 	Priority     Priority        `json:"priority"`
 	State        JobState        `json:"state"`
@@ -112,6 +113,12 @@ func (j *Job) WithRequiredCaps(caps []string) *Job {
 // WithMaxRetries sets the maximum retry count.
 func (j *Job) WithMaxRetries(n int) *Job {
 	j.MaxRetries = n
+	return j
+}
+
+// WithAgentID sets the target agent for this job.
+func (j *Job) WithAgentID(agentID string) *Job {
+	j.AgentID = agentID
 	return j
 }
 

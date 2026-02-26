@@ -45,14 +45,34 @@ type ActionRule struct {
 
 // Builtin action rules.
 var BuiltinRules = map[string]ActionRule{
-	"file_read":       {Action: "file_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
-	"file_write":      {Action: "file_write", RiskLevel: RiskMedium, RequiresConfirmation: false},
-	"file_delete":     {Action: "file_delete", RiskLevel: RiskHigh, RequiresConfirmation: true},
+	// File operations
+	"file_read":   {Action: "file_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
+	"file_write":  {Action: "file_write", RiskLevel: RiskMedium, RequiresConfirmation: false},
+	"file_delete": {Action: "file_delete", RiskLevel: RiskHigh, RequiresConfirmation: true},
+
+	// Shell/system operations
 	"shell_execute":   {Action: "shell_execute", RiskLevel: RiskMedium, RequiresConfirmation: false},
-	"network_request": {Action: "network_request", RiskLevel: RiskLow, RequiresConfirmation: false},
-	"send_message":    {Action: "send_message", RiskLevel: RiskMedium, RequiresConfirmation: false},
 	"install_package": {Action: "install_package", RiskLevel: RiskHigh, RequiresConfirmation: true},
 	"system_modify":   {Action: "system_modify", RiskLevel: RiskCritical, RequiresConfirmation: true},
+
+	// Network operations
+	"network_request": {Action: "network_request", RiskLevel: RiskLow, RequiresConfirmation: false},
+	"send_message":    {Action: "send_message", RiskLevel: RiskMedium, RequiresConfirmation: false},
+
+	// Memory operations
+	"memory_read":  {Action: "memory_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
+	"memory_write": {Action: "memory_write", RiskLevel: RiskLow, RequiresConfirmation: false},
+
+	// Platform introspection (always safe - read-only)
+	"platform_read": {Action: "platform_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
+
+	// Task management
+	"task_read":  {Action: "task_read", RiskLevel: RiskSafe, RequiresConfirmation: false},
+	"task_write": {Action: "task_write", RiskLevel: RiskLow, RequiresConfirmation: false},
+
+	// Agent operations
+	"agent_delegate": {Action: "agent_delegate", RiskLevel: RiskLow, RequiresConfirmation: false},
+	"skill_execute":  {Action: "skill_execute", RiskLevel: RiskMedium, RequiresConfirmation: false},
 }
 
 // Dangerous command patterns that elevate shell_execute to HIGH risk.
@@ -134,30 +154,60 @@ func (pc *PermissionChecker) checkPathWithReason(pathStr string) (bool, string) 
 
 	// Block list takes precedence
 	for _, pattern := range pc.blockedGlobs {
-		if matched, _ := filepath.Match(pattern, resolved); matched {
+		if pc.matchGlobPattern(pattern, resolved) {
 			return false, "Path matches blocked pattern: " + pattern
-		}
-		// Also check if path starts with blocked directory
-		if strings.HasPrefix(resolved, pattern) {
-			return false, "Path is within blocked directory: " + pattern
 		}
 	}
 
 	// If there's an allow list, path must match at least one
 	if len(pc.allowedGlobs) > 0 {
 		for _, pattern := range pc.allowedGlobs {
-			if matched, _ := filepath.Match(pattern, resolved); matched {
+			if pc.matchGlobPattern(pattern, resolved) {
 				return true, "Path is within allowed paths"
-			}
-			// Check if path starts with allowed directory
-			if strings.HasPrefix(resolved, pattern) {
-				return true, "Path is within allowed directory"
 			}
 		}
 		return false, "Path does not match any allowed path pattern"
 	}
 
 	return true, "No path restrictions configured"
+}
+
+// matchGlobPattern handles both exact globs and directory prefixes.
+// Patterns ending with /* or /** are treated as directory prefixes.
+func (pc *PermissionChecker) matchGlobPattern(pattern, path string) bool {
+	// Handle trailing /* or /** as directory prefix match
+	if strings.HasSuffix(pattern, "/*") || strings.HasSuffix(pattern, "/**") {
+		// Strip the trailing /* or /**
+		dirPrefix := strings.TrimSuffix(strings.TrimSuffix(pattern, "**"), "*")
+		dirPrefix = strings.TrimSuffix(dirPrefix, "/")
+
+		// Check if path equals the directory or is under it
+		if path == dirPrefix {
+			return true
+		}
+		// Check if path is under this directory
+		if strings.HasPrefix(path, dirPrefix+"/") {
+			return true
+		}
+		return false
+	}
+
+	// Try exact filepath.Match for non-prefix patterns
+	if matched, _ := filepath.Match(pattern, path); matched {
+		return true
+	}
+
+	// Also check exact path match (for patterns without wildcards)
+	if pattern == path {
+		return true
+	}
+
+	// Check if path is under the pattern directory (for directory patterns without *)
+	if strings.HasPrefix(path, pattern+"/") {
+		return true
+	}
+
+	return false
 }
 
 // EvaluateShellRisk returns the risk level for a shell command.

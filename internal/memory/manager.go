@@ -32,6 +32,9 @@ type Manager struct {
 	task        *TaskMemory
 	personality *PersonalityMemory
 
+	// Knowledge graph for relationship tracking and PageRank scoring
+	graph *KnowledgeGraph
+
 	consolidator *Consolidator
 	initialized  bool
 	mu           sync.RWMutex
@@ -146,6 +149,20 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		})
 	}
 
+	// Initialize knowledge graph
+	graphDir := filepath.Join(dataDir, "graph")
+	m.graph = NewKnowledgeGraph(KnowledgeGraphConfig{
+		DataDir: graphDir,
+		Logger:  m.logger.With("subsystem", "graph"),
+	})
+	if err := m.graph.Initialize(ctx); err != nil {
+		m.logger.Warn("Failed to initialize knowledge graph", "error", err)
+		// Graph is optional, continue without it
+		m.graph = nil
+	} else {
+		m.logger.Info("Knowledge graph initialized")
+	}
+
 	backend := "sqlite"
 	if m.useMemvid {
 		backend = "memvid"
@@ -154,6 +171,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	m.logger.Info("MemoryManager fully initialized",
 		"backend", backend,
 		"data_dir", dataDir,
+		"graph_enabled", m.graph != nil,
 	)
 	return nil
 }
@@ -591,6 +609,11 @@ func (m *Manager) GetRelevantContext(ctx context.Context, query string, maxItems
 		}
 	}
 
+	// Apply graph ranking if available
+	if m.graph != nil && len(results) > 0 {
+		results, _ = m.graph.RankResults(ctx, results, 0.3)
+	}
+
 	// Sort by relevance descending, recency as tie-breaker
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].RelevanceScore != results[j].RelevanceScore {
@@ -797,6 +820,146 @@ func (m *Manager) Backend() string {
 	return "sqlite"
 }
 
+// Graph returns the knowledge graph if enabled.
+func (m *Manager) Graph() *KnowledgeGraph {
+	return m.graph
+}
+
+// SearchWithGraph searches memories and applies graph-aware ranking.
+// The alpha parameter controls PageRank influence: 0 = pure relevance, 1 = pure PageRank.
+func (m *Manager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error) {
+	results, err := m.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply PageRank re-ranking if graph is available
+	if m.graph != nil && len(results) > 0 {
+		results, err = m.graph.RankResults(ctx, results, alpha)
+		if err != nil {
+			m.logger.Warn("Graph ranking failed", "error", err)
+			// Return unranked results
+		}
+	}
+
+	return results, nil
+}
+
+// GetRelatedMemories returns memories related to the given memory via the knowledge graph.
+func (m *Manager) GetRelatedMemories(ctx context.Context, memoryID string, limit int) ([]MemoryResult, error) {
+	if m.graph == nil {
+		return nil, errors.New("knowledge graph not enabled")
+	}
+
+	// Get related IDs from graph
+	relatedIDs, err := m.graph.GetRelatedMemoryIDs(ctx, memoryID, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(relatedIDs) == 0 {
+		return nil, nil
+	}
+
+	// Fetch full memory content
+	if m.useMemvid && m.memvid != nil {
+		memories, err := m.GetByIDs(ctx, relatedIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		results := make([]MemoryResult, len(memories))
+		for i, mem := range memories {
+			pr, _ := m.graph.GetPageRank(ctx, mem.ID)
+			results[i] = MemoryResult{
+				Memory:         mem,
+				RelevanceScore: pr,
+				Source:         "graph",
+			}
+		}
+		return results, nil
+	}
+
+	// For SQLite, we need to search each ID
+	// This is less efficient but works for smaller datasets
+	var results []MemoryResult
+	for _, id := range relatedIDs {
+		// Try episodic first
+		if m.episodic != nil {
+			epResults, err := m.episodic.Search(ctx, id, 1)
+			if err == nil && len(epResults) > 0 && epResults[0].Memory.ID == id {
+				pr, _ := m.graph.GetPageRank(ctx, id)
+				epResults[0].RelevanceScore = pr
+				epResults[0].Source = "graph:episodic"
+				results = append(results, epResults[0])
+				continue
+			}
+		}
+
+		// Try task memory
+		if m.task != nil {
+			taskResults, err := m.task.Search(ctx, id, "", 1)
+			if err == nil && len(taskResults) > 0 && taskResults[0].Memory.ID == id {
+				pr, _ := m.graph.GetPageRank(ctx, id)
+				taskResults[0].RelevanceScore = pr
+				taskResults[0].Source = "graph:task"
+				results = append(results, taskResults[0])
+			}
+		}
+	}
+
+	return results, nil
+}
+
+// AddMemoryRelation creates a relationship between two memories.
+func (m *Manager) AddMemoryRelation(ctx context.Context, sourceID, targetID string, edgeType EdgeType, weight float64) error {
+	if m.graph == nil {
+		return errors.New("knowledge graph not enabled")
+	}
+
+	return m.graph.AddEdge(ctx, MemoryEdge{
+		SourceID: sourceID,
+		TargetID: targetID,
+		EdgeType: edgeType,
+		Weight:   weight,
+	})
+}
+
+// RecordSessionMemories creates temporal edges between memories from a session.
+func (m *Manager) RecordSessionMemories(ctx context.Context, sessionID string, memoryIDs []string) error {
+	if m.graph == nil {
+		return nil // Silently skip if graph not available
+	}
+
+	return m.graph.CreateTemporalEdges(ctx, sessionID, memoryIDs)
+}
+
+// UpdateGraphMetrics recomputes PageRank and community detection.
+func (m *Manager) UpdateGraphMetrics(ctx context.Context) error {
+	if m.graph == nil {
+		return errors.New("knowledge graph not enabled")
+	}
+
+	if err := m.graph.ComputePageRank(ctx); err != nil {
+		return fmt.Errorf("PageRank computation failed: %w", err)
+	}
+
+	if _, err := m.graph.DetectCommunities(ctx); err != nil {
+		return fmt.Errorf("community detection failed: %w", err)
+	}
+
+	return nil
+}
+
+// GetGraphStats returns statistics about the knowledge graph.
+func (m *Manager) GetGraphStats(ctx context.Context) (*GraphStats, error) {
+	if m.graph == nil {
+		return nil, errors.New("knowledge graph not enabled")
+	}
+
+	return m.graph.GetStats(ctx)
+}
+
 // Close gracefully shuts down all subsystems.
 func (m *Manager) Close() error {
 	m.mu.Lock()
@@ -831,6 +994,13 @@ func (m *Manager) Close() error {
 			lastErr = err
 		}
 		m.personality = nil
+	}
+
+	if m.graph != nil {
+		if err := m.graph.Close(); err != nil {
+			lastErr = err
+		}
+		m.graph = nil
 	}
 
 	m.memvid = nil

@@ -175,7 +175,8 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 		}
 	}
 
-	results, err := t.manager.Search(ctx, memQuery)
+	// Use graph-aware search for better ranking (alpha=0.3 = 30% PageRank influence)
+	results, err := t.manager.SearchWithGraph(ctx, memQuery, 0.3)
 	if err != nil {
 		return nil, fmt.Errorf("memory search failed: %w", err)
 	}

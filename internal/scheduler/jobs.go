@@ -34,9 +34,12 @@ type Job interface {
 type JobType string
 
 const (
-	JobTypeAgent    JobType = "agent"
-	JobTypeShell    JobType = "shell"
-	JobTypeReminder JobType = "reminder"
+	JobTypeAgent        JobType = "agent"
+	JobTypeShell        JobType = "shell"
+	JobTypeReminder     JobType = "reminder"
+	JobTypeOptimization JobType = "optimization" // Memory graph optimization
+	JobTypeSecurity     JobType = "security"     // Security scans
+	JobTypeLearning     JobType = "learning"     // Learning consolidation
 )
 
 // JobConfig is the serializable configuration for a job.
@@ -54,9 +57,12 @@ type JobConfig struct {
 	Metadata    map[string]string `json:"metadata,omitempty"`
 
 	// Type-specific configuration
-	AgentConfig    *AgentJobConfig    `json:"agent_config,omitempty"`
-	ShellConfig    *ShellJobConfig    `json:"shell_config,omitempty"`
-	ReminderConfig *ReminderJobConfig `json:"reminder_config,omitempty"`
+	AgentConfig        *AgentJobConfig        `json:"agent_config,omitempty"`
+	ShellConfig        *ShellJobConfig        `json:"shell_config,omitempty"`
+	ReminderConfig     *ReminderJobConfig     `json:"reminder_config,omitempty"`
+	OptimizationConfig *OptimizationJobConfig `json:"optimization_config,omitempty"`
+	SecurityConfig     *SecurityJobConfig     `json:"security_config,omitempty"`
+	LearningConfig     *LearningJobConfig     `json:"learning_config,omitempty"`
 }
 
 // AgentJobConfig holds configuration for agent jobs.
@@ -84,6 +90,21 @@ type ReminderJobConfig struct {
 	Channels   []string `json:"channels,omitempty"` // e.g., ["telegram", "notification"]
 	Priority   string   `json:"priority,omitempty"` // low, normal, high, urgent
 	RepeatUntil *time.Time `json:"repeat_until,omitempty"`
+}
+
+// OptimizationJobConfig holds configuration for optimization jobs.
+type OptimizationJobConfig struct {
+	Target string `json:"target"` // "memory_graph", "memory_consolidate", "all"
+}
+
+// SecurityJobConfig holds configuration for security scan jobs.
+type SecurityJobConfig struct {
+	ScanTypes []string `json:"scan_types"` // "permissions", "patterns", "secrets"
+}
+
+// LearningJobConfig holds configuration for learning pipeline jobs.
+type LearningJobConfig struct {
+	Action string `json:"action"` // "consolidate", "decay_stale", "detect_contradictions"
 }
 
 // JobInfo contains information about a scheduled job.
@@ -381,7 +402,227 @@ func (j *ReminderJob) Execute(ctx context.Context) error {
 	return nil
 }
 
-// CreateJob creates a job from a JobConfig.
+// MemoryOptimizer is the interface for memory graph optimization operations.
+// Implementations may return additional result types; callers should use
+// MemoryOptimizerFunc adapters when the concrete type has a richer return signature.
+type MemoryOptimizer interface {
+	UpdateGraphMetrics(ctx context.Context) error
+	ConsolidateMemory(ctx context.Context) error
+}
+
+// LearningConsolidator is the interface for learning pipeline consolidation.
+// Implementations may return additional result types; callers should use
+// LearningConsolidatorFunc adapters when the concrete type has a richer return signature.
+type LearningConsolidator interface {
+	ConsolidateLearning(ctx context.Context) error
+}
+
+// MemoryOptimizerAdapter wraps separate functions to satisfy MemoryOptimizer.
+type MemoryOptimizerAdapter struct {
+	UpdateMetricsFn  func(ctx context.Context) error
+	ConsolidateFn    func(ctx context.Context) error
+}
+
+func (a *MemoryOptimizerAdapter) UpdateGraphMetrics(ctx context.Context) error {
+	if a.UpdateMetricsFn == nil {
+		return fmt.Errorf("UpdateGraphMetrics not configured")
+	}
+	return a.UpdateMetricsFn(ctx)
+}
+
+func (a *MemoryOptimizerAdapter) ConsolidateMemory(ctx context.Context) error {
+	if a.ConsolidateFn == nil {
+		return fmt.Errorf("ConsolidateMemory not configured")
+	}
+	return a.ConsolidateFn(ctx)
+}
+
+// LearningConsolidatorAdapter wraps a function to satisfy LearningConsolidator.
+type LearningConsolidatorAdapter struct {
+	ConsolidateFn func(ctx context.Context) error
+}
+
+func (a *LearningConsolidatorAdapter) ConsolidateLearning(ctx context.Context) error {
+	if a.ConsolidateFn == nil {
+		return fmt.Errorf("ConsolidateLearning not configured")
+	}
+	return a.ConsolidateFn(ctx)
+}
+
+// SecurityScanner is the interface for security scanning operations.
+type SecurityScanner interface {
+	ScanAll(ctx context.Context) ([]SecurityIssue, error)
+}
+
+// SecurityIssue represents a security issue found during scanning.
+type SecurityIssue struct {
+	Type        string `json:"type"`
+	Severity    string `json:"severity"`
+	Description string `json:"description"`
+	Location    string `json:"location,omitempty"`
+}
+
+// JobDependencies holds dependencies for extended job types.
+type JobDependencies struct {
+	Bus              *bus.MessageBus
+	MemoryManager    MemoryOptimizer
+	LearningPipeline LearningConsolidator
+	SecurityEngine   SecurityScanner
+}
+
+// OptimizationJob runs memory graph optimization tasks.
+type OptimizationJob struct {
+	baseJob
+	target string
+	deps   *JobDependencies
+}
+
+// NewOptimizationJob creates a new optimization job.
+func NewOptimizationJob(cfg JobConfig, deps *JobDependencies) (*OptimizationJob, error) {
+	if cfg.OptimizationConfig == nil {
+		return nil, fmt.Errorf("optimization job requires optimization_config")
+	}
+	target := cfg.OptimizationConfig.Target
+	if target == "" {
+		target = "all"
+	}
+
+	return &OptimizationJob{
+		baseJob: baseJob{
+			id:       cfg.ID,
+			name:     cfg.Name,
+			schedule: cfg.Schedule,
+			jobType:  JobTypeOptimization,
+			config:   cfg,
+		},
+		target: target,
+		deps:   deps,
+	}, nil
+}
+
+// Execute runs the optimization job.
+func (j *OptimizationJob) Execute(ctx context.Context) error {
+	if j.deps == nil || j.deps.MemoryManager == nil {
+		return fmt.Errorf("memory manager not configured")
+	}
+
+	switch j.target {
+	case "memory_graph":
+		return j.deps.MemoryManager.UpdateGraphMetrics(ctx)
+	case "memory_consolidate":
+		return j.deps.MemoryManager.ConsolidateMemory(ctx)
+	case "all":
+		if err := j.deps.MemoryManager.UpdateGraphMetrics(ctx); err != nil {
+			return fmt.Errorf("graph metrics failed: %w", err)
+		}
+		return j.deps.MemoryManager.ConsolidateMemory(ctx)
+	default:
+		return fmt.Errorf("unknown optimization target: %s", j.target)
+	}
+}
+
+// SecurityJob runs security scan tasks.
+type SecurityJob struct {
+	baseJob
+	scanTypes []string
+	deps      *JobDependencies
+}
+
+// NewSecurityJob creates a new security job.
+func NewSecurityJob(cfg JobConfig, deps *JobDependencies) (*SecurityJob, error) {
+	if cfg.SecurityConfig == nil {
+		return nil, fmt.Errorf("security job requires security_config")
+	}
+	scanTypes := cfg.SecurityConfig.ScanTypes
+	if len(scanTypes) == 0 {
+		scanTypes = []string{"permissions", "patterns"}
+	}
+
+	return &SecurityJob{
+		baseJob: baseJob{
+			id:       cfg.ID,
+			name:     cfg.Name,
+			schedule: cfg.Schedule,
+			jobType:  JobTypeSecurity,
+			config:   cfg,
+		},
+		scanTypes: scanTypes,
+		deps:      deps,
+	}, nil
+}
+
+// Execute runs the security job.
+func (j *SecurityJob) Execute(ctx context.Context) error {
+	if j.deps == nil || j.deps.SecurityEngine == nil {
+		return fmt.Errorf("security engine not configured")
+	}
+
+	issues, err := j.deps.SecurityEngine.ScanAll(ctx)
+	if err != nil {
+		return fmt.Errorf("security scan failed: %w", err)
+	}
+
+	// Publish scan results
+	if j.deps.Bus != nil {
+		payload := map[string]any{
+			"job_id":      j.id,
+			"issues":      issues,
+			"issue_count": len(issues),
+			"scan_types":  j.scanTypes,
+		}
+		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+j.id, payload)
+		j.deps.Bus.Publish("scheduler.security.completed", msg)
+	}
+
+	return nil
+}
+
+// LearningJob runs learning pipeline tasks.
+type LearningJob struct {
+	baseJob
+	action string
+	deps   *JobDependencies
+}
+
+// NewLearningJob creates a new learning job.
+func NewLearningJob(cfg JobConfig, deps *JobDependencies) (*LearningJob, error) {
+	if cfg.LearningConfig == nil {
+		return nil, fmt.Errorf("learning job requires learning_config")
+	}
+	action := cfg.LearningConfig.Action
+	if action == "" {
+		action = "consolidate"
+	}
+
+	return &LearningJob{
+		baseJob: baseJob{
+			id:       cfg.ID,
+			name:     cfg.Name,
+			schedule: cfg.Schedule,
+			jobType:  JobTypeLearning,
+			config:   cfg,
+		},
+		action: action,
+		deps:   deps,
+	}, nil
+}
+
+// Execute runs the learning job.
+func (j *LearningJob) Execute(ctx context.Context) error {
+	if j.deps == nil || j.deps.LearningPipeline == nil {
+		return fmt.Errorf("learning pipeline not configured")
+	}
+
+	switch j.action {
+	case "consolidate":
+		return j.deps.LearningPipeline.ConsolidateLearning(ctx)
+	default:
+		return fmt.Errorf("unknown learning action: %s", j.action)
+	}
+}
+
+// CreateJob creates a job from a JobConfig using only the message bus.
+// For extended job types (optimization, security, learning), use CreateJobWithDeps.
 func CreateJob(cfg JobConfig, msgBus *bus.MessageBus) (Job, error) {
 	switch cfg.Type {
 	case JobTypeAgent:
@@ -390,6 +631,28 @@ func CreateJob(cfg JobConfig, msgBus *bus.MessageBus) (Job, error) {
 		return NewShellJob(cfg, msgBus)
 	case JobTypeReminder:
 		return NewReminderJob(cfg, msgBus)
+	case JobTypeOptimization, JobTypeSecurity, JobTypeLearning:
+		return nil, fmt.Errorf("job type %s requires dependencies; use CreateJobWithDeps", cfg.Type)
+	default:
+		return nil, fmt.Errorf("unknown job type: %s", cfg.Type)
+	}
+}
+
+// CreateJobWithDeps creates a job from a JobConfig with full dependencies.
+func CreateJobWithDeps(cfg JobConfig, deps *JobDependencies) (Job, error) {
+	switch cfg.Type {
+	case JobTypeAgent:
+		return NewAgentJob(cfg, deps.Bus)
+	case JobTypeShell:
+		return NewShellJob(cfg, deps.Bus)
+	case JobTypeReminder:
+		return NewReminderJob(cfg, deps.Bus)
+	case JobTypeOptimization:
+		return NewOptimizationJob(cfg, deps)
+	case JobTypeSecurity:
+		return NewSecurityJob(cfg, deps)
+	case JobTypeLearning:
+		return NewLearningJob(cfg, deps)
 	default:
 		return nil, fmt.Errorf("unknown job type: %s", cfg.Type)
 	}
@@ -431,6 +694,18 @@ func ValidateJobConfig(cfg JobConfig) error {
 		}
 		if cfg.ReminderConfig.Message == "" {
 			return fmt.Errorf("reminder job requires a message")
+		}
+	case JobTypeOptimization:
+		if cfg.OptimizationConfig == nil {
+			return fmt.Errorf("optimization job requires optimization_config")
+		}
+	case JobTypeSecurity:
+		if cfg.SecurityConfig == nil {
+			return fmt.Errorf("security job requires security_config")
+		}
+	case JobTypeLearning:
+		if cfg.LearningConfig == nil {
+			return fmt.Errorf("learning job requires learning_config")
 		}
 	default:
 		return fmt.Errorf("unknown job type: %s", cfg.Type)

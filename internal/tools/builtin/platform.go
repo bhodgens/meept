@@ -3,6 +3,8 @@ package builtin
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/llm"
@@ -164,9 +166,138 @@ func (t *PlatformToolsTool) Execute(ctx context.Context, args map[string]any) (a
 	}, nil
 }
 
+// DelegateTaskTool delegates a task to a specific agent.
+type DelegateTaskTool struct {
+	registry *agent.AgentRegistry
+}
+
+// NewDelegateTaskTool creates a new delegate task tool.
+func NewDelegateTaskTool(registry *agent.AgentRegistry) *DelegateTaskTool {
+	return &DelegateTaskTool{registry: registry}
+}
+
+func (t *DelegateTaskTool) Name() string { return "delegate_task" }
+
+func (t *DelegateTaskTool) Description() string {
+	return "Delegate a task to a specific specialist agent by ID. Returns the agent's response. Use platform_agents first to discover available agents."
+}
+
+func (t *DelegateTaskTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: "object",
+		Properties: map[string]llm.ParameterProperty{
+			"agent_id": {
+				Type:        "string",
+				Description: "The ID of the agent to delegate to (e.g., 'coder', 'planner', 'analyst').",
+			},
+			"message": {
+				Type:        "string",
+				Description: "The message/task to send to the agent.",
+			},
+			"context": {
+				Type:        "string",
+				Description: "Optional additional context to provide to the agent.",
+			},
+		},
+		Required: []string{"agent_id", "message"},
+	}
+}
+
+// DelegateResult is the result of delegating a task.
+type DelegateResult struct {
+	AgentID  string `json:"agent_id"`
+	Success  bool   `json:"success"`
+	Response string `json:"response,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.registry == nil {
+		return DelegateResult{
+			Success: false,
+			Error:   "agent registry not available",
+		}, nil
+	}
+
+	agentID, _ := args["agent_id"].(string)
+	message, _ := args["message"].(string)
+	context, _ := args["context"].(string)
+
+	if agentID == "" {
+		return DelegateResult{
+			Success: false,
+			Error:   "agent_id is required",
+		}, nil
+	}
+
+	if message == "" {
+		return DelegateResult{
+			Success: false,
+			Error:   "message is required",
+		}, nil
+	}
+
+	// Check if agent exists
+	spec, ok := t.registry.GetSpec(agentID)
+	if !ok {
+		// List available agents for helpful error
+		specs := t.registry.ListSpecs()
+		available := make([]string, len(specs))
+		for i, s := range specs {
+			available[i] = s.ID
+		}
+		return DelegateResult{
+			AgentID: agentID,
+			Success: false,
+			Error:   "agent not found: " + agentID + ". Available: " + joinStrings(available),
+		}, nil
+	}
+
+	// Build the full message with context
+	fullMessage := message
+	if context != "" {
+		fullMessage = "Context: " + context + "\n\nTask: " + message
+	}
+
+	// Generate a conversation ID for this delegation
+	conversationID := "delegate-" + agentID + "-" + generateDelegateID()
+
+	// Run the agent
+	response, err := t.registry.RunAgent(ctx, spec.ID, fullMessage, conversationID)
+	if err != nil {
+		return DelegateResult{
+			AgentID: agentID,
+			Success: false,
+			Error:   err.Error(),
+		}, nil
+	}
+
+	return DelegateResult{
+		AgentID:  agentID,
+		Success:  true,
+		Response: response,
+	}, nil
+}
+
+func joinStrings(strs []string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	result := strs[0]
+	for i := 1; i < len(strs); i++ {
+		result += ", " + strs[i]
+	}
+	return result
+}
+
+func generateDelegateID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
 // Ensure tools implement the Tool interface
 var (
 	_ tools.Tool = (*PlatformStatusTool)(nil)
 	_ tools.Tool = (*PlatformAgentsTool)(nil)
 	_ tools.Tool = (*PlatformToolsTool)(nil)
+	_ tools.Tool = (*DelegateTaskTool)(nil)
 )

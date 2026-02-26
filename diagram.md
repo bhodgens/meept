@@ -284,13 +284,78 @@ flowchart LR
     Agent --> Memory
 ```
 
+## Multi-Agent Orchestration
+
+```mermaid
+flowchart TB
+    subgraph AgentRegistry["Agent Registry"]
+        Dispatcher["Dispatcher<br/>intake & routing"]
+        Chat["Chat Agent<br/>general conversation"]
+        Coder["Coder Agent<br/>file & shell ops"]
+        Debugger["Debugger Agent<br/>troubleshooting"]
+        Planner["Planner Agent<br/>task decomposition"]
+        Analyst["Analyst Agent<br/>research & analysis"]
+        Committer["Committer Agent<br/>git operations"]
+        Scheduler["Scheduler Agent<br/>job scheduling"]
+    end
+
+    subgraph Tools["Coworker Awareness Tools"]
+        PlatformAgents["platform_agents<br/>List available agents"]
+        PlatformStatus["platform_status<br/>Platform health"]
+        PlatformTools["platform_tools<br/>List tools"]
+        DelegateTask["delegate_task<br/>Route to specialist"]
+    end
+
+    subgraph Queue["Job Queue"]
+        Jobs[(SQLite Jobs)]
+        AgentFilter{"agent_id<br/>filter"}
+    end
+
+    User([User]) --> Dispatcher
+    Dispatcher --> PlatformAgents
+    Dispatcher --> DelegateTask
+    DelegateTask --> Coder
+    DelegateTask --> Debugger
+    DelegateTask --> Planner
+    DelegateTask --> Analyst
+    DelegateTask --> Committer
+    DelegateTask --> Scheduler
+
+    Jobs --> AgentFilter
+    AgentFilter -->|"agent_id=coder"| Coder
+    AgentFilter -->|"agent_id=planner"| Planner
+    AgentFilter -->|"unassigned"| Chat
+```
+
+### Agent Types
+
+| ID | Role | Purpose | Additional Tools |
+|----|------|---------|------------------|
+| `dispatcher` | Dispatcher | Intake, classify, route requests | `delegate_task` |
+| `chat` | Executor | General conversation | `web_fetch` |
+| `coder` | Executor | File ops, shell, coding | `file_*`, `shell_execute` |
+| `debugger` | Executor | Troubleshooting, bug fixing | `file_*`, `shell_execute` |
+| `planner` | Executor | Task decomposition, planning | - |
+| `analyst` | Executor | Research, data analysis | `web_fetch` |
+| `committer` | Executor | Git operations | `shell_execute` |
+| `scheduler` | Executor | Job scheduling | - |
+
+### Task Pickup Flow
+
+Two paths exist for agents to receive work:
+
+1. **Synchronous (Chat Handler)**: User → RPC → MessageBus → `chat.request` → Agent Loop
+2. **Asynchronous (Job Queue)**: Job → SQLite Queue → Worker Pool → Agent by `agent_id`
+
+Jobs specify `agent_id` to target a specific agent. Unassigned jobs can be claimed by any agent matching required capabilities.
+
 ## Package Structure
 
 | Layer | Packages | Description |
 |-------|----------|-------------|
 | **Entry** | `cmd/meept`, `cmd/meept-daemon` | CLI and daemon entry points |
 | **Server** | `internal/daemon`, `internal/rpc`, `internal/bus` | Daemon lifecycle, RPC, messaging |
-| **Agent** | `internal/agent` | Agent loop, executor, conversation, planner |
+| **Agent** | `internal/agent` | Agent loop, executor, conversation, planner, registry |
 | **Orchestration** | `internal/queue`, `internal/task`, `internal/worker`, `internal/session` | Multi-agent job orchestration |
 | **LLM** | `internal/llm` | Client, resolver, budget, providers |
 | **Tools** | `internal/tools`, `internal/tools/builtin`, `internal/tools/mcp` | Tool registry and implementations |

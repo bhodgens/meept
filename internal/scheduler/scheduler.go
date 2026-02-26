@@ -22,6 +22,7 @@ type Scheduler struct {
 	logger  *slog.Logger
 	cfg     config.SchedulerConfig
 	dataDir string
+	jobDeps *JobDependencies
 
 	mu          sync.RWMutex
 	jobs        map[string]Job
@@ -46,6 +47,15 @@ func WithDataDir(dir string) Option {
 func WithLogger(logger *slog.Logger) Option {
 	return func(s *Scheduler) error {
 		s.logger = logger
+		return nil
+	}
+}
+
+// WithJobDependencies sets the job dependencies for extended job types
+// (optimization, security, learning).
+func WithJobDependencies(deps *JobDependencies) Option {
+	return func(s *Scheduler) error {
+		s.jobDeps = deps
 		return nil
 	}
 }
@@ -238,8 +248,8 @@ func (s *Scheduler) ScheduleConfig(cfg JobConfig) (string, error) {
 		return "", err
 	}
 
-	// Create job
-	job, err := CreateJob(cfg, s.bus)
+	// Create job using deps if available (needed for extended job types)
+	job, err := s.createJob(cfg)
 	if err != nil {
 		return "", err
 	}
@@ -542,7 +552,7 @@ func (s *Scheduler) loadPersistedJobs() error {
 			continue
 		}
 
-		job, err := CreateJob(cfg, s.bus)
+		job, err := s.createJob(cfg)
 		if err != nil {
 			s.logger.Warn("scheduler: failed to create job from config",
 				"job_id", cfg.ID,
@@ -573,6 +583,14 @@ func (s *Scheduler) loadPersistedJobs() error {
 	}
 
 	return nil
+}
+
+// createJob creates a job from config, using JobDependencies if available.
+func (s *Scheduler) createJob(cfg JobConfig) (Job, error) {
+	if s.jobDeps != nil {
+		return CreateJobWithDeps(cfg, s.jobDeps)
+	}
+	return CreateJob(cfg, s.bus)
 }
 
 // parseSchedule validates and parses a schedule expression.
