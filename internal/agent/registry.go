@@ -9,6 +9,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -30,6 +31,7 @@ type AgentRegistry struct {
 	bus       *bus.MessageBus
 	security  *security.PermissionChecker
 	tools     ToolRegistry
+	shadowMgr *shadow.Manager
 	logger    *slog.Logger
 }
 
@@ -41,6 +43,7 @@ type RegistryConfig struct {
 	MessageBus      *bus.MessageBus
 	SecurityChecker *security.PermissionChecker
 	ToolRegistry    ToolRegistry
+	ShadowManager   *shadow.Manager
 	Logger          *slog.Logger
 }
 
@@ -59,6 +62,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		bus:       cfg.MessageBus,
 		security:  cfg.SecurityChecker,
 		tools:     cfg.ToolRegistry,
+		shadowMgr: cfg.ShadowManager,
 		logger:    cfg.Logger,
 	}
 
@@ -185,6 +189,10 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
 		// Filter tools based on spec
 		filtered := r.filterTools(spec)
 		opts = append(opts, WithToolRegistry(filtered))
+	}
+
+	if r.shadowMgr != nil {
+		opts = append(opts, WithShadowManager(r.shadowMgr))
 	}
 
 	return NewAgentLoop(opts...), nil

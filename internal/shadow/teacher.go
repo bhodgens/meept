@@ -82,7 +82,7 @@ func (t *TeacherClient) GetResponse(ctx context.Context, messages []llm.ChatMess
 	// Try primary
 	response, err := t.callTeacher(timeoutCtx, t.primary, messages)
 	if err == nil {
-		t.recordUsage(ctx, t.primary.Config())
+		t.recordUsage(ctx, t.primary.Config(), response)
 		return response.Content, t.primary.Config().ModelID, nil
 	}
 
@@ -95,7 +95,7 @@ func (t *TeacherClient) GetResponse(ctx context.Context, messages []llm.ChatMess
 	if t.fallback != nil {
 		response, err = t.callTeacher(timeoutCtx, t.fallback, messages)
 		if err == nil {
-			t.recordUsage(ctx, t.fallback.Config())
+			t.recordUsage(ctx, t.fallback.Config(), response)
 			return response.Content, t.fallback.Config().ModelID, nil
 		}
 
@@ -151,19 +151,21 @@ func (t *TeacherClient) checkLimits(ctx context.Context) error {
 	return nil
 }
 
-func (t *TeacherClient) recordUsage(ctx context.Context, cfg *llm.ModelConfig) {
+func (t *TeacherClient) recordUsage(ctx context.Context, cfg *llm.ModelConfig, response *llm.Response) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.dailyQueries++
 
-	// Estimate cost (rough approximation)
-	estimatedCost := (cfg.CostPerMillionInput + cfg.CostPerMillionOutput) / 1000.0
-	t.dailyCost += estimatedCost
+	// Calculate cost based on actual token usage from the response
+	inputCost := float64(response.Usage.PromptTokens) * cfg.CostPerMillionInput / 1_000_000.0
+	outputCost := float64(response.Usage.CompletionTokens) * cfg.CostPerMillionOutput / 1_000_000.0
+	actualCost := inputCost + outputCost
+	t.dailyCost += actualCost
 
 	// Persist to database if available
 	if t.trainingStore != nil {
-		if err := t.trainingStore.RecordTeacherUsage(ctx, 1, estimatedCost); err != nil {
+		if err := t.trainingStore.RecordTeacherUsage(ctx, 1, actualCost); err != nil {
 			t.logger.Warn("Failed to record teacher usage", "error", err)
 		}
 	}
@@ -171,6 +173,8 @@ func (t *TeacherClient) recordUsage(ctx context.Context, cfg *llm.ModelConfig) {
 	t.logger.Debug("Teacher usage recorded",
 		"daily_queries", t.dailyQueries,
 		"daily_cost", t.dailyCost,
+		"input_tokens", response.Usage.PromptTokens,
+		"output_tokens", response.Usage.CompletionTokens,
 	)
 }
 

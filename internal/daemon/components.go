@@ -320,6 +320,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			MessageBus:      msgBus,
 			SecurityChecker: c.SecurityChecker,
 			ToolRegistry:    toolAdapter,
+			ShadowManager:   c.ShadowManager,
 			Logger:          logger,
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))

@@ -327,6 +327,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Publish agent action event
 			l.publishAction(conversationID, iteration, response.ToolCalls)
 
+			// Capture tool-use interaction for shadow training
+			if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
+				modelID := ""
+				if l.llm != nil {
+					modelID = l.llm.Config().ModelID
+				}
+				go l.shadowMgr.CaptureToolInteraction(
+					context.Background(),
+					conversationID,
+					messages,
+					response,
+					modelID,
+				)
+			}
+
 			// Execute tools
 			results := l.executeToolCalls(ctx, response.ToolCalls)
 

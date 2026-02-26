@@ -503,6 +503,69 @@ func (m *Manager) Config() *Config {
 	return m.config
 }
 
+// CaptureToolInteraction captures a tool-use interaction for shadow training.
+// This is called when the LLM returns tool calls, capturing the intermediate step.
+func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID string) {
+	if !m.IsEnabled() || m.trainingStore == nil {
+		return
+	}
+
+	// Convert llm.ChatMessage to shadow.Message
+	shadowMessages := make([]Message, len(messages))
+	for i, msg := range messages {
+		shadowMessages[i] = Message{
+			Role:    string(msg.Role),
+			Content: msg.Content,
+		}
+	}
+
+	// Classify the interaction
+	domain := m.classifyDomain(messages)
+	complexity := m.estimateComplexity(messages)
+
+	// Always classify as tool_use since we know there are tool calls
+	taskType := TaskTypeToolUse
+
+	// Check if we should shadow this interaction
+	if !m.config.ShouldShadow(string(domain), string(taskType), complexity) {
+		return
+	}
+
+	// Build a content representation of the tool calls
+	var toolContent string
+	for i, tc := range response.ToolCalls {
+		if i > 0 {
+			toolContent += "\n"
+		}
+		toolContent += "Tool: " + tc.Function.Name + "\nArgs: " + tc.Function.Arguments
+	}
+
+	// Create the shadow record
+	record := NewShadowRecord(conversationID, shadowMessages, modelID, toolContent)
+	record.StudentTokensIn = response.Usage.PromptTokens
+	record.StudentTokensOut = response.Usage.CompletionTokens
+	record.Domain = domain
+	record.TaskType = taskType
+
+	// For tool-use interactions, we typically don't get teacher responses
+	// since the exact tool choice is context-dependent. Just process the record.
+	switch m.config.Shadowing.Mode {
+	case ModeSync:
+		if err := m.ProcessRecord(ctx, record); err != nil {
+			m.logger.Error("Failed to process shadow tool record", "error", err)
+		}
+
+	case ModeAsync, ModeSelective:
+		go func() {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := m.ProcessRecord(bgCtx, record); err != nil {
+				m.logger.Error("Failed to process shadow tool record", "error", err)
+			}
+		}()
+	}
+}
+
 // Close closes all resources.
 func (m *Manager) Close() error {
 	var lastErr error
