@@ -193,19 +193,29 @@ func (d *Daemon) Run(ctx context.Context) error {
 	})
 	d.bus.Publish("daemon.started", msg)
 
-	// Wait for shutdown signal
+	// Wait for shutdown signal or SIGHUP for reload
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
-	select {
-	case sig := <-sigCh:
-		d.logger.Info("daemon: received signal", "signal", sig)
-	case <-ctx.Done():
-		d.logger.Info("daemon: context cancelled")
+	for {
+		select {
+		case sig := <-sigCh:
+			if sig == syscall.SIGHUP {
+				d.logger.Info("daemon: received SIGHUP, reloading configuration")
+				if err := d.reloadConfig(ctx); err != nil {
+					d.logger.Error("daemon: reload failed", "error", err)
+				}
+				continue // Continue waiting for signals
+			}
+			d.logger.Info("daemon: received signal", "signal", sig)
+			// Graceful shutdown
+			return d.shutdown()
+		case <-ctx.Done():
+			d.logger.Info("daemon: context cancelled")
+			// Graceful shutdown
+			return d.shutdown()
+		}
 	}
-
-	// Graceful shutdown
-	return d.shutdown()
 }
 
 func (d *Daemon) shutdown() error {
@@ -280,6 +290,68 @@ func (d *Daemon) writePIDFile() error {
 
 func (d *Daemon) removePIDFile() {
 	os.Remove(d.pidFile)
+}
+
+// reloadConfig reloads configuration from disk and applies changes.
+// Currently supports reloading MCP server configuration.
+func (d *Daemon) reloadConfig(ctx context.Context) error {
+	d.logger.Info("daemon: reloading configuration")
+
+	// Reload full configuration from disk
+	newCfg, err := config.LoadDefault()
+	if err != nil {
+		d.logger.Warn("daemon: failed to reload config, keeping existing", "error", err)
+		// Continue with MCP reload using existing config
+		newCfg = d.fullConfig
+	} else {
+		d.fullConfig = newCfg
+	}
+
+	// Reload MCP configuration if MCP is enabled
+	if d.components != nil && d.components.MCPManager != nil && newCfg.MCP.Enabled {
+		mcpCfg, err := config.LoadMCPConfig(newCfg.MCP.ConfigFile)
+		if err != nil {
+			d.logger.Error("daemon: failed to load MCP config during reload", "error", err)
+			return err
+		}
+
+		if err := d.components.MCPManager.Reload(ctx, mcpCfg.Servers); err != nil {
+			d.logger.Error("daemon: MCP reload failed", "error", err)
+			return err
+		}
+
+		// Re-register MCP tools with the tool registry
+		// First, unregister old MCP tools (those with "." in name indicating server.tool format)
+		for _, name := range d.components.ToolRegistry.Names() {
+			if hasDot(name) {
+				if err := d.components.ToolRegistry.Unregister(name); err != nil {
+					d.logger.Debug("daemon: failed to unregister old MCP tool", "name", name, "error", err)
+				}
+			}
+		}
+
+		// Register new MCP tools
+		registerMCPTools(d.components.ToolRegistry, d.components.MCPManager, d.logger)
+	}
+
+	// Publish reload event
+	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "daemon", map[string]any{
+		"event": "reloaded",
+	})
+	d.bus.Publish("daemon.reloaded", msg)
+
+	d.logger.Info("daemon: configuration reloaded successfully")
+	return nil
+}
+
+// hasDot checks if a string contains a dot.
+func hasDot(s string) bool {
+	for _, c := range s {
+		if c == '.' {
+			return true
+		}
+	}
+	return false
 }
 
 // Status returns the current daemon status.
