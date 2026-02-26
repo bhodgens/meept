@@ -12,6 +12,8 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -62,12 +64,16 @@ type AgentLoop struct {
 	executor *Executor
 	registry ToolRegistry
 	security *security.PermissionChecker
+	securityOrch *intsecurity.Orchestrator
 	bus      *bus.MessageBus
 	logger   *slog.Logger
 
 	// Memory for context injection
 	memvid    *memvid.Client
 	taskStore *task.Store
+
+	// Shadow training for few-shot example injection
+	shadowMgr *shadow.Manager
 
 	// Configuration
 	config AgentConfig
@@ -148,6 +154,20 @@ func WithTaskStore(store *task.Store) LoopOption {
 	}
 }
 
+// WithShadowManager sets the shadow manager for few-shot example injection.
+func WithShadowManager(mgr *shadow.Manager) LoopOption {
+	return func(l *AgentLoop) {
+		l.shadowMgr = mgr
+	}
+}
+
+// WithSecurityOrchestrator sets the security orchestrator for input/output processing.
+func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
+	return func(l *AgentLoop) {
+		l.securityOrch = orch
+	}
+}
+
 // NewAgentLoop creates a new agent loop.
 func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 	loop := &AgentLoop{
@@ -162,10 +182,16 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 
 	// Create executor if we have a registry
 	if loop.registry != nil {
+		executorOpts := []ExecutorOption{
+			WithExecutorLogger(loop.logger),
+		}
+		if loop.agentID != "" {
+			executorOpts = append(executorOpts, WithExecutorAgentID(loop.agentID))
+		}
 		loop.executor = NewExecutor(
 			loop.registry,
 			loop.security,
-			WithExecutorLogger(loop.logger),
+			executorOpts...,
 		)
 	}
 
@@ -186,6 +212,26 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		return "", ErrNoLLMClient
 	}
 
+	// Sanitize user input through security orchestrator
+	sanitizedMessage := userMessage
+	if l.securityOrch != nil {
+		cleanText, blocked, warnings := l.securityOrch.SanitizeInput(userMessage)
+		if blocked {
+			l.logger.Warn("User input blocked by security",
+				"conversation", conversationID,
+				"warnings", len(warnings),
+			)
+			return "I cannot process that request due to security concerns.", nil
+		}
+		if len(warnings) > 0 {
+			l.logger.Info("User input sanitized",
+				"conversation", conversationID,
+				"warnings", len(warnings),
+			)
+		}
+		sanitizedMessage = cleanText
+	}
+
 	// Get or create conversation
 	conv := l.conversations.Get(conversationID)
 
@@ -193,8 +239,8 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	systemPrompt := l.buildSystemPrompt()
 	conv.SetSystemPrompt(systemPrompt)
 
-	// Add user message
-	conv.AddUserMessage(userMessage)
+	// Add user message (sanitized)
+	conv.AddUserMessage(sanitizedMessage)
 
 	// Truncate if needed
 	conv.Truncate()
@@ -212,9 +258,22 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		return errorMsg, err
 	}
 
+	// Scan output through security orchestrator before returning
+	finalResponse := response
+	if l.securityOrch != nil {
+		scannedText, hasCredentials, warnings := l.securityOrch.ScanOutput(response)
+		if hasCredentials {
+			l.logger.Warn("Credentials detected in output",
+				"conversation", conversationID,
+				"warnings", len(warnings),
+			)
+			finalResponse = scannedText
+		}
+	}
+
 	// Add final response to conversation
-	conv.AddAssistantMessage(response)
-	return response, nil
+	conv.AddAssistantMessage(finalResponse)
+	return finalResponse, nil
 }
 
 // reasoningCycle runs the main reasoning loop with tool execution.
@@ -238,8 +297,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			tools = l.registry.GetDefinitions()
 		}
 
-		// Call LLM
+		// Get messages for LLM
 		messages := conv.GetMessages()
+
+		// Inject few-shot examples from shadow training (only on first iteration)
+		if iteration == 1 && l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
+			messages = l.injectFewShotExamples(ctx, messages, conversationID)
+		}
+
 		var chatOpts []llm.ChatOption
 		if len(tools) > 0 {
 			chatOpts = append(chatOpts, llm.WithTools(tools))
@@ -282,6 +347,22 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			"iterations", iteration,
 			"conversation", conversationID,
 		)
+
+		// Capture interaction for shadow training
+		if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
+			modelID := ""
+			if l.llm != nil {
+				modelID = l.llm.Config().ModelID
+			}
+			go l.shadowMgr.CaptureInteraction(
+				context.Background(),
+				conversationID,
+				messages,
+				response,
+				modelID,
+			)
+		}
+
 		return response.Content, nil
 	}
 
@@ -508,6 +589,125 @@ func truncateForMemory(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// injectFewShotExamples retrieves and injects relevant few-shot examples into messages.
+func (l *AgentLoop) injectFewShotExamples(ctx context.Context, messages []llm.ChatMessage, conversationID string) []llm.ChatMessage {
+	if l.shadowMgr == nil {
+		return messages
+	}
+
+	// Extract query from the last user message
+	var query string
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == llm.RoleUser {
+			query = messages[i].Content
+			break
+		}
+	}
+	if query == "" {
+		return messages
+	}
+
+	// Classify domain and task type based on message content
+	domain, taskType := l.classifyForShadow(messages)
+
+	// Get relevant few-shot examples
+	examples, err := l.shadowMgr.GetFewShotExamples(ctx, domain, taskType, query, 3)
+	if err != nil {
+		l.logger.Warn("Failed to get few-shot examples", "error", err)
+		return messages
+	}
+	if len(examples) == 0 {
+		return messages
+	}
+
+	// Format examples for injection
+	exampleMessages := l.shadowMgr.FormatExamplesForInjection(examples)
+	if len(exampleMessages) == 0 {
+		return messages
+	}
+
+	// Convert shadow.Message to llm.ChatMessage
+	exampleChatMessages := make([]llm.ChatMessage, len(exampleMessages))
+	for i, msg := range exampleMessages {
+		exampleChatMessages[i] = llm.ChatMessage{
+			Role:    llm.Role(msg.Role),
+			Content: msg.Content,
+		}
+	}
+
+	// Inject after system prompt
+	// Find position after system messages
+	insertPos := 0
+	for i, msg := range messages {
+		if msg.Role == llm.RoleSystem {
+			insertPos = i + 1
+		} else {
+			break
+		}
+	}
+
+	// Build new messages slice with examples injected
+	result := make([]llm.ChatMessage, 0, len(messages)+len(exampleChatMessages))
+	result = append(result, messages[:insertPos]...)
+	result = append(result, exampleChatMessages...)
+	result = append(result, messages[insertPos:]...)
+
+	l.logger.Debug("Injected few-shot examples",
+		"count", len(examples),
+		"conversation", conversationID,
+	)
+
+	return result
+}
+
+// classifyForShadow classifies messages for shadow training example retrieval.
+func (l *AgentLoop) classifyForShadow(messages []llm.ChatMessage) (shadow.Domain, shadow.TaskType) {
+	var text string
+	for _, msg := range messages {
+		text += " " + msg.Content
+	}
+
+	// Simple keyword-based classification
+	codeKeywords := []string{"code", "function", "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
+	planningKeywords := []string{"plan", "step", "first", "then", "next", "strategy", "approach", "design", "architecture"}
+	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "stack trace", "exception", "traceback"}
+	analysisKeywords := []string{"analyze", "explain", "why", "how does", "what is", "understand", "review"}
+
+	domain := shadow.DomainGeneral
+	if containsAnyKeyword(text, codeKeywords) {
+		domain = shadow.DomainCode
+	} else if containsAnyKeyword(text, debuggingKeywords) {
+		domain = shadow.DomainDebugging
+	} else if containsAnyKeyword(text, planningKeywords) {
+		domain = shadow.DomainPlanning
+	} else if containsAnyKeyword(text, analysisKeywords) {
+		domain = shadow.DomainAnalysis
+	}
+
+	taskType := shadow.TaskTypeChat
+	multiStepKeywords := []string{"step by step", "first", "second", "then", "finally", "multiple steps"}
+	reasoningKeywords := []string{"think", "reason", "consider", "analyze", "evaluate", "compare"}
+
+	if containsAnyKeyword(text, multiStepKeywords) {
+		taskType = shadow.TaskTypeMultiStep
+	} else if containsAnyKeyword(text, reasoningKeywords) {
+		taskType = shadow.TaskTypeReasoning
+	}
+
+	return domain, taskType
+}
+
+// containsAnyKeyword checks if text contains any of the keywords.
+func containsAnyKeyword(text string, keywords []string) bool {
+	lower := strings.ToLower(text)
+	for _, kw := range keywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return true
+		}
+	}
+	return false
 }
 
 // executeToolCalls executes tool calls using the executor.

@@ -36,7 +36,16 @@ update_interval_conversations = 10
 [security]
 # Input sanitization
 sanitize_inputs = true
-llm_filter_external = false  # Enable LLM-based filtering for untrusted sources
+sanitize_strictness = "standard"  # "permissive", "standard", "strict"
+llm_filter_external = false       # Enable LLM-based filtering for untrusted sources
+
+# Output monitoring
+monitor_output = true             # Enable credential detection in LLM output
+redact_output = true              # Automatically redact detected credentials
+
+# Shell command security
+scan_shell_commands = true        # Enable Tirith command scanning before execution
+tirith_binary = "tirith"          # Path to tirith binary (must be on PATH)
 
 # Action permissions
 require_confirmation_high = true
@@ -46,6 +55,10 @@ block_financial = true
 # Allowed paths for file operations (glob patterns)
 allowed_paths = ["~/*"]
 blocked_paths = ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"]
+
+# Audit logging
+enable_audit_log = false          # Enable security audit logging
+audit_db_path = "~/.meept/audit.db"
 
 [scheduler]
 enabled = true

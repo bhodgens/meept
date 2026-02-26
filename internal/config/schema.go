@@ -108,13 +108,26 @@ type MultiAgentConfig struct {
 
 // SecurityConfig holds security settings.
 type SecurityConfig struct {
-	SanitizeInputs             bool     `toml:"sanitize_inputs"`
-	LLMFilterExternal          bool     `toml:"llm_filter_external"`
-	RequireConfirmationHigh    bool     `toml:"require_confirmation_high"`
-	RequireConfirmationCritical bool    `toml:"require_confirmation_critical"`
-	BlockFinancial             bool     `toml:"block_financial"`
-	AllowedPaths               []string `toml:"allowed_paths"`
-	BlockedPaths               []string `toml:"blocked_paths"`
+	SanitizeInputs              bool     `toml:"sanitize_inputs"`
+	SanitizeStrictness          string   `toml:"sanitize_strictness"` // "permissive", "standard", "strict"
+	LLMFilterExternal           bool     `toml:"llm_filter_external"`
+	RequireConfirmationHigh     bool     `toml:"require_confirmation_high"`
+	RequireConfirmationCritical bool     `toml:"require_confirmation_critical"`
+	BlockFinancial              bool     `toml:"block_financial"`
+	AllowedPaths                []string `toml:"allowed_paths"`
+	BlockedPaths                []string `toml:"blocked_paths"`
+
+	// Output monitoring
+	MonitorOutput bool `toml:"monitor_output"` // Enable credential detection in LLM output
+	RedactOutput  bool `toml:"redact_output"`  // Automatically redact detected credentials
+
+	// Shell command security
+	ScanShellCommands bool   `toml:"scan_shell_commands"` // Enable Tirith command scanning
+	TirithBinary      string `toml:"tirith_binary"`       // Path to tirith binary
+
+	// Audit logging
+	EnableAuditLog bool   `toml:"enable_audit_log"` // Enable security audit logging
+	AuditDBPath    string `toml:"audit_db_path"`    // Path to audit log database
 }
 
 // SchedulerConfig holds scheduler settings.
@@ -415,12 +428,19 @@ func DefaultConfig() *Config {
 		},
 		Security: SecurityConfig{
 			SanitizeInputs:              true,
+			SanitizeStrictness:          "standard",
 			LLMFilterExternal:           false,
 			RequireConfirmationHigh:     true,
 			RequireConfirmationCritical: true,
 			BlockFinancial:              true,
 			AllowedPaths:                []string{"~/*"},
 			BlockedPaths:                []string{"~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"},
+			MonitorOutput:               true,
+			RedactOutput:                true,
+			ScanShellCommands:           true,
+			TirithBinary:                "tirith",
+			EnableAuditLog:              false,
+			AuditDBPath:                 "~/.meept/audit.db",
 		},
 		Scheduler: SchedulerConfig{
 			Enabled:  true,

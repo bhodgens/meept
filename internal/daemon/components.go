@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/queue"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
@@ -37,6 +38,7 @@ type Components struct {
 	LLMResolver     *llm.Resolver
 	ToolRegistry    *tools.Registry
 	SecurityChecker *security.PermissionChecker
+	SecurityOrchestrator *intsecurity.Orchestrator
 	AgentLoop       *agent.AgentLoop
 	ChatHandler     *agent.ChatHandler
 	StatusHandler   *StatusHandler
@@ -108,6 +110,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 	c.SecurityChecker = security.NewPermissionChecker(secCfg)
 
+	// Create security orchestrator for input sanitization, output monitoring, and shell scanning
+	c.SecurityOrchestrator = createSecurityOrchestrator(cfg, logger)
+
 	// Create LLM client
 	llmCfg := createLLMConfig(modelsCfg, logger)
 	if llmCfg != nil {
@@ -170,6 +175,10 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 	if c.SecurityChecker != nil {
 		agentOpts = append(agentOpts, agent.WithSecurityChecker(c.SecurityChecker))
+	}
+	if c.SecurityOrchestrator != nil {
+		agentOpts = append(agentOpts, agent.WithSecurityOrchestrator(c.SecurityOrchestrator))
+		logger.Info("Agent loop configured with security orchestrator")
 	}
 	if c.ToolRegistry != nil {
 		adapter := agent.NewToolRegistryAdapter(c.ToolRegistry)
@@ -293,7 +302,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.MemoryManager, taskStore, logger)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, logger)
 
 	// Create agent registry if multi-agent is enabled
 	if cfg.MultiAgent.Enabled {
@@ -657,6 +666,22 @@ func splitModelRef(ref string) []string {
 	return []string{ref}
 }
 
+// createSecurityOrchestrator creates a security orchestrator from configuration.
+func createSecurityOrchestrator(cfg *config.Config, logger *slog.Logger) *intsecurity.Orchestrator {
+	orchCfg := intsecurity.OrchestratorConfig{
+		SanitizeInputs:     cfg.Security.SanitizeInputs,
+		SanitizeStrictness: intsecurity.ParseStrictnessLevel(cfg.Security.SanitizeStrictness),
+		MonitorOutput:      cfg.Security.MonitorOutput,
+		RedactOutput:       cfg.Security.RedactOutput,
+		ScanShellCommands:  cfg.Security.ScanShellCommands,
+		TirithBinary:       cfg.Security.TirithBinary,
+		EnableAuditLog:     cfg.Security.EnableAuditLog,
+		AuditDBPath:        cfg.Security.AuditDBPath,
+	}
+
+	return intsecurity.NewOrchestrator(orchCfg, logger)
+}
+
 // convertShadowConfig converts config.ShadowConfig to shadow.Config.
 func convertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
 	return &shadow.Config{
@@ -744,6 +769,7 @@ func convertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
 func registerBuiltinTools(
 	registry *tools.Registry,
 	checker *security.PermissionChecker,
+	secOrch *intsecurity.Orchestrator,
 	memoryMgr *memory.Manager,
 	taskStore *task.Store,
 	logger *slog.Logger,
@@ -754,9 +780,14 @@ func registerBuiltinTools(
 	registry.Register(builtin.NewDeleteFileTool(checker))
 	registry.Register(builtin.NewListDirectoryTool(checker))
 
-	// Shell tool
+	// Shell tool with security orchestrator for Tirith scanning
 	wd, _ := os.Getwd()
-	registry.Register(builtin.NewShellExecuteTool(wd, 60*time.Second))
+	shellTool := builtin.NewShellExecuteTool(wd, 60*time.Second)
+	if secOrch != nil {
+		shellTool.SetSecurityOrchestrator(secOrch)
+		logger.Debug("Shell tool configured with security orchestrator")
+	}
+	registry.Register(shellTool)
 
 	// Web fetch tool
 	registry.Register(builtin.NewWebFetchTool(30*time.Second, 100000))

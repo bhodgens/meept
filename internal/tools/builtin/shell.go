@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -82,6 +83,7 @@ var dangerousPattern = regexp.MustCompile(
 type ShellExecuteTool struct {
 	workingDir     string
 	defaultTimeout time.Duration
+	securityOrch   *intsecurity.Orchestrator
 }
 
 // NewShellExecuteTool creates a new shell execution tool.
@@ -96,6 +98,11 @@ func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration) *Shell
 		workingDir:     workingDir,
 		defaultTimeout: defaultTimeout,
 	}
+}
+
+// SetSecurityOrchestrator sets the security orchestrator for command scanning.
+func (t *ShellExecuteTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	t.securityOrch = orch
 }
 
 func (t *ShellExecuteTool) Name() string { return "shell" }
@@ -155,11 +162,21 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		workDir = resolved
 	}
 
-	// Check command risk level
+	// Check command risk level (built-in check)
 	risk := t.classifyRisk(command)
 	if risk == RiskCritical {
 		baseCmd := extractBaseCommand(command)
 		return nil, fmt.Errorf("command blocked for safety: %s", baseCmd)
+	}
+
+	// Scan command with Tirith via security orchestrator (if configured)
+	if t.securityOrch != nil {
+		blocked, warning, reason := t.securityOrch.ScanShellCommand(ctx, command)
+		if blocked {
+			return nil, fmt.Errorf("command blocked by security scanner: %s", reason)
+		}
+		// Warnings are logged by the orchestrator, but we continue execution
+		_ = warning
 	}
 
 	// Create context with timeout
