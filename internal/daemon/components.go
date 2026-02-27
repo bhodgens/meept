@@ -16,6 +16,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/queue"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/scheduler"
@@ -82,6 +83,10 @@ type Components struct {
 	// Skills
 	SkillRegistry   *skills.Registry
 	SkillExecutor   *skills.Executor
+
+	// Distributed memory sync
+	SyncManager     *memsync.SyncManager
+	SyncHandler     *memsync.Handler
 
 	Logger          *slog.Logger
 }
@@ -256,9 +261,10 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Create memory manager
 	c.MemoryManager = memory.NewManager(memory.ManagerConfig{
-		Config:       cfg.Memory,
-		MemvidConfig: cfg.Memvid,
-		Logger:       logger.With("component", "memory"),
+		Config:            cfg.Memory,
+		MemvidConfig:      cfg.Memvid,
+		DistributedConfig: cfg.DistributedMemory,
+		Logger:            logger.With("component", "memory"),
 	})
 	if err := c.MemoryManager.Initialize(context.Background()); err != nil {
 		logger.Error("Failed to initialize memory manager", "error", err)
@@ -266,6 +272,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	} else {
 		logger.Info("Memory manager initialized",
 			"backend", c.MemoryManager.Backend(),
+			"distributed", c.MemoryManager.IsDistributed(),
 		)
 	}
 
@@ -280,6 +287,28 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			Timeout:  time.Duration(cfg.Memvid.Timeout) * time.Second,
 		})
 		logger.Info("Standalone memvid client initialized", "endpoint", cfg.Memvid.Endpoint)
+	}
+
+	// Create distributed memory sync manager if enabled
+	if c.MemoryManager.IsDistributed() && c.MemvidClient != nil {
+		syncMgr, err := memsync.NewSyncManager(memsync.SyncManagerConfig{
+			Config:       cfg.DistributedMemory,
+			LocalManager: c.MemoryManager,
+			MemvidClient: c.MemvidClient,
+			MessageBus:   msgBus,
+			Logger:       logger.With("component", "sync"),
+		})
+		if err != nil {
+			logger.Error("Failed to create sync manager", "error", err)
+		} else {
+			c.SyncManager = syncMgr
+			c.SyncHandler = memsync.NewHandler(syncMgr, msgBus, logger.With("component", "sync-handler"))
+			logger.Info("Distributed memory sync enabled",
+				"mode", cfg.DistributedMemory.Mode,
+				"hydrate_on_claim", cfg.DistributedMemory.Sync.HydrateOnClaim,
+				"distill_on_complete", cfg.DistributedMemory.Sync.DistillOnComplete,
+			)
+		}
 	}
 
 	// Create session store (SQLite-backed for persistence)
@@ -536,12 +565,38 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start sync manager and handler
+	if c.SyncManager != nil {
+		if err := c.SyncManager.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start sync manager", "error", err)
+		}
+	}
+	if c.SyncHandler != nil {
+		if err := c.SyncHandler.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start sync handler", "error", err)
+		}
+	}
+
 	return nil
 }
 
 // Stop stops all components.
 func (c *Components) Stop(ctx context.Context) error {
 	var lastErr error
+
+	// Stop sync handler and manager first (depends on queue events)
+	if c.SyncHandler != nil {
+		if err := c.SyncHandler.Stop(ctx); err != nil {
+			c.Logger.Error("Failed to stop sync handler", "error", err)
+			lastErr = err
+		}
+	}
+	if c.SyncManager != nil {
+		if err := c.SyncManager.Stop(); err != nil {
+			c.Logger.Error("Failed to stop sync manager", "error", err)
+			lastErr = err
+		}
+	}
 
 	// Stop scheduler first to prevent new job executions
 	if c.Scheduler != nil {

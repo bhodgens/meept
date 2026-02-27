@@ -1049,6 +1049,217 @@ func (g *KnowledgeGraph) invalidateCache() {
 	g.mu.Unlock()
 }
 
+// GetEdgesForMemory retrieves all edges for a memory, split into outgoing and incoming.
+// This is useful for sync operations where edges need to be serialized with the memory.
+func (g *KnowledgeGraph) GetEdgesForMemory(ctx context.Context, memoryID string) (out []MemoryEdge, in []MemoryEdge, err error) {
+	g.mu.RLock()
+	if !g.initialized {
+		g.mu.RUnlock()
+		return nil, nil, errors.New("knowledge graph not initialized")
+	}
+	g.mu.RUnlock()
+
+	db, err := g.pool.Get(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer g.pool.Put(db)
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, source_id, target_id, edge_type, weight, confidence, metadata_json, created_at
+		FROM memory_edges
+		WHERE source_id = ? OR target_id = ?
+		ORDER BY weight DESC
+	`, memoryID, memoryID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get edges: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var edge MemoryEdge
+		var edgeType, metaJSON, createdAtStr string
+
+		if err := rows.Scan(&edge.ID, &edge.SourceID, &edge.TargetID,
+			&edgeType, &edge.Weight, &edge.Confidence, &metaJSON, &createdAtStr); err != nil {
+			return nil, nil, err
+		}
+
+		edge.EdgeType = EdgeType(edgeType)
+		edge.Metadata = ParseMetadata(metaJSON)
+		edge.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
+
+		if edge.SourceID == memoryID {
+			out = append(out, edge)
+		} else {
+			in = append(in, edge)
+		}
+	}
+
+	return out, in, rows.Err()
+}
+
+// ImportEdges bulk imports edges, typically used when hydrating from shared storage.
+// This is more efficient than AddEdges for hydration as it skips cache invalidation
+// until all edges are imported.
+func (g *KnowledgeGraph) ImportEdges(ctx context.Context, edges []MemoryEdge) error {
+	g.mu.RLock()
+	if !g.initialized {
+		g.mu.RUnlock()
+		return errors.New("knowledge graph not initialized")
+	}
+	g.mu.RUnlock()
+
+	if len(edges) == 0 {
+		return nil
+	}
+
+	return g.pool.WithConn(ctx, func(db *sql.DB) error {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		// Use INSERT OR IGNORE to handle duplicate edges gracefully
+		stmt, err := tx.PrepareContext(ctx,
+			`INSERT OR IGNORE INTO memory_edges
+			(id, source_id, target_id, edge_type, weight, confidence, metadata_json, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		for _, edge := range edges {
+			if edge.ID == "" {
+				edge.ID = fmt.Sprintf("%s-%s-%s", edge.SourceID[:min(8, len(edge.SourceID))], edge.TargetID[:min(8, len(edge.TargetID))], edge.EdgeType)
+			}
+			if edge.CreatedAt.IsZero() {
+				edge.CreatedAt = time.Now()
+			}
+			if edge.Weight == 0 {
+				edge.Weight = 0.5
+			}
+			if edge.Confidence == 0 {
+				edge.Confidence = 1.0
+			}
+
+			metaJSON := (&Memory{Metadata: edge.Metadata}).MetadataJSON()
+
+			_, err := stmt.ExecContext(ctx,
+				edge.ID, edge.SourceID, edge.TargetID, string(edge.EdgeType),
+				edge.Weight, edge.Confidence, metaJSON, edge.CreatedAt.Format(time.RFC3339),
+			)
+			if err != nil {
+				return err
+			}
+		}
+
+		g.invalidateCache()
+		return tx.Commit()
+	})
+}
+
+// GetMemoriesWithHighPageRank returns memory IDs with PageRank above the threshold.
+// Used by distillation policy to find important memories for promotion.
+func (g *KnowledgeGraph) GetMemoriesWithHighPageRank(ctx context.Context, threshold float64, limit int) ([]string, error) {
+	g.mu.RLock()
+	if !g.initialized {
+		g.mu.RUnlock()
+		return nil, errors.New("knowledge graph not initialized")
+	}
+	g.mu.RUnlock()
+
+	db, err := g.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer g.pool.Put(db)
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT memory_id FROM memory_pagerank
+		WHERE score >= ?
+		ORDER BY score DESC
+		LIMIT ?
+	`, threshold, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+
+	return ids, rows.Err()
+}
+
+// GetHighDegreeNodes returns memory IDs that are hub nodes (high connectivity).
+// Used by distillation policy to identify structurally important memories.
+func (g *KnowledgeGraph) GetHighDegreeNodes(ctx context.Context, minDegree int, limit int) ([]string, error) {
+	g.mu.RLock()
+	if !g.initialized {
+		g.mu.RUnlock()
+		return nil, errors.New("knowledge graph not initialized")
+	}
+	g.mu.RUnlock()
+
+	db, err := g.pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer g.pool.Put(db)
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT memory_id, (in_degree + out_degree) as total_degree
+		FROM memory_pagerank
+		WHERE (in_degree + out_degree) >= ?
+		ORDER BY total_degree DESC
+		LIMIT ?
+	`, minDegree, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		var degree int
+		if err := rows.Scan(&id, &degree); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+
+	return ids, rows.Err()
+}
+
+// EnsureNode ensures a node exists in the PageRank table.
+// Creates a placeholder entry if the node doesn't exist.
+// Useful during hydration when edges reference memories not yet imported.
+func (g *KnowledgeGraph) EnsureNode(ctx context.Context, memoryID string) error {
+	g.mu.RLock()
+	if !g.initialized {
+		g.mu.RUnlock()
+		return errors.New("knowledge graph not initialized")
+	}
+	g.mu.RUnlock()
+
+	_, err := g.pool.Exec(ctx,
+		`INSERT OR IGNORE INTO memory_pagerank
+		(memory_id, score, in_degree, out_degree, community_id, updated_at)
+		VALUES (?, 0, 0, 0, '', ?)`,
+		memoryID, time.Now().Format(time.RFC3339))
+	return err
+}
+
 // Close releases resources.
 func (g *KnowledgeGraph) Close() error {
 	g.mu.Lock()

@@ -27,7 +27,8 @@ type Config struct {
 	Skills      SkillsConfig      `toml:"skills"`
 	ClawSkills  ClawSkillsConfig  `toml:"clawskills"`
 	SelfImprove SelfImproveConfig `toml:"selfimprove"`
-	Shadow      ShadowConfig      `toml:"shadow"`
+	Shadow            ShadowConfig            `toml:"shadow"`
+	DistributedMemory DistributedMemoryConfig `toml:"distributed_memory"`
 }
 
 // DaemonConfig holds daemon-specific settings.
@@ -96,6 +97,48 @@ type MemvidConfig struct {
 	Endpoint  string `toml:"endpoint"`
 	DataDir   string `toml:"data_dir"`
 	Timeout   int    `toml:"timeout_seconds"`
+}
+
+// DistributedMemoryConfig holds settings for 2-tier distributed memory sync.
+type DistributedMemoryConfig struct {
+	// Enabled turns on distributed memory synchronization
+	Enabled bool `toml:"enabled"`
+	// Mode is "local" (default, no sync) or "distributed" (sync with memvid)
+	Mode string `toml:"mode"`
+	// Sync configures synchronization behavior
+	Sync SyncConfig `toml:"sync"`
+	// Distillation configures which memories to promote
+	Distillation DistillationConfig `toml:"distillation"`
+}
+
+// SyncConfig holds sync timing and behavior settings.
+type SyncConfig struct {
+	// HydrateOnClaim fetches relevant memories when a job is claimed
+	HydrateOnClaim bool `toml:"hydrate_on_claim"`
+	// HydrationLimit is max memories to fetch during hydration
+	HydrationLimit int `toml:"hydration_limit"`
+	// DistillOnComplete promotes memories when a job completes
+	DistillOnComplete bool `toml:"distill_on_complete"`
+	// PeriodicDistillIntervalMinutes runs distillation on a timer (0 = disabled)
+	PeriodicDistillIntervalMinutes int `toml:"periodic_distill_interval_minutes"`
+	// RetryOnFailure queues failed sync operations for retry
+	RetryOnFailure bool `toml:"retry_on_failure"`
+	// MaxRetries is the max retry attempts for failed operations
+	MaxRetries int `toml:"max_retries"`
+}
+
+// DistillationConfig controls which memories get promoted to shared storage.
+type DistillationConfig struct {
+	// PageRankThreshold promotes memories with PageRank above this value
+	PageRankThreshold float64 `toml:"pagerank_threshold"`
+	// HubConnectivityThreshold promotes memories with degree >= this
+	HubConnectivityThreshold int `toml:"hub_connectivity_threshold"`
+	// PromoteTaskCompletions always promotes task completion summaries
+	PromoteTaskCompletions bool `toml:"promote_task_completions"`
+	// CrossAgentReferencesMin promotes memories referenced by >= N other agents
+	CrossAgentReferencesMin int `toml:"cross_agent_references_min"`
+	// MinMemoryAgeMinutes requires memories to be at least this old
+	MinMemoryAgeMinutes int `toml:"min_memory_age_minutes"`
 }
 
 // MultiAgentConfig holds multi-agent orchestration settings.
@@ -651,6 +694,25 @@ func DefaultConfig() *Config {
 					Beta:     0.1,
 					LossType: "sigmoid",
 				},
+			},
+		},
+		DistributedMemory: DistributedMemoryConfig{
+			Enabled: false,
+			Mode:    "local",
+			Sync: SyncConfig{
+				HydrateOnClaim:                 true,
+				HydrationLimit:                 20,
+				DistillOnComplete:              true,
+				PeriodicDistillIntervalMinutes: 30,
+				RetryOnFailure:                 true,
+				MaxRetries:                     3,
+			},
+			Distillation: DistillationConfig{
+				PageRankThreshold:        0.3,
+				HubConnectivityThreshold: 5,
+				PromoteTaskCompletions:   true,
+				CrossAgentReferencesMin:  2,
+				MinMemoryAgeMinutes:      5,
 			},
 		},
 	}

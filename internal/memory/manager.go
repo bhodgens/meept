@@ -19,9 +19,10 @@ import (
 // It provides a single entry-point for the rest of meept to interact with
 // the memory system. Supports memvid as primary backend with SQLite fallback.
 type Manager struct {
-	config    config.MemoryConfig
-	memvidCfg config.MemvidConfig
-	dataDir   string
+	config       config.MemoryConfig
+	memvidCfg    config.MemvidConfig
+	distributedCfg config.DistributedMemoryConfig
+	dataDir      string
 
 	// Memvid client (primary backend when configured)
 	memvid    *memvid.Client
@@ -35,6 +36,9 @@ type Manager struct {
 	// Knowledge graph for relationship tracking and PageRank scoring
 	graph *KnowledgeGraph
 
+	// Distributed sync (when distributed_memory.enabled && mode == "distributed")
+	distributed bool
+
 	consolidator *Consolidator
 	initialized  bool
 	mu           sync.RWMutex
@@ -47,6 +51,8 @@ type ManagerConfig struct {
 	Config config.MemoryConfig
 	// MemvidConfig is the memvid service configuration.
 	MemvidConfig config.MemvidConfig
+	// DistributedConfig is the distributed memory sync configuration.
+	DistributedConfig config.DistributedMemoryConfig
 	// Logger for operations.
 	Logger *slog.Logger
 }
@@ -57,9 +63,10 @@ func NewManager(cfg ManagerConfig) *Manager {
 		cfg.Logger = slog.Default()
 	}
 	return &Manager{
-		config:    cfg.Config,
-		memvidCfg: cfg.MemvidConfig,
-		logger:    cfg.Logger,
+		config:         cfg.Config,
+		memvidCfg:      cfg.MemvidConfig,
+		distributedCfg: cfg.DistributedConfig,
+		logger:         cfg.Logger,
 	}
 }
 
@@ -163,6 +170,9 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		m.logger.Info("Knowledge graph initialized")
 	}
 
+	// Check if distributed mode is enabled
+	m.distributed = m.distributedCfg.Enabled && m.distributedCfg.Mode == "distributed"
+
 	backend := "sqlite"
 	if m.useMemvid {
 		backend = "memvid"
@@ -172,6 +182,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		"backend", backend,
 		"data_dir", dataDir,
 		"graph_enabled", m.graph != nil,
+		"distributed", m.distributed,
 	)
 	return nil
 }
@@ -1005,7 +1016,20 @@ func (m *Manager) Close() error {
 
 	m.memvid = nil
 	m.useMemvid = false
+	m.distributed = false
 	m.initialized = false
 	m.logger.Info("MemoryManager closed")
 	return lastErr
+}
+
+// IsDistributed returns true if distributed memory sync is enabled.
+func (m *Manager) IsDistributed() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.distributed
+}
+
+// DistributedConfig returns the distributed memory configuration.
+func (m *Manager) DistributedConfig() config.DistributedMemoryConfig {
+	return m.distributedCfg
 }
