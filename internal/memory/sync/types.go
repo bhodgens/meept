@@ -118,11 +118,15 @@ type RetryItem struct {
 	ID string `json:"id"`
 	// Operation is the type of operation ("hydrate" or "distill")
 	Operation string `json:"operation"`
-	// MemoryID is the memory being operated on (for distill)
+	// MemoryID is the memory being operated on (for distill single memory)
 	MemoryID string `json:"memory_id,omitempty"`
+	// TaskID is the task associated with the operation (for distill replay)
+	TaskID string `json:"task_id,omitempty"`
+	// AgentID is the agent associated with the operation (for distill replay)
+	AgentID string `json:"agent_id,omitempty"`
 	// Request is the original request (for hydrate)
 	Request *HydrationRequest `json:"request,omitempty"`
-	// Memory is the distilled memory (for distill)
+	// Memory is the distilled memory (for distill single memory)
 	Memory *DistilledMemory `json:"memory,omitempty"`
 	// Attempts is the number of retry attempts
 	Attempts int `json:"attempts"`

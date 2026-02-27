@@ -77,35 +77,18 @@ func (h *Handler) Stop(ctx context.Context) error {
 
 // handleJobClaimed processes a job claimed event.
 func (h *Handler) handleJobClaimed(ctx context.Context, msg *models.BusMessage) {
-	// Parse the event payload
-	var payload struct {
-		JobID    string `json:"job_id"`
-		WorkerID string `json:"worker_id"`
-	}
-
+	var payload JobEventPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		h.logger.Warn("Failed to parse job claimed event", "error", err)
 		return
 	}
 
-	// Get task ID from job (would need queue access, but we can work with what we have)
-	// For now, pass empty taskID and let the manager handle it
-	taskID := ""
-
-	// Extract task_id from payload if present
-	var fullPayload map[string]any
-	if err := json.Unmarshal(msg.Payload, &fullPayload); err == nil {
-		if tid, ok := fullPayload["task_id"].(string); ok {
-			taskID = tid
-		}
-	}
-
 	h.logger.Debug("Processing job claimed event",
 		"job_id", payload.JobID,
-		"task_id", taskID,
+		"task_id", payload.TaskID,
 	)
 
-	if err := h.manager.HandleJobClaimed(ctx, payload.JobID, taskID); err != nil {
+	if err := h.manager.HandleJobClaimed(ctx, payload.JobID, payload.TaskID); err != nil {
 		h.logger.Warn("Hydration failed",
 			"job_id", payload.JobID,
 			"error", err,
@@ -115,37 +98,19 @@ func (h *Handler) handleJobClaimed(ctx context.Context, msg *models.BusMessage) 
 
 // handleJobCompleted processes a job completed event.
 func (h *Handler) handleJobCompleted(ctx context.Context, msg *models.BusMessage) {
-	// Parse the event payload
-	var payload struct {
-		JobID string `json:"job_id"`
-	}
-
+	var payload JobEventPayload
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		h.logger.Warn("Failed to parse job completed event", "error", err)
 		return
 	}
 
-	// Extract additional fields from payload
-	var fullPayload map[string]any
-	taskID := ""
-	agentID := ""
-
-	if err := json.Unmarshal(msg.Payload, &fullPayload); err == nil {
-		if tid, ok := fullPayload["task_id"].(string); ok {
-			taskID = tid
-		}
-		if aid, ok := fullPayload["agent_id"].(string); ok {
-			agentID = aid
-		}
-	}
-
 	h.logger.Debug("Processing job completed event",
 		"job_id", payload.JobID,
-		"task_id", taskID,
-		"agent_id", agentID,
+		"task_id", payload.TaskID,
+		"agent_id", payload.AgentID,
 	)
 
-	if err := h.manager.HandleJobCompleted(ctx, payload.JobID, taskID, agentID); err != nil {
+	if err := h.manager.HandleJobCompleted(ctx, payload.JobID, payload.TaskID, payload.AgentID); err != nil {
 		h.logger.Warn("Distillation failed",
 			"job_id", payload.JobID,
 			"error", err,

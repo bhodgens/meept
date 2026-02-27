@@ -31,23 +31,35 @@ func NewDistillationPolicy(cfg config.DistillationConfig, graph *memory.Knowledg
 	}
 }
 
+// promotionMetrics holds graph metrics computed during promotion evaluation.
+type promotionMetrics struct {
+	pageRank  float64
+	inDegree  int
+	outDegree int
+}
+
 // ShouldPromote evaluates whether a single memory should be promoted.
 // Returns: should promote, reason, computed score.
 func (p *DistillationPolicy) ShouldPromote(ctx context.Context, mem memory.MemoryResult) (bool, string, float64) {
+	_, promote, reason, score := p.shouldPromoteWithMetrics(ctx, mem)
+	return promote, reason, score
+}
+
+// shouldPromoteWithMetrics evaluates promotion and also returns the computed metrics
+// to avoid redundant graph queries.
+func (p *DistillationPolicy) shouldPromoteWithMetrics(ctx context.Context, mem memory.MemoryResult) (promotionMetrics, bool, string, float64) {
+	var m promotionMetrics
+
 	// Check minimum age
 	minAge := time.Duration(p.config.MinMemoryAgeMinutes) * time.Minute
 	if minAge > 0 && time.Since(mem.Memory.CreatedAt) < minAge {
-		return false, "memory too recent", 0
+		return m, false, "memory too recent", 0
 	}
 
 	// Get graph metrics if available
-	pageRank := 0.0
-	inDegree := 0
-	outDegree := 0
-
 	if p.graph != nil {
 		var err error
-		pageRank, err = p.graph.GetPageRank(ctx, mem.Memory.ID)
+		m.pageRank, err = p.graph.GetPageRank(ctx, mem.Memory.ID)
 		if err != nil {
 			p.logger.Debug("Failed to get PageRank", "memory_id", mem.Memory.ID, "error", err)
 		}
@@ -57,40 +69,40 @@ func (p *DistillationPolicy) ShouldPromote(ctx context.Context, mem memory.Memor
 		if err == nil {
 			for _, e := range edges {
 				if e.SourceID == mem.Memory.ID {
-					outDegree++
+					m.outDegree++
 				} else {
-					inDegree++
+					m.inDegree++
 				}
 			}
 		}
 	}
 
 	// Check PageRank threshold
-	if p.config.PageRankThreshold > 0 && pageRank >= p.config.PageRankThreshold {
-		return true, "high PageRank importance", pageRank
+	if p.config.PageRankThreshold > 0 && m.pageRank >= p.config.PageRankThreshold {
+		return m, true, "high PageRank importance", m.pageRank
 	}
 
 	// Check hub connectivity (high degree nodes are important for graph structure)
-	totalDegree := inDegree + outDegree
+	totalDegree := m.inDegree + m.outDegree
 	if p.config.HubConnectivityThreshold > 0 && totalDegree >= p.config.HubConnectivityThreshold {
 		score := float64(totalDegree) / float64(p.config.HubConnectivityThreshold)
-		return true, "hub node with high connectivity", score
+		return m, true, "hub node with high connectivity", score
 	}
 
 	// Check cross-agent references (memory referenced by multiple agents)
 	if p.config.CrossAgentReferencesMin > 0 {
 		crossAgentRefs := p.countCrossAgentReferences(ctx, mem.Memory.ID, mem.Memory.AgentID)
 		if crossAgentRefs >= p.config.CrossAgentReferencesMin {
-			return true, "cross-agent knowledge sharing", float64(crossAgentRefs)
+			return m, true, "cross-agent knowledge sharing", float64(crossAgentRefs)
 		}
 	}
 
 	// Check if this is a task completion summary
 	if p.config.PromoteTaskCompletions && isTaskCompletion(mem.Memory) {
-		return true, "task completion summary", 0.8
+		return m, true, "task completion summary", 0.8
 	}
 
-	return false, "", 0
+	return m, false, "", 0
 }
 
 // SelectForPromotion filters a list of memories to those eligible for promotion.
@@ -99,35 +111,16 @@ func (p *DistillationPolicy) SelectForPromotion(ctx context.Context, memories []
 	candidates := make([]PromotionCandidate, 0)
 
 	for _, mem := range memories {
-		shouldPromote, reason, score := p.ShouldPromote(ctx, mem)
+		metrics, shouldPromote, reason, score := p.shouldPromoteWithMetrics(ctx, mem)
 		if !shouldPromote {
 			continue
 		}
 
-		// Get additional metrics for the candidate
-		pageRank := 0.0
-		inDegree := 0
-		outDegree := 0
-
-		if p.graph != nil {
-			pageRank, _ = p.graph.GetPageRank(ctx, mem.Memory.ID)
-			edges, err := p.graph.GetEdges(ctx, mem.Memory.ID)
-			if err == nil {
-				for _, e := range edges {
-					if e.SourceID == mem.Memory.ID {
-						outDegree++
-					} else {
-						inDegree++
-					}
-				}
-			}
-		}
-
 		candidates = append(candidates, PromotionCandidate{
 			MemoryID:  mem.Memory.ID,
-			PageRank:  pageRank,
-			InDegree:  inDegree,
-			OutDegree: outDegree,
+			PageRank:  metrics.pageRank,
+			InDegree:  metrics.inDegree,
+			OutDegree: metrics.outDegree,
 			TaskID:    mem.Memory.TaskID,
 			AgentID:   mem.Memory.AgentID,
 			Score:     score,
@@ -146,54 +139,32 @@ func (p *DistillationPolicy) SelectForPromotion(ctx context.Context, memories []
 func (p *DistillationPolicy) EvaluateTaskMemories(ctx context.Context, taskID string, memories []memory.MemoryResult) []PromotionCandidate {
 	candidates := make([]PromotionCandidate, 0)
 
-	// Always promote task completion summaries
 	for _, mem := range memories {
 		if isTaskCompletion(mem.Memory) {
+			// Always promote task completion summaries at high priority
 			pageRank := 0.0
 			if p.graph != nil {
 				pageRank, _ = p.graph.GetPageRank(ctx, mem.Memory.ID)
 			}
-
 			candidates = append(candidates, PromotionCandidate{
 				MemoryID: mem.Memory.ID,
 				PageRank: pageRank,
 				TaskID:   taskID,
 				AgentID:  mem.Memory.AgentID,
-				Score:    1.0, // High priority
+				Score:    1.0,
 				Reason:   "task completion summary",
 			})
-		}
-	}
-
-	// Add other high-value memories
-	for _, mem := range memories {
-		if isTaskCompletion(mem.Memory) {
-			continue // Already added
+			continue
 		}
 
-		shouldPromote, reason, score := p.ShouldPromote(ctx, mem)
+		// Evaluate other memories using the policy
+		metrics, shouldPromote, reason, score := p.shouldPromoteWithMetrics(ctx, mem)
 		if shouldPromote {
-			pageRank := 0.0
-			inDegree := 0
-			outDegree := 0
-
-			if p.graph != nil {
-				pageRank, _ = p.graph.GetPageRank(ctx, mem.Memory.ID)
-				edges, _ := p.graph.GetEdges(ctx, mem.Memory.ID)
-				for _, e := range edges {
-					if e.SourceID == mem.Memory.ID {
-						outDegree++
-					} else {
-						inDegree++
-					}
-				}
-			}
-
 			candidates = append(candidates, PromotionCandidate{
 				MemoryID:  mem.Memory.ID,
-				PageRank:  pageRank,
-				InDegree:  inDegree,
-				OutDegree: outDegree,
+				PageRank:  metrics.pageRank,
+				InDegree:  metrics.inDegree,
+				OutDegree: metrics.outDegree,
 				TaskID:    taskID,
 				AgentID:   mem.Memory.AgentID,
 				Score:     score,

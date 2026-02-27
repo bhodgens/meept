@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -323,6 +322,8 @@ func (s *SyncManager) Distill(ctx context.Context, taskID, agentID string) (*Dis
 			s.queueRetry(RetryItem{
 				ID:          fmt.Sprintf("distill-%s-%d", taskID, time.Now().UnixNano()),
 				Operation:   "distill",
+				TaskID:      taskID,
+				AgentID:     agentID,
 				Attempts:    0,
 				LastAttempt: time.Now(),
 				NextAttempt: time.Now().Add(30 * time.Second),
@@ -432,16 +433,34 @@ func (s *SyncManager) Distill(ctx context.Context, taskID, agentID string) (*Dis
 
 // prepareDistilledMemory creates a DistilledMemory from a promotion candidate.
 func (s *SyncManager) prepareDistilledMemory(ctx context.Context, candidate PromotionCandidate, agentID string) (*DistilledMemory, error) {
-	// Fetch the full memory
-	memories, err := s.localMgr.Search(ctx, memory.MemoryQuery{
-		Query: candidate.MemoryID,
-		Limit: 1,
-	})
-	if err != nil || len(memories) == 0 {
-		return nil, fmt.Errorf("memory not found: %s", candidate.MemoryID)
-	}
+	// Fetch the full memory by ID
+	var mem memory.Memory
 
-	mem := memories[0].Memory
+	fullMemories, err := s.localMgr.GetByIDs(ctx, []string{candidate.MemoryID})
+	if err == nil && len(fullMemories) > 0 {
+		mem = fullMemories[0]
+	} else {
+		// Fallback to search (e.g. when memvid is not the primary backend)
+		results, searchErr := s.localMgr.Search(ctx, memory.MemoryQuery{
+			Query: candidate.MemoryID,
+			Limit: 5,
+		})
+		if searchErr != nil || len(results) == 0 {
+			return nil, fmt.Errorf("memory not found: %s", candidate.MemoryID)
+		}
+		// Find exact ID match in search results
+		found := false
+		for _, r := range results {
+			if r.Memory.ID == candidate.MemoryID {
+				mem = r.Memory
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("memory not found by ID: %s", candidate.MemoryID)
+		}
+	}
 
 	// Get edges from graph
 	var edgesOut, edgesIn []EdgeRef
@@ -540,18 +559,18 @@ func (s *SyncManager) HandleJobCompleted(ctx context.Context, jobID, taskID, age
 
 // Status returns the current sync status.
 func (s *SyncManager) Status(ctx context.Context) SyncStatus {
-	s.statsMu.RLock()
-	defer s.statsMu.RUnlock()
-
-	status := s.stats
-
-	// Update memvid availability
-	status.MemvidAvailable = s.memvid.IsAvailable(ctx)
-
-	// Count pending retries
+	// Acquire retryMu first to match lock ordering in queueRetry
 	s.retryMu.Lock()
-	status.PendingRetries = len(s.retryQueue)
+	pendingRetries := len(s.retryQueue)
 	s.retryMu.Unlock()
+
+	s.statsMu.RLock()
+	status := s.stats
+	s.statsMu.RUnlock()
+
+	// These don't require locks
+	status.MemvidAvailable = s.memvid.IsAvailable(ctx)
+	status.PendingRetries = pendingRetries
 
 	return status
 }
@@ -559,18 +578,17 @@ func (s *SyncManager) Status(ctx context.Context) SyncStatus {
 // queueRetry adds a failed operation to the retry queue.
 func (s *SyncManager) queueRetry(item RetryItem) {
 	s.retryMu.Lock()
-	defer s.retryMu.Unlock()
-
 	// Limit queue size
 	if len(s.retryQueue) >= 100 {
 		// Remove oldest item
 		s.retryQueue = s.retryQueue[1:]
 	}
-
 	s.retryQueue = append(s.retryQueue, item)
+	count := len(s.retryQueue)
+	s.retryMu.Unlock()
 
 	s.statsMu.Lock()
-	s.stats.PendingRetries = len(s.retryQueue)
+	s.stats.PendingRetries = count
 	s.statsMu.Unlock()
 }
 
@@ -605,8 +623,17 @@ func (s *SyncManager) processRetryQueue(ctx context.Context) {
 		item.LastAttempt = now
 
 		var err error
-		if item.Operation == "distill" && item.Memory != nil {
+		switch {
+		case item.Operation == "distill" && item.Memory != nil:
+			// Retry promoting a specific memory
 			err = s.promoteToShared(ctx, item.Memory)
+		case item.Operation == "distill" && (item.TaskID != "" || item.AgentID != ""):
+			// Replay full distillation (queued when memvid was entirely unavailable)
+			_, err = s.Distill(ctx, item.TaskID, item.AgentID)
+		default:
+			// Unknown or unhandled retry item, skip
+			s.logger.Warn("Dropping unhandled retry item", "id", item.ID, "operation", item.Operation)
+			continue
 		}
 
 		if err != nil {
@@ -651,13 +678,3 @@ func (s *SyncManager) runPeriodicDistillation(ctx context.Context) {
 	}
 }
 
-// publishEvent publishes a sync event to the message bus.
-func (s *SyncManager) publishEvent(topic string, data any) {
-	if s.bus == nil {
-		return
-	}
-
-	payload, _ := json.Marshal(data)
-	// Just log for now, actual publishing would go through bus
-	s.logger.Debug("Sync event", "topic", topic, "payload", string(payload))
-}
