@@ -12,6 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // SharedZone is the memvid zone for cross-agent shared memories.
@@ -184,6 +185,8 @@ func (s *SyncManager) Hydrate(ctx context.Context, req HydrationRequest) (*Hydra
 		"edges_restored", result.EdgesRestored,
 		"duration_ms", result.Duration.Milliseconds(),
 	)
+
+	s.publishEvent("memory.sync.hydrated", result)
 
 	return result, nil
 }
@@ -427,6 +430,8 @@ func (s *SyncManager) Distill(ctx context.Context, taskID, agentID string) (*Dis
 		"failures", len(result.Failures),
 		"duration_ms", result.Duration.Milliseconds(),
 	)
+
+	s.publishEvent("memory.sync.distilled", result)
 
 	return result, nil
 }
@@ -677,4 +682,21 @@ func (s *SyncManager) runPeriodicDistillation(ctx context.Context) {
 		}
 	}
 }
+
+// publishEvent publishes a sync lifecycle event to the message bus.
+// This allows other components (UI, agents, monitoring) to observe sync operations.
+func (s *SyncManager) publishEvent(topic string, data any) {
+	if s.bus == nil {
+		return
+	}
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "sync-manager", data)
+	if err != nil {
+		s.logger.Debug("Failed to create bus message", "topic", topic, "error", err)
+		return
+	}
+
+	s.bus.Publish(topic, msg)
+}
+
 
