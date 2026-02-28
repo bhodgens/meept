@@ -137,6 +137,7 @@ type ModelsConfig struct {
 	Model             string              `json:"model"`
 	SmallModel        string              `json:"small_model"`
 	DisabledProviders []string            `json:"disabled_providers"`
+	DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
 	Providers         map[string]Provider `json:"providers"`
 }
 
@@ -184,6 +185,16 @@ func LoadModelsConfig(path string) (*ModelsConfig, error) {
 	var cfg ModelsConfig
 	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse models config: %w", err)
+	}
+
+	// Apply default timeout to providers that don't specify one
+	if cfg.DefaultTimeout > 0 {
+		for providerID, provider := range cfg.Providers {
+			if provider.Options.Timeout == 0 {
+				provider.Options.Timeout = cfg.DefaultTimeout
+				cfg.Providers[providerID] = provider
+			}
+		}
 	}
 
 	return &cfg, nil

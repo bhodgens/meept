@@ -73,6 +73,7 @@ type ExecutionResult struct {
 	Success    bool   `json:"success"`
 	Result     any    `json:"result,omitempty"`
 	Error      string `json:"error,omitempty"`
+	Cached     bool   `json:"cached,omitempty"` // True if result came from cache
 }
 
 // ToJSON converts the result to a JSON string.
@@ -100,6 +101,7 @@ type Executor struct {
 	logger      *slog.Logger
 	parallelism int
 	agentID     string // Identifier for the agent/worker using this executor
+	cache       *ResultCache
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -125,6 +127,13 @@ func WithParallelism(n int) ExecutorOption {
 func WithExecutorAgentID(id string) ExecutorOption {
 	return func(e *Executor) {
 		e.agentID = id
+	}
+}
+
+// WithExecutorCache sets the result cache for the executor.
+func WithExecutorCache(cache *ResultCache) ExecutorOption {
+	return func(e *Executor) {
+		e.cache = cache
 	}
 }
 
@@ -159,6 +168,22 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 			ToolCallID: toolCall.ID,
 			Success:    false,
 			Error:      fmt.Sprintf("invalid JSON in tool arguments: %v", err),
+		}
+	}
+
+	// Check cache BEFORE tool lookup (only if tool is enabled for caching)
+	if e.cache != nil {
+		if cachedResult, hit := e.cache.Get(toolName, args); hit {
+			e.logger.Debug("Tool result cache hit",
+				"agent", e.agentID,
+				"tool", toolName,
+			)
+			return &ExecutionResult{
+				ToolCallID: toolCall.ID,
+				Success:    true,
+				Result:     cachedResult,
+				Cached:     true,
+			}
 		}
 	}
 
@@ -230,10 +255,20 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		}
 	}
 
+	// Store in cache after successful execution
+	if e.cache != nil {
+		e.cache.Put(toolName, args, result)
+		e.logger.Debug("Cached tool result",
+			"agent", e.agentID,
+			"tool", toolName,
+		)
+	}
+
 	return &ExecutionResult{
 		ToolCallID: toolCall.ID,
 		Success:    true,
 		Result:     result,
+		Cached:     false, // Fresh result, not from cache
 	}
 }
 

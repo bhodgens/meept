@@ -88,6 +88,9 @@ type Components struct {
 	SyncManager     *memsync.SyncManager
 	SyncHandler     *memsync.Handler
 
+	// Result cache for tool outputs
+	ResultCache     *agent.ResultCache
+
 	Logger          *slog.Logger
 }
 
@@ -217,6 +220,30 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 	}
 
+	// Create result cache if enabled in config
+	if cfg.Agent.Cache.Enabled {
+		cacheConfig := agent.DefaultCacheConfig()
+
+		// Override with config values if specified
+		if cfg.Agent.Cache.MaxEntries > 0 {
+			cacheConfig.MaxEntries = cfg.Agent.Cache.MaxEntries
+		}
+		if cfg.Agent.Cache.DefaultTTLSeconds > 0 {
+			cacheConfig.DefaultTTL = time.Duration(cfg.Agent.Cache.DefaultTTLSeconds) * time.Second
+		}
+		if cfg.Agent.Cache.CleanupFreqSeconds > 0 {
+			cacheConfig.CleanupFreq = time.Duration(cfg.Agent.Cache.CleanupFreqSeconds) * time.Second
+		}
+		if len(cfg.Agent.Cache.EnabledTools) > 0 {
+			cacheConfig.EnabledTools = cfg.Agent.Cache.EnabledTools
+		}
+
+		c.ResultCache = agent.NewResultCache(cacheConfig, logger.With("component", "cache"))
+		logger.Info("Result cache enabled", "max_entries", cacheConfig.MaxEntries)
+	} else {
+		logger.Info("Result cache disabled")
+	}
+
 	// Create agent loop
 	agentOpts := []agent.LoopOption{
 		agent.WithMessageBus(msgBus),
@@ -248,6 +275,20 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		lpAdapter := &learningPipelineAdapter{pipeline: c.LearningPipeline}
 		agentOpts = append(agentOpts, agent.WithLearningPipeline(lpAdapter))
 		logger.Info("Agent loop configured with learning pipeline")
+	}
+	// Wire result cache
+	if c.ResultCache != nil {
+		agentOpts = append(agentOpts, agent.WithResultCache(c.ResultCache))
+		logger.Info("Agent loop configured with result cache")
+	}
+	// Wire progress tracking
+	if cfg.Agent.ProgressEnabled {
+		agentOpts = append(agentOpts, agent.WithProgressEnabled(true))
+		interval := time.Duration(cfg.Agent.ProgressIntervalSeconds) * time.Second
+		if interval > 0 {
+			agentOpts = append(agentOpts, agent.WithProgressInterval(interval))
+		}
+		logger.Info("Agent loop configured with progress tracking")
 	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
@@ -388,7 +429,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, logger)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, logger)
 
 	// Wire memvid client and task store to the main agent loop now that they're available
 	if c.MemvidClient != nil {
@@ -524,6 +565,12 @@ func (c *Components) Start(ctx context.Context) error {
 	// Start session handler
 	if err := c.SessionHandler.Start(ctx); err != nil {
 		return err
+	}
+
+	// Start result cache cleanup goroutine
+	if c.ResultCache != nil {
+		c.ResultCache.Start()
+		c.Logger.Debug("Result cache cleanup started")
 	}
 
 	// Start queue handler
@@ -703,6 +750,12 @@ func (c *Components) Stop(ctx context.Context) error {
 	// Stop all MCP server connections
 	if c.MCPManager != nil {
 		c.MCPManager.StopAll()
+	}
+
+	// Stop result cache cleanup goroutine
+	if c.ResultCache != nil {
+		c.ResultCache.Stop()
+		c.Logger.Debug("Result cache cleanup stopped")
 	}
 
 	return lastErr
@@ -960,6 +1013,7 @@ func registerBuiltinTools(
 	secOrch *intsecurity.Orchestrator,
 	memoryMgr *memory.Manager,
 	taskStore *task.Store,
+	sched *scheduler.Scheduler,
 	logger *slog.Logger,
 ) {
 	// Filesystem tools
@@ -980,6 +1034,9 @@ func registerBuiltinTools(
 	// Web fetch tool
 	registry.Register(builtin.NewWebFetchTool(30*time.Second, 100000))
 
+	// Web search tool (DuckDuckGo)
+	registry.Register(builtin.NewWebSearchTool(15 * time.Second))
+
 	// Memory tools (only if memory manager is available)
 	if memoryMgr != nil {
 		registry.Register(builtin.NewMemoryStoreTool(memoryMgr))
@@ -995,6 +1052,19 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewTaskListTool(taskStore))
 		registry.Register(builtin.NewTaskUpdateTool(taskStore))
 		logger.Debug("Registered task tools")
+	}
+
+	// Scheduler tools (only if scheduler is available)
+	if sched != nil {
+		registry.Register(builtin.NewScheduleCreateTool(sched))
+		registry.Register(builtin.NewScheduleListTool(sched))
+		registry.Register(builtin.NewScheduleGetTool(sched))
+		registry.Register(builtin.NewScheduleDeleteTool(sched))
+		registry.Register(builtin.NewSchedulePauseTool(sched))
+		registry.Register(builtin.NewScheduleResumeTool(sched))
+		registry.Register(builtin.NewScheduleRunNowTool(sched))
+		registry.Register(builtin.NewCronCreateTool(sched))
+		logger.Debug("Registered scheduler tools")
 	}
 
 	logger.Info("Registered builtin tools", "count", registry.Count())

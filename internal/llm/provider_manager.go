@@ -99,9 +99,7 @@ func NewProviderManager(cfg ProviderManagerConfig) *ProviderManager {
 	if cfg.RecoveryThreshold == 0 {
 		cfg.RecoveryThreshold = 2
 	}
-	if cfg.FailoverTimeout == 0 {
-		cfg.FailoverTimeout = 30 * time.Second
-	}
+	// FailoverTimeout of 0 means no timeout (use provider's HTTP client timeout only)
 
 	pm := &ProviderManager{
 		config:   cfg,
@@ -167,8 +165,14 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 		attempts++
 		start := time.Now()
 
-		// Create timeout context for this attempt
-		attemptCtx, cancel := context.WithTimeout(ctx, pm.config.FailoverTimeout)
+		// Create timeout context for this attempt (if FailoverTimeout is set)
+		var attemptCtx context.Context
+		var cancel context.CancelFunc
+		if pm.config.FailoverTimeout > 0 {
+			attemptCtx, cancel = context.WithTimeout(ctx, pm.config.FailoverTimeout)
+		} else {
+			attemptCtx, cancel = context.WithCancel(ctx)
+		}
 		resp, err := entry.Client.Chat(attemptCtx, messages, opts...)
 		cancel()
 
@@ -209,6 +213,15 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 	}
 
 	return nil, errors.New("no available providers")
+}
+
+// ChatWithProgress sends a chat completion request with progress reporting.
+// For ProviderManager, progress callbacks are not fully supported across failover,
+// so this just calls Chat() without progress.
+func (pm *ProviderManager) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
+	// Progress reporting not fully implemented for ProviderManager failover
+	// Just call the standard Chat method
+	return pm.Chat(ctx, messages, opts...)
 }
 
 // getOrderedProviders returns providers sorted by preference.

@@ -31,7 +31,7 @@ type AgentConstraints struct {
 // DefaultConstraints returns sensible default constraints.
 func DefaultConstraints() AgentConstraints {
 	return AgentConstraints{
-		MaxIterations:    10,
+		MaxIterations:    25,
 		Timeout:          5 * time.Minute,
 		MaxTokensPerTurn: 4096,
 		MaxMemoryRefs:    20,

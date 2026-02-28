@@ -183,7 +183,7 @@ func GetAgentsByRole(agents map[string]*AgentDefinition, role string) []*AgentDe
 // MergeAgentDefaults applies default values to an agent definition.
 func MergeAgentDefaults(agent *AgentDefinition) {
 	if agent.Constraints.MaxIterations == 0 {
-		agent.Constraints.MaxIterations = 10
+		agent.Constraints.MaxIterations = 25
 	}
 	if agent.Constraints.TimeoutSeconds == 0 {
 		agent.Constraints.TimeoutSeconds = 300 // 5 minutes

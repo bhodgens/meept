@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,7 +23,7 @@ import (
 
 // Default values for the agent loop.
 const (
-	DefaultMaxIterations = 10
+	DefaultMaxIterations = 25
 	DefaultTimeout       = 5 * time.Minute
 )
 
@@ -30,7 +32,231 @@ var (
 	ErrMaxIterationsReached = errors.New("maximum iterations reached")
 	ErrContextCancelled     = errors.New("context cancelled")
 	ErrNoLLMClient          = errors.New("no LLM client configured")
+	ErrCycleDetected        = errors.New("agent detected a cycle in tool calls")
+	ErrConvergenceDetected  = errors.New("agent responses converged without progress")
 )
+
+// DetectionConfig holds configuration for cycle and convergence detection.
+type DetectionConfig struct {
+	// CycleDetection: minimum consecutive similar tool calls to trigger
+	CycleThreshold int
+
+	// ConvergenceDetection: minimum consecutive similar responses to trigger
+	ConvergenceThreshold int
+
+	// HistorySize: how many iterations to keep in history
+	HistorySize int
+}
+
+// DefaultDetectionConfig returns sensible detection defaults.
+func DefaultDetectionConfig() DetectionConfig {
+	return DetectionConfig{
+		CycleThreshold:       3, // 3 similar tool calls in a row
+		ConvergenceThreshold: 3, // 3 similar responses in a row
+		HistorySize:          10,
+	}
+}
+
+// cycleDetector tracks tool calls to detect repeated patterns.
+type cycleDetector struct {
+	mu       sync.Mutex
+	history  []toolCallSignature
+	config   DetectionConfig
+	logger   *slog.Logger
+	lastWarn time.Time
+}
+
+// toolCallSignature represents a simplified tool call for cycle detection.
+type toolCallSignature struct {
+	tool       string
+	argHash    string // hash of arguments
+	timestamp  time.Time
+}
+
+// newCycleDetector creates a new cycle detector.
+func newCycleDetector(config DetectionConfig, logger *slog.Logger) *cycleDetector {
+	return &cycleDetector{
+		history: make([]toolCallSignature, 0, config.HistorySize),
+		config:  config,
+		logger:  logger,
+	}
+}
+
+// recordCall records a tool call and checks for cycles.
+// Returns true if a cycle was detected.
+func (cd *cycleDetector) recordCall(tool string, argsJSON string) bool {
+	cd.mu.Lock()
+	defer cd.mu.Unlock()
+
+	// Create argument signature
+	argHash := hashArgs(argsJSON)
+	sig := toolCallSignature{
+		tool:      tool,
+		argHash:   argHash,
+		timestamp: time.Now(),
+	}
+
+	// Add to history
+	cd.history = append(cd.history, sig)
+	if len(cd.history) > cd.config.HistorySize {
+		cd.history = cd.history[1:]
+	}
+
+	// Check for cycles: look for consecutive similar calls
+	return cd.detectCycle()
+}
+
+// detectCycle checks if we have consecutive similar tool calls.
+func (cd *cycleDetector) detectCycle() bool {
+	if len(cd.history) < cd.config.CycleThreshold {
+		return false
+	}
+
+	// Check last N calls for similarity
+	recent := cd.history[len(cd.history)-cd.config.CycleThreshold:]
+
+	// All must be same tool with same args
+	firstTool := recent[0].tool
+	firstArgs := recent[0].argHash
+
+	for i := 1; i < len(recent); i++ {
+		if recent[i].tool != firstTool || recent[i].argHash != firstArgs {
+			return false
+		}
+	}
+
+	// Rate limit warnings
+	if time.Since(cd.lastWarn) > 30*time.Second {
+		cd.logger.Warn("Cycle detected in tool calls",
+			"tool", firstTool,
+			"args_hash", firstArgs[:8],
+			"count", len(recent),
+		)
+		cd.lastWarn = time.Now()
+	}
+
+	return true
+}
+
+// convergenceDetector tracks LLM responses to detect stagnation.
+type convergenceDetector struct {
+	mu       sync.Mutex
+	history  []responseSignature
+	config   DetectionConfig
+	logger   *slog.Logger
+	lastWarn time.Time
+}
+
+// responseSignature represents a simplified LLM response for convergence detection.
+type responseSignature struct {
+	contentHash string // hash of trimmed, lowercased content
+	hasTools    bool
+	timestamp   time.Time
+}
+
+// newConvergenceDetector creates a new convergence detector.
+func newConvergenceDetector(config DetectionConfig, logger *slog.Logger) *convergenceDetector {
+	return &convergenceDetector{
+		history: make([]responseSignature, 0, config.HistorySize),
+		config:  config,
+		logger:  logger,
+	}
+}
+
+// recordResponse records an LLM response and checks for convergence.
+// Returns true if convergence was detected (without tool calls).
+func (cd *convergenceDetector) recordResponse(content string, hasTools bool) bool {
+	cd.mu.Lock()
+	defer cd.mu.Unlock()
+
+	// Normalize and hash content
+	normalized := normalizeContent(content)
+	contentHash := hashString(normalized)
+
+	sig := responseSignature{
+		contentHash: contentHash,
+		hasTools:    hasTools,
+		timestamp:   time.Now(),
+	}
+
+	// Add to history
+	cd.history = append(cd.history, sig)
+	if len(cd.history) > cd.config.HistorySize {
+		cd.history = cd.history[1:]
+	}
+
+	// Only check convergence if no tools are being used
+	// (responses with tools are expected to vary)
+	if hasTools {
+		return false
+	}
+
+	return cd.detectConvergence()
+}
+
+// detectConvergence checks if responses are converging without progress.
+func (cd *convergenceDetector) detectConvergence() bool {
+	if len(cd.history) < cd.config.ConvergenceThreshold {
+		return false
+	}
+
+	// Check last N responses
+	recent := cd.history[len(cd.history)-cd.config.ConvergenceThreshold:]
+
+	// All must have no tools and similar content
+	firstHash := recent[0].contentHash
+
+	for i := 1; i < len(recent); i++ {
+		if recent[i].hasTools || recent[i].contentHash != firstHash {
+			return false
+		}
+	}
+
+	// Rate limit warnings
+	if time.Since(cd.lastWarn) > 30*time.Second {
+		cd.logger.Warn("Convergence detected in responses",
+			"content_hash", firstHash[:8],
+			"count", len(recent),
+		)
+		cd.lastWarn = time.Now()
+	}
+
+	return true
+}
+
+// hashArgs creates a hash of tool arguments for comparison.
+// Accepts JSON string arguments directly.
+func hashArgs(argsJSON string) string {
+	if argsJSON == "" || argsJSON == "{}" {
+		return "empty"
+	}
+
+	// Normalize JSON: remove extra whitespace
+	normalized := strings.TrimSpace(argsJSON)
+
+	// For simple comparison, we can hash the normalized JSON directly
+	// Most LLMs produce deterministic JSON for the same arguments
+	return hashString(normalized)
+}
+
+// normalizeContent normalizes response content for comparison.
+func normalizeContent(content string) string {
+	// Trim, lowercase, remove extra whitespace
+	content = strings.TrimSpace(content)
+	content = strings.ToLower(content)
+
+	// Collapse multiple spaces
+	words := strings.Fields(content)
+	return strings.Join(words, " ")
+}
+
+// hashString creates a SHA256 hash of a string.
+func hashString(s string) string {
+	h := sha256.New()
+	h.Write([]byte(s))
+	return hex.EncodeToString(h.Sum(nil))[:16] // First 16 chars is enough
+}
+
 
 // AgentConfig holds configuration for the agent loop.
 type AgentConfig struct {
@@ -79,14 +305,29 @@ type AgentLoop struct {
 	// Learning pipeline for JUDGE/DISTILL/CONSOLIDATE
 	learningPipeline LearningPipeline
 
+	// Result cache for tool outputs
+	cache *ResultCache
+
+	// Progress tracking
+	progressEnabled  bool          // Enable/disable progress events
+	progressInterval time.Duration // Minimum interval between progress events (reserved for future use)
+
 	// Configuration
-	config AgentConfig
+	config          AgentConfig
+	detectionConfig DetectionConfig
+
+	// Cycle and convergence detection
+	cycleDetector       *cycleDetector
+	convergenceDetector *convergenceDetector
 
 	// Conversation management
 	conversations *ConversationStore
 
 	// Prompt building
 	promptBuilder *PromptBuilder
+
+	// Claude artifacts integration
+	artifactManager *ArtifactManager
 
 	// Agent identity
 	agentID string
@@ -234,6 +475,28 @@ func WithShadowManager(mgr *shadow.Manager) LoopOption {
 	}
 }
 
+// WithResultCache sets the result cache for the agent loop.
+func WithResultCache(cache *ResultCache) LoopOption {
+	return func(l *AgentLoop) {
+		l.cache = cache
+	}
+}
+
+// WithProgressEnabled enables or disables progress event publishing.
+func WithProgressEnabled(enabled bool) LoopOption {
+	return func(l *AgentLoop) {
+		l.progressEnabled = enabled
+	}
+}
+
+// WithProgressInterval sets the minimum interval between progress events.
+// Reserved for future use to throttle high-frequency progress updates.
+func WithProgressInterval(interval time.Duration) LoopOption {
+	return func(l *AgentLoop) {
+		l.progressInterval = interval
+	}
+}
+
 // WithSecurityOrchestrator sets the security orchestrator for input/output processing.
 func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
 	return func(l *AgentLoop) {
@@ -244,14 +507,19 @@ func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
 // NewAgentLoop creates a new agent loop.
 func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 	loop := &AgentLoop{
-		config:        DefaultAgentConfig(),
-		conversations: NewConversationStore(100),
-		logger:        slog.Default(),
+		config:           DefaultAgentConfig(),
+		detectionConfig:  DefaultDetectionConfig(),
+		conversations:    NewConversationStore(100),
+		logger:           slog.Default(),
 	}
 
 	for _, opt := range opts {
 		opt(loop)
 	}
+
+	// Initialize detectors
+	loop.cycleDetector = newCycleDetector(loop.detectionConfig, loop.logger)
+	loop.convergenceDetector = newConvergenceDetector(loop.detectionConfig, loop.logger)
 
 	// Create executor if we have a registry
 	if loop.registry != nil {
@@ -260,6 +528,10 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 		}
 		if loop.agentID != "" {
 			executorOpts = append(executorOpts, WithExecutorAgentID(loop.agentID))
+		}
+		if loop.cache != nil {
+			executorOpts = append(executorOpts, WithExecutorCache(loop.cache))
+			loop.logger.Debug("Wired result cache to executor")
 		}
 		loop.executor = NewExecutor(
 			loop.registry,
@@ -527,6 +799,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Execute tools
 			results := l.executeToolCalls(ctx, response.ToolCalls)
 
+			// Record tool calls for cycle detection
+			for _, tc := range response.ToolCalls {
+				if l.cycleDetector.recordCall(tc.Function.Name, tc.Function.Arguments) {
+					// Cycle detected - abort with helpful message
+					l.logger.Warn("Cycle detected, aborting loop",
+						"iteration", iteration,
+						"tool", tc.Function.Name,
+					)
+					exhaustMsg := fmt.Sprintf("I detected I was repeating the same action (%s) and stopped to avoid getting stuck. "+
+						"Please provide more specific guidance or clarify what you'd like me to do.", tc.Function.Name)
+					return exhaustMsg, ErrCycleDetected
+				}
+			}
+
 			// Add tool results to conversation
 			for _, result := range results {
 				conv.AddToolResult(result.ToolCallID, result.ToJSON())
@@ -537,6 +823,17 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 			// Continue loop for LLM to process tool results
 			continue
+		}
+
+		// Record response for convergence detection
+		if l.convergenceDetector.recordResponse(response.Content, false) {
+			// Convergence detected - abort with helpful message
+			l.logger.Warn("Convergence detected, aborting loop",
+				"iteration", iteration,
+			)
+			exhaustMsg := "I noticed my responses were converging without making new progress. " +
+				"Please provide more specific guidance or clarify what you'd like me to do."
+			return exhaustMsg, ErrConvergenceDetected
 		}
 
 		// Case 2: LLM returned text response (no tool calls) - done
@@ -1029,6 +1326,35 @@ func (l *AgentLoop) publishResult(conversationID string, iteration int, results 
 	}
 
 	l.bus.Publish("agent.result", msg)
+}
+
+// publishProgress publishes a progress event to the message bus.
+func (l *AgentLoop) publishProgress(conversationID string, iteration int, stage string, detail string, tokenCount int) {
+	// Skip if progress disabled or no bus
+	if !l.progressEnabled || l.bus == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"conversation_id": conversationID,
+		"iteration":       iteration,
+		"stage":           stage,
+		"detail":          detail,
+		"token_count":     tokenCount,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+	}
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
+	if err != nil {
+		l.logger.Warn("Failed to create progress bus message", "error", err)
+		return
+	}
+
+	// Publish - don't care if nobody is listening
+	delivered := l.bus.Publish("agent.progress", msg)
+	if delivered == 0 {
+		l.logger.Debug("Progress event published (no subscribers)", "stage", stage)
+	}
 }
 
 // GetConversation returns a conversation by ID.

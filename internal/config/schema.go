@@ -14,6 +14,7 @@ type Config struct {
 	Memvid      MemvidConfig      `toml:"memvid"`
 	MultiAgent  MultiAgentConfig  `toml:"multiagent"`
 	Agents      AgentsConfig      `toml:"agents"`
+	Agent       AgentConfig       `toml:"agent"`
 	Security    SecurityConfig    `toml:"security"`
 	Scheduler   SchedulerConfig   `toml:"scheduler"`
 	Queue       QueueConfig       `toml:"queue"`
@@ -71,6 +72,7 @@ type MemoryConfig struct {
 	Episodic                   EpisodicConfig      `toml:"episodic"`
 	Task                       TaskMemoryConfig    `toml:"task"`
 	Personality                PersonalityConfig   `toml:"personality"`
+	Embeddings                 EmbeddingConfig     `toml:"embeddings"`
 }
 
 // EpisodicConfig holds episodic memory settings.
@@ -89,6 +91,16 @@ type TaskMemoryConfig struct {
 type PersonalityConfig struct {
 	Enabled                    bool `toml:"enabled"`
 	UpdateIntervalConversations int  `toml:"update_interval_conversations"`
+}
+
+// EmbeddingConfig holds vector embedding settings for semantic memory search.
+type EmbeddingConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Provider string `toml:"provider"` // "openai" or "ollama"
+	APIKey   string `toml:"api_key"`
+	BaseURL  string `toml:"base_url"`
+	Model    string `toml:"model"`
+	Dimension int   `toml:"dimension"`
 }
 
 // MemvidConfig holds memvid service settings.
@@ -139,6 +151,42 @@ type DistillationConfig struct {
 	CrossAgentReferencesMin int `toml:"cross_agent_references_min"`
 	// MinMemoryAgeMinutes requires memories to be at least this old
 	MinMemoryAgeMinutes int `toml:"min_memory_age_minutes"`
+}
+
+// CacheConfig holds settings for tool result caching.
+type CacheConfig struct {
+	// Enabled turns on tool result caching
+	Enabled bool `toml:"enabled"`
+	// MaxEntries is the maximum number of cached results
+	MaxEntries int `toml:"max_entries"`
+	// DefaultTTLSeconds is the default time-to-live for cache entries
+	DefaultTTLSeconds int `toml:"default_ttl_seconds"`
+	// CleanupFreqSeconds is how often to cleanup expired entries
+	CleanupFreqSeconds int `toml:"cleanup_freq_seconds"`
+	// EnabledTools is a list of tool names to cache (empty = all tools)
+	EnabledTools []string `toml:"enabled_tools"`
+}
+
+// AgentConfig holds agent loop settings.
+type AgentConfig struct {
+	// ProgressEnabled turns on streaming progress updates
+	ProgressEnabled bool `toml:"progress_enabled"`
+	// ProgressIntervalSeconds is the minimum interval between progress events
+	ProgressIntervalSeconds int `toml:"progress_interval_seconds"`
+	// Cache holds tool result caching settings
+	Cache CacheConfig `toml:"cache"`
+	// Errors holds error handling settings
+	Errors ErrorsConfig `toml:"errors"`
+}
+
+// ErrorsConfig holds error handling settings.
+type ErrorsConfig struct {
+	// DetailedErrors enables detailed error messages
+	DetailedErrors bool `toml:"detailed_errors"`
+	// IncludeExamples adds usage examples to error messages
+	IncludeExamples bool `toml:"include_examples"`
+	// MaxSuggestionLength limits the length of error suggestions
+	MaxSuggestionLength int `toml:"max_suggestion_length"`
 }
 
 // MultiAgentConfig holds multi-agent orchestration settings.
@@ -495,6 +543,30 @@ func DefaultConfig() *Config {
 			PromptsDir:   "config/prompts",
 			DefaultModel: "", // Empty = use llm.default_model
 			DispatcherID: "dispatcher",
+		},
+		Agent: AgentConfig{
+			ProgressEnabled:         false, // Disabled by default
+			ProgressIntervalSeconds: 30,
+			Cache: CacheConfig{
+				Enabled:           false, // Disabled by default
+				MaxEntries:        1000,
+				DefaultTTLSeconds: 300,   // 5 minutes
+				CleanupFreqSeconds: 60,   // 1 minute
+				EnabledTools: []string{
+					"file_read",
+					"list_directory",
+					"memory_search",
+					"memory_get_context",
+					"platform_status",
+					"platform_agents",
+					"platform_tools",
+				},
+			},
+			Errors: ErrorsConfig{
+				DetailedErrors:      true,
+				IncludeExamples:     true,
+				MaxSuggestionLength: 500,
+			},
 		},
 		Security: SecurityConfig{
 			SanitizeInputs:              true,

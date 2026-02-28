@@ -5,16 +5,18 @@
   // Fast/cheap model for classification, summarization
   "small_model": "zai/glm-4.5-air",
 
+  // Default timeout for all providers (in seconds, 50 minutes)
+  "default_timeout": 3000,
+
   // Providers to skip entirely
-  "disabled_providers": [],
+  "disabled_providers": ["gala-mlx", "gala-llama"],
 
   "providers": {
     "zai": {
       "api": "openai",
       "options": {
         "baseURL": "https://api.z.ai/api/coding/paas/v4",
-        "apiKey": "${ZAI_API_KEY}",
-        "timeout": 120
+        "apiKey": "${ZAI_API_KEY}"
       },
       "models": {
         "glm-4.7": {
@@ -42,8 +44,7 @@
       "api": "openai",
       "options": {
         "baseURL": "http://gala/api/mlx",
-        "apiKey": "${GALA_API_KEY}",
-        "timeout": 120
+        "apiKey": "${GALA_API_KEY}"
       },
       "models": {
         "lfm-thinking": {
@@ -62,8 +63,7 @@
       "api": "openai",
       "options": {
         "baseURL": "http://gala/llama/v1",
-        "apiKey": "${GALA_API_KEY}",
-        "timeout": 120
+        "apiKey": "${GALA_API_KEY}"
       },
       "models": {
         "dolphin-mistral-7b": {
@@ -81,8 +81,7 @@
     "ollama": {
       "api": "openai",
       "options": {
-        "baseURL": "http://localhost:11434/v1",
-        "timeout": 120
+        "baseURL": "http://localhost:11434/v1"
       },
       "models": {
         "llama3.2": {

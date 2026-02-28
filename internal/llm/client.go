@@ -185,6 +185,130 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	}
 }
 
+// ChatWithProgress sends a chat completion request with progress reporting.
+// The progress callback is invoked at various stages of the request lifecycle.
+// If progress is nil, this behaves identically to Chat().
+func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
+	// Helper function to safely call progress callback
+	reportProgress := func(stage ProgressStage, detail string) {
+		if progress == nil {
+			return
+		}
+		// Call progress in a goroutine to prevent callback errors from failing the request
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					c.logger.Warn("Progress callback panicked", "stage", stage, "panic", r)
+				}
+			}()
+			progress(stage, detail)
+		}()
+	}
+
+	// Report starting stage
+	reportProgress(ProgressStageStarting, "Starting LLM request...")
+
+	// Apply chat options
+	chatOpts := &chatOptions{
+		temperature: c.config.Temperature,
+		maxTokens:   c.config.MaxTokens,
+	}
+	for _, opt := range opts {
+		opt(chatOpts)
+	}
+
+	// Budget gate
+	if c.budget != nil {
+		reportProgress(ProgressStageStarting, "Checking token budget...")
+		if !c.budget.CheckBudget() {
+			return nil, &BudgetExceededError{Message: "Token budget exceeded - request blocked"}
+		}
+
+		reportProgress(ProgressStageStarting, "Waiting for rate limit...")
+		if err := c.budget.WaitForRateLimit(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	// Build request payload
+	msgDicts := make([]map[string]any, len(messages))
+	for i, msg := range messages {
+		msgDicts[i] = msg.ToOpenAIDict()
+	}
+
+	payload := map[string]any{
+		"model":       c.config.ModelID,
+		"messages":    msgDicts,
+		"temperature": chatOpts.temperature,
+		"max_tokens":  chatOpts.maxTokens,
+	}
+
+	if len(chatOpts.tools) > 0 {
+		payload["tools"] = chatOpts.tools
+		reportProgress(ProgressStageToolCall, fmt.Sprintf("Request includes %d tools", len(chatOpts.tools)))
+	}
+
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			reportProgress(ProgressStageThinking, fmt.Sprintf("Retry attempt %d/%d...", attempt, maxRetries))
+		} else {
+			reportProgress(ProgressStageThinking, "Model is thinking...")
+		}
+
+		resp, err := c.doRequest(ctx, payload)
+		if err != nil {
+			var apiErr *APIError
+			if errors.As(err, &apiErr) && retryableStatusCodes[apiErr.StatusCode] {
+				c.logger.Warn("Retryable error",
+					"status", apiErr.StatusCode,
+					"attempt", attempt,
+					"max_retries", maxRetries,
+				)
+				lastErr = err
+				if attempt < maxRetries {
+					sleepDuration := time.Duration(retryBackoffBase*float64(attempt)) * time.Second
+					select {
+					case <-time.After(sleepDuration):
+						continue
+					case <-ctx.Done():
+						reportProgress(ProgressStageDone, "Request cancelled")
+						return nil, ctx.Err()
+					}
+				}
+				continue
+			}
+			reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+			return nil, err
+		}
+
+		// Streaming stage - response received
+		reportProgress(ProgressStageStreaming, "Receiving response...")
+
+		// Record usage
+		if c.budget != nil {
+			c.budget.RecordUsage(resp.Usage)
+		}
+
+		// Check if response contains tool calls
+		if resp.HasToolCalls() {
+			reportProgress(ProgressStageToolCall, fmt.Sprintf("Response contains %d tool calls", len(resp.ToolCalls)))
+		}
+
+		// Report completion with token count
+		reportProgress(ProgressStageDone, fmt.Sprintf("Complete: %d tokens", resp.Usage.TotalTokens))
+
+		return resp, nil
+	}
+
+	reportProgress(ProgressStageDone, fmt.Sprintf("Failed after %d attempts", maxRetries))
+	return nil, &ClientError{
+		Message: fmt.Sprintf("All %d attempts failed", maxRetries),
+		Cause:   lastErr,
+	}
+}
+
 // chatOptions holds options for a chat request.
 type chatOptions struct {
 	tools       []ToolDefinition

@@ -197,3 +197,29 @@ log_lookback_hours = 24
 pytest_args = ["-v", "--tb=short"]
 mypy_args = ["--ignore-missing-imports"]
 ruff_args = []
+
+# Agent loop improvements: progress updates, caching, and error recovery
+
+[agent]
+progress_enabled = true              # Enable streaming progress updates during long operations
+progress_interval_seconds = 30       # Minimum interval between progress events
+
+[agent.cache]
+enabled = true                        # Enable tool result caching
+max_entries = 1000                    # Maximum number of cached results
+default_ttl_seconds = 300             # Default TTL (5 minutes)
+cleanup_freq_seconds = 60             # Cleanup interval (1 minute)
+enabled_tools = [                     # Tools to cache (read-only, idempotent operations)
+    "file_read",
+    "list_directory",
+    "memory_search",
+    "memory_get_context",
+    "platform_status",
+    "platform_agents",
+    "platform_tools"
+]
+
+[agent.errors]
+detailed_errors = true                # Enable detailed error messages
+include_examples = true               # Include usage examples in error messages
+max_suggestion_length = 500           # Maximum length of error suggestions
