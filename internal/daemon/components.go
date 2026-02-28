@@ -12,6 +12,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -59,6 +60,7 @@ type Components struct {
 
 	// Memory
 	MemoryManager   *memory.Manager
+	MemoryHandler   *memory.Handler
 
 	// Memvid and multi-agent
 	MemvidClient    *memvid.Client
@@ -90,6 +92,9 @@ type Components struct {
 
 	// Result cache for tool outputs
 	ResultCache     *agent.ResultCache
+
+	// Web API server
+	WebServer       *web.Server
 
 	Logger          *slog.Logger
 }
@@ -132,14 +137,28 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Create security orchestrator for input sanitization, output monitoring, and shell scanning
 	c.SecurityOrchestrator = createSecurityOrchestrator(cfg, logger)
 
-	// Create LLM client
+	// Create LLM client with budget tracking
 	llmCfg := createLLMConfig(modelsCfg, logger)
+	var budgetTracker *llm.Budget
 	if llmCfg != nil {
-		c.LLMClient = llm.NewClient(llmCfg, llm.WithLogger(logger))
+		// Create budget tracker from config
+		budgetTracker = llm.NewBudget(llm.BudgetConfig{
+			HourlyLimit:    cfg.LLM.Budget.HourlyTokenLimit,
+			DailyLimit:     cfg.LLM.Budget.DailyTokenLimit,
+			RateLimitRPM:   cfg.LLM.Budget.RateLimitRPM,
+			Aggressiveness: cfg.LLM.Budget.Aggressiveness,
+		}, logger.With("component", "budget"))
+
+		c.LLMClient = llm.NewClient(llmCfg,
+			llm.WithLogger(logger),
+			llm.WithBudget(budgetTracker),
+		)
 		logger.Info("LLM client initialized successfully",
 			"provider", llmCfg.ProviderID,
 			"model", llmCfg.ModelID,
 			"base_url", llmCfg.BaseURL,
+			"budget_hourly_limit", cfg.LLM.Budget.HourlyTokenLimit,
+			"budget_daily_limit", cfg.LLM.Budget.DailyTokenLimit,
 		)
 	} else {
 		logger.Error("FATAL: No LLM configured - chat will not work",
@@ -297,8 +316,12 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Chat handler created later after dispatcher (if multi-agent enabled)
 
-	// Create status handler
-	c.StatusHandler = NewStatusHandler(msgBus, logger)
+	// Create status handler with budget tracking
+	statusOpts := []StatusHandlerOption{}
+	if budgetTracker != nil {
+		statusOpts = append(statusOpts, WithBudgetTracker(budgetTracker))
+	}
+	c.StatusHandler = NewStatusHandler(msgBus, logger, statusOpts...)
 
 	// Create memory manager
 	c.MemoryManager = memory.NewManager(memory.ManagerConfig{
@@ -315,6 +338,8 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			"backend", c.MemoryManager.Backend(),
 			"distributed", c.MemoryManager.IsDistributed(),
 		)
+		// Create memory handler to respond to memory.query and memory.recent bus messages
+		c.MemoryHandler = memory.NewHandler(c.MemoryManager, msgBus, logger.With("component", "memory-handler"))
 	}
 
 	// Store the memvid client from memory manager if active, or create standalone
@@ -547,6 +572,54 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 	}
 
+	// Create web server if enabled
+	if cfg.Web.Enabled {
+		webCfg := web.ServerConfig{
+			Addr:         fmt.Sprintf("%s:%d", cfg.Web.Host, cfg.Web.Port),
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+			EnableCORS:   true,
+		}
+
+		// Create web handler adapter (implements web.Handler interface)
+		webHandler := &webHandlerAdapter{
+			agentLoop:     c.AgentLoop,
+			statusHandler: c.StatusHandler,
+		}
+
+		// Create authenticator
+		var auth web.Authenticator
+		if cfg.Web.SecretKey != "" {
+			auth = web.NewBearerAuth(cfg.Web.SecretKey)
+		}
+
+		// Collect server options with adapters
+		webOpts := []web.ServerOption{}
+
+		// Wire memory searcher if available
+		if c.MemoryManager != nil {
+			webOpts = append(webOpts, web.WithMemorySearcher(&memorySearcherAdapter{mgr: c.MemoryManager}))
+		}
+
+		// Wire skills lister if available
+		if c.SkillRegistry != nil {
+			webOpts = append(webOpts, web.WithSkillsLister(&skillsListerAdapter{registry: c.SkillRegistry}))
+		}
+
+		// Wire jobs lister if available
+		if c.Scheduler != nil {
+			webOpts = append(webOpts, web.WithJobsLister(&jobsListerAdapter{scheduler: c.Scheduler}))
+		}
+
+		c.WebServer = web.NewServer(webCfg, webHandler, auth, logger.With("component", "web"), webOpts...)
+		logger.Info("Web server configured",
+			"addr", webCfg.Addr,
+			"has_memory", c.MemoryManager != nil,
+			"has_skills", c.SkillRegistry != nil,
+			"has_jobs", c.Scheduler != nil,
+		)
+	}
+
 	return c, nil
 }
 
@@ -565,6 +638,13 @@ func (c *Components) Start(ctx context.Context) error {
 	// Start session handler
 	if err := c.SessionHandler.Start(ctx); err != nil {
 		return err
+	}
+
+	// Start memory handler
+	if c.MemoryHandler != nil {
+		if err := c.MemoryHandler.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start memory handler", "error", err)
+		}
 	}
 
 	// Start result cache cleanup goroutine
@@ -624,12 +704,30 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start web server (in background goroutine - it blocks)
+	if c.WebServer != nil {
+		go func() {
+			if err := c.WebServer.Start(ctx); err != nil {
+				c.Logger.Error("Web server error", "error", err)
+			}
+		}()
+		c.Logger.Info("Web server started")
+	}
+
 	return nil
 }
 
 // Stop stops all components.
 func (c *Components) Stop(ctx context.Context) error {
 	var lastErr error
+
+	// Stop web server first (external API)
+	if c.WebServer != nil {
+		if err := c.WebServer.Shutdown(ctx); err != nil {
+			c.Logger.Error("Failed to stop web server", "error", err)
+			lastErr = err
+		}
+	}
 
 	// Stop sync handler and manager first (depends on queue events)
 	if c.SyncHandler != nil {
@@ -694,6 +792,12 @@ func (c *Components) Stop(ctx context.Context) error {
 
 	if c.SessionHandler != nil {
 		if err := c.SessionHandler.Stop(ctx); err != nil {
+			lastErr = err
+		}
+	}
+
+	if c.MemoryHandler != nil {
+		if err := c.MemoryHandler.Stop(ctx); err != nil {
 			lastErr = err
 		}
 	}
@@ -1037,12 +1141,14 @@ func registerBuiltinTools(
 	// Web search tool (DuckDuckGo)
 	registry.Register(builtin.NewWebSearchTool(15 * time.Second))
 
-	// Memory tools (only if memory manager is available)
-	if memoryMgr != nil {
+	// Memory tools (only if memory manager is available AND successfully initialized)
+	if memoryMgr != nil && memoryMgr.IsInitialized() {
 		registry.Register(builtin.NewMemoryStoreTool(memoryMgr))
 		registry.Register(builtin.NewMemorySearchTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetContextTool(memoryMgr))
 		logger.Debug("Registered memory tools")
+	} else if memoryMgr != nil {
+		logger.Warn("Memory tools not registered: memory manager not initialized")
 	}
 
 	// Task tools (only if task store is available)
@@ -1385,19 +1491,34 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 
 // StatusHandler handles status.request messages on the bus.
 type StatusHandler struct {
-	bus       *bus.MessageBus
-	logger    *slog.Logger
-	startTime time.Time
-	cancel    context.CancelFunc
+	bus           *bus.MessageBus
+	logger        *slog.Logger
+	startTime     time.Time
+	cancel        context.CancelFunc
+	budgetTracker *llm.Budget
+}
+
+// StatusHandlerOption is a functional option for configuring StatusHandler.
+type StatusHandlerOption func(*StatusHandler)
+
+// WithBudgetTracker sets the budget tracker for status reporting.
+func WithBudgetTracker(budget *llm.Budget) StatusHandlerOption {
+	return func(h *StatusHandler) {
+		h.budgetTracker = budget
+	}
 }
 
 // NewStatusHandler creates a new status handler.
-func NewStatusHandler(msgBus *bus.MessageBus, logger *slog.Logger) *StatusHandler {
-	return &StatusHandler{
+func NewStatusHandler(msgBus *bus.MessageBus, logger *slog.Logger, opts ...StatusHandlerOption) *StatusHandler {
+	h := &StatusHandler{
 		bus:       msgBus,
 		logger:    logger,
 		startTime: time.Now(),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // Start begins listening for status requests.
@@ -1436,11 +1557,29 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 	uptime := time.Since(h.startTime).Seconds()
 
 	response := map[string]any{
-		"status":         "running",
-		"uptime_seconds": uptime,
-		"version":        "0.2.0-go",
+		"status":          "running",
+		"uptime_seconds":  uptime,
+		"version":         "0.2.0-go",
 		"bus_subscribers": len(h.bus.Stats()),
-		"tokens_used":    0, // TODO: Get from budget tracker
+	}
+
+	// Include token usage from budget tracker if available
+	if h.budgetTracker != nil {
+		budgetStatus := h.budgetTracker.GetStatus()
+		response["tokens_used"] = budgetStatus.HourlyUsed
+		response["budget"] = map[string]any{
+			"hourly_used":      budgetStatus.HourlyUsed,
+			"hourly_limit":     budgetStatus.HourlyLimit,
+			"hourly_remaining": budgetStatus.HourlyRemaining,
+			"daily_used":       budgetStatus.DailyUsed,
+			"daily_limit":      budgetStatus.DailyLimit,
+			"daily_remaining":  budgetStatus.DailyRemaining,
+			"rpm_current":      budgetStatus.RPMCurrent,
+			"rpm_limit":        budgetStatus.RPMLimit,
+			"within_budget":    budgetStatus.WithinBudget,
+		}
+	} else {
+		response["tokens_used"] = 0
 	}
 
 	payload, _ := json.Marshal(response)
@@ -1519,3 +1658,159 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 
 // Ensure AgentJobProcessor implements worker.JobProcessor
 var _ worker.JobProcessor = (*AgentJobProcessor)(nil)
+
+// webHandlerAdapter adapts AgentLoop and StatusHandler to the web.Handler interface.
+type webHandlerAdapter struct {
+	agentLoop     *agent.AgentLoop
+	statusHandler *StatusHandler
+}
+
+// Chat handles a chat request via the web handler.
+func (h *webHandlerAdapter) Chat(ctx context.Context, message string) (string, error) {
+	if h.agentLoop == nil {
+		return "", fmt.Errorf("agent loop not available")
+	}
+	// Use AgentLoop.RunOnce for synchronous chat
+	conversationID := fmt.Sprintf("web-%d", time.Now().UnixNano())
+	return h.agentLoop.RunOnce(ctx, message, conversationID)
+}
+
+// Status returns the daemon status via the web handler.
+func (h *webHandlerAdapter) Status(ctx context.Context) (map[string]any, error) {
+	status := map[string]any{
+		"status":  "running",
+		"version": "0.3.0-go",
+	}
+
+	if h.statusHandler != nil {
+		uptime := time.Since(h.statusHandler.startTime).Seconds()
+		status["uptime_seconds"] = uptime
+		status["bus_subscribers"] = len(h.statusHandler.bus.Stats())
+
+		if h.statusHandler.budgetTracker != nil {
+			budgetStatus := h.statusHandler.budgetTracker.GetStatus()
+			status["tokens_used"] = budgetStatus.HourlyUsed
+			status["budget"] = map[string]any{
+				"hourly_used":      budgetStatus.HourlyUsed,
+				"hourly_limit":     budgetStatus.HourlyLimit,
+				"hourly_remaining": budgetStatus.HourlyRemaining,
+				"daily_used":       budgetStatus.DailyUsed,
+				"daily_limit":      budgetStatus.DailyLimit,
+				"daily_remaining":  budgetStatus.DailyRemaining,
+				"rpm_current":      budgetStatus.RPMCurrent,
+				"rpm_limit":        budgetStatus.RPMLimit,
+				"within_budget":    budgetStatus.WithinBudget,
+			}
+		}
+	}
+
+	return status, nil
+}
+
+// memorySearcherAdapter wraps memory.Manager to implement web.MemorySearcher.
+type memorySearcherAdapter struct {
+	mgr *memory.Manager
+}
+
+// Search implements web.MemorySearcher.
+func (a *memorySearcherAdapter) Search(ctx context.Context, query string, limit int) ([]web.MemorySearchResult, error) {
+	results, err := a.mgr.Search(ctx, memory.MemoryQuery{
+		Query: query,
+		Limit: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	webResults := make([]web.MemorySearchResult, len(results))
+	for i, r := range results {
+		createdAt := ""
+		if !r.Memory.CreatedAt.IsZero() {
+			createdAt = r.Memory.CreatedAt.Format(time.RFC3339)
+		}
+
+		webResults[i] = web.MemorySearchResult{
+			ID:        r.Memory.ID,
+			Content:   r.Memory.Content,
+			Type:      string(r.Memory.Type),
+			Category:  r.Memory.Category,
+			CreatedAt: createdAt,
+			Score:     r.RelevanceScore,
+			Metadata:  r.Memory.Metadata,
+		}
+	}
+
+	return webResults, nil
+}
+
+// skillsListerAdapter wraps skills.Registry to implement web.SkillsLister.
+type skillsListerAdapter struct {
+	registry *skills.Registry
+}
+
+// List implements web.SkillsLister.
+func (a *skillsListerAdapter) List() []web.SkillInfo {
+	skillList := a.registry.List()
+	webSkills := make([]web.SkillInfo, len(skillList))
+
+	for i, s := range skillList {
+		webSkills[i] = web.SkillInfo{
+			Name:        s.Name,
+			Description: s.Description,
+			Tags:        s.Tags,
+			Priority:    s.Priority,
+		}
+	}
+
+	return webSkills
+}
+
+// jobsListerAdapter wraps scheduler.Scheduler to implement web.JobsLister.
+type jobsListerAdapter struct {
+	scheduler *scheduler.Scheduler
+}
+
+// ListJobs implements web.JobsLister.
+func (a *jobsListerAdapter) ListJobs() ([]web.JobInfo, error) {
+	jobs := a.scheduler.ListJobs()
+	webJobs := make([]web.JobInfo, len(jobs))
+
+	for i, j := range jobs {
+		nextRun := ""
+		if j.NextRun != nil {
+			nextRun = j.NextRun.Format(time.RFC3339)
+		}
+
+		lastRun := ""
+		if j.LastRun != nil {
+			lastRun = j.LastRun.Format(time.RFC3339)
+		}
+
+		status := "active"
+		if !j.Enabled {
+			status = "paused"
+		} else if j.IsRunning {
+			status = "running"
+		}
+
+		webJobs[i] = web.JobInfo{
+			ID:       j.ID,
+			Name:     j.Name,
+			Schedule: j.Schedule,
+			NextRun:  nextRun,
+			LastRun:  lastRun,
+			Status:   status,
+			Paused:   !j.Enabled,
+		}
+	}
+
+	return webJobs, nil
+}
+
+// Ensure adapters implement their interfaces.
+var (
+	_ web.MemorySearcher = (*memorySearcherAdapter)(nil)
+	_ web.SkillsLister   = (*skillsListerAdapter)(nil)
+	_ web.JobsLister     = (*jobsListerAdapter)(nil)
+	_ web.Handler        = (*webHandlerAdapter)(nil)
+)

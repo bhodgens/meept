@@ -730,8 +730,21 @@ func (l *AgentLoop) classifyDomain(messages []llm.ChatMessage) string {
 	return "general"
 }
 
+// Token budget constants for context management
+const (
+	// IterationTokenBudget is the maximum tokens to send per LLM iteration
+	// This prevents context explosion across multiple iterations
+	IterationTokenBudget = 30000
+
+	// ToolResultMaxTokens is the maximum tokens per tool result
+	// Large tool outputs are compressed to fit this limit
+	ToolResultMaxTokens = 3000
+)
+
 // reasoningCycle runs the main reasoning loop with tool execution.
 func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conversationID string) (string, error) {
+	var totalTokens int
+
 	for iteration := 1; iteration <= l.config.MaxIterations; iteration++ {
 		select {
 		case <-ctx.Done():
@@ -745,14 +758,29 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			"conversation", conversationID,
 		)
 
+		// Publish progress: thinking
+		l.publishProgress(conversationID, iteration, "thinking", "", totalTokens)
+
+		// Enforce token budget before LLM call to prevent context explosion
+		// This truncates old messages while preserving system prompt and recent context
+		removed := conv.TruncateByTokens(IterationTokenBudget)
+		if removed > 0 {
+			l.logger.Debug("Truncated conversation for token budget",
+				"removed", removed,
+				"budget", IterationTokenBudget,
+				"conversation", conversationID,
+			)
+		}
+
 		// Get tool definitions
 		var tools []llm.ToolDefinition
 		if l.registry != nil {
 			tools = l.registry.GetDefinitions()
 		}
 
-		// Get messages for LLM
-		messages := conv.GetMessages()
+		// Get messages for LLM with windowed context to prevent token explosion
+		// This preserves system prompt, original user message, and recent context
+		messages := conv.GetWindowedMessages(IterationTokenBudget)
 
 		// Inject few-shot examples from shadow training (only on first iteration)
 		if iteration == 1 && l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
@@ -772,6 +800,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			)
 			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
+
+		// Track token usage
+		totalTokens += response.Usage.TotalTokens
 
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
@@ -796,6 +827,18 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				)
 			}
 
+			// Build tool names for progress
+			var toolNames string
+			for i, tc := range response.ToolCalls {
+				if i > 0 {
+					toolNames += ", "
+				}
+				toolNames += tc.Function.Name
+			}
+
+			// Publish progress: executing tools
+			l.publishProgress(conversationID, iteration, "executing", toolNames, totalTokens)
+
 			// Execute tools
 			results := l.executeToolCalls(ctx, response.ToolCalls)
 
@@ -813,9 +856,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				}
 			}
 
-			// Add tool results to conversation
+			// Add tool results to conversation with compression to prevent token explosion
 			for _, result := range results {
-				conv.AddToolResult(result.ToolCallID, result.ToJSON())
+				conv.AddToolResult(result.ToolCallID, result.ToCompressedJSON(ToolResultMaxTokens))
 			}
 
 			// Publish agent result event
@@ -841,6 +884,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			"iterations", iteration,
 			"conversation", conversationID,
 		)
+
+		// Publish progress: complete
+		l.publishProgress(conversationID, iteration, "complete", "", totalTokens)
 
 		// Capture interaction for shadow training
 		if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
@@ -1332,8 +1378,17 @@ func (l *AgentLoop) publishResult(conversationID string, iteration int, results 
 func (l *AgentLoop) publishProgress(conversationID string, iteration int, stage string, detail string, tokenCount int) {
 	// Skip if progress disabled or no bus
 	if !l.progressEnabled || l.bus == nil {
+		l.logger.Debug("Progress skipped", "enabled", l.progressEnabled, "bus_nil", l.bus == nil)
 		return
 	}
+
+	l.logger.Info("Publishing progress event",
+		"conversation", conversationID,
+		"iteration", iteration,
+		"stage", stage,
+		"detail", detail,
+		"tokens", tokenCount,
+	)
 
 	payload := map[string]any{
 		"conversation_id": conversationID,

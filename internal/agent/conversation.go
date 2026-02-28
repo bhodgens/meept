@@ -249,6 +249,105 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 	return removed
 }
 
+// GetWindowedMessages returns messages within a token budget with smart context selection.
+// It preserves: (1) system prompt always, (2) original user message, (3) most recent messages.
+// Returns messages that fit within the token budget.
+func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if tokenBudget <= 0 {
+		return c.buildMessageList()
+	}
+
+	const charsPerToken = 4
+
+	// Calculate system prompt tokens
+	systemTokens := len(c.systemPrompt) / charsPerToken
+
+	// Reserve tokens for system prompt
+	availableBudget := tokenBudget - systemTokens
+	if availableBudget <= 0 {
+		// System prompt alone exceeds budget, return just system + last message
+		result := make([]llm.ChatMessage, 0, 2)
+		if c.systemPrompt != "" {
+			result = append(result, llm.ChatMessage{
+				Role:    llm.RoleSystem,
+				Content: c.systemPrompt,
+			})
+		}
+		if len(c.messages) > 0 {
+			result = append(result, c.messages[len(c.messages)-1])
+		}
+		return result
+	}
+
+	// Find the original user message (first user message after any system messages)
+	var originalUserIdx int = -1
+	for i, msg := range c.messages {
+		if msg.Role == llm.RoleUser {
+			originalUserIdx = i
+			break
+		}
+	}
+
+	// Build result with system prompt first
+	result := make([]llm.ChatMessage, 0, len(c.messages)+1)
+	if c.systemPrompt != "" {
+		result = append(result, llm.ChatMessage{
+			Role:    llm.RoleSystem,
+			Content: c.systemPrompt,
+		})
+	}
+
+	// If we have an original user message, always include it
+	originalUserTokens := 0
+	if originalUserIdx >= 0 {
+		originalUserTokens = len(c.messages[originalUserIdx].Content) / charsPerToken
+		availableBudget -= originalUserTokens
+	}
+
+	// Count tokens from the end (most recent) until we exceed remaining budget
+	totalTokens := 0
+	keepFromIdx := len(c.messages)
+
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		// Skip original user message in this pass, we'll add it separately
+		if i == originalUserIdx {
+			continue
+		}
+
+		msgTokens := len(c.messages[i].Content) / charsPerToken
+		// Also count tool calls if present
+		for _, tc := range c.messages[i].ToolCalls {
+			msgTokens += len(tc.Function.Arguments) / charsPerToken
+		}
+
+		if totalTokens+msgTokens > availableBudget {
+			keepFromIdx = i + 1
+			break
+		}
+		totalTokens += msgTokens
+		keepFromIdx = i
+	}
+
+	// Add original user message if it exists and is before keepFromIdx
+	if originalUserIdx >= 0 && originalUserIdx < keepFromIdx {
+		result = append(result, c.messages[originalUserIdx])
+	}
+
+	// Add remaining messages within budget
+	for i := keepFromIdx; i < len(c.messages); i++ {
+		// Skip original user if we already added it
+		if i == originalUserIdx && originalUserIdx < keepFromIdx {
+			continue
+		}
+		result = append(result, c.messages[i])
+	}
+
+	return result
+}
+
 // Clone creates a deep copy of the conversation.
 func (c *Conversation) Clone() *Conversation {
 	c.mu.RLock()

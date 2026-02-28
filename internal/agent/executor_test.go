@@ -521,3 +521,107 @@ func TestSummarizeArgs(t *testing.T) {
 		}
 	})
 }
+
+func TestToCompressedJSON(t *testing.T) {
+	t.Run("small result no compression", func(t *testing.T) {
+		result := &ExecutionResult{
+			ToolCallID: "call_123",
+			Success:    true,
+			Result:     "small result",
+		}
+
+		// With large token budget, should return full JSON
+		compressed := result.ToCompressedJSON(10000)
+		full := result.ToJSON()
+
+		if compressed != full {
+			t.Error("small result should not be compressed")
+		}
+	})
+
+	t.Run("large string result compressed", func(t *testing.T) {
+		// Create a large string result
+		largeContent := make([]byte, 50000)
+		for i := range largeContent {
+			largeContent[i] = byte('a' + (i % 26))
+		}
+
+		result := &ExecutionResult{
+			ToolCallID: "call_456",
+			Success:    true,
+			Result:     string(largeContent),
+		}
+
+		// With small token budget, should compress
+		compressed := result.ToCompressedJSON(1000) // ~4000 chars
+		full := result.ToJSON()
+
+		if len(compressed) >= len(full) {
+			t.Errorf("compressed (%d) should be smaller than full (%d)", len(compressed), len(full))
+		}
+
+		// Should still be valid JSON
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(compressed), &parsed); err != nil {
+			t.Errorf("compressed result should be valid JSON: %v", err)
+		}
+	})
+
+	t.Run("large map result compressed", func(t *testing.T) {
+		// Create a result with large map values
+		result := &ExecutionResult{
+			ToolCallID: "call_789",
+			Success:    true,
+			Result: map[string]any{
+				"short": "value",
+				"long":  string(make([]byte, 20000)),
+			},
+		}
+
+		compressed := result.ToCompressedJSON(500)
+		full := result.ToJSON()
+
+		if len(compressed) >= len(full) {
+			t.Errorf("compressed (%d) should be smaller than full (%d)", len(compressed), len(full))
+		}
+
+		// Should still be valid JSON
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(compressed), &parsed); err != nil {
+			t.Errorf("compressed result should be valid JSON: %v", err)
+		}
+	})
+}
+
+func TestTruncateWithMarker(t *testing.T) {
+	// Test short string - no truncation
+	short := "Hello, World!"
+	result := truncateWithMarker(short, 100)
+	if result != short {
+		t.Errorf("short string should not be truncated")
+	}
+
+	// Test long string - should truncate with marker
+	long := make([]byte, 1000)
+	for i := range long {
+		long[i] = byte('a' + (i % 26))
+	}
+	result = truncateWithMarker(string(long), 200)
+
+	if len(result) > 250 { // Some overhead for marker
+		t.Errorf("truncated result too long: %d", len(result))
+	}
+
+	if !containsSubstring(result, "truncated") {
+		t.Error("truncated result should contain truncation marker")
+	}
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

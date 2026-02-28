@@ -55,11 +55,13 @@ END`
 )
 
 // EpisodicMemory stores and retrieves conversation and interaction history.
-// It uses SQLite with FTS5 for full-text search.
+// It uses SQLite with FTS5 for full-text search when available, falling back
+// to LIKE-based queries when FTS5 is not compiled into SQLite.
 type EpisodicMemory struct {
 	pool        *sqlite.Pool
 	dataDir     string
 	initialized bool
+	hasFTS5     bool // true if FTS5 is available
 	mu          sync.RWMutex
 	logger      *slog.Logger
 }
@@ -114,24 +116,49 @@ func (e *EpisodicMemory) Initialize(ctx context.Context) error {
 	}
 
 	e.initialized = true
-	e.logger.Info("Episodic memory initialized", "path", dbPath)
+	e.logger.Info("Episodic memory initialized", "path", dbPath, "fts5", e.hasFTS5)
 	return nil
+}
+
+// HasFTS5 returns true if FTS5 full-text search is available.
+// When false, search falls back to slower LIKE-based queries.
+func (e *EpisodicMemory) HasFTS5() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.hasFTS5
 }
 
 // initSchema creates the database tables and indexes.
 func (e *EpisodicMemory) initSchema(ctx context.Context) error {
 	return e.pool.WithConn(ctx, func(db *sql.DB) error {
-		statements := []string{
-			createEpisodicTableSQL,
-			createEpisodicFTSSQL,
+		// Create main table first (always required)
+		if _, err := db.ExecContext(ctx, createEpisodicTableSQL); err != nil {
+			return fmt.Errorf("failed to create episodic table: %w", err)
+		}
+
+		// Check if FTS5 is available by attempting to create the virtual table
+		_, err := db.ExecContext(ctx, createEpisodicFTSSQL)
+		if err != nil {
+			// FTS5 not available - log warning and continue without it
+			e.logger.Warn("FTS5 not available, using LIKE-based search (slower)",
+				"error", err,
+				"hint", "Install SQLite with FTS5 support for better search performance",
+			)
+			e.hasFTS5 = false
+			return nil
+		}
+
+		// FTS5 is available, create triggers to keep it in sync
+		e.hasFTS5 = true
+		ftsStatements := []string{
 			triggerEpisodicInsert,
 			triggerEpisodicDelete,
 			triggerEpisodicUpdate,
 		}
 
-		for _, stmt := range statements {
+		for _, stmt := range ftsStatements {
 			if _, err := db.ExecContext(ctx, stmt); err != nil {
-				return fmt.Errorf("failed to execute schema statement: %w", err)
+				return fmt.Errorf("failed to create FTS trigger: %w", err)
 			}
 		}
 		return nil
@@ -166,13 +193,15 @@ func (e *EpisodicMemory) Store(ctx context.Context, content string, category str
 	return id, nil
 }
 
-// Search finds episodic memories matching the query using FTS5.
+// Search finds episodic memories matching the query.
+// Uses FTS5 when available, falls back to LIKE-based queries otherwise.
 func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
 	e.mu.RLock()
 	if !e.initialized {
 		e.mu.RUnlock()
 		return nil, errors.New("episodic memory not initialized")
 	}
+	hasFTS5 := e.hasFTS5
 	e.mu.RUnlock()
 
 	safeQuery := sqlite.SanitizeQuery(query)
@@ -186,22 +215,38 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	}
 	defer e.pool.Put(db)
 
-	rows, err := db.QueryContext(ctx, `
-		SELECT
-			m.id, m.content, m.category, m.metadata_json, m.created_at,
-			f.rank
-		FROM episodic_fts f
-		JOIN episodic_memories m ON m.rowid = f.rowid
-		WHERE episodic_fts MATCH ?
-		ORDER BY f.rank
-		LIMIT ?
-	`, safeQuery, limit)
+	var rows *sql.Rows
+
+	if hasFTS5 {
+		// Use FTS5 for efficient full-text search
+		rows, err = db.QueryContext(ctx, `
+			SELECT
+				m.id, m.content, m.category, m.metadata_json, m.created_at,
+				f.rank
+			FROM episodic_fts f
+			JOIN episodic_memories m ON m.rowid = f.rowid
+			WHERE episodic_fts MATCH ?
+			ORDER BY f.rank
+			LIMIT ?
+		`, safeQuery, limit)
+	} else {
+		// Fallback to LIKE-based search (slower but works without FTS5)
+		likePattern := "%" + query + "%"
+		rows, err = db.QueryContext(ctx, `
+			SELECT id, content, category, metadata_json, created_at
+			FROM episodic_memories
+			WHERE content LIKE ? OR category LIKE ?
+			ORDER BY created_at DESC
+			LIMIT ?
+		`, likePattern, likePattern, limit)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to search: %w", err)
 	}
 	defer rows.Close()
 
-	return e.scanResults(rows, true)
+	return e.scanResults(rows, hasFTS5)
 }
 
 // GetRecent retrieves the most recent episodic memories.

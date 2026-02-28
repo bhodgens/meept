@@ -55,12 +55,14 @@ END`
 
 // TaskMemory stores and retrieves domain-specific technical knowledge.
 // It supports multiple domains (e.g., "general", "code", "commands") and
-// uses SQLite with FTS5 for full-text search.
+// uses SQLite with FTS5 for full-text search when available, falling back
+// to LIKE-based queries when FTS5 is not compiled into SQLite.
 type TaskMemory struct {
 	pool        *sqlite.Pool
 	dataDir     string
 	domains     []string
 	initialized bool
+	hasFTS5     bool // true if FTS5 is available
 	mu          sync.RWMutex
 	logger      *slog.Logger
 }
@@ -135,24 +137,50 @@ func (t *TaskMemory) Initialize(ctx context.Context) error {
 	t.logger.Info("Task memory initialized",
 		"path", dbPath,
 		"domains", t.domains,
+		"fts5", t.hasFTS5,
 	)
 	return nil
+}
+
+// HasFTS5 returns true if FTS5 full-text search is available.
+// When false, search falls back to slower LIKE-based queries.
+func (t *TaskMemory) HasFTS5() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.hasFTS5
 }
 
 // initSchema creates the database tables and indexes.
 func (t *TaskMemory) initSchema(ctx context.Context) error {
 	return t.pool.WithConn(ctx, func(db *sql.DB) error {
-		statements := []string{
-			createTaskTableSQL,
-			createTaskFTSSQL,
+		// Create main table first (always required)
+		if _, err := db.ExecContext(ctx, createTaskTableSQL); err != nil {
+			return fmt.Errorf("failed to create task table: %w", err)
+		}
+
+		// Check if FTS5 is available by attempting to create the virtual table
+		_, err := db.ExecContext(ctx, createTaskFTSSQL)
+		if err != nil {
+			// FTS5 not available - log warning and continue without it
+			t.logger.Warn("FTS5 not available, using LIKE-based search (slower)",
+				"error", err,
+				"hint", "Install SQLite with FTS5 support for better search performance",
+			)
+			t.hasFTS5 = false
+			return nil
+		}
+
+		// FTS5 is available, create triggers to keep it in sync
+		t.hasFTS5 = true
+		ftsStatements := []string{
 			triggerTaskInsert,
 			triggerTaskDelete,
 			triggerTaskUpdate,
 		}
 
-		for _, stmt := range statements {
+		for _, stmt := range ftsStatements {
 			if _, err := db.ExecContext(ctx, stmt); err != nil {
-				return fmt.Errorf("failed to execute schema statement: %w", err)
+				return fmt.Errorf("failed to create FTS trigger: %w", err)
 			}
 		}
 		return nil
@@ -190,7 +218,8 @@ func (t *TaskMemory) Store(ctx context.Context, content string, domain string, m
 	return id, nil
 }
 
-// Search finds task memories matching the query using FTS5.
+// Search finds task memories matching the query.
+// Uses FTS5 when available, falls back to LIKE-based queries otherwise.
 // If domain is specified, results are limited to that domain.
 func (t *TaskMemory) Search(ctx context.Context, query string, domain string, limit int) ([]MemoryResult, error) {
 	t.mu.RLock()
@@ -198,6 +227,7 @@ func (t *TaskMemory) Search(ctx context.Context, query string, domain string, li
 		t.mu.RUnlock()
 		return nil, errors.New("task memory not initialized")
 	}
+	hasFTS5 := t.hasFTS5
 	t.mu.RUnlock()
 
 	safeQuery := sqlite.SanitizeQuery(query)
@@ -212,28 +242,52 @@ func (t *TaskMemory) Search(ctx context.Context, query string, domain string, li
 	defer t.pool.Put(db)
 
 	var rows *sql.Rows
-	if domain != "" {
-		rows, err = db.QueryContext(ctx, `
-			SELECT
-				m.id, m.content, m.domain, m.metadata_json, m.created_at,
-				f.rank
-			FROM task_fts f
-			JOIN task_memories m ON m.rowid = f.rowid
-			WHERE task_fts MATCH ? AND m.domain = ?
-			ORDER BY f.rank
-			LIMIT ?
-		`, safeQuery, domain, limit)
+
+	if hasFTS5 {
+		// Use FTS5 for efficient full-text search
+		if domain != "" {
+			rows, err = db.QueryContext(ctx, `
+				SELECT
+					m.id, m.content, m.domain, m.metadata_json, m.created_at,
+					f.rank
+				FROM task_fts f
+				JOIN task_memories m ON m.rowid = f.rowid
+				WHERE task_fts MATCH ? AND m.domain = ?
+				ORDER BY f.rank
+				LIMIT ?
+			`, safeQuery, domain, limit)
+		} else {
+			rows, err = db.QueryContext(ctx, `
+				SELECT
+					m.id, m.content, m.domain, m.metadata_json, m.created_at,
+					f.rank
+				FROM task_fts f
+				JOIN task_memories m ON m.rowid = f.rowid
+				WHERE task_fts MATCH ?
+				ORDER BY f.rank
+				LIMIT ?
+			`, safeQuery, limit)
+		}
 	} else {
-		rows, err = db.QueryContext(ctx, `
-			SELECT
-				m.id, m.content, m.domain, m.metadata_json, m.created_at,
-				f.rank
-			FROM task_fts f
-			JOIN task_memories m ON m.rowid = f.rowid
-			WHERE task_fts MATCH ?
-			ORDER BY f.rank
-			LIMIT ?
-		`, safeQuery, limit)
+		// Fallback to LIKE-based search (slower but works without FTS5)
+		likePattern := "%" + query + "%"
+		if domain != "" {
+			rows, err = db.QueryContext(ctx, `
+				SELECT id, content, domain, metadata_json, created_at
+				FROM task_memories
+				WHERE (content LIKE ? OR domain LIKE ?) AND domain = ?
+				ORDER BY created_at DESC
+				LIMIT ?
+			`, likePattern, likePattern, domain, limit)
+		} else {
+			rows, err = db.QueryContext(ctx, `
+				SELECT id, content, domain, metadata_json, created_at
+				FROM task_memories
+				WHERE content LIKE ? OR domain LIKE ?
+				ORDER BY created_at DESC
+				LIMIT ?
+			`, likePattern, likePattern, limit)
+		}
 	}
 
 	if err != nil {
@@ -241,7 +295,7 @@ func (t *TaskMemory) Search(ctx context.Context, query string, domain string, li
 	}
 	defer rows.Close()
 
-	return t.scanResults(rows, true)
+	return t.scanResults(rows, hasFTS5)
 }
 
 // GetRecent retrieves the most recent task memories.

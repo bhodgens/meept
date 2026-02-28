@@ -198,7 +198,14 @@ func (m *Manager) initSQLiteBackends(ctx context.Context) error {
 		if err := m.episodic.Initialize(ctx); err != nil {
 			return fmt.Errorf("failed to initialize episodic memory: %w", err)
 		}
-		m.logger.Info("Episodic memory subsystem initialized (SQLite)")
+		fts5Status := "FTS5"
+		if !m.episodic.HasFTS5() {
+			fts5Status = "LIKE-fallback"
+		}
+		m.logger.Info("Episodic memory subsystem initialized",
+			"backend", "SQLite",
+			"search", fts5Status,
+		)
 	} else {
 		m.logger.Info("Episodic memory disabled by configuration")
 	}
@@ -217,7 +224,15 @@ func (m *Manager) initSQLiteBackends(ctx context.Context) error {
 		if err := m.task.Initialize(ctx); err != nil {
 			return fmt.Errorf("failed to initialize task memory: %w", err)
 		}
-		m.logger.Info("Task memory subsystem initialized (SQLite)", "domains", domains)
+		fts5Status := "FTS5"
+		if !m.task.HasFTS5() {
+			fts5Status = "LIKE-fallback"
+		}
+		m.logger.Info("Task memory subsystem initialized",
+			"backend", "SQLite",
+			"search", fts5Status,
+			"domains", domains,
+		)
 	} else {
 		m.logger.Info("Task memory disabled by configuration")
 	}
@@ -1027,6 +1042,14 @@ func (m *Manager) IsDistributed() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.distributed
+}
+
+// IsInitialized returns true if the memory manager was successfully initialized.
+// This should be checked before using memory tools to avoid "not initialized" errors.
+func (m *Manager) IsInitialized() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.initialized
 }
 
 // DistributedConfig returns the distributed memory configuration.

@@ -46,12 +46,14 @@ var ToolActionMap = map[string]string{
 }
 
 // Tool represents a tool that can be executed by the agent.
-// This is an interface to allow for different tool implementations.
+// This interface mirrors tools.Tool to allow for different tool implementations.
 type Tool interface {
 	// Name returns the tool's name.
 	Name() string
 	// Description returns the tool's description.
 	Description() string
+	// Parameters returns the JSON Schema parameters for this tool.
+	Parameters() llm.FunctionParameters
 	// Execute runs the tool with the given arguments.
 	Execute(ctx context.Context, args map[string]any) (any, error)
 }
@@ -83,6 +85,92 @@ func (r *ExecutionResult) ToJSON() string {
 		return fmt.Sprintf(`{"success":false,"error":"failed to marshal result: %s"}`, err)
 	}
 	return string(data)
+}
+
+// ToCompressedJSON converts the result to a JSON string, compressing if over maxTokens.
+// Uses 4 chars/token estimation. Large results are truncated with a summary.
+func (r *ExecutionResult) ToCompressedJSON(maxTokens int) string {
+	full := r.ToJSON()
+	const charsPerToken = 4
+	maxChars := maxTokens * charsPerToken
+
+	if len(full) <= maxChars {
+		return full
+	}
+
+	// Compress by truncating the result content
+	compressed := &ExecutionResult{
+		ToolCallID: r.ToolCallID,
+		Success:    r.Success,
+		Error:      r.Error,
+		Cached:     r.Cached,
+	}
+
+	// Handle the result based on type
+	switch result := r.Result.(type) {
+	case string:
+		compressed.Result = truncateWithMarker(result, maxChars-200) // Reserve space for JSON wrapper
+	case map[string]any:
+		compressed.Result = compressMapResult(result, maxChars-200)
+	default:
+		// For other types, marshal and truncate the raw JSON
+		if data, err := json.Marshal(r.Result); err == nil && len(data) > maxChars-200 {
+			compressed.Result = string(data[:maxChars-200]) + "...[truncated]"
+		} else {
+			compressed.Result = r.Result
+		}
+	}
+
+	data, err := json.Marshal(compressed)
+	if err != nil {
+		return fmt.Sprintf(`{"success":false,"error":"failed to marshal result: %s"}`, err)
+	}
+	return string(data)
+}
+
+// truncateWithMarker truncates a string and adds a truncation marker.
+func truncateWithMarker(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	// Keep first and last portions for context
+	keepStart := maxLen * 2 / 3
+	keepEnd := maxLen / 6
+	marker := fmt.Sprintf("\n\n...[truncated %d chars]...\n\n", len(s)-keepStart-keepEnd)
+
+	return s[:keepStart] + marker + s[len(s)-keepEnd:]
+}
+
+// compressMapResult compresses a map result by truncating long string values.
+func compressMapResult(m map[string]any, maxChars int) map[string]any {
+	compressed := make(map[string]any)
+	totalChars := 0
+
+	for k, v := range m {
+		if totalChars >= maxChars {
+			compressed["_truncated"] = true
+			break
+		}
+
+		switch val := v.(type) {
+		case string:
+			remaining := maxChars - totalChars
+			if len(val) > remaining {
+				compressed[k] = truncateWithMarker(val, remaining)
+				totalChars = maxChars
+			} else {
+				compressed[k] = val
+				totalChars += len(val)
+			}
+		default:
+			compressed[k] = v
+			if data, err := json.Marshal(v); err == nil {
+				totalChars += len(data)
+			}
+		}
+	}
+
+	return compressed
 }
 
 // ToChatMessage converts the result to a tool role chat message.
@@ -384,8 +472,8 @@ func ResultsToChatMessages(results []*ExecutionResult) []llm.ChatMessage {
 	return messages
 }
 
-// PlaceholderToolRegistry is a placeholder implementation for testing.
-// This will be replaced with a real implementation in Phase 8.
+// PlaceholderToolRegistry is a simple implementation for testing.
+// For production use, prefer the full tools.Registry implementation.
 type PlaceholderToolRegistry struct {
 	tools map[string]Tool
 }
@@ -418,14 +506,25 @@ func (r *PlaceholderToolRegistry) List() []Tool {
 
 // GetDefinitions returns tool definitions for the LLM.
 func (r *PlaceholderToolRegistry) GetDefinitions() []llm.ToolDefinition {
-	// Placeholder - returns empty for now
-	return nil
+	defs := make([]llm.ToolDefinition, 0, len(r.tools))
+	for _, tool := range r.tools {
+		defs = append(defs, llm.ToolDefinition{
+			Type: "function",
+			Function: llm.FunctionDef{
+				Name:        tool.Name(),
+				Description: tool.Description(),
+				Parameters:  tool.Parameters(),
+			},
+		})
+	}
+	return defs
 }
 
 // MockTool is a mock tool for testing.
 type MockTool struct {
 	name        string
 	description string
+	parameters  llm.FunctionParameters
 	executeFunc func(ctx context.Context, args map[string]any) (any, error)
 }
 
@@ -434,6 +533,20 @@ func NewMockTool(name, description string, fn func(ctx context.Context, args map
 	return &MockTool{
 		name:        name,
 		description: description,
+		parameters: llm.FunctionParameters{
+			Type:       "object",
+			Properties: map[string]llm.ParameterProperty{},
+		},
+		executeFunc: fn,
+	}
+}
+
+// NewMockToolWithParams creates a new mock tool with custom parameters.
+func NewMockToolWithParams(name, description string, params llm.FunctionParameters, fn func(ctx context.Context, args map[string]any) (any, error)) *MockTool {
+	return &MockTool{
+		name:        name,
+		description: description,
+		parameters:  params,
 		executeFunc: fn,
 	}
 }
@@ -446,6 +559,11 @@ func (t *MockTool) Name() string {
 // Description returns the tool's description.
 func (t *MockTool) Description() string {
 	return t.description
+}
+
+// Parameters returns the JSON Schema parameters for this tool.
+func (t *MockTool) Parameters() llm.FunctionParameters {
+	return t.parameters
 }
 
 // Execute runs the mock tool.

@@ -360,3 +360,73 @@ func TestConversationStoreLRU(t *testing.T) {
 		t.Error("conv4 should still exist")
 	}
 }
+
+func TestGetWindowedMessages(t *testing.T) {
+	conv := NewConversation(WithSystemPrompt("System prompt"))
+
+	// Add multiple messages
+	conv.AddUserMessage("Original user message")
+	conv.AddAssistantMessage("First response")
+	conv.AddUserMessage("Follow up")
+	conv.AddAssistantMessage("Second response")
+	conv.AddUserMessage("Another question")
+	conv.AddAssistantMessage("Third response")
+
+	// Test with large budget - should get all messages
+	messages := conv.GetWindowedMessages(100000)
+	if len(messages) != 7 { // system + 6 messages
+		t.Errorf("expected 7 messages with large budget, got %d", len(messages))
+	}
+
+	// Test with small budget - should keep system prompt, original user, and recent
+	// Using a budget that allows ~100 chars per message
+	messages = conv.GetWindowedMessages(200) // Very small budget
+	if len(messages) < 2 {
+		t.Errorf("expected at least 2 messages with small budget, got %d", len(messages))
+	}
+
+	// First message should always be system prompt
+	if messages[0].Role != llm.RoleSystem {
+		t.Errorf("first message should be system prompt, got %s", messages[0].Role)
+	}
+}
+
+func TestGetWindowedMessagesPreservesOriginalUser(t *testing.T) {
+	conv := NewConversation(WithSystemPrompt("Sys"))
+
+	// Add original user message with identifiable content
+	conv.AddUserMessage("ORIGINAL_USER_MESSAGE")
+	conv.AddAssistantMessage("Response 1")
+	conv.AddUserMessage("Follow up")
+	conv.AddAssistantMessage("Response 2")
+	conv.AddUserMessage("Another follow up")
+	conv.AddAssistantMessage("Response 3")
+
+	// Use medium budget that forces truncation but should preserve original
+	messages := conv.GetWindowedMessages(500)
+
+	// Check if original user message is preserved
+	hasOriginalUser := false
+	for _, msg := range messages {
+		if msg.Content == "ORIGINAL_USER_MESSAGE" {
+			hasOriginalUser = true
+			break
+		}
+	}
+
+	if !hasOriginalUser {
+		t.Error("original user message should be preserved in windowed messages")
+	}
+}
+
+func TestGetWindowedMessagesZeroBudget(t *testing.T) {
+	conv := NewConversation(WithSystemPrompt("System"))
+	conv.AddUserMessage("User message")
+	conv.AddAssistantMessage("Response")
+
+	// Zero budget should return all messages
+	messages := conv.GetWindowedMessages(0)
+	if len(messages) != 3 {
+		t.Errorf("expected 3 messages with zero budget, got %d", len(messages))
+	}
+}
