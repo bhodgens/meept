@@ -32,7 +32,7 @@ func createTestApp() *App {
 		activeModal:  ModalNone,
 	}
 	// Initialize sub-models
-	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage)
+	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)

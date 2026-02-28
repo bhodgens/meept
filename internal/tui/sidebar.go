@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -36,6 +37,10 @@ type SidebarModel struct {
 	styles        *Styles
 	rpc           *RPCClient
 	expandedPanel SidebarPanel
+	selectedPanel SidebarPanel // For keyboard navigation
+
+	// Panel header Y positions for click detection
+	panelHeaderY map[SidebarPanel]int
 
 	// Cached data for panels
 	statusData        *SidebarStatusData
@@ -55,7 +60,7 @@ type SidebarModel struct {
 	activityFeed []ActivityFeedItem
 
 	// Dispatch visualization
-	viz            *viz.DispatchViz
+	viz              *viz.DispatchViz
 	animationEnabled bool
 
 	// Loading/error state
@@ -129,9 +134,11 @@ func NewSidebarModel(rpc *RPCClient, styles *Styles, animationEnabled bool) *Sid
 		rpc:              rpc,
 		styles:           styles,
 		expandedPanel:    PanelStatus,
+		selectedPanel:    PanelStatus,
 		visible:          true, // Visible by default
 		animationEnabled: animationEnabled,
 		activityFeed:     make([]ActivityFeedItem, 0),
+		panelHeaderY:     make(map[SidebarPanel]int),
 	}
 	if animationEnabled {
 		s.viz = viz.NewDispatchViz(30) // Default width
@@ -209,6 +216,21 @@ func (s *SidebarModel) IsFocused() bool {
 	return s.focused
 }
 
+// HandleClick processes a mouse click at the given relative coordinates.
+// Returns a tea.Cmd if an action should be taken.
+func (s *SidebarModel) HandleClick(x, y int) tea.Cmd {
+	// Check if click is on a panel header
+	for panel, headerY := range s.panelHeaderY {
+		// Headers are typically 1 line tall, check if y is within that line
+		if y == headerY {
+			s.expandedPanel = panel
+			s.selectedPanel = panel
+			return nil
+		}
+	}
+	return nil
+}
+
 // SidebarRefreshTick signals time for sidebar data refresh.
 type SidebarRefreshTick struct{}
 
@@ -266,7 +288,6 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 			if statusResp, err := s.rpc.Status(); err == nil {
 				status.Uptime = types.FormatUptime(statusResp.UptimeSeconds)
 				status.ConversationCnt = statusResp.BusSubscribers // Use bus subscribers as proxy
-				status.MemoryCount = statusResp.TokensUsed        // Use tokens as proxy for activity
 			}
 
 			// Fetch worker pool stats and workers
@@ -345,12 +366,34 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 			}
 		}
 
+		// Fetch recent memories
+		var memories []SidebarMemoryItem
+		if s.rpc.IsConnected() {
+			if memResp, err := s.rpc.GetRecentMemories(5); err == nil {
+				items := memResp.GetItems()
+				for _, m := range items {
+					preview := m.Content
+					if len(preview) > 50 {
+						preview = preview[:47] + "..."
+					}
+					memories = append(memories, SidebarMemoryItem{
+						ID:      m.ID,
+						Type:    m.GetType(),
+						Preview: preview,
+						Created: m.CreatedAt,
+					})
+				}
+				// Set actual memory count from fetched memories
+				status.MemoryCount = len(items)
+			}
+		}
+
 		return SidebarDataMsg{
 			Status:        status,
 			AgentActivity: agentActivity,
 			Workers:       workers,
 			Tasks:         tasks,
-			Memory:        nil, // TODO: Fetch from RPC when available
+			Memory:        memories,
 		}
 	}
 }
@@ -421,20 +464,35 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			s.eventStream.Update(msg)
 			s.updateActivityFeed()
 		}
+		// DEBUG: Log event count to stderr
+		if len(msg.Events) > 0 {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Received %d events\n", len(msg.Events))
+			for _, e := range msg.Events {
+				fmt.Fprintf(os.Stderr, "[DEBUG]   Topic: %s\n", e.Topic)
+			}
+		}
 		// Check for progress events and forward to chat
+		// Collect all commands - don't return early on first match
+		var cmds []tea.Cmd
 		for _, e := range msg.Events {
+			// DEBUG: Show exact topic comparison
 			if e.Topic == "agent.progress" {
-				return s.handleProgressEvent(e)
+				fmt.Fprintf(os.Stderr, "[DEBUG] MATCH: topic '%s' == 'agent.progress'\n", e.Topic)
 			}
-			if e.Topic == "llm.tokens.used" {
-				return s.handleTokenEvent(e)
+			switch e.Topic {
+			case "agent.progress":
+				fmt.Fprintf(os.Stderr, "[DEBUG] Handling agent.progress event, payload type: %T\n", e.Payload)
+				cmds = append(cmds, s.handleProgressEvent(e))
+			case "llm.tokens.used":
+				cmds = append(cmds, s.handleTokenEvent(e))
+			case "conversation.reset":
+				cmds = append(cmds, s.handleContextResetEvent(e))
+			case "worker.state_changed":
+				cmds = append(cmds, s.handleWorkerStateEvent(e))
 			}
-			if e.Topic == "conversation.reset" {
-				return s.handleContextResetEvent(e)
-			}
-			if e.Topic == "worker.state_changed" {
-				return s.handleWorkerStateEvent(e)
-			}
+		}
+		if len(cmds) > 0 {
+			return tea.Batch(cmds...)
 		}
 		return nil
 
@@ -445,6 +503,27 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 		switch msg.String() {
 		case "tab":
 			// Cycle focus back to chat
+			s.focused = false
+			return func() tea.Msg { return SidebarFocusChatMsg{} }
+		case "up", "k":
+			// Move selection up
+			if s.selectedPanel > PanelStatus {
+				s.selectedPanel--
+			}
+			return nil
+		case "down", "j":
+			// Move selection down
+			if s.selectedPanel < PanelActivityFeed {
+				s.selectedPanel++
+			}
+			return nil
+		case "right", "enter", "l":
+			// Expand selected panel
+			s.expandedPanel = s.selectedPanel
+			return nil
+		case "left", "h":
+			// Collapse current panel (go back to no expansion by selecting status)
+			// Actually just cycle focus back
 			s.focused = false
 			return func() tea.Msg { return SidebarFocusChatMsg{} }
 		}
@@ -522,33 +601,51 @@ func summarizeEvent(topic string, payload any) string {
 // handleProgressEvent converts an agent.progress bus event to a ProgressUpdateMsg.
 func (s *SidebarModel) handleProgressEvent(e BusEvent) tea.Cmd {
 	return func() tea.Msg {
+		fmt.Fprintf(os.Stderr, "[DEBUG] handleProgressEvent: payload type=%T\n", e.Payload)
 		payloadMap, ok := e.Payload.(map[string]any)
 		if !ok {
+			fmt.Fprintf(os.Stderr, "[DEBUG] handleProgressEvent: payload is NOT map[string]any, returning nil\n")
 			return nil
 		}
 
-		var agentID, stage string
+		var agentID, stage, currentTool string
 		var percent float64
 		var tokenCount float64
 
+		// Support both field naming conventions
 		if v, ok := payloadMap["agent_id"].(string); ok {
+			agentID = v
+		} else if v, ok := payloadMap["conversation_id"].(string); ok {
 			agentID = v
 		}
 		if v, ok := payloadMap["stage"].(string); ok {
 			stage = v
 		}
+		if v, ok := payloadMap["detail"].(string); ok {
+			currentTool = v
+		}
 		if v, ok := payloadMap["percent"].(float64); ok {
 			percent = v
+		} else if iteration, ok := payloadMap["iteration"].(float64); ok {
+			// Estimate percent from iteration (assume max 10 iterations)
+			percent = iteration * 10.0
+			if percent > 100 {
+				percent = 100
+			}
 		}
 		if v, ok := payloadMap["token_count"].(float64); ok {
 			tokenCount = v
 		}
+
+		fmt.Fprintf(os.Stderr, "[DEBUG] handleProgressEvent: returning ProgressUpdateMsg{AgentID:%s, Stage:%s, Percent:%.0f, Tokens:%d, Tool:%s}\n",
+			agentID, stage, percent, int(tokenCount), currentTool)
 
 		return models.ProgressUpdateMsg{
 			AgentID:     agentID,
 			Stage:       stage,
 			Percent:     percent,
 			TokensUsed:  int(tokenCount),
+			CurrentTool: currentTool,
 		}
 	}
 }
@@ -732,6 +829,12 @@ func (s *SidebarModel) renderPanelHeader(title string, panel SidebarPanel) strin
 		icon = "▾"
 	}
 
+	// Selection indicator for keyboard navigation
+	selectionIndicator := " "
+	if s.focused && s.selectedPanel == panel {
+		selectionIndicator = ">"
+	}
+
 	style := lipgloss.NewStyle().
 		Foreground(ColorMuted).
 		Bold(s.expandedPanel == panel)
@@ -740,7 +843,12 @@ func (s *SidebarModel) renderPanelHeader(title string, panel SidebarPanel) strin
 		style = style.Foreground(ColorAccent)
 	}
 
-	return style.Render(fmt.Sprintf("%s %s", icon, title))
+	// Highlight selected panel when sidebar is focused
+	if s.focused && s.selectedPanel == panel {
+		style = style.Background(lipgloss.Color("#374151"))
+	}
+
+	return style.Render(fmt.Sprintf("%s%s %s", selectionIndicator, icon, title))
 }
 
 func (s *SidebarModel) renderStatusPanel() string {

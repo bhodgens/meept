@@ -89,7 +89,7 @@ func newTestChatModel() *ChatModel {
 	userStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
 	assistantStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
 	systemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	return NewChatModel(mock, userStyle, assistantStyle, systemStyle)
+	return NewChatModel(mock, userStyle, assistantStyle, systemStyle, "once")
 }
 
 func TestChatModel_NewChatModel(t *testing.T) {
@@ -153,7 +153,7 @@ func TestChatModel_SetSize(t *testing.T) {
 func TestChatModel_SendMessage(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle)
+	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
 	model.SetSize(80, 24)
 	model.Init()
 
@@ -813,7 +813,7 @@ func TestChatModel_ExtractDescription(t *testing.T) {
 func TestChatModel_AutoDescription(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle)
+	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
 	model.SetSize(80, 24)
 	model.sessionID = "sess-1"
 
@@ -848,7 +848,7 @@ func TestChatModel_AutoDescription(t *testing.T) {
 func TestChatModel_NoAutoDescriptionOnSecondExchange(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle)
+	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
 	model.SetSize(80, 24)
 	model.sessionID = "sess-1"
 	model.sessionDescription = "Already set"
@@ -873,7 +873,7 @@ func TestChatModel_NoAutoDescriptionOnSecondExchange(t *testing.T) {
 func TestChatModel_FlushMessages(t *testing.T) {
 	mock := NewMockChatRPCClient()
 	userStyle := lipgloss.NewStyle()
-	model := NewChatModel(mock, userStyle, userStyle, userStyle)
+	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
 	model.SetSize(80, 24)
 	model.sessionID = "sess-1"
 

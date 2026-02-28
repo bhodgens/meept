@@ -20,6 +20,7 @@ const (
 	ModalSessionPicker
 	ModalNewSession
 	ModalSessionRename
+	ModalConfirm
 )
 
 // ModalItem represents an item in a modal menu.
@@ -699,6 +700,129 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 		if len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
 			m.selected = 0
 			m.inputBuffer += key
+		}
+	}
+	return nil
+}
+
+// ConfirmModal is a modal for yes/no confirmations.
+type ConfirmModal struct {
+	visible   bool
+	title     string
+	message   string
+	selected  int // 0=yes, 1=no
+	styles    *Styles
+	width     int
+	onConfirm func() tea.Cmd
+	onCancel  func() tea.Cmd
+}
+
+// NewConfirmModal creates a new confirmation modal.
+func NewConfirmModal(styles *Styles) *ConfirmModal {
+	return &ConfirmModal{
+		visible:  false,
+		selected: 1, // Default to "no" for safety
+		styles:   styles,
+		width:    50,
+	}
+}
+
+// Show displays the confirm modal with the given title and message.
+func (m *ConfirmModal) Show(title, message string, onConfirm, onCancel func() tea.Cmd) {
+	m.visible = true
+	m.title = title
+	m.message = message
+	m.selected = 1 // Default to "no"
+	m.onConfirm = onConfirm
+	m.onCancel = onCancel
+}
+
+// Hide hides the modal.
+func (m *ConfirmModal) Hide() {
+	m.visible = false
+}
+
+// IsVisible returns whether the modal is visible.
+func (m *ConfirmModal) IsVisible() bool {
+	return m.visible
+}
+
+// View renders the confirm modal.
+func (m *ConfirmModal) View(screenW, screenH int) string {
+	if !m.visible {
+		return ""
+	}
+
+	var b strings.Builder
+
+	// Modal box style
+	boxStyle := m.styles.ModalBox.Width(m.width)
+
+	// Title
+	titleStyle := m.styles.ModalTitle.Width(m.width - 4)
+	b.WriteString(titleStyle.Render(m.title))
+	b.WriteString("\n")
+
+	// Separator
+	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", m.width-4)))
+	b.WriteString("\n\n")
+
+	// Message
+	b.WriteString(m.styles.Paragraph.Render(m.message))
+	b.WriteString("\n\n")
+
+	// Buttons
+	yesStyle := m.styles.ModalItem
+	noStyle := m.styles.ModalItem
+	if m.selected == 0 {
+		yesStyle = m.styles.ModalItemSelected
+	}
+	if m.selected == 1 {
+		noStyle = m.styles.ModalItemSelected
+	}
+
+	yesBtn := yesStyle.Render("  [ yes ]  ")
+	noBtn := noStyle.Render("  [ no ]  ")
+	buttons := lipgloss.JoinHorizontal(lipgloss.Center, yesBtn, "    ", noBtn)
+	buttonLine := lipgloss.NewStyle().Width(m.width - 4).Align(lipgloss.Center)
+	b.WriteString(buttonLine.Render(buttons))
+	b.WriteString("\n")
+
+	// Footer hint
+	b.WriteString("\n")
+	hintStyle := m.styles.Muted.Align(lipgloss.Center).Width(m.width - 4)
+	b.WriteString(hintStyle.Render("←/→ to select · enter to confirm · esc to cancel"))
+
+	content := boxStyle.Render(b.String())
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, content)
+}
+
+// HandleKey processes key input for the confirm modal.
+func (m *ConfirmModal) HandleKey(key string) tea.Cmd {
+	switch key {
+	case "left", "h":
+		m.selected = 0 // yes
+	case "right", "l":
+		m.selected = 1 // no
+	case "tab":
+		m.selected = (m.selected + 1) % 2
+	case "y":
+		m.Hide()
+		if m.onConfirm != nil {
+			return m.onConfirm()
+		}
+	case "n", "esc", "q":
+		m.Hide()
+		if m.onCancel != nil {
+			return m.onCancel()
+		}
+	case "enter":
+		m.Hide()
+		if m.selected == 0 && m.onConfirm != nil {
+			return m.onConfirm()
+		}
+		if m.selected == 1 && m.onCancel != nil {
+			return m.onCancel()
 		}
 	}
 	return nil

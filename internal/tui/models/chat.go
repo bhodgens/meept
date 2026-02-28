@@ -3,6 +3,7 @@ package models
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -105,6 +106,16 @@ type ChatModel struct {
 	// Vim mode
 	vimState *vim.State
 
+	// Escape behavior config: "once", "twice", or "off"
+	escapeBehavior string
+	lastEscapeTime time.Time
+
+	// Paste compression
+	compressedPastes map[int]string // pasteID -> original paste content
+	pasteCounter     int
+	lastInputValue   string // For detecting pastes
+	lastInputLines   int    // Line count at last check
+
 	// Styles
 	userStyle       lipgloss.Style
 	assistantStyle  lipgloss.Style
@@ -127,7 +138,7 @@ type RPCClient interface {
 }
 
 // NewChatModel creates a new chat model.
-func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style) *ChatModel {
+func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style, escapeBehavior string) *ChatModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -146,25 +157,32 @@ func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss
 	// Initialize vim state (disabled by default)
 	vimState := vim.NewState()
 
+	// Default escape behavior if not specified
+	if escapeBehavior == "" {
+		escapeBehavior = "once"
+	}
+
 	return &ChatModel{
-		rpc:             rpc,
-		messages:        []ChatMessage{},
-		viewport:        vp,
-		textarea:        ta,
-		conversationID:  generateConversationID(),
-		focused:         FocusInput,
-		selectedMsgIdx:  -1,
-		pendingMsgIdx:   -1,
-		historyIdx:      -1,
-		sessionMessages: make(map[string][]ChatMessage),
-		sessionHistory:  make(map[string][]string),
-		dirtyMessages:   make(map[string][]ChatMessage),
-		mdRenderer:      mdRenderer,
-		renderMarkdown:  true, // Enable markdown by default
-		vimState:        vimState,
-		userStyle:       userStyle,
-		assistantStyle:  assistantStyle,
-		systemStyle:     systemStyle,
+		rpc:              rpc,
+		messages:         []ChatMessage{},
+		viewport:         vp,
+		textarea:         ta,
+		conversationID:   generateConversationID(),
+		focused:          FocusInput,
+		selectedMsgIdx:   -1,
+		pendingMsgIdx:    -1,
+		historyIdx:       -1,
+		sessionMessages:  make(map[string][]ChatMessage),
+		sessionHistory:   make(map[string][]string),
+		dirtyMessages:    make(map[string][]ChatMessage),
+		mdRenderer:       mdRenderer,
+		renderMarkdown:   true, // Enable markdown by default
+		vimState:         vimState,
+		escapeBehavior:   escapeBehavior,
+		compressedPastes: make(map[int]string),
+		userStyle:        userStyle,
+		assistantStyle:   assistantStyle,
+		systemStyle:      systemStyle,
 		pendingStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#F59E0B")).
 			Italic(true).
@@ -342,6 +360,29 @@ func (m *ChatModel) IsFocused() bool {
 	return m.focused == FocusInput || m.focused == FocusViewport
 }
 
+// IsLoading returns whether the chat is currently waiting for a response.
+func (m *ChatModel) IsLoading() bool {
+	return m.loading
+}
+
+// ClearLoading resets the loading state (e.g., after stopping work).
+func (m *ChatModel) ClearLoading() {
+	m.loading = false
+	// Remove pending message if any
+	if m.pendingMsgIdx >= 0 && m.pendingMsgIdx < len(m.messages) {
+		// Replace pending message with a cancelled indicator
+		m.messages[m.pendingMsgIdx] = ChatMessage{
+			Role:      "system",
+			Content:   "[work stopped]",
+			Timestamp: time.Now(),
+			State:     MessageNormal,
+		}
+		m.pendingMsgIdx = -1
+		m.progressState = nil
+		m.updateViewport()
+	}
+}
+
 // SetFocus sets focus to a specific element.
 func (m *ChatModel) SetFocus(elem FocusedElement) {
 	m.focused = elem
@@ -395,9 +436,24 @@ func (m *ChatModel) HandleEscape() tea.Cmd {
 		m.SetFocus(FocusInput)
 		return nil
 	}
-	// If focused on input, clear it
+	// If focused on input, clear it based on escape behavior config
 	if m.focused == FocusInput {
-		m.textarea.Reset()
+		switch m.escapeBehavior {
+		case "once":
+			m.textarea.Reset()
+		case "twice":
+			now := time.Now()
+			if now.Sub(m.lastEscapeTime) < 500*time.Millisecond {
+				m.textarea.Reset()
+				m.lastEscapeTime = time.Time{} // Reset the timer
+			} else {
+				m.lastEscapeTime = now
+			}
+		case "off":
+			// Do nothing - escape doesn't clear input
+		default:
+			m.textarea.Reset() // Fallback to "once"
+		}
 		return nil
 	}
 	return nil
@@ -514,6 +570,18 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		// Handle mouse wheel scrolling in viewport
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.viewport.LineUp(3)
+			return nil
+		case tea.MouseButtonWheelDown:
+			m.viewport.LineDown(3)
+			return nil
+		}
+		return nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab":
@@ -536,16 +604,23 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 
-			// Add to history buffer
+			// Expand paste tokens to get actual message content
+			actualText := m.expandPasteTokens(text)
+
+			// Add to history buffer (with tokens for display)
 			m.addToHistory(text)
 
 			m.textarea.Reset()
 
-			// Add user message
-			m.addMessage("user", text)
+			// Clear compressed pastes after sending
+			m.compressedPastes = make(map[int]string)
+			m.pasteCounter = 0
+
+			// Add user message (with expanded content)
+			m.addMessage("user", actualText)
 
 			// Track dirty message for persistence
-			m.trackDirtyMessage("user", text)
+			m.trackDirtyMessage("user", actualText)
 
 			// Initialize progress state
 			m.progressState = &ProgressState{
@@ -565,7 +640,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			m.updateViewport()
 
 			m.loading = true
-			return m.sendMessage(text)
+			return m.sendMessage(actualText)
 
 		case "up":
 			if m.focused == FocusInput {
@@ -623,15 +698,41 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			// Escape is handled by App.HandleEscape, but handle here for direct calls
 			return m.HandleEscape()
 
-		case "pgup":
+		case "shift+up":
 			if m.focused == FocusViewport {
 				m.viewport.HalfViewUp()
 				return nil
 			}
 
-		case "pgdown":
+		case "shift+down":
 			if m.focused == FocusViewport {
 				m.viewport.HalfViewDown()
+				return nil
+			}
+
+		case "pgup":
+			if m.focused == FocusViewport {
+				m.viewport.ViewUp()
+				return nil
+			}
+
+		case "pgdown":
+			if m.focused == FocusViewport {
+				m.viewport.ViewDown()
+				return nil
+			}
+
+		case "j":
+			// Vim-style: scroll viewport or select message
+			if m.focused == FocusViewport {
+				m.viewport.LineDown(1)
+				return nil
+			}
+
+		case "k":
+			// Vim-style: scroll viewport
+			if m.focused == FocusViewport {
+				m.viewport.LineUp(1)
 				return nil
 			}
 		}
@@ -710,27 +811,83 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case ProgressUpdateMsg:
-		// Update progress state for the pending message
-		m.progressState = &ProgressState{
-			AgentID:       msg.AgentID,
-			Stage:         msg.Stage,
-			Percent:       msg.Percent,
-			CurrentTool:   msg.CurrentTool,
-			TokensUsed:    msg.TokensUsed,
-			ContextResets: msg.ContextResets,
-			LastUpdate:    time.Now(),
+		fmt.Fprintf(os.Stderr, "[DEBUG] ChatModel.Update received ProgressUpdateMsg: AgentID=%s Stage=%s pendingIdx=%d\n",
+			msg.AgentID, msg.Stage, m.pendingMsgIdx)
+		// Update progress state for the pending message, merging with existing state
+		if m.progressState == nil {
+			m.progressState = &ProgressState{}
 		}
+		// Only update fields that are non-zero in the message
+		if msg.AgentID != "" {
+			m.progressState.AgentID = msg.AgentID
+		}
+		if msg.Stage != "" {
+			m.progressState.Stage = msg.Stage
+		}
+		if msg.Percent > 0 {
+			m.progressState.Percent = msg.Percent
+		}
+		if msg.CurrentTool != "" {
+			m.progressState.CurrentTool = msg.CurrentTool
+		}
+		if msg.TokensUsed > 0 {
+			m.progressState.TokensUsed = msg.TokensUsed
+		}
+		if msg.ContextResets > 0 {
+			m.progressState.ContextResets = msg.ContextResets
+		}
+		m.progressState.LastUpdate = time.Now()
 		// Update the pending message content with new progress
+		fmt.Fprintf(os.Stderr, "[DEBUG] ChatModel calling updateProgressMessage, progressState={AgentID:%s Stage:%s Percent:%.0f}\n",
+			m.progressState.AgentID, m.progressState.Stage, m.progressState.Percent)
 		m.updateProgressMessage()
 		return nil
 	}
 
 	// Update textarea if focused
 	if m.focused == FocusInput {
+		oldValue := m.textarea.Value()
+		oldLines := strings.Count(oldValue, "\n") + 1
+
 		var taCmd tea.Cmd
 		m.textarea, taCmd = m.textarea.Update(msg)
 		if taCmd != nil {
 			cmds = append(cmds, taCmd)
+		}
+
+		// Detect paste: significant multi-line increase in single update
+		newValue := m.textarea.Value()
+		newLines := strings.Count(newValue, "\n") + 1
+		addedLines := newLines - oldLines
+
+		// If 3+ lines were added at once, treat as paste and compress
+		if addedLines >= 3 {
+			// Extract the pasted content
+			added := ""
+			if len(newValue) > len(oldValue) {
+				// Simple heuristic: the added content is appended
+				// Find where the addition starts
+				commonLen := 0
+				for i := 0; i < len(oldValue) && i < len(newValue); i++ {
+					if oldValue[i] == newValue[i] {
+						commonLen = i + 1
+					} else {
+						break
+					}
+				}
+				added = newValue[commonLen:]
+			}
+
+			if added != "" {
+				m.pasteCounter++
+				pasteID := m.pasteCounter
+				m.compressedPastes[pasteID] = added
+
+				// Replace the pasted content with a token
+				pasteToken := fmt.Sprintf("{paste: %d lines}", addedLines)
+				compressedValue := oldValue + pasteToken
+				m.textarea.SetValue(compressedValue)
+			}
 		}
 	}
 
@@ -1363,4 +1520,32 @@ func (m *ChatModel) SetMarkdownEnabled(enabled bool) {
 		m.messages[i].rendered = ""
 	}
 	m.updateViewport()
+}
+
+// expandPasteTokens replaces {paste: N lines} tokens with their original content.
+func (m *ChatModel) expandPasteTokens(text string) string {
+	if len(m.compressedPastes) == 0 {
+		return text
+	}
+
+	result := text
+	// Expand paste tokens in reverse order of pasteID to handle multiple pastes
+	for id := m.pasteCounter; id >= 1; id-- {
+		content, exists := m.compressedPastes[id]
+		if !exists {
+			continue
+		}
+
+		// Find and replace the token for this paste
+		// Token format: {paste: N lines}
+		for lineCount := 100; lineCount >= 3; lineCount-- {
+			token := fmt.Sprintf("{paste: %d lines}", lineCount)
+			if strings.Contains(result, token) {
+				result = strings.Replace(result, token, content, 1)
+				break
+			}
+		}
+	}
+
+	return result
 }

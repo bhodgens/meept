@@ -328,6 +328,25 @@ func (c *RPCClient) QueryMemory(query string, limit int) (*types.MemoryQueryResp
 	return &resp, nil
 }
 
+// GetRecentMemories retrieves the most recent memories.
+func (c *RPCClient) GetRecentMemories(limit int) (*types.MemoryQueryResponse, error) {
+	params := map[string]any{
+		"limit": limit,
+	}
+
+	result, err := c.Call("memory.recent", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.MemoryQueryResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse memory response: %w", err)
+	}
+
+	return &resp, nil
+}
+
 // ListWorkers gets the list of active agent workers.
 func (c *RPCClient) ListWorkers() (*types.WorkerListResponse, error) {
 	result, err := c.Call("agent.workers.list", nil)
@@ -478,6 +497,44 @@ func (c *RPCClient) GenerateSessionDescription(sessionID, firstMessage, projectN
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// ============================================================================
+// Session Work Control Methods
+// ============================================================================
+
+// StopSession stops all work for a session.
+func (c *RPCClient) StopSession(sessionID string) (*types.StopSessionResponse, error) {
+	params := map[string]string{"session_id": sessionID}
+	result, err := c.Call("session.stop", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.StopSessionResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse stop session response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// GetSessionChildTasks gets tasks associated with a session.
+func (c *RPCClient) GetSessionChildTasks(sessionID string) ([]string, error) {
+	params := map[string]string{"session_id": sessionID}
+	result, err := c.Call("session.get_child_tasks", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Tasks []string `json:"tasks"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse child tasks response: %w", err)
+	}
+
+	return resp.Tasks, nil
 }
 
 // ============================================================================

@@ -36,6 +36,11 @@ const (
 	FocusSidebar
 )
 
+// Rect represents component bounds for click detection.
+type Rect struct {
+	X, Y, Width, Height int
+}
+
 // App is the main bubbletea model for the TUI.
 type App struct {
 	width       int
@@ -67,6 +72,7 @@ type App struct {
 	commandPalette *Modal
 	sessionPicker  *SessionPickerModal
 	sessionRename  *SessionRenameModal
+	confirmModal   *ConfirmModal
 
 	// Current session
 	currentSession *types.Session
@@ -77,6 +83,16 @@ type App struct {
 	// Status message (for clipboard feedback)
 	statusMessage     string
 	statusMessageTime time.Time
+
+	// Double-press tracking for Ctrl-C/Ctrl-D
+	lastCtrlC      time.Time
+	lastCtrlD      time.Time
+	doublePressTTL time.Duration
+
+	// Component bounds for click-to-focus
+	sidebarBounds  Rect
+	viewportBounds Rect
+	inputBounds    Rect
 
 	// Error state
 	err error
@@ -129,18 +145,19 @@ func NewApp(socketPath string) *App {
 	projectDir, _ := os.Getwd()
 
 	app := &App{
-		styles:       styles,
-		rpc:          rpc,
-		currentView:  ViewChat,
-		chat:         models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage),
-		tasks:        models.NewTasksModel(rpc),
-		queue:        models.NewQueueModel(rpc),
-		memory:       models.NewMemoryModel(rpc),
-		sidebar:      NewSidebarModel(rpc, styles, clientConfig.Rendering.SidebarAnimation),
-		keys:         DefaultKeyMap(),
-		clientConfig: clientConfig,
-		projectDir:   projectDir,
-		activeModal:  ModalNone,
+		styles:         styles,
+		rpc:            rpc,
+		currentView:    ViewChat,
+		chat:           models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior),
+		tasks:          models.NewTasksModel(rpc),
+		queue:          models.NewQueueModel(rpc),
+		memory:         models.NewMemoryModel(rpc),
+		sidebar:        NewSidebarModel(rpc, styles, clientConfig.Rendering.SidebarAnimation),
+		keys:           DefaultKeyMap(),
+		clientConfig:   clientConfig,
+		projectDir:     projectDir,
+		activeModal:    ModalNone,
+		doublePressTTL: 500 * time.Millisecond,
 	}
 
 	// Create modals
@@ -158,6 +175,7 @@ func (a *App) Init() tea.Cmd {
 		a.loadSession,
 		tea.EnterAltScreen,
 		tea.SetWindowTitle("Meept"),
+		tea.EnableMouseCellMotion,
 	)
 }
 
@@ -219,8 +237,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Calculate reserved height for chrome (header + status bar)
 		chromeHeight := 1 // status bar
+		headerHeight := 0
 		if a.clientConfig.Rendering.ShowHeader {
 			chromeHeight = 2 // header + status bar
+			headerHeight = 1
 		}
 
 		// Calculate sidebar width (30% of screen when visible, max 40 chars)
@@ -242,13 +262,57 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.tasks.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)
+
+		// Update component bounds for click-to-focus
+		// Viewport is the chat area minus input (input is 5 lines with border)
+		contentHeight := msg.Height - chromeHeight
+		viewportHeight := contentHeight - 6 // viewport + border + gap + input + border
+		a.viewportBounds = Rect{X: 0, Y: headerHeight, Width: mainWidth, Height: viewportHeight}
+		a.inputBounds = Rect{X: 0, Y: headerHeight + viewportHeight + 1, Width: mainWidth, Height: 5}
+		a.sidebarBounds = Rect{X: mainWidth, Y: headerHeight, Width: sidebarWidth, Height: contentHeight}
+
 		return a, nil
 
+	case tea.MouseMsg:
+		// Handle mouse events for click-to-focus and scrolling
+		return a.handleMouseMsg(msg)
+
 	case tea.KeyMsg:
-		// Ctrl+C always quits
-		if key.Matches(msg, a.keys.Quit) {
-			a.rpc.Close()
-			return a, tea.Quit
+		// Handle Ctrl+C - double-press to exit, single press to stop work or show hint
+		if msg.String() == "ctrl+c" {
+			now := time.Now()
+			if now.Sub(a.lastCtrlC) < a.doublePressTTL {
+				a.rpc.Close()
+				return a, tea.Quit
+			}
+			a.lastCtrlC = now
+
+			// If chat is loading, stop current work
+			if a.chat != nil && a.chat.IsLoading() {
+				return a, a.stopCurrentWork()
+			}
+
+			// Show hint message
+			a.statusMessage = "press ctrl+c again to exit"
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+		}
+
+		// Handle Ctrl+D - double-press to exit
+		if msg.String() == "ctrl+d" {
+			now := time.Now()
+			if now.Sub(a.lastCtrlD) < a.doublePressTTL {
+				a.rpc.Close()
+				return a, tea.Quit
+			}
+			a.lastCtrlD = now
+			a.statusMessage = "press ctrl+d again to exit"
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
 		}
 
 		// Handle modal key input first
@@ -312,6 +376,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.Session != nil {
 			a.currentSession = msg.Session
 			a.setTerminalTitle()
+			// Wire up session ID for tasks FilterMine feature
+			a.tasks.SetCurrentSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
 			if msg.IsNew {
 				a.statusMessage = fmt.Sprintf("Created session: %s", msg.Session.Name)
@@ -341,6 +407,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Session != nil {
 			a.currentSession = msg.Session
 			a.setTerminalTitle()
+			// Wire up session ID for tasks FilterMine feature
+			a.tasks.SetCurrentSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
 			a.statusMessage = fmt.Sprintf("Switched to: %s", msg.Session.Name)
 			a.statusMessageTime = time.Now()
@@ -376,8 +444,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Delegate to sidebar
 		return a, a.sidebar.Update(msg)
 
+	case EventStreamTickMsg:
+		// Forward event stream tick to sidebar for polling
+		return a, a.sidebar.Update(msg)
+
+	case EventStreamDataMsg:
+		// Forward event stream data to sidebar for processing
+		return a, a.sidebar.Update(msg)
+
 	case models.ProgressUpdateMsg:
 		// Forward progress updates to chat model
+		fmt.Fprintf(os.Stderr, "[DEBUG] App.Update received ProgressUpdateMsg: AgentID=%s Stage=%s Percent=%.0f\n",
+			msg.AgentID, msg.Stage, msg.Percent)
 		return a, a.chat.Update(msg)
 
 	case viz.VizTickMsg:
@@ -429,6 +507,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CopyErrorMsg:
 		a.statusMessage = fmt.Sprintf("Copy failed: %v", msg.Err)
 		a.statusMessageTime = time.Now()
+
+	case StopSessionResultMsg:
+		a.activeModal = ModalNone
+		if msg.Error != nil {
+			a.statusMessage = fmt.Sprintf("Stop failed: %v", msg.Error)
+		} else {
+			workers := len(msg.Response.WorkersStopped)
+			a.statusMessage = fmt.Sprintf("Stopped %d worker(s)", workers)
+			// Reset loading state in chat
+			if a.chat != nil {
+				a.chat.ClearLoading()
+			}
+		}
+		a.statusMessageTime = time.Now()
+		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
 		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 			return StatusMessageClearMsg{}
 		})
@@ -532,6 +627,15 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalNone
 		}
 		return a, cmd
+
+	case ModalConfirm:
+		if a.confirmModal != nil {
+			cmd := a.confirmModal.HandleKey(keyStr)
+			if !a.confirmModal.IsVisible() {
+				a.activeModal = ModalNone
+			}
+			return a, cmd
+		}
 	}
 
 	return a, nil
@@ -654,6 +758,10 @@ func (a *App) renderModalOverlay() string {
 		return a.sessionPicker.View(a.width, a.height)
 	case ModalSessionRename:
 		return a.sessionRename.View(a.width, a.height)
+	case ModalConfirm:
+		if a.confirmModal != nil {
+			return a.confirmModal.View(a.width, a.height)
+		}
 	}
 	return ""
 }
@@ -938,3 +1046,101 @@ func doCopy(text string) tea.Cmd {
 
 // StatusMessageClearMsg clears the status message.
 type StatusMessageClearMsg struct{}
+
+// handleMouseMsg processes mouse events for click-to-focus and scrolling.
+func (a *App) handleMouseMsg(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Handle mouse wheel scrolling - delegate to chat model
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		if a.currentView == ViewChat && a.isInBounds(msg.X, msg.Y, a.viewportBounds) {
+			return a, a.chat.Update(msg)
+		}
+		if a.isInBounds(msg.X, msg.Y, a.sidebarBounds) && a.sidebar.IsVisible() {
+			// Could add sidebar scrolling here in the future
+		}
+		return a, nil
+	}
+
+	// Handle left click for focus switching
+	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+		if a.isInBounds(msg.X, msg.Y, a.sidebarBounds) && a.sidebar.IsVisible() {
+			a.appFocus = FocusSidebar
+			a.sidebar.SetFocused(true)
+			// Adjust coordinates relative to sidebar for panel click detection
+			relX := msg.X - a.sidebarBounds.X
+			relY := msg.Y - a.sidebarBounds.Y
+			return a, a.sidebar.HandleClick(relX, relY)
+		} else if a.isInBounds(msg.X, msg.Y, a.viewportBounds) {
+			a.appFocus = FocusChat
+			a.sidebar.SetFocused(false)
+			a.chat.SetFocus(models.FocusViewport)
+			return a, nil
+		} else if a.isInBounds(msg.X, msg.Y, a.inputBounds) {
+			a.appFocus = FocusChat
+			a.sidebar.SetFocused(false)
+			a.chat.SetFocus(models.FocusInput)
+			return a, nil
+		}
+	}
+
+	return a, nil
+}
+
+// isInBounds checks if a point is within a rectangle.
+func (a *App) isInBounds(x, y int, r Rect) bool {
+	return x >= r.X && x < r.X+r.Width && y >= r.Y && y < r.Y+r.Height
+}
+
+// stopCurrentWork stops the current session's work and prompts for child tasks.
+func (a *App) stopCurrentWork() tea.Cmd {
+	if a.currentSession == nil {
+		a.statusMessage = "no active session"
+		a.statusMessageTime = time.Now()
+		return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+	}
+
+	// Check if there are child tasks
+	tasks, _ := a.rpc.GetSessionChildTasks(a.currentSession.ID)
+
+	if len(tasks) > 0 {
+		// Show confirm modal to ask about child tasks
+		if a.confirmModal == nil {
+			a.confirmModal = NewConfirmModal(a.styles)
+		}
+		a.activeModal = ModalConfirm
+		sessionID := a.currentSession.ID
+		a.confirmModal.Show(
+			"stop work",
+			fmt.Sprintf("Stop current work? There are %d active tasks.", len(tasks)),
+			func() tea.Cmd {
+				return a.doStopSession(sessionID)
+			},
+			func() tea.Cmd {
+				a.activeModal = ModalNone
+				return nil
+			},
+		)
+		return nil
+	}
+
+	// No child tasks, stop immediately
+	return a.doStopSession(a.currentSession.ID)
+}
+
+// doStopSession performs the actual session stop RPC call.
+func (a *App) doStopSession(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		resp, err := a.rpc.StopSession(sessionID)
+		if err != nil {
+			return StopSessionResultMsg{Error: err}
+		}
+		return StopSessionResultMsg{Response: resp}
+	}
+}
+
+// StopSessionResultMsg carries the result of stopping a session.
+type StopSessionResultMsg struct {
+	Response *types.StopSessionResponse
+	Error    error
+}

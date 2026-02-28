@@ -379,6 +379,8 @@ func (h *Handler) Start(ctx context.Context) error {
 		"session.messages.get",
 		"session.update_description",
 		"session.generate_description",
+		"session.stop",
+		"session.get_child_tasks",
 	}
 
 	for _, topic := range topics {
@@ -442,6 +444,10 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleUpdateDescription(msg)
 	case "session.generate_description":
 		response, err = h.handleGenerateDescription(msg)
+	case "session.stop":
+		response, err = h.handleStop(msg)
+	case "session.get_child_tasks":
+		response, err = h.handleGetChildTasks(msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -687,6 +693,75 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		"session_id":  params.SessionID,
 		"description": description,
 		"status":      "generated",
+	}, nil
+}
+
+// handleStop stops all work for a session (cancels workers).
+func (h *Handler) handleStop(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	session := h.store.Get(params.SessionID)
+	if session == nil {
+		return nil, fmt.Errorf("session not found: %s", params.SessionID)
+	}
+
+	// Publish a stop request for each worker associated with this session
+	stoppedWorkers := make([]string, 0, len(session.WorkerIDs))
+	for _, workerID := range session.WorkerIDs {
+		// Publish stop event to worker
+		stopPayload, _ := json.Marshal(map[string]string{
+			"worker_id":  workerID,
+			"session_id": params.SessionID,
+			"action":     "stop",
+		})
+		stopMsg := &models.BusMessage{
+			ID:        fmt.Sprintf("stop-%d", time.Now().UnixNano()),
+			Type:      models.MessageTypeRequest,
+			Topic:     "worker.stop",
+			Source:    "session-handler",
+			Timestamp: time.Now().UTC(),
+			Payload:   stopPayload,
+		}
+		h.bus.Publish("worker.stop", stopMsg)
+		stoppedWorkers = append(stoppedWorkers, workerID)
+	}
+
+	h.logger.Info("Session stop requested",
+		"session_id", params.SessionID,
+		"workers_stopped", len(stoppedWorkers),
+	)
+
+	return map[string]any{
+		"status":          "stopped",
+		"session_id":      params.SessionID,
+		"workers_stopped": stoppedWorkers,
+	}, nil
+}
+
+// handleGetChildTasks returns tasks associated with a session.
+func (h *Handler) handleGetChildTasks(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	session := h.store.Get(params.SessionID)
+	if session == nil {
+		return nil, fmt.Errorf("session not found: %s", params.SessionID)
+	}
+
+	// Return worker IDs as "child tasks" for now
+	// A more complete implementation would query a task store
+	return map[string]any{
+		"session_id": params.SessionID,
+		"tasks":      session.WorkerIDs,
 	}, nil
 }
 

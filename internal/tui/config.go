@@ -51,6 +51,7 @@ type SidebarConfig struct {
 type KeybindingsConfig struct {
 	CommandMode    string             `json:"command_mode"`    // Key to enter command mode (default: "ctrl+x")
 	Quit           string             `json:"quit"`            // Key to quit (default: "ctrl+c")
+	EscapeBehavior string             `json:"escape_behavior"` // "once", "twice", or "off" for clearing input (default: "once")
 	CommandPalette CommandPaletteKeys `json:"command_palette"` // Keys within command palette
 }
 
@@ -76,8 +77,9 @@ type SessionConfig struct {
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
 		Keybindings: KeybindingsConfig{
-			CommandMode: "ctrl+x",
-			Quit:        "ctrl+c",
+			CommandMode:    "ctrl+x",
+			Quit:           "ctrl+c",
+			EscapeBehavior: "once",
 			CommandPalette: CommandPaletteKeys{
 				ViewChat:      "1",
 				ViewTasks:     "2",

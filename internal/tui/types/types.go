@@ -259,6 +259,13 @@ type QueueStatsResponse struct {
 	DeadCount  int            `json:"dead_count"`
 }
 
+// StopSessionResponse represents the response from stopping a session.
+type StopSessionResponse struct {
+	Status         string   `json:"status"`
+	SessionID      string   `json:"session_id"`
+	WorkersStopped []string `json:"workers_stopped"`
+}
+
 // QueueJobListResponse represents the queue job list RPC response.
 type QueueJobListResponse struct {
 	Jobs []QueueJob `json:"jobs"`
