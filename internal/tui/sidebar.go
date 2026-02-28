@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/caimlas/meept/internal/tui/components"
+	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/viz"
 )
@@ -420,6 +421,21 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			s.eventStream.Update(msg)
 			s.updateActivityFeed()
 		}
+		// Check for progress events and forward to chat
+		for _, e := range msg.Events {
+			if e.Topic == "agent.progress" {
+				return s.handleProgressEvent(e)
+			}
+			if e.Topic == "llm.tokens.used" {
+				return s.handleTokenEvent(e)
+			}
+			if e.Topic == "conversation.reset" {
+				return s.handleContextResetEvent(e)
+			}
+			if e.Topic == "worker.state_changed" {
+				return s.handleWorkerStateEvent(e)
+			}
+		}
 		return nil
 
 	case tea.KeyMsg:
@@ -501,6 +517,98 @@ func summarizeEvent(topic string, payload any) string {
 	}
 
 	return action
+}
+
+// handleProgressEvent converts an agent.progress bus event to a ProgressUpdateMsg.
+func (s *SidebarModel) handleProgressEvent(e BusEvent) tea.Cmd {
+	return func() tea.Msg {
+		payloadMap, ok := e.Payload.(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		var agentID, stage string
+		var percent float64
+		var tokenCount float64
+
+		if v, ok := payloadMap["agent_id"].(string); ok {
+			agentID = v
+		}
+		if v, ok := payloadMap["stage"].(string); ok {
+			stage = v
+		}
+		if v, ok := payloadMap["percent"].(float64); ok {
+			percent = v
+		}
+		if v, ok := payloadMap["token_count"].(float64); ok {
+			tokenCount = v
+		}
+
+		return models.ProgressUpdateMsg{
+			AgentID:     agentID,
+			Stage:       stage,
+			Percent:     percent,
+			TokensUsed:  int(tokenCount),
+		}
+	}
+}
+
+// handleTokenEvent converts an llm.tokens.used event to a ProgressUpdateMsg.
+func (s *SidebarModel) handleTokenEvent(e BusEvent) tea.Cmd {
+	return func() tea.Msg {
+		payloadMap, ok := e.Payload.(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		var totalTokens float64
+		if v, ok := payloadMap["total_tokens"].(float64); ok {
+			totalTokens = v
+		}
+
+		// Just update the token count, preserve other progress state
+		return models.ProgressUpdateMsg{
+			TokensUsed: int(totalTokens),
+		}
+	}
+}
+
+// handleContextResetEvent converts a conversation.reset event to a ProgressUpdateMsg.
+func (s *SidebarModel) handleContextResetEvent(e BusEvent) tea.Cmd {
+	return func() tea.Msg {
+		payloadMap, ok := e.Payload.(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		var resetCount int
+		if v, ok := payloadMap["messages_removed"].(float64); ok {
+			resetCount = int(v)
+		}
+
+		return models.ProgressUpdateMsg{
+			ContextResets: resetCount,
+		}
+	}
+}
+
+// handleWorkerStateEvent converts a worker.state_changed event to a ProgressUpdateMsg.
+func (s *SidebarModel) handleWorkerStateEvent(e BusEvent) tea.Cmd {
+	return func() tea.Msg {
+		payloadMap, ok := e.Payload.(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		var currentTool string
+		if v, ok := payloadMap["current_tool"].(string); ok {
+			currentTool = v
+		}
+
+		return models.ProgressUpdateMsg{
+			CurrentTool: currentTool,
+		}
+	}
 }
 
 // syncVizWithData synchronizes the visualization with current agent/worker data.

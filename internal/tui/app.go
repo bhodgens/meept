@@ -376,6 +376,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Delegate to sidebar
 		return a, a.sidebar.Update(msg)
 
+	case models.ProgressUpdateMsg:
+		// Forward progress updates to chat model
+		return a, a.chat.Update(msg)
+
 	case viz.VizTickMsg:
 		// Forward viz tick to sidebar
 		if a.sidebar.IsVisible() {

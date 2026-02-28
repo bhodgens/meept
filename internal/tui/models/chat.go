@@ -49,6 +49,7 @@ type ChatMessage struct {
 	Content   string
 	Timestamp time.Time
 	State     MessageState
+	Progress  *ProgressState // Progress state for pending messages
 
 	// Rendering cache
 	rendered    string // Cached rendered output
@@ -81,6 +82,9 @@ type ChatModel struct {
 
 	// Pending message tracking
 	pendingMsgIdx int // index of the "Sending..." message, -1 if none
+
+	// Progress state for the current pending message
+	progressState *ProgressState
 
 	// Per-session input history
 	sessionHistory map[string][]string
@@ -251,6 +255,86 @@ type SessionMessagesLoadedMsg struct {
 type SessionDescriptionUpdatedMsg struct {
 	SessionID   string
 	Description string
+}
+
+// ProgressUpdateMsg carries progress updates for the current pending message.
+type ProgressUpdateMsg struct {
+	AgentID       string
+	Stage         string
+	Percent       float64
+	CurrentTool   string
+	TokensUsed    int
+	ContextResets int
+}
+
+// ProgressState holds current progress for display in chat.
+type ProgressState struct {
+	AgentID       string
+	Stage         string
+	Percent       float64
+	CurrentTool   string
+	TokensUsed    int
+	ContextResets int
+	LastUpdate    time.Time
+}
+
+// Render returns the formatted progress string for display.
+func (p *ProgressState) Render() string {
+	if p == nil {
+		return "Sending..."
+	}
+
+	var parts []string
+
+	// Agent emoji + name
+	if p.AgentID != "" {
+		agentDisplay := p.AgentID
+		if len(agentDisplay) > 12 {
+			agentDisplay = agentDisplay[:12]
+		}
+		parts = append(parts, fmt.Sprintf("🤖 %s", agentDisplay))
+	}
+
+	// Progress bar
+	if p.Percent > 0 {
+		barWidth := 20
+		filled := int(p.Percent / 100 * float64(barWidth))
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+		parts = append(parts, fmt.Sprintf("[%s %.0f%%]", bar, p.Percent))
+	} else if p.Stage != "" {
+		parts = append(parts, p.Stage)
+	}
+
+	// Current tool
+	if p.CurrentTool != "" {
+		parts = append(parts, fmt.Sprintf("→ %s", p.CurrentTool))
+	}
+
+	// Tokens
+	if p.TokensUsed > 0 {
+		parts = append(parts, fmt.Sprintf("📊 %s", formatTokens(p.TokensUsed)))
+	}
+
+	// Context reset indicator
+	if p.ContextResets > 0 {
+		parts = append(parts, fmt.Sprintf("🔄 %d", p.ContextResets))
+	}
+
+	if len(parts) == 0 {
+		return "Processing..."
+	}
+
+	return strings.Join(parts, " │ ")
+}
+
+// IsComplete returns true if progress indicates completion.
+func (p *ProgressState) IsComplete() bool {
+	return p != nil && p.Percent >= 100
+}
+
+// IsStale returns true if progress hasn't been updated recently.
+func (p *ProgressState) IsStale() bool {
+	return p == nil || time.Since(p.LastUpdate) > 5*time.Minute
 }
 
 // IsFocused returns whether the chat model has focus.
@@ -463,13 +547,20 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			// Track dirty message for persistence
 			m.trackDirtyMessage("user", text)
 
+			// Initialize progress state
+			m.progressState = &ProgressState{
+				Stage:      "Sending...",
+				LastUpdate: time.Now(),
+			}
+
 			// Add pending "Sending..." message immediately
 			m.pendingMsgIdx = len(m.messages)
 			m.messages = append(m.messages, ChatMessage{
 				Role:      "pending",
-				Content:   "Sending...",
+				Content:   m.renderProgressContent(),
 				Timestamp: time.Now(),
 				State:     MessageNormal,
+				Progress:  m.progressState,
 			})
 			m.updateViewport()
 
@@ -557,6 +648,9 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 	case ChatResponseMsg:
 		m.loading = false
 
+		// Clear progress state
+		m.progressState = nil
+
 		// Remove the pending message
 		if m.pendingMsgIdx >= 0 && m.pendingMsgIdx < len(m.messages) {
 			m.messages = append(m.messages[:m.pendingMsgIdx], m.messages[m.pendingMsgIdx+1:]...)
@@ -613,6 +707,21 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.SessionID == m.sessionID {
 			m.sessionDescription = msg.Description
 		}
+		return nil
+
+	case ProgressUpdateMsg:
+		// Update progress state for the pending message
+		m.progressState = &ProgressState{
+			AgentID:       msg.AgentID,
+			Stage:         msg.Stage,
+			Percent:       msg.Percent,
+			CurrentTool:   msg.CurrentTool,
+			TokensUsed:    msg.TokensUsed,
+			ContextResets: msg.ContextResets,
+			LastUpdate:    time.Now(),
+		}
+		// Update the pending message content with new progress
+		m.updateProgressMessage()
 		return nil
 	}
 
@@ -808,6 +917,72 @@ func extractDescription(text string) string {
 		desc += "..."
 	}
 	return desc
+}
+
+// updateProgressMessage updates the pending message content with current progress.
+func (m *ChatModel) updateProgressMessage() {
+	if m.pendingMsgIdx < 0 || m.pendingMsgIdx >= len(m.messages) {
+		return
+	}
+
+	// Replace the pending message content with progress info
+	m.messages[m.pendingMsgIdx].Content = m.renderProgressContent()
+	m.messages[m.pendingMsgIdx].Progress = m.progressState
+	m.updateViewport()
+}
+
+// renderProgressContent renders the current progress state as a string.
+func (m *ChatModel) renderProgressContent() string {
+	p := m.progressState
+	if p == nil {
+		return "Sending..."
+	}
+
+	var parts []string
+
+	// Agent emoji + name
+	if p.AgentID != "" {
+		agentDisplay := p.AgentID
+		if len(agentDisplay) > 12 {
+			agentDisplay = agentDisplay[:12]
+		}
+		parts = append(parts, fmt.Sprintf("🤖 %s", agentDisplay))
+	}
+
+	// Progress bar
+	if p.Percent > 0 {
+		barWidth := 20
+		filled := int(p.Percent / 100 * float64(barWidth))
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+		parts = append(parts, fmt.Sprintf("[%s %.0f%%]", bar, p.Percent))
+	} else if p.Stage != "" {
+		parts = append(parts, p.Stage)
+	}
+
+	// Current tool
+	if p.CurrentTool != "" {
+		parts = append(parts, fmt.Sprintf("→ %s", p.CurrentTool))
+	}
+
+	// Tokens
+	if p.TokensUsed > 0 {
+		parts = append(parts, fmt.Sprintf("📊 %s", formatTokens(p.TokensUsed)))
+	}
+
+	// Context reset indicator
+	if p.ContextResets > 0 {
+		parts = append(parts, fmt.Sprintf("🔄 %d", p.ContextResets))
+	}
+
+	return strings.Join(parts, " │ ")
+}
+
+// formatTokens formats token counts for display.
+func formatTokens(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
 // loadServerMessages converts server messages and populates local state.
