@@ -829,8 +829,7 @@ func (s *SidebarModel) View() string {
 	panels := strings.Join(panelLines, "\n")
 
 	// Build panel header Y positions for click detection
-	// Click Y is relative to sidebar visual bounds (including border)
-	// Testing with panelStartY=0 to determine actual offset needed
+	// Click Y is relative to sidebar content area (lipgloss handles border offset)
 	s.panelHeaderY = make(map[SidebarPanel]int)
 	panelNames := map[string]SidebarPanel{
 		"Status":         PanelStatus,
@@ -841,7 +840,7 @@ func (s *SidebarModel) View() string {
 		"Metrics":        PanelMetrics,
 		"Activity":       PanelActivityFeed,
 	}
-	// Testing: start at 0 to find actual offset
+	// Panel lines start at Y=0 relative to content area
 	panelStartY := 0
 	for i, line := range panelLines {
 		// Panel headers contain ▸ or ▾ followed by panel name
