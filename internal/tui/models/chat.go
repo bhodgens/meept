@@ -117,6 +117,21 @@ type ChatModel struct {
 	lastInputValue   string // For detecting pastes
 	lastInputLines   int    // Line count at last check
 
+	// Mouse selection state
+	mouseDown      bool
+	mouseDownY     int // Viewport Y where mouse was pressed
+	mouseDownX     int // Viewport X where mouse was pressed
+	mouseDragY     int // Current viewport Y during drag
+	mouseDragX     int // Current viewport X during drag
+	selectionStart int // Character offset in viewport content
+	selectionEnd   int // Character offset in viewport content
+	isSelecting    bool
+
+	// Click tracking for double/triple click
+	lastClickTime time.Time
+	lastClickY    int
+	clickCount    int
+
 	// Styles
 	userStyle       lipgloss.Style
 	assistantStyle  lipgloss.Style
@@ -597,10 +612,27 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		case tea.MouseButtonWheelDown:
 			m.viewport.LineDown(3)
 			return nil
+		case tea.MouseButtonLeft:
+			// Handle left click for text selection
+			switch msg.Action {
+			case tea.MouseActionPress:
+				return m.handleMousePress(msg)
+			case tea.MouseActionRelease:
+				return m.handleMouseRelease(msg)
+			case tea.MouseActionMotion:
+				if m.mouseDown {
+					return m.handleMouseDrag(msg)
+				}
+			}
 		}
 		return nil
 
 	case tea.KeyMsg:
+		// Clear any active text selection when user starts typing
+		if m.hasSelection() && m.focused == FocusInput {
+			m.clearSelection()
+		}
+
 		switch msg.String() {
 		case "tab":
 			// Cycle focus within chat view
@@ -1424,7 +1456,15 @@ func (m *ChatModel) View() string {
 		Width(m.width - 2).
 		Height(m.viewport.Height)
 
-	b.WriteString(viewportStyle.Render(m.viewport.View()))
+	// Get viewport content and apply selection highlighting if active
+	viewportContent := m.viewport.View()
+	if m.hasSelection() {
+		// Use ANSI escape sequence for selection highlight (reverse video)
+		selectionStyle := "\033[7m" // Reverse video
+		viewportContent = m.applySelectionHighlight(viewportContent, selectionStyle)
+	}
+
+	b.WriteString(viewportStyle.Render(viewportContent))
 	b.WriteString("\n")
 
 	// Input textarea with focus-dependent border
@@ -1642,6 +1682,92 @@ func (m *ChatModel) expandPasteTokens(text string) string {
 	}
 
 	return result
+}
+
+// viewportBorderOffset is the number of lines used by the viewport border (top border = 1)
+const viewportBorderOffset = 1
+
+// handleMousePress handles mouse button press for text selection.
+func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
+	m.mouseDown = true
+	m.mouseDownY = msg.Y
+	m.mouseDownX = msg.X
+
+	// Adjust coordinates for viewport border
+	// The viewport content starts 1 line down (after top border) and 1 char in (after left border)
+	adjustedY := msg.Y - viewportBorderOffset
+	adjustedX := msg.X - 1 // left border offset
+
+	// Ignore clicks on the border itself
+	if adjustedY < 0 || adjustedX < 0 {
+		m.mouseDown = false
+		return nil
+	}
+
+	// Check for double/triple click
+	now := time.Now()
+	if now.Sub(m.lastClickTime) < 400*time.Millisecond && m.lastClickY == msg.Y {
+		m.clickCount++
+		if m.clickCount == 2 {
+			// Double-click: select word
+			m.selectWordAt(adjustedY, adjustedX)
+			return nil
+		} else if m.clickCount >= 3 {
+			// Triple-click: select line
+			m.selectLineAt(adjustedY)
+			m.clickCount = 3 // Cap at 3
+			return nil
+		}
+	} else {
+		m.clickCount = 1
+	}
+	m.lastClickTime = now
+	m.lastClickY = msg.Y
+
+	// Single click: start selection at cursor position
+	m.selectionStart = m.calculateCursorOffset(adjustedY, adjustedX)
+	m.selectionEnd = m.selectionStart
+	m.isSelecting = true
+	return nil
+}
+
+// handleMouseDrag handles mouse drag for extending text selection.
+func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
+	m.mouseDragY = msg.Y
+	m.mouseDragX = msg.X
+
+	// Adjust coordinates for viewport border
+	adjustedY := msg.Y - viewportBorderOffset
+	adjustedX := msg.X - 1
+
+	// Clamp to valid range (allow dragging outside viewport to extend selection)
+	if adjustedY < 0 {
+		adjustedY = 0
+	}
+	if adjustedX < 0 {
+		adjustedX = 0
+	}
+
+	m.selectionEnd = m.calculateCursorOffset(adjustedY, adjustedX)
+	return nil
+}
+
+// handleMouseRelease handles mouse button release to finalize selection.
+func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
+	m.mouseDown = false
+
+	if m.isSelecting && m.selectionStart != m.selectionEnd {
+		// Copy selected text to clipboard
+		selectedText := m.extractSelectedText()
+		if selectedText != "" {
+			// Clear selection state after a brief moment to show feedback
+			return func() tea.Msg {
+				return CopyToClipboardMsg{Text: selectedText}
+			}
+		}
+	}
+
+	return nil
 }
 
 // parseAsyncAck checks if a reply is an async task acknowledgment JSON.

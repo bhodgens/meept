@@ -74,6 +74,9 @@ type Styles struct {
 	ModalTitle        lipgloss.Style
 	ModalItem         lipgloss.Style
 	ModalItemSelected lipgloss.Style
+
+	// Text selection
+	TextSelection lipgloss.Style
 }
 
 // DefaultStyles returns the default style set.
@@ -240,6 +243,11 @@ func DefaultStyles() *Styles {
 		Background(lipgloss.Color("#374151")).
 		Foreground(ColorAccent).
 		Bold(true)
+
+	// Text selection - reverse colors for visibility
+	s.TextSelection = lipgloss.NewStyle().
+		Foreground(ColorBackground).
+		Background(ColorPrimary)
 
 	return s
 }
