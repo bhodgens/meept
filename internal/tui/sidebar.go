@@ -30,14 +30,14 @@ const (
 
 // SidebarModel is the model for the expandable sidebar.
 type SidebarModel struct {
-	width         int
-	height        int
-	visible       bool
-	focused       bool
-	styles        *Styles
-	rpc           *RPCClient
-	expandedPanel SidebarPanel
-	selectedPanel SidebarPanel // For keyboard navigation
+	width          int
+	height         int
+	visible        bool
+	focused        bool
+	styles         *Styles
+	rpc            *RPCClient
+	expandedPanels map[SidebarPanel]bool // Multiple panels can be expanded
+	selectedPanel  SidebarPanel          // For keyboard navigation
 
 	// Panel header Y positions for click detection
 	panelHeaderY map[SidebarPanel]int
@@ -129,13 +129,24 @@ type SidebarToolCall struct {
 }
 
 // NewSidebarModel creates a new sidebar model.
-func NewSidebarModel(rpc *RPCClient, styles *Styles, animationEnabled bool) *SidebarModel {
+// eventRPC is a separate RPC client for event stream polling, so it doesn't
+// block on the main client's mutex during long-running Chat calls.
+func NewSidebarModel(rpc *RPCClient, eventRPC *RPCClient, styles *Styles, animationEnabled bool) *SidebarModel {
 	s := &SidebarModel{
-		rpc:              rpc,
-		styles:           styles,
-		expandedPanel:    PanelStatus,
-		selectedPanel:    PanelStatus,
-		visible:          true, // Visible by default
+		rpc:           rpc,
+		styles:        styles,
+		selectedPanel: PanelStatus,
+		visible:       true, // Visible by default
+		// All panels expanded by default
+		expandedPanels: map[SidebarPanel]bool{
+			PanelStatus:       true,
+			PanelAgentActivity: true,
+			PanelWorkers:      true,
+			PanelTasks:        true,
+			PanelMemory:       true,
+			PanelMetrics:      true,
+			PanelActivityFeed: true,
+		},
 		animationEnabled: animationEnabled,
 		activityFeed:     make([]ActivityFeedItem, 0),
 		panelHeaderY:     make(map[SidebarPanel]int),
@@ -152,8 +163,13 @@ func NewSidebarModel(rpc *RPCClient, styles *Styles, animationEnabled bool) *Sid
 	// Initialize metrics collector
 	s.metricsCollector = NewMetricsCollector(rpc, 30)
 
-	// Initialize event stream
-	s.eventStream = NewEventStream(rpc, nil)
+	// Initialize event stream with dedicated RPC client to avoid blocking
+	// on the main client's callMu during long-running Chat calls
+	esRPC := eventRPC
+	if esRPC == nil {
+		esRPC = rpc // Fallback to shared client
+	}
+	s.eventStream = NewEventStream(esRPC, nil)
 
 	return s
 }
@@ -221,9 +237,9 @@ func (s *SidebarModel) IsFocused() bool {
 func (s *SidebarModel) HandleClick(x, y int) tea.Cmd {
 	// Check if click is on a panel header
 	for panel, headerY := range s.panelHeaderY {
-		// Headers are typically 1 line tall, check if y is within that line
 		if y == headerY {
-			s.expandedPanel = panel
+			// Toggle the clicked panel's expansion state
+			s.expandedPanels[panel] = !s.expandedPanels[panel]
 			s.selectedPanel = panel
 			return nil
 		}
@@ -452,8 +468,9 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case EventStreamTickMsg:
-		// Forward to event stream
-		if s.eventStream != nil && s.visible {
+		// Forward to event stream - always poll regardless of sidebar visibility
+		// because progress events need to reach the chat model
+		if s.eventStream != nil {
 			return s.eventStream.Update(msg)
 		}
 		return nil
@@ -492,6 +509,7 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			}
 		}
 		if len(cmds) > 0 {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Sidebar returning tea.Batch with %d commands\n", len(cmds))
 			return tea.Batch(cmds...)
 		}
 		return nil
@@ -518,8 +536,8 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		case "right", "enter", "l":
-			// Expand selected panel
-			s.expandedPanel = s.selectedPanel
+			// Toggle selected panel expansion
+			s.expandedPanels[s.selectedPanel] = !s.expandedPanels[s.selectedPanel]
 			return nil
 		case "left", "h":
 			// Collapse current panel (go back to no expansion by selecting status)
@@ -744,8 +762,6 @@ func (s *SidebarModel) View() string {
 		return ""
 	}
 
-	var b strings.Builder
-
 	// Sidebar container style with focus-dependent border
 	borderColor := ColorBorder
 	if s.focused {
@@ -753,79 +769,114 @@ func (s *SidebarModel) View() string {
 	}
 
 	// Height is the total visual height including border (2 lines for top+bottom)
-	// So inner content height should be s.height - 2
 	innerHeight := s.height - 2
 	if innerHeight < 1 {
 		innerHeight = 1
 	}
 
+	contentWidth := s.width - 4 // Account for border (2) + padding (2)
+
+	// Calculate viz height FIRST - this is fixed at the bottom
+	vizHeight := 0
+	vizContent := ""
+	if s.animationEnabled && s.viz != nil {
+		vizHeight = s.viz.Height()
+		vizContent = s.viz.View()
+	}
+
+	// Build header (1 line: version banner with orange bg, black text)
+	// Version is based on git commit date
+	version := "meept v20260228"
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#000000")).
+		Background(lipgloss.Color("#F97316")). // Orange
+		Width(contentWidth).
+		Align(lipgloss.Center)
+
+	header := titleStyle.Render(version)
+	headerLines := 1
+
+	// Calculate available height for scrollable panel content
+	// innerHeight - headerLines - vizHeight - 1 (blank before viz)
+	availableForPanels := innerHeight - headerLines - vizHeight - 1
+	if availableForPanels < 3 {
+		availableForPanels = 3
+	}
+
+	// Render all panel content
+	var panelContent strings.Builder
+	panelContent.WriteString(s.renderStatusPanel())
+	panelContent.WriteString(s.renderAgentActivityPanel())
+	panelContent.WriteString(s.renderWorkersPanel())
+	panelContent.WriteString(s.renderTasksPanel())
+	panelContent.WriteString(s.renderMemoryPanel())
+	panelContent.WriteString(s.renderMetricsPanel())
+	panelContent.WriteString(s.renderActivityFeedPanel())
+
+	// Truncate panels to fit
+	panelStr := panelContent.String()
+	panelLines := strings.Split(strings.TrimRight(panelStr, "\n"), "\n")
+	if len(panelLines) > availableForPanels {
+		panelLines = panelLines[:availableForPanels-1]
+		panelLines = append(panelLines, s.styles.Muted.Render("  ..."))
+	}
+
+	// Pad panels to fill available space (so viz stays at bottom)
+	for len(panelLines) < availableForPanels {
+		panelLines = append(panelLines, "")
+	}
+	panels := strings.Join(panelLines, "\n")
+
+	// Build panel header Y positions for click detection
+	// Click Y is relative to sidebar visual bounds (including border)
+	// Testing with panelStartY=0 to determine actual offset needed
+	s.panelHeaderY = make(map[SidebarPanel]int)
+	panelNames := map[string]SidebarPanel{
+		"Status":         PanelStatus,
+		"Agent Activity": PanelAgentActivity,
+		"Workers":        PanelWorkers,
+		"Tasks":          PanelTasks,
+		"Recent Memory":  PanelMemory,
+		"Metrics":        PanelMetrics,
+		"Activity":       PanelActivityFeed,
+	}
+	// Testing: start at 0 to find actual offset
+	panelStartY := 0
+	for i, line := range panelLines {
+		// Panel headers contain ▸ or ▾ followed by panel name
+		for name, panel := range panelNames {
+			if strings.Contains(line, name) && (strings.Contains(line, "▸") || strings.Contains(line, "▾")) {
+				s.panelHeaderY[panel] = panelStartY + i
+				break
+			}
+		}
+	}
+
+	// Compose final content: header + panels + blank + viz
+	var content strings.Builder
+	content.WriteString(header)
+	content.WriteString("\n") // newline after header (starts panels on next line)
+	content.WriteString(panels)
+	if vizHeight > 0 {
+		content.WriteString("\n") // blank line before viz
+		content.WriteString(vizContent)
+	}
+
+	// Apply container style
 	containerStyle := lipgloss.NewStyle().
 		Width(s.width - 2).
-		Height(innerHeight).
-		MaxHeight(innerHeight).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1)
 
-	// Title
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(ColorPrimary).
-		Width(s.width - 6).
-		Align(lipgloss.Center)
-
-	b.WriteString(titleStyle.Render("sidebar"))
-	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", s.width-6))
-	b.WriteString("\n\n")
-
-	// Render panels
-	b.WriteString(s.renderStatusPanel())
-	b.WriteString("\n")
-	b.WriteString(s.renderAgentActivityPanel())
-	b.WriteString("\n")
-	b.WriteString(s.renderWorkersPanel())
-	b.WriteString("\n")
-	b.WriteString(s.renderTasksPanel())
-	b.WriteString("\n")
-	b.WriteString(s.renderMemoryPanel())
-	b.WriteString("\n")
-	b.WriteString(s.renderMetricsPanel())
-	b.WriteString("\n")
-	b.WriteString(s.renderActivityFeedPanel())
-
-	// Calculate space used by panels
-	panelsContent := b.String()
-	panelsLines := strings.Count(panelsContent, "\n") + 1
-
-	// Calculate viz height (approximately square based on width)
-	vizHeight := 0
-	if s.animationEnabled && s.viz != nil {
-		vizHeight = s.viz.Height()
-	}
-
-	// Calculate remaining space for viz
-	remainingLines := innerHeight - panelsLines
-
-	// Render visualization at bottom if we have space and animation is enabled
-	if s.animationEnabled && s.viz != nil && remainingLines >= vizHeight {
-		// Add spacing before viz
-		spacingBeforeViz := remainingLines - vizHeight
-		if spacingBeforeViz > 0 {
-			b.WriteString(strings.Repeat("\n", spacingBeforeViz))
-		}
-		b.WriteString(s.viz.View())
-	} else if remainingLines > 0 {
-		// Just add spacing if no room for viz
-		b.WriteString(strings.Repeat("\n", remainingLines))
-	}
-
-	return containerStyle.Render(b.String())
+	return containerStyle.Render(content.String())
 }
 
 func (s *SidebarModel) renderPanelHeader(title string, panel SidebarPanel) string {
+	isExpanded := s.expandedPanels[panel]
 	icon := "▸"
-	if s.expandedPanel == panel {
+	if isExpanded {
 		icon = "▾"
 	}
 
@@ -837,9 +888,9 @@ func (s *SidebarModel) renderPanelHeader(title string, panel SidebarPanel) strin
 
 	style := lipgloss.NewStyle().
 		Foreground(ColorMuted).
-		Bold(s.expandedPanel == panel)
+		Bold(isExpanded)
 
-	if s.expandedPanel == panel {
+	if isExpanded {
 		style = style.Foreground(ColorAccent)
 	}
 
@@ -857,7 +908,7 @@ func (s *SidebarModel) renderStatusPanel() string {
 	b.WriteString(s.renderPanelHeader("Status", PanelStatus))
 	b.WriteString("\n")
 
-	if s.expandedPanel == PanelStatus {
+	if s.expandedPanels[PanelStatus] {
 		if s.statusData == nil {
 			b.WriteString(s.styles.Muted.Render("  Loading..."))
 		} else {
@@ -907,7 +958,7 @@ func (s *SidebarModel) renderAgentActivityPanel() string {
 	b.WriteString(s.renderPanelHeader("Agent Activity", PanelAgentActivity))
 	b.WriteString("\n")
 
-	if s.expandedPanel == PanelAgentActivity {
+	if s.expandedPanels[PanelAgentActivity] {
 		if len(s.agentActivityData) == 0 {
 			b.WriteString(s.styles.Muted.Render("  No active agents"))
 			b.WriteString("\n")
@@ -1014,7 +1065,7 @@ func (s *SidebarModel) renderWorkersPanel() string {
 	b.WriteString(s.renderPanelHeader("Workers", PanelWorkers))
 	b.WriteString("\n")
 
-	if s.expandedPanel == PanelWorkers {
+	if s.expandedPanels[PanelWorkers] {
 		if len(s.workersData) == 0 {
 			b.WriteString(s.styles.Muted.Render("  No workers"))
 			b.WriteString("\n")
@@ -1082,7 +1133,7 @@ func (s *SidebarModel) renderTasksPanel() string {
 	b.WriteString(s.renderPanelHeader("Tasks", PanelTasks))
 	b.WriteString("\n")
 
-	if s.expandedPanel == PanelTasks {
+	if s.expandedPanels[PanelTasks] {
 		if len(s.tasksData) == 0 {
 			b.WriteString(s.styles.Muted.Render("  No active tasks"))
 			b.WriteString("\n")
@@ -1132,7 +1183,7 @@ func (s *SidebarModel) renderMemoryPanel() string {
 	b.WriteString(s.renderPanelHeader("Recent Memory", PanelMemory))
 	b.WriteString("\n")
 
-	if s.expandedPanel == PanelMemory {
+	if s.expandedPanels[PanelMemory] {
 		if len(s.memoryData) == 0 {
 			b.WriteString(s.styles.Muted.Render("  No recent memories"))
 			b.WriteString("\n")
@@ -1176,7 +1227,7 @@ func (s *SidebarModel) renderMetricsPanel() string {
 	b.WriteString(s.renderPanelHeader("Metrics", PanelMetrics))
 	b.WriteString("\n")
 
-	if s.expandedPanel == PanelMetrics {
+	if s.expandedPanels[PanelMetrics] {
 		// Sparkline style
 		sparkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4"))
 		labelStyle := lipgloss.NewStyle().
@@ -1229,7 +1280,7 @@ func (s *SidebarModel) renderActivityFeedPanel() string {
 	b.WriteString(s.renderPanelHeader("Activity", PanelActivityFeed))
 	b.WriteString("\n")
 
-	if s.expandedPanel == PanelActivityFeed {
+	if s.expandedPanels[PanelActivityFeed] {
 		if len(s.activityFeed) == 0 {
 			b.WriteString(s.styles.Muted.Render("  No recent activity"))
 			b.WriteString("\n")

@@ -24,7 +24,7 @@ func createTestApp() *App {
 		rpc:          rpc,
 		currentView:  ViewChat,
 		keys:         DefaultKeyMap(),
-		sidebar:      NewSidebarModel(rpc, styles, clientConfig.Rendering.SidebarAnimation),
+		sidebar:      NewSidebarModel(rpc, nil, styles, clientConfig.Rendering.SidebarAnimation),
 		clientConfig: clientConfig,
 		width:        80,
 		height:       24,

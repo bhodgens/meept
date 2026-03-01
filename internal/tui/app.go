@@ -47,6 +47,7 @@ type App struct {
 	height      int
 	styles      *Styles
 	rpc         *RPCClient
+	eventRPC    *RPCClient // Separate connection for event polling
 	currentView ViewType
 
 	// Sub-models for each view
@@ -88,6 +89,9 @@ type App struct {
 	lastCtrlC      time.Time
 	lastCtrlD      time.Time
 	doublePressTTL time.Duration
+
+	// Mouse mode toggle (for text selection)
+	mouseEnabled bool
 
 	// Component bounds for click-to-focus
 	sidebarBounds  Rect
@@ -136,6 +140,9 @@ func DefaultKeyMap() KeyMap {
 // NewApp creates a new TUI application.
 func NewApp(socketPath string) *App {
 	rpc := NewRPCClient(socketPath)
+	// Separate RPC client for event stream polling so it doesn't block
+	// on the main client's callMu while a Chat call is in-flight
+	eventRPC := NewRPCClient(socketPath)
 	styles := DefaultStyles()
 
 	// Load client configuration
@@ -147,17 +154,19 @@ func NewApp(socketPath string) *App {
 	app := &App{
 		styles:         styles,
 		rpc:            rpc,
+		eventRPC:       eventRPC,
 		currentView:    ViewChat,
 		chat:           models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior),
 		tasks:          models.NewTasksModel(rpc),
 		queue:          models.NewQueueModel(rpc),
 		memory:         models.NewMemoryModel(rpc),
-		sidebar:        NewSidebarModel(rpc, styles, clientConfig.Rendering.SidebarAnimation),
+		sidebar:        NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
 		keys:           DefaultKeyMap(),
 		clientConfig:   clientConfig,
 		projectDir:     projectDir,
 		activeModal:    ModalNone,
 		doublePressTTL: 500 * time.Millisecond,
+		mouseEnabled:   true, // Mouse mode enabled by default
 	}
 
 	// Create modals
@@ -215,6 +224,12 @@ func (a *App) connectDaemon() tea.Msg {
 	if err := a.rpc.Connect(); err != nil {
 		return ConnectErrorMsg{Err: err}
 	}
+	// Connect the event stream RPC client on its own connection
+	if a.eventRPC != nil {
+		if err := a.eventRPC.Connect(); err != nil {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Event RPC connect failed: %v\n", err)
+		}
+	}
 	return ConnectSuccessMsg{}
 }
 
@@ -229,6 +244,9 @@ type ConnectErrorMsg struct {
 // Update handles messages and updates the model.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// DEBUG: Log every message type that reaches App.Update
+	fmt.Fprintf(os.Stderr, "[DEBUG] App.Update received msg type: %T\n", msg)
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -283,6 +301,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			now := time.Now()
 			if now.Sub(a.lastCtrlC) < a.doublePressTTL {
 				a.rpc.Close()
+				if a.eventRPC != nil {
+					a.eventRPC.Close()
+				}
 				return a, tea.Quit
 			}
 			a.lastCtrlC = now
@@ -305,6 +326,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			now := time.Now()
 			if now.Sub(a.lastCtrlD) < a.doublePressTTL {
 				a.rpc.Close()
+				if a.eventRPC != nil {
+					a.eventRPC.Close()
+				}
 				return a, tea.Quit
 			}
 			a.lastCtrlD = now
@@ -325,6 +349,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalCommandPalette
 			a.commandPalette.Show()
 			return a, nil
+		}
+
+		// Check for Ctrl+M to toggle mouse mode (for text selection)
+		if msg.String() == "ctrl+m" {
+			a.mouseEnabled = !a.mouseEnabled
+			if a.mouseEnabled {
+				a.statusMessage = "mouse mode enabled"
+				return a, tea.Batch(
+					tea.EnableMouseCellMotion,
+					tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return StatusMessageClearMsg{}
+					}),
+				)
+			} else {
+				a.statusMessage = "select mode - use cmd+c to copy"
+				return a, tea.Batch(
+					tea.DisableMouse,
+					tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+						return StatusMessageClearMsg{}
+					}),
+				)
+			}
 		}
 
 		// Global escape handler
@@ -449,8 +495,67 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.sidebar.Update(msg)
 
 	case EventStreamDataMsg:
-		// Forward event stream data to sidebar for processing
-		return a, a.sidebar.Update(msg)
+		// Process progress events directly to update chat model
+		var cmds []tea.Cmd
+		for _, e := range msg.Events {
+			switch e.Topic {
+			case "agent.progress":
+				// Extract progress data and update chat directly
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					progressMsg := models.ProgressUpdateMsg{}
+					if v, ok := payloadMap["agent_id"].(string); ok {
+						progressMsg.AgentID = v
+					} else if v, ok := payloadMap["conversation_id"].(string); ok {
+						progressMsg.AgentID = v
+					}
+					if v, ok := payloadMap["stage"].(string); ok {
+						progressMsg.Stage = v
+					}
+					if v, ok := payloadMap["detail"].(string); ok {
+						progressMsg.CurrentTool = v
+					}
+					if v, ok := payloadMap["percent"].(float64); ok {
+						progressMsg.Percent = v
+					} else if iteration, ok := payloadMap["iteration"].(float64); ok {
+						progressMsg.Percent = iteration * 10.0
+						if progressMsg.Percent > 100 {
+							progressMsg.Percent = 100
+						}
+					}
+					if v, ok := payloadMap["token_count"].(float64); ok {
+						progressMsg.TokensUsed = int(v)
+					}
+					fmt.Fprintf(os.Stderr, "[DEBUG] App processing agent.progress: AgentID=%s Stage=%s Percent=%.0f\n",
+						progressMsg.AgentID, progressMsg.Stage, progressMsg.Percent)
+					// Update chat directly
+					if cmd := a.chat.Update(progressMsg); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+			case "llm.tokens.used":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if totalTokens, ok := payloadMap["total_tokens"].(float64); ok {
+						progressMsg := models.ProgressUpdateMsg{TokensUsed: int(totalTokens)}
+						a.chat.Update(progressMsg)
+					}
+				}
+			case "conversation.reset":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if resets, ok := payloadMap["resets"].(float64); ok {
+						progressMsg := models.ProgressUpdateMsg{ContextResets: int(resets)}
+						a.chat.Update(progressMsg)
+					}
+				}
+			}
+		}
+		// Also forward to sidebar for activity feed updates
+		if sidebarCmd := a.sidebar.Update(msg); sidebarCmd != nil {
+			cmds = append(cmds, sidebarCmd)
+		}
+		if len(cmds) > 0 {
+			return a, tea.Batch(cmds...)
+		}
+		return a, nil
 
 	case models.ProgressUpdateMsg:
 		// Forward progress updates to chat model
@@ -882,6 +987,14 @@ func (a *App) renderStatusBar() string {
 		statusStyle = a.styles.StatusRunning
 	}
 
+	// Mouse mode indicator
+	mouseIndicator := "[mouse]"
+	mouseStyle := a.styles.Muted
+	if !a.mouseEnabled {
+		mouseIndicator = "[select]"
+		mouseStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")) // Orange/yellow
+	}
+
 	// Project directory (shortened)
 	projectDisplay := a.projectDir
 	maxProjectLen := 25
@@ -889,7 +1002,7 @@ func (a *App) renderStatusBar() string {
 		projectDisplay = "..." + projectDisplay[len(projectDisplay)-maxProjectLen+3:]
 	}
 
-	// Build single line: status dot | context-sensitive keybindings | directory
+	// Build single line: status dot | mouse mode | context-sensitive keybindings | directory
 	var parts []string
 
 	// Status message takes priority if present
@@ -897,6 +1010,7 @@ func (a *App) renderStatusBar() string {
 		parts = append(parts, a.styles.StatusRunning.Render(a.statusMessage))
 	} else {
 		parts = append(parts, statusStyle.Render(connectionStatus))
+		parts = append(parts, mouseStyle.Render(mouseIndicator))
 		// Add context-sensitive quick actions
 		quickActions := a.getQuickActions()
 		parts = append(parts, quickActions...)
@@ -960,6 +1074,13 @@ func (a *App) getQuickActions() []string {
 	// Add sidebar toggle hint if sidebar is hidden
 	if !a.sidebar.IsVisible() {
 		actions = append(actions, a.styles.HelpKey.Render("^X y")+" "+a.styles.HelpValue.Render("sidebar"))
+	}
+
+	// Add mouse mode toggle hint
+	if a.mouseEnabled {
+		actions = append(actions, a.styles.HelpKey.Render("^M")+" "+a.styles.HelpValue.Render("select"))
+	} else {
+		actions = append(actions, a.styles.HelpKey.Render("^M")+" "+a.styles.HelpValue.Render("mouse"))
 	}
 
 	return actions
@@ -1049,6 +1170,17 @@ type StatusMessageClearMsg struct{}
 
 // handleMouseMsg processes mouse events for click-to-focus and scrolling.
 func (a *App) handleMouseMsg(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// If mouse mode is disabled, don't process any mouse events
+	// (allows terminal to handle text selection natively)
+	if !a.mouseEnabled {
+		return a, nil
+	}
+
+	// Also allow native text selection when Shift is held
+	if msg.Shift {
+		return a, nil
+	}
+
 	// Handle mouse wheel scrolling - delegate to chat model
 	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 		if a.currentView == ViewChat && a.isInBounds(msg.X, msg.Y, a.viewportBounds) {
