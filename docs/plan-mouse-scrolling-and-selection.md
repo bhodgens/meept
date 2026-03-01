@@ -1,8 +1,9 @@
 # Plan: Mouse Scrolling and Text Selection for Meept TUI
 
-**Status:** Planning Phase
+**Status:** Implemented
 **Created:** 2025-03-01
-**Updated:** 2025-03-01
+**Updated:** 2026-03-01
+**Implemented:** 2026-03-01
 **Based On:** Analysis of Charmbracelet Crush's mouse selection implementation
 
 ## Overview
