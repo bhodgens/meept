@@ -154,9 +154,10 @@ func (r *AgentRegistry) GetDispatcher() (*AgentLoop, error) {
 // createLoop creates a new agent loop from a spec.
 func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
 	config := AgentConfig{
-		MaxIterations: spec.Constraints.MaxIterations,
-		Timeout:       spec.Constraints.Timeout,
-		Purpose:       spec.Purpose,
+		MaxIterations:         spec.Constraints.MaxIterations,
+		Timeout:               spec.Constraints.Timeout,
+		Purpose:               spec.Purpose,
+		MaxConversationTokens: spec.Constraints.MaxConversationTokens,
 	}
 
 	opts := []LoopOption{
@@ -199,14 +200,19 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
 }
 
 // filterTools returns a filtered tool registry based on agent spec.
+// Each agent only gets its baseline tools plus its additional tools,
+// reducing the number of tool definitions sent per LLM call.
 func (r *AgentRegistry) filterTools(spec *AgentSpec) ToolRegistry {
 	if r.tools == nil {
 		return nil
 	}
 
-	// For now, return full registry - tool filtering can be implemented later
-	// when we have proper tool name mapping
-	return r.tools
+	allowedTools := spec.AllTools()
+	if len(allowedTools) == 0 {
+		return r.tools
+	}
+
+	return NewFilteredToolRegistry(r.tools, allowedTools)
 }
 
 // GetByRole returns all agent loops with the given role.

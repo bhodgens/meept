@@ -26,6 +26,9 @@ type AgentConstraints struct {
 	MaxTokensPerTurn int `json:"max_tokens_per_turn,omitempty"`
 	// MaxMemoryRefs is the maximum memory references to inject.
 	MaxMemoryRefs int `json:"max_memory_refs,omitempty"`
+	// MaxConversationTokens is the total token budget for a single conversation turn.
+	// When exceeded, the agent stops gracefully. 0 means use the default.
+	MaxConversationTokens int `json:"max_conversation_tokens,omitempty"`
 }
 
 // DefaultConstraints returns sensible default constraints.
@@ -131,7 +134,7 @@ func ChatAgentSpec() *AgentSpec {
 		Model:   "",
 		AdditionalTools: []string{
 			"web_fetch",
-			// NOTE: web_search tool does not exist yet
+			"web_search",
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -205,7 +208,8 @@ func AnalystAgentSpec() *AgentSpec {
 		Model:   "",
 		AdditionalTools: []string{
 			"web_fetch",
-			// NOTE: web_search and summarize tools do not exist yet
+			"web_search",
+			// NOTE: summarize tool does not exist yet
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -241,7 +245,9 @@ func SchedulerAgentSpec() *AgentSpec {
 		Purpose: "You are a scheduling specialist. You create, manage, and cancel scheduled tasks and reminders.",
 		Model:   "", // Use cheap model
 		AdditionalTools: []string{
-			// NOTE: schedule, list_jobs, and cancel_job tools do not exist yet
+			"schedule_create",
+			"schedule_list",
+			"schedule_delete",
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    3,

@@ -88,10 +88,10 @@ func (r *ExecutionResult) ToJSON() string {
 }
 
 // ToCompressedJSON converts the result to a JSON string, compressing if over maxTokens.
-// Uses 4 chars/token estimation. Large results are truncated with a summary.
+// Uses 3 chars/token estimation (appropriate for JSON/code content). Large results are truncated with a summary.
 func (r *ExecutionResult) ToCompressedJSON(maxTokens int) string {
 	full := r.ToJSON()
-	const charsPerToken = 4
+	const charsPerToken = 3
 	maxChars := maxTokens * charsPerToken
 
 	if len(full) <= maxChars {

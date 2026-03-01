@@ -153,8 +153,10 @@ func TestAgentLoopBuildSystemPromptWithToolRegistry(t *testing.T) {
 
 	prompt := loop.buildSystemPrompt()
 
-	if !strings.Contains(prompt, "test_tool") {
-		t.Error("prompt missing tool from registry")
+	// Tool descriptions should NOT be in the system prompt since they are
+	// sent via the API's tools parameter to avoid duplication.
+	if strings.Contains(prompt, "test_tool") {
+		t.Error("system prompt should not contain tool descriptions (they are sent via API tools parameter)")
 	}
 }
 

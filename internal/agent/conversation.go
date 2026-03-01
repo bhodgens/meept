@@ -199,7 +199,8 @@ func (c *Conversation) Truncate() int {
 }
 
 // TruncateByTokens removes old messages to fit within a token budget.
-// It uses a rough estimate of 4 characters per token.
+// It uses a rough estimate of 3 characters per token (appropriate for JSON/code-heavy content).
+// It counts both Content and ToolCalls fields for accurate estimation.
 // Returns the number of messages removed.
 func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 	c.mu.Lock()
@@ -209,8 +210,7 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 		return 0
 	}
 
-	// Rough token estimation: ~4 characters per token
-	const charsPerToken = 4
+	const charsPerToken = 3
 
 	// Calculate system prompt tokens
 	systemTokens := len(c.systemPrompt) / charsPerToken
@@ -233,6 +233,16 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		msgTokens := len(c.messages[i].Content) / charsPerToken
+		// Count tool calls (assistant messages requesting tools)
+		for _, tc := range c.messages[i].ToolCalls {
+			msgTokens += len(tc.Function.Name) / charsPerToken
+			msgTokens += len(tc.Function.Arguments) / charsPerToken
+			msgTokens += 20 // structural overhead per tool call
+		}
+		// Count tool result overhead
+		if c.messages[i].ToolCallID != "" {
+			msgTokens += 15 // tool_call_id structural overhead
+		}
 		if totalTokens+msgTokens > availableBudget {
 			keepFrom = i + 1
 			break
@@ -260,7 +270,7 @@ func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 		return c.buildMessageList()
 	}
 
-	const charsPerToken = 4
+	const charsPerToken = 3
 
 	// Calculate system prompt tokens
 	systemTokens := len(c.systemPrompt) / charsPerToken

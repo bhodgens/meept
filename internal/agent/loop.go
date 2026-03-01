@@ -29,11 +29,12 @@ const (
 
 // Error types for the agent loop.
 var (
-	ErrMaxIterationsReached = errors.New("maximum iterations reached")
-	ErrContextCancelled     = errors.New("context cancelled")
-	ErrNoLLMClient          = errors.New("no LLM client configured")
-	ErrCycleDetected        = errors.New("agent detected a cycle in tool calls")
-	ErrConvergenceDetected  = errors.New("agent responses converged without progress")
+	ErrMaxIterationsReached          = errors.New("maximum iterations reached")
+	ErrContextCancelled              = errors.New("context cancelled")
+	ErrNoLLMClient                   = errors.New("no LLM client configured")
+	ErrCycleDetected                 = errors.New("agent detected a cycle in tool calls")
+	ErrConvergenceDetected           = errors.New("agent responses converged without progress")
+	ErrConversationBudgetExhausted   = errors.New("conversation token budget exhausted")
 )
 
 // DetectionConfig holds configuration for cycle and convergence detection.
@@ -260,13 +261,14 @@ func hashString(s string) string {
 
 // AgentConfig holds configuration for the agent loop.
 type AgentConfig struct {
-	MaxIterations       int
-	Timeout             time.Duration
-	Constitution        string
-	Restrictions        string
-	Purpose             string
-	Personality         string
-	SystemPromptOveride string
+	MaxIterations            int
+	Timeout                  time.Duration
+	Constitution             string
+	Restrictions             string
+	Purpose                  string
+	Personality              string
+	SystemPromptOveride      string
+	MaxConversationTokens    int // 0 means use DefaultConversationTokenBudget
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -739,17 +741,57 @@ const (
 	// ToolResultMaxTokens is the maximum tokens per tool result
 	// Large tool outputs are compressed to fit this limit
 	ToolResultMaxTokens = 3000
+
+	// DefaultConversationTokenBudget is the total token budget for a single
+	// conversation turn across all iterations. When exceeded, the agent
+	// stops gracefully and returns what it has so far.
+	DefaultConversationTokenBudget = 50000
+
+	// ConversationBudgetWarningRatio is the fraction of the conversation
+	// budget at which the agent starts wrapping up (skips new tool calls).
+	ConversationBudgetWarningRatio = 0.80
 )
+
+// conversationTokenBudget returns the effective conversation token budget.
+func (l *AgentLoop) conversationTokenBudget() int {
+	if l.config.MaxConversationTokens > 0 {
+		return l.config.MaxConversationTokens
+	}
+	return DefaultConversationTokenBudget
+}
 
 // reasoningCycle runs the main reasoning loop with tool execution.
 func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conversationID string) (string, error) {
 	var totalTokens int
+	convBudget := l.conversationTokenBudget()
+	inWarningZone := false
 
 	for iteration := 1; iteration <= l.config.MaxIterations; iteration++ {
 		select {
 		case <-ctx.Done():
 			return "", ErrContextCancelled
 		default:
+		}
+
+		// Check conversation token budget
+		if totalTokens >= convBudget {
+			l.logger.Warn("Conversation token budget exhausted",
+				"total_tokens", totalTokens,
+				"budget", convBudget,
+				"conversation", conversationID,
+			)
+			return "I've used my full token budget for this request. Here is what I accomplished so far -- " +
+				"please let me know if you'd like me to continue in a follow-up.", ErrConversationBudgetExhausted
+		}
+
+		// Warning zone: at 80% of budget, prepare to wrap up
+		if !inWarningZone && float64(totalTokens) >= float64(convBudget)*ConversationBudgetWarningRatio {
+			inWarningZone = true
+			l.logger.Info("Approaching conversation token budget",
+				"total_tokens", totalTokens,
+				"budget", convBudget,
+				"conversation", conversationID,
+			)
 		}
 
 		l.logger.Debug("Agent loop iteration",
@@ -761,26 +803,34 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Publish progress: thinking
 		l.publishProgress(conversationID, iteration, "thinking", "", totalTokens)
 
-		// Enforce token budget before LLM call to prevent context explosion
-		// This truncates old messages while preserving system prompt and recent context
-		removed := conv.TruncateByTokens(IterationTokenBudget)
-		if removed > 0 {
-			l.logger.Debug("Truncated conversation for token budget",
-				"removed", removed,
-				"budget", IterationTokenBudget,
-				"conversation", conversationID,
-			)
-		}
-
 		// Get tool definitions
 		var tools []llm.ToolDefinition
 		if l.registry != nil {
 			tools = l.registry.GetDefinitions()
 		}
 
+		// Enforce token budget before LLM call to prevent context explosion.
+		// Reserve space for tool definitions (~175 tokens per tool) which are
+		// sent alongside messages but not counted by TruncateByTokens.
+		toolOverhead := len(tools) * 175
+		effectiveBudget := IterationTokenBudget - toolOverhead
+		if effectiveBudget < 2000 {
+			effectiveBudget = 2000 // minimum budget for messages
+		}
+		removed := conv.TruncateByTokens(effectiveBudget)
+		if removed > 0 {
+			l.logger.Debug("Truncated conversation for token budget",
+				"removed", removed,
+				"budget", effectiveBudget,
+				"tool_overhead", toolOverhead,
+				"conversation", conversationID,
+			)
+		}
+
 		// Get messages for LLM with windowed context to prevent token explosion
 		// This preserves system prompt, original user message, and recent context
-		messages := conv.GetWindowedMessages(IterationTokenBudget)
+		// Uses the same effective budget that accounts for tool definition overhead
+		messages := conv.GetWindowedMessages(effectiveBudget)
 
 		// Inject few-shot examples from shadow training (only on first iteration)
 		if iteration == 1 && l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
@@ -788,8 +838,16 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		var chatOpts []llm.ChatOption
-		if len(tools) > 0 {
+		// In warning zone, don't send tools so the LLM produces a final text response
+		if len(tools) > 0 && !inWarningZone {
 			chatOpts = append(chatOpts, llm.WithTools(tools))
+		}
+		if inWarningZone {
+			// Inject wrap-up instruction so the LLM summarizes without further tool use
+			messages = append(messages, llm.ChatMessage{
+				Role:    llm.RoleUser,
+				Content: "[system: you are approaching your token budget. provide a final summary of what you've accomplished and any remaining work, without making additional tool calls.]",
+			})
 		}
 
 		response, err := l.llm.Chat(ctx, messages, chatOpts...)
@@ -856,9 +914,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				}
 			}
 
-			// Add tool results to conversation with compression to prevent token explosion
+			// Add tool results to conversation with adaptive compression.
+			// As we consume more of the conversation budget, compress tool results more aggressively.
+			dynamicToolBudget := ToolResultMaxTokens
+			if convBudget > 0 && totalTokens > 0 {
+				ratio := 1.0 - float64(totalTokens)/float64(convBudget)
+				if ratio < 0 {
+					ratio = 0
+				}
+				dynamicToolBudget = int(float64(ToolResultMaxTokens) * ratio)
+				if dynamicToolBudget < 600 {
+					dynamicToolBudget = 600 // minimum readable result size
+				}
+			}
 			for _, result := range results {
-				conv.AddToolResult(result.ToolCallID, result.ToCompressedJSON(ToolResultMaxTokens))
+				conv.AddToolResult(result.ToolCallID, result.ToCompressedJSON(dynamicToolBudget))
 			}
 
 			// Publish agent result event
@@ -1047,16 +1117,8 @@ func (l *AgentLoop) buildSystemPromptWithContext(contextParts []string) string {
 		builder.AddSection("context", contextSection)
 	}
 
-	// Add tool descriptions if registry is available
-	if l.registry != nil {
-		tools := l.registry.List()
-		for _, tool := range tools {
-			builder.AddTool(ToolDescription{
-				Name:        tool.Name(),
-				Description: tool.Description(),
-			})
-		}
-	}
+	// Tool descriptions are omitted from the system prompt because they are
+	// already sent via the API's tools parameter, avoiding duplication.
 
 	return builder.Build()
 }
@@ -1283,36 +1345,16 @@ func (l *AgentLoop) buildSystemPrompt() string {
 		Personality:  l.config.Personality,
 	})
 
-	// Add tool descriptions if registry is available
-	if l.registry != nil {
-		tools := l.registry.List()
-		for _, tool := range tools {
-			builder.AddTool(ToolDescription{
-				Name:        tool.Name(),
-				Description: tool.Description(),
-			})
-		}
-	}
+	// Tool descriptions are omitted from the system prompt because they are
+	// already sent via the API's tools parameter, avoiding duplication.
 
 	return builder.Build()
 }
 
 // buildSystemPromptWithOverride builds system prompt with an override.
+// Tool descriptions are omitted because they are sent via the API's tools parameter.
 func (l *AgentLoop) buildSystemPromptWithOverride() string {
-	if l.registry == nil {
-		return l.config.SystemPromptOveride
-	}
-
-	// Append tool descriptions to override
-	var tools []ToolDescription
-	for _, tool := range l.registry.List() {
-		tools = append(tools, ToolDescription{
-			Name:        tool.Name(),
-			Description: tool.Description(),
-		})
-	}
-
-	return BuildSystemPromptWithOverride(l.config.SystemPromptOveride, tools)
+	return l.config.SystemPromptOveride
 }
 
 // publishAction publishes an agent action event.
