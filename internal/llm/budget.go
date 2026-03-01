@@ -275,6 +275,8 @@ func (b *Budget) WaitForRateLimit(ctx context.Context) error {
 }
 
 // BudgetExceededError is returned when a request would exceed the token budget.
+// It implements NonRetryableError because budget exhaustion cannot be resolved
+// by retrying the same request.
 type BudgetExceededError struct {
 	Message string
 }
@@ -282,3 +284,11 @@ type BudgetExceededError struct {
 func (e *BudgetExceededError) Error() string {
 	return e.Message
 }
+
+// NonRetryable returns true because budget exhaustion cannot be resolved by retry.
+func (e *BudgetExceededError) NonRetryable() bool {
+	return true
+}
+
+// Ensure BudgetExceededError implements NonRetryableError
+var _ NonRetryableError = (*BudgetExceededError)(nil)

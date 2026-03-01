@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -161,5 +162,48 @@ func TestBudgetExceededError(t *testing.T) {
 	err := &BudgetExceededError{Message: "test error"}
 	if err.Error() != "test error" {
 		t.Errorf("Error() = %q, want %q", err.Error(), "test error")
+	}
+}
+
+func TestIsNonRetryable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "regular error",
+			err:  fmt.Errorf("some error"),
+			want: false,
+		},
+		{
+			name: "BudgetExceededError directly",
+			err:  &BudgetExceededError{Message: "budget exceeded"},
+			want: true,
+		},
+		{
+			name: "wrapped BudgetExceededError",
+			err:  fmt.Errorf("failed to process: %w", &BudgetExceededError{Message: "budget exceeded"}),
+			want: true,
+		},
+		{
+			name: "double-wrapped BudgetExceededError",
+			err:  fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", &BudgetExceededError{Message: "budget exceeded"})),
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsNonRetryable(tt.err)
+			if got != tt.want {
+				t.Errorf("IsNonRetryable() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

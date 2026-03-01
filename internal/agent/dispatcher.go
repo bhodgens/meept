@@ -237,9 +237,15 @@ func (d *Dispatcher) extractMemoryRefs(results []memory.MemoryResult) []string {
 
 // shouldCreateTask determines if a task should be created.
 func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
+	// Never create tasks for conversational/reporting intents
+	switch intent.Type {
+	case "chat", "report", "recall", "platform":
+		return false
+	}
+
 	// Create tasks for work that should be trackable
 	switch intent.Type {
-	case "code", "debug", "plan", "schedule":
+	case "code", "debug", "plan", "schedule", "git":
 		return true
 	default:
 		return intent.RequiresPlanning
@@ -376,6 +382,12 @@ func (c *KeywordClassifier) Classify(ctx context.Context, input string, context 
 		// Platform introspection (highest priority - matches first)
 		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status"}, "platform", "chat", 0.9, false},
 
+		// Report/Summary requests (high priority - handle inline, not async)
+		{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, "report", "chat", 0.9, false},
+
+		// Recall/Memory requests (high priority - handle inline)
+		{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, "recall", "chat", 0.85, false},
+
 		// Code-related
 		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, "debug", "debugger", 0.8, false},
 		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, "code", "coder", 0.8, false},
@@ -390,7 +402,8 @@ func (c *KeywordClassifier) Classify(ctx context.Context, input string, context 
 		// Planning
 		{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, "plan", "planner", 0.8, true},
 
-		// Analysis/Research
+		// Analysis/Research ("summarize" alone stays here for document summarization;
+		// "summarize what" and "summary of work" are captured by report intent above)
 		{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, "analyze", "analyst", 0.7, false},
 		{[]string{"search", "find", "look up", "google"}, "search", "analyst", 0.7, false},
 
@@ -528,10 +541,20 @@ func (d *Dispatcher) ShouldDispatchAsync(result *DispatchResult) bool {
 		return false
 	}
 
-	// Check intent type
+	// Simple intents are always handled inline - never dispatch async
 	switch result.Intent.Type {
-	case "code", "debug", "plan", "schedule":
+	case "chat", "report", "recall", "platform", "analyze", "search":
+		return false
+	}
+
+	// Complex intents that benefit from task decomposition
+	switch result.Intent.Type {
+	case "code", "debug", "plan", "git":
 		return true
+	case "schedule":
+		// Only dispatch async for schedule if it requires planning
+		// Simple "remind me" requests should be inline
+		return result.Intent.RequiresPlanning
 	default:
 		return result.Intent.RequiresPlanning
 	}

@@ -474,3 +474,8 @@ func (c *Client) Close() error {
 func (c *Client) Config() *ModelConfig {
 	return c.config
 }
+
+// Budget returns the token budget tracker, if one is configured.
+func (c *Client) Budget() *Budget {
+	return c.budget
+}

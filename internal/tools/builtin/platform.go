@@ -294,10 +294,167 @@ func generateDelegateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
+// SessionHistoryTool provides access to recent session activity and completed work.
+// This enables agents to provide reports about what was accomplished.
+type SessionHistoryTool struct {
+	getRecentTasks    func(limit int) ([]SessionTaskInfo, error)
+	getRecentMessages func(sessionID string, limit int) ([]SessionMessageInfo, error)
+}
+
+// SessionTaskInfo represents summary information about a task.
+type SessionTaskInfo struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description,omitempty"`
+	State          string    `json:"state"`
+	AssignedAgent  string    `json:"assigned_agent,omitempty"`
+	CompletedJobs  int       `json:"completed_jobs"`
+	TotalJobs      int       `json:"total_jobs"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// SessionMessageInfo represents a message in the session history.
+type SessionMessageInfo struct {
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// SessionHistoryResult is the result of querying session history.
+type SessionHistoryResult struct {
+	Tasks      []SessionTaskInfo    `json:"tasks"`
+	Messages   []SessionMessageInfo `json:"messages,omitempty"`
+	TaskCount  int                  `json:"task_count"`
+	Summary    string               `json:"summary"`
+}
+
+// NewSessionHistoryTool creates a new session history tool.
+func NewSessionHistoryTool(
+	getRecentTasks func(limit int) ([]SessionTaskInfo, error),
+	getRecentMessages func(sessionID string, limit int) ([]SessionMessageInfo, error),
+) *SessionHistoryTool {
+	return &SessionHistoryTool{
+		getRecentTasks:    getRecentTasks,
+		getRecentMessages: getRecentMessages,
+	}
+}
+
+func (t *SessionHistoryTool) Name() string { return "session_history" }
+
+func (t *SessionHistoryTool) Description() string {
+	return "Query recent session activity including completed tasks, work summary, and conversation history. Use this to provide reports about what was accomplished."
+}
+
+func (t *SessionHistoryTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: "object",
+		Properties: map[string]llm.ParameterProperty{
+			"limit": {
+				Type:        "integer",
+				Description: "Maximum number of recent tasks to return (default: 10, max: 50).",
+			},
+			"session_id": {
+				Type:        "string",
+				Description: "Optional session ID to filter history for a specific session.",
+			},
+			"include_messages": {
+				Type:        "boolean",
+				Description: "Whether to include recent conversation messages (default: false).",
+			},
+		},
+		Required: []string{},
+	}
+}
+
+func (t *SessionHistoryTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	// Parse parameters
+	limit := 10
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+		if limit > 50 {
+			limit = 50
+		}
+	}
+
+	sessionID, _ := args["session_id"].(string)
+	includeMessages, _ := args["include_messages"].(bool)
+
+	result := SessionHistoryResult{
+		Tasks:    []SessionTaskInfo{},
+		Messages: []SessionMessageInfo{},
+	}
+
+	// Get recent tasks
+	if t.getRecentTasks != nil {
+		tasks, err := t.getRecentTasks(limit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get recent tasks: %w", err)
+		}
+		result.Tasks = tasks
+		result.TaskCount = len(tasks)
+	}
+
+	// Get recent messages if requested
+	if includeMessages && t.getRecentMessages != nil && sessionID != "" {
+		messages, err := t.getRecentMessages(sessionID, limit)
+		if err != nil {
+			// Non-fatal - just skip messages
+			result.Messages = []SessionMessageInfo{}
+		} else {
+			result.Messages = messages
+		}
+	}
+
+	// Generate summary
+	result.Summary = t.generateSummary(result.Tasks)
+
+	return result, nil
+}
+
+// generateSummary creates a human-readable summary of recent work.
+func (t *SessionHistoryTool) generateSummary(tasks []SessionTaskInfo) string {
+	if len(tasks) == 0 {
+		return "No recent tasks found."
+	}
+
+	var completed, inProgress, pending, failed int
+	for _, task := range tasks {
+		switch task.State {
+		case "completed":
+			completed++
+		case "executing", "planning":
+			inProgress++
+		case "pending":
+			pending++
+		case "failed":
+			failed++
+		}
+	}
+
+	summary := fmt.Sprintf("Recent activity: %d tasks total", len(tasks))
+	if completed > 0 {
+		summary += fmt.Sprintf(", %d completed", completed)
+	}
+	if inProgress > 0 {
+		summary += fmt.Sprintf(", %d in progress", inProgress)
+	}
+	if pending > 0 {
+		summary += fmt.Sprintf(", %d pending", pending)
+	}
+	if failed > 0 {
+		summary += fmt.Sprintf(", %d failed", failed)
+	}
+	summary += "."
+
+	return summary
+}
+
 // Ensure tools implement the Tool interface
 var (
 	_ tools.Tool = (*PlatformStatusTool)(nil)
 	_ tools.Tool = (*PlatformAgentsTool)(nil)
 	_ tools.Tool = (*PlatformToolsTool)(nil)
 	_ tools.Tool = (*DelegateTaskTool)(nil)
+	_ tools.Tool = (*SessionHistoryTool)(nil)
 )

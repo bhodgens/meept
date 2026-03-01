@@ -26,6 +26,10 @@ func (s State) IsActive() bool {
 }
 
 // CanClaim returns true if the worker can claim new work.
+// NOTE: This is a logical check for whether a worker is available to claim work.
+// Workers in StateComplete or StateError MUST transition to StateIdle before
+// actually claiming a job. The worker.tryProcessJob method handles this by
+// explicitly calling setState(StateIdle) before setState(StateClaiming).
 func (s State) CanClaim() bool {
 	return s == StateIdle || s == StateComplete || s == StateError
 }

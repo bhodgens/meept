@@ -69,6 +69,7 @@ type Job struct {
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 	DueAt        *time.Time      `json:"due_at,omitempty"`
+	NextRetryAt  *time.Time      `json:"next_retry_at,omitempty"` // Retry backoff time
 }
 
 // NewJob creates a new job with default values.

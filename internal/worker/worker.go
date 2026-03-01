@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/queue"
 )
 
@@ -201,6 +202,14 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		w.mu.Unlock()
 		return false, nil
 	}
+
+	// Force transition to Idle first if in Complete or Error state.
+	// This ensures we follow the valid state transition path:
+	// Complete/Error -> Idle -> Claiming
+	if w.State == StateComplete || w.State == StateError {
+		w.setState(StateIdle)
+	}
+
 	w.setState(StateClaiming)
 	w.mu.Unlock()
 
@@ -251,8 +260,14 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 			w.logger.Error("Failed to mark job as failed", "job", job.ID, "error", err)
 		}
 
-		// Check if we can retry
-		if job.CanRetry() {
+		// Check if we can retry - but NOT for non-retryable errors
+		// Non-retryable errors (like budget exhaustion) should go directly to dead letter
+		if llm.IsNonRetryable(processErr) {
+			w.logger.Info("Non-retryable error - skipping retry",
+				"job", job.ID,
+				"error", processErr,
+			)
+		} else if job.CanRetry() {
 			if err := w.queue.Retry(ctx, job.ID); err != nil {
 				w.logger.Error("Failed to queue job for retry", "job", job.ID, "error", err)
 			}

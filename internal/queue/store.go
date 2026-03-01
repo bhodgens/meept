@@ -92,6 +92,7 @@ func (s *Store) migrate() error {
 	migrations := []string{
 		"ALTER TABLE jobs ADD COLUMN agent_id TEXT",
 		"ALTER TABLE dead_letter ADD COLUMN agent_id TEXT",
+		"ALTER TABLE jobs ADD COLUMN next_retry_at TEXT",
 	}
 
 	for _, m := range migrations {
@@ -147,7 +148,7 @@ func (s *Store) Insert(job *Job) error {
 func (s *Store) GetByID(id string) (*Job, error) {
 	row := s.db.QueryRow(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at
+		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs WHERE id = ?`, id)
 
 	return s.scanJob(row)
@@ -162,6 +163,7 @@ func (s *Store) ClaimNext(workerID string, caps []string) (*Job, error) {
 // ClaimNextForAgent claims the next available job for a specific agent.
 // If agentID is empty, claims any job matching capabilities.
 // If agentID is specified, only claims jobs targeted to that agent OR unassigned jobs.
+// Respects next_retry_at for jobs with retry backoff.
 func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string) (*Job, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -169,36 +171,41 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	}
 	defer tx.Rollback()
 
+	now := time.Now().UTC().Format(time.RFC3339)
+
 	// Build query with optional agent filtering
 	// Jobs can be claimed if:
 	// - They have no agent_id (unassigned, any agent can claim)
 	// - Their agent_id matches the claiming agent
+	// - Retry backoff has elapsed (next_retry_at <= now)
 	var query string
 	var args []any
 
 	if agentID != "" {
 		query = `
 			SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-			       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at
+			       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 			FROM jobs
 			WHERE state = 'pending'
 			  AND (due_at IS NULL OR due_at <= ?)
+			  AND (next_retry_at IS NULL OR next_retry_at <= ?)
 			  AND (agent_id IS NULL OR agent_id = '' OR agent_id = ?)
 			ORDER BY
 			  CASE WHEN agent_id = ? THEN 0 ELSE 1 END,
 			  priority DESC, created_at ASC
 			LIMIT 10`
-		args = []any{time.Now().UTC().Format(time.RFC3339), agentID, agentID}
+		args = []any{now, now, agentID, agentID}
 	} else {
 		query = `
 			SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-			       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at
+			       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 			FROM jobs
 			WHERE state = 'pending'
 			  AND (due_at IS NULL OR due_at <= ?)
+			  AND (next_retry_at IS NULL OR next_retry_at <= ?)
 			ORDER BY priority DESC, created_at ASC
 			LIMIT 10`
-		args = []any{time.Now().UTC().Format(time.RFC3339)}
+		args = []any{now, now}
 	}
 
 	rows, err := tx.Query(query, args...)
@@ -224,8 +231,7 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 		return nil, nil // No jobs available
 	}
 
-	// Claim the job
-	now := time.Now().UTC().Format(time.RFC3339)
+	// Claim the job (reuse now from above since it's already in the same transaction)
 	_, err = tx.Exec(`
 		UPDATE jobs SET state = 'claimed', claimed_by = ?, updated_at = ?
 		WHERE id = ? AND state = 'pending'`,
@@ -310,9 +316,29 @@ func (s *Store) Fail(jobID string, errMsg string) error {
 	return nil
 }
 
-// Retry resets a failed job for retry.
+// retryBackoffBase is the base delay for exponential retry backoff.
+const retryBackoffBase = 2 * time.Second
+
+// Retry resets a failed job for retry with exponential backoff.
+// Backoff follows: 2s, 4s, 8s (capped at 8s).
 func (s *Store) Retry(jobID string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+
+	// Get current retry count to calculate backoff
+	var retryCount int
+	row := s.db.QueryRow(`SELECT retry_count FROM jobs WHERE id = ?`, jobID)
+	if err := row.Scan(&retryCount); err != nil {
+		return fmt.Errorf("failed to get retry count: %w", err)
+	}
+
+	// Calculate exponential backoff: 2s * 2^retryCount, capped at 8s
+	backoffMultiplier := 1 << retryCount // 2^retryCount: 1, 2, 4, 8, ...
+	backoff := retryBackoffBase * time.Duration(backoffMultiplier)
+	if backoff > 8*time.Second {
+		backoff = 8 * time.Second
+	}
+
+	nextRetryAt := now.Add(backoff)
 
 	result, err := s.db.Exec(`
 		UPDATE jobs
@@ -320,9 +346,10 @@ func (s *Store) Retry(jobID string) error {
 		    retry_count = retry_count + 1,
 		    claimed_by = NULL,
 		    error = NULL,
+		    next_retry_at = ?,
 		    updated_at = ?
 		WHERE id = ? AND state IN ('failed', 'claimed')`,
-		now, jobID)
+		nextRetryAt.Format(time.RFC3339), now.Format(time.RFC3339), jobID)
 
 	if err != nil {
 		return fmt.Errorf("failed to retry job: %w", err)
@@ -333,7 +360,12 @@ func (s *Store) Retry(jobID string) error {
 		return fmt.Errorf("job not found or not in retryable state: %s", jobID)
 	}
 
-	s.logger.Info("Job queued for retry", "id", jobID)
+	s.logger.Info("Job queued for retry with backoff",
+		"id", jobID,
+		"retry_count", retryCount+1,
+		"backoff", backoff,
+		"next_retry_at", nextRetryAt,
+	)
 	return nil
 }
 
@@ -341,7 +373,7 @@ func (s *Store) Retry(jobID string) error {
 func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at
+		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs
 		WHERE state = ?
 		ORDER BY priority DESC, created_at ASC
@@ -369,7 +401,7 @@ func (s *Store) ListByState(state JobState, limit int) ([]*Job, error) {
 func (s *Store) ListByTaskID(taskID string) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at
+		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs
 		WHERE task_id = ?
 		ORDER BY created_at ASC`,
@@ -395,7 +427,7 @@ func (s *Store) ListByTaskID(taskID string) ([]*Job, error) {
 func (s *Store) ListByAgentID(agentID string, limit int) ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, agent_id, type, priority, state, payload, required_caps,
-		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at
+		       max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at, next_retry_at
 		FROM jobs
 		WHERE agent_id = ? AND state = 'pending'
 		ORDER BY priority DESC, created_at ASC
@@ -512,16 +544,16 @@ func (s *Store) scanJob(row *sql.Row) (*Job, error) {
 		result, errMsg                    sql.NullString
 		capsJSON                          string
 		createdAt, updatedAt              string
-		dueAt                             sql.NullString
+		dueAt, nextRetryAt                sql.NullString
 	)
 
 	err := row.Scan(&id, &taskID, &agentID, &jobType, &priority, &state, &payload, &capsJSON,
-		&maxRetries, &retryCount, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt)
+		&maxRetries, &retryCount, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, claimedBy, result, errMsg, createdAt, updatedAt, dueAt)
+	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt)
 }
 
 func (s *Store) scanJobRows(rows *sql.Rows) (*Job, error) {
@@ -532,21 +564,21 @@ func (s *Store) scanJobRows(rows *sql.Rows) (*Job, error) {
 		result, errMsg                    sql.NullString
 		capsJSON                          string
 		createdAt, updatedAt              string
-		dueAt                             sql.NullString
+		dueAt, nextRetryAt                sql.NullString
 	)
 
 	err := rows.Scan(&id, &taskID, &agentID, &jobType, &priority, &state, &payload, &capsJSON,
-		&maxRetries, &retryCount, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt)
+		&maxRetries, &retryCount, &claimedBy, &result, &errMsg, &createdAt, &updatedAt, &dueAt, &nextRetryAt)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, claimedBy, result, errMsg, createdAt, updatedAt, dueAt)
+	return s.buildJob(id, taskID, agentID, jobType, state, payload, capsJSON, priority, maxRetries, retryCount, claimedBy, result, errMsg, createdAt, updatedAt, dueAt, nextRetryAt)
 }
 
 func (s *Store) buildJob(id string, taskID, agentID sql.NullString, jobType, state, payload, capsJSON string,
 	priority, maxRetries, retryCount int, claimedBy, result, errMsg sql.NullString,
-	createdAt, updatedAt string, dueAt sql.NullString) (*Job, error) {
+	createdAt, updatedAt string, dueAt, nextRetryAt sql.NullString) (*Job, error) {
 
 	job := &Job{
 		ID:         id,
@@ -585,6 +617,11 @@ func (s *Store) buildJob(id string, taskID, agentID sql.NullString, jobType, sta
 	if dueAt.Valid {
 		if t, err := time.Parse(time.RFC3339, dueAt.String); err == nil {
 			job.DueAt = &t
+		}
+	}
+	if nextRetryAt.Valid {
+		if t, err := time.Parse(time.RFC3339, nextRetryAt.String); err == nil {
+			job.NextRetryAt = &t
 		}
 	}
 

@@ -123,14 +123,26 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		sp.logger.Error("Failed to update task state to planning", "error", err)
 	}
 
-	// Use planner agent to generate plan
-	steps, err := sp.generatePlan(ctx, req)
-	if err != nil {
-		sp.logger.Warn("Plan generation failed, creating single-step fallback",
+	var steps []*task.TaskStep
+
+	// Fast-path: simple requests don't need LLM decomposition
+	if !sp.shouldDecompose(req) {
+		sp.logger.Info("Fast-path: skipping decomposition for simple request",
 			"task_id", req.TaskID,
-			"error", err,
+			"intent", req.Intent,
 		)
 		steps = sp.createFallbackSteps(req)
+	} else {
+		// Use planner agent to generate plan
+		var err error
+		steps, err = sp.generatePlan(ctx, req)
+		if err != nil {
+			sp.logger.Warn("Plan generation failed, creating single-step fallback",
+				"task_id", req.TaskID,
+				"error", err,
+			)
+			steps = sp.createFallbackSteps(req)
+		}
 	}
 
 	// Persist steps
@@ -260,6 +272,40 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest) []*task.TaskSte
 	step := task.NewTaskStep(req.TaskID, req.Input, 0)
 	step.ToolHint = req.Intent
 	return []*task.TaskStep{step}
+}
+
+// shouldDecompose returns true if the request warrants LLM-based task decomposition.
+// Simple intents and short requests are handled as single-step tasks to avoid
+// over-decomposition and unnecessary LLM calls.
+func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
+	// Simple intents that never need decomposition
+	switch req.Intent {
+	case "chat", "report", "recall", "platform", "search", "analyze":
+		return false
+	}
+
+	// Short requests (<100 chars) without complex action verbs are likely simple
+	if len(req.Input) < 100 {
+		lower := strings.ToLower(req.Input)
+
+		// Check for complexity indicators that warrant decomposition
+		complexityIndicators := []string{
+			"and then", "after that", "followed by", "multiple",
+			"several", "all of", "each of", "for every",
+			"step by step", "steps", "phases",
+		}
+		for _, indicator := range complexityIndicators {
+			if strings.Contains(lower, indicator) {
+				return true
+			}
+		}
+
+		// Simple requests don't need decomposition
+		return false
+	}
+
+	// Longer requests may benefit from decomposition
+	return true
 }
 
 func (sp *StrategicPlanner) publishEvent(topic string, data map[string]any) {
