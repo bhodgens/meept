@@ -3,6 +3,8 @@ package queue
 
 import (
 	"encoding/json"
+	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -163,7 +165,10 @@ func (j *Job) CanRetry() bool {
 	return j.RetryCount < j.MaxRetries
 }
 
-// generateJobID creates a unique job ID.
+var jobIDCounter atomic.Uint64
+
+// generateJobID creates a unique job ID using timestamp + atomic counter.
 func generateJobID() string {
-	return "job-" + time.Now().UTC().Format("20060102150405.000000000")
+	seq := jobIDCounter.Add(1)
+	return fmt.Sprintf("job-%s-%04d", time.Now().UTC().Format("20060102150405.000000000"), seq)
 }

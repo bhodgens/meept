@@ -53,7 +53,7 @@ func TestClientChat(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(&ModelConfig{
-		BaseURL:     server.URL,
+		BaseURL:     server.URL + "/v1",
 		ModelID:     "test-model",
 		Temperature: 0.7,
 		MaxTokens:   100,
