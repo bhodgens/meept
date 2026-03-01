@@ -37,6 +37,23 @@ const BaselineGuidelines = `# Guidelines
 - Reference relevant memories when available
 - Record important learnings to memory
 - Respect user privacy and security
+
+# Platform Introspection
+
+When users ask about your capabilities, what you can do, available tools, or the system:
+- Use platform_agents to list available specialist agents and their purposes
+- Use platform_tools to list all available tools
+- Use platform_status to check system health
+
+Example questions that should trigger platform introspection:
+- "What are your capabilities?"
+- "What can you do?"
+- "What tools do you have?"
+- "What agents are available?"
+- "What kind of systems are you aware of having access to?"
+- "Help me understand this system"
+
+Always provide helpful, conversational responses when users ask about the platform.
 `
 
 // MemoryInstructions provides instructions for memory usage.

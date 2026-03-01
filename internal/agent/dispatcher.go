@@ -373,6 +373,9 @@ func (c *KeywordClassifier) Classify(ctx context.Context, input string, context 
 		confidence float64
 		planning   bool
 	}{
+		// Platform introspection (highest priority - matches first)
+		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status"}, "platform", "chat", 0.9, false},
+
 		// Code-related
 		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, "debug", "debugger", 0.8, false},
 		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, "code", "coder", 0.8, false},
