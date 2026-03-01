@@ -343,6 +343,7 @@ func (h *Handler) Start(ctx context.Context) error {
 		"task.update",
 		"task.delete",
 		"task.list",
+		"task.list_extended",
 		"task.link",
 		"task.unlink",
 		"task.steps",
@@ -393,6 +394,8 @@ func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.B
 		response, err = h.handleUpdate(ctx, msg)
 	case "task.list":
 		response, err = h.handleList(ctx, msg)
+	case "task.list_extended":
+		response, err = h.handleListExtended(ctx, msg)
 	case "task.delete":
 		response, err = h.handleDelete(ctx, msg)
 	case "task.link":
@@ -492,6 +495,79 @@ func (h *Handler) handleList(ctx context.Context, msg *models.BusMessage) (any, 
 	}
 
 	return h.registry.List(ctx, state, limit)
+}
+
+// TaskExtendedResponse represents a task with all extended fields for TUI display.
+type TaskExtendedResponse struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description,omitempty"`
+	ProjectDir      string   `json:"project_dir,omitempty"`
+	WorkspaceDir    string   `json:"workspace_dir,omitempty"`
+	State           string   `json:"state"`
+	GitRepo         string   `json:"git_repo,omitempty"`
+	MemvidZone      string   `json:"memvid_zone,omitempty"`
+	TotalJobs       int      `json:"total_jobs"`
+	CompletedJobs   int      `json:"completed_jobs"`
+	FailedJobs      int      `json:"failed_jobs"`
+	LinkedSessions  []string `json:"linked_sessions,omitempty"`
+	MemoryRefs      []string `json:"memory_refs,omitempty"`
+	ContextQuery    string   `json:"context_query,omitempty"`
+	InheritedFrom   string   `json:"inherited_from,omitempty"`
+	CreatedMemories []string `json:"created_memories,omitempty"`
+	AssignedAgent   string   `json:"assigned_agent,omitempty"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
+	Steps           []*TaskStep `json:"steps,omitempty"`
+}
+
+func (h *Handler) handleListExtended(ctx context.Context, msg *models.BusMessage) (any, error) {
+	// Get all tasks (no filter, reasonable limit)
+	tasks, err := h.registry.List(ctx, nil, 100)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get step store for enriching with step data
+	stepStore := h.registry.StepStore()
+
+	// Build extended response
+	extended := make([]TaskExtendedResponse, len(tasks))
+	for i, t := range tasks {
+		ext := TaskExtendedResponse{
+			ID:              t.ID,
+			Name:            t.Name,
+			Description:     t.Description,
+			ProjectDir:      t.ProjectDir,
+			WorkspaceDir:    t.WorkspaceDir,
+			State:           string(t.State),
+			GitRepo:         t.GitRepo,
+			MemvidZone:      t.MemvidZone,
+			TotalJobs:       t.TotalJobs,
+			CompletedJobs:   t.CompletedJobs,
+			FailedJobs:      t.FailedJobs,
+			LinkedSessions:  t.LinkedSessions,
+			MemoryRefs:      t.MemoryRefs,
+			ContextQuery:    t.ContextQuery,
+			InheritedFrom:   t.InheritedFrom,
+			CreatedMemories: t.CreatedMemories,
+			AssignedAgent:   t.AssignedAgent,
+			CreatedAt:       t.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:       t.UpdatedAt.Format(time.RFC3339),
+		}
+
+		// Fetch steps if step store is available
+		if stepStore != nil {
+			steps, err := stepStore.ListByTaskID(t.ID)
+			if err == nil {
+				ext.Steps = steps
+			}
+		}
+
+		extended[i] = ext
+	}
+
+	return map[string]any{"tasks": extended}, nil
 }
 
 func (h *Handler) handleDelete(ctx context.Context, msg *models.BusMessage) (any, error) {
