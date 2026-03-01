@@ -12,8 +12,9 @@ import (
 
 // Store provides SQLite persistence for tasks.
 type Store struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db        *sql.DB
+	stepStore *StepStore
+	logger    *slog.Logger
 }
 
 // NewStore creates a new SQLite-backed task store.
@@ -36,6 +37,14 @@ func NewStore(dbPath string, logger *slog.Logger) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
+
+	// Initialize step store using the same database connection
+	stepStore, err := NewStepStore(db, logger.With("component", "step-store"))
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize step store: %w", err)
+	}
+	store.stepStore = stepStore
 
 	logger.Info("Task store initialized", "path", dbPath)
 	return store, nil
@@ -386,6 +395,16 @@ func (s *Store) GetTasksForSession(sessionID string) ([]*Task, error) {
 	}
 
 	return tasks, nil
+}
+
+// StepStore returns the underlying step store.
+func (s *Store) StepStore() *StepStore {
+	return s.stepStore
+}
+
+// DB returns the underlying database connection.
+func (s *Store) DB() *sql.DB {
+	return s.db
 }
 
 // Close closes the database connection.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -53,6 +54,7 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 
 	// Memory methods
 	server.RegisterHandler("memory.query", p.makeProxy("memory.query", "memory.result", 30*time.Second))
+	server.RegisterHandler("memory.recent", p.makeProxy("memory.recent", "memory.result", 10*time.Second))
 	server.RegisterHandler("memory.export", p.makeProxy("memory.export", "memory.result", 10*time.Second))
 
 	// Scheduler methods
@@ -98,6 +100,7 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("task.delete", p.makeProxy("task.delete", "task.result", 10*time.Second))
 	server.RegisterHandler("task.link", p.makeProxy("task.link", "task.result", 10*time.Second))
 	server.RegisterHandler("task.unlink", p.makeProxy("task.unlink", "task.result", 10*time.Second))
+	server.RegisterHandler("task.steps", p.makeProxy("task.steps", "task.result", 10*time.Second))
 
 	// Queue methods
 	server.RegisterHandler("queue.enqueue", p.makeProxy("queue.enqueue", "queue.result", 10*time.Second))
@@ -263,9 +266,17 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	// Start goroutine to collect events from all topics
 	go func() {
 		for _, topic := range req.Topics {
+			slog.Debug("Creating bus subscription for TUI", "subscription_id", subID, "topic", topic)
 			topicSub := p.bus.Subscribe(subID+"-"+topic, topic)
-			go func(ts *bus.Subscriber) {
+			go func(ts *bus.Subscriber, topicName string) {
+				slog.Debug("Started event collector for topic", "topic", topicName)
 				for msg := range ts.Channel {
+					slog.Debug("TUI subscription received event",
+						"subscription_id", subID,
+						"subscribed_topic", topicName,
+						"msg_topic", msg.Topic,
+						"msg_source", msg.Source,
+					)
 					sub.mu.Lock()
 					event := &busEventRecord{
 						Topic:     msg.Topic,
@@ -281,17 +292,27 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 						}
 					}
 					sub.Events = append(sub.Events, event)
+					slog.Debug("Added event to subscription buffer",
+						"subscription_id", subID,
+						"event_count", len(sub.Events),
+					)
 					// Trim to max size
 					if len(sub.Events) > sub.MaxEvents {
 						sub.Events = sub.Events[len(sub.Events)-sub.MaxEvents:]
 					}
 					sub.mu.Unlock()
 				}
-			}(topicSub)
+				slog.Debug("Event collector stopped for topic", "topic", topicName)
+			}(topicSub, topic)
 		}
 	}()
 
 	p.subscriptions.Store(subID, sub)
+
+	slog.Info("Created TUI event subscription",
+		"subscription_id", subID,
+		"topics", req.Topics,
+	)
 
 	return map[string]any{
 		"subscription_id": subID,
@@ -311,6 +332,7 @@ func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage
 
 	subVal, ok := p.subscriptions.Load(req.SubscriptionID)
 	if !ok {
+		slog.Debug("Poll for unknown subscription", "subscription_id", req.SubscriptionID)
 		return nil, fmt.Errorf("subscription not found: %s", req.SubscriptionID)
 	}
 
@@ -335,6 +357,14 @@ func (p *ProxyHandler) handleBusPoll(ctx context.Context, params json.RawMessage
 		if e.Timestamp.After(since) {
 			events = append(events, e)
 		}
+	}
+
+	if len(events) > 0 {
+		slog.Debug("Poll returning events",
+			"subscription_id", req.SubscriptionID,
+			"total_buffered", len(sub.Events),
+			"events_returned", len(events),
+		)
 	}
 
 	return map[string]any{

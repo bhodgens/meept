@@ -339,6 +339,20 @@ type BusEvent struct {
 	Payload   any    `json:"payload"`
 }
 
+// TaskStepView represents a step within a task for TUI display.
+type TaskStepView struct {
+	ID          string   `json:"id"`
+	TaskID      string   `json:"task_id"`
+	Description string   `json:"description"`
+	AgentID     string   `json:"agent_id,omitempty"`
+	State       string   `json:"state"`
+	Result      string   `json:"result,omitempty"`
+	Sequence    int      `json:"sequence"`
+	DependsOn   []string `json:"depends_on,omitempty"`
+	JobID       string   `json:"job_id,omitempty"`
+	ToolHint    string   `json:"tool_hint,omitempty"`
+}
+
 // TaskExtended represents a task with memory context fields.
 type TaskExtended struct {
 	Task
@@ -349,9 +363,17 @@ type TaskExtended struct {
 	InheritedFrom   string   `json:"inherited_from,omitempty"`
 	CreatedMemories []string `json:"created_memories,omitempty"`
 	AssignedAgent   string   `json:"assigned_agent,omitempty"`
+
+	// Steps for orchestrator tasks
+	Steps []TaskStepView `json:"steps,omitempty"`
 }
 
 // TaskExtendedListResponse represents the extended task list response.
 type TaskExtendedListResponse struct {
 	Tasks []TaskExtended `json:"tasks"`
+}
+
+// TaskStepsResponse represents the response from the task.steps RPC method.
+type TaskStepsResponse struct {
+	Steps []TaskStepView `json:"steps"`
 }

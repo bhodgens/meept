@@ -2,6 +2,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -273,6 +274,23 @@ type SessionMessagesLoadedMsg struct {
 type SessionDescriptionUpdatedMsg struct {
 	SessionID   string
 	Description string
+}
+
+// ChatDetachedTaskMsg signals that a task was dispatched asynchronously.
+type ChatDetachedTaskMsg struct {
+	TaskID      string
+	TaskName    string
+	Description string
+}
+
+// ChatTaskResultMsg signals that an async task completed or failed.
+type ChatTaskResultMsg struct {
+	TaskID         string
+	TaskName       string
+	State          string // "completed" or "failed"
+	CompletedSteps int
+	TotalSteps     int
+	ResultSummary  string
 }
 
 // ProgressUpdateMsg carries progress updates for the current pending message.
@@ -761,7 +779,48 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.Err != nil {
 			m.addMessage("system", fmt.Sprintf("Error: %v", msg.Err))
 		} else {
-			m.addMessage("assistant", msg.Reply)
+			// Check if the reply is an async task ack
+			if isAsyncAck, taskID, taskMessage := parseAsyncAck(msg.Reply); isAsyncAck {
+				// Render as a detached task message
+				content := fmt.Sprintf("┌ task detached ─────────────────────────────┐\n"+
+					"│ %s\n"+
+					"│ Task ID: %s\n"+
+					"│ View progress: [ctrl+x 2] tasks\n"+
+					"└─────────────────────────────────────────────┘",
+					types.TruncateString(taskMessage, 45),
+					types.TruncateString(taskID, 40),
+				)
+				m.addMessage("system", content)
+			} else if result := parseTaskResult(msg.Reply); result != nil {
+				// Render as a task result message
+				var content string
+				if result.IsSuccess {
+					content = fmt.Sprintf("┌ task completed ────────────────────────────┐\n"+
+						"│ Task: \"%s\"\n"+
+						"│ Steps: %d/%d completed\n",
+						types.TruncateString(result.Name, 40),
+						result.Completed, result.Total,
+					)
+					if result.Result != "" {
+						content += fmt.Sprintf("│ %s\n", types.TruncateString(result.Result, 45))
+					}
+					content += "└─────────────────────────────────────────────┘"
+				} else {
+					content = fmt.Sprintf("┌ task failed ───────────────────────────────┐\n"+
+						"│ Task: \"%s\"\n"+
+						"│ Steps: %d completed, %d failed of %d\n",
+						types.TruncateString(result.Name, 40),
+						result.Completed, result.Failed, result.Total,
+					)
+					if result.Error != "" {
+						content += fmt.Sprintf("│ Error: %s\n", types.TruncateString(result.Error, 40))
+					}
+					content += "└─────────────────────────────────────────────┘"
+				}
+				m.addMessage("system", content)
+			} else {
+				m.addMessage("assistant", msg.Reply)
+			}
 
 			// Track dirty message for persistence
 			m.trackDirtyMessage("assistant", msg.Reply)
@@ -808,6 +867,39 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.SessionID == m.sessionID {
 			m.sessionDescription = msg.Description
 		}
+		return nil
+
+	case ChatDetachedTaskMsg:
+		// Render a styled detached task message in chat
+		content := fmt.Sprintf("┌ task detached ─────────────────────────────┐\n"+
+			"│ Working on: \"%s\"\n"+
+			"│ Task ID: %s\n"+
+			"│ View progress: [ctrl+x 2] tasks\n"+
+			"└─────────────────────────────────────────────┘",
+			types.TruncateString(msg.TaskName, 40),
+			types.TruncateString(msg.TaskID, 40),
+		)
+		m.addMessage("system", content)
+		return nil
+
+	case ChatTaskResultMsg:
+		// Render a styled task result message in chat
+		stateLabel := "completed"
+		if msg.State == "failed" {
+			stateLabel = "failed"
+		}
+		content := fmt.Sprintf("┌ task %s ────────────────────────────────┐\n"+
+			"│ Task: \"%s\"\n"+
+			"│ Steps: %d/%d %s\n",
+			stateLabel,
+			types.TruncateString(msg.TaskName, 40),
+			msg.CompletedSteps, msg.TotalSteps, stateLabel,
+		)
+		if msg.ResultSummary != "" {
+			content += fmt.Sprintf("│ %s\n", types.TruncateString(msg.ResultSummary, 50))
+		}
+		content += "└─────────────────────────────────────────────┘"
+		m.addMessage("system", content)
 		return nil
 
 	case ProgressUpdateMsg:
@@ -1055,6 +1147,8 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 			_ = rpc.UpdateSessionDescription(sessionID, desc)
 			return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: desc}
 		}
+		// Save the LLM-generated description to the database
+		_ = rpc.UpdateSessionDescription(sessionID, result.Description)
 		return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: result.Description}
 	}
 }
@@ -1548,4 +1642,80 @@ func (m *ChatModel) expandPasteTokens(text string) string {
 	}
 
 	return result
+}
+
+// parseAsyncAck checks if a reply is an async task acknowledgment JSON.
+// Returns (isAsync, taskID, message).
+func parseAsyncAck(reply string) (bool, string, string) {
+	// Quick check: must start with { to be JSON
+	trimmed := strings.TrimSpace(reply)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false, "", ""
+	}
+
+	var ack struct {
+		Async   bool   `json:"async"`
+		TaskID  string `json:"task_id"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &ack); err != nil {
+		return false, "", ""
+	}
+	if !ack.Async {
+		return false, "", ""
+	}
+	return true, ack.TaskID, ack.Message
+}
+
+// taskResultInfo holds parsed task completion/failure info.
+type taskResultInfo struct {
+	IsResult  bool
+	IsSuccess bool
+	TaskID    string
+	Name      string
+	Completed int
+	Failed    int
+	Total     int
+	Result    string
+	Error     string
+}
+
+// parseTaskResult checks if a reply is a task completion/failure JSON.
+func parseTaskResult(reply string) *taskResultInfo {
+	trimmed := strings.TrimSpace(reply)
+	if !strings.HasPrefix(trimmed, "{") {
+		return nil
+	}
+
+	var result struct {
+		TaskCompleted bool   `json:"task_completed"`
+		TaskFailed    bool   `json:"task_failed"`
+		TaskID        string `json:"task_id"`
+		Name          string `json:"name"`
+		Completed     int    `json:"completed"`
+		Failed        int    `json:"failed"`
+		Total         int    `json:"total"`
+		Result        string `json:"result"`
+		Error         string `json:"error"`
+	}
+
+	if err := json.Unmarshal([]byte(trimmed), &result); err != nil {
+		return nil
+	}
+
+	if !result.TaskCompleted && !result.TaskFailed {
+		return nil
+	}
+
+	return &taskResultInfo{
+		IsResult:  true,
+		IsSuccess: result.TaskCompleted,
+		TaskID:    result.TaskID,
+		Name:      result.Name,
+		Completed: result.Completed,
+		Failed:    result.Failed,
+		Total:     result.Total,
+		Result:    result.Result,
+		Error:     result.Error,
+	}
 }

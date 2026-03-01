@@ -57,6 +57,7 @@ type Components struct {
 	WorkerPool      *worker.Pool
 	WorkerHandler   *worker.Handler
 	JobProcessor    worker.JobProcessor
+	Orchestrator    *agent.Orchestrator
 
 	// Memory
 	MemoryManager   *memory.Manager
@@ -505,13 +506,51 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		// Create chat handler with dispatcher for multi-agent routing
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, msgBus, logger)
 		logger.Info("ChatHandler initialized with dispatcher")
+
+		// Create orchestrator components if task registry and queue are available
+		if c.TaskRegistry != nil && c.Queue != nil {
+			stepStore := c.TaskRegistry.StepStore()
+			orchTaskStore := c.TaskRegistry.Store()
+
+			strategicPlanner := agent.NewStrategicPlanner(agent.StrategicPlannerConfig{
+				Registry:       c.AgentRegistry,
+				TaskStore:      orchTaskStore,
+				StepStore:      stepStore,
+				Bus:            msgBus,
+				Logger:         logger.With("component", "strategic"),
+				MaxPlanSteps:   cfg.Orchestrator.MaxPlanSteps,
+				PlannerTimeout: time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
+			})
+
+			tacticalScheduler := agent.NewTacticalScheduler(agent.TacticalSchedulerConfig{
+				StepStore: stepStore,
+				TaskStore: orchTaskStore,
+				Queue:     c.Queue,
+				Registry:  c.AgentRegistry,
+				Bus:       msgBus,
+				Logger:    logger.With("component", "tactical"),
+			})
+
+			c.Orchestrator = agent.NewOrchestrator(agent.OrchestratorDeps{
+				Strategic: strategicPlanner,
+				Tactical:  tacticalScheduler,
+				Bus:       msgBus,
+				Logger:    logger.With("component", "orchestrator"),
+			})
+
+			logger.Info("Orchestrator initialized with strategic and tactical layers")
+		}
 	} else {
 		// Create chat handler without dispatcher (single-agent mode)
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, msgBus, logger)
 	}
 
-	// Create job processor that uses the agent loop
-	c.JobProcessor = NewAgentJobProcessor(c.AgentLoop, logger)
+	// Create job processor that uses the agent loop (with optional multi-agent registry)
+	jobProc := NewAgentJobProcessor(c.AgentLoop, logger)
+	if c.AgentRegistry != nil {
+		jobProc.WithRegistry(c.AgentRegistry)
+	}
+	c.JobProcessor = jobProc
 
 	// Create worker pool
 	if c.Queue != nil && c.JobProcessor != nil {
@@ -692,6 +731,13 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start orchestrator
+	if c.Orchestrator != nil {
+		if err := c.Orchestrator.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start orchestrator", "error", err)
+		}
+	}
+
 	// Start sync manager and handler
 	if c.SyncManager != nil {
 		if err := c.SyncManager.Start(ctx); err != nil {
@@ -739,6 +785,14 @@ func (c *Components) Stop(ctx context.Context) error {
 	if c.SyncManager != nil {
 		if err := c.SyncManager.Stop(); err != nil {
 			c.Logger.Error("Failed to stop sync manager", "error", err)
+			lastErr = err
+		}
+	}
+
+	// Stop orchestrator before scheduler and queue
+	if c.Orchestrator != nil {
+		if err := c.Orchestrator.Stop(ctx); err != nil {
+			c.Logger.Error("Failed to stop orchestrator", "error", err)
 			lastErr = err
 		}
 	}
@@ -1598,8 +1652,11 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 }
 
 // AgentJobProcessor processes jobs using the agent loop.
+// AgentJobProcessor processes jobs using the agent loop, with optional
+// multi-agent dispatch via the agent registry.
 type AgentJobProcessor struct {
 	agentLoop *agent.AgentLoop
+	registry  *agent.AgentRegistry
 	logger    *slog.Logger
 }
 
@@ -1611,46 +1668,109 @@ func NewAgentJobProcessor(agentLoop *agent.AgentLoop, logger *slog.Logger) *Agen
 	}
 }
 
-// Process executes a job using the agent loop.
+// WithRegistry sets the agent registry for multi-agent job dispatch.
+func (p *AgentJobProcessor) WithRegistry(registry *agent.AgentRegistry) *AgentJobProcessor {
+	p.registry = registry
+	return p
+}
+
+// Process executes a job using the appropriate agent loop.
+// If the job has an AgentID and a registry is configured, it dispatches to
+// the agent-specific loop. Otherwise it falls back to the main loop.
 func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, error) {
-	// Parse the job payload
-	var payload struct {
+	// Try step-based payload first (from orchestrator)
+	var stepPayload struct {
+		StepID      string `json:"step_id"`
+		TaskID      string `json:"task_id"`
+		Description string `json:"description"`
+		ToolHint    string `json:"tool_hint,omitempty"`
+	}
+
+	// Try legacy payload format
+	var legacyPayload struct {
 		Prompt    string `json:"prompt"`
 		SessionID string `json:"session_id,omitempty"`
 	}
 
-	if err := json.Unmarshal(job.Payload, &payload); err != nil {
-		return nil, fmt.Errorf("failed to parse job payload: %w", err)
+	isStepJob := false
+	if err := json.Unmarshal(job.Payload, &stepPayload); err == nil && stepPayload.StepID != "" {
+		isStepJob = true
 	}
 
-	if payload.Prompt == "" {
-		return nil, fmt.Errorf("job payload missing prompt")
+	if !isStepJob {
+		if err := json.Unmarshal(job.Payload, &legacyPayload); err != nil {
+			return nil, fmt.Errorf("failed to parse job payload: %w", err)
+		}
 	}
 
-	p.logger.Info("Processing job", "job_id", job.ID, "prompt_len", len(payload.Prompt))
-
-	if p.agentLoop == nil {
-		return nil, fmt.Errorf("agent loop not configured")
+	// Determine which agent loop to use
+	var agentLoop *agent.AgentLoop
+	if job.AgentID != "" && p.registry != nil {
+		loop, err := p.registry.Get(job.AgentID)
+		if err != nil {
+			p.logger.Warn("Agent not found, falling back to main loop",
+				"agent_id", job.AgentID,
+				"job_id", job.ID,
+				"error", err,
+			)
+			agentLoop = p.agentLoop
+		} else {
+			agentLoop = loop
+		}
+	} else {
+		agentLoop = p.agentLoop
 	}
 
-	// Use session ID as conversation ID if provided, otherwise use job ID
-	conversationID := payload.SessionID
-	if conversationID == "" {
-		conversationID = job.ID
+	if agentLoop == nil {
+		return nil, fmt.Errorf("no agent loop available")
 	}
 
-	// Execute using agent loop
-	response, err := p.agentLoop.RunOnce(ctx, payload.Prompt, conversationID)
+	// Build prompt and conversation ID
+	var prompt, conversationID string
+	if isStepJob {
+		prompt = stepPayload.Description
+		conversationID = fmt.Sprintf("step-%s-%s", stepPayload.TaskID, stepPayload.StepID)
+		p.logger.Info("Processing step job",
+			"job_id", job.ID,
+			"step_id", stepPayload.StepID,
+			"task_id", stepPayload.TaskID,
+			"agent_id", job.AgentID,
+		)
+	} else {
+		prompt = legacyPayload.Prompt
+		if prompt == "" {
+			return nil, fmt.Errorf("job payload missing prompt")
+		}
+		conversationID = legacyPayload.SessionID
+		if conversationID == "" {
+			conversationID = job.ID
+		}
+		p.logger.Info("Processing job",
+			"job_id", job.ID,
+			"prompt_len", len(prompt),
+			"agent_id", job.AgentID,
+		)
+	}
+
+	// Execute
+	response, err := agentLoop.RunOnce(ctx, prompt, conversationID)
 	if err != nil {
-		p.logger.Error("Agent loop execution failed", "job_id", job.ID, "error", err)
+		p.logger.Error("Agent execution failed",
+			"job_id", job.ID,
+			"agent_id", job.AgentID,
+			"error", err,
+		)
 		return nil, fmt.Errorf("agent execution failed: %w", err)
 	}
 
 	result := map[string]any{
-		"job_id":     job.ID,
-		"response":   response,
-		"status":     "completed",
-		"session_id": payload.SessionID,
+		"job_id":   job.ID,
+		"response": response,
+		"status":   "completed",
+	}
+	if isStepJob {
+		result["step_id"] = stepPayload.StepID
+		result["task_id"] = stepPayload.TaskID
 	}
 
 	return result, nil

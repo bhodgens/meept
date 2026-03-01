@@ -513,6 +513,27 @@ func (d *Dispatcher) executeSkill(ctx context.Context, skill *skills.Skill, inpu
 	}, nil
 }
 
+// ShouldDispatchAsync returns true if the dispatch result should be handled
+// asynchronously via the orchestrator pipeline rather than inline.
+func (d *Dispatcher) ShouldDispatchAsync(result *DispatchResult) bool {
+	if result == nil || result.Intent == nil {
+		return false
+	}
+
+	// Skills are always handled inline
+	if result.Response != "" {
+		return false
+	}
+
+	// Check intent type
+	switch result.Intent.Type {
+	case "code", "debug", "plan", "schedule":
+		return true
+	default:
+		return result.Intent.RequiresPlanning
+	}
+}
+
 // GetSkillRegistry returns the skill registry for external access.
 func (d *Dispatcher) GetSkillRegistry() *skills.Registry {
 	return d.skillRegistry

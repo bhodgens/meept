@@ -28,6 +28,7 @@ type Config struct {
 	Skills      SkillsConfig      `toml:"skills"`
 	ClawSkills  ClawSkillsConfig  `toml:"clawskills"`
 	SelfImprove SelfImproveConfig `toml:"selfimprove"`
+	Orchestrator      OrchestratorConfig      `toml:"orchestrator"`
 	Shadow            ShadowConfig            `toml:"shadow"`
 	DistributedMemory DistributedMemoryConfig `toml:"distributed_memory"`
 }
@@ -382,6 +383,14 @@ type DetectionConfig struct {
 	RuffArgs          []string `toml:"ruff_args"`
 }
 
+// OrchestratorConfig holds hierarchical orchestrator settings.
+type OrchestratorConfig struct {
+	MaxPlanSteps     int `toml:"max_plan_steps"`
+	MaxResearchSteps int `toml:"max_research_steps"`
+	PlannerTimeout   int `toml:"planner_timeout"`
+	TokenBudgetAlert int `toml:"token_budget_alert"`
+}
+
 // ShadowConfig holds shadow training settings.
 type ShadowConfig struct {
 	Enabled   bool                    `toml:"enabled"`
@@ -531,7 +540,7 @@ func DefaultConfig() *Config {
 			Timeout:  30,
 		},
 		MultiAgent: MultiAgentConfig{
-			Enabled:            false,
+			Enabled:            true,
 			DispatcherModel:    "", // Use default
 			DefaultModel:       "",
 			MaxMemoryRefs:      20,
@@ -545,7 +554,7 @@ func DefaultConfig() *Config {
 			DispatcherID: "dispatcher",
 		},
 		Agent: AgentConfig{
-			ProgressEnabled:         false, // Disabled by default
+			ProgressEnabled:         true, // Enabled by default for TUI progress bars
 			ProgressIntervalSeconds: 30,
 			Cache: CacheConfig{
 				Enabled:           false, // Disabled by default
@@ -688,6 +697,12 @@ func DefaultConfig() *Config {
 				MypyArgs:         []string{"--ignore-missing-imports"},
 				RuffArgs:         []string{},
 			},
+		},
+		Orchestrator: OrchestratorConfig{
+			MaxPlanSteps:     10,
+			MaxResearchSteps: 3,
+			PlannerTimeout:   120,
+			TokenBudgetAlert: 5000,
 		},
 		Shadow: ShadowConfig{
 			Enabled: false,

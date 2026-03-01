@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -78,7 +79,11 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// Subscribe to worker list requests
 	workerSub := h.bus.Subscribe("worker-handler", "agent.workers.list")
 
-	h.wg.Add(2)
+	// Subscribe to task completion events for result push-back
+	taskCompletedSub := h.bus.Subscribe("chat-handler", "task.completed")
+	taskFailedSub := h.bus.Subscribe("chat-handler", "task.failed")
+
+	h.wg.Add(4)
 
 	// Chat request handler
 	go func() {
@@ -110,6 +115,40 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 					return
 				}
 				h.handleWorkerListRequest(msg)
+			}
+		}
+	}()
+
+	// Task completed handler - push results back to linked session
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(taskCompletedSub)
+				return
+			case msg, ok := <-taskCompletedSub.Channel:
+				if !ok {
+					return
+				}
+				h.handleTaskCompleted(msg)
+			}
+		}
+	}()
+
+	// Task failed handler - push error back to linked session
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(taskFailedSub)
+				return
+			case msg, ok := <-taskFailedSub.Channel:
+				if !ok {
+					return
+				}
+				h.handleTaskFailed(msg)
 			}
 		}
 	}()
@@ -224,6 +263,18 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 		if dispatchErr != nil {
 			h.logger.Error("Dispatch failed", "error", dispatchErr)
 			err = dispatchErr
+		} else if h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil {
+			// Async dispatch: send ack immediately, let orchestrator handle it
+			h.logger.Info("Async dispatch: sending ack and publishing plan request",
+				"task_id", result.Task.ID,
+				"agent", result.AgentID,
+				"intent", result.Intent.Type,
+			)
+			reply = fmt.Sprintf(`{"async":true,"task_id":"%s","message":"Working on task: %s"}`,
+				result.Task.ID, truncateString(result.Task.Name, 80))
+
+			// Publish plan request to orchestrator
+			h.publishPlanRequest(result, conversationID)
 		} else {
 			h.logger.Debug("Dispatched to agent",
 				"agent", result.AgentID,
@@ -265,6 +316,37 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	// Send response
 	h.sendResponse(msg.ID, response)
+}
+
+// publishPlanRequest sends a plan request to the orchestrator via the bus.
+func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID string) {
+	req := PlanRequest{
+		TaskID:    result.Task.ID,
+		SessionID: sessionID,
+		Input:     result.Task.Description,
+		Intent:    result.Intent.Type,
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		h.logger.Error("Failed to marshal plan request", "error", err)
+		return
+	}
+
+	msg := &models.BusMessage{
+		ID:        generateMessageID(),
+		Type:      models.MessageTypeRequest,
+		Topic:     "orchestrator.plan",
+		Source:    "chat-handler",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	delivered := h.bus.Publish("orchestrator.plan", msg)
+	h.logger.Debug("Published plan request",
+		"task_id", result.Task.ID,
+		"delivered", delivered,
+	)
 }
 
 // sendResponse publishes a chat response.
@@ -352,6 +434,120 @@ func (h *ChatHandler) publishWorkerEvent(topic string, w *Worker) {
 		Payload:   payload,
 	}
 	h.bus.Publish(topic, msg)
+}
+
+// handleTaskCompleted handles task.completed events and pushes results back to chat.
+func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
+	var payload struct {
+		TaskID         string   `json:"task_id"`
+		Name           string   `json:"name"`
+		CompletedJobs  int      `json:"completed_jobs"`
+		TotalJobs      int      `json:"total_jobs"`
+		LinkedSessions []string `json:"linked_sessions"`
+		Result         string   `json:"result,omitempty"`
+	}
+
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		h.logger.Error("Failed to parse task.completed payload", "error", err)
+		return
+	}
+
+	h.logger.Info("Task completed, pushing result to chat",
+		"task_id", payload.TaskID,
+		"name", payload.Name,
+		"completed", payload.CompletedJobs,
+		"total", payload.TotalJobs,
+	)
+
+	// Build completion message
+	resultSummary := payload.Result
+	if resultSummary == "" {
+		resultSummary = fmt.Sprintf("Completed %d/%d steps successfully", payload.CompletedJobs, payload.TotalJobs)
+	}
+	if len(resultSummary) > 200 {
+		resultSummary = resultSummary[:197] + "..."
+	}
+
+	response := ChatResponse{
+		Reply: fmt.Sprintf(`{"task_completed":true,"task_id":"%s","name":"%s","completed":%d,"total":%d,"result":"%s"}`,
+			payload.TaskID,
+			truncateString(payload.Name, 80),
+			payload.CompletedJobs,
+			payload.TotalJobs,
+			truncateString(resultSummary, 100),
+		),
+	}
+
+	// Send to all linked sessions
+	for _, sessionID := range payload.LinkedSessions {
+		response.ConversationID = sessionID
+		h.sendResponse("task-completed-"+payload.TaskID, response)
+	}
+
+	// If no linked sessions, broadcast on task.result topic
+	if len(payload.LinkedSessions) == 0 {
+		h.sendResponse("task-completed-"+payload.TaskID, response)
+	}
+}
+
+// handleTaskFailed handles task.failed events and pushes errors back to chat.
+func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
+	var payload struct {
+		TaskID         string   `json:"task_id"`
+		Name           string   `json:"name"`
+		FailedJobs     int      `json:"failed_jobs"`
+		CompletedJobs  int      `json:"completed_jobs"`
+		TotalJobs      int      `json:"total_jobs"`
+		LinkedSessions []string `json:"linked_sessions"`
+		Error          string   `json:"error,omitempty"`
+		FailedStep     string   `json:"failed_step,omitempty"`
+	}
+
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		h.logger.Error("Failed to parse task.failed payload", "error", err)
+		return
+	}
+
+	h.logger.Warn("Task failed, pushing error to chat",
+		"task_id", payload.TaskID,
+		"name", payload.Name,
+		"failed", payload.FailedJobs,
+		"completed", payload.CompletedJobs,
+		"total", payload.TotalJobs,
+		"error", payload.Error,
+	)
+
+	// Build error message
+	errorSummary := payload.Error
+	if errorSummary == "" {
+		errorSummary = fmt.Sprintf("Task failed: %d/%d steps failed", payload.FailedJobs, payload.TotalJobs)
+	}
+	if len(errorSummary) > 200 {
+		errorSummary = errorSummary[:197] + "..."
+	}
+
+	response := ChatResponse{
+		Reply: fmt.Sprintf(`{"task_failed":true,"task_id":"%s","name":"%s","failed":%d,"completed":%d,"total":%d,"error":"%s"}`,
+			payload.TaskID,
+			truncateString(payload.Name, 80),
+			payload.FailedJobs,
+			payload.CompletedJobs,
+			payload.TotalJobs,
+			truncateString(errorSummary, 100),
+		),
+		Error: errorSummary,
+	}
+
+	// Send to all linked sessions
+	for _, sessionID := range payload.LinkedSessions {
+		response.ConversationID = sessionID
+		h.sendResponse("task-failed-"+payload.TaskID, response)
+	}
+
+	// If no linked sessions, broadcast
+	if len(payload.LinkedSessions) == 0 {
+		h.sendResponse("task-failed-"+payload.TaskID, response)
+	}
 }
 
 // generateWorkerID creates a unique worker ID.

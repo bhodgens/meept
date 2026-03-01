@@ -2,6 +2,8 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -50,6 +52,8 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 			"queue.*",
 			"memory.*",
 			"worker.*",
+			"llm.*",
+			"conversation.*",
 		},
 		BufferSize:   50,
 		PollInterval: 500 * time.Millisecond,
@@ -83,8 +87,8 @@ func (es *EventStream) Start() tea.Cmd {
 	es.running = true
 	es.mu.Unlock()
 
-	// Subscribe to topics
-	go es.subscribe()
+	// Subscribe to topics synchronously to ensure subscription is ready before polling
+	es.subscribe()
 
 	// Return command to start poll loop
 	return es.schedulePoll()
@@ -93,8 +97,11 @@ func (es *EventStream) Start() tea.Cmd {
 // subscribe sends subscription request to daemon.
 func (es *EventStream) subscribe() {
 	if !es.rpc.IsConnected() {
+		fmt.Fprintf(os.Stderr, "[DEBUG] EventStream.subscribe: not connected\n")
 		return
 	}
+
+	fmt.Fprintf(os.Stderr, "[DEBUG] EventStream.subscribe: subscribing to topics: %v\n", es.topics)
 
 	params := map[string]any{
 		"topics": es.topics,
@@ -102,6 +109,7 @@ func (es *EventStream) subscribe() {
 
 	result, err := es.rpc.Call("bus.subscribe", params)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "[DEBUG] EventStream.subscribe: RPC error: %v\n", err)
 		return
 	}
 
@@ -109,9 +117,11 @@ func (es *EventStream) subscribe() {
 		SubscriptionID string `json:"subscription_id"`
 	}
 	if err := json.Unmarshal(result, &resp); err != nil {
+		fmt.Fprintf(os.Stderr, "[DEBUG] EventStream.subscribe: unmarshal error: %v\n", err)
 		return
 	}
 	es.subscriptionID = resp.SubscriptionID
+	fmt.Fprintf(os.Stderr, "[DEBUG] EventStream.subscribe: got subscription_id: %s\n", es.subscriptionID)
 }
 
 // Stop stops the event stream.
@@ -163,6 +173,7 @@ func (es *EventStream) Poll() tea.Cmd {
 		es.mu.Unlock()
 
 		if !es.rpc.IsConnected() || subID == "" {
+			// Debug: only log periodically to avoid spam
 			return EventStreamDataMsg{Events: nil, Err: nil}
 		}
 
@@ -173,6 +184,7 @@ func (es *EventStream) Poll() tea.Cmd {
 
 		result, err := es.rpc.Call("bus.poll", params)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Poll: RPC error: %v\n", err)
 			return EventStreamDataMsg{Events: nil, Err: err}
 		}
 
@@ -180,6 +192,7 @@ func (es *EventStream) Poll() tea.Cmd {
 			Events []BusEvent `json:"events"`
 		}
 		if err := json.Unmarshal(result, &resp); err != nil {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Poll: unmarshal error: %v\n", err)
 			return EventStreamDataMsg{Events: nil, Err: err}
 		}
 
@@ -188,6 +201,14 @@ func (es *EventStream) Poll() tea.Cmd {
 		// Add to circular buffer
 		for _, e := range resp.Events {
 			es.addToBuffer(e)
+		}
+
+		// Debug: log when events are received
+		if len(resp.Events) > 0 {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Poll: received %d events\n", len(resp.Events))
+			for _, e := range resp.Events {
+				fmt.Fprintf(os.Stderr, "[DEBUG]   Event topic: %s\n", e.Topic)
+			}
 		}
 
 		return EventStreamDataMsg{Events: resp.Events, Err: nil}

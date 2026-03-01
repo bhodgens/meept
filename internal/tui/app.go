@@ -93,6 +93,10 @@ type App struct {
 	// Mouse mode toggle (for text selection)
 	mouseEnabled bool
 
+	// Tab flash indicator (shows notification dot on tab)
+	tabFlash     map[ViewType]bool
+	tabFlashTime time.Time
+
 	// Component bounds for click-to-focus
 	sidebarBounds  Rect
 	viewportBounds Rect
@@ -167,6 +171,7 @@ func NewApp(socketPath string) *App {
 		activeModal:    ModalNone,
 		doublePressTTL: 500 * time.Millisecond,
 		mouseEnabled:   true, // Mouse mode enabled by default
+		tabFlash:       make(map[ViewType]bool),
 	}
 
 	// Create modals
@@ -545,6 +550,39 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						progressMsg := models.ProgressUpdateMsg{ContextResets: int(resets)}
 						a.chat.Update(progressMsg)
 					}
+				}
+			case "task.completed", "task.failed":
+				// Inject task result message into chat
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					resultMsg := models.ChatTaskResultMsg{
+						State: "completed",
+					}
+					if e.Topic == "task.failed" {
+						resultMsg.State = "failed"
+					}
+					if v, ok := payloadMap["task_id"].(string); ok {
+						resultMsg.TaskID = v
+					}
+					if v, ok := payloadMap["name"].(string); ok {
+						resultMsg.TaskName = v
+					}
+					if v, ok := payloadMap["completed_jobs"].(float64); ok {
+						resultMsg.CompletedSteps = int(v)
+					}
+					if v, ok := payloadMap["total_jobs"].(float64); ok {
+						resultMsg.TotalSteps = int(v)
+					}
+					if v, ok := payloadMap["result"].(string); ok {
+						resultMsg.ResultSummary = v
+					}
+					if cmd := a.chat.Update(resultMsg); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+				// Flash the Tasks tab indicator if not currently viewing tasks
+				if a.currentView != ViewTasks {
+					a.tabFlash[ViewTasks] = true
+					a.tabFlashTime = time.Now()
 				}
 			}
 		}
@@ -963,8 +1001,14 @@ func (a *App) renderTabs() string {
 		style := a.styles.Tab
 		if t.view == a.currentView {
 			style = a.styles.ActiveTab
+			// Clear flash when viewing the tab
+			delete(a.tabFlash, t.view)
 		}
 		label := fmt.Sprintf("[%d] %s", i+1, t.name)
+		// Add notification indicator if tab has flash
+		if a.tabFlash[t.view] {
+			label += " ●"
+		}
 		renderedTabs = append(renderedTabs, style.Render(label))
 	}
 

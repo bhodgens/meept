@@ -24,9 +24,11 @@ type TasksModel struct {
 	loading        bool
 	err            error
 	showingHelp    bool
-	showingDetail  bool        // Task detail modal
+	showingDetail  bool         // Task detail modal
 	viewMode       TaskViewMode // jobs vs tasks
 	filter         TaskFilter
+	currentAgentID   string // Current agent ID for FilterMine (for agent-mode clients)
+	currentSessionID string // Current session ID for FilterMine (for TUI clients)
 }
 
 // TaskViewMode selects between jobs and tasks view.
@@ -52,6 +54,7 @@ const (
 type TasksRPCClient interface {
 	ListJobs() (*types.JobListResponse, error)
 	ListTasksExtended() (*types.TaskExtendedListResponse, error)
+	ListTaskSteps(taskID string) (*types.TaskStepsResponse, error)
 	IsConnected() bool
 }
 
@@ -107,6 +110,18 @@ func (m *TasksModel) SetFilter(filter TaskFilter) {
 	}
 }
 
+// SetCurrentAgent sets the current agent ID for FilterMine filtering.
+// This is used when the client is an agent (e.g., in a multi-agent setup).
+func (m *TasksModel) SetCurrentAgent(agentID string) {
+	m.currentAgentID = agentID
+}
+
+// SetCurrentSession sets the current session ID for FilterMine filtering.
+// This is used by the TUI to filter tasks linked to the current session.
+func (m *TasksModel) SetCurrentSession(sessionID string) {
+	m.currentSessionID = sessionID
+}
+
 // SetSize updates the model dimensions.
 func (m *TasksModel) SetSize(width, height int) {
 	m.width = width
@@ -141,11 +156,12 @@ func (m *TasksModel) setJobsColumns() {
 }
 
 func (m *TasksModel) setTasksColumns() {
-	// Task view columns: Name | State | Agent | Progress | Memory | Updated
+	// Task view columns: Name | State | Agent | Steps | Progress | Memory | Updated
 	available := m.width - 10 // borders/padding
-	nameW := available * 25 / 100
+	nameW := available * 22 / 100
 	stateW := 8
 	agentW := 12
+	stepsW := 7
 	progressW := 12
 	memoryW := 10
 	updatedW := 10
@@ -158,6 +174,7 @@ func (m *TasksModel) setTasksColumns() {
 		{Title: "Name", Width: nameW},
 		{Title: "State", Width: stateW},
 		{Title: "Agent", Width: agentW},
+		{Title: "Steps", Width: stepsW},
 		{Title: "Progress", Width: progressW},
 		{Title: "Memory", Width: memoryW},
 		{Title: "Updated", Width: updatedW},
@@ -386,8 +403,22 @@ func (m *TasksModel) filterTasks() []types.TaskExtended {
 				filtered = append(filtered, t)
 			}
 		case FilterMine:
-			// TODO: Compare with current user/agent
-			if t.AssignedAgent != "" {
+			// Filter by session (for TUI) or agent (for agent-mode clients).
+			// Priority: session > agent > fallback to all assigned tasks.
+			if m.currentSessionID != "" {
+				// Check if current session is linked to this task
+				for _, linkedSess := range t.LinkedSessions {
+					if linkedSess == m.currentSessionID {
+						filtered = append(filtered, t)
+						break
+					}
+				}
+			} else if m.currentAgentID != "" {
+				if t.AssignedAgent == m.currentAgentID {
+					filtered = append(filtered, t)
+				}
+			} else if t.AssignedAgent != "" {
+				// Fallback: show all assigned tasks
 				filtered = append(filtered, t)
 			}
 		default:
@@ -409,6 +440,20 @@ func (m *TasksModel) updateTasksTable() {
 		agent := task.AssignedAgent
 		if agent == "" {
 			agent = "-"
+		}
+
+		// Steps column: completed/total from step data
+		stepsStr := "-"
+		if len(task.Steps) > 0 {
+			completedSteps := 0
+			for _, s := range task.Steps {
+				if s.State == "completed" {
+					completedSteps++
+				}
+			}
+			stepsStr = fmt.Sprintf("%d/%d", completedSteps, len(task.Steps))
+		} else if task.TotalJobs > 0 {
+			stepsStr = fmt.Sprintf("%d/%d", task.CompletedJobs, task.TotalJobs)
 		}
 
 		// Progress bar
@@ -435,6 +480,7 @@ func (m *TasksModel) updateTasksTable() {
 			types.TruncateString(name, 20),
 			stateIcon,
 			types.TruncateString(agent, 10),
+			stepsStr,
 			progress,
 			memory,
 			updated,
@@ -875,6 +921,70 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	content.WriteString(failedStyle.Render(fmt.Sprintf("✗ %d failed", task.FailedJobs)))
 	content.WriteString("\n")
 
+	// Steps section
+	if len(task.Steps) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("─── Steps ───"))
+		content.WriteString("\n")
+
+		agentStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#06B6D4")).
+			Bold(true)
+
+		for _, step := range task.Steps {
+			// Line 1: seq. [agent] description  state_icon state_label
+			stepIcon := m.getStepStateIcon(step.State)
+			stepLabel := m.getStepStateLabel(step.State)
+			stepColor := m.getStepStateColor(step.State)
+			stepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(stepColor))
+
+			agentLabel := ""
+			if step.AgentID != "" {
+				agentLabel = agentStyle.Render(fmt.Sprintf("[%s]", step.AgentID))
+			}
+
+			desc := step.Description
+			maxDescLen := modalWidth - 30
+			if maxDescLen < 20 {
+				maxDescLen = 20
+			}
+			if len(desc) > maxDescLen {
+				desc = desc[:maxDescLen-3] + "..."
+			}
+
+			content.WriteString(fmt.Sprintf(" %d. %s %s  %s",
+				step.Sequence,
+				agentLabel,
+				valueStyle.Render(desc),
+				stepStyle.Render(stepIcon+" "+stepLabel),
+			))
+			content.WriteString("\n")
+
+			// Line 2: progress bar  percent%  (blocked indicator)
+			stepPercent := m.getStepPercent(step.State)
+			barWidth := 20
+			filled := int(stepPercent / 100 * float64(barWidth))
+			empty := barWidth - filled
+			if filled > barWidth {
+				filled = barWidth
+				empty = 0
+			}
+			bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+
+			blockedIndicator := ""
+			if step.State == "pending" && len(step.DependsOn) > 0 {
+				blockedIndicator = pendingStyle.Render("  (blocked)")
+			}
+
+			content.WriteString(fmt.Sprintf("    %s %3.0f%%%s",
+				stepStyle.Render(bar),
+				stepPercent,
+				blockedIndicator,
+			))
+			content.WriteString("\n")
+		}
+	}
+
 	// Memory Context section
 	content.WriteString("\n")
 	content.WriteString(sectionStyle.Render("─── Memory Context ───"))
@@ -952,6 +1062,82 @@ func (m *TasksModel) getStateColor(state string) string {
 		return "#6B7280" // Gray
 	default:
 		return "#6B7280"
+	}
+}
+
+func (m *TasksModel) getStepStateIcon(state string) string {
+	switch state {
+	case "pending":
+		return "○"
+	case "ready":
+		return "◌"
+	case "scheduled":
+		return "◐"
+	case "running":
+		return "●"
+	case "completed":
+		return "✓"
+	case "failed":
+		return "✗"
+	case "skipped":
+		return "⊘"
+	default:
+		return "?"
+	}
+}
+
+func (m *TasksModel) getStepStateLabel(state string) string {
+	switch state {
+	case "pending":
+		return "pend"
+	case "ready":
+		return "ready"
+	case "scheduled":
+		return "sched"
+	case "running":
+		return "exec"
+	case "completed":
+		return "done"
+	case "failed":
+		return "fail"
+	case "skipped":
+		return "skip"
+	default:
+		return state
+	}
+}
+
+func (m *TasksModel) getStepStateColor(state string) string {
+	switch state {
+	case "pending":
+		return "#6B7280"
+	case "ready":
+		return "#F59E0B"
+	case "scheduled":
+		return "#F59E0B"
+	case "running":
+		return "#3B82F6"
+	case "completed":
+		return "#10B981"
+	case "failed":
+		return "#EF4444"
+	case "skipped":
+		return "#6B7280"
+	default:
+		return "#6B7280"
+	}
+}
+
+func (m *TasksModel) getStepPercent(state string) float64 {
+	switch state {
+	case "completed":
+		return 100
+	case "running":
+		return 50
+	case "failed":
+		return 100
+	default:
+		return 0
 	}
 }
 

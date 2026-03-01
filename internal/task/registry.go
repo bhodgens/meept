@@ -277,6 +277,11 @@ func (r *Registry) FailJob(ctx context.Context, taskID string) error {
 }
 
 // Close closes the registry.
+// StepStore returns the underlying step store.
+func (r *Registry) StepStore() *StepStore {
+	return r.store.StepStore()
+}
+
 // Store returns the underlying task store.
 func (r *Registry) Store() *Store {
 	return r.store
@@ -340,6 +345,7 @@ func (h *Handler) Start(ctx context.Context) error {
 		"task.list",
 		"task.link",
 		"task.unlink",
+		"task.steps",
 	}
 
 	for _, topic := range topics {
@@ -393,6 +399,8 @@ func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.B
 		response, err = h.handleLink(ctx, msg)
 	case "task.unlink":
 		response, err = h.handleUnlink(ctx, msg)
+	case "task.steps":
+		response, err = h.handleSteps(ctx, msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -531,6 +539,27 @@ func (h *Handler) handleUnlink(ctx context.Context, msg *models.BusMessage) (any
 	}
 
 	return map[string]string{"status": "unlinked"}, nil
+}
+
+func (h *Handler) handleSteps(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	stepStore := h.registry.StepStore()
+	if stepStore == nil {
+		return map[string]any{"steps": []any{}}, nil
+	}
+
+	steps, err := stepStore.ListByTaskID(params.TaskID)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{"steps": steps}, nil
 }
 
 func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {

@@ -620,6 +620,22 @@ func (c *RPCClient) ListTasksExtended() (*types.TaskExtendedListResponse, error)
 	return &resp, nil
 }
 
+// ListTaskSteps returns the steps for a task.
+func (c *RPCClient) ListTaskSteps(taskID string) (*types.TaskStepsResponse, error) {
+	params := map[string]string{"task_id": taskID}
+	result, err := c.Call("task.steps", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.TaskStepsResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse task steps response: %w", err)
+	}
+
+	return &resp, nil
+}
+
 // DeleteTask deletes a task by ID.
 func (c *RPCClient) DeleteTask(taskID string) error {
 	params := map[string]string{"id": taskID}

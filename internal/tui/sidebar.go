@@ -95,10 +95,13 @@ type SidebarWorkerItem struct {
 
 // SidebarTaskItem represents a task shown in the sidebar.
 type SidebarTaskItem struct {
-	ID      string
-	Title   string
-	Status  string
-	Created string
+	ID            string
+	Title         string
+	Status        string
+	AgentID       string
+	CompletedJobs int
+	TotalJobs     int
+	Created       string
 }
 
 // SidebarMemoryItem represents a recent memory item in the sidebar.
@@ -324,7 +327,7 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 				}
 			}
 
-			// Fetch active agent workers for agent activity and tasks panel
+			// Fetch active agent workers for agent activity panel
 			if workersResp, err := s.rpc.ListWorkers(); err == nil {
 				for _, w := range workersResp.Workers {
 					// Create agent activity entry for active workers
@@ -353,32 +356,38 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 
 						agentActivity = append(agentActivity, activity)
 					}
-
-					// Also add to tasks for backward compatibility
-					taskStatus := "running"
-					if w.State == "completed" {
-						taskStatus = "completed"
-					} else if w.State == "error" {
-						taskStatus = "failed"
-					}
-
-					title := w.ConversationID
-					if w.CurrentTool != "" {
-						title = "Tool: " + w.CurrentTool
-					}
-
-					tasks = append(tasks, SidebarTaskItem{
-						ID:      w.ID,
-						Title:   title,
-						Status:  taskStatus,
-						Created: w.StartTime,
-					})
 				}
 			}
 
-			// Fetch pending task count from task registry
-			if taskResp, err := s.rpc.ListTasks("pending", 100); err == nil {
-				status.PendingTasks = len(taskResp.Tasks)
+			// Fetch tasks from task registry with progress data
+			if taskResp, err := s.rpc.ListTasksExtended(); err == nil {
+				for _, t := range taskResp.Tasks {
+					taskStatus := t.State
+					title := t.Name
+					if title == "" {
+						title = t.ID
+					}
+					tasks = append(tasks, SidebarTaskItem{
+						ID:            t.ID,
+						Title:         title,
+						Status:        taskStatus,
+						AgentID:       t.AssignedAgent,
+						CompletedJobs: t.CompletedJobs,
+						TotalJobs:     t.TotalJobs,
+						Created:       t.CreatedAt,
+					})
+				}
+				status.PendingTasks = 0
+				for _, t := range taskResp.Tasks {
+					if t.State == "pending" || t.State == "planning" || t.State == "executing" {
+						status.PendingTasks++
+					}
+				}
+			} else {
+				// Fallback: fetch pending task count
+				if taskResp, err := s.rpc.ListTasks("pending", 100); err == nil {
+					status.PendingTasks = len(taskResp.Tasks)
+				}
 			}
 		}
 
@@ -506,6 +515,9 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, s.handleContextResetEvent(e))
 			case "worker.state_changed":
 				cmds = append(cmds, s.handleWorkerStateEvent(e))
+			case "task.planned", "task.progress", "task.completed", "task.failed":
+				// Refresh sidebar task data on task lifecycle events
+				cmds = append(cmds, s.refreshData())
 			}
 		}
 		if len(cmds) > 0 {
@@ -1138,36 +1150,87 @@ func (s *SidebarModel) renderTasksPanel() string {
 			b.WriteString("\n")
 		} else {
 			for i, task := range s.tasksData {
-				if i >= 5 { // Limit display
-					b.WriteString(s.styles.Muted.Render(fmt.Sprintf("  +%d more...", len(s.tasksData)-5)))
+				if i >= 4 { // Limit to 4 tasks (8 lines: 2 lines per task)
+					remaining := len(s.tasksData) - 4
+					b.WriteString(s.styles.Muted.Render(fmt.Sprintf("  +%d more...", remaining)))
 					b.WriteString("\n")
 					break
 				}
 
+				// Line 1: state_icon task_name [agent]
 				statusIcon := "○"
 				statusStyle := s.styles.Muted
 				switch task.Status {
-				case "running":
+				case "pending":
+					statusIcon = "○"
+					statusStyle = s.styles.Muted
+				case "planning":
+					statusIcon = "◐"
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+				case "executing":
 					statusIcon = "●"
 					statusStyle = s.styles.StatusRunning
+				case "testing":
+					statusIcon = "◑"
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6"))
 				case "completed":
 					statusIcon = "✓"
 					statusStyle = s.styles.Success
 				case "failed":
 					statusIcon = "✗"
 					statusStyle = s.styles.Error
+				case "cancelled":
+					statusIcon = "⊘"
+					statusStyle = s.styles.Muted
+				}
+
+				agentLabel := ""
+				if task.AgentID != "" {
+					agentLabel = s.styles.Muted.Render(fmt.Sprintf(" [%s]", task.AgentID))
 				}
 
 				title := task.Title
-				maxLen := s.width - 12
+				maxLen := s.width - 16
+				if maxLen < 8 {
+					maxLen = 8
+				}
 				if len(title) > maxLen {
 					title = title[:maxLen-3] + "..."
 				}
 
-				b.WriteString(fmt.Sprintf("  %s %s",
+				b.WriteString(fmt.Sprintf("  %s %s%s",
 					statusStyle.Render(statusIcon),
 					s.styles.Paragraph.Render(title),
+					agentLabel,
 				))
+				b.WriteString("\n")
+
+				// Line 2: progress bar completed/total
+				barWidth := s.width - 14
+				if barWidth < 4 {
+					barWidth = 4
+				}
+				if barWidth > 12 {
+					barWidth = 12
+				}
+
+				if task.TotalJobs > 0 {
+					filled := (task.CompletedJobs * barWidth) / task.TotalJobs
+					empty := barWidth - filled
+					if filled > barWidth {
+						filled = barWidth
+						empty = 0
+					}
+					bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+					b.WriteString(fmt.Sprintf("    %s %d/%d",
+						statusStyle.Render(bar),
+						task.CompletedJobs,
+						task.TotalJobs,
+					))
+				} else {
+					bar := strings.Repeat("░", barWidth)
+					b.WriteString(fmt.Sprintf("    %s", s.styles.Muted.Render(bar)))
+				}
 				b.WriteString("\n")
 			}
 		}
