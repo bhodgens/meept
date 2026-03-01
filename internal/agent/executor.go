@@ -43,6 +43,18 @@ var ToolActionMap = map[string]string{
 
 	// Agent delegation
 	"delegate_task": "agent_delegate",
+
+	// Code intelligence - AST (read-only, safe)
+	"ast_parse":   "code_read",
+	"ast_symbols": "code_read",
+	"ast_query":   "code_read",
+
+	// Code intelligence - LSP (read-only, requires server)
+	"lsp_goto_definition":   "code_read",
+	"lsp_find_references":   "code_read",
+	"lsp_hover":             "code_read",
+	"lsp_workspace_symbols": "code_read",
+	"lsp_diagnostics":       "code_read",
 }
 
 // Tool represents a tool that can be executed by the agent.

@@ -31,6 +31,55 @@ type Config struct {
 	Orchestrator      OrchestratorConfig      `toml:"orchestrator"`
 	Shadow            ShadowConfig            `toml:"shadow"`
 	DistributedMemory DistributedMemoryConfig `toml:"distributed_memory"`
+	CodeIntel         CodeIntelConfig         `toml:"code_intel"`
+}
+
+// CodeIntelConfig holds code intelligence settings (AST/LSP).
+type CodeIntelConfig struct {
+	// Enabled turns on code intelligence features
+	Enabled bool `toml:"enabled"`
+	// AST holds AST parsing settings
+	AST ASTConfig `toml:"ast"`
+	// LSP holds LSP client settings
+	LSP LSPConfig `toml:"lsp"`
+}
+
+// ASTConfig holds AST parsing settings.
+type ASTConfig struct {
+	// CacheEnabled enables parse result caching
+	CacheEnabled bool `toml:"cache_enabled"`
+	// CacheMaxSize is the maximum number of cached parse results
+	CacheMaxSize int `toml:"cache_max_size"`
+	// CacheTTLMinutes is how long cached results remain valid
+	CacheTTLMinutes int `toml:"cache_ttl_minutes"`
+}
+
+// LSPConfig holds LSP client settings.
+type LSPConfig struct {
+	// Enabled turns on LSP client features
+	Enabled bool `toml:"enabled"`
+	// Servers maps language IDs to server configurations
+	Servers map[string]LSPServerConfig `toml:"servers"`
+	// AutoStartServers starts LSP servers on demand
+	AutoStartServers bool `toml:"auto_start_servers"`
+	// ConnectionTimeoutSeconds is the timeout for connecting to LSP servers
+	ConnectionTimeoutSeconds int `toml:"connection_timeout_seconds"`
+}
+
+// LSPServerConfig configures a single LSP server.
+type LSPServerConfig struct {
+	// Command is the command to start the server
+	Command string `toml:"command"`
+	// Args are command line arguments
+	Args []string `toml:"args"`
+	// Transport is "stdio" or "tcp"
+	Transport string `toml:"transport"`
+	// Host is the TCP host (for tcp transport)
+	Host string `toml:"host"`
+	// Port is the TCP port (for tcp transport)
+	Port int `toml:"port"`
+	// Languages are the language IDs this server handles
+	Languages []string `toml:"languages"`
 }
 
 // DaemonConfig holds daemon-specific settings.
@@ -800,6 +849,20 @@ func DefaultConfig() *Config {
 				PromoteTaskCompletions:   true,
 				CrossAgentReferencesMin:  2,
 				MinMemoryAgeMinutes:      5,
+			},
+		},
+		CodeIntel: CodeIntelConfig{
+			Enabled: true,
+			AST: ASTConfig{
+				CacheEnabled:    true,
+				CacheMaxSize:    100,
+				CacheTTLMinutes: 5,
+			},
+			LSP: LSPConfig{
+				Enabled:                  false,
+				Servers:                  make(map[string]LSPServerConfig),
+				AutoStartServers:         true,
+				ConnectionTimeoutSeconds: 10,
 			},
 		},
 	}

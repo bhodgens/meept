@@ -12,6 +12,9 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/code/ast"
+	"github.com/caimlas/meept/internal/code/lsp"
+	codetools "github.com/caimlas/meept/internal/code/tools"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -96,6 +99,10 @@ type Components struct {
 
 	// Web API server
 	WebServer       *web.Server
+
+	// Code intelligence
+	ASTParser       *ast.ParserManager
+	LSPManager      *lsp.Manager
 
 	Logger          *slog.Logger
 }
@@ -456,6 +463,11 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		taskStore = c.TaskRegistry.Store()
 	}
 	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, logger)
+
+	// Initialize code intelligence if enabled
+	if cfg.CodeIntel.Enabled {
+		c.initializeCodeIntel(cfg, logger)
+	}
 
 	// Wire memvid client and task store to the main agent loop now that they're available
 	if c.MemvidClient != nil {
@@ -908,6 +920,14 @@ func (c *Components) Stop(ctx context.Context) error {
 	// Stop all MCP server connections
 	if c.MCPManager != nil {
 		c.MCPManager.StopAll()
+	}
+
+	// Stop all LSP server connections
+	if c.LSPManager != nil {
+		if err := c.LSPManager.StopAll(ctx); err != nil {
+			c.Logger.Error("Failed to stop LSP servers", "error", err)
+			lastErr = err
+		}
 	}
 
 	// Stop result cache cleanup goroutine
@@ -1492,6 +1512,62 @@ func (a *learningPipelineAdapter) Retrieve(ctx context.Context, query string, do
 	}
 
 	return result, nil
+}
+
+// initializeCodeIntel sets up code intelligence (AST and LSP).
+func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger) {
+	logger.Info("Initializing code intelligence")
+
+	// Initialize AST parser manager
+	astConfig := ast.ParserConfig{
+		CacheEnabled: cfg.CodeIntel.AST.CacheEnabled,
+		CacheMaxSize: cfg.CodeIntel.AST.CacheMaxSize,
+		CacheTTL:     time.Duration(cfg.CodeIntel.AST.CacheTTLMinutes) * time.Minute,
+	}
+
+	c.ASTParser = ast.NewParserManager(astConfig)
+	logger.Info("AST parser manager initialized",
+		"cache_enabled", astConfig.CacheEnabled,
+		"cache_max_size", astConfig.CacheMaxSize,
+	)
+
+	// Register AST tools
+	c.ToolRegistry.Register(codetools.NewASTParseTool(c.ASTParser))
+	c.ToolRegistry.Register(codetools.NewASTSymbolsTool(c.ASTParser))
+	c.ToolRegistry.Register(codetools.NewASTQueryTool(c.ASTParser))
+	logger.Debug("Registered AST tools")
+
+	// Initialize LSP manager if servers are configured
+	if len(cfg.CodeIntel.LSP.Servers) > 0 {
+		// Get workspace root
+		rootURI := ""
+		if wd, err := os.Getwd(); err == nil {
+			rootURI = lsp.PathToURI(wd)
+		}
+
+		lspOpts := []lsp.ManagerOption{
+			lsp.WithManagerLogger(logger.With("component", "lsp")),
+			lsp.WithRootURI(rootURI),
+		}
+
+		c.LSPManager = lsp.NewManager(cfg.CodeIntel.LSP, lspOpts...)
+		logger.Info("LSP manager initialized",
+			"configured_servers", len(cfg.CodeIntel.LSP.Servers),
+			"auto_start", cfg.CodeIntel.LSP.AutoStartServers,
+		)
+
+		// Register LSP tools
+		c.ToolRegistry.Register(codetools.NewLSPDefinitionTool(c.LSPManager))
+		c.ToolRegistry.Register(codetools.NewLSPReferencesTool(c.LSPManager))
+		c.ToolRegistry.Register(codetools.NewLSPHoverTool(c.LSPManager))
+		c.ToolRegistry.Register(codetools.NewLSPSymbolsTool(c.LSPManager))
+		c.ToolRegistry.Register(codetools.NewLSPDiagnosticsTool(c.LSPManager))
+		logger.Debug("Registered LSP tools")
+	} else {
+		logger.Info("LSP tools not registered (no servers configured)")
+	}
+
+	logger.Info("Code intelligence initialized")
 }
 
 // initializeSkills sets up the skills system.
