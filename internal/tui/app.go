@@ -231,9 +231,7 @@ func (a *App) connectDaemon() tea.Msg {
 	}
 	// Connect the event stream RPC client on its own connection
 	if a.eventRPC != nil {
-		if err := a.eventRPC.Connect(); err != nil {
-			fmt.Fprintf(os.Stderr, "[DEBUG] Event RPC connect failed: %v\n", err)
-		}
+		_ = a.eventRPC.Connect()
 	}
 	return ConnectSuccessMsg{}
 }
@@ -249,9 +247,6 @@ type ConnectErrorMsg struct {
 // Update handles messages and updates the model.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-
-	// DEBUG: Log every message type that reaches App.Update
-	fmt.Fprintf(os.Stderr, "[DEBUG] App.Update received msg type: %T\n", msg)
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -530,8 +525,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if v, ok := payloadMap["token_count"].(float64); ok {
 						progressMsg.TokensUsed = int(v)
 					}
-					fmt.Fprintf(os.Stderr, "[DEBUG] App processing agent.progress: AgentID=%s Stage=%s Percent=%.0f\n",
-						progressMsg.AgentID, progressMsg.Stage, progressMsg.Percent)
 					// Update chat directly
 					if cmd := a.chat.Update(progressMsg); cmd != nil {
 						cmds = append(cmds, cmd)
@@ -597,8 +590,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case models.ProgressUpdateMsg:
 		// Forward progress updates to chat model
-		fmt.Fprintf(os.Stderr, "[DEBUG] App.Update received ProgressUpdateMsg: AgentID=%s Stage=%s Percent=%.0f\n",
-			msg.AgentID, msg.Stage, msg.Percent)
 		return a, a.chat.Update(msg)
 
 	case viz.VizTickMsg:

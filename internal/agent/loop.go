@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent/prompts"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
@@ -1107,6 +1108,10 @@ func (l *AgentLoop) buildSystemPromptWithContext(contextParts []string) string {
 		Personality:  l.config.Personality,
 	})
 
+	// Add baseline capabilities and platform introspection guidelines
+	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
+
 	// Add memory context section if present
 	if len(contextParts) > 0 {
 		contextSection := "## Relevant Context\n\n"
@@ -1344,6 +1349,10 @@ func (l *AgentLoop) buildSystemPrompt() string {
 		Purpose:      l.config.Purpose,
 		Personality:  l.config.Personality,
 	})
+
+	// Add baseline capabilities and platform introspection guidelines
+	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
 
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.

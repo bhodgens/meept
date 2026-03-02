@@ -4,7 +4,6 @@ package models
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -935,13 +934,9 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case ProgressUpdateMsg:
-		fmt.Fprintf(os.Stderr, "[DEBUG] ChatModel.Update received ProgressUpdateMsg: AgentID=%s Stage=%s pendingIdx=%d\n",
-			msg.AgentID, msg.Stage, m.pendingMsgIdx)
-		// Update progress state for the pending message, merging with existing state
 		if m.progressState == nil {
 			m.progressState = &ProgressState{}
 		}
-		// Only update fields that are non-zero in the message
 		if msg.AgentID != "" {
 			m.progressState.AgentID = msg.AgentID
 		}
@@ -961,9 +956,6 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			m.progressState.ContextResets = msg.ContextResets
 		}
 		m.progressState.LastUpdate = time.Now()
-		// Update the pending message content with new progress
-		fmt.Fprintf(os.Stderr, "[DEBUG] ChatModel calling updateProgressMessage, progressState={AgentID:%s Stage:%s Percent:%.0f}\n",
-			m.progressState.AgentID, m.progressState.Stage, m.progressState.Percent)
 		m.updateProgressMessage()
 		return nil
 	}

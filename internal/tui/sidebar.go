@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -490,24 +489,10 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			s.eventStream.Update(msg)
 			s.updateActivityFeed()
 		}
-		// DEBUG: Log event count to stderr
-		if len(msg.Events) > 0 {
-			fmt.Fprintf(os.Stderr, "[DEBUG] Received %d events\n", len(msg.Events))
-			for _, e := range msg.Events {
-				fmt.Fprintf(os.Stderr, "[DEBUG]   Topic: %s\n", e.Topic)
-			}
-		}
-		// Check for progress events and forward to chat
-		// Collect all commands - don't return early on first match
 		var cmds []tea.Cmd
 		for _, e := range msg.Events {
-			// DEBUG: Show exact topic comparison
-			if e.Topic == "agent.progress" {
-				fmt.Fprintf(os.Stderr, "[DEBUG] MATCH: topic '%s' == 'agent.progress'\n", e.Topic)
-			}
 			switch e.Topic {
 			case "agent.progress":
-				fmt.Fprintf(os.Stderr, "[DEBUG] Handling agent.progress event, payload type: %T\n", e.Payload)
 				cmds = append(cmds, s.handleProgressEvent(e))
 			case "llm.tokens.used":
 				cmds = append(cmds, s.handleTokenEvent(e))
@@ -516,12 +501,10 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			case "worker.state_changed":
 				cmds = append(cmds, s.handleWorkerStateEvent(e))
 			case "task.planned", "task.progress", "task.completed", "task.failed":
-				// Refresh sidebar task data on task lifecycle events
 				cmds = append(cmds, s.refreshData())
 			}
 		}
 		if len(cmds) > 0 {
-			fmt.Fprintf(os.Stderr, "[DEBUG] Sidebar returning tea.Batch with %d commands\n", len(cmds))
 			return tea.Batch(cmds...)
 		}
 		return nil
@@ -631,10 +614,8 @@ func summarizeEvent(topic string, payload any) string {
 // handleProgressEvent converts an agent.progress bus event to a ProgressUpdateMsg.
 func (s *SidebarModel) handleProgressEvent(e BusEvent) tea.Cmd {
 	return func() tea.Msg {
-		fmt.Fprintf(os.Stderr, "[DEBUG] handleProgressEvent: payload type=%T\n", e.Payload)
 		payloadMap, ok := e.Payload.(map[string]any)
 		if !ok {
-			fmt.Fprintf(os.Stderr, "[DEBUG] handleProgressEvent: payload is NOT map[string]any, returning nil\n")
 			return nil
 		}
 
@@ -642,7 +623,6 @@ func (s *SidebarModel) handleProgressEvent(e BusEvent) tea.Cmd {
 		var percent float64
 		var tokenCount float64
 
-		// Support both field naming conventions
 		if v, ok := payloadMap["agent_id"].(string); ok {
 			agentID = v
 		} else if v, ok := payloadMap["conversation_id"].(string); ok {
@@ -657,7 +637,6 @@ func (s *SidebarModel) handleProgressEvent(e BusEvent) tea.Cmd {
 		if v, ok := payloadMap["percent"].(float64); ok {
 			percent = v
 		} else if iteration, ok := payloadMap["iteration"].(float64); ok {
-			// Estimate percent from iteration (assume max 10 iterations)
 			percent = iteration * 10.0
 			if percent > 100 {
 				percent = 100
@@ -666,9 +645,6 @@ func (s *SidebarModel) handleProgressEvent(e BusEvent) tea.Cmd {
 		if v, ok := payloadMap["token_count"].(float64); ok {
 			tokenCount = v
 		}
-
-		fmt.Fprintf(os.Stderr, "[DEBUG] handleProgressEvent: returning ProgressUpdateMsg{AgentID:%s, Stage:%s, Percent:%.0f, Tokens:%d, Tool:%s}\n",
-			agentID, stage, percent, int(tokenCount), currentTool)
 
 		return models.ProgressUpdateMsg{
 			AgentID:     agentID,
