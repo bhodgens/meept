@@ -131,6 +131,17 @@ type ChatModel struct {
 	lastClickY    int
 	clickCount    int
 
+	// Input selection state (mirrors viewport selection)
+	inputMouseDown      bool
+	inputSelectionStart int
+	inputSelectionEnd   int
+	inputIsSelecting    bool
+	inputLastClickTime  time.Time
+	inputClickCount     int
+
+	// Fixed input height (no auto-expand)
+	inputHeight int
+
 	// Styles
 	userStyle       lipgloss.Style
 	assistantStyle  lipgloss.Style
@@ -152,8 +163,22 @@ type RPCClient interface {
 	GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error)
 }
 
+// InputBehaviorConfig holds input textarea behavior settings.
+type InputBehaviorConfig struct {
+	EnterBehavior string // "shift_sends" or "double_enter"
+	AutoExpand    bool   // Enable auto-expanding input height
+}
+
 // NewChatModel creates a new chat model.
 func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style, escapeBehavior string) *ChatModel {
+	return NewChatModelWithConfig(rpc, userStyle, assistantStyle, systemStyle, escapeBehavior, InputBehaviorConfig{
+		EnterBehavior: "shift_sends",
+		AutoExpand:    false,
+	})
+}
+
+// NewChatModelWithConfig creates a new chat model with input configuration.
+func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style, escapeBehavior string, inputConfig InputBehaviorConfig) *ChatModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -161,7 +186,10 @@ func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss
 	ta.SetWidth(80)
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
-	ta.KeyMap.InsertNewline.SetEnabled(false) // Enter sends, Shift+Enter for newline
+
+	// ALWAYS disable InsertNewline - we handle both Enter and Shift+Enter manually
+	// This prevents bubbles/textarea from intercepting Enter before our Update() handler
+	ta.KeyMap.InsertNewline.SetEnabled(false)
 
 	vp := viewport.New(80, 20)
 	vp.SetContent("")
@@ -178,26 +206,27 @@ func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss
 	}
 
 	return &ChatModel{
-		rpc:              rpc,
-		messages:         []ChatMessage{},
-		viewport:         vp,
-		textarea:         ta,
-		conversationID:   generateConversationID(),
-		focused:          FocusInput,
-		selectedMsgIdx:   -1,
-		pendingMsgIdx:    -1,
-		historyIdx:       -1,
-		sessionMessages:  make(map[string][]ChatMessage),
-		sessionHistory:   make(map[string][]string),
-		dirtyMessages:    make(map[string][]ChatMessage),
-		mdRenderer:       mdRenderer,
+		rpc:               rpc,
+		messages:          []ChatMessage{},
+		viewport:          vp,
+		textarea:          ta,
+		conversationID:    generateConversationID(),
+		focused:           FocusInput,
+		selectedMsgIdx:    -1,
+		pendingMsgIdx:     -1,
+		historyIdx:        -1,
+		sessionMessages:   make(map[string][]ChatMessage),
+		sessionHistory:    make(map[string][]string),
+		dirtyMessages:     make(map[string][]ChatMessage),
+		mdRenderer:        mdRenderer,
 		renderMarkdown:   true, // Enable markdown by default
 		vimState:         vimState,
 		escapeBehavior:   escapeBehavior,
+		inputHeight:      3, // Fixed input height
 		compressedPastes: make(map[int]string),
-		userStyle:        userStyle,
-		assistantStyle:   assistantStyle,
-		systemStyle:      systemStyle,
+		userStyle:         userStyle,
+		assistantStyle:    assistantStyle,
+		systemStyle:       systemStyle,
 		pendingStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#F59E0B")).
 			Italic(true).
@@ -227,19 +256,21 @@ func (m *ChatModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 
-	// Calculate viewport height to fit total in 'height' lines
-	// Chat View renders:
-	// - viewport with border: viewportHeight + 2 lines
-	// - newline: 1 line (between viewport and input)
-	// - input with border: 3 + 2 = 5 lines
-	// Total: viewportHeight + 2 + 1 + 5 = viewportHeight + 8
-	// So: viewportHeight = height - 8
-	viewportHeight := height - 8
+	// Fixed input height (like Crush uses 5 lines total with border)
+	const inputContentHeight = 3
+	inputWithBorder := inputContentHeight + 2 // 5 total lines
+
+	// Layout: viewport(+border) + gap(1) + input(+border)
+	// Total = viewportContent + 2 + 1 + inputContent + 2 = viewportContent + inputContent + 5
+	// So: viewportContent = height - inputContent - 5
+	viewportHeight := height - inputContentHeight - 5
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
 
-	m.textarea.SetWidth(width - 4)
+	m.inputHeight = inputContentHeight
+	m.textarea.SetWidth(width - 4) // Account for border padding
+	m.textarea.SetHeight(inputContentHeight)
 	m.viewport.Width = width - 2
 	m.viewport.Height = viewportHeight
 
@@ -253,6 +284,9 @@ func (m *ChatModel) SetSize(width, height int) {
 		m.messages[i].rendered = ""
 		m.messages[i].renderedAt = 0
 	}
+
+	// Suppress unused variable warning
+	_ = inputWithBorder
 }
 
 // Init initializes the chat model.
@@ -287,7 +321,13 @@ type SessionMessagesLoadedMsg struct {
 // SessionDescriptionUpdatedMsg signals a description update completed.
 type SessionDescriptionUpdatedMsg struct {
 	SessionID   string
+	Name        string
 	Description string
+}
+
+// InputHeightChangedMsg signals that the input area height changed.
+type InputHeightChangedMsg struct {
+	NewHeight int // New input height in lines (excluding borders)
 }
 
 // ChatDetachedTaskMsg signals that a task was dispatched asynchronously.
@@ -642,54 +682,19 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case "enter":
-			if m.focused != FocusInput {
+			// Enter always sends message (when focused on input and not loading)
+			if m.focused != FocusInput || m.loading {
 				return nil
 			}
-			if m.loading {
+			return m.doSendMessage()
+
+		case "shift+enter", "ctrl+j":
+			// Shift+Enter or Ctrl+J inserts a newline
+			if m.focused == FocusInput {
+				m.textarea.InsertRune('\n')
 				return nil
 			}
-			text := strings.TrimSpace(m.textarea.Value())
-			if text == "" {
-				return nil
-			}
-
-			// Expand paste tokens to get actual message content
-			actualText := m.expandPasteTokens(text)
-
-			// Add to history buffer (with tokens for display)
-			m.addToHistory(text)
-
-			m.textarea.Reset()
-
-			// Clear compressed pastes after sending
-			m.compressedPastes = make(map[int]string)
-			m.pasteCounter = 0
-
-			// Add user message (with expanded content)
-			m.addMessage("user", actualText)
-
-			// Track dirty message for persistence
-			m.trackDirtyMessage("user", actualText)
-
-			// Initialize progress state
-			m.progressState = &ProgressState{
-				Stage:      "Sending...",
-				LastUpdate: time.Now(),
-			}
-
-			// Add pending "Sending..." message immediately
-			m.pendingMsgIdx = len(m.messages)
-			m.messages = append(m.messages, ChatMessage{
-				Role:      "pending",
-				Content:   m.renderProgressContent(),
-				Timestamp: time.Now(),
-				State:     MessageNormal,
-				Progress:  m.progressState,
-			})
-			m.updateViewport()
-
-			m.loading = true
-			return m.sendMessage(actualText)
+			return nil
 
 		case "up":
 			if m.focused == FocusInput {
@@ -1096,6 +1101,57 @@ func (m *ChatModel) trackDirtyMessage(role, content string) {
 	})
 }
 
+// doSendMessage handles the common logic for sending a message.
+func (m *ChatModel) doSendMessage() tea.Cmd {
+	text := strings.TrimSpace(m.textarea.Value())
+	if text == "" {
+		return nil
+	}
+
+	// Expand paste tokens to get actual message content
+	actualText := m.expandPasteTokens(text)
+
+	// Add to history buffer (with tokens for display)
+	m.addToHistory(text)
+
+	m.textarea.Reset()
+
+	// Clear compressed pastes after sending
+	m.compressedPastes = make(map[int]string)
+	m.pasteCounter = 0
+
+	// Add user message (with expanded content)
+	m.addMessage("user", actualText)
+
+	// Track dirty message for persistence
+	m.trackDirtyMessage("user", actualText)
+
+	// Initialize progress state
+	m.progressState = &ProgressState{
+		Stage:      "Sending...",
+		LastUpdate: time.Now(),
+	}
+
+	// Add pending "Sending..." message immediately
+	m.pendingMsgIdx = len(m.messages)
+	m.messages = append(m.messages, ChatMessage{
+		Role:      "pending",
+		Content:   m.renderProgressContent(),
+		Timestamp: time.Now(),
+		State:     MessageNormal,
+		Progress:  m.progressState,
+	})
+	m.updateViewport()
+
+	m.loading = true
+	return m.sendMessage(actualText)
+}
+
+// GetInputHeight returns the fixed input height in lines.
+func (m *ChatModel) GetInputHeight() int {
+	return m.inputHeight
+}
+
 // flushMessages sends dirty messages to the server.
 func (m *ChatModel) flushMessages() tea.Cmd {
 	if m.sessionID == "" || !m.rpc.IsConnected() {
@@ -1171,9 +1227,12 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 			_ = rpc.UpdateSessionDescription(sessionID, desc)
 			return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: desc}
 		}
-		// Save the LLM-generated description to the database
-		_ = rpc.UpdateSessionDescription(sessionID, result.Description)
-		return SessionDescriptionUpdatedMsg{SessionID: sessionID, Description: result.Description}
+		// The daemon already saved both name and description, so just return the result
+		return SessionDescriptionUpdatedMsg{
+			SessionID:   sessionID,
+			Name:        result.Name,
+			Description: result.Description,
+		}
 	}
 }
 
@@ -1648,6 +1707,7 @@ func (m *ChatModel) SetMarkdownEnabled(enabled bool) {
 	m.updateViewport()
 }
 
+
 // expandPasteTokens replaces {paste: N lines} tokens with their original content.
 func (m *ChatModel) expandPasteTokens(text string) string {
 	if len(m.compressedPastes) == 0 {
@@ -1676,8 +1736,10 @@ func (m *ChatModel) expandPasteTokens(text string) string {
 	return result
 }
 
-// viewportBorderOffset is the number of lines used by the viewport border (top border = 1)
-const viewportBorderOffset = 1
+// viewportBorderOffset is the offset from screen Y to viewport content Y.
+// The viewport bounds in app.go already account for the header, and the viewport's
+// View() output is what gets hit-tested, so no additional offset is needed.
+const viewportBorderOffset = 0
 
 // handleMousePress handles mouse button press for text selection.
 func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {

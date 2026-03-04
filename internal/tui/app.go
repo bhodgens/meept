@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/base64"
 	"fmt"
+	"image"
 	"os"
 	"os/exec"
 	"runtime"
@@ -155,12 +156,18 @@ func NewApp(socketPath string) *App {
 	// Get current working directory for display
 	projectDir, _ := os.Getwd()
 
+	// Create input behavior config from client config
+	inputConfig := models.InputBehaviorConfig{
+		EnterBehavior: clientConfig.Input.EnterBehavior,
+		AutoExpand:    clientConfig.Input.AutoExpand,
+	}
+
 	app := &App{
 		styles:         styles,
 		rpc:            rpc,
 		eventRPC:       eventRPC,
 		currentView:    ViewChat,
-		chat:           models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior),
+		chat:           models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior, inputConfig),
 		tasks:          models.NewTasksModel(rpc),
 		queue:          models.NewQueueModel(rpc),
 		memory:         models.NewMemoryModel(rpc),
@@ -282,11 +289,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)
 
 		// Update component bounds for click-to-focus
-		// Viewport is the chat area minus input (input is 5 lines with border)
+		// Fixed input height (3 lines content + 2 for border = 5 total)
+		const inputContentHeight = 3
+		inputBoundsHeight := inputContentHeight + 2
+
+		// Calculate viewport bounds height
+		// Layout: viewport(+border) + gap(1) + input(+border)
+		// Total contentHeight = viewportContent + 2 + 1 + inputContent + 2
+		// So: viewportBoundsHeight = contentHeight - 1 - inputBoundsHeight
 		contentHeight := msg.Height - chromeHeight
-		viewportHeight := contentHeight - 6 // viewport + border + gap + input + border
-		a.viewportBounds = Rect{X: 0, Y: headerHeight, Width: mainWidth, Height: viewportHeight}
-		a.inputBounds = Rect{X: 0, Y: headerHeight + viewportHeight + 1, Width: mainWidth, Height: 5}
+		viewportBoundsHeight := contentHeight - inputBoundsHeight - 1 // -1 for \n gap in View()
+		if viewportBoundsHeight < 3 { // minimum: 1 content + 2 border
+			viewportBoundsHeight = 3
+		}
+
+		a.viewportBounds = Rect{X: 0, Y: headerHeight, Width: mainWidth, Height: viewportBoundsHeight}
+		// inputBounds.Y = headerHeight + viewportBoundsHeight + 1 (for the \n gap)
+		a.inputBounds = Rect{X: 0, Y: headerHeight + viewportBoundsHeight + 1, Width: mainWidth, Height: inputBoundsHeight}
 		a.sidebarBounds = Rect{X: mainWidth, Y: headerHeight, Width: sidebarWidth, Height: contentHeight}
 
 		return a, nil
@@ -445,6 +464,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update session picker with session list
 		if msg.Err == nil {
 			a.sessionPicker.SetSessions(msg.Sessions)
+			// Auto-select current session
+			if a.currentSession != nil {
+				a.sessionPicker.SetCurrentSession(a.currentSession.ID)
+			}
 		}
 		return a, nil
 
@@ -658,9 +681,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 			return StatusMessageClearMsg{}
 		})
-		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-			return StatusMessageClearMsg{}
-		})
 
 	case StatusMessageClearMsg:
 		if time.Since(a.statusMessageTime) >= 2*time.Second {
@@ -669,8 +689,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case models.SessionDescriptionUpdatedMsg:
-		// Update the app-level session description so tab bar and picker reflect it
+		// Update the app-level session name and description so tab bar and picker reflect it
 		if a.currentSession != nil && msg.SessionID == a.currentSession.ID {
+			if msg.Name != "" {
+				a.currentSession.Name = msg.Name
+			}
 			a.currentSession.Description = msg.Description
 			a.setTerminalTitle()
 		}
@@ -1216,45 +1239,88 @@ func (a *App) handleMouseMsg(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Handle mouse wheel scrolling - delegate to chat model
-	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
-		if a.currentView == ViewChat && a.isInBounds(msg.X, msg.Y, a.viewportBounds) {
-			return a, a.chat.Update(msg)
+	// Check if session picker modal is active and handle mouse clicks
+	if a.activeModal == ModalSessionPicker && a.sessionPicker.IsVisible() {
+		cmd := a.sessionPicker.HandleMouse(msg, a.width, a.height)
+		if cmd != nil {
+			a.activeModal = ModalNone
+			return a, cmd
 		}
-		if a.isInBounds(msg.X, msg.Y, a.sidebarBounds) && a.sidebar.IsVisible() {
-			// Could add sidebar scrolling here in the future
+	}
+
+	// Convert bounds to image.Rectangle for cleaner hit testing
+	pt := image.Pt(msg.X, msg.Y)
+	inputRect := a.rectToImageRect(a.inputBounds)
+	viewportRect := a.rectToImageRect(a.viewportBounds)
+	sidebarRect := a.rectToImageRect(a.sidebarBounds)
+
+	// Handle mouse wheel scrolling - ALWAYS scroll viewport, never input
+	// This matches Crush's behavior where mouse wheel scrolls the viewport only
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		if a.currentView == ViewChat {
+			// Mouse wheel always scrolls viewport (not input)
+			return a, a.chat.Update(msg)
 		}
 		return a, nil
 	}
 
-	// Handle left click for focus switching
-	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-		if a.isInBounds(msg.X, msg.Y, a.sidebarBounds) && a.sidebar.IsVisible() {
-			a.appFocus = FocusSidebar
-			a.sidebar.SetFocused(true)
-			// Adjust coordinates relative to sidebar for panel click detection
-			relX := msg.X - a.sidebarBounds.X
-			relY := msg.Y - a.sidebarBounds.Y
-			return a, a.sidebar.HandleClick(relX, relY)
-		} else if a.isInBounds(msg.X, msg.Y, a.viewportBounds) {
-			a.appFocus = FocusChat
-			a.sidebar.SetFocused(false)
-			a.chat.SetFocus(models.FocusViewport)
-			return a, nil
-		} else if a.isInBounds(msg.X, msg.Y, a.inputBounds) {
-			a.appFocus = FocusChat
-			a.sidebar.SetFocused(false)
-			a.chat.SetFocus(models.FocusInput)
-			return a, nil
+	// Handle left click - focus switching AND text selection
+	if msg.Button == tea.MouseButtonLeft {
+		// Check input area FIRST (it's rendered after viewport in the layout)
+		// This ensures clicking in input doesn't accidentally focus viewport
+		if a.currentView == ViewChat && pt.In(inputRect) {
+			// Set focus on press
+			if msg.Action == tea.MouseActionPress {
+				a.appFocus = FocusChat
+				a.sidebar.SetFocused(false)
+				a.chat.SetFocus(models.FocusInput)
+			}
+			// Forward to chat model for input selection handling
+			// Convert screen coordinates to input-relative coordinates
+			relY := msg.Y - a.inputBounds.Y
+			relX := msg.X - a.inputBounds.X
+			inputMsg := tea.MouseMsg{
+				X:      relX,
+				Y:      relY,
+				Button: msg.Button,
+				Action: msg.Action,
+				Ctrl:   msg.Ctrl,
+				Alt:    msg.Alt,
+				Shift:  msg.Shift,
+			}
+			return a, a.chat.HandleInputMouse(inputMsg)
+		}
+
+		// In viewport: forward ALL actions (press/motion/release) for text selection
+		if a.currentView == ViewChat && pt.In(viewportRect) {
+			// Set focus on press
+			if msg.Action == tea.MouseActionPress {
+				a.appFocus = FocusChat
+				a.sidebar.SetFocused(false)
+				a.chat.SetFocus(models.FocusViewport)
+			}
+			// Forward to chat model for selection handling
+			return a, a.chat.Update(msg)
+		}
+
+		// Handle press in sidebar for focus
+		if msg.Action == tea.MouseActionPress {
+			if pt.In(sidebarRect) && a.sidebar.IsVisible() {
+				a.appFocus = FocusSidebar
+				a.sidebar.SetFocused(true)
+				relX := msg.X - a.sidebarBounds.X
+				relY := msg.Y - a.sidebarBounds.Y
+				return a, a.sidebar.HandleClick(relX, relY)
+			}
 		}
 	}
 
 	return a, nil
 }
 
-// isInBounds checks if a point is within a rectangle.
-func (a *App) isInBounds(x, y int, r Rect) bool {
-	return x >= r.X && x < r.X+r.Width && y >= r.Y && y < r.Y+r.Height
+// rectToImageRect converts our Rect to image.Rectangle for hit testing.
+func (a *App) rectToImageRect(r Rect) image.Rectangle {
+	return image.Rect(r.X, r.Y, r.X+r.Width, r.Y+r.Height)
 }
 
 // stopCurrentWork stops the current session's work and prompts for child tasks.

@@ -15,6 +15,7 @@ type ClientConfig struct {
 	Session     SessionConfig     `json:"session"`
 	Vim         VimConfig         `json:"vim"`
 	Rendering   RenderingConfig   `json:"rendering"`
+	Input       InputConfig       `json:"input"`
 }
 
 // VimConfig defines vim mode settings.
@@ -36,6 +37,14 @@ type RenderingConfig struct {
 	ShowHeader         bool          `json:"show_header"`         // Show header bar with session info (default: true)
 	SidebarAnimation   bool          `json:"sidebar_animation"`   // Enable animated dispatch visualization in sidebar (default: true)
 	Sidebar            SidebarConfig `json:"sidebar"`             // Sidebar panel configuration
+}
+
+// InputConfig defines input textarea behavior settings.
+// Note: EnterBehavior and AutoExpand are deprecated and no longer used.
+// Enter always sends, Shift+Enter inserts newline, and input has fixed height.
+type InputConfig struct {
+	EnterBehavior string `json:"enter_behavior"` // Deprecated: Enter always sends, Shift+Enter inserts newline
+	AutoExpand    bool   `json:"auto_expand"`    // Deprecated: Input height is now fixed at 3 lines
 }
 
 // SidebarConfig defines sidebar panel settings.
@@ -114,6 +123,10 @@ func DefaultClientConfig() *ClientConfig {
 				MetricsHistory:   30,
 				ActivityFeedSize: 50,
 			},
+		},
+		Input: InputConfig{
+			EnterBehavior: "", // Empty = original behavior (Enter sends message)
+			AutoExpand:    false,
 		},
 	}
 }
