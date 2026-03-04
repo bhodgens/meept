@@ -58,6 +58,9 @@ type Store interface {
 	// UpdateDescription updates a session's description.
 	UpdateDescription(sessionID, description string) error
 
+	// UpdateName updates a session's name.
+	UpdateName(sessionID, name string) error
+
 	// HasResponses checks if a session has any assistant messages.
 	HasResponses(sessionID string) (bool, error)
 

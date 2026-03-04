@@ -476,6 +476,23 @@ func (s *SQLiteStore) UpdateDescription(sessionID, description string) error {
 	return nil
 }
 
+// UpdateName updates a session's name.
+func (s *SQLiteStore) UpdateName(sessionID, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec("UPDATE sessions SET name = ? WHERE id = ?", name, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to update name: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
 // HasResponses checks if a session has any assistant messages.
 func (s *SQLiteStore) HasResponses(sessionID string) (bool, error) {
 	s.mu.RLock()

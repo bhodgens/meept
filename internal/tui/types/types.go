@@ -171,6 +171,7 @@ type Session struct {
 // GenerateDescriptionResult is the result of LLM-based session description generation.
 type GenerateDescriptionResult struct {
 	SessionID   string `json:"session_id"`
+	Name        string `json:"name"`
 	Description string `json:"description"`
 	Status      string `json:"status"`
 }

@@ -306,6 +306,19 @@ func (s *MemoryStore) UpdateDescription(sessionID, description string) error {
 	return nil
 }
 
+// UpdateName updates a session's name.
+func (s *MemoryStore) UpdateName(sessionID, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.Name = name
+	return nil
+}
+
 // HasResponses checks if a session has any assistant messages.
 func (s *MemoryStore) HasResponses(sessionID string) (bool, error) {
 	s.mu.RLock()
@@ -640,7 +653,7 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		return nil, fmt.Errorf("session_id and first_message are required")
 	}
 
-	var description string
+	var name, description string
 	if h.summarizer != nil {
 		h.logger.Info("Using LLM-based summarization",
 			"session_id", params.SessionID,
@@ -649,7 +662,7 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		desc, err := h.summarizer.GenerateDescription(ctx, SummarizeRequest{
+		result, err := h.summarizer.GenerateDescription(ctx, SummarizeRequest{
 			FirstMessage: params.FirstMessage,
 			ProjectName:  params.ProjectName,
 		})
@@ -658,20 +671,38 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 				"error", err,
 				"session_id", params.SessionID,
 			)
-			description = extractSimple(params.FirstMessage)
+			fallback := extractSimpleResult(params.FirstMessage)
+			name = fallback.Name
+			description = fallback.Description
 		} else {
 			h.logger.Info("LLM summarization succeeded",
 				"session_id", params.SessionID,
-				"description", desc,
+				"name", result.Name,
+				"description", result.Description,
 			)
-			description = desc
+			name = result.Name
+			description = result.Description
 		}
 	} else {
 		h.logger.Warn("No summarizer available, using simple extraction",
 			"session_id", params.SessionID,
 		)
 		// Fallback to simple extraction
-		description = extractSimple(params.FirstMessage)
+		fallback := extractSimpleResult(params.FirstMessage)
+		name = fallback.Name
+		description = fallback.Description
+	}
+
+	// Save the generated name if different from default
+	if name != "" && name != "default" && name != "chat" {
+		if err := h.store.UpdateName(params.SessionID, name); err != nil {
+			h.logger.Error("Failed to save generated name",
+				"error", err,
+				"session_id", params.SessionID,
+				"name", name,
+			)
+			// Continue even if name update fails
+		}
 	}
 
 	// Save the generated description
@@ -684,13 +715,15 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		return nil, err
 	}
 
-	h.logger.Info("Session description generated and saved",
+	h.logger.Info("Session name and description generated and saved",
 		"session_id", params.SessionID,
+		"name", name,
 		"description", description,
 	)
 
 	return map[string]string{
 		"session_id":  params.SessionID,
+		"name":        name,
 		"description": description,
 		"status":      "generated",
 	}, nil

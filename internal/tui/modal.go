@@ -201,7 +201,7 @@ type SessionPickerModal struct {
 // NewSessionPickerModal creates a new session picker modal.
 func NewSessionPickerModal(styles *Styles, rpc *RPCClient, config *ClientConfig) *SessionPickerModal {
 	m := NewModal("sessions", styles)
-	m.width = 75
+	m.width = 90
 
 	return &SessionPickerModal{
 		Modal:        m,
@@ -237,6 +237,52 @@ type SessionListMsg struct {
 func (s *SessionPickerModal) SetSessions(sessions []types.Session) {
 	s.sessions = sessions
 	s.rebuildItems()
+}
+
+// SetCurrentSession sets the selected index to match the given session ID.
+func (s *SessionPickerModal) SetCurrentSession(sessionID string) {
+	for i, sess := range s.sessions {
+		if sess.ID == sessionID {
+			s.selected = i
+			return
+		}
+	}
+}
+
+// HandleMouse processes mouse events for the session picker.
+func (s *SessionPickerModal) HandleMouse(msg tea.MouseMsg, screenW, screenH int) tea.Cmd {
+	if !s.visible || s.inputMode || len(s.sessions) == 0 {
+		return nil
+	}
+
+	// Calculate modal dimensions and position (centered)
+	modalH := len(s.sessions) + 7 // sessions + header + footer
+	modalX := (screenW - s.width) / 2
+	modalY := (screenH - modalH) / 2
+
+	// Only handle left click release
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionRelease {
+		return nil
+	}
+
+	// Check if click is within modal horizontal bounds
+	if msg.X < modalX || msg.X >= modalX+s.width {
+		return nil
+	}
+
+	// Header is 3 lines (title + separator + empty), sessions start after
+	headerLines := 3
+	relY := msg.Y - modalY - headerLines
+
+	if relY >= 0 && relY < len(s.sessions) {
+		sess := s.sessions[relY]
+		s.Hide()
+		return func() tea.Msg {
+			return SessionSwitchMsg{Session: &sess}
+		}
+	}
+
+	return nil
 }
 
 func (s *SessionPickerModal) rebuildItems() {
@@ -343,9 +389,10 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 			}
 
 			// Show both name and description
-			// Name on the left (truncated), description on the right (truncated), time at far right
-			maxNameLen := 20
-			maxDescLen := s.width - maxNameLen - 15 // 15 for time + spacing
+			// Name on the left (truncated), description in middle (truncated), time at far right
+			maxNameLen := 16
+			timeColWidth := 18
+			maxDescLen := s.width - maxNameLen - timeColWidth - 8 // 8 for spacing/pointer
 
 			name := sess.Name
 			if len(name) > maxNameLen {
@@ -360,10 +407,10 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 				desc = desc[:maxDescLen-3] + "..."
 			}
 
-			// Format: pointer + name (fixed width) + description + time
+			// Format: pointer + name (fixed width) + description + time (right-aligned)
 			namePart := fmt.Sprintf("%-*s", maxNameLen, name)
 			descPart := s.styles.Muted.Render(fmt.Sprintf("%-*s", maxDescLen, desc))
-			timePart := s.styles.Muted.Render(lastActivity)
+			timePart := s.styles.Muted.Render(fmt.Sprintf("%*s", timeColWidth, lastActivity))
 
 			line := fmt.Sprintf("%s%s  %s  %s", pointer, namePart, descPart, timePart)
 			b.WriteString(style.Render(line))

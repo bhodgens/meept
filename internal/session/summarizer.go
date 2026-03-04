@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -33,9 +34,15 @@ type SummarizeRequest struct {
 	ProjectName  string // Optional project/cwd name for context
 }
 
-// GenerateDescription creates a concise session description from the first message.
-// Returns a description like "personal: toenail fungus" or "meept: debug job queue".
-func (s *Summarizer) GenerateDescription(ctx context.Context, req SummarizeRequest) (string, error) {
+// SummarizeResult contains both the session name and description.
+type SummarizeResult struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// GenerateDescription creates a concise session name and description from the first message.
+// Returns a SummarizeResult with name (single word) and description (category: brief description).
+func (s *Summarizer) GenerateDescription(ctx context.Context, req SummarizeRequest) (*SummarizeResult, error) {
 	s.logger.Info("Summarizer.GenerateDescription called",
 		"first_message_len", len(req.FirstMessage),
 		"project_name", req.ProjectName,
@@ -44,46 +51,40 @@ func (s *Summarizer) GenerateDescription(ctx context.Context, req SummarizeReque
 
 	if s.llmClient == nil {
 		s.logger.Warn("No LLM client available for summarization, using simple extraction")
-		// Fallback to simple extraction if no LLM available
-		return extractSimple(req.FirstMessage), nil
+		return extractSimpleResult(req.FirstMessage), nil
 	}
 
-	// Build the summarization prompt
-	systemPrompt := `You are a session summarizer. Generate a very brief description (3-8 words) of what this conversation is about.
+	systemPrompt := `You are a session summarizer. Generate a JSON object with:
+1. "name": A single lowercase word that captures the topic (like a folder name)
+2. "description": A brief 3-8 word description in "category: detail" format
 
-Format: "category: brief description"
-
-Categories to use:
-- "personal" - health, relationships, life questions, personal matters
-- "coding" - programming, debugging, code review, software development
-- "research" - learning, information gathering, explanations
+Categories for description:
+- "personal" - health, relationships, life questions
+- "coding" - programming, debugging, code review
+- "research" - learning, information gathering
 - "task" - todo lists, planning, organization
-- "creative" - writing, art, brainstorming, ideas
-- "system" - system administration, devops, infrastructure
+- "creative" - writing, art, brainstorming
+- "system" - system administration, devops
 - Use the project name if discussing a specific codebase
 
-Examples:
-- "personal: remedy for headaches"
-- "coding: fix null pointer in auth"
-- "myproject: add user authentication"
-- "research: kubernetes networking"
-- "task: plan vacation itinerary"
-- "creative: story ideas for scifi"
+Output ONLY valid JSON. Examples:
+{"name": "debugging", "description": "coding: fix null pointer in auth"}
+{"name": "weather", "description": "research: local forecast query"}
+{"name": "vacation", "description": "task: plan hawaii itinerary"}
+{"name": "headache", "description": "personal: remedy for migraines"}
 
-Be extremely concise. No punctuation at the end. All lowercase.`
+All lowercase. No punctuation at end of description.`
 
 	userPrompt := req.FirstMessage
 	if req.ProjectName != "" {
 		userPrompt = fmt.Sprintf("[Project: %s]\n\n%s", req.ProjectName, req.FirstMessage)
 	}
 
-	// Create minimal message for summarization
 	messages := []llm.ChatMessage{
 		{Role: llm.RoleSystem, Content: systemPrompt},
 		{Role: llm.RoleUser, Content: userPrompt},
 	}
 
-	// Use a short timeout for summarization
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -92,47 +93,75 @@ Be extremely concise. No punctuation at the end. All lowercase.`
 		"user_prompt_len", len(userPrompt),
 	)
 
-	// Request with minimal tokens
 	resp, err := s.llmClient.Chat(ctx, messages,
-		llm.WithMaxTokens(50),
+		llm.WithMaxTokens(100),
 		llm.WithTemperature(0.3),
 	)
 	if err != nil {
 		s.logger.Warn("LLM summarization request failed, using fallback", "error", err)
-		return extractSimple(req.FirstMessage), nil
+		return extractSimpleResult(req.FirstMessage), nil
 	}
 
-	s.logger.Debug("LLM summarization response received",
-		"raw_response", resp.Content,
-	)
+	s.logger.Debug("LLM summarization response received", "raw_response", resp.Content)
 
-	// Clean up the response
-	desc := strings.TrimSpace(resp.Content)
-	desc = strings.ToLower(desc)
-	desc = strings.TrimSuffix(desc, ".")
-
-	// Validate it's not too long
-	if len(desc) > 60 {
-		desc = desc[:60] + "..."
+	// Parse JSON response
+	content := strings.TrimSpace(resp.Content)
+	var result SummarizeResult
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		s.logger.Warn("Failed to parse JSON response, using fallback", "error", err, "content", content)
+		return extractSimpleResult(req.FirstMessage), nil
 	}
 
-	s.logger.Debug("Generated session description", "description", desc)
-	return desc, nil
+	// Clean up and validate
+	result.Name = strings.ToLower(strings.TrimSpace(result.Name))
+	result.Description = strings.ToLower(strings.TrimSpace(result.Description))
+	result.Description = strings.TrimSuffix(result.Description, ".")
+
+	// Ensure name is a single word
+	if words := strings.Fields(result.Name); len(words) > 1 {
+		result.Name = words[0]
+	}
+	if result.Name == "" {
+		result.Name = "chat"
+	}
+	if len(result.Description) > 60 {
+		result.Description = result.Description[:60] + "..."
+	}
+
+	s.logger.Debug("Generated session summary", "name", result.Name, "description", result.Description)
+	return &result, nil
 }
 
-// extractSimple extracts the first few words as a fallback.
-func extractSimple(text string) string {
+// extractSimpleResult extracts the first few words as a fallback.
+func extractSimpleResult(text string) *SummarizeResult {
 	words := strings.Fields(text)
+
+	// Name: first significant word
+	name := "chat"
+	if len(words) > 0 {
+		name = strings.ToLower(words[0])
+		// Skip common short words
+		if len(name) < 3 && len(words) > 1 {
+			name = strings.ToLower(words[1])
+		}
+	}
+
+	// Description: first few words
 	maxWords := 6
 	if len(words) < maxWords {
 		maxWords = len(words)
 	}
-	if maxWords == 0 {
-		return "new conversation"
+	desc := "new conversation"
+	if maxWords > 0 {
+		desc = strings.Join(words[:maxWords], " ")
+		if len(words) > maxWords {
+			desc += "..."
+		}
+		desc = strings.ToLower(desc)
 	}
-	desc := strings.Join(words[:maxWords], " ")
-	if len(words) > maxWords {
-		desc += "..."
+
+	return &SummarizeResult{
+		Name:        name,
+		Description: desc,
 	}
-	return strings.ToLower(desc)
 }
