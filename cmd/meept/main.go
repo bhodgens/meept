@@ -3,6 +3,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -15,15 +17,53 @@ var (
 	// Global flags
 	socketPath string
 	stateDir   string
-	debug      bool
+	debugFile  string // Empty = no debug, "-" = stderr, "filename" = file
 )
+
+// debugEnabled returns whether debug mode is active.
+func debugEnabled() bool {
+	return debugFile != ""
+}
 
 func main() {
 	homeDir, _ := os.UserHomeDir()
 	defaultStateDir := filepath.Join(homeDir, ".meept")
 	defaultSocket := filepath.Join(defaultStateDir, "meept.sock")
 
+	// We need to parse flags early to configure logging before command execution.
+	// Cobra's PersistentPreRunE runs after flag parsing but before the command.
+	var debugWriter io.WriteCloser
+
 	rootCmd := &cobra.Command{
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Configure logging based on debug flag
+			if debugFile == "" {
+				// No debug: discard all logs
+				slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			} else {
+				var output io.Writer
+				if debugFile == "-" {
+					output = os.Stderr
+				} else {
+					f, err := os.OpenFile(debugFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+					if err != nil {
+						return fmt.Errorf("failed to open debug file: %w", err)
+					}
+					debugWriter = f
+					output = f
+				}
+				slog.SetDefault(slog.New(slog.NewTextHandler(output, &slog.HandlerOptions{
+					Level: slog.LevelDebug,
+				})))
+			}
+			return nil
+		},
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			if debugWriter != nil {
+				return debugWriter.Close()
+			}
+			return nil
+		},
 		Use:   "meept [message]",
 		Short: "Meept AI assistant",
 		Long: `Meept is an AI assistant with multi-agent task orchestration, memory, and skill capabilities.
@@ -58,7 +98,7 @@ Memory & Skills:
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&socketPath, "socket", "s", defaultSocket, "Unix socket path")
 	rootCmd.PersistentFlags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
-	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Enable debug output")
+	rootCmd.PersistentFlags().StringVar(&debugFile, "debug", "", "Enable debug output (use '-' for stderr or specify a filename)")
 
 	// Add subcommands
 	rootCmd.AddCommand(newChatCmd())

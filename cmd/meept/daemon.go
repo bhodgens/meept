@@ -70,7 +70,7 @@ func newDaemonRestartCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := stopDaemon(); err != nil {
 				// Ignore stop errors - daemon might not be running
-				if debug {
+				if debugEnabled() {
 					fmt.Printf("Stop warning: %v\n", err)
 				}
 			}
@@ -112,7 +112,7 @@ func startDaemon(foreground bool) error {
 	if stateDir != "" {
 		daemonArgs = append(daemonArgs, "-d", stateDir)
 	}
-	if debug {
+	if debugEnabled() {
 		daemonArgs = append(daemonArgs, "--debug")
 	}
 
