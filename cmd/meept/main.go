@@ -98,7 +98,8 @@ Memory & Skills:
 	// Global flags
 	rootCmd.PersistentFlags().StringVarP(&socketPath, "socket", "s", defaultSocket, "Unix socket path")
 	rootCmd.PersistentFlags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
-	rootCmd.PersistentFlags().StringVar(&debugFile, "debug", "", "Enable debug output (use '-' for stderr or specify a filename)")
+	rootCmd.PersistentFlags().StringVar(&debugFile, "debug", "", "Enable debug output (--debug or --debug=file, use '-' for stderr)")
+	rootCmd.PersistentFlags().Lookup("debug").NoOptDefVal = "debug.log"
 
 	// Add subcommands
 	rootCmd.AddCommand(newChatCmd())
