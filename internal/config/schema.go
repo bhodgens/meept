@@ -625,6 +625,20 @@ func DefaultConfig() *Config {
 				IncludeExamples:     true,
 				MaxSuggestionLength: 500,
 			},
+			Review: ReviewConfig{
+				Enabled: true,
+				RequireReview: []string{"code", "refactor", "debug", "git"},
+				SkipReview:    []string{"chat", "report", "recall", "search"},
+				ReviewerMapping: map[string]string{
+					"coder":     "code-reviewer",
+					"debugger":  "debug-reviewer",
+					"planner":   "planner-reviewer",
+					"analyst":   "analyst-reviewer",
+					"committer": "code-reviewer",
+				},
+				MaxRevisionCycles: 3,
+				AutoApprovePatterns: []string{"*.md", "LICENSE"},
+			},
 		},
 		Security: SecurityConfig{
 			SanitizeInputs:              true,

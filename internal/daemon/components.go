@@ -61,6 +61,7 @@ type Components struct {
 	WorkerHandler   *worker.Handler
 	JobProcessor    worker.JobProcessor
 	Orchestrator    *agent.Orchestrator
+	ReviewManager   *agent.ReviewManager
 
 	// Memory
 	MemoryManager   *memory.Manager
