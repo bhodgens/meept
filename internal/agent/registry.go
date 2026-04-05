@@ -28,6 +28,7 @@ type AgentRegistry struct {
 	memvid    *memvid.Client
 	taskStore *task.Store
 	llm       *llm.Client
+	resolver  *llm.Resolver
 	bus       *bus.MessageBus
 	security  *security.PermissionChecker
 	tools     ToolRegistry
@@ -40,6 +41,7 @@ type RegistryConfig struct {
 	MemvidClient    *memvid.Client
 	TaskStore       *task.Store
 	LLMClient       *llm.Client
+	Resolver        *llm.Resolver
 	MessageBus      *bus.MessageBus
 	SecurityChecker *security.PermissionChecker
 	ToolRegistry    ToolRegistry
@@ -59,6 +61,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		memvid:    cfg.MemvidClient,
 		taskStore: cfg.TaskStore,
 		llm:       cfg.LLMClient,
+		resolver:  cfg.Resolver,
 		bus:       cfg.MessageBus,
 		security:  cfg.SecurityChecker,
 		tools:     cfg.ToolRegistry,
@@ -168,6 +171,15 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
 
 	if r.llm != nil {
 		opts = append(opts, WithLLMClient(r.llm))
+	}
+
+	if r.resolver != nil {
+		opts = append(opts, WithResolver(r.resolver))
+	}
+
+	// Pass the model from the spec (can be alias or direct ref)
+	if spec.Model != "" {
+		opts = append(opts, WithModelRef(spec.Model))
 	}
 
 	if r.bus != nil {

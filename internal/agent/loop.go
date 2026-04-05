@@ -292,6 +292,7 @@ type AgentLoop struct {
 	llm          llm.Chatter // Interface for LLM operations (Client or ProviderManager)
 	llmClient    *llm.Client // Concrete client for config access (may be nil if using ProviderManager)
 	resolver     *llm.Resolver // Model resolver for alias resolution
+	modelRef     string        // Model reference from agent spec (can be alias or direct ref)
 	executor     *Executor
 	registry     ToolRegistry
 	security     *security.PermissionChecker
@@ -413,6 +414,13 @@ func WithLLMChatter(chatter llm.Chatter) LoopOption {
 func WithResolver(resolver *llm.Resolver) LoopOption {
 	return func(l *AgentLoop) {
 		l.resolver = resolver
+	}
+}
+
+// WithModelRef sets the model reference (alias name or direct model ref) from the agent spec.
+func WithModelRef(modelRef string) LoopOption {
+	return func(l *AgentLoop) {
+		l.modelRef = modelRef
 	}
 }
 
@@ -861,11 +869,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		response, err := l.llm.Chat(ctx, messages, chatOpts...)
 		if err != nil {
+			// Record alias failure if LLM call fails
+			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+				l.resolver.RecordAliasFailure(l.modelRef, err)
+			}
 			l.logger.Error("LLM call failed",
 				"iteration", iteration,
 				"error", err,
 			)
 			return "", fmt.Errorf("LLM call failed: %w", err)
+		}
+
+		// Record alias success
+		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+			l.resolver.RecordAliasSuccess(l.modelRef)
 		}
 
 		// Track token usage

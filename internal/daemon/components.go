@@ -493,6 +493,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			MemvidClient:    c.MemvidClient,
 			TaskStore:       taskStore,
 			LLMClient:       c.LLMClient,
+			Resolver:        c.LLMResolver,
 			MessageBus:      msgBus,
 			SecurityChecker: c.SecurityChecker,
 			ToolRegistry:    toolAdapter,

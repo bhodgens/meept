@@ -52,7 +52,8 @@ type AgentSpec struct {
 	// Purpose is a description of what this agent does (used in system prompt).
 	Purpose string `json:"purpose"`
 	// Model can be an alias name (e.g., "coder"), a direct model reference (e.g., "zai/glm-4.7"),
-	// or empty to use the default. If it matches a known alias, alias resolution is used.
+	// or empty to use the default. If it matches a known alias, alias resolution with
+	// automatic failover and cooldown rotation is used.
 	Model string `json:"model,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
