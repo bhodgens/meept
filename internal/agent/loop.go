@@ -867,6 +867,24 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			})
 		}
 
+		// Resolve alias to get the current model and switch the LLM client
+		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef)
+			if err != nil {
+				l.logger.Warn("Alias resolution failed, using default",
+					"alias", l.modelRef,
+					"error", err,
+				)
+			} else if l.llmClient != nil {
+				// Switch the LLM client to the resolved model
+				l.llmClient.SwitchModel(modelConfig)
+				l.logger.Debug("Switched to alias model",
+					"alias", l.modelRef,
+					"model", modelConfig.ModelID,
+				)
+			}
+		}
+
 		response, err := l.llm.Chat(ctx, messages, chatOpts...)
 		if err != nil {
 			// Record alias failure if LLM call fails
