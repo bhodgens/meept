@@ -40,4 +40,6 @@ type Chatter interface {
 var (
 	_ Chatter = (*Client)(nil)
 	_ Chatter = (*ProviderManager)(nil)
+	_ Chatter = (*ModelBroker)(nil)
+	_ Chatter = (*ContextFirewall)(nil)
 )

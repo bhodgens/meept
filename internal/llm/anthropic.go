@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/caimlas/meept/internal/llm/metrics"
 )
 
 const (
@@ -34,10 +36,12 @@ var anthropicRetryableStatusCodes = map[int]bool{
 // AnthropicClient implements the Chatter interface for Anthropic's Messages API.
 // It provides native support for Anthropic-specific features including extended thinking.
 type AnthropicClient struct {
-	config     *ModelConfig
-	budget     *Budget
-	httpClient *http.Client
-	logger     *slog.Logger
+	config        *ModelConfig
+	budget        *Budget
+	httpClient    *http.Client
+	logger        *slog.Logger
+	metricsStore  *metrics.Store
+	timeoutCalc   *metrics.Calculator
 }
 
 // AnthropicClientOption is a functional option for configuring an AnthropicClient.
@@ -61,6 +65,20 @@ func WithAnthropicLogger(logger *slog.Logger) AnthropicClientOption {
 func WithAnthropicTimeout(timeout time.Duration) AnthropicClientOption {
 	return func(c *AnthropicClient) {
 		c.httpClient.Timeout = timeout
+	}
+}
+
+// WithAnthropicMetricsStore sets the metrics store for the client.
+func WithAnthropicMetricsStore(store *metrics.Store) AnthropicClientOption {
+	return func(c *AnthropicClient) {
+		c.metricsStore = store
+	}
+}
+
+// WithAnthropicTimeoutCalculator sets the adaptive timeout calculator for the client.
+func WithAnthropicTimeoutCalculator(calc *metrics.Calculator) AnthropicClientOption {
+	return func(c *AnthropicClient) {
+		c.timeoutCalc = calc
 	}
 }
 

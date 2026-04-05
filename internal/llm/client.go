@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/caimlas/meept/internal/llm/metrics"
 )
 
 const (
@@ -59,10 +61,12 @@ func (e *ClientError) Unwrap() error {
 
 // Client is an HTTP client for OpenAI-compatible chat completions endpoints.
 type Client struct {
-	config     *ModelConfig
-	budget     *Budget
-	httpClient *http.Client
-	logger     *slog.Logger
+	config        *ModelConfig
+	budget        *Budget
+	httpClient    *http.Client
+	logger        *slog.Logger
+	metricsStore  *metrics.Store
+	timeoutCalc   *metrics.Calculator
 }
 
 // ClientOption is a functional option for configuring a Client.
@@ -86,6 +90,20 @@ func WithLogger(logger *slog.Logger) ClientOption {
 func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *Client) {
 		c.httpClient.Timeout = timeout
+	}
+}
+
+// WithMetricsStore sets the metrics store for the client.
+func WithMetricsStore(store *metrics.Store) ClientOption {
+	return func(c *Client) {
+		c.metricsStore = store
+	}
+}
+
+// WithTimeoutCalculator sets the adaptive timeout calculator for the client.
+func WithTimeoutCalculator(calc *metrics.Calculator) ClientOption {
+	return func(c *Client) {
+		c.timeoutCalc = calc
 	}
 }
 
@@ -125,6 +143,16 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		if err := c.budget.WaitForRateLimit(ctx); err != nil {
 			return nil, err
 		}
+	}
+
+	// Compute adaptive timeout if available
+	if c.timeoutCalc != nil {
+		estimatedTokens := chatOpts.maxTokens
+		if estimatedTokens <= 0 {
+			estimatedTokens = 4096 // Safe default
+		}
+		timeout := c.timeoutCalc.Calculate(ctx, c.config.ProviderID, c.config.ModelID, estimatedTokens, defaultTimeout)
+		c.httpClient.Timeout = timeout
 	}
 
 	// Build request payload
@@ -365,7 +393,40 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
 	}
 
+	// Time the HTTP request
+	start := time.Now()
 	resp, err := c.httpClient.Do(req)
+	latencyMs := time.Since(start).Milliseconds()
+
+	// Record metrics if metrics store is configured
+	if c.metricsStore != nil && payload["max_tokens"] != nil {
+		errType := metrics.ErrorTypeNone
+		if err != nil {
+			errType = metrics.ClassifyError(err, 0)
+		} else if resp != nil {
+			errType = metrics.ClassifyError(nil, resp.StatusCode)
+		}
+		go func() {
+			record := metrics.RequestRecord{
+				Timestamp:  time.Now(),
+				ProviderID: c.config.ProviderID,
+				ModelID:    c.config.ModelID,
+				LatencyMs:  latencyMs,
+				HTTPStatus: 0,
+				ErrorType:  errType,
+				Success:    err == nil && (resp == nil || resp.StatusCode == http.StatusOK),
+			}
+			if resp != nil {
+				record.HTTPStatus = resp.StatusCode
+			}
+			// Estimate tokens (rough)
+			if maxTok, ok := payload["max_tokens"].(int); ok {
+				record.CompletionTokens = maxTok / 2 // Very rough estimate
+			}
+			_ = c.metricsStore.Record(context.Background(), record)
+		}()
+	}
+
 	if err != nil {
 		return nil, &ClientError{Message: "request failed", Cause: err}
 	}
@@ -412,7 +473,27 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		return nil, &ClientError{Message: "failed to parse response", Cause: err}
 	}
 
-	return c.parseResponse(&chatResp)
+	parsedResp, err := c.parseResponse(&chatResp)
+
+	// Update metrics with actual token counts if available
+	if c.metricsStore != nil && parsedResp != nil {
+		go func() {
+			record := metrics.RequestRecord{
+				Timestamp:        time.Now(),
+				ProviderID:       c.config.ProviderID,
+				ModelID:          c.config.ModelID,
+				PromptTokens:     chatResp.Usage.PromptTokens,
+				CompletionTokens: chatResp.Usage.CompletionTokens,
+				LatencyMs:        latencyMs,
+				HTTPStatus:       resp.StatusCode,
+				ErrorType:        metrics.ErrorTypeNone,
+				Success:          true,
+			}
+			_ = c.metricsStore.Record(context.Background(), record)
+		}()
+	}
+
+	return parsedResp, err
 }
 
 // parseResponse converts a raw ChatResponse to a Response.

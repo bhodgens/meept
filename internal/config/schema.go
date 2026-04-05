@@ -8,26 +8,26 @@ import (
 
 // Config is the root configuration structure loaded from meept.toml.
 type Config struct {
-	Daemon      DaemonConfig      `toml:"daemon"`
-	LLM         LLMConfig         `toml:"llm"`
-	Memory      MemoryConfig      `toml:"memory"`
-	Memvid      MemvidConfig      `toml:"memvid"`
-	MultiAgent  MultiAgentConfig  `toml:"multiagent"`
-	Agents      AgentsConfig      `toml:"agents"`
-	Agent       AgentConfig       `toml:"agent"`
-	Security    SecurityConfig    `toml:"security"`
-	Scheduler   SchedulerConfig   `toml:"scheduler"`
-	Queue       QueueConfig       `toml:"queue"`
-	Workers     WorkersConfig     `toml:"workers"`
-	Isolation   IsolationConfig   `toml:"isolation"`
-	Telegram    TelegramConfig    `toml:"telegram"`
-	Web         WebConfig         `toml:"web"`
-	MCP         MCPConfig         `toml:"mcp"`
-	Plugins     PluginsConfig     `toml:"plugins"`
-	Workspace   WorkspaceConfig   `toml:"workspace"`
-	Skills      SkillsConfig      `toml:"skills"`
-	ClawSkills  ClawSkillsConfig  `toml:"clawskills"`
-	SelfImprove SelfImproveConfig `toml:"selfimprove"`
+	Daemon            DaemonConfig            `toml:"daemon"`
+	LLM               LLMConfig               `toml:"llm"`
+	Memory            MemoryConfig            `toml:"memory"`
+	Memvid            MemvidConfig            `toml:"memvid"`
+	MultiAgent        MultiAgentConfig        `toml:"multiagent"`
+	Agents            AgentsConfig            `toml:"agents"`
+	Agent             AgentConfig             `toml:"agent"`
+	Security          SecurityConfig          `toml:"security"`
+	Scheduler         SchedulerConfig         `toml:"scheduler"`
+	Queue             QueueConfig             `toml:"queue"`
+	Workers           WorkersConfig           `toml:"workers"`
+	Isolation         IsolationConfig         `toml:"isolation"`
+	Telegram          TelegramConfig          `toml:"telegram"`
+	Web               WebConfig               `toml:"web"`
+	MCP               MCPConfig               `toml:"mcp"`
+	Plugins           PluginsConfig           `toml:"plugins"`
+	Workspace         WorkspaceConfig         `toml:"workspace"`
+	Skills            SkillsConfig            `toml:"skills"`
+	ClawSkills        ClawSkillsConfig        `toml:"clawskills"`
+	SelfImprove       SelfImproveConfig       `toml:"selfimprove"`
 	Orchestrator      OrchestratorConfig      `toml:"orchestrator"`
 	Shadow            ShadowConfig            `toml:"shadow"`
 	DistributedMemory DistributedMemoryConfig `toml:"distributed_memory"`
@@ -90,9 +90,50 @@ type DaemonConfig struct {
 	DataDir    string `toml:"data_dir"`
 }
 
-// LLMConfig holds LLM configuration including budget.
+// LLMConfig holds LLM configuration including budget, broker, and metrics.
 type LLMConfig struct {
-	Budget BudgetConfig `toml:"budget"`
+	Budget          BudgetConfig          `toml:"budget"`
+	Broker          LLMBrokerConfig       `toml:"broker"`
+	AdaptiveTimeout LLMAdaptiveTimeoutConfig `toml:"adaptive_timeout"`
+	ContextFirewall LLMContextFirewallConfig `toml:"context_firewall"`
+	Metrics         LLMMetricsConfig      `toml:"metrics"`
+}
+
+// LLMBrokerConfig configures the model broker.
+type LLMBrokerConfig struct {
+	MaxErrorRate    float64 `toml:"max_error_rate"`     // default 0.10
+	MaxP95LatencyMS float64 `toml:"max_p95_latency_ms"` // default 30000
+	FallbackEnabled bool    `toml:"fallback_enabled"`   // default true
+}
+
+// LLMAdaptiveTimeoutConfig configures adaptive timeout calculation.
+type LLMAdaptiveTimeoutConfig struct {
+	Enabled                bool    `toml:"enabled"`                    // default true
+	StddevMultiplier       float64 `toml:"stddev_multiplier"`          // default 3.0
+	StddevTokenRateTimeout bool    `toml:"stddev_token_rate_timeout"`  // default true
+	MinTimeoutSeconds      int     `toml:"min_timeout_seconds"`        // default 10
+	MaxTimeoutSeconds      int     `toml:"max_timeout_seconds"`        // default 300
+	WarmupRequests         int     `toml:"warmup_requests"`            // default 20
+	WindowHours            int     `toml:"window_hours"`               // default 24
+}
+
+// LLMContextFirewallConfig configures context budget management.
+type LLMContextFirewallConfig struct {
+	Enabled                    bool    `toml:"enabled"`                        // default true
+	SummarizeHistory           bool    `toml:"summarize_history"`              // default true
+	SmallModelContextThreshold int     `toml:"small_model_context_threshold"`  // default 32768
+	IterationBudgetRatio       float64 `toml:"iteration_budget_ratio"`         // default 0.30
+	ConversationBudgetRatio    float64 `toml:"conversation_budget_ratio"`      // default 0.50
+	ChunkLargeInputs           bool    `toml:"chunk_large_inputs"`             // default true
+	ChunkThresholdRatio        float64 `toml:"chunk_threshold_ratio"`          // default 0.25
+}
+
+// LLMMetricsConfig configures HTTP-level metrics collection.
+type LLMMetricsConfig struct {
+	Enabled             bool   `toml:"enabled"`                // default true
+	DBPath              string `toml:"db_path"`                // default "~/.meept/metrics.db"
+	RetentionDays       int    `toml:"retention_days"`         // default 7
+	StatsRefreshMinutes int    `toml:"stats_refresh_minutes"`  // default 5
 }
 
 // BudgetConfig holds token budget settings.
@@ -116,13 +157,13 @@ const (
 // MemoryConfig holds memory subsystem settings.
 type MemoryConfig struct {
 	// Backend specifies the storage backend: "memvid" (default) or "sqlite"
-	Backend                    MemoryBackend       `toml:"backend"`
-	DataDir                    string              `toml:"data_dir"`
-	ConsolidationIntervalHours int                 `toml:"consolidation_interval_hours"`
-	Episodic                   EpisodicConfig      `toml:"episodic"`
-	Task                       TaskMemoryConfig    `toml:"task"`
-	Personality                PersonalityConfig   `toml:"personality"`
-	Embeddings                 EmbeddingConfig     `toml:"embeddings"`
+	Backend                    MemoryBackend     `toml:"backend"`
+	DataDir                    string            `toml:"data_dir"`
+	ConsolidationIntervalHours int               `toml:"consolidation_interval_hours"`
+	Episodic                   EpisodicConfig    `toml:"episodic"`
+	Task                       TaskMemoryConfig  `toml:"task"`
+	Personality                PersonalityConfig `toml:"personality"`
+	Embeddings                 EmbeddingConfig   `toml:"embeddings"`
 }
 
 // EpisodicConfig holds episodic memory settings.
@@ -139,26 +180,26 @@ type TaskMemoryConfig struct {
 
 // PersonalityConfig holds personality memory settings.
 type PersonalityConfig struct {
-	Enabled                    bool `toml:"enabled"`
+	Enabled                     bool `toml:"enabled"`
 	UpdateIntervalConversations int  `toml:"update_interval_conversations"`
 }
 
 // EmbeddingConfig holds vector embedding settings for semantic memory search.
 type EmbeddingConfig struct {
-	Enabled  bool   `toml:"enabled"`
-	Provider string `toml:"provider"` // "openai" or "ollama"
-	APIKey   string `toml:"api_key"`
-	BaseURL  string `toml:"base_url"`
-	Model    string `toml:"model"`
-	Dimension int   `toml:"dimension"`
+	Enabled   bool   `toml:"enabled"`
+	Provider  string `toml:"provider"` // "openai" or "ollama"
+	APIKey    string `toml:"api_key"`
+	BaseURL   string `toml:"base_url"`
+	Model     string `toml:"model"`
+	Dimension int    `toml:"dimension"`
 }
 
 // MemvidConfig holds memvid service settings.
 type MemvidConfig struct {
-	Enabled   bool   `toml:"enabled"`
-	Endpoint  string `toml:"endpoint"`
-	DataDir   string `toml:"data_dir"`
-	Timeout   int    `toml:"timeout_seconds"`
+	Enabled  bool   `toml:"enabled"`
+	Endpoint string `toml:"endpoint"`
+	DataDir  string `toml:"data_dir"`
+	Timeout  int    `toml:"timeout_seconds"`
 }
 
 // DistributedMemoryConfig holds settings for 2-tier distributed memory sync.
@@ -227,6 +268,8 @@ type AgentConfig struct {
 	Cache CacheConfig `toml:"cache"`
 	// Errors holds error handling settings
 	Errors ErrorsConfig `toml:"errors"`
+	// Review holds code review settings
+	Review ReviewConfig `toml:"review"`
 }
 
 // ErrorsConfig holds error handling settings.
@@ -239,11 +282,28 @@ type ErrorsConfig struct {
 	MaxSuggestionLength int `toml:"max_suggestion_length"`
 }
 
+// ReviewConfig holds code review settings for the multi-agent system.
+type ReviewConfig struct {
+	// Enabled turns on automatic code review
+	Enabled bool `toml:"enabled"`
+	// RequireReview lists intent types that require review
+	RequireReview []string `toml:"require_review"`
+	// SkipReview lists intent types that skip review
+	SkipReview []string `toml:"skip_review"`
+	// ReviewerMapping maps agent IDs to reviewer agent IDs
+	ReviewerMapping map[string]string `toml:"reviewer_mapping"`
+	// MaxRevisionCycles is the maximum revision cycles before auto-approval
+	MaxRevisionCycles int `toml:"max_revision_cycles"`
+	// AutoApprovePatterns lists glob patterns that are auto-approved
+	AutoApprovePatterns []string `toml:"auto_approve_patterns"`
+}
+
 // MultiAgentConfig holds multi-agent orchestration settings.
 type MultiAgentConfig struct {
 	Enabled            bool   `toml:"enabled"`
 	DispatcherModel    string `toml:"dispatcher_model"`
 	DefaultModel       string `toml:"default_model"`
+	ClassifierModel    string `toml:"classifier_model"` // Model for intent classification (defaults to small_model)
 	MaxMemoryRefs      int    `toml:"max_memory_refs"`
 	ContextSearchLimit int    `toml:"context_search_limit"`
 }
@@ -375,15 +435,15 @@ type ClawSkillsConfig struct {
 
 // SelfImproveConfig holds self-improvement settings.
 type SelfImproveConfig struct {
-	Enabled              bool                  `toml:"enabled"`
-	DataDir              string                `toml:"data_dir"`
-	MaxIterationsPerCycle int                  `toml:"max_iterations_per_cycle"`
-	MaxFixesPerCycle     int                   `toml:"max_fixes_per_cycle"`
-	AutoRunIntervalHours int                   `toml:"auto_run_interval_hours"`
-	AIInfra              AIInfraConfig         `toml:"ai_infra"`
-	Sandbox              SandboxConfig         `toml:"sandbox"`
-	Safety               SafetyConfig          `toml:"safety"`
-	Detection            DetectionConfig       `toml:"detection"`
+	Enabled               bool            `toml:"enabled"`
+	DataDir               string          `toml:"data_dir"`
+	MaxIterationsPerCycle int             `toml:"max_iterations_per_cycle"`
+	MaxFixesPerCycle      int             `toml:"max_fixes_per_cycle"`
+	AutoRunIntervalHours  int             `toml:"auto_run_interval_hours"`
+	AIInfra               AIInfraConfig   `toml:"ai_infra"`
+	Sandbox               SandboxConfig   `toml:"sandbox"`
+	Safety                SafetyConfig    `toml:"safety"`
+	Detection             DetectionConfig `toml:"detection"`
 }
 
 // AIInfraConfig holds AI infrastructure settings for self-improvement.
@@ -409,27 +469,27 @@ type SandboxConfig struct {
 
 // SafetyConfig holds safety settings for self-improvement.
 type SafetyConfig struct {
-	RequireHumanApproval     bool     `toml:"require_human_approval"`
-	MaxFilesPerFix           int      `toml:"max_files_per_fix"`
-	MaxLinesChangedPerFix    int      `toml:"max_lines_changed_per_fix"`
-	BlockedPaths             []string `toml:"blocked_paths"`
-	AllowedRiskLevels        []string `toml:"allowed_risk_levels"`
-	BlockCriticalRisk        bool     `toml:"block_critical_risk"`
-	RequireTestsPass         bool     `toml:"require_tests_pass"`
-	MinConfidenceThreshold   float64  `toml:"min_confidence_threshold"`
+	RequireHumanApproval   bool     `toml:"require_human_approval"`
+	MaxFilesPerFix         int      `toml:"max_files_per_fix"`
+	MaxLinesChangedPerFix  int      `toml:"max_lines_changed_per_fix"`
+	BlockedPaths           []string `toml:"blocked_paths"`
+	AllowedRiskLevels      []string `toml:"allowed_risk_levels"`
+	BlockCriticalRisk      bool     `toml:"block_critical_risk"`
+	RequireTestsPass       bool     `toml:"require_tests_pass"`
+	MinConfidenceThreshold float64  `toml:"min_confidence_threshold"`
 }
 
 // DetectionConfig holds detection settings for self-improvement.
 type DetectionConfig struct {
-	ScanPytest        bool     `toml:"scan_pytest"`
-	ScanRuntimeLogs   bool     `toml:"scan_runtime_logs"`
-	ScanTypeCheck     bool     `toml:"scan_type_check"`
-	ScanLint          bool     `toml:"scan_lint"`
-	LogFile           string   `toml:"log_file"`
-	LogLookbackHours  int      `toml:"log_lookback_hours"`
-	PytestArgs        []string `toml:"pytest_args"`
-	MypyArgs          []string `toml:"mypy_args"`
-	RuffArgs          []string `toml:"ruff_args"`
+	ScanPytest       bool     `toml:"scan_pytest"`
+	ScanRuntimeLogs  bool     `toml:"scan_runtime_logs"`
+	ScanTypeCheck    bool     `toml:"scan_type_check"`
+	ScanLint         bool     `toml:"scan_lint"`
+	LogFile          string   `toml:"log_file"`
+	LogLookbackHours int      `toml:"log_lookback_hours"`
+	PytestArgs       []string `toml:"pytest_args"`
+	MypyArgs         []string `toml:"mypy_args"`
+	RuffArgs         []string `toml:"ruff_args"`
 }
 
 // OrchestratorConfig holds hierarchical orchestrator settings.
@@ -442,14 +502,14 @@ type OrchestratorConfig struct {
 
 // ShadowConfig holds shadow training settings.
 type ShadowConfig struct {
-	Enabled   bool                    `toml:"enabled"`
-	DataDir   string                  `toml:"data_dir"`
-	Shadowing ShadowShadowingConfig   `toml:"shadowing"`
-	Teacher   ShadowTeacherConfig     `toml:"teacher"`
-	Quality   ShadowQualityConfig     `toml:"quality"`
-	Examples  ShadowExamplesConfig    `toml:"examples"`
-	Export    ShadowExportConfig      `toml:"export"`
-	Adapters  ShadowAdaptersConfig    `toml:"adapters"`
+	Enabled   bool                  `toml:"enabled"`
+	DataDir   string                `toml:"data_dir"`
+	Shadowing ShadowShadowingConfig `toml:"shadowing"`
+	Teacher   ShadowTeacherConfig   `toml:"teacher"`
+	Quality   ShadowQualityConfig   `toml:"quality"`
+	Examples  ShadowExamplesConfig  `toml:"examples"`
+	Export    ShadowExportConfig    `toml:"export"`
+	Adapters  ShadowAdaptersConfig  `toml:"adapters"`
 }
 
 // ShadowShadowingConfig controls when and how responses are shadowed.
@@ -518,14 +578,14 @@ type ShadowExportConfig struct {
 
 // ShadowAdaptersConfig configures adapter management.
 type ShadowAdaptersConfig struct {
-	Enabled        bool               `toml:"enabled"`
-	OllamaEndpoint string             `toml:"ollama_endpoint"`
-	AutoTrain      bool               `toml:"auto_train"`
-	TrainThreshold int                `toml:"train_threshold"`
-	TrainSchedule  string             `toml:"train_schedule"`
-	AdapterDir     string             `toml:"adapter_dir"`
-	LoRA           ShadowLoRAConfig   `toml:"lora"`
-	DPO            ShadowDPOConfig    `toml:"dpo"`
+	Enabled        bool             `toml:"enabled"`
+	OllamaEndpoint string           `toml:"ollama_endpoint"`
+	AutoTrain      bool             `toml:"auto_train"`
+	TrainThreshold int              `toml:"train_threshold"`
+	TrainSchedule  string           `toml:"train_schedule"`
+	AdapterDir     string           `toml:"adapter_dir"`
+	LoRA           ShadowLoRAConfig `toml:"lora"`
+	DPO            ShadowDPOConfig  `toml:"dpo"`
 }
 
 // ShadowLoRAConfig configures LoRA training parameters.
@@ -564,6 +624,35 @@ func DefaultConfig() *Config {
 				RateLimitRPM:     30,
 				Aggressiveness:   0.5,
 			},
+			Broker: LLMBrokerConfig{
+				MaxErrorRate:    0.10,
+				MaxP95LatencyMS: 30000,
+				FallbackEnabled: true,
+			},
+			AdaptiveTimeout: LLMAdaptiveTimeoutConfig{
+				Enabled:                true,
+				StddevMultiplier:       3.0,
+				StddevTokenRateTimeout: true,
+				MinTimeoutSeconds:      10,
+				MaxTimeoutSeconds:      300,
+				WarmupRequests:         20,
+				WindowHours:            24,
+			},
+			ContextFirewall: LLMContextFirewallConfig{
+				Enabled:                    true,
+				SummarizeHistory:           true,
+				SmallModelContextThreshold: 32768,
+				IterationBudgetRatio:       0.30,
+				ConversationBudgetRatio:    0.50,
+				ChunkLargeInputs:           true,
+				ChunkThresholdRatio:        0.25,
+			},
+			Metrics: LLMMetricsConfig{
+				Enabled:             true,
+				DBPath:              "~/.meept/metrics.db",
+				RetentionDays:       7,
+				StatsRefreshMinutes: 5,
+			},
 		},
 		Memory: MemoryConfig{
 			Backend:                    MemoryBackendMemvid, // Default to memvid, fallback to sqlite
@@ -578,7 +667,7 @@ func DefaultConfig() *Config {
 				Domains: []string{"general", "code", "commands"},
 			},
 			Personality: PersonalityConfig{
-				Enabled:                    true,
+				Enabled:                     true,
 				UpdateIntervalConversations: 10,
 			},
 		},
@@ -592,6 +681,7 @@ func DefaultConfig() *Config {
 			Enabled:            true,
 			DispatcherModel:    "", // Use default
 			DefaultModel:       "",
+			ClassifierModel:    "", // Empty = use small_model
 			MaxMemoryRefs:      20,
 			ContextSearchLimit: 10,
 		},
@@ -606,10 +696,10 @@ func DefaultConfig() *Config {
 			ProgressEnabled:         true, // Enabled by default for TUI progress bars
 			ProgressIntervalSeconds: 30,
 			Cache: CacheConfig{
-				Enabled:           false, // Disabled by default
-				MaxEntries:        1000,
-				DefaultTTLSeconds: 300,   // 5 minutes
-				CleanupFreqSeconds: 60,   // 1 minute
+				Enabled:            false, // Disabled by default
+				MaxEntries:         1000,
+				DefaultTTLSeconds:  300, // 5 minutes
+				CleanupFreqSeconds: 60,  // 1 minute
 				EnabledTools: []string{
 					"file_read",
 					"list_directory",
@@ -626,7 +716,7 @@ func DefaultConfig() *Config {
 				MaxSuggestionLength: 500,
 			},
 			Review: ReviewConfig{
-				Enabled: true,
+				Enabled:       true,
 				RequireReview: []string{"code", "refactor", "debug", "git"},
 				SkipReview:    []string{"chat", "report", "recall", "search"},
 				ReviewerMapping: map[string]string{
@@ -636,7 +726,7 @@ func DefaultConfig() *Config {
 					"analyst":   "analyst-reviewer",
 					"committer": "code-reviewer",
 				},
-				MaxRevisionCycles: 3,
+				MaxRevisionCycles:   3,
 				AutoApprovePatterns: []string{"*.md", "LICENSE"},
 			},
 		},

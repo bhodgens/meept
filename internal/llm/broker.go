@@ -1,0 +1,312 @@
+package llm
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/caimlas/meept/internal/llm/metrics"
+)
+
+// ProviderStatus type is defined in provider_manager.go (reuse it)
+
+// BrokerConfig configures a ModelBroker.
+type BrokerConfig struct {
+	ProvidersConfig *ProvidersConfig
+	MaxErrorRate    float64 // default 0.10
+	MaxP95LatencyMS float64 // default 30000
+	FallbackEnabled bool    // default true
+	MetricsStore    *metrics.Store
+	TimeoutCalc     *metrics.Calculator
+	Budget          *Budget
+	Logger          *slog.Logger
+}
+
+// brokerEntry holds a Chatter and its health state.
+type brokerEntry struct {
+	model              *ModelConfig
+	chatter            Chatter
+	status             ProviderStatus
+	lastStatusCheckTime time.Time
+}
+
+// ModelBroker manages multiple LLM providers and routes requests with health awareness.
+type ModelBroker struct {
+	mu       sync.RWMutex
+	entries  map[string]*brokerEntry // keyed by "provider/model-id"
+	config   BrokerConfig
+	logger   *slog.Logger
+	fallback Chatter // fallback model if primary fails
+}
+
+// BrokerStatus provides a snapshot of broker health.
+type BrokerStatus struct {
+	Providers []ProviderStatusEntry
+}
+
+// ProviderStatusEntry describes the status of a single provider/model.
+type ProviderStatusEntry struct {
+	ProviderID     string
+	ModelID        string
+	Status         ProviderStatus
+	ErrorRate      float64
+	P95LatencyMs   float64
+	CurrentTimeout time.Duration
+	TotalRequests  int64
+}
+
+// NewModelBroker creates a new model broker.
+func NewModelBroker(cfg BrokerConfig) *ModelBroker {
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+
+	b := &ModelBroker{
+		entries: make(map[string]*brokerEntry),
+		config:  cfg,
+		logger:  cfg.Logger,
+	}
+
+	// Initialize all models from config
+	if cfg.ProvidersConfig != nil {
+		allModels := GetAllModels(cfg.ProvidersConfig)
+		for _, modelCfg := range allModels {
+			chatter := b.newChatterFor(modelCfg)
+			key := fmt.Sprintf("%s/%s", modelCfg.ProviderID, modelCfg.ModelID)
+			b.entries[key] = &brokerEntry{
+				model:  modelCfg,
+				chatter: chatter,
+				status: ProviderStatusHealthy,
+			}
+		}
+
+		// Set fallback to SmallModel if configured
+		if cfg.ProvidersConfig.SmallModel != "" {
+			fallbackModel := ResolveModelRef(cfg.ProvidersConfig.SmallModel, cfg.ProvidersConfig)
+			if fallbackModel != nil {
+				b.fallback = b.newChatterFor(fallbackModel)
+			}
+		}
+	}
+
+	b.logger.Debug("model broker initialized", "models", len(b.entries))
+	return b
+}
+
+// newChatterFor creates a Chatter for a ModelConfig.
+// Detects Anthropic vs OpenAI-compat and injects metrics/timeout options.
+func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
+	var chatter Chatter
+
+	// Detect Anthropic
+	if cfg.ProviderID == "anthropic" || strings.Contains(strings.ToLower(cfg.BaseURL), "anthropic") {
+		opts := []AnthropicClientOption{
+			WithAnthropicLogger(b.logger),
+		}
+		if b.config.Budget != nil {
+			opts = append(opts, WithAnthropicBudget(b.config.Budget))
+		}
+		chatter = NewAnthropicClient(cfg, opts...)
+	} else {
+		// OpenAI-compat
+		opts := []ClientOption{
+			WithLogger(b.logger),
+		}
+		if b.config.Budget != nil {
+			opts = append(opts, WithBudget(b.config.Budget))
+		}
+		chatter = NewClient(cfg, opts...)
+	}
+
+	// TODO: Inject metrics and timeout calculator options
+	// (deferred to Phase 6 when Client/AnthropicClient support these options)
+
+	return chatter
+}
+
+// Chat sends a request to the broker, which routes to a healthy provider.
+// If no healthy provider exists and fallback is enabled, uses the fallback model.
+func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	// Try to find a healthy provider
+	var healthyEntry *brokerEntry
+	for _, entry := range b.entries {
+		if entry.status == ProviderStatusHealthy {
+			healthyEntry = entry
+			break
+		}
+	}
+
+	// If no healthy provider and fallback enabled, use fallback
+	if healthyEntry == nil && b.config.FallbackEnabled && b.fallback != nil {
+		b.logger.Warn("using fallback model due to degraded providers")
+		return b.fallback.Chat(ctx, messages, opts...)
+	}
+
+	// If still no provider, return error
+	if healthyEntry == nil {
+		return nil, errors.New("no healthy providers available")
+	}
+
+	return healthyEntry.chatter.Chat(ctx, messages, opts...)
+}
+
+// ChatWithProgress sends a request with progress reporting.
+func (b *ModelBroker) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	// Try to find a healthy provider
+	var healthyEntry *brokerEntry
+	for _, entry := range b.entries {
+		if entry.status == ProviderStatusHealthy {
+			healthyEntry = entry
+			break
+		}
+	}
+
+	if healthyEntry == nil && b.config.FallbackEnabled && b.fallback != nil {
+		b.logger.Warn("using fallback model due to degraded providers")
+		return b.fallback.ChatWithProgress(ctx, messages, progress, opts...)
+	}
+
+	if healthyEntry == nil {
+		return nil, errors.New("no healthy providers available")
+	}
+
+	return healthyEntry.chatter.ChatWithProgress(ctx, messages, progress, opts...)
+}
+
+// ChatWithModel sends a request to a specific model, bypassing health checks.
+// modelRef is in the format "provider/model-id".
+func (b *ModelBroker) ChatWithModel(ctx context.Context, modelRef string, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
+	b.mu.RLock()
+	entry, ok := b.entries[modelRef]
+	b.mu.RUnlock()
+
+	if !ok || entry == nil {
+		return nil, fmt.Errorf("model not found: %s", modelRef)
+	}
+
+	return entry.chatter.Chat(ctx, messages, opts...)
+}
+
+// ChatWithModelProgress sends a request to a specific model with progress reporting.
+func (b *ModelBroker) ChatWithModelProgress(ctx context.Context, modelRef string, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
+	b.mu.RLock()
+	entry, ok := b.entries[modelRef]
+	b.mu.RUnlock()
+
+	if !ok || entry == nil {
+		return nil, fmt.Errorf("model not found: %s", modelRef)
+	}
+
+	return entry.chatter.ChatWithProgress(ctx, messages, progress, opts...)
+}
+
+// UpdateHealth re-evaluates provider health based on metrics.
+// Called periodically (e.g., every 30 seconds) by the daemon.
+func (b *ModelBroker) UpdateHealth(ctx context.Context) error {
+	if b.config.MetricsStore == nil {
+		return nil // Metrics not enabled
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	allStats, err := b.config.MetricsStore.GetAllStats(ctx, 24)
+	if err != nil {
+		b.logger.Debug("UpdateHealth: GetAllStats failed", "error", err)
+		return err
+	}
+
+	statsMap := make(map[string]*metrics.ProviderStats)
+	for _, s := range allStats {
+		key := fmt.Sprintf("%s/%s", s.ProviderID, s.ModelID)
+		statsMap[key] = s
+	}
+
+	now := time.Now()
+	for key, entry := range b.entries {
+		stats, ok := statsMap[key]
+		if !ok {
+			// No metrics yet; assume healthy
+			entry.status = ProviderStatusHealthy
+			entry.lastStatusCheckTime = now
+			continue
+		}
+
+		// Check thresholds
+		if stats.ErrorRate > b.config.MaxErrorRate || stats.P95LatencyMs > b.config.MaxP95LatencyMS {
+			if entry.status == ProviderStatusHealthy {
+				entry.status = ProviderStatusDegraded
+				b.logger.Warn("provider degraded",
+					"provider", key,
+					"error_rate", stats.ErrorRate,
+					"p95_latency_ms", stats.P95LatencyMs,
+				)
+			}
+		} else {
+			if entry.status != ProviderStatusHealthy {
+				entry.status = ProviderStatusHealthy
+				b.logger.Info("provider recovered", "provider", key)
+			}
+		}
+
+		entry.lastStatusCheckTime = now
+	}
+
+	return nil
+}
+
+// GetStatus returns a snapshot of broker health.
+func (b *ModelBroker) GetStatus() BrokerStatus {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	var entries []ProviderStatusEntry
+	for key, be := range b.entries {
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		// Get current timeout estimate if available
+		var timeout time.Duration
+		if b.config.TimeoutCalc != nil {
+			timeout = b.config.TimeoutCalc.Calculate(context.Background(), be.model.ProviderID, be.model.ModelID, 4096, 120*time.Second)
+		}
+
+		entry := ProviderStatusEntry{
+			ProviderID:     parts[0],
+			ModelID:        parts[1],
+			Status:         be.status,
+			CurrentTimeout: timeout,
+		}
+
+		// Populate metrics if available
+		if b.config.MetricsStore != nil {
+			stats, err := b.config.MetricsStore.GetStats(context.Background(), be.model.ProviderID, be.model.ModelID, 24)
+			if err == nil && stats != nil {
+				entry.ErrorRate = stats.ErrorRate
+				entry.P95LatencyMs = stats.P95LatencyMs
+				entry.TotalRequests = stats.RequestCount
+			}
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return BrokerStatus{
+		Providers: entries,
+	}
+}
+
+// Ensure ModelBroker implements Chatter
+var _ Chatter = (*ModelBroker)(nil)
