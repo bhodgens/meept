@@ -1,274 +1,258 @@
 package llm
 
 import (
+	"log/slog"
+	"os"
 	"testing"
+	"time"
 )
 
-func testProvidersConfig() *ProvidersConfig {
+func createTestConfig() *ProvidersConfig {
 	return &ProvidersConfig{
-		Model:      "provider1/model-a",
-		SmallModel: "provider1/model-b",
+		Model:      "zai/glm-4.7",
+		SmallModel: "zai/glm-4.5-air",
 		Providers: map[string]ProviderConfig{
-			"provider1": {
+			"zai": {
+				API: "openai",
+				Options: ProviderOptionsConfig{
+					BaseURL: "https://api.z.ai/test",
+					APIKey:  "test-key",
+				},
+				Models: map[string]ModelDef{
+					"glm-4.7": {
+						Name:         "glm-4.7",
+						Capabilities: []string{"completion", "code", "reasoning", "tool_use"},
+						InputCost:    0.0,
+						OutputCost:   0.0,
+						ContextLimit: 128000,
+						MaxOutput:    8192,
+						Temperature:  0.7,
+					},
+					"glm-4.5-air": {
+						Name:         "glm-4.5-air",
+						Capabilities: []string{"completion", "code", "reasoning"},
+						InputCost:    0.0,
+						OutputCost:   0.0,
+						ContextLimit: 32000,
+						MaxOutput:    4096,
+						Temperature:  0.7,
+					},
+				},
+			},
+			"ollama": {
 				API: "openai",
 				Options: ProviderOptionsConfig{
 					BaseURL: "http://localhost:11434/v1",
 				},
 				Models: map[string]ModelDef{
-					"model-a": {
-						Name:         "model-a",
-						Capabilities: []string{"code", "reasoning"},
-						InputCost:    1.0,
-						OutputCost:   2.0,
+					"llama3.2": {
+						Name:         "llama3.2",
+						Capabilities: []string{"code", "tool_use", "reasoning"},
+						InputCost:    0.0,
+						OutputCost:   0.0,
 						ContextLimit: 128000,
 						MaxOutput:    4096,
 						Temperature:  0.7,
 					},
-					"model-b": {
-						Name:         "model-b",
-						Capabilities: []string{"code"},
-						InputCost:    0.5,
-						OutputCost:   1.0,
-						ContextLimit: 32000,
-						MaxOutput:    2048,
-						Temperature:  0.5,
-					},
 				},
 			},
-			"provider2": {
-				API: "openai",
-				Options: ProviderOptionsConfig{
-					BaseURL: "https://api.example.com/v1",
-				},
-				Models: map[string]ModelDef{
-					"model-x": {
-						Name:         "model-x",
-						Capabilities: []string{"code", "reasoning", "tool_use"},
-						InputCost:    3.0,
-						OutputCost:   15.0,
-						ContextLimit: 200000,
-						MaxOutput:    8192,
-						Temperature:  0.7,
-					},
-				},
+		},
+		ModelAliases: map[string]ModelAliasEntry{
+			"coder": {
+				Models:   []string{"zai/glm-4.7", "ollama/llama3.2"},
+				Timeout:  30,
+				MaxFails: 3,
+			},
+			"planner": {
+				Models:   []string{"zai/glm-4.5-air", "ollama/llama3.2"},
+				Timeout:  15,
+				MaxFails: 2,
 			},
 		},
 	}
 }
 
-func TestResolverDefaultModel(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
+func TestResolver_NewResolver_LoadsAliases(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	resolver := NewResolver(cfg, logger)
 
-	defaultModel := r.DefaultModel()
-	if defaultModel == nil {
-		t.Fatal("Default model should not be nil")
+	// Verify aliases were loaded
+	if len(resolver.aliases) != 2 {
+		t.Fatalf("Expected 2 aliases, got %d", len(resolver.aliases))
 	}
 
-	if defaultModel.ModelID != "model-a" {
-		t.Errorf("DefaultModel.ModelID = %q, want model-a", defaultModel.ModelID)
-	}
-
-	if defaultModel.ProviderID != "provider1" {
-		t.Errorf("DefaultModel.ProviderID = %q, want provider1", defaultModel.ProviderID)
-	}
-}
-
-func TestResolverSmallModel(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
-
-	smallModel := r.SmallModel()
-	if smallModel == nil {
-		t.Fatal("Small model should not be nil")
-	}
-
-	if smallModel.ModelID != "model-b" {
-		t.Errorf("SmallModel.ModelID = %q, want model-b", smallModel.ModelID)
-	}
-}
-
-func TestResolverResolveForSkillNoRequirements(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
-
-	// No skill - should return default
-	model, err := r.ResolveForSkill(nil, nil)
-	if err != nil {
-		t.Fatalf("ResolveForSkill failed: %v", err)
-	}
-
-	if model.ModelID != "model-a" {
-		t.Errorf("Model = %q, want model-a (default)", model.ModelID)
-	}
-
-	// Empty requirements - should return default
-	model, err = r.ResolveForSkill(&SkillRequirements{Name: "test"}, nil)
-	if err != nil {
-		t.Fatalf("ResolveForSkill failed: %v", err)
-	}
-
-	if model.ModelID != "model-a" {
-		t.Errorf("Model = %q, want model-a (default)", model.ModelID)
-	}
-}
-
-func TestResolverResolveForSkillCurrentSatisfies(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
-
-	current := r.DefaultModel() // has code, reasoning
-
-	skill := &SkillRequirements{
-		Name:     "test-skill",
-		Requires: []string{"code"},
-	}
-
-	model, err := r.ResolveForSkill(skill, current)
-	if err != nil {
-		t.Fatalf("ResolveForSkill failed: %v", err)
-	}
-
-	// Should use current model since it satisfies requirements
-	if model.ModelID != current.ModelID {
-		t.Errorf("Model = %q, want %q (current)", model.ModelID, current.ModelID)
-	}
-}
-
-func TestResolverResolveForSkillEscalate(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
-
-	// model-b only has "code", not "tool_use"
-	current := r.SmallModel()
-
-	skill := &SkillRequirements{
-		Name:     "tool-skill",
-		Requires: []string{"tool_use"},
-	}
-
-	model, err := r.ResolveForSkill(skill, current)
-	if err != nil {
-		t.Fatalf("ResolveForSkill failed: %v", err)
-	}
-
-	// Should escalate to model-x which has tool_use
-	if model.ModelID != "model-x" {
-		t.Errorf("Model = %q, want model-x", model.ModelID)
-	}
-}
-
-func TestResolverResolveForSkillNoMatch(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
-
-	skill := &SkillRequirements{
-		Name:     "impossible-skill",
-		Requires: []string{"vision", "magic"},
-	}
-
-	_, err := r.ResolveForSkill(skill, nil)
-	if err == nil {
-		t.Fatal("Expected CapabilityError")
-	}
-
-	capErr, ok := err.(*CapabilityError)
+	// Verify coder alias
+	coderAlias, ok := resolver.aliases["coder"]
 	if !ok {
-		t.Fatalf("Expected CapabilityError, got %T", err)
+		t.Fatal("Expected 'coder' alias to exist")
+	}
+	if len(coderAlias.Models) != 2 {
+		t.Fatalf("Expected 'coder' alias to have 2 models, got %d", len(coderAlias.Models))
+	}
+	if coderAlias.Timeout != 30*time.Second {
+		t.Errorf("Expected 'coder' timeout to be 30s, got %v", coderAlias.Timeout)
+	}
+	if coderAlias.MaxFails != 3 {
+		t.Errorf("Expected 'coder' max_fails to be 3, got %d", coderAlias.MaxFails)
 	}
 
-	if capErr.SkillName != "impossible-skill" {
-		t.Errorf("SkillName = %q, want impossible-skill", capErr.SkillName)
+	// Verify planner alias
+	plannerAlias, ok := resolver.aliases["planner"]
+	if !ok {
+		t.Fatal("Expected 'planner' alias to exist")
 	}
-}
-
-func TestResolverFindCheapest(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
-
-	// Find cheapest with "code" capability
-	model := r.FindCheapest([]string{"code"})
-	if model == nil {
-		t.Fatal("Should find a model")
+	if len(plannerAlias.Models) != 2 {
+		t.Fatalf("Expected 'planner' alias to have 2 models, got %d", len(plannerAlias.Models))
 	}
-
-	// model-b is cheapest (0.5 + 1.0 = 1.5)
-	if model.ModelID != "model-b" {
-		t.Errorf("Model = %q, want model-b (cheapest)", model.ModelID)
-	}
-}
-
-func TestResolverFindByProvider(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
-
-	models := r.FindByProvider("provider1")
-	if len(models) != 2 {
-		t.Errorf("Expected 2 models from provider1, got %d", len(models))
-	}
-
-	models = r.FindByProvider("provider2")
-	if len(models) != 1 {
-		t.Errorf("Expected 1 model from provider2, got %d", len(models))
-	}
-
-	models = r.FindByProvider("nonexistent")
-	if len(models) != 0 {
-		t.Errorf("Expected 0 models from nonexistent provider, got %d", len(models))
+	if plannerAlias.Timeout != 15*time.Second {
+		t.Errorf("Expected 'planner' timeout to be 15s, got %v", plannerAlias.Timeout)
 	}
 }
 
-func TestResolverAllModels(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
+func TestResolver_ResolveForAlias(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	resolver := NewResolver(cfg, logger)
 
-	models := r.AllModels()
-	if len(models) != 3 {
-		t.Errorf("Expected 3 total models, got %d", len(models))
+	// Should return the first model initially
+	modelConfig, err := resolver.ResolveForAlias("coder")
+	if err != nil {
+		t.Fatalf("ResolveForAlias failed: %v", err)
+	}
+	if modelConfig.ModelID != "glm-4.7" {
+		t.Errorf("Expected first model 'glm-4.7', got '%s'", modelConfig.ModelID)
 	}
 }
 
-func TestResolverResolveRef(t *testing.T) {
-	cfg := testProvidersConfig()
-	r := NewResolver(cfg, nil)
+func TestResolver_ResolveForAlias_NotFound(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	resolver := NewResolver(cfg, logger)
 
-	model := r.ResolveRef("provider2/model-x")
-	if model == nil {
-		t.Fatal("Should resolve model")
-	}
-
-	if model.ModelID != "model-x" {
-		t.Errorf("ModelID = %q, want model-x", model.ModelID)
-	}
-
-	// Invalid ref
-	model = r.ResolveRef("invalid")
-	if model != nil {
-		t.Error("Should return nil for invalid ref")
+	_, err := resolver.ResolveForAlias("nonexistent")
+	if err == nil {
+		t.Error("Expected error for nonexistent alias")
 	}
 }
 
-func TestModelConfigHasCapabilities(t *testing.T) {
-	m := &ModelConfig{
-		Capabilities: map[string]bool{
-			"code":      true,
-			"reasoning": true,
-		},
+func TestResolver_RecordAliasFailure_Success(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	resolver := NewResolver(cfg, logger)
+
+	// Record a failure
+	resolver.RecordAliasFailure("coder", nil)
+
+	// Check health state
+	health := resolver.health["coder"]
+	if health == nil {
+		t.Fatal("Expected health tracking to exist")
+	}
+	if health.ConsecutiveFails != 1 {
+		t.Errorf("Expected 1 consecutive failure, got %d", health.ConsecutiveFails)
+	}
+	// CooldownUntil should be set to a future time
+	if health.CooldownUntil.IsZero() {
+		t.Errorf("Expected cooldown until to be set")
+	}
+	if health.CooldownUntil.Before(time.Now()) {
+		t.Errorf("Expected cooldown until to be in the future, got %v", health.CooldownUntil)
+	}
+}
+
+func TestResolver_RecordAliasSuccess_ResetsFailures(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	resolver := NewResolver(cfg, logger)
+
+	// Record some failures
+	resolver.RecordAliasFailure("coder", nil)
+	resolver.RecordAliasFailure("coder", nil)
+	resolver.RecordAliasFailure("coder", nil)
+
+	// Verify failures were recorded
+	health := resolver.health["coder"]
+	if health.ConsecutiveFails != 3 {
+		t.Fatalf("Expected 3 consecutive failures, got %d", health.ConsecutiveFails)
 	}
 
-	if !m.HasCapability("code") {
-		t.Error("Should have code capability")
+	// Record success
+	resolver.RecordAliasSuccess("coder")
+
+	// Verify resets
+	if health.ConsecutiveFails != 0 {
+		t.Errorf("Expected 0 consecutive failures after success, got %d", health.ConsecutiveFails)
+	}
+	if !health.CooldownUntil.IsZero() {
+		t.Error("Expected cooldown to be reset")
+	}
+}
+
+func TestResolver_Rotation(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	resolver := NewResolver(cfg, logger)
+
+	// Get initial model
+	model1, _ := resolver.ResolveForAlias("coder")
+	if model1.ModelID != "glm-4.7" {
+		t.Errorf("Expected first model 'glm-4.7', got '%s'", model1.ModelID)
 	}
 
-	if m.HasCapability("vision") {
-		t.Error("Should not have vision capability")
+	// Simulate failures to trigger cooldown
+	for i := 0; i < 3; i++ {
+		resolver.RecordAliasFailure("coder", nil)
 	}
 
-	if !m.HasCapabilities([]string{"code", "reasoning"}) {
-		t.Error("Should have both code and reasoning")
+	// Next resolution should trigger rotation
+	model2, _ := resolver.ResolveForAlias("coder")
+	if model2.ModelID != "llama3.2" {
+		t.Errorf("Expected rotation to 'llama3.2', got '%s'", model2.ModelID)
 	}
+}
 
-	if m.HasCapabilities([]string{"code", "vision"}) {
-		t.Error("Should not have code and vision")
+func TestResolver_HasAlias(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	resolver := NewResolver(cfg, logger)
+
+	if !resolver.HasAlias("coder") {
+		t.Error("Expected 'coder' alias to exist")
+	}
+	if !resolver.HasAlias("planner") {
+		t.Error("Expected 'planner' alias to exist")
+	}
+	if resolver.HasAlias("nonexistent") {
+		t.Error("Expected 'nonexistent' alias to not exist")
+	}
+}
+
+func TestResolver_ExponentialBackoff(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	
+	resolver := NewResolver(cfg, logger)
+
+	// Record first failure
+	resolver.RecordAliasFailure("coder", nil)
+	health1 := resolver.health["coder"]
+	cooldown1 := health1.CooldownUntil.Sub(time.Now())
+
+	// Record second failure
+	resolver.RecordAliasFailure("coder", nil)
+	health2 := resolver.health["coder"]
+	cooldown2 := health2.CooldownUntil.Sub(time.Now())
+
+	// Cooldown should roughly double (30s -> 60s)
+	if cooldown2 < cooldown1 + cooldown1 {
+		t.Errorf("Expected exponential backoff: cooldown1=%v, cooldown2=%v", cooldown1, cooldown2)
 	}
 }

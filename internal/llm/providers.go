@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/caimlas/meept/internal/pathutil"
 )
 
 // ProviderConfig represents a provider configuration from models.json5.
@@ -39,7 +41,15 @@ type ProvidersConfig struct {
 	Model             string                    `json:"model"`
 	SmallModel        string                    `json:"small_model"`
 	DisabledProviders []string                  `json:"disabled_providers"`
+	ModelAliases      map[string]ModelAliasEntry `json:"model_aliases"`
 	Providers         map[string]ProviderConfig `json:"providers"`
+}
+
+// ModelAliasEntry represents a model alias configuration.
+type ModelAliasEntry struct {
+	Models   []string `json:"models"`    // List of "provider/model-id" in priority order
+	Timeout  int      `json:"timeout"`   // Cooldown timeout in seconds after failure
+	MaxFails int      `json:"max_fails"` // Max consecutive failures before rotation
 }
 
 // envVarPattern matches ${VAR_NAME} or $VAR_NAME patterns.
@@ -47,7 +57,7 @@ var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)
 
 // LoadProvidersConfig loads providers configuration from a JSON5 file.
 func LoadProvidersConfig(path string) (*ProvidersConfig, error) {
-	path = expandTildePath(path)
+	path = pathutil.ExpandPath(path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -99,26 +109,6 @@ func expandEnvVars(s string) string {
 		}
 		return ""
 	})
-}
-
-// expandTildePath expands ~ to the home directory.
-func expandTildePath(path string) string {
-	if !strings.HasPrefix(path, "~") {
-		return path
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-
-	if path == "~" {
-		return homeDir
-	}
-	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(homeDir, path[2:])
-	}
-	return path
 }
 
 // stripJSON5Comments removes // and /* */ comments from JSON5 content.

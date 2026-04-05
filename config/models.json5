@@ -5,6 +5,28 @@
   // Fast/cheap model for classification, summarization
   "small_model": "zai/glm-4.5-air",
 
+  // Model for intent classification (defaults to small_model)
+  "classifier_model": "zai/glm-4.5-air",
+
+  // Model aliases with cooldown-based failover
+  "model_aliases": {
+    "coder": {
+      "models": ["zai/glm-4.7", "ollama/llama3.2"],
+      "timeout": 30,
+      "max_fails": 3
+    },
+    "planner": {
+      "models": ["zai/glm-4.5-air", "ollama/llama3.2"],
+      "timeout": 15,
+      "max_fails": 2
+    },
+    "analyst": {
+      "models": ["zai/glm-4.5-air", "ollama/qwen2.5-coder"],
+      "timeout": 20,
+      "max_fails": 3
+    }
+  },
+
   // Default timeout for all providers (in seconds, 50 minutes)
   "default_timeout": 3000,
 

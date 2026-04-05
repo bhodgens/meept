@@ -3,6 +3,7 @@ package llm
 
 import (
 	"encoding/json"
+	"time"
 )
 
 // Role represents the role of a message in a conversation.
@@ -133,6 +134,21 @@ func (m *ModelConfig) HasCapabilities(caps []string) bool {
 // TotalCost returns the total cost per million tokens (input + output).
 func (m *ModelConfig) TotalCost() float64 {
 	return m.CostPerMillionInput + m.CostPerMillionOutput
+}
+
+// AliasEntry holds the resolved models and configuration for an alias.
+type AliasEntry struct {
+	Models   []*ModelConfig // Ordered by priority (first = primary)
+	Timeout  time.Duration  // Base cooldown timeout after failure
+	MaxFails int            // Max consecutive failures before rotation
+}
+
+// AliasHealth tracks the health and rotation state of an alias.
+type AliasHealth struct {
+	CurrentIndex       int       // Which model in the rotation is currently active
+	ConsecutiveFails   int       // Number of consecutive failures on the current model
+	LastFailure        time.Time // When the last failure occurred
+	CooldownUntil      time.Time // Don't use the current model until this time
 }
 
 // ToolDefinition defines a tool/function for the LLM.

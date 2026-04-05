@@ -51,7 +51,8 @@ type AgentSpec struct {
 	Role AgentRole `json:"role"`
 	// Purpose is a description of what this agent does (used in system prompt).
 	Purpose string `json:"purpose"`
-	// Model is the LLM model to use (empty means use default).
+	// Model can be an alias name (e.g., "coder"), a direct model reference (e.g., "zai/glm-4.7"),
+	// or empty to use the default. If it matches a known alias, alias resolution is used.
 	Model string `json:"model,omitempty"`
 	// AdditionalTools are tools beyond the baseline that this agent has access to.
 	AdditionalTools []string `json:"additional_tools,omitempty"`
@@ -258,6 +259,149 @@ func SchedulerAgentSpec() *AgentSpec {
 	}
 }
 
+// CodeReviewerSpec returns the spec for the code reviewer agent.
+func CodeReviewerSpec() *AgentSpec {
+	return &AgentSpec{
+		ID:      "code-reviewer",
+		Name:    "Code Reviewer Agent",
+		Role:    RoleReviewer,
+		Purpose: `You are a code review specialist. Your role is to review code changes for:
+1. Correctness: Does the code accomplish what was intended?
+2. Style: Does the code follow best practices and idiomatic patterns?
+3. Security: Are there any security vulnerabilities or potential issues?
+4. Completeness: Is anything missing? Are error cases handled?
+
+When reviewing, provide specific, actionable feedback. If issues are minor, you may approve with notes.
+For serious issues, reject with clear explanation of what needs to be fixed.
+
+Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedback": "...", "issues": [...], "confidence": 0.0-1.0}`,
+		Model: "",
+		AdditionalTools: []string{
+			"file_read",
+			"memory_search",
+		},
+		Constraints: AgentConstraints{
+			MaxIterations:    3,
+			Timeout:          2 * time.Minute,
+			MaxTokensPerTurn: 2048,
+			MaxMemoryRefs:    10,
+		},
+	}
+}
+
+// TestReviewerSpec returns the spec for the test reviewer agent.
+func TestReviewerSpec() *AgentSpec {
+	return &AgentSpec{
+		ID:      "test-reviewer",
+		Name:    "Test Reviewer Agent",
+		Role:    RoleReviewer,
+		Purpose: `You are a test verification specialist. Your role is to verify that work is complete and correct by:
+1. Checking that the stated work was actually done
+2. Verifying outputs match expectations
+3. Running tests if appropriate
+4. Validating results
+
+You are pragmatic: if the work looks good and accomplishes the stated goal, approve it quickly.
+Don't be overly nitpicky - focus on actual problems that would prevent the work from being useful.
+
+Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedback": "...", "issues": [...], "confidence": 0.0-1.0}`,
+		Model: "",
+		AdditionalTools: []string{
+			"shell_execute",
+			"file_read",
+		},
+		Constraints: AgentConstraints{
+			MaxIterations:    5,
+			Timeout:          3 * time.Minute,
+			MaxTokensPerTurn: 2048,
+		},
+	}
+}
+
+// DebugReviewerSpec returns the spec for the debug reviewer agent.
+func DebugReviewerSpec() *AgentSpec {
+	return &AgentSpec{
+		ID:      "debug-reviewer",
+		Name:    "Debug Reviewer Agent",
+		Role:    RoleReviewer,
+		Purpose: `You are a debugging review specialist. Your role is to review debugging work for:
+1. Root cause analysis: Was the actual problem identified?
+2. Solution effectiveness: Will the fix actually resolve the issue?
+3. Side effects: Could the fix introduce new problems?
+4. Testing: Was the fix verified to work?
+
+Debugging work should be practical and focused. Approve if the approach is sound even if not perfect.
+
+Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedback": "...", "issues": [...], "confidence": 0.0-1.0}`,
+		Model: "",
+		AdditionalTools: []string{
+			"file_read",
+			"memory_search",
+		},
+		Constraints: AgentConstraints{
+			MaxIterations:    3,
+			Timeout:          2 * time.Minute,
+			MaxTokensPerTurn: 2048,
+		},
+	}
+}
+
+// AnalystReviewerSpec returns the spec for the analyst reviewer agent.
+func AnalystReviewerSpec() *AgentSpec {
+	return &AgentSpec{
+		ID:      "analyst-reviewer",
+		Name:    "Analyst Reviewer Agent",
+		Role:    RoleReviewer,
+		Purpose: `You are an analysis review specialist. Your role is to review analytical work for:
+1. Accuracy: Is the information correct and well-sourced?
+2. Completeness: Are all relevant aspects considered?
+3. Clarity: Is the analysis well-structured and understandable?
+4. Actionability: Does the analysis lead to clear conclusions or next steps?
+
+Analysis work should be thorough but not excessively verbose. Approve if the key insights are captured.
+
+Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedback": "...", "issues": [...], "confidence": 0.0-1.0}`,
+		Model: "",
+		AdditionalTools: []string{
+			"web_search",
+			"web_fetch",
+			"memory_search",
+		},
+		Constraints: AgentConstraints{
+			MaxIterations:    3,
+			Timeout:          2 * time.Minute,
+			MaxTokensPerTurn: 2048,
+		},
+	}
+}
+
+// PlannerReviewerSpec returns the spec for the planner reviewer agent.
+func PlannerReviewerSpec() *AgentSpec {
+	return &AgentSpec{
+		ID:      "planner-reviewer",
+		Name:    "Planner Reviewer Agent",
+		Role:    RoleReviewer,
+		Purpose: `You are a planning review specialist. Your role is to review execution plans for:
+1. Feasibility: Can the plan actually be executed as described?
+2. Completeness: Are all necessary steps included?
+3. Ordering: Are steps in a logical sequence with appropriate dependencies?
+4. Risk: Are there obvious risks or missing considerations?
+
+Plans should be actionable and clear. Minor gaps are acceptable if the overall direction is sound.
+
+Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedback": "...", "issues": [...], "confidence": 0.0-1.0}`,
+		Model: "",
+		AdditionalTools: []string{
+			"memory_search",
+		},
+		Constraints: AgentConstraints{
+			MaxIterations:    3,
+			Timeout:          2 * time.Minute,
+			MaxTokensPerTurn: 2048,
+		},
+	}
+}
+
 // DefaultSpecs returns all default agent specifications.
 func DefaultSpecs() []*AgentSpec {
 	return []*AgentSpec{
@@ -269,6 +413,11 @@ func DefaultSpecs() []*AgentSpec {
 		AnalystAgentSpec(),
 		CommitterAgentSpec(),
 		SchedulerAgentSpec(),
+		CodeReviewerSpec(),
+		TestReviewerSpec(),
+		DebugReviewerSpec(),
+		AnalystReviewerSpec(),
+		PlannerReviewerSpec(),
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"sync"
+	"time"
 )
 
 // CapabilityError is returned when no model satisfies a skill's requirements.
@@ -28,8 +30,13 @@ type Resolver struct {
 	defaultModel *ModelConfig
 	smallModel   *ModelConfig
 	allModels    []*ModelConfig
+	aliases      map[string]*AliasEntry
+	health       map[string]*AliasHealth
+	mu           sync.Mutex
 	logger       *slog.Logger
 }
+
+// NewResolver creates a new model resolver.
 
 // NewResolver creates a new model resolver.
 func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
@@ -40,6 +47,8 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	r := &Resolver{
 		config:    cfg,
 		allModels: GetAllModels(cfg),
+		aliases:   make(map[string]*AliasEntry),
+		health:    make(map[string]*AliasHealth),
 		logger:    logger,
 	}
 
@@ -51,8 +60,35 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 		r.smallModel = ResolveModelRef(cfg.SmallModel, cfg)
 	}
 
+	// Load model aliases
+	for aliasName, aliasEntry := range cfg.ModelAliases {
+		models := make([]*ModelConfig, 0, len(aliasEntry.Models))
+		for _, modelRef := range aliasEntry.Models {
+			mc := ResolveModelRef(modelRef, cfg)
+			if mc != nil {
+				models = append(models, mc)
+			}
+		}
+		if len(models) > 0 {
+			timeout := time.Duration(aliasEntry.Timeout) * time.Second
+			if timeout == 0 {
+				timeout = 30 * time.Second // Default timeout
+			}
+			maxFails := aliasEntry.MaxFails
+			if maxFails == 0 {
+				maxFails = 3 // Default max fails
+			}
+			r.aliases[aliasName] = &AliasEntry{
+				Models:   models,
+				Timeout:  timeout,
+				MaxFails: maxFails,
+			}
+		}
+	}
+
 	return r
 }
+
 
 // DefaultModel returns the default model configuration.
 func (r *Resolver) DefaultModel() *ModelConfig {
@@ -171,4 +207,97 @@ func (r *Resolver) FindByProvider(providerID string) []*ModelConfig {
 		}
 	}
 	return results
+}
+
+// ResolveForAlias resolves an alias to a specific model, handling rotation.
+// It returns the currently active model for the given alias.
+func (r *Resolver) ResolveForAlias(aliasName string) (*ModelConfig, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	alias, ok := r.aliases[aliasName]
+	if !ok {
+		return nil, fmt.Errorf("alias not found: %s", aliasName)
+	}
+
+	health := r.getOrCreateHealth(aliasName)
+
+	// Check if current model is in cooldown
+	now := time.Now()
+	if !health.CooldownUntil.IsZero() && now.Before(health.CooldownUntil) {
+		r.rotateToNext(aliasName, alias)
+		health = r.getOrCreateHealth(aliasName)
+	}
+
+	// Return the active model
+	if health.CurrentIndex < len(alias.Models) {
+		return alias.Models[health.CurrentIndex], nil
+	}
+
+	return nil, fmt.Errorf("all models in alias %q exhausted", aliasName)
+}
+
+// RecordAliasFailure records a failure for cooldown tracking.
+func (r *Resolver) RecordAliasFailure(aliasName string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	health := r.getOrCreateHealth(aliasName)
+	health.ConsecutiveFails++
+	health.LastFailure = time.Now()
+
+	// Calculate cooldown with exponential backoff: timeout * 2^(fails-1)
+	alias := r.aliases[aliasName]
+	backoffFactor := 1 << uint(health.ConsecutiveFails-1) // 2^(fails-1)
+	cooldownDuration := alias.Timeout * time.Duration(backoffFactor)
+	health.CooldownUntil = time.Now().Add(cooldownDuration)
+
+	r.logger.Warn("Recorded alias failure",
+		"alias", aliasName,
+		"consecutive_fails", health.ConsecutiveFails,
+		"cooldown_until", health.CooldownUntil.Format(time.RFC3339),
+		"error", err,
+	)
+}
+
+// RecordAliasSuccess records a success, resetting failure counter.
+func (r *Resolver) RecordAliasSuccess(aliasName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	health := r.getOrCreateHealth(aliasName)
+	health.ConsecutiveFails = 0
+	health.CooldownUntil = time.Time{} // Reset cooldown
+}
+
+// getOrCreateHealth returns the health tracking for an alias, creating it if needed.
+func (r *Resolver) getOrCreateHealth(aliasName string) *AliasHealth {
+	health, ok := r.health[aliasName]
+	if !ok {
+		health = &AliasHealth{
+			CurrentIndex:     0,
+			ConsecutiveFails: 0,
+		}
+		r.health[aliasName] = health
+	}
+	return health
+}
+
+func (r *Resolver) rotateToNext(aliasName string, alias *AliasEntry) {
+	health := r.health[aliasName]
+	health.CurrentIndex = (health.CurrentIndex + 1) % len(alias.Models)
+	health.ConsecutiveFails = 0
+	health.CooldownUntil = time.Time{} // Reset cooldown
+
+	r.logger.Info("Rotated to next model in alias",
+		"alias", aliasName,
+		"newModel", alias.Models[health.CurrentIndex].ModelID,
+		"newIndex", health.CurrentIndex,
+	)
+}
+
+// HasAlias checks if an alias exists.
+func (r *Resolver) HasAlias(aliasName string) bool {
+	_, ok := r.aliases[aliasName]
+	return ok
 }
