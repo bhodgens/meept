@@ -398,3 +398,30 @@ go test ./tests/... -v
 # Check task tracking:
 ./bin/meept status
 ```
+
+## Implementation Status
+
+**COMPLETED** on 2026-04-06 (100% of in-scope phases)
+
+### Phases 1–6 — ✅ Shipped
+- `internal/task/step.go` (StepStore, TaskStep, StepState, GetReadySteps, AreAllCompleted)
+- `internal/agent/strategic.go` (StrategicPlanner, `Plan`, JSON parse + single-step fallback, publishes `orchestrator.schedule` and `task.planned`)
+- `internal/agent/tactical.go` (TacticalScheduler, ScheduleReadySteps, OnJobCompleted dependency promotion, OnJobFailed, deterministic ToolHint→agent selectAgent)
+- `internal/agent/orchestrator.go` + bus subscriptions for `orchestrator.plan`, `orchestrator.schedule`, `queue.job.completed`, `queue.job.failed`
+- `internal/agent/handler.go` async branch + `publishPlanRequest`, `task.completed`/`task.failed` → chat response
+- `internal/agent/dispatcher.go` `ShouldDispatchAsync`
+- `internal/daemon/components.go` wires StepStore, StrategicPlanner, TacticalScheduler, Orchestrator
+
+### Phase 7 — ✅ Shipped
+- **Sidebar** (`internal/tui/sidebar.go`): per-task status lines with agent label + two-line compact progress bar (`sidebar.go:1184`); handles `task.planned`, `task.progress`, `task.completed`, `task.failed` (`sidebar.go:503`).
+- **Tasks dashboard** (`internal/tui/models/tasks.go`): Steps column in the tasks table (`tasks.go:445`); step detail modal renders per-step progress lines with `(blocked)` indicator (`tasks.go:963–982`); fetches via `ListTaskSteps`.
+- **Chat detachment** (`internal/tui/models/chat.go`): `ChatDetachedTaskMsg` + `ChatTaskResultMsg` styled boxes (`chat.go:333–341`, handlers at `chat.go:908`/`chat.go:921`).
+- **App routing** (`internal/tui/app.go:577`): on `task.completed` **and** `task.failed` injects `ChatTaskResultMsg` into chat with task_id/name/steps/result.
+- **RPC** (`internal/rpc/proxy.go:104`, `internal/task/registry.go:349,405`): `task.steps` method; TUI client `ListTaskSteps` at `internal/tui/rpc.go:623`.
+- **Types** (`internal/tui/types/types.go:343–379`): `TaskStepView`, `TaskExtended.Steps`, `TaskStepsResponse`.
+
+### Phase 8 — ✅ Shipped
+- `tests/orchestrator_test.go` covers the end-to-end plan → schedule → job-complete → task-complete flow.
+
+### Deferred (non-blocking)
+- **`task.step.progress` per-step live estimates**: the plan listed this as an optional enhancement ("Steps in `running` state show a progress estimate (from `agent.progress` events if available)"). Not currently published by any executor; agent progress is still visible via existing `agent.progress` topic. Tracked separately if/when sub-step reporting is added to the executor loop.
