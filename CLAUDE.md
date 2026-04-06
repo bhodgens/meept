@@ -82,6 +82,7 @@ User Input (CLI/Telegram/Web)
 | **Skills** | `internal/skills` (discovery, registry, parser, models) |
 | **Memory** | `internal/memory` (manager, episodic, task, consolidation) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp) |
+| **Code Intel** | `internal/code/ast` (tree-sitter parser + symbol extraction), `internal/code/lsp` (LSP client/manager), `internal/code/tools` (ast_* and lsp_* agent tools) |
 | **ClawSkills** | `internal/clawskills` (client, installer, security, index) |
 | **Self-Improve** | `internal/selfimprove` (controller, detector, analyzer, generator, validator, applier) |
 | **Scheduler** | `internal/scheduler` (scheduler, jobs) |

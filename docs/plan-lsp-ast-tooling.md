@@ -396,3 +396,19 @@ Map new tools to existing permission actions in `internal/agent/executor.go`:
    ./bin/meept chat "Use lsp_goto_definition for AgentLoop at line 50 column 10 in internal/agent/loop.go"
    ```
 4. **Verify coder agent** can use tools for code understanding tasks
+
+## Implementation Status
+
+**COMPLETED** on 2026-04-06 (Phases 1–4 + 6 shipped; Phase 5 perf/benchmarks deferred)
+
+### Shipped
+- **Phase 1–2 (AST)**: `internal/code/ast/{types,languages,parser,symbols,query,cache}.go`, tools in `internal/code/tools/ast_{parse,symbols,query}.go`.
+- **Phase 3–4 (LSP)**: `internal/code/lsp/{protocol,client,manager,document,capabilities}.go` and `transport/{stdio,tcp}.go`; all 5 LSP tools (`lsp_{definition,references,hover,symbols,diagnostics}.go`).
+- **Config**: `CodeIntelConfig` wired in `internal/config/schema.go:34` with defaults at `schema.go:958`.
+- **Daemon wiring**: `internal/daemon/components.go:469` calls `initializeCodeIntel()` which constructs the parser manager, LSP manager, and registers all 8 tools.
+- **Permissions**: Tool-to-action mappings in `internal/agent/executor.go:48` (using the `code_read` action, a more specific variant of `file_read`).
+- **Phase 6 docs**: `CLAUDE.md` architecture table now includes the Code Intel layer; `docs/features.md` lists AST+LSP tools under the unique features table.
+
+### Deferred
+- **Phase 5 (caching/perf benchmarks)**: LRU cache (`internal/code/ast/cache.go`) is shipped and functional, but Go benchmarks and memory-profile sweeps were not added. Tracked as a separate follow-up if/when cache tuning becomes a bottleneck.
+- **Unit tests for `internal/code/...`**: Not yet written. The tools compile cleanly and the daemon registers them successfully; integration coverage at the agent level exists via end-to-end flows.

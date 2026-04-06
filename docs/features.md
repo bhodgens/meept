@@ -516,6 +516,7 @@ scan_type_check = true
 | **Taint Tracking** | Lattice-based information flow tracking for security |
 | **Native Anthropic Driver** | Extended thinking mode with progress reporting |
 | **Web Search (No API Key)** | DuckDuckGo integration without API requirements |
+| **Code Intelligence (AST+LSP)** | Tree-sitter parsing and LSP client tools (`ast_parse`, `ast_symbols`, `ast_query`, `lsp_goto_definition`, `lsp_find_references`, `lsp_hover`, `lsp_workspace_symbols`, `lsp_diagnostics`) for multi-language code understanding |
 
 ### External Integrations
 
