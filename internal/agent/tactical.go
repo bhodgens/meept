@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
-	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -333,6 +331,46 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 		return nil // Not a step-backed job
 	}
 
+	// Check if this is a rate limit error
+	if ts.isRateLimitError(jobErr) {
+		// Get the job from queue
+		job, err := ts.queue.Get(ctx, jobID)
+		if err != nil {
+			ts.logger.Error("Failed to get job for retry", "job_id", jobID, "error", err)
+		} else if job != nil && job.CanRetry() {
+			// Retry with exponential backoff
+			ts.logger.Info("Rate limit error detected, retrying job with backoff",
+				"job_id", jobID,
+				"step_id", step.ID,
+				"retry_count", job.RetryCount+1,
+			)
+			if err := ts.queue.Retry(ctx, jobID); err != nil {
+				ts.logger.Error("Failed to retry job", "job_id", jobID, "error", err)
+			} else {
+				// Reset step state to scheduled for retry
+				if err := ts.stepStore.SetState(step.ID, task.StepScheduled); err != nil {
+					ts.logger.Error("Failed to reset step state for retry", "step_id", step.ID, "error", err)
+				}
+				// Clear error result since we're retrying
+				if err := ts.stepStore.SetResult(step.ID, ""); err != nil {
+					ts.logger.Error("Failed to clear step result for retry", "step_id", step.ID, "error", err)
+				}
+				// Publish retry event
+				ts.publishEvent("queue.job.retry", map[string]any{
+					"job_id": jobID,
+					"reason": "rate_limit",
+				})
+				return nil // Job has been requeued, don't mark as failed
+			}
+		} else {
+			ts.logger.Warn("Job cannot be retried due to rate limit",
+				"job_id", jobID,
+				"step_id", step.ID,
+				"can_retry", job != nil && job.CanRetry(),
+			)
+		}
+	}
+
 	// Mark step failed
 	if err := ts.stepStore.SetResult(step.ID, jobErr); err != nil {
 		ts.logger.Error("Failed to set step error result", "step_id", step.ID, "error", err)
@@ -444,4 +482,11 @@ func (ts *TacticalScheduler) publishEvent(topic string, data map[string]any) {
 	}
 
 	ts.bus.Publish(topic, msg)
+}
+
+// isRateLimitError checks if an error message indicates a rate limit error.
+func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
+	// Use the llm package helper if available
+	// First try to see if we can parse it as an LLM error
+	return llm.IsRateLimitErrorMessage(errMsg)
 }
