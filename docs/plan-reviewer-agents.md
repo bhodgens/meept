@@ -250,7 +250,7 @@ func (ts *TacticalScheduler) OnReviewCompleted(ctx context.Context, stepID strin
         ts.stepStore.PromoteReadySteps(step.TaskID)
 
     case ReviewRejected:
-        step.State = step.StepRejected
+        step.State = task.StepRejected
         ts.stepStore.SetResult(step.ID, result.Feedback)
         // Create revision job
         ts.createRevisionJob(step, result)
@@ -380,38 +380,38 @@ max_revision_cycles = 3
 auto_approve_patterns = ["*.md", "LICENSE", "*.txt"]
 
 [reviewers]
-code = "claude-3-5-sonnet"  # Use capable model for reviews
-test = "claude-3-haiku"      # Faster for test execution
+code = "claude-opus-4-6"     # Use most capable model for code review
+test = "claude-haiku-4-5"    # Faster/cheaper for test-result verification
 ```
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Core Review Infrastructure (Week 1)
+### Phase 1: Core Review Infrastructure
 1. Add step states (`StepReviewing`, `StepApproved`, `StepRejected`)
 2. Create `ReviewManager` with policy-based review decisions
 3. Add reviewer agent specs (`code-reviewer`, `test-reviewer`)
 4. Modify `TacticalScheduler.OnJobCompleted` to trigger review
 
-### Phase 2: Reviewer Agents (Week 2)
+### Phase 2: Reviewer Agents
 1. Implement reviewer system prompts
 2. Add reviewer-specific tools (minimal, focused)
 3. Implement review result parsing
 4. Add revision cycle logic
 
-### Phase 3: Task-Level Testing Phase (Week 2)
+### Phase 3: Task-Level Testing Phase
 1. Activate existing `StateTesting` task state
 2. Create final review step when task completes
 3. Add task completion criteria
 
-### Phase 4: TUI & Visibility (Week 3)
+### Phase 4: TUI & Visibility
 1. Add review state icons
 2. Show review feedback in step details
 3. Add revision count in task view
 4. Human override/escalation UI
 
-### Phase 5: Polish (Week 4)
+### Phase 5: Polish
 1. Configuration file support
 2. Per-project review policies
 3. Metrics (review pass rate, revision cycles)
@@ -447,3 +447,24 @@ test = "claude-3-haiku"      # Faster for test execution
 4. **Parallel reviews**: Should multiple reviewers review the same step (e.g., code + security)?
 
 5. **Review cache**: Should identical changes skip re-review (like `git blame` history)?
+
+---
+
+## Implementation Status
+
+**COMPLETED** on 2026-04-06 (Phases 1, 2, 4, 5 shipped; Phase 3 final-review phase deferred)
+
+### Shipped
+- **Step states**: `StepReviewing`, `StepApproved`, `StepRejected` in `internal/task/step.go:21`, plus `task.CreateRevision` (`internal/task/step.go:92`) with `RevisionCount` tracking.
+- **ReviewPolicy**: `internal/agent/review.go` — `NeedsReview`, `SelectReviewer`, `ShouldAutoApprove` (glob-based auto-approve), `ExceedsMaxRevisions`, `RequiresHumanIntervention`.
+- **ReviewManager**: `internal/agent/review_manager.go` — `ReviewStep`, `buildReviewPrompt`, `parseReviewResult`, `HandleReviewResult`, `publishReviewEvent`, and human-intervention fallback when `MaxRevisionCycles` is exceeded (`review_manager.go:95`).
+- **Reviewer specs** (5): `code-reviewer`, `test-reviewer`, `debug-reviewer`, `analyst-reviewer`, `planner-reviewer` in `internal/agent/spec.go`.
+- **Tactical integration**: `TacticalScheduler.OnJobCompleted` (`internal/agent/tactical.go:171`) triggers review synchronously when a policy is enabled, publishes `step.review_requested`, routes `ReviewApproved`/`ReviewRejected`/`ReviewNeedsInfo`, and schedules revision steps (`tactical.go:292`).
+- **TUI**: Review state icons (`reviewing`, `approved`, `rejected`) and styles wired in `internal/tui/models/tasks.go:1078+` across list view, detail modal, and progress coloring.
+- **Config**: `[review]` section in `config/meept.toml:227` with `enabled`, `require_review`, `skip_review`, `reviewer_mapping`, `max_revision_cycles`, and `auto_approve_patterns`.
+- **Human escalation**: When `RevisionCount > MaxRevisionCycles`, `ReviewStep` returns `ReviewNeedsInfo` with a "Human intervention required" feedback message (surfaces in the step result and TUI detail modal).
+
+### Deferred / Out of scope
+- **Phase 3 — Task-level `StateTesting` final-review step**: `StateTesting` constant exists (`internal/task/task.go:16`) and is accepted by `IsActive`, but no final-review step is currently auto-injected on task completion. This is a speculative enhancement; nothing in the current agent flows requires it, and adding it would couple review into task-completion semantics. Tracked as a follow-up.
+- **Revision count UI surface**: `TaskStep.RevisionCount` is persisted but not yet projected through `TaskStepView` to the Tasks dashboard. Small typed-struct plumbing follow-up.
+- **Metrics (pass rate / avg revision cycles)**: not yet emitted; the `review` bus events provide everything needed for an external scraper.
