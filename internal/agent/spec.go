@@ -156,7 +156,6 @@ func CoderAgentSpec() *AgentSpec {
 			"file_delete",
 			"list_directory",
 			"shell_execute",
-			// NOTE: exec_tool does not exist yet
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -174,7 +173,6 @@ func DebuggerAgentSpec() *AgentSpec {
 			"file_read",
 			"file_write",
 			"shell_execute",
-			// NOTE: exec_tool and run_tests do not exist yet
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -188,9 +186,9 @@ func PlannerAgentSpec() *AgentSpec {
 		Role:    RoleExecutor,
 		Purpose: "You are a planning specialist. You decompose complex tasks into smaller subtasks and create execution plans.",
 		Model:   "", // Use reasoning model if available
-		AdditionalTools: []string{
-			// NOTE: decompose_task and create_subtasks tools do not exist yet
-		},
+		// Planner relies on the base tool set (memory + task tools) from
+		// DefaultAgentTools; no additional tools required.
+		AdditionalTools: []string{},
 		Constraints: AgentConstraints{
 			MaxIterations:    5,
 			Timeout:          3 * time.Minute,
@@ -211,7 +209,6 @@ func AnalystAgentSpec() *AgentSpec {
 		AdditionalTools: []string{
 			"web_fetch",
 			"web_search",
-			// NOTE: summarize tool does not exist yet
 		},
 		Constraints: DefaultConstraints(),
 	}
@@ -226,8 +223,7 @@ func CommitterAgentSpec() *AgentSpec {
 		Purpose: "You are a git operations specialist. You handle commits, branches, and repository management.",
 		Model:   "", // Use cheap model
 		AdditionalTools: []string{
-			"shell_execute", // Use shell_execute for git commands
-			// NOTE: git_* tools do not exist yet
+			"shell_execute", // git operations are driven through shell_execute
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    5,

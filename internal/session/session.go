@@ -35,9 +35,9 @@ type MemoryStore struct {
 	logger   *slog.Logger
 }
 
-// NewStore creates a new in-memory session store.
-// Deprecated: Use NewSQLiteStore for persistent sessions.
-func NewStore(logger *slog.Logger) *MemoryStore {
+// NewMemoryStore creates a new in-memory session store.
+// For persistent sessions, use NewSQLiteStore instead.
+func NewMemoryStore(logger *slog.Logger) *MemoryStore {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -46,11 +46,6 @@ func NewStore(logger *slog.Logger) *MemoryStore {
 		messages: make(map[string][]Message),
 		logger:   logger,
 	}
-}
-
-// NewMemoryStore creates a new in-memory session store.
-func NewMemoryStore(logger *slog.Logger) *MemoryStore {
-	return NewStore(logger)
 }
 
 // Create creates a new session.

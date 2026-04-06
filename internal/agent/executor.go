@@ -71,7 +71,10 @@ type Tool interface {
 }
 
 // ToolRegistry provides access to available tools.
-// This is a placeholder interface that will be implemented in Phase 8.
+// Production implementation lives in internal/tools/registry.go; the
+// executor depends on this narrower interface so that unit tests can
+// substitute NewPlaceholderToolRegistry without dragging in the full
+// tool registry graph.
 type ToolRegistry interface {
 	// Get retrieves a tool by name.
 	Get(name string) Tool

@@ -40,3 +40,6 @@ menubar/node_modules/
 # Go
 bin/
 *.exe
+
+.claude
+docs/.claude/
