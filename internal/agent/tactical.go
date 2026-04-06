@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
@@ -22,22 +25,24 @@ type StepJobPayload struct {
 
 // TacticalScheduler schedules ready steps as queue jobs and handles completion callbacks.
 type TacticalScheduler struct {
-	stepStore *task.StepStore
-	taskStore *task.Store
-	queue     queue.Queue
-	registry  *AgentRegistry
-	bus       *bus.MessageBus
-	logger    *slog.Logger
+	stepStore     *task.StepStore
+	taskStore     *task.Store
+	queue         queue.Queue
+	registry      *AgentRegistry
+	bus           *bus.MessageBus
+	reviewManager *ReviewManager
+	logger        *slog.Logger
 }
 
 // TacticalSchedulerConfig holds configuration for the tactical scheduler.
 type TacticalSchedulerConfig struct {
-	StepStore *task.StepStore
-	TaskStore *task.Store
-	Queue     queue.Queue
-	Registry  *AgentRegistry
-	Bus       *bus.MessageBus
-	Logger    *slog.Logger
+	StepStore     *task.StepStore
+	TaskStore     *task.Store
+	Queue         queue.Queue
+	Registry      *AgentRegistry
+	Bus           *bus.MessageBus
+	ReviewManager *ReviewManager
+	Logger        *slog.Logger
 }
 
 // NewTacticalScheduler creates a new tactical scheduler.
@@ -47,12 +52,13 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 	}
 
 	return &TacticalScheduler{
-		stepStore: cfg.StepStore,
-		taskStore: cfg.TaskStore,
-		queue:     cfg.Queue,
-		registry:  cfg.Registry,
-		bus:       cfg.Bus,
-		logger:    cfg.Logger,
+		stepStore:     cfg.StepStore,
+		taskStore:     cfg.TaskStore,
+		queue:         cfg.Queue,
+		registry:      cfg.Registry,
+		bus:           cfg.Bus,
+		reviewManager: cfg.ReviewManager,
+		logger:        cfg.Logger,
 	}
 }
 
@@ -154,7 +160,7 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		return nil // Not a step-backed job, ignore
 	}
 
-	// Mark step completed
+	// Store the result
 	resultStr := ""
 	if result != nil {
 		resultStr = string(result)
@@ -162,8 +168,39 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	if err := ts.stepStore.SetResult(step.ID, resultStr); err != nil {
 		ts.logger.Error("Failed to set step result", "step_id", step.ID, "error", err)
 	}
-	if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
-		ts.logger.Error("Failed to set step state to completed", "step_id", step.ID, "error", err)
+
+	// Check if review is needed
+	if ts.reviewManager != nil && ts.reviewManager.GetPolicy().Enabled {
+		// Trigger review process
+		ts.logger.Debug("Triggering review for step", "step_id", step.ID)
+
+		// Publish review request event
+		ts.publishEvent("step.review_requested", map[string]any{
+			"step_id":   step.ID,
+			"task_id":   step.TaskID,
+			"tool_hint": step.ToolHint,
+			"agent_id":  step.AgentID,
+		})
+
+		// Perform review (synchronously for now)
+		reviewResult, err := ts.reviewManager.ReviewStep(ctx, step)
+		if err != nil {
+			ts.logger.Error("Review failed", "step_id", step.ID, "error", err)
+			// Continue without review - mark as completed
+			if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
+				ts.logger.Error("Failed to set step to completed after review failure", "error", err)
+			}
+		} else {
+			// Handle review result
+			if err := ts.handleReviewResult(ctx, step, reviewResult); err != nil {
+				ts.logger.Error("Failed to handle review result", "error", err)
+			}
+		}
+	} else {
+		// No review manager or review disabled - mark completed directly
+		if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
+			ts.logger.Error("Failed to set step state to completed", "step_id", step.ID, "error", err)
+		}
 	}
 
 	// Update parent task's completed jobs counter
@@ -177,22 +214,25 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		ts.logger.Error("Failed to update task after job completion", "error", err)
 	}
 
-	// Check for newly unblocked steps
-	promoted, err := ts.stepStore.PromoteReadySteps(step.TaskID)
-	if err != nil {
-		ts.logger.Error("Failed to promote ready steps", "error", err)
-	} else if len(promoted) > 0 {
-		ts.logger.Info("Promoted newly unblocked steps",
-			"task_id", step.TaskID,
-			"count", len(promoted),
-		)
-		// Schedule the newly unblocked steps
-		if err := ts.ScheduleReadySteps(ctx, step.TaskID); err != nil {
-			ts.logger.Error("Failed to schedule unblocked steps", "error", err)
+	// Check for newly unblocked steps (only if step was approved/completed)
+	step, _ = ts.stepStore.GetByID(step.ID) // Refresh step state
+	if step.State == task.StepCompleted || step.State == task.StepApproved {
+		promoted, err := ts.stepStore.PromoteReadySteps(step.TaskID)
+		if err != nil {
+			ts.logger.Error("Failed to promote ready steps", "error", err)
+		} else if len(promoted) > 0 {
+			ts.logger.Info("Promoted newly unblocked steps",
+				"task_id", step.TaskID,
+				"count", len(promoted),
+			)
+			// Schedule the newly unblocked steps
+			if err := ts.ScheduleReadySteps(ctx, step.TaskID); err != nil {
+				ts.logger.Error("Failed to schedule unblocked steps", "error", err)
+			}
 		}
 	}
 
-	// Check if all steps are completed
+	// Check if all steps are completed/approved
 	allDone, err := ts.stepStore.AreAllCompleted(step.TaskID)
 	if err != nil {
 		ts.logger.Error("Failed to check task completion", "error", err)
@@ -225,6 +265,58 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"completed_jobs": t.CompletedJobs,
 			"total_jobs":     t.TotalJobs,
 		})
+	}
+
+	return nil
+}
+
+// handleReviewResult processes a review result and updates step state accordingly.
+func (ts *TacticalScheduler) handleReviewResult(ctx context.Context, step *task.TaskStep, result *ReviewResult) error {
+	switch result.Status {
+	case ReviewApproved:
+		// Mark as approved (terminal state)
+		if err := ts.stepStore.SetState(step.ID, task.StepApproved); err != nil {
+			return fmt.Errorf("failed to set approved state: %w", err)
+		}
+		ts.logger.Info("Step approved", "step_id", step.ID, "feedback", result.Feedback)
+
+	case ReviewRejected:
+		// Mark as rejected and create revision
+		if err := ts.stepStore.SetState(step.ID, task.StepRejected); err != nil {
+			return fmt.Errorf("failed to set rejected state: %w", err)
+		}
+		if err := ts.stepStore.SetResult(step.ID, result.Feedback); err != nil {
+			ts.logger.Error("Failed to set rejection feedback", "error", err)
+		}
+		ts.logger.Info("Step rejected, creating revision", "step_id", step.ID, "issues", result.Issues)
+
+		// Create revision step
+		revision := task.CreateRevision(step, result.Feedback)
+		if err := ts.stepStore.Create(revision); err != nil {
+			ts.logger.Error("Failed to create revision step", "error", err)
+		} else {
+			ts.logger.Info("Created revision step",
+				"revision_id", revision.ID,
+				"original_id", step.ID,
+			)
+			// Schedule the revision
+			if err := ts.scheduleStep(ctx, revision); err != nil {
+				ts.logger.Error("Failed to schedule revision step", "error", err)
+			}
+		}
+
+	case ReviewNeedsInfo:
+		// Keep in reviewing state, update with feedback
+		if err := ts.stepStore.SetResult(step.ID, result.Feedback); err != nil {
+			ts.logger.Error("Failed to set needs_info feedback", "error", err)
+		}
+		ts.logger.Info("Step needs more info", "step_id", step.ID)
+
+		// Mark as completed to allow task to proceed
+		// (human can intervene if needed)
+		if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
+			ts.logger.Error("Failed to set step to completed", "error", err)
+		}
 	}
 
 	return nil

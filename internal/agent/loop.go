@@ -885,24 +885,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 		}
 
-		response, err := l.llm.Chat(ctx, messages, chatOpts...)
+		response, err := l.chatWithFailover(ctx, messages, chatOpts...)
 		if err != nil {
-			// Record alias failure if LLM call fails
-			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-				l.resolver.RecordAliasFailure(l.modelRef, err)
-			}
 			l.logger.Error("LLM call failed",
 				"iteration", iteration,
 				"error", err,
 			)
 			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
-
-		// Record alias success
-		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
-			l.resolver.RecordAliasSuccess(l.modelRef)
-		}
-
 		// Track token usage
 		totalTokens += response.Usage.TotalTokens
 
@@ -1029,6 +1019,134 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	exhaustMsg := "I've reached the maximum number of reasoning steps for this turn. " +
 		"Here is what I have so far -- please let me know if you'd like me to continue."
 	return exhaustMsg, ErrMaxIterationsReached
+}
+
+// chatWithFailover wraps LLM Chat calls with model rotation and backoff for rate limit handling.
+// When a rate limit error occurs:
+// 1. If there are more models in the alias, rotate to the next model and retry immediately.
+// 2. If all models exhausted or only one model, apply exponential backoff and retry same model.
+// 3. After max attempts, return the error.
+func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	const maxAttempts = 5
+	const maxBackoff = 30 * time.Second
+	baseBackoff := 2 * time.Second
+
+	attempt := 0
+	currentBackoff := baseBackoff
+
+	for {
+		attempt++
+
+		// Resolve model for this attempt
+		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+			modelConfig, err := l.resolver.ResolveForAlias(l.modelRef)
+			if err != nil {
+				l.logger.Warn("Alias resolution failed",
+					"alias", l.modelRef,
+					"attempt", attempt,
+					"error", err,
+				)
+				// If all models in alias exhausted, apply backoff
+				if attempt < maxAttempts {
+					l.logger.Info("Waiting before retry due to exhausted alias",
+						"backoff", currentBackoff,
+						"attempt", attempt,
+					)
+					select {
+					case <-time.After(currentBackoff):
+						currentBackoff = time.Duration(float64(currentBackoff) * 2)
+						if currentBackoff > maxBackoff {
+							currentBackoff = maxBackoff
+						}
+						continue
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				}
+				return nil, err
+			}
+			if l.llmClient != nil {
+				l.llmClient.SwitchModel(modelConfig)
+			}
+		}
+
+		// Make the LLM call
+		response, err := l.llm.Chat(ctx, messages, opts...)
+		if err == nil {
+			// Success - record it and return
+			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+				l.resolver.RecordAliasSuccess(l.modelRef)
+			}
+			return response, nil
+		}
+
+		// Check if it's a rate limit error
+		var rateLimitErr *llm.RateLimitError
+		if errors.As(err, &rateLimitErr) {
+			l.logger.Warn("Rate limit hit, handling with backoff",
+				"provider", rateLimitErr.ProviderID,
+				"model", rateLimitErr.ModelID,
+				"retry_after", rateLimitErr.RetryAfter,
+				"attempt", attempt,
+			)
+
+			// Record failure for this alias
+			if l.modelRef != "" && l.resolver != nil {
+				l.resolver.RecordAliasFailure(l.modelRef, err)
+			}
+
+			// Check if we can rotate to another model
+			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+				// Try to rotate to next model
+				_, rotateErr := l.resolver.RotateToNextModel(l.modelRef)
+				if rotateErr == nil {
+					l.logger.Info("Rotated to next model after rate limit",
+						"alias", l.modelRef,
+						"attempt", attempt,
+					)
+					// Retry immediately with the new model
+					continue
+				}
+				l.logger.Warn("Failed to rotate model, applying backoff",
+					"error", rotateErr,
+				)
+			}
+
+			// No more models to rotate to, apply backoff
+			if attempt >= maxAttempts {
+				return nil, fmt.Errorf("max retry attempts (%d) reached for rate limit: %w", maxAttempts, err)
+			}
+
+			// Use Retry-After header if available, otherwise use computed backoff
+			waitTime := currentBackoff
+			if rateLimitErr.RetryAfter > 0 && rateLimitErr.RetryAfter < maxBackoff {
+				waitTime = rateLimitErr.RetryAfter
+			}
+
+			l.logger.Info("Waiting before retry due to rate limit",
+				"backoff", waitTime,
+				"attempt", attempt,
+			)
+
+			select {
+			case <-time.After(waitTime):
+				// Increase backoff for next attempt
+				currentBackoff = time.Duration(float64(currentBackoff) * 2)
+				if currentBackoff > maxBackoff {
+					currentBackoff = maxBackoff
+				}
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		// Non-rate-limit error - return immediately
+		if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+			l.resolver.RecordAliasFailure(l.modelRef, err)
+		}
+		return nil, err
+	}
 }
 
 // HandleMessage processes a single message without conversation context.

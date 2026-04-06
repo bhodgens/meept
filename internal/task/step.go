@@ -16,6 +16,9 @@ const (
 	StepReady     StepState = "ready"
 	StepScheduled StepState = "scheduled"
 	StepRunning   StepState = "running"
+	StepReviewing StepState = "reviewing"
+	StepApproved  StepState = "approved"
+	StepRejected  StepState = "rejected"
 	StepCompleted StepState = "completed"
 	StepFailed    StepState = "failed"
 	StepSkipped   StepState = "skipped"
@@ -26,24 +29,26 @@ func (s StepState) String() string {
 }
 
 // IsTerminal returns true if the step is in a terminal state.
+// Approved steps are also terminal - they're ready to be treated as completed.
 func (s StepState) IsTerminal() bool {
-	return s == StepCompleted || s == StepFailed || s == StepSkipped
+	return s == StepCompleted || s == StepApproved || s == StepFailed || s == StepSkipped
 }
 
 // TaskStep represents a single step within a task's execution plan.
 type TaskStep struct {
-	ID          string    `json:"id"`
-	TaskID      string    `json:"task_id"`
-	Description string    `json:"description"`
-	DependsOn   []string  `json:"depends_on,omitempty"`
-	ToolHint    string    `json:"tool_hint,omitempty"`
-	AgentID     string    `json:"agent_id,omitempty"`
-	JobID       string    `json:"job_id,omitempty"`
-	State       StepState `json:"state"`
-	Result      string    `json:"result,omitempty"`
-	Sequence    int       `json:"sequence"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	TaskID        string    `json:"task_id"`
+	Description   string    `json:"description"`
+	DependsOn     []string  `json:"depends_on,omitempty"`
+	ToolHint      string    `json:"tool_hint,omitempty"`
+	AgentID       string    `json:"agent_id,omitempty"`
+	JobID         string    `json:"job_id,omitempty"`
+	State         StepState `json:"state"`
+	Result        string    `json:"result,omitempty"`
+	Sequence      int       `json:"sequence"`
+	RevisionCount int       `json:"revision_count"` // Number of revision cycles
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // NewTaskStep creates a new task step.
@@ -76,6 +81,34 @@ func (s *TaskStep) WithToolHint(hint string) *TaskStep {
 func (s *TaskStep) WithAgentID(agentID string) *TaskStep {
 	s.AgentID = agentID
 	return s
+}
+
+// IncrementRevision increments the revision count.
+func (s *TaskStep) IncrementRevision() {
+	s.RevisionCount++
+}
+
+// CreateRevision creates a new revision step based on this step.
+func CreateRevision(original *TaskStep, feedback string) *TaskStep {
+	now := time.Now().UTC()
+	revision := &TaskStep{
+		ID:            fmt.Sprintf("step-%s-rev-%d-%d", original.TaskID, original.Sequence+1000+original.RevisionCount, now.UnixNano()),
+		TaskID:        original.TaskID,
+		Description:   fmt.Sprintf("[REVISION] %s\n\nFeedback: %s", original.Description, feedback),
+		ToolHint:      original.ToolHint,
+		State:         StepPending,
+		Sequence:      original.Sequence + 1000 + original.RevisionCount,
+		RevisionCount: original.RevisionCount + 1,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	// The revision depends on the original step
+	if original.DependsOn == nil {
+		revision.DependsOn = []string{original.ID}
+	} else {
+		revision.DependsOn = append(original.DependsOn, original.ID)
+	}
+	return revision
 }
 
 // StepStore provides SQLite persistence for task steps.

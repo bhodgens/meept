@@ -718,7 +718,7 @@ func (m *Manager) Close() error {
 }
 
 // WrapLLMClient wraps an LLM client with shadow middleware.
-func (m *Manager) WrapLLMClient(client LLMChatter) *Middleware {
+func (m *Manager) WrapLLMClient(client ChatterWithConfig) *Middleware {
 	if !m.IsEnabled() {
 		return nil
 	}

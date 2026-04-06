@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/caimlas/meept/internal/pathutil"
 )
 
 // DiscoveryTier represents a directory tier for skill discovery.
@@ -112,7 +114,7 @@ func (d *Discovery) Discover() ([]*Skill, error) {
 
 // scanTier scans a single tier directory for skills.
 func (d *Discovery) scanTier(tier DiscoveryTier) error {
-	path := expandPath(tier.Path)
+	path := pathutil.ExpandPath(tier.Path)
 
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -210,29 +212,6 @@ func isSkillFile(name string) bool {
 // normalizeName normalizes a skill name for case-insensitive comparison.
 func normalizeName(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
-}
-
-// expandPath expands ~ to home directory and resolves the path.
-func expandPath(path string) string {
-	if strings.HasPrefix(path, "~") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return path
-		}
-		if path == "~" {
-			return homeDir
-		}
-		if strings.HasPrefix(path, "~/") {
-			return filepath.Join(homeDir, path[2:])
-		}
-	}
-
-	// Try to make absolute
-	if absPath, err := filepath.Abs(path); err == nil {
-		return absPath
-	}
-
-	return path
 }
 
 // GetSkill returns a skill by name from the last discovery.

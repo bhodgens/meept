@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/skills"
@@ -46,14 +47,16 @@ type DispatchResult struct {
 
 // Dispatcher handles intake classification and routing of requests.
 type Dispatcher struct {
-	registry      *AgentRegistry
-	memvid        *memvid.Client
-	memoryMgr     *memory.Manager
-	taskStore     *task.Store
-	skillRegistry *skills.Registry
-	skillExecutor *skills.Executor
-	logger        *slog.Logger
-	classifiers   []IntentClassifier
+	registry          *AgentRegistry
+	memvid            *memvid.Client
+	memoryMgr         *memory.Manager
+	taskStore         *task.Store
+	skillRegistry     *skills.Registry
+	skillExecutor     *skills.Executor
+	logger            *slog.Logger
+	classifiers       []IntentClassifier
+	llmClassifier     *LLMClassifier
+	keywordClassifier *KeywordClassifier
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -63,13 +66,15 @@ type IntentClassifier interface {
 
 // DispatcherConfig holds configuration for creating a Dispatcher.
 type DispatcherConfig struct {
-	Registry      *AgentRegistry
-	MemvidClient  *memvid.Client
-	MemoryMgr     *memory.Manager
-	TaskStore     *task.Store
-	SkillRegistry *skills.Registry
-	SkillExecutor *skills.Executor
-	Logger        *slog.Logger
+	Registry        *AgentRegistry
+	MemvidClient    *memvid.Client
+	MemoryMgr       *memory.Manager
+	TaskStore       *task.Store
+	SkillRegistry   *skills.Registry
+	SkillExecutor   *skills.Executor
+	Logger          *slog.Logger
+	LLMClient       *llm.Client
+	ClassifierModel string
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -88,8 +93,19 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		logger:        cfg.Logger,
 	}
 
-	// Add default keyword-based classifier
-	d.classifiers = append(d.classifiers, &KeywordClassifier{})
+	// Add keyword-based classifier
+	d.keywordClassifier = &KeywordClassifier{}
+	d.classifiers = append(d.classifiers, d.keywordClassifier)
+
+	// Add LLM-based classifier if client is provided
+	if cfg.LLMClient != nil {
+		d.llmClassifier = NewLLMClassifier(LLMClassifierConfig{
+			Client: cfg.LLMClient,
+			Model:  cfg.ClassifierModel,
+			Logger: cfg.Logger,
+		})
+		d.classifiers = append(d.classifiers, d.llmClassifier)
+	}
 
 	return d
 }
@@ -193,35 +209,52 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 	return result, nil
 }
 
-// classifyIntent uses classifiers to determine intent.
+// classifyIntent uses classifiers to determine intent with fallback chain:
+// 1. Try LLM classifier (if available)
+// 2. If LLM fails OR confidence < threshold → try Keyword classifier
+// 3. If Keyword fails → return Chat fallback
 func (d *Dispatcher) classifyIntent(ctx context.Context, input string, context []memory.MemoryResult) (*Intent, error) {
-	var bestIntent *Intent
-	var bestConfidence float64
-
-	for _, classifier := range d.classifiers {
-		intent, err := classifier.Classify(ctx, input, context)
-		if err != nil {
-			d.logger.Warn("Classifier failed", "error", err)
-			continue
-		}
-
-		if intent != nil && intent.Confidence > bestConfidence {
-			bestIntent = intent
-			bestConfidence = intent.Confidence
+	// Step 1: Try LLM classifier if available
+	if d.llmClassifier != nil {
+		intent, err := d.llmClassifier.Classify(ctx, input, context)
+		if err == nil && intent != nil {
+			if ShouldUseLLMResult(intent) {
+				d.logger.Debug("LLM classifier succeeded",
+					"intent", intent.Type,
+					"confidence", intent.Confidence,
+				)
+				return intent, nil
+			}
+			d.logger.Debug("LLM classifier result below threshold",
+				"intent", intent.Type,
+				"confidence", intent.Confidence,
+				"threshold", GetThresholdForIntent(intent.Type),
+			)
+		} else if err != nil {
+			d.logger.Warn("LLM classifier failed, trying keyword", "error", err)
 		}
 	}
 
-	if bestIntent == nil {
-		// Default fallback
-		return &Intent{
-			Type:       "chat",
-			Confidence: 0.5,
-			AgentType:  "chat",
-			Summary:    "General conversation",
-		}, nil
+	// Step 2: Try Keyword classifier
+	if d.keywordClassifier != nil {
+		intent, err := d.keywordClassifier.Classify(ctx, input, context)
+		if err == nil && intent != nil {
+			d.logger.Debug("Keyword classifier succeeded",
+				"intent", intent.Type,
+				"confidence", intent.Confidence,
+			)
+			return intent, nil
+		}
+		d.logger.Warn("Keyword classifier failed", "error", err)
 	}
 
-	return bestIntent, nil
+	// Step 3: Fallback to Chat for clarification
+	return &Intent{
+		Type:       "chat",
+		Confidence: 0.3,
+		AgentType:  "chat",
+		Summary:    "Could not determine intent, clarifying with user",
+	}, nil
 }
 
 // extractMemoryRefs extracts memory IDs from search results.
@@ -380,7 +413,10 @@ func (c *KeywordClassifier) Classify(ctx context.Context, input string, context 
 		planning   bool
 	}{
 		// Platform introspection (highest priority - matches first)
-		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status"}, "platform", "chat", 0.9, false},
+		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status",
+			"internal capabilities", "your capabilities", "tell me about your", "built into", "agent harness", "memory system", "tool system",
+			"what models", "what agents are", "available tools", "your tools", "your features", "how are you built", "your architecture",
+			"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities"}, "platform", "chat", 0.9, false},
 
 		// Report/Summary requests (high priority - handle inline, not async)
 		{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, "report", "chat", 0.9, false},

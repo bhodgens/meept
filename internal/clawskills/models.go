@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// Skill represents a skill from the ClawHub registry.
-type Skill struct {
+// RemoteSkill represents a skill from the ClawHub registry.
+type RemoteSkill struct {
 	Slug         string            `json:"slug"`
 	Name         string            `json:"name"`
 	Description  string            `json:"description"`

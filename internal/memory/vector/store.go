@@ -12,17 +12,16 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/caimlas/git/meept/internal/memory"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 // SearchResult represents a vector similarity search result.
 type SearchResult struct {
-	MemoryID        string
-	Content         string
-	Metadata        map[string]any
-	RelevanceScore  float32
-	VectorSimilarity float32
+	MemoryID         string
+	Content          string
+	Metadata         map[string]any
+	RelevanceScore   float64
+	VectorSimilarity float64
 }
 
 // Store stores and retrieves embeddings for memories.
@@ -181,8 +180,8 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]SearchRe
 		similarity := cosineSimilarity(queryEmbedding, vector)
 
 		results = append(results, SearchResult{
-			MemoryID:        memoryID,
-			VectorSimilarity: similarity,
+			MemoryID:         memoryID,
+			VectorSimilarity: float64(similarity),
 		})
 	}
 

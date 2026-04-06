@@ -439,7 +439,22 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	c.logger.Debug("LLM response received", "status", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"))
 
-	// Check for retryable status codes
+	// Check for rate limit (429) specifically
+	if resp.StatusCode == http.StatusTooManyRequests {
+		detail := string(respBody)
+		if len(detail) > 500 {
+			detail = detail[:500]
+		}
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		return nil, &RateLimitError{
+			ProviderID: c.config.ProviderID,
+			ModelID:    c.config.ModelID,
+			RetryAfter: retryAfter,
+			Cause:      &APIError{StatusCode: resp.StatusCode, Detail: detail},
+		}
+	}
+
+	// Check for other retryable status codes
 	if retryableStatusCodes[resp.StatusCode] {
 		detail := string(respBody)
 		if len(detail) > 500 {

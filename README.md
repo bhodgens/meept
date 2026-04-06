@@ -6,11 +6,17 @@
 
 ---
 
-Meept is a Go-based daemon that runs AI agents as background processes. It supports multi-agent collaboration, persistent memory, tool execution, and multiple frontends (TUI, Telegram, web). Agents can decompose complex tasks, route work to specialists, and maintain context across sessions.
+Meept is a Go-based daemon that runs AI agents as background processes. It supports multi-agent collaboration, persistent memory, tool execution, and multiple frontends (TUI, Telegram, web). Agents can decompose complex tasks, route work to specialists, and maintain context across sessions and tries to retain as much compatibility as I found useful from eg. opencode or claude. 
 
+## But What Is It, Really?
+
+Meept is my feeble attempt at, "This irritates me, I could do better than this." I've been playing with chatbots since Python was new and ELIZA was barely known, even on IRC. Could I make something convincing? 
+
+Instead of a chatbot, I need a useful tool, and I wanted to see if I could borrow the features I liked from the different tools, while exploring my apparent love for complex data queuing and routing, and perhaps stretching some of my performance engineering experience in the process. 
+
+So I figured I'd do it in Golang, because the world needs more beauty - especially since Python somehow ended up popular. 
+   
 ## Project Status
-
-> **Note**: This project was migrated from Python to Go. The Go implementation is the active codebase. Legacy Python code is archived in `archive/python-legacy/`.
 
 ### What Works
 

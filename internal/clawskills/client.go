@@ -252,7 +252,7 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]SearchR
 }
 
 // ListRemote lists skills from the ClawHub registry.
-func (c *Client) ListRemote(ctx context.Context, limit int, sort string) ([]Skill, error) {
+func (c *Client) ListRemote(ctx context.Context, limit int, sort string) ([]RemoteSkill, error) {
 	params := url.Values{}
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	params.Set("sort", sort)
@@ -262,13 +262,13 @@ func (c *Client) ListRemote(ctx context.Context, limit int, sort string) ([]Skil
 		return nil, err
 	}
 
-	var skills []Skill
+	var skills []RemoteSkill
 	if err := json.Unmarshal(data, &skills); err == nil {
 		return skills, nil
 	}
 
 	var wrapper struct {
-		Skills []Skill `json:"skills"`
+		Skills []RemoteSkill `json:"skills"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
 		return nil, err
@@ -277,13 +277,13 @@ func (c *Client) ListRemote(ctx context.Context, limit int, sort string) ([]Skil
 }
 
 // SkillDetail fetches detail for a specific skill by slug.
-func (c *Client) SkillDetail(ctx context.Context, slug string) (*Skill, error) {
+func (c *Client) SkillDetail(ctx context.Context, slug string) (*RemoteSkill, error) {
 	data, err := c.getJSON(ctx, "/api/v1/skills/"+slug, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var skill Skill
+	var skill RemoteSkill
 	if err := json.Unmarshal(data, &skill); err != nil {
 		return nil, err
 	}

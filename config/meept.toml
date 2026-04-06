@@ -223,3 +223,16 @@ enabled_tools = [                     # Tools to cache (read-only, idempotent op
 detailed_errors = true                # Enable detailed error messages
 include_examples = true               # Include usage examples in error messages
 max_suggestion_length = 500           # Maximum length of error suggestions
+
+[review]
+enabled = true
+# Tool hints that always require review
+require_review = ["code", "refactor", "debug", "git", "fix"]
+# Tool hints that never require review (trusted operations)
+skip_review = ["chat", "report", "recall", "search", "analyze"]
+# Agent to reviewer mapping
+reviewer_mapping = {coder = "code-reviewer", debugger = "debug-reviewer", planner = "planner-reviewer", analyst = "analyst-reviewer", committer = "code-reviewer"}
+# Maximum revision cycles before human intervention
+max_revision_cycles = 3
+# Auto-approve low-risk file patterns
+auto_approve_patterns = ["*.md", "LICENSE", "*.txt"]

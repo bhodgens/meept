@@ -370,6 +370,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Check for Ctrl+S to open session picker directly
+		if msg.String() == "ctrl+s" {
+			a.activeModal = ModalSessionPicker
+			a.sessionPicker.Show()
+			return a, a.sessionPicker.RefreshSessions()
+		}
+
 		// Check for Ctrl+M to toggle mouse mode (for text selection)
 		if msg.String() == "ctrl+m" {
 			a.mouseEnabled = !a.mouseEnabled
@@ -1087,8 +1094,9 @@ func (a *App) renderStatusBar() string {
 func (a *App) getQuickActions() []string {
 	var actions []string
 
-	// Always show menu and quit
+	// Always show menu, sessions, and quit
 	actions = append(actions, a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"))
+	actions = append(actions, a.styles.HelpKey.Render("^S")+" "+a.styles.HelpValue.Render("sessions"))
 	actions = append(actions, a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"))
 
 	switch a.currentView {

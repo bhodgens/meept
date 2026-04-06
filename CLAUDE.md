@@ -159,6 +159,11 @@ Jobs can be targeted to specific agents via `agent_id`:
 - **All UI element text must be explicitly lowercase** (e.g., "switch" not "Switch", "ok" not "OK")
 - This applies to: button labels, menu items, tooltips, status messages, dialog titles, hints
 
+## Coding Practices 
+
+- Always implement complete wired features, do not leave stub code or partial implementations
+- Always check your work 
+
 ## Project Structure
 
 ```
@@ -196,9 +201,8 @@ archive/           # Legacy Python code (reference only)
 1. **diagram.md**: Update architecture diagrams when adding/modifying components, agents, tools, or data flows
 2. **CLAUDE.md**: Update this file when changing architecture patterns, adding new agents, or modifying key behaviors
 3. **Code comments**: Keep inline documentation accurate when modifying function signatures or behavior
+4. **features.md**: Update features as they are implemented or changed 
+
 
 Documentation should always reflect the current implementation state. If you add a new agent, tool, or architectural component, document it immediately.
 
-## Legacy Python
-
-The original Python implementation is archived in `archive/python-legacy/` for reference. It is no longer maintained or used.

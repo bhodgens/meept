@@ -200,7 +200,7 @@ func NewOllamaProvider(cfg OllamaProviderConfig) *OllamaProvider {
 
 	return &OllamaProvider{
 		baseURL:    cfg.BaseURL,
-		model:      cfg.model,
+		model:      cfg.Model,
 		dimension:  cfg.Dimension,
 		httpClient: &http.Client{},
 		logger:     cfg.Logger,

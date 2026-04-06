@@ -12,14 +12,14 @@ import (
 type HybridSearcher struct {
 	vectorStore *Store
 	memManager  *memory.Manager
-	alpha       float32 // Weight for vector similarity (0-1)
+	alpha       float64 // Weight for vector similarity (0-1)
 }
 
 // HybridSearcherConfig holds configuration for the hybrid searcher.
 type HybridSearcherConfig struct {
 	VectorStore *Store
 	MemManager  *memory.Manager
-	Alpha       float32 // Weight for vector similarity: 0 = pure keyword, 1 = pure vector
+	Alpha       float64 // Weight for vector similarity: 0 = pure keyword, 1 = pure vector
 }
 
 // NewHybridSearcher creates a new hybrid searcher.
@@ -43,12 +43,12 @@ func NewHybridSearcher(cfg HybridSearcherConfig) (*HybridSearcher, error) {
 
 // HybridResult represents a combined search result.
 type HybridResult struct {
-	MemoryID          string
-	Content           string
-	Metadata          map[string]any
-	KeywordScore      float32
-	VectorScore       float32
-	CombinedScore     float32
+	MemoryID      string
+	Content       string
+	Metadata      map[string]any
+	KeywordScore  float64
+	VectorScore   float64
+	CombinedScore float64
 }
 
 // Search performs a hybrid search combining keyword and vector similarity.
@@ -69,12 +69,12 @@ func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([
 	}
 
 	// Build score maps
-	keywordScores := make(map[string]float32)
+	keywordScores := make(map[string]float64)
 	for _, r := range keywordResults {
 		keywordScores[r.Memory.ID] = r.RelevanceScore
 	}
 
-	vectorScores := make(map[string]float32)
+	vectorScores := make(map[string]float64)
 	for _, r := range vectorResults {
 		vectorScores[r.MemoryID] = r.VectorSimilarity
 	}
@@ -167,7 +167,7 @@ func (h *HybridSearcher) KeywordOnly(ctx context.Context, query string, limit in
 }
 
 // SetAlpha changes the weighting factor for hybrid search.
-func (h *HybridSearcher) SetAlpha(alpha float32) {
+func (h *HybridSearcher) SetAlpha(alpha float64) {
 	if alpha < 0 {
 		alpha = 0
 	} else if alpha > 1 {
@@ -177,6 +177,6 @@ func (h *HybridSearcher) SetAlpha(alpha float32) {
 }
 
 // GetAlpha returns the current weighting factor.
-func (h *HybridSearcher) GetAlpha() float32 {
+func (h *HybridSearcher) GetAlpha() float64 {
 	return h.alpha
 }

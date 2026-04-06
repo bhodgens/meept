@@ -301,3 +301,91 @@ func (r *Resolver) HasAlias(aliasName string) bool {
 	_, ok := r.aliases[aliasName]
 	return ok
 }
+
+// HasHealthyModels checks if an alias has any models that are not in cooldown.
+func (r *Resolver) HasHealthyModels(aliasName string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	alias, ok := r.aliases[aliasName]
+	if !ok {
+		return false
+	}
+
+	now := time.Now()
+	for i, model := range alias.Models {
+		health := r.getOrCreateHealth(aliasName)
+		// Check if this model is the current one and not in cooldown
+		if i == health.CurrentIndex {
+			if health.CooldownUntil.IsZero() || now.After(health.CooldownUntil) {
+				return true
+			}
+		} else {
+			// Non-current models are always available for rotation
+			return true
+		}
+		_ = model // Silence unused variable warning
+	}
+	return false
+}
+
+// RotateToNextModel forces rotation to the next model in an alias and resets failure counters.
+// Returns the new model config after rotation.
+func (r *Resolver) RotateToNextModel(aliasName string) (*ModelConfig, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	alias, ok := r.aliases[aliasName]
+	if !ok {
+		return nil, fmt.Errorf("alias not found: %s", aliasName)
+	}
+
+	if len(alias.Models) == 0 {
+		return nil, fmt.Errorf("alias %q has no models", aliasName)
+	}
+
+	health := r.getOrCreateHealth(aliasName)
+
+	// Rotate to next model
+	health.CurrentIndex = (health.CurrentIndex + 1) % len(alias.Models)
+	health.ConsecutiveFails = 0
+	health.CooldownUntil = time.Time{}
+	health.LastFailure = time.Time{}
+
+	newModel := alias.Models[health.CurrentIndex]
+
+	r.logger.Info("Manually rotated to next model in alias",
+		"alias", aliasName,
+		"newModel", newModel.ModelID,
+		"newIndex", health.CurrentIndex,
+	)
+
+	return newModel, nil
+}
+
+// GetAliasHealth returns the current health status for an alias.
+func (r *Resolver) GetAliasHealth(aliasName string) (currentIndex int, consecutiveFails int, cooldownUntil time.Time, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	health, ok := r.health[aliasName]
+	if !ok {
+		return 0, 0, time.Time{}, false
+	}
+	return health.CurrentIndex, health.ConsecutiveFails, health.CooldownUntil, true
+}
+
+// GetAllModelsForAlias returns all models configured for an alias.
+func (r *Resolver) GetAllModelsForAlias(aliasName string) ([]*ModelConfig, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	alias, ok := r.aliases[aliasName]
+	if !ok {
+		return nil, false
+	}
+	// Return a copy to prevent modification
+	models := make([]*ModelConfig, len(alias.Models))
+	copy(models, alias.Models)
+	return models, true
+}

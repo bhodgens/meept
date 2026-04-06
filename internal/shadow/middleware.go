@@ -9,15 +9,16 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
-// LLMChatter defines the interface for LLM chat operations.
-type LLMChatter interface {
+// ChatterWithConfig extends the basic chat interface with configuration access.
+// This differs from llm.Chatter by requiring Config() instead of ChatWithProgress().
+type ChatterWithConfig interface {
 	Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error)
 	Config() *llm.ModelConfig
 }
 
 // Middleware wraps an LLM client to intercept and shadow requests.
 type Middleware struct {
-	client  LLMChatter
+	client  ChatterWithConfig
 	manager *Manager
 	config  *Config
 	logger  *slog.Logger
@@ -47,7 +48,7 @@ func WithMiddlewareLogger(logger *slog.Logger) MiddlewareOption {
 }
 
 // NewMiddleware creates a new shadow middleware.
-func NewMiddleware(client LLMChatter, manager *Manager, config *Config, opts ...MiddlewareOption) *Middleware {
+func NewMiddleware(client ChatterWithConfig, manager *Manager, config *Config, opts ...MiddlewareOption) *Middleware {
 	m := &Middleware{
 		client:      client,
 		manager:     manager,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/pathutil"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -383,7 +384,7 @@ func (e *Engine) evaluateCommand(command string) (RiskLevel, string, bool) {
 
 // checkPath checks a filesystem path against path rules.
 func (e *Engine) checkPath(pathStr, action string) *Decision {
-	resolved := e.expandPath(pathStr)
+	resolved := pathutil.ExpandPath(pathStr)
 	if absPath, err := filepath.Abs(resolved); err == nil {
 		resolved = absPath
 	}
@@ -407,7 +408,7 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 			continue
 		}
 
-		expandedPattern := e.expandPath(pattern)
+		expandedPattern := pathutil.ExpandPath(pattern)
 		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
 			ruleSource := "path_rule"
 			if immutable == 1 {
@@ -455,7 +456,7 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 			continue
 		}
 
-		expandedPattern := e.expandPath(pattern)
+		expandedPattern := pathutil.ExpandPath(pattern)
 		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
 			return nil // Allowed
 		}
@@ -729,14 +730,6 @@ func (e *Engine) GetContextForLLM(decision Decision, action string, details map[
 	}
 
 	return strings.Join(lines, "\n")
-}
-
-// expandPath expands ~ to the home directory.
-func (e *Engine) expandPath(path string) string {
-	if strings.HasPrefix(path, "~") && e.homeDir != "" {
-		return e.homeDir + path[1:]
-	}
-	return filepath.Clean(path)
 }
 
 // Close closes the database connection.

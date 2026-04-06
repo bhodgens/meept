@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/caimlas/meept/internal/pathutil"
 )
 
 func TestDiscovery_SingleTier(t *testing.T) {
@@ -384,20 +386,14 @@ func TestExpandPath(t *testing.T) {
 		{"~", homeDir},
 		{"~/skills", filepath.Join(homeDir, "skills")},
 		{"/absolute/path", "/absolute/path"},
-		{"relative/path", ""}, // Will be made absolute, check separately
+		{"relative/path", "relative/path"}, // Cleaned but not made absolute
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := expandPath(tt.input)
-			if tt.want != "" && got != tt.want {
-				t.Errorf("expandPath(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-			if tt.input == "relative/path" {
-				// Should be an absolute path
-				if !filepath.IsAbs(got) {
-					t.Errorf("expandPath(%q) = %q, should be absolute", tt.input, got)
-				}
+			got := pathutil.ExpandPath(tt.input)
+			if got != tt.want {
+				t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

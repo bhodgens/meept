@@ -1,0 +1,11 @@
+{
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "contextplus"
+  ],
+  "permissions": {
+    "allow": [
+      "Skill(claudeception)"
+    ]
+  }
+}

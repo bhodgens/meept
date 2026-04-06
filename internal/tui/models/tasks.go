@@ -1075,6 +1075,12 @@ func (m *TasksModel) getStepStateIcon(state string) string {
 		return "◐"
 	case "running":
 		return "●"
+	case "reviewing":
+		return "🔍"
+	case "approved":
+		return "✔"
+	case "rejected":
+		return "✎"
 	case "completed":
 		return "✓"
 	case "failed":
@@ -1096,6 +1102,12 @@ func (m *TasksModel) getStepStateLabel(state string) string {
 		return "sched"
 	case "running":
 		return "exec"
+	case "reviewing":
+		return "rev"
+	case "approved":
+		return "ok"
+	case "rejected":
+		return "fix"
 	case "completed":
 		return "done"
 	case "failed":
@@ -1117,6 +1129,12 @@ func (m *TasksModel) getStepStateColor(state string) string {
 		return "#F59E0B"
 	case "running":
 		return "#3B82F6"
+	case "reviewing":
+		return "#8B5CF6"
+	case "approved":
+		return "#10B981"
+	case "rejected":
+		return "#F59E0B"
 	case "completed":
 		return "#10B981"
 	case "failed":
@@ -1130,11 +1148,11 @@ func (m *TasksModel) getStepStateColor(state string) string {
 
 func (m *TasksModel) getStepPercent(state string) float64 {
 	switch state {
-	case "completed":
+	case "completed", "approved":
 		return 100
-	case "running":
+	case "running", "reviewing":
 		return 50
-	case "failed":
+	case "failed", "rejected":
 		return 100
 	default:
 		return 0
