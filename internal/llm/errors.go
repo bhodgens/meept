@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+// NonRetryableError marks errors that should not be retried.
+// Budget exhaustion (BudgetExceededError) is a non-retryable error.
+type NonRetryableError interface {
+	error
+	NonRetryable() bool
+}
+
 // RateLimitError is returned when a rate limit (HTTP 429) is encountered.
 type RateLimitError struct {
 	ProviderID string
@@ -83,6 +90,18 @@ func IsRateLimitErrorMessage(errMsg string) bool {
 		strings.Contains(lower, "rpm limit") ||
 		strings.Contains(lower, "tpm limit") ||
 		strings.Contains(lower, "concurrent requests")
+}
+
+// IsNonRetryable checks if an error is non-retryable.
+func IsNonRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nonRetryableErr NonRetryableError
+	if errors.As(err, &nonRetryableErr) {
+		return nonRetryableErr.NonRetryable()
+	}
+	return false
 }
 
 func parseRetryAfter(header string) time.Duration {
