@@ -139,13 +139,18 @@ Add `isRateLimitError(errMsg string) bool` helper:
 
 ## Implementation Status
 
-**COMPLETED** on 2026-04-05
+**COMPLETED** on 2026-04-06 (100%)
 
-All layers A-E have been implemented:
-1. ✅ Error classification with RateLimitError type
-2. ✅ LLM client HTTP 429 detection and Retry-After parsing
-3. ✅ Resolver with enhanced alias rotation methods
-4. ✅ Agent loop chatWithFailover with model rotation and backoff
-5. ✅ Tactical scheduler job retry on rate limit
+All layers A–E implemented and under unit test:
+1. ✅ Error classification — `internal/llm/errors.go` (`RateLimitError`, `IsRateLimitError`, `AsRateLimitError`, `IsRateLimitErrorMessage`, `parseRetryAfter`)
+2. ✅ LLM client HTTP 429 detection and Retry-After parsing — `internal/llm/client.go`
+3. ✅ Resolver alias rotation — `HasHealthyModels`, `RotateToNextModel` in `internal/llm/resolver.go`
+4. ✅ Agent loop failover — `chatWithFailover` in `internal/agent/loop.go`
+5. ✅ Tactical scheduler job retry — `OnJobFailed` rate-limit branch + `isRateLimitError` helper in `internal/agent/tactical.go`
 
-The system now provides robust rate limit handling with automatic model failover, exponential backoff, and job-level recovery mechanisms.
+### Tests
+- `internal/llm/errors_test.go`: `RateLimitError.Error`, `IsRateLimitError`, `AsRateLimitError`, `IsRateLimitErrorMessage`, `parseRetryAfter` (including wrapped-error and HTTP-date paths)
+- `internal/llm/resolver_test.go`: `TestResolver_RotateToNextModel`, `TestResolver_HasHealthyModels`
+- `internal/agent/tactical_test.go`: `TestTacticalScheduler_IsRateLimitError`
+
+The system now provides robust rate limit handling with automatic model failover, exponential backoff, and job-level recovery mechanisms, with unit-test coverage of the classification and rotation surfaces.

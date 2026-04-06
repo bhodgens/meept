@@ -127,6 +127,74 @@ func TestResolver_ResolveForAlias(t *testing.T) {
 	}
 }
 
+func TestResolver_RotateToNextModel(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	resolver := NewResolver(cfg, logger)
+
+	// Initial model
+	m0, err := resolver.ResolveForAlias("coder")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Rotate
+	m1, err := resolver.RotateToNextModel("coder")
+	if err != nil {
+		t.Fatalf("RotateToNextModel failed: %v", err)
+	}
+	if m1.ModelID == m0.ModelID {
+		t.Errorf("expected different model after rotation, got same: %s", m1.ModelID)
+	}
+
+	// Verify ResolveForAlias now returns the rotated model
+	m2, _ := resolver.ResolveForAlias("coder")
+	if m2.ModelID != m1.ModelID {
+		t.Errorf("expected %s after rotation, got %s", m1.ModelID, m2.ModelID)
+	}
+
+	// Rotation should reset failure counters
+	_, fails, cooldown, _ := resolver.GetAliasHealth("coder")
+	if fails != 0 {
+		t.Errorf("expected consecutive_fails reset to 0, got %d", fails)
+	}
+	if !cooldown.IsZero() {
+		t.Errorf("expected cooldown cleared, got %v", cooldown)
+	}
+
+	// Rotate a full cycle (2 models) and ensure we return to m0
+	m3, _ := resolver.RotateToNextModel("coder")
+	if m3.ModelID != m0.ModelID {
+		t.Errorf("expected wrap-around to %s, got %s", m0.ModelID, m3.ModelID)
+	}
+
+	if _, err := resolver.RotateToNextModel("nonexistent"); err == nil {
+		t.Error("expected error for nonexistent alias")
+	}
+}
+
+func TestResolver_HasHealthyModels(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	resolver := NewResolver(cfg, logger)
+
+	// Fresh alias: current model is healthy
+	if !resolver.HasHealthyModels("coder") {
+		t.Error("expected healthy models on fresh alias")
+	}
+
+	// Unknown alias
+	if resolver.HasHealthyModels("nope") {
+		t.Error("expected false for unknown alias")
+	}
+
+	// After failure (current in cooldown), other models still available
+	resolver.RecordAliasFailure("coder", nil)
+	if !resolver.HasHealthyModels("coder") {
+		t.Error("expected other models available even if current is cooling down")
+	}
+}
+
 func TestResolver_ResolveForAlias_NotFound(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
