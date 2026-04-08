@@ -291,8 +291,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		logger.Info("Agent loop configured with security orchestrator")
 	}
 	if c.ToolRegistry != nil {
-		adapter := agent.NewToolRegistryAdapter(c.ToolRegistry)
-		agentOpts = append(agentOpts, agent.WithToolRegistry(adapter))
+		agentOpts = append(agentOpts, agent.WithToolRegistry(c.ToolRegistry))
 	}
 	if c.ShadowManager != nil {
 		agentOpts = append(agentOpts, agent.WithShadowManager(c.ShadowManager))
@@ -482,7 +481,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Create agent registry if multi-agent is enabled
 	if cfg.MultiAgent.Enabled {
-		toolAdapter := agent.NewToolRegistryAdapter(c.ToolRegistry)
+		
 
 		var taskStore *task.Store
 		if c.TaskRegistry != nil {
@@ -496,7 +495,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			Resolver:        c.LLMResolver,
 			MessageBus:      msgBus,
 			SecurityChecker: c.SecurityChecker,
-			ToolRegistry:    toolAdapter,
+			ToolRegistry: c.ToolRegistry,
 			ShadowManager:   c.ShadowManager,
 			Logger:          logger,
 		})

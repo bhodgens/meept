@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/security"
 )
 
@@ -57,18 +58,6 @@ var ToolActionMap = map[string]string{
 	"lsp_diagnostics":       "code_read",
 }
 
-// Tool represents a tool that can be executed by the agent.
-// This interface mirrors tools.Tool to allow for different tool implementations.
-type Tool interface {
-	// Name returns the tool's name.
-	Name() string
-	// Description returns the tool's description.
-	Description() string
-	// Parameters returns the JSON Schema parameters for this tool.
-	Parameters() llm.FunctionParameters
-	// Execute runs the tool with the given arguments.
-	Execute(ctx context.Context, args map[string]any) (any, error)
-}
 
 // ToolRegistry provides access to available tools.
 // Production implementation lives in internal/tools/registry.go; the
@@ -77,9 +66,9 @@ type Tool interface {
 // tool registry graph.
 type ToolRegistry interface {
 	// Get retrieves a tool by name.
-	Get(name string) Tool
+	Get(name string) tools.Tool
 	// List returns all available tools.
-	List() []Tool
+	List() []tools.Tool
 	// GetDefinitions returns tool definitions for the LLM.
 	GetDefinitions() []llm.ToolDefinition
 }
@@ -490,29 +479,29 @@ func ResultsToChatMessages(results []*ExecutionResult) []llm.ChatMessage {
 // PlaceholderToolRegistry is a simple implementation for testing.
 // For production use, prefer the full tools.Registry implementation.
 type PlaceholderToolRegistry struct {
-	tools map[string]Tool
+	tools map[string]tools.Tool
 }
 
 // NewPlaceholderToolRegistry creates a new placeholder registry.
 func NewPlaceholderToolRegistry() *PlaceholderToolRegistry {
 	return &PlaceholderToolRegistry{
-		tools: make(map[string]Tool),
+		tools: make(map[string]tools.Tool),
 	}
 }
 
 // Register adds a tool to the registry.
-func (r *PlaceholderToolRegistry) Register(tool Tool) {
+func (r *PlaceholderToolRegistry) Register(tool tools.Tool) {
 	r.tools[tool.Name()] = tool
 }
 
 // Get retrieves a tool by name.
-func (r *PlaceholderToolRegistry) Get(name string) Tool {
+func (r *PlaceholderToolRegistry) Get(name string) tools.Tool {
 	return r.tools[name]
 }
 
 // List returns all available tools.
-func (r *PlaceholderToolRegistry) List() []Tool {
-	tools := make([]Tool, 0, len(r.tools))
+func (r *PlaceholderToolRegistry) List() []tools.Tool {
+	tools := make([]tools.Tool, 0, len(r.tools))
 	for _, t := range r.tools {
 		tools = append(tools, t)
 	}
@@ -609,7 +598,7 @@ func NewFilteredToolRegistry(parent ToolRegistry, allowedTools []string) *Filter
 }
 
 // Get retrieves a tool by name, returning nil if not in the allowed set.
-func (r *FilteredToolRegistry) Get(name string) Tool {
+func (r *FilteredToolRegistry) Get(name string) tools.Tool {
 	if len(r.allowed) > 0 && !r.allowed[name] {
 		return nil
 	}
@@ -617,13 +606,13 @@ func (r *FilteredToolRegistry) Get(name string) Tool {
 }
 
 // List returns only allowed tools.
-func (r *FilteredToolRegistry) List() []Tool {
+func (r *FilteredToolRegistry) List() []tools.Tool {
 	all := r.parent.List()
 	if len(r.allowed) == 0 {
 		return all
 	}
 
-	filtered := make([]Tool, 0)
+	filtered := make([]tools.Tool, 0)
 	for _, t := range all {
 		if r.allowed[t.Name()] {
 			filtered = append(filtered, t)

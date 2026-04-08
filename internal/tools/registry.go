@@ -153,5 +153,11 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 	return NewSuccessResult(result), nil
 }
 
+// GetDefinitions returns tool definitions for the LLM.
+// This is an alias for ToLLMDefinitions for compatibility with agent.ToolRegistry.
+func (r *Registry) GetDefinitions() []llm.ToolDefinition {
+	return r.ToLLMDefinitions()
+}
+
 // Executor is a Registry that implements ToolExecutor.
 var _ ToolExecutor = (*Registry)(nil)
