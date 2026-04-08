@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"io"
 	"errors"
 	"fmt"
 	"log/slog"

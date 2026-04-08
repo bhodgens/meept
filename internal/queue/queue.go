@@ -265,10 +265,10 @@ var _ Queue = (*PersistentQueue)(nil)
 
 // Handler handles queue-related requests on the message bus.
 type Handler struct {
-	queue  Queue
-	bus    *bus.MessageBus
-	logger *slog.Logger
-	cancel context.CancelFunc
+	handler *bus.SubscriptionHandler
+	queue   Queue
+	bus     *bus.MessageBus
+	logger  *slog.Logger
 }
 
 // NewHandler creates a new queue handler.
@@ -276,58 +276,75 @@ func NewHandler(queue Queue, msgBus *bus.MessageBus, logger *slog.Logger) *Handl
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{
-		queue:  queue,
-		bus:    msgBus,
-		logger: logger,
+	h := &Handler{
+		handler: bus.NewSubscriptionHandler(msgBus, logger.With("component", "queue-handler")),
+		queue:   queue,
+		bus:     msgBus,
+		logger:  logger,
 	}
+
+	// Subscribe to all queue topics
+	topics := map[string]bus.MessageCallback{
+		"queue.enqueue":  h.handleQueueEnqueue,
+		"queue.claim":    h.handleQueueClaim,
+		"queue.complete": h.handleQueueComplete,
+		"queue.fail":     h.handleQueueFail,
+		"queue.retry":    h.handleQueueRetry,
+		"queue.get":      h.handleQueueGet,
+		"queue.list":     h.handleQueueList,
+		"queue.stats":    h.handleQueueStats,
+	}
+
+	for topic, callback := range topics {
+		h.handler.Subscribe(topic, callback)
+	}
+
+	return h
 }
 
 // Start begins listening for queue requests.
 func (h *Handler) Start(ctx context.Context) error {
-	ctx, h.cancel = context.WithCancel(ctx)
-
-	topics := []string{
-		"queue.enqueue",
-		"queue.claim",
-		"queue.complete",
-		"queue.fail",
-		"queue.retry",
-		"queue.get",
-		"queue.list",
-		"queue.stats",
-	}
-
-	for _, topic := range topics {
-		sub := h.bus.Subscribe("queue-handler-"+topic, topic)
-		go h.handleTopic(ctx, sub, topic)
-	}
-
+	h.handler.Start(ctx)
 	h.logger.Info("Queue handler started")
 	return nil
 }
 
 // Stop stops the handler.
 func (h *Handler) Stop(ctx context.Context) error {
-	if h.cancel != nil {
-		h.cancel()
-	}
+	h.handler.Stop()
 	return nil
 }
 
-func (h *Handler) handleTopic(ctx context.Context, sub *bus.Subscriber, topic string) {
-	for {
-		select {
-		case <-ctx.Done():
-			h.bus.Unsubscribe(sub)
-			return
-		case msg, ok := <-sub.Channel:
-			if !ok {
-				return
-			}
-			h.handleMessage(ctx, topic, msg)
-		}
-	}
+func (h *Handler) handleQueueEnqueue(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueClaim(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueComplete(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueFail(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueRetry(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueGet(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueList(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueStats(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
 func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.BusMessage) {

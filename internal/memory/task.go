@@ -5,12 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
-	"path/filepath"
-	"sync"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/caimlas/meept/pkg/sqlite"
 )
@@ -58,13 +55,9 @@ END`
 // uses SQLite with FTS5 for full-text search when available, falling back
 // to LIKE-based queries when FTS5 is not compiled into SQLite.
 type TaskMemory struct {
-	pool        *sqlite.Pool
-	dataDir     string
-	domains     []string
-	initialized bool
-	hasFTS5     bool // true if FTS5 is available
-	mu          sync.RWMutex
-	logger      *slog.Logger
+	store   *SQLiteFTSStore
+	domains []string
+	logger  *slog.Logger
 }
 
 // TaskMemoryConfig holds configuration for task memory.
@@ -98,8 +91,24 @@ func NewTaskMemory(cfg TaskMemoryConfig) *TaskMemory {
 	if len(cfg.Domains) == 0 {
 		cfg.Domains = []string{"general"}
 	}
+
+	// Create the shared FTS store with task-specific config
+	storeCfg := FTSConfig{
+		TableName:     "task_memories",
+		FTS5Table:     "task_fts",
+		CategoryField: "domain",
+		DataDir:       cfg.DataDir,
+		Schema:        []string{createTaskTableSQL, createTaskFTSSQL},
+		Triggers:      []string{triggerTaskInsert, triggerTaskDelete, triggerTaskUpdate},
+	}
+
+	store, err := NewSQLiteFTSStore(storeCfg, cfg.Logger)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create task store: %v", err))
+	}
+
 	return &TaskMemory{
-		dataDir: cfg.DataDir,
+		store:   store,
 		domains: cfg.Domains,
 		logger:  cfg.Logger,
 	}
@@ -107,105 +116,27 @@ func NewTaskMemory(cfg TaskMemoryConfig) *TaskMemory {
 
 // Initialize sets up the database schema and connections.
 func (t *TaskMemory) Initialize(ctx context.Context) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.initialized {
-		return nil
-	}
-
-	dbPath := filepath.Join(t.dataDir, "task.db")
-
-	pool, err := sqlite.NewPool(sqlite.PoolConfig{
-		Path:     dbPath,
-		PoolSize: 5,
-		WALMode:  true,
-		Logger:   t.logger,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create connection pool: %w", err)
-	}
-	t.pool = pool
-
-	// Initialize schema
-	if err := t.initSchema(ctx); err != nil {
-		pool.Close()
-		return fmt.Errorf("failed to initialize schema: %w", err)
-	}
-
-	t.initialized = true
-	t.logger.Info("Task memory initialized",
-		"path", dbPath,
-		"domains", t.domains,
-		"fts5", t.hasFTS5,
-	)
-	return nil
+	return t.store.Initialize(ctx)
 }
 
 // HasFTS5 returns true if FTS5 full-text search is available.
 // When false, search falls back to slower LIKE-based queries.
 func (t *TaskMemory) HasFTS5() bool {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.hasFTS5
-}
-
-// initSchema creates the database tables and indexes.
-func (t *TaskMemory) initSchema(ctx context.Context) error {
-	return t.pool.WithConn(ctx, func(db *sql.DB) error {
-		// Create main table first (always required)
-		if _, err := db.ExecContext(ctx, createTaskTableSQL); err != nil {
-			return fmt.Errorf("failed to create task table: %w", err)
-		}
-
-		// Check if FTS5 is available by attempting to create the virtual table
-		_, err := db.ExecContext(ctx, createTaskFTSSQL)
-		if err != nil {
-			// FTS5 not available - log warning and continue without it
-			t.logger.Warn("FTS5 not available, using LIKE-based search (slower)",
-				"error", err,
-				"hint", "Install SQLite with FTS5 support for better search performance",
-			)
-			t.hasFTS5 = false
-			return nil
-		}
-
-		// FTS5 is available, create triggers to keep it in sync
-		t.hasFTS5 = true
-		ftsStatements := []string{
-			triggerTaskInsert,
-			triggerTaskDelete,
-			triggerTaskUpdate,
-		}
-
-		for _, stmt := range ftsStatements {
-			if _, err := db.ExecContext(ctx, stmt); err != nil {
-				return fmt.Errorf("failed to create FTS trigger: %w", err)
-			}
-		}
-		return nil
-	})
+	return t.store.HasFTS5()
 }
 
 // Store persists a new task memory.
 // Returns the unique ID of the stored item.
 func (t *TaskMemory) Store(ctx context.Context, content string, domain string, metadata map[string]any) (string, error) {
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
-		return "", errors.New("task memory not initialized")
-	}
-	t.mu.RUnlock()
-
 	if domain == "" {
 		domain = "general"
 	}
 
-	id := uuid.New().String()
+	id := generateUUID()
 	nowISO := time.Now().UTC().Format(time.RFC3339)
 	metaJSON := (&Memory{Metadata: metadata}).MetadataJSON()
 
-	_, err := t.pool.Exec(ctx,
+	err := t.store.Store(ctx,
 		`INSERT INTO task_memories (id, content, domain, metadata_json, created_at)
          VALUES (?, ?, ?, ?, ?)`,
 		id, content, domain, metaJSON, nowISO,
@@ -222,24 +153,23 @@ func (t *TaskMemory) Store(ctx context.Context, content string, domain string, m
 // Uses FTS5 when available, falls back to LIKE-based queries otherwise.
 // If domain is specified, results are limited to that domain.
 func (t *TaskMemory) Search(ctx context.Context, query string, domain string, limit int) ([]MemoryResult, error) {
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
+	if !t.store.Initialized() {
 		return nil, errors.New("task memory not initialized")
 	}
-	hasFTS5 := t.hasFTS5
-	t.mu.RUnlock()
 
 	safeQuery := sqlite.SanitizeQuery(query)
 	if safeQuery == "" {
 		return t.GetRecent(ctx, domain, limit)
 	}
 
-	db, err := t.pool.Get(ctx)
+	hasFTS5 := t.store.HasFTS5Public()
+	pool := t.store.GetPool()
+
+	db, err := pool.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer t.pool.Put(db)
+	defer pool.Put(db)
 
 	var rows *sql.Rows
 
@@ -269,7 +199,7 @@ func (t *TaskMemory) Search(ctx context.Context, query string, domain string, li
 			`, safeQuery, limit)
 		}
 	} else {
-		// Fallback to LIKE-based search (slower but works without FTS5)
+		// Fallback to LIKE-based search
 		likePattern := "%" + query + "%"
 		if domain != "" {
 			rows, err = db.QueryContext(ctx, `
@@ -301,18 +231,16 @@ func (t *TaskMemory) Search(ctx context.Context, query string, domain string, li
 // GetRecent retrieves the most recent task memories.
 // If domain is specified, results are limited to that domain.
 func (t *TaskMemory) GetRecent(ctx context.Context, domain string, limit int) ([]MemoryResult, error) {
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
+	if !t.store.Initialized() {
 		return nil, errors.New("task memory not initialized")
 	}
-	t.mu.RUnlock()
 
-	db, err := t.pool.Get(ctx)
+	pool := t.store.GetPool()
+	db, err := pool.Get(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer t.pool.Put(db)
+	defer pool.Put(db)
 
 	var rows *sql.Rows
 	if domain != "" {
@@ -345,162 +273,32 @@ func (t *TaskMemory) GetRecent(ctx context.Context, domain string, limit int) ([
 // sharing the same content. Only groups where content exceeds thresholdChars
 // are returned.
 func (t *TaskMemory) FindDuplicates(ctx context.Context, thresholdChars int) ([][]string, error) {
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
-		return nil, errors.New("task memory not initialized")
-	}
-	t.mu.RUnlock()
-
-	db, err := t.pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer t.pool.Put(db)
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT GROUP_CONCAT(id, ','), content, COUNT(*) as cnt
-		FROM task_memories
-		WHERE LENGTH(content) > ?
-		GROUP BY content
-		HAVING cnt > 1
-	`, thresholdChars)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find duplicates: %w", err)
-	}
-	defer rows.Close()
-
-	var groups [][]string
-	for rows.Next() {
-		var idsStr, content string
-		var count int
-		if err := rows.Scan(&idsStr, &content, &count); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		ids := splitString(idsStr, ',')
-		groups = append(groups, ids)
-	}
-
-	return groups, rows.Err()
+	return t.store.FindDuplicateGroups(ctx, "task_memories", thresholdChars)
 }
 
 // Delete removes a memory by ID.
 func (t *TaskMemory) Delete(ctx context.Context, id string) error {
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
-		return errors.New("task memory not initialized")
-	}
-	t.mu.RUnlock()
-
-	_, err := t.pool.Exec(ctx, "DELETE FROM task_memories WHERE id = ?", id)
-	return err
+	return t.store.Delete(ctx, "DELETE FROM task_memories WHERE id = ?", id)
 }
 
 // DeleteByIDs removes multiple memories by ID.
 func (t *TaskMemory) DeleteByIDs(ctx context.Context, ids []string) (int, error) {
-	if len(ids) == 0 {
-		return 0, nil
-	}
-
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
-		return 0, errors.New("task memory not initialized")
-	}
-	t.mu.RUnlock()
-
-	// Build query with placeholders
-	placeholders := make([]string, len(ids))
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	query := fmt.Sprintf("DELETE FROM task_memories WHERE id IN (%s)",
-		joinStrings(placeholders, ","))
-
-	result, err := t.pool.Exec(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("failed to delete memories: %w", err)
-	}
-
-	deleted, _ := result.RowsAffected()
-	return int(deleted), nil
+	return t.store.DeleteByIDs(ctx, "task_memories", ids)
 }
 
 // Count returns the total number of task memories.
 func (t *TaskMemory) Count(ctx context.Context) (int, error) {
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
-		return 0, errors.New("task memory not initialized")
-	}
-	t.mu.RUnlock()
-
-	var count int
-	err := t.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_memories").Scan(&count)
-	})
-	return count, err
+	return t.store.Count(ctx, "task_memories")
 }
 
 // GetOldestTimestamp returns the created_at of the oldest memory.
 func (t *TaskMemory) GetOldestTimestamp(ctx context.Context) (*time.Time, error) {
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
-		return nil, errors.New("task memory not initialized")
-	}
-	t.mu.RUnlock()
-
-	var ts sql.NullString
-	err := t.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT MIN(created_at) FROM task_memories").Scan(&ts)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if !ts.Valid || ts.String == "" {
-		return nil, nil
-	}
-
-	parsedTime, err := time.Parse(time.RFC3339, ts.String)
-	if err != nil {
-		return nil, err
-	}
-	return &parsedTime, nil
+	return t.store.GetOldestTimestamp(ctx, "task_memories")
 }
 
 // GetNewestTimestamp returns the created_at of the newest memory.
 func (t *TaskMemory) GetNewestTimestamp(ctx context.Context) (*time.Time, error) {
-	t.mu.RLock()
-	if !t.initialized {
-		t.mu.RUnlock()
-		return nil, errors.New("task memory not initialized")
-	}
-	t.mu.RUnlock()
-
-	var ts sql.NullString
-	err := t.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT MAX(created_at) FROM task_memories").Scan(&ts)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	if !ts.Valid || ts.String == "" {
-		return nil, nil
-	}
-
-	parsedTime, err := time.Parse(time.RFC3339, ts.String)
-	if err != nil {
-		return nil, err
-	}
-	return &parsedTime, nil
+	return t.store.GetNewestTimestamp(ctx, "task_memories")
 }
 
 // Domains returns the configured domains.
@@ -510,18 +308,7 @@ func (t *TaskMemory) Domains() []string {
 
 // Close releases all resources.
 func (t *TaskMemory) Close() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if !t.initialized {
-		return nil
-	}
-
-	t.initialized = false
-	if t.pool != nil {
-		return t.pool.Close()
-	}
-	return nil
+	return t.store.Close()
 }
 
 // scanResults scans database rows into MemoryResult slice.
@@ -565,22 +352,5 @@ func (t *TaskMemory) scanResults(rows *sql.Rows, hasRank bool) ([]MemoryResult, 
 	return results, nil
 }
 
-// splitString splits a string by separator.
-func splitString(s string, sep rune) []string {
-	var result []string
-	current := ""
-	for _, r := range s {
-		if r == sep {
-			if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		} else {
-			current += string(r)
-		}
-	}
-	if current != "" {
-		result = append(result, current)
-	}
-	return result
-}
+// Ensure TaskMemory implements io.Closer
+var _ io.Closer = (*TaskMemory)(nil)

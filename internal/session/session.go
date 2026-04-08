@@ -337,10 +337,10 @@ var _ Store = (*MemoryStore)(nil)
 
 // Handler handles session-related RPC requests via the message bus.
 type Handler struct {
+	handler    *bus.SubscriptionHandler
 	store      Store
 	bus        *bus.MessageBus
 	logger     *slog.Logger
-	cancel     context.CancelFunc
 	summarizer *Summarizer
 }
 
@@ -360,68 +360,102 @@ func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger, opts .
 		logger = slog.Default()
 	}
 	h := &Handler{
-		store:  store,
-		bus:    msgBus,
-		logger: logger,
+		handler: bus.NewSubscriptionHandler(msgBus, logger.With("component", "session-handler")),
+		store:   store,
+		bus:     msgBus,
+		logger:  logger,
 	}
 	for _, opt := range opts {
 		opt(h)
 	}
+
+	// Subscribe to all session topics
+	topics := map[string]bus.MessageCallback{
+		"session.create":               h.handleSessionCreate,
+		"session.list":                 h.handleSessionList,
+		"session.get":                  h.handleSessionGet,
+		"session.get_most_recent":      h.handleSessionGetMostRecent,
+		"session.attach":               h.handleSessionAttach,
+		"session.detach":               h.handleSessionDetach,
+		"session.delete":               h.handleSessionDelete,
+		"session.messages.save":        h.handleSessionSaveMessages,
+		"session.messages.get":         h.handleSessionGetMessages,
+		"session.update_description":   h.handleSessionUpdateDescription,
+		"session.generate_description": h.handleSessionGenerateDescription,
+		"session.stop":                 h.handleSessionStop,
+		"session.get_child_tasks":      h.handleSessionGetChildTasks,
+	}
+
+	for topic, callback := range topics {
+		h.handler.Subscribe(topic, callback)
+	}
+
 	return h
 }
 
 // Start begins listening for session requests.
 func (h *Handler) Start(ctx context.Context) error {
-	ctx, h.cancel = context.WithCancel(ctx)
-
-	// Subscribe to session topics
-	topics := []string{
-		"session.create",
-		"session.list",
-		"session.get",
-		"session.get_most_recent",
-		"session.attach",
-		"session.detach",
-		"session.delete",
-		"session.messages.save",
-		"session.messages.get",
-		"session.update_description",
-		"session.generate_description",
-		"session.stop",
-		"session.get_child_tasks",
-	}
-
-	for _, topic := range topics {
-		sub := h.bus.Subscribe("session-handler-"+topic, topic)
-		go h.handleTopic(ctx, sub, topic)
-	}
-
+	h.handler.Start(ctx)
 	h.logger.Info("SessionHandler started")
 	return nil
 }
 
 // Stop stops the handler.
 func (h *Handler) Stop(ctx context.Context) error {
-	if h.cancel != nil {
-		h.cancel()
-	}
+	h.handler.Stop()
 	return nil
 }
 
-// handleTopic handles messages for a specific topic.
-func (h *Handler) handleTopic(ctx context.Context, sub *bus.Subscriber, topic string) {
-	for {
-		select {
-		case <-ctx.Done():
-			h.bus.Unsubscribe(sub)
-			return
-		case msg, ok := <-sub.Channel:
-			if !ok {
-				return
-			}
-			h.handleMessage(topic, msg)
-		}
-	}
+func (h *Handler) handleSessionCreate(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionList(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionGet(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionGetMostRecent(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionAttach(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionDetach(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionDelete(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionSaveMessages(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionGetMessages(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionUpdateDescription(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionGenerateDescription(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionStop(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionGetChildTasks(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
 // handleMessage routes messages to the appropriate handler.

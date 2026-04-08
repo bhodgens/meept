@@ -315,10 +315,10 @@ func (r *Registry) publishEvent(topic string, data map[string]any) {
 
 // Handler handles task-related requests on the message bus.
 type Handler struct {
+	handler  *bus.SubscriptionHandler
 	registry *Registry
 	bus      *bus.MessageBus
 	logger   *slog.Logger
-	cancel   context.CancelFunc
 }
 
 // NewHandler creates a new task handler.
@@ -326,59 +326,80 @@ func NewHandler(registry *Registry, msgBus *bus.MessageBus, logger *slog.Logger)
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{
+	h := &Handler{
+		handler:  bus.NewSubscriptionHandler(msgBus, logger.With("component", "task-handler")),
 		registry: registry,
 		bus:      msgBus,
 		logger:   logger,
 	}
+
+	// Subscribe to all task topics
+	topics := map[string]bus.MessageCallback{
+		"task.create":        h.handleTaskCreate,
+		"task.get":           h.handleTaskGet,
+		"task.update":        h.handleTaskUpdate,
+		"task.delete":        h.handleTaskDelete,
+		"task.list":          h.handleTaskList,
+		"task.list_extended": h.handleTaskListExtended,
+		"task.link":          h.handleTaskLink,
+		"task.unlink":        h.handleTaskUnlink,
+		"task.steps":         h.handleTaskSteps,
+	}
+
+	for topic, callback := range topics {
+		h.handler.Subscribe(topic, callback)
+	}
+
+	return h
 }
 
 // Start begins listening for task requests.
 func (h *Handler) Start(ctx context.Context) error {
-	ctx, h.cancel = context.WithCancel(ctx)
-
-	topics := []string{
-		"task.create",
-		"task.get",
-		"task.update",
-		"task.delete",
-		"task.list",
-		"task.list_extended",
-		"task.link",
-		"task.unlink",
-		"task.steps",
-	}
-
-	for _, topic := range topics {
-		sub := h.bus.Subscribe("task-handler-"+topic, topic)
-		go h.handleTopic(ctx, sub, topic)
-	}
-
+	h.handler.Start(ctx)
 	h.logger.Info("Task handler started")
 	return nil
 }
 
 // Stop stops the handler.
 func (h *Handler) Stop(ctx context.Context) error {
-	if h.cancel != nil {
-		h.cancel()
-	}
+	h.handler.Stop()
 	return nil
 }
 
-func (h *Handler) handleTopic(ctx context.Context, sub *bus.Subscriber, topic string) {
-	for {
-		select {
-		case <-ctx.Done():
-			h.bus.Unsubscribe(sub)
-			return
-		case msg, ok := <-sub.Channel:
-			if !ok {
-				return
-			}
-			h.handleMessage(ctx, topic, msg)
-		}
-	}
+func (h *Handler) handleTaskCreate(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleTaskGet(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleTaskUpdate(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleTaskDelete(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleTaskList(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleTaskListExtended(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleTaskLink(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleTaskUnlink(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleTaskSteps(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
 func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.BusMessage) {
