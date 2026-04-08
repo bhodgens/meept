@@ -1275,3 +1275,6 @@ func (g *KnowledgeGraph) Close() error {
 	}
 	return nil
 }
+
+// Ensure KnowledgeGraph implements io.Closer
+var _ io.Closer = (*KnowledgeGraph)(nil)

@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"io"
 	"context"
 	"fmt"
 	"log/slog"
@@ -293,3 +294,6 @@ type ServerStatus struct {
 	Uptime       time.Duration
 	Capabilities ServerCapabilities
 }
+
+// Ensure Manager implements io.Closer
+var _ io.Closer = (*Manager)(nil)

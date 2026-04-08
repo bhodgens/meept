@@ -554,3 +554,6 @@ func joinStrings(strs []string, sep string) string {
 	}
 	return result
 }
+
+// Ensure EpisodicMemory implements io.Closer
+var _ io.Closer = (*EpisodicMemory)(nil)

@@ -1,6 +1,7 @@
 package task
 
 import (
+	"io"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -559,3 +560,6 @@ func decodeStringSlice(s string) []string {
 	}
 	return slice
 }
+
+// Ensure TaskStore implements io.Closer
+var _ io.Closer = (*Store)(nil)

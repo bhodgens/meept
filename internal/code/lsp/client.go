@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"io"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -406,3 +407,6 @@ func (c *Client) WaitForExit(timeout time.Duration) error {
 		return fmt.Errorf("timeout waiting for client exit")
 	}
 }
+
+// Ensure Client implements io.Closer
+var _ io.Closer = (*Client)(nil)

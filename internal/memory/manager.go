@@ -1056,3 +1056,6 @@ func (m *Manager) IsInitialized() bool {
 func (m *Manager) DistributedConfig() config.DistributedMemoryConfig {
 	return m.distributedCfg
 }
+
+// Ensure Manager implements io.Closer
+var _ io.Closer = (*Manager)(nil)

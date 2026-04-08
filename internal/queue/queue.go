@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"io"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -570,3 +571,6 @@ func WaitForJob(ctx context.Context, q Queue, jobID string, pollInterval time.Du
 		}
 	}
 }
+
+// Ensure PersistentQueue implements io.Closer
+var _ io.Closer = (*PersistentQueue)(nil)
