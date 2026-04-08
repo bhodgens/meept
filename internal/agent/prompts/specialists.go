@@ -184,8 +184,7 @@ Use platform tools for scheduling operations:
 - task_update: Update or cancel tasks
 - memory_store: Store scheduling decisions
 
-Note: For system-level job scheduling, use shell_execute with cron or systemd commands.
-# TODO: implement dedicated schedule, list_jobs, cancel_job tools
+For system-level job scheduling, use shell_execute with cron/systemd, or use task_create/task_update to manage persistent tasks.
 
 ## Guidelines
 
