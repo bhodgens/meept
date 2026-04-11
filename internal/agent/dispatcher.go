@@ -313,6 +313,11 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		return "", fmt.Errorf("no agent registry configured")
 	}
 
+	// Handle platform introspection directly without LLM
+	if result.Intent != nil && result.Intent.Type == "platform" {
+		return d.handlePlatformIntrospection(ctx)
+	}
+
 	// Build context message with memory refs
 	contextMsg := d.buildContextMessage(result)
 
@@ -338,6 +343,50 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	}
 
 	return response, nil
+}
+
+// handlePlatformIntrospection returns platform capabilities directly.
+// This bypasses the LLM for reliable introspection responses.
+func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context) (string, error) {
+	var sb strings.Builder
+
+	sb.WriteString("## Platform Capabilities\n\n")
+
+	// List available agents
+	if d.registry != nil {
+		specs := d.registry.ListSpecs()
+		sb.WriteString("### Available Agents\n\n")
+		for _, spec := range specs {
+			sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", spec.Name, spec.ID, truncateString(spec.Purpose, 100)))
+		}
+		sb.WriteString("\n")
+	}
+
+	// List baseline tools available to all agents
+	sb.WriteString("### Baseline Tools (available to all agents)\n\n")
+	for _, tool := range BaselineTools {
+		sb.WriteString(fmt.Sprintf("- %s\n", tool))
+	}
+	sb.WriteString("\n")
+
+	// List available skills
+	if d.skillRegistry != nil {
+		skills := d.skillRegistry.List()
+		if len(skills) > 0 {
+			sb.WriteString("### Available Skills\n\n")
+			for _, skill := range skills {
+				sb.WriteString(fmt.Sprintf("- **/%s**: %s\n", skill.Name, truncateString(skill.Description, 80)))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	sb.WriteString("### How to Use\n\n")
+	sb.WriteString("- Ask me to do something and I'll route it to the right specialist agent\n")
+	sb.WriteString("- Use `/skill-name` to invoke a specific skill directly\n")
+	sb.WriteString("- Complex tasks are automatically decomposed and tracked\n")
+
+	return sb.String(), nil
 }
 
 // buildContextMessage builds a message with memory context injected.
