@@ -140,6 +140,30 @@ Meept runs 8 specialist agents that can discover and delegate to each other:
 | `committer` | Git operations | shell_execute (git) |
 | `scheduler` | Job scheduling | scheduler tools |
 
+### Agent Customization (AGENT.md)
+
+Agents can be overridden or extended with `AGENT.md` files using YAML frontmatter — same pattern as skills. Discovery hierarchy (highest priority first):
+
+```
+.meept/agents/<id>/AGENT.md    # project-local
+~/.meept/agents/<id>/AGENT.md  # user-global
+~/.config/meept/agents/        # system-wide
+config/agents/                 # bundled defaults
+```
+
+Example override for the coder agent (`~/.meept/agents/coder/AGENT.md`):
+```yaml
+---
+id: coder
+temperature: 0.1
+max_iterations: 20
+---
+# Custom Coder Instructions
+Always add type annotations. Prefer functional style.
+```
+
+Non-empty fields override programmatic defaults; tools are merged (union). A global `RULES.md` can inject behavior requirements into all agents, with structured JSON report parsing built into the dispatcher.
+
 ### Agent Discovery
 
 Agents can discover coworkers via platform tools:
