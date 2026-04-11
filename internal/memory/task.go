@@ -133,7 +133,7 @@ func (t *TaskMemory) Store(ctx context.Context, content string, domain string, m
 	}
 
 	id := generateUUID()
-	nowISO := time.Now().UTC().Format(time.RFC3339)
+	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
 	metaJSON := (&Memory{Metadata: metadata}).MetadataJSON()
 
 	err := t.store.Store(ctx,
@@ -329,7 +329,7 @@ func (t *TaskMemory) scanResults(rows *sql.Rows, hasRank bool) ([]MemoryResult, 
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		createdAt, _ := time.Parse(time.RFC3339, createdAtStr)
+		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 
 		results = append(results, MemoryResult{
 			Memory: Memory{

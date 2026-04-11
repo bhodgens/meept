@@ -407,8 +407,7 @@ func TestArtifactScanner(t *testing.T) {
 		t.Error("Artifacts should be available after creating CLAUDE.md")
 	}
 
-	// Test cache
-	scanner.InvalidateCache(tmpDir)
+	// Test cache (second scan should use cache without invalidation)
 	artifacts2, err := scanner.Scan()
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)

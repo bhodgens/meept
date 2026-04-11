@@ -158,6 +158,8 @@ func inferCommandCategory(command string) string {
 		return "build"
 	case strings.Contains(cmd, "test"):
 		return "test"
+	case strings.Contains(cmd, "lint") || strings.Contains(cmd, "check"):
+		return "lint"
 	case strings.Contains(cmd, "run") || strings.Contains(cmd, "start"):
 		return "run"
 	case strings.Contains(cmd, "deploy"):
@@ -166,8 +168,6 @@ func inferCommandCategory(command string) string {
 		return "install"
 	case strings.Contains(cmd, "clean"):
 		return "clean"
-	case strings.Contains(cmd, "lint") || strings.Contains(cmd, "check"):
-		return "lint"
 	case strings.Contains(cmd, "format") || strings.Contains(cmd, "fmt"):
 		return "format"
 	default:
@@ -206,17 +206,35 @@ func findSection(content string, titles ...string) string {
 
 		// Check if this line starts a section we want
 		if !levelFound {
+			found := false
 			for _, title := range titles {
-				if strings.HasPrefix(trimmed, "## "+title) || strings.HasPrefix(trimmed, "# "+title) {
-					inSection = true
-					level = strings.Count(trimmed, "#")
-					levelFound = true
-					continue
+				// Match any heading level (# Title, ## Title, ### Title, etc.)
+				if strings.HasPrefix(trimmed, "#") {
+					// Extract heading level and text
+					hashes := 0
+					for _, ch := range trimmed {
+						if ch == '#' {
+							hashes++
+						} else {
+							break
+						}
+					}
+					headingText := strings.TrimSpace(trimmed[hashes:])
+					if headingText == title {
+						inSection = true
+						level = hashes
+						levelFound = true
+						found = true
+						break
+					}
 				}
+			}
+			if found {
+				continue
 			}
 		}
 
-		if inSection && i > 0 {
+		if inSection {
 			// Check if we've reached another section at same or higher level
 			if strings.HasPrefix(trimmed, "#") {
 				currentLevel := strings.Count(trimmed, "#")

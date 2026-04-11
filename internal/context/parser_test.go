@@ -212,7 +212,7 @@ func TestFindSection(t *testing.T) {
 		{
 			name:    "try multiple titles",
 			titles:  []string{"NonExistent", "Third Section"},
-			wantLen: 2, // "Final content." + empty line
+			wantLen: 1, // "Final content." (last section, no trailing content)
 		},
 		{
 			name:    "section not found",

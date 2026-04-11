@@ -242,7 +242,7 @@ func (s *SQLiteFTSStore) GetOldestTimestamp(ctx context.Context, tableName strin
 		return nil, nil
 	}
 
-	t, err := time.Parse(time.RFC3339, ts.String)
+	t, err := time.Parse(time.RFC3339Nano, ts.String)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func (s *SQLiteFTSStore) GetNewestTimestamp(ctx context.Context, tableName strin
 		return nil, nil
 	}
 
-	t, err := time.Parse(time.RFC3339, ts.String)
+	t, err := time.Parse(time.RFC3339Nano, ts.String)
 	if err != nil {
 		return nil, err
 	}

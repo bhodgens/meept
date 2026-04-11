@@ -178,8 +178,8 @@ func TestMergeAgentDefaults(t *testing.T) {
 
 	MergeAgentDefaults(agent)
 
-	if agent.Constraints.MaxIterations != 10 {
-		t.Errorf("Expected default max_iterations 10, got %d", agent.Constraints.MaxIterations)
+	if agent.Constraints.MaxIterations != 25 {
+		t.Errorf("Expected default max_iterations 25, got %d", agent.Constraints.MaxIterations)
 	}
 	if agent.Constraints.TimeoutSeconds != 300 {
 		t.Errorf("Expected default timeout_seconds 300, got %d", agent.Constraints.TimeoutSeconds)

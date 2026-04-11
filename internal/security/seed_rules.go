@@ -84,7 +84,7 @@ func seedToolRules() []SeedToolRule {
 func seedCommandPatterns() []SeedCommandPattern {
 	return []SeedCommandPattern{
 		// CRITICAL (4) -- Immutable, always blocked
-		{Pattern: `\brm\s+-rf\s+/(?!\S)`, PatternType: "regex", RiskLevel: RiskCritical, Category: "destructive", Description: "Recursive delete from root", Immutable: true},
+		{Pattern: `\brm\s+-rf\s+/\s*$`, PatternType: "regex", RiskLevel: RiskCritical, Category: "destructive", Description: "Recursive delete from root", Immutable: true},
 		{Pattern: `\bmkfs\b`, PatternType: "regex", RiskLevel: RiskCritical, Category: "destructive", Description: "Filesystem format", Immutable: true},
 		{Pattern: `\bdd\s+if=/dev/(zero|urandom)\s+of=/dev/`, PatternType: "regex", RiskLevel: RiskCritical, Category: "destructive", Description: "Disk overwrite", Immutable: true},
 		{Pattern: `:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:`, PatternType: "regex", RiskLevel: RiskCritical, Category: "destructive", Description: "Fork bomb", Immutable: true},

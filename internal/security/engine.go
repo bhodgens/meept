@@ -261,7 +261,9 @@ func (e *Engine) Check(action, toolName string, details map[string]string, conve
 	if action == "shell_execute" {
 		cmd := details["command"]
 		cmdRisk, cmdSource, cmdImmutable := e.evaluateCommand(cmd)
-		if cmdRisk > effectiveRisk {
+		if cmdSource != "shell_execute" {
+			// A specific command pattern matched; use its risk level
+			// (may raise or lower the base rule risk)
 			effectiveRisk = cmdRisk
 			ruleSource = "command_pattern:" + cmdSource
 		}
@@ -517,9 +519,17 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			} else {
 				// Try matching against specific detail values
 				for _, v := range details {
-					if matched, _ = filepath.Match(pattern, v); matched {
+					if m, _ := filepath.Match(pattern, v); m {
+						matched = true
 						break
 					}
+				}
+			}
+			if !matched {
+				// Try substring match with glob wildcards stripped
+				trimmed := strings.Trim(pattern, "*")
+				if trimmed != "" && strings.Contains(detailStr, trimmed) {
+					matched = true
 				}
 			}
 			if !matched {

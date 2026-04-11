@@ -115,7 +115,7 @@ func (e *EpisodicMemory) Store(ctx context.Context, content string, category str
 	}
 
 	id := generateUUID()
-	nowISO := time.Now().UTC().Format(time.RFC3339)
+	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
 	metaJSON := (&Memory{Metadata: metadata}).MetadataJSON()
 
 	err := e.store.Store(ctx,
@@ -252,7 +252,7 @@ func (e *EpisodicMemory) GetByTimeRange(ctx context.Context, start, end time.Tim
 		WHERE created_at >= ? AND created_at <= ?
 		ORDER BY created_at DESC
 		LIMIT ?
-	`, start.Format(time.RFC3339), end.Format(time.RFC3339), limit)
+	`, start.UTC().Format(time.RFC3339Nano), end.UTC().Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get by time range: %w", err)
 	}
@@ -276,7 +276,7 @@ func (e *EpisodicMemory) GetOldMemories(ctx context.Context, olderThan time.Time
 		WHERE created_at < ?
 		ORDER BY created_at ASC
 		LIMIT ?
-	`, olderThan.Format(time.RFC3339), limit)
+	`, olderThan.UTC().Format(time.RFC3339Nano), limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get old memories: %w", err)
 	}
@@ -333,7 +333,7 @@ func (e *EpisodicMemory) scanResults(rows *sql.Rows, hasRank bool) ([]MemoryResu
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 
-		createdAt, _ := time.Parse(time.RFC3339, createdAtStr)
+		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 
 		results = append(results, MemoryResult{
 			Memory: Memory{
