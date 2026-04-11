@@ -124,7 +124,7 @@ func TestLLMClassifier_ParseInvalidIntent(t *testing.T) {
 			content:     "",
 			input:       "test",
 			wantErr:     true,
-			errContains: "empty response",
+			errContains: "no intent",
 		},
 		{
 			name:        "invalid JSON returns error",
@@ -141,7 +141,7 @@ func TestLLMClassifier_ParseInvalidIntent(t *testing.T) {
 			errContains: "invalid intent",
 		},
 		{
-			name:        "empty intent returns error",
+			name:        "empty intent in JSON returns error",
 			content:     `{"intent": "", "confidence": 0.9}`,
 			input:       "test",
 			wantErr:     true,

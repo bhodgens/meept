@@ -52,6 +52,11 @@ var (
 				Italic(true).
 				MarginBottom(0)
 
+	notificationLabelStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#22C55E")). // Bright green
+				MarginBottom(0)
+
 	userContentStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#E5E7EB")).
 				PaddingLeft(2)
@@ -63,6 +68,10 @@ var (
 	systemContentStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#9CA3AF")).
 				Italic(true).
+				PaddingLeft(2)
+
+	notificationContentStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#86EFAC")). // Light green
 				PaddingLeft(2)
 
 	timestampStyle = lipgloss.NewStyle().
@@ -110,6 +119,12 @@ func (v *Viewport) SetSize(width, height int) {
 
 	// Mark dirty to re-render with new width
 	v.dirty = true
+}
+
+// SetYPosition sets the viewport's vertical position for mouse coordinate calculation.
+// This must be set to the row where the viewport starts in the terminal.
+func (v *Viewport) SetYPosition(y int) {
+	v.viewport.YPosition = y
 }
 
 // SetInputFocus sets whether the input field has focus.
@@ -395,6 +410,8 @@ func (v *Viewport) renderRoleLabel(role string) string {
 		return assistantLabelStyle.Render("meept:")
 	case "system":
 		return systemLabelStyle.Render("system:")
+	case "notification":
+		return notificationLabelStyle.Render("task:")
 	default:
 		return systemLabelStyle.Render(role + ":")
 	}
@@ -424,6 +441,8 @@ func (v *Viewport) renderContent(role, content string) string {
 		style = assistantContentStyle
 	case "system":
 		style = systemContentStyle
+	case "notification":
+		style = notificationContentStyle
 	default:
 		style = assistantContentStyle
 	}

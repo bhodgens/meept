@@ -19,6 +19,9 @@ type MockTasksRPCClient struct {
 	TasksExtendedResponse *types.TaskExtendedListResponse
 	TasksExtendedError    error
 	TasksExtendedCalls    int
+	TaskStepsResponse     *types.TaskStepsResponse
+	TaskStepsError        error
+	TaskStepsCalls        int
 }
 
 func NewMockTasksRPCClient() *MockTasksRPCClient {
@@ -81,6 +84,17 @@ func (m *MockTasksRPCClient) ListTasksExtended() (*types.TaskExtendedListRespons
 		return nil, m.TasksExtendedError
 	}
 	return m.TasksExtendedResponse, nil
+}
+
+func (m *MockTasksRPCClient) ListTaskSteps(taskID string) (*types.TaskStepsResponse, error) {
+	m.TaskStepsCalls++
+	if m.TaskStepsError != nil {
+		return nil, m.TaskStepsError
+	}
+	if m.TaskStepsResponse != nil {
+		return m.TaskStepsResponse, nil
+	}
+	return &types.TaskStepsResponse{Steps: []types.TaskStepView{}}, nil
 }
 
 func (m *MockTasksRPCClient) IsConnected() bool {

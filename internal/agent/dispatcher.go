@@ -534,14 +534,6 @@ func extractSummary(input string) string {
 	return truncateString(input, 100)
 }
 
-// truncateString truncates a string to max length.
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
-}
-
 // DispatcherStats returns statistics about the dispatcher.
 type DispatcherStats struct {
 	TotalDispatched int            `json:"total_dispatched"`

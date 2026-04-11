@@ -733,16 +733,25 @@ func (s *SidebarModel) handleTaskProgressEvent(e BusEvent) {
 	}
 
 	taskID, _ := payloadMap["task_id"].(string)
-	currentStep, _ := payloadMap["current_step"].(string)
-
-	if taskID == "" || currentStep == "" {
+	if taskID == "" {
 		return
 	}
+
+	currentStep, _ := payloadMap["current_step"].(string)
 
 	// Update the matching task in tasksData
 	for i := range s.tasksData {
 		if s.tasksData[i].ID == taskID {
-			s.tasksData[i].CurrentStep = currentStep
+			if currentStep != "" {
+				s.tasksData[i].CurrentStep = currentStep
+			}
+			// Update job counts from event data (source of truth)
+			if completed, ok := payloadMap["completed_jobs"].(float64); ok {
+				s.tasksData[i].CompletedJobs = int(completed)
+			}
+			if total, ok := payloadMap["total_jobs"].(float64); ok {
+				s.tasksData[i].TotalJobs = int(total)
+			}
 			break
 		}
 	}
@@ -761,11 +770,11 @@ func (s *SidebarModel) handleStepCompletedEvent(e BusEvent) {
 	}
 
 	// Clear current step since it just completed (will be updated with next progress event)
+	// Note: We don't increment CompletedJobs here to avoid drift from actual state.
+	// The next task.progress event will provide accurate counts.
 	for i := range s.tasksData {
 		if s.tasksData[i].ID == taskID {
 			s.tasksData[i].CurrentStep = ""
-			// Increment completed count locally for immediate feedback
-			s.tasksData[i].CompletedJobs++
 			break
 		}
 	}

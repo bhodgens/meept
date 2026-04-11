@@ -15,6 +15,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/tui"
+	"github.com/caimlas/meept/internal/tui/handlers"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -52,6 +53,11 @@ type App struct {
 	prompt    *Prompt
 	menu      *Menu
 	dashboard *Dashboard
+
+	// Event streaming for real-time task notifications
+	eventStream      *tui.EventStream
+	eventRPC         *tui.RPCClient           // Separate RPC client for events to avoid blocking
+	taskEventHandler *handlers.TaskEventHandler // Shared handler with rate limiting
 
 	// State
 	session   *types.Session
@@ -98,16 +104,34 @@ func NewApp(socketPath string) *App {
 	}
 
 	rpc := tui.NewRPCClient(socketPath)
+	// Separate RPC client for event stream to avoid blocking on main client
+	eventRPC := tui.NewRPCClient(socketPath)
+
+	// Configure event stream for task notifications
+	eventStreamCfg := &tui.EventStreamConfig{
+		Topics: []string{
+			"task.completed",
+			"task.failed",
+			"task.progress",
+			"task.step_completed",
+			"agent.execution_complete",
+		},
+		BufferSize:   20,
+		PollInterval: 500 * time.Millisecond,
+	}
 
 	app := &App{
-		rpc:            rpc,
-		viewport:       NewViewport(),
-		prompt:         NewPrompt(),
-		menu:           NewMenu(),
-		dashboard:      NewDashboard(rpc),
-		focus:          FocusInput, // Start with focus on input
-		socketPath:     socketPath,
-		doublePressTTL: 500 * time.Millisecond,
+		rpc:              rpc,
+		eventRPC:         eventRPC,
+		eventStream:      tui.NewEventStream(eventRPC, eventStreamCfg),
+		taskEventHandler: handlers.NewTaskEventHandler(),
+		viewport:         NewViewport(),
+		prompt:           NewPrompt(),
+		menu:             NewMenu(),
+		dashboard:        NewDashboard(rpc),
+		focus:            FocusInput, // Start with focus on input
+		socketPath:       socketPath,
+		doublePressTTL:   500 * time.Millisecond,
 	}
 
 	return app
@@ -127,11 +151,24 @@ func NewAppFromConfig() (*App, error) {
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.connectDaemon,
+		a.connectEventStream,
 		a.dashboard.Init(),
 		tea.EnterAltScreen,
 		tea.SetWindowTitle("meept-lite"),
 	)
 }
+
+// connectEventStream connects the event RPC and starts the event stream.
+func (a *App) connectEventStream() tea.Msg {
+	if err := a.eventRPC.Connect(); err != nil {
+		// Non-fatal: event stream is optional
+		return nil
+	}
+	return EventStreamStartMsg{}
+}
+
+// EventStreamStartMsg signals that event stream should start.
+type EventStreamStartMsg struct{}
 
 // connectDaemon attempts to connect to the meept daemon.
 func (a *App) connectDaemon() tea.Msg {
@@ -523,9 +560,67 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.displayModelStatus(msg)
 		}
 		return a, nil
+
+	case EventStreamStartMsg:
+		// Start the event stream polling
+		if a.eventStream != nil {
+			return a, a.eventStream.Start()
+		}
+		return a, nil
+
+	case tui.EventStreamTickMsg:
+		// Forward to event stream
+		if a.eventStream != nil {
+			return a, a.eventStream.Update(msg)
+		}
+		return a, nil
+
+	case tui.EventStreamDataMsg:
+		// Process incoming events
+		if a.eventStream != nil {
+			a.eventStream.Update(msg)
+		}
+		return a, a.handleBusEvents(msg.Events)
 	}
 
 	return a, nil
+}
+
+// handleBusEvents processes bus events and displays notifications.
+func (a *App) handleBusEvents(events []tui.BusEvent) tea.Cmd {
+	for _, e := range events {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		var notification *handlers.TaskNotification
+		switch e.Topic {
+		case "task.completed":
+			notification = a.taskEventHandler.HandleTaskCompleted(payload)
+			// Clear rate limiting state for completed task
+			if taskID, ok := payload["task_id"].(string); ok {
+				a.taskEventHandler.ClearTaskProgress(taskID)
+			}
+		case "task.failed":
+			notification = a.taskEventHandler.HandleTaskFailed(payload)
+			// Clear rate limiting state for failed task
+			if taskID, ok := payload["task_id"].(string); ok {
+				a.taskEventHandler.ClearTaskProgress(taskID)
+			}
+		case "task.progress":
+			notification = a.taskEventHandler.HandleTaskProgress(payload)
+		case "task.step_completed":
+			// Step completions are debounced by progress events, don't show separately
+			// to avoid flooding the viewport
+			continue
+		}
+
+		if notification != nil {
+			a.viewport.AddMessage("notification", notification.Message)
+		}
+	}
+	return nil
 }
 
 // HistoryLoadedMsg carries conversation history.

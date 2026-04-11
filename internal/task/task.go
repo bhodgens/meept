@@ -40,6 +40,7 @@ type Task struct {
 	MemvidZone   string          `json:"memvid_zone,omitempty"`
 	Metadata     json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
+	StartedAt    time.Time       `json:"started_at,omitempty"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 
 	// Linked sessions
@@ -172,8 +173,24 @@ func (t *Task) FailJob() {
 
 // SetState updates the task state.
 func (t *Task) SetState(state TaskState) {
+	// Set StartedAt when transitioning from pending to an active state
+	if t.State == StatePending && (state == StatePlanning || state == StateExecuting) {
+		t.StartedAt = time.Now().UTC()
+	}
 	t.State = state
 	t.UpdatedAt = time.Now().UTC()
+}
+
+// ExecutionTime returns the duration since task started executing.
+// Returns zero duration if task hasn't started yet.
+func (t *Task) ExecutionTime() time.Duration {
+	if t.StartedAt.IsZero() {
+		return 0
+	}
+	if t.State.IsTerminal() {
+		return t.UpdatedAt.Sub(t.StartedAt)
+	}
+	return time.Since(t.StartedAt)
 }
 
 // TaskSummary provides a lightweight view of a task.

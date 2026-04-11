@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -270,8 +271,8 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				"agent", result.AgentID,
 				"intent", result.Intent.Type,
 			)
-			reply = fmt.Sprintf(`{"async":true,"task_id":"%s","message":"Working on task: %s"}`,
-				result.Task.ID, truncateString(result.Task.Name, 80))
+			// Build human-readable acknowledgment
+			reply = h.formatAsyncTaskAck(result)
 
 			// Publish plan request to orchestrator
 			h.publishPlanRequest(result, conversationID)
@@ -436,15 +437,26 @@ func (h *ChatHandler) publishWorkerEvent(topic string, w *Worker) {
 	h.bus.Publish(topic, msg)
 }
 
+// TaskStepSummary represents a step in a task completion payload.
+type TaskStepSummary struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	State       string `json:"state"`
+	Result      string `json:"result,omitempty"`
+	AgentID     string `json:"agent_id,omitempty"`
+}
+
 // handleTaskCompleted handles task.completed events and pushes results back to chat.
 func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	var payload struct {
-		TaskID         string   `json:"task_id"`
-		Name           string   `json:"name"`
-		CompletedJobs  int      `json:"completed_jobs"`
-		TotalJobs      int      `json:"total_jobs"`
-		LinkedSessions []string `json:"linked_sessions"`
-		Result         string   `json:"result,omitempty"`
+		TaskID         string            `json:"task_id"`
+		Name           string            `json:"name"`
+		CompletedJobs  int               `json:"completed_jobs"`
+		TotalJobs      int               `json:"total_jobs"`
+		LinkedSessions []string          `json:"linked_sessions"`
+		Steps          []TaskStepSummary `json:"steps,omitempty"`
+		ExecutionTime  string            `json:"execution_time,omitempty"`
+		Result         string            `json:"result,omitempty"`
 	}
 
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
@@ -459,23 +471,11 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 		"total", payload.TotalJobs,
 	)
 
-	// Build completion message
-	resultSummary := payload.Result
-	if resultSummary == "" {
-		resultSummary = fmt.Sprintf("Completed %d/%d steps successfully", payload.CompletedJobs, payload.TotalJobs)
-	}
-	if len(resultSummary) > 200 {
-		resultSummary = resultSummary[:197] + "..."
-	}
+	// Build human-readable completion message
+	reply := h.formatTaskCompletedMessage(payload.Name, payload.Steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs)
 
 	response := ChatResponse{
-		Reply: fmt.Sprintf(`{"task_completed":true,"task_id":"%s","name":"%s","completed":%d,"total":%d,"result":"%s"}`,
-			payload.TaskID,
-			truncateString(payload.Name, 80),
-			payload.CompletedJobs,
-			payload.TotalJobs,
-			truncateString(resultSummary, 100),
-		),
+		Reply: reply,
 	}
 
 	// Send to all linked sessions
@@ -488,6 +488,40 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	if len(payload.LinkedSessions) == 0 {
 		h.sendResponse("task-completed-"+payload.TaskID, response)
 	}
+}
+
+// formatTaskCompletedMessage builds a human-readable task completion message.
+func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSummary, executionTime, result string, completed, total int) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("## task completed: %s\n\n", strings.ToLower(name)))
+
+	if len(steps) > 0 {
+		sb.WriteString("### steps:\n")
+		for i, step := range steps {
+			icon := "+"
+			if step.State != "completed" && step.State != "approved" {
+				icon = "x"
+			}
+			sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, icon, strings.ToLower(step.Description)))
+			if step.Result != "" {
+				resultPreview := truncateString(step.Result, 80)
+				sb.WriteString(fmt.Sprintf("   %s\n", resultPreview))
+			}
+		}
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("completed %d/%d steps successfully.\n\n", completed, total))
+	}
+
+	if result != "" {
+		sb.WriteString(fmt.Sprintf("**summary:** %s\n\n", result))
+	}
+
+	if executionTime != "" {
+		sb.WriteString(fmt.Sprintf("completed in %s\n", executionTime))
+	}
+
+	return sb.String()
 }
 
 // handleTaskFailed handles task.failed events and pushes errors back to chat.
@@ -517,25 +551,12 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 		"error", payload.Error,
 	)
 
-	// Build error message
-	errorSummary := payload.Error
-	if errorSummary == "" {
-		errorSummary = fmt.Sprintf("Task failed: %d/%d steps failed", payload.FailedJobs, payload.TotalJobs)
-	}
-	if len(errorSummary) > 200 {
-		errorSummary = errorSummary[:197] + "..."
-	}
+	// Build human-readable error message
+	reply := h.formatTaskFailedMessage(payload.Name, payload.Error, payload.FailedStep, payload.FailedJobs, payload.CompletedJobs, payload.TotalJobs)
 
 	response := ChatResponse{
-		Reply: fmt.Sprintf(`{"task_failed":true,"task_id":"%s","name":"%s","failed":%d,"completed":%d,"total":%d,"error":"%s"}`,
-			payload.TaskID,
-			truncateString(payload.Name, 80),
-			payload.FailedJobs,
-			payload.CompletedJobs,
-			payload.TotalJobs,
-			truncateString(errorSummary, 100),
-		),
-		Error: errorSummary,
+		Reply: reply,
+		Error: payload.Error,
 	}
 
 	// Send to all linked sessions
@@ -548,6 +569,42 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 	if len(payload.LinkedSessions) == 0 {
 		h.sendResponse("task-failed-"+payload.TaskID, response)
 	}
+}
+
+// formatTaskFailedMessage builds a human-readable task failure message.
+func (h *ChatHandler) formatTaskFailedMessage(name, errMsg, failedStep string, failed, completed, total int) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("## task failed: %s\n\n", strings.ToLower(name)))
+
+	sb.WriteString(fmt.Sprintf("**progress:** %d/%d steps completed, %d failed\n\n", completed, total, failed))
+
+	if failedStep != "" {
+		sb.WriteString(fmt.Sprintf("**failed at step:** %s\n\n", failedStep))
+	}
+
+	if errMsg != "" {
+		sb.WriteString(fmt.Sprintf("**error:** %s\n", truncateString(errMsg, 200)))
+	}
+
+	return sb.String()
+}
+
+// formatAsyncTaskAck builds a human-readable acknowledgment for async task dispatch.
+func (h *ChatHandler) formatAsyncTaskAck(result *DispatchResult) string {
+	var sb strings.Builder
+	sb.WriteString("## starting task\n\n")
+	sb.WriteString(fmt.Sprintf("**task:** %s\n", strings.ToLower(result.Task.Name)))
+	sb.WriteString(fmt.Sprintf("**id:** `%s`\n", result.Task.ID))
+	sb.WriteString(fmt.Sprintf("**assigned to:** %s agent\n", result.AgentID))
+
+	status := "planning steps..."
+	if result.Intent.Type == "simple" {
+		status = "executing..."
+	}
+	sb.WriteString(fmt.Sprintf("**status:** %s\n\n", status))
+	sb.WriteString("you will receive updates as the task progresses.\n")
+
+	return sb.String()
 }
 
 // generateWorkerID creates a unique worker ID.

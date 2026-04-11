@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
@@ -88,10 +90,15 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		}
 	}
 
-	// Publish progress event
+	// Publish progress event with current step info
+	currentStepDesc := ""
+	if len(readySteps) > 0 {
+		currentStepDesc = readySteps[0].Description
+	}
 	ts.publishEvent("task.progress", map[string]any{
 		"task_id":         taskID,
 		"scheduled_steps": len(readySteps),
+		"current_step":    currentStepDesc,
 	})
 
 	return nil
@@ -148,6 +155,8 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 // OnJobCompleted handles a completed job by updating the step, promoting
 // newly unblocked steps, and checking task completion.
 func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage) error {
+	startTime := time.Now()
+
 	// Find step by job ID
 	step, err := ts.stepStore.GetByJobID(jobID)
 	if err != nil {
@@ -166,6 +175,17 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	if err := ts.stepStore.SetResult(step.ID, resultStr); err != nil {
 		ts.logger.Error("Failed to set step result", "step_id", step.ID, "error", err)
 	}
+
+	// Publish step completed event with details
+	ts.publishEvent("task.step_completed", map[string]any{
+		"task_id":     step.TaskID,
+		"step_id":     step.ID,
+		"description": step.Description,
+		"agent_id":    step.AgentID,
+		"result":      truncateString(resultStr, 200),
+		"state":       string(task.StepCompleted),
+		"duration":    time.Since(startTime).String(),
+	})
 
 	// Check if review is needed
 	if ts.reviewManager != nil && ts.reviewManager.GetPolicy().Enabled {
@@ -243,12 +263,20 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			ts.logger.Error("Failed to set task completed", "error", err)
 		}
 
+		// Build step summaries for the completion event
+		stepSummaries := ts.buildStepSummaries(step.TaskID)
+		executionTime := t.ExecutionTime().Round(time.Second).String()
+		resultSummary := ts.buildResultSummary(stepSummaries)
+
 		ts.publishEvent("task.completed", map[string]any{
 			"task_id":         step.TaskID,
 			"name":            t.Name,
 			"completed_jobs":  t.CompletedJobs,
 			"total_jobs":      t.TotalJobs,
 			"linked_sessions": t.LinkedSessions,
+			"steps":           stepSummaries,
+			"execution_time":  executionTime,
+			"result":          resultSummary,
 		})
 
 		ts.logger.Info("Task completed",
@@ -257,11 +285,19 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"total", t.TotalJobs,
 		)
 	} else {
+		// Get next step description for progress update
+		nextStepDesc := ""
+		readySteps, _ := ts.stepStore.GetReadySteps(step.TaskID)
+		if len(readySteps) > 0 {
+			nextStepDesc = readySteps[0].Description
+		}
+
 		// Publish progress update
 		ts.publishEvent("task.progress", map[string]any{
 			"task_id":        step.TaskID,
 			"completed_jobs": t.CompletedJobs,
 			"total_jobs":     t.TotalJobs,
+			"current_step":   nextStepDesc,
 		})
 	}
 
@@ -438,12 +474,19 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 			"total", t.TotalJobs,
 		)
 	} else {
-		// Task is still partially alive
+		// Task is still partially alive - get next step for progress
+		nextStepDesc := ""
+		readySteps, _ := ts.stepStore.GetReadySteps(step.TaskID)
+		if len(readySteps) > 0 {
+			nextStepDesc = readySteps[0].Description
+		}
+
 		ts.publishEvent("task.progress", map[string]any{
-			"task_id":      step.TaskID,
-			"failed_jobs":  t.FailedJobs,
+			"task_id":        step.TaskID,
+			"failed_jobs":    t.FailedJobs,
 			"completed_jobs": t.CompletedJobs,
-			"total_jobs":   t.TotalJobs,
+			"total_jobs":     t.TotalJobs,
+			"current_step":   nextStepDesc,
 		})
 	}
 
@@ -489,4 +532,61 @@ func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
 	// Use the llm package helper if available
 	// First try to see if we can parse it as an LLM error
 	return llm.IsRateLimitErrorMessage(errMsg)
+}
+
+// buildStepSummaries creates an array of step summaries for task completion events.
+func (ts *TacticalScheduler) buildStepSummaries(taskID string) []map[string]any {
+	allSteps, err := ts.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		ts.logger.Error("Failed to list steps for summary", "error", err)
+		return nil
+	}
+
+	summaries := make([]map[string]any, len(allSteps))
+	for i, s := range allSteps {
+		summaries[i] = map[string]any{
+			"id":          s.ID,
+			"description": s.Description,
+			"state":       string(s.State),
+			"result":      truncateString(s.Result, 100),
+			"agent_id":    s.AgentID,
+		}
+	}
+	return summaries
+}
+
+// buildResultSummary creates a human-readable summary of what was accomplished.
+func (ts *TacticalScheduler) buildResultSummary(steps []map[string]any) string {
+	if len(steps) == 0 {
+		return "Task completed."
+	}
+
+	var sb strings.Builder
+	completedCount := 0
+	for _, s := range steps {
+		if s["state"] == string(task.StepCompleted) || s["state"] == string(task.StepApproved) {
+			completedCount++
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("Completed %d/%d steps: ", completedCount, len(steps)))
+
+	// List the first few completed step descriptions
+	shown := 0
+	for _, s := range steps {
+		if shown >= 3 {
+			sb.WriteString("...")
+			break
+		}
+		if s["state"] == string(task.StepCompleted) || s["state"] == string(task.StepApproved) {
+			if shown > 0 {
+				sb.WriteString(", ")
+			}
+			desc := s["description"].(string)
+			sb.WriteString(truncateString(desc, 40))
+			shown++
+		}
+	}
+
+	return sb.String()
 }

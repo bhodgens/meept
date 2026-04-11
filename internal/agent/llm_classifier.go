@@ -179,7 +179,9 @@ func (c *LLMClassifier) parseResponse(content string, originalInput string) (*In
 	}
 
 	if !isValidIntent(resp.Intent) {
-		c.logger.Debug("Invalid intent from LLM", "intent", resp.Intent)
+		if c.logger != nil {
+			c.logger.Debug("Invalid intent from LLM", "intent", resp.Intent)
+		}
 		return nil, fmt.Errorf("invalid intent: %s", resp.Intent)
 	}
 
