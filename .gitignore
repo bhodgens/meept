@@ -1,6 +1,7 @@
 
 meept-daemon
 meept
+/meept-lite
 
 # IDE
 .idea/
