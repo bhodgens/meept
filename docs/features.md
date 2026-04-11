@@ -485,9 +485,12 @@ The dispatcher evaluates agent reports to determine next actions:
 | Status | UserDecisionNeeded | SuggestedNextAgent | Action |
 |--------|--------------------|--------------------|--------|
 | completed | false | empty | Close task, notify user |
+| completed | true | any | Notify user, await input |
 | completed/partial | false | set | Route to suggested agent |
 | partial/needs_input | true | - | Notify user, await input |
 | failed | - | - | Notify user with error |
+
+Agent report JSON is automatically stripped from user-facing responses; only the clean output is returned.
 
 **Configuration:**
 ```toml

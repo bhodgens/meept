@@ -57,6 +57,7 @@ type Dispatcher struct {
 	classifiers       []IntentClassifier
 	llmClassifier     *LLMClassifier
 	keywordClassifier *KeywordClassifier
+	capabilityMatcher *CapabilityMatcher
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -66,15 +67,16 @@ type IntentClassifier interface {
 
 // DispatcherConfig holds configuration for creating a Dispatcher.
 type DispatcherConfig struct {
-	Registry        *AgentRegistry
-	MemvidClient    *memvid.Client
-	MemoryMgr       *memory.Manager
-	TaskStore       *task.Store
-	SkillRegistry   *skills.Registry
-	SkillExecutor   *skills.Executor
-	Logger          *slog.Logger
-	LLMClient       *llm.Client
-	ClassifierModel string
+	Registry          *AgentRegistry
+	MemvidClient      *memvid.Client
+	MemoryMgr         *memory.Manager
+	TaskStore         *task.Store
+	SkillRegistry     *skills.Registry
+	SkillExecutor     *skills.Executor
+	Logger            *slog.Logger
+	LLMClient         *llm.Client
+	ClassifierModel   string
+	CapabilityMatcher *CapabilityMatcher
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -84,13 +86,14 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	}
 
 	d := &Dispatcher{
-		registry:      cfg.Registry,
-		memvid:        cfg.MemvidClient,
-		memoryMgr:     cfg.MemoryMgr,
-		taskStore:     cfg.TaskStore,
-		skillRegistry: cfg.SkillRegistry,
-		skillExecutor: cfg.SkillExecutor,
-		logger:        cfg.Logger,
+		registry:          cfg.Registry,
+		memvid:            cfg.MemvidClient,
+		memoryMgr:         cfg.MemoryMgr,
+		taskStore:         cfg.TaskStore,
+		skillRegistry:     cfg.SkillRegistry,
+		skillExecutor:     cfg.SkillExecutor,
+		logger:            cfg.Logger,
+		capabilityMatcher: cfg.CapabilityMatcher,
 	}
 
 	// Add keyword-based classifier
@@ -210,11 +213,38 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 }
 
 // classifyIntent uses classifiers to determine intent with fallback chain:
-// 1. Try LLM classifier (if available)
-// 2. If LLM fails OR confidence < threshold → try Keyword classifier
-// 3. If Keyword fails → return Chat fallback
+// 1. Try capability matcher (fast, no LLM) if available and confident
+// 2. Try LLM classifier (if available)
+// 3. If LLM fails OR confidence < threshold → try Keyword classifier
+// 4. If Keyword fails → return Chat fallback
 func (d *Dispatcher) classifyIntent(ctx context.Context, input string, context []memory.MemoryResult) (*Intent, error) {
-	// Step 1: Try LLM classifier if available
+	// Step 1: Try capability matcher first (fast, no LLM)
+	if d.capabilityMatcher != nil {
+		result := d.capabilityMatcher.Match(input)
+		if result != nil && result.Confidence >= 0.7 {
+			d.logger.Debug("Capability matcher succeeded",
+				"agent", result.AgentID,
+				"intent", result.IntentType,
+				"confidence", result.Confidence,
+				"match_type", result.MatchType,
+			)
+			return &Intent{
+				Type:       result.IntentType,
+				Confidence: result.Confidence,
+				AgentType:  result.AgentID,
+				Summary:    extractSummary(input),
+			}, nil
+		}
+		if result != nil {
+			d.logger.Debug("Capability matcher result below threshold",
+				"agent", result.AgentID,
+				"confidence", result.Confidence,
+				"threshold", 0.7,
+			)
+		}
+	}
+
+	// Step 2: Try LLM classifier if available
 	if d.llmClassifier != nil {
 		intent, err := d.llmClassifier.Classify(ctx, input, context)
 		if err == nil && intent != nil {
@@ -235,7 +265,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, context [
 		}
 	}
 
-	// Step 2: Try Keyword classifier
+	// Step 3: Try Keyword classifier
 	if d.keywordClassifier != nil {
 		intent, err := d.keywordClassifier.Classify(ctx, input, context)
 		if err == nil && intent != nil {
@@ -248,7 +278,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, context [
 		d.logger.Warn("Keyword classifier failed", "error", err)
 	}
 
-	// Step 3: Fallback to Chat for clarification
+	// Step 4: Fallback to Chat for clarification
 	return &Intent{
 		Type:       "chat",
 		Confidence: 0.3,
@@ -337,12 +367,18 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		return "", fmt.Errorf("agent execution failed: %w", err)
 	}
 
+	// Parse structured report from response and strip it from the display output
+	report := ExtractReport(response)
+	action := DetermineRouteAction(report)
+	d.logger.Debug("Agent completed", "action", action.String(), "agent", result.AgentID)
+	displayResponse := StripReport(response)
+
 	// Record memory of this interaction
 	if d.memvid != nil && d.memvid.IsAvailable(ctx) {
-		go d.recordInteraction(context.Background(), result, response)
+		go d.recordInteraction(context.Background(), result, displayResponse)
 	}
 
-	return response, nil
+	return displayResponse, nil
 }
 
 // handlePlatformIntrospection returns platform capabilities directly.
@@ -645,4 +681,14 @@ func (d *Dispatcher) GetSkillRegistry() *skills.Registry {
 // GetSkillExecutor returns the skill executor for external access.
 func (d *Dispatcher) GetSkillExecutor() *skills.Executor {
 	return d.skillExecutor
+}
+
+// GetCapabilityMatcher returns the capability matcher for external access.
+func (d *Dispatcher) GetCapabilityMatcher() *CapabilityMatcher {
+	return d.capabilityMatcher
+}
+
+// SetCapabilityMatcher sets the capability matcher for fast routing.
+func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher) {
+	d.capabilityMatcher = matcher
 }

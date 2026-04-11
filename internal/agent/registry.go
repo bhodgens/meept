@@ -236,6 +236,14 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
 		opts = append(opts, WithShadowManager(r.shadowMgr))
 	}
 
+	if r.capabilityIndex != nil {
+		opts = append(opts, WithCapabilityIndex(r.capabilityIndex))
+	}
+
+	if r.skillLoader != nil {
+		opts = append(opts, WithSkillLoader(r.skillLoader))
+	}
+
 	return NewAgentLoop(opts...), nil
 }
 
@@ -337,13 +345,13 @@ func (r *AgentRegistry) SetCapabilitiesMap(capMap *CapabilitiesMap) {
 // discoverGlobalRules loads global rules from the discovery hierarchy.
 func (r *AgentRegistry) discoverGlobalRules() string {
 	discovery := agents.NewRulesDiscovery(r.logger)
-	rules := discovery.DiscoverGlobalRules()
-	if path := discovery.RulesPath(); path != "" {
+	content, path := discovery.DiscoverWithPath()
+	if path != "" {
 		r.logger.Info("Loaded global rules", "path", path)
 	} else {
 		r.logger.Debug("Using embedded default rules")
 	}
-	return rules
+	return content
 }
 
 // loadAgentDefinitions discovers AGENT.md files and merges with programmatic specs.
@@ -411,8 +419,7 @@ func (r *AgentRegistry) mergeAgentDefinition(def *agents.AgentDefinition) {
 // mergeSpec merges an AGENT.md definition into an existing spec.
 func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) *AgentSpec {
 	merged := &AgentSpec{
-		ID:   base.ID,
-		Role: base.Role,
+		ID: base.ID,
 	}
 
 	// Name: prefer AGENT.md if set
@@ -427,6 +434,12 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.Role = AgentRole(def.Role)
 	} else {
 		merged.Role = base.Role
+	}
+
+	// SystemPromptSections: carry from base (AGENT.md body replaces Purpose, not sections)
+	if len(base.SystemPromptSections) > 0 {
+		merged.SystemPromptSections = make([]string, len(base.SystemPromptSections))
+		copy(merged.SystemPromptSections, base.SystemPromptSections)
 	}
 
 	// Purpose: prefer AGENT.md body if non-empty
@@ -470,10 +483,18 @@ func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) 
 		merged.Constraints.MaxMemoryRefs = def.MaxMemoryRefs
 	}
 	if def.Temperature != nil {
-		merged.Constraints.Temperature = def.Temperature
+		v := *def.Temperature
+		merged.Constraints.Temperature = &v
+	} else if base.Constraints.Temperature != nil {
+		v := *base.Constraints.Temperature
+		merged.Constraints.Temperature = &v
 	}
 	if def.TopP != nil {
-		merged.Constraints.TopP = def.TopP
+		v := *def.TopP
+		merged.Constraints.TopP = &v
+	} else if base.Constraints.TopP != nil {
+		v := *base.Constraints.TopP
+		merged.Constraints.TopP = &v
 	}
 
 	return merged
@@ -488,9 +509,9 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		Name:            def.Name,
 		Purpose:         def.Body,
 		Model:           def.Model,
-		AdditionalTools: def.AdditionalTools,
-		AvailableSkills: def.AvailableSkills,
-		SkillTriggers:   def.SkillTriggers,
+		AdditionalTools: append([]string(nil), def.AdditionalTools...),
+		AvailableSkills: append([]string(nil), def.AvailableSkills...),
+		SkillTriggers:   copyStringMap(def.SkillTriggers),
 	}
 
 	// Apply defaults
@@ -524,8 +545,14 @@ func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec
 		spec.Constraints.MaxMemoryRefs = defaults.MaxMemoryRefs
 	}
 
-	spec.Constraints.Temperature = def.Temperature
-	spec.Constraints.TopP = def.TopP
+	if def.Temperature != nil {
+		v := *def.Temperature
+		spec.Constraints.Temperature = &v
+	}
+	if def.TopP != nil {
+		v := *def.TopP
+		spec.Constraints.TopP = &v
+	}
 
 	return spec
 }
@@ -553,6 +580,17 @@ func mergeStringSlices(base, overlay []string) []string {
 	return result
 }
 
+func copyStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	c := make(map[string]string, len(m))
+	for k, v := range m {
+		c[k] = v
+	}
+	return c
+}
+
 func mergeStringMaps(base, overlay map[string]string) map[string]string {
 	if base == nil && overlay == nil {
 		return nil
@@ -566,6 +604,28 @@ func mergeStringMaps(base, overlay map[string]string) map[string]string {
 		result[k] = v
 	}
 	return result
+}
+
+// SetCapabilityIndex sets the capability index for all agents.
+// Invalidates existing loops so they get recreated with the new index.
+func (r *AgentRegistry) SetCapabilityIndex(ci *skills.CapabilityIndex) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.capabilityIndex = ci
+	// Invalidate all loops so they get recreated with skill discovery
+	r.loops = make(map[string]*AgentLoop)
+	r.logger.Debug("Capability index set, agent loops invalidated")
+}
+
+// SetSkillLoader sets the lazy skill loader for all agents.
+// Invalidates existing loops so they get recreated with the new loader.
+func (r *AgentRegistry) SetSkillLoader(loader *skills.LazySkillLoader) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.skillLoader = loader
+	// Invalidate all loops so they get recreated with skill loading
+	r.loops = make(map[string]*AgentLoop)
+	r.logger.Debug("Skill loader set, agent loops invalidated")
 }
 
 // GlobalRules returns the global rules content.

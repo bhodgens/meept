@@ -33,6 +33,63 @@ func (e *ParseError) Unwrap() error {
 	return e.Cause
 }
 
+// ParseSkillMetadataOnly parses only the YAML frontmatter from a SKILL.md file.
+// This is faster than ParseSkillFile as it skips parsing the body content.
+func ParseSkillMetadataOnly(path string) (*SkillIndexEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, &ParseError{
+			Path:    path,
+			Message: "failed to read file",
+			Cause:   err,
+		}
+	}
+
+	frontmatter, _, err := splitFrontmatter(string(data))
+	if err != nil {
+		return nil, &ParseError{
+			Path:    path,
+			Message: "failed to split frontmatter",
+			Cause:   err,
+		}
+	}
+
+	meta, err := parseMetadata(frontmatter)
+	if err != nil {
+		return nil, &ParseError{
+			Path:    path,
+			Message: "failed to parse metadata",
+			Cause:   err,
+		}
+	}
+
+	if meta.Name == "" {
+		return nil, &ParseError{
+			Path:    path,
+			Message: "skill has no name",
+			Cause:   ErrNoName,
+		}
+	}
+
+	entry := &SkillIndexEntry{
+		Name:         meta.Name,
+		Description:  meta.Description,
+		Requires:     meta.Requires,
+		Tags:         meta.Tags,
+		Path:         path,
+		RiskLevel:    meta.RiskLevel,
+		AllowedTools: meta.AllowedTools,
+		Examples:     meta.Examples,
+	}
+
+	// Apply defaults
+	if entry.RiskLevel == "" {
+		entry.RiskLevel = "medium"
+	}
+
+	return entry, nil
+}
+
 // ParseSkillFile parses a SKILL.md file and returns a Skill.
 // Returns an error if the file cannot be read or has invalid format.
 func ParseSkillFile(path string) (*Skill, error) {

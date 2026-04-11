@@ -271,7 +271,8 @@ type AgentConfig struct {
 	Personality              string
 	SystemPromptOveride      string
 	GlobalRules              string // Global rules injected into all agent prompts
-	MaxConversationTokens    int // 0 means use DefaultConversationTokenBudget
+	MaxConversationTokens    int     // 0 means use DefaultConversationTokenBudget
+	SkillDiscoveryThreshold  float64 // Minimum confidence for skill discovery (default 0.5)
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -638,7 +639,7 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	conv := l.conversations.Get(conversationID)
 
 	// Discover relevant skills for this input (metadata-driven, lightweight)
-	discovered := l.discoverRelevantSkills(sanitizedMessage, 0.5)
+	discovered := l.discoverRelevantSkills(sanitizedMessage, l.skillDiscoveryThreshold())
 	if len(discovered) > 0 {
 		l.logger.Info("Discovered relevant skills",
 			"conversation", conversationID,
@@ -808,11 +809,15 @@ type DiscoveredSkill struct {
 // discoverRelevantSkills finds skills that might help with the current input.
 // Uses the CapabilityIndex for metadata-driven matching without loading bodies.
 func (l *AgentLoop) discoverRelevantSkills(input string, minConfidence float64) []*DiscoveredSkill {
-	if l.capabilityIndex == nil {
+	l.mu.RLock()
+	ci := l.capabilityIndex
+	l.mu.RUnlock()
+
+	if ci == nil {
 		return nil
 	}
 
-	matches := l.capabilityIndex.MatchWithThreshold(input, minConfidence, 3)
+	matches := ci.MatchWithThreshold(input, minConfidence, 3)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -843,11 +848,15 @@ func (l *AgentLoop) discoverRelevantSkills(input string, minConfidence float64) 
 // loadSkillContext loads a skill's body and formats it for context injection.
 // Uses the LazySkillLoader to load on-demand with caching.
 func (l *AgentLoop) loadSkillContext(ctx context.Context, skillName string) (string, error) {
-	if l.skillLoader == nil {
+	l.mu.RLock()
+	loader := l.skillLoader
+	l.mu.RUnlock()
+
+	if loader == nil {
 		return "", fmt.Errorf("skill loader not configured")
 	}
 
-	skill, err := l.skillLoader.Load(ctx, skillName)
+	skill, err := loader.Load(ctx, skillName)
 	if err != nil {
 		return "", err
 	}
@@ -876,6 +885,10 @@ func formatSkillForPrompt(skill *skills.Skill) string {
 }
 
 // buildSkillContextSection creates the skill context section for the system prompt.
+// MaxSkillContextTokens is the approximate token budget for injected skill bodies.
+// Skills can be large markdown files; this prevents system prompt bloat.
+const MaxSkillContextTokens = 4000
+
 func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*DiscoveredSkill) string {
 	if len(discovered) == 0 {
 		return ""
@@ -884,6 +897,9 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 	var sb strings.Builder
 	sb.WriteString("## Relevant Skills\n\n")
 	sb.WriteString("The following skills are available and relevant to this request:\n\n")
+
+	// Track approximate token usage (rough estimate: 1 token ≈ 4 chars)
+	tokenEstimate := 0
 
 	for _, d := range discovered {
 		// Load skill body
@@ -899,8 +915,22 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 			continue
 		}
 
+		contentTokens := len(skillContent) / 4
+		if tokenEstimate+contentTokens > MaxSkillContextTokens {
+			l.logger.Debug("Skill context token budget exceeded, skipping remaining skills",
+				"skill", d.Entry.Name,
+				"current_tokens", tokenEstimate,
+				"would_add", contentTokens,
+			)
+			// Include metadata-only summary for skipped skills
+			sb.WriteString(fmt.Sprintf("### %s (summary only — context budget reached)\n", d.Entry.Name))
+			sb.WriteString(fmt.Sprintf("*%s*\n\n", d.Entry.Description))
+			continue
+		}
+
 		sb.WriteString(skillContent)
 		sb.WriteString("\n---\n\n")
+		tokenEstimate += contentTokens
 	}
 
 	return sb.String()
@@ -1335,7 +1365,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	if t.Description != "" {
 		taskInput += " " + t.Description
 	}
-	discovered := l.discoverRelevantSkills(taskInput, 0.5)
+	discovered := l.discoverRelevantSkills(taskInput, l.skillDiscoveryThreshold())
 	if len(discovered) > 0 {
 		l.logger.Info("Discovered skills for task",
 			"task", t.ID,
@@ -1424,46 +1454,6 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 	}
 
 	return parts
-}
-
-// buildSystemPromptWithContext constructs system prompt with injected memory context.
-func (l *AgentLoop) buildSystemPromptWithContext(contextParts []string) string {
-	// Use override if set
-	if l.config.SystemPromptOveride != "" {
-		return l.buildSystemPromptWithOverride()
-	}
-
-	// Build from components
-	builder := NewPromptBuilderFromConfig(PromptConfig{
-		Constitution: l.config.Constitution,
-		Restrictions: l.config.Restrictions,
-		Purpose:      l.config.Purpose,
-		Personality:  l.config.Personality,
-	})
-
-	// Add baseline capabilities and platform introspection guidelines
-	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
-	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
-
-	// Add global rules if configured
-	if l.config.GlobalRules != "" {
-		builder.AddSection("Global Rules", l.config.GlobalRules)
-	}
-
-	// Add memory context section if present
-	if len(contextParts) > 0 {
-		contextSection := "## Relevant Context\n\n"
-		for _, part := range contextParts {
-			contextSection += "- " + part + "\n"
-		}
-		contextSection += "\n---\n"
-		builder.AddSection("context", contextSection)
-	}
-
-	// Tool descriptions are omitted from the system prompt because they are
-	// already sent via the API's tools parameter, avoiding duplication.
-
-	return builder.Build()
 }
 
 // buildSystemPromptWithContextAndSkills constructs system prompt with both memory and skill context.
@@ -1790,9 +1780,13 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 }
 
 // buildSystemPromptWithOverride builds system prompt with an override.
+// Global rules are appended even when an override is set.
 // Tool descriptions are omitted because they are sent via the API's tools parameter.
 func (l *AgentLoop) buildSystemPromptWithOverride() string {
-	return l.config.SystemPromptOveride
+	if l.config.GlobalRules == "" {
+		return l.config.SystemPromptOveride
+	}
+	return l.config.SystemPromptOveride + "\n\n## Global Rules\n\n" + l.config.GlobalRules
 }
 
 // publishAction publishes an agent action event.
@@ -1950,6 +1944,14 @@ func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.skillLoader = loader
+}
+
+// skillDiscoveryThreshold returns the configured skill discovery confidence threshold.
+func (l *AgentLoop) skillDiscoveryThreshold() float64 {
+	if l.config.SkillDiscoveryThreshold > 0 {
+		return l.config.SkillDiscoveryThreshold
+	}
+	return 0.5 // default
 }
 
 // generateConversationID creates a new conversation ID.

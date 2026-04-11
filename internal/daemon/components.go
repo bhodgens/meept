@@ -90,6 +90,12 @@ type Components struct {
 	// Skills
 	SkillRegistry   *skills.Registry
 	SkillExecutor   *skills.Executor
+	SkillIndex      *skills.SkillIndex
+	SkillLoader     *skills.LazySkillLoader
+	CapabilityIndex *skills.CapabilityIndex
+
+	// Agent capabilities
+	CapabilitiesMap *agent.CapabilitiesMap
 
 	// Distributed memory sync
 	SyncManager     *memsync.SyncManager
@@ -478,6 +484,19 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		c.AgentLoop.SetTaskStore(taskStore)
 		logger.Debug("Wired task store to main agent loop")
 	}
+	// Wire skill discovery to the main agent loop
+	if c.CapabilityIndex != nil {
+		c.AgentLoop.SetCapabilityIndex(c.CapabilityIndex)
+		logger.Info("Agent loop configured with capability index",
+			"keywords", c.CapabilityIndex.KeywordCount(),
+		)
+	}
+	if c.SkillLoader != nil {
+		c.AgentLoop.SetSkillLoader(c.SkillLoader)
+		logger.Info("Agent loop configured with skill loader",
+			"cache_size", c.SkillLoader.CacheSize(),
+		)
+	}
 
 	// Create agent registry if multi-agent is enabled
 	if cfg.MultiAgent.Enabled {
@@ -489,29 +508,71 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 
 		c.AgentRegistry = agent.NewAgentRegistry(agent.RegistryConfig{
-			MemvidClient:    c.MemvidClient,
-			TaskStore:       taskStore,
-			LLMClient:       c.LLMClient,
-			Resolver:        c.LLMResolver,
-			MessageBus:      msgBus,
-			SecurityChecker: c.SecurityChecker,
-			ToolRegistry: c.ToolRegistry,
-			ShadowManager:   c.ShadowManager,
-			Logger:          logger,
+			MemvidClient:      c.MemvidClient,
+			TaskStore:         taskStore,
+			LLMClient:         c.LLMClient,
+			Resolver:          c.LLMResolver,
+			MessageBus:        msgBus,
+			SecurityChecker:   c.SecurityChecker,
+			ToolRegistry:      c.ToolRegistry,
+			ShadowManager:     c.ShadowManager,
+			Logger:            logger,
+			BundledAgentsPath: "config/agents",
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
-		// Create dispatcher
+		// Wire skill discovery to registry so all specialist agents get it
+		if c.CapabilityIndex != nil {
+			c.AgentRegistry.SetCapabilityIndex(c.CapabilityIndex)
+		}
+		if c.SkillLoader != nil {
+			c.AgentRegistry.SetSkillLoader(c.SkillLoader)
+		}
+
+		// Build capabilities map from agent specs and skill metadata
+		capBuilder := agent.NewCapabilitiesBuilder(c.SkillIndex, logger.With("component", "capabilities-builder"))
+		capMap, err := capBuilder.Build(c.AgentRegistry.ListSpecs())
+		if err != nil {
+			logger.Warn("Failed to build capabilities map", "error", err)
+		} else {
+			c.CapabilitiesMap = capMap
+			c.AgentRegistry.SetCapabilitiesMap(capMap)
+			logger.Info("Capabilities map built",
+				"agents", capMap.Count(),
+				"intent_types", len(capMap.AllIntentTypes()),
+				"keywords", len(capMap.AllKeywords()),
+			)
+		}
+
+		// Create capability matcher for fast routing
+		var capMatcher *agent.CapabilityMatcher
+		if c.CapabilitiesMap != nil {
+			capMatcher = agent.NewCapabilityMatcher(agent.CapabilityMatcherConfig{
+				CapabilitiesMap: c.CapabilitiesMap,
+				CapabilityIndex: c.CapabilityIndex,
+				Logger:          logger.With("component", "capability-matcher"),
+			})
+			if c.CapabilityIndex != nil {
+				logger.Debug("Capability matcher initialized with capability index",
+					"keywords", c.CapabilityIndex.KeywordCount(),
+				)
+			} else {
+				logger.Debug("Capability matcher initialized without capability index")
+			}
+		}
+
+		// Create dispatcher with capability matcher
 		c.Dispatcher = agent.NewDispatcher(agent.DispatcherConfig{
-			Registry:      c.AgentRegistry,
-			MemvidClient:  c.MemvidClient,
-			MemoryMgr:     c.MemoryManager,
-			TaskStore:     taskStore,
-			SkillRegistry: c.SkillRegistry,
-			SkillExecutor: c.SkillExecutor,
-			Logger:        logger.With("component", "dispatcher"),
+			Registry:          c.AgentRegistry,
+			MemvidClient:      c.MemvidClient,
+			MemoryMgr:         c.MemoryManager,
+			TaskStore:         taskStore,
+			SkillRegistry:     c.SkillRegistry,
+			SkillExecutor:     c.SkillExecutor,
+			Logger:            logger.With("component", "dispatcher"),
+			CapabilityMatcher: capMatcher,
 		})
-		logger.Info("Dispatcher initialized")
+		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, logger)
@@ -1571,7 +1632,7 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 	logger.Info("Code intelligence initialized")
 }
 
-// initializeSkills sets up the skills system.
+// initializeSkills sets up the skills system with lazy loading.
 func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 	// Build discovery options
 	discoveryOpts := []skills.DiscoveryOption{
@@ -1592,32 +1653,80 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 		))
 	}
 
-	// Create discovery and registry
+	// Create discovery
 	discovery := skills.NewDiscovery(discoveryOpts...)
+
+	// Discover metadata only (lightweight index, no bodies)
+	indexEntries, err := discovery.DiscoverMetadataOnly()
+	if err != nil {
+		logger.Warn("Skill metadata discovery failed", "error", err)
+	} else {
+		// Create skill index from metadata
+		c.SkillIndex = skills.NewSkillIndex()
+		c.SkillIndex.IndexAll(indexEntries)
+		logger.Info("Skill index built",
+			"count", c.SkillIndex.Count(),
+			"tags", len(c.SkillIndex.AllTags()),
+			"capabilities", len(c.SkillIndex.AllCapabilities()),
+		)
+
+		// Build capability index for metadata-driven skill matching
+		c.CapabilityIndex = skills.BuildCapabilityIndex(
+			c.SkillIndex,
+			skills.WithCapabilityLogger(logger.With("component", "capability-index")),
+		)
+		logger.Info("Capability index built",
+			"skills", c.CapabilityIndex.SkillCount(),
+			"keywords", c.CapabilityIndex.KeywordCount(),
+		)
+
+		// Create lazy loader with LRU cache
+		cacheSize := 50 // Default cache size
+		if cfg.Skills.CacheSize > 0 {
+			cacheSize = cfg.Skills.CacheSize
+		}
+		c.SkillLoader = skills.NewLazySkillLoader(
+			c.SkillIndex,
+			skills.WithLoaderLogger(logger.With("component", "skills-loader")),
+			skills.WithCacheSize(cacheSize),
+		)
+		logger.Debug("Skills lazy loader initialized", "cache_size", cacheSize)
+	}
+
+	// Create registry (for backwards compatibility)
+	// Register skills from metadata (bodies will be loaded on-demand)
 	c.SkillRegistry = skills.NewRegistry(
 		skills.WithRegistryLogger(logger.With("component", "skills-registry")),
 	)
 
-	// Discover and register skills
+	// Load full skills for registry (for backwards compatibility with existing code)
+	// TODO: Consider making registry also use lazy loading
 	discovered, err := discovery.Discover()
 	if err != nil {
 		logger.Warn("Skill discovery failed", "error", err)
 	} else {
 		c.SkillRegistry.RegisterAll(discovered)
-		logger.Info("Skills loaded", "count", len(discovered))
+		logger.Info("Skills loaded into registry", "count", len(discovered))
 	}
 
 	// Create executor if we have a resolver
 	if c.LLMResolver != nil {
-		c.SkillExecutor = skills.NewExecutor(
-			c.LLMResolver,
+		executorOpts := []skills.ExecutorOption{
 			skills.WithExecutorLogger(logger.With("component", "skills-executor")),
 			skills.WithClient(c.LLMClient),
-		)
+		}
+
+		// Add lazy loader to executor
+		if c.SkillLoader != nil {
+			executorOpts = append(executorOpts, skills.WithLazyLoader(c.SkillLoader))
+		}
+
+		c.SkillExecutor = skills.NewExecutor(c.LLMResolver, executorOpts...)
 		logger.Debug("Skills executor initialized")
 	} else {
 		logger.Warn("Skills executor not created - no LLM resolver available")
 	}
+
 }
 
 // StatusHandler handles status.request messages on the bus.

@@ -419,6 +419,7 @@ type SkillsConfig struct {
 	Enabled     bool     `toml:"enabled"`
 	SearchPaths []string `toml:"search_paths"` // Additional skill directories beyond defaults
 	AutoReload  bool     `toml:"auto_reload"`  // Watch for skill file changes
+	CacheSize   int      `toml:"cache_size"`   // Max skills to cache in lazy loader (default: 50)
 }
 
 // ClawSkillsConfig holds ClawSkills settings.

@@ -38,9 +38,10 @@ func (e *ExecutorError) Unwrap() error {
 
 // Executor executes skills using the LLM client.
 type Executor struct {
-	resolver *llm.Resolver
-	client   *llm.Client
-	logger   *slog.Logger
+	resolver   *llm.Resolver
+	client     *llm.Client
+	logger     *slog.Logger
+	lazyLoader *LazySkillLoader
 }
 
 // ExecutorOption is a functional option for configuring Executor.
@@ -58,6 +59,13 @@ func WithExecutorLogger(logger *slog.Logger) ExecutorOption {
 func WithClient(client *llm.Client) ExecutorOption {
 	return func(e *Executor) {
 		e.client = client
+	}
+}
+
+// WithLazyLoader sets a lazy loader for on-demand skill body loading.
+func WithLazyLoader(loader *LazySkillLoader) ExecutorOption {
+	return func(e *Executor) {
+		e.lazyLoader = loader
 	}
 }
 
@@ -292,4 +300,33 @@ func (e *Executor) GetModelForSkill(skill *Skill) (*llm.ModelConfig, error) {
 	}
 
 	return e.resolveModel(skill)
+}
+
+// ExecuteByName executes a skill by name using the lazy loader.
+// This is useful when you only have the skill name and want on-demand loading.
+func (e *Executor) ExecuteByName(ctx context.Context, name string, input string) (*SkillExecutionResult, error) {
+	if e.lazyLoader == nil {
+		return nil, fmt.Errorf("lazy loader not configured")
+	}
+
+	skill, err := e.lazyLoader.Load(ctx, name)
+	if err != nil {
+		return nil, &ExecutorError{
+			SkillName: name,
+			Message:   "failed to load skill",
+			Cause:     err,
+		}
+	}
+
+	return e.Execute(ctx, skill, input)
+}
+
+// LazyLoader returns the configured lazy loader (may be nil).
+func (e *Executor) LazyLoader() *LazySkillLoader {
+	return e.lazyLoader
+}
+
+// SetLazyLoader sets the lazy loader for on-demand skill loading.
+func (e *Executor) SetLazyLoader(loader *LazySkillLoader) {
+	e.lazyLoader = loader
 }

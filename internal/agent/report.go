@@ -190,7 +190,10 @@ func DetermineRouteAction(report *AgentReport) RouteAction {
 
 	switch report.Status {
 	case ReportStatusCompleted:
-		if report.SuggestedNextAgent != "" && !report.UserDecisionNeeded {
+		if report.UserDecisionNeeded {
+			return RouteActionNotifyUser
+		}
+		if report.SuggestedNextAgent != "" {
 			return RouteActionRoute
 		}
 		return RouteActionClose

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/skills"
 )
 
 // mockLLMClient is a mock LLM client for testing.
@@ -447,4 +448,119 @@ func TestAgentLoopPublishResult(t *testing.T) {
 
 	// Should not panic
 	loop.publishResult("conv-1", 1, results)
+}
+
+func TestAgentLoopDiscoverRelevantSkills(t *testing.T) {
+	loop := NewAgentLoop()
+
+	// Without capability index, should return nil
+	result := loop.discoverRelevantSkills("write code", 0.5)
+	if result != nil {
+		t.Error("expected nil when no capability index configured")
+	}
+}
+
+func TestAgentLoopSetCapabilityIndex(t *testing.T) {
+	loop := NewAgentLoop()
+
+	// Initially should be nil
+	if loop.capabilityIndex != nil {
+		t.Error("capabilityIndex should be nil initially")
+	}
+
+	// Create a mock capability index
+	idx := createTestCapabilityIndex()
+	loop.SetCapabilityIndex(idx)
+
+	// Should now be set
+	if loop.capabilityIndex == nil {
+		t.Error("capabilityIndex should be set after SetCapabilityIndex")
+	}
+}
+
+func TestAgentLoopSetSkillLoader(t *testing.T) {
+	loop := NewAgentLoop()
+
+	// Initially should be nil
+	if loop.skillLoader != nil {
+		t.Error("skillLoader should be nil initially")
+	}
+
+	// Note: We can't easily test SetSkillLoader without a full skill index setup
+	// Just verify it doesn't panic
+	loop.SetSkillLoader(nil)
+}
+
+func TestAgentLoopDiscoverRelevantSkillsWithIndex(t *testing.T) {
+	loop := NewAgentLoop()
+
+	// Create and set a test capability index
+	idx := createTestCapabilityIndex()
+	loop.SetCapabilityIndex(idx)
+
+	// Should find skills matching input
+	result := loop.discoverRelevantSkills("code review", 0.3)
+	if result == nil {
+		t.Error("expected to find skills matching 'code review'")
+	}
+
+	// With high threshold, might not find matches
+	result = loop.discoverRelevantSkills("xyz random", 0.9)
+	if len(result) > 0 {
+		t.Log("Unexpected match for random input:", result[0].Entry.Name)
+	}
+}
+
+func TestBuildSkillContextSection(t *testing.T) {
+	loop := NewAgentLoop()
+
+	// Empty discovered list should return empty string
+	result := loop.buildSkillContextSection(context.Background(), nil)
+	if result != "" {
+		t.Error("expected empty string for nil discovered skills")
+	}
+
+	result = loop.buildSkillContextSection(context.Background(), []*DiscoveredSkill{})
+	if result != "" {
+		t.Error("expected empty string for empty discovered skills")
+	}
+}
+
+func TestFormatSkillForPrompt(t *testing.T) {
+	skill := &skills.Skill{
+		Name:        "test-skill",
+		Description: "A test skill",
+		Body:        "This is the skill body with instructions.",
+	}
+
+	formatted := formatSkillForPrompt(skill)
+
+	if !strings.Contains(formatted, "test-skill") {
+		t.Error("formatted skill should contain name")
+	}
+	if !strings.Contains(formatted, "A test skill") {
+		t.Error("formatted skill should contain description")
+	}
+	if !strings.Contains(formatted, "This is the skill body") {
+		t.Error("formatted skill should contain body")
+	}
+}
+
+// createTestCapabilityIndex creates a minimal capability index for testing.
+func createTestCapabilityIndex() *skills.CapabilityIndex {
+	idx := skills.NewSkillIndex()
+	idx.Index(&skills.SkillIndexEntry{
+		Name:        "code-review",
+		Description: "Review code for quality and best practices",
+		Tags:        []string{"coding", "review"},
+		Examples:    []string{"review this code", "check code quality"},
+	})
+	idx.Index(&skills.SkillIndexEntry{
+		Name:        "test-runner",
+		Description: "Run tests and verify functionality",
+		Tags:        []string{"testing"},
+		Examples:    []string{"run the tests", "execute test suite"},
+	})
+
+	return skills.BuildCapabilityIndex(idx)
 }

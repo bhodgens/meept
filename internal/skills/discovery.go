@@ -69,6 +69,125 @@ func NewDiscovery(opts ...DiscoveryOption) *Discovery {
 	return d
 }
 
+// DiscoverMetadataOnly scans all tiers and returns skill index entries (metadata only).
+// This is faster than Discover() as it skips parsing skill bodies.
+func (d *Discovery) DiscoverMetadataOnly() ([]*SkillIndexEntry, error) {
+	entries := make(map[string]*SkillIndexEntry)
+
+	// Sort tiers by priority (lowest first) so we can build the map
+	// with higher-priority skills overwriting lower-priority ones.
+	sortedTiers := make([]DiscoveryTier, len(d.tiers))
+	copy(sortedTiers, d.tiers)
+	sort.Slice(sortedTiers, func(i, j int) bool {
+		return sortedTiers[i].Priority > sortedTiers[j].Priority
+	})
+
+	for _, tier := range sortedTiers {
+		if err := d.scanTierMetadataOnly(tier, entries); err != nil {
+			d.logger.Warn("Failed to scan tier for metadata",
+				"path", tier.Path,
+				"error", err,
+			)
+		}
+	}
+
+	// Convert map to slice
+	result := make([]*SkillIndexEntry, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, entry)
+	}
+
+	// Sort by name for consistent ordering
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+
+	d.logger.Info("Skill metadata discovery complete",
+		"count", len(result),
+		"tiers", len(d.tiers),
+	)
+
+	return result, nil
+}
+
+// scanTierMetadataOnly scans a single tier directory for skill metadata.
+func (d *Discovery) scanTierMetadataOnly(tier DiscoveryTier, entries map[string]*SkillIndexEntry) error {
+	path := pathutil.ExpandPath(tier.Path)
+
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		d.logger.Debug("Tier directory does not exist", "path", path)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+
+	dirEntries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+
+	for _, dirEntry := range dirEntries {
+		entryPath := filepath.Join(path, dirEntry.Name())
+
+		if dirEntry.IsDir() {
+			// Look for SKILL.md inside the directory
+			skillFile := filepath.Join(entryPath, "SKILL.md")
+			if _, err := os.Stat(skillFile); err == nil {
+				d.loadSkillMetadata(skillFile, tier.Priority, entries)
+			}
+		} else {
+			// Support flat .md files (not SKILL.md, which would be at root)
+			if isSkillFile(dirEntry.Name()) {
+				d.loadSkillMetadata(entryPath, tier.Priority, entries)
+			}
+		}
+	}
+
+	return nil
+}
+
+// loadSkillMetadata loads skill metadata from a file and adds it to entries.
+func (d *Discovery) loadSkillMetadata(path string, priority int, entries map[string]*SkillIndexEntry) {
+	entry, err := ParseSkillMetadataOnly(path)
+	if err != nil {
+		d.logger.Warn("Failed to parse skill metadata",
+			"path", path,
+			"error", err,
+		)
+		return
+	}
+
+	entry.Priority = priority
+
+	// Check if we should shadow an existing entry
+	key := normalizeName(entry.Name)
+	existing, exists := entries[key]
+	if exists {
+		if entry.Priority <= existing.Priority {
+			d.logger.Debug("Skill metadata shadowed by higher priority",
+				"name", entry.Name,
+				"new_path", path,
+				"old_path", existing.Path,
+			)
+		} else {
+			// Don't overwrite with lower priority
+			return
+		}
+	}
+
+	entries[key] = entry
+	d.logger.Debug("Loaded skill metadata",
+		"name", entry.Name,
+		"path", path,
+		"priority", priority,
+	)
+}
+
 // Discover scans all tiers and returns discovered skills.
 // Higher-priority tiers (lower Priority value) shadow lower ones.
 func (d *Discovery) Discover() ([]*Skill, error) {

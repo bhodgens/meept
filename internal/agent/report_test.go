@@ -209,7 +209,7 @@ func TestDetermineRouteAction(t *testing.T) {
 				SuggestedNextAgent: "coder",
 				UserDecisionNeeded: true,
 			},
-			want: RouteActionClose,
+			want: RouteActionNotifyUser,
 		},
 		{
 			name: "partial with routing",

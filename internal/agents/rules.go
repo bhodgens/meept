@@ -31,15 +31,14 @@ func NewRulesDiscovery(logger *slog.Logger) *RulesDiscovery {
 	return &RulesDiscovery{logger: logger}
 }
 
-// DiscoverGlobalRules finds and loads the global rules content.
-// Priority: .meept/RULES.md > ~/.meept/RULES.md > embedded default
-func (r *RulesDiscovery) DiscoverGlobalRules() string {
+// findRulesFile returns the path and content of the highest-priority rules file.
+// Returns ("", embeddedRules) if no file is found in any tier.
+func (r *RulesDiscovery) findRulesFile() (string, string) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "~"
 	}
 
-	// Search paths in priority order
 	searchPaths := []string{
 		".meept/RULES.md",
 		filepath.Join(homeDir, ".meept", "RULES.md"),
@@ -49,34 +48,30 @@ func (r *RulesDiscovery) DiscoverGlobalRules() string {
 		path := pathutil.ExpandPath(searchPath)
 		content, err := os.ReadFile(path)
 		if err == nil {
-			r.logger.Debug("Loaded global rules", "path", path)
-			return string(content)
+			return path, string(content)
 		}
 	}
 
-	r.logger.Debug("Using embedded default rules")
-	return embeddedRules
+	return "", embeddedRules
+}
+
+// DiscoverWithPath returns the global rules content and the file path it was loaded from.
+// Path is empty when using embedded defaults.
+func (r *RulesDiscovery) DiscoverWithPath() (content, path string) {
+	path, content = r.findRulesFile()
+	return content, path
+}
+
+// DiscoverGlobalRules finds and loads the global rules content.
+// Priority: .meept/RULES.md > ~/.meept/RULES.md > embedded default
+func (r *RulesDiscovery) DiscoverGlobalRules() string {
+	_, content := r.findRulesFile()
+	return content
 }
 
 // RulesPath returns the path where the highest-priority rules were found,
 // or empty string if using embedded defaults.
 func (r *RulesDiscovery) RulesPath() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "~"
-	}
-
-	searchPaths := []string{
-		".meept/RULES.md",
-		filepath.Join(homeDir, ".meept", "RULES.md"),
-	}
-
-	for _, searchPath := range searchPaths {
-		path := pathutil.ExpandPath(searchPath)
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-
-	return ""
+	path, _ := r.findRulesFile()
+	return path
 }
