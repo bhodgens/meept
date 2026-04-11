@@ -127,10 +127,8 @@ Always include relevant memory_refs when creating tasks to provide context conti
 - NEVER assume what agents or tools exist - always query first
 - When users ask about capabilities, respond with actual data from platform_* tools
 - If you're uncertain which agent to use, call platform_agents to review options`,
-		Model: "", // Use default model
-		AdditionalTools: []string{
-			"delegate_task",
-		},
+		Model:           "", // Use default model
+		AdditionalTools: []string{}, // delegate_task is in BaselineTools
 		Constraints: AgentConstraints{
 			MaxIterations:    5,
 			Timeout:          60 * time.Second,
