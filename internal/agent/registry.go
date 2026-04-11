@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/shadow"
+	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -24,16 +26,24 @@ type AgentRegistry struct {
 	// Instantiated agent loops (lazy creation)
 	loops map[string]*AgentLoop
 
+	// Capabilities map for fast routing
+	capabilitiesMap *CapabilitiesMap
+
+	// Global rules injected into all agent prompts
+	globalRules string
+
 	// Shared dependencies
-	memvid    *memvid.Client
-	taskStore *task.Store
-	llm       *llm.Client
-	resolver  *llm.Resolver
-	bus       *bus.MessageBus
-	security  *security.PermissionChecker
-	tools     ToolRegistry
-	shadowMgr *shadow.Manager
-	logger    *slog.Logger
+	memvid          *memvid.Client
+	taskStore       *task.Store
+	llm             *llm.Client
+	resolver        *llm.Resolver
+	bus             *bus.MessageBus
+	security        *security.PermissionChecker
+	tools           ToolRegistry
+	shadowMgr       *shadow.Manager
+	capabilityIndex *skills.CapabilityIndex
+	skillLoader     *skills.LazySkillLoader
+	logger          *slog.Logger
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -47,6 +57,13 @@ type RegistryConfig struct {
 	ToolRegistry    ToolRegistry
 	ShadowManager   *shadow.Manager
 	Logger          *slog.Logger
+
+	// BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
+	BundledAgentsPath string
+
+	// GlobalRules is the global rules content to inject into all agents.
+	// If empty, the registry will auto-discover rules using RulesDiscovery.
+	GlobalRules string
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -69,10 +86,20 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		logger:    cfg.Logger,
 	}
 
+	// Load global rules
+	if cfg.GlobalRules != "" {
+		r.globalRules = cfg.GlobalRules
+	} else {
+		r.globalRules = r.discoverGlobalRules()
+	}
+
 	// Register default specs
 	for _, spec := range DefaultSpecs() {
 		r.RegisterSpec(spec)
 	}
+
+	// Discover and merge AGENT.md definitions
+	r.loadAgentDefinitions(cfg.BundledAgentsPath)
 
 	return r
 }
@@ -161,6 +188,7 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
 		Timeout:               spec.Constraints.Timeout,
 		Purpose:               spec.Purpose,
 		MaxConversationTokens: spec.Constraints.MaxConversationTokens,
+		GlobalRules:           r.globalRules,
 	}
 
 	opts := []LoopOption{
@@ -289,4 +317,271 @@ func (r *AgentRegistry) Stats() map[string]int {
 		"specs":        len(r.specs),
 		"active_loops": len(r.loops),
 	}
+}
+
+// CapabilitiesMap returns the capabilities map (may be nil).
+func (r *AgentRegistry) CapabilitiesMap() *CapabilitiesMap {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.capabilitiesMap
+}
+
+// SetCapabilitiesMap sets the capabilities map for fast routing.
+func (r *AgentRegistry) SetCapabilitiesMap(capMap *CapabilitiesMap) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.capabilitiesMap = capMap
+	r.logger.Debug("Capabilities map set", "agents", capMap.Count())
+}
+
+// discoverGlobalRules loads global rules from the discovery hierarchy.
+func (r *AgentRegistry) discoverGlobalRules() string {
+	discovery := agents.NewRulesDiscovery(r.logger)
+	rules := discovery.DiscoverGlobalRules()
+	if path := discovery.RulesPath(); path != "" {
+		r.logger.Info("Loaded global rules", "path", path)
+	} else {
+		r.logger.Debug("Using embedded default rules")
+	}
+	return rules
+}
+
+// loadAgentDefinitions discovers AGENT.md files and merges with programmatic specs.
+func (r *AgentRegistry) loadAgentDefinitions(bundledPath string) {
+	// Build discovery options
+	opts := []agents.DiscoveryOption{
+		agents.WithDiscoveryLogger(r.logger),
+	}
+	if bundledPath != "" {
+		opts = append(opts, agents.WithBundledPath(bundledPath))
+	}
+
+	// Create discovery and discover AGENT.md files
+	discovery := agents.NewDiscovery(opts...)
+	definitions, err := discovery.Discover()
+	if err != nil {
+		r.logger.Warn("Failed to discover agent definitions", "error", err)
+		return
+	}
+
+	if len(definitions) == 0 {
+		r.logger.Debug("No AGENT.md definitions discovered")
+		return
+	}
+
+	// Merge each discovered definition into existing specs
+	for _, def := range definitions {
+		r.mergeAgentDefinition(def)
+	}
+
+	r.logger.Info("Loaded agent definitions from AGENT.md files",
+		"count", len(definitions),
+	)
+}
+
+// mergeAgentDefinition merges an AGENT.md definition into the registry.
+// If a spec with the same ID exists, non-empty fields from the definition override it.
+// If no spec exists, a new one is created from the definition.
+func (r *AgentRegistry) mergeAgentDefinition(def *agents.AgentDefinition) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	existing, hasExisting := r.specs[def.ID]
+
+	if hasExisting {
+		// Merge: AGENT.md fields override non-empty existing fields
+		r.specs[def.ID] = r.mergeSpec(existing, def)
+		r.logger.Debug("Merged AGENT.md definition",
+			"id", def.ID,
+			"source", "merged",
+		)
+	} else {
+		// New spec from AGENT.md only
+		r.specs[def.ID] = r.definitionToSpec(def)
+		r.logger.Debug("Added AGENT.md definition",
+			"id", def.ID,
+			"source", "agent.md",
+		)
+	}
+
+	// Invalidate any existing loop so it gets recreated with new config
+	delete(r.loops, def.ID)
+}
+
+// mergeSpec merges an AGENT.md definition into an existing spec.
+func (r *AgentRegistry) mergeSpec(base *AgentSpec, def *agents.AgentDefinition) *AgentSpec {
+	merged := &AgentSpec{
+		ID:   base.ID,
+		Role: base.Role,
+	}
+
+	// Name: prefer AGENT.md if set
+	if def.Name != "" {
+		merged.Name = def.Name
+	} else {
+		merged.Name = base.Name
+	}
+
+	// Role: prefer AGENT.md if set
+	if def.Role != "" {
+		merged.Role = AgentRole(def.Role)
+	} else {
+		merged.Role = base.Role
+	}
+
+	// Purpose: prefer AGENT.md body if non-empty
+	if def.Body != "" {
+		merged.Purpose = def.Body
+	} else {
+		merged.Purpose = base.Purpose
+	}
+
+	// Model: prefer AGENT.md if set
+	if def.Model != "" {
+		merged.Model = def.Model
+	} else {
+		merged.Model = base.Model
+	}
+
+	// Tools: MERGE (union)
+	merged.AdditionalTools = mergeStringSlices(base.AdditionalTools, def.AdditionalTools)
+
+	// Skills: MERGE (union)
+	merged.AvailableSkills = mergeStringSlices(base.AvailableSkills, def.AvailableSkills)
+
+	// SkillTriggers: MERGE
+	merged.SkillTriggers = mergeStringMaps(base.SkillTriggers, def.SkillTriggers)
+
+	// Constraints: prefer AGENT.md if non-zero
+	merged.Constraints = base.Constraints
+	if def.MaxIterations > 0 {
+		merged.Constraints.MaxIterations = def.MaxIterations
+	}
+	if def.TimeoutSeconds > 0 {
+		merged.Constraints.Timeout = def.Timeout()
+	}
+	if def.MaxTokensPerTurn > 0 {
+		merged.Constraints.MaxTokensPerTurn = def.MaxTokensPerTurn
+	}
+	if def.MaxConversationTokens > 0 {
+		merged.Constraints.MaxConversationTokens = def.MaxConversationTokens
+	}
+	if def.MaxMemoryRefs > 0 {
+		merged.Constraints.MaxMemoryRefs = def.MaxMemoryRefs
+	}
+	if def.Temperature != nil {
+		merged.Constraints.Temperature = def.Temperature
+	}
+	if def.TopP != nil {
+		merged.Constraints.TopP = def.TopP
+	}
+
+	return merged
+}
+
+// definitionToSpec converts an AGENT.md definition to an AgentSpec.
+func (r *AgentRegistry) definitionToSpec(def *agents.AgentDefinition) *AgentSpec {
+	defaults := agents.DefaultMetadata()
+
+	spec := &AgentSpec{
+		ID:              def.ID,
+		Name:            def.Name,
+		Purpose:         def.Body,
+		Model:           def.Model,
+		AdditionalTools: def.AdditionalTools,
+		AvailableSkills: def.AvailableSkills,
+		SkillTriggers:   def.SkillTriggers,
+	}
+
+	// Apply defaults
+	if spec.Name == "" {
+		spec.Name = def.ID
+	}
+
+	// Role
+	if def.Role != "" {
+		spec.Role = AgentRole(def.Role)
+	} else {
+		spec.Role = AgentRole(defaults.Role)
+	}
+
+	// Constraints
+	spec.Constraints.MaxIterations = def.MaxIterations
+	if spec.Constraints.MaxIterations == 0 {
+		spec.Constraints.MaxIterations = defaults.MaxIterations
+	}
+
+	spec.Constraints.Timeout = def.Timeout()
+
+	spec.Constraints.MaxTokensPerTurn = def.MaxTokensPerTurn
+	if spec.Constraints.MaxTokensPerTurn == 0 {
+		spec.Constraints.MaxTokensPerTurn = defaults.MaxTokensPerTurn
+	}
+
+	spec.Constraints.MaxConversationTokens = def.MaxConversationTokens
+	spec.Constraints.MaxMemoryRefs = def.MaxMemoryRefs
+	if spec.Constraints.MaxMemoryRefs == 0 {
+		spec.Constraints.MaxMemoryRefs = defaults.MaxMemoryRefs
+	}
+
+	spec.Constraints.Temperature = def.Temperature
+	spec.Constraints.TopP = def.TopP
+
+	return spec
+}
+
+// Helper functions for merging
+
+func mergeStringSlices(base, overlay []string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(base)+len(overlay))
+
+	for _, s := range base {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			result = append(result, s)
+		}
+	}
+
+	for _, s := range overlay {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			result = append(result, s)
+		}
+	}
+
+	return result
+}
+
+func mergeStringMaps(base, overlay map[string]string) map[string]string {
+	if base == nil && overlay == nil {
+		return nil
+	}
+
+	result := make(map[string]string)
+	for k, v := range base {
+		result[k] = v
+	}
+	for k, v := range overlay {
+		result[k] = v
+	}
+	return result
+}
+
+// GlobalRules returns the global rules content.
+func (r *AgentRegistry) GlobalRules() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.globalRules
+}
+
+// SetGlobalRules sets the global rules content.
+func (r *AgentRegistry) SetGlobalRules(rules string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.globalRules = rules
+
+	// Invalidate all loops so they get recreated with new rules
+	r.loops = make(map[string]*AgentLoop)
+	r.logger.Info("Global rules updated, agent loops invalidated")
 }

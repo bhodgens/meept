@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/shadow"
+	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -269,6 +270,7 @@ type AgentConfig struct {
 	Purpose                  string
 	Personality              string
 	SystemPromptOveride      string
+	GlobalRules              string // Global rules injected into all agent prompts
 	MaxConversationTokens    int // 0 means use DefaultConversationTokenBudget
 }
 
@@ -337,6 +339,10 @@ type AgentLoop struct {
 
 	// Agent identity
 	agentID string
+
+	// Skill discovery (lightweight, metadata-driven)
+	capabilityIndex *skills.CapabilityIndex
+	skillLoader     *skills.LazySkillLoader
 }
 
 // LearningPipeline is the interface for the learning pipeline.
@@ -534,6 +540,27 @@ func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
 	}
 }
 
+// WithCapabilityIndex sets the capability index for skill discovery.
+func WithCapabilityIndex(ci *skills.CapabilityIndex) LoopOption {
+	return func(l *AgentLoop) {
+		l.capabilityIndex = ci
+	}
+}
+
+// WithSkillLoader sets the lazy skill loader for on-demand loading.
+func WithSkillLoader(loader *skills.LazySkillLoader) LoopOption {
+	return func(l *AgentLoop) {
+		l.skillLoader = loader
+	}
+}
+
+// WithGlobalRules sets the global rules content to inject into all prompts.
+func WithGlobalRules(rules string) LoopOption {
+	return func(l *AgentLoop) {
+		l.config.GlobalRules = rules
+	}
+}
+
 // NewAgentLoop creates a new agent loop.
 func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 	loop := &AgentLoop{
@@ -610,8 +637,19 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	// Get or create conversation
 	conv := l.conversations.Get(conversationID)
 
-	// Build and set system prompt
-	systemPrompt := l.buildSystemPrompt()
+	// Discover relevant skills for this input (metadata-driven, lightweight)
+	discovered := l.discoverRelevantSkills(sanitizedMessage, 0.5)
+	if len(discovered) > 0 {
+		l.logger.Info("Discovered relevant skills",
+			"conversation", conversationID,
+			"count", len(discovered),
+			"top_skill", discovered[0].Entry.Name,
+			"top_confidence", discovered[0].Confidence,
+		)
+	}
+
+	// Build and set system prompt with skill context
+	systemPrompt := l.buildSystemPromptWithSkills(ctx, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
 	// Add user message (sanitized)
@@ -758,6 +796,114 @@ func (l *AgentLoop) classifyDomain(messages []llm.ChatMessage) string {
 		return "planning"
 	}
 	return "general"
+}
+
+// DiscoveredSkill holds a skill that was found relevant to the input.
+type DiscoveredSkill struct {
+	Entry      *skills.SkillIndexEntry
+	Confidence float64
+	Keywords   []string
+}
+
+// discoverRelevantSkills finds skills that might help with the current input.
+// Uses the CapabilityIndex for metadata-driven matching without loading bodies.
+func (l *AgentLoop) discoverRelevantSkills(input string, minConfidence float64) []*DiscoveredSkill {
+	if l.capabilityIndex == nil {
+		return nil
+	}
+
+	matches := l.capabilityIndex.MatchWithThreshold(input, minConfidence, 3)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	discovered := make([]*DiscoveredSkill, 0, len(matches))
+	for _, match := range matches {
+		keywords := make([]string, 0, len(match.Matches))
+		for _, km := range match.Matches {
+			keywords = append(keywords, km.Keyword)
+		}
+
+		discovered = append(discovered, &DiscoveredSkill{
+			Entry:      match.Entry,
+			Confidence: match.Confidence,
+			Keywords:   keywords,
+		})
+
+		l.logger.Debug("Discovered relevant skill",
+			"skill", match.Entry.Name,
+			"confidence", match.Confidence,
+			"keywords", keywords,
+		)
+	}
+
+	return discovered
+}
+
+// loadSkillContext loads a skill's body and formats it for context injection.
+// Uses the LazySkillLoader to load on-demand with caching.
+func (l *AgentLoop) loadSkillContext(ctx context.Context, skillName string) (string, error) {
+	if l.skillLoader == nil {
+		return "", fmt.Errorf("skill loader not configured")
+	}
+
+	skill, err := l.skillLoader.Load(ctx, skillName)
+	if err != nil {
+		return "", err
+	}
+
+	// Format skill body for injection
+	return formatSkillForPrompt(skill), nil
+}
+
+// formatSkillForPrompt formats a skill for inclusion in the system prompt.
+func formatSkillForPrompt(skill *skills.Skill) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## Skill: %s\n\n", skill.Name))
+
+	if skill.Description != "" {
+		sb.WriteString(skill.Description)
+		sb.WriteString("\n\n")
+	}
+
+	if skill.Body != "" {
+		sb.WriteString(skill.Body)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// buildSkillContextSection creates the skill context section for the system prompt.
+func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*DiscoveredSkill) string {
+	if len(discovered) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Relevant Skills\n\n")
+	sb.WriteString("The following skills are available and relevant to this request:\n\n")
+
+	for _, d := range discovered {
+		// Load skill body
+		skillContent, err := l.loadSkillContext(ctx, d.Entry.Name)
+		if err != nil {
+			l.logger.Warn("Failed to load skill for context",
+				"skill", d.Entry.Name,
+				"error", err,
+			)
+			// Include metadata even if body fails to load
+			sb.WriteString(fmt.Sprintf("### %s\n", d.Entry.Name))
+			sb.WriteString(fmt.Sprintf("*%s*\n\n", d.Entry.Description))
+			continue
+		}
+
+		sb.WriteString(skillContent)
+		sb.WriteString("\n---\n\n")
+	}
+
+	return sb.String()
 }
 
 // Token budget constants for context management
@@ -1184,8 +1330,22 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Build context parts from memory
 	contextParts := l.buildMemoryContext(ctx, t)
 
-	// Build system prompt with injected context
-	systemPrompt := l.buildSystemPromptWithContext(contextParts)
+	// Discover relevant skills for this task (based on name and description)
+	taskInput := t.Name
+	if t.Description != "" {
+		taskInput += " " + t.Description
+	}
+	discovered := l.discoverRelevantSkills(taskInput, 0.5)
+	if len(discovered) > 0 {
+		l.logger.Info("Discovered skills for task",
+			"task", t.ID,
+			"count", len(discovered),
+			"top_skill", discovered[0].Entry.Name,
+		)
+	}
+
+	// Build system prompt with memory and skill context
+	systemPrompt := l.buildSystemPromptWithContextAndSkills(ctx, contextParts, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
 	// Build user message from task
@@ -1285,6 +1445,11 @@ func (l *AgentLoop) buildSystemPromptWithContext(contextParts []string) string {
 	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
 	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
 
+	// Add global rules if configured
+	if l.config.GlobalRules != "" {
+		builder.AddSection("Global Rules", l.config.GlobalRules)
+	}
+
 	// Add memory context section if present
 	if len(contextParts) > 0 {
 		contextSection := "## Relevant Context\n\n"
@@ -1293,6 +1458,54 @@ func (l *AgentLoop) buildSystemPromptWithContext(contextParts []string) string {
 		}
 		contextSection += "\n---\n"
 		builder.AddSection("context", contextSection)
+	}
+
+	// Tool descriptions are omitted from the system prompt because they are
+	// already sent via the API's tools parameter, avoiding duplication.
+
+	return builder.Build()
+}
+
+// buildSystemPromptWithContextAndSkills constructs system prompt with both memory and skill context.
+func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, contextParts []string, discovered []*DiscoveredSkill) string {
+	// Use override if set
+	if l.config.SystemPromptOveride != "" {
+		return l.buildSystemPromptWithOverride()
+	}
+
+	// Build from components
+	builder := NewPromptBuilderFromConfig(PromptConfig{
+		Constitution: l.config.Constitution,
+		Restrictions: l.config.Restrictions,
+		Purpose:      l.config.Purpose,
+		Personality:  l.config.Personality,
+	})
+
+	// Add baseline capabilities and platform introspection guidelines
+	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
+
+	// Add global rules if configured
+	if l.config.GlobalRules != "" {
+		builder.AddSection("Global Rules", l.config.GlobalRules)
+	}
+
+	// Add memory context section if present
+	if len(contextParts) > 0 {
+		contextSection := "## Relevant Context\n\n"
+		for _, part := range contextParts {
+			contextSection += "- " + part + "\n"
+		}
+		contextSection += "\n---\n"
+		builder.AddSection("context", contextSection)
+	}
+
+	// Add discovered skill context (loaded on-demand)
+	if len(discovered) > 0 {
+		skillContext := l.buildSkillContextSection(ctx, discovered)
+		if skillContext != "" {
+			builder.AddSection("Skills", skillContext)
+		}
 	}
 
 	// Tool descriptions are omitted from the system prompt because they are
@@ -1527,6 +1740,49 @@ func (l *AgentLoop) buildSystemPrompt() string {
 	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
 	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
 
+	// Add global rules if configured
+	if l.config.GlobalRules != "" {
+		builder.AddSection("Global Rules", l.config.GlobalRules)
+	}
+
+	// Tool descriptions are omitted from the system prompt because they are
+	// already sent via the API's tools parameter, avoiding duplication.
+
+	return builder.Build()
+}
+
+// buildSystemPromptWithSkills builds system prompt with discovered skill context.
+func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered []*DiscoveredSkill) string {
+	// Use override if set (skills don't apply to overridden prompts)
+	if l.config.SystemPromptOveride != "" {
+		return l.buildSystemPromptWithOverride()
+	}
+
+	// Build from components
+	builder := NewPromptBuilderFromConfig(PromptConfig{
+		Constitution: l.config.Constitution,
+		Restrictions: l.config.Restrictions,
+		Purpose:      l.config.Purpose,
+		Personality:  l.config.Personality,
+	})
+
+	// Add baseline capabilities and platform introspection guidelines
+	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
+
+	// Add global rules if configured
+	if l.config.GlobalRules != "" {
+		builder.AddSection("Global Rules", l.config.GlobalRules)
+	}
+
+	// Add discovered skill context (loaded on-demand)
+	if len(discovered) > 0 {
+		skillContext := l.buildSkillContextSection(ctx, discovered)
+		if skillContext != "" {
+			builder.AddSection("Skills", skillContext)
+		}
+	}
+
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.
 
@@ -1676,6 +1932,24 @@ func (l *AgentLoop) SetTaskStore(store *task.Store) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.taskStore = store
+}
+
+// SetCapabilityIndex sets the capability index for skill discovery.
+// This allows wiring the index after the loop is created when
+// skills are initialized in a specific order.
+func (l *AgentLoop) SetCapabilityIndex(ci *skills.CapabilityIndex) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.capabilityIndex = ci
+}
+
+// SetSkillLoader sets the lazy skill loader for on-demand loading.
+// This allows wiring the loader after the loop is created when
+// skills are initialized in a specific order.
+func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.skillLoader = loader
 }
 
 // generateConversationID creates a new conversation ID.

@@ -414,6 +414,90 @@ result, err := searchTool.Execute(ctx, map[string]any{
 
 ---
 
+### Markdown Agent Definitions **NEW**
+
+Agents can be defined using AGENT.md files with YAML frontmatter, following the same ergonomic pattern as skills. This enables user customization without code changes.
+
+#### Agent Discovery Hierarchy (Priority)
+1. `.meept/agents/` - Project-local (highest priority)
+2. `~/.meept/agents/` - User-global
+3. `~/.config/meept/agents/` - System-wide
+4. `config/agents/` - Bundled defaults (lowest priority)
+
+#### AGENT.md Format
+```markdown
+---
+id: coder
+name: Code Specialist
+role: executor
+additional_tools:
+  - file_read
+  - file_write
+  - shell_execute
+capabilities:
+  - code
+  - reasoning
+max_iterations: 15
+timeout_seconds: 600
+temperature: 0.3
+---
+
+# Code Specialist
+
+You implement, modify, and maintain code with precision.
+
+## Principles
+1. Read before writing
+2. Minimal changes
+3. Follow conventions
+...
+```
+
+#### Merge Behavior
+- AGENT.md fields **override** non-empty programmatic defaults
+- Empty fields inherit from programmatic defaults
+- Tools are **merged** (union), not replaced
+
+#### Global Rules System
+
+Global rules are injected into all agent prompts, enabling platform-wide behavior requirements.
+
+**Discovery:** `.meept/RULES.md` > `~/.meept/RULES.md` > embedded default
+
+**Default Rules** require structured post-execution reports:
+```json
+{
+  "status": "completed|partial|failed|needs_input",
+  "accomplished": ["what you completed"],
+  "not_done": ["what remains"],
+  "issues": ["problems encountered"],
+  "observations": ["context for follow-up"],
+  "suggested_next_agent": "agent-id",
+  "user_decision_needed": true,
+  "decision_context": "what user needs to decide"
+}
+```
+
+#### Dispatcher Feedback Loop
+
+The dispatcher evaluates agent reports to determine next actions:
+
+| Status | UserDecisionNeeded | SuggestedNextAgent | Action |
+|--------|--------------------|--------------------|--------|
+| completed | false | empty | Close task, notify user |
+| completed/partial | false | set | Route to suggested agent |
+| partial/needs_input | true | - | Notify user, await input |
+| failed | - | - | Notify user with error |
+
+**Configuration:**
+```toml
+[agents]
+enabled = true
+config_dirs = ["~/.meept/agents", "config/agents"]
+```
+
+---
+
 ### Skills & ClawSkills
 
 Meept supports a three-tier skill discovery system and a third-party marketplace.
@@ -508,6 +592,8 @@ scan_type_check = true
 |---------|-------------|
 | **MCP Protocol Support** | First-class Model Context Protocol integration for external tools |
 | **Agent Coworker Awareness** | Agents can discover and delegate to each other via platform tools |
+| **Markdown Agent Definitions** | User-customizable AGENT.md files with YAML frontmatter, 4-tier discovery with shadowing |
+| **Global Rules & Reporting** | Platform-wide rules with structured JSON reports enabling dispatcher feedback loop |
 | **Learning Pipeline** | Shadow training, trajectory learning, and automated fixing |
 | **ClawSkills Marketplace** | Third-party skill marketplace with security scanning |
 | **Self-Improvement System** | Automated detection, fixing, and validation of code issues |
