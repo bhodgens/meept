@@ -293,6 +293,7 @@ type AgentLoop struct {
 	llmClient    *llm.Client // Concrete client for config access (may be nil if using ProviderManager)
 	resolver     *llm.Resolver // Model resolver for alias resolution
 	modelRef     string        // Model reference from agent spec (can be alias or direct ref)
+	spec         *AgentSpec    // Agent specification (for inference parameter overrides)
 	executor     *Executor
 	registry     ToolRegistry
 	security     *security.PermissionChecker
@@ -421,6 +422,16 @@ func WithResolver(resolver *llm.Resolver) LoopOption {
 func WithModelRef(modelRef string) LoopOption {
 	return func(l *AgentLoop) {
 		l.modelRef = modelRef
+	}
+}
+
+// WithAgentSpec sets the agent specification for inference parameter overrides.
+func WithAgentSpec(spec *AgentSpec) LoopOption {
+	return func(l *AgentLoop) {
+		l.spec = spec
+		if spec != nil && spec.Model != "" {
+			l.modelRef = spec.Model
+		}
 	}
 }
 
@@ -854,7 +865,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			messages = l.injectFewShotExamples(ctx, messages, conversationID)
 		}
 
-		var chatOpts []llm.ChatOption
+		// Build chat options with resolved inference parameters from agent spec
+		chatOpts := l.resolveInferenceParams()
 		// In warning zone, don't send tools so the LLM produces a final text response
 		if len(tools) > 0 && !inWarningZone {
 			chatOpts = append(chatOpts, llm.WithTools(tools))
@@ -1756,6 +1768,38 @@ func (l *AgentLoop) recordAliasFailure(modelRef string, err error) {
 	if aliasName != "" && l.resolver != nil {
 		l.resolver.RecordAliasFailure(aliasName, err)
 	}
+}
+
+// resolveInferenceParams builds chat options that merge model defaults with agent overrides.
+// Agent spec values take precedence when set, otherwise model defaults apply.
+func (l *AgentLoop) resolveInferenceParams() []llm.ChatOption {
+	var opts []llm.ChatOption
+
+	// If no spec, return empty options (model defaults will be used)
+	if l.spec == nil {
+		return opts
+	}
+
+	constraints := &l.spec.Constraints
+
+	// Apply inference parameter overrides from agent constraints
+	if constraints.Temperature != nil {
+		opts = append(opts, llm.WithTemperature(*constraints.Temperature))
+	}
+	if constraints.TopP != nil {
+		opts = append(opts, llm.WithTopP(*constraints.TopP))
+	}
+	if constraints.FrequencyPenalty != nil {
+		opts = append(opts, llm.WithFrequencyPenalty(*constraints.FrequencyPenalty))
+	}
+	if constraints.PresencePenalty != nil {
+		opts = append(opts, llm.WithPresencePenalty(*constraints.PresencePenalty))
+	}
+	if len(constraints.StopSequences) > 0 {
+		opts = append(opts, llm.WithStopSequences(constraints.StopSequences))
+	}
+
+	return opts
 }
 
 // recordAliasSuccess records a success for the current model alias.

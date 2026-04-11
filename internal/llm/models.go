@@ -111,6 +111,10 @@ type ModelConfig struct {
 	CostPerMillionOutput float64
 	MaxTokens            int
 	Temperature          float64
+	TopP                 float64
+	FrequencyPenalty     float64
+	PresencePenalty      float64
+	StopSequences        []string
 	ContextLimit         int
 	Capabilities         map[string]bool
 	ProviderID           string
@@ -192,11 +196,15 @@ func NewToolDefinition(name, description string, params FunctionParameters) Tool
 
 // ChatRequest represents a request to the chat completions endpoint.
 type ChatRequest struct {
-	Model       string           `json:"model"`
-	Messages    []map[string]any `json:"messages"`
-	Temperature float64          `json:"temperature,omitempty"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
-	Tools       []ToolDefinition `json:"tools,omitempty"`
+	Model            string           `json:"model"`
+	Messages         []map[string]any `json:"messages"`
+	Temperature      float64          `json:"temperature,omitempty"`
+	MaxTokens        int              `json:"max_tokens,omitempty"`
+	TopP             float64          `json:"top_p,omitempty"`
+	FrequencyPenalty float64          `json:"frequency_penalty,omitempty"`
+	PresencePenalty  float64          `json:"presence_penalty,omitempty"`
+	Stop             []string         `json:"stop,omitempty"`
+	Tools            []ToolDefinition `json:"tools,omitempty"`
 }
 
 // ChatResponse represents the raw response from the chat completions endpoint.
@@ -247,4 +255,15 @@ func (rtc *RawToolCall) ToToolCall() ToolCall {
 			Arguments: rtc.Function.Arguments,
 		},
 	}
+}
+
+// Ptr returns a pointer to the given value.
+func Ptr[T any](v T) *T { return &v }
+
+// DerefOr returns the dereferenced value of p, or def if p is nil.
+func DerefOr[T any](p *T, def T) T {
+	if p == nil {
+		return def
+	}
+	return *p
 }

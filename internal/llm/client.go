@@ -126,10 +126,14 @@ func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
 
 // Chat sends a chat completion request and returns the parsed response.
 func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
-	// Apply chat options
+	// Apply chat options, starting with model defaults
 	chatOpts := &chatOptions{
-		temperature: c.config.Temperature,
-		maxTokens:   c.config.MaxTokens,
+		temperature:      c.config.Temperature,
+		maxTokens:        c.config.MaxTokens,
+		topP:             c.config.TopP,
+		frequencyPenalty: c.config.FrequencyPenalty,
+		presencePenalty:  c.config.PresencePenalty,
+		stopSequences:    c.config.StopSequences,
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
@@ -166,6 +170,20 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		"messages":    msgDicts,
 		"temperature": chatOpts.temperature,
 		"max_tokens":  chatOpts.maxTokens,
+	}
+
+	// Add optional parameters if set
+	if chatOpts.topP > 0 {
+		payload["top_p"] = chatOpts.topP
+	}
+	if chatOpts.frequencyPenalty != 0 {
+		payload["frequency_penalty"] = chatOpts.frequencyPenalty
+	}
+	if chatOpts.presencePenalty != 0 {
+		payload["presence_penalty"] = chatOpts.presencePenalty
+	}
+	if len(chatOpts.stopSequences) > 0 {
+		payload["stop"] = chatOpts.stopSequences
 	}
 
 	if len(chatOpts.tools) > 0 {
@@ -236,10 +254,14 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	// Report starting stage
 	reportProgress(ProgressStageStarting, "Starting LLM request...")
 
-	// Apply chat options
+	// Apply chat options, starting with model defaults
 	chatOpts := &chatOptions{
-		temperature: c.config.Temperature,
-		maxTokens:   c.config.MaxTokens,
+		temperature:      c.config.Temperature,
+		maxTokens:        c.config.MaxTokens,
+		topP:             c.config.TopP,
+		frequencyPenalty: c.config.FrequencyPenalty,
+		presencePenalty:  c.config.PresencePenalty,
+		stopSequences:    c.config.StopSequences,
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
@@ -269,6 +291,20 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		"messages":    msgDicts,
 		"temperature": chatOpts.temperature,
 		"max_tokens":  chatOpts.maxTokens,
+	}
+
+	// Add optional parameters if set
+	if chatOpts.topP > 0 {
+		payload["top_p"] = chatOpts.topP
+	}
+	if chatOpts.frequencyPenalty != 0 {
+		payload["frequency_penalty"] = chatOpts.frequencyPenalty
+	}
+	if chatOpts.presencePenalty != 0 {
+		payload["presence_penalty"] = chatOpts.presencePenalty
+	}
+	if len(chatOpts.stopSequences) > 0 {
+		payload["stop"] = chatOpts.stopSequences
 	}
 
 	if len(chatOpts.tools) > 0 {
@@ -339,9 +375,13 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 
 // chatOptions holds options for a chat request.
 type chatOptions struct {
-	tools       []ToolDefinition
-	temperature float64
-	maxTokens   int
+	tools            []ToolDefinition
+	temperature      float64
+	maxTokens        int
+	topP             float64
+	frequencyPenalty float64
+	presencePenalty  float64
+	stopSequences    []string
 }
 
 // ChatOption is a functional option for configuring a chat request.
@@ -365,6 +405,34 @@ func WithTemperature(temp float64) ChatOption {
 func WithMaxTokens(tokens int) ChatOption {
 	return func(o *chatOptions) {
 		o.maxTokens = tokens
+	}
+}
+
+// WithTopP sets the top_p (nucleus sampling) for the chat request.
+func WithTopP(p float64) ChatOption {
+	return func(o *chatOptions) {
+		o.topP = p
+	}
+}
+
+// WithFrequencyPenalty sets the frequency penalty for the chat request.
+func WithFrequencyPenalty(p float64) ChatOption {
+	return func(o *chatOptions) {
+		o.frequencyPenalty = p
+	}
+}
+
+// WithPresencePenalty sets the presence penalty for the chat request.
+func WithPresencePenalty(p float64) ChatOption {
+	return func(o *chatOptions) {
+		o.presencePenalty = p
+	}
+}
+
+// WithStopSequences sets the stop sequences for the chat request.
+func WithStopSequences(seqs []string) ChatOption {
+	return func(o *chatOptions) {
+		o.stopSequences = seqs
 	}
 }
 

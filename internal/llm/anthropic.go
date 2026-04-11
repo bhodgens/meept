@@ -102,8 +102,11 @@ func NewAnthropicClient(config *ModelConfig, opts ...AnthropicClientOption) *Ant
 // Chat sends a chat completion request to Anthropic's Messages API.
 func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
 	chatOpts := &chatOptions{
-		temperature: c.config.Temperature,
-		maxTokens:   c.config.MaxTokens,
+		temperature:   c.config.Temperature,
+		maxTokens:     c.config.MaxTokens,
+		topP:          c.config.TopP,
+		stopSequences: c.config.StopSequences,
+		// Note: Anthropic doesn't support frequency_penalty or presence_penalty
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
@@ -183,8 +186,11 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	reportProgress(ProgressStageStarting, "Starting Anthropic request...")
 
 	chatOpts := &chatOptions{
-		temperature: c.config.Temperature,
-		maxTokens:   c.config.MaxTokens,
+		temperature:   c.config.Temperature,
+		maxTokens:     c.config.MaxTokens,
+		topP:          c.config.TopP,
+		stopSequences: c.config.StopSequences,
+		// Note: Anthropic doesn't support frequency_penalty or presence_penalty
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
@@ -277,13 +283,15 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 // Anthropic API request structures
 
 type anthropicRequest struct {
-	Model       string                  `json:"model"`
-	MaxTokens   int                     `json:"max_tokens"`
-	System      string                  `json:"system,omitempty"`
-	Messages    []anthropicMessage      `json:"messages"`
-	Tools       []anthropicTool         `json:"tools,omitempty"`
-	Temperature *float64                `json:"temperature,omitempty"`
-	Stream      bool                    `json:"stream,omitempty"`
+	Model         string                   `json:"model"`
+	MaxTokens     int                      `json:"max_tokens"`
+	System        string                   `json:"system,omitempty"`
+	Messages      []anthropicMessage       `json:"messages"`
+	Tools         []anthropicTool          `json:"tools,omitempty"`
+	Temperature   *float64                 `json:"temperature,omitempty"`
+	TopP          *float64                 `json:"top_p,omitempty"`
+	StopSequences []string                 `json:"stop_sequences,omitempty"`
+	Stream        bool                     `json:"stream,omitempty"`
 	// Extended thinking configuration
 	Thinking *anthropicThinkingConfig `json:"thinking,omitempty"`
 }
@@ -462,6 +470,14 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 		Messages:    apiMessages,
 		Stream:      stream,
 		Temperature: &opts.temperature,
+	}
+
+	// Add optional parameters if set
+	if opts.topP > 0 {
+		req.TopP = &opts.topP
+	}
+	if len(opts.stopSequences) > 0 {
+		req.StopSequences = opts.stopSequences
 	}
 
 	// Add tools if present

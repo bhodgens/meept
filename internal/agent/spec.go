@@ -4,6 +4,9 @@ import (
 	"time"
 )
 
+// ptr returns a pointer to the given value.
+func ptr[T any](v T) *T { return &v }
+
 // AgentRole defines the role an agent plays in the system.
 type AgentRole string
 
@@ -29,6 +32,18 @@ type AgentConstraints struct {
 	// MaxConversationTokens is the total token budget for a single conversation turn.
 	// When exceeded, the agent stops gracefully. 0 means use the default.
 	MaxConversationTokens int `json:"max_conversation_tokens,omitempty"`
+
+	// Inference parameter overrides (nil = use model default)
+	// Temperature controls randomness. Lower values are more deterministic.
+	Temperature *float64 `json:"temperature,omitempty"`
+	// TopP controls nucleus sampling. 1.0 means no nucleus sampling.
+	TopP *float64 `json:"top_p,omitempty"`
+	// FrequencyPenalty penalizes tokens based on frequency in the text so far.
+	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
+	// PresencePenalty penalizes tokens based on whether they appear in the text so far.
+	PresencePenalty *float64 `json:"presence_penalty,omitempty"`
+	// StopSequences are sequences where the model will stop generating.
+	StopSequences []string `json:"stop_sequences,omitempty"`
 }
 
 // DefaultConstraints returns sensible default constraints.
@@ -140,6 +155,8 @@ Always include relevant memory_refs when creating tasks to provide context conti
 
 // ChatAgentSpec returns the spec for the general chat agent.
 func ChatAgentSpec() *AgentSpec {
+	constraints := DefaultConstraints()
+	constraints.Temperature = ptr(0.8) // Higher for natural conversation
 	return &AgentSpec{
 		ID:      "chat",
 		Name:    "Chat Agent",
@@ -150,12 +167,14 @@ func ChatAgentSpec() *AgentSpec {
 			"web_fetch",
 			"web_search",
 		},
-		Constraints: DefaultConstraints(),
+		Constraints: constraints,
 	}
 }
 
 // CoderAgentSpec returns the spec for the coding specialist agent.
 func CoderAgentSpec() *AgentSpec {
+	constraints := DefaultConstraints()
+	constraints.Temperature = ptr(0.3) // Low for deterministic code
 	return &AgentSpec{
 		ID:      "coder",
 		Name:    "Coder Agent",
@@ -169,7 +188,7 @@ func CoderAgentSpec() *AgentSpec {
 			"list_directory",
 			"shell_execute",
 		},
-		Constraints: DefaultConstraints(),
+		Constraints: constraints,
 	}
 }
 
