@@ -101,6 +101,7 @@ type SidebarTaskItem struct {
 	CompletedJobs int
 	TotalJobs     int
 	Created       string
+	CurrentStep   string // Description of the currently executing step
 }
 
 // SidebarMemoryItem represents a recent memory item in the sidebar.
@@ -141,13 +142,12 @@ func NewSidebarModel(rpc *RPCClient, eventRPC *RPCClient, styles *Styles, animat
 		visible:       true, // Visible by default
 		// All panels expanded by default
 		expandedPanels: map[SidebarPanel]bool{
-			PanelStatus:       true,
+			PanelStatus:        true,
 			PanelAgentActivity: true,
-			PanelWorkers:      true,
-			PanelTasks:        true,
-			PanelMemory:       true,
-			PanelMetrics:      true,
-			PanelActivityFeed: true,
+			PanelTasks:         true,
+			PanelMemory:        true,
+			PanelMetrics:       true,
+			PanelActivityFeed:  true,
 		},
 		animationEnabled: animationEnabled,
 		activityFeed:     make([]ActivityFeedItem, 0),
@@ -500,7 +500,12 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, s.handleContextResetEvent(e))
 			case "worker.state_changed":
 				cmds = append(cmds, s.handleWorkerStateEvent(e))
-			case "task.planned", "task.progress", "task.completed", "task.failed":
+			case "task.progress":
+				s.handleTaskProgressEvent(e)
+				cmds = append(cmds, s.refreshData())
+			case "task.step_completed":
+				s.handleStepCompletedEvent(e)
+			case "task.planned", "task.completed", "task.failed":
 				cmds = append(cmds, s.refreshData())
 			}
 		}
@@ -519,15 +524,21 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			s.focused = false
 			return func() tea.Msg { return SidebarFocusChatMsg{} }
 		case "up", "k":
-			// Move selection up
+			// Move selection up, skipping PanelWorkers (now just a counter)
 			if s.selectedPanel > PanelStatus {
 				s.selectedPanel--
+				if s.selectedPanel == PanelWorkers {
+					s.selectedPanel--
+				}
 			}
 			return nil
 		case "down", "j":
-			// Move selection down
+			// Move selection down, skipping PanelWorkers (now just a counter)
 			if s.selectedPanel < PanelActivityFeed {
 				s.selectedPanel++
+				if s.selectedPanel == PanelWorkers {
+					s.selectedPanel++
+				}
 			}
 			return nil
 		case "right", "enter", "l":
@@ -714,6 +725,52 @@ func (s *SidebarModel) handleWorkerStateEvent(e BusEvent) tea.Cmd {
 	}
 }
 
+// handleTaskProgressEvent updates the current step for a task from progress events.
+func (s *SidebarModel) handleTaskProgressEvent(e BusEvent) {
+	payloadMap, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+
+	taskID, _ := payloadMap["task_id"].(string)
+	currentStep, _ := payloadMap["current_step"].(string)
+
+	if taskID == "" || currentStep == "" {
+		return
+	}
+
+	// Update the matching task in tasksData
+	for i := range s.tasksData {
+		if s.tasksData[i].ID == taskID {
+			s.tasksData[i].CurrentStep = currentStep
+			break
+		}
+	}
+}
+
+// handleStepCompletedEvent updates task data when a step completes.
+func (s *SidebarModel) handleStepCompletedEvent(e BusEvent) {
+	payloadMap, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+
+	taskID, _ := payloadMap["task_id"].(string)
+	if taskID == "" {
+		return
+	}
+
+	// Clear current step since it just completed (will be updated with next progress event)
+	for i := range s.tasksData {
+		if s.tasksData[i].ID == taskID {
+			s.tasksData[i].CurrentStep = ""
+			// Increment completed count locally for immediate feedback
+			s.tasksData[i].CompletedJobs++
+			break
+		}
+	}
+}
+
 // syncVizWithData synchronizes the visualization with current agent/worker data.
 func (s *SidebarModel) syncVizWithData() {
 	if !s.animationEnabled || s.viz == nil {
@@ -822,7 +879,6 @@ func (s *SidebarModel) View() string {
 	panelNames := map[string]SidebarPanel{
 		"Status":         PanelStatus,
 		"Agent Activity": PanelAgentActivity,
-		"Workers":        PanelWorkers,
 		"Tasks":          PanelTasks,
 		"Recent Memory":  PanelMemory,
 		"Metrics":        PanelMetrics,
@@ -1049,67 +1105,49 @@ func (s *SidebarModel) renderAgentActivityPanel() string {
 func (s *SidebarModel) renderWorkersPanel() string {
 	var b strings.Builder
 
-	b.WriteString(s.renderPanelHeader("Workers", PanelWorkers))
-	b.WriteString("\n")
-
-	if s.expandedPanels[PanelWorkers] {
-		if len(s.workersData) == 0 {
-			b.WriteString(s.styles.Muted.Render("  No workers"))
-			b.WriteString("\n")
-		} else {
-			for i, worker := range s.workersData {
-				if i >= 6 { // Limit display
-					b.WriteString(s.styles.Muted.Render(fmt.Sprintf("  +%d more...", len(s.workersData)-6)))
-					b.WriteString("\n")
-					break
-				}
-
-				// State indicator
-				stateIcon := "○"
-				stateStyle := s.styles.Muted
-				switch worker.State {
-				case "idle":
-					stateIcon = "○"
-					stateStyle = s.styles.Muted
-				case "claiming":
-					stateIcon = "◐"
-					stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
-				case "processing":
-					stateIcon = "●"
-					stateStyle = s.styles.StatusRunning
-				case "error":
-					stateIcon = "✗"
-					stateStyle = s.styles.Error
-				}
-
-				// Worker ID (shortened)
-				workerID := worker.ID
-				maxIDLen := s.width - 10
-				if len(workerID) > maxIDLen {
-					workerID = workerID[:maxIDLen-3] + "..."
-				}
-
-				b.WriteString(fmt.Sprintf("  %s %s",
-					stateStyle.Render(stateIcon),
-					s.styles.Paragraph.Render(workerID),
-				))
-				b.WriteString("\n")
-
-				// Show current job if processing
-				if worker.State == "processing" && worker.CurrentJobID != "" {
-					jobID := worker.CurrentJobID
-					maxJobLen := s.width - 12
-					if len(jobID) > maxJobLen {
-						jobID = jobID[:maxJobLen-3] + "..."
-					}
-					b.WriteString(fmt.Sprintf("    %s",
-						s.styles.Muted.Render(jobID),
-					))
-					b.WriteString("\n")
-				}
-			}
+	// Count workers by state
+	var idle, busy, errored int
+	for _, w := range s.workersData {
+		switch w.State {
+		case "idle":
+			idle++
+		case "claiming", "processing":
+			busy++
+		case "error":
+			errored++
 		}
 	}
+
+	total := len(s.workersData)
+
+	// Compact single-line display: "Workers: 3 (2 busy, 1 idle)"
+	labelStyle := lipgloss.NewStyle().Foreground(ColorMuted)
+	valueStyle := lipgloss.NewStyle().Foreground(ColorForeground)
+
+	b.WriteString(labelStyle.Render("  workers: "))
+	if total == 0 {
+		b.WriteString(s.styles.Muted.Render("none"))
+	} else {
+		b.WriteString(valueStyle.Render(fmt.Sprintf("%d", total)))
+		b.WriteString(s.styles.Muted.Render(" ("))
+		if busy > 0 {
+			b.WriteString(s.styles.StatusRunning.Render(fmt.Sprintf("%d busy", busy)))
+			if idle > 0 || errored > 0 {
+				b.WriteString(s.styles.Muted.Render(", "))
+			}
+		}
+		if idle > 0 {
+			b.WriteString(s.styles.Muted.Render(fmt.Sprintf("%d idle", idle)))
+			if errored > 0 {
+				b.WriteString(s.styles.Muted.Render(", "))
+			}
+		}
+		if errored > 0 {
+			b.WriteString(s.styles.Error.Render(fmt.Sprintf("%d err", errored)))
+		}
+		b.WriteString(s.styles.Muted.Render(")"))
+	}
+	b.WriteString("\n")
 
 	return b.String()
 }
@@ -1208,6 +1246,19 @@ func (s *SidebarModel) renderTasksPanel() string {
 					b.WriteString(fmt.Sprintf("    %s", s.styles.Muted.Render(bar)))
 				}
 				b.WriteString("\n")
+
+				// Line 3 (optional): current step when executing
+				if (task.Status == "executing" || task.Status == "planning") && task.CurrentStep != "" {
+					stepMaxLen := s.width - 10
+					if stepMaxLen < 8 {
+						stepMaxLen = 8
+					}
+					stepDesc := task.CurrentStep
+					if len(stepDesc) > stepMaxLen {
+						stepDesc = stepDesc[:stepMaxLen-3] + "..."
+					}
+					b.WriteString(fmt.Sprintf("    -> %s\n", s.styles.Muted.Render(stepDesc)))
+				}
 			}
 		}
 	}
