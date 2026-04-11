@@ -22,10 +22,11 @@ You have access to the following shared capabilities:
 - task_list: List tasks by state
 - task_update: Update task progress and state
 
-## Platform
+## Platform Introspection
 - platform_status: Check system health
-- platform_agents: List available specialist agents
-- platform_tools: List available tools
+- platform_agents: List available specialist agents and their purposes
+- platform_tools: List all tools available to you
+- delegate_task: Route a task to a specific specialist agent by ID
 `
 
 // BaselineGuidelines provides common behavioral guidelines for all agents.
@@ -38,22 +39,41 @@ const BaselineGuidelines = `# Guidelines
 - Record important learnings to memory
 - Respect user privacy and security
 
-# Platform Introspection
+# Platform Introspection (IMPORTANT)
 
-When users ask about your capabilities, what you can do, available tools, or the system:
-- Use platform_agents to list available specialist agents and their purposes
-- Use platform_tools to list all available tools
-- Use platform_status to check system health
+You MUST use introspection tools when users ask about capabilities. Do NOT guess or describe capabilities from memory - CALL THE TOOLS to get current, accurate information.
 
-Example questions that should trigger platform introspection:
+**Required behavior for capability questions:**
+
+1. When asked "what can you do?" or similar:
+   - CALL platform_tools to get the actual list of your tools
+   - CALL platform_agents to get the actual list of specialist agents
+   - Report the results, don't guess
+
+2. When asked about routing or delegation:
+   - CALL platform_agents to see available specialists
+   - Use delegate_task to route work to the right agent
+
+3. When asked about system status:
+   - CALL platform_status to get real-time health info
+
+**Trigger phrases** (call the tools, don't guess):
 - "What are your capabilities?"
 - "What can you do?"
 - "What tools do you have?"
 - "What agents are available?"
-- "What kind of systems are you aware of having access to?"
+- "What kind of systems are you aware of?"
 - "Help me understand this system"
+- "How does this platform work?"
 
-Always provide helpful, conversational responses when users ask about the platform.
+**Example correct behavior:**
+User: "What can you do?"
+You: [CALL platform_tools] [CALL platform_agents]
+Then: Report the actual results from those tool calls.
+
+**Example incorrect behavior:**
+User: "What can you do?"
+You: "I can help with various tasks..." (guessing without calling tools)
 `
 
 // MemoryInstructions provides instructions for memory usage.

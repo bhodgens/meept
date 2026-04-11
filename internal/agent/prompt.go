@@ -47,14 +47,15 @@ type ToolParameter struct {
 
 // PromptBuilder provides a fluent API for building system prompts.
 type PromptBuilder struct {
-	constitution   string
-	restrictions   string
-	purpose        string
-	personality    string
-	tools          []ToolDescription
-	memoryContext  string
-	userPrefs      map[string]string
-	customSections []promptSection
+	constitution      string
+	restrictions      string
+	purpose           string
+	personality       string
+	tools             []ToolDescription
+	memoryContext     string
+	userPrefs         map[string]string
+	customSections    []promptSection
+	coworkerAwareness string
 }
 
 type promptSection struct {
@@ -147,6 +148,27 @@ func (b *PromptBuilder) AddSection(title, content string) *PromptBuilder {
 	return b
 }
 
+// WithCoworkerAwareness sets the coworker awareness section.
+// This tells agents about their introspection capabilities.
+func (b *PromptBuilder) WithCoworkerAwareness(awareness string) *PromptBuilder {
+	b.coworkerAwareness = awareness
+	return b
+}
+
+// DefaultCoworkerAwareness returns the standard coworker awareness prompt.
+func DefaultCoworkerAwareness() string {
+	return `You have access to introspection tools to understand your capabilities:
+
+- **platform_agents**: List all available specialist agents with their IDs, roles, and purposes. Use this to discover coworkers you can delegate to.
+- **platform_tools**: List all tools available to you with their names and descriptions.
+- **platform_status**: Get current platform health and status.
+- **delegate_task**: Route a task to a specific specialist agent by ID.
+
+When users ask about your capabilities, what you can do, or what agents/tools are available, USE these tools to provide accurate, current information rather than guessing.
+
+When a task is outside your specialty, use platform_agents to find the right specialist, then delegate_task to route the work.`
+}
+
 // Build constructs the complete system prompt.
 func (b *PromptBuilder) Build() string {
 	var sections []string
@@ -182,6 +204,11 @@ func (b *PromptBuilder) Build() string {
 	// Memory Context
 	if b.memoryContext != "" {
 		sections = append(sections, "\n# Relevant Context from Memory", b.memoryContext)
+	}
+
+	// Coworker Awareness (tells agents how to introspect)
+	if b.coworkerAwareness != "" {
+		sections = append(sections, "\n# Coworker Awareness", b.coworkerAwareness)
 	}
 
 	// Available Tools
