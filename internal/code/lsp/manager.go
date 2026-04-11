@@ -222,6 +222,11 @@ func (m *Manager) StopAll(ctx context.Context) error {
 	return lastErr
 }
 
+// Close implements io.Closer by stopping all servers.
+func (m *Manager) Close() error {
+	return m.StopAll(context.Background())
+}
+
 // RunningServers returns names of running servers.
 func (m *Manager) RunningServers() []string {
 	m.mu.RLock()
