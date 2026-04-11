@@ -39,7 +39,7 @@ const (
 
 // App is the main BubbleTea model for meept-lite.
 // It provides a minimal shell-like interface with:
-// - A scrollback viewport for conversation history
+// - Messages printed to terminal scrollback (native selection)
 // - A 2-line prompt (status line + input line)
 // - A dashboard showing background activity
 // - A Ctrl+X menu overlay for commands
@@ -49,7 +49,8 @@ type App struct {
 	rpc    *tui.RPCClient
 
 	// Components
-	viewport  *Viewport
+	viewport  *Viewport        // Still used for history storage, not rendering
+	printer   *MessagePrinter  // Prints messages to terminal scrollback
 	prompt    *Prompt
 	menu      *Menu
 	dashboard *Dashboard
@@ -125,7 +126,8 @@ func NewApp(socketPath string) *App {
 		eventRPC:         eventRPC,
 		eventStream:      tui.NewEventStream(eventRPC, eventStreamCfg),
 		taskEventHandler: handlers.NewTaskEventHandler(),
-		viewport:         NewViewport(),
+		viewport:         NewViewport(),   // For history storage only
+		printer:          NewMessagePrinter(),
 		prompt:           NewPrompt(),
 		menu:             NewMenu(),
 		dashboard:        NewDashboard(rpc),
@@ -149,11 +151,17 @@ func NewAppFromConfig() (*App, error) {
 
 // Init initializes the application.
 func (a *App) Init() tea.Cmd {
+	// Print startup banner to scrollback
+	banner := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#10B981")).
+		Bold(true).
+		Render("─── meept-lite ───")
+
 	return tea.Batch(
+		tea.Println(banner),
 		a.connectDaemon,
 		a.connectEventStream,
 		a.dashboard.Init(),
-		tea.EnterAltScreen,
 		tea.SetWindowTitle("meept-lite"),
 	)
 }
@@ -223,6 +231,12 @@ func (a *App) loadSession() tea.Msg {
 	return SessionLoadedMsg{Session: session, IsNew: true}
 }
 
+// printMsg stores a message in history and returns a command to print it to scrollback.
+func (a *App) printMsg(role, content string) tea.Cmd {
+	a.viewport.AddMessage(role, content) // Store for history
+	return a.printer.PrintMessage(role, content)
+}
+
 // Update handles messages and updates the model.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -232,13 +246,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 
-		// Calculate component sizes
-		// Layout: viewport takes most space, prompt is 2 lines, dashboard is 1 line at bottom
-		promptHeight := 2
-		dashboardHeight := 1
-		viewportHeight := a.height - promptHeight - dashboardHeight - 1 // -1 for gap
-
-		a.viewport.SetSize(a.width, viewportHeight)
+		// Update component widths (viewport not rendered, but keep for history)
+		a.viewport.SetSize(a.width, a.height)
+		a.printer.SetWidth(a.width)
 		a.prompt.SetSize(a.width)
 		a.menu.SetSize(a.width, a.height)
 		a.dashboard.SetSize(a.width)
@@ -255,11 +265,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.lastCtrlC = now
 
-			// Show hint via viewport
-			a.viewport.AddMessage("system", "press ctrl+c again to exit")
-			return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-				return StatusClearMsg{}
-			})
+			// Show hint
+			return a, tea.Batch(
+				a.printMsg("system", "press ctrl+c again to exit"),
+				tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+					return StatusClearMsg{}
+				}),
+			)
 		}
 
 		// Handle menu toggle
@@ -321,8 +333,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "esc" {
 				a.inputMode = InputModeNormal
 				a.prompt.Reset()
-				a.viewport.AddMessage("system", "cancelled")
-				return a, nil
+				return a, a.printMsg("system", "cancelled")
 			}
 			if msg.String() == "enter" {
 				input := strings.TrimSpace(a.prompt.Value())
@@ -357,12 +368,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.prompt.Input().AddHistory(input)
 				a.prompt.Reset()
 
-				// Add user message to viewport
-				a.viewport.AddMessage("user", input)
-
-				// Send to daemon
-				cmd := a.sendChat(input)
-				return a, cmd
+				// Print user message and send to daemon
+				return a, tea.Batch(
+					a.printMsg("user", input),
+					a.sendChat(input),
+				)
 			}
 			return a, nil
 		}
@@ -373,7 +383,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ConnectSuccessMsg:
 		a.err = nil
-		a.viewport.AddMessage("system", "connected to daemon")
+		cmds = append(cmds, a.printMsg("system", "connected to daemon"))
 		cmds = append(cmds, a.loadSession)
 		cmds = append(cmds, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 			return StatusClearMsg{}
@@ -382,12 +392,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ConnectErrorMsg:
 		a.err = msg.Err
-		a.viewport.AddMessage("system", fmt.Sprintf("error: %v", msg.Err))
-		return a, nil
+		return a, a.printMsg("system", fmt.Sprintf("error: %v", msg.Err))
 
 	case SessionLoadedMsg:
 		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("session error: %v", msg.Err))
+			cmds = append(cmds, a.printMsg("system", fmt.Sprintf("session error: %v", msg.Err)))
 		} else if msg.Session != nil {
 			// Check if switching to a different session
 			switching := a.session != nil && a.session.ID != msg.Session.ID
@@ -396,13 +405,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.prompt.Input().SetSessionID(msg.Session.ID)
 
 			if switching {
-				// Clear viewport when switching sessions
+				// Clear viewport history when switching sessions
 				a.viewport.ClearMessages()
-				a.viewport.AddMessage("system", fmt.Sprintf("switched to session: %s", msg.Session.Name))
+				cmds = append(cmds, a.printMsg("system", fmt.Sprintf("switched to session: %s", msg.Session.Name)))
 			} else if msg.IsNew {
-				a.viewport.AddMessage("system", fmt.Sprintf("created session: %s", msg.Session.Name))
+				cmds = append(cmds, a.printMsg("system", fmt.Sprintf("created session: %s", msg.Session.Name)))
 			} else {
-				a.viewport.AddMessage("system", fmt.Sprintf("resumed session: %s", msg.Session.Name))
+				cmds = append(cmds, a.printMsg("system", fmt.Sprintf("resumed session: %s", msg.Session.Name)))
 			}
 			// Load conversation history
 			cmds = append(cmds, a.loadHistory)
@@ -413,29 +422,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case ChatResponseMsg:
-		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("error: %v", msg.Err))
-		} else {
-			a.viewport.AddMessage("assistant", msg.Reply)
-		}
 		a.prompt.StopAgent()
-		return a, nil
+		if msg.Err != nil {
+			return a, a.printMsg("system", fmt.Sprintf("error: %v", msg.Err))
+		}
+		return a, a.printMsg("assistant", msg.Reply)
 
 	case HistoryLoadedMsg:
 		if msg.Err == nil {
 			for _, m := range msg.Messages {
-				a.viewport.AddMessage(m.Role, m.Content)
+				// Store in viewport for history, print to scrollback
+				cmds = append(cmds, a.printMsg(m.Role, m.Content))
 				// Add user messages to input history for recall with up arrow
 				if m.Role == "user" {
 					a.prompt.Input().AddHistory(m.Content)
 				}
 			}
-			a.viewport.ScrollToBottom()
 		}
-		return a, nil
+		return a, tea.Batch(cmds...)
 
 	case StatusClearMsg:
-		// Status messages are now shown in viewport, no need to clear
+		// Status messages are now in scrollback, nothing to clear
 		return a, nil
 
 	case MenuActionMsg:
@@ -461,105 +468,86 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.menu.ClearDynamicContent()
 			a.showMenu = false
 			a.menu.Hide()
-			a.viewport.AddMessage("system", fmt.Sprintf("error: %v", msg.Err))
-		} else {
-			items := make([]DynamicItem, len(msg.Sessions))
-			for i, s := range msg.Sessions {
-				marker := ""
-				if a.session != nil && s.ID == a.session.ID {
-					marker = "* "
-				}
-				name := s.Name
-				if s.Description != "" {
-					name = s.Description
-				}
-				items[i] = DynamicItem{
-					Key:    fmt.Sprintf("%d", i+1),
-					Label:  marker + name,
-					Action: "session:switch:" + s.ID,
-					Data:   s,
-				}
-			}
-			a.menu.SetDynamicContent("sessions", items, "press 1-9 to switch, esc to go back")
-			a.sessions = msg.Sessions
+			return a, a.printMsg("system", fmt.Sprintf("error: %v", msg.Err))
 		}
+		items := make([]DynamicItem, len(msg.Sessions))
+		for i, s := range msg.Sessions {
+			marker := ""
+			if a.session != nil && s.ID == a.session.ID {
+				marker = "* "
+			}
+			name := s.Name
+			if s.Description != "" {
+				name = s.Description
+			}
+			items[i] = DynamicItem{
+				Key:    fmt.Sprintf("%d", i+1),
+				Label:  marker + name,
+				Action: "session:switch:" + s.ID,
+				Data:   s,
+			}
+		}
+		a.menu.SetDynamicContent("sessions", items, "press 1-9 to switch, esc to go back")
+		a.sessions = msg.Sessions
 		return a, nil
 
 	case WorkersListMsg:
 		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("failed to list workers: %v", msg.Err))
-		} else {
-			a.displayWorkerStatus(msg)
+			return a, a.printMsg("system", fmt.Sprintf("failed to list workers: %v", msg.Err))
 		}
-		return a, nil
+		return a, a.displayWorkerStatus(msg)
 
 	case TasksListMsg:
 		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("failed to list tasks: %v", msg.Err))
-		} else {
-			a.displayTaskList(msg)
+			return a, a.printMsg("system", fmt.Sprintf("failed to list tasks: %v", msg.Err))
 		}
-		return a, nil
+		return a, a.displayTaskList(msg)
 
 	case MemoryQueryMsg:
 		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("memory query failed: %v", msg.Err))
-		} else {
-			a.displayMemoryResults(msg)
+			return a, a.printMsg("system", fmt.Sprintf("memory query failed: %v", msg.Err))
 		}
-		return a, nil
+		return a, a.displayMemoryResults(msg)
 
 	case MemoryRecentMsg:
 		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("failed to get recent memories: %v", msg.Err))
-		} else {
-			a.displayRecentMemories(msg)
+			return a, a.printMsg("system", fmt.Sprintf("failed to get recent memories: %v", msg.Err))
 		}
-		return a, nil
+		return a, a.displayRecentMemories(msg)
 
 	case SessionRenamedMsg:
-		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("failed to rename session: %v", msg.Err))
-		} else {
-			a.viewport.AddMessage("system", fmt.Sprintf("session renamed to: %s", msg.Name))
-		}
 		a.inputMode = InputModeNormal
-		return a, nil
+		if msg.Err != nil {
+			return a, a.printMsg("system", fmt.Sprintf("failed to rename session: %v", msg.Err))
+		}
+		return a, a.printMsg("system", fmt.Sprintf("session renamed to: %s", msg.Name))
 
 	case SessionDeletedMsg:
 		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("failed to delete session: %v", msg.Err))
-		} else {
-			a.viewport.AddMessage("system", "session deleted")
-			// Load a new session
-			cmds = append(cmds, a.loadSession)
+			return a, a.printMsg("system", fmt.Sprintf("failed to delete session: %v", msg.Err))
 		}
+		cmds = append(cmds, a.printMsg("system", "session deleted"))
+		cmds = append(cmds, a.loadSession)
 		return a, tea.Batch(cmds...)
 
 	case SessionStoppedMsg:
 		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("failed to stop session: %v", msg.Err))
-		} else {
-			a.viewport.AddMessage("system", fmt.Sprintf("stopped %d workers", msg.WorkersStopped))
+			return a, a.printMsg("system", fmt.Sprintf("failed to stop session: %v", msg.Err))
 		}
-		return a, nil
+		return a, a.printMsg("system", fmt.Sprintf("stopped %d workers", msg.WorkersStopped))
 
 	case TaskCreatedMsg:
-		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("failed to create task: %v", msg.Err))
-		} else {
-			a.viewport.AddMessage("system", fmt.Sprintf("created task: %s", msg.Task.Name))
-		}
 		a.inputMode = InputModeNormal
-		return a, nil
+		if msg.Err != nil {
+			return a, a.printMsg("system", fmt.Sprintf("failed to create task: %v", msg.Err))
+		}
+		return a, a.printMsg("system", fmt.Sprintf("created task: %s", msg.Task.Name))
 
 	case ModelStatusMsg:
 		if msg.Err != nil {
-			a.viewport.AddMessage("system", fmt.Sprintf("failed to get status: %v", msg.Err))
-		} else {
-			a.displayModelStatus(msg)
+			return a, a.printMsg("system", fmt.Sprintf("failed to get status: %v", msg.Err))
 		}
-		return a, nil
+		return a, a.displayModelStatus(msg)
 
 	case EventStreamStartMsg:
 		// Start the event stream polling
@@ -588,6 +576,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleBusEvents processes bus events and displays notifications.
 func (a *App) handleBusEvents(events []tui.BusEvent) tea.Cmd {
+	var cmds []tea.Cmd
 	for _, e := range events {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
@@ -612,15 +601,14 @@ func (a *App) handleBusEvents(events []tui.BusEvent) tea.Cmd {
 			notification = a.taskEventHandler.HandleTaskProgress(payload)
 		case "task.step_completed":
 			// Step completions are debounced by progress events, don't show separately
-			// to avoid flooding the viewport
 			continue
 		}
 
 		if notification != nil {
-			a.viewport.AddMessage("notification", notification.Message)
+			cmds = append(cmds, a.printMsg("notification", notification.Message))
 		}
 	}
-	return nil
+	return tea.Batch(cmds...)
 }
 
 // HistoryLoadedMsg carries conversation history.
@@ -764,15 +752,13 @@ func (a *App) handleMenuAction(action string) (tea.Model, tea.Cmd) {
 		a.showMenu = false
 		a.menu.Hide()
 		a.inputMode = InputModeSessionName
-		a.viewport.AddMessage("system", "enter new session name (enter to confirm, esc to cancel):")
-		return a, nil
+		return a, a.printMsg("system", "enter new session name (enter to confirm, esc to cancel):")
 
 	case ActionSessionDelete:
 		if a.session != nil {
 			return a, a.deleteCurrentSession
 		}
-		a.viewport.AddMessage("system", "no active session to delete")
-		return a, nil
+		return a, a.printMsg("system", "no active session to delete")
 
 	// Agent actions
 	case ActionAgentStatus:
@@ -784,8 +770,7 @@ func (a *App) handleMenuAction(action string) (tea.Model, tea.Cmd) {
 		if a.session != nil {
 			return a, a.stopCurrentSession
 		}
-		a.viewport.AddMessage("system", "no active session to stop")
-		return a, nil
+		return a, a.printMsg("system", "no active session to stop")
 
 	case ActionAgentModel:
 		// Keep menu open, show loading state
@@ -802,8 +787,7 @@ func (a *App) handleMenuAction(action string) (tea.Model, tea.Cmd) {
 		a.showMenu = false
 		a.menu.Hide()
 		a.inputMode = InputModeTaskName
-		a.viewport.AddMessage("system", "enter task name (enter to confirm, esc to cancel):")
-		return a, nil
+		return a, a.printMsg("system", "enter task name (enter to confirm, esc to cancel):")
 
 	case ActionTaskCancel:
 		// Show task list for selection
@@ -815,8 +799,7 @@ func (a *App) handleMenuAction(action string) (tea.Model, tea.Cmd) {
 		a.showMenu = false
 		a.menu.Hide()
 		a.inputMode = InputModeMemorySearch
-		a.viewport.AddMessage("system", "enter search query (enter to search, esc to cancel):")
-		return a, nil
+		return a, a.printMsg("system", "enter search query (enter to search, esc to cancel):")
 
 	case ActionMemoryRecent:
 		// Keep menu open, show loading state
@@ -825,20 +808,18 @@ func (a *App) handleMenuAction(action string) (tea.Model, tea.Cmd) {
 
 	case ActionMemoryClear:
 		a.viewport.ClearMessages()
-		return a, nil
+		return a, a.printMsg("system", "scrollback cleared (terminal history preserved)")
 
 	// Config actions
 	case ActionConfigEdit:
 		return a, a.openConfigEditor()
 
 	case ActionConfigReload:
-		a.viewport.AddMessage("system", "config reload requested (daemon will apply on next operation)")
-		return a, nil
+		return a, a.printMsg("system", "config reload requested (daemon will apply on next operation)")
 
 	// View actions
 	case ActionViewChat:
-		a.viewport.AddMessage("system", "chat view is the default view")
-		return a, nil
+		return a, a.printMsg("system", "chat view is the default view")
 
 	case ActionViewTasks:
 		// Keep menu open, show loading state
@@ -855,14 +836,12 @@ func (a *App) handleMenuAction(action string) (tea.Model, tea.Cmd) {
 		a.menu.SetLoading("memories")
 		return a, a.fetchRecentMemories
 
-	// Help actions (these output to viewport)
+	// Help actions
 	case ActionHelpKeybindings:
-		a.viewport.AddMessage("system", a.helpText())
-		return a, nil
+		return a, a.printMsg("system", a.helpText())
 
 	case ActionHelpCommands:
-		a.viewport.AddMessage("system", a.commandsText())
-		return a, nil
+		return a, a.printMsg("system", a.commandsText())
 
 	case "quit":
 		a.rpc.Close()
@@ -871,7 +850,7 @@ func (a *App) handleMenuAction(action string) (tea.Model, tea.Cmd) {
 
 	// Handle other actions with a fallback message
 	if action != "" {
-		a.viewport.AddMessage("system", fmt.Sprintf("action %q not yet implemented", action))
+		return a, a.printMsg("system", fmt.Sprintf("action %q not yet implemented", action))
 	}
 	return a, nil
 }
@@ -1030,8 +1009,8 @@ func (a *App) openConfigEditor() tea.Cmd {
 	})
 }
 
-// displaySessionPicker shows the session picker in the viewport.
-func (a *App) displaySessionPicker() {
+// displaySessionPicker shows the session picker (unused, sessions go through menu).
+func (a *App) displaySessionPicker() tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString("sessions (press 1-9 to switch, esc to cancel):\n")
 	for i, s := range a.sessions {
@@ -1049,11 +1028,11 @@ func (a *App) displaySessionPicker() {
 		}
 		sb.WriteString(fmt.Sprintf("%s [%d] %s\n", marker, i+1, name))
 	}
-	a.viewport.AddMessage("system", sb.String())
+	return a.printMsg("system", sb.String())
 }
 
-// displayWorkerStatus shows worker status in the viewport.
-func (a *App) displayWorkerStatus(msg WorkersListMsg) {
+// displayWorkerStatus shows worker status.
+func (a *App) displayWorkerStatus(msg WorkersListMsg) tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("agent workers (%d total):\n", msg.Count))
 	if len(msg.Workers) == 0 {
@@ -1072,11 +1051,11 @@ func (a *App) displayWorkerStatus(msg WorkersListMsg) {
 			sb.WriteString(fmt.Sprintf("  %s: %s%s\n", id, state, tool))
 		}
 	}
-	a.viewport.AddMessage("system", sb.String())
+	return a.printMsg("system", sb.String())
 }
 
-// displayTaskList shows tasks in the viewport.
-func (a *App) displayTaskList(msg TasksListMsg) {
+// displayTaskList shows tasks.
+func (a *App) displayTaskList(msg TasksListMsg) tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("tasks (%d total):\n", len(msg.Tasks)))
 	if len(msg.Tasks) == 0 {
@@ -1098,11 +1077,11 @@ func (a *App) displayTaskList(msg TasksListMsg) {
 			sb.WriteString(fmt.Sprintf("  %s: %s%s\n", t.State, name, progress))
 		}
 	}
-	a.viewport.AddMessage("system", sb.String())
+	return a.printMsg("system", sb.String())
 }
 
-// displayMemoryResults shows memory search results in the viewport.
-func (a *App) displayMemoryResults(msg MemoryQueryMsg) {
+// displayMemoryResults shows memory search results.
+func (a *App) displayMemoryResults(msg MemoryQueryMsg) tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("memory search \"%s\" (%d results):\n", msg.Query, len(msg.Items)))
 	if len(msg.Items) == 0 {
@@ -1116,11 +1095,11 @@ func (a *App) displayMemoryResults(msg MemoryQueryMsg) {
 			sb.WriteString(fmt.Sprintf("  [%s] %s\n", m.GetType(), content))
 		}
 	}
-	a.viewport.AddMessage("system", sb.String())
+	return a.printMsg("system", sb.String())
 }
 
-// displayRecentMemories shows recent memories in the viewport.
-func (a *App) displayRecentMemories(msg MemoryRecentMsg) {
+// displayRecentMemories shows recent memories.
+func (a *App) displayRecentMemories(msg MemoryRecentMsg) tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("recent memories (%d):\n", len(msg.Items)))
 	if len(msg.Items) == 0 {
@@ -1134,11 +1113,11 @@ func (a *App) displayRecentMemories(msg MemoryRecentMsg) {
 			sb.WriteString(fmt.Sprintf("  [%s] %s\n", m.GetType(), content))
 		}
 	}
-	a.viewport.AddMessage("system", sb.String())
+	return a.printMsg("system", sb.String())
 }
 
-// displayModelStatus shows model and daemon status in the viewport.
-func (a *App) displayModelStatus(msg ModelStatusMsg) {
+// displayModelStatus shows model and daemon status.
+func (a *App) displayModelStatus(msg ModelStatusMsg) tea.Cmd {
 	var sb strings.Builder
 	sb.WriteString("daemon status:\n")
 
@@ -1165,7 +1144,7 @@ func (a *App) displayModelStatus(msg ModelStatusMsg) {
 		sb.WriteString(fmt.Sprintf("  session: %s\n", a.session.Name))
 	}
 
-	a.viewport.AddMessage("system", sb.String())
+	return a.printMsg("system", sb.String())
 }
 
 // helpText returns the help text for the app.
@@ -1217,6 +1196,8 @@ config:
 }
 
 // View renders the application.
+// In primitive scrollback mode, we only render the prompt and dashboard.
+// Messages are printed above via tea.Println and stay in terminal scrollback.
 func (a *App) View() string {
 	if a.width == 0 || a.height == 0 {
 		return "loading..."
@@ -1227,22 +1208,16 @@ func (a *App) View() string {
 		return a.menu.View()
 	}
 
-	var b strings.Builder
-
 	// Render error state if not connected
 	if a.err != nil {
 		return a.renderError()
 	}
 
-	// Render viewport (scrollback)
-	b.WriteString(a.viewport.View())
-	b.WriteString("\n")
+	var b strings.Builder
 
-	// Render prompt (status line + input line)
+	// Only render prompt and dashboard - messages are in terminal scrollback
 	b.WriteString(a.prompt.View())
 	b.WriteString("\n")
-
-	// Render dashboard (bottom bar)
 	b.WriteString(a.dashboard.View())
 
 	return b.String()
@@ -1266,8 +1241,10 @@ Press ctrl+c twice to exit.`, a.err)
 }
 
 // Run starts the BubbleTea program.
+// Runs inline (no alt-screen) - messages go to terminal scrollback.
+// This enables native text selection with mouse.
 func (a *App) Run() error {
-	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(a)
 	_, err := p.Run()
 	return err
 }
