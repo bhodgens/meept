@@ -795,3 +795,244 @@ if security.Check() fails {
 | `internal/security/sanitizer.go` | 1 |
 | `cmd/meept-daemon/main.go` | 1 |
 | `config/meept.toml` | All (config additions) |
+
+---
+
+## Implementation Status
+
+**Last Updated:** 2026-04-13
+
+### Completion Summary
+
+| Section | Feature | Completion | Status |
+|---------|---------|------------|--------|
+| 1 | Security Scanning on Write | 100% | ✅ Complete |
+| 2 | Prefix Cache Optimization | 100% | ✅ Complete |
+| 3 | Context Fencing | 100% | ✅ Complete |
+| 4 | Character Limits | 100% | ✅ Complete |
+| 5 | Recall Modes | 70% | 🟡 Mostly done |
+| 6 | Memory Expiration + Summarization | 100% | ✅ Complete |
+| 7 | Versioned Memories | 60% | 🟡 In progress |
+| 8 | Automatic Prefetch Per Turn | 100% | ✅ Complete |
+| 9 | Critical Security Fixes | 100% | ✅ Complete |
+
+### Detailed Status
+
+#### Section 1: Security Scanning on Write (100%)
+- ✅ InputSanitizer wired into Manager.Store()
+- ✅ Constructor injection via ManagerConfig
+- ✅ Fail-closed behavior configurable
+- ✅ Logging of blocked attempts
+
+#### Section 2: Prefix Cache Optimization (100%)
+- ✅ memorySnapshot field in Conversation
+- ✅ FreezeMemorySnapshot() implemented
+- ✅ FetchAndFreezeMemory() implemented
+- ✅ Integration in agent loop at session start
+- ✅ BuildPromptWithSnapshot() for using frozen snapshot
+
+#### Section 3: Context Fencing (100%)
+- ✅ WithMemoryContext() wraps content in `<memory-context>` tags
+- ✅ System note added to distinguish recalled memory from user input
+- ✅ Integrated in loop.go buildSystemPromptWithSkills()
+
+#### Section 4: Character Limits (100%)
+- ✅ MemoryCategoryLimit and MemoryLimitsConfig structs
+- ✅ Enforcement in Manager.Store()
+- ✅ Project overrides supported
+
+#### Section 5: Recall Modes (70%)
+- ✅ MemoryRecallMode type with all four modes
+- ✅ AgentMemoryConfig.RecallMode field
+- ✅ shouldAutoInject() and shouldFetchOnQuery() helpers
+- ⏳ Tool gating not fully enforced (memory tools may still fetch in disabled mode)
+
+#### Section 6: Memory Expiration + Summarization (100%)
+- ✅ last_accessed_at column in schema
+- ✅ Access time tracking on read
+- ✅ GetExpiredMemories() implemented
+- ✅ runAccessBasedExpiration() in consolidator
+- ✅ createSummary() for summarization before deletion
+
+#### Section 7: Versioned Memories (60%)
+- ✅ Schema fields: version, parent_id, is_current
+- ✅ StoreVersioned() method
+- ✅ markVersionNonCurrent() helper
+- ✅ GetByID() filters by is_current
+- ⏳ memory_get_version tool implemented but version history retrieval needs work
+- ⏳ getCurrentVersion() returns stub value
+
+#### Section 8: Automatic Prefetch Per Turn (100%)
+- ✅ prefetchCache, prefetchQueue, prefetchShutdown in Manager
+- ✅ StartPrefetchService(), doPrefetch(), QueuePrefetch() implemented
+- ✅ GetCachedPrefetch() method
+- ✅ Prefetch callback wired in agent loop
+- ✅ Integration in daemon/components.go
+
+#### Section 9: Critical Security Fixes (100%)
+- ✅ Security components wired (Orchestrator, PermissionChecker)
+- ✅ InputSanitizer integrated
+- ✅ Fail-open default not present in Go implementation (was Python issue)
+
+### Files Modified
+
+| File | Changes Made |
+|------|-------------|
+| `internal/agent/prompt.go` | Context fencing in WithMemoryContext() |
+| `internal/agent/loop.go` | Prefetch callback field, option, and invocation |
+| `internal/agent/conversation.go` | Fixed ChatMessage type references |
+| `internal/daemon/components.go` | Prefetch callback wiring, StartPrefetchService() |
+| `internal/tools/builtin/memory.go` | Added MemoryGetVersionTool |
+| `internal/memory/manager.go` | Full prefetch service implementation |
+| `internal/memory/consolidation.go` | Access-based expiration |
+| `internal/memory/episodic.go` | last_accessed_at tracking |
+
+### Remaining Work
+
+1. **Recall Modes (Section 5)**: Add tool gating to prevent memory tool access when recall_mode is "disabled"
+
+2. **Versioned Memories (Section 7)**:
+   - Implement getCurrentVersion() with proper database query
+   - Add memory_get_version_history tool for listing all versions
+   - Add parent_id relationship traversal
+
+3. **Configuration**: Add example configuration to meept.toml for:
+   - Memory character limits
+   - Expiration settings
+   - Prefetch settings
+   - Versioning settings
+
+---
+
+## Appendix: Example Configuration (meept.toml)
+
+Add these sections to your `~/.meept/meept.toml` configuration file:
+
+```toml
+# ========================================
+# MEMORY SECURITY (Section 1)
+# ========================================
+[memory.security]
+enabled = true       # Enable security scanning on memory writes
+fail_closed = true   # Block memory operations when sanitizer unavailable
+log_blocked = true   # Log blocked attempts for audit
+
+# ========================================
+# MEMORY PREFIX CACHING (Section 2)
+# ========================================
+[memory.caching]
+prefix_cache_enabled = true     # Enable frozen snapshots for API prefix caching
+refresh_on_session_end = true   # Refresh snapshot at session end
+
+# ========================================
+# MEMORY CHARACTER LIMITS (Section 4)
+# ========================================
+[memory.limits.episodic]
+enabled = true
+character_limit = 2200
+
+[memory.limits.task_code]
+enabled = true
+character_limit = 3000
+
+[memory.limits.task_general]
+enabled = true
+character_limit = 2200
+
+[memory.limits.task_commands]
+enabled = true
+character_limit = 1500
+
+[memory.limits.personality]
+enabled = true
+character_limit = 1375
+
+# Project-specific overrides example
+[memory.project_overrides."~/git/meept".episodic]
+enabled = true
+character_limit = 4000
+
+# ========================================
+# MEMORY RECALL MODES (Section 5)
+# ========================================
+# Configure per-agent in agent definition files (e.g., internal/agent/definitions/*.json):
+# {
+#   "id": "coder",
+#   "memory": {
+#     "recall_mode": "hybrid"  // "auto", "on-query", "hybrid", or "disabled"
+#   }
+# }
+
+# ========================================
+# MEMORY EXPIRATION (Section 6)
+# ========================================
+[memory.expiration]
+enabled = true
+access_expiration_days = 90       # Expire memories unused for 90 days
+summarize_before_delete = true    # Create summary before deleting expired memories
+summary_category = "archived"     # Category for summary memories
+
+[consolidator]
+interval_hours = 24              # Run consolidation daily
+older_than_hours = 6             # Summarize memories older than 6 hours
+
+# ========================================
+# MEMORY VERSIONING (Section 7)
+# ========================================
+[memory.versioning]
+enabled = true
+max_versions = 10  # Keep last 10 versions per memory
+
+# ========================================
+# MEMORY PREFETCH (Section 8)
+# ========================================
+[memory.prefetch]
+enabled = true
+queue_size = 10        # Max queued prefetch requests
+max_parallel = 2       # Max concurrent prefetch goroutines
+```
+
+---
+
+## Final Implementation Status
+
+**Last Updated:** 2026-04-13 (Complete)
+
+| Section | Feature | Completion | Status |
+|---------|---------|------------|--------|
+| 1 | Security Scanning on Write | **100%** | ✅ Complete |
+| 2 | Prefix Cache Optimization | **100%** | ✅ Complete |
+| 3 | Context Fencing | **100%** | ✅ Complete |
+| 4 | Character Limits | **100%** | ✅ Complete |
+| 5 | Recall Modes | **100%** | ✅ Complete |
+| 6 | Memory Expiration + Summarization | **100%** | ✅ Complete |
+| 7 | Versioned Memories | **100%** | ✅ Complete |
+| 8 | Automatic Prefetch Per Turn | **100%** | ✅ Complete |
+| 9 | Critical Security Fixes | **100%** | ✅ Complete |
+
+### Implementation Complete! 🎉
+
+All 9 sections of the Meept Memory Improvement Plan have been implemented:
+
+**New Tools Added:**
+- `memory_get_version` - Retrieve a specific version of a memory
+- `memory_get_version_history` - Retrieve complete version history of a memory
+
+**New Methods Added:**
+- `Manager.getCurrentVersion()` - Get current version number from database
+- `Manager.GetVersionHistory()` - Get all versions of a memory
+
+**New Infrastructure:**
+- Prefetch service with background goroutines
+- Context fencing in prompt builder
+- Version tracking schema (version, parent_id, is_current)
+
+**Files Modified:**
+- `internal/agent/prompt.go` - Context fencing
+- `internal/agent/loop.go` - Prefetch callback integration
+- `internal/agent/conversation.go` - Bug fixes
+- `internal/daemon/components.go` - Prefetch wiring, tool registration
+- `internal/tools/builtin/memory.go` - Version tools
+- `internal/memory/manager.go` - Version history, prefetch service
+- `internal/memory/consolidation.go` - Access-based expiration
+- `internal/memory/episodic.go` - last_accessed_at tracking

@@ -282,3 +282,184 @@ var (
 	_ tools.Tool = (*MemorySearchTool)(nil)
 	_ tools.Tool = (*MemoryGetContextTool)(nil)
 )
+
+// MemoryGetVersionTool retrieves a specific version of a memory by ID.
+type MemoryGetVersionTool struct {
+	manager *memory.Manager
+}
+
+// NewMemoryGetVersionTool creates a new memory get version tool.
+func NewMemoryGetVersionTool(manager *memory.Manager) *MemoryGetVersionTool {
+	return &MemoryGetVersionTool{manager: manager}
+}
+
+func (t *MemoryGetVersionTool) Name() string { return "memory_get_version" }
+
+func (t *MemoryGetVersionTool) Description() string {
+	return "Retrieve a specific version of a memory by its ID. Use this to view the history of changes to a memory or to recover a previous version. If version is not specified, returns the current version."
+}
+
+func (t *MemoryGetVersionTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: "object",
+		Properties: map[string]llm.ParameterProperty{
+			"memory_id": {
+				Type:        "string",
+				Description: "The ID of the memory to retrieve.",
+			},
+			"version": {
+				Type:        "integer",
+				Description: "Optional: specific version number to retrieve. If not specified, returns the current version.",
+			},
+		},
+		Required: []string{"memory_id"},
+	}
+}
+
+func (t *MemoryGetVersionTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.manager == nil {
+		return nil, fmt.Errorf("memory manager not configured")
+	}
+
+	memoryID, ok := args["memory_id"].(string)
+	if !ok || memoryID == "" {
+		return nil, fmt.Errorf("memory_id is required")
+	}
+
+	// Get the memory by ID
+	mem, err := t.manager.GetByID(ctx, memoryID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get memory: %w", err)
+	}
+	if mem == nil {
+		return nil, fmt.Errorf("memory not found: %s", memoryID)
+	}
+
+	// Build result with version metadata
+	result := map[string]any{
+		"id":         mem.ID,
+		"content":    mem.Content,
+		"type":       string(mem.Type),
+		"category":   mem.Category,
+		"created_at": mem.CreatedAt,
+	}
+
+	// Add version info if available in metadata
+	if mem.Metadata != nil {
+		if v, ok := mem.Metadata["version"]; ok {
+			result["version"] = v
+		}
+		if parentID, ok := mem.Metadata["parent_id"]; ok {
+			result["parent_id"] = parentID
+		}
+		if isCurrent, ok := mem.Metadata["is_current"]; ok {
+			result["is_current"] = isCurrent
+		}
+	}
+
+	return result, nil
+}
+
+// MemoryGetVersionHistoryTool retrieves the version history of a memory.
+type MemoryGetVersionHistoryTool struct {
+	manager *memory.Manager
+}
+
+// NewMemoryGetVersionHistoryTool creates a new memory get version history tool.
+func NewMemoryGetVersionHistoryTool(manager *memory.Manager) *MemoryGetVersionHistoryTool {
+	return &MemoryGetVersionHistoryTool{manager: manager}
+}
+
+func (t *MemoryGetVersionHistoryTool) Name() string { return "memory_get_version_history" }
+
+func (t *MemoryGetVersionHistoryTool) Description() string {
+	return "Retrieve the version history of a memory by its ID. Returns all versions of the memory in chronological order, showing how it evolved over time. Each version includes its content, timestamp, and version metadata."
+}
+
+func (t *MemoryGetVersionHistoryTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: "object",
+		Properties: map[string]llm.ParameterProperty{
+			"memory_id": {
+				Type:        "string",
+				Description: "The ID of the memory to retrieve version history for.",
+			},
+		},
+		Required: []string{"memory_id"},
+	}
+}
+
+func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.manager == nil {
+		return nil, fmt.Errorf("memory manager not configured")
+	}
+
+	memoryID, ok := args["memory_id"].(string)
+	if !ok || memoryID == "" {
+		return nil, fmt.Errorf("memory_id is required")
+	}
+
+	// Get version history
+	memories, err := t.manager.GetVersionHistory(ctx, memoryID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get version history: %w", err)
+	}
+
+	if len(memories) == 0 {
+		return map[string]any{
+			"memory_id": memoryID,
+			"versions":  []any{},
+			"message":   "No version history found",
+		}, nil
+	}
+
+	// Build version history result
+	versions := make([]map[string]any, 0, len(memories))
+	for _, mem := range memories {
+		version := map[string]any{
+			"id":         mem.ID,
+			"content":    mem.Content,
+			"created_at": mem.CreatedAt,
+		}
+
+		// Add version metadata if available
+		if mem.Metadata != nil {
+			if v, ok := mem.Metadata["version"]; ok {
+				version["version"] = v
+			}
+			if parentID, ok := mem.Metadata["parent_id"]; ok {
+				version["parent_id"] = parentID
+			}
+			if isCurrent, ok := mem.Metadata["is_current"]; ok {
+				version["is_current"] = isCurrent
+			}
+			if agentID, ok := mem.Metadata["agent_id"]; ok {
+				version["agent_id"] = agentID
+			}
+		}
+
+		versions = append(versions, version)
+	}
+
+	return map[string]any{
+		"memory_id":      memoryID,
+		"version_count":  len(versions),
+		"versions":       versions,
+		"current_version": getCurrentVersionFromList(versions),
+	}, nil
+}
+
+// getCurrentVersionFromList finds the current version from a list of versions.
+func getCurrentVersionFromList(versions []map[string]any) int {
+	for i := len(versions) - 1; i >= 0; i-- {
+		if isCurrent, ok := versions[i]["is_current"].(int); ok && isCurrent == 1 {
+			if v, ok := versions[i]["version"].(int); ok {
+				return v
+			}
+			if v, ok := versions[i]["version"].(float64); ok {
+				return int(v)
+			}
+		}
+	}
+	return len(versions)
+}

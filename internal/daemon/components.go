@@ -356,6 +356,18 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		)
 		// Create memory handler to respond to memory.query and memory.recent bus messages
 		c.MemoryHandler = memory.NewHandler(c.MemoryManager, msgBus, logger.With("component", "memory-handler"))
+
+		// Wire prefetch callback to agent loop (Hermes pattern)
+		// This enables background prefetching of memory context at turn completion
+		prefetchCallback := func(query string, maxItems int) {
+			c.MemoryManager.QueuePrefetch(query, maxItems)
+		}
+		c.AgentLoop.SetPrefetchCallback(prefetchCallback)
+		logger.Info("Prefetch callback wired to agent loop")
+
+		// Start prefetch service
+		c.MemoryManager.StartPrefetchService(context.Background())
+		logger.Info("Memory prefetch service started")
 	}
 
 	// Store the memvid client from memory manager if active, or create standalone
@@ -1284,6 +1296,8 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewMemoryStoreTool(memoryMgr))
 		registry.Register(builtin.NewMemorySearchTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetContextTool(memoryMgr))
+		registry.Register(builtin.NewMemoryGetVersionTool(memoryMgr))
+		registry.Register(builtin.NewMemoryGetVersionHistoryTool(memoryMgr))
 		logger.Debug("Registered memory tools")
 	} else if memoryMgr != nil {
 		logger.Warn("Memory tools not registered: memory manager not initialized")

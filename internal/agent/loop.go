@@ -378,6 +378,10 @@ type AgentLoop struct {
 	// Skill discovery (lightweight, metadata-driven)
 	capabilityIndex *skills.CapabilityIndex
 	skillLoader     *skills.LazySkillLoader
+
+	// Prefetch callback for memory context (Hermes pattern)
+	// Called at turn completion to prefetch context for next turn
+	prefetchCallback func(query string, maxItems int)
 }
 
 // LearningPipeline is the interface for the learning pipeline.
@@ -589,6 +593,15 @@ func WithSkillLoader(loader *skills.LazySkillLoader) LoopOption {
 	}
 }
 
+// WithPrefetchCallback sets the callback for prefetching memory context.
+// This implements the Hermes pattern where context is prefetched at turn completion
+// for the next turn, enabling background retrieval and reduced latency.
+func WithPrefetchCallback(callback func(query string, maxItems int)) LoopOption {
+	return func(l *AgentLoop) {
+		l.prefetchCallback = callback
+	}
+}
+
 // WithGlobalRules sets the global rules content to inject into all prompts.
 func WithGlobalRules(rules string) LoopOption {
 	return func(l *AgentLoop) {
@@ -690,6 +703,12 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 	return loop
 }
 
+// SetPrefetchCallback sets the callback for prefetching memory context.
+// This is used to wire the memory manager's QueuePrefetch method after construction.
+func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int)) {
+	l.prefetchCallback = callback
+}
+
 // RunOnce processes a single user turn through the full reasoning loop.
 func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (string, error) {
 	if l.llm == nil {
@@ -773,6 +792,13 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 
 	// Add final response to conversation
 	conv.AddAssistantMessage(finalResponse)
+
+	// Queue prefetch for next turn (Hermes pattern)
+	// Prefetch is triggered with the last user message as query
+	if l.prefetchCallback != nil && sanitizedMessage != "" {
+		l.prefetchCallback(sanitizedMessage, 5) // Prefetch 5 context items
+	}
+
 	return finalResponse, nil
 }
 
