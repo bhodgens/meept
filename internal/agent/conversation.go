@@ -142,7 +142,6 @@ const (
 	ImportanceHigh
 	ImportanceCritical
 )
-
 // Conversation manages chat message history with LRU eviction and truncation.
 type Conversation struct {
 	mu           sync.RWMutex
@@ -157,6 +156,9 @@ type Conversation struct {
 	memoryContext string
 	// memorySnapshot is frozen at session start for API prefix caching
 	memorySnapshot string
+
+	// Anchor messages are exempt from truncation (validation instructions, escalation triggers)
+	anchorMessages map[string]bool // message content hash -> isAnchor
 }
 
 // ConversationOption is a functional option for configuring a Conversation.
@@ -198,6 +200,53 @@ func NewConversation(opts ...ConversationOption) *Conversation {
 
 	return c
 }
+
+// AddAnchorMessage adds a message that is exempt from truncation.
+// Anchor messages are treated as ImportanceCritical and preserved during context management.
+// This is used for validation instructions, escalation triggers, and other critical context.
+func (c *Conversation) AddAnchorMessage(role llm.Role, content string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Add the message
+	c.messages = append(c.messages, llm.ChatMessage{
+		Role:    role,
+		Content: content,
+	})
+
+	// Mark as anchor
+	if c.anchorMessages == nil {
+		c.anchorMessages = make(map[string]bool)
+	}
+	hash := c.hashContent(content)
+	c.anchorMessages[hash] = true
+}
+
+// IsAnchorMessage checks if a message content is anchored.
+func (c *Conversation) IsAnchorMessage(content string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.anchorMessages == nil {
+		return false
+	}
+	return c.anchorMessages[c.hashContent(content)]
+}
+
+// ClearAnchors removes all anchor markings (used when context is reset).
+func (c *Conversation) ClearAnchors() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.anchorMessages = nil
+}
+
+// hashContent creates a simple hash of content for anchor tracking.
+func (c *Conversation) hashContent(content string) string {
+	if len(content) > 200 {
+		return content[:200] // Use prefix as key for long content
+	}
+	return content
+}
+
 
 // classifyMessageClassification determines the semantic type of a message based on role and content.
 func classifyMessageClassification(msg llm.ChatMessage, isFirstUserMsg bool) MessageClassification {

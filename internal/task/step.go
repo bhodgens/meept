@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+// CategorizedRecommendation represents a recommendation from an agent.
+type CategorizedRecommendation struct {
+	Category    string  `json:"category"`    // "security", "performance", "maintainability", "follow-up"
+	Priority    string  `json:"priority"`    // "critical", "high", "medium", "low"
+	Description string  `json:"description"`
+	AgentID     string  `json:"agent_id"`
+	Confidence  float64 `json:"confidence"`
+}
+
 // StepState represents the state of a task step.
 type StepState string
 
@@ -47,6 +56,8 @@ type TaskStep struct {
 	Result        string    `json:"result,omitempty"`
 	Sequence      int       `json:"sequence"`
 	RevisionCount int       `json:"revision_count"` // Number of revision cycles
+	// Recommendations holds categorized recommendations from the agent
+	Recommendations []CategorizedRecommendation `json:"recommendations,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

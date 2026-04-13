@@ -233,3 +233,30 @@ func (a RouteAction) String() string {
 		return "unknown"
 	}
 }
+
+// CategorizedRecommendation represents a recommendation from an agent.
+type CategorizedRecommendation struct {
+	Category    string  `json:"category"`    // "security", "performance", "maintainability", "follow-up"
+	Priority    string  `json:"priority"`    // "critical", "high", "medium", "low"
+	Description string  `json:"description"`
+	AgentID     string  `json:"agent_id"`
+	Confidence  float64 `json:"confidence"`
+	// Optional fields
+	CodeSnippet     string   `json:"code_snippet,omitempty"`
+	RelatedFiles    []string `json:"related_files,omitempty"`
+	EstimatedEffort string   `json:"estimated_effort,omitempty"` // "small", "medium", "large"
+}
+
+// AggregatedTaskReport represents the final report for a completed task.
+type AggregatedTaskReport struct {
+	// Summary is a brief overview of what was accomplished
+	Summary string `json:"summary"`
+	// StepsCompleted is the number of steps that completed successfully
+	StepsCompleted int `json:"steps_completed"`
+	// StepsTotal is the total number of steps
+	StepsTotal int `json:"steps_total"`
+	// Recommendations are categorized recommendations from all agents
+	Recommendations []CategorizedRecommendation `json:"recommendations"`
+	// ExecutionTime is the total execution time
+	ExecutionTime string `json:"execution_time"`
+}
