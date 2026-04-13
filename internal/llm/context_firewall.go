@@ -16,6 +16,12 @@ type ContextFirewallConfig struct {
 	ConversationBudgetRatio    float64 // fraction for overall conversation history
 	ChunkLargeInputs           bool    // When true, split oversized inputs at boundaries
 	ChunkThresholdRatio        float64 // max input size relative to context limit
+	// WrapUpThreshold is the "soft" limit (0.0-1.0) where wrap-up suggestions are injected
+	WrapUpThreshold float64 // default 0.50
+	// HardLimit is the "hard" limit (0.0-1.0) where context is dropped and reattempted
+	HardLimit float64 // default 0.80
+	// DropContextOnHardLimit enables context dropping when hard limit is hit
+	DropContextOnHardLimit bool // default true
 }
 
 // ContextFirewall wraps a Chatter and enforces context budgets.
@@ -55,6 +61,12 @@ func NewContextFirewall(
 	}
 	if cfg.ChunkThresholdRatio <= 0 {
 		cfg.ChunkThresholdRatio = 0.25
+	}
+	if cfg.WrapUpThreshold <= 0 {
+		cfg.WrapUpThreshold = 0.50
+	}
+	if cfg.HardLimit <= 0 {
+		cfg.HardLimit = 0.80
 	}
 
 	if summaryModel == nil {
@@ -152,6 +164,9 @@ func (f *ContextFirewall) ContextUtilization(messages []ChatMessage) float64 {
 }
 
 // processMessages applies the context firewall filtering pipeline.
+// It implements threshold-based handling:
+// - At wrapUpThreshold (50%): logs warning for potential wrap-up
+// - At hardLimit (80%): drops old context if DropContextOnHardLimit is enabled
 func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMessage) ([]ChatMessage, error) {
 	if !f.config.Enabled || f.model == nil || f.model.ContextLimit == 0 {
 		return messages, nil
@@ -161,6 +176,33 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 
 	// Estimate current token usage using tokenizer
 	currentTokens := f.countTokens(result)
+	utilization := float64(currentTokens) / float64(f.model.ContextLimit)
+
+	// Check Hard Limit first - may force context drop
+	if utilization >= f.config.HardLimit {
+		if f.config.DropContextOnHardLimit {
+			f.logger.Warn("context exceeded hard limit, dropping old context",
+				"utilization", utilization,
+				"hard_limit", f.config.HardLimit,
+			)
+			result = f.dropOldContext(result)
+			currentTokens = f.countTokens(result)
+			utilization = float64(currentTokens) / float64(f.model.ContextLimit)
+		} else {
+			f.logger.Warn("context exceeded hard limit but DropContextOnHardLimit is disabled",
+				"utilization", utilization,
+				"hard_limit", f.config.HardLimit,
+			)
+		}
+	}
+
+	// Check Wrap-Up Threshold - log warning for potential wrap-up
+	if utilization >= f.config.WrapUpThreshold && utilization < f.config.HardLimit {
+		f.logger.Info("context exceeded wrap-up threshold, consider wrapping up",
+			"utilization", utilization,
+			"wrap_up_threshold", f.config.WrapUpThreshold,
+		)
+	}
 
 	// Step 1: Chunk large input if configured
 	if f.config.ChunkLargeInputs && len(result) > 0 {
@@ -186,7 +228,8 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	}
 
 	// Step 2: Summarize old history if too much context is used
-	if f.config.SummarizeHistory && currentTokens > int(float64(f.model.ContextLimit)*0.8) {
+	// Use hard limit as the summarization threshold
+	if f.config.SummarizeHistory && currentTokens > int(float64(f.model.ContextLimit)*f.config.HardLimit) {
 		summarized, err := f.summarizeOldHistory(ctx, result)
 		if err != nil {
 			f.logger.Debug("summarization failed", "error", err)
@@ -199,6 +242,45 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	}
 
 	return result, nil
+}
+
+// dropOldContext removes old messages, keeping only system prompt and last 2 messages.
+// This is used when the hard limit is exceeded to quickly free up context space.
+func (f *ContextFirewall) dropOldContext(messages []ChatMessage) []ChatMessage {
+	if len(messages) <= 3 {
+		return messages // Already minimal
+	}
+
+	// Find system message(s) to keep
+	var systemMsgs []ChatMessage
+	var nonSystemMsgs []ChatMessage
+
+	for _, msg := range messages {
+		if msg.Role == RoleSystem {
+			systemMsgs = append(systemMsgs, msg)
+		} else {
+			nonSystemMsgs = append(nonSystemMsgs, msg)
+		}
+	}
+
+	// Keep system + last 2 non-system messages
+	result := make([]ChatMessage, 0, len(systemMsgs)+2)
+	result = append(result, systemMsgs...)
+
+	// Keep last 2 messages
+	if len(nonSystemMsgs) > 2 {
+		result = append(result, nonSystemMsgs[len(nonSystemMsgs)-2:]...)
+	} else {
+		result = append(result, nonSystemMsgs...)
+	}
+
+	f.logger.Debug("dropped old context",
+		"original_count", len(messages),
+		"new_count", len(result),
+		"dropped_count", len(messages)-len(result),
+	)
+
+	return result
 }
 
 // chunkMessage splits a message at paragraph or sentence boundaries.

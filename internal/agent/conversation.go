@@ -519,6 +519,7 @@ func (c *Conversation) Truncate() int {
 // TruncateByTokens removes old messages to fit within a token budget.
 // It uses a rough estimate of 3 characters per token (appropriate for JSON/code-heavy content).
 // It counts both Content and ToolCalls fields for accurate estimation.
+// Anchor messages are preserved and never removed.
 // Returns the number of messages removed.
 func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 	c.mu.Lock()
@@ -537,43 +538,63 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 	availableBudget := tokenBudget - systemTokens
 	if availableBudget <= 0 {
 		// System prompt alone exceeds budget, keep at least last message
-		if len(c.messages) > 1 {
-			removed := len(c.messages) - 1
-			c.messages = c.messages[removed:]
-			return removed
+		// but preserve anchors
+		removed := 0
+		newMessages := make([]llm.ChatMessage, 0, 2)
+		for _, msg := range c.messages {
+			if c.IsAnchorMessage(msg.Content) {
+				newMessages = append(newMessages, msg)
+			}
 		}
-		return 0
+		if len(newMessages) == 0 && len(c.messages) > 1 {
+			newMessages = append(newMessages, c.messages[len(c.messages)-1])
+		}
+		removed = len(c.messages) - len(newMessages)
+		c.messages = newMessages
+		return removed
 	}
 
-	// Count tokens from the end (most recent) until we exceed budget
+	// Build list of messages to keep (from end), skipping anchors
+	keepMask := make([]bool, len(c.messages))
 	totalTokens := 0
-	keepFrom := 0
 
 	for i := len(c.messages) - 1; i >= 0; i-- {
+		// Always keep anchor messages
+		if c.IsAnchorMessage(c.messages[i].Content) {
+			keepMask[i] = true
+			continue
+		}
+
 		msgTokens := len(c.messages[i].Content) / charsPerToken
-		// Count tool calls (assistant messages requesting tools)
+		// Count tool calls
 		for _, tc := range c.messages[i].ToolCalls {
 			msgTokens += len(tc.Function.Name) / charsPerToken
 			msgTokens += len(tc.Function.Arguments) / charsPerToken
-			msgTokens += 20 // structural overhead per tool call
+			msgTokens += 20
 		}
-		// Count tool result overhead
 		if c.messages[i].ToolCallID != "" {
-			msgTokens += 15 // tool_call_id structural overhead
+			msgTokens += 15
 		}
+
 		if totalTokens+msgTokens > availableBudget {
-			keepFrom = i + 1
 			break
 		}
 		totalTokens += msgTokens
+		keepMask[i] = true
 	}
 
-	if keepFrom == 0 {
-		return 0
+	// Build new message list
+	newMessages := make([]llm.ChatMessage, 0, len(c.messages))
+	removed := 0
+	for i, msg := range c.messages {
+		if keepMask[i] {
+			newMessages = append(newMessages, msg)
+		} else {
+			removed++
+		}
 	}
 
-	removed := keepFrom
-	c.messages = c.messages[keepFrom:]
+	c.messages = newMessages
 	return removed
 }
 
@@ -586,6 +607,7 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 // 5. Assistant plans (medium)
 // 6. Regular tool results (medium)
 // 7. Intermediate reasoning steps (low - removed first)
+// Anchor messages are always treated as ImportanceCritical and preserved.
 // Returns the number of messages removed.
 func (c *Conversation) TruncateByImportance(tokenBudget int) int {
 	c.mu.Lock()
@@ -638,10 +660,15 @@ func (c *Conversation) TruncateByImportance(tokenBudget int) int {
 		if i < len(c.messageTypes) {
 			msgType = c.messageTypes[i]
 		}
+		// Anchor messages are treated as ImportanceCritical
+		importance := getMessageImportance(msgType)
+		if c.IsAnchorMessage(msg.Content) {
+			importance = ImportanceCritical
+		}
 		msgTokens := len(msg.Content) / charsPerToken
 		indices = append(indices, msgIndex{
 			idx:        i,
-			importance: getMessageImportance(msgType),
+			importance: importance,
 			tokens:     msgTokens,
 		})
 	}
