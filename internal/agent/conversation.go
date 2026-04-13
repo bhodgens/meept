@@ -747,7 +747,8 @@ func (c *Conversation) TruncateByImportance(tokenBudget int) int {
 }
 
 // GetWindowedMessages returns messages within a token budget with smart context selection.
-// It preserves: (1) system prompt always, (2) original user message, (3) most recent messages.
+// It preserves: (1) system prompt always, (2) original user message, (3) anchor messages, (4) most recent messages.
+// Anchor messages are always included regardless of token budget.
 // Returns messages that fit within the token budget.
 func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 	c.mu.RLock()
@@ -765,13 +766,19 @@ func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 	// Reserve tokens for system prompt
 	availableBudget := tokenBudget - systemTokens
 	if availableBudget <= 0 {
-		// System prompt alone exceeds budget, return just system + last message
-		result := make([]llm.ChatMessage, 0, 2)
+		// System prompt alone exceeds budget, return just system + anchors + last message
+		result := make([]llm.ChatMessage, 0, 4)
 		if c.systemPrompt != "" {
 			result = append(result, llm.ChatMessage{
 				Role:    llm.RoleSystem,
 				Content: c.systemPrompt,
 			})
+		}
+		// Always include anchor messages
+		for _, msg := range c.messages {
+			if c.isAnchorMessageUnsafe(msg.Content) {
+				result = append(result, msg)
+			}
 		}
 		if len(c.messages) > 0 {
 			result = append(result, c.messages[len(c.messages)-1])
@@ -787,6 +794,21 @@ func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 			break
 		}
 	}
+
+	// Identify anchor message indices
+	anchorIndices := make(map[int]bool)
+	for i, msg := range c.messages {
+		if c.isAnchorMessageUnsafe(msg.Content) {
+			anchorIndices[i] = true
+		}
+	}
+
+	// Calculate anchor token overhead
+	anchorTokens := 0
+	for i := range anchorIndices {
+		anchorTokens += len(c.messages[i].Content) / charsPerToken
+	}
+	availableBudget -= anchorTokens
 
 	// Build result with system prompt first
 	result := make([]llm.ChatMessage, 0, len(c.messages)+1)
@@ -804,13 +826,20 @@ func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 		availableBudget -= originalUserTokens
 	}
 
+	// Add anchor messages first (they're always included)
+	for i, msg := range c.messages {
+		if anchorIndices[i] {
+			result = append(result, msg)
+		}
+	}
+
 	// Count tokens from the end (most recent) until we exceed remaining budget
 	totalTokens := 0
 	keepFromIdx := len(c.messages)
 
 	for i := len(c.messages) - 1; i >= 0; i-- {
-		// Skip original user message in this pass, we'll add it separately
-		if i == originalUserIdx {
+		// Skip original user and anchors in this pass
+		if i == originalUserIdx || anchorIndices[i] {
 			continue
 		}
 
@@ -833,10 +862,14 @@ func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 		result = append(result, c.messages[originalUserIdx])
 	}
 
-	// Add remaining messages within budget
+	// Add remaining messages within budget (excluding anchors already added)
 	for i := keepFromIdx; i < len(c.messages); i++ {
 		// Skip original user if we already added it
 		if i == originalUserIdx && originalUserIdx < keepFromIdx {
+			continue
+		}
+		// Skip anchors already added
+		if anchorIndices[i] {
 			continue
 		}
 		result = append(result, c.messages[i])
