@@ -194,6 +194,60 @@ func NewToolDefinition(name, description string, params FunctionParameters) Tool
 	}
 }
 
+// CountTokens returns the approximate token count for a tool definition.
+// Uses the provided tokenizer if available, otherwise falls back to character-based heuristic.
+func (t *ToolDefinition) CountTokens(tokenizer Tokenizer) int {
+	if tokenizer == nil {
+		// Fall back to heuristic: 3 chars/token
+		tokenizer = &HeuristicTokenizer{}
+	}
+
+	// Count tokens in name
+	tokens := tokenizer.CountTokens(t.Function.Name)
+
+	// Count tokens in description
+	tokens += tokenizer.CountTokens(t.Function.Description)
+
+	// Count tokens in parameters structure
+	tokens += 10 // "parameters" key + structural overhead
+	tokens += tokenizer.CountTokens(t.Function.Parameters.Type)
+
+	// Count tokens in each property
+	for key, prop := range t.Function.Parameters.Properties {
+		tokens += tokenizer.CountTokens(key)              // property name
+		tokens += tokenizer.CountTokens(prop.Type)        // type
+		tokens += tokenizer.CountTokens(prop.Description) // description
+		tokens += 2                                       // structural overhead per property
+
+		// Count enum values if present
+		for _, enumVal := range prop.Enum {
+			tokens += tokenizer.CountTokens(enumVal)
+			tokens++ // structural overhead
+		}
+	}
+
+	// Count required fields
+	for _, req := range t.Function.Parameters.Required {
+		tokens += tokenizer.CountTokens(req)
+		tokens++ // structural overhead
+	}
+
+	// Add structural overhead for the tool definition itself
+	tokens += 15 // "type", "function", braces, etc.
+
+	return tokens
+}
+
+// CountToolDefinitionsTokens counts tokens for multiple tool definitions.
+func CountToolDefinitionsTokens(tools []ToolDefinition, tokenizer Tokenizer) int {
+	total := 0
+	for _, tool := range tools {
+		total += tool.CountTokens(tokenizer)
+	}
+	return total
+}
+
+
 // ChatRequest represents a request to the chat completions endpoint.
 type ChatRequest struct {
 	Model            string           `json:"model"`

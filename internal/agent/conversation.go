@@ -2,6 +2,7 @@
 package agent
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -18,10 +19,134 @@ const (
 	// MaxMemoryContextTokens is the maximum tokens allowed for memory context injection.
 	MaxMemoryContextTokens = 2000
 )
+
+// TurnBudgetTracker tracks token usage across multiple conversation turns.
+// This enables multi-turn budget allocation and graceful wrap-up when depleted.
+type TurnBudgetTracker struct {
+	mu              sync.Mutex
+	totalBudget     int   // Total tokens allocated for the session
+	usedBudget      int   // Tokens used so far
+	tokensPerTurn   int   // Expected tokens per turn (for estimation)
+	maxTurns        int   // Maximum turns before wrap-up
+	currentTurn     int   // Current turn number
+	warningZone     bool  // Set when budget is nearly depleted
+	wrapUpRequested bool  // Set when wrap-up is requested
+}
+
+// NewTurnBudgetTracker creates a new budget tracker.
+func NewTurnBudgetTracker(totalBudget, tokensPerTurn, maxTurns int) *TurnBudgetTracker {
+	return &TurnBudgetTracker{
+		totalBudget:   totalBudget,
+		tokensPerTurn: tokensPerTurn,
+		maxTurns:      maxTurns,
+	}
+}
+
+// RecordUsage records token usage for the current turn.
+func (t *TurnBudgetTracker) RecordUsage(tokensUsed int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.usedBudget += tokensUsed
+	t.currentTurn++
+
+	// Check if entering warning zone (80% depleted)
+	remainingRatio := float64(t.totalBudget-t.usedBudget) / float64(t.totalBudget)
+	if remainingRatio < 0.2 {
+		t.warningZone = true
+	}
+
+	// Check if max turns reached
+	if t.currentTurn >= t.maxTurns {
+		t.wrapUpRequested = true
+	}
+}
+
+// RemainingBudget returns tokens remaining in the budget.
+func (t *TurnBudgetTracker) RemainingBudget() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.totalBudget - t.usedBudget
+}
+
+// AvailableBudgetForTurn returns the budget available for the current turn.
+func (t *TurnBudgetTracker) AvailableBudgetForTurn() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	remaining := t.totalBudget - t.usedBudget
+	remainingTurns := t.maxTurns - t.currentTurn
+	if remainingTurns <= 0 {
+		// Wrap-up turn: use all remaining budget
+		return remaining
+	}
+	// Allocate remaining budget across remaining turns
+	perTurn := remaining / remainingTurns
+	if perTurn < 1000 {
+		return 1000 // minimum budget
+	}
+	if perTurn > t.tokensPerTurn {
+		return t.tokensPerTurn // cap at expected per-turn usage
+	}
+	return perTurn
+}
+
+// IsWarningZone returns true if budget is nearly depleted (80%+ used).
+func (t *TurnBudgetTracker) IsWarningZone() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.warningZone
+}
+
+// IsWrapUpRequested returns true if wrap-up is requested due to budget exhaustion.
+func (t *TurnBudgetTracker) IsWrapUpRequested() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.wrapUpRequested
+}
+
+// GetTurnInfo returns current turn, max turns, and budget status.
+func (t *TurnBudgetTracker) GetTurnInfo() (current, max, used, total int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.currentTurn, t.maxTurns, t.usedBudget, t.totalBudget
+}
+
+
+// MessageClassification classifies the semantic type of a message for importance-based retention.
+type MessageClassification int
+
+const (
+	// MessageUnknown is the default for unclassified messages.
+	MessageUnknown MessageClassification = iota
+	// MessageUserInput is the original user request or follow-up questions.
+	MessageUserInput
+	// MessageAssistantPlan is assistant output containing plans, task decomposition, or step-by-step thinking.
+	MessageAssistantPlan
+	// MessageAssistantConclusion is assistant output with final answers, summaries, or conclusions.
+	MessageAssistantConclusion
+	// MessageToolResult is the output from tool execution.
+	MessageToolResult
+	// MessageToolResultKey is a tool result containing key findings (e.g., file contents, search results).
+	MessageToolResultKey
+	// MessageReasoningStep is intermediate reasoning or exploration (lowest priority).
+	MessageReasoningStep
+)
+
+// MessageImportance is the priority level for message retention during truncation.
+// Higher values = more important = retained longer.
+type MessageImportance int
+
+const (
+	ImportanceLow MessageImportance = iota
+	ImportanceMedium
+	ImportanceHigh
+	ImportanceCritical
+)
+
 // Conversation manages chat message history with LRU eviction and truncation.
 type Conversation struct {
 	mu           sync.RWMutex
 	messages     []llm.ChatMessage
+	messageTypes []MessageClassification // Parallel array tracking semantic type of each message
 	systemPrompt string
 	maxMessages  int
 	contextLimit int
@@ -55,6 +180,7 @@ func WithSystemPrompt(prompt string) ConversationOption {
 func NewConversation(opts ...ConversationOption) *Conversation {
 	c := &Conversation{
 		messages:     make([]llm.ChatMessage, 0, 32),
+		messageTypes: make([]MessageClassification, 0, 32),
 		maxMessages:  DefaultMaxMessages,
 		contextLimit: DefaultContextLimit,
 	}
@@ -66,12 +192,143 @@ func NewConversation(opts ...ConversationOption) *Conversation {
 	return c
 }
 
+// classifyMessageClassification determines the semantic type of a message based on role and content.
+func classifyMessageClassification(msg llm.ChatMessage, isFirstUserMsg bool) MessageClassification {
+	switch msg.Role {
+	case llm.RoleUser:
+		return MessageUserInput
+	case llm.RoleTool:
+		// Check if this looks like a key finding
+		content := msg.Content
+		if isKeyFindingContent(content) {
+			return MessageToolResultKey
+		}
+		return MessageToolResult
+	case llm.RoleAssistant:
+		// Classify based on content patterns
+		content := msg.Content
+		if isConclusionContent(content) {
+			return MessageAssistantConclusion
+		}
+		if isPlanContent(content) {
+			return MessageAssistantPlan
+		}
+		if isReasoningContent(content) {
+			return MessageReasoningStep
+		}
+		// Default to conclusion for general assistant responses
+		return MessageAssistantConclusion
+	case llm.RoleSystem:
+		return MessageUnknown
+	default:
+		return MessageUnknown
+	}
+}
+
+// isKeyFindingContent checks if content looks like key findings from tool execution.
+func isKeyFindingContent(content string) bool {
+	lower := strings.ToLower(content)
+	// Key findings often contain file contents, search results, or structured data
+	keyIndicators := []string{
+		"file:", "path:", "result:", "found:", "matches:",
+		"```", "{", "[", // Code/JSON/arrays
+		"package ", "func ", "type ", // Go code
+		"import ", "export ", "class ", // Other languages
+	}
+	for _, indicator := range keyIndicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// isConclusionContent checks if assistant output is a conclusion or summary.
+func isConclusionContent(content string) bool {
+	lower := strings.ToLower(content)
+	conclusionIndicators := []string{
+		"in conclusion", "in summary", "to summarize",
+		"final answer", "final result", "final code",
+		"completed", "finished", "done",
+		"here's the", "here is the", "here's how",
+		"summary:", "answer:", "solution:",
+	}
+	for _, indicator := range conclusionIndicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// isPlanContent checks if assistant output is a plan or task decomposition.
+func isPlanContent(content string) bool {
+	lower := strings.ToLower(content)
+	planIndicators := []string{
+		"plan:", "step 1", "step 2", "step 3",
+		"first,", "second,", "third,", "finally,",
+		"1.", "2.", "3.", // Numbered list
+		"- [ ]", "- [x]", // Task list
+		"we need to", "we should", "i will",
+		"approach:", "strategy:", "breakdown:",
+	}
+	for _, indicator := range planIndicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// isReasoningContent checks if assistant output is intermediate reasoning.
+func isReasoningContent(content string) bool {
+	lower := strings.ToLower(content)
+	reasoningIndicators := []string{
+		"let me think", "let's see", "hmm",
+		"considering", "analyzing", "exploring",
+		"note:", "observation:", "interesting",
+		"this suggests", "this means", "this implies",
+		"wait,", "actually,", "on second thought",
+	}
+	for _, indicator := range reasoningIndicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// getMessageImportance returns the importance level for a message type.
+func getMessageImportance(msgType MessageClassification) MessageImportance {
+	switch msgType {
+	case MessageUserInput:
+		return ImportanceCritical
+	case MessageAssistantConclusion:
+		return ImportanceHigh
+	case MessageToolResultKey:
+		return ImportanceHigh
+	case MessageAssistantPlan:
+		return ImportanceMedium
+	case MessageToolResult:
+		return ImportanceMedium
+	case MessageReasoningStep:
+		return ImportanceLow
+	default:
+		return ImportanceLow
+	}
+}
+
 // AddMessage appends a message to the conversation history.
 func (c *Conversation) AddMessage(msg llm.ChatMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.messages = append(c.messages, msg)
+
+	// Classify and track message type for importance-based retention
+	isFirstUserMsg := len(c.messages) == 1 && msg.Role == llm.RoleUser
+	msgType := classifyMessageClassification(msg, isFirstUserMsg)
+	c.messageTypes = append(c.messageTypes, msgType)
 }
 
 // AddUserMessage is a convenience method to add a user message.
@@ -148,6 +405,7 @@ func (c *Conversation) Clear() {
 	defer c.mu.Unlock()
 
 	c.messages = make([]llm.ChatMessage, 0, 32)
+	c.messageTypes = make([]MessageClassification, 0, 32)
 }
 
 // SetSystemPrompt sets or updates the system prompt.
@@ -261,6 +519,139 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 	removed := keepFrom
 	c.messages = c.messages[keepFrom:]
 	return removed
+}
+
+// TruncateByImportance removes messages based on semantic importance rather than recency.
+// It preserves messages in priority order:
+// 1. System prompt (always)
+// 2. Original user message (critical)
+// 3. Assistant conclusions/summaries (high)
+// 4. Tool results with key findings (high)
+// 5. Assistant plans (medium)
+// 6. Regular tool results (medium)
+// 7. Intermediate reasoning steps (low - removed first)
+// Returns the number of messages removed.
+func (c *Conversation) TruncateByImportance(tokenBudget int) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if tokenBudget <= 0 || len(c.messages) == 0 {
+		return 0
+	}
+
+	const charsPerToken = 3
+
+	// Calculate system prompt tokens
+	systemTokens := len(c.systemPrompt) / charsPerToken
+
+	// Calculate available token budget for messages
+	availableBudget := tokenBudget - systemTokens
+	if availableBudget <= 0 {
+		if len(c.messages) > 1 {
+			removed := len(c.messages) - 1
+			c.messages = c.messages[removed:]
+			c.messageTypes = c.messageTypes[removed:]
+			return removed
+		}
+		return 0
+	}
+
+	// Calculate current token usage
+	currentTokens := 0
+	for _, msg := range c.messages {
+		msgTokens := len(msg.Content) / charsPerToken
+		for _, tc := range msg.ToolCalls {
+			msgTokens += len(tc.Function.Arguments) / charsPerToken
+		}
+		currentTokens += msgTokens
+	}
+
+	if currentTokens <= availableBudget {
+		return 0
+	}
+
+	type msgIndex struct {
+		idx        int
+		importance MessageImportance
+		tokens     int
+	}
+
+	var indices []msgIndex
+	for i, msg := range c.messages {
+		msgType := MessageUnknown
+		if i < len(c.messageTypes) {
+			msgType = c.messageTypes[i]
+		}
+		msgTokens := len(msg.Content) / charsPerToken
+		indices = append(indices, msgIndex{
+			idx:        i,
+			importance: getMessageImportance(msgType),
+			tokens:     msgTokens,
+		})
+	}
+
+	// Sort by importance (lowest first), then by token count (highest first)
+	for i := 0; i < len(indices)-1; i++ {
+		for j := i + 1; j < len(indices); j++ {
+			shouldSwap := false
+			if indices[i].importance > indices[j].importance {
+				shouldSwap = true
+			} else if indices[i].importance == indices[j].importance && indices[i].tokens < indices[j].tokens {
+				shouldSwap = true
+			}
+			if shouldSwap {
+				indices[i], indices[j] = indices[j], indices[i]
+			}
+		}
+	}
+
+	removedTokens := 0
+	for _, mi := range indices {
+		if currentTokens-removedTokens <= availableBudget {
+			break
+		}
+		removedTokens += mi.tokens
+	}
+
+	keepMask := make([]bool, len(c.messages))
+	tokensRemoved := 0
+	for _, mi := range indices {
+		if tokensRemoved >= removedTokens {
+			break
+		}
+		keepMask[mi.idx] = false
+		tokensRemoved += mi.tokens
+	}
+
+	// Always keep the last few messages
+	minKeep := 4
+	if len(c.messages) < minKeep {
+		minKeep = len(c.messages)
+	}
+	for i := len(c.messages) - minKeep; i < len(c.messages); i++ {
+		if i >= 0 {
+			keepMask[i] = true
+		}
+	}
+
+	newMessages := make([]llm.ChatMessage, 0, len(c.messages))
+	newTypes := make([]MessageClassification, 0, len(c.messageTypes))
+	removedCount := 0
+
+	for i, msg := range c.messages {
+		if i < len(keepMask) && keepMask[i] {
+			newMessages = append(newMessages, msg)
+			if i < len(c.messageTypes) {
+				newTypes = append(newTypes, c.messageTypes[i])
+			}
+		} else {
+			removedCount++
+		}
+	}
+
+	c.messages = newMessages
+	c.messageTypes = newTypes
+	return removedCount
 }
 
 // GetWindowedMessages returns messages within a token budget with smart context selection.

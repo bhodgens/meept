@@ -332,6 +332,9 @@ type AgentLoop struct {
 	// Conversation management
 	conversations *ConversationStore
 
+	// Multi-turn budget tracking
+	budgetTracker *TurnBudgetTracker
+
 	// Prompt building
 	promptBuilder *PromptBuilder
 
@@ -648,6 +651,10 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 		loop.llm = firewall
 		loop.logger.Debug("ContextFirewall enabled for agent loop")
 	}
+
+	// Initialize multi-turn budget tracker
+	// Default: 100,000 tokens total, 30,000 per turn, max 10 turns
+	loop.budgetTracker = NewTurnBudgetTracker(100000, 30000, 10)
 
 	return loop
 }
@@ -1031,6 +1038,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"please let me know if you'd like me to continue in a follow-up.", ErrConversationBudgetExhausted
 		}
 
+		// Check multi-turn budget tracker for wrap-up request
+		if l.budgetTracker != nil && l.budgetTracker.IsWrapUpRequested() {
+			current, maxTurns, used, total := l.budgetTracker.GetTurnInfo()
+			l.logger.Info("Multi-turn budget exhausted, wrapping up",
+				"current_turn", current,
+				"max_turns", maxTurns,
+				"used_tokens", used,
+				"total_tokens", total,
+				"conversation", conversationID,
+			)
+			return "I've completed the maximum number of turns allowed for this session. " +
+				"Here's a summary of what was accomplished -- please start a new session if you need further assistance.", nil
+		}
+
 		// Warning zone: at 80% of budget, prepare to wrap up
 		if !inWarningZone && float64(totalTokens) >= float64(convBudget)*ConversationBudgetWarningRatio {
 			inWarningZone = true
@@ -1057,9 +1078,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		// Enforce token budget before LLM call to prevent context explosion.
-		// Reserve space for tool definitions (~175 tokens per tool) which are
-		// sent alongside messages but not counted by TruncateByTokens.
-		toolOverhead := len(tools) * 175
+		// Reserve space for tool definitions using accurate token counting.
+		// Tool definitions are sent alongside messages but not counted by TruncateByTokens.
+		var toolOverhead int
+		if len(tools) > 0 {
+			// Use actual token counting for tool definitions
+			toolOverhead = llm.CountToolDefinitionsTokens(tools, nil) // nil = use heuristic
+		} else {
+			toolOverhead = 0
+		}
 		effectiveBudget := IterationTokenBudget - toolOverhead
 		if effectiveBudget < 2000 {
 			effectiveBudget = 2000 // minimum budget for messages
@@ -1126,6 +1153,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 		// Track token usage
 		totalTokens += response.Usage.TotalTokens
+
+		// Record budget usage for multi-turn tracking
+		if l.budgetTracker != nil {
+			l.budgetTracker.RecordUsage(response.Usage.TotalTokens)
+		}
 
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
