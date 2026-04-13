@@ -133,6 +133,28 @@ func NewTokenizerForModel(modelID string) Tokenizer {
 	if isGPT3Family(modelID) {
 		return NewTiktokenTokenizer("p50k_base")
 	}
+	// Qwen family (qwen2.5-coder, etc.) - uses cl100k_base compatible BPE
+	if isQwenFamily(modelID) {
+		return NewTiktokenTokenizer("cl100k_base")
+	}
+	// GLM family (glm-4.7, glm-4.5-air) - uses cl100k_base compatible BPE
+	if isGLMFamily(modelID) {
+		return NewTiktokenTokenizer("cl100k_base")
+	}
+	// Mistral family - uses p50k_base (similar to GPT-3)
+	if isMistralFamily(modelID) {
+		return NewTiktokenTokenizer("p50k_base")
+	}
+	// Llama family (llama3, llama3.1, llama3.2) - uses tiktoken llama3 encoding
+	if isLlamaFamily(modelID) {
+		// Try llama3 encoding first, fall back to cl100k_base if unavailable
+		t := NewTiktokenTokenizer("llama3")
+		if t.tke != nil {
+			return t
+		}
+		// Fall back to cl100k_base if llama3 encoding not available
+		return NewTiktokenTokenizer("cl100k_base")
+	}
 	// Default to cl100k_base (most common for modern models)
 	// Many providers use compatible tokenizers
 	return NewTiktokenTokenizer("cl100k_base")
@@ -156,6 +178,26 @@ func isGPT35Family(modelID string) bool {
 // isGPT3Family checks if model is GPT-3 family
 func isGPT3Family(modelID string) bool {
 	return containsIgnoreCase(modelID, "text-davinci") || containsIgnoreCase(modelID, "ada-001")
+}
+
+// isQwenFamily checks if model is Qwen family
+func isQwenFamily(modelID string) bool {
+	return containsIgnoreCase(modelID, "qwen")
+}
+
+// isGLMFamily checks if model is GLM family (Z.Ai models)
+func isGLMFamily(modelID string) bool {
+	return containsIgnoreCase(modelID, "glm")
+}
+
+// isMistralFamily checks if model is Mistral family
+func isMistralFamily(modelID string) bool {
+	return containsIgnoreCase(modelID, "mistral")
+}
+
+// isLlamaFamily checks if model is Llama family
+func isLlamaFamily(modelID string) bool {
+	return containsIgnoreCase(modelID, "llama")
 }
 
 func containsIgnoreCase(s, substr string) bool {

@@ -14,33 +14,19 @@ import (
 
 // ANSI escape sequences for scrolling region control.
 const (
-	// CSI sequences
 	csi = "\033["
 
 	// DECSTBM - Set Top and Bottom Margins (scrolling region)
-	// Usage: \033[<top>;<bottom>r
 	setScrollRegion = csi + "%d;%dr"
 
 	// Reset scrolling region to full screen
 	resetScrollRegion = csi + "r"
 
-	// CUP - Cursor Position
-	// Usage: \033[<row>;<col>H
-	cursorPosition = csi + "%d;%dH"
-
-	// ED - Erase in Display (clear from cursor to end of screen)
-	clearToEnd = csi + "J"
-
-	// EL - Erase in Line (clear from cursor to end of line)
-	clearLine = csi + "K"
-
-	// Save and restore cursor position
-	saveCursor    = csi + "s"
-	restoreCursor = csi + "u"
-
-	// Hide/show cursor
-	hideCursor = csi + "?25l"
+	// Show cursor (for cleanup)
 	showCursor = csi + "?25h"
+
+	// CUP - Cursor Position (row, col)
+	cursorPosition = csi + "%d;%dH"
 )
 
 // ScrollRegionPrinter manages printing to a scrolling region while keeping
@@ -254,35 +240,11 @@ func (p *ScrollRegionPrinter) wrapText(text string, width int) string {
 	return result.String()
 }
 
-// RenderFixedArea returns the content for the fixed area (prompt + dashboard)
-// with proper cursor positioning.
+// RenderFixedArea returns the content for the fixed area (prompt + dashboard).
+// Simplified to just return the content without cursor manipulation -
+// BubbleTea handles positioning and we don't want to interfere with text selection.
 func (p *ScrollRegionPrinter) RenderFixedArea(promptView, dashboardView string) string {
-	if p.scrollRegionEnd <= 0 {
-		return promptView + "\n" + dashboardView
-	}
-
-	var sb strings.Builder
-
-	// Save cursor position (we're in the scrolling region)
-	sb.WriteString(saveCursor)
-
-	// Move cursor to the fixed area (first line below scrolling region)
-	sb.WriteString(fmt.Sprintf(cursorPosition, p.scrollRegionEnd+1, 1))
-
-	// Clear the fixed area
-	sb.WriteString(clearToEnd)
-
-	// Render prompt
-	sb.WriteString(promptView)
-	sb.WriteString("\n")
-
-	// Render dashboard
-	sb.WriteString(dashboardView)
-
-	// Restore cursor to scrolling region
-	sb.WriteString(restoreCursor)
-
-	return sb.String()
+	return promptView + "\n" + dashboardView
 }
 
 // Cleanup returns ANSI codes to reset terminal state.
