@@ -67,6 +67,21 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	start := time.Now()
 	report := &ConsolidationReport{}
 
+	// Access-based expiration (run before consolidation)
+	cfg := c.manager.Config().Expiration
+	if cfg.Enabled && cfg.AccessExpirationDays > 0 {
+		accessReport, err := c.runAccessBasedExpiration(ctx)
+		if err != nil {
+			if report.Error != "" {
+				report.Error += "; "
+			}
+			report.Error += err.Error()
+			c.logger.Error("Access-based expiration failed", "error", err)
+		} else {
+			report.Expired = accessReport.Expired
+		}
+	}
+
 	// Episodic consolidation
 	if c.manager.episodic != nil {
 		cutoff := time.Now().Add(-time.Duration(olderThanHours) * time.Hour)
@@ -100,10 +115,49 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 		"episodic_archived", report.EpisodicArchived,
 		"summaries_created", report.SummariesCreated,
 		"duplicates_removed", report.DuplicatesRemoved,
+		"expired", report.Expired,
 		"duration", report.Duration,
 	)
 
 	return report, nil
+}
+
+// runAccessBasedExpiration performs access-based memory expiration.
+func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*ConsolidationReport, error) {
+	cfg := c.manager.Config().Expiration
+	expiredMemories, err := c.manager.GetExpiredMemories(ctx, cfg.AccessExpirationDays)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, mem := range expiredMemories {
+		if cfg.SummarizeBeforeDelete {
+			// Create summary memory first
+			summary := c.createSummary(mem)
+			summary.Category = cfg.SummaryCategory
+			c.manager.Store(ctx, summary)
+		}
+		// Delete expired memory
+		c.manager.Delete(ctx, mem.ID)
+	}
+
+	return &ConsolidationReport{Expired: len(expiredMemories)}, nil
+}
+
+// createSummary creates a summary memory from an expired memory.
+func (c *Consolidator) createSummary(mem Memory) Memory {
+	summaryContent := fmt.Sprintf("Summary of expired memory: %s", mem.Content)
+	if len(summaryContent) > 500 {
+		summaryContent = summaryContent[:500] + "..."
+	}
+
+	return Memory{
+		Content:   summaryContent,
+		Type:      mem.Type,
+		Category:  "summary",
+		Metadata:  mem.Metadata,
+		CreatedAt: time.Now(),
+	}
 }
 
 // episodicReport holds internal episodic consolidation results.

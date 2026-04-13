@@ -156,3 +156,68 @@ func (p *ReviewPolicy) ExceedsMaxRevisions(step *task.TaskStep) bool {
 func (p *ReviewPolicy) RequiresHumanIntervention(step *task.TaskStep) bool {
 	return p.ExceedsMaxRevisions(step)
 }
+
+// ValidationPolicy determines which steps require validation and how.
+type ValidationPolicy struct {
+	// Enabled globally
+	Enabled bool
+
+	// Tool hints that ALWAYS require validation
+	RequireValidation []string
+
+	// Tool hints that NEVER require validation (trusted operations)
+	SkipValidation []string
+
+	// Maximum validation retry loops before escalation
+	MaxValidationLoops int
+
+	// Skip validation for these agents
+	SkipValidationAgents []string
+}
+
+// DefaultValidationPolicy returns sensible defaults for validation policy.
+func DefaultValidationPolicy() *ValidationPolicy {
+	return &ValidationPolicy{
+		Enabled:             true,
+		RequireValidation:   []string{"code", "refactor", "debug", "git", "fix", "commit"},
+		SkipValidation:      []string{"chat", "report", "recall", "search", "analyze", "platform"},
+		MaxValidationLoops:  3,
+		SkipValidationAgents: []string{"chat", "analyst"},
+	}
+}
+
+// NeedsValidation determines if a step requires validation based on policy.
+func (p *ValidationPolicy) NeedsValidation(step *task.TaskStep) bool {
+	if !p.Enabled {
+		return false
+	}
+
+	// Check if tool hint is in skip list
+	for _, skip := range p.SkipValidation {
+		if step.ToolHint == skip {
+			return false
+		}
+	}
+
+	// Check if agent is in skip list
+	for _, skipAgent := range p.SkipValidationAgents {
+		if step.AgentID == skipAgent {
+			return false
+		}
+	}
+
+	// Check if tool hint is in require list
+	for _, req := range p.RequireValidation {
+		if step.ToolHint == req {
+			return true
+		}
+	}
+
+	// Default: validation if tool hint is set and not in skip lists
+	return step.ToolHint != ""
+}
+
+// ExceedsMaxValidationLoops checks if a step has exceeded validation retry loops.
+func (p *ValidationPolicy) ExceedsMaxValidationLoops(validationLoops int) bool {
+	return p.MaxValidationLoops > 0 && validationLoops >= p.MaxValidationLoops
+}

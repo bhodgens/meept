@@ -126,6 +126,12 @@ type LLMContextFirewallConfig struct {
 	ConversationBudgetRatio    float64 `toml:"conversation_budget_ratio"`      // default 0.50
 	ChunkLargeInputs           bool    `toml:"chunk_large_inputs"`             // default true
 	ChunkThresholdRatio        float64 `toml:"chunk_threshold_ratio"`          // default 0.25
+	// WrapUpThreshold is the "soft" limit (0.0-1.0) where wrap-up suggestions are injected
+	WrapUpThreshold float64 `toml:"wrap_up_threshold"` // default 0.50
+	// HardLimit is the "hard" limit (0.0-1.0) where context is dropped and reattempted
+	HardLimit float64 `toml:"hard_limit"` // default 0.80
+	// DropContextOnHardLimit enables context dropping when hard limit is hit
+	DropContextOnHardLimit bool `toml:"drop_context_on_hard_limit"` // default true
 }
 
 // LLMMetricsConfig configures HTTP-level metrics collection.
@@ -171,21 +177,62 @@ type MemoryCachingConfig struct {
 	// RefreshOnSessionEnd refreshes the snapshot at session end
 	RefreshOnSessionEnd bool `toml:"refresh_on_session_end"`
 }
+// MemoryCategoryLimit holds character limit settings for a memory category.
+type MemoryCategoryLimit struct {
+	Enabled        bool `toml:"enabled"`
+	CharacterLimit int  `toml:"character_limit"`
+}
+
+// MemoryLimitsConfig holds character limit settings for different memory categories.
+type MemoryLimitsConfig struct {
+	Episodic     MemoryCategoryLimit `toml:"episodic"`
+	TaskCode     MemoryCategoryLimit `toml:"task_code"`
+	TaskGeneral  MemoryCategoryLimit `toml:"task_general"`
+	TaskCommands MemoryCategoryLimit `toml:"task_commands"`
+	Personality  MemoryCategoryLimit `toml:"personality"`
+}
+
+// MemoryExpirationConfig holds memory expiration settings.
+type MemoryExpirationConfig struct {
+	// Enabled turns on access-based expiration
+	Enabled bool `toml:"enabled"`
+	// AccessExpirationDays is the number of days without access before expiration (0 = disabled)
+	AccessExpirationDays int `toml:"access_expiration_days"`
+	// SummarizeBeforeDelete creates a summary before deleting expired memories
+	SummarizeBeforeDelete bool `toml:"summarize_before_delete"`
+	// SummaryCategory is the category for summary memories
+	SummaryCategory string `toml:"summary_category"`
+}
+
+// MemoryVersioningConfig holds versioned memory settings.
+type MemoryVersioningConfig struct {
+	Enabled     bool `toml:"enabled"`
+	MaxVersions int  `toml:"max_versions"`
+}
+
 
 // MemoryConfig holds memory subsystem settings.
 type MemoryConfig struct {
 	// Backend specifies the storage backend: "memvid" (default) or "sqlite"
-	Backend                    MemoryBackend     `toml:"backend"`
-	DataDir                    string            `toml:"data_dir"`
-	ConsolidationIntervalHours int               `toml:"consolidation_interval_hours"`
-	Episodic                   EpisodicConfig    `toml:"episodic"`
-	Task                       TaskMemoryConfig  `toml:"task"`
-	Personality                PersonalityConfig `toml:"personality"`
-	Embeddings                 EmbeddingConfig   `toml:"embeddings"`
+	Backend                    MemoryBackend        `toml:"backend"`
+	DataDir                    string               `toml:"data_dir"`
+	ConsolidationIntervalHours int                  `toml:"consolidation_interval_hours"`
+	Episodic                   EpisodicConfig       `toml:"episodic"`
+	Task                       TaskMemoryConfig     `toml:"task"`
+	Personality                PersonalityConfig    `toml:"personality"`
+	Embeddings                 EmbeddingConfig      `toml:"embeddings"`
 	// Security holds memory security settings
 	Security MemorySecurityConfig `toml:"security"`
 	// Caching holds memory prefix caching settings
 	Caching MemoryCachingConfig `toml:"caching"`
+	// Limits holds character limit settings for memory categories
+	Limits MemoryLimitsConfig `toml:"limits"`
+	// Expiration holds memory expiration settings
+	Expiration MemoryExpirationConfig `toml:"expiration"`
+	// Versioning holds versioned memory settings
+	Versioning MemoryVersioningConfig `toml:"versioning"`
+	// ProjectOverrides allows per-project character limit overrides
+	ProjectOverrides map[string]MemoryLimitsConfig `toml:"project_overrides"`
 }
 
 // EpisodicConfig holds episodic memory settings.
@@ -292,6 +339,24 @@ type AgentConfig struct {
 	Errors ErrorsConfig `toml:"errors"`
 	// Review holds code review settings
 	Review ReviewConfig `toml:"review"`
+	// Validation holds task completion validation settings
+	Validation ValidationConfig `toml:"validation"`
+	// Watchdog holds agent monitoring settings
+	Watchdog WatchdogConfig `toml:"watchdog"`
+}
+
+// WatchdogConfig holds agent monitoring and timeout settings.
+type WatchdogConfig struct {
+	// Enabled turns on watchdog monitoring
+	Enabled bool `toml:"enabled"`
+	// TimeoutMinutes is the timeout in minutes before aborting (default: 10)
+	TimeoutMinutes int `toml:"timeout_minutes"`
+	// HeartbeatIntervalSec is the heartbeat interval in seconds (default: 30)
+	HeartbeatIntervalSec int `toml:"heartbeat_interval_sec"`
+	// MaxIterations is the maximum iterations before aborting (default: 50)
+	MaxIterations int `toml:"max_iterations"`
+	// StuckIterationCount is iterations without progress before flagged as stuck (default: 5)
+	StuckIterationCount int `toml:"stuck_iteration_count"`
 }
 
 // ErrorsConfig holds error handling settings.
@@ -318,6 +383,20 @@ type ReviewConfig struct {
 	MaxRevisionCycles int `toml:"max_revision_cycles"`
 	// AutoApprovePatterns lists glob patterns that are auto-approved
 	AutoApprovePatterns []string `toml:"auto_approve_patterns"`
+}
+
+// ValidationConfig holds task completion validation settings.
+type ValidationConfig struct {
+	// Enabled turns on task completion validation
+	Enabled bool `toml:"enabled"`
+	// RequireValidation lists tool hints that require validation
+	RequireValidation []string `toml:"require_validation"`
+	// SkipValidation lists tool hints that skip validation
+	SkipValidation []string `toml:"skip_validation"`
+	// SkipValidationAgents lists agents that skip validation
+	SkipValidationAgents []string `toml:"skip_validation_agents"`
+	// MaxValidationLoops is the maximum validation loops before escalation
+	MaxValidationLoops int `toml:"max_validation_loops"`
 }
 
 // MultiAgentConfig holds multi-agent orchestration settings.
@@ -631,6 +710,18 @@ type ShadowDPOConfig struct {
 	LossType string  `toml:"loss_type"`
 }
 
+
+// GetLimitsForProject returns the character limits for a specific project path.
+// If project-specific overrides exist, they are returned; otherwise defaults are used.
+func (c *MemoryConfig) GetLimitsForProject(projectPath string) MemoryLimitsConfig {
+	if c.ProjectOverrides != nil {
+		if overrides, exists := c.ProjectOverrides[projectPath]; exists {
+			return overrides
+		}
+	}
+	return c.Limits
+}
+
 // DefaultConfig returns a configuration with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
@@ -669,6 +760,9 @@ func DefaultConfig() *Config {
 				ConversationBudgetRatio:    0.50,
 				ChunkLargeInputs:           true,
 				ChunkThresholdRatio:        0.25,
+				WrapUpThreshold:        0.50,
+				HardLimit:              0.80,
+				DropContextOnHardLimit: true,
 			},
 			Metrics: LLMMetricsConfig{
 				Enabled:             true,
@@ -702,6 +796,39 @@ func DefaultConfig() *Config {
 				Enabled:             true,
 				RefreshOnSessionEnd: true,
 			},
+			Limits: MemoryLimitsConfig{
+				Episodic: MemoryCategoryLimit{
+					Enabled:        true,
+					CharacterLimit: 2200,
+				},
+				TaskCode: MemoryCategoryLimit{
+					Enabled:        true,
+					CharacterLimit: 3000,
+				},
+				TaskGeneral: MemoryCategoryLimit{
+					Enabled:        true,
+					CharacterLimit: 2200,
+				},
+				TaskCommands: MemoryCategoryLimit{
+					Enabled:        true,
+					CharacterLimit: 1500,
+				},
+				Personality: MemoryCategoryLimit{
+					Enabled:        true,
+					CharacterLimit: 1375,
+				},
+			},
+			Expiration: MemoryExpirationConfig{
+				Enabled:               true,
+				AccessExpirationDays:  90,
+				SummarizeBeforeDelete: true,
+				SummaryCategory:       "archived",
+			},
+			Versioning: MemoryVersioningConfig{
+				Enabled:     true,
+				MaxVersions: 10,
+			},
+			ProjectOverrides: make(map[string]MemoryLimitsConfig),
 		},
 		Memvid: MemvidConfig{
 			Enabled:  false,
@@ -760,6 +887,20 @@ func DefaultConfig() *Config {
 				},
 				MaxRevisionCycles:   3,
 				AutoApprovePatterns: []string{"*.md", "LICENSE"},
+			},
+			Validation: ValidationConfig{
+				Enabled:              true,
+				RequireValidation:    []string{"code", "refactor", "debug", "git", "fix", "commit"},
+				SkipValidation:       []string{"chat", "report", "recall", "search", "analyze", "platform"},
+				SkipValidationAgents: []string{"chat", "analyst"},
+				MaxValidationLoops:   3,
+			},
+			Watchdog: WatchdogConfig{
+				Enabled:              true,
+				TimeoutMinutes:       10,
+				HeartbeatIntervalSec: 30,
+				MaxIterations:        50,
+				StuckIterationCount:  5,
 			},
 		},
 		Security: SecurityConfig{

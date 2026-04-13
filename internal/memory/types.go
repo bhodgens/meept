@@ -34,6 +34,8 @@ type Memory struct {
 	CreatedAt time.Time `json:"created_at"`
 	// UpdatedAt is when the memory was last modified.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	// LastAccessedAt is when the memory was last accessed.
+	LastAccessedAt *time.Time `json:"last_accessed_at,omitempty"`
 
 	// Agent attribution fields (for multi-agent orchestration)
 	// AgentID identifies which agent created this memory.
@@ -92,6 +94,8 @@ type ConsolidationReport struct {
 	SummariesCreated int `json:"summaries_created"`
 	// DuplicatesRemoved is the number of duplicate task memories removed.
 	DuplicatesRemoved int `json:"duplicates_removed"`
+	// Expired is the number of memories expired due to access-based expiration.
+	Expired int `json:"expired"`
 	// Duration is how long consolidation took.
 	Duration time.Duration `json:"duration"`
 	// Error is any error that occurred.

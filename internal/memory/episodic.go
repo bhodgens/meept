@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/pkg/sqlite"
@@ -16,11 +17,15 @@ const (
 	// SQL for creating the episodic memories table
 	createEpisodicTableSQL = `
 CREATE TABLE IF NOT EXISTS episodic_memories (
-    id            TEXT PRIMARY KEY,
-    content       TEXT NOT NULL,
-    category      TEXT NOT NULL DEFAULT 'conversation',
-    metadata_json TEXT NOT NULL DEFAULT '{}',
-    created_at    TEXT NOT NULL
+    id               TEXT PRIMARY KEY,
+    content          TEXT NOT NULL,
+    category         TEXT NOT NULL DEFAULT 'conversation',
+    metadata_json    TEXT NOT NULL DEFAULT '{}',
+    created_at       TEXT NOT NULL,
+    last_accessed_at TEXT NOT NULL DEFAULT '',
+    version          INTEGER DEFAULT 1,
+    parent_id        TEXT REFERENCES episodic_memories(id),
+    is_current       INTEGER DEFAULT 1
 )`
 
 	// SQL for creating the FTS5 virtual table
@@ -119,9 +124,9 @@ func (e *EpisodicMemory) Store(ctx context.Context, content string, category str
 	metaJSON := (&Memory{Metadata: metadata}).MetadataJSON()
 
 	err := e.store.Store(ctx,
-		`INSERT INTO episodic_memories (id, content, category, metadata_json, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-		id, content, category, metaJSON, nowISO,
+		`INSERT INTO episodic_memories (id, content, category, metadata_json, created_at, last_accessed_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+		id, content, category, metaJSON, nowISO, nowISO,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to store memory: %w", err)
@@ -183,7 +188,50 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	}
 	defer rows.Close()
 
-	return e.scanResults(rows, hasFTS5)
+	results, err := e.scanResults(rows, hasFTS5)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update last_accessed_at for retrieved memories
+	if err := e.updateLastAccessed(ctx, results); err != nil {
+		e.logger.Warn("Failed to update last_accessed_at", "error", err)
+	}
+
+	return results, nil
+}
+
+// updateLastAccessed updates the last_accessed_at timestamp for retrieved memories.
+func (e *EpisodicMemory) updateLastAccessed(ctx context.Context, results []MemoryResult) error {
+	if len(results) == 0 {
+		return nil
+	}
+
+	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
+	ids := make([]string, len(results))
+	for i, result := range results {
+		ids[i] = result.Memory.ID
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids)+1)
+	args[0] = nowISO
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i+1] = id
+	}
+
+	query := fmt.Sprintf("UPDATE episodic_memories SET last_accessed_at = ? WHERE id IN (%s)", strings.Join(placeholders, ","))
+	
+	pool := e.store.GetPool()
+	db, dbErr := pool.Get(ctx)
+	if dbErr != nil {
+		return dbErr
+	}
+	defer pool.Put(db)
+	
+	_, err := db.ExecContext(ctx, query, args...)
+	return err
 }
 
 // GetRecent retrieves the most recent episodic memories.

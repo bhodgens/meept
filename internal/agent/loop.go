@@ -261,6 +261,21 @@ func hashString(s string) string {
 }
 
 
+// MemoryRecallMode determines how memory context is retrieved for an agent.
+type MemoryRecallMode string
+
+const (
+	RecallModeAuto     MemoryRecallMode = "auto"      // Always auto-inject context before LLM calls
+	RecallModeOnQuery  MemoryRecallMode = "on-query"  // Only fetch when agent calls memory_search tool
+	RecallModeHybrid   MemoryRecallMode = "hybrid"    // Auto-inject + tools available
+	RecallModeDisabled MemoryRecallMode = "disabled"  // No memory injection, tools still available
+)
+
+// AgentMemoryConfig holds memory recall configuration for an agent.
+type AgentMemoryConfig struct {
+	RecallMode MemoryRecallMode `json:"recall_mode"`
+}
+
 // AgentConfig holds configuration for the agent loop.
 type AgentConfig struct {
 	MaxIterations            int
@@ -273,6 +288,7 @@ type AgentConfig struct {
 	GlobalRules              string // Global rules injected into all agent prompts
 	MaxConversationTokens    int     // 0 means use DefaultConversationTokenBudget
 	SkillDiscoveryThreshold  float64 // Minimum confidence for skill discovery (default 0.5)
+	Memory                   AgentMemoryConfig
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -284,7 +300,22 @@ func DefaultAgentConfig() AgentConfig {
 		Restrictions:  DefaultRestrictions,
 		Purpose:       DefaultPurpose,
 		Personality:   "",
+		Memory: AgentMemoryConfig{
+			RecallMode: RecallModeAuto, // Default to auto for backwards compatibility
+		},
 	}
+}
+
+// shouldAutoInject returns true if memory context should be auto-injected before LLM calls.
+func (l *AgentLoop) shouldAutoInject() bool {
+	mode := l.config.Memory.RecallMode
+	return mode == RecallModeAuto || mode == RecallModeHybrid
+}
+
+// shouldFetchOnQuery returns true if memory should be fetched when agent calls memory tools.
+func (l *AgentLoop) shouldFetchOnQuery() bool {
+	mode := l.config.Memory.RecallMode
+	return mode == RecallModeOnQuery || mode == RecallModeHybrid
 }
 
 // AgentLoop orchestrates LLM reasoning interleaved with tool execution.
@@ -1432,8 +1463,11 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Get or create conversation
 	conv := l.conversations.Get(conversationID)
 
-	// Build context parts from memory
-	contextParts := l.buildMemoryContext(ctx, t)
+	// Build context parts from memory (conditional based on recall mode)
+	var contextParts []string
+	if l.shouldAutoInject() {
+		contextParts = l.buildMemoryContext(ctx, t)
+	}
 
 	// Set memory context on conversation and freeze snapshot for prefix caching
 	if len(contextParts) > 0 {

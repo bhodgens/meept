@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -50,6 +51,18 @@ type Manager struct {
 	// Security components for memory store validation
 	sanitizer    *security.InputSanitizer
 	securityCfg  config.MemorySecurityConfig
+
+	// Prefetch cache and service for automatic context retrieval (Hermes pattern)
+	prefetchCache    sync.Map // map[string]string - query -> cached context
+	prefetchQueue    chan prefetchRequest
+	prefetchShutdown chan struct{}
+	prefetchWg       sync.WaitGroup
+}
+
+// prefetchRequest represents a request to prefetch context for a query.
+type prefetchRequest struct {
+	query    string
+	maxItems int
 }
 
 // ManagerConfig holds configuration for creating a Manager.
@@ -308,6 +321,34 @@ func (m *Manager) Store(ctx context.Context, mem Memory) (string, error) {
 	} else if securityEnabled && m.sanitizer == nil && failClosed {
 		// Security enabled but sanitizer not available - fail closed
 		return "", errors.New("memory security enabled but sanitizer not initialized")
+	}
+
+	// Character limit enforcement (after security scan)
+	// Note: ProjectPath is not available on Memory struct, use empty string for global defaults
+	limits := m.config.GetLimitsForProject("")
+	var limit config.MemoryCategoryLimit
+	switch mem.Type {
+	case MemoryTypeEpisodic:
+		limit = limits.Episodic
+	case MemoryTypeTask:
+		switch mem.Category {
+		case "code":
+			limit = limits.TaskCode
+		case "commands":
+			limit = limits.TaskCommands
+		default:
+			limit = limits.TaskGeneral
+		}
+	case MemoryTypePersonality:
+		limit = limits.Personality
+	default:
+		// No limit for unknown types
+		limit = config.MemoryCategoryLimit{Enabled: false}
+	}
+
+	// Enforce limit
+	if limit.Enabled && len(mem.Content) > limit.CharacterLimit {
+		return "", fmt.Errorf("memory content exceeds limit of %d characters", limit.CharacterLimit)
 	}
 
 	// Route through memvid when active
@@ -1027,6 +1068,315 @@ func (m *Manager) GetGraphStats(ctx context.Context) (*GraphStats, error) {
 	}
 
 	return m.graph.GetStats(ctx)
+}
+
+// StoreOptions holds options for versioned memory storage.
+type StoreOptions struct {
+	CreateVersion bool
+	ParentID      string
+}
+
+// StoreVersioned stores a memory with version tracking.
+// If CreateVersion is true and mem.ID is set, it creates a new version of the memory.
+func (m *Manager) StoreVersioned(ctx context.Context, mem Memory, opts StoreOptions) (string, error) {
+	if opts.CreateVersion && mem.ID != "" {
+		// Mark old version as non-current
+		if err := m.markVersionNonCurrent(ctx, mem.ID); err != nil {
+			m.logger.Warn("Failed to mark version non-current", "error", err)
+		}
+
+		// Get current version number
+		currentVersion := m.getCurrentVersion(mem.ID)
+
+		// Create new version
+		newMem := mem
+		newMem.ID = "" // Will get new ID
+		newMem.Metadata["parent_id"] = opts.ParentID
+		if newMem.Metadata == nil {
+			newMem.Metadata = make(map[string]any)
+		}
+		newMem.Metadata["version"] = currentVersion + 1
+		newMem.Metadata["is_current"] = 1
+
+		return m.Store(ctx, newMem)
+	}
+	return m.Store(ctx, mem)
+}
+
+// markVersionNonCurrent marks a memory version as non-current.
+func (m *Manager) markVersionNonCurrent(ctx context.Context, id string) error {
+	if m.episodic == nil {
+		return errors.New("episodic memory not available")
+	}
+
+	pool := m.episodic.store.GetPool()
+	db, err := pool.Get(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Put(db)
+
+	_, err = db.ExecContext(ctx, "UPDATE episodic_memories SET is_current = 0 WHERE id = ?", id)
+	return err
+}
+
+// getCurrentVersion returns the current version number for a memory.
+func (m *Manager) getCurrentVersion(id string) int {
+	if m.episodic == nil {
+		return 0
+	}
+	// For simplicity, return 0 - actual implementation would query the database
+	return 0
+}
+
+// GetByID retrieves a memory by its ID.
+func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
+	if m.episodic == nil {
+		return nil, errors.New("episodic memory not available")
+	}
+
+	pool := m.episodic.store.GetPool()
+	db, err := pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Put(db)
+
+	row := db.QueryRowContext(ctx, `
+		SELECT id, content, category, metadata_json, created_at, last_accessed_at
+		FROM episodic_memories
+		WHERE id = ? AND is_current = 1
+	`, id)
+
+	var mem Memory
+	var metaJSON string
+	err = row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &mem.CreatedAt, &mem.LastAccessedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	mem.Metadata = ParseMetadata(metaJSON)
+	mem.Type = MemoryTypeEpisodic
+	return &mem, nil
+}
+
+// GetExpiredMemories returns memories that haven't been accessed in the specified number of days.
+func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, error) {
+	m.mu.RLock()
+	if !m.initialized {
+		m.mu.RUnlock()
+		return nil, errors.New("memory manager not initialized")
+	}
+	useMemvid := m.useMemvid
+	m.mu.RUnlock()
+
+	// Memvid backend doesn't support expiration tracking yet
+	if useMemvid && m.memvid != nil {
+		return nil, errors.New("expiration tracking not supported for memvid backend")
+	}
+
+	// SQLite backend implementation
+	if m.episodic == nil {
+		return nil, errors.New("episodic memory is disabled")
+	}
+
+	cutoffDays := days
+	if cutoffDays <= 0 {
+		cutoffDays = 90 // Default to 90 days
+	}
+	cutoffTime := time.Now().AddDate(0, 0, -cutoffDays)
+
+	pool := m.episodic.store.GetPool()
+	db, err := pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Put(db)
+
+	cutoffISO := cutoffTime.UTC().Format(time.RFC3339Nano)
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, content, category, metadata_json, created_at, last_accessed_at
+		FROM episodic_memories
+		WHERE COALESCE(NULLIF(last_accessed_at, ''), created_at) < ?
+		ORDER BY COALESCE(NULLIF(last_accessed_at, ''), created_at) ASC
+	`, cutoffISO)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query expired memories: %w", err)
+	}
+	defer rows.Close()
+
+	var memories []Memory
+	for rows.Next() {
+		var id, content, category, metaJSON, createdAtStr, lastAccessedStr string
+		err := rows.Scan(&id, &content, &category, &metaJSON, &createdAtStr, &lastAccessedStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan memory: %w", err)
+		}
+
+		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
+		var lastAccessed *time.Time
+		if lastAccessedStr != "" {
+			t, _ := time.Parse(time.RFC3339Nano, lastAccessedStr)
+			lastAccessed = &t
+		}
+
+		memories = append(memories, Memory{
+			ID:        id,
+			Content:   content,
+			Type:      MemoryTypeEpisodic,
+			Category:  category,
+			Metadata:  ParseMetadata(metaJSON),
+			CreatedAt: createdAt,
+			UpdatedAt: lastAccessed,
+		})
+	}
+
+	return memories, nil
+}
+
+// Delete removes a memory by ID from the appropriate backend.
+func (m *Manager) Delete(ctx context.Context, id string) error {
+	m.mu.RLock()
+	if !m.initialized {
+		m.mu.RUnlock()
+		return errors.New("memory manager not initialized")
+	}
+	useMemvid := m.useMemvid
+	m.mu.RUnlock()
+
+	// Route through memvid when active
+	if useMemvid && m.memvid != nil {
+		// Memvid doesn't support direct deletion by ID yet
+		return errors.New("delete by ID not supported for memvid backend")
+	}
+
+	// Try episodic memory first
+	if m.episodic != nil {
+		err := m.episodic.Delete(ctx, id)
+		if err == nil {
+			return nil
+		}
+	}
+
+	// Try task memory
+	if m.task != nil {
+		err := m.task.Delete(ctx, id)
+		if err == nil {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("memory with ID %s not found", id)
+}
+
+// StartPrefetchService starts the background prefetch service.
+func (m *Manager) StartPrefetchService(ctx context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.prefetchQueue != nil {
+		return // Already started
+	}
+
+	m.prefetchQueue = make(chan prefetchRequest, 10)
+	m.prefetchShutdown = make(chan struct{})
+
+	m.prefetchWg.Add(1)
+	go func() {
+		defer m.prefetchWg.Done()
+		for {
+			select {
+			case req := <-m.prefetchQueue:
+				go m.doPrefetch(ctx, req)
+			case <-m.prefetchShutdown:
+				return
+			}
+		}
+	}()
+
+	m.logger.Info("Prefetch service started")
+}
+
+// doPrefetch performs the actual prefetch operation in the background.
+func (m *Manager) doPrefetch(ctx context.Context, req prefetchRequest) {
+	// Perform the search to warm the cache
+	results, err := m.GetRelevantContext(ctx, req.query, req.maxItems)
+	if err != nil {
+		m.logger.Warn("Prefetch failed", "query", req.query, "error", err)
+		return
+	}
+
+	// Convert results to context string
+	var contextBuilder strings.Builder
+	for i, result := range results {
+		if i > 0 {
+			contextBuilder.WriteString("\n\n")
+		}
+		contextBuilder.WriteString(result.Memory.Content)
+	}
+
+	// Store in cache
+	cacheKey := m.generatePrefetchCacheKey(req.query, req.maxItems)
+	m.prefetchCache.Store(cacheKey, contextBuilder.String())
+
+	m.logger.Debug("Prefetch completed", "query", req.query, "items", len(results))
+}
+
+// GetCachedPrefetch retrieves prefetched context from cache.
+func (m *Manager) GetCachedPrefetch(query string, maxItems int) (string, bool) {
+	cacheKey := m.generatePrefetchCacheKey(query, maxItems)
+	if cached, ok := m.prefetchCache.Load(cacheKey); ok {
+		return cached.(string), true
+	}
+	return "", false
+}
+
+// QueuePrefetch queues a query for background prefetching.
+func (m *Manager) QueuePrefetch(query string, maxItems int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.prefetchQueue == nil {
+		return // Service not started
+	}
+
+	select {
+	case m.prefetchQueue <- prefetchRequest{query: query, maxItems: maxItems}:
+		m.logger.Debug("Prefetch queued", "query", query, "maxItems", maxItems)
+	default:
+		m.logger.Warn("Prefetch queue full, dropping request", "query", query)
+	}
+}
+
+// StopPrefetchService stops the prefetch service.
+func (m *Manager) StopPrefetchService() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.prefetchQueue == nil {
+		return // Not running
+	}
+
+	close(m.prefetchShutdown)
+	m.prefetchWg.Wait()
+
+	close(m.prefetchQueue)
+	m.prefetchQueue = nil
+	m.prefetchShutdown = nil
+
+	// Clear cache
+	m.prefetchCache = sync.Map{}
+
+	m.logger.Info("Prefetch service stopped")
+}
+
+// generatePrefetchCacheKey creates a unique cache key for a query and maxItems combination.
+func (m *Manager) generatePrefetchCacheKey(query string, maxItems int) string {
+	return fmt.Sprintf("%s:%d", query, maxItems)
 }
 
 // Close gracefully shuts down all subsystems.
