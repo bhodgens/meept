@@ -2,6 +2,7 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"sync"
 
@@ -150,6 +151,12 @@ type Conversation struct {
 	systemPrompt string
 	maxMessages  int
 	contextLimit int
+
+	// Prefix cache optimization (Hermes pattern)
+	// memoryContext is live-updated memory context (deprecated for prompt building)
+	memoryContext string
+	// memorySnapshot is frozen at session start for API prefix caching
+	memorySnapshot string
 }
 
 // ConversationOption is a functional option for configuring a Conversation.
@@ -803,6 +810,97 @@ func (c *Conversation) RemoveLast() *llm.ChatMessage {
 	msg := c.messages[len(c.messages)-1]
 	c.messages = c.messages[:len(c.messages)-1]
 	return &msg
+}
+
+// FreezeMemorySnapshot captures the current memory context for prefix caching.
+// This implements the Hermes pattern where memory is frozen at session start
+// to enable API prefix caching. The snapshot remains stable for the session,
+// allowing the LLM API to cache the prefix and reduce token costs.
+// Returns an error if memory context is empty (nothing to freeze).
+func (c *Conversation) FreezeMemorySnapshot(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.memoryContext == "" {
+		return nil // Nothing to freeze
+	}
+
+	c.memorySnapshot = c.memoryContext
+	return nil
+}
+
+// GetMemorySnapshot returns the frozen memory snapshot for prefix caching.
+// Returns empty string if no snapshot has been frozen.
+func (c *Conversation) GetMemorySnapshot() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.memorySnapshot
+}
+
+// HasMemorySnapshot returns true if a memory snapshot has been frozen.
+func (c *Conversation) HasMemorySnapshot() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.memorySnapshot != ""
+}
+
+// ClearMemorySnapshot clears the frozen snapshot (e.g., at session end).
+func (c *Conversation) ClearMemorySnapshot() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.memorySnapshot = ""
+}
+
+// GetMemoryContext returns the live memory context (deprecated, use snapshot for prompts).
+func (c *Conversation) GetMemoryContext() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.memoryContext
+}
+
+// SetMemoryContext sets the live memory context (for internal use).
+func (c *Conversation) SetMemoryContext(context string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.memoryContext = context
+}
+
+// FetchAndFreezeMemory fetches memory context and freezes it for prefix caching.
+// The fetchFn should fetch the relevant memory context and return it as a string.
+// Returns an error if the fetch fails.
+func (c *Conversation) FetchAndFreezeMemory(ctx context.Context, fetchFn func(ctx context.Context) (string, error)) error {
+	context, err := fetchFn(ctx)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.memoryContext = context
+	c.memorySnapshot = context
+	return nil
+}
+
+// BuildPromptWithSnapshot returns the memory context for prompt building,
+// using the frozen snapshot if available for prefix cache efficiency.
+func (c *Conversation) BuildPromptWithSnapshot() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Use frozen snapshot if available, otherwise live context
+	if c.memorySnapshot != "" {
+		return c.memorySnapshot
+	}
+	return c.memoryContext
+}
+
+// ClearMemoryContext clears both live context and frozen snapshot.
+func (c *Conversation) ClearMemoryContext() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.memoryContext = ""
+	c.memorySnapshot = ""
 }
 
 // InjectContext inserts a context message after the system prompt.

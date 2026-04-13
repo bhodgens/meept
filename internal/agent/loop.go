@@ -1435,6 +1435,25 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Build context parts from memory
 	contextParts := l.buildMemoryContext(ctx, t)
 
+	// Set memory context on conversation and freeze snapshot for prefix caching
+	if len(contextParts) > 0 {
+		// Join all context parts into a single string
+		fullContext := ""
+		for _, part := range contextParts {
+			fullContext += "- " + part + "\n"
+		}
+
+		// Set the memory context on the conversation
+		conv.SetMemoryContext(fullContext)
+
+		// Freeze the memory snapshot for prefix caching efficiency
+		if err := conv.FreezeMemorySnapshot(ctx); err != nil {
+			l.logger.Warn("Failed to freeze memory snapshot", "error", err)
+		} else {
+			l.logger.Debug("Memory snapshot frozen for prefix caching", "conversation", conversationID)
+		}
+	}
+
 	// Discover relevant skills for this task (based on name and description)
 	taskInput := t.Name
 	if t.Description != "" {
@@ -1568,7 +1587,7 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 		// Apply token budget if context is too large
 		budgetTokens := MaxMemoryContextTokens
 		estimatedTokens := llm.EstimateTokenCountHeuristic(fullContext)
-		
+
 		if estimatedTokens > budgetTokens {
 			// Truncate context proportionally
 			ratio := float64(budgetTokens) / float64(estimatedTokens)

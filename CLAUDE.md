@@ -202,7 +202,7 @@ archive/           # Legacy Python code (reference only)
 1. **diagram.md**: Update architecture diagrams when adding/modifying components, agents, tools, or data flows
 2. **CLAUDE.md**: Update this file when changing architecture patterns, adding new agents, or modifying key behaviors
 3. **Code comments**: Keep inline documentation accurate when modifying function signatures or behavior
-4. **features.md**: Update features as they are implemented or changed 
+4. **features.md**: Always update features as they are implemented or changed to match the code. 
 
 
 Documentation should always reflect the current implementation state. If you add a new agent, tool, or architectural component, document it immediately.

@@ -164,6 +164,14 @@ type MemorySecurityConfig struct {
 	LogBlocked bool `toml:"log_blocked"`
 }
 
+// MemoryCachingConfig holds memory prefix caching settings (Hermes pattern).
+type MemoryCachingConfig struct {
+	// Enabled turns on frozen snapshot prefix caching
+	Enabled bool `toml:"enabled"`
+	// RefreshOnSessionEnd refreshes the snapshot at session end
+	RefreshOnSessionEnd bool `toml:"refresh_on_session_end"`
+}
+
 // MemoryConfig holds memory subsystem settings.
 type MemoryConfig struct {
 	// Backend specifies the storage backend: "memvid" (default) or "sqlite"
@@ -176,6 +184,8 @@ type MemoryConfig struct {
 	Embeddings                 EmbeddingConfig   `toml:"embeddings"`
 	// Security holds memory security settings
 	Security MemorySecurityConfig `toml:"security"`
+	// Caching holds memory prefix caching settings
+	Caching MemoryCachingConfig `toml:"caching"`
 }
 
 // EpisodicConfig holds episodic memory settings.
@@ -687,6 +697,10 @@ func DefaultConfig() *Config {
 				Enabled:    true,
 				FailClosed: true,
 				LogBlocked: true,
+			},
+			Caching: MemoryCachingConfig{
+				Enabled:             true,
+				RefreshOnSessionEnd: true,
 			},
 		},
 		Memvid: MemvidConfig{
