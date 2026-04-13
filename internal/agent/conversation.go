@@ -516,6 +516,15 @@ func (c *Conversation) Truncate() int {
 	return removed
 }
 
+// isAnchorMessageUnsafe checks if a message is anchored without acquiring lock.
+// Must only be called when c.mu is already held.
+func (c *Conversation) isAnchorMessageUnsafe(content string) bool {
+	if c.anchorMessages == nil {
+		return false
+	}
+	return c.anchorMessages[c.hashContent(content)]
+}
+
 // TruncateByTokens removes old messages to fit within a token budget.
 // It uses a rough estimate of 3 characters per token (appropriate for JSON/code-heavy content).
 // It counts both Content and ToolCalls fields for accurate estimation.
@@ -542,7 +551,7 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 		removed := 0
 		newMessages := make([]llm.ChatMessage, 0, 2)
 		for _, msg := range c.messages {
-			if c.IsAnchorMessage(msg.Content) {
+			if c.isAnchorMessageUnsafe(msg.Content) {
 				newMessages = append(newMessages, msg)
 			}
 		}
@@ -560,7 +569,7 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		// Always keep anchor messages
-		if c.IsAnchorMessage(c.messages[i].Content) {
+		if c.isAnchorMessageUnsafe(c.messages[i].Content) {
 			keepMask[i] = true
 			continue
 		}
@@ -662,7 +671,7 @@ func (c *Conversation) TruncateByImportance(tokenBudget int) int {
 		}
 		// Anchor messages are treated as ImportanceCritical
 		importance := getMessageImportance(msgType)
-		if c.IsAnchorMessage(msg.Content) {
+		if c.isAnchorMessageUnsafe(msg.Content) {
 			importance = ImportanceCritical
 		}
 		msgTokens := len(msg.Content) / charsPerToken
