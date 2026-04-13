@@ -208,32 +208,32 @@ func truncateWithMarker(s string, maxLen int) string {
    - **Status**: RESOLVED - `ValidateContextSize()` called before processing messages
    - **Location**: `internal/llm/context_firewall.go:337-370`
 
-### Remaining Critical Gaps
+### Remaining Critical Gaps - ALL RESOLVED
 
-4. **Skill Context Budget Only**
-   - `MaxSkillContextTokens = 4000` exists but only triggers skip behavior
-   - No hard enforcement; large skills could still bloat prompts
+~~4. **Skill Context Budget Only**~~
+   - **Status**: RESOLVED - `InjectContextBounded()` enforces memory limits
 
-### Medium Priority Gaps (Phase 2)
+### Medium Priority Gaps (Phase 2) - ALL RESOLVED
 
-6. **Conversation History Strategy is Simple**
-   - Only preserves: system, original user message, recent messages
-   - No semantic importance ranking for message retention
-   - Important intermediate findings could be lost
+~~6. **Conversation History Strategy is Simple**~~
+   - **Status**: RESOLVED - Semantic importance ranking implemented
+   - `MessageClassification` types for semantic categorization
+   - `TruncateByImportance()` preserves important messages
+   - Anchor messages for critical instructions
 
-7. **Tool Definition Overhead Estimated, Not Counted**
-   - Uses fixed `~175 tokens per tool` estimate
-   - Actual tool definitions may vary significantly
+~~7. **Tool Definition Overhead Estimated, Not Counted**~~
+   - **Status**: RESOLVED - `CountToolDefinitionsTokens()` in `models.go:241`
+   - Actual token counting via tiktoken or heuristic
 
-8. **No Multi-Turn Budget Allocation**
-   - Each conversation turn gets full `IterationTokenBudget`
-   - No tracking of cumulative budget across multiple user turns
+~~8. **No Multi-Turn Budget Allocation**~~
+   - **Status**: RESOLVED - `TurnBudgetTracker` implemented
+   - Tracks cumulative budget across turns
+   - Warning zone and wrap-up triggers
 
-9. **Model-Specific Tokenizer Differences Ignored**
-   - **Status**: PARTIALLY RESOLVED - OpenAI families supported (GPT-4, GPT-4o, GPT-3.5)
-   - **Remaining**: Qwen, GLM, Mistral, Llama tokenizers need implementation
-   - Different models (e.g., llama vs. glm) use different tokenizers
-   - Single heuristic may be more accurate for some models than others
+~~9. **Model-Specific Tokenizer Differences Ignored**~~
+   - **Status**: RESOLVED - All model families supported
+   - Qwen, GLM, Mistral, Llama tokenizers implemented
+   - `NewTokenizerForModel()` dispatcher selects appropriate tokenizer
 
 ---
 
@@ -372,7 +372,7 @@ func truncateWithMarker(s string, maxLen int) string {
 | 1.3 Bound memory injection | `internal/agent/conversation.go` | ✅ DONE |
 | 1.4 Pre-call validation | `internal/llm/context_firewall.go` | ✅ DONE |
 
-### Phase 2: Quality Improvements (Week 2) - ✅ COMPLETE
+### Phase 2: Quality Improvements (Week 2) - ✅ COMPLETE (100%)
 
 | Task | Files | Status |
 |------|-------|--------|
@@ -380,6 +380,8 @@ func truncateWithMarker(s string, maxLen int) string {
 | 2.2 Tool definition counting | `internal/llm/models.go`, `internal/agent/loop.go` | ✅ DONE |
 | 2.3 Multi-turn budget tracking | `internal/agent/conversation.go`, `internal/agent/loop.go` | ✅ DONE |
 | 2.4 Model-specific tokenizers | `internal/llm/tokenizer.go` | ✅ DONE |
+| 2.5 Context firewall thresholds | `internal/llm/context_firewall.go` | ✅ DONE |
+| 2.6 Anchor message protection | `internal/agent/conversation.go` | ✅ DONE |
 
 ### Phase 3: Extended Tokenizer Support (Week 3) - ✅ COMPLETE
 
@@ -445,7 +447,7 @@ Meept has a solid foundation for context management with:
 - Smart conversation windowing
 - Adaptive tool compression
 - Model-aware context limits
-- **All Phases Complete**: Tokenizer interface, ContextFirewall enforcement, bounded memory injection, pre-call validation, semantic importance, tool counting, multi-turn budget, extended tokenizer support, comprehensive tests
+- **All Phases Complete**: Tokenizer interface, ContextFirewall enforcement, bounded memory injection, pre-call validation, semantic importance, tool counting, multi-turn budget, extended tokenizer support, comprehensive tests, context firewall thresholds (wrap-up/hard limit), anchor message protection
 
 **Implementation Summary**:
 
@@ -460,6 +462,16 @@ Meept has a solid foundation for context management with:
 - TruncateByImportance for importance-based retention
 - Accurate tool definition counting (CountTokens, CountToolDefinitionsTokens)
 - Multi-turn budget tracking (TurnBudgetTracker)
+- Context firewall thresholds (WrapUpThreshold=0.50, HardLimit=0.80)
+- Anchor message protection for critical instructions
+
+**Phase 2.5** (Context Thresholds & Anchor Protection - NEW): ✅
+- WrapUpThreshold: logs warning at 50% utilization
+- HardLimit: triggers context drop at 80% utilization
+- dropOldContext(): keeps system + last 2 messages on hard limit
+- TruncateByTokens(): preserves anchor messages
+- TruncateByImportance(): treats anchors as ImportanceCritical
+- GetWindowedMessages(): always includes anchors
 
 **Phase 3** (Extended Tokenizer Support): ✅
 - Qwen family tokenizer (cl100k_base)
