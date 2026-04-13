@@ -606,6 +606,49 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 		Personality:  loop.config.Personality,
 	})
 
+
+	// Wrap LLM with ContextFirewall for context budget enforcement
+	if loop.llm != nil {
+		var modelConfig *llm.ModelConfig
+		var model *llm.ModelConfig
+
+		// Try to get model config from llmClient if available
+		if loop.llmClient != nil {
+			modelConfig = loop.llmClient.Config()
+		}
+
+		// If we have a model config, use it; otherwise use a default
+		if modelConfig != nil {
+			model = modelConfig
+		} else {
+			// Default model config for firewall
+			model = &llm.ModelConfig{
+				ContextLimit: 32768, // Default context window
+			}
+		}
+
+		// Create tokenizer for the model
+		tokenizer := llm.NewTokenizerForModel(model.ModelID)
+
+		// Create ContextFirewall with default enabled config
+		firewall := llm.NewContextFirewall(
+			loop.llm,
+			model,
+			llm.ContextFirewallConfig{
+				Enabled:                  true,
+				SummarizeHistory:         true,
+				ChunkLargeInputs:         true,
+				IterationBudgetRatio:     0.30,
+				ConversationBudgetRatio:  0.50,
+			},
+			nil, // summaryModel - uses inner by default
+			loop.logger,
+			tokenizer,
+		)
+		loop.llm = firewall
+		loop.logger.Debug("ContextFirewall enabled for agent loop")
+	}
+
 	return loop
 }
 
@@ -1456,7 +1499,9 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 	return parts
 }
 
+
 // buildSystemPromptWithContextAndSkills constructs system prompt with both memory and skill context.
+// Memory context is bounded to MaxMemoryContextTokens to prevent context domination.
 func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, contextParts []string, discovered []*DiscoveredSkill) string {
 	// Use override if set
 	if l.config.SystemPromptOveride != "" {
@@ -1480,13 +1525,32 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 		builder.AddSection("Global Rules", l.config.GlobalRules)
 	}
 
-	// Add memory context section if present
+	// Add memory context section if present, with token budget enforcement
 	if len(contextParts) > 0 {
-		contextSection := "## Relevant Context\n\n"
+		// Join all context parts
+		fullContext := ""
 		for _, part := range contextParts {
-			contextSection += "- " + part + "\n"
+			fullContext += "- " + part + "\n"
 		}
-		contextSection += "\n---\n"
+
+		// Apply token budget if context is too large
+		budgetTokens := MaxMemoryContextTokens
+		estimatedTokens := llm.EstimateTokenCountHeuristic(fullContext)
+		
+		if estimatedTokens > budgetTokens {
+			// Truncate context proportionally
+			ratio := float64(budgetTokens) / float64(estimatedTokens)
+			truncateLen := int(float64(len(fullContext)) * ratio)
+			if truncateLen > 0 {
+				fullContext = fullContext[:truncateLen] + "\n\n...[memory truncated due to token budget]..."
+			}
+			l.logger.Debug("Memory context truncated due to token budget",
+				"original_tokens", estimatedTokens,
+				"budget_tokens", budgetTokens,
+			)
+		}
+
+		contextSection := "## Relevant Context\n\n" + fullContext + "\n---\n"
 		builder.AddSection("context", contextSection)
 	}
 
@@ -1503,7 +1567,6 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 
 	return builder.Build()
 }
-
 // buildTaskMessage constructs the user message from a task.
 func (l *AgentLoop) buildTaskMessage(t *task.Task) string {
 	var sb strings.Builder

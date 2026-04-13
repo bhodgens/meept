@@ -14,6 +14,10 @@ const (
 	DefaultContextLimit = 100000
 )
 
+const (
+	// MaxMemoryContextTokens is the maximum tokens allowed for memory context injection.
+	MaxMemoryContextTokens = 2000
+)
 // Conversation manages chat message history with LRU eviction and truncation.
 type Conversation struct {
 	mu           sync.RWMutex
@@ -411,6 +415,44 @@ func (c *Conversation) RemoveLast() *llm.ChatMessage {
 }
 
 // InjectContext inserts a context message after the system prompt.
+
+// InjectContextBounded inserts context with a token budget limit.
+// This is used for memory injection to prevent memory from dominating the context.
+// If the context exceeds the budget, it is truncated proportionally.
+func (c *Conversation) InjectContextBounded(context string, maxTokens int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Remove any previous context messages (marked with a specific pattern)
+	newMessages := make([]llm.ChatMessage, 0, len(c.messages))
+	for _, msg := range c.messages {
+		if msg.Role == llm.RoleSystem && isContextMessage(msg.Content) {
+			continue
+		}
+		newMessages = append(newMessages, msg)
+	}
+
+	// Estimate token count and truncate if necessary
+	contextContent := context
+	estimatedTokens := llm.EstimateTokenCountHeuristic(context)
+	
+	if estimatedTokens > maxTokens {
+		// Truncate proportionally
+		ratio := float64(maxTokens) / float64(estimatedTokens)
+		truncateLen := int(float64(len(context)) * ratio)
+		if truncateLen > 0 {
+			contextContent = context[:truncateLen] + "\n\n...[memory truncated due to token budget]..."
+		}
+	}
+
+	// Insert new context at the beginning
+	contextMsg := llm.ChatMessage{
+		Role:    llm.RoleSystem,
+		Content: "# Relevant Context from Memory\n" + contextContent,
+	}
+
+	c.messages = append([]llm.ChatMessage{contextMsg}, newMessages...)
+}
 // This is used for memory injection before LLM calls.
 func (c *Conversation) InjectContext(context string) {
 	c.mu.Lock()

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 )
 
@@ -26,16 +25,19 @@ type ContextFirewall struct {
 	config       ContextFirewallConfig
 	summaryModel Chatter
 	logger       *slog.Logger
+	tokenizer    Tokenizer
 }
 
 // NewContextFirewall creates a new context firewall.
 // summaryModel may be nil; in that case, inner is used for summaries.
+// tokenizer may be nil; in that case, a heuristic tokenizer is used.
 func NewContextFirewall(
 	inner Chatter,
 	model *ModelConfig,
 	cfg ContextFirewallConfig,
 	summaryModel Chatter,
 	logger *slog.Logger,
+	tokenizer Tokenizer,
 ) *ContextFirewall {
 	if logger == nil {
 		logger = slog.Default()
@@ -59,17 +61,28 @@ func NewContextFirewall(
 		summaryModel = inner
 	}
 
+	if tokenizer == nil {
+		tokenizer = &HeuristicTokenizer{}
+	}
+
 	return &ContextFirewall{
 		inner:        inner,
 		model:        model,
 		config:       cfg,
 		summaryModel: summaryModel,
 		logger:       logger,
+		tokenizer:    tokenizer,
 	}
 }
 
+
 // Chat sends a request through context filtering.
 func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
+	// Validate context size before processing
+	if err := f.ValidateContextSize(messages); err != nil {
+		return nil, err
+	}
+
 	processed, err := f.processMessages(ctx, messages)
 	if err != nil {
 		return nil, fmt.Errorf("context firewall: %w", err)
@@ -85,6 +98,11 @@ func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts
 
 // ChatWithProgress sends a request with progress reporting through context filtering.
 func (f *ContextFirewall) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
+	// Validate context size before processing
+	if err := f.ValidateContextSize(messages); err != nil {
+		return nil, err
+	}
+
 	processed, err := f.processMessages(ctx, messages)
 	if err != nil {
 		return nil, fmt.Errorf("context firewall: %w", err)
@@ -129,7 +147,7 @@ func (f *ContextFirewall) ContextUtilization(messages []ChatMessage) float64 {
 	if f.model == nil || f.model.ContextLimit == 0 {
 		return 0
 	}
-	tokens := estimateTokens(messages)
+	tokens := f.countTokens(messages)
 	return float64(tokens) / float64(f.model.ContextLimit)
 }
 
@@ -141,14 +159,14 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 
 	result := append([]ChatMessage{}, messages...)
 
-	// Estimate current token usage
-	currentTokens := estimateTokens(result)
+	// Estimate current token usage using tokenizer
+	currentTokens := f.countTokens(result)
 
 	// Step 1: Chunk large input if configured
 	if f.config.ChunkLargeInputs && len(result) > 0 {
 		threshold := int(float64(f.model.ContextLimit) * f.config.ChunkThresholdRatio)
 		lastMsg := &result[len(result)-1]
-		lastMsgTokens := estimateTokenCount(lastMsg.Content)
+		lastMsgTokens := f.tokenizer.CountTokens(lastMsg.Content)
 		if lastMsgTokens > threshold {
 			chunks := f.chunkMessage(lastMsg.Content, threshold)
 			if len(chunks) > 1 {
@@ -162,7 +180,7 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 						Content: chunk,
 					})
 				}
-				currentTokens = estimateTokens(result)
+				currentTokens = f.countTokens(result)
 			}
 		}
 	}
@@ -175,7 +193,7 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 			// Continue without summarization
 		} else {
 			result = summarized
-			currentTokens = estimateTokens(result)
+			currentTokens = f.countTokens(result)
 			f.logger.Debug("summarized history", "tokens", currentTokens)
 		}
 	}
@@ -254,6 +272,15 @@ func (f *ContextFirewall) greedyChunk(parts []string, maxChars int, sep string) 
 	return chunks
 }
 
+// countTokens counts tokens in a message slice using the configured tokenizer.
+func (f *ContextFirewall) countTokens(messages []ChatMessage) int {
+	total := 0
+	for _, msg := range messages {
+		total += f.tokenizer.CountTokens(msg.Content)
+	}
+	return total
+}
+
 // summarizeOldHistory summarizes old messages, keeping the system prompt and last few messages.
 func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []ChatMessage) ([]ChatMessage, error) {
 	// Keep: system prompt + last 4 messages
@@ -307,18 +334,39 @@ func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []Ch
 	return final, nil
 }
 
-// estimateTokens estimates token count for a message slice using 3 chars/token heuristic.
-func estimateTokens(messages []ChatMessage) int {
-	total := 0
-	for _, msg := range messages {
-		total += estimateTokenCount(msg.Content)
+// ValidateContextSize checks if the context size exceeds the model limit.
+// Returns a ContextSizeExceeded error if the limit is exceeded.
+func (f *ContextFirewall) ValidateContextSize(messages []ChatMessage) error {
+	if f.model == nil || f.model.ContextLimit == 0 {
+		return nil // No limit configured
 	}
-	return total
-}
 
-// estimateTokenCount estimates tokens for a string using 3 chars/token.
-func estimateTokenCount(content string) int {
-	return int(math.Ceil(float64(len(content)) / 3.0))
+	estimated := f.countTokens(messages)
+	modelLimit := f.model.ContextLimit
+
+	if estimated > modelLimit {
+		return &ContextSizeExceeded{
+			Estimated:  estimated,
+			ModelLimit: modelLimit,
+			Suggestions: []string{
+				"Reduce conversation history length",
+				"Use summarization for old messages",
+				"Split large inputs into smaller chunks",
+				"Clear unnecessary context",
+			},
+		}
+	}
+
+	// Warning zone: 80%+ utilization
+	if estimated > int(float64(modelLimit)*0.8) {
+		f.logger.Warn("context size approaching model limit",
+			"estimated", estimated,
+			"limit", modelLimit,
+			"utilization", float64(estimated)/float64(modelLimit),
+		)
+	}
+
+	return nil
 }
 
 // Ensure ContextFirewall implements Chatter
