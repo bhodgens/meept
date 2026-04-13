@@ -154,6 +154,16 @@ const (
 	MemoryBackendSQLite MemoryBackend = "sqlite"
 )
 
+// MemorySecurityConfig holds memory security settings.
+type MemorySecurityConfig struct {
+	// Enabled turns on security scanning for memory operations
+	Enabled bool `toml:"enabled"`
+	// FailClosed blocks memory operations when scanner is unavailable (default: true)
+	FailClosed bool `toml:"fail_closed"`
+	// LogBlocked logs blocked memory store attempts
+	LogBlocked bool `toml:"log_blocked"`
+}
+
 // MemoryConfig holds memory subsystem settings.
 type MemoryConfig struct {
 	// Backend specifies the storage backend: "memvid" (default) or "sqlite"
@@ -164,6 +174,8 @@ type MemoryConfig struct {
 	Task                       TaskMemoryConfig  `toml:"task"`
 	Personality                PersonalityConfig `toml:"personality"`
 	Embeddings                 EmbeddingConfig   `toml:"embeddings"`
+	// Security holds memory security settings
+	Security MemorySecurityConfig `toml:"security"`
 }
 
 // EpisodicConfig holds episodic memory settings.
@@ -670,6 +682,11 @@ func DefaultConfig() *Config {
 			Personality: PersonalityConfig{
 				Enabled:                     true,
 				UpdateIntervalConversations: 10,
+			},
+			Security: MemorySecurityConfig{
+				Enabled:    true,
+				FailClosed: true,
+				LogBlocked: true,
 			},
 		},
 		Memvid: MemvidConfig{

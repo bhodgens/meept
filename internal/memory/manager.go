@@ -2,18 +2,20 @@ package memory
 
 import (
 	"context"
-	"io"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/internal/security"
 )
 
 // Manager is the unified facade over episodic, task, and personality memory.
@@ -44,6 +46,10 @@ type Manager struct {
 	initialized  bool
 	mu           sync.RWMutex
 	logger       *slog.Logger
+
+	// Security components for memory store validation
+	sanitizer    *security.InputSanitizer
+	securityCfg  config.MemorySecurityConfig
 }
 
 // ManagerConfig holds configuration for creating a Manager.
@@ -56,6 +62,10 @@ type ManagerConfig struct {
 	DistributedConfig config.DistributedMemoryConfig
 	// Logger for operations.
 	Logger *slog.Logger
+	// Sanitizer is the input sanitizer for memory store validation.
+	Sanitizer *security.InputSanitizer
+	// SecurityConfig is the memory security configuration.
+	SecurityConfig config.MemorySecurityConfig
 }
 
 // NewManager creates a new memory manager.
@@ -68,6 +78,8 @@ func NewManager(cfg ManagerConfig) *Manager {
 		memvidCfg:      cfg.MemvidConfig,
 		distributedCfg: cfg.DistributedConfig,
 		logger:         cfg.Logger,
+		sanitizer:      cfg.Sanitizer,
+		securityCfg:    cfg.SecurityConfig,
 	}
 }
 
@@ -265,8 +277,38 @@ func (m *Manager) Store(ctx context.Context, mem Memory) (string, error) {
 		m.mu.RUnlock()
 		return "", errors.New("memory manager not initialized")
 	}
+	// Check security configuration
+	securityEnabled := m.securityCfg.Enabled
+	failClosed := m.securityCfg.FailClosed
+	logBlocked := m.securityCfg.LogBlocked
 	useMemvid := m.useMemvid
 	m.mu.RUnlock()
+
+	// Security scan before storage (if enabled)
+	if securityEnabled && m.sanitizer != nil {
+		result := m.sanitizer.Sanitize(mem.Content)
+		if len(result.ThreatsDetected) > 0 {
+			// Build threat summary for logging
+			threats := make([]string, len(result.ThreatsDetected))
+			for i, t := range result.ThreatsDetected {
+				threats[i] = t.Type
+			}
+			if logBlocked {
+				m.logger.Warn("Memory store blocked by security scanner",
+					"threats", strings.Join(threats, ", "),
+					"agent_id", mem.AgentID,
+				)
+			}
+			if failClosed {
+				return "", fmt.Errorf("memory content failed security scan: %s", strings.Join(threats, ", "))
+			}
+			// If not fail-closed, log and continue (sanitized content)
+			mem.Content = result.CleanText
+		}
+	} else if securityEnabled && m.sanitizer == nil && failClosed {
+		// Security enabled but sanitizer not available - fail closed
+		return "", errors.New("memory security enabled but sanitizer not initialized")
+	}
 
 	// Route through memvid when active
 	if useMemvid && m.memvid != nil {

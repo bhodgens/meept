@@ -9,6 +9,7 @@ import (
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/skills"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // mockLLMClient is a mock LLM client for testing.
@@ -242,12 +243,16 @@ func TestAgentLoopExecuteToolCalls(t *testing.T) {
 
 func TestAgentLoopWithExecutor(t *testing.T) {
 	registry := NewPlaceholderToolRegistry()
-	registry.Register(NewMockTool("echo", "Echo tool", func(ctx context.Context, args map[string]any) (any, error) {
-		return map[string]any{"echoed": args["message"]}, nil
+	registry.Register(NewMockTool("file_read", "File read", func(ctx context.Context, args map[string]any) (any, error) {
+		return map[string]any{"content": "test content"}, nil
 	}))
+
+	// Create security checker with default config
+	secChecker := security.NewPermissionChecker(security.Config{})
 
 	loop := NewAgentLoop(
 		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
 	)
 
 	toolCalls := []llm.ToolCall{
@@ -255,8 +260,8 @@ func TestAgentLoopWithExecutor(t *testing.T) {
 			ID:   "call_1",
 			Type: "function",
 			Function: llm.ToolCallFunction{
-				Name:      "echo",
-				Arguments: `{"message": "hello"}`,
+				Name:      "file_read",
+				Arguments: `{"path": "/tmp/test.txt"}`,
 			},
 		},
 	}

@@ -278,6 +278,12 @@ func (o *Orchestrator) Config() OrchestratorConfig {
 	return o.config
 }
 
+// InputSanitizer returns the input sanitizer component.
+// Returns nil if input sanitization is not enabled.
+func (o *Orchestrator) InputSanitizer() *InputSanitizer {
+	return o.sanitizer
+}
+
 // IsEnabled returns whether the orchestrator has any security features enabled.
 func (o *Orchestrator) IsEnabled() bool {
 	return o.config.SanitizeInputs || o.config.MonitorOutput || o.config.ScanShellCommands

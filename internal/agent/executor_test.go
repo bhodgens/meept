@@ -217,20 +217,22 @@ func TestExecutorInvalidArguments(t *testing.T) {
 
 func TestExecutorSuccess(t *testing.T) {
 	registry := NewPlaceholderToolRegistry()
-	registry.Register(NewMockTool("echo", "Echo tool", func(ctx context.Context, args map[string]any) (any, error) {
+	registry.Register(NewMockTool("file_read", "File read", func(ctx context.Context, args map[string]any) (any, error) {
 		return map[string]any{
-			"echoed": args["message"],
+			"content": "test content",
 		}, nil
 	}))
 
-	executor := NewExecutor(registry, nil)
+	// Create security checker with default config
+	secChecker := security.NewPermissionChecker(security.Config{})
+	executor := NewExecutor(registry, secChecker)
 
 	toolCall := llm.ToolCall{
 		ID:   "call_123",
 		Type: "function",
 		Function: llm.ToolCallFunction{
-			Name:      "echo",
-			Arguments: `{"message": "hello"}`,
+			Name:      "file_read",
+			Arguments: `{"path": "/tmp/test.txt"}`,
 		},
 	}
 
@@ -245,25 +247,27 @@ func TestExecutorSuccess(t *testing.T) {
 		t.Fatal("expected map result")
 	}
 
-	if resultMap["echoed"] != "hello" {
-		t.Errorf("expected echoed='hello', got '%v'", resultMap["echoed"])
+	if resultMap["content"] != "test content" {
+		t.Errorf("expected content='test content', got '%v'", resultMap["content"])
 	}
 }
 
 func TestExecutorToolError(t *testing.T) {
 	registry := NewPlaceholderToolRegistry()
-	registry.Register(NewMockTool("failing_tool", "Fails", func(ctx context.Context, args map[string]any) (any, error) {
+	registry.Register(NewMockTool("file_read", "Fails", func(ctx context.Context, args map[string]any) (any, error) {
 		return nil, errors.New("intentional failure")
 	}))
 
-	executor := NewExecutor(registry, nil)
+	// Create security checker with default config
+	secChecker := security.NewPermissionChecker(security.Config{})
+	executor := NewExecutor(registry, secChecker)
 
 	toolCall := llm.ToolCall{
 		ID:   "call_123",
 		Type: "function",
 		Function: llm.ToolCallFunction{
-			Name:      "failing_tool",
-			Arguments: "{}",
+			Name:      "file_read",
+			Arguments: `{"path": "/tmp/test.txt"}`,
 		},
 	}
 
@@ -331,25 +335,27 @@ func TestExecutorWithSecurity(t *testing.T) {
 
 func TestExecuteAll(t *testing.T) {
 	registry := NewPlaceholderToolRegistry()
-	registry.Register(NewMockTool("tool1", "Tool 1", func(ctx context.Context, args map[string]any) (any, error) {
+	registry.Register(NewMockTool("file_read", "File read", func(ctx context.Context, args map[string]any) (any, error) {
 		return "result1", nil
 	}))
-	registry.Register(NewMockTool("tool2", "Tool 2", func(ctx context.Context, args map[string]any) (any, error) {
+	registry.Register(NewMockTool("memory_read", "Memory read", func(ctx context.Context, args map[string]any) (any, error) {
 		return "result2", nil
 	}))
 
-	executor := NewExecutor(registry, nil, WithParallelism(2))
+	// Create security checker with default config
+	secChecker := security.NewPermissionChecker(security.Config{})
+	executor := NewExecutor(registry, secChecker, WithParallelism(2))
 
 	toolCalls := []llm.ToolCall{
 		{
 			ID:       "call_1",
 			Type:     "function",
-			Function: llm.ToolCallFunction{Name: "tool1", Arguments: "{}"},
+			Function: llm.ToolCallFunction{Name: "file_read", Arguments: "{}"},
 		},
 		{
 			ID:       "call_2",
 			Type:     "function",
-			Function: llm.ToolCallFunction{Name: "tool2", Arguments: "{}"},
+			Function: llm.ToolCallFunction{Name: "memory_read", Arguments: "{}"},
 		},
 	}
 
@@ -410,27 +416,29 @@ func TestExecuteSequential(t *testing.T) {
 	mu.order = executionOrder
 
 	registry := NewPlaceholderToolRegistry()
-	registry.Register(NewMockTool("first", "First", func(ctx context.Context, args map[string]any) (any, error) {
+	registry.Register(NewMockTool("file_read", "File read", func(ctx context.Context, args map[string]any) (any, error) {
 		mu.order = append(mu.order, "first")
 		return "first", nil
 	}))
-	registry.Register(NewMockTool("second", "Second", func(ctx context.Context, args map[string]any) (any, error) {
+	registry.Register(NewMockTool("memory_read", "Memory read", func(ctx context.Context, args map[string]any) (any, error) {
 		mu.order = append(mu.order, "second")
 		return "second", nil
 	}))
 
-	executor := NewExecutor(registry, nil)
+	// Create security checker with default config
+	secChecker := security.NewPermissionChecker(security.Config{})
+	executor := NewExecutor(registry, secChecker)
 
 	toolCalls := []llm.ToolCall{
 		{
 			ID:       "call_1",
 			Type:     "function",
-			Function: llm.ToolCallFunction{Name: "first", Arguments: "{}"},
+			Function: llm.ToolCallFunction{Name: "file_read", Arguments: "{}"},
 		},
 		{
 			ID:       "call_2",
 			Type:     "function",
-			Function: llm.ToolCallFunction{Name: "second", Arguments: "{}"},
+			Function: llm.ToolCallFunction{Name: "memory_read", Arguments: "{}"},
 		},
 	}
 
