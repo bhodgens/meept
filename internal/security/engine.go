@@ -398,7 +398,12 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 		WHERE rule_type = 'block' AND enabled = 1`)
 	if err != nil {
 		e.logger.Error("Failed to query path rules", "error", err)
-		return nil
+		return &Decision{
+			Allowed:    false,
+			Reason:     "path rule query failed",
+			RiskLevel:  RiskHigh,
+			RuleSource: "fail_closed",
+		}
 	}
 	defer rows.Close()
 
@@ -447,7 +452,12 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 		WHERE rule_type = 'allow' AND enabled = 1`)
 	if err != nil {
 		e.logger.Error("Failed to query allow path rules", "error", err)
-		return nil
+		return &Decision{
+			Allowed:    false,
+			Reason:     "path rule query failed",
+			RiskLevel:  RiskHigh,
+			RuleSource: "fail_closed",
+		}
 	}
 	defer rows.Close()
 
@@ -537,12 +547,15 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			}
 		}
 
-		// Increment usage count
-		_, _ = e.db.Exec(`
+		// Increment usage count; log on error but don't fail the decision path.
+		if _, uerr := e.db.Exec(`
 			UPDATE permission_overrides
 			SET usage_count = usage_count + 1,
 			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-			WHERE id = ?`, id)
+			WHERE id = ?`, id); uerr != nil {
+			e.logger.Warn("failed to update permission_overrides usage_count",
+				"override_id", id, "error", uerr)
+		}
 
 		if decisionStr == "allow" {
 			reasonStr := "Creator pre-approved"

@@ -31,6 +31,7 @@ type Server struct {
 	listener   net.Listener
 	bus        *bus.MessageBus
 	logger     *slog.Logger
+	startTime  time.Time
 
 	mu       sync.RWMutex
 	handlers map[string]Handler
@@ -57,6 +58,7 @@ func New(cfg *Config, bus *bus.MessageBus, logger *slog.Logger) *Server {
 		socketPath: cfg.SocketPath,
 		bus:        bus,
 		logger:     logger,
+		startTime:  time.Now(),
 		handlers:   make(map[string]Handler),
 		conns:      make(map[net.Conn]struct{}),
 		closeCh:    make(chan struct{}),
@@ -304,7 +306,7 @@ func (s *Server) registerBuiltinHandlers() {
 		return map[string]any{
 			"status":             "running",
 			"version":            "0.2.0-go",
-			"uptime_seconds":     0.0, // TODO: track actual uptime
+			"uptime_seconds":     time.Since(s.startTime).Seconds(),
 			"model":              "",
 			"default_model":      "",
 			"tokens_used":        0,

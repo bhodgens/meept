@@ -4,6 +4,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -373,7 +374,11 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	if recursive {
 		entries, truncated = t.listRecursive(resolved, maxEntries)
 	} else {
-		entries, truncated = t.listDirect(resolved, maxEntries)
+		var err error
+		entries, truncated, err = t.listDirect(resolved, maxEntries)
+		if err != nil {
+			return ListResult{}, fmt.Errorf("failed to list directory: %w", err)
+		}
 	}
 
 	return ListResult{
@@ -384,10 +389,10 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	}, nil
 }
 
-func (t *ListDirectoryTool) listDirect(dir string, max int) ([]DirEntry, bool) {
+func (t *ListDirectoryTool) listDirect(dir string, max int) ([]DirEntry, bool, error) {
 	dirEntries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 
 	entries := make([]DirEntry, 0, len(dirEntries))
@@ -416,15 +421,18 @@ func (t *ListDirectoryTool) listDirect(dir string, max int) ([]DirEntry, bool) {
 		entries = append(entries, entry)
 	}
 
-	return entries, truncated
+	return entries, truncated, nil
 }
 
 func (t *ListDirectoryTool) listRecursive(root string, max int) ([]DirEntry, bool) {
 	entries := make([]DirEntry, 0)
 	truncated := false
+	errorCount := 0
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			errorCount++
+			slog.Debug("listRecursive: skipping entry", "path", path, "error", err)
 			return nil // Skip errors (permission denied, etc.)
 		}
 
@@ -459,7 +467,11 @@ func (t *ListDirectoryTool) listRecursive(root string, max int) ([]DirEntry, boo
 	})
 
 	if err != nil {
+		slog.Warn("listRecursive: walk terminated with error", "root", root, "error", err, "skipped_entries", errorCount)
 		return entries, truncated
+	}
+	if errorCount > 0 {
+		slog.Warn("listRecursive: walk completed with skipped entries", "root", root, "skipped_entries", errorCount)
 	}
 
 	return entries, truncated

@@ -105,6 +105,7 @@ const (
 	ActionViewChat
 	ActionClearChat
 	ActionRefresh
+	ActionMoveStartOfLine
 )
 
 // ModeChangeMsg signals a mode change.
@@ -153,8 +154,8 @@ func (s *State) handleNormalMode(key string, msg tea.KeyMsg) (Action, bool) {
 	// Handle numeric prefix
 	if key >= "0" && key <= "9" && s.Pending == "" {
 		if s.Count == 0 && key == "0" {
-			// 0 without count means move to start of line (not implemented here)
-			return Action{Type: ActionNone}, false
+			// "0" with no accumulated count jumps to the start of the line.
+			return Action{Type: ActionMoveStartOfLine, Count: 1}, true
 		}
 		s.Count = s.Count*10 + int(key[0]-'0')
 		return Action{Type: ActionNone}, true

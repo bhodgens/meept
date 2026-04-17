@@ -16,11 +16,11 @@ type LSPSymbolsTool struct {
 }
 
 // NewLSPSymbolsTool creates a new LSP symbols tool.
-func NewLSPSymbolsTool(manager *lsp.Manager) *LSPSymbolsTool {
+func NewLSPSymbolsTool(manager *lsp.Manager) (*LSPSymbolsTool, error) {
 	if manager == nil {
-		panic("lsp.Manager cannot be nil")
+		return nil, fmt.Errorf("lsp.Manager cannot be nil")
 	}
-	return &LSPSymbolsTool{manager: manager}
+	return &LSPSymbolsTool{manager: manager}, nil
 }
 
 func (t *LSPSymbolsTool) Name() string { return "lsp_workspace_symbols" }

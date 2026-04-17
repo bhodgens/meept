@@ -16,6 +16,7 @@ type RPCClient interface {
 	GetTask(taskID string) (*types.Task, error)
 	ListTasksExtended() (*types.TaskExtendedListResponse, error)
 	ListTaskSteps(taskID string) (*types.TaskStepsResponse, error)
+	CancelTask(taskID string) error
 	IsConnected() bool
 }
 
@@ -100,20 +101,17 @@ func (t *TaskManager) Get(taskID string) (*types.Task, error) {
 	return task, nil
 }
 
-// Cancel cancels a task.
-// Note: This requires the Cancel RPC method which may need to be added to the RPC client.
-// For now, this returns an error indicating the feature is not yet available.
+// Cancel cancels a task by flipping it into StateCancelled via the
+// task.cancel RPC. This does not interrupt any in-flight jobs; workers
+// observe the state change when they next check the task.
 func (t *TaskManager) Cancel(taskID string) error {
 	if !t.rpc.IsConnected() {
 		return fmt.Errorf("not connected to daemon")
 	}
-
 	if taskID == "" {
 		return fmt.Errorf("task ID is required")
 	}
-
-	// TODO: Implement when task.cancel RPC method is available
-	return fmt.Errorf("task cancellation not yet implemented")
+	return t.rpc.CancelTask(taskID)
 }
 
 // FormatTaskList formats tasks for display in viewport.

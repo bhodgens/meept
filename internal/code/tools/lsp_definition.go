@@ -16,11 +16,11 @@ type LSPDefinitionTool struct {
 }
 
 // NewLSPDefinitionTool creates a new LSP definition tool.
-func NewLSPDefinitionTool(manager *lsp.Manager) *LSPDefinitionTool {
+func NewLSPDefinitionTool(manager *lsp.Manager) (*LSPDefinitionTool, error) {
 	if manager == nil {
-		panic("lsp.Manager cannot be nil")
+		return nil, fmt.Errorf("lsp.Manager cannot be nil")
 	}
-	return &LSPDefinitionTool{manager: manager}
+	return &LSPDefinitionTool{manager: manager}, nil
 }
 
 func (t *LSPDefinitionTool) Name() string { return "lsp_goto_definition" }

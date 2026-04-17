@@ -81,9 +81,10 @@ var dangerousPattern = regexp.MustCompile(
 
 // ShellExecuteTool executes shell commands in a sandboxed subprocess.
 type ShellExecuteTool struct {
-	workingDir     string
-	defaultTimeout time.Duration
-	securityOrch   *intsecurity.Orchestrator
+	workingDir         string
+	defaultTimeout     time.Duration
+	securityOrch       *intsecurity.Orchestrator
+	knownSafeCommands  map[string]struct{}
 }
 
 // NewShellExecuteTool creates a new shell execution tool.
@@ -95,14 +96,30 @@ func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration) *Shell
 		defaultTimeout = DefaultShellTimeout
 	}
 	return &ShellExecuteTool{
-		workingDir:     workingDir,
-		defaultTimeout: defaultTimeout,
+		workingDir:        workingDir,
+		defaultTimeout:    defaultTimeout,
+		knownSafeCommands: make(map[string]struct{}),
 	}
 }
 
 // SetSecurityOrchestrator sets the security orchestrator for command scanning.
 func (t *ShellExecuteTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
 	t.securityOrch = orch
+}
+
+// SetKnownSafeCommands configures a set of base command names that are
+// treated as low-risk (RiskMedium) instead of the default RiskHigh for
+// unknown commands. This is an escape hatch for deployments that want to
+// whitelist project-specific tools (e.g. "mytool", "mycli").
+func (t *ShellExecuteTool) SetKnownSafeCommands(cmds []string) {
+	safe := make(map[string]struct{}, len(cmds))
+	for _, c := range cmds {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			safe[c] = struct{}{}
+		}
+	}
+	t.knownSafeCommands = safe
 }
 
 func (t *ShellExecuteTool) Name() string { return "shell" }
@@ -248,17 +265,9 @@ func (t *ShellExecuteTool) classifyRisk(command string) ShellCommandRisk {
 		return RiskCritical
 	}
 
-	// Check dangerous patterns
-	if dangerousPattern.MatchString(command) {
-		return RiskHigh
-	}
-
-	// Check read-only commands
-	if readOnlyCommands[baseCmd] {
-		return RiskMedium
-	}
-
-	// Check pipes - evaluate each segment
+	// Check pipes first - evaluate each segment independently so that a
+	// blocked/sudo segment in a pipeline is detected as CRITICAL rather than
+	// being masked by a HIGH dangerous-pattern match on the full line.
 	if strings.Contains(command, "|") {
 		segments := strings.Split(command, "|")
 		maxRisk := RiskMedium
@@ -269,6 +278,21 @@ func (t *ShellExecuteTool) classifyRisk(command string) ShellCommandRisk {
 			}
 		}
 		return maxRisk
+	}
+
+	// Check dangerous patterns
+	if dangerousPattern.MatchString(command) {
+		return RiskHigh
+	}
+
+	// Check read-only commands
+	if readOnlyCommands[baseCmd] {
+		return RiskMedium
+	}
+
+	// Check operator-configured allowlist for otherwise-unknown commands.
+	if _, ok := t.knownSafeCommands[baseCmd]; ok {
+		return RiskMedium
 	}
 
 	// Default: HIGH for unknown commands

@@ -643,6 +643,14 @@ func (c *RPCClient) DeleteTask(taskID string) error {
 	return err
 }
 
+// CancelTask transitions a task to StateCancelled. This is a state flip
+// only; it does not interrupt any in-flight jobs.
+func (c *RPCClient) CancelTask(taskID string) error {
+	params := map[string]string{"id": taskID}
+	_, err := c.Call("task.cancel", params)
+	return err
+}
+
 // LinkTaskSession links a session to a task.
 func (c *RPCClient) LinkTaskSession(taskID, sessionID string) error {
 	params := map[string]string{

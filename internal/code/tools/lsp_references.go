@@ -16,11 +16,11 @@ type LSPReferencesTool struct {
 }
 
 // NewLSPReferencesTool creates a new LSP references tool.
-func NewLSPReferencesTool(manager *lsp.Manager) *LSPReferencesTool {
+func NewLSPReferencesTool(manager *lsp.Manager) (*LSPReferencesTool, error) {
 	if manager == nil {
-		panic("lsp.Manager cannot be nil")
+		return nil, fmt.Errorf("lsp.Manager cannot be nil")
 	}
-	return &LSPReferencesTool{manager: manager}
+	return &LSPReferencesTool{manager: manager}, nil
 }
 
 func (t *LSPReferencesTool) Name() string { return "lsp_find_references" }

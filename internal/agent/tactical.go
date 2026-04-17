@@ -305,49 +305,34 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 }
 
 // handleReviewResult processes a review result and updates step state accordingly.
+// It delegates the state-machine logic to ReviewManager.HandleReviewResult
+// (the canonical implementation) and then adds tactical-specific side
+// effects: scheduling any created revision steps, and forcing a NeedsInfo
+// step into the completed state so the task can proceed while humans
+// optionally intervene.
 func (ts *TacticalScheduler) handleReviewResult(ctx context.Context, step *task.TaskStep, result *ReviewResult) error {
-	switch result.Status {
-	case ReviewApproved:
-		// Mark as approved (terminal state)
-		if err := ts.stepStore.SetState(step.ID, task.StepApproved); err != nil {
-			return fmt.Errorf("failed to set approved state: %w", err)
-		}
-		ts.logger.Info("Step approved", "step_id", step.ID, "feedback", result.Feedback)
+	if ts.reviewManager == nil {
+		return fmt.Errorf("tactical scheduler has no ReviewManager")
+	}
 
-	case ReviewRejected:
-		// Mark as rejected and create revision
-		if err := ts.stepStore.SetState(step.ID, task.StepRejected); err != nil {
-			return fmt.Errorf("failed to set rejected state: %w", err)
-		}
-		if err := ts.stepStore.SetResult(step.ID, result.Feedback); err != nil {
-			ts.logger.Error("Failed to set rejection feedback", "error", err)
-		}
-		ts.logger.Info("Step rejected, creating revision", "step_id", step.ID, "issues", result.Issues)
+	revisions, err := ts.reviewManager.HandleReviewResult(ctx, step.ID, result)
+	if err != nil {
+		return err
+	}
 
-		// Create revision step
-		revision := task.CreateRevision(step, result.Feedback)
-		if err := ts.stepStore.Create(revision); err != nil {
-			ts.logger.Error("Failed to create revision step", "error", err)
-		} else {
-			ts.logger.Info("Created revision step",
-				"revision_id", revision.ID,
-				"original_id", step.ID,
+	// Schedule any newly-created revision steps.
+	for _, rev := range revisions {
+		if err := ts.scheduleStep(ctx, rev); err != nil {
+			ts.logger.Error("Failed to schedule revision step",
+				"revision_id", rev.ID,
+				"error", err,
 			)
-			// Schedule the revision
-			if err := ts.scheduleStep(ctx, revision); err != nil {
-				ts.logger.Error("Failed to schedule revision step", "error", err)
-			}
 		}
+	}
 
-	case ReviewNeedsInfo:
-		// Keep in reviewing state, update with feedback
-		if err := ts.stepStore.SetResult(step.ID, result.Feedback); err != nil {
-			ts.logger.Error("Failed to set needs_info feedback", "error", err)
-		}
-		ts.logger.Info("Step needs more info", "step_id", step.ID)
-
-		// Mark as completed to allow task to proceed
-		// (human can intervene if needed)
+	// NeedsInfo: tactical forces completion so the overall task can proceed;
+	// humans can intervene out-of-band if needed.
+	if result.Status == ReviewNeedsInfo {
 		if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
 			ts.logger.Error("Failed to set step to completed", "error", err)
 		}

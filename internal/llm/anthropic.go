@@ -121,6 +121,21 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		}
 	}
 
+	// Compute adaptive timeout if a calculator is configured.
+	if c.timeoutCalc != nil {
+		estimatedTokens := chatOpts.maxTokens
+		if estimatedTokens <= 0 {
+			estimatedTokens = 4096
+		}
+		c.httpClient.Timeout = c.timeoutCalc.Calculate(
+			ctx,
+			c.config.ProviderID,
+			c.config.ModelID,
+			estimatedTokens,
+			anthropicDefaultTimeout,
+		)
+	}
+
 	// Build Anthropic API request
 	reqBody, err := c.buildRequest(messages, chatOpts, false)
 	if err != nil {
@@ -206,6 +221,21 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 		if err := c.budget.WaitForRateLimit(ctx); err != nil {
 			return nil, err
 		}
+	}
+
+	// Compute adaptive timeout if a calculator is configured.
+	if c.timeoutCalc != nil {
+		estimatedTokens := chatOpts.maxTokens
+		if estimatedTokens <= 0 {
+			estimatedTokens = 4096
+		}
+		c.httpClient.Timeout = c.timeoutCalc.Calculate(
+			ctx,
+			c.config.ProviderID,
+			c.config.ModelID,
+			estimatedTokens,
+			anthropicDefaultTimeout,
+		)
 	}
 
 	// Build Anthropic API request with streaming enabled for progress
@@ -529,7 +559,40 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 	httpReq.Header.Set("x-api-key", c.config.APIKey)
 	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
 
+	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
+	latencyMs := time.Since(start).Milliseconds()
+
+	// Record metrics if a store is configured.
+	if c.metricsStore != nil {
+		errType := metrics.ErrorTypeNone
+		if err != nil {
+			errType = metrics.ClassifyError(err, 0)
+		} else if resp != nil {
+			errType = metrics.ClassifyError(nil, resp.StatusCode)
+		}
+		record := metrics.RequestRecord{
+			Timestamp:        time.Now(),
+			ProviderID:       c.config.ProviderID,
+			ModelID:          c.config.ModelID,
+			LatencyMs:        latencyMs,
+			HTTPStatus:       0,
+			ErrorType:        errType,
+			Success:          err == nil && resp != nil && resp.StatusCode == http.StatusOK,
+			CompletionTokens: reqBody.MaxTokens / 2,
+		}
+		if resp != nil {
+			record.HTTPStatus = resp.StatusCode
+		}
+		store := c.metricsStore
+		logger := c.logger
+		go func() {
+			if rerr := store.Record(context.Background(), record); rerr != nil {
+				logger.Debug("metrics record failed", "error", rerr)
+			}
+		}()
+	}
+
 	if err != nil {
 		return nil, &ClientError{Message: "request failed", Cause: err}
 	}
@@ -605,7 +668,38 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	httpReq.Header.Set("x-api-key", c.config.APIKey)
 	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
 
+	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
+	latencyMs := time.Since(start).Milliseconds()
+
+	if c.metricsStore != nil {
+		errType := metrics.ErrorTypeNone
+		if err != nil {
+			errType = metrics.ClassifyError(err, 0)
+		} else if resp != nil {
+			errType = metrics.ClassifyError(nil, resp.StatusCode)
+		}
+		record := metrics.RequestRecord{
+			Timestamp:        time.Now(),
+			ProviderID:       c.config.ProviderID,
+			ModelID:          c.config.ModelID,
+			LatencyMs:        latencyMs,
+			ErrorType:        errType,
+			Success:          err == nil && resp != nil && resp.StatusCode == http.StatusOK,
+			CompletionTokens: reqBody.MaxTokens / 2,
+		}
+		if resp != nil {
+			record.HTTPStatus = resp.StatusCode
+		}
+		store := c.metricsStore
+		logger := c.logger
+		go func() {
+			if rerr := store.Record(context.Background(), record); rerr != nil {
+				logger.Debug("metrics record failed", "error", rerr)
+			}
+		}()
+	}
+
 	if err != nil {
 		return nil, &ClientError{Message: "request failed", Cause: err}
 	}

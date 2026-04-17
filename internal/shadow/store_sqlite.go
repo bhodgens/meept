@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,23 +153,26 @@ func (s *SQLiteTrainingStore) migrateToV2() error {
 	_, err := s.db.Exec(`
 		ALTER TABLE shadow_records ADD COLUMN metadata_json TEXT DEFAULT '';
 	`)
-	// Ignore error if column already exists
+	// Ignore error if column already exists (duplicate column). Otherwise log
+	// at WARN so unexpected migration failures are visible.
 	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
-		// Only return error if it's not a "duplicate column" error
-		_ = err // Ignore column already exists errors
+		slog.Warn("shadow training store migration: ALTER failed", "error", err)
 	}
 
 	// Add export tracking
 	_, err = s.db.Exec(`
 		ALTER TABLE shadow_records ADD COLUMN exported_at TEXT;
 	`)
-	// Ignore if already exists
-	_ = err
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		slog.Warn("shadow training store migration: add exported_at failed", "error", err)
+	}
 
 	// Create index for export tracking
-	_, _ = s.db.Exec(`
+	if _, ierr := s.db.Exec(`
 		CREATE INDEX IF NOT EXISTS idx_shadow_records_exported ON shadow_records(exported_at);
-	`)
+	`); ierr != nil {
+		slog.Warn("shadow training store migration: create index failed", "error", ierr)
+	}
 
 	return nil
 }
@@ -742,18 +746,22 @@ func (s *SQLiteExamplesStore) migrateToV1() error {
 }
 
 func (s *SQLiteExamplesStore) migrateToV2() error {
-	// Add tags column for categorization
+	// Add tags column for categorization. Ignore duplicate-column errors;
+	// log other errors at WARN.
 	_, err := s.db.Exec(`
 		ALTER TABLE fewshot_examples ADD COLUMN tags TEXT DEFAULT '';
 	`)
-	// Ignore if already exists
-	_ = err
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		slog.Warn("shadow examples store migration: add tags failed", "error", err)
+	}
 
 	// Add last_used_at for recency tracking
 	_, err = s.db.Exec(`
 		ALTER TABLE fewshot_examples ADD COLUMN last_used_at TEXT;
 	`)
-	_ = err
+	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		slog.Warn("shadow examples store migration: add last_used_at failed", "error", err)
+	}
 
 	return nil
 }

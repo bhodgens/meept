@@ -328,3 +328,37 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// TestCheckPath_FailClosedOnDBError verifies that when the path rule query
+// fails (e.g. the DB has been closed), checkPath returns a deny Decision
+// instead of nil (which callers would treat as "allow").
+func TestCheckPath_FailClosedOnDBError(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "security.db")
+
+	cfg := &config.SecurityConfig{
+		RequireConfirmationHigh:     true,
+		RequireConfirmationCritical: true,
+	}
+
+	engine, err := NewEngine(dbPath, cfg, nil)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+
+	// Close the DB out from under the engine so subsequent queries fail.
+	if err := engine.db.Close(); err != nil {
+		t.Fatalf("failed to close DB: %v", err)
+	}
+
+	decision := engine.checkPath("/tmp/should-not-matter", "file_read")
+	if decision == nil {
+		t.Fatal("checkPath returned nil on DB error; expected fail-closed deny Decision")
+	}
+	if decision.Allowed {
+		t.Errorf("checkPath should deny on DB error, got allowed=true: %+v", decision)
+	}
+	if decision.RuleSource != "fail_closed" {
+		t.Errorf("expected RuleSource=fail_closed, got %q", decision.RuleSource)
+	}
+}

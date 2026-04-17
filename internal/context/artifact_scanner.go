@@ -2,6 +2,7 @@ package context
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -136,7 +137,10 @@ func ScanSkillsDirectory(skillsDir string) ([]*Skill, error) {
 		skill, err := ParseSkillFile(path)
 		if err != nil {
 			// Log but don't fail the entire scan
-			fmt.Printf("Warning: failed to parse skill file %s: %v\n", path, err)
+			slog.Default().Warn("failed to parse skill file",
+				"path", path,
+				"error", err,
+			)
 			return nil
 		}
 
@@ -175,7 +179,10 @@ func ScanAgentsDirectory(agentsDir string) ([]*AgentDefinition, error) {
 		agentDefs, err := ParseAgentFile(path)
 		if err != nil {
 			// Log but don't fail the entire scan
-			fmt.Printf("Warning: failed to parse agent file %s: %v\n", path, err)
+			slog.Default().Warn("failed to parse agent file",
+				"path", path,
+				"error", err,
+			)
 			return nil
 		}
 

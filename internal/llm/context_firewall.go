@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 )
 
 // ContextFirewallConfig configures context budget and summarization behavior.
@@ -32,6 +33,27 @@ type ContextFirewall struct {
 	summaryModel Chatter
 	logger       *slog.Logger
 	tokenizer    Tokenizer
+
+	// Counters (atomic-safe for concurrent callers)
+	summarizationFailures atomic.Uint64
+	droppedMessages       atomic.Uint64
+	dropEvents            atomic.Uint64
+}
+
+// FirewallStats is a snapshot of firewall counters.
+type FirewallStats struct {
+	SummarizationFailures uint64
+	DroppedMessages       uint64
+	DropEvents            uint64
+}
+
+// Stats returns a snapshot of firewall counters.
+func (f *ContextFirewall) Stats() FirewallStats {
+	return FirewallStats{
+		SummarizationFailures: f.summarizationFailures.Load(),
+		DroppedMessages:       f.droppedMessages.Load(),
+		DropEvents:            f.dropEvents.Load(),
+	}
 }
 
 // NewContextFirewall creates a new context firewall.
@@ -232,7 +254,11 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	if f.config.SummarizeHistory && currentTokens > int(float64(f.model.ContextLimit)*f.config.HardLimit) {
 		summarized, err := f.summarizeOldHistory(ctx, result)
 		if err != nil {
-			f.logger.Debug("summarization failed", "error", err)
+			f.summarizationFailures.Add(1)
+			f.logger.Warn("summarization failed, continuing without summarization",
+				"error", err,
+				"failures_total", f.summarizationFailures.Load(),
+			)
 			// Continue without summarization
 		} else {
 			result = summarized
@@ -274,10 +300,16 @@ func (f *ContextFirewall) dropOldContext(messages []ChatMessage) []ChatMessage {
 		result = append(result, nonSystemMsgs...)
 	}
 
-	f.logger.Debug("dropped old context",
+	dropped := len(messages) - len(result)
+	if dropped > 0 {
+		f.droppedMessages.Add(uint64(dropped))
+		f.dropEvents.Add(1)
+	}
+	f.logger.Warn("dropped old context",
 		"original_count", len(messages),
 		"new_count", len(result),
-		"dropped_count", len(messages)-len(result),
+		"dropped_count", dropped,
+		"dropped_total", f.droppedMessages.Load(),
 	)
 
 	return result

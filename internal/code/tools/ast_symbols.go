@@ -15,13 +15,13 @@ type ASTSymbolsTool struct {
 }
 
 // NewASTSymbolsTool creates a new AST symbols tool.
-func NewASTSymbolsTool(parser *ast.ParserManager) *ASTSymbolsTool {
+func NewASTSymbolsTool(parser *ast.ParserManager) (*ASTSymbolsTool, error) {
 	if parser == nil {
-		panic("ast.ParserManager cannot be nil")
+		return nil, fmt.Errorf("ast.ParserManager cannot be nil")
 	}
 	return &ASTSymbolsTool{
 		extractor: ast.NewSymbolExtractor(parser),
-	}
+	}, nil
 }
 
 func (t *ASTSymbolsTool) Name() string { return "ast_symbols" }

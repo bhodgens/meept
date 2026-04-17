@@ -133,7 +133,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	if err := t.sched.ValidateSchedule(cronExpr); err != nil {
 		return CronCreateResult{
 			Success: false,
-			Error:   fmt.Sprintf("invalid cron expression: %w", err),
+			Error:   fmt.Sprintf("invalid cron expression: %v", err),
 		}, nil
 	}
 

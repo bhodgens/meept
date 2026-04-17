@@ -103,6 +103,11 @@ type AppliedFix struct {
 	CommitHash  string    `json:"commit_hash,omitempty"`
 	RollbackAvailable bool `json:"rollback_available"`
 	BackupPath  string    `json:"backup_path,omitempty"`
+	// OriginalPath is the file path relative to the project root. It is
+	// stored so that Rollback can write the backup contents back to the
+	// original location (rather than reconstructing from the backup
+	// filename, which loses directory information).
+	OriginalPath string `json:"original_path,omitempty"`
 }
 
 // CycleStatus represents the status of an improvement cycle.

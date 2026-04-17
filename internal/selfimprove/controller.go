@@ -13,8 +13,14 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/google/uuid"
 )
+
+// statusTopic is the bus topic where self-improve cycle status updates are
+// published. Subscribers observe the full lifecycle of a cycle
+// (started, detecting, analyzing, generating, validating, applying, completed).
+const statusTopic = "selfimprove.status"
 
 // Controller orchestrates the full self-improvement cycle.
 type Controller struct {
@@ -217,11 +223,15 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	for _, fix := range c.fixes {
 		result, err := c.validator.Validate(ctx, fix)
 		if err != nil {
+			c.recordFailure(fix.IssueID)
 			continue
 		}
 		c.validations = append(c.validations, result)
 		if result.Success {
 			c.currentCycle.FixesValidated++
+			c.recordSuccess(fix.IssueID)
+		} else {
+			c.recordFailure(fix.IssueID)
 		}
 	}
 
@@ -253,10 +263,13 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 			continue
 		}
 		if err != nil {
+			c.logger.Warn("failed to apply fix", "fix_id", pair.fix.ID, "error", err)
+			c.recordFailure(pair.fix.IssueID)
 			continue
 		}
 		c.applied = append(c.applied, applied)
 		c.currentCycle.FixesApplied++
+		c.recordSuccess(pair.fix.IssueID)
 	}
 
 	c.currentCycle.Status = CycleStatusCompleted
@@ -360,8 +373,39 @@ func (c *Controller) publishStatus(phase string, data any) {
 	if c.bus == nil {
 		return
 	}
-	// Publish status update to bus
-	// Implementation depends on bus interface
+	cycleID := ""
+	if c.currentCycle != nil {
+		cycleID = c.currentCycle.ID
+	}
+	msg, err := models.NewBusMessage(
+		models.MessageTypeStatusUpdate,
+		"selfimprove."+cycleID,
+		map[string]any{
+			"phase":    phase,
+			"cycle_id": cycleID,
+			"data":     data,
+		},
+	)
+	if err != nil {
+		c.logger.Warn("failed to build status bus message", "phase", phase, "error", err)
+		return
+	}
+	c.bus.Publish(statusTopic, msg)
+}
+
+// persistedState is the on-disk shape of the controller state. It is kept
+// as a distinct type so that loadState can deserialize it deterministically
+// and populate the controller's in-memory fields.
+type persistedState struct {
+	Issues              []Issue                `json:"issues"`
+	Analyses            []*RootCauseAnalysis   `json:"analyses"`
+	Fixes               []*ProposedFix         `json:"fixes"`
+	Validations         []*ValidationResult    `json:"validations"`
+	Applied             []*AppliedFix          `json:"applied"`
+	Cycles              []*ImprovementCycle    `json:"cycles"`
+	FailureCounts       map[string]int         `json:"failure_counts"`
+	ConsecutiveFailures int                    `json:"consecutive_failures"`
+	Timestamp           time.Time              `json:"timestamp"`
 }
 
 func (c *Controller) saveState() error {
@@ -370,14 +414,16 @@ func (c *Controller) saveState() error {
 
 	os.MkdirAll(c.config.DataPath, 0755)
 
-	state := map[string]any{
-		"issues":      c.issues,
-		"analyses":    c.analyses,
-		"fixes":       c.fixes,
-		"validations": c.validations,
-		"applied":     c.applied,
-		"cycles":      c.cycles,
-		"timestamp":   time.Now(),
+	state := persistedState{
+		Issues:              c.issues,
+		Analyses:            c.analyses,
+		Fixes:               c.fixes,
+		Validations:         c.validations,
+		Applied:             c.applied,
+		Cycles:              c.cycles,
+		FailureCounts:       c.failureCounts,
+		ConsecutiveFailures: c.consecutiveFailures,
+		Timestamp:           time.Now(),
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -396,13 +442,30 @@ func (c *Controller) loadState() error {
 		return err
 	}
 
-	var state map[string]json.RawMessage
+	var state persistedState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
 
-	// Load each component (simplified - would need proper deserialization)
-	c.logger.Info("loaded state from disk")
+	c.mu.Lock()
+	c.issues = state.Issues
+	c.analyses = state.Analyses
+	c.fixes = state.Fixes
+	c.validations = state.Validations
+	c.applied = state.Applied
+	c.cycles = state.Cycles
+	if state.FailureCounts != nil {
+		c.failureCounts = state.FailureCounts
+	}
+	c.consecutiveFailures = state.ConsecutiveFailures
+	c.mu.Unlock()
+
+	c.logger.Info("loaded state from disk",
+		"issues", len(c.issues),
+		"analyses", len(c.analyses),
+		"fixes", len(c.fixes),
+		"applied", len(c.applied),
+		"cycles", len(c.cycles))
 	return nil
 }
 

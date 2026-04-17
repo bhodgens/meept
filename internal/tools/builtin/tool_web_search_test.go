@@ -404,7 +404,6 @@ func TestWebSearchTool_StripHTMLTags(t *testing.T) {
 
 func TestWebSearchTool_RateLimiting(t *testing.T) {
 	tool := NewWebSearchTool(time.Second)
-	ctx := context.Background()
 
 	// Note: This test doesn't make actual HTTP requests but verifies
 	// that the rate limiting logic is in place by checking the mutex is used
@@ -424,7 +423,7 @@ func TestWebSearchTool_RateLimiting(t *testing.T) {
 }
 
 func TestWebSearchTool_LimitValidation(t *testing.T) {
-	tool := NewWebSearchTool(0)
+	_ = NewWebSearchTool(0)
 
 	tests := []struct {
 		name      string

@@ -84,7 +84,7 @@ func DefaultTaskMemoryConfig(dataDir string) TaskMemoryConfig {
 }
 
 // NewTaskMemory creates a new task memory instance.
-func NewTaskMemory(cfg TaskMemoryConfig) *TaskMemory {
+func NewTaskMemory(cfg TaskMemoryConfig) (*TaskMemory, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -104,14 +104,14 @@ func NewTaskMemory(cfg TaskMemoryConfig) *TaskMemory {
 
 	store, err := NewSQLiteFTSStore(storeCfg, cfg.Logger)
 	if err != nil {
-		panic(fmt.Sprintf("failed to create task store: %v", err))
+		return nil, fmt.Errorf("failed to create task store: %w", err)
 	}
 
 	return &TaskMemory{
 		store:   store,
 		domains: cfg.Domains,
 		logger:  cfg.Logger,
-	}
+	}, nil
 }
 
 // Initialize sets up the database schema and connections.

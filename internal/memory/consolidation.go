@@ -293,11 +293,16 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 	return summaries
 }
 
-// MergeRelated merges related memories into consolidated summaries.
-// This is a more sophisticated grouping that considers content similarity.
+// MergeRelated groups memories into consolidated summaries.
+//
+// NOTE: The current implementation groups strictly by date (calendar day).
+// It does NOT perform semantic clustering, content similarity analysis, or
+// keyword-based grouping — callers must not rely on "relatedness" beyond
+// same-day co-occurrence. See docs/bugs-and-gaps.md issue #16 (M9.1).
+//
+// A future implementation may incorporate embeddings or keyword clustering;
+// when that happens, callers may observe different grouping behaviour.
 func (c *Consolidator) MergeRelated(ctx context.Context, memories []MemoryResult) ([]Summary, error) {
-	// For now, fall back to date-based grouping
-	// A future version could use embeddings or keyword clustering
 	return c.summarizeByDate(memories), nil
 }
 

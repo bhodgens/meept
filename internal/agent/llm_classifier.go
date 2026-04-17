@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	classifierTimeout = 5 * time.Second
+	// defaultClassifierTimeout is used when LLMClassifierConfig.Timeout is zero.
+	defaultClassifierTimeout = 5 * time.Second
 )
 
 var intentThresholds = map[string]float64{
@@ -46,9 +47,10 @@ var agentMapping = map[string]string{
 }
 
 type LLMClassifier struct {
-	client *llm.Client
-	model  string
-	logger Logger
+	client  *llm.Client
+	model   string
+	timeout time.Duration
+	logger  Logger
 }
 
 type Logger interface {
@@ -66,9 +68,10 @@ func (stdLogger) Error(msg string, args ...any) {}
 func (stdLogger) Info(msg string, args ...any)  {}
 
 type LLMClassifierConfig struct {
-	Client *llm.Client
-	Model  string
-	Logger Logger
+	Client  *llm.Client
+	Model   string
+	Timeout time.Duration // When zero, defaultClassifierTimeout is used.
+	Logger  Logger
 }
 
 func NewLLMClassifier(cfg LLMClassifierConfig) *LLMClassifier {
@@ -76,10 +79,15 @@ func NewLLMClassifier(cfg LLMClassifierConfig) *LLMClassifier {
 	if logger == nil {
 		logger = stdLogger{}
 	}
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = defaultClassifierTimeout
+	}
 	return &LLMClassifier{
-		client: cfg.Client,
-		model:  cfg.Model,
-		logger: logger,
+		client:  cfg.Client,
+		model:   cfg.Model,
+		timeout: timeout,
+		logger:  logger,
 	}
 }
 
@@ -100,7 +108,7 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, ctxMemory []
 		{Role: llm.RoleUser, Content: classificationPrompt},
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, classifierTimeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	resp, err := c.client.Chat(timeoutCtx, messages,

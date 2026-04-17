@@ -106,6 +106,17 @@ Skills declare `requires: [code, reasoning]` in YAML frontmatter; models declare
 - **Models**: `config/models.json5` (JSON5 format with capability tags)
 - **MCP servers**: `~/.meept/mcp_servers.json`
 
+### Programmatic component options
+
+- `ShellExecuteTool.SetKnownSafeCommands([]string)` — base command names treated
+  as `RiskMedium` instead of the default `RiskHigh` for unknown commands. Use for
+  project-local CLIs (`mytool`, `mycli`) that the operator has vetted.
+- `LLMClassifierConfig.Timeout time.Duration` — per-classification HTTP timeout;
+  defaults to 5 s when unset.
+- `ContextFirewall.Stats()` returns `FirewallStats` with counters for
+  `SummarizationFailures`, `DroppedMessages`, and `DropEvents` so operators
+  can monitor context-pressure indicators.
+
 ## Skills Discovery
 
 Three-tier with priority shadowing:

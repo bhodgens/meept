@@ -16,11 +16,11 @@ type LSPHoverTool struct {
 }
 
 // NewLSPHoverTool creates a new LSP hover tool.
-func NewLSPHoverTool(manager *lsp.Manager) *LSPHoverTool {
+func NewLSPHoverTool(manager *lsp.Manager) (*LSPHoverTool, error) {
 	if manager == nil {
-		panic("lsp.Manager cannot be nil")
+		return nil, fmt.Errorf("lsp.Manager cannot be nil")
 	}
-	return &LSPHoverTool{manager: manager}
+	return &LSPHoverTool{manager: manager}, nil
 }
 
 func (t *LSPHoverTool) Name() string { return "lsp_hover" }

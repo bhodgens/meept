@@ -16,11 +16,11 @@ type ASTParseTool struct {
 }
 
 // NewASTParseTool creates a new AST parse tool.
-func NewASTParseTool(parser *ast.ParserManager) *ASTParseTool {
+func NewASTParseTool(parser *ast.ParserManager) (*ASTParseTool, error) {
 	if parser == nil {
-		panic("ast.ParserManager cannot be nil")
+		return nil, fmt.Errorf("ast.ParserManager cannot be nil")
 	}
-	return &ASTParseTool{parser: parser}
+	return &ASTParseTool{parser: parser}, nil
 }
 
 func (t *ASTParseTool) Name() string { return "ast_parse" }

@@ -610,13 +610,23 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 				PlannerTimeout: time.Duration(cfg.Orchestrator.PlannerTimeout) * time.Second,
 			})
 
-			tacticalScheduler := agent.NewTacticalScheduler(agent.TacticalSchedulerConfig{
+			reviewManager := agent.NewReviewManager(agent.ReviewManagerConfig{
+				Registry:  c.AgentRegistry,
 				StepStore: stepStore,
 				TaskStore: orchTaskStore,
-				Queue:     c.Queue,
-				Registry:  c.AgentRegistry,
 				Bus:       msgBus,
-				Logger:    logger.With("component", "tactical"),
+				Logger:    logger.With("component", "review"),
+			})
+			c.ReviewManager = reviewManager
+
+			tacticalScheduler := agent.NewTacticalScheduler(agent.TacticalSchedulerConfig{
+				StepStore:     stepStore,
+				TaskStore:     orchTaskStore,
+				Queue:         c.Queue,
+				Registry:      c.AgentRegistry,
+				Bus:           msgBus,
+				Logger:        logger.With("component", "tactical"),
+				ReviewManager: reviewManager,
 			})
 
 			c.Orchestrator = agent.NewOrchestrator(agent.OrchestratorDeps{
@@ -1610,9 +1620,21 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 	)
 
 	// Register AST tools
-	c.ToolRegistry.Register(codetools.NewASTParseTool(c.ASTParser))
-	c.ToolRegistry.Register(codetools.NewASTSymbolsTool(c.ASTParser))
-	c.ToolRegistry.Register(codetools.NewASTQueryTool(c.ASTParser))
+	if tool, err := codetools.NewASTParseTool(c.ASTParser); err != nil {
+		logger.Error("Failed to initialize AST parse tool", "error", err)
+	} else {
+		c.ToolRegistry.Register(tool)
+	}
+	if tool, err := codetools.NewASTSymbolsTool(c.ASTParser); err != nil {
+		logger.Error("Failed to initialize AST symbols tool", "error", err)
+	} else {
+		c.ToolRegistry.Register(tool)
+	}
+	if tool, err := codetools.NewASTQueryTool(c.ASTParser); err != nil {
+		logger.Error("Failed to initialize AST query tool", "error", err)
+	} else {
+		c.ToolRegistry.Register(tool)
+	}
 	logger.Debug("Registered AST tools")
 
 	// Initialize LSP manager if servers are configured
@@ -1635,11 +1657,31 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 		)
 
 		// Register LSP tools
-		c.ToolRegistry.Register(codetools.NewLSPDefinitionTool(c.LSPManager))
-		c.ToolRegistry.Register(codetools.NewLSPReferencesTool(c.LSPManager))
-		c.ToolRegistry.Register(codetools.NewLSPHoverTool(c.LSPManager))
-		c.ToolRegistry.Register(codetools.NewLSPSymbolsTool(c.LSPManager))
-		c.ToolRegistry.Register(codetools.NewLSPDiagnosticsTool(c.LSPManager))
+		if tool, err := codetools.NewLSPDefinitionTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP definition tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPReferencesTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP references tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPHoverTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP hover tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPSymbolsTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP symbols tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPDiagnosticsTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP diagnostics tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
 		logger.Debug("Registered LSP tools")
 	} else {
 		logger.Info("LSP tools not registered (no servers configured)")
@@ -1715,8 +1757,13 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 		skills.WithRegistryLogger(logger.With("component", "skills-registry")),
 	)
 
-	// Load full skills for registry (for backwards compatibility with existing code)
-	// TODO: Consider making registry also use lazy loading
+	// Load full skills for registry (for backwards compatibility with existing
+	// code that walks the registry eagerly at startup). A fully lazy registry
+	// would require reworking every RegisterAll consumer — the SkillIndex
+	// above is already metadata-only, and SkillLoader already provides
+	// on-demand loading for new consumers, which covers the common hot path.
+	// Full lazy conversion of the registry is tracked as a separate concern
+	// in docs/bugs-and-gaps.md (issue #33, scope-deferred).
 	discovered, err := discovery.Discover()
 	if err != nil {
 		logger.Warn("Skill discovery failed", "error", err)

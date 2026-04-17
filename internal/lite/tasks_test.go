@@ -18,6 +18,8 @@ type mockRPCClient struct {
 	getTaskErr     error
 	listStepsErr   error
 	extendedErr    error
+	cancelledIDs   []string
+	cancelErr      error
 }
 
 func newMockRPCClient() *mockRPCClient {
@@ -60,6 +62,14 @@ func (m *mockRPCClient) GetTask(taskID string) (*types.Task, error) {
 		}
 	}
 	return nil, nil
+}
+
+func (m *mockRPCClient) CancelTask(taskID string) error {
+	if m.cancelErr != nil {
+		return m.cancelErr
+	}
+	m.cancelledIDs = append(m.cancelledIDs, taskID)
+	return nil
 }
 
 func (m *mockRPCClient) ListTaskSteps(taskID string) (*types.TaskStepsResponse, error) {
@@ -193,15 +203,38 @@ func TestTaskManager_Get_EmptyID(t *testing.T) {
 }
 
 func TestTaskManager_Cancel(t *testing.T) {
-	rpc := newMockRPCClient()
-	tm := NewTaskManager(rpc)
+	t.Run("empty id errors", func(t *testing.T) {
+		rpc := newMockRPCClient()
+		tm := NewTaskManager(rpc)
+		if err := tm.Cancel(""); err == nil {
+			t.Error("expected error for empty task id")
+		}
+	})
 
-	// Currently returns "not implemented"
-	err := tm.Cancel("task-1")
-	if err == nil {
-		t.Error("expected error (not implemented)")
-	}
+	t.Run("valid id dispatched to rpc", func(t *testing.T) {
+		rpc := newMockRPCClient()
+		tm := NewTaskManager(rpc)
+		if err := tm.Cancel("task-1"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(rpc.cancelledIDs) != 1 || rpc.cancelledIDs[0] != "task-1" {
+			t.Errorf("expected cancelledIDs=[task-1], got %v", rpc.cancelledIDs)
+		}
+	})
+
+	t.Run("rpc error propagates", func(t *testing.T) {
+		rpc := newMockRPCClient()
+		rpc.cancelErr = errSentinel("boom")
+		tm := NewTaskManager(rpc)
+		if err := tm.Cancel("task-1"); err == nil {
+			t.Error("expected error propagation from rpc")
+		}
+	})
 }
+
+type errSentinel string
+
+func (e errSentinel) Error() string { return string(e) }
 
 func TestTaskManager_FormatTaskList(t *testing.T) {
 	rpc := newMockRPCClient()

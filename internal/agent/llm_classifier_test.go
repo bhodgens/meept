@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -340,6 +341,68 @@ func TestIsValidIntent(t *testing.T) {
 	}
 }
 
-// TestDispatcher_FallbackChain removed: it relied on a non-existent function-field
-// layout for *LLMClassifier.Classify and has been dead/non-building.
-// TODO: rewrite using the classifierFn interface if fallback-chain coverage is desired.
+// TestDispatcher_FallbackChain exercises the classifyIntent fallback ladder:
+// when no capability matcher and no LLM classifier are wired, a matching input
+// is resolved by the keyword classifier; a non-matching input falls through to
+// the final Chat fallback with confidence 0.3.
+//
+// Note: the Dispatcher stores llmClassifier as a concrete *LLMClassifier, so
+// the full LLM path cannot be mocked without a refactor. The keyword → chat
+// slice of the chain is what we can reliably cover here.
+func TestDispatcher_FallbackChain(t *testing.T) {
+	d := &Dispatcher{
+		logger:            slog.Default(),
+		keywordClassifier: &KeywordClassifier{},
+	}
+
+	tests := []struct {
+		name           string
+		input          string
+		wantType       string
+		wantAgent      string
+		wantConfidence float64
+		wantExactConf  bool
+	}{
+		{
+			name:      "keyword classifier matches git",
+			input:     "please commit these changes",
+			wantType:  "git",
+			wantAgent: "committer",
+		},
+		{
+			name:      "keyword classifier matches debug",
+			input:     "there is a bug, please debug it",
+			wantType:  "debug",
+			wantAgent: "debugger",
+		},
+		{
+			name:           "no classifier matches falls through to chat",
+			input:          "xyzzy fnord quux",
+			wantType:       "chat",
+			wantAgent:      "chat",
+			wantConfidence: 0.3,
+			wantExactConf:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			intent, err := d.classifyIntent(context.Background(), tt.input, nil)
+			if err != nil {
+				t.Fatalf("classifyIntent returned error: %v", err)
+			}
+			if intent == nil {
+				t.Fatalf("classifyIntent returned nil intent")
+			}
+			if intent.Type != tt.wantType {
+				t.Errorf("Type = %q, want %q", intent.Type, tt.wantType)
+			}
+			if intent.AgentType != tt.wantAgent {
+				t.Errorf("AgentType = %q, want %q", intent.AgentType, tt.wantAgent)
+			}
+			if tt.wantExactConf && intent.Confidence != tt.wantConfidence {
+				t.Errorf("Confidence = %v, want exactly %v", intent.Confidence, tt.wantConfidence)
+			}
+		})
+	}
+}

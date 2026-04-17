@@ -338,6 +338,7 @@ func NewHandler(registry *Registry, msgBus *bus.MessageBus, logger *slog.Logger)
 		"task.create":        h.handleTaskCreate,
 		"task.get":           h.handleTaskGet,
 		"task.update":        h.handleTaskUpdate,
+		"task.cancel":        h.handleTaskCancel,
 		"task.delete":        h.handleTaskDelete,
 		"task.list":          h.handleTaskList,
 		"task.list_extended": h.handleTaskListExtended,
@@ -382,6 +383,10 @@ func (h *Handler) handleTaskDelete(ctx context.Context, topic string, msg interf
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
+func (h *Handler) handleTaskCancel(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
 func (h *Handler) handleTaskList(ctx context.Context, topic string, msg interface{}) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
@@ -419,6 +424,8 @@ func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.B
 		response, err = h.handleListExtended(ctx, msg)
 	case "task.delete":
 		response, err = h.handleDelete(ctx, msg)
+	case "task.cancel":
+		response, err = h.handleCancel(ctx, msg)
 	case "task.link":
 		response, err = h.handleLink(ctx, msg)
 	case "task.unlink":
@@ -604,6 +611,49 @@ func (h *Handler) handleDelete(ctx context.Context, msg *models.BusMessage) (any
 	}
 
 	return map[string]string{"status": "deleted"}, nil
+}
+
+// handleCancel flips a task into StateCancelled.
+//
+// Note: this does NOT interrupt any jobs already in flight; workers observe
+// the state change only when they next check the task. Full in-flight
+// interruption is out of scope for the current implementation.
+func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.ID == "" {
+		return nil, fmt.Errorf("task id is required")
+	}
+
+	task, err := h.registry.Get(ctx, params.ID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task not found: %s", params.ID)
+	}
+
+	if task.State.IsTerminal() {
+		return map[string]any{
+			"status":  "noop",
+			"state":   string(task.State),
+			"message": "task already in terminal state",
+		}, nil
+	}
+
+	task.SetState(StateCancelled)
+	if err := h.registry.Update(ctx, task); err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"status": "cancelled",
+		"state":  string(task.State),
+	}, nil
 }
 
 func (h *Handler) handleLink(ctx context.Context, msg *models.BusMessage) (any, error) {

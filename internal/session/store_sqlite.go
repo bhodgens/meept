@@ -87,7 +87,7 @@ func (s *SQLiteStore) migrate() error {
 }
 
 // Create creates a new session with the given name.
-func (s *SQLiteStore) Create(name string) *Session {
+func (s *SQLiteStore) Create(name string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -123,11 +123,11 @@ func (s *SQLiteStore) Create(name string) *Session {
 
 	if err != nil {
 		s.logger.Error("Failed to create session", "error", err)
-		return nil
+		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
 	s.logger.Info("Session created", "id", id, "name", name)
-	return session
+	return session, nil
 }
 
 // Get retrieves a session by ID.
@@ -203,14 +203,18 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		session.LastActivity = t
 	}
 
-	json.Unmarshal([]byte(attachedJSON), &session.AttachedClients)
-	json.Unmarshal([]byte(workersJSON), &session.WorkerIDs)
+	if err := json.Unmarshal([]byte(attachedJSON), &session.AttachedClients); err != nil {
+		s.logger.Warn("Failed to unmarshal session attached_clients JSON", "id", id, "error", err)
+	}
+	if err := json.Unmarshal([]byte(workersJSON), &session.WorkerIDs); err != nil {
+		s.logger.Warn("Failed to unmarshal session worker_ids JSON", "id", id, "error", err)
+	}
 
 	return session
 }
 
 // List returns all sessions that have at least one assistant response, ordered by last activity.
-func (s *SQLiteStore) List() []*Session {
+func (s *SQLiteStore) List() ([]*Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -224,11 +228,15 @@ func (s *SQLiteStore) List() []*Session {
 		ORDER BY s.last_activity DESC`)
 	if err != nil {
 		s.logger.Error("Failed to list sessions", "error", err)
-		return nil
+		return nil, fmt.Errorf("failed to list sessions: %w", err)
 	}
 	defer rows.Close()
 
-	return s.scanSessionRows(rows)
+	sessions := s.scanSessionRows(rows)
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate sessions: %w", err)
+	}
+	return sessions, nil
 }
 
 func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
@@ -263,8 +271,12 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 			session.LastActivity = t
 		}
 
-		json.Unmarshal([]byte(attachedJSON), &session.AttachedClients)
-		json.Unmarshal([]byte(workersJSON), &session.WorkerIDs)
+		if err := json.Unmarshal([]byte(attachedJSON), &session.AttachedClients); err != nil {
+			s.logger.Warn("Failed to unmarshal session attached_clients JSON", "id", id, "error", err)
+		}
+		if err := json.Unmarshal([]byte(workersJSON), &session.WorkerIDs); err != nil {
+			s.logger.Warn("Failed to unmarshal session worker_ids JSON", "id", id, "error", err)
+		}
 
 		sessions = append(sessions, session)
 	}
@@ -283,7 +295,11 @@ func (s *SQLiteStore) Delete(id string) bool {
 		return false
 	}
 
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		s.logger.Warn("Failed to read RowsAffected after Delete", "id", id, "error", err)
+		return false
+	}
 	if rows > 0 {
 		s.logger.Info("Session deleted", "id", id)
 		return true
@@ -333,7 +349,7 @@ func (s *SQLiteStore) Detach(sessionID, clientID string) error {
 }
 
 // UpdateActivity updates the last activity timestamp for a session.
-func (s *SQLiteStore) UpdateActivity(sessionID string) {
+func (s *SQLiteStore) UpdateActivity(sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -341,7 +357,9 @@ func (s *SQLiteStore) UpdateActivity(sessionID string) {
 	_, err := s.db.Exec("UPDATE sessions SET last_activity = ? WHERE id = ?", now, sessionID)
 	if err != nil {
 		s.logger.Error("Failed to update session activity", "id", sessionID, "error", err)
+		return fmt.Errorf("failed to update session activity: %w", err)
 	}
+	return nil
 }
 
 // AddWorker adds a worker ID to a session.

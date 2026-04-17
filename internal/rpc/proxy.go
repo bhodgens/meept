@@ -98,6 +98,7 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("task.list", p.makeProxy("task.list", "task.result", 10*time.Second))
 	server.RegisterHandler("task.list_extended", p.makeProxy("task.list_extended", "task.result", 10*time.Second))
 	server.RegisterHandler("task.update", p.makeProxy("task.update", "task.result", 10*time.Second))
+	server.RegisterHandler("task.cancel", p.makeProxy("task.cancel", "task.result", 10*time.Second))
 	server.RegisterHandler("task.delete", p.makeProxy("task.delete", "task.result", 10*time.Second))
 	server.RegisterHandler("task.link", p.makeProxy("task.link", "task.result", 10*time.Second))
 	server.RegisterHandler("task.unlink", p.makeProxy("task.unlink", "task.result", 10*time.Second))

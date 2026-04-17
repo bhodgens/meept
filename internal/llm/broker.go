@@ -100,8 +100,6 @@ func NewModelBroker(cfg BrokerConfig) *ModelBroker {
 // newChatterFor creates a Chatter for a ModelConfig.
 // Detects Anthropic vs OpenAI-compat and injects metrics/timeout options.
 func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
-	var chatter Chatter
-
 	// Detect Anthropic
 	if cfg.ProviderID == "anthropic" || strings.Contains(strings.ToLower(cfg.BaseURL), "anthropic") {
 		opts := []AnthropicClientOption{
@@ -110,22 +108,29 @@ func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 		if b.config.Budget != nil {
 			opts = append(opts, WithAnthropicBudget(b.config.Budget))
 		}
-		chatter = NewAnthropicClient(cfg, opts...)
-	} else {
-		// OpenAI-compat
-		opts := []ClientOption{
-			WithLogger(b.logger),
+		if b.config.MetricsStore != nil {
+			opts = append(opts, WithAnthropicMetricsStore(b.config.MetricsStore))
 		}
-		if b.config.Budget != nil {
-			opts = append(opts, WithBudget(b.config.Budget))
+		if b.config.TimeoutCalc != nil {
+			opts = append(opts, WithAnthropicTimeoutCalculator(b.config.TimeoutCalc))
 		}
-		chatter = NewClient(cfg, opts...)
+		return NewAnthropicClient(cfg, opts...)
 	}
 
-	// TODO: Inject metrics and timeout calculator options
-	// (deferred to Phase 6 when Client/AnthropicClient support these options)
-
-	return chatter
+	// OpenAI-compat
+	opts := []ClientOption{
+		WithLogger(b.logger),
+	}
+	if b.config.Budget != nil {
+		opts = append(opts, WithBudget(b.config.Budget))
+	}
+	if b.config.MetricsStore != nil {
+		opts = append(opts, WithMetricsStore(b.config.MetricsStore))
+	}
+	if b.config.TimeoutCalc != nil {
+		opts = append(opts, WithTimeoutCalculator(b.config.TimeoutCalc))
+	}
+	return NewClient(cfg, opts...)
 }
 
 // Chat sends a request to the broker, which routes to a healthy provider.

@@ -15,13 +15,13 @@ type ASTQueryTool struct {
 }
 
 // NewASTQueryTool creates a new AST query tool.
-func NewASTQueryTool(parser *ast.ParserManager) *ASTQueryTool {
+func NewASTQueryTool(parser *ast.ParserManager) (*ASTQueryTool, error) {
 	if parser == nil {
-		panic("ast.ParserManager cannot be nil")
+		return nil, fmt.Errorf("ast.ParserManager cannot be nil")
 	}
 	return &ASTQueryTool{
 		executor: ast.NewQueryExecutor(parser),
-	}
+	}, nil
 }
 
 func (t *ASTQueryTool) Name() string { return "ast_query" }

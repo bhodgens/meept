@@ -49,7 +49,7 @@ func NewMemoryStore(logger *slog.Logger) *MemoryStore {
 }
 
 // Create creates a new session.
-func (s *MemoryStore) Create(name string) *Session {
+func (s *MemoryStore) Create(name string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -66,7 +66,7 @@ func (s *MemoryStore) Create(name string) *Session {
 
 	s.sessions[id] = session
 	s.logger.Info("Session created", "id", id, "name", name)
-	return session
+	return session, nil
 }
 
 // Get returns a session by ID.
@@ -104,7 +104,7 @@ func (s *MemoryStore) GetMostRecent() *Session {
 }
 
 // List returns all sessions that have assistant responses.
-func (s *MemoryStore) List() []*Session {
+func (s *MemoryStore) List() ([]*Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -129,7 +129,7 @@ func (s *MemoryStore) List() []*Session {
 		return sessions[i].LastActivity.After(sessions[j].LastActivity)
 	})
 
-	return sessions
+	return sessions, nil
 }
 
 // Delete removes a session.
@@ -193,13 +193,15 @@ func (s *MemoryStore) Detach(sessionID, clientID string) error {
 }
 
 // UpdateActivity updates the last activity timestamp.
-func (s *MemoryStore) UpdateActivity(sessionID string) {
+func (s *MemoryStore) UpdateActivity(sessionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if session, exists := s.sessions[sessionID]; exists {
 		session.LastActivity = time.Now()
+		return nil
 	}
+	return fmt.Errorf("session not found: %s", sessionID)
 }
 
 // AddWorker adds a worker ID to a session.
@@ -507,13 +509,19 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 		return nil, err
 	}
 
-	session := h.store.Create(params.Name)
+	session, err := h.store.Create(params.Name)
+	if err != nil {
+		return nil, err
+	}
 	return session, nil
 }
 
 // handleList lists all sessions.
 func (h *Handler) handleList(msg *models.BusMessage) (any, error) {
-	sessions := h.store.List()
+	sessions, err := h.store.List()
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{"sessions": sessions}, nil
 }
 

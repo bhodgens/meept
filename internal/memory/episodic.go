@@ -74,7 +74,7 @@ type EpisodicConfig struct {
 }
 
 // NewEpisodicMemory creates a new episodic memory instance.
-func NewEpisodicMemory(cfg EpisodicConfig) *EpisodicMemory {
+func NewEpisodicMemory(cfg EpisodicConfig) (*EpisodicMemory, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -91,14 +91,13 @@ func NewEpisodicMemory(cfg EpisodicConfig) *EpisodicMemory {
 
 	store, err := NewSQLiteFTSStore(storeCfg, cfg.Logger)
 	if err != nil {
-		// This shouldn't fail with current implementation
-		panic(fmt.Sprintf("failed to create episodic store: %v", err))
+		return nil, fmt.Errorf("failed to create episodic store: %w", err)
 	}
 
 	return &EpisodicMemory{
 		store:  store,
 		logger: cfg.Logger,
-	}
+	}, nil
 }
 
 // Initialize sets up the database schema and connections.

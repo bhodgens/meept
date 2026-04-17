@@ -228,3 +228,27 @@ func TestShellExecuteTool_WorkingDir(t *testing.T) {
 		}
 	})
 }
+
+// TestShellRisk_ConfigurableAllowlist verifies that an unknown command is
+// classified RiskHigh by default but drops to RiskMedium when added via
+// SetKnownSafeCommands.
+func TestShellRisk_ConfigurableAllowlist(t *testing.T) {
+	tool := NewShellExecuteTool("", time.Second*10)
+
+	// Default: unknown command is RiskHigh.
+	if got := tool.classifyRisk("mytool --flag"); got != RiskHigh {
+		t.Errorf("classifyRisk(mytool) = %v, want RiskHigh before allowlist", got)
+	}
+
+	tool.SetKnownSafeCommands([]string{"mytool"})
+
+	if got := tool.classifyRisk("mytool --flag"); got != RiskMedium {
+		t.Errorf("classifyRisk(mytool) = %v, want RiskMedium after allowlist", got)
+	}
+
+	// Blocked commands remain RiskCritical even if in the allowlist.
+	tool.SetKnownSafeCommands([]string{"rm"})
+	if got := tool.classifyRisk("rm -rf /"); got != RiskCritical {
+		t.Errorf("classifyRisk(rm) = %v, want RiskCritical (blocked list wins)", got)
+	}
+}

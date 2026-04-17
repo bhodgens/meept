@@ -288,6 +288,9 @@ func (s *Store) List(state *TaskState, limit int) ([]*Task, error) {
 		}
 		tasks = append(tasks, task)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate tasks: %w", err)
+	}
 
 	return tasks, nil
 }
@@ -311,9 +314,13 @@ func (s *Store) ListActive() ([]*Task, error) {
 	for rows.Next() {
 		task, err := s.scanTaskRows(rows)
 		if err != nil {
+			s.logger.Error("Failed to scan active task row", "error", err)
 			continue
 		}
 		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate active tasks: %w", err)
 	}
 
 	return tasks, nil

@@ -132,6 +132,7 @@ func (a *ChangeApplier) applyFix(ctx context.Context, fix *ProposedFix) (*Applie
 		CommitHash:        commitHash,
 		RollbackAvailable: backupPath != "",
 		BackupPath:        backupPath,
+		OriginalPath:      fix.FilePath,
 	}
 
 	a.logger.Info("fix applied", "fix_id", fix.ID, "file", fix.FilePath)
@@ -183,10 +184,16 @@ func (a *ChangeApplier) Rollback(applied *AppliedFix) error {
 		return fmt.Errorf("failed to read backup: %w", err)
 	}
 
-	// Restore file (we need to figure out the original path)
-	// For now, we'll use a convention
-	originalPath := strings.TrimSuffix(applied.BackupPath, ".backup")
-	originalPath = filepath.Join(a.projectRoot, filepath.Base(originalPath))
+	// Restore file to its original location. Prefer the explicitly recorded
+	// OriginalPath; fall back to the legacy convention for older AppliedFix
+	// records that pre-date the field.
+	var originalPath string
+	if applied.OriginalPath != "" {
+		originalPath = filepath.Join(a.projectRoot, applied.OriginalPath)
+	} else {
+		legacy := strings.TrimSuffix(applied.BackupPath, ".backup")
+		originalPath = filepath.Join(a.projectRoot, filepath.Base(legacy))
+	}
 
 	if err := os.WriteFile(originalPath, backupContent, 0644); err != nil {
 		return fmt.Errorf("failed to restore file: %w", err)
@@ -272,8 +279,15 @@ func (a *ChangeApplier) hasGit() bool {
 
 // createCommit creates a git commit for the fix.
 func (a *ChangeApplier) createCommit(fix *ProposedFix) (string, error) {
-	// Stage the file
-	cmd := exec.Command("git", "add", fix.FilePath)
+	// Validate fix.FilePath is within projectRoot to prevent path traversal
+	// and arg-injection via leading "-" characters.
+	if err := a.validateFixPath(fix.FilePath); err != nil {
+		return "", err
+	}
+
+	// Stage the file. The `--` separator prevents git from interpreting
+	// a path beginning with `-` as an option flag.
+	cmd := exec.Command("git", "add", "--", fix.FilePath)
 	cmd.Dir = a.projectRoot
 	if err := cmd.Run(); err != nil {
 		return "", err
@@ -298,4 +312,33 @@ func (a *ChangeApplier) createCommit(fix *ProposedFix) (string, error) {
 	}
 
 	return strings.TrimSpace(string(output)), nil
+}
+
+// validateFixPath ensures that a relative file path resolves inside the
+// project root and does not escape via "..", symlinks, or absolute paths.
+// Paths beginning with "-" are rejected to defend against arg-injection
+// (callers should also pass "--" to the git invocation).
+func (a *ChangeApplier) validateFixPath(relPath string) error {
+	if relPath == "" {
+		return fmt.Errorf("fix file path is empty")
+	}
+	if strings.HasPrefix(relPath, "-") {
+		return fmt.Errorf("fix file path starts with '-': %q", relPath)
+	}
+	if filepath.IsAbs(relPath) {
+		return fmt.Errorf("fix file path must be relative: %q", relPath)
+	}
+
+	absRoot, err := filepath.Abs(a.projectRoot)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	absTarget, err := filepath.Abs(filepath.Join(absRoot, relPath))
+	if err != nil {
+		return fmt.Errorf("resolve fix path: %w", err)
+	}
+	if absTarget != absRoot && !strings.HasPrefix(absTarget, absRoot+string(filepath.Separator)) {
+		return fmt.Errorf("fix file path escapes project root: %q", relPath)
+	}
+	return nil
 }

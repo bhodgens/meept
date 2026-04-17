@@ -21,14 +21,14 @@ type LSPDiagnosticsTool struct {
 }
 
 // NewLSPDiagnosticsTool creates a new LSP diagnostics tool.
-func NewLSPDiagnosticsTool(manager *lsp.Manager) *LSPDiagnosticsTool {
+func NewLSPDiagnosticsTool(manager *lsp.Manager) (*LSPDiagnosticsTool, error) {
 	if manager == nil {
-		panic("lsp.Manager cannot be nil")
+		return nil, fmt.Errorf("lsp.Manager cannot be nil")
 	}
 	return &LSPDiagnosticsTool{
 		manager:     manager,
 		diagnostics: make(map[string][]lsp.Diagnostic),
-	}
+	}, nil
 }
 
 func (t *LSPDiagnosticsTool) Name() string { return "lsp_diagnostics" }

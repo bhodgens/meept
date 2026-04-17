@@ -247,20 +247,24 @@ func (rm *ReviewManager) parseReviewResult(output string) *ReviewResult {
 }
 
 // HandleReviewResult processes a review result and updates step state.
-func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, result *ReviewResult) error {
+// Returns any newly-created revision step(s) so that callers with scheduling
+// responsibilities (e.g. TacticalScheduler) can enqueue them.
+func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, result *ReviewResult) ([]*task.TaskStep, error) {
 	step, err := rm.stepStore.GetByID(stepID)
 	if err != nil {
-		return fmt.Errorf("failed to get step: %w", err)
+		return nil, fmt.Errorf("failed to get step: %w", err)
 	}
 	if step == nil {
-		return fmt.Errorf("step not found: %s", stepID)
+		return nil, fmt.Errorf("step not found: %s", stepID)
 	}
+
+	var revisions []*task.TaskStep
 
 	switch result.Status {
 	case ReviewApproved:
 		// Mark as approved (terminal state)
 		if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
-			return fmt.Errorf("failed to set approved state: %w", err)
+			return nil, fmt.Errorf("failed to set approved state: %w", err)
 		}
 		rm.logger.Info("Step approved", "step_id", step.ID, "feedback", result.Feedback)
 
@@ -278,7 +282,7 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 	case ReviewRejected:
 		// Mark as rejected
 		if err := rm.stepStore.SetState(step.ID, task.StepRejected); err != nil {
-			return fmt.Errorf("failed to set rejected state: %w", err)
+			return nil, fmt.Errorf("failed to set rejected state: %w", err)
 		}
 		if err := rm.stepStore.SetResult(step.ID, result.Feedback); err != nil {
 			rm.logger.Error("Failed to set rejection feedback", "error", err)
@@ -294,6 +298,7 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 				"revision_id", revision.ID,
 				"original_id", step.ID,
 			)
+			revisions = append(revisions, revision)
 		}
 
 	case ReviewNeedsInfo:
@@ -304,7 +309,7 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		rm.logger.Info("Step needs more info", "step_id", step.ID)
 	}
 
-	return nil
+	return revisions, nil
 }
 
 // publishReviewEvent publishes a review completion event.

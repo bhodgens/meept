@@ -491,7 +491,9 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 			if maxTok, ok := payload["max_tokens"].(int); ok {
 				record.CompletionTokens = maxTok / 2 // Very rough estimate
 			}
-			_ = c.metricsStore.Record(context.Background(), record)
+			if rerr := c.metricsStore.Record(context.Background(), record); rerr != nil {
+				c.logger.Debug("metrics record failed", "error", rerr)
+			}
 		}()
 	}
 
@@ -572,7 +574,9 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 				ErrorType:        metrics.ErrorTypeNone,
 				Success:          true,
 			}
-			_ = c.metricsStore.Record(context.Background(), record)
+			if rerr := c.metricsStore.Record(context.Background(), record); rerr != nil {
+				c.logger.Debug("metrics record failed", "error", rerr)
+			}
 		}()
 	}
 

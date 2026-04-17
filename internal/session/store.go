@@ -14,7 +14,7 @@ type Message struct {
 // Store defines the interface for session persistence.
 type Store interface {
 	// Create creates a new session with the given name.
-	Create(name string) *Session
+	Create(name string) (*Session, error)
 
 	// Get retrieves a session by ID.
 	Get(id string) *Session
@@ -26,7 +26,7 @@ type Store interface {
 	GetMostRecent() *Session
 
 	// List returns all sessions.
-	List() []*Session
+	List() ([]*Session, error)
 
 	// Delete removes a session by ID.
 	Delete(id string) bool
@@ -38,7 +38,7 @@ type Store interface {
 	Detach(sessionID, clientID string) error
 
 	// UpdateActivity updates the last activity timestamp for a session.
-	UpdateActivity(sessionID string)
+	UpdateActivity(sessionID string) error
 
 	// AddWorker adds a worker ID to a session.
 	AddWorker(sessionID, workerID string) error

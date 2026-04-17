@@ -7,11 +7,22 @@ import (
 	"time"
 )
 
+// mustNewEpisodicMemory wraps NewEpisodicMemory with a t.Fatalf on error,
+// for terser test setup.
+func mustNewEpisodicMemory(t *testing.T, cfg EpisodicConfig) *EpisodicMemory {
+	t.Helper()
+	mem, err := NewEpisodicMemory(cfg)
+	if err != nil {
+		t.Fatalf("NewEpisodicMemory: %v", err)
+	}
+	return mem
+}
+
 func TestEpisodicMemoryInitialize(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -32,7 +43,7 @@ func TestEpisodicMemoryStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -68,7 +79,7 @@ func TestEpisodicMemorySearch(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -119,7 +130,7 @@ func TestEpisodicMemoryGetRecent(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -158,7 +169,7 @@ func TestEpisodicMemoryGetByCategory(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -194,7 +205,7 @@ func TestEpisodicMemoryDelete(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -233,7 +244,7 @@ func TestEpisodicMemoryDeleteByIDs(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -275,7 +286,7 @@ func TestEpisodicMemoryTimestamps(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -329,7 +340,7 @@ func TestEpisodicMemoryTimestamps(t *testing.T) {
 }
 
 func TestEpisodicMemoryNotInitialized(t *testing.T) {
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: "/tmp/test",
 	})
 
@@ -356,7 +367,7 @@ func TestEpisodicMemoryEmptySearch(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -395,7 +406,7 @@ func TestEpisodicMemoryGetOldMemories(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -437,7 +448,7 @@ func TestEpisodicMemoryMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewEpisodicMemory(EpisodicConfig{
+	mem := mustNewEpisodicMemory(t,EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 

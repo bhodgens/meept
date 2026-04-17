@@ -217,10 +217,14 @@ func (m *Manager) Initialize(ctx context.Context) error {
 func (m *Manager) initSQLiteBackends(ctx context.Context) error {
 	if m.config.Episodic.Enabled {
 		episodicDir := filepath.Join(m.dataDir, "episodic")
-		m.episodic = NewEpisodicMemory(EpisodicConfig{
+		episodic, err := NewEpisodicMemory(EpisodicConfig{
 			DataDir: episodicDir,
 			Logger:  m.logger.With("subsystem", "episodic"),
 		})
+		if err != nil {
+			return fmt.Errorf("failed to create episodic memory: %w", err)
+		}
+		m.episodic = episodic
 		if err := m.episodic.Initialize(ctx); err != nil {
 			return fmt.Errorf("failed to initialize episodic memory: %w", err)
 		}
@@ -242,11 +246,15 @@ func (m *Manager) initSQLiteBackends(ctx context.Context) error {
 		if len(domains) == 0 {
 			domains = []string{"general", "code", "commands"}
 		}
-		m.task = NewTaskMemory(TaskMemoryConfig{
+		taskMem, err := NewTaskMemory(TaskMemoryConfig{
 			DataDir: taskDir,
 			Domains: domains,
 			Logger:  m.logger.With("subsystem", "task"),
 		})
+		if err != nil {
+			return fmt.Errorf("failed to create task memory: %w", err)
+		}
+		m.task = taskMem
 		if err := m.task.Initialize(ctx); err != nil {
 			return fmt.Errorf("failed to initialize task memory: %w", err)
 		}

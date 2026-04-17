@@ -7,11 +7,22 @@ import (
 	"time"
 )
 
+// mustNewTaskMemory wraps NewTaskMemory with a t.Fatalf on error,
+// for terser test setup.
+func mustNewTaskMemory(t *testing.T, cfg TaskMemoryConfig) *TaskMemory {
+	t.Helper()
+	mem, err := NewTaskMemory(cfg)
+	if err != nil {
+		t.Fatalf("NewTaskMemory: %v", err)
+	}
+	return mem
+}
+
 func TestTaskMemoryInitialize(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(TaskMemoryConfig{
+	mem := mustNewTaskMemory(t,TaskMemoryConfig{
 		DataDir: filepath.Join(tmpDir, "task"),
 		Domains: []string{"general", "code", "commands"},
 	})
@@ -33,7 +44,7 @@ func TestTaskMemoryStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -69,7 +80,7 @@ func TestTaskMemorySearchByDomain(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -107,7 +118,7 @@ func TestTaskMemoryGetRecent(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -152,7 +163,7 @@ func TestTaskMemoryFindDuplicates(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -186,7 +197,7 @@ func TestTaskMemoryDelete(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -212,7 +223,7 @@ func TestTaskMemoryDeleteByIDs(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -254,7 +265,7 @@ func TestTaskMemoryTimestamps(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -296,7 +307,7 @@ func TestTaskMemoryDefaultDomain(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -321,7 +332,7 @@ func TestTaskMemoryDefaultDomain(t *testing.T) {
 }
 
 func TestTaskMemoryNotInitialized(t *testing.T) {
-	mem := NewTaskMemory(TaskMemoryConfig{
+	mem := mustNewTaskMemory(t,TaskMemoryConfig{
 		DataDir: "/tmp/test",
 	})
 
@@ -343,7 +354,7 @@ func TestTaskMemoryRelevanceScore(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -383,7 +394,7 @@ func TestTaskMemoryMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {
@@ -417,7 +428,7 @@ func TestTaskMemorySource(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := NewTaskMemory(DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
+	mem := mustNewTaskMemory(t,DefaultTaskMemoryConfig(filepath.Join(tmpDir, "task")))
 
 	err := mem.Initialize(ctx)
 	if err != nil {

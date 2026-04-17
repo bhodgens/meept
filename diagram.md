@@ -349,6 +349,16 @@ Two paths exist for agents to receive work:
 
 Jobs specify `agent_id` to target a specific agent. Unassigned jobs can be claimed by any agent matching required capabilities.
 
+### Bus topics (non-exhaustive)
+
+| Topic | Publisher | Subscriber | Payload |
+|-------|-----------|------------|---------|
+| `chat.request` | RPC handler | Agent loop | User chat input |
+| `task.create` / `task.result` | RPC proxy | Task handler | Task CRUD |
+| `task.cancel` | RPC / TUI | Task handler | `{id}` → flips state to `cancelled` |
+| `selfimprove.status` | `selfimprove.Controller.publishStatus` | Bus subscribers / observability | `{phase, data}` per cycle phase |
+| `scheduler.reminder` | `scheduler.ReminderJob` | Agents | Reminder message |
+
 ## Package Structure
 
 | Layer | Packages | Description |

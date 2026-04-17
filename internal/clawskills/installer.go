@@ -234,6 +234,11 @@ func (i *Installer) extractZip(data []byte, targetDir string) error {
 	// Remove existing directory
 	os.RemoveAll(targetDir)
 
+	absTargetDir, err := filepath.Abs(targetDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve target dir: %w", err)
+	}
+
 	for _, file := range reader.File {
 		// Security: prevent path traversal
 		name := filepath.Clean(file.Name)
@@ -243,6 +248,17 @@ func (i *Installer) extractZip(data []byte, targetDir string) error {
 		}
 
 		targetPath := filepath.Join(targetDir, name)
+
+		// Containment check: resolved target must live under absTargetDir.
+		absTarget, aerr := filepath.Abs(targetPath)
+		if aerr != nil {
+			i.logger.Warn("skipping unresolvable path in zip", "path", file.Name, "error", aerr)
+			continue
+		}
+		if absTarget != absTargetDir && !strings.HasPrefix(absTarget, absTargetDir+string(filepath.Separator)) {
+			i.logger.Warn("skipping zip entry outside target dir", "path", file.Name, "resolved", absTarget)
+			continue
+		}
 
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(targetPath, 0755); err != nil {
