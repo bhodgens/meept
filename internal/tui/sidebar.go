@@ -895,7 +895,9 @@ func (s *SidebarModel) View() string {
 	content.WriteString("\n") // newline after header (starts panels on next line)
 	content.WriteString(panels)
 	if vizHeight > 0 {
-		content.WriteString("\n") // blank line before viz
+		// Blank line before viz: panels already ends with content (no trailing \n),
+		// so we need \n to end panels line, then empty string, then \n to start viz.
+		content.WriteString("\n\n") // ends panel line + blank line
 		content.WriteString(vizContent)
 	}
 
