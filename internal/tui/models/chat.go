@@ -4,6 +4,8 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -115,6 +117,9 @@ type ChatModel struct {
 	pasteCounter     int
 	lastInputValue   string // For detecting pastes
 	lastInputLines   int    // Line count at last check
+
+	// File attachments - paths dragged/pasted into the input
+	attachments []string
 
 	// Mouse selection state
 	mouseDown      bool
@@ -641,10 +646,8 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Only handle mouse wheel scrolling in viewport. Text selection is
-		// handled by the terminal natively (toggle with Ctrl+M) so we do not
-		// consume left-button events here - that avoids distortion from custom
-		// highlight rendering and unwanted auto-copy on release.
+		// Mouse wheel scrolls viewport. Text selection via native terminal
+		// selection (hold Shift in most terminals to bypass mouse capture).
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			m.viewport.LineUp(3)
@@ -999,6 +1002,12 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				m.textarea.SetValue(compressedValue)
 			}
 		}
+
+		// Detect file path drops/pastes: check for newly added path-like content
+		// that refers to an existing file. Only trigger on paste (not typing).
+		if newValue != oldValue && len(newValue) > len(oldValue) {
+			m.detectAndAttachFile(oldValue, newValue)
+		}
 	}
 
 	// Update viewport for scrolling
@@ -1093,17 +1102,28 @@ func (m *ChatModel) trackDirtyMessage(role, content string) {
 // doSendMessage handles the common logic for sending a message.
 func (m *ChatModel) doSendMessage() tea.Cmd {
 	text := strings.TrimSpace(m.textarea.Value())
-	if text == "" {
+	if text == "" && len(m.attachments) == 0 {
 		return nil
 	}
 
 	// Expand paste tokens to get actual message content
 	actualText := m.expandPasteTokens(text)
 
+	// Prepend attachment file references for the LLM context
+	if len(m.attachments) > 0 {
+		var attachmentRefs []string
+		for _, path := range m.attachments {
+			// Include file path as context for the LLM
+			attachmentRefs = append(attachmentRefs, fmt.Sprintf("[Attached file: %s]", path))
+		}
+		actualText = strings.Join(attachmentRefs, "\n") + "\n\n" + actualText
+	}
+
 	// Add to history buffer (with tokens for display)
 	m.addToHistory(text)
 
 	m.textarea.Reset()
+	m.attachments = nil // Clear attachments after sending
 
 	// Clear compressed pastes after sending
 	m.compressedPastes = make(map[int]string)
@@ -1508,8 +1528,21 @@ func (m *ChatModel) View() string {
 		inputBorder = m.focusedBorder
 	}
 
-	// Add history indicator if browsing
-	inputStyle := inputBorder.Width(m.width - 2)
+	// Build input area: optional attachments line + textarea
+	var inputContent strings.Builder
+
+	// Show attached files in orange [filename.ext] format
+	if len(m.attachments) > 0 {
+		attachStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316")) // orange
+		var attachLabels []string
+		for _, path := range m.attachments {
+			name := filepath.Base(path)
+			attachLabels = append(attachLabels, attachStyle.Render("["+name+"]"))
+		}
+		inputContent.WriteString(strings.Join(attachLabels, " "))
+		inputContent.WriteString("\n")
+	}
+
 	inputView := m.textarea.View()
 	if m.historyIdx >= 0 {
 		history := m.currentHistory()
@@ -1519,7 +1552,10 @@ func (m *ChatModel) View() string {
 			Render(fmt.Sprintf(" [history %d/%d]", m.historyIdx+1, len(history)))
 		inputView = inputView + historyIndicator
 	}
-	b.WriteString(inputStyle.Render(inputView))
+	inputContent.WriteString(inputView)
+
+	inputStyle := inputBorder.Width(m.width - 2)
+	b.WriteString(inputStyle.Render(inputContent.String()))
 
 	return b.String()
 }
@@ -1871,4 +1907,71 @@ func parseTaskResult(reply string) *taskResultInfo {
 		Result:    result.Result,
 		Error:     result.Error,
 	}
+}
+
+// detectAndAttachFile checks if new input content contains a file path and
+// converts it to an attachment (shown as [filename] in the UI).
+func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
+	// Find what was added
+	added := ""
+	for i := 0; i < len(oldValue) && i < len(newValue); i++ {
+		if oldValue[i] != newValue[i] {
+			added = newValue[i:]
+			break
+		}
+	}
+	if added == "" && len(newValue) > len(oldValue) {
+		added = newValue[len(oldValue):]
+	}
+
+	// Trim whitespace and check if it looks like a file path
+	candidate := strings.TrimSpace(added)
+	if candidate == "" {
+		return
+	}
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(candidate, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			candidate = filepath.Join(home, candidate[2:])
+		}
+	}
+
+	// Must be an absolute path
+	if !filepath.IsAbs(candidate) {
+		return
+	}
+
+	// Check if file exists and is a regular file
+	info, err := os.Stat(candidate)
+	if err != nil || info.IsDir() {
+		return
+	}
+
+	// Avoid duplicates
+	for _, existing := range m.attachments {
+		if existing == candidate {
+			return
+		}
+	}
+
+	// Add to attachments and remove from textarea
+	m.attachments = append(m.attachments, candidate)
+
+	// Remove the path from the textarea, keeping other content
+	// Find and remove the added path segment from current textarea value
+	currentVal := m.textarea.Value()
+	cleaned := strings.Replace(currentVal, added, "", 1)
+	cleaned = strings.TrimSpace(cleaned)
+	m.textarea.SetValue(cleaned)
+}
+
+// GetAttachments returns the list of attached file paths.
+func (m *ChatModel) GetAttachments() []string {
+	return m.attachments
+}
+
+// ClearAttachments removes all attachments.
+func (m *ChatModel) ClearAttachments() {
+	m.attachments = nil
 }

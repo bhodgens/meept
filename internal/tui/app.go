@@ -38,9 +38,10 @@ const (
 
 // App is the main bubbletea model for the TUI.
 type App struct {
-	width       int
-	height      int
-	styles      *Styles
+	width        int
+	height       int
+	sidebarWidth int // cached for status bar width calculation
+	styles       *Styles
 	rpc         *RPCClient
 	eventRPC    *RPCClient // Separate connection for event polling
 	currentView ViewType
@@ -251,20 +252,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Calculate sidebar width (30% of screen when visible, max 40 chars)
-		sidebarWidth := 0
+		a.sidebarWidth = 0
 		if a.sidebar.IsVisible() {
-			sidebarWidth = msg.Width * 30 / 100
-			if sidebarWidth > 40 {
-				sidebarWidth = 40
+			a.sidebarWidth = msg.Width * 30 / 100
+			if a.sidebarWidth > 40 {
+				a.sidebarWidth = 40
 			}
-			if sidebarWidth < 20 {
-				sidebarWidth = 20
+			if a.sidebarWidth < 20 {
+				a.sidebarWidth = 20
 			}
 		}
-		a.sidebar.SetSize(sidebarWidth, msg.Height-chromeHeight)
+		a.sidebar.SetSize(a.sidebarWidth, msg.Height-chromeHeight)
 
 		// Update sub-models with remaining width
-		mainWidth := msg.Width - sidebarWidth
+		mainWidth := msg.Width - a.sidebarWidth
 		a.chat.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.tasks.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
@@ -1002,9 +1003,11 @@ func (a *App) renderStatusBar() string {
 
 	content := strings.Join(parts, " │ ")
 
+	// Status bar spans only the main content area (excludes sidebar)
+	statusWidth := a.width - a.sidebarWidth
 	return a.styles.StatusBar.
-		Width(a.width).
-		MaxWidth(a.width).
+		Width(statusWidth).
+		MaxWidth(statusWidth).
 		Render(content)
 }
 
