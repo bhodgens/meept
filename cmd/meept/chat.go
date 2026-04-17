@@ -71,7 +71,8 @@ func runTUI(socketPath string) error {
 	app := tui.NewApp(socketPath)
 	p := tea.NewProgram(app,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(), // Capture scroll wheel; hold Shift to select text
+		// No mouse capture - allows native terminal text selection.
+		// Viewport scrolling via keyboard: j/k, arrows, PgUp/PgDn.
 	)
 	_, err := p.Run()
 	return err

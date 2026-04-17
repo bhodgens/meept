@@ -646,37 +646,9 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Mouse wheel scrolls viewport (always works regardless of focus).
-		// NOTE: Scroll wheel must remain active even during text selection
-		// so users can scroll while selecting text across visible area.
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
-			m.viewport.LineUp(3)
-			return nil
-		case tea.MouseButtonWheelDown:
-			m.viewport.LineDown(3)
-			return nil
-		}
-
-		// Text selection in viewport area only (Y < viewport height + border).
-		// Input area uses native terminal selection.
-		viewportMaxY := m.viewport.Height + 2 // +2 for border
-		if msg.Y < viewportMaxY {
-			switch msg.Action {
-			case tea.MouseActionPress:
-				if msg.Button == tea.MouseButtonLeft {
-					return m.handleMousePress(msg)
-				}
-			case tea.MouseActionMotion:
-				if m.mouseDown {
-					return m.handleMouseDrag(msg)
-				}
-			case tea.MouseActionRelease:
-				if msg.Button == tea.MouseButtonLeft {
-					return m.handleMouseRelease(msg)
-				}
-			}
-		}
+		// Mouse capture is disabled to allow native terminal text selection.
+		// This case remains for potential future use but currently does nothing.
+		// Viewport scrolling is keyboard-only: j/k, arrows, PgUp/PgDn.
 		return nil
 
 	case tea.KeyMsg:
@@ -1537,15 +1509,9 @@ func (m *ChatModel) View() string {
 		Width(m.width - 2).
 		Height(m.viewport.Height)
 
-	// Render viewport content, applying selection highlight if active.
-	// Note: highlighting works on stripped content which may affect styling
-	// in the selected region, but restores outside the selection.
-	viewportContent := m.viewport.View()
-	if m.hasSelection() {
-		selStyle := "\033[7m" // reverse video for selection highlight
-		viewportContent = m.applySelectionHighlight(viewportContent, selStyle)
-	}
-	b.WriteString(viewportStyle.Render(viewportContent))
+	// Render viewport content. Text selection is native terminal selection
+	// (mouse capture disabled), so no app-level highlighting needed.
+	b.WriteString(viewportStyle.Render(m.viewport.View()))
 	b.WriteString("\n")
 
 	// Input textarea with focus-dependent border
