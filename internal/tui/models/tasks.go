@@ -143,6 +143,9 @@ func (m *TasksModel) SetSize(width, height int) {
 }
 
 func (m *TasksModel) setJobsColumns() {
+	// Clear rows before changing columns to prevent panic from row/column mismatch
+	m.table.SetRows([]table.Row{})
+
 	colWidth := (m.width - 20) / 4
 	if colWidth < 10 {
 		colWidth = 10
@@ -156,6 +159,9 @@ func (m *TasksModel) setJobsColumns() {
 }
 
 func (m *TasksModel) setTasksColumns() {
+	// Clear rows before changing columns to prevent panic from row/column mismatch
+	m.table.SetRows([]table.Row{})
+
 	// Task view columns: Name | State | Agent | Steps | Progress | Memory | Updated
 	available := m.width - 10 // borders/padding
 	nameW := available * 22 / 100
@@ -380,6 +386,9 @@ func (m *TasksModel) updateTable() {
 		}
 	}
 	m.table.SetRows(rows)
+	if len(rows) > 0 {
+		m.table.GotoTop()
+	}
 }
 
 func (m *TasksModel) filterTasks() []types.TaskExtended {
@@ -487,6 +496,9 @@ func (m *TasksModel) updateTasksTable() {
 		}
 	}
 	m.table.SetRows(rows)
+	if len(rows) > 0 {
+		m.table.GotoTop()
+	}
 }
 
 func (m *TasksModel) getStateIcon(state string) string {
