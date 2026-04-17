@@ -256,14 +256,15 @@ func (m *ChatModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 
-	// Fixed input height (like Crush uses 5 lines total with border)
+	// Fixed input height (5 lines total with border)
 	const inputContentHeight = 3
-	inputWithBorder := inputContentHeight + 2 // 5 total lines
 
-	// Layout: viewport(+border) + gap(1) + input(+border)
-	// Total = viewportContent + 2 + 1 + inputContent + 2 = viewportContent + inputContent + 5
-	// So: viewportContent = height - inputContent - 5
-	viewportHeight := height - inputContentHeight - 5
+	// Layout: viewport(+border) followed immediately by input(+border).
+	// View() joins them with a single "\n" which is a line separator, NOT
+	// an extra blank row. So total chrome = viewport border(2) + input border(2)
+	// + input content(inputContentHeight) = 4 + inputContentHeight.
+	// viewportContent = height - inputContent - 4
+	viewportHeight := height - inputContentHeight - 4
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -284,9 +285,6 @@ func (m *ChatModel) SetSize(width, height int) {
 		m.messages[i].rendered = ""
 		m.messages[i].renderedAt = 0
 	}
-
-	// Suppress unused variable warning
-	_ = inputWithBorder
 }
 
 // Init initializes the chat model.
@@ -643,7 +641,10 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Handle mouse wheel scrolling in viewport
+		// Only handle mouse wheel scrolling in viewport. Text selection is
+		// handled by the terminal natively (toggle with Ctrl+M) so we do not
+		// consume left-button events here - that avoids distortion from custom
+		// highlight rendering and unwanted auto-copy on release.
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			m.viewport.LineUp(3)
@@ -651,18 +652,6 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		case tea.MouseButtonWheelDown:
 			m.viewport.LineDown(3)
 			return nil
-		case tea.MouseButtonLeft:
-			// Handle left click for text selection
-			switch msg.Action {
-			case tea.MouseActionPress:
-				return m.handleMousePress(msg)
-			case tea.MouseActionRelease:
-				return m.handleMouseRelease(msg)
-			case tea.MouseActionMotion:
-				if m.mouseDown {
-					return m.handleMouseDrag(msg)
-				}
-			}
 		}
 		return nil
 
@@ -1507,15 +1496,10 @@ func (m *ChatModel) View() string {
 		Width(m.width - 2).
 		Height(m.viewport.Height)
 
-	// Get viewport content and apply selection highlighting if active
-	viewportContent := m.viewport.View()
-	if m.hasSelection() {
-		// Use ANSI escape sequence for selection highlight (reverse video)
-		selectionStyle := "\033[7m" // Reverse video
-		viewportContent = m.applySelectionHighlight(viewportContent, selectionStyle)
-	}
-
-	b.WriteString(viewportStyle.Render(viewportContent))
+	// Render the viewport content without custom selection highlighting.
+	// Custom highlighting previously stripped all ANSI codes from the content,
+	// which destroyed message styling and caused visible distortion during drag.
+	b.WriteString(viewportStyle.Render(m.viewport.View()))
 	b.WriteString("\n")
 
 	// Input textarea with focus-dependent border
@@ -1806,21 +1790,10 @@ func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
-// handleMouseRelease handles mouse button release to finalize selection.
+// handleMouseRelease handles mouse button release. Text is NOT automatically
+// copied on release; selection is handled natively by the terminal.
 func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDown = false
-
-	if m.isSelecting && m.selectionStart != m.selectionEnd {
-		// Copy selected text to clipboard
-		selectedText := m.extractSelectedText()
-		if selectedText != "" {
-			// Clear selection state after a brief moment to show feedback
-			return func() tea.Msg {
-				return CopyToClipboardMsg{Text: selectedText}
-			}
-		}
-	}
-
 	return nil
 }
 

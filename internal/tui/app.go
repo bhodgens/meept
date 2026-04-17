@@ -3,7 +3,6 @@ package tui
 import (
 	"encoding/base64"
 	"fmt"
-	"image"
 	"os"
 	"os/exec"
 	"runtime"
@@ -36,11 +35,6 @@ const (
 	FocusChat AppFocus = iota
 	FocusSidebar
 )
-
-// Rect represents component bounds for click detection.
-type Rect struct {
-	X, Y, Width, Height int
-}
 
 // App is the main bubbletea model for the TUI.
 type App struct {
@@ -91,17 +85,9 @@ type App struct {
 	lastCtrlD      time.Time
 	doublePressTTL time.Duration
 
-	// Mouse mode toggle (for text selection)
-	mouseEnabled bool
-
 	// Tab flash indicator (shows notification dot on tab)
 	tabFlash     map[ViewType]bool
 	tabFlashTime time.Time
-
-	// Component bounds for click-to-focus
-	sidebarBounds  Rect
-	viewportBounds Rect
-	inputBounds    Rect
 
 	// Error state
 	err error
@@ -177,7 +163,6 @@ func NewApp(socketPath string) *App {
 		projectDir:     projectDir,
 		activeModal:    ModalNone,
 		doublePressTTL: 500 * time.Millisecond,
-		mouseEnabled:   true, // Mouse mode enabled by default
 		tabFlash:       make(map[ViewType]bool),
 	}
 
@@ -196,7 +181,6 @@ func (a *App) Init() tea.Cmd {
 		a.loadSession,
 		tea.EnterAltScreen,
 		tea.SetWindowTitle("Meept"),
-		tea.EnableMouseCellMotion,
 	)
 }
 
@@ -262,10 +246,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Calculate reserved height for chrome (header + status bar)
 		chromeHeight := 1 // status bar
-		headerHeight := 0
 		if a.clientConfig.Rendering.ShowHeader {
 			chromeHeight = 2 // header + status bar
-			headerHeight = 1
 		}
 
 		// Calculate sidebar width (30% of screen when visible, max 40 chars)
@@ -288,31 +270,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)
 
-		// Update component bounds for click-to-focus
-		// Fixed input height (3 lines content + 2 for border = 5 total)
-		const inputContentHeight = 3
-		inputBoundsHeight := inputContentHeight + 2
-
-		// Calculate viewport bounds height
-		// Layout: viewport(+border) + gap(1) + input(+border)
-		// Total contentHeight = viewportContent + 2 + 1 + inputContent + 2
-		// So: viewportBoundsHeight = contentHeight - 1 - inputBoundsHeight
-		contentHeight := msg.Height - chromeHeight
-		viewportBoundsHeight := contentHeight - inputBoundsHeight - 1 // -1 for \n gap in View()
-		if viewportBoundsHeight < 3 { // minimum: 1 content + 2 border
-			viewportBoundsHeight = 3
-		}
-
-		a.viewportBounds = Rect{X: 0, Y: headerHeight, Width: mainWidth, Height: viewportBoundsHeight}
-		// inputBounds.Y = headerHeight + viewportBoundsHeight + 1 (for the \n gap)
-		a.inputBounds = Rect{X: 0, Y: headerHeight + viewportBoundsHeight + 1, Width: mainWidth, Height: inputBoundsHeight}
-		a.sidebarBounds = Rect{X: mainWidth, Y: headerHeight, Width: sidebarWidth, Height: contentHeight}
-
 		return a, nil
-
-	case tea.MouseMsg:
-		// Handle mouse events for click-to-focus and scrolling
-		return a.handleMouseMsg(msg)
 
 	case tea.KeyMsg:
 		// Handle Ctrl+C - double-press to exit, single press to stop work or show hint
@@ -375,28 +333,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalSessionPicker
 			a.sessionPicker.Show()
 			return a, a.sessionPicker.RefreshSessions()
-		}
-
-		// Check for Ctrl+M to toggle mouse mode (for text selection)
-		if msg.String() == "ctrl+m" {
-			a.mouseEnabled = !a.mouseEnabled
-			if a.mouseEnabled {
-				a.statusMessage = "mouse mode enabled"
-				return a, tea.Batch(
-					tea.EnableMouseCellMotion,
-					tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-						return StatusMessageClearMsg{}
-					}),
-				)
-			} else {
-				a.statusMessage = "select mode - use cmd+c to copy"
-				return a, tea.Batch(
-					tea.DisableMouse,
-					tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-						return StatusMessageClearMsg{}
-					}),
-				)
-			}
 		}
 
 		// Global escape handler
@@ -656,17 +592,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, doCopy(msg.Text)
 
 	case CopySuccessMsg:
-		// Show success feedback
-		preview := msg.Text
-		if len(preview) > 30 {
-			preview = preview[:30] + "..."
-		}
-		a.statusMessage = fmt.Sprintf("Copied: %s", preview)
-		a.statusMessageTime = time.Now()
-		// Clear message after 2 seconds
-		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-			return StatusMessageClearMsg{}
-		})
+		// Copy silently - do not display a "Copied: ..." status message.
+		return a, nil
 
 	case CopyErrorMsg:
 		a.statusMessage = fmt.Sprintf("Copy failed: %v", msg.Err)
@@ -1052,14 +979,6 @@ func (a *App) renderStatusBar() string {
 		statusStyle = a.styles.StatusRunning
 	}
 
-	// Mouse mode indicator
-	mouseIndicator := "[mouse]"
-	mouseStyle := a.styles.Muted
-	if !a.mouseEnabled {
-		mouseIndicator = "[select]"
-		mouseStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")) // Orange/yellow
-	}
-
 	// Project directory (shortened)
 	projectDisplay := a.projectDir
 	maxProjectLen := 25
@@ -1075,7 +994,6 @@ func (a *App) renderStatusBar() string {
 		parts = append(parts, a.styles.StatusRunning.Render(a.statusMessage))
 	} else {
 		parts = append(parts, statusStyle.Render(connectionStatus))
-		parts = append(parts, mouseStyle.Render(mouseIndicator))
 		// Add context-sensitive quick actions
 		quickActions := a.getQuickActions()
 		parts = append(parts, quickActions...)
@@ -1140,13 +1058,6 @@ func (a *App) getQuickActions() []string {
 	// Add sidebar toggle hint if sidebar is hidden
 	if !a.sidebar.IsVisible() {
 		actions = append(actions, a.styles.HelpKey.Render("^X y")+" "+a.styles.HelpValue.Render("sidebar"))
-	}
-
-	// Add mouse mode toggle hint
-	if a.mouseEnabled {
-		actions = append(actions, a.styles.HelpKey.Render("^M")+" "+a.styles.HelpValue.Render("select"))
-	} else {
-		actions = append(actions, a.styles.HelpKey.Render("^M")+" "+a.styles.HelpValue.Render("mouse"))
 	}
 
 	return actions
@@ -1233,103 +1144,6 @@ func doCopy(text string) tea.Cmd {
 
 // StatusMessageClearMsg clears the status message.
 type StatusMessageClearMsg struct{}
-
-// handleMouseMsg processes mouse events for click-to-focus and scrolling.
-func (a *App) handleMouseMsg(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	// If mouse mode is disabled, don't process any mouse events
-	// (allows terminal to handle text selection natively)
-	if !a.mouseEnabled {
-		return a, nil
-	}
-
-	// Also allow native text selection when Shift is held
-	if msg.Shift {
-		return a, nil
-	}
-
-	// Check if session picker modal is active and handle mouse clicks
-	if a.activeModal == ModalSessionPicker && a.sessionPicker.IsVisible() {
-		cmd := a.sessionPicker.HandleMouse(msg, a.width, a.height)
-		if cmd != nil {
-			a.activeModal = ModalNone
-			return a, cmd
-		}
-	}
-
-	// Convert bounds to image.Rectangle for cleaner hit testing
-	pt := image.Pt(msg.X, msg.Y)
-	inputRect := a.rectToImageRect(a.inputBounds)
-	viewportRect := a.rectToImageRect(a.viewportBounds)
-	sidebarRect := a.rectToImageRect(a.sidebarBounds)
-
-	// Handle mouse wheel scrolling - ALWAYS scroll viewport, never input
-	// This matches Crush's behavior where mouse wheel scrolls the viewport only
-	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
-		if a.currentView == ViewChat {
-			// Mouse wheel always scrolls viewport (not input)
-			return a, a.chat.Update(msg)
-		}
-		return a, nil
-	}
-
-	// Handle left click - focus switching AND text selection
-	if msg.Button == tea.MouseButtonLeft {
-		// Check input area FIRST (it's rendered after viewport in the layout)
-		// This ensures clicking in input doesn't accidentally focus viewport
-		if a.currentView == ViewChat && pt.In(inputRect) {
-			// Set focus on press
-			if msg.Action == tea.MouseActionPress {
-				a.appFocus = FocusChat
-				a.sidebar.SetFocused(false)
-				a.chat.SetFocus(models.FocusInput)
-			}
-			// Forward to chat model for input selection handling
-			// Convert screen coordinates to input-relative coordinates
-			relY := msg.Y - a.inputBounds.Y
-			relX := msg.X - a.inputBounds.X
-			inputMsg := tea.MouseMsg{
-				X:      relX,
-				Y:      relY,
-				Button: msg.Button,
-				Action: msg.Action,
-				Ctrl:   msg.Ctrl,
-				Alt:    msg.Alt,
-				Shift:  msg.Shift,
-			}
-			return a, a.chat.HandleInputMouse(inputMsg)
-		}
-
-		// In viewport: forward ALL actions (press/motion/release) for text selection
-		if a.currentView == ViewChat && pt.In(viewportRect) {
-			// Set focus on press
-			if msg.Action == tea.MouseActionPress {
-				a.appFocus = FocusChat
-				a.sidebar.SetFocused(false)
-				a.chat.SetFocus(models.FocusViewport)
-			}
-			// Forward to chat model for selection handling
-			return a, a.chat.Update(msg)
-		}
-
-		// Handle press in sidebar for focus
-		if msg.Action == tea.MouseActionPress {
-			if pt.In(sidebarRect) && a.sidebar.IsVisible() {
-				a.appFocus = FocusSidebar
-				a.sidebar.SetFocused(true)
-				relX := msg.X - a.sidebarBounds.X
-				relY := msg.Y - a.sidebarBounds.Y
-				return a, a.sidebar.HandleClick(relX, relY)
-			}
-		}
-	}
-
-	return a, nil
-}
-
-// rectToImageRect converts our Rect to image.Rectangle for hit testing.
-func (a *App) rectToImageRect(r Rect) image.Rectangle {
-	return image.Rect(r.X, r.Y, r.X+r.Width, r.Y+r.Height)
-}
 
 // stopCurrentWork stops the current session's work and prompts for child tasks.
 func (a *App) stopCurrentWork() tea.Cmd {

@@ -498,8 +498,11 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, s.handleTokenEvent(e))
 			case "conversation.reset":
 				cmds = append(cmds, s.handleContextResetEvent(e))
-			case "worker.state_changed":
-				cmds = append(cmds, s.handleWorkerStateEvent(e))
+			case "worker.started", "worker.completed", "worker.error", "worker.state_changed":
+				// Worker lifecycle + progress events: refresh data so the viz
+				// picks up the new worker state immediately instead of
+				// waiting for the next periodic poll tick.
+				cmds = append(cmds, s.refreshData())
 			case "task.progress":
 				s.handleTaskProgressEvent(e)
 				cmds = append(cmds, s.refreshData())
@@ -706,25 +709,6 @@ func (s *SidebarModel) handleContextResetEvent(e BusEvent) tea.Cmd {
 	}
 }
 
-// handleWorkerStateEvent converts a worker.state_changed event to a ProgressUpdateMsg.
-func (s *SidebarModel) handleWorkerStateEvent(e BusEvent) tea.Cmd {
-	return func() tea.Msg {
-		payloadMap, ok := e.Payload.(map[string]any)
-		if !ok {
-			return nil
-		}
-
-		var currentTool string
-		if v, ok := payloadMap["current_tool"].(string); ok {
-			currentTool = v
-		}
-
-		return models.ProgressUpdateMsg{
-			CurrentTool: currentTool,
-		}
-	}
-}
-
 // handleTaskProgressEvent updates the current step for a task from progress events.
 func (s *SidebarModel) handleTaskProgressEvent(e BusEvent) {
 	payloadMap, ok := e.Payload.(map[string]any)
@@ -915,14 +899,25 @@ func (s *SidebarModel) View() string {
 		content.WriteString(vizContent)
 	}
 
-	// Apply container style
+	// Constrain the inner content to exactly innerHeight rows of the sidebar
+	// content width. Panels that wrap to multiple visual rows at narrow
+	// widths would otherwise push the sidebar taller than the chat view and
+	// introduce blank padding rows beneath the chat input in JoinHorizontal.
+	innerStyle := lipgloss.NewStyle().
+		Width(contentWidth).
+		Height(innerHeight).
+		MaxHeight(innerHeight)
+	innerRendered := innerStyle.Render(content.String())
+
+	// Apply border + padding wrapper. Content is already exactly innerHeight
+	// rows so the wrapped total is innerHeight + 2 (top/bottom border) =
+	// s.height, matching chat.View() and preventing vertical mismatch.
 	containerStyle := lipgloss.NewStyle().
-		Width(s.width - 2).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(0, 1)
 
-	return containerStyle.Render(content.String())
+	return containerStyle.Render(innerRendered)
 }
 
 func (s *SidebarModel) renderPanelHeader(title string, panel SidebarPanel) string {

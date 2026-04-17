@@ -77,18 +77,10 @@ func (m *ChatModel) handleInputMouseDrag(msg tea.MouseMsg) tea.Cmd {
 }
 
 // handleInputMouseRelease handles mouse button release for input selection.
+// Text is NOT automatically copied on release - the user must explicitly
+// request a copy via keyboard.
 func (m *ChatModel) handleInputMouseRelease(msg tea.MouseMsg) tea.Cmd {
 	m.inputMouseDown = false
-
-	if m.inputIsSelecting && m.inputSelectionStart != m.inputSelectionEnd {
-		selectedText := m.extractInputSelectedText()
-		if selectedText != "" {
-			return func() tea.Msg {
-				return CopyToClipboardMsg{Text: selectedText}
-			}
-		}
-	}
-
 	return nil
 }
 

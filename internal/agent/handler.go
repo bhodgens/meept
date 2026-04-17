@@ -84,7 +84,11 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	taskCompletedSub := h.bus.Subscribe("chat-handler", "task.completed")
 	taskFailedSub := h.bus.Subscribe("chat-handler", "task.failed")
 
-	h.wg.Add(4)
+	// Subscribe to agent progress events to keep worker state in sync with
+	// the agent loop's stage transitions (thinking vs. executing tools).
+	progressSub := h.bus.Subscribe("chat-handler", "agent.progress")
+
+	h.wg.Add(5)
 
 	// Chat request handler
 	go func() {
@@ -154,8 +158,75 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Agent progress handler - syncs worker state with loop stage transitions
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(progressSub)
+				return
+			case msg, ok := <-progressSub.Channel:
+				if !ok {
+					return
+				}
+				h.handleAgentProgress(msg)
+			}
+		}
+	}()
+
 	h.logger.Info("ChatHandler started")
 	return nil
+}
+
+// handleAgentProgress updates worker state/current tool based on agent.progress
+// events so the TUI viz reflects reasoning vs tool-execution phases.
+func (h *ChatHandler) handleAgentProgress(msg *models.BusMessage) {
+	var payload struct {
+		ConversationID string `json:"conversation_id"`
+		Stage          string `json:"stage"`
+		Detail         string `json:"detail"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		return
+	}
+	if payload.ConversationID == "" {
+		return
+	}
+
+	h.workersMu.Lock()
+	defer h.workersMu.Unlock()
+	for _, w := range h.workers {
+		if w.ConversationID != payload.ConversationID {
+			continue
+		}
+		// Don't override terminal states.
+		if w.State == "completed" || w.State == "error" {
+			continue
+		}
+		changed := false
+		switch payload.Stage {
+		case "executing":
+			if w.State != "executing_tool" || w.CurrentTool != payload.Detail {
+				w.State = "executing_tool"
+				w.CurrentTool = payload.Detail
+				changed = true
+			}
+		case "thinking":
+			if w.State != "processing" || w.CurrentTool != "" {
+				w.State = "processing"
+				w.CurrentTool = ""
+				changed = true
+			}
+		}
+		w.LastActivity = time.Now()
+		if changed {
+			// Snapshot before releasing the lock so the publish goroutine
+			// doesn't race with future mutations of w.
+			snapshot := *w
+			go h.publishWorkerEvent("worker.state_changed", &snapshot)
+		}
+	}
 }
 
 // handleWorkerListRequest responds to worker list queries.

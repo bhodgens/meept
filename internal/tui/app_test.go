@@ -312,43 +312,24 @@ func TestApp_EscapeFromOtherView(t *testing.T) {
 func TestApp_CopySuccessMessage(t *testing.T) {
 	app := createTestApp()
 
-	// Simulate copy success
-	newModel, cmd := app.Update(CopySuccessMsg{Text: "test text"})
+	// Copy success should be silent: no status message displayed.
+	newModel, _ := app.Update(CopySuccessMsg{Text: "test text"})
 	newApp := newModel.(*App)
 
-	if !strings.Contains(newApp.statusMessage, "Copied") {
-		t.Error("expected status message to contain 'Copied'")
-	}
-	if cmd == nil {
-		t.Error("expected command to clear message after timeout")
-	}
-}
-
-func TestApp_CopySuccessMessageTruncation(t *testing.T) {
-	app := createTestApp()
-
-	// Simulate copy success with long text
-	longText := strings.Repeat("a", 100)
-	newModel, _ := app.Update(CopySuccessMsg{Text: longText})
-	newApp := newModel.(*App)
-
-	if !strings.Contains(newApp.statusMessage, "...") {
-		t.Error("expected long text to be truncated with '...'")
+	if newApp.statusMessage != "" {
+		t.Errorf("expected no status message on copy success, got %q", newApp.statusMessage)
 	}
 }
 
 func TestApp_CopyErrorMessage(t *testing.T) {
 	app := createTestApp()
 
-	// Simulate copy error
-	newModel, cmd := app.Update(CopyErrorMsg{Err: &testError{"copy failed"}})
+	// Copy errors should still surface to the user.
+	newModel, _ := app.Update(CopyErrorMsg{Err: &testError{"copy failed"}})
 	newApp := newModel.(*App)
 
 	if !strings.Contains(newApp.statusMessage, "Copy failed") {
 		t.Error("expected status message to contain error")
-	}
-	if cmd == nil {
-		t.Error("expected command to clear message after timeout")
 	}
 }
 
