@@ -62,10 +62,10 @@ func TestApp_ViewSwitching_Modal(t *testing.T) {
 		key          string
 		expectedView ViewType
 	}{
-		{"switch to chat", "1", ViewChat},
-		{"switch to tasks", "2", ViewTasks},
-		{"switch to queue", "3", ViewQueue},
-		{"switch to memory", "4", ViewMemory},
+		{"switch to chat", "c", ViewChat},
+		{"switch to tasks", "t", ViewTasks},
+		{"switch to queue", "q", ViewQueue},
+		{"switch to memory", "m", ViewMemory},
 	}
 
 	for _, tt := range tests {
