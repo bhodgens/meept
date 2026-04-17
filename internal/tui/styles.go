@@ -144,9 +144,8 @@ func DefaultStyles() *Styles {
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(ColorPrimary)
 
-	// Status styles
+	// Status styles - no background to avoid grey bar overflow
 	s.StatusBar = lipgloss.NewStyle().
-		Background(ColorBackground).
 		Foreground(ColorForeground).
 		Padding(0, 1)
 

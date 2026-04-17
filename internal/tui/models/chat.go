@@ -646,8 +646,9 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Mouse wheel scrolls viewport. Text selection via native terminal
-		// selection (hold Shift in most terminals to bypass mouse capture).
+		// Mouse wheel scrolls viewport (always works regardless of focus).
+		// NOTE: Scroll wheel must remain active even during text selection
+		// so users can scroll while selecting text across visible area.
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			m.viewport.LineUp(3)
@@ -655,6 +656,26 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		case tea.MouseButtonWheelDown:
 			m.viewport.LineDown(3)
 			return nil
+		}
+
+		// Text selection in viewport area only (Y < viewport height + border).
+		// Input area uses native terminal selection.
+		viewportMaxY := m.viewport.Height + 2 // +2 for border
+		if msg.Y < viewportMaxY {
+			switch msg.Action {
+			case tea.MouseActionPress:
+				if msg.Button == tea.MouseButtonLeft {
+					return m.handleMousePress(msg)
+				}
+			case tea.MouseActionMotion:
+				if m.mouseDown {
+					return m.handleMouseDrag(msg)
+				}
+			case tea.MouseActionRelease:
+				if msg.Button == tea.MouseButtonLeft {
+					return m.handleMouseRelease(msg)
+				}
+			}
 		}
 		return nil
 
@@ -1516,10 +1537,15 @@ func (m *ChatModel) View() string {
 		Width(m.width - 2).
 		Height(m.viewport.Height)
 
-	// Render the viewport content without custom selection highlighting.
-	// Custom highlighting previously stripped all ANSI codes from the content,
-	// which destroyed message styling and caused visible distortion during drag.
-	b.WriteString(viewportStyle.Render(m.viewport.View()))
+	// Render viewport content, applying selection highlight if active.
+	// Note: highlighting works on stripped content which may affect styling
+	// in the selected region, but restores outside the selection.
+	viewportContent := m.viewport.View()
+	if m.hasSelection() {
+		selStyle := "\033[7m" // reverse video for selection highlight
+		viewportContent = m.applySelectionHighlight(viewportContent, selStyle)
+	}
+	b.WriteString(viewportStyle.Render(viewportContent))
 	b.WriteString("\n")
 
 	// Input textarea with focus-dependent border
@@ -1826,10 +1852,19 @@ func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
-// handleMouseRelease handles mouse button release. Text is NOT automatically
-// copied on release; selection is handled natively by the terminal.
+// handleMouseRelease handles mouse button release. Copies selected text to clipboard.
 func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDown = false
+
+	// Copy selected text to clipboard if there is a selection
+	if m.hasSelection() {
+		text := m.extractSelectedText()
+		if text != "" {
+			return func() tea.Msg {
+				return CopyToClipboardMsg{Text: text}
+			}
+		}
+	}
 	return nil
 }
 
