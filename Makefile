@@ -49,7 +49,6 @@ CLI := $(BIN_DIR)/meept
 
 # Build flags
 GO_LDFLAGS := -s -w
-GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 
 # Version info (if available from git)
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -59,6 +58,8 @@ BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 # Inject version info
 GO_LDFLAGS_VERSION := -X github.com/caimlas/meept/internal/version.Version=$(VERSION) -X github.com/caimlas/meept/internal/version.Commit=$(COMMIT) -X github.com/caimlas/meept/internal/version.BuildTime=$(BUILD_TIME)
 
+# Build flags (after version info so it can reference GO_LDFLAGS_VERSION)
+GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 # =============================================================================
 # Setup
 # =============================================================================
