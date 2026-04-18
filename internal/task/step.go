@@ -38,9 +38,18 @@ func (s StepState) String() string {
 }
 
 // IsTerminal returns true if the step is in a terminal state.
-// Approved steps are also terminal - they're ready to be treated as completed.
+// Terminal states indicate no more direct work will be done on this step:
+// - Completed/Approved: work succeeded
+// - Failed/Skipped: work cannot proceed
+// - Rejected: work finished but failed review; a revision step handles the redo
 func (s StepState) IsTerminal() bool {
-	return s == StepCompleted || s == StepApproved || s == StepFailed || s == StepSkipped
+	return s == StepCompleted || s == StepApproved || s == StepFailed || s == StepSkipped || s == StepRejected
+}
+
+// IsSuccessfullyTerminal returns true if the step completed successfully.
+// Used for task completion checks where rejected steps need revisions.
+func (s StepState) IsSuccessfullyTerminal() bool {
+	return s == StepCompleted || s == StepApproved
 }
 
 // TaskStep represents a single step within a task's execution plan.
@@ -399,7 +408,12 @@ func (s *StepStore) SetResult(id, result string) error {
 }
 
 // AreAllCompleted returns true if all steps for a task are in a terminal state
-// and none have failed.
+// and the task can be considered successfully completed.
+//
+// A task is complete when:
+// - All steps are in a terminal state
+// - No steps have failed (StepFailed)
+// - All rejected steps have a successful revision (completed/approved)
 func (s *StepStore) AreAllCompleted(taskID string) (bool, error) {
 	steps, err := s.ListByTaskID(taskID)
 	if err != nil {
@@ -410,12 +424,41 @@ func (s *StepStore) AreAllCompleted(taskID string) (bool, error) {
 		return false, nil
 	}
 
+	// Build a map of step states and track which rejected steps have successful revisions
+	stepStates := make(map[string]StepState)
+	rejectedSteps := make(map[string]bool) // stepID -> has successful revision
+
+	for _, step := range steps {
+		stepStates[step.ID] = step.State
+		if step.State == StepRejected {
+			rejectedSteps[step.ID] = false // initially no successful revision
+		}
+	}
+
+	// Check for successful revisions of rejected steps
+	// A revision depends on the original step, so check DependsOn
+	for _, step := range steps {
+		if step.State.IsSuccessfullyTerminal() {
+			for _, depID := range step.DependsOn {
+				if _, isRejected := rejectedSteps[depID]; isRejected {
+					rejectedSteps[depID] = true // this rejected step has a successful revision
+				}
+			}
+		}
+	}
+
 	for _, step := range steps {
 		if !step.State.IsTerminal() {
 			return false, nil
 		}
 		if step.State == StepFailed {
 			return false, nil
+		}
+		// Check rejected steps have successful revisions
+		if step.State == StepRejected {
+			if !rejectedSteps[step.ID] {
+				return false, nil // rejected without successful revision
+			}
 		}
 	}
 

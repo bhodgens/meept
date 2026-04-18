@@ -387,7 +387,10 @@ func TestStepState_IsTerminal(t *testing.T) {
 		{StepReady, false},
 		{StepScheduled, false},
 		{StepRunning, false},
+		{StepReviewing, false},
 		{StepCompleted, true},
+		{StepApproved, true},
+		{StepRejected, true}, // Rejected is terminal - revision step handles redo
 		{StepFailed, true},
 		{StepSkipped, true},
 	}
@@ -397,6 +400,136 @@ func TestStepState_IsTerminal(t *testing.T) {
 		if got != tt.terminal {
 			t.Errorf("state %q: expected IsTerminal=%v, got %v", tt.state, tt.terminal, got)
 		}
+	}
+}
+
+func TestStepState_IsSuccessfullyTerminal(t *testing.T) {
+	tests := []struct {
+		state   StepState
+		success bool
+	}{
+		{StepPending, false},
+		{StepReady, false},
+		{StepScheduled, false},
+		{StepRunning, false},
+		{StepReviewing, false},
+		{StepCompleted, true},
+		{StepApproved, true},
+		{StepRejected, false}, // Rejected is NOT successfully terminal
+		{StepFailed, false},
+		{StepSkipped, false},
+	}
+
+	for _, tt := range tests {
+		got := tt.state.IsSuccessfullyTerminal()
+		if got != tt.success {
+			t.Errorf("state %q: expected IsSuccessfullyTerminal=%v, got %v", tt.state, tt.success, got)
+		}
+	}
+}
+
+func TestStepStore_AreAllCompleted_WithRejectedAndRevision(t *testing.T) {
+	store := newTestStepStore(t)
+
+	// Create original step and set it to rejected
+	original := NewTaskStep("task-1", "original work", 0)
+	original.ID = "step-original"
+	if err := store.Create(original); err != nil {
+		t.Fatalf("Create original failed: %v", err)
+	}
+	if err := store.SetState("step-original", StepRejected); err != nil {
+		t.Fatalf("SetState rejected failed: %v", err)
+	}
+
+	// Task should NOT be complete - rejected step without revision
+	done, err := store.AreAllCompleted("task-1")
+	if err != nil {
+		t.Fatalf("AreAllCompleted failed: %v", err)
+	}
+	if done {
+		t.Error("expected task NOT complete with rejected step without revision")
+	}
+
+	// Create revision step that depends on original
+	revision := NewTaskStep("task-1", "revision work", 1)
+	revision.ID = "step-revision"
+	revision.DependsOn = []string{"step-original"}
+	if err := store.Create(revision); err != nil {
+		t.Fatalf("Create revision failed: %v", err)
+	}
+
+	// Set revision to completed
+	if err := store.SetState("step-revision", StepCompleted); err != nil {
+		t.Fatalf("SetState completed failed: %v", err)
+	}
+
+	// Now task SHOULD be complete - rejected step has successful revision
+	done, err = store.AreAllCompleted("task-1")
+	if err != nil {
+		t.Fatalf("AreAllCompleted failed: %v", err)
+	}
+	if !done {
+		t.Error("expected task complete when rejected step has successful revision")
+	}
+}
+
+func TestStepStore_AreAllCompleted_MultipleRejections(t *testing.T) {
+	store := newTestStepStore(t)
+
+	// Create two steps, both rejected
+	step1 := NewTaskStep("task-1", "step 1", 0)
+	step1.ID = "step-1"
+	step2 := NewTaskStep("task-1", "step 2", 1)
+	step2.ID = "step-2"
+
+	for _, s := range []*TaskStep{step1, step2} {
+		if err := store.Create(s); err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		if err := store.SetState(s.ID, StepRejected); err != nil {
+			t.Fatalf("SetState rejected failed: %v", err)
+		}
+	}
+
+	// Create revisions
+	rev1 := NewTaskStep("task-1", "rev 1", 2)
+	rev1.ID = "rev-1"
+	rev1.DependsOn = []string{"step-1"}
+
+	rev2 := NewTaskStep("task-1", "rev 2", 3)
+	rev2.ID = "rev-2"
+	rev2.DependsOn = []string{"step-2"}
+
+	for _, s := range []*TaskStep{rev1, rev2} {
+		if err := store.Create(s); err != nil {
+			t.Fatalf("Create revision failed: %v", err)
+		}
+	}
+
+	// Only one revision approved - should not be complete
+	if err := store.SetState("rev-1", StepApproved); err != nil {
+		t.Fatalf("SetState approved failed: %v", err)
+	}
+
+	done, err := store.AreAllCompleted("task-1")
+	if err != nil {
+		t.Fatalf("AreAllCompleted failed: %v", err)
+	}
+	if done {
+		t.Error("expected task NOT complete - rev-2 is still pending")
+	}
+
+	// Both revisions approved - should be complete
+	if err := store.SetState("rev-2", StepApproved); err != nil {
+		t.Fatalf("SetState approved failed: %v", err)
+	}
+
+	done, err = store.AreAllCompleted("task-1")
+	if err != nil {
+		t.Fatalf("AreAllCompleted failed: %v", err)
+	}
+	if !done {
+		t.Error("expected task complete - all rejected steps have successful revisions")
 	}
 }
 

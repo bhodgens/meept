@@ -837,7 +837,7 @@ func (s *SidebarModel) View() string {
 
 	// Calculate available height for scrollable panel content
 	// innerHeight - headerLines - vizHeight - 1 (blank before viz)
-	availableForPanels := innerHeight - headerLines - vizHeight - 1
+	availableForPanels := innerHeight - headerLines - vizHeight - 5 // -1 header, -1 blank before viz, -4 bottom padding
 	if availableForPanels < 3 {
 		availableForPanels = 3
 	}
@@ -899,6 +899,7 @@ func (s *SidebarModel) View() string {
 		// so we need \n to end panels line, then empty string, then \n to start viz.
 		content.WriteString("\n\n") // ends panel line + blank line
 		content.WriteString(vizContent)
+		content.WriteString("\n\n\n\n") // 4 lines bottom padding so viz isn't cut off
 	}
 
 	// Constrain the inner content to exactly innerHeight rows of the sidebar

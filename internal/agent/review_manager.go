@@ -187,11 +187,11 @@ func (rm *ReviewManager) parseReviewResult(output string) *ReviewResult {
 		Confidence: 0.5,
 	}
 
-	// Try to extract JSON from the output
-	jsonPattern := regexp.MustCompile(`\{[^{}]*"status"\s*:\s*"[^"]*"[^{}]*\}`)
-	matches := jsonPattern.FindStringSubmatch(output)
+	// Try to extract JSON from the output using multiple strategies
+	jsonStr := rm.extractReviewJSON(output)
+	jsonParsed := false
 
-	if len(matches) > 0 {
+	if jsonStr != "" {
 		var parsed struct {
 			Status     string   `json:"status"`
 			Feedback   string   `json:"feedback"`
@@ -199,13 +199,14 @@ func (rm *ReviewManager) parseReviewResult(output string) *ReviewResult {
 			Confidence float64  `json:"confidence"`
 		}
 
-		if err := json.Unmarshal([]byte(matches[0]), &parsed); err == nil {
-			switch parsed.Status {
-			case "approved":
+		if err := json.Unmarshal([]byte(jsonStr), &parsed); err == nil {
+			jsonParsed = true
+			switch strings.ToLower(parsed.Status) {
+			case "approved", "approve", "pass", "lgtm":
 				result.Status = ReviewApproved
-			case "rejected":
+			case "rejected", "reject", "fail":
 				result.Status = ReviewRejected
-			case "needs_info":
+			case "needs_info", "needsinfo", "needs-info", "info":
 				result.Status = ReviewNeedsInfo
 			}
 
@@ -221,19 +222,20 @@ func (rm *ReviewManager) parseReviewResult(output string) *ReviewResult {
 		}
 	}
 
-	// Fallback: analyze text for decision
-	outputLower := strings.ToLower(output)
-	if strings.Contains(outputLower, "reject") || strings.Contains(outputLower, "needs revision") {
-		result.Status = ReviewRejected
+	// Fallback: analyze text for decision ONLY if JSON parsing failed
+	// Use phrase matching to avoid false positives from negations
+	if !jsonParsed {
+		result.Status, result.Confidence = rm.analyzeReviewText(output)
 	}
 
-	// Extract feedback from non-JSON parts
+	// Extract feedback from non-JSON parts if needed
 	if result.Feedback == "No explicit feedback provided" && len(output) > 0 {
-		// Remove JSON part if present
 		feedback := output
-		if len(matches) > 0 {
-			feedback = strings.ReplaceAll(output, matches[0], "")
+		if jsonStr != "" {
+			feedback = strings.ReplaceAll(output, jsonStr, "")
 		}
+		// Remove markdown code fences
+		feedback = regexp.MustCompile("```[\\s\\S]*?```").ReplaceAllString(feedback, "")
 		feedback = strings.TrimSpace(feedback)
 		if len(feedback) > 500 {
 			feedback = feedback[:500] + "..."
@@ -244,6 +246,113 @@ func (rm *ReviewManager) parseReviewResult(output string) *ReviewResult {
 	}
 
 	return result
+}
+
+// extractReviewJSON attempts to extract valid JSON containing a status field from output.
+func (rm *ReviewManager) extractReviewJSON(output string) string {
+	// Strategy 1: Check if the entire output is valid JSON
+	trimmed := strings.TrimSpace(output)
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		if json.Valid([]byte(trimmed)) && strings.Contains(trimmed, `"status"`) {
+			return trimmed
+		}
+	}
+
+	// Strategy 2: Extract from markdown code fence
+	codeBlockPattern := regexp.MustCompile("```(?:json)?\\s*\\n?([\\s\\S]*?)\\n?```")
+	if matches := codeBlockPattern.FindStringSubmatch(output); len(matches) > 1 {
+		candidate := strings.TrimSpace(matches[1])
+		if json.Valid([]byte(candidate)) && strings.Contains(candidate, `"status"`) {
+			return candidate
+		}
+	}
+
+	// Strategy 3: Find JSON object by balanced braces
+	start := strings.Index(output, "{")
+	if start >= 0 {
+		depth := 0
+		for i := start; i < len(output); i++ {
+			switch output[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					candidate := output[start : i+1]
+					if json.Valid([]byte(candidate)) && strings.Contains(candidate, `"status"`) {
+						return candidate
+					}
+					break
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+// analyzeReviewText performs text analysis to determine review status.
+// It uses phrase matching to avoid false positives from negations.
+func (rm *ReviewManager) analyzeReviewText(output string) (ReviewStatus, float64) {
+	lower := strings.ToLower(output)
+
+	// Check for explicit rejection phrases (high confidence)
+	rejectionPhrases := []string{
+		"i reject",
+		"this is rejected",
+		"status: rejected",
+		"my verdict is reject",
+		"decision: reject",
+		"must be rejected",
+		"should be rejected",
+		"needs revision",
+		"requires revision",
+		"cannot approve",
+		"cannot be approved",
+		"do not approve",
+		"fails review",
+		"review: fail",
+	}
+	for _, phrase := range rejectionPhrases {
+		if strings.Contains(lower, phrase) {
+			return ReviewRejected, 0.8
+		}
+	}
+
+	// Check for explicit approval phrases (high confidence)
+	approvalPhrases := []string{
+		"i approve",
+		"this is approved",
+		"status: approved",
+		"my verdict is approve",
+		"decision: approve",
+		"looks good",
+		"lgtm",
+		"passes review",
+		"review: pass",
+	}
+	for _, phrase := range approvalPhrases {
+		if strings.Contains(lower, phrase) {
+			return ReviewApproved, 0.8
+		}
+	}
+
+	// Check for needs_info phrases
+	needsInfoPhrases := []string{
+		"need more info",
+		"needs more information",
+		"unclear",
+		"please clarify",
+		"cannot determine",
+	}
+	for _, phrase := range needsInfoPhrases {
+		if strings.Contains(lower, phrase) {
+			return ReviewNeedsInfo, 0.7
+		}
+	}
+
+	// Default to approved with low confidence if no clear signal
+	return ReviewApproved, 0.3
 }
 
 // HandleReviewResult processes a review result and updates step state.
@@ -299,6 +408,16 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 				"original_id", step.ID,
 			)
 			revisions = append(revisions, revision)
+
+			// Update task TotalJobs to include the new revision step
+			if rm.taskStore != nil {
+				if t, err := rm.taskStore.GetByID(step.TaskID); err == nil && t != nil {
+					t.IncrementJobs()
+					if err := rm.taskStore.Update(t); err != nil {
+						rm.logger.Error("Failed to update task TotalJobs for revision", "error", err)
+					}
+				}
+			}
 		}
 
 	case ReviewNeedsInfo:

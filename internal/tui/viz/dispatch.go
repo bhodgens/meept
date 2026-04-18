@@ -37,12 +37,12 @@ type DispatchViz struct {
 }
 
 // NewDispatchViz creates a new dispatch visualization with the given width.
-// Height is calculated to be compact.
+// Height is calculated to give more vertical space for the animation.
 func NewDispatchViz(width int) *DispatchViz {
-	// Calculate height - very compact visualization (width/6 ratio)
-	height := width / 6
-	if height < 2 {
-		height = 2
+	// Calculate height - visualization (compact, width/5 ratio)
+	height := width / 5
+	if height < 4 {
+		height = 4
 	}
 
 	v := &DispatchViz{
@@ -104,9 +104,9 @@ func (v *DispatchViz) SetSize(width int) {
 	}
 
 	v.width = width
-	v.height = width / 6
-	if v.height < 2 {
-		v.height = 2
+	v.height = width / 5
+	if v.height < 4 {
+		v.height = 4
 	}
 
 	// Preserve robot states before reinitializing
