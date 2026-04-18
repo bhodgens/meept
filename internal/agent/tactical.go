@@ -105,7 +105,47 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 }
 
 // scheduleStep creates a queue job for a single step.
+// It validates that all dependencies are satisfied before scheduling.
 func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskStep) error {
+	// Validate dependencies before scheduling (defense in depth)
+	if len(step.DependsOn) > 0 {
+		allSteps, err := ts.stepStore.ListByTaskID(step.TaskID)
+		if err != nil {
+			return fmt.Errorf("failed to list steps for dependency check: %w", err)
+		}
+
+		stateMap := make(map[string]task.StepState)
+		for _, s := range allSteps {
+			stateMap[s.ID] = s.State
+		}
+
+		for _, depID := range step.DependsOn {
+			depState, ok := stateMap[depID]
+			if !ok {
+				ts.logger.Warn("Step dependency not found, skipping schedule",
+					"step_id", step.ID,
+					"missing_dep", depID,
+				)
+				return fmt.Errorf("dependency %s not found", depID)
+			}
+			if !depState.IsTerminal() {
+				ts.logger.Warn("Step dependency not terminal, skipping schedule",
+					"step_id", step.ID,
+					"dep_id", depID,
+					"dep_state", depState,
+				)
+				return fmt.Errorf("dependency %s not terminal (state: %s)", depID, depState)
+			}
+			if depState == task.StepFailed {
+				ts.logger.Warn("Step dependency failed, skipping schedule",
+					"step_id", step.ID,
+					"dep_id", depID,
+				)
+				return fmt.Errorf("dependency %s failed", depID)
+			}
+		}
+	}
+
 	// Select agent based on tool hint
 	agentID := ts.selectAgent(step)
 	step.AgentID = agentID
@@ -142,11 +182,13 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 		ts.logger.Error("Failed to set step state to scheduled", "step_id", step.ID, "error", err)
 	}
 
-	ts.logger.Info("Step scheduled as job",
+	ts.logger.Info("ASSIGN step scheduled",
 		"step_id", step.ID,
 		"job_id", job.ID,
 		"agent_id", agentID,
 		"task_id", step.TaskID,
+		"tool_hint", step.ToolHint,
+		"description", truncateString(step.Description, 80),
 	)
 
 	return nil
@@ -268,6 +310,18 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		executionTime := t.ExecutionTime().Round(time.Second).String()
 		resultSummary := ts.buildResultSummary(stepSummaries)
 
+		// Extract unique agents used
+		agentSet := make(map[string]struct{})
+		for _, s := range stepSummaries {
+			if agentID, ok := s["agent_id"].(string); ok && agentID != "" {
+				agentSet[agentID] = struct{}{}
+			}
+		}
+		agentsUsed := make([]string, 0, len(agentSet))
+		for agent := range agentSet {
+			agentsUsed = append(agentsUsed, agent)
+		}
+
 		ts.publishEvent("task.completed", map[string]any{
 			"task_id":         step.TaskID,
 			"name":            t.Name,
@@ -277,12 +331,15 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"steps":           stepSummaries,
 			"execution_time":  executionTime,
 			"result":          resultSummary,
+			"agents_used":     agentsUsed,
 		})
 
-		ts.logger.Info("Task completed",
+		ts.logger.Info("DONE task completed",
 			"task_id", step.TaskID,
-			"completed", t.CompletedJobs,
-			"total", t.TotalJobs,
+			"steps_completed", t.CompletedJobs,
+			"steps_total", t.TotalJobs,
+			"agents_used", agentsUsed,
+			"duration", executionTime,
 		)
 	} else {
 		// Get next step description for progress update
@@ -307,9 +364,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 // handleReviewResult processes a review result and updates step state accordingly.
 // It delegates the state-machine logic to ReviewManager.HandleReviewResult
 // (the canonical implementation) and then adds tactical-specific side
-// effects: scheduling any created revision steps, and forcing a NeedsInfo
-// step into the completed state so the task can proceed while humans
-// optionally intervene.
+// effects: promoting and scheduling revision steps through the proper
+// dependency-checking flow, and forcing a NeedsInfo step into the completed
+// state so the task can proceed while humans optionally intervene.
 func (ts *TacticalScheduler) handleReviewResult(ctx context.Context, step *task.TaskStep, result *ReviewResult) error {
 	if ts.reviewManager == nil {
 		return fmt.Errorf("tactical scheduler has no ReviewManager")
@@ -320,21 +377,38 @@ func (ts *TacticalScheduler) handleReviewResult(ctx context.Context, step *task.
 		return err
 	}
 
-	// Schedule any newly-created revision steps.
-	for _, rev := range revisions {
-		if err := ts.scheduleStep(ctx, rev); err != nil {
-			ts.logger.Error("Failed to schedule revision step",
-				"revision_id", rev.ID,
-				"error", err,
-			)
-		}
-	}
-
 	// NeedsInfo: tactical forces completion so the overall task can proceed;
 	// humans can intervene out-of-band if needed.
 	if result.Status == ReviewNeedsInfo {
 		if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
 			ts.logger.Error("Failed to set step to completed", "error", err)
+		}
+	}
+
+	// If revisions were created, use proper promotion flow to respect dependencies.
+	// Revision steps depend on the rejected step (now terminal) and possibly other
+	// dependencies from the original step that may not yet be complete.
+	if len(revisions) > 0 {
+		// Promote any steps that are now ready (all dependencies terminal)
+		promoted, err := ts.stepStore.PromoteReadySteps(step.TaskID)
+		if err != nil {
+			ts.logger.Error("Failed to promote ready steps after review",
+				"task_id", step.TaskID,
+				"error", err,
+			)
+		} else if len(promoted) > 0 {
+			ts.logger.Info("Promoted steps after review",
+				"task_id", step.TaskID,
+				"count", len(promoted),
+			)
+		}
+
+		// Schedule any newly ready steps (may include revisions)
+		if err := ts.ScheduleReadySteps(ctx, step.TaskID); err != nil {
+			ts.logger.Error("Failed to schedule ready steps after review",
+				"task_id", step.TaskID,
+				"error", err,
+			)
 		}
 	}
 

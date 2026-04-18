@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -236,7 +237,33 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 	w.setStateWithJob(StateProcessing, job.ID)
 	w.mu.Unlock()
 
-	w.logger.Info("Processing job", "worker", w.ID, "job", job.ID)
+	// Extract step/task context from job payload for logging
+	var stepID, taskID, agentID string
+	if job.Payload != nil {
+		var payload struct {
+			StepID string `json:"step_id"`
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err == nil {
+			stepID = payload.StepID
+			taskID = payload.TaskID
+		}
+	}
+	if job.TaskID != "" {
+		taskID = job.TaskID
+	}
+	if job.AgentID != "" {
+		agentID = job.AgentID
+	}
+
+	jobStartTime := time.Now()
+	w.logger.Info("ASSIGN job claimed",
+		"worker_id", w.ID,
+		"job_id", job.ID,
+		"step_id", stepID,
+		"task_id", taskID,
+		"agent_id", agentID,
+	)
 
 	// Mark as processing
 	if err := w.queue.MarkProcessing(ctx, job.ID); err != nil {
@@ -287,7 +314,14 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 		return true, err
 	}
 
-	w.logger.Info("Job completed", "worker", w.ID, "job", job.ID)
+	w.logger.Info("DONE job completed",
+		"worker_id", w.ID,
+		"job_id", job.ID,
+		"step_id", stepID,
+		"task_id", taskID,
+		"agent_id", agentID,
+		"duration_ms", time.Since(jobStartTime).Milliseconds(),
+	)
 	return true, nil
 }
 

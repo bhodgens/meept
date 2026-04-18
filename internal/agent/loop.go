@@ -1192,10 +1192,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				)
 			} else if l.llmClient != nil {
 				// Switch the LLM client to the resolved model
+				oldModel := l.llmClient.Config().ModelID
 				l.llmClient.SwitchModel(modelConfig)
-				l.logger.Debug("Switched to alias model",
+				l.logger.Info("Agent switched model",
+					"agent_id", l.agentID,
+					"from_model", oldModel,
+					"to_model", modelConfig.ModelID,
 					"alias", l.modelRef,
-					"model", modelConfig.ModelID,
+					"reason", "alias_resolution",
 				)
 			}
 		}
@@ -1539,17 +1543,37 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Truncate if needed
 	conv.Truncate()
 
+	// Log agent execution start with model context
+	modelID, providerID := l.currentModelInfo()
+	l.logger.Info("START agent executing task",
+		"agent_id", l.agentID,
+		"task_id", t.ID,
+		"model", modelID,
+		"provider", providerID,
+	)
+
 	// Run reasoning cycle
+	startTime := time.Now()
 	response, err := l.reasoningCycle(ctx, conv, conversationID)
 	if err != nil {
 		l.logger.Error("Task reasoning cycle failed",
 			"task", t.ID,
+			"agent_id", l.agentID,
+			"model", modelID,
 			"error", err,
 		)
 		errorMsg := "I encountered an error during processing. Please try again."
 		conv.AddAssistantMessage(errorMsg)
 		return errorMsg, err
 	}
+
+	// Log task completion
+	l.logger.Info("DONE agent completed task",
+		"agent_id", l.agentID,
+		"task_id", t.ID,
+		"model", modelID,
+		"duration_ms", time.Since(startTime).Milliseconds(),
+	)
 
 	// Add final response to conversation
 	conv.AddAssistantMessage(response)
@@ -2268,4 +2292,15 @@ func (l *AgentLoop) recordAliasSuccess(modelRef string) {
 	if aliasName != "" && l.resolver != nil {
 		l.resolver.RecordAliasSuccess(aliasName)
 	}
+}
+
+// currentModelInfo returns the current model ID and provider ID for logging.
+func (l *AgentLoop) currentModelInfo() (modelID, providerID string) {
+	if l.llmClient != nil {
+		cfg := l.llmClient.Config()
+		if cfg != nil {
+			return cfg.ModelID, cfg.ProviderID
+		}
+	}
+	return "unknown", "unknown"
 }
