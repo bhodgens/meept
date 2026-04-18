@@ -10,12 +10,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/caimlas/meept/internal/version"
+
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/daemon"
 )
 
 var (
-	version = "0.3.0-go"
+	
 
 	// Flags
 	configPath string
@@ -47,7 +49,7 @@ func main() {
 		Use:   "version",
 		Short: "Print version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(version)
+			fmt.Println(version.String())
 		},
 	})
 

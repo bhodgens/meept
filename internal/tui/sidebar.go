@@ -12,6 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/viz"
+	"github.com/caimlas/meept/internal/version"
 )
 
 // SidebarPanel represents a collapsible panel in the sidebar.
@@ -824,7 +825,7 @@ func (s *SidebarModel) View() string {
 
 	// Build header (1 line: version banner with orange bg, black text)
 	// Version is based on git commit date
-	version := "meept v20260228"
+	versionStr := "meept " + version.String()
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#000000")).
@@ -832,7 +833,7 @@ func (s *SidebarModel) View() string {
 		Width(contentWidth).
 		Align(lipgloss.Center)
 
-	header := titleStyle.Render(version)
+	header := titleStyle.Render(versionStr)
 	headerLines := 1
 
 	// Calculate available height for scrollable panel content

@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+
+	"github.com/caimlas/meept/internal/version"
 )
 
 var (
-	version = "0.2.0-go"
+	
 
 	// Global flags
 	socketPath string
@@ -128,7 +130,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("meept version %s\n", version)
+			fmt.Printf("meept version %s\n", version.String())
 		},
 	}
 }
