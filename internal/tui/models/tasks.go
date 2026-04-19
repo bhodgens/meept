@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -60,11 +60,16 @@ type TasksRPCClient interface {
 
 // NewTasksModel creates a new tasks model.
 func NewTasksModel(rpc TasksRPCClient) *TasksModel {
+	// Initialize with task columns (7) since default viewMode is ViewModeTasks.
+	// SetSize() will adjust column widths; setJobsColumns() switches to 4 job columns.
 	columns := []table.Column{
 		{Title: "Name", Width: 20},
-		{Title: "Schedule", Width: 20},
-		{Title: "Next Run", Width: 20},
-		{Title: "Status", Width: 10},
+		{Title: "State", Width: 8},
+		{Title: "Agent", Width: 12},
+		{Title: "Steps", Width: 7},
+		{Title: "Progress", Width: 12},
+		{Title: "Memory", Width: 10},
+		{Title: "Updated", Width: 10},
 	}
 
 	t := table.New(
@@ -248,7 +253,7 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 		m.updateTasksTable()
 		return nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Handle detail modal first
 		if m.showingDetail {
 			if msg.String() == "esc" || msg.String() == "q" {

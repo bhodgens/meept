@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/caimlas/meept/internal/tui"
@@ -70,7 +70,6 @@ func runChat(cmd *cobra.Command, args []string) error {
 func runTUI(socketPath string) error {
 	app := tui.NewApp(socketPath)
 	p := tea.NewProgram(app,
-		tea.WithAltScreen(),
 		// No mouse capture - allows native terminal text selection.
 		// Viewport scrolling via keyboard: j/k, arrows, PgUp/PgDn.
 	)

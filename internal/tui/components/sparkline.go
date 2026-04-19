@@ -4,7 +4,7 @@ package components
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // Sparkline renders a simple sparkline visualization using block characters.

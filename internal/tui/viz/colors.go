@@ -1,6 +1,6 @@
 package viz
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Visualization-specific colors (matching the main TUI palette)
 var (

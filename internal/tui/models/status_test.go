@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -198,7 +198,7 @@ func TestStatusModel_ManualRefresh(t *testing.T) {
 	mock := NewMockStatusRPCClient()
 	model := NewStatusModel(mock)
 
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}
+	msg := tea.KeyPressMsg{Code: 'r', Text: "r"}
 	cmd := model.Update(msg)
 
 	if !model.loading {

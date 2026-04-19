@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -165,7 +165,7 @@ func TestChatModel_SendMessage(t *testing.T) {
 	model.textarea.SetValue("Hello world")
 
 	// Press enter to send
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter}
 	cmd := model.Update(msg)
 
 	// Check user message was added
@@ -221,7 +221,7 @@ func TestChatModel_SendEmptyMessage(t *testing.T) {
 
 	// Try to send empty message
 	model.textarea.SetValue("")
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter}
 	model.Update(msg)
 
 	if len(model.messages) != initialCount {
@@ -237,7 +237,7 @@ func TestChatModel_SendWhileLoading(t *testing.T) {
 	initialCount := len(model.messages)
 
 	model.textarea.SetValue("test message")
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter}
 	model.Update(msg)
 
 	if len(model.messages) != initialCount {
@@ -325,7 +325,7 @@ func TestChatModel_ClearChat(t *testing.T) {
 	originalConvID := model.conversationID
 
 	// Press Ctrl+L to clear
-	msg := tea.KeyMsg{Type: tea.KeyCtrlL}
+	msg := tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
 	model.Update(msg)
 
 	if len(model.messages) != 0 {
@@ -346,7 +346,7 @@ func TestChatModel_FocusCycling(t *testing.T) {
 	}
 
 	// Tab to viewport
-	msg := tea.KeyMsg{Type: tea.KeyTab}
+	msg := tea.KeyPressMsg{Code: tea.KeyTab}
 	model.Update(msg)
 	if model.focused != FocusViewport {
 		t.Error("expected focus on viewport after tab")
@@ -517,7 +517,7 @@ func TestChatModel_ExpandMessage(t *testing.T) {
 	model.selectedMsgIdx = 1
 
 	// Expand message via 'e' key in viewport
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")}
+	msg := tea.KeyPressMsg{Code: 'e', Text: "e"}
 	model.Update(msg)
 
 	if model.messages[1].State != MessageExpanded {
@@ -534,7 +534,7 @@ func TestChatModel_CopySelectedMessage(t *testing.T) {
 	model.selectedMsgIdx = 1
 
 	// Press 'c' to copy
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")}
+	msg := tea.KeyPressMsg{Code: 'c', Text: "c"}
 	cmd := model.Update(msg)
 
 	if cmd == nil {
@@ -613,17 +613,17 @@ func TestChatModel_ViewportNavigation(t *testing.T) {
 	model.SetFocus(FocusViewport)
 
 	// Test up/down navigation (now selects messages)
-	upMsg := tea.KeyMsg{Type: tea.KeyUp}
+	upMsg := tea.KeyPressMsg{Code: tea.KeyUp}
 	model.Update(upMsg)
 
-	downMsg := tea.KeyMsg{Type: tea.KeyDown}
+	downMsg := tea.KeyPressMsg{Code: tea.KeyDown}
 	model.Update(downMsg)
 
 	// Test page up/down
-	pgUpMsg := tea.KeyMsg{Type: tea.KeyPgUp}
+	pgUpMsg := tea.KeyPressMsg{Code: tea.KeyPgUp}
 	model.Update(pgUpMsg)
 
-	pgDownMsg := tea.KeyMsg{Type: tea.KeyPgDown}
+	pgDownMsg := tea.KeyPressMsg{Code: tea.KeyPgDown}
 	model.Update(pgDownMsg)
 
 	// No assertions needed - just checking no panics

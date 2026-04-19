@@ -3,7 +3,7 @@ package viz
 import (
 	"math"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // RobotState represents the current state of a robot agent.
@@ -133,7 +133,7 @@ func (r *Robot) ApplyBounce() float64 {
 }
 
 // GetColor returns the primary color for this robot based on state.
-func (r *Robot) GetColor() lipgloss.Color {
+func (r *Robot) GetColor() ansi.Color {
 	switch r.State {
 	case RobotIdle:
 		return ColorIdle
@@ -187,7 +187,7 @@ func (r *Robot) Draw(c *Canvas) {
 }
 
 // drawBody draws the basic robot shape.
-func (r *Robot) drawBody(c *Canvas, x, y, height int, color lipgloss.Color) {
+func (r *Robot) drawBody(c *Canvas, x, y, height int, color ansi.Color) {
 	// Simple filled rectangle for small robot (2x4 dots = 1 char)
 	for py := 0; py < height; py++ {
 		for px := 0; px < RobotWidth; px++ {
@@ -198,7 +198,7 @@ func (r *Robot) drawBody(c *Canvas, x, y, height int, color lipgloss.Color) {
 }
 
 // drawWithFill draws the robot with a progress fill from bottom to top.
-func (r *Robot) drawWithFill(c *Canvas, x, y, height int, color lipgloss.Color) {
+func (r *Robot) drawWithFill(c *Canvas, x, y, height int, color ansi.Color) {
 	fillHeight := int(float64(height) * r.Progress)
 
 	for py := 0; py < height; py++ {
@@ -216,7 +216,7 @@ func (r *Robot) drawWithFill(c *Canvas, x, y, height int, color lipgloss.Color) 
 }
 
 // drawX draws an X over the robot body.
-func (r *Robot) drawX(c *Canvas, x, y, height int, color lipgloss.Color) {
+func (r *Robot) drawX(c *Canvas, x, y, height int, color ansi.Color) {
 	// Draw X in the center of the body
 	centerX := x + RobotWidth/2
 	centerY := y + height/2
@@ -231,7 +231,7 @@ func (r *Robot) drawX(c *Canvas, x, y, height int, color lipgloss.Color) {
 }
 
 // drawExclamation draws a ! symbol in the robot body.
-func (r *Robot) drawExclamation(c *Canvas, x, y, height int, color lipgloss.Color) {
+func (r *Robot) drawExclamation(c *Canvas, x, y, height int, color ansi.Color) {
 	centerX := x + RobotWidth/2
 	centerY := y + height/2
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"github.com/charmbracelet/x/ansi"
 	"testing"
 
 	"github.com/caimlas/meept/internal/tui/types"
@@ -33,7 +34,7 @@ func TestFormatUptime(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := types.FormatUptime(tt.seconds)
+		result := ansi.Strip(types.FormatUptime(tt.seconds))
 		for _, substr := range tt.contains {
 			if !strings.Contains(result, substr) {
 				t.Errorf("types.FormatUptime(%f) = %q, expected to contain %q", tt.seconds, result, substr)

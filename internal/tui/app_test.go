@@ -2,11 +2,11 @@ package tui
 
 import (
 	"strings"
+	"github.com/charmbracelet/x/ansi"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/exp/teatest"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/caimlas/meept/internal/tui/models"
 )
@@ -77,7 +77,7 @@ func TestApp_ViewSwitching_Modal(t *testing.T) {
 			app.commandPalette.Show()
 
 			// Send the key
-			msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
+			msg := tea.KeyPressMsg{Code: rune(tt.key[0]), Text: tt.key}
 			newModel, _ := app.Update(msg)
 			newApp := newModel.(*App)
 
@@ -95,7 +95,7 @@ func TestApp_CommandPalette_Open(t *testing.T) {
 	app := createTestApp()
 
 	// Send Ctrl+X to open command palette
-	msg := tea.KeyMsg{Type: tea.KeyCtrlX}
+	msg := tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
@@ -113,7 +113,7 @@ func TestApp_CommandPalette_EscapeCloses(t *testing.T) {
 	app.commandPalette.Show()
 
 	// Send escape
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	msg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
@@ -126,7 +126,7 @@ func TestApp_Quit(t *testing.T) {
 	app := createTestApp()
 
 	// Send Ctrl+C
-	msg := tea.KeyMsg{Type: tea.KeyCtrlC}
+	msg := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	_, cmd := app.Update(msg)
 
 	// Check that we get a quit command
@@ -154,7 +154,7 @@ func TestApp_RenderTabs(t *testing.T) {
 	app := createTestApp()
 	app.currentView = ViewTasks
 
-	tabs := app.renderTabs()
+	tabs := ansi.Strip(app.renderTabs())
 
 	// Check that all tabs are present
 	expectedTabs := []string{"Chat", "Tasks", "Queue", "Memory"}
@@ -240,7 +240,7 @@ func TestApp_SidebarToggle(t *testing.T) {
 	// Open command palette and toggle sidebar
 	app.activeModal = ModalCommandPalette
 	app.commandPalette.Show()
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")} // 'y' for sidebar in new keybindings
+	msg := tea.KeyPressMsg{Code: 'y', Text: "y"} // 'y' for sidebar in new keybindings
 	app.Update(msg)
 
 	if app.sidebar.IsVisible() == initialVisible {
@@ -254,7 +254,7 @@ func TestApp_EscapeToInput(t *testing.T) {
 	app.chat.SetFocus(models.FocusViewport)
 
 	// Send escape
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	msg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
@@ -268,7 +268,7 @@ func TestApp_EscapeClearsInput(t *testing.T) {
 	// Focus on input - already the default
 
 	// First escape should clear input (input is empty, so it's a no-op)
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	msg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	app.Update(msg)
 
 	// Verify input is focused and empty
@@ -283,7 +283,7 @@ func TestApp_EscapeFromSidebar(t *testing.T) {
 	app.sidebar.SetFocused(true)
 
 	// Send escape
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	msg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
@@ -300,7 +300,7 @@ func TestApp_EscapeFromOtherView(t *testing.T) {
 	app.currentView = ViewTasks
 
 	// Send escape
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	msg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
@@ -391,7 +391,7 @@ func TestApp_ModalOverlayRendering(t *testing.T) {
 	view := app.View()
 
 	// Should contain modal content (lowercase per UI conventions)
-	if !strings.Contains(view, "command palette") {
+	if !strings.Contains(view.Content, "command palette") {
 		t.Error("expected modal content in view when modal is active")
 	}
 }
@@ -404,7 +404,7 @@ func TestApp_SessionPickerModal(t *testing.T) {
 	app.commandPalette.Show()
 
 	// Press 's' to open session picker
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}
+	msg := tea.KeyPressMsg{Code: 's', Text: "s"}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
@@ -416,7 +416,7 @@ func TestApp_SessionPickerModal(t *testing.T) {
 func TestApp_NoMouseCapture(t *testing.T) {
 	app := createTestApp()
 
-	// Init should NOT include tea.EnableMouseAllMotion
+	// Init should NOT include mouse capture commands
 	cmd := app.Init()
 	if cmd == nil {
 		t.Error("expected Init to return commands")
@@ -425,53 +425,9 @@ func TestApp_NoMouseCapture(t *testing.T) {
 	// (there's no direct way to inspect batch commands)
 }
 
-// TestApp_WithTeatest demonstrates using teatest for integration testing.
-// This test verifies the full app lifecycle including initialization and basic rendering.
-func TestApp_WithTeatest_BasicRender(t *testing.T) {
-	// Skip if running in short mode (CI without terminal)
-	if testing.Short() {
-		t.Skip("skipping teatest in short mode")
-	}
-
-	app := createTestApp()
-
-	// Create test model with initial terminal size
-	tm := teatest.NewTestModel(t, app, teatest.WithInitialTermSize(80, 24))
-
-	// Wait for initial render - check for any UI element (including error state)
-	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
-		s := string(out)
-		// Check for basic UI elements (tabs, error, or loading)
-		return strings.Contains(s, "[1]") || // Tab indicator
-			strings.Contains(s, "Error") ||
-			strings.Contains(s, "Loading") ||
-			strings.Contains(s, "Ctrl+X")
-	}, teatest.WithDuration(2*time.Second))
-
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
-	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
-}
-
-// TestApp_WithTeatest_CommandPalette demonstrates opening command palette with teatest.
-func TestApp_WithTeatest_CommandPalette(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping teatest in short mode")
-	}
-
-	app := createTestApp()
-
-	tm := teatest.NewTestModel(t, app, teatest.WithInitialTermSize(80, 24))
-
-	// Open command palette with Ctrl+X
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlX})
-
-	// Wait for command palette to appear (lowercase per UI conventions)
-	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
-		s := string(out)
-		return strings.Contains(s, "command palette") ||
-			strings.Contains(s, "chat") // Modal content
-	}, teatest.WithDuration(2*time.Second))
-
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
-	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
-}
+// TODO: Re-enable teatest integration tests once a bubbletea v2-compatible
+// teatest package is available. The github.com/charmbracelet/x/exp/teatest
+// package currently depends on bubbletea v1.
+//
+// func TestApp_WithTeatest_BasicRender(t *testing.T) { ... }
+// func TestApp_WithTeatest_CommandPalette(t *testing.T) { ... }

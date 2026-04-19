@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -145,7 +145,7 @@ func (m *QueueModel) Update(msg tea.Msg) tea.Cmd {
 		m.updateTable()
 		return nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.showingHelp {
 			m.showingHelp = false
 			return nil

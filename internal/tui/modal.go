@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -255,24 +255,26 @@ func (s *SessionPickerModal) HandleMouse(msg tea.MouseMsg, screenW, screenH int)
 		return nil
 	}
 
+	click, ok := msg.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return nil
+	}
+
+	mouse := click.Mouse()
+
 	// Calculate modal dimensions and position (centered)
 	modalH := len(s.sessions) + 7 // sessions + header + footer
 	modalX := (screenW - s.width) / 2
 	modalY := (screenH - modalH) / 2
 
-	// Only handle left click release
-	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionRelease {
-		return nil
-	}
-
 	// Check if click is within modal horizontal bounds
-	if msg.X < modalX || msg.X >= modalX+s.width {
+	if mouse.X < modalX || mouse.X >= modalX+s.width {
 		return nil
 	}
 
 	// Header is 3 lines (title + separator + empty), sessions start after
 	headerLines := 3
-	relY := msg.Y - modalY - headerLines
+	relY := mouse.Y - modalY - headerLines
 
 	if relY >= 0 && relY < len(s.sessions) {
 		sess := s.sessions[relY]

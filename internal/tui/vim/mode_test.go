@@ -3,7 +3,7 @@ package vim
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // TestZeroKeyMovesToStartOfLine verifies that pressing "0" in normal mode
@@ -13,7 +13,7 @@ func TestZeroKeyMovesToStartOfLine(t *testing.T) {
 	s.Enabled = true
 	s.Mode = ModeNormal
 
-	action, handled := s.handleNormalMode("0", tea.KeyMsg{})
+	action, handled := s.handleNormalMode("0", tea.KeyPressMsg{})
 
 	if !handled {
 		t.Fatalf("expected '0' to be handled in normal mode")
@@ -35,13 +35,13 @@ func TestZeroKeyContinuesCountPrefix(t *testing.T) {
 	s.Mode = ModeNormal
 
 	// First: "1" starts a count
-	_, _ = s.handleNormalMode("1", tea.KeyMsg{})
+	_, _ = s.handleNormalMode("1", tea.KeyPressMsg{})
 	if s.Count != 1 {
 		t.Fatalf("after '1', s.Count = %d, want 1", s.Count)
 	}
 
 	// Then: "0" should extend the count to 10, not emit an action.
-	action, handled := s.handleNormalMode("0", tea.KeyMsg{})
+	action, handled := s.handleNormalMode("0", tea.KeyPressMsg{})
 	if !handled {
 		t.Fatalf("expected '0' to be handled")
 	}

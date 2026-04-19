@@ -4,7 +4,7 @@ package types
 import (
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // DaemonStatusResponse represents the status RPC response.

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -180,8 +180,6 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.connectDaemon,
 		a.loadSession,
-		tea.EnterAltScreen,
-		tea.SetWindowTitle("Meept"),
 	)
 }
 
@@ -273,7 +271,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Handle Ctrl+C - double-press to exit, single press to stop work or show hint
 		if msg.String() == "ctrl+c" {
 			now := time.Now()
@@ -384,7 +382,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMessageTime = time.Now()
 		} else if msg.Session != nil {
 			a.currentSession = msg.Session
-			a.setTerminalTitle()
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
@@ -419,7 +416,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Switch to selected session
 		if msg.Session != nil {
 			a.currentSession = msg.Session
-			a.setTerminalTitle()
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
@@ -630,7 +626,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.currentSession.Name = msg.Name
 			}
 			a.currentSession.Description = msg.Description
-			a.setTerminalTitle()
 		}
 		// Still delegate to chat model
 	}
@@ -791,14 +786,14 @@ func (a *App) initCurrentView() tea.Cmd {
 }
 
 // View renders the application.
-func (a *App) View() string {
+func (a *App) View() tea.View {
 	if a.width == 0 || a.height == 0 {
-		return "Loading..."
+		return tea.NewView("Loading...")
 	}
 
 	// Render modal overlay if active
 	if a.activeModal != ModalNone {
-		return a.renderModalOverlay()
+		return tea.NewView(a.renderModalOverlay())
 	}
 
 	var b strings.Builder
@@ -838,7 +833,10 @@ func (a *App) View() string {
 	b.WriteString("\n")
 	b.WriteString(a.renderStatusBar())
 
-	return b.String()
+	v := tea.NewView(b.String())
+	v.AltScreen = true
+	v.WindowTitle = a.getWindowTitle()
+	return v
 }
 
 // renderModalOverlay renders the active modal centered on a dimmed background.
@@ -920,6 +918,19 @@ func (a *App) renderHeader() string {
 }
 
 // setTerminalTitle sets the terminal tab/window title using OSC escape sequence.
+// getWindowTitle returns the terminal title string.
+func (a *App) getWindowTitle() string {
+	title := "meept"
+	if a.currentSession != nil {
+		if a.currentSession.Description != "" {
+			title = "meept - " + a.currentSession.Description
+		} else if a.currentSession.Name != "" && a.currentSession.Name != "default" {
+			title = "meept - " + a.currentSession.Name
+		}
+	}
+	return title
+}
+
 func (a *App) setTerminalTitle() {
 	title := "meept"
 	if a.currentSession != nil {
@@ -1079,14 +1090,8 @@ func (a *App) renderError() string {
 
 // isPrintableKey returns true if the key message represents a printable character
 // that should trigger auto-focus to the text input.
-func isPrintableKey(msg tea.KeyMsg) bool {
-	switch msg.Type {
-	case tea.KeyRunes:
-		return true
-	case tea.KeySpace:
-		return true
-	}
-	return false
+func isPrintableKey(msg tea.KeyPressMsg) bool {
+	return len(msg.Text) > 0
 }
 
 func max(a, b int) int {

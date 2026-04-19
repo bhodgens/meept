@@ -7,17 +7,18 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // HandleInputMouse handles mouse events for text selection in the input textarea.
+// HandleInputMouse handles mouse events for text selection in the input textarea.
 func (m *ChatModel) HandleInputMouse(msg tea.MouseMsg) tea.Cmd {
-	switch msg.Action {
-	case tea.MouseActionPress:
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
 		return m.handleInputMousePress(msg)
-	case tea.MouseActionRelease:
+	case tea.MouseReleaseMsg:
 		return m.handleInputMouseRelease(msg)
-	case tea.MouseActionMotion:
+	case tea.MouseMotionMsg:
 		if m.inputMouseDown {
 			return m.handleInputMouseDrag(msg)
 		}
@@ -26,13 +27,14 @@ func (m *ChatModel) HandleInputMouse(msg tea.MouseMsg) tea.Cmd {
 }
 
 // handleInputMousePress handles mouse button press for input text selection.
-func (m *ChatModel) handleInputMousePress(msg tea.MouseMsg) tea.Cmd {
+func (m *ChatModel) handleInputMousePress(msg tea.MouseClickMsg) tea.Cmd {
 	m.inputMouseDown = true
 
+	mouse := msg.Mouse()
 	// Calculate position within textarea content
 	// Textarea has 1 char left padding for border
-	adjustedX := msg.X - 1
-	adjustedY := msg.Y
+	adjustedX := mouse.X - 1
+	adjustedY := mouse.Y
 
 	if adjustedX < 0 {
 		adjustedX = 0
@@ -64,9 +66,10 @@ func (m *ChatModel) handleInputMousePress(msg tea.MouseMsg) tea.Cmd {
 }
 
 // handleInputMouseDrag handles mouse drag for extending input text selection.
-func (m *ChatModel) handleInputMouseDrag(msg tea.MouseMsg) tea.Cmd {
-	adjustedX := msg.X - 1
-	adjustedY := msg.Y
+func (m *ChatModel) handleInputMouseDrag(msg tea.MouseMotionMsg) tea.Cmd {
+	mouse := msg.Mouse()
+	adjustedX := mouse.X - 1
+	adjustedY := mouse.Y
 
 	if adjustedX < 0 {
 		adjustedX = 0
@@ -79,12 +82,11 @@ func (m *ChatModel) handleInputMouseDrag(msg tea.MouseMsg) tea.Cmd {
 // handleInputMouseRelease handles mouse button release for input selection.
 // Text is NOT automatically copied on release - the user must explicitly
 // request a copy via keyboard.
-func (m *ChatModel) handleInputMouseRelease(msg tea.MouseMsg) tea.Cmd {
+func (m *ChatModel) handleInputMouseRelease(msg tea.MouseReleaseMsg) tea.Cmd {
 	m.inputMouseDown = false
 	return nil
 }
 
-// calculateInputCursorOffset converts textarea Y,X to character offset in the input content.
 func (m *ChatModel) calculateInputCursorOffset(y, x int) int {
 	content := m.textarea.Value()
 	lines := strings.Split(content, "\n")

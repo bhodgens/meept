@@ -1,6 +1,7 @@
 package viz
 
 import (
+	"image/color"
 	"testing"
 )
 
@@ -110,25 +111,38 @@ func TestRobotApplyBounce(t *testing.T) {
 	}
 }
 
+// colorsEqual compares two color.Color values by their RGBA components.
+func colorsEqual(a, b color.Color) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+	return ar == br && ag == bg && ab == bb && aa == ba
+}
+
 func TestRobotGetColor(t *testing.T) {
 	r := NewRobot("robot-1", "agent-1", Point{0, 0})
 
 	tests := []struct {
 		state RobotState
-		color string
+		color color.Color
 	}{
-		{RobotIdle, string(ColorIdle)},
-		{RobotWorking, string(ColorWorking)},
-		{RobotTaskComplete, string(ColorSuccess)},
-		{RobotFailed, string(ColorError)},
-		{RobotCarrying, string(ColorCarrying)},
+		{RobotIdle, ColorIdle},
+		{RobotWorking, ColorWorking},
+		{RobotTaskComplete, ColorSuccess},
+		{RobotFailed, ColorError},
+		{RobotCarrying, ColorCarrying},
 	}
 
 	for _, tt := range tests {
 		r.SetState(tt.state)
-		color := r.GetColor()
-		if string(color) != tt.color {
-			t.Errorf("GetColor() for state %v = %v, want %v", tt.state, color, tt.color)
+		got := r.GetColor()
+		if !colorsEqual(got, tt.color) {
+			t.Errorf("GetColor() for state %v = %v, want %v", tt.state, got, tt.color)
 		}
 	}
 }

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/render"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -196,7 +196,7 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 	// This prevents bubbles/textarea from intercepting Enter before our Update() handler
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
-	vp := viewport.New(80, 20)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.SetContent("")
 
 	// Initialize markdown renderer (will be resized on first SetSize)
@@ -277,8 +277,8 @@ func (m *ChatModel) SetSize(width, height int) {
 	m.inputHeight = inputContentHeight
 	m.textarea.SetWidth(width - 4) // Account for border padding
 	m.textarea.SetHeight(inputContentHeight)
-	m.viewport.Width = width - 2
-	m.viewport.Height = viewportHeight
+	m.viewport.SetWidth(width - 2)
+	m.viewport.SetHeight(viewportHeight)
 
 	// Update markdown renderer width
 	if m.mdRenderer != nil {
@@ -651,7 +651,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		// Viewport scrolling is keyboard-only: j/k, arrows, PgUp/PgDn.
 		return nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Clear any active text selection when user starts typing
 		if m.hasSelection() && m.focused == FocusInput {
 			m.clearSelection()
@@ -739,46 +739,46 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 		case "shift+up":
 			if m.focused == FocusViewport {
-				m.viewport.HalfViewUp()
+				m.viewport.HalfPageUp()
 				return nil
 			}
 
 		case "shift+down":
 			if m.focused == FocusViewport {
-				m.viewport.HalfViewDown()
+				m.viewport.HalfPageDown()
 				return nil
 			}
 
 		case "pgup":
 			if m.focused == FocusViewport {
-				m.viewport.ViewUp()
+				m.viewport.PageUp()
 				return nil
 			}
 
 		case "pgdown":
 			if m.focused == FocusViewport {
-				m.viewport.ViewDown()
+				m.viewport.PageDown()
 				return nil
 			}
 
 		case "j":
 			// Vim-style: scroll viewport or select message
 			if m.focused == FocusViewport {
-				m.viewport.LineDown(1)
+				m.viewport.ScrollDown(1)
 				return nil
 			}
 
 		case "k":
 			// Vim-style: scroll viewport
 			if m.focused == FocusViewport {
-				m.viewport.LineUp(1)
+				m.viewport.ScrollUp(1)
 				return nil
 			}
 		}
 
 		// Auto-focus: if viewport is focused and a printable character is typed,
 		// redirect focus to the input and forward the keystroke
-		if m.focused == FocusViewport && (msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace) {
+		if m.focused == FocusViewport && len(msg.Text) > 0 {
 			m.SetFocus(FocusInput)
 			var taCmd tea.Cmd
 			m.textarea, taCmd = m.textarea.Update(msg)
@@ -1447,10 +1447,10 @@ func (m *ChatModel) updateViewport() {
 
 	// Scroll behavior: if a message is selected, keep it visible; otherwise go to bottom
 	if m.selectedMsgIdx >= 0 && selectedStartLine >= 0 {
-		if selectedStartLine < m.viewport.YOffset {
+		if selectedStartLine < m.viewport.YOffset() {
 			m.viewport.SetYOffset(selectedStartLine)
-		} else if selectedStartLine >= m.viewport.YOffset+m.viewport.Height {
-			m.viewport.SetYOffset(selectedStartLine - m.viewport.Height/3)
+		} else if selectedStartLine >= m.viewport.YOffset()+m.viewport.Height() {
+			m.viewport.SetYOffset(selectedStartLine - m.viewport.Height()/3)
 		}
 	} else {
 		m.viewport.GotoBottom()
@@ -1507,7 +1507,7 @@ func (m *ChatModel) View() string {
 	// Height sets inner content height; border adds 2 more lines
 	viewportStyle := viewportBorder.
 		Width(m.width - 2).
-		Height(m.viewport.Height)
+		Height(m.viewport.Height())
 
 	// Render viewport content. Text selection is native terminal selection
 	// (mouse capture disabled), so no app-level highlighting needed.
@@ -1756,13 +1756,13 @@ const viewportBorderOffset = 0
 // handleMousePress handles mouse button press for text selection.
 func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDown = true
-	m.mouseDownY = msg.Y
-	m.mouseDownX = msg.X
+	m.mouseDownY = msg.Mouse().Y
+	m.mouseDownX = msg.Mouse().X
 
 	// Adjust coordinates for viewport border
 	// The viewport content starts 1 line down (after top border) and 1 char in (after left border)
-	adjustedY := msg.Y - viewportBorderOffset
-	adjustedX := msg.X - 1 // left border offset
+	adjustedY := msg.Mouse().Y - viewportBorderOffset
+	adjustedX := msg.Mouse().X - 1 // left border offset
 
 	// Ignore clicks on the border itself
 	if adjustedY < 0 || adjustedX < 0 {
@@ -1772,7 +1772,7 @@ func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
 
 	// Check for double/triple click
 	now := time.Now()
-	if now.Sub(m.lastClickTime) < 400*time.Millisecond && m.lastClickY == msg.Y {
+	if now.Sub(m.lastClickTime) < 400*time.Millisecond && m.lastClickY == msg.Mouse().Y {
 		m.clickCount++
 		if m.clickCount == 2 {
 			// Double-click: select word
@@ -1788,7 +1788,7 @@ func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
 		m.clickCount = 1
 	}
 	m.lastClickTime = now
-	m.lastClickY = msg.Y
+	m.lastClickY = msg.Mouse().Y
 
 	// Single click: start selection at cursor position
 	m.selectionStart = m.calculateCursorOffset(adjustedY, adjustedX)
@@ -1799,12 +1799,12 @@ func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
 
 // handleMouseDrag handles mouse drag for extending text selection.
 func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
-	m.mouseDragY = msg.Y
-	m.mouseDragX = msg.X
+	m.mouseDragY = msg.Mouse().Y
+	m.mouseDragX = msg.Mouse().X
 
 	// Adjust coordinates for viewport border
-	adjustedY := msg.Y - viewportBorderOffset
-	adjustedX := msg.X - 1
+	adjustedY := msg.Mouse().Y - viewportBorderOffset
+	adjustedX := msg.Mouse().X - 1
 
 	// Clamp to valid range (allow dragging outside viewport to extend selection)
 	if adjustedY < 0 {

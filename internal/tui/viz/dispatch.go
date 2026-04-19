@@ -3,7 +3,7 @@ package viz
 import (
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // VizTickMsg signals a visualization frame update.

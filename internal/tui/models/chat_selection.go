@@ -68,7 +68,7 @@ func (m *ChatModel) messageAtY(y int) (msgIdx int, lineInMsg int, charOffset int
 	positions := m.buildPositionIndex()
 
 	// Adjust y for viewport scroll offset
-	adjustedY := y + m.viewport.YOffset
+	adjustedY := y + m.viewport.YOffset()
 
 	for _, pos := range positions {
 		if adjustedY >= pos.LineStart && adjustedY < pos.LineStart+pos.LineCount {
@@ -91,7 +91,7 @@ func (m *ChatModel) calculateCursorOffset(y, x int) int {
 	lines := strings.Split(content, "\n")
 
 	// Adjust y for viewport scroll offset
-	adjustedY := y + m.viewport.YOffset
+	adjustedY := y + m.viewport.YOffset()
 
 	// Calculate offset up to the target line
 	offset := 0
@@ -146,7 +146,7 @@ func (m *ChatModel) selectLineAt(y int) {
 	lines := strings.Split(content, "\n")
 
 	// Adjust y for viewport scroll offset
-	adjustedY := y + m.viewport.YOffset
+	adjustedY := y + m.viewport.YOffset()
 
 	if adjustedY < 0 || adjustedY >= len(lines) {
 		return

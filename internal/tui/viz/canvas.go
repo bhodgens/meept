@@ -3,7 +3,8 @@ package viz
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Point represents a coordinate in pixel (Braille dot) space.
@@ -17,7 +18,7 @@ type Canvas struct {
 	charWidth  int                 // Width in characters
 	charHeight int                 // Height in characters
 	pixels     [][]bool            // Pixel data [y][x] in dot coordinates
-	colors     [][]lipgloss.Color  // Per-character color [charY][charX]
+	colors     [][]ansi.Color  // Per-character color [charY][charX]
 }
 
 // Braille dot weights for the 2x4 grid:
@@ -47,9 +48,9 @@ func NewCanvas(charWidth, charHeight int) *Canvas {
 		pixels[y] = make([]bool, pixelWidth)
 	}
 
-	colors := make([][]lipgloss.Color, charHeight)
+	colors := make([][]ansi.Color, charHeight)
 	for y := range colors {
-		colors[y] = make([]lipgloss.Color, charWidth)
+		colors[y] = make([]ansi.Color, charWidth)
 		for x := range colors[y] {
 			colors[y][x] = ColorIdle // Default color
 		}
@@ -114,7 +115,7 @@ func (c *Canvas) GetPixel(x, y int) bool {
 }
 
 // SetColorAt sets the color for a character cell.
-func (c *Canvas) SetColorAt(charX, charY int, color lipgloss.Color) {
+func (c *Canvas) SetColorAt(charX, charY int, color ansi.Color) {
 	if charX < 0 || charX >= c.charWidth || charY < 0 || charY >= c.charHeight {
 		return
 	}
@@ -122,7 +123,7 @@ func (c *Canvas) SetColorAt(charX, charY int, color lipgloss.Color) {
 }
 
 // SetColorAtPixel sets the color for the character cell containing the given pixel.
-func (c *Canvas) SetColorAtPixel(x, y int, color lipgloss.Color) {
+func (c *Canvas) SetColorAtPixel(x, y int, color ansi.Color) {
 	charX := x / 2
 	charY := y / 4
 	c.SetColorAt(charX, charY, color)
@@ -145,7 +146,7 @@ func (c *Canvas) DrawRect(x, y, w, h int, filled bool) {
 }
 
 // DrawFilledRect draws a filled rectangle with a specific color.
-func (c *Canvas) DrawFilledRect(x, y, w, h int, color lipgloss.Color) {
+func (c *Canvas) DrawFilledRect(x, y, w, h int, color ansi.Color) {
 	c.DrawRect(x, y, w, h, true)
 	// Set color for all character cells covered by the rectangle
 	startCharX := x / 2
@@ -189,7 +190,7 @@ func (c *Canvas) DrawDottedLine(from, to Point, dashLen, gapLen int) {
 }
 
 // DrawLine draws a solid line between two points using Bresenham's algorithm.
-func (c *Canvas) DrawLine(from, to Point, color lipgloss.Color) {
+func (c *Canvas) DrawLine(from, to Point, color ansi.Color) {
 	x0, y0 := from.X, from.Y
 	x1, y1 := to.X, to.Y
 
@@ -231,7 +232,7 @@ func (c *Canvas) DrawLine(from, to Point, color lipgloss.Color) {
 }
 
 // DrawCircle draws a circle outline.
-func (c *Canvas) DrawCircle(cx, cy, r int, color lipgloss.Color) {
+func (c *Canvas) DrawCircle(cx, cy, r int, color ansi.Color) {
 	x := r
 	y := 0
 	err := 0
@@ -247,7 +248,7 @@ func (c *Canvas) DrawCircle(cx, cy, r int, color lipgloss.Color) {
 	}
 }
 
-func (c *Canvas) setCirclePoints(cx, cy, x, y int, color lipgloss.Color) {
+func (c *Canvas) setCirclePoints(cx, cy, x, y int, color ansi.Color) {
 	points := []Point{
 		{cx + x, cy + y},
 		{cx - x, cy + y},
@@ -265,7 +266,7 @@ func (c *Canvas) setCirclePoints(cx, cy, x, y int, color lipgloss.Color) {
 }
 
 // DrawArc draws a partial arc (for halo effect).
-func (c *Canvas) DrawArc(cx, cy, r int, startAngle, endAngle float64, color lipgloss.Color) {
+func (c *Canvas) DrawArc(cx, cy, r int, startAngle, endAngle float64, color ansi.Color) {
 	// Simple arc approximation using discrete points
 	import_math := func(x float64) float64 { return x }
 	_ = import_math // placeholder - we'll use integer math

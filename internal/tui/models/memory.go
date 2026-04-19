@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -64,7 +64,7 @@ func NewMemoryModel(rpc MemoryRPCClient) *MemoryModel {
 	ti.Placeholder = "Search memory..."
 	ti.Focus()
 	ti.CharLimit = 256
-	ti.Width = 50
+	ti.SetWidth(50)
 
 	// List
 	delegate := list.NewDefaultDelegate()
@@ -98,7 +98,7 @@ func (m *MemoryModel) SetSize(width, height int) {
 	m.height = height
 
 	// Update search input width
-	m.searchInput.Width = width - 10
+	m.searchInput.SetWidth(width - 10)
 
 	// Update list dimensions
 	listHeight := height - 16 // Account for search, detail panel, etc.
@@ -143,7 +143,7 @@ func (m *MemoryModel) Update(msg tea.Msg) tea.Cmd {
 		m.updateList()
 		return nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "enter":
 			if m.focusedSearch {

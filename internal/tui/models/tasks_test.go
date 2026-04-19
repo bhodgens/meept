@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/caimlas/meept/internal/tui/types"
 )
@@ -235,7 +235,7 @@ func TestTasksModel_Refresh(t *testing.T) {
 	model := NewTasksModel(mock)
 	model.SetSize(80, 24)
 
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}
+	msg := tea.KeyPressMsg{Code: 'r', Text: "r"}
 	cmd := model.Update(msg)
 
 	if !model.loading {
@@ -251,7 +251,7 @@ func TestTasksModel_ToggleHelp(t *testing.T) {
 	model := NewTasksModel(mock)
 
 	// Show help
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")}
+	msg := tea.KeyPressMsg{Code: '?', Text: "?"}
 	model.Update(msg)
 
 	if !model.showingHelp {
@@ -259,7 +259,7 @@ func TestTasksModel_ToggleHelp(t *testing.T) {
 	}
 
 	// Hide help (any key)
-	anyKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")}
+	anyKey := tea.KeyPressMsg{Code: 'x', Text: "x"}
 	model.Update(anyKey)
 
 	if model.showingHelp {
@@ -276,7 +276,7 @@ func TestTasksModel_SelectJob(t *testing.T) {
 	model.updateTable()
 
 	// Press enter to select
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter}
 	model.Update(msg)
 
 	if model.selectedJob == nil {
@@ -291,7 +291,7 @@ func TestTasksModel_SelectJobEmpty(t *testing.T) {
 	model.jobs = []types.Job{} // Empty
 
 	// Press enter to select
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	msg := tea.KeyPressMsg{Code: tea.KeyEnter}
 	model.Update(msg)
 
 	if model.selectedJob != nil {
@@ -307,7 +307,7 @@ func TestTasksModel_ClearSelection(t *testing.T) {
 	model.selectedJob = &model.jobs[0]
 
 	// Press escape
-	msg := tea.KeyMsg{Type: tea.KeyEscape}
+	msg := tea.KeyPressMsg{Code: tea.KeyEscape}
 	model.Update(msg)
 
 	if model.selectedJob != nil {
@@ -325,9 +325,9 @@ func TestTasksModel_Navigation(t *testing.T) {
 	// Navigate down
 	downKeys := []string{"down", "j"}
 	for _, key := range downKeys {
-		msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+		msg := tea.KeyPressMsg{Code: rune(key[0]), Text: key}
 		if key == "down" {
-			msg = tea.KeyMsg{Type: tea.KeyDown}
+			msg = tea.KeyPressMsg{Code: tea.KeyDown}
 		}
 		model.Update(msg)
 	}
@@ -335,9 +335,9 @@ func TestTasksModel_Navigation(t *testing.T) {
 	// Navigate up
 	upKeys := []string{"up", "k"}
 	for _, key := range upKeys {
-		msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+		msg := tea.KeyPressMsg{Code: rune(key[0]), Text: key}
 		if key == "up" {
-			msg = tea.KeyMsg{Type: tea.KeyUp}
+			msg = tea.KeyPressMsg{Code: tea.KeyUp}
 		}
 		model.Update(msg)
 	}
