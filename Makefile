@@ -278,9 +278,9 @@ docs-deps:
 	@if ! python3 -c "import mkdocs" 2>/dev/null; then \
 		echo "Installing docs dependencies (creating venv)..."; \
 		if [ -d docs/.venv ]; then \
-			. docs/.venv/bin/activate && pip install -q --upgrade -r docs/requirements.txt; \
+			. docs/.venv/bin/activate && pip install -q --no-warn-script-location -r docs/requirements.txt 2>&1 | grep -v "notice"; \
 		else \
-			python3 -m venv docs/.venv && . docs/.venv/bin/activate && pip install -q --upgrade -r docs/requirements.txt; \
+			python3 -m venv docs/.venv && . docs/.venv/bin/activate && pip install -q --no-warn-script-location -r docs/requirements.txt 2>&1 | grep -v "notice"; \
 		fi; \
 	else \
 		echo "Docs dependencies already installed."; \
