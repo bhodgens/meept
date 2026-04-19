@@ -1,0 +1,34 @@
+// Template for generating config reference documentation
+// Variables: SectionName, Description, Example, Fields
+
+# {{.SectionName}}
+
+{{.Description}}
+
+{{if .Example}}
+## Example
+
+```toml
+{{.Example}}
+```
+{{end}}
+
+## Fields
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+{{range .Fields}}| `{{.Name}}` | `{{.Type}}` | {{.Description}} | {{.Default}} |
+{{end}}
+
+{{if .Fields}}
+## Field Details
+
+{{range .Fields}}
+### {{.Name}}
+
+- **Type**: `{{.Type}}`
+- **Tag**: `{{.Tag}}`
+- **Description**: {{.Description}}
+
+{{end}}
+{{end}}

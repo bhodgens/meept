@@ -7,6 +7,10 @@ import (
 )
 
 // Config is the root configuration structure loaded from meept.toml.
+//
+//gendoc:section config
+//gendoc:desc Root configuration structure containing all subsystem configurations.
+//gendoc:example [config] daemon.socket_path = "~/.meept/meept.sock"
 type Config struct {
 	Daemon            DaemonConfig            `toml:"daemon"`
 	LLM               LLMConfig               `toml:"llm"`
@@ -83,6 +87,10 @@ type LSPServerConfig struct {
 }
 
 // DaemonConfig holds daemon-specific settings.
+//
+//gendoc:section daemon
+//gendoc:desc Configuration for the daemon process including socket, logging, and data directory.
+//gendoc:example [daemon] socket_path = "~/.meept/meept.sock"
 type DaemonConfig struct {
 	SocketPath string `toml:"socket_path"`
 	PIDFile    string `toml:"pid_file"`
@@ -91,6 +99,10 @@ type DaemonConfig struct {
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.
+//
+//gendoc:section llm
+//gendoc:desc LLM subsystem configuration including token budget, model broker, adaptive timeout, context firewall, and metrics.
+//gendoc:example [llm] budget.hourly_token_limit = 100000
 type LLMConfig struct {
 	Budget          BudgetConfig          `toml:"budget"`
 	Broker          LLMBrokerConfig       `toml:"broker"`
@@ -212,6 +224,10 @@ type MemoryVersioningConfig struct {
 
 
 // MemoryConfig holds memory subsystem settings.
+//
+//gendoc:section memory
+//gendoc:desc Memory subsystem configuration including backend selection, consolidation, episodic/task/personality memory types, embeddings, security, caching, limits, expiration, and versioning.
+//gendoc:example [memory] backend = "memvid"
 type MemoryConfig struct {
 	// Backend specifies the storage backend: "memvid" (default) or "sqlite"
 	Backend                    MemoryBackend        `toml:"backend"`
@@ -328,6 +344,10 @@ type CacheConfig struct {
 }
 
 // AgentConfig holds agent loop settings.
+//
+//gendoc:section agent
+//gendoc:desc Agent configuration including progress streaming, caching, error handling, review workflow, validation, and watchdog monitoring.
+//gendoc:example [agent] progress_enabled = true
 type AgentConfig struct {
 	// ProgressEnabled turns on streaming progress updates
 	ProgressEnabled bool `toml:"progress_enabled"`
@@ -429,6 +449,10 @@ type AgentsConfig struct {
 }
 
 // SecurityConfig holds security settings.
+//
+//gendoc:section security
+//gendoc:desc Security configuration including input sanitization, path restrictions, output monitoring, shell command scanning, and audit logging.
+//gendoc:example [security] sanitize_inputs = true
 type SecurityConfig struct {
 	SanitizeInputs              bool     `toml:"sanitize_inputs"`
 	SanitizeStrictness          string   `toml:"sanitize_strictness"` // "permissive", "standard", "strict"

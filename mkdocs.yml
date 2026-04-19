@@ -1,0 +1,122 @@
+site_name: Meept
+site_description: Self-executing autonomous agent daemon with multi-agent orchestration, hybrid memory, and skill-based task execution.
+site_url: https://github.com/caimlas/meept
+repo_url: https://github.com/caimlas/meept
+repo_name: caimlas/meept
+
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+  logo: img/logo.svg
+
+plugins:
+  - search
+  - mermaid2:
+      version: 10.9.0
+  - git-revision-date-localized:
+      enable_creation_date: true
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate: false
+  - pymdownx.details
+  - pymdownx.snippets
+  - admonition
+  - attr_list
+  - md_in_html
+  - def_list
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - getting-started/index.md
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quick-start.md
+      - First Run: getting-started/first-run.md
+      - Troubleshooting: getting-started/troubleshooting.md
+  - Concepts:
+      - concepts/index.md
+      - Architecture: concepts/architecture.md
+      - Multi-Agent System: concepts/multi-agent.md
+      - Request Flow: concepts/request-flow.md
+      - Tools: concepts/tools.md
+      - Memory: concepts/memory.md
+      - Skills: concepts/skills.md
+  - Configuration:
+      - configuration/index.md
+      - Daemon: configuration/daemon.md
+      - Agents: configuration/agents.md
+      - LLM & Models: configuration/llm.md
+      - Examples:
+          - configuration/examples/index.md
+          - Minimal: configuration/examples/minimal.md
+          - Production: configuration/examples/production.md
+          - Advanced: configuration/examples/advanced.md
+  - Workflows:
+      - workflows/index.md
+      - Dynamic Tool Routing: workflows/tool-routing.md
+      - Multi-Agent Orchestration: workflows/agent-orchestration.md
+      - Skill System: workflows/skills.md
+      - Security Engine: workflows/security.md
+      - Memory System: workflows/memory.md
+      - Self-Improvement: workflows/self-improvement.md
+      - LLM Provider Management: workflows/llm-management.md
+      - Context Firewall: workflows/context-firewall.md
+      - Code Intelligence: workflows/code-intelligence.md
+      - Job Scheduling: workflows/job-scheduling.md
+      - ClawSkills Marketplace: workflows/clawskills.md
+      - External Integrations: workflows/external-integrations.md
+      - Collaborative Planning: workflows/collaborative-planning.md
+      - Taint Tracking: workflows/taint-tracking.md
+      - Shadow Training: workflows/shadow-training.md
+  - Reference:
+      - reference/index.md
+      - CLI Commands: reference/cli.md
+      - RPC API: reference/rpc.md
+      - Tool Reference: reference/tools.md
+      - Logging: reference/logging.md
+      - Metrics & Debugging: reference/metrics.md
+      - Generated Docs: reference/generated/
+  - Plans:
+      - plans/index.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/caimlas/meept
+
+copyright: MIT License

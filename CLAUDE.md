@@ -171,10 +171,10 @@ Jobs can be targeted to specific agents via `agent_id`:
 - **All UI element text must be explicitly lowercase** (e.g., "switch" not "Switch", "ok" not "OK")
 - This applies to: button labels, menu items, tooltips, status messages, dialog titles, hints
 
-## Coding Practices 
+## Coding Practices
 
 - Always implement complete wired features, do not leave stub code or partial implementations
-- Always check your work 
+- Always check your work
 
 ## Project Structure
 
@@ -182,6 +182,7 @@ Jobs can be targeted to specific agents via `agent_id`:
 cmd/
   meept/           # CLI application
   meept-daemon/    # Daemon application
+  gendoc/          # Documentation generator tool
 internal/
   agent/           # Agent loop, planner, workspace, collaborative
   bus/             # Message bus (pub/sub)
@@ -202,9 +203,34 @@ internal/
   skills/          # Skill discovery and parsing
   tools/           # Tool registry and builtins
 config/            # Configuration templates
+docs/              # MkDocs documentation site
 tests/             # Integration tests
 archive/           # Legacy Python code (reference only)
 ```
+
+## Documentation
+
+Meept uses MkDocs Material for its documentation site. The site is built from markdown files under `docs/`.
+
+### Documentation Commands
+
+```bash
+make docs-serve       # Start local dev server (auto-reload)
+make docs-build       # Build static site to site/
+make docs-generate    # Generate reference docs from Go source
+```
+
+### Documentation Structure
+
+| Directory | Purpose |
+|-----------|---------|
+| `docs/getting-started/` | Installation, quick start, troubleshooting |
+| `docs/concepts/` | Architecture, agents, memory, tools, skills |
+| `docs/configuration/` | Config reference with examples |
+| `docs/workflows/` | Feature specifications (15 features) |
+| `docs/reference/` | CLI, RPC API, tools, logging, metrics |
+| `docs/reference/generated/` | Auto-generated from Go structs via `cmd/gendoc` |
+| `docs/plans/archive/` | Historical implementation plans |
 
 ## Documentation Maintenance
 
@@ -213,8 +239,15 @@ archive/           # Legacy Python code (reference only)
 1. **diagram.md**: Update architecture diagrams when adding/modifying components, agents, tools, or data flows
 2. **CLAUDE.md**: Update this file when changing architecture patterns, adding new agents, or modifying key behaviors
 3. **Code comments**: Keep inline documentation accurate when modifying function signatures or behavior
-4. **features.md**: Always update features as they are implemented or changed to match the code. 
+4. **features.md**: Always update features as they are implemented or changed to match the code.
 
+### Documentation Rules
+
+- All features must have a feature spec in `docs/workflows/` using the standard template
+- Struct changes in `internal/config/schema.go` require running `make docs-generate`
+- New CLI commands require updating `docs/reference/cli.md`
+- New agents require updating `docs/concepts/multi-agent.md`
+- All doc pages must be linked from `mkdocs.yml` nav
+- README.md feature list must stay in sync with `docs/workflows/`
 
 Documentation should always reflect the current implementation state. If you add a new agent, tool, or architectural component, document it immediately.
-

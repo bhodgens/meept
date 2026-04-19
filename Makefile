@@ -1,4 +1,4 @@
-.PHONY: help build build-all build-daemon build-cli test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup build-linux build-darwin build-cross
+.PHONY: help build build-all build-daemon build-cli test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup build-linux build-darwin build-cross docs-serve docs-build docs-generate
 
 help:
 	@echo "Usage: make [target]"
@@ -8,9 +8,10 @@ help:
 	@echo "  deps             Download Go dependencies"
 	@echo ""
 	@echo "Build:"
-	@echo "  build            Build all binaries (daemon + CLI)"
+	@echo "  build            Build all binaries (daemon + CLI + gendoc)"
 	@echo "  build-daemon     Build only the daemon binary"
 	@echo "  build-cli        Build only the CLI binary"
+	@echo "  build-gendoc     Build only the documentation generator"
 	@echo "  build-release    Build with version info from git"
 	@echo "  install          Install binaries to GOPATH/bin"
 	@echo ""
@@ -41,6 +42,11 @@ help:
 	@echo "Service:"
 	@echo "  install-service  Install as a system service (launchd/systemd)"
 	@echo "  uninstall        Remove the system service"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  docs-serve       Start local docs dev server"
+	@echo "  docs-build       Build static docs site"
+	@echo "  docs-generate    Generate reference docs from Go source"
 
 MEEPT_HOME := $(HOME)/.meept
 BIN_DIR := bin
@@ -90,7 +96,7 @@ deps:
 
 build: build-all
 
-build-all: build-daemon build-cli
+build-all: build-daemon build-cli build-gendoc
 	@echo ""
 	@echo "Build complete:"
 	@ls -lh $(BIN_DIR)/
@@ -106,6 +112,12 @@ build-cli:
 	@echo "Building CLI..."
 	go build $(GO_BUILD_FLAGS) -o $(CLI) ./cmd/meept
 	@echo "Built $(CLI) ($$(du -h $(CLI) | cut -f1))"
+
+build-gendoc:
+	@mkdir -p $(BIN_DIR)
+	@echo "Building gendoc tool..."
+	go build $(GO_BUILD_FLAGS) -o $(BIN_DIR)/gendoc ./cmd/gendoc
+	@echo "Built $(BIN_DIR)/gendoc ($$(du -h $(BIN_DIR)/gendoc | cut -f1))"
 
 build-release: GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 build-release: build-all
@@ -256,6 +268,26 @@ uninstall:
 			;; \
 	esac
 	@echo "Service uninstalled (data preserved at $(MEEPT_HOME))"
+
+# =============================================================================
+# Documentation
+# =============================================================================
+
+docs-deps:
+	@echo "Installing docs dependencies..."
+	pip3 install -r docs/requirements.txt
+
+docs-serve: docs-deps
+	@echo "Starting docs dev server..."
+	mkdocs serve
+
+docs-build: docs-deps
+	@echo "Building docs..."
+	mkdocs build -d site
+
+docs-generate:
+	@echo "Generating reference docs from Go source..."
+	go run ./cmd/gendoc
 
 # =============================================================================
 # Legacy Aliases (for backwards compatibility)
