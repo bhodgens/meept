@@ -274,16 +274,33 @@ uninstall:
 # =============================================================================
 
 docs-deps:
-	@echo "Installing docs dependencies..."
-	pip3 install -r docs/requirements.txt
+	@echo "Checking docs dependencies..."
+	@if ! python3 -c "import mkdocs" 2>/dev/null; then \
+		echo "Installing docs dependencies (creating venv)..."; \
+		if [ -d docs/.venv ]; then \
+			. docs/.venv/bin/activate && pip install -q --upgrade -r docs/requirements.txt; \
+		else \
+			python3 -m venv docs/.venv && . docs/.venv/bin/activate && pip install -q --upgrade -r docs/requirements.txt; \
+		fi; \
+	else \
+		echo "Docs dependencies already installed."; \
+	fi
 
 docs-serve: docs-deps
 	@echo "Starting docs dev server..."
-	mkdocs serve
+	@if [ -d docs/.venv ]; then \
+		. docs/.venv/bin/activate && mkdocs serve; \
+	else \
+		mkdocs serve; \
+	fi
 
 docs-build: docs-deps
 	@echo "Building docs..."
-	mkdocs build -d site
+	@if [ -d docs/.venv ]; then \
+		. docs/.venv/bin/activate && mkdocs build -d site; \
+	else \
+		mkdocs build -d site; \
+	fi
 
 docs-generate:
 	@echo "Generating reference docs from Go source..."
