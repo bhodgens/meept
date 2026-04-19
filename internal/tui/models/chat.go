@@ -646,9 +646,27 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Mouse capture is disabled to allow native terminal text selection.
-		// This case remains for potential future use but currently does nothing.
-		// Viewport scrolling is keyboard-only: j/k, arrows, PgUp/PgDn.
+		// Handle mouse events for viewport scrolling and text selection.
+		switch msg := msg.(type) {
+		case tea.MouseClickMsg:
+			// Check if click is within viewport bounds
+			if m.isClickInViewport(msg.Mouse()) {
+				return m.handleMousePress(msg)
+			}
+		case tea.MouseMotionMsg:
+			// Handle drag selection only when mouse is down and in viewport
+			if m.mouseDown && m.isClickInViewport(msg.Mouse()) {
+				return m.handleMouseDrag(msg)
+			}
+		case tea.MouseReleaseMsg:
+			// Handle mouse release (ends selection, triggers copy)
+			if m.mouseDown {
+				return m.handleMouseRelease(msg)
+			}
+		case tea.MouseWheelMsg:
+			// Handle wheel scrolling
+			return m.handleMouseWheel(msg)
+		}
 		return nil
 
 	case tea.KeyPressMsg:
@@ -1832,6 +1850,38 @@ func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// handleMouseWheel handles mouse wheel events for viewport scrolling.
+func (m *ChatModel) handleMouseWheel(msg tea.MouseMsg) tea.Cmd {
+	// Only handle wheel events when viewport is focused
+	if m.focused != FocusViewport {
+		return nil
+	}
+
+	// In bubbletea v2, MouseWheelMsg carries the wheel direction in the Button field
+	wheelMsg, ok := msg.(tea.MouseWheelMsg)
+	if !ok {
+		return nil
+	}
+
+	mouse := wheelMsg.Mouse()
+	switch mouse.Button {
+	case tea.MouseWheelUp:
+		m.viewport.ScrollUp(1)
+	case tea.MouseWheelDown:
+		m.viewport.ScrollDown(1)
+	}
+	return nil
+}
+
+// isClickInViewport checks if mouse coordinates are within the viewport content area.
+// This confines selection to the viewport and prevents interference with other UI elements.
+func (m *ChatModel) isClickInViewport(mouse tea.Mouse) bool {
+	// Viewport content area: Y from 1 to viewport.Height (accounting for border)
+	// X from 1 to viewport.Width (accounting for border)
+	return mouse.Y >= 1 && mouse.Y <= m.viewport.Height() &&
+		mouse.X >= 1 && mouse.X <= m.viewport.Width()
 }
 
 // parseAsyncAck checks if a reply is an async task acknowledgment JSON.

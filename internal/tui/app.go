@@ -793,7 +793,11 @@ func (a *App) View() tea.View {
 
 	// Render modal overlay if active
 	if a.activeModal != ModalNone {
-		return tea.NewView(a.renderModalOverlay())
+		v := tea.NewView(a.renderModalOverlay())
+		v.AltScreen = true
+		v.WindowTitle = a.getWindowTitle()
+		v.MouseMode = tea.MouseModeAllMotion
+		return v
 	}
 
 	var b strings.Builder
@@ -836,6 +840,7 @@ func (a *App) View() tea.View {
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	v.WindowTitle = a.getWindowTitle()
+	v.MouseMode = tea.MouseModeAllMotion
 	return v
 }
 

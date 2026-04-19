@@ -69,10 +69,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 func runTUI(socketPath string) error {
 	app := tui.NewApp(socketPath)
-	p := tea.NewProgram(app,
-		// No mouse capture - allows native terminal text selection.
-		// Viewport scrolling via keyboard: j/k, arrows, PgUp/PgDn.
-	)
+	p := tea.NewProgram(app)
 	_, err := p.Run()
 	return err
 }
