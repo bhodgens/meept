@@ -67,12 +67,11 @@ func (m *ChatModel) buildPositionIndex() []MessagePosition {
 func (m *ChatModel) messageAtY(y int) (msgIdx int, lineInMsg int, charOffset int) {
 	positions := m.buildPositionIndex()
 
-	// Adjust y for viewport scroll offset
-	adjustedY := y + m.viewport.YOffset()
+	// Y is already relative to visible content (no YOffset adjustment needed)
 
 	for _, pos := range positions {
-		if adjustedY >= pos.LineStart && adjustedY < pos.LineStart+pos.LineCount {
-			return pos.MsgIdx, adjustedY - pos.LineStart, pos.ContentStart
+		if y >= pos.LineStart && y < pos.LineStart+pos.LineCount {
+			return pos.MsgIdx, y - pos.LineStart, pos.ContentStart
 		}
 	}
 
@@ -90,18 +89,17 @@ func (m *ChatModel) calculateCursorOffset(y, x int) int {
 	content := ansi.Strip(m.viewport.View())
 	lines := strings.Split(content, "\n")
 
-	// Adjust y for viewport scroll offset
-	adjustedY := y + m.viewport.YOffset()
+	// Y is already relative to visible content (no YOffset adjustment needed)
 
 	// Calculate offset up to the target line
 	offset := 0
-	for i := 0; i < adjustedY && i < len(lines); i++ {
+	for i := 0; i < y && i < len(lines); i++ {
 		offset += len(lines[i]) + 1 // +1 for newline
 	}
 
 	// Add x offset within the target line
-	if adjustedY >= 0 && adjustedY < len(lines) {
-		lineLen := len(lines[adjustedY])
+	if y >= 0 && y < len(lines) {
+		lineLen := len(lines[y])
 		if x > lineLen {
 			x = lineLen
 		}
@@ -145,19 +143,18 @@ func (m *ChatModel) selectLineAt(y int) {
 	content := ansi.Strip(m.viewport.View())
 	lines := strings.Split(content, "\n")
 
-	// Adjust y for viewport scroll offset
-	adjustedY := y + m.viewport.YOffset()
+	// Y is already relative to visible content (no YOffset adjustment needed)
 
-	if adjustedY < 0 || adjustedY >= len(lines) {
+	if y < 0 || y >= len(lines) {
 		return
 	}
 
 	// Calculate character offsets for this line
 	lineStart := 0
-	for i := 0; i < adjustedY; i++ {
+	for i := 0; i < y; i++ {
 		lineStart += len(lines[i]) + 1 // +1 for newline
 	}
-	lineEnd := lineStart + len(lines[adjustedY])
+	lineEnd := lineStart + len(lines[y])
 
 	// Ensure lineEnd doesn't exceed content length
 	if lineEnd > len(content) {
