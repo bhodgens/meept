@@ -112,6 +112,10 @@ type ChatModel struct {
 	escapeBehavior string
 	lastEscapeTime time.Time
 
+	// Chat config
+	autoCopyOnRelease bool // Whether to auto-copy text selection on mouse release
+	scrollSpeed       int  // Lines to scroll per mouse wheel event
+
 	// Paste compression
 	compressedPastes map[int]string // pasteID -> original paste content
 	pasteCounter     int
@@ -168,6 +172,12 @@ type RPCClient interface {
 	GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error)
 }
 
+// ChatConfig holds chat viewport behavior settings.
+type ChatConfig struct {
+	AutoCopyOnRelease bool // Whether to auto-copy text selection on mouse release
+	ScrollSpeed       int  // Lines to scroll per mouse wheel event
+}
+
 // InputBehaviorConfig holds input textarea behavior settings.
 type InputBehaviorConfig struct {
 	EnterBehavior string // "shift_sends" or "double_enter"
@@ -179,11 +189,14 @@ func NewChatModel(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss
 	return NewChatModelWithConfig(rpc, userStyle, assistantStyle, systemStyle, escapeBehavior, InputBehaviorConfig{
 		EnterBehavior: "shift_sends",
 		AutoExpand:    false,
+	}, ChatConfig{
+		AutoCopyOnRelease: false,
+		ScrollSpeed:       3,
 	})
 }
 
 // NewChatModelWithConfig creates a new chat model with input configuration.
-func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style, escapeBehavior string, inputConfig InputBehaviorConfig) *ChatModel {
+func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyle lipgloss.Style, escapeBehavior string, inputConfig InputBehaviorConfig, chatConfig ChatConfig) *ChatModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -224,10 +237,12 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		sessionHistory:    make(map[string][]string),
 		dirtyMessages:     make(map[string][]ChatMessage),
 		mdRenderer:        mdRenderer,
-		renderMarkdown:   true, // Enable markdown by default
-		vimState:         vimState,
-		escapeBehavior:   escapeBehavior,
-		inputHeight:      3, // Fixed input height
+		renderMarkdown:    true, // Enable markdown by default
+		vimState:          vimState,
+		escapeBehavior:    escapeBehavior,
+		inputHeight:       3, // Fixed input height
+		autoCopyOnRelease: chatConfig.AutoCopyOnRelease,
+		scrollSpeed:       chatConfig.ScrollSpeed,
 		compressedPastes: make(map[int]string),
 		userStyle:         userStyle,
 		assistantStyle:    assistantStyle,
@@ -649,11 +664,15 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		// Handle mouse wheel scrolling manually (viewport doesn't know its screen position)
 		if wheelMsg, ok := msg.(tea.MouseWheelMsg); ok {
 			mouse := wheelMsg.Mouse()
+			lines := m.scrollSpeed
+			if lines <= 0 {
+				lines = 3 // Default scroll speed
+			}
 			switch mouse.Button {
 			case tea.MouseWheelUp:
-				m.viewport.ScrollUp(1)
+				m.viewport.ScrollUp(lines)
 			case tea.MouseWheelDown:
-				m.viewport.ScrollDown(1)
+				m.viewport.ScrollDown(lines)
 			}
 			return nil
 		}
@@ -1780,9 +1799,9 @@ func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDownY = msg.Mouse().Y
 	m.mouseDownX = msg.Mouse().X
 
-	// Convert screen coordinates to viewport-relative (header=2, border=1)
-	// Viewport content starts at screen Y=3 (header 2 + border 1) (after top border) and 1 char in (after left border)
-	adjustedY := msg.Mouse().Y - 3
+	// Convert screen coordinates to viewport-relative
+	// Header is 1 line, viewport border top is 1 line, so viewport content starts at screen Y=2
+	adjustedY := msg.Mouse().Y - 2
 	adjustedX := msg.Mouse().X - 1 // left border offset
 
 	// Ignore clicks on the border itself
@@ -1823,8 +1842,8 @@ func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDragY = msg.Mouse().Y
 	m.mouseDragX = msg.Mouse().X
 
-	// Convert screen coordinates to viewport-relative (header=2, border=1)
-	adjustedY := msg.Mouse().Y - 3
+	// Convert screen coordinates to viewport-relative (header=1, viewport border=1)
+	adjustedY := msg.Mouse().Y - 2
 	adjustedX := msg.Mouse().X - 1
 
 	// Clamp to valid range (allow dragging outside viewport to extend selection)
@@ -1839,12 +1858,12 @@ func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
-// handleMouseRelease handles mouse button release. Copies selected text to clipboard.
+// handleMouseRelease handles mouse button release. Optionally copies selected text to clipboard.
 func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDown = false
 
-	// Copy selected text to clipboard if there is a selection
-	if m.hasSelection() {
+	// Copy selected text to clipboard only if autoCopyOnRelease is enabled
+	if m.autoCopyOnRelease && m.hasSelection() {
 		text := m.extractSelectedText()
 		if text != "" {
 			return func() tea.Msg {

@@ -16,6 +16,7 @@ type ClientConfig struct {
 	Vim         VimConfig         `json:"vim"`
 	Rendering   RenderingConfig   `json:"rendering"`
 	Input       InputConfig       `json:"input"`
+	Chat        ChatConfig        `json:"chat"`
 }
 
 // VimConfig defines vim mode settings.
@@ -46,6 +47,13 @@ type InputConfig struct {
 	EnterBehavior string `json:"enter_behavior"` // Deprecated: Enter always sends, Shift+Enter inserts newline
 	AutoExpand    bool   `json:"auto_expand"`    // Deprecated: Input height is now fixed at 3 lines
 }
+// ChatConfig defines chat viewport behavior settings.
+type ChatConfig struct {
+	AutoCopyOnRelease bool `json:"auto_copy_on_release"` // Auto-copy selected text on mouse release (default: false)
+	ScrollSpeed       int  `json:"scroll_speed"`         // Lines to scroll per mouse wheel event (default: 3)
+}
+
+
 
 // SidebarConfig defines sidebar panel settings.
 type SidebarConfig struct {

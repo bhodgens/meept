@@ -52,5 +52,14 @@
 
     // Enable animated dispatch visualization in sidebar
     "sidebar_animation": true
+  },
+
+  // Chat viewport behavior configuration
+  "chat": {
+    // Auto-copy selected text to clipboard on mouse release (default: false)
+    "auto_copy_on_release": false,
+
+    // Lines to scroll per mouse wheel event (default: 3)
+    "scroll_speed": 5
   }
 }

@@ -154,7 +154,10 @@ func NewApp(socketPath string) *App {
 		rpc:            rpc,
 		eventRPC:       eventRPC,
 		currentView:    ViewChat,
-		chat:           models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior, inputConfig),
+		chat:           models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior, inputConfig, models.ChatConfig{
+		AutoCopyOnRelease: clientConfig.Chat.AutoCopyOnRelease,
+		ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
+	}),
 		tasks:          models.NewTasksModel(rpc),
 		queue:          models.NewQueueModel(rpc),
 		memory:         models.NewMemoryModel(rpc),
