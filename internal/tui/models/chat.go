@@ -661,9 +661,11 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Handle mouse wheel scrolling manually (viewport doesn't know its screen position)
-		if wheelMsg, ok := msg.(tea.MouseWheelMsg); ok {
-			mouse := wheelMsg.Mouse()
+		// Handle different mouse event types
+		switch msg := msg.(type) {
+		case tea.MouseWheelMsg:
+			// Handle mouse wheel scrolling
+			mouse := msg.Mouse()
 			lines := m.scrollSpeed
 			if lines <= 0 {
 				lines = 3 // Default scroll speed
@@ -675,18 +677,17 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				m.viewport.ScrollDown(lines)
 			}
 			return nil
-		}
 
-		// Handle text selection events
-		switch msg := msg.(type) {
 		case tea.MouseClickMsg:
 			// Handle click for text selection
 			return m.handleMousePress(msg)
+
 		case tea.MouseMotionMsg:
 			// Handle drag selection only when mouse is down
 			if m.mouseDown {
 				return m.handleMouseDrag(msg)
 			}
+
 		case tea.MouseReleaseMsg:
 			// Handle mouse release (ends selection, triggers copy)
 			if m.mouseDown {
