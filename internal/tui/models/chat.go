@@ -1553,9 +1553,14 @@ func (m *ChatModel) View() string {
 		Width(m.width - 2).
 		Height(m.viewport.Height())
 
-	// Render viewport content. Text selection is native terminal selection
-	// (mouse capture disabled), so no app-level highlighting needed.
-	b.WriteString(viewportStyle.Render(m.viewport.View()))
+	// Render viewport content with selection highlighting
+	viewportContent := m.viewport.View()
+	if m.isSelecting && m.selectionStart != m.selectionEnd {
+		// Apply visual highlighting for text selection
+		selStyle := lipgloss.NewStyle().Background(lipgloss.Color("#3B82F6")).Foreground(lipgloss.Color("#FFFFFF")).String()
+		viewportContent = m.applySelectionHighlight(viewportContent, selStyle)
+	}
+	b.WriteString(viewportStyle.Render(viewportContent))
 	b.WriteString("\n")
 
 	// Input textarea with focus-dependent border
