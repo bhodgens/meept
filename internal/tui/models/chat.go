@@ -646,16 +646,26 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Handle mouse events for viewport scrolling and text selection.
+		// Handle mouse wheel scrolling manually (viewport doesn't know its screen position)
+		if wheelMsg, ok := msg.(tea.MouseWheelMsg); ok {
+			mouse := wheelMsg.Mouse()
+			switch mouse.Button {
+			case tea.MouseWheelUp:
+				m.viewport.ScrollUp(1)
+			case tea.MouseWheelDown:
+				m.viewport.ScrollDown(1)
+			}
+			return nil
+		}
+
+		// Handle text selection events
 		switch msg := msg.(type) {
 		case tea.MouseClickMsg:
-			// Check if click is within viewport bounds
-			if m.isClickInViewport(msg.Mouse()) {
-				return m.handleMousePress(msg)
-			}
+			// Handle click for text selection
+			return m.handleMousePress(msg)
 		case tea.MouseMotionMsg:
-			// Handle drag selection only when mouse is down and in viewport
-			if m.mouseDown && m.isClickInViewport(msg.Mouse()) {
+			// Handle drag selection only when mouse is down
+			if m.mouseDown {
 				return m.handleMouseDrag(msg)
 			}
 		case tea.MouseReleaseMsg:
@@ -663,9 +673,6 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			if m.mouseDown {
 				return m.handleMouseRelease(msg)
 			}
-		case tea.MouseWheelMsg:
-			// Handle wheel scrolling
-			return m.handleMouseWheel(msg)
 		}
 		return nil
 
@@ -1766,10 +1773,6 @@ func (m *ChatModel) expandPasteTokens(text string) string {
 	return result
 }
 
-// viewportBorderOffset is the offset from screen Y to viewport content Y.
-// The viewport bounds in app.go already account for the header, and the viewport's
-// View() output is what gets hit-tested, so no additional offset is needed.
-const viewportBorderOffset = 0
 
 // handleMousePress handles mouse button press for text selection.
 func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
@@ -1777,9 +1780,9 @@ func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDownY = msg.Mouse().Y
 	m.mouseDownX = msg.Mouse().X
 
-	// Adjust coordinates for viewport border
-	// The viewport content starts 1 line down (after top border) and 1 char in (after left border)
-	adjustedY := msg.Mouse().Y - viewportBorderOffset
+	// Convert screen coordinates to viewport-relative (header=2, border=1)
+	// Viewport content starts at screen Y=3 (header 2 + border 1) (after top border) and 1 char in (after left border)
+	adjustedY := msg.Mouse().Y - 3
 	adjustedX := msg.Mouse().X - 1 // left border offset
 
 	// Ignore clicks on the border itself
@@ -1820,8 +1823,8 @@ func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDragY = msg.Mouse().Y
 	m.mouseDragX = msg.Mouse().X
 
-	// Adjust coordinates for viewport border
-	adjustedY := msg.Mouse().Y - viewportBorderOffset
+	// Convert screen coordinates to viewport-relative (header=2, border=1)
+	adjustedY := msg.Mouse().Y - 3
 	adjustedX := msg.Mouse().X - 1
 
 	// Clamp to valid range (allow dragging outside viewport to extend selection)
@@ -1852,36 +1855,22 @@ func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
-// handleMouseWheel handles mouse wheel events for viewport scrolling.
-func (m *ChatModel) handleMouseWheel(msg tea.MouseMsg) tea.Cmd {
-	// Only handle wheel events when viewport is focused
-	if m.focused != FocusViewport {
-		return nil
-	}
-
-	// In bubbletea v2, MouseWheelMsg carries the wheel direction in the Button field
-	wheelMsg, ok := msg.(tea.MouseWheelMsg)
-	if !ok {
-		return nil
-	}
-
-	mouse := wheelMsg.Mouse()
-	switch mouse.Button {
-	case tea.MouseWheelUp:
-		m.viewport.ScrollUp(1)
-	case tea.MouseWheelDown:
-		m.viewport.ScrollDown(1)
-	}
-	return nil
-}
-
-// isClickInViewport checks if mouse coordinates are within the viewport content area.
+// isClickInViewportArea checks if mouse coordinates are within the viewport area on screen.
+// The viewport is positioned after the header (2 lines) and includes a border.
 // This confines selection to the viewport and prevents interference with other UI elements.
-func (m *ChatModel) isClickInViewport(mouse tea.Mouse) bool {
-	// Viewport content area: Y from 1 to viewport.Height (accounting for border)
-	// X from 1 to viewport.Width (accounting for border)
-	return mouse.Y >= 1 && mouse.Y <= m.viewport.Height() &&
-		mouse.X >= 1 && mouse.X <= m.viewport.Width()
+func (m *ChatModel) isClickInViewportArea(mouse tea.Mouse) bool {
+	// Viewport screen position:
+	// - Y: starts at line 2 (after header) + 1 (top border) = line 3
+	// - Ends at viewport height + border offset
+	// For simplicity, check if Y is in the upper portion of screen where viewport renders
+	// and X is within the viewport width (minus sidebar if present)
+
+	headerOffset := 2 // header + newline
+	viewportStart := headerOffset + 1 // +1 for top border
+	viewportEnd := viewportStart + m.viewport.Height()
+
+	return mouse.Y >= viewportStart && mouse.Y <= viewportEnd &&
+		mouse.X >= 0 && mouse.X <= m.width
 }
 
 // parseAsyncAck checks if a reply is an async task acknowledgment JSON.
