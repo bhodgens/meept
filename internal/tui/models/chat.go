@@ -661,9 +661,9 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Only handle wheel events - clicks pass through for terminal-native selection
 		switch msg := msg.(type) {
 		case tea.MouseWheelMsg:
+			// Handle wheel scrolling - this prevents terminal buffer scroll
 			mouse := msg.Mouse()
 			lines := m.scrollSpeed
 			if lines <= 0 {
@@ -675,8 +675,10 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			case tea.MouseWheelDown:
 				m.viewport.ScrollDown(lines)
 			}
+			return nil
 		}
-		// Clicks pass through to terminal for native text selection
+		// Click events are not handled - they remain in the terminal buffer
+		// This allows some terminals to support native text selection
 		return nil
 
 	case tea.KeyPressMsg:

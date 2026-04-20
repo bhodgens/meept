@@ -799,7 +799,7 @@ func (a *App) View() tea.View {
 		v := tea.NewView(a.renderModalOverlay())
 		v.AltScreen = true
 		v.WindowTitle = a.getWindowTitle()
-		v.MouseMode = tea.MouseModeNone
+		v.MouseMode = tea.MouseModeAllMotion
 		return v
 	}
 
@@ -843,7 +843,7 @@ func (a *App) View() tea.View {
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	v.WindowTitle = a.getWindowTitle()
-	v.MouseMode = tea.MouseModeNone
+	v.MouseMode = tea.MouseModeAllMotion
 	return v
 }
 
