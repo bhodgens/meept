@@ -770,8 +770,8 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			}
 
 		case "c":
-			// Copy text selection (mouse-based)
-			if m.focused == FocusViewport && m.hasSelection() {
+			// Copy text selection (mouse-based) - works regardless of focus
+			if m.hasSelection() {
 				return m.CopySelection()
 			}
 			// Copy selected message content (keyboard navigation)

@@ -1048,6 +1048,10 @@ func (a *App) getQuickActions() []string {
 	case ViewChat:
 		// Chat view actions depend on chat mode
 		if a.chat != nil {
+			// Show copy hint when there's an active text selection
+			if a.chat.HasSelection() {
+				actions = append(actions, a.styles.HelpKey.Render("c")+" "+a.styles.HelpValue.Render("copy selection"))
+			}
 			chatMode := a.chat.GetMode()
 			switch chatMode {
 			case "insert":
