@@ -6,6 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -311,4 +312,30 @@ func (m *ChatModel) applySelectionHighlight(content string, selStyle string) str
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// HasSelection returns true if there is an active text selection in the viewport.
+// This is used by the parent app to intercept ctrl+c for copying selected text.
+func (m *ChatModel) HasSelection() bool {
+	return m.isSelecting && m.selectionStart != m.selectionEnd
+}
+
+// CopySelection copies the currently selected text to the system clipboard.
+// Returns a command that sends CopyToClipboardMsg.
+func (m *ChatModel) CopySelection() tea.Cmd {
+	if !m.hasSelection() {
+		return nil
+	}
+
+	text := m.extractSelectedText()
+	if text == "" {
+		return nil
+	}
+
+	// Clear selection after copying
+	m.clearSelection()
+
+	return func() tea.Msg {
+		return CopyToClipboardMsg{Text: text}
+	}
 }

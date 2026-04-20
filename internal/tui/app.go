@@ -275,8 +275,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyPressMsg:
-		// Handle Ctrl+C - double-press to exit, single press to stop work or show hint
+		// Handle Ctrl+C - copy selection or double-press to exit
 		if msg.String() == "ctrl+c" {
+			// First check: if chat viewport has active text selection, copy it
+			if a.chat != nil && a.currentView == ViewChat && a.chat.HasSelection() {
+				return a, a.chat.CopySelection()
+			}
+
 			now := time.Now()
 			if now.Sub(a.lastCtrlC) < a.doublePressTTL {
 				a.rpc.Close()
