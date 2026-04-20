@@ -716,7 +716,13 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case tea.KeyPressMsg:
-		// Clear any active text selection when user starts typing
+		// Handle 'c' key for copying selection before any other logic
+		// This allows copying even when input is focused
+		if msg.String() == "c" && m.hasSelection() {
+			return m.CopySelection()
+		}
+
+		// Clear any active text selection when user starts typing (but not for 'c')
 		if m.hasSelection() && m.focused == FocusInput {
 			m.clearSelection()
 		}
@@ -770,10 +776,6 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			}
 
 		case "c":
-			// Copy text selection (mouse-based) - works regardless of focus
-			if m.hasSelection() {
-				return m.CopySelection()
-			}
 			// Copy selected message content (keyboard navigation)
 			if m.focused == FocusViewport && m.selectedMsgIdx >= 0 && m.selectedMsgIdx < len(m.messages) {
 				msgContent := m.messages[m.selectedMsgIdx].Content
