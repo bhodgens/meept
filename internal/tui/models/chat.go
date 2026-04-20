@@ -661,14 +661,13 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Handle different mouse event types
+		// Only handle wheel events - clicks pass through for terminal-native selection
 		switch msg := msg.(type) {
 		case tea.MouseWheelMsg:
-			// Handle mouse wheel scrolling
 			mouse := msg.Mouse()
 			lines := m.scrollSpeed
 			if lines <= 0 {
-				lines = 3 // Default scroll speed
+				lines = 3
 			}
 			switch mouse.Button {
 			case tea.MouseWheelUp:
@@ -676,24 +675,8 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			case tea.MouseWheelDown:
 				m.viewport.ScrollDown(lines)
 			}
-			return nil
-
-		case tea.MouseClickMsg:
-			// Handle click for text selection
-			return m.handleMousePress(msg)
-
-		case tea.MouseMotionMsg:
-			// Handle drag selection only when mouse is down
-			if m.mouseDown {
-				return m.handleMouseDrag(msg)
-			}
-
-		case tea.MouseReleaseMsg:
-			// Handle mouse release (ends selection, triggers copy)
-			if m.mouseDown {
-				return m.handleMouseRelease(msg)
-			}
 		}
+		// Clicks pass through to terminal for native text selection
 		return nil
 
 	case tea.KeyPressMsg:
@@ -1554,14 +1537,9 @@ func (m *ChatModel) View() string {
 		Width(m.width - 2).
 		Height(m.viewport.Height())
 
-	// Render viewport content with selection highlighting
-	viewportContent := m.viewport.View()
-	if m.isSelecting && m.selectionStart != m.selectionEnd {
-		// Apply visual highlighting for text selection
-		selStyle := lipgloss.NewStyle().Background(lipgloss.Color("#3B82F6")).Foreground(lipgloss.Color("#FFFFFF")).String()
-		viewportContent = m.applySelectionHighlight(viewportContent, selStyle)
-	}
-	b.WriteString(viewportStyle.Render(viewportContent))
+	// Render viewport content
+	// Note: Text selection is handled by the terminal natively (mouse capture disabled)
+	b.WriteString(viewportStyle.Render(m.viewport.View()))
 	b.WriteString("\n")
 
 	// Input textarea with focus-dependent border
