@@ -1801,18 +1801,25 @@ func (m *ChatModel) expandPasteTokens(text string) string {
 
 // handleMousePress handles mouse button press for text selection.
 func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
+	mouse := msg.Mouse()
 	m.mouseDown = true
-	m.mouseDownY = msg.Mouse().Y
-	m.mouseDownX = msg.Mouse().X
+	m.mouseDownY = mouse.Y
+	m.mouseDownX = mouse.X
 
 	// Convert screen coordinates to viewport-relative
 	// Header is 1 line, viewport border top is 1 line, so viewport content starts at screen Y=2
-	adjustedY := msg.Mouse().Y - 2
-	adjustedX := msg.Mouse().X - 1 // left border offset
+	adjustedY := mouse.Y - 2
+	adjustedX := mouse.X - 1 // left border offset
 
-	// Ignore clicks on the border itself
+	// Clamp to valid range - ignore clicks outside viewport
 	if adjustedY < 0 || adjustedX < 0 {
-		m.mouseDown = false
+		// Click was outside viewport area (maybe on header, sidebar, or status bar)
+		return nil
+	}
+	
+	// Also check if click is within viewport dimensions
+	if adjustedY >= m.viewport.Height() || adjustedX >= m.viewport.Width() {
+		// Click was outside viewport bounds
 		return nil
 	}
 
