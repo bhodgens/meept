@@ -1592,6 +1592,16 @@ func (m *ChatModel) View() string {
 	b.WriteString(viewportStyle.Render(viewportContent))
 	b.WriteString("\n")
 
+	// Show copy hint when there's an active selection
+	if m.isSelecting && m.hasSelection() {
+		copyHintStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")). // Black text
+			Background(lipgloss.Color("#F97316")).  // Orange background
+			Padding(0, 1)
+		b.WriteString(copyHintStyle.Render(" press 'c' to copy "))
+		b.WriteString("\n")
+	}
+
 	// Input textarea with focus-dependent border
 	inputBorder := m.unfocusedBorder
 	if m.focused == FocusInput {
