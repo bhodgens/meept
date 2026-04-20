@@ -676,9 +676,43 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				m.viewport.ScrollDown(lines)
 			}
 			return nil
+
+		case tea.MouseClickMsg:
+			mouse := msg.Mouse()
+			// Convert screen coordinates to viewport-relative
+			// Header=2 lines (header + newline), border top=1 line
+			adjustedY := mouse.Y - 2
+			adjustedX := mouse.X - 1
+
+			// Check if click is within viewport bounds
+			if adjustedY >= 0 && adjustedY < m.viewport.Height() &&
+				adjustedX >= 0 && adjustedX < m.viewport.Width() {
+				return m.handleMousePress(msg)
+			}
+			return nil
+
+		case tea.MouseMotionMsg:
+			if m.mouseDown {
+				mouse := msg.Mouse()
+				adjustedY := mouse.Y - 2
+				adjustedX := mouse.X - 1
+				// Allow dragging outside viewport to extend selection
+				if adjustedY < 0 {
+					adjustedY = 0
+				}
+				if adjustedX < 0 {
+					adjustedX = 0
+				}
+				return m.handleMouseDrag(msg)
+			}
+			return nil
+
+		case tea.MouseReleaseMsg:
+			if m.mouseDown {
+				return m.handleMouseRelease(msg)
+			}
+			return nil
 		}
-		// Click events are not handled - they remain in the terminal buffer
-		// This allows some terminals to support native text selection
 		return nil
 
 	case tea.KeyPressMsg:
@@ -1539,9 +1573,17 @@ func (m *ChatModel) View() string {
 		Width(m.width - 2).
 		Height(m.viewport.Height())
 
-	// Render viewport content
-	// Note: Text selection is handled by the terminal natively (mouse capture disabled)
-	b.WriteString(viewportStyle.Render(m.viewport.View()))
+	// Render viewport content with selection highlighting
+	viewportContent := m.viewport.View()
+
+	// Apply selection highlight if there's an active selection
+	if m.isSelecting && m.hasSelection() {
+		// Define selection highlight style (reverse video - terminal native)
+		selStyle := "\033[7m"
+		viewportContent = m.applySelectionHighlight(viewportContent, selStyle)
+	}
+
+	b.WriteString(viewportStyle.Render(viewportContent))
 	b.WriteString("\n")
 
 	// Input textarea with focus-dependent border
