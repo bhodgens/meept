@@ -2085,3 +2085,100 @@ func (m *ChatModel) GetAttachments() []string {
 func (m *ChatModel) ClearAttachments() {
 	m.attachments = nil
 }
+
+// GetInputValue returns the current value of the input textarea.
+func (m *ChatModel) GetInputValue() string {
+	return m.textarea.Value()
+}
+
+// SetInputValue sets the value of the input textarea.
+func (m *ChatModel) SetInputValue(value string) {
+	m.textarea.SetValue(value)
+}
+
+// RetryLast removes the last assistant message and re-sends the last user message.
+// Returns true if retry was performed, false if no user message to retry.
+func (m *ChatModel) RetryLast() bool {
+	if len(m.messages) == 0 {
+		return false
+	}
+
+	// Find the last user message
+	lastUserIdx := -1
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.messages[i].Role == "user" {
+			lastUserIdx = i
+			break
+		}
+	}
+
+	if lastUserIdx == -1 {
+		return false
+	}
+
+	// Get the last user message content
+	lastUserContent := m.messages[lastUserIdx].Content
+
+	// Remove messages from the last user message onwards
+	m.messages = m.messages[:lastUserIdx]
+
+	// Update viewport and re-send the message
+	m.updateViewport()
+
+	// Set the input to the last user message content for re-sending
+	m.textarea.SetValue(lastUserContent)
+
+	return true
+}
+
+// GetLastUserMessage returns the content of the last user message, or empty string if none.
+func (m *ChatModel) GetLastUserMessage() string {
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.messages[i].Role == "user" {
+			return m.messages[i].Content
+		}
+	}
+	return ""
+}
+
+// UndoLast removes the last user message and its corresponding assistant response.
+// Returns true if undo was performed, false if no exchange to remove.
+func (m *ChatModel) UndoLast() bool {
+	if len(m.messages) == 0 {
+		return false
+	}
+
+	// Find the last user message
+	lastUserIdx := -1
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		if m.messages[i].Role == "user" {
+			lastUserIdx = i
+			break
+		}
+	}
+
+	if lastUserIdx == -1 {
+		return false
+	}
+
+	// Remove all messages from the last user message onwards
+	m.messages = m.messages[:lastUserIdx]
+	m.updateViewport()
+
+	return true
+}
+
+// ClearConversation removes all messages from the conversation.
+func (m *ChatModel) ClearConversation() {
+	m.messages = []ChatMessage{}
+	m.dirtyMessages = make(map[string][]ChatMessage)
+	m.sessionMessages = make(map[string][]ChatMessage)
+	m.updateViewport()
+}
+
+// GetMessages returns a copy of the messages slice.
+func (m *ChatModel) GetMessages() []ChatMessage {
+	result := make([]ChatMessage, len(m.messages))
+	copy(result, m.messages)
+	return result
+}

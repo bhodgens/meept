@@ -90,6 +90,9 @@ type App struct {
 	tabFlash     map[ViewType]bool
 	tabFlashTime time.Time
 
+	// Slash command handling
+	commandHandler *CommandHandler
+
 	// Error state
 	err error
 }
@@ -174,6 +177,11 @@ func NewApp(socketPath string) *App {
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	app.sessionRename = NewSessionRenameModal(styles)
+
+	// Initialize command handler for slash commands
+	app.commandHandler = NewCommandHandler(rpc, WithChatModelGetter(func() *models.ChatModel {
+		return app.chat
+	}))
 
 	return app
 }
@@ -377,6 +385,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := a.sidebar.Update(msg)
 			return a, cmd
 		}
+
+		// Slash command detection - intercept Enter when input starts with "/"
+		if a.currentView == ViewChat && a.appFocus == FocusChat && msg.String() == "enter" {
+			input := a.chat.GetInputValue()
+			if strings.HasPrefix(strings.TrimSpace(input), "/") {
+				// Parse the slash command
+				cmd := ParseSlash(input)
+				if cmd != nil {
+					// Clear the input
+					a.chat.SetInputValue("")
+					// Execute the command
+					return a, a.commandHandler.Execute(cmd)
+				}
+			}
+		}
+
 		// Otherwise fall through to delegate to current view
 
 	case ConnectSuccessMsg:
@@ -603,6 +627,40 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CopyErrorMsg:
 		a.statusMessage = fmt.Sprintf("Copy failed: %v", msg.Err)
 		a.statusMessageTime = time.Now()
+
+	case CommandResultMsg:
+		// Handle slash command result
+		if msg.Result != nil {
+			// Display the output
+			if msg.Result.Output != "" {
+				a.statusMessage = msg.Result.Output
+				a.statusMessageTime = time.Now()
+			}
+
+			// Handle special actions
+			if msg.Result.ClearConversation {
+				a.chat.ClearConversation()
+			}
+
+			// Handle retry - re-send the last message
+			if msg.Result.RetryLast {
+				// The chat model already has the input set to the last user message
+				// from RetryLast(), so we just need to trigger send
+				return a, a.chat.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			}
+
+			// Handle vim toggle
+			if msg.Result.ToggleVimMode {
+				// Vim mode was already toggled by the command handler
+				// Just clear status message after delay
+			}
+
+			// Clear status message after delay
+			return a, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+		}
+		return a, nil
 
 	case StopSessionResultMsg:
 		a.activeModal = ModalNone
