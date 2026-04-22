@@ -16,8 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/render"
-	"github.com/caimlas/meept/internal/tui/slash"
-	"github.com/caimlas/meept/internal/tui/types"
+		"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
 )
 
@@ -2144,6 +2143,23 @@ func (m *ChatModel) GetInputValue() string {
 	return m.textarea.Value()
 }
 
+// builtinCommands returns a list of built-in slash command names.
+func builtinCommands() []string {
+	return []string{
+		"help",
+		"new",
+		"clear",
+		"retry",
+		"undo",
+		"usage",
+		"stop",
+		"status",
+		"vim",
+		"session",
+		"task",
+	}
+}
+
 // findBestSlashMatch finds the best matching slash command for the given input.
 // Returns the full command string (e.g., "/help") or empty string if no match.
 func findBestSlashMatch(input string) string {
@@ -2151,7 +2167,7 @@ func findBestSlashMatch(input string) string {
 		return ""
 	}
 	
-	commands := slash.BuiltinCommands()
+	commands := builtinCommands()
 	inputLower := strings.ToLower(strings.TrimPrefix(input, "/"))
 	
 	if inputLower == "" {
