@@ -410,28 +410,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Check if autocomplete is visible
 			if a.slashAutocomplete.IsVisible() {
 				result, cmd := a.slashAutocomplete.HandleKey(msg.String())
-				switch result {
-				case HandleKeyInsert:
-					// cmd will insert the command via SlashAutocompleteMsg
-					// We still need to execute it after insertion
-					if cmd != nil {
-						return a, cmd
-					}
-					return a, nil
-				case HandleKeyNavigated:
-					return a, nil
-				case HandleKeyPassThrough:
-					// Fall through to normal input
+				if result == HandleKeyNavigated {
+					// Navigation keys (including escape) - consume and return
+					return a, cmd
 				}
+				if result == HandleKeyInsert && cmd != nil {
+					return a, cmd
+				}
+				// PassThrough - continue to normal input handling
 			}
 
 			// Check for slash command trigger: "/" at start of input
 			// Show popup immediately when "/" is typed on empty input
 			if msg.String() == "/" {
 				input := a.chat.GetInputValue()
+				// Debug logging - write to file for inspection
+				DebugLog(fmt.Sprintf("SLASH /: input=%q (len=%d), appFocus=%v, currentView=%v", input, len(input), a.appFocus, a.currentView))
+				
 				if input == "" || strings.HasPrefix(input, "/") {
-					// Show popup - "/" is either just typed or already in input
 					a.slashAutocomplete.Show("")
+					DebugLog(fmt.Sprintf("SLASH Show(): visible=%v, filtered=%d commands", a.slashAutocomplete.IsVisible(), len(a.slashAutocomplete.filtered)))
+				} else {
+					DebugLog("SLASH: NOT showing popup, input condition failed")
 				}
 			}
 
@@ -933,22 +933,26 @@ func (a *App) initCurrentView() tea.Cmd {
 // generateAutocompletePopup generates the autocomplete popup string.
 func (a *App) generateAutocompletePopup() string {
 	if !a.slashAutocomplete.IsVisible() {
+		DebugLog("POPUP: autocomplete not visible")
 		return ""
 	}
 	
-	inputValue := a.chat.GetInputValue()
-	if !strings.HasPrefix(inputValue, "/") {
-		return ""
-	}
-	
-	filter := strings.TrimPrefix(inputValue, "/")
-	filter = strings.TrimSpace(filter)
-	
-	// Get filtered commands from autocomplete
+	// Get filtered commands from autocomplete (this is the source of truth)
 	commands := a.slashAutocomplete.GetFilteredCommands()
 	if len(commands) == 0 {
+		DebugLog("POPUP: no filtered commands")
 		return ""
 	}
+	
+	// Get current input to determine filter for highlighting
+	inputValue := a.chat.GetInputValue()
+	filter := ""
+	if strings.HasPrefix(inputValue, "/") {
+		filter = strings.TrimPrefix(inputValue, "/")
+		filter = strings.TrimSpace(filter)
+	}
+	
+	DebugLog(fmt.Sprintf("POPUP: generating with %d commands, filter=%q, input=%q", len(commands), filter, inputValue))
 	
 	// Build popup
 	var b strings.Builder
@@ -983,7 +987,9 @@ func (a *App) generateAutocompletePopup() string {
 		b.WriteString("\n")
 	}
 	
-	return boxStyle.Render(b.String())
+	result := boxStyle.Render(b.String())
+	DebugLog(fmt.Sprintf("POPUP: generated %d bytes", len(result)))
+	return result
 }
 
 // View renders the application.
@@ -1018,6 +1024,7 @@ func (a *App) View() tea.View {
 		case ViewChat:
 			// Set autocomplete popup on chat model before rendering
 			popup := a.generateAutocompletePopup()
+			DebugLog(fmt.Sprintf("VIEW: setting popup on chat, len=%d, empty=%v", len(popup), popup == ""))
 			a.chat.SetSlashAutocompletePopup(popup)
 			mainView = a.chat.View()
 		case ViewTasks:

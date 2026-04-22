@@ -3,6 +3,7 @@ package models
 
 import (
 	"encoding/json"
+
 	"fmt"
 	"os"
 	"path/filepath"
@@ -302,15 +303,12 @@ func (m *ChatModel) SetSize(width, height int) {
 	m.textarea.SetWidth(width - 4)
 	// Don't call SetHeight - DynamicHeight auto-calculates based on content
 	
-	// Calculate viewport height - popup overlays viewport when visible
-	// Layout: viewport_border(2) + input_border(2) + input(3) = 7
-	const chromeHeight = 2 + 2 + minInputHeight
-	viewportHeight := height - chromeHeight
-	if viewportHeight < 1 {
-		viewportHeight = 1
-	}
+	// Set textarea width (height is dynamic)
+	m.textarea.SetWidth(width - 4)
+	
+	// Set viewport width - height will be set in View() based on popup state
 	m.viewport.SetWidth(width - 2)
-	m.viewport.SetHeight(viewportHeight)
+	// Don't set viewport height here - it's calculated in View()
 
 	// Update markdown renderer width
 	if m.mdRenderer != nil {
@@ -1596,13 +1594,8 @@ func (m *ChatModel) View() string {
 		viewportBorder = m.focusedBorder
 	}
 
-	// Calculate dynamic viewport height based on popup visibility
-	popupHeight := 0
-	if m.slashAutocompletePopup != "" {
-		popupHeight = strings.Count(m.slashAutocompletePopup, "\n") + 1
-	}
-	
-	// Input height is dynamic based on content
+	// Calculate viewport height - popup will overlay, not take layout space
+	// Chrome: viewport borders (2) + input borders (2) + input content
 	inputLines := m.textarea.LineCount()
 	if inputLines < 3 {
 		inputLines = 3
@@ -1610,10 +1603,7 @@ func (m *ChatModel) View() string {
 	if inputLines > 8 {
 		inputLines = 8
 	}
-	inputHeight := inputLines
-	
-	// Calculate available viewport height
-	chromeHeight := 2 + popupHeight + 2 + inputHeight
+	chromeHeight := 2 + 2 + inputLines
 	viewportContentHeight := m.height - chromeHeight
 	if viewportContentHeight < 1 {
 		viewportContentHeight = 1
@@ -1639,10 +1629,16 @@ func (m *ChatModel) View() string {
 	// Show copy hint when there's an active selection
 	if m.isSelecting && m.hasSelection() {
 		copyHintStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")). // Black text
-			Background(lipgloss.Color("#F97316")).  // Orange background
+			Foreground(lipgloss.Color("#000000")).
+			Background(lipgloss.Color("#F97316")).
 			Padding(0, 1)
 		b.WriteString(copyHintStyle.Render(" press 'c' to copy "))
+		b.WriteString("\n")
+	}
+
+	// Render slash autocomplete popup above input
+	if m.slashAutocompletePopup != "" {
+		b.WriteString(m.slashAutocompletePopup)
 		b.WriteString("\n")
 	}
 

@@ -136,7 +136,7 @@ func (s *SlashAutocomplete) HandleKey(key string) (HandleKeyResult, tea.Cmd) {
 		return HandleKeyPassThrough, nil
 	case "esc":
 		s.Hide()
-		return HandleKeyPassThrough, nil
+		return HandleKeyNavigated, nil  // Consume the key
 	}
 
 	// Any other key - pass through to input (autocomplete will be hidden by caller)
