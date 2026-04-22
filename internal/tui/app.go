@@ -2,8 +2,8 @@ package tui
 
 import (
 	"encoding/base64"
-	"fmt"
 	"os"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -429,8 +429,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Show popup immediately when "/" is typed on empty input
 			if msg.String() == "/" {
 				input := a.chat.GetInputValue()
-				if input == "" {
-					// The "/" hasn't been added to the textarea yet, so show with "/" as the filter
+				if input == "" || strings.HasPrefix(input, "/") {
+					// Show popup - "/" is either just typed or already in input
 					a.slashAutocomplete.Show("")
 				}
 			}
