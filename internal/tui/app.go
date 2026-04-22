@@ -91,7 +91,8 @@ type App struct {
 	tabFlashTime time.Time
 
 	// Slash command handling
-	commandHandler *CommandHandler
+	commandHandler    *CommandHandler
+	slashAutocomplete *SlashAutocomplete
 
 	// Error state
 	err error
@@ -177,6 +178,9 @@ func NewApp(socketPath string) *App {
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	app.sessionRename = NewSessionRenameModal(styles)
+
+	// Initialize slash autocomplete
+	app.slashAutocomplete = NewSlashAutocomplete(styles)
 
 	// Initialize command handler for slash commands
 	app.commandHandler = NewCommandHandler(rpc, WithChatModelGetter(func() *models.ChatModel {
@@ -397,6 +401,50 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.chat.SetInputValue("")
 					// Execute the command
 					return a, a.commandHandler.Execute(cmd)
+				}
+			}
+		}
+
+		// Slash command autocomplete handling
+		if a.currentView == ViewChat && a.appFocus == FocusChat && a.slashAutocomplete != nil {
+			// Check if autocomplete is visible
+			if a.slashAutocomplete.IsVisible() {
+				result, cmd := a.slashAutocomplete.HandleKey(msg.String())
+				switch result {
+				case HandleKeyInsert:
+					// cmd will insert the command via SlashAutocompleteMsg
+					// We still need to execute it after insertion
+					if cmd != nil {
+						return a, cmd
+					}
+					return a, nil
+				case HandleKeyNavigated:
+					return a, nil
+				case HandleKeyPassThrough:
+					// Fall through to normal input
+				}
+			}
+
+			// Check for slash command trigger: "/" at start of input
+			// Show popup immediately when "/" is typed on empty input
+			if msg.String() == "/" {
+				input := a.chat.GetInputValue()
+				if input == "" {
+					// The "/" hasn't been added to the textarea yet, so show with "/" as the filter
+					a.slashAutocomplete.Show("")
+				}
+			}
+
+			// Handle Enter for slash command execution
+			if msg.String() == "enter" {
+				input := a.chat.GetInputValue()
+				if strings.HasPrefix(strings.TrimSpace(input), "/") {
+					cmd := ParseSlash(input)
+					if cmd != nil {
+						a.chat.SetInputValue("")
+						a.slashAutocomplete.Hide()
+						return a, a.commandHandler.Execute(cmd)
+					}
 				}
 			}
 		}
@@ -631,10 +679,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CommandResultMsg:
 		// Handle slash command result
 		if msg.Result != nil {
-			// Display the output
+			// Display the output in the chat transcript (not status bar)
 			if msg.Result.Output != "" {
-				a.statusMessage = msg.Result.Output
-				a.statusMessageTime = time.Now()
+				a.chat.AddSystemMessage(msg.Result.Output)
 			}
 
 			// Handle special actions
@@ -694,6 +741,38 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentSession.Description = msg.Description
 		}
 		// Still delegate to chat model
+
+	case SlashAutocompleteMsg:
+		// Insert the selected command and execute it
+		if a.currentView == ViewChat && a.appFocus == FocusChat {
+			a.chat.SetInputValue(msg.Command + " ")
+			a.slashAutocomplete.Hide()
+			// Parse and execute the command
+			cmd := ParseSlash(msg.Command + " ")
+			if cmd != nil {
+				return a, a.commandHandler.Execute(cmd)
+			}
+		}
+		return a, nil
+	}
+
+	// Handle slash autocomplete filter updates when typing
+	if a.slashAutocomplete != nil && a.currentView == ViewChat && a.appFocus == FocusChat && a.slashAutocomplete.IsVisible() {
+		// Check for key press or check if we just showed the popup
+		currentInput := a.chat.GetInputValue()
+		if strings.HasPrefix(currentInput, "/") {
+			// Normal case: input has "/" prefix
+			filter := strings.TrimPrefix(currentInput, "/")
+			filter = strings.TrimSpace(filter)
+			a.slashAutocomplete.SetFilter(filter)
+			if len(a.slashAutocomplete.filtered) == 0 {
+				a.slashAutocomplete.Hide()
+			}
+		} else if currentInput == "" && a.slashAutocomplete.IsVisible() {
+			// Special case: "/" was just typed but not yet in textarea
+			// Show all commands
+			a.slashAutocomplete.SetFilter("")
+		}
 	}
 
 	// Delegate to current view
@@ -851,6 +930,62 @@ func (a *App) initCurrentView() tea.Cmd {
 	return nil
 }
 
+// generateAutocompletePopup generates the autocomplete popup string.
+func (a *App) generateAutocompletePopup() string {
+	if !a.slashAutocomplete.IsVisible() {
+		return ""
+	}
+	
+	inputValue := a.chat.GetInputValue()
+	if !strings.HasPrefix(inputValue, "/") {
+		return ""
+	}
+	
+	filter := strings.TrimPrefix(inputValue, "/")
+	filter = strings.TrimSpace(filter)
+	
+	// Get filtered commands from autocomplete
+	commands := a.slashAutocomplete.GetFilteredCommands()
+	if len(commands) == 0 {
+		return ""
+	}
+	
+	// Build popup
+	var b strings.Builder
+	boxStyle := a.styles.ModalBox.Width(30)
+	
+	// Header
+	b.WriteString(a.styles.ModalTitle.Render("commands"))
+	b.WriteString("\n")
+	
+	// Items
+	selectedIdx := a.slashAutocomplete.GetSelectedIndex()
+	for i, cmd := range commands {
+		style := a.styles.ModalItem
+		if i == selectedIdx {
+			style = a.styles.ModalItemSelected
+		}
+		
+		marker := "  "
+		if i == selectedIdx {
+			marker = "▸ "
+		}
+		
+		// Highlight matched portion
+		var label string
+		if filter != "" && strings.HasPrefix(cmd, filter) {
+			label = a.styles.HelpKey.Render(cmd[:len(filter)]) + cmd[len(filter):]
+		} else {
+			label = cmd
+		}
+		
+		b.WriteString(style.Render(marker + label))
+		b.WriteString("\n")
+	}
+	
+	return boxStyle.Render(b.String())
+}
+
 // View renders the application.
 func (a *App) View() tea.View {
 	if a.width == 0 || a.height == 0 {
@@ -881,6 +1016,9 @@ func (a *App) View() tea.View {
 	} else {
 		switch a.currentView {
 		case ViewChat:
+			// Set autocomplete popup on chat model before rendering
+			popup := a.generateAutocompletePopup()
+			a.chat.SetSlashAutocompletePopup(popup)
 			mainView = a.chat.View()
 		case ViewTasks:
 			mainView = a.tasks.View()
@@ -894,10 +1032,11 @@ func (a *App) View() tea.View {
 	// If sidebar is visible, render it alongside the main view
 	if a.sidebar.IsVisible() {
 		sidebarView := a.sidebar.View()
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, mainView, sidebarView))
-	} else {
-		b.WriteString(mainView)
+		mainView = lipgloss.JoinHorizontal(lipgloss.Top, mainView, sidebarView)
 	}
+
+	// Render main view
+	b.WriteString(mainView)
 
 	// Render status bar
 	b.WriteString("\n")

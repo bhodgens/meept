@@ -148,8 +148,11 @@ type ChatModel struct {
 	inputLastClickTime  time.Time
 	inputClickCount     int
 
-	// Fixed input height (no auto-expand)
+	// Input height (supports dynamic resize)
 	inputHeight int
+
+	// Slash autocomplete popup (rendered above input)
+	slashAutocompletePopup string
 
 	// Styles
 	userStyle       lipgloss.Style
@@ -202,8 +205,23 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 	ta.Focus()
 	ta.CharLimit = 4000
 	ta.SetWidth(80)
-	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
+	
+	// Dynamic height: starts at 3 lines, grows up to 8 lines as content increases
+	ta.DynamicHeight = true
+	ta.MinHeight = 3
+	ta.MaxHeight = 8
+
+	// Configure cursor: orange, blinking, vertical bar
+	styles := ta.Styles()
+	orange := lipgloss.Color("#F97316")
+	styles.Cursor.Color = orange
+	styles.Cursor.Blink = true
+	styles.Cursor.Shape = tea.CursorBar
+	ta.SetStyles(styles)
+	
+	// Use virtual cursor - rendered as part of textarea content
+	ta.SetVirtualCursor(true)
 
 	// ALWAYS disable InsertNewline - we handle both Enter and Shift+Enter manually
 	// This prevents bubbles/textarea from intercepting Enter before our Update() handler
@@ -276,22 +294,21 @@ func (m *ChatModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
 
-	// Fixed input height (5 lines total with border)
-	const inputContentHeight = 3
-
-	// Layout: viewport(+border) followed immediately by input(+border).
-	// View() joins them with a single "\n" which is a line separator, NOT
-	// an extra blank row. So total chrome = viewport border(2) + input border(2)
-	// + input content(inputContentHeight) = 4 + inputContentHeight.
-	// viewportContent = height - inputContent - 4
-	viewportHeight := height - inputContentHeight - 4
+	// Minimum input height (dynamic height enabled)
+	const minInputHeight = 3
+	m.inputHeight = minInputHeight
+	
+	// Set textarea width
+	m.textarea.SetWidth(width - 4)
+	// Don't call SetHeight - DynamicHeight auto-calculates based on content
+	
+	// Calculate viewport height - popup overlays viewport when visible
+	// Layout: viewport_border(2) + input_border(2) + input(3) = 7
+	const chromeHeight = 2 + 2 + minInputHeight
+	viewportHeight := height - chromeHeight
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
-
-	m.inputHeight = inputContentHeight
-	m.textarea.SetWidth(width - 4) // Account for border padding
-	m.textarea.SetHeight(inputContentHeight)
 	m.viewport.SetWidth(width - 2)
 	m.viewport.SetHeight(viewportHeight)
 
@@ -1150,6 +1167,11 @@ func (m *ChatModel) addMessage(role, content string) {
 	m.updateViewport()
 }
 
+// AddSystemMessage adds a system message to the chat transcript.
+func (m *ChatModel) AddSystemMessage(content string) {
+	m.addMessage("system", content)
+}
+
 // trackDirtyMessage adds a message to the dirty buffer for later persistence.
 func (m *ChatModel) trackDirtyMessage(role, content string) {
 	if m.sessionID == "" {
@@ -1574,10 +1596,32 @@ func (m *ChatModel) View() string {
 		viewportBorder = m.focusedBorder
 	}
 
-	// Height sets inner content height; border adds 2 more lines
+	// Calculate dynamic viewport height based on popup visibility
+	popupHeight := 0
+	if m.slashAutocompletePopup != "" {
+		popupHeight = strings.Count(m.slashAutocompletePopup, "\n") + 1
+	}
+	
+	// Input height is dynamic based on content
+	inputLines := m.textarea.LineCount()
+	if inputLines < 3 {
+		inputLines = 3
+	}
+	if inputLines > 8 {
+		inputLines = 8
+	}
+	inputHeight := inputLines
+	
+	// Calculate available viewport height
+	chromeHeight := 2 + popupHeight + 2 + inputHeight
+	viewportContentHeight := m.height - chromeHeight
+	if viewportContentHeight < 1 {
+		viewportContentHeight = 1
+	}
+	
 	viewportStyle := viewportBorder.
 		Width(m.width - 2).
-		Height(m.viewport.Height())
+		Height(viewportContentHeight)
 
 	// Render viewport content with selection highlighting
 	viewportContent := m.viewport.View()
@@ -1638,6 +1682,17 @@ func (m *ChatModel) View() string {
 	b.WriteString(inputStyle.Render(inputContent.String()))
 
 	return b.String()
+}
+
+
+// SetSlashAutocompletePopup sets the autocomplete popup string to render.
+func (m *ChatModel) SetSlashAutocompletePopup(popup string) {
+	m.slashAutocompletePopup = popup
+}
+
+// ClearSlashAutocompletePopup clears the autocomplete popup.
+func (m *ChatModel) ClearSlashAutocompletePopup() {
+	m.slashAutocompletePopup = ""
 }
 
 // Reset clears the chat state.

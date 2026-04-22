@@ -203,9 +203,9 @@ func DefaultStyles() *Styles {
 		Bold(true).
 		Padding(0, 1)
 
-	// Help styles
+	// Help styles - orange for keys and special characters
 	s.HelpKey = lipgloss.NewStyle().
-		Foreground(ColorMuted).
+		Foreground(ColorPrimary).
 		Bold(true)
 
 	s.HelpValue = lipgloss.NewStyle().
