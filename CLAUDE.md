@@ -40,6 +40,15 @@ make go-daemon-debug   # Build and start with debug logging
 ./bin/meept chat "What's the weather like?"
 ./bin/meept chat  # Interactive TUI mode
 
+# Models management
+./bin/meept models                    # Interactive model management
+./bin/meept models list               # List configured models
+./bin/meept models providers          # List available providers
+./bin/meept models add                # Add new provider/model
+./bin/meept models remove <ref>       # Remove model
+./bin/meept models set-default <ref>  # Set default model
+./bin/meept models credentials        # Manage API credentials
+
 # ClawSkills commands
 ./bin/meept clawskills search "query"
 ./bin/meept clawskills install <slug>
@@ -170,6 +179,8 @@ Jobs can be targeted to specific agents via `agent_id`:
 
 - **All UI element text must be explicitly lowercase** (e.g., "switch" not "Switch", "ok" not "OK")
 - This applies to: button labels, menu items, tooltips, status messages, dialog titles, hints
+- for TUI, use bubblezone library to help with positioning. 
+- Default to making elements clickable for switching context, if possible.
 
 ## Coding Practices
 
