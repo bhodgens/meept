@@ -76,6 +76,7 @@ cp config/models.json5 ~/.meept/models.json5
 | **Memory Management** | ✅ Working | Hybrid memvid + SQLite memory | [Memory](docs/concepts/memory.md) |
 | **Tool Execution** | ✅ Working | File ops, shell, web fetch, memory | [Tools](docs/concepts/tools.md) |
 | **Interactive TUI** | ✅ Working | Vim keybindings, markdown rendering | [CLI Reference](docs/reference/cli.md) |
+| **Models CLI** | ✅ Working | Interactive provider/model management | [Models CLI](docs/reference/models-cli.md) |
 | **Job Scheduling** | ✅ Working | SQLite-backed queue with priorities | [Workflows](docs/workflows/) |
 | **Skills System** | 🔄 Partial | Discovery works; execution in progress | [Skills](docs/concepts/skills.md) |
 | **Security Engine** | 🔄 Partial | Permission system; sanitizers not wired | [Configuration](docs/configuration/) |
@@ -152,6 +153,8 @@ data_dir = "~/.meept/memory"
 ```
 
 ### Models Config: `~/.meept/models.json5` (REQUIRED)
+
+**Quick Setup:** Use `meept models setup` for interactive configuration instead of manual editing.
 Meept requires a valid models configuration with API keys. See the template in `config/models.json5`.
 
 ### Agent Customization
