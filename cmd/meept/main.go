@@ -117,6 +117,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newSelfImproveCmd())
 	rootCmd.AddCommand(newShadowCmd())
 	rootCmd.AddCommand(newDevCmd())
+	rootCmd.AddCommand(newModelsCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newHelpCmd(rootCmd))
 
