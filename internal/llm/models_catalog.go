@@ -204,6 +204,38 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			Capabilities:  []string{"completion", "code", "reasoning"},
 		},
 	},
+	"bedrock": {
+		{
+			ModelID:       "anthropic.claude-sonnet-4-6-v2:0",
+			Name:          "Claude Sonnet 4.6 (Bedrock)",
+			ProviderID:    "bedrock",
+			ContextWindow: 200000,
+			MaxOutput:     8192,
+			InputCost:     3.0,
+			OutputCost:    15.0,
+			Capabilities:  []string{"completion", "code", "reasoning", "tool_use"},
+		},
+		{
+			ModelID:       "anthropic.claude-opus-4-7-v1:0",
+			Name:          "Claude Opus 4.7 (Bedrock)",
+			ProviderID:    "bedrock",
+			ContextWindow: 200000,
+			MaxOutput:     8192,
+			InputCost:     15.0,
+			OutputCost:    75.0,
+			Capabilities:  []string{"completion", "code", "reasoning", "tool_use", "thinking"},
+		},
+		{
+			ModelID:       "meta.llama3-70b-instruct-v1:0",
+			Name:          "Llama 3 70B Instruct (Bedrock)",
+			ProviderID:    "bedrock",
+			ContextWindow: 8192,
+			MaxOutput:     2048,
+			InputCost:     2.65,
+			OutputCost:    3.5,
+			Capabilities:  []string{"completion", "code", "reasoning"},
+		},
+	},
 }
 
 // GetModelsForProvider returns all models for a provider.

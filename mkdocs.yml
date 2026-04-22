@@ -95,6 +95,7 @@ nav:
       - Memory System: workflows/memory.md
       - Self-Improvement: workflows/self-improvement.md
       - LLM Provider Management: workflows/llm-management.md
+      - Models CLI: workflows/models-cli.md
       - Context Firewall: workflows/context-firewall.md
       - Code Intelligence: workflows/code-intelligence.md
       - Job Scheduling: workflows/job-scheduling.md
@@ -106,6 +107,7 @@ nav:
   - Reference:
       - reference/index.md
       - CLI Commands: reference/cli.md
+      - Models CLI Reference: reference/models-cli.md
       - RPC API: reference/rpc.md
       - Tool Reference: reference/tools.md
       - Logging: reference/logging.md

@@ -16,6 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/render"
+	"github.com/caimlas/meept/internal/tui/slash"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
 )
@@ -1663,7 +1664,8 @@ func (m *ChatModel) View() string {
 		inputContent.WriteString("\n")
 	}
 
-	inputView := m.textarea.View()
+	// Render input with ghost text completion
+	inputView := m.renderInputWithGhostText()
 	if m.historyIdx >= 0 {
 		history := m.currentHistory()
 		historyIndicator := lipgloss.NewStyle().
@@ -2140,6 +2142,75 @@ func (m *ChatModel) ClearAttachments() {
 // GetInputValue returns the current value of the input textarea.
 func (m *ChatModel) GetInputValue() string {
 	return m.textarea.Value()
+}
+
+// findBestSlashMatch finds the best matching slash command for the given input.
+// Returns the full command string (e.g., "/help") or empty string if no match.
+func findBestSlashMatch(input string) string {
+	if !strings.HasPrefix(input, "/") {
+		return ""
+	}
+	
+	commands := slash.BuiltinCommands()
+	inputLower := strings.ToLower(strings.TrimPrefix(input, "/"))
+	
+	if inputLower == "" {
+		// No filter - return first command (will be "/help")
+		if len(commands) > 0 {
+			return "/" + commands[0]
+		}
+		return ""
+	}
+	
+	// Find exact prefix match
+	for _, cmd := range commands {
+		if strings.HasPrefix(cmd, inputLower) {
+			return "/" + cmd
+		}
+	}
+	
+	return ""
+}
+
+// renderInputWithGhostText renders the input textarea with ghost text completion.
+// The typed portion is orange, ghost portion is grey.
+func (m *ChatModel) renderInputWithGhostText() string {
+	inputValue := m.textarea.Value()
+	
+	// Check if we should show ghost completion (slash commands at start)
+	showGhost := false
+	if strings.HasPrefix(inputValue, "/") {
+		// Only show ghost if input is a prefix of a command (not complete)
+		bestMatch := findBestSlashMatch(inputValue)
+		showGhost = bestMatch != "" && bestMatch != inputValue
+	}
+	
+	if !showGhost {
+		// No ghost - render normally
+		return m.textarea.View()
+	}
+	
+	// Get ghost completion
+	bestMatch := findBestSlashMatch(inputValue)
+	if bestMatch == "" {
+		return m.textarea.View()
+	}
+	
+	// Build styled input: orange for typed, grey for ghost
+	// We need to render the text manually since bubbles textarea doesn't support partial styling
+	orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
+	greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	
+	typedPortion := inputValue
+	ghostPortion := bestMatch[len(inputValue):]
+	
+	styledInput := orangeStyle.Render(typedPortion) + greyStyle.Render(ghostPortion)
+	
+	// Add cursor indicator
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
+	cursor := cursorStyle.Render("▊")
+	
+	return styledInput + cursor
 }
 
 // SetInputValue sets the value of the input textarea.
