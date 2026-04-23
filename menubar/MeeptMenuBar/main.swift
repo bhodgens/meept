@@ -1,69 +1,73 @@
-//
-//  AppDelegate.swift
-//  MeeptMenuBar
-//
-
-import SwiftUI
 import AppKit
+import SwiftUI
+import os.log
 
-@main
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
-
+    
     private let apiClient = APIClient()
     private let daemonController = DaemonController()
     private var daemonStatus = DaemonStatus()
     private var isUpdating = false
-
+    private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "Main")
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
-        setupStatusItem()
-        startStatusPolling()
-    }
-
-    private func setupStatusItem() {
+        logger.info("applicationDidFinishLaunching called!")
+        
+        NSApp.setActivationPolicy(.accessory)
+        
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem?.behavior = .removalAllowed
-
+        
         if let button = statusItem?.button {
-            button.image = createStatusImage()
+            button.title = "meept"
+            
+            if let cpuImage = NSImage(systemSymbolName: "cpu", accessibilityDescription: "Meept") {
+                cpuImage.isTemplate = true
+                cpuImage.size = NSSize(width: 14, height: 14)
+                button.image = cpuImage
+            }
             button.action = #selector(togglePopover(_:))
             button.target = self
+            logger.info("button configured with title: \(button.title)")
         }
-
+        
         popover = NSPopover()
         popover?.contentSize = NSSize(width: 200, height: 150)
         popover?.behavior = .transient
         updatePopoverContent()
+        
+        startStatusPolling()
     }
-
+    
     private func createStatusImage() -> NSImage? {
-        let imageName: String
+        let symbolName: String
         switch daemonStatus.state {
         case .offline:
-            imageName = "MeeptIdle"
+            symbolName = "power"
         case .idle:
-            imageName = "MeeptRunning"
+            symbolName = "checkmark.circle"
         case .working:
-            imageName = "MeeptWorking"
+            symbolName = "gearshape.2.fill"
         case .error:
-            imageName = "MeeptError"
+            symbolName = "exclamationmark.triangle.fill"
         }
-
-        if let image = NSImage(named: imageName) {
+        
+        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Meept") {
             image.isTemplate = true
-            image.size = NSSize(width: 18, height: 18)
+            image.size = NSSize(width: 14, height: 14)
             return image
         }
         return nil
     }
-
+    
     private func updateStatusImage() {
         if let image = createStatusImage() {
             statusItem?.button?.image = image
         }
     }
-
+    
     private func updatePopoverContent() {
         popover?.contentViewController = NSHostingController(
             rootView: MenuView(
@@ -75,7 +79,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
         )
     }
-
+    
     @objc private func togglePopover(_ sender: AnyObject?) {
         if let button = statusItem?.button {
             if popover?.isShown == true {
@@ -85,14 +89,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-
+    
     private func startStatusPolling() {
         Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.fetchDaemonStatus()
         }
         fetchDaemonStatus()
     }
-
+    
     private func fetchDaemonStatus() {
         guard !isUpdating else { return }
         apiClient.getDaemonStatus { [weak self] result in
@@ -105,7 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-
+    
     private func startDaemon() {
         guard !isUpdating else { return }
         isUpdating = true
@@ -116,7 +120,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-
+    
     private func stopDaemon() {
         guard !isUpdating else { return }
         isUpdating = true
@@ -127,7 +131,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-
+    
     private func restartDaemon() {
         guard !isUpdating else { return }
         isUpdating = true
@@ -139,3 +143,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()

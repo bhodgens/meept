@@ -8,8 +8,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "MeeptMenuBar",
-            path: "MeeptMenuBar",
-            resources: [.process("Assets.xcassets")]
+            path: "MeeptMenuBar"
         )
     ]
 )
