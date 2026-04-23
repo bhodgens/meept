@@ -521,3 +521,11 @@ type Event struct {
 	Message   string            `json:"message"`
 	Context   map[string]any    `json:"context,omitempty"`
 }
+
+// SubscribeMetrics returns a channel for receiving metric updates.
+// Currently returns a closed channel and nil stop function as placeholder.
+func (s *Store) SubscribeMetrics() (<-chan *LiveMetricsSnapshot, func()) {
+	ch := make(chan *LiveMetricsSnapshot, 1)
+	// Placeholder - actual implementation would push metrics to channel
+	return ch, func() { close(ch) }
+}

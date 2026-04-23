@@ -685,7 +685,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		// First, check if mouse event is in the textarea input area
-		if textareaStartY, _ := m.getTextareaBounds(); textareaStartY >= 0 {
+		if textareaStartY, textareaEndY := m.getTextareaBounds(); textareaStartY >= 0 {
 			// Forward mouse events to textarea handler
 			return m.HandleInputMouse(msg)
 		}
@@ -2034,12 +2034,11 @@ func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
-// getTextareaBounds returns the screen Y coordinate range where the textarea input is rendered.
+// getTextareaBounds returns the Y coordinate range where the textarea input is rendered.
 // Returns (startY, endY) where startY is the first line of the textarea content area
 // and endY is the last line. If bounds cannot be calculated, returns (-1, -1).
 //
-// Layout from top of screen:
-//   - Header/chrome (screenYOffset): variable
+// Layout from top of chat model's coordinate space (Y=0 is top of chat area, not screen):
 //   - Viewport border top: 1 line
 //   - Viewport content: viewport.Height() lines
 //   - Viewport border bottom/newline: 1 line
@@ -2047,7 +2046,9 @@ func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
 //   - Attachments (conditional): 0-1 lines
 //   - Input border top + textarea content: dynamic
 //
-// Returns screen-relative coordinates suitable for comparing with mouse events.
+// Note: The chat model's Y=0 is already offset by the App's header (if shown).
+// Mouse coordinates from tea.MouseMsg are screen-relative, so callers must add
+// the App's header offset when comparing.
 func (m *ChatModel) getTextareaBounds() (startY, endY int) {
 	// Viewport section
 	viewportBorderLines := 2 // top and bottom borders/newlines
@@ -2073,17 +2074,17 @@ func (m *ChatModel) getTextareaBounds() (startY, endY int) {
 		inputLines = 8
 	}
 
-	// Calculate start Y relative to chat area
-	chatRelativeStartY := viewportBorderLines + viewportContentLines + copyHintLines + attachmentsLines
-
-	// Convert to screen-relative by adding the screen offset (header, etc.)
-	startY = m.screenYOffset + chatRelativeStartY
+	// Calculate start Y: after viewport + conditional elements
+	// Y=0 is viewport top border
+	// startY = viewport border (1) + viewport content + viewport bottom border/newline (1) + conditional
+	startY = viewportBorderLines + viewportContentLines + copyHintLines + attachmentsLines
 
 	// Calculate end Y: start + textarea content lines - 1 (inclusive)
 	endY = startY + inputLines - 1
 
 	return startY, endY
 }
+
 // isClickInViewportArea checks if mouse coordinates are within the viewport area on screen.
 // The viewport is positioned after the header (2 lines) and includes a border.
 // This confines selection to the viewport and prevents interference with other UI elements.

@@ -13,15 +13,30 @@ import (
 // HandleInputMouse handles mouse events for text selection in the input textarea.
 // HandleInputMouse handles mouse events for text selection in the input textarea.
 func (m *ChatModel) HandleInputMouse(msg tea.MouseMsg) tea.Cmd {
+	// Check if mouse event is within textarea bounds
+	inputStartY, inputEndY := m.getTextareaBounds()
+	if inputStartY < 0 {
+		return nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
-		return m.handleInputMousePress(msg)
+		mouse := msg.Mouse()
+		// Only handle if within textarea vertical bounds
+		if mouse.Y >= inputStartY && mouse.Y <= inputEndY {
+			return m.handleInputMousePress(msg)
+		}
+		return nil
 	case tea.MouseReleaseMsg:
-		return m.handleInputMouseRelease(msg)
+		if m.inputMouseDown {
+			return m.handleInputMouseRelease(msg)
+		}
+		return nil
 	case tea.MouseMotionMsg:
 		if m.inputMouseDown {
 			return m.handleInputMouseDrag(msg)
 		}
+		return nil
 	}
 	return nil
 }
@@ -31,13 +46,21 @@ func (m *ChatModel) handleInputMousePress(msg tea.MouseClickMsg) tea.Cmd {
 	m.inputMouseDown = true
 
 	mouse := msg.Mouse()
+
 	// Calculate position within textarea content
-	// Textarea has 1 char left padding for border
+	// Need to convert screen coordinates to textarea-relative coordinates
+	inputStartY, _ := m.getTextareaBounds()
+
+	// Adjust Y to be relative to textarea content area
+	// Adjust X to account for left border/padding
 	adjustedX := mouse.X - 1
-	adjustedY := mouse.Y
+	adjustedY := mouse.Y - inputStartY
 
 	if adjustedX < 0 {
 		adjustedX = 0
+	}
+	if adjustedY < 0 {
+		adjustedY = 0
 	}
 
 	// Check for double/triple click
@@ -68,11 +91,17 @@ func (m *ChatModel) handleInputMousePress(msg tea.MouseClickMsg) tea.Cmd {
 // handleInputMouseDrag handles mouse drag for extending input text selection.
 func (m *ChatModel) handleInputMouseDrag(msg tea.MouseMotionMsg) tea.Cmd {
 	mouse := msg.Mouse()
+
+	// Convert screen coordinates to textarea-relative coordinates
+	inputStartY, _ := m.getTextareaBounds()
 	adjustedX := mouse.X - 1
-	adjustedY := mouse.Y
+	adjustedY := mouse.Y - inputStartY
 
 	if adjustedX < 0 {
 		adjustedX = 0
+	}
+	if adjustedY < 0 {
+		adjustedY = 0
 	}
 
 	m.inputSelectionEnd = m.calculateInputCursorOffset(adjustedY, adjustedX)

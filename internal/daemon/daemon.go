@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/registry"
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/pkg/models"
@@ -22,13 +24,15 @@ import (
 
 // Daemon manages the meept daemon lifecycle.
 type Daemon struct {
-	config     *Config
-	fullConfig *config.Config // Full configuration loaded from file
-	bus        *bus.MessageBus
-	registry   *registry.Registry
-	rpc        *rpc.Server
-	components *Components // Agent, tools, LLM, etc.
-	logger     *slog.Logger
+	config       *Config
+	fullConfig   *config.Config // Full configuration loaded from file
+	bus          *bus.MessageBus
+	registry     *registry.Registry
+	rpc          *rpc.Server
+	httpServer   *http.Server
+	components   *Components // Agent, tools, LLM, etc.
+	metricsStore *metrics.Store
+	logger       *slog.Logger
 
 	status    models.DaemonStatus
 	startTime time.Time
@@ -56,11 +60,11 @@ func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 	stateDir := filepath.Join(homeDir, ".meept")
 	return &Config{
-		SocketPath:     filepath.Join(stateDir, "meept.sock"),
-		PIDFile:        filepath.Join(stateDir, "meept.pid"),
-		StateDir:       stateDir,
+		SocketPath:      filepath.Join(stateDir, "meept.sock"),
+		PIDFile:         filepath.Join(stateDir, "meept.pid"),
+		StateDir:        stateDir,
 		ShutdownTimeout: 10 * time.Second,
-		LogLevel:       slog.LevelInfo,
+		LogLevel:        slog.LevelInfo,
 	}
 }
 
@@ -134,16 +138,53 @@ func New(cfg *Config) (*Daemon, error) {
 		)
 	}
 
+	// Create config service for HTTP server
+	configService, err := http.NewConfigService()
+	if err != nil {
+		logger.Warn("Failed to create config service", "error", err)
+	}
+
+	// Create daemon control for HTTP server
+	daemonControl, err := NewDaemonControl()
+	if err != nil {
+		logger.Warn("Failed to create daemon control", "error", err)
+	}
+
+	// Create metrics store
+	metricsStore, err := metrics.NewStore(&metrics.StoreConfig{
+		DatabasePath:  filepath.Join(cfg.StateDir, "metrics.db"),
+		BatchSize:     100,
+		FlushInterval: 10 * time.Second,
+	})
+	if err != nil {
+		logger.Warn("Failed to create metrics store", "error", err)
+	}
+
+	// Create metrics collector
+	if metricsStore != nil {
+		metrics.NewCollector(metricsStore, msgBus, nil)
+	}
+
+	// Create HTTP server - use metricsStore as the MetricsService
+	var httpSrv *http.Server
+	if configService != nil && daemonControl != nil && metricsStore != nil {
+		httpCfg := http.DefaultServerConfig()
+		httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, logger)
+		logger.Info("HTTP server created", "addr", httpCfg.Addr)
+	}
+
 	return &Daemon{
-		config:     cfg,
-		fullConfig: fullCfg,
-		bus:        msgBus,
-		registry:   reg,
-		rpc:        rpcServer,
-		components: components,
-		logger:     logger,
-		status:     models.StatusStopped,
-		pidFile:    cfg.PIDFile,
+		config:       cfg,
+		fullConfig:   fullCfg,
+		bus:          msgBus,
+		registry:     reg,
+		rpc:          rpcServer,
+		httpServer:   httpSrv,
+		components:   components,
+		metricsStore: metricsStore,
+		logger:       logger,
+		status:       models.StatusStopped,
+		pidFile:      cfg.PIDFile,
 	}, nil
 }
 
@@ -178,6 +219,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 			"tools", d.components.ToolRegistry.Count(),
 			"llm_configured", d.components.LLMClient != nil,
 		)
+	}
+
+	// Metrics collector is started automatically by NewCollector
+
+	// Start HTTP server for menubar app
+	if d.httpServer != nil {
+		go func() {
+			if err := d.httpServer.Start(ctx); err != nil {
+				d.logger.Error("HTTP server error", "error", err)
+			}
+		}()
+		d.logger.Info("HTTP server starting", "addr", ":8081")
 	}
 
 	d.status = models.StatusRunning
@@ -231,6 +284,18 @@ func (d *Daemon) shutdown() error {
 	// Create shutdown context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), d.config.ShutdownTimeout)
 	defer cancel()
+
+	// Stop HTTP server
+	if d.httpServer != nil {
+		if err := d.httpServer.Shutdown(ctx); err != nil {
+			d.logger.Error("HTTP server shutdown error", "error", err)
+		}
+	}
+
+	// Stop metrics collector
+	if d.metricsStore != nil {
+		d.metricsStore.Close()
+	}
 
 	// Stop agent components first
 	if d.components != nil {
@@ -388,4 +453,21 @@ func (d *Daemon) RPC() *rpc.Server {
 // Components returns the agent components.
 func (d *Daemon) Components() *Components {
 	return d.components
+}
+
+// metricsStoreWrapper adapts *metrics.Store to implement the MetricsService interface.
+type metricsStoreWrapper struct {
+	store *metrics.Store
+}
+
+func (w *metricsStoreWrapper) GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error) {
+	return w.store.GetLiveMetrics()
+}
+
+func (w *metricsStoreWrapper) GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error) {
+	return w.store.GetHistoricalMetrics(from, to, resolution)
+}
+
+func (w *metricsStoreWrapper) SubscribeMetrics() (<-chan *metrics.LiveMetricsSnapshot, func()) {
+	return w.store.SubscribeMetrics()
 }

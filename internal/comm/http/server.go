@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/metrics"
 )
 
 // ServerConfig holds configuration for the HTTP server.
@@ -41,9 +43,9 @@ type DaemonController interface {
 
 // MetricsService provides metrics access.
 type MetricsService interface {
-	GetLiveMetrics() (*LiveMetrics, error)
-	GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]MetricPoint, error)
-	SubscribeMetrics() (<-chan *LiveMetrics, func())
+	GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error)
+	GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error)
+	SubscribeMetrics() (<-chan *metrics.LiveMetricsSnapshot, func())
 }
 
 // Server is the HTTP API server for the menubar app.
@@ -75,25 +77,6 @@ type Agent struct {
 	Prompt      string         `json:"prompt"`
 	Frontmatter map[string]any `json:"frontmatter,omitempty"`
 	Enabled     bool           `json:"enabled"`
-}
-
-// LiveMetrics represents current metrics snapshot.
-type LiveMetrics struct {
-	Timestamp      time.Time      `json:"timestamp"`
-	ActiveAgents   int            `json:"active_agents"`
-	RequestsPerSec float64        `json:"requests_per_sec"`
-	TokenUsageRate float64        `json:"token_usage_rate"`
-	QueueDepth     int            `json:"queue_depth"`
-	ModelFailovers int            `json:"model_failovers"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
-}
-
-// MetricPoint represents a single metric data point.
-type MetricPoint struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Name      string            `json:"name"`
-	Value     float64           `json:"value"`
-	Tags      map[string]string `json:"tags,omitempty"`
 }
 
 // NewServer creates a new HTTP API server.

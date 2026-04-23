@@ -265,8 +265,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Calculate reserved height for chrome (header + status bar)
 		chromeHeight := 1 // status bar
+		headerOffset := 0
 		if a.clientConfig.Rendering.ShowHeader {
 			chromeHeight = 2 // header + status bar
+			headerOffset = 2 // header line + newline
 		}
 
 		// Calculate sidebar width (30% of screen when visible, max 40 chars)
@@ -285,6 +287,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update sub-models with remaining width
 		mainWidth := msg.Width - a.sidebarWidth
 		a.chat.SetSize(mainWidth, msg.Height-chromeHeight)
+		a.chat.SetScreenYOffset(headerOffset)
 		a.tasks.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)

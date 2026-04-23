@@ -11,9 +11,9 @@ struct SettingsWindow: View {
     @State private var modelsConfig = "// Loading..."
     @State private var isSaving = false
     @State private var showSaveError = false
-    
+
     private let configService = ConfigService()
-    
+
     var body: some View {
         TabView(selection: $selectedTab) {
             ClientConfigView(
@@ -36,7 +36,7 @@ struct SettingsWindow: View {
                 Label("client", systemImage: "gearshape")
             }
             .tag(0)
-            
+
             ModelsConfigView(
                 config: $modelsConfig,
                 isSaving: isSaving,
@@ -57,6 +57,12 @@ struct SettingsWindow: View {
                 Label("models", systemImage: "cpu")
             }
             .tag(1)
+
+            AgentsConfigView()
+            .tabItem {
+                Label("agents", systemImage: "person.crop.circle")
+            }
+            .tag(2)
         }
         .frame(width: 600, height: 450)
         .padding()
@@ -69,7 +75,7 @@ struct SettingsWindow: View {
             loadConfigs()
         }
     }
-    
+
     private func loadConfigs() {
         configService.getClientConfig { result in
             switch result {
@@ -79,7 +85,7 @@ struct SettingsWindow: View {
                 clientConfig = "// Error loading config"
             }
         }
-        
+
         configService.getModelsConfig { result in
             switch result {
             case .success(let content):
