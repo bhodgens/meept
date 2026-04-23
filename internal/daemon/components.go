@@ -450,6 +450,22 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		c.TaskRegistry = taskRegistry
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
 
+		// Wire queue to check task cancellation via interrupt manager
+		if jobQueue != nil {
+			interruptMgr := taskRegistry.InterruptManager()
+			jobQueue.SetTaskCancelledChecker(func(taskID string) (bool, string) {
+				token, ok := interruptMgr.Get(taskID)
+				if !ok {
+					return false, ""
+				}
+				if token.IsTriggered() {
+					return true, string(token.Reason())
+				}
+				return false, ""
+			})
+			logger.Debug("Queue wired to interrupt manager")
+		}
+
 		// Create amendment manager and register built-in handlers
 		c.AmendmentMgr = task.NewAmendmentManager(msgBus, logger.With("component", "amendment-mgr"))
 		amendmentHandlers := task.NewAmendmentHandlers(taskRegistry, jobQueue)
