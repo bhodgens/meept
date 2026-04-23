@@ -23,9 +23,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem?.behavior = .removalAllowed
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "cpu", accessibilityDescription: "Meept")
+            button.image = createStatusImage()
             button.action = #selector(togglePopover(_:))
             button.target = self
         }
@@ -34,6 +35,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover?.contentSize = NSSize(width: 200, height: 150)
         popover?.behavior = .transient
         updatePopoverContent()
+    }
+
+    private func createStatusImage() -> NSImage? {
+        let imageName: String
+        switch daemonStatus.state {
+        case .offline:
+            imageName = "MeeptIdle"
+        case .idle:
+            imageName = "MeeptRunning"
+        case .working:
+            imageName = "MeeptWorking"
+        case .error:
+            imageName = "MeeptError"
+        }
+
+        if let image = NSImage(named: imageName) {
+            image.isTemplate = true
+            image.size = NSSize(width: 18, height: 18)
+            return image
+        }
+        return nil
+    }
+
+    private func updateStatusImage() {
+        if let image = createStatusImage() {
+            statusItem?.button?.image = image
+        }
     }
 
     private func updatePopoverContent() {
@@ -72,6 +100,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if case .success(let status) = result {
                     self?.daemonStatus = status
                     self?.updatePopoverContent()
+                    self?.updateStatusImage()
                 }
             }
         }

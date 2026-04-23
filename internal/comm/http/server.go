@@ -436,10 +436,27 @@ func (s *Server) handleDaemonStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	running := s.daemonCtrl.IsRunning()
+	state := "offline"
+	if running {
+		state = "idle"
+		// Check for active work via metrics
+		if s.metricsService != nil {
+			if metrics, err := s.metricsService.GetLiveMetrics(); err == nil {
+				if metrics.ActiveAgents > 0 || metrics.QueueDepth > 0 {
+					state = "working"
+				} else if metrics.ModelFailovers > 0 {
+					state = "error"
+				}
+			}
+		}
+	}
+
 	status := map[string]any{
-		"running": s.daemonCtrl.IsRunning(),
+		"running": running,
 		"pid":     0,
 		"uptime":  "",
+		"state":   state,
 	}
 
 	if s.daemonCtrl.IsRunning() {

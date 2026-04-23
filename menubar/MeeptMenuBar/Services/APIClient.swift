@@ -38,7 +38,8 @@ class APIClient {
                 completion(.success(DaemonStatus(
                     running: status.running,
                     pid: status.pid,
-                    uptime: status.uptime
+                    uptime: status.uptime,
+                    state: DaemonState(rawValue: status.state) ?? .offline
                 )))
             } catch {
                 completion(.failure(error))
@@ -74,6 +75,7 @@ struct DaemonStatusResponse: Codable {
     let running: Bool
     let pid: Int
     let uptime: String
+    let state: String
 }
 
 enum APIError: LocalizedError {
