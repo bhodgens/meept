@@ -14,9 +14,11 @@ import (
 
 // Registry manages tasks and provides a unified API.
 type Registry struct {
-	store  *Store
-	bus    *bus.MessageBus
-	logger *slog.Logger
+	store           *Store
+	bus             *bus.MessageBus
+	logger          *slog.Logger
+	interruptMgr    *InterruptManager
+	interruptMgrBus *bus.MessageBus
 
 	mu     sync.RWMutex
 	closed bool
@@ -34,9 +36,11 @@ func NewRegistry(dbPath string, msgBus *bus.MessageBus, logger *slog.Logger) (*R
 	}
 
 	reg := &Registry{
-		store:  store,
-		bus:    msgBus,
-		logger: logger,
+		store:           store,
+		bus:             msgBus,
+		logger:          logger,
+		interruptMgr:    NewInterruptManager(logger.With("component", "interrupt-mgr")),
+		interruptMgrBus: msgBus,
 	}
 
 	logger.Info("Task registry initialized", "path", dbPath)
@@ -285,6 +289,11 @@ func (r *Registry) StepStore() *StepStore {
 // Store returns the underlying task store.
 func (r *Registry) Store() *Store {
 	return r.store
+}
+
+// InterruptManager returns the interrupt manager.
+func (r *Registry) InterruptManager() *InterruptManager {
+	return r.interruptMgr
 }
 
 func (r *Registry) Close() error {
@@ -613,14 +622,12 @@ func (h *Handler) handleDelete(ctx context.Context, msg *models.BusMessage) (any
 	return map[string]string{"status": "deleted"}, nil
 }
 
-// handleCancel flips a task into StateCancelled.
-//
-// Note: this does NOT interrupt any jobs already in flight; workers observe
-// the state change only when they next check the task. Full in-flight
-// interruption is out of scope for the current implementation.
+// handleCancel flips a task into StateCancelled and triggers the interrupt token.
 func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any, error) {
 	var params struct {
-		ID string `json:"id"`
+		ID      string `json:"id"`
+		Reason  string `json:"reason,omitempty"`
+		Message string `json:"message,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &params); err != nil {
 		return nil, err
@@ -645,14 +652,37 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
 		}, nil
 	}
 
+	// Trigger interrupt token (this cancels the context for in-flight jobs)
+	reason := InterruptReason(params.Reason)
+	if reason == "" {
+		reason = ReasonUserCancelled
+	}
+	msgText := params.Message
+	if msgText == "" {
+		msgText = "Cancelled by user"
+	}
+
+	if err := h.registry.interruptMgr.Trigger(params.ID, reason, msgText); err != nil {
+		h.logger.Warn("Failed to trigger interrupt", "task_id", params.ID, "error", err)
+	}
+
+	// Update task state
 	task.SetState(StateCancelled)
 	if err := h.registry.Update(ctx, task); err != nil {
 		return nil, err
 	}
 
+	// Publish cancellation event
+	h.registry.publishEvent("task.cancelled", map[string]any{
+		"task_id": params.ID,
+		"reason":  reason,
+		"message": msgText,
+	})
+
 	return map[string]any{
 		"status": "cancelled",
 		"state":  string(task.State),
+		"reason": reason,
 	}, nil
 }
 
