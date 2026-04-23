@@ -1,4 +1,4 @@
-.PHONY: help build build-all build-daemon build-cli test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup build-linux build-darwin build-cross docs-serve docs-build docs-generate
+.PHONY: help build build-all build-daemon build-cli test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app
 
 help:
 	@echo "Usage: make [target]"
@@ -13,6 +13,14 @@ help:
 	@echo "  build-cli        Build only the CLI binary"
 	@echo "  build-gendoc     Build only the documentation generator"
 	@echo "  build-release    Build with version info from git"
+	@echo "  menubar          Build macOS menubar app (Swift, binary)"
+	@echo "  menubar-xcode    Build macOS menubar app (Xcode, .app bundle)"
+	@echo "  menubar          Build menubar app (SPM binary)"
+	@echo "  menubar-app      Create .app bundle from menubar binary"
+	@echo "  menubar-install  Install menubar binary to ~/Applications"
+	@echo "  menubar-install-app-bundle  Install .app bundle to ~/Applications"
+	@echo "  menubar-app          Build menubar as .app bundle"
+	@echo "  menubar-install-app-bundle  Install menubar .app to ~/Applications"
 	@echo "  install          Install binaries to GOPATH/bin"
 	@echo ""
 	@echo "Testing:"
@@ -28,6 +36,7 @@ help:
 	@echo "  vet              Run go vet"
 	@echo "  mod-tidy         Tidy go modules"
 	@echo "  clean            Remove build artifacts"
+	@echo "  menubar-clean    Remove menubar build artifacts"
 	@echo ""
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
@@ -323,3 +332,67 @@ go-daemon-debug: daemon-debug
 go-clean: clean
 go-lint: lint
 go-install: install
+
+# =============================================================================
+# macOS MenuBar App
+# =============================================================================
+
+MENUBAR_DIR := menubar
+MENUBAR_BIN := $(MENUBAR_DIR)/.build/release/MeeptMenuBar
+MENUBAR_APP := $(MENUBAR_DIR)/.build/Release/MeeptMenuBar.app
+MENUBAR_XCODEPROJ := $(MENUBAR_DIR)/MeeptMenuBar.xcodeproj
+
+# Build using Swift Package Manager (binary output, fast)
+menubar:
+	@echo "Building menubar app (SPM)..."
+	cd $(MENUBAR_DIR) && swift build -c release
+	@echo "Built $(MENUBAR_BIN)"
+
+# Create .app bundle structure
+menubar-app: menubar
+	@echo "Creating .app bundle..."
+	rm -rf $(MENUBAR_APP)
+	mkdir -p $(MENUBAR_APP)/Contents/MacOS
+	mkdir -p $(MENUBAR_APP)/Contents/Resources
+	cp $(MENUBAR_BIN) $(MENUBAR_APP)/Contents/MacOS/
+	@printf '<?xml version="1.0" encoding="UTF-8"?>\n\
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n\
+<plist version="1.0">\n\
+<dict>\n\
+    <key>CFBundleExecutable</key>\n\
+    <string>MeeptMenuBar</string>\n\
+    <key>CFBundleIdentifier</key>\n\
+    <string>com.caimlas.meept.menubar</string>\n\
+    <key>CFBundleName</key>\n\
+    <string>Meept MenuBar</string>\n\
+    <key>CFBundlePackageType</key>\n\
+    <string>APPL</string>\n\
+    <key>CFBundleShortVersionString</key>\n\
+    <string>1.0</string>\n\
+    <key>CFBundleVersion</key>\n\
+    <string>1</string>\n\
+    <key>LSMinimumSystemVersion</key>\n\
+    <string>13.0</string>\n\
+    <key>LSUIElement</key>\n\
+    <true/>\n\
+    <key>NSPrincipalClass</key>\n\
+    <string>NSApplication</string>\n\
+</dict>\n\
+</plist>\n' > $(MENUBAR_APP)/Contents/Info.plist
+	@echo "Created $(MENUBAR_APP)"
+
+menubar-clean:
+	rm -rf $(MENUBAR_DIR)/.build
+	rm -rf $(MENUBAR_APP)
+
+menubar-install: menubar
+	@echo "Installing menubar binary to ~/Applications..."
+	mkdir -p ~/Applications
+	cp $(MENUBAR_BIN) ~/Applications/MeeptMenuBar
+	@echo "Installed: ~/Applications/MeeptMenuBar"
+
+menubar-install-app-bundle: menubar-app
+	@echo "Installing .app bundle to ~/Applications..."
+	rm -rf ~/Applications/MeeptMenuBar.app
+	cp -r $(MENUBAR_APP) ~/Applications/
+	@echo "Installed: ~/Applications/MeeptMenuBar.app"

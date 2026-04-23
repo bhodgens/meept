@@ -55,9 +55,9 @@ func LoadDefault() (*Config, error) {
 	return Load(filepath.Join(homeDir, ".meept", "meept.toml"))
 }
 
-// expandEnvVars expands environment variables in a string.
+// ExpandEnvVars expands environment variables in a string.
 // Supports both ${VAR_NAME} and $VAR_NAME syntax.
-func expandEnvVars(s string) string {
+func ExpandEnvVars(s string) string {
 	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
 		var varName string
 		if strings.HasPrefix(match, "${") {
@@ -72,6 +72,12 @@ func expandEnvVars(s string) string {
 		// Return empty string for undefined variables
 		return ""
 	})
+}
+
+// expandEnvVars expands environment variables in a string.
+// Supports both ${VAR_NAME} and $VAR_NAME syntax.
+func expandEnvVars(s string) string {
+	return ExpandEnvVars(s)
 }
 
 // expandPath expands ~ to the home directory.
@@ -215,8 +221,8 @@ func LoadModelsConfigDefault() (*ModelsConfig, error) {
 	return LoadModelsConfig(filepath.Join(homeDir, ".meept", "models.json5"))
 }
 
-// stripJSON5Comments removes // and /* */ comments from JSON5 content.
-func stripJSON5Comments(s string) string {
+// StripJSON5Comments removes // and /* */ comments from JSON5 content.
+func StripJSON5Comments(s string) string {
 	var result strings.Builder
 	inString := false
 	inSingleLineComment := false
@@ -271,6 +277,11 @@ func stripJSON5Comments(s string) string {
 	}
 
 	return result.String()
+}
+
+// stripJSON5Comments removes // and /* */ comments from JSON5 content.
+func stripJSON5Comments(s string) string {
+	return StripJSON5Comments(s)
 }
 
 // EnsureDataDir creates the data directory if it doesn't exist.

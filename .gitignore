@@ -49,3 +49,5 @@ site/
 # Worktrees
 .worktrees/
 worktrees/
+menubar/.build/
+menubar/MeeptMenuBar.app/

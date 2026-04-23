@@ -40,6 +40,15 @@ make go-daemon-debug   # Build and start with debug logging
 ./bin/meept chat "What's the weather like?"
 ./bin/meept chat  # Interactive TUI mode
 
+# macOS MenuBar app (macOS only)
+make menubar                   # Build menubar app (release)
+make menubar-install           # Build and install to /Applications
+make menubar-clean             # Clean menubar build artifacts
+# cd menubar
+# swift build                    # Build menubar app
+# swift run         # Run menubar app
+# cp -r  # Install
+
 # Models management
 ./bin/meept models                    # Interactive model management
 ./bin/meept models list               # List configured models
@@ -67,8 +76,8 @@ Meept is a **Go daemon** with skill-based task orchestration, LLM integration, m
 ### Request Flow
 
 ```
-User Input (CLI/Telegram/Web)
-    → CommServer (Unix socket JSON-RPC)
+User Input (CLI/Telegram/Web/MenuBar)
+    → CommServer (Unix socket JSON-RPC) OR HTTP REST API
     → MessageBus (pub/sub)
     → AgentLoop
         → Planner.Decompose() → TaskSteps
@@ -97,6 +106,8 @@ User Input (CLI/Telegram/Web)
 | **Scheduler** | `internal/scheduler` (scheduler, jobs) |
 | **External** | `internal/comm/telegram`, `internal/comm/web`, `internal/calendar` |
 | **CLI** | `cmd/meept` (chat, status, jobs, memory, clawskills, selfimprove) |
+| **MenuBar** | `menubar/` (SwiftUI app), `internal/comm/http` (REST API) |
+| **Metrics** | `internal/metrics` (store, collector) |
 
 ### Skill/Model Resolution
 
@@ -113,7 +124,11 @@ Skills declare `requires: [code, reasoning]` in YAML frontmatter; models declare
 
 - **Main config**: `~/.meept/meept.toml` (see `config/meept.toml` for template)
 - **Models**: `config/models.json5` (JSON5 format with capability tags)
+- **Client**: `~/.meept/client.json5` (menubar app settings)
+- **Presets**: `config/presets.json5` (model presets), `~/.meept/presets.json5` (user overrides)
 - **MCP servers**: `~/.meept/mcp_servers.json`
+- **Metrics DB**: `~/.meept/metrics.db` (SQLite time-series storage)
+- **launchd Plist**: `~/Library/LaunchAgents/com.caimlas.meept-daemon.plist` (macOS)
 
 ### Programmatic component options
 
@@ -179,7 +194,7 @@ Jobs can be targeted to specific agents via `agent_id`:
 
 - **All UI element text must be explicitly lowercase** (e.g., "switch" not "Switch", "ok" not "OK")
 - This applies to: button labels, menu items, tooltips, status messages, dialog titles, hints
-- for TUI, use bubblezone library to help with positioning. 
+- for TUI, use bubblezone library to help with positioning.
 - Default to making elements clickable for switching context, if possible.
 
 ## Coding Practices
@@ -202,10 +217,12 @@ internal/
   comm/
     telegram/      # Telegram bot
     web/           # HTTP API server
+    http/          # REST API for menubar app (NEW)
   config/          # Configuration loading
   daemon/          # Daemon lifecycle
   llm/             # LLM client and resolution
   memory/          # Memory management (SQLite+FTS5)
+  metrics/         # Metrics storage and collection (NEW)
   registry/        # Service registry
   rpc/             # JSON-RPC server
   scheduler/       # Job scheduling
@@ -214,10 +231,61 @@ internal/
   skills/          # Skill discovery and parsing
   tools/           # Tool registry and builtins
 config/            # Configuration templates
+  presets.json5    # Model presets (NEW)
 docs/              # MkDocs documentation site
+menubar/           # macOS MenuBar app (NEW)
+  MeeptMenuBar/    # Main SwiftUI app
+  Views/           # Menu, Settings, Analytics views
+  Services/        # APIClient, DaemonController, ConfigService
+  Models/          # Data models and presets
 tests/             # Integration tests
 archive/           # Legacy Python code (reference only)
 ```
+
+## macOS MenuBar App
+
+The menubar app provides native macOS integration for monitoring and controlling Meept:
+
+### Features
+- **Status menu**: Shows daemon running/stopped state with uptime
+- **Daemon control**: Start, stop, restart via launchd
+- **Settings**: Edit client.json5, models.json5, manage agents
+- **Analytics**: Live metrics dashboard with historical charts
+
+### Architecture
+```
+MenuBar App (SwiftUI)
+    ↓ HTTP REST (localhost:8081)
+internal/comm/http/
+    ↓
+Daemon components
+```
+
+### HTTP API Endpoints
+
+**Config:**
+- `GET/POST /api/v1/config/client` - Client configuration
+- `GET/POST /api/v1/config/models` - Models configuration
+- `GET/POST/DELETE /api/v1/config/agents/:id` - Agent management
+
+**Daemon:**
+- `GET /api/v1/daemon/status` - Running state, PID, uptime
+- `POST /api/v1/daemon/restart` - Graceful restart
+
+**Metrics:**
+- `GET /api/v1/metrics/live` - Current metrics snapshot
+- `GET /api/v1/metrics/historical?from=&to=&resolution=` - Historical data
+
+### Model Presets
+
+Built-in presets for common tasks:
+- `development` (temp: 0.3) - Balanced for coding
+- `debugging` (temp: 0.2) - Methodical troubleshooting
+- `planning` (temp: 0.4) - Structured thinking
+- `creative` (temp: 0.9) - High creativity
+- `research` (temp: 0.5) - Analytical tasks
+- `fast` - Quick responses
+- `detailed` - Comprehensive answers
 
 ## Documentation
 
