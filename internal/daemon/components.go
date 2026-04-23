@@ -57,6 +57,7 @@ type Components struct {
 	QueueHandler    *queue.Handler
 	TaskRegistry    *task.Registry
 	TaskHandler     *task.Handler
+	AmendmentMgr    *task.AmendmentManager
 	WorkerPool      *worker.Pool
 	WorkerHandler   *worker.Handler
 	JobProcessor    worker.JobProcessor
@@ -448,6 +449,12 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	} else {
 		c.TaskRegistry = taskRegistry
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
+
+		// Create amendment manager and register built-in handlers
+		c.AmendmentMgr = task.NewAmendmentManager(msgBus, logger.With("component", "amendment-mgr"))
+		amendmentHandlers := task.NewAmendmentHandlers(taskRegistry, jobQueue)
+		amendmentHandlers.RegisterAll(c.AmendmentMgr)
+		logger.Info("Amendment manager initialized")
 	}
 
 	// Initialize MCP manager and register MCP tools
@@ -581,6 +588,8 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			MemvidClient:      c.MemvidClient,
 			MemoryMgr:         c.MemoryManager,
 			TaskStore:         taskStore,
+			TaskRegistry:      c.TaskRegistry,
+			AmendmentManager:  c.AmendmentMgr,
 			SkillRegistry:     c.SkillRegistry,
 			SkillExecutor:     c.SkillExecutor,
 			Logger:            logger.With("component", "dispatcher"),
