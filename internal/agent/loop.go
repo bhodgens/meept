@@ -1307,6 +1307,18 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			return exhaustMsg, ErrConvergenceDetected
 		}
 
+		// Check for empty response (no tool calls, no content) - nudge the model
+		if strings.TrimSpace(response.Content) == "" {
+			l.logger.Warn("LLM returned empty content, nudging for more information",
+				"iteration", iteration,
+				"conversation", conversationID,
+			)
+			// Add a nudge message and continue the loop
+			conv.AddAssistantMessage("[empty response - waiting for content]")
+			conv.AddUserMessage("[system: Your response was empty. Please provide a substantive answer or explanation. If you intended to use tools, include tool calls in your response.]")
+			continue
+		}
+
 		// Case 2: LLM returned text response (no tool calls) - done
 		l.logger.Info("Agent loop complete",
 			"iterations", iteration,
