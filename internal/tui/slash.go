@@ -15,17 +15,21 @@ type SlashCommand struct {
 
 // builtinCommands is the set of built-in commands that are handled locally.
 var builtinCommands = map[string]struct{}{
-	"help":    {},
-	"new":     {},
-	"clear":   {},
-	"retry":   {},
-	"undo":    {},
-	"usage":   {},
-	"stop":    {},
-	"status":  {},
-	"vim":     {},
-	"session": {},
-	"task":    {},
+	"help":      {},
+	"new":       {},
+	"clear":     {},
+	"retry":     {},
+	"undo":      {},
+	"usage":     {},
+	"stop":      {},
+	"status":    {},
+	"vim":       {},
+	"session":   {},
+	"task":      {},
+	"cancel":    {},
+	"amend":     {},
+	"interrupt": {},
+	"tasks":     {},
 }
 
 // ParseSlash parses a slash command from input text.

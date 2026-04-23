@@ -133,6 +133,10 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /stop               stop current session's work\n")
 	sb.WriteString("  /status             show platform health status\n")
 	sb.WriteString("  /vim                toggle vim-style keybindings\n")
+	sb.WriteString("  /cancel <id>        cancel a task by ID\n")
+	sb.WriteString("  /amend <id> <type>  submit amendment to task\n")
+	sb.WriteString("  /interrupt <id>     interrupt a running task\n")
+	sb.WriteString("  /tasks              list all tasks\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -458,4 +462,158 @@ func (h *CommandHandler) executeVim() *CommandResult {
 		Output:        fmt.Sprintf("vim mode %s", mode),
 		ToggleVimMode: true,
 	}
+}
+
+// executeCancel cancels a task by ID.
+func (h *CommandHandler) executeCancel(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  "not connected to daemon",
+			IsError: true,
+		}
+	}
+
+	if len(args) == 0 {
+		return &CommandResult{
+			Output:  "usage: /cancel <task-id> [reason]",
+			IsError: true,
+		}
+	}
+
+	taskID := args[0]
+	reason := ""
+	if len(args) > 1 {
+		reason = s.Join(args[1:], " ")
+	}
+
+	if err := h.rpc.CancelTask(taskID); err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to cancel task: %v", err),
+			IsError: true,
+		}
+	}
+
+	msg := fmt.Sprintf("task %s cancelled", taskID)
+	if reason != "" {
+		msg += ": " + reason
+	}
+
+	return &CommandResult{Output: msg}
+}
+
+// executeAmend submits an amendment to a task.
+// usage: /amend <task-id> <type> [content]
+// types: inject_context, skip_step, add_step, reprioritize, change_agent
+func (h *CommandHandler) executeAmend(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  "not connected to daemon",
+			IsError: true,
+		}
+	}
+
+	if len(args) < 2 {
+		return &CommandResult{
+			Output:  "usage: /amend <task-id> <type> [content]\ntypes: inject_context, skip_step, add_step, reprioritize, change_agent",
+			IsError: true,
+		}
+	}
+
+	taskID := args[0]
+	amendmentType := args[1]
+	content := ""
+	if len(args) > 2 {
+		content = s.Join(args[2:], " ")
+	}
+
+	// For now, return a not-yet-implemented message
+	// Full amendment support requires bus communication which is more complex
+	return &CommandResult{
+		Output: fmt.Sprintf("amendment request (not yet fully implemented):\n  task: %s\n  type: %s\n  content: %s\n\nuse the dispatcher API directly for full amendment support", taskID, amendmentType, content),
+	}
+}
+
+// executeInterrupt triggers an interrupt token for a task.
+// usage: /interrupt <task-id> [reason]
+func (h *CommandHandler) executeInterrupt(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  "not connected to daemon",
+			IsError: true,
+		}
+	}
+
+	if len(args) == 0 {
+		return &CommandResult{
+			Output:  "usage: /interrupt <task-id> [reason]",
+			IsError: true,
+		}
+	}
+
+	taskID := args[0]
+	reason := "user_requested"
+	if len(args) > 1 {
+		reason = s.Join(args[1:], " ")
+	}
+
+	// Interrupt is handled via task cancellation for now
+	if err := h.rpc.CancelTask(taskID); err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to interrupt task: %v", err),
+			IsError: true,
+		}
+	}
+
+	return &CommandResult{
+		Output: fmt.Sprintf("task %s interrupted (reason: %s)", taskID, reason),
+	}
+}
+
+// executeTasks lists all tasks.
+// usage: /tasks [state]
+func (h *CommandHandler) executeTasks(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  "not connected to daemon",
+			IsError: true,
+		}
+	}
+
+	// Get extended task list
+	resp, err := h.rpc.ListTasksExtended()
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to list tasks: %v", err),
+			IsError: true,
+		}
+	}
+
+	if len(resp.Tasks) == 0 {
+		return &CommandResult{Output: "no tasks found"}
+	}
+
+	var sb s.Builder
+	sb.WriteString(fmt.Sprintf("tasks (%d total):\n\n", len(resp.Tasks)))
+
+	for _, t := range resp.Tasks {
+		stateIcon := "○"
+		switch t.State {
+		case "completed":
+			stateIcon = "●"
+		case "failed", "cancelled":
+			stateIcon = "○"
+		case "executing", "planning":
+			stateIcon = "◉"
+		}
+
+		name := coalesce(t.Name, "unnamed")
+		progress := ""
+		if t.TotalJobs > 0 {
+			progress = fmt.Sprintf(" [%d/%d]", t.CompletedJobs, t.TotalJobs)
+		}
+
+		sb.WriteString(fmt.Sprintf("%s %s: %s%s\n", stateIcon, t.State, name, progress))
+	}
+
+	return &CommandResult{Output: sb.String()}
 }
