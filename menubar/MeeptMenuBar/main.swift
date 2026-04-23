@@ -5,24 +5,26 @@ import os.log
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
-    
+    private var settingsWindow: NSWindow?
+    private var dashboardWindow: NSWindow?
+
     private let apiClient = APIClient()
     private let daemonController = DaemonController()
     private var daemonStatus = DaemonStatus()
     private var isUpdating = false
     private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "Main")
-    
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.info("applicationDidFinishLaunching called!")
-        
+
         NSApp.setActivationPolicy(.accessory)
-        
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem?.behavior = .removalAllowed
-        
+
         if let button = statusItem?.button {
             button.title = "meept"
-            
+
             if let cpuImage = NSImage(systemSymbolName: "cpu", accessibilityDescription: "Meept") {
                 cpuImage.isTemplate = true
                 cpuImage.size = NSSize(width: 14, height: 14)
@@ -32,15 +34,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
             logger.info("button configured with title: \(button.title)")
         }
-        
+
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 200, height: 150)
+        popover?.contentSize = NSSize(width: 220, height: 180)
         popover?.behavior = .transient
         updatePopoverContent()
-        
+
         startStatusPolling()
     }
-    
+
     private func createStatusImage() -> NSImage? {
         let symbolName: String
         switch daemonStatus.state {
@@ -53,7 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         case .error:
             symbolName = "exclamationmark.triangle.fill"
         }
-        
+
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Meept") {
             image.isTemplate = true
             image.size = NSSize(width: 14, height: 14)
@@ -61,13 +63,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return nil
     }
-    
+
     private func updateStatusImage() {
         if let image = createStatusImage() {
             statusItem?.button?.image = image
         }
     }
-    
+
     private func updatePopoverContent() {
         popover?.contentViewController = NSHostingController(
             rootView: MenuView(
@@ -75,11 +77,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 onStart: { [weak self] in self?.startDaemon() },
                 onStop: { [weak self] in self?.stopDaemon() },
                 onRestart: { [weak self] in self?.restartDaemon() },
+                onShowSettings: { [weak self] in self?.showSettings() },
+                onShowDashboard: { [weak self] in self?.showDashboard() },
                 onQuit: { NSApp.terminate(nil) }
             )
         )
     }
-    
+
+    private func showSettings() {
+        if settingsWindow == nil {
+            let hostingController = NSHostingController(rootView: SettingsWindow())
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 450),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentViewController = hostingController
+            window.title = "meept settings"
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showDashboard() {
+        if dashboardWindow == nil {
+            let hostingController = NSHostingController(rootView: DashboardWindow())
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentViewController = hostingController
+            window.title = "meept dashboard"
+            window.isReleasedWhenClosed = false
+            window.center()
+            dashboardWindow = window
+        }
+
+        dashboardWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func togglePopover(_ sender: AnyObject?) {
         if let button = statusItem?.button {
             if popover?.isShown == true {
@@ -89,14 +133,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    
+
     private func startStatusPolling() {
         Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.fetchDaemonStatus()
         }
         fetchDaemonStatus()
     }
-    
+
     private func fetchDaemonStatus() {
         guard !isUpdating else { return }
         apiClient.getDaemonStatus { [weak self] result in
@@ -109,7 +153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    
+
     private func startDaemon() {
         guard !isUpdating else { return }
         isUpdating = true
@@ -120,7 +164,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    
+
     private func stopDaemon() {
         guard !isUpdating else { return }
         isUpdating = true
@@ -131,7 +175,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    
+
     private func restartDaemon() {
         guard !isUpdating else { return }
         isUpdating = true
