@@ -1,10 +1,10 @@
 package queue
 
 import (
-	"io"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -12,6 +12,9 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// IsTaskCancelledFunc defines a function type for checking task cancellation.
+type IsTaskCancelledFunc func(taskID string) (bool, string)
 
 // Queue defines the interface for job queue operations.
 type Queue interface {
@@ -51,12 +54,13 @@ type Queue interface {
 
 // PersistentQueue implements Queue with SQLite persistence and bus notifications.
 type PersistentQueue struct {
-	store  *Store
-	bus    *bus.MessageBus
-	logger *slog.Logger
+	store           *Store
+	bus             *bus.MessageBus
+	logger          *slog.Logger
+	isTaskCancelled IsTaskCancelledFunc // Optional: check if task is cancelled
 
-	mu      sync.RWMutex
-	closed  bool
+	mu     sync.RWMutex
+	closed bool
 }
 
 // NewPersistentQueue creates a new persistent queue.
@@ -78,6 +82,11 @@ func NewPersistentQueue(dbPath string, msgBus *bus.MessageBus, logger *slog.Logg
 
 	logger.Info("Persistent queue initialized", "path", dbPath)
 	return q, nil
+}
+
+// SetTaskCancelledChecker sets the function for checking task cancellation.
+func (q *PersistentQueue) SetTaskCancelledChecker(fn IsTaskCancelledFunc) {
+	q.isTaskCancelled = fn
 }
 
 // Enqueue adds a job to the queue.
@@ -119,6 +128,20 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 	}
 
 	if job != nil {
+		// Check if the task is cancelled (if checker is configured)
+		if q.isTaskCancelled != nil && job.TaskID != "" {
+			if cancelled, reason := q.isTaskCancelled(job.TaskID); cancelled {
+				q.logger.Info("Skipping job for cancelled task",
+					"job_id", job.ID,
+					"task_id", job.TaskID,
+					"reason", reason,
+				)
+				// Release the job claim and try next
+				_ = q.store.UpdateState(job.ID, StatePending)
+				return q.Claim(ctx, workerID, caps)
+			}
+		}
+
 		q.publishEvent("queue.job.claimed", map[string]any{
 			"job_id":    job.ID,
 			"worker_id": workerID,
