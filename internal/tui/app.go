@@ -18,6 +18,11 @@ import (
 	"github.com/caimlas/meept/internal/tui/viz"
 )
 
+// getSlashCommands returns the list of built-in slash commands.
+func getSlashCommands() []string {
+	return []string{"help", "new", "clear", "retry", "undo", "usage", "stop", "status", "vim", "session", "task"}
+}
+
 // ViewType represents the different views in the TUI.
 type ViewType int
 
@@ -1022,10 +1027,6 @@ func (a *App) View() tea.View {
 	} else {
 		switch a.currentView {
 		case ViewChat:
-			// Set autocomplete popup on chat model before rendering
-			popup := a.generateAutocompletePopup()
-			DebugLog(fmt.Sprintf("VIEW: setting popup on chat, len=%d, empty=%v", len(popup), popup == ""))
-			a.chat.SetSlashAutocompletePopup(popup)
 			mainView = a.chat.View()
 		case ViewTasks:
 			mainView = a.tasks.View()
@@ -1256,6 +1257,7 @@ func (a *App) getQuickActions() []string {
 			if a.chat.HasSelection() {
 				actions = append(actions, a.styles.HelpKey.Render("c")+" "+a.styles.HelpValue.Render("copy selection"))
 			}
+			
 			chatMode := a.chat.GetMode()
 			switch chatMode {
 			case "insert":

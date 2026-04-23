@@ -305,10 +305,8 @@ func (m *ChatModel) SetSize(width, height int) {
 	
 	// Set textarea width (height is dynamic)
 	m.textarea.SetWidth(width - 4)
-	
-	// Set viewport width - height will be set in View() based on popup state
 	m.viewport.SetWidth(width - 2)
-	// Don't set viewport height here - it's calculated in View()
+	// Viewport height is set in View() to match actual render
 
 	// Update markdown renderer width
 	if m.mdRenderer != nil {
@@ -1594,8 +1592,7 @@ func (m *ChatModel) View() string {
 		viewportBorder = m.focusedBorder
 	}
 
-	// Calculate viewport height - popup will overlay, not take layout space
-	// Chrome: viewport borders (2) + input borders (2) + input content
+	// Calculate viewport height to fill available space
 	inputLines := m.textarea.LineCount()
 	if inputLines < 3 {
 		inputLines = 3
@@ -1603,17 +1600,35 @@ func (m *ChatModel) View() string {
 	if inputLines > 8 {
 		inputLines = 8
 	}
-	chromeHeight := 2 + 2 + inputLines
-	viewportContentHeight := m.height - chromeHeight
+	// Layout: viewport(2 borders + content) + copy_hint(0-1) + input(2 borders + content) + completions(0-1) + statusbar(1)
+	// Account for copy hint line when selection is active
+	copyHintLines := 0
+	if m.isSelecting && m.hasSelection() {
+		copyHintLines = 1
+	}
+	// Account for completions line only when slash command is being typed
+	completionsLines := 0
+	if strings.HasPrefix(m.textarea.Value(), "/") {
+		completionsLines = 1
+	}
+	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - 1(statusbar)
+	viewportContentHeight := m.height - copyHintLines - inputLines - completionsLines - 5
 	if viewportContentHeight < 1 {
 		viewportContentHeight = 1
 	}
+	if viewportContentHeight < 1 {
+		viewportContentHeight = 1
+	}
+	
+	// Update viewport dimensions BEFORE rendering
+	m.viewport.SetWidth(m.width - 2)
+	m.viewport.SetHeight(viewportContentHeight)
 	
 	viewportStyle := viewportBorder.
 		Width(m.width - 2).
 		Height(viewportContentHeight)
 
-	// Render viewport content with selection highlighting
+	// Render viewport content
 	viewportContent := m.viewport.View()
 
 	// Apply selection highlight if there's an active selection
@@ -1633,12 +1648,6 @@ func (m *ChatModel) View() string {
 			Background(lipgloss.Color("#F97316")).
 			Padding(0, 1)
 		b.WriteString(copyHintStyle.Render(" press 'c' to copy "))
-		b.WriteString("\n")
-	}
-
-	// Render slash autocomplete popup above input
-	if m.slashAutocompletePopup != "" {
-		b.WriteString(m.slashAutocompletePopup)
 		b.WriteString("\n")
 	}
 
@@ -1664,19 +1673,51 @@ func (m *ChatModel) View() string {
 	}
 
 	// Render input with ghost text completion
-	inputView := m.renderInputWithGhostText()
-	if m.historyIdx >= 0 {
-		history := m.currentHistory()
-		historyIndicator := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280")).
-			Italic(true).
-			Render(fmt.Sprintf(" [history %d/%d]", m.historyIdx+1, len(history)))
-		inputView = inputView + historyIndicator
+	ghostText := m.renderInputWithGhostText()
+	if ghostText != "" {
+		// Render styled ghost text (textarea will render cursor on top)
+		inputContent.WriteString(ghostText)
+	} else {
+		// No ghost - use normal textarea rendering
+		inputView := m.textarea.View()
+		if m.historyIdx >= 0 {
+			history := m.currentHistory()
+			historyIndicator := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6B7280")).
+				Italic(true).
+				Render(fmt.Sprintf(" [history %d/%d]", m.historyIdx+1, len(history)))
+			inputView = inputView + historyIndicator
+		}
+		inputContent.WriteString(inputView)
 	}
-	inputContent.WriteString(inputView)
 
 	inputStyle := inputBorder.Width(m.width - 2)
 	b.WriteString(inputStyle.Render(inputContent.String()))
+
+	// Render slash command completions below input (only when / is typed)
+	inputValue := m.textarea.Value()
+	if strings.HasPrefix(inputValue, "/") {
+		commands := builtinCommands()
+		filter := strings.TrimPrefix(inputValue, "/")
+		filter = strings.TrimSpace(filter)
+
+		// Filter commands
+		var matches []string
+		for _, cmd := range commands {
+			if filter == "" || strings.HasPrefix(cmd, filter) {
+				matches = append(matches, cmd)
+			}
+		}
+
+		if len(matches) > 0 {
+			// Show all matching commands (including all when just / is typed)
+			// Add newline BEFORE completions line
+			b.WriteString("\n")
+			completions := "/" + strings.Join(matches, "  /")
+			completionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).PaddingLeft(2)
+			b.WriteString(completionStyle.Render(completions))
+		}
+	}
 
 	return b.String()
 }
@@ -2190,43 +2231,29 @@ func findBestSlashMatch(input string) string {
 
 // renderInputWithGhostText renders the input textarea with ghost text completion.
 // The typed portion is orange, ghost portion is grey.
+// Returns the styled text without cursor - textarea handles cursor natively.
 func (m *ChatModel) renderInputWithGhostText() string {
 	inputValue := m.textarea.Value()
 	
 	// Check if we should show ghost completion (slash commands at start)
-	showGhost := false
-	if strings.HasPrefix(inputValue, "/") {
-		// Only show ghost if input is a prefix of a command (not complete)
-		bestMatch := findBestSlashMatch(inputValue)
-		showGhost = bestMatch != "" && bestMatch != inputValue
+	if !strings.HasPrefix(inputValue, "/") {
+		return "" // Let textarea render normally
 	}
 	
-	if !showGhost {
-		// No ghost - render normally
-		return m.textarea.View()
-	}
-	
-	// Get ghost completion
+	// Only show ghost if input is a prefix of a command (not complete)
 	bestMatch := findBestSlashMatch(inputValue)
-	if bestMatch == "" {
-		return m.textarea.View()
+	if bestMatch == "" || bestMatch == inputValue {
+		return "" // No ghost - let textarea render normally
 	}
 	
 	// Build styled input: orange for typed, grey for ghost
-	// We need to render the text manually since bubbles textarea doesn't support partial styling
 	orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
 	greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 	
 	typedPortion := inputValue
 	ghostPortion := bestMatch[len(inputValue):]
 	
-	styledInput := orangeStyle.Render(typedPortion) + greyStyle.Render(ghostPortion)
-	
-	// Add cursor indicator
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
-	cursor := cursorStyle.Render("▊")
-	
-	return styledInput + cursor
+	return orangeStyle.Render(typedPortion) + greyStyle.Render(ghostPortion)
 }
 
 // SetInputValue sets the value of the input textarea.
