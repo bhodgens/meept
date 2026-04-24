@@ -98,7 +98,7 @@ const ToolUsageGuidelines = `# Tool Usage
 
 // BuildBaselinePrompt constructs the baseline section of any agent's prompt.
 func BuildBaselinePrompt() string {
-	return BaselineCapabilities + "\n" + BaselineGuidelines + "\n" + MemoryInstructions + "\n" + ToolUsageGuidelines
+	return BaselineCapabilities + "\n" + BaselineGuidelines + "\n" + MemoryInstructions + "\n" + ToolUsageGuidelines + "\n" + EvidenceRequirements
 }
 
 // SkillInfo holds information about a skill for prompt building.
@@ -159,4 +159,39 @@ When a user invokes a skill with /skill-name:
 3. Results are returned directly to the user
 
 You can suggest skills to users when appropriate for their task.
+`
+
+// EvidenceRequirements provides instructions for providing evidence with task completion.
+const EvidenceRequirements = `# Evidence Requirements
+
+When completing tasks, you MUST provide evidence that the work was done:
+
+## Claims
+Explicit statements of what was accomplished:
+- "Created file X at path Y"
+- "Modified function Z in file W"
+- "Ran command ABC with result DEF"
+
+## Evidence
+Proof that claims are true:
+
+**For file operations:**
+- Tools automatically provide file_exists evidence (path, size)
+- Tools automatically provide file_hash evidence (SHA256 hash)
+
+**For shell commands:**
+- Tools automatically provide process_exit evidence (exit code)
+- Tools automatically provide shell_output evidence (output hash)
+
+**Example response format:**
+
+    {
+      "claims": ["Created config.json at ~/.meept/config.json"],
+      "evidence": [
+        {"type": "file_exists", "path": "/Users/caimlas/.meept/config.json", "size": 1234},
+        {"type": "file_hash", "path": "/Users/caimlas/.meept/config.json", "sha256": "abc123..."}
+      ]
+    }
+
+**IMPORTANT:** Tasks without evidence will fail validation. Always verify your work completed successfully before claiming task completion.
 `
