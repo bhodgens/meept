@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -150,6 +152,11 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 		return NewErrorResult(err.Error()), nil
 	}
 
+	// If result is already a ToolResult, return it directly to preserve evidence
+	if tr, ok := result.(*ToolResult); ok {
+		return tr, nil
+	}
+
 	return NewSuccessResult(result), nil
 }
 
@@ -157,6 +164,208 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 // This is an alias for ToLLMDefinitions for compatibility with agent.ToolRegistry.
 func (r *Registry) GetDefinitions() []llm.ToolDefinition {
 	return r.ToLLMDefinitions()
+}
+
+// ToolRetryPolicy defines retry semantics for a specific tool.
+type ToolRetryPolicy struct {
+	MaxRetries     int           // Maximum number of retry attempts
+	RetryDelay     time.Duration // Base delay between retries
+	Exponential    bool          // Use exponential backoff (delay * 2^attempt)
+	Retryable      bool          // Whether retries are allowed
+	RetryableErrors []*regexp.Regexp // Patterns for retryable errors (nil = all errors retryable)
+}
+
+// defaultRetryPolicies defines retry semantics for builtin tools.
+var defaultRetryPolicies = map[string]ToolRetryPolicy{
+	// File operations - writes are not retryable (side effects)
+	"file_read": {
+		MaxRetries:  1,
+		RetryDelay:  100 * time.Millisecond,
+		Exponential: false,
+		Retryable:   true,
+	},
+	"file_write": {
+		MaxRetries:  0,
+		Retryable:   false, // Side effects - may cause duplication
+	},
+	"delete_file": {
+		MaxRetries:  0,
+		Retryable:   false, // Side effects
+	},
+	"list_directory": {
+		MaxRetries:  1,
+		RetryDelay:  100 * time.Millisecond,
+		Exponential: false,
+		Retryable:   true,
+	},
+
+	// Shell execution - not retryable due to side effects
+	"shell": {
+		MaxRetries:  0,
+		Retryable:   false,
+	},
+
+	// Web operations - highly retryable (network failures)
+	"web_fetch": {
+		MaxRetries:     2,
+		RetryDelay:     1 * time.Second,
+		Exponential:    true,
+		Retryable:      true,
+	},
+	"web_search": {
+		MaxRetries:     2,
+		RetryDelay:     1 * time.Second,
+		Exponential:    true,
+		Retryable:      true,
+	},
+
+	// Memory operations - retryable (transient DB locks)
+	"memory_read": {
+		MaxRetries:  1,
+		RetryDelay:  100 * time.Millisecond,
+		Retryable:   true,
+	},
+	"memory_write": {
+		MaxRetries:  1,
+		RetryDelay:  100 * time.Millisecond,
+		Retryable:   true,
+	},
+	"memory_search": {
+		MaxRetries:  1,
+		RetryDelay:  100 * time.Millisecond,
+		Retryable:   true,
+	},
+
+	// Task operations - not retryable (state changes)
+	"task_create": {
+		MaxRetries:  0,
+		Retryable:   false,
+	},
+	"task_update": {
+		MaxRetries:  0,
+		Retryable:   false,
+	},
+
+	// Platform operations - depends on operation
+	"platform_agents": {
+		MaxRetries:  1,
+		RetryDelay:  100 * time.Millisecond,
+		Retryable:   true,
+	},
+	"platform_tools": {
+		MaxRetries:  1,
+		RetryDelay:  100 * time.Millisecond,
+		Retryable:   true,
+	},
+	"platform_status": {
+		MaxRetries:  1,
+		RetryDelay:  100 * time.Millisecond,
+		Retryable:   true,
+	},
+
+	// Default - conservative retry for unknown tools
+	"default": {
+		MaxRetries:  0,
+		Retryable:   false,
+	},
+}
+
+// getRetryPolicy returns the retry policy for a tool.
+func getRetryPolicy(toolName string) ToolRetryPolicy {
+	policy, ok := defaultRetryPolicies[toolName]
+	if !ok {
+		policy = defaultRetryPolicies["default"]
+	}
+	return policy
+}
+
+// isRetryableError checks if an error matches retryable patterns.
+func isRetryableError(errMsg string, patterns []*regexp.Regexp) bool {
+	if len(patterns) == 0 {
+		return true // All errors retryable
+	}
+	for _, pattern := range patterns {
+		if pattern.MatchString(errMsg) {
+			return true
+		}
+	}
+	return false
+}
+
+// ExecuteWithRetry executes a tool with retry semantics based on tool-specific policies.
+// Returns the result of the first successful execution or the last error.
+func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[string]any) (*ToolResult, error) {
+	policy := getRetryPolicy(name)
+	
+	if !policy.Retryable {
+		// No retry - execute once
+		return r.Execute(ctx, name, args)
+	}
+
+	var lastErr error
+	var lastResult *ToolResult
+
+	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
+		result, err := r.Execute(ctx, name, args)
+		
+		if err == nil && result != nil && result.Success {
+			// Success - return immediately
+			return result, nil
+		}
+
+		// Record error for potential return
+		if err != nil {
+			lastErr = err
+		} else if result != nil && result.Error != "" {
+			lastErr = fmt.Errorf("%s", result.Error)
+			lastResult = result
+		}
+
+		// Check if error is retryable
+		if !isRetryableError(lastErr.Error(), policy.RetryableErrors) {
+			// Non-retryable error - fail immediately
+			r.logger.Debug("Tool execution failed with non-retryable error",
+				"name", name,
+				"attempt", attempt+1,
+				"error", lastErr,
+			)
+			if lastResult != nil {
+				return lastResult, nil
+			}
+			return NewErrorResult(lastErr.Error()), nil
+		}
+
+		// Wait before retry (if not last attempt)
+		if attempt < policy.MaxRetries {
+			delay := policy.RetryDelay
+			if policy.Exponential {
+				delay = delay * time.Duration(1<<uint(attempt))
+			}
+			
+			select {
+			case <-ctx.Done():
+				return NewErrorResult(ctx.Err().Error()), ctx.Err()
+			case <-time.After(delay):
+				r.logger.Debug("Retrying tool execution",
+					"name", name,
+					"attempt", attempt+2,
+					"delay", delay,
+				)
+			}
+		}
+	}
+
+	// All retries exhausted
+	r.logger.Warn("Tool execution failed after all retries",
+		"name", name,
+		"max_retries", policy.MaxRetries,
+		"error", lastErr,
+	)
+	
+	if lastResult != nil {
+		return lastResult, nil
+	}
+	return NewErrorResult(lastErr.Error()), nil
 }
 
 // Executor is a Registry that implements ToolExecutor.

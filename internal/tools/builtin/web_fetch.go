@@ -11,6 +11,7 @@ import (
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 const (
@@ -166,12 +167,28 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 		truncated = true
 	}
 
-	return FetchResult{
+	result := FetchResult{
 		Content:     text,
 		URL:         resp.Request.URL.String(),
 		StatusCode:  resp.StatusCode,
 		ContentType: contentType,
 		Truncated:   truncated,
+	}
+
+	// Build evidence: API response confirmation
+	evidence := []models.Evidence{
+		models.NewEvidence(
+			models.EvidenceAPIResponse,
+			url,
+			fmt.Sprintf("status=%d,size=%d,content_type=%s", resp.StatusCode, len(body), contentType),
+			t.Name(),
+		),
+	}
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   result,
+		Evidence: evidence,
 	}, nil
 }
 

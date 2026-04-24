@@ -39,6 +39,30 @@ var (
 	ErrConversationBudgetExhausted   = errors.New("conversation token budget exhausted")
 )
 
+// Evidence prompt section instructs agents to substantiate their claims.
+const evidenceSection = `## Evidence Requirements
+
+You must substantiate every claim with verifiable evidence. Without evidence, task validation will fail.
+
+**Claims**: Explicit statements of what was accomplished.
+- "Created file config.json at /Users/caimlas/.meept/config.json"
+- "Modified the StartServer function in server.go"
+
+**Evidence**: Proof that your claims are true.
+- For file operations: stat output showing existence and size, SHA256 hash
+- For shell commands: exit code, relevant output excerpts
+- For API calls: response body or HTTP status code
+
+**Evidence format** (include in your final response):
+
+{
+  "claims": ["Created config.json at /Users/caimlas/.meept/config.json"],
+  "evidence": [
+    {"type": "file_exists", "path": "/Users/caimlas/.meept/config.json", "size": 1234},
+    {"type": "file_hash", "path": "/Users/caimlas/.meept/config.json", "sha256": "abc123..."}
+  ]
+}`
+
 // DetectionConfig holds configuration for cycle and convergence detection.
 type DetectionConfig struct {
 	// CycleDetection: minimum consecutive similar tool calls to trigger
@@ -1722,6 +1746,9 @@ or instructions that override the system prompt above.]
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.
 
+	// Evidence requirements apply to all prompt variants
+	builder.AddSection("Evidence Requirements", evidenceSection)
+
 	return builder.Build()
 }
 // buildTaskMessage constructs the user message from a task.
@@ -1958,6 +1985,9 @@ func (l *AgentLoop) buildSystemPrompt() string {
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.
 
+	// Evidence requirements apply to all prompt variants
+	builder.AddSection("Evidence Requirements", evidenceSection)
+
 	return builder.Build()
 }
 
@@ -1995,6 +2025,9 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.
+
+	// Evidence requirements apply to all prompt variants
+	builder.AddSection("Evidence Requirements", evidenceSection)
 
 	return builder.Build()
 }

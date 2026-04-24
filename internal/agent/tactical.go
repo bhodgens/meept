@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/validator"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -25,24 +27,35 @@ type StepJobPayload struct {
 
 // TacticalScheduler schedules ready steps as queue jobs and handles completion callbacks.
 type TacticalScheduler struct {
-	stepStore     *task.StepStore
-	taskStore     *task.Store
-	queue         queue.Queue
-	registry      *AgentRegistry
-	bus           *bus.MessageBus
-	reviewManager *ReviewManager
-	logger        *slog.Logger
+	stepStore              *task.StepStore
+	taskStore              *task.Store
+	queue                  queue.Queue
+	registry               *AgentRegistry
+	bus                    *bus.MessageBus
+	reviewManager          *ReviewManager
+	validatorManager       *validator.ValidatorManager
+	logger                 *slog.Logger
+	globalSemaphore        chan struct{}                 // Global execution limit
+	agentSemaphore         map[string]chan struct{}      // Per-agent concurrency slots
+	semaphoreMu            sync.Mutex                    // Protects agentSemaphore map
+	validationGateInterval int                           // Run validation gate every N steps
+	validationGateCounter  map[string]int                // Per-task validation gate counter
+	validationGateMu       sync.Mutex                    // Protects validationGateCounter
 }
 
 // TacticalSchedulerConfig holds configuration for the tactical scheduler.
 type TacticalSchedulerConfig struct {
-	StepStore     *task.StepStore
-	TaskStore     *task.Store
-	Queue         queue.Queue
-	Registry      *AgentRegistry
-	Bus           *bus.MessageBus
-	ReviewManager *ReviewManager
-	Logger        *slog.Logger
+	StepStore              *task.StepStore
+	TaskStore              *task.Store
+	Queue                  queue.Queue
+	Registry               *AgentRegistry
+	Bus                    *bus.MessageBus
+	ReviewManager          *ReviewManager
+	ValidatorManager       *validator.ValidatorManager
+	Logger                 *slog.Logger
+	MaxConcurrentJobs      int // Global concurrent job limit (default: 10)
+	MaxConcurrentPerAgent  int // Per-agent concurrent job limit (default: 3)
+	ValidationGateInterval int // Run validation gate every N steps (default: 3, 0 to disable)
 }
 
 // NewTacticalScheduler creates a new tactical scheduler.
@@ -51,18 +64,52 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		cfg.Logger = slog.Default()
 	}
 
+	// Set defaults for concurrency limits
+	maxConcurrentJobs := cfg.MaxConcurrentJobs
+	if maxConcurrentJobs <= 0 {
+		maxConcurrentJobs = 10
+	}
+	maxConcurrentPerAgent := cfg.MaxConcurrentPerAgent
+	if maxConcurrentPerAgent <= 0 {
+		maxConcurrentPerAgent = 3
+	}
+	// Set default validation gate interval (every 3 steps)
+	validationGateInterval := cfg.ValidationGateInterval
+	if validationGateInterval <= 0 {
+		validationGateInterval = 3
+	}
+
+	// Initialize semaphores
+	globalSemaphore := make(chan struct{}, maxConcurrentJobs)
+	agentSemaphore := make(map[string]chan struct{})
+
+	// Pre-initialize semaphores for known agents
+	knownAgents := []string{"coder", "debugger", "planner", "analyst", "committer", "scheduler", "chat"}
+	for _, agentID := range knownAgents {
+		agentSemaphore[agentID] = make(chan struct{}, maxConcurrentPerAgent)
+	}
+
 	return &TacticalScheduler{
-		stepStore:     cfg.StepStore,
-		taskStore:     cfg.TaskStore,
-		queue:         cfg.Queue,
-		registry:      cfg.Registry,
-		bus:           cfg.Bus,
-		reviewManager: cfg.ReviewManager,
-		logger:        cfg.Logger,
+		stepStore:              cfg.StepStore,
+		taskStore:              cfg.TaskStore,
+		queue:                  cfg.Queue,
+		registry:               cfg.Registry,
+		bus:                    cfg.Bus,
+		reviewManager:          cfg.ReviewManager,
+		validatorManager:       cfg.ValidatorManager,
+		logger:                 cfg.Logger,
+		globalSemaphore:        globalSemaphore,
+		agentSemaphore:         agentSemaphore,
+		semaphoreMu:            sync.Mutex{},
+		validationGateInterval: validationGateInterval,
+		validationGateCounter:  make(map[string]int),
+		validationGateMu:       sync.Mutex{},
 	}
 }
 
 // ScheduleReadySteps finds ready steps for a task and enqueues them as jobs.
+// Steps that cannot be scheduled due to semaphore limits remain in "ready" state
+// and will be retried on the next scheduling cycle.
 func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID string) error {
 	readySteps, err := ts.stepStore.GetReadySteps(taskID)
 	if err != nil {
@@ -79,8 +126,21 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		"count", len(readySteps),
 	)
 
+	scheduledCount := 0
+	semaphoreBlockedCount := 0
+
 	for _, step := range readySteps {
 		if err := ts.scheduleStep(ctx, step); err != nil {
+			// Check if this was a semaphore block (expected, not an error)
+			if strings.Contains(err.Error(), "no available execution slot") {
+				semaphoreBlockedCount++
+				ts.logger.Debug("Step blocked due to execution limit",
+					"step_id", step.ID,
+					"task_id", taskID,
+					"agent_id", step.AgentID,
+				)
+				continue
+			}
 			ts.logger.Error("Failed to schedule step",
 				"step_id", step.ID,
 				"task_id", taskID,
@@ -88,16 +148,29 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 			)
 			continue
 		}
+		scheduledCount++
 	}
+
+	ts.logger.Debug("Scheduling complete",
+		"task_id", taskID,
+		"scheduled", scheduledCount,
+		"blocked_by_semaphore", semaphoreBlockedCount,
+		"total_ready", len(readySteps),
+	)
 
 	// Publish progress event with current step info
 	currentStepDesc := ""
-	if len(readySteps) > 0 {
-		currentStepDesc = readySteps[0].Description
+	if scheduledCount > 0 {
+		for _, step := range readySteps {
+			if step.State == task.StepScheduled {
+				currentStepDesc = step.Description
+				break
+			}
+		}
 	}
 	ts.publishEvent("task.progress", map[string]any{
 		"task_id":         taskID,
-		"scheduled_steps": len(readySteps),
+		"scheduled_steps": scheduledCount,
 		"current_step":    currentStepDesc,
 	})
 
@@ -106,6 +179,7 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 
 // scheduleStep creates a queue job for a single step.
 // It validates that all dependencies are satisfied before scheduling.
+// Returns errSemaphoreUnavailable if no semaphore slot is available.
 func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskStep) error {
 	// Validate dependencies before scheduling (defense in depth)
 	if len(step.DependsOn) > 0 {
@@ -150,6 +224,11 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 	agentID := ts.selectAgent(step)
 	step.AgentID = agentID
 
+	// Acquire semaphore slots (non-blocking)
+	if !ts.acquireSlots(agentID) {
+		return fmt.Errorf("no available execution slot for agent %s", agentID)
+	}
+
 	// Create job payload
 	payload := StepJobPayload{
 		StepID:      step.ID,
@@ -160,6 +239,7 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 
 	job, err := queue.NewJob(queue.JobTypeProjectTask, payload)
 	if err != nil {
+		ts.releaseSlots(agentID)
 		return fmt.Errorf("failed to create job: %w", err)
 	}
 
@@ -168,6 +248,7 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 
 	// Enqueue the job
 	if err := ts.queue.Enqueue(ctx, job); err != nil {
+		ts.releaseSlots(agentID)
 		return fmt.Errorf("failed to enqueue job: %w", err)
 	}
 
@@ -194,6 +275,69 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 	return nil
 }
 
+// acquireSlots attempts to acquire both global and per-agent semaphore slots.
+// Returns true if both acquired, false otherwise (no blocking).
+func (ts *TacticalScheduler) acquireSlots(agentID string) bool {
+	ts.semaphoreMu.Lock()
+	agentSem, ok := ts.agentSemaphore[agentID]
+	if !ok {
+		// Create semaphore for unknown agents
+		ts.semaphoreMu.Unlock()
+
+		ts.semaphoreMu.Lock()
+		agentSem = ts.agentSemaphore[agentID]
+		if !ok {
+			maxPerAgent := cap(ts.globalSemaphore) / 3 // Rough heuristic
+			if maxPerAgent < 1 {
+				maxPerAgent = 3
+			}
+			agentSem = make(chan struct{}, maxPerAgent)
+			ts.agentSemaphore[agentID] = agentSem
+		}
+	}
+	ts.semaphoreMu.Unlock()
+
+	// Try to acquire global slot (non-blocking)
+	select {
+	case ts.globalSemaphore <- struct{}{}:
+		// Got global slot
+	default:
+		return false // Global semaphore full
+	}
+
+	// Try to acquire per-agent slot (non-blocking)
+	select {
+	case agentSem <- struct{}{}:
+		// Got agent slot
+	default:
+		<-ts.globalSemaphore // Release global slot
+		return false // Agent semaphore full
+	}
+
+	return true
+}
+
+// releaseSlots releases both global and per-agent semaphore slots.
+func (ts *TacticalScheduler) releaseSlots(agentID string) {
+	ts.semaphoreMu.Lock()
+	agentSem := ts.agentSemaphore[agentID]
+	ts.semaphoreMu.Unlock()
+
+	// Release per-agent slot
+	if agentSem != nil {
+		select {
+		case <-agentSem:
+		default:
+		}
+	}
+
+	// Release global slot
+	select {
+	case <-ts.globalSemaphore:
+	default:
+	}
+}
+
 // OnJobCompleted handles a completed job by updating the step, promoting
 // newly unblocked steps, and checking task completion.
 func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, result json.RawMessage) error {
@@ -209,13 +353,55 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		return nil // Not a step-backed job, ignore
 	}
 
-	// Store the result
+	// Release semaphore slots for this completed job
+	defer ts.releaseSlots(step.AgentID)
+
+	// Store the result and extract evidence
 	resultStr := ""
 	if result != nil {
 		resultStr = string(result)
 	}
 	if err := ts.stepStore.SetResult(step.ID, resultStr); err != nil {
 		ts.logger.Error("Failed to set step result", "step_id", step.ID, "error", err)
+	}
+
+	// NEW: Extract evidence from result before validation
+	var execResult struct {
+		Success  bool              `json:"success"`
+		Result   any               `json:"result,omitempty"`
+		Error    string            `json:"error,omitempty"`
+		Evidence []models.Evidence `json:"evidence,omitempty"`
+	}
+	if err := json.Unmarshal(result, &execResult); err != nil {
+		ts.logger.Debug("Failed to parse execution result", "step_id", step.ID, "error", err)
+	}
+
+	// Update step with evidence before validation
+	if len(execResult.Evidence) > 0 {
+		step.Evidence = execResult.Evidence
+		// Persist evidence to step store
+		if err := ts.stepStore.Update(step); err != nil {
+			ts.logger.Error("Failed to persist step evidence", "step_id", step.ID, "error", err)
+		}
+		ts.logger.Debug("Extracted evidence from execution result",
+			"step_id", step.ID,
+			"evidence_count", len(execResult.Evidence),
+		)
+	}
+
+	// NEW: Validation gate - validate evidence before proceeding
+	if ts.validatorManager != nil {
+		validationErr := ts.validatorManager.ValidateStep(ctx, step)
+		if validationErr != nil {
+			ts.logger.Error("Validation failed", "step_id", step.ID, "error", validationErr)
+			// Mark step as needs_info to trigger human review
+			step.Validated = false
+			step.ValidationError = validationErr.Error()
+			ts.stepStore.Update(step) // Persist
+			return validationErr      // Don't proceed to completion
+		}
+		step.Validated = true
+		step.ValidationError = ""
 	}
 
 	// Publish step completed event with details
@@ -263,6 +449,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		}
 	}
 
+	// NEW: Run validation gate if interval reached
+	ts.runValidationGateIfDue(ctx, step.TaskID)
+
 	// Update parent task's completed jobs counter
 	t, err := ts.taskStore.GetByID(step.TaskID)
 	if err != nil || t == nil {
@@ -300,6 +489,30 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	}
 
 	if allDone {
+		// NEW: Task-level validation before marking complete
+		steps, err := ts.stepStore.ListByTaskID(step.TaskID)
+		if err != nil {
+			ts.logger.Error("Failed to list steps for task validation", "error", err)
+		} else {
+			var validationErrors []string
+			for _, s := range steps {
+				if s.State.IsSuccessfullyTerminal() && !s.Validated {
+					validationErrors = append(validationErrors,
+						fmt.Sprintf("step %s completed but not validated", s.ID))
+				}
+				if s.ValidationError != "" {
+					validationErrors = append(validationErrors,
+						fmt.Sprintf("step %s has validation error: %s", s.ID, s.ValidationError))
+				}
+			}
+			if len(validationErrors) > 0 {
+				ts.logger.Error("Task validation incomplete - blocking completion",
+					"task_id", step.TaskID,
+					"errors", strings.Join(validationErrors, ", "))
+				return fmt.Errorf("task validation incomplete: %s", strings.Join(validationErrors, ", "))
+			}
+		}
+
 		t.SetState(task.StateCompleted)
 		if err := ts.taskStore.Update(t); err != nil {
 			ts.logger.Error("Failed to set task completed", "error", err)
@@ -426,18 +639,28 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 		return nil // Not a step-backed job
 	}
 
-	// Check if this is a rate limit error
-	if ts.isRateLimitError(jobErr) {
+	// Release semaphore slots for this failed job
+	defer ts.releaseSlots(step.AgentID)
+
+	// Check if this is a retryable error (rate limit or transient failure)
+	if ts.isRetryableError(jobErr) {
 		// Get the job from queue
 		job, err := ts.queue.Get(ctx, jobID)
 		if err != nil {
 			ts.logger.Error("Failed to get job for retry", "job_id", jobID, "error", err)
 		} else if job != nil && job.CanRetry() {
+			// Determine retry reason
+			reason := "transient_error"
+			if ts.isRateLimitError(jobErr) {
+				reason = "rate_limit"
+			}
+
 			// Retry with exponential backoff
-			ts.logger.Info("Rate limit error detected, retrying job with backoff",
+			ts.logger.Info("Retryable error detected, retrying job with backoff",
 				"job_id", jobID,
 				"step_id", step.ID,
 				"retry_count", job.RetryCount+1,
+				"reason", reason,
 			)
 			if err := ts.queue.Retry(ctx, jobID); err != nil {
 				ts.logger.Error("Failed to retry job", "job_id", jobID, "error", err)
@@ -453,15 +676,16 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 				// Publish retry event
 				ts.publishEvent("queue.job.retry", map[string]any{
 					"job_id": jobID,
-					"reason": "rate_limit",
+					"reason": reason,
 				})
 				return nil // Job has been requeued, don't mark as failed
 			}
 		} else {
-			ts.logger.Warn("Job cannot be retried due to rate limit",
+			ts.logger.Warn("Job cannot be retried",
 				"job_id", jobID,
 				"step_id", step.ID,
 				"can_retry", job != nil && job.CanRetry(),
+				"error", jobErr,
 			)
 		}
 	}
@@ -591,6 +815,97 @@ func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
 	// Use the llm package helper if available
 	// First try to see if we can parse it as an LLM error
 	return llm.IsRateLimitErrorMessage(errMsg)
+}
+
+// isRetryableError checks if an error is transient and worth retrying.
+// This includes rate limits, timeouts, network errors, and other temporary failures.
+func (ts *TacticalScheduler) isRetryableError(errMsg string) bool {
+	// Always retry rate limits
+	if ts.isRateLimitError(errMsg) {
+		return true
+	}
+
+	// Check for transient error patterns
+	transientPatterns := []string{
+		"timeout",
+		"temporary",
+		"connection refused",
+		"connection reset",
+		"broken pipe",
+		"network",
+		"busy",
+		"lock",
+		"deadlock",
+		"unavailable",
+		"try again later",
+	}
+
+	lowerErr := strings.ToLower(errMsg)
+	for _, pattern := range transientPatterns {
+		if strings.Contains(lowerErr, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// runValidationGateIfDue increments the validation counter for a task and runs
+// the validation gate if the interval has been reached.
+func (ts *TacticalScheduler) runValidationGateIfDue(ctx context.Context, taskID string) {
+	ts.validationGateMu.Lock()
+	defer ts.validationGateMu.Unlock()
+
+	if ts.validationGateInterval <= 0 {
+		return // Validation gate disabled
+	}
+
+	ts.validationGateCounter[taskID]++
+	if ts.validationGateCounter[taskID] >= ts.validationGateInterval {
+		// Run validation gate
+		if err := ts.runValidationGate(ctx, taskID); err != nil {
+			ts.logger.Warn("Validation gate detected issues",
+				"task_id", taskID,
+				"error", err,
+			)
+			// Don't block execution - just log warning as per design
+		}
+		// Reset counter after running gate
+		ts.validationGateCounter[taskID] = 0
+	}
+}
+
+// runValidationGate checks all completed steps for a task are validated.
+// Returns error if any completed step lacks validation.
+func (ts *TacticalScheduler) runValidationGate(ctx context.Context, taskID string) error {
+	steps, err := ts.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to list steps for validation gate: %w", err)
+	}
+
+	var unvalidatedSteps []string
+	for _, step := range steps {
+		if step.State.IsSuccessfullyTerminal() && !step.Validated {
+			unvalidatedSteps = append(unvalidatedSteps, step.ID)
+		}
+		if step.ValidationError != "" {
+			ts.logger.Warn("Step has validation error",
+				"step_id", step.ID,
+				"error", step.ValidationError,
+			)
+		}
+	}
+
+	if len(unvalidatedSteps) > 0 {
+		return fmt.Errorf("validation gate: %d completed steps not validated: %v",
+			len(unvalidatedSteps), unvalidatedSteps)
+	}
+
+	ts.logger.Debug("Validation gate passed",
+		"task_id", taskID,
+		"steps_checked", len(steps),
+	)
+	return nil
 }
 
 // buildStepSummaries creates an array of step summaries for task completion events.

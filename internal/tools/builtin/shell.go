@@ -3,6 +3,8 @@ package builtin
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
 
@@ -238,11 +241,39 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		}
 	}
 
-	return ShellResult{
-		Stdout:     stdoutStr,
-		Stderr:     stderrStr,
-		ReturnCode: returnCode,
-		Truncated:  truncated,
+	// Build evidence: exit code and output hash
+	evidence := []models.Evidence{
+		models.NewEvidence(
+			models.EvidenceProcessExit,
+			command,
+			fmt.Sprintf("%d", returnCode),
+			t.Name(),
+		),
+	}
+
+	// Hash output for compactness (full output is still returned in result)
+	outputForHash := stdoutStr + stderrStr
+	if len(outputForHash) > MaxOutputSize {
+		outputForHash = outputForHash[:MaxOutputSize]
+	}
+	h := sha256.Sum256([]byte(outputForHash))
+	outputHash := hex.EncodeToString(h[:])
+	evidence = append(evidence, models.NewEvidence(
+		models.EvidenceShellOutput,
+		command,
+		outputHash,
+		t.Name(),
+	))
+
+	return tools.ToolResult{
+		Success:  returnCode == 0,
+		Result: ShellResult{
+			Stdout:     stdoutStr,
+			Stderr:     stderrStr,
+			ReturnCode: returnCode,
+			Truncated:  truncated,
+		},
+		Evidence: evidence,
 	}, nil
 }
 

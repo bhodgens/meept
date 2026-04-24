@@ -3,11 +3,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -285,4 +287,197 @@ func (w *WorkspaceManager) gitCmd(ctx context.Context, workspace string, args ..
 		return false, string(output)
 	}
 	return true, strings.TrimSpace(string(output))
+}
+
+// Checkpoint represents a workspace checkpoint for rollback.
+type Checkpoint struct {
+	TaskID    string    `json:"task_id"`
+	Label     string    `json:"label"`
+	GitRef    string    `json:"git_ref"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// CreateCheckpoint creates a checkpoint in the workspace using git tags.
+// The tag format is: checkpoint-{taskID}-{label}-{timestamp}
+func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label string) (*Checkpoint, error) {
+	w.mu.RLock()
+	workspace, ok := w.workspaces[taskID]
+	w.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("no workspace for task %s", taskID)
+	}
+
+	// Create checkpoints directory
+	checkpointDir := filepath.Join(workspace, "checkpoints", label)
+	if err := os.MkdirAll(checkpointDir, 0755); err != nil {
+		w.logger.Warn("Failed to create checkpoint directory",
+			"task_id", taskID,
+			"label", label,
+			"error", err,
+		)
+		// Continue anyway - git tag is the primary mechanism
+	}
+
+	// Generate tag name
+	timestamp := time.Now().Unix()
+	tagName := fmt.Sprintf("checkpoint-%s-%s-%d", taskID, label, timestamp)
+
+	// Write checkpoint metadata file
+	metadata := Checkpoint{
+		TaskID:    taskID,
+		Label:     label,
+		GitRef:    tagName,
+		Timestamp: time.Unix(timestamp, 0),
+	}
+	metadataPath := filepath.Join(checkpointDir, "checkpoint.json")
+	data, _ := json.MarshalIndent(metadata, "", "  ")
+	if err := os.WriteFile(metadataPath, data, 0644); err != nil {
+		w.logger.Warn("Failed to write checkpoint metadata", "error", err)
+	}
+
+	// Create git tag
+	_, output := w.gitCmd(ctx, workspace, "tag", tagName)
+	if tagName == "" {
+		return nil, fmt.Errorf("failed to create checkpoint tag: %s", output)
+	}
+
+	w.logger.Info("Checkpoint created",
+		"task_id", taskID,
+		"label", label,
+		"tag", tagName,
+	)
+
+	return &metadata, nil
+}
+
+// RestoreCheckpoint restores a workspace to a previously created checkpoint.
+// Returns error if checkpoint does not exist.
+func (w *WorkspaceManager) RestoreCheckpoint(ctx context.Context, taskID, label string) error {
+	w.mu.RLock()
+	workspace, ok := w.workspaces[taskID]
+	w.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("no workspace for task %s", taskID)
+	}
+
+	// Find the most recent checkpoint tag matching the label
+	tagName := fmt.Sprintf("checkpoint-%s-%s", taskID, label)
+	_, output := w.gitCmd(ctx, workspace, "tag", "-l", tagName+"-*")
+	if output == "" {
+		return fmt.Errorf("no checkpoint found with label '%s' for task %s", label, taskID)
+	}
+
+	// Get the most recent tag (last in the list, since tags include timestamp)
+	tags := strings.Split(strings.TrimSpace(output), "\n")
+	if len(tags) == 0 || tags[0] == "" {
+		return fmt.Errorf("no checkpoint found with label '%s' for task %s", label, taskID)
+	}
+	latestTag := tags[len(tags)-1]
+
+	// Checkout the checkpoint tag
+	// Note: This puts the repo in detached HEAD state
+	ok, output = w.gitCmd(ctx, workspace, "checkout", latestTag)
+	if !ok {
+		return fmt.Errorf("failed to restore checkpoint '%s': %s", label, output)
+	}
+
+	w.logger.Info("Checkpoint restored",
+		"task_id", taskID,
+		"label", label,
+		"tag", latestTag,
+	)
+
+	return nil
+}
+
+// ListCheckpoints returns all checkpoints for a task.
+func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) ([]Checkpoint, error) {
+	w.mu.RLock()
+	workspace, ok := w.workspaces[taskID]
+	w.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("no workspace for task %s", taskID)
+	}
+
+	// List all checkpoint tags for this task
+	tagPrefix := fmt.Sprintf("checkpoint-%s-", taskID)
+	_, output := w.gitCmd(ctx, workspace, "tag", "-l", tagPrefix+"*")
+	if output == "" {
+		return []Checkpoint{}, nil
+	}
+
+	tags := strings.Split(strings.TrimSpace(output), "\n")
+	var checkpoints []Checkpoint
+
+	for _, tag := range tags {
+		if tag == "" {
+			continue
+		}
+		// Parse tag: checkpoint-{taskID}-{label}-{timestamp}
+		parts := strings.Split(tag, "-")
+		if len(parts) < 4 {
+			continue
+		}
+		label := parts[2]
+		// Timestamp might have multiple parts if label had dashes
+		timestampStr := strings.Join(parts[3:], "")
+		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
+		if err != nil {
+			continue
+		}
+
+		checkpoints = append(checkpoints, Checkpoint{
+			TaskID:    taskID,
+			Label:     label,
+			GitRef:    tag,
+			Timestamp: time.Unix(timestamp, 0),
+		})
+	}
+
+	return checkpoints, nil
+}
+
+// DeleteCheckpoint removes a checkpoint by deleting the git tag.
+func (w *WorkspaceManager) DeleteCheckpoint(ctx context.Context, taskID, label string) error {
+	w.mu.RLock()
+	workspace, ok := w.workspaces[taskID]
+	w.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("no workspace for task %s", taskID)
+	}
+
+	// Find the checkpoint tag
+	tagPrefix := fmt.Sprintf("checkpoint-%s-%s", taskID, label)
+	_, output := w.gitCmd(ctx, workspace, "tag", "-l", tagPrefix+"-*")
+	if output == "" {
+		return fmt.Errorf("checkpoint not found: %s", label)
+	}
+
+	tags := strings.Split(strings.TrimSpace(output), "\n")
+	for _, tag := range tags {
+		if tag == "" {
+			continue
+		}
+		// Delete the tag
+		ok, delOutput := w.gitCmd(ctx, workspace, "tag", "-d", tag)
+		if !ok {
+			w.logger.Warn("Failed to delete checkpoint tag",
+				"tag", tag,
+				"error", delOutput,
+			)
+		}
+	}
+
+	// Remove checkpoint directory if it exists
+	checkpointDir := filepath.Join(workspace, "checkpoints", label)
+	if err := os.RemoveAll(checkpointDir); err != nil {
+		w.logger.Warn("Failed to remove checkpoint directory", "error", err)
+	}
+
+	w.logger.Info("Checkpoint deleted",
+		"task_id", taskID,
+		"label", label,
+	)
+
+	return nil
 }

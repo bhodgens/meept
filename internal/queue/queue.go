@@ -45,6 +45,15 @@ type Queue interface {
 	// Stats returns queue statistics.
 	Stats(ctx context.Context) (*QueueStats, error)
 
+	// RecoverFromDeadLetter recovers a dead-lettered job back to the active queue.
+	RecoverFromDeadLetter(ctx context.Context, jobID string) (*Job, error)
+
+	// ListDeadLetter lists dead-lettered jobs.
+	ListDeadLetter(ctx context.Context, limit int) ([]*Job, error)
+
+	// DeadLetterStats returns dead-letter queue statistics.
+	DeadLetterStats(ctx context.Context) (int, error)
+
 	// Close closes the queue.
 	Close() error
 }
@@ -233,6 +242,43 @@ func (q *PersistentQueue) Stats(ctx context.Context) (*QueueStats, error) {
 	return q.store.GetStats()
 }
 
+// RecoverFromDeadLetter recovers a dead-lettered job back to the active queue.
+func (q *PersistentQueue) RecoverFromDeadLetter(ctx context.Context, jobID string) (*Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	if q.closed {
+		return nil, fmt.Errorf("queue is closed")
+	}
+
+	recovered, err := q.store.RecoverFromDeadLetter(jobID)
+	if err != nil {
+		return nil, err
+	}
+
+	q.publishEvent("queue.job.recovered", map[string]any{
+		"job_id": jobID,
+	})
+
+	return recovered, nil
+}
+
+// ListDeadLetter lists dead-lettered jobs.
+func (q *PersistentQueue) ListDeadLetter(ctx context.Context, limit int) ([]*Job, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	return q.store.ListDeadLetter(limit)
+}
+
+// DeadLetterStats returns dead-letter queue statistics.
+func (q *PersistentQueue) DeadLetterStats(ctx context.Context) (int, error) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	return q.store.DeadLetterStats()
+}
+
 // Close closes the queue.
 func (q *PersistentQueue) Close() error {
 	q.mu.Lock()
@@ -285,14 +331,17 @@ func NewHandler(queue Queue, msgBus *bus.MessageBus, logger *slog.Logger) *Handl
 
 	// Subscribe to all queue topics
 	topics := map[string]bus.MessageCallback{
-		"queue.enqueue":  h.handleQueueEnqueue,
-		"queue.claim":    h.handleQueueClaim,
-		"queue.complete": h.handleQueueComplete,
-		"queue.fail":     h.handleQueueFail,
-		"queue.retry":    h.handleQueueRetry,
-		"queue.get":      h.handleQueueGet,
-		"queue.list":     h.handleQueueList,
-		"queue.stats":    h.handleQueueStats,
+		"queue.enqueue":      h.handleQueueEnqueue,
+		"queue.claim":        h.handleQueueClaim,
+		"queue.complete":     h.handleQueueComplete,
+		"queue.fail":         h.handleQueueFail,
+		"queue.retry":        h.handleQueueRetry,
+		"queue.get":          h.handleQueueGet,
+		"queue.list":         h.handleQueueList,
+		"queue.stats":        h.handleQueueStats,
+		"queue.recover":      h.handleQueueRecover,
+		"queue.dead_letter":  h.handleQueueDeadLetter,
+		"queue.dead_stats":   h.handleQueueDeadStats,
 	}
 
 	for topic, callback := range topics {
@@ -347,6 +396,18 @@ func (h *Handler) handleQueueStats(ctx context.Context, topic string, msg interf
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
+func (h *Handler) handleQueueRecover(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueDeadLetter(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleQueueDeadStats(ctx context.Context, topic string, msg interface{}) {
+	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
+}
+
 func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.BusMessage) {
 	var response any
 	var err error
@@ -368,6 +429,12 @@ func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.B
 		response, err = h.handleList(ctx, msg)
 	case "queue.stats":
 		response, err = h.handleStats(ctx, msg)
+	case "queue.recover":
+		response, err = h.handleRecover(ctx, msg)
+	case "queue.dead_letter":
+		response, err = h.handleDeadLetter(ctx, msg)
+	case "queue.dead_stats":
+		response, err = h.handleDeadStats(ctx, msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -541,6 +608,53 @@ func (h *Handler) handleStats(ctx context.Context, msg *models.BusMessage) (any,
 		"by_priority": byPriority,
 		"dead_count":  stats.DeadCount,
 	}, nil
+}
+
+
+func (h *Handler) handleRecover(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	job, err := h.queue.RecoverFromDeadLetter(ctx, params.JobID)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{"job": job, "status": "recovered"}, nil
+}
+
+func (h *Handler) handleDeadLetter(ctx context.Context, msg *models.BusMessage) (any, error) {
+	var params struct {
+		Limit int `json:"limit,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	jobs, err := h.queue.ListDeadLetter(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{"jobs": jobs}, nil
+}
+
+func (h *Handler) handleDeadStats(ctx context.Context, msg *models.BusMessage) (any, error) {
+	count, err := h.queue.DeadLetterStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{"dead_count": count}, nil
 }
 
 func (h *Handler) sendResponse(replyTo, topic string, response any, err error) {

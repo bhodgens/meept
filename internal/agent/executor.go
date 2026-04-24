@@ -9,6 +9,7 @@ import (
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
 
@@ -58,7 +59,6 @@ var ToolActionMap = map[string]string{
 	"lsp_diagnostics":       "code_read",
 }
 
-
 // ToolRegistry provides access to available tools.
 // Production implementation lives in internal/tools/registry.go; the
 // executor depends on this narrower interface so that unit tests can
@@ -75,11 +75,12 @@ type ToolRegistry interface {
 
 // ExecutionResult represents the result of a tool execution.
 type ExecutionResult struct {
-	ToolCallID string `json:"tool_call_id"`
-	Success    bool   `json:"success"`
-	Result     any    `json:"result,omitempty"`
-	Error      string `json:"error,omitempty"`
-	Cached     bool   `json:"cached,omitempty"` // True if result came from cache
+	ToolCallID string          `json:"tool_call_id"`
+	Success    bool            `json:"success"`
+	Result     any             `json:"result,omitempty"`
+	Error      string          `json:"error,omitempty"`
+	Cached     bool            `json:"cached,omitempty"` // True if result came from cache
+	Evidence   []models.Evidence `json:"evidence,omitempty"` // Evidence of tool side-effects
 }
 
 // ToJSON converts the result to a JSON string.
@@ -353,23 +354,36 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		"args_summary", summarizeArgs(args),
 	)
 
-	result, err := tool.Execute(ctx, args)
-	if err != nil {
+	toolResult, toolErr := tool.Execute(ctx, args)
+	if toolErr != nil {
 		e.logger.Error("Tool execution failed",
 			"agent", e.agentID,
 			"tool", toolName,
-			"error", err,
+			"error", toolErr,
 		)
 		return &ExecutionResult{
 			ToolCallID: toolCall.ID,
 			Success:    false,
-			Error:      fmt.Sprintf("tool execution failed: %v", err),
+			Error:      fmt.Sprintf("tool execution failed: %v", toolErr),
 		}
 	}
 
-	// Store in cache after successful execution
+	// Extract evidence from ToolResult if present
+	var evidence []models.Evidence
+	if tr, ok := toolResult.(*tools.ToolResult); ok && tr != nil && len(tr.Evidence) > 0 {
+		evidence = tr.Evidence
+		e.logger.Debug("Tool produced evidence",
+			"agent", e.agentID,
+			"tool", toolName,
+			"evidence_count", len(evidence),
+		)
+		// Use the actual result from ToolResult
+		toolResult = tr.Result
+	}
+
+	// Store in cache after successful execution (cache the result, not evidence)
 	if e.cache != nil {
-		e.cache.Put(toolName, args, result)
+		e.cache.Put(toolName, args, toolResult)
 		e.logger.Debug("Cached tool result",
 			"agent", e.agentID,
 			"tool", toolName,
@@ -379,8 +393,9 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	return &ExecutionResult{
 		ToolCallID: toolCall.ID,
 		Success:    true,
-		Result:     result,
+		Result:     toolResult,
 		Cached:     false, // Fresh result, not from cache
+		Evidence:   evidence,
 	}
 }
 

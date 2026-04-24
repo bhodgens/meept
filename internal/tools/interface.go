@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // Tool is the interface that all meept tools must implement.
@@ -37,9 +38,10 @@ type Tool interface {
 
 // ToolResult is the standardized result envelope returned by tool execution.
 type ToolResult struct {
-	Success bool   `json:"success"`
-	Result  any    `json:"result,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success  bool              `json:"success"`
+	Result   any               `json:"result,omitempty"`
+	Error    string            `json:"error,omitempty"`
+	Evidence []models.Evidence `json:"evidence,omitempty"` // NEW: evidence of side-effects
 }
 
 // NewSuccessResult creates a successful tool result.

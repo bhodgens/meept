@@ -531,6 +531,163 @@ func (s *Store) moveToDead(jobID string) error {
 	return tx.Commit()
 }
 
+// RecoverFromDeadLetter recovers a dead-lettered job by re-inserting it into the active queue.
+// The job is reset to pending state with retry count cleared.
+// Returns the recovered job or an error if recovery fails.
+func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Select from dead_letter
+	row := tx.QueryRow(`
+		SELECT id, task_id, agent_id, type, priority, payload, required_caps, max_retries, retry_count, error, created_at
+		FROM dead_letter WHERE id = ?`, jobID)
+
+	var (
+		id, jobType, payload, capsJSON    string
+		priority, maxRetries, retryCount  int
+		taskID, agentID                   sql.NullString
+		errMsg                            sql.NullString
+		createdAt                         string
+	)
+
+	err = row.Scan(&id, &taskID, &agentID, &jobType, &priority, &payload, &capsJSON,
+		&maxRetries, &retryCount, &errMsg, &createdAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("dead letter job not found: %s", jobID)
+		}
+		return nil, fmt.Errorf("failed to read dead letter: %w", err)
+	}
+
+	// Re-insert into jobs with reset state
+	_, err = tx.Exec(`
+		INSERT INTO jobs (id, task_id, agent_id, type, priority, state, payload, required_caps,
+		                  max_retries, retry_count, claimed_by, result, error, created_at, updated_at, due_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id,
+		taskID,
+		agentID,
+		jobType,
+		priority,
+		string(StatePending),
+		payload,
+		capsJSON,
+		maxRetries,
+		0, // Reset retry_count
+		(*string)(nil), // claimed_by
+		(*string)(nil), // result
+		(*string)(nil), // Reset error
+		createdAt,
+		now,
+		(*string)(nil), // due_at
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-insert job: %w", err)
+	}
+
+	// Delete from dead_letter
+	_, err = tx.Exec(`DELETE FROM dead_letter WHERE id = ?`, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to remove from dead letter: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit recovery: %w", err)
+	}
+
+	// Fetch and return the recovered job
+	recovered, err := s.GetByID(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch recovered job: %w", err)
+	}
+
+	s.logger.Info("Dead letter job recovered",
+		"job_id", jobID,
+		"task_id", recovered.TaskID,
+		"agent_id", recovered.AgentID,
+	)
+
+	return recovered, nil
+}
+
+// ListDeadLetter returns dead-lettered jobs with optional filtering.
+func (s *Store) ListDeadLetter(limit int) ([]*Job, error) {
+	rows, err := s.db.Query(`
+		SELECT id, task_id, agent_id, type, priority, payload, required_caps,
+		       max_retries, retry_count, error, created_at, died_at
+		FROM dead_letter
+		ORDER BY died_at ASC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dead letter: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*Job
+	for rows.Next() {
+		var (
+			id, jobType, payload, capsJSON  string
+			priority, maxRetries, retryCount int
+			taskID, agentID                  sql.NullString
+			errMsg                           sql.NullString
+			createdAt, diedAt                string
+		)
+
+		err := rows.Scan(&id, &taskID, &agentID, &jobType, &priority, &payload, &capsJSON,
+			&maxRetries, &retryCount, &errMsg, &createdAt, &diedAt)
+		if err != nil {
+			s.logger.Error("Failed to scan dead letter job", "error", err)
+			continue
+		}
+
+		job := &Job{
+			ID:         id,
+			Type:       JobType(jobType),
+			State:      StateDead,
+			Payload:    json.RawMessage(payload),
+			Priority:   Priority(priority),
+			MaxRetries: maxRetries,
+			RetryCount: retryCount,
+		}
+
+		if taskID.Valid {
+			job.TaskID = taskID.String
+		}
+		if agentID.Valid {
+			job.AgentID = agentID.String
+		}
+		if errMsg.Valid {
+			job.Error = errMsg.String
+		}
+
+		json.Unmarshal([]byte(capsJSON), &job.RequiredCaps)
+
+		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+			job.CreatedAt = t
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	return jobs, nil
+}
+
+// DeadLetterStats returns statistics about dead-lettered jobs.
+func (s *Store) DeadLetterStats() (int, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM dead_letter`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count dead letter: %w", err)
+	}
+	return count, nil
+}
+
 // Close closes the database connection.
 func (s *Store) Close() error {
 	return s.db.Close()

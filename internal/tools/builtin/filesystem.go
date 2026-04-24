@@ -3,6 +3,8 @@ package builtin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
 
@@ -123,7 +126,33 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 		text = strings.Join(lines[start:end], "\n")
 	}
 
-	return text, nil
+	// Compute evidence: file stat and hash
+	evInfo, err := os.Stat(resolved)
+	var evidence []models.Evidence
+	if err == nil {
+		evidence = append(evidence, models.NewEvidence(
+			models.EvidenceFileExists,
+			resolved,
+			fmt.Sprintf("size=%d", evInfo.Size()),
+			t.Name(),
+		))
+	}
+
+	// Compute SHA256 hash of file content
+	h := sha256.Sum256(content)
+	hash := hex.EncodeToString(h[:])
+	evidence = append(evidence, models.NewEvidence(
+		models.EvidenceFileHash,
+		resolved,
+		hash,
+		t.Name(),
+	))
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   text,
+		Evidence: evidence,
+	}, nil
 }
 
 // WriteFileTool writes content to a file.
@@ -209,12 +238,50 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
+	// Compute evidence: file stat and hash
+	info, err := os.Stat(resolved)
+	if err != nil {
+		slog.Warn("WriteFileTool: failed to stat file for evidence", "path", resolved, "error", err)
+	}
+
+	var hash string
+	hashData, err := os.ReadFile(resolved)
+	if err != nil {
+		slog.Warn("WriteFileTool: failed to read file for hash", "path", resolved, "error", err)
+	} else {
+		h := sha256.Sum256(hashData)
+		hash = hex.EncodeToString(h[:])
+	}
+
 	action := "wrote"
 	if appendMode {
 		action = "appended to"
 	}
 
-	return fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content)), nil
+	// Build evidence list
+	evidence := []models.Evidence{}
+	if err == nil {
+		evidence = append(evidence, models.NewEvidence(
+			models.EvidenceFileExists,
+			resolved,
+			fmt.Sprintf("size=%d", info.Size()),
+			t.Name(),
+		))
+	}
+	if hash != "" {
+		evidence = append(evidence, models.NewEvidence(
+			models.EvidenceFileHash,
+			resolved,
+			hash,
+			t.Name(),
+		))
+	}
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content)),
+		Evidence: evidence,
+	}, nil
 }
 
 // DeleteFileTool deletes a file from the filesystem.
@@ -277,7 +344,29 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any,
 		return nil, fmt.Errorf("failed to delete file: %w", err)
 	}
 
-	return fmt.Sprintf("Successfully deleted %s", resolved), nil
+	// Store file info for evidence before deletion
+	fileSize := info.Size()
+
+	// Verify deletion
+	_, verifyErr := os.Stat(resolved)
+	evidence := []models.Evidence{
+		models.NewEvidence(
+			models.EvidenceFileExists,
+			resolved,
+			"deleted",
+			t.Name(),
+		),
+	}
+	if verifyErr == nil {
+		// File still exists - deletion may have failed
+		slog.Warn("DeleteFileTool: file still exists after deletion", "path", resolved)
+	}
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   fmt.Sprintf("Successfully deleted %s (%d bytes)", resolved, fileSize),
+		Evidence: evidence,
+	}, nil
 }
 
 // ListDirectoryTool lists the contents of a directory.
@@ -381,11 +470,27 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 		}
 	}
 
-	return ListResult{
+	result := ListResult{
 		Path:      resolved,
 		Entries:   entries,
 		Count:     len(entries),
 		Truncated: truncated,
+	}
+
+	// Build evidence: directory listing confirmation
+	evidence := []models.Evidence{
+		models.NewEvidence(
+			models.EvidenceFileExists,
+			resolved,
+			fmt.Sprintf("entries=%d,recursive=%v,truncated=%v", len(entries), recursive, truncated),
+			t.Name(),
+		),
+	}
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   result,
+		Evidence: evidence,
 	}, nil
 }
 

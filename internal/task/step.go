@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // CategorizedRecommendation represents a recommendation from an agent.
@@ -67,7 +69,15 @@ type TaskStep struct {
 	RevisionCount int       `json:"revision_count"` // Number of revision cycles
 	// Recommendations holds categorized recommendations from the agent
 	Recommendations []CategorizedRecommendation `json:"recommendations,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	// Evidence collected during step execution (file hashes, exit codes, etc.)
+	Evidence []models.Evidence `json:"evidence,omitempty"`
+	// Claims made by the agent about what was accomplished
+	Claims []string `json:"claims,omitempty"`
+	// Validated indicates whether evidence has been verified
+	Validated bool `json:"validated"`
+	// ValidationError contains the reason validation failed
+	ValidationError string `json:"validation_error,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
@@ -133,8 +143,20 @@ func CreateRevision(original *TaskStep, feedback string) *TaskStep {
 
 // StepStore provides SQLite persistence for task steps.
 type StepStore struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db             *sql.DB
+	logger         *slog.Logger
+	logTransitions bool // Enable transition logging
+}
+
+// StateTransition represents a state transition for a task step.
+type StateTransition struct {
+	ID        int64     `json:"id"`
+	StepID    string    `json:"step_id"`
+	FromState StepState `json:"from_state"`
+	ToState   StepState `json:"to_state"`
+	Reason    string    `json:"reason"`
+	AgentID   string    `json:"agent_id"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // NewStepStore creates a new step store using an existing database connection.
@@ -159,38 +181,77 @@ func NewStepStore(db *sql.DB, logger *slog.Logger) (*StepStore, error) {
 func (s *StepStore) migrate() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS task_steps (
-		id          TEXT PRIMARY KEY,
-		task_id     TEXT NOT NULL,
-		description TEXT NOT NULL,
-		depends_on  TEXT,
-		tool_hint   TEXT,
-		agent_id    TEXT,
-		job_id      TEXT,
-		state       TEXT DEFAULT 'pending',
-		result      TEXT,
-		sequence    INTEGER DEFAULT 0,
-		created_at  TEXT NOT NULL,
-		updated_at  TEXT NOT NULL,
+		id             TEXT PRIMARY KEY,
+		task_id        TEXT NOT NULL,
+		description    TEXT NOT NULL,
+		depends_on     TEXT,
+		tool_hint      TEXT,
+		agent_id       TEXT,
+		job_id         TEXT,
+		state          TEXT DEFAULT 'pending',
+		result         TEXT,
+		sequence       INTEGER DEFAULT 0,
+		revision_count INTEGER DEFAULT 0,
+		recommendations TEXT,
+		evidence       TEXT,
+		claims         TEXT,
+		validated      BOOLEAN DEFAULT FALSE,
+		validation_error TEXT,
+		created_at     TEXT NOT NULL,
+		updated_at     TEXT NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS task_state_transitions (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		step_id     TEXT NOT NULL,
+		from_state  TEXT NOT NULL,
+		to_state    TEXT NOT NULL,
+		reason      TEXT,
+		agent_id    TEXT,
+		timestamp   DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (step_id) REFERENCES task_steps(id) ON DELETE CASCADE
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_task_steps_task_id ON task_steps(task_id);
 	CREATE INDEX IF NOT EXISTS idx_task_steps_state ON task_steps(state);
 	CREATE INDEX IF NOT EXISTS idx_task_steps_job_id ON task_steps(job_id);
+	CREATE INDEX IF NOT EXISTS idx_task_state_transitions_step_id ON task_state_transitions(step_id);
+	CREATE INDEX IF NOT EXISTS idx_task_state_transitions_timestamp ON task_state_transitions(timestamp DESC);
 	`
 
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Post-migration: add columns for existing databases (ignore errors if column exists)
+	for _, col := range []string{
+		"ALTER TABLE task_steps ADD COLUMN revision_count INTEGER DEFAULT 0",
+		"ALTER TABLE task_steps ADD COLUMN recommendations TEXT",
+		"ALTER TABLE task_steps ADD COLUMN evidence TEXT",
+		"ALTER TABLE task_steps ADD COLUMN claims TEXT",
+		"ALTER TABLE task_steps ADD COLUMN validated BOOLEAN DEFAULT FALSE",
+		"ALTER TABLE task_steps ADD COLUMN validation_error TEXT",
+	} {
+		s.db.Exec(col)
+	}
+
+	return nil
 }
 
 // Create inserts a new task step.
 func (s *StepStore) Create(step *TaskStep) error {
 	depsJSON := encodeStringSlice(step.DependsOn)
+	recsJSON := encodeRecommendations(step.Recommendations)
+	evidenceJSON := encodeEvidenceSlice(step.Evidence)
+	claimsJSON := encodeStringSlice(step.Claims)
 
 	_, err := s.db.Exec(`
 		INSERT INTO task_steps (id, task_id, description, depends_on, tool_hint, agent_id,
-		                        job_id, state, result, sequence, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                        job_id, state, result, sequence, revision_count,
+		                        recommendations, evidence, claims, validated, validation_error,
+		                        created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.ID,
 		step.TaskID,
 		step.Description,
@@ -201,6 +262,12 @@ func (s *StepStore) Create(step *TaskStep) error {
 		string(step.State),
 		nullableString(step.Result),
 		step.Sequence,
+		step.RevisionCount,
+		nullableString(recsJSON),
+		nullableString(evidenceJSON),
+		nullableString(claimsJSON),
+		step.Validated,
+		nullableString(step.ValidationError),
 		step.CreatedAt.Format(time.RFC3339),
 		step.UpdatedAt.Format(time.RFC3339),
 	)
@@ -217,12 +284,17 @@ func (s *StepStore) Create(step *TaskStep) error {
 // Update updates an existing task step.
 func (s *StepStore) Update(step *TaskStep) error {
 	depsJSON := encodeStringSlice(step.DependsOn)
+	recsJSON := encodeRecommendations(step.Recommendations)
+	evidenceJSON := encodeEvidenceSlice(step.Evidence)
+	claimsJSON := encodeStringSlice(step.Claims)
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.Exec(`
 		UPDATE task_steps
 		SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
-		    job_id = ?, state = ?, result = ?, sequence = ?, updated_at = ?
+		    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
+		    recommendations = ?, evidence = ?, claims = ?, validated = ?,
+		    validation_error = ?, updated_at = ?
 		WHERE id = ?`,
 		step.Description,
 		nullableString(depsJSON),
@@ -232,6 +304,12 @@ func (s *StepStore) Update(step *TaskStep) error {
 		string(step.State),
 		nullableString(step.Result),
 		step.Sequence,
+		step.RevisionCount,
+		nullableString(recsJSON),
+		nullableString(evidenceJSON),
+		nullableString(claimsJSON),
+		step.Validated,
+		nullableString(step.ValidationError),
 		now,
 		step.ID,
 	)
@@ -248,7 +326,9 @@ func (s *StepStore) Update(step *TaskStep) error {
 func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 	row := s.db.QueryRow(`
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
-		       job_id, state, result, sequence, created_at, updated_at
+		       job_id, state, result, sequence, revision_count,
+		       recommendations, evidence, claims, validated, validation_error,
+		       created_at, updated_at
 		FROM task_steps WHERE id = ?`, id)
 
 	return s.scanStep(row)
@@ -258,7 +338,9 @@ func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 func (s *StepStore) GetByJobID(jobID string) (*TaskStep, error) {
 	row := s.db.QueryRow(`
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
-		       job_id, state, result, sequence, created_at, updated_at
+		       job_id, state, result, sequence, revision_count,
+		       recommendations, evidence, claims, validated, validation_error,
+		       created_at, updated_at
 		FROM task_steps WHERE job_id = ?`, jobID)
 
 	return s.scanStep(row)
@@ -268,7 +350,9 @@ func (s *StepStore) GetByJobID(jobID string) (*TaskStep, error) {
 func (s *StepStore) ListByTaskID(taskID string) ([]*TaskStep, error) {
 	rows, err := s.db.Query(`
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
-		       job_id, state, result, sequence, created_at, updated_at
+		       job_id, state, result, sequence, revision_count,
+		       recommendations, evidence, claims, validated, validation_error,
+		       created_at, updated_at
 		FROM task_steps
 		WHERE task_id = ?
 		ORDER BY sequence ASC`, taskID)
@@ -510,15 +594,20 @@ func (s *StepStore) DeleteByTaskID(taskID string) error {
 
 func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	var (
-		id, taskID, description, state string
-		dependsOn, toolHint            sql.NullString
-		agentID, jobID, result         sql.NullString
-		sequence                       int
-		createdAt, updatedAt           string
+		id, taskID, description, state      string
+		dependsOn, toolHint                 sql.NullString
+		agentID, jobID, result              sql.NullString
+		sequence, revisionCount             int
+		recommendations, evidence, claims    sql.NullString
+		validated                           bool
+		validationError                     sql.NullString
+		createdAt, updatedAt                string
 	)
 
 	err := row.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
-		&jobID, &state, &result, &sequence, &createdAt, &updatedAt)
+		&jobID, &state, &result, &sequence, &revisionCount,
+		&recommendations, &evidence, &claims, &validated, &validationError,
+		&createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -527,38 +616,52 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	}
 
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
-		agentID, jobID, result, sequence, createdAt, updatedAt), nil
+		agentID, jobID, result, sequence, revisionCount,
+		recommendations, evidence, claims, validated, validationError,
+		createdAt, updatedAt), nil
 }
 
 func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 	var (
-		id, taskID, description, state string
-		dependsOn, toolHint            sql.NullString
-		agentID, jobID, result         sql.NullString
-		sequence                       int
-		createdAt, updatedAt           string
+		id, taskID, description, state      string
+		dependsOn, toolHint                 sql.NullString
+		agentID, jobID, result              sql.NullString
+		sequence, revisionCount             int
+		recommendations, evidence, claims    sql.NullString
+		validated                           bool
+		validationError                     sql.NullString
+		createdAt, updatedAt                string
 	)
 
 	err := rows.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
-		&jobID, &state, &result, &sequence, &createdAt, &updatedAt)
+		&jobID, &state, &result, &sequence, &revisionCount,
+		&recommendations, &evidence, &claims, &validated, &validationError,
+		&createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
 
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
-		agentID, jobID, result, sequence, createdAt, updatedAt), nil
+		agentID, jobID, result, sequence, revisionCount,
+		recommendations, evidence, claims, validated, validationError,
+		createdAt, updatedAt), nil
 }
 
 func buildStep(id, taskID, description, state string,
 	dependsOn, toolHint, agentID, jobID, result sql.NullString,
-	sequence int, createdAt, updatedAt string) *TaskStep {
+	sequence, revisionCount int,
+	recommendations, evidence, claims sql.NullString,
+	validated bool, validationError sql.NullString,
+	createdAt, updatedAt string) *TaskStep {
 
 	step := &TaskStep{
-		ID:          id,
-		TaskID:      taskID,
-		Description: description,
-		State:       StepState(state),
-		Sequence:    sequence,
+		ID:            id,
+		TaskID:        taskID,
+		Description:   description,
+		State:         StepState(state),
+		Sequence:      sequence,
+		RevisionCount: revisionCount,
+		Validated:     validated,
 	}
 
 	if dependsOn.Valid {
@@ -575,6 +678,18 @@ func buildStep(id, taskID, description, state string,
 	}
 	if result.Valid {
 		step.Result = result.String
+	}
+	if recommendations.Valid {
+		_ = json.Unmarshal([]byte(recommendations.String), &step.Recommendations)
+	}
+	if evidence.Valid {
+		_ = json.Unmarshal([]byte(evidence.String), &step.Evidence)
+	}
+	if claims.Valid {
+		step.Claims = decodeStringSlice(claims.String)
+	}
+	if validationError.Valid {
+		step.ValidationError = validationError.String
 	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -594,4 +709,161 @@ func encodeStepDependsOn(deps []string) string {
 	}
 	data, _ := json.Marshal(deps)
 	return string(data)
+}
+
+// encodeRecommendations encodes recommendations as JSON.
+func encodeRecommendations(recs []CategorizedRecommendation) string {
+	if len(recs) == 0 {
+		return ""
+	}
+	data, _ := json.Marshal(recs)
+	return string(data)
+}
+
+// encodeEvidenceSlice encodes an evidence slice as JSON.
+func encodeEvidenceSlice(evs []models.Evidence) string {
+	if len(evs) == 0 {
+		return ""
+	}
+	data, _ := json.Marshal(evs)
+	return string(data)
+}
+
+// SetStateWithReason updates a step's state and records the transition with a reason.
+func (s *StepStore) SetStateWithReason(id string, state StepState, reason string) error {
+	// Get current state for transition logging
+	var currentStepState StepState
+	row := s.db.QueryRow("SELECT state FROM task_steps WHERE id = ?", id)
+	if err := row.Scan(&currentStepState); err != nil {
+		// Step might not exist yet, continue without transition logging
+		currentStepState = StepPending
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`
+		UPDATE task_steps SET state = ?, updated_at = ? WHERE id = ?`,
+		string(state), now, id)
+	if err != nil {
+		return fmt.Errorf("failed to set step state: %w", err)
+	}
+
+	// Record transition if logging is enabled and state actually changed
+	if s.logTransitions && currentStepState != state {
+		if err := s.RecordTransition(&StateTransition{
+			StepID:    id,
+			FromState: currentStepState,
+			ToState:   state,
+			Reason:    reason,
+			Timestamp: time.Now().UTC(),
+		}); err != nil {
+			s.logger.Warn("Failed to record state transition", "error", err)
+		}
+	}
+
+	return nil
+}
+
+// RecordTransition records a state transition in the database.
+func (s *StepStore) RecordTransition(transition *StateTransition) error {
+	_, err := s.db.Exec(`
+		INSERT INTO task_state_transitions (step_id, from_state, to_state, reason, agent_id, timestamp)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		transition.StepID,
+		string(transition.FromState),
+		string(transition.ToState),
+		nullableString(transition.Reason),
+		nullableString(transition.AgentID),
+		transition.Timestamp.Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to record transition: %w", err)
+	}
+	return nil
+}
+
+// GetTransitions returns all state transitions for a step, ordered by timestamp.
+func (s *StepStore) GetTransitions(stepID string) ([]*StateTransition, error) {
+	rows, err := s.db.Query(`
+		SELECT id, step_id, from_state, to_state, reason, agent_id, timestamp
+		FROM task_state_transitions
+		WHERE step_id = ?
+		ORDER BY timestamp ASC`, stepID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transitions: %w", err)
+	}
+	defer rows.Close()
+
+	var transitions []*StateTransition
+	for rows.Next() {
+		var t StateTransition
+		var reason, agentID sql.NullString
+		var timestamp string
+
+		if err := rows.Scan(&t.ID, &t.StepID, &t.FromState, &t.ToState, &reason, &agentID, &timestamp); err != nil {
+			continue
+		}
+
+		if reason.Valid {
+			t.Reason = reason.String
+		}
+		if agentID.Valid {
+			t.AgentID = agentID.String
+		}
+		if ts, err := time.Parse(time.RFC3339, timestamp); err == nil {
+			t.Timestamp = ts
+		}
+
+		transitions = append(transitions, &t)
+	}
+
+	return transitions, nil
+}
+
+// GetTransitionsByTask returns all state transitions for all steps in a task.
+func (s *StepStore) GetTransitionsByTask(taskID string) ([]*StateTransition, error) {
+	rows, err := s.db.Query(`
+		SELECT st.id, st.step_id, st.from_state, st.to_state, st.reason, st.agent_id, st.timestamp
+		FROM task_state_transitions st
+		JOIN task_steps ts ON st.step_id = ts.id
+		WHERE ts.task_id = ?
+		ORDER BY st.timestamp ASC`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task transitions: %w", err)
+	}
+	defer rows.Close()
+
+	var transitions []*StateTransition
+	for rows.Next() {
+		var t StateTransition
+		var reason, agentID sql.NullString
+		var timestamp string
+
+		if err := rows.Scan(&t.ID, &t.StepID, &t.FromState, &t.ToState, &reason, &agentID, &timestamp); err != nil {
+			continue
+		}
+
+		if reason.Valid {
+			t.Reason = reason.String
+		}
+		if agentID.Valid {
+			t.AgentID = agentID.String
+		}
+		if ts, err := time.Parse(time.RFC3339, timestamp); err == nil {
+			t.Timestamp = ts
+		}
+
+		transitions = append(transitions, &t)
+	}
+
+	return transitions, nil
+}
+
+// SetTransitionLogging enables or disables transition logging.
+func (s *StepStore) SetTransitionLogging(enabled bool) {
+	s.logTransitions = enabled
+}
+
+// TransitionLoggingEnabled returns whether transition logging is enabled.
+func (s *StepStore) TransitionLoggingEnabled() bool {
+	return s.logTransitions
 }
