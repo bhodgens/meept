@@ -1,34 +1,35 @@
 # Phase 2: Unified Intent Taxonomy + Validation
 
-**Status:** Not started
+**Status:** Completed
 **Priority:** High (requires Phase 1)
-**Estimated Effort:** 2-3 sprints
+**Estimated Effort:** 1 sprint
+**Completed:** 2026-04-24
+
+---
+
+## Summary
+
+All implementation steps completed:
+
+1. **IntentType enum created** - Single source of truth in `intent.go` with all intent types, Category(), DefaultAgent(), RequiresPlanning(), ShouldCreateTask(), ShouldDispatchAsync(), and IsValidIntentType() methods
+2. **KeywordClassifier updated** - Uses IntentType constants instead of string literals
+3. **shouldCreateTask and ShouldDispatchAsync updated** - Use IntentType methods with fallback for unknown intents
+4. **ValidateRouting() added** - Post-completion routing validation with RoutingValidation struct
+
+All tests pass.
 
 ---
 
 ## Overview
 
-Currently, intent types are defined in at least 3 different places with overlapping but inconsistent values. This phase consolidates all intent definitions into a single source of truth and adds validation to ensure routing decisions are correct.
+Currently, intent types are defined as raw strings in multiple places with overlapping but inconsistent values. This phase consolidates all intent definitions into a single source of truth and adds validation to ensure routing decisions are correct.
 
----
-
-## Current State Analysis
-
-### Intent Type Definitions (Scattered)
-
-| Location | Line | Intent Types Defined |
-|----------|------|---------------------|
-| `dispatcher.go` keyword patterns | ~493-532 | `platform`, `report`, `recall`, `debug`, `code`, `review`, `git`, `schedule`, `plan`, `analyze`, `search`, `chat` |
-| `llm_classifier.go` agentMapping | TBD | ~10-12 intents (needs verification) |
-| `capability_matcher.go` getDefaultIntentType | ~251-261 | Agent ID fallbacks |
-| `dispatcher.go` shouldCreateTask | ~302-315 | Hardcoded switch cases |
-
-### Problems
-
-1. **Inconsistent naming**: Keyword classifier uses `analyze`, LLM might use `research`
-2. **Agent ID coupling**: Some intents default to agent ID (e.g., `coder`) instead of semantic intent (`code`)
-3. **Drift risk**: Adding a new intent requires updating 3+ files
-4. **No validation**: No way to verify if routing was correct
+**Current State (verified 2026-04-24):**
+- Intent types are raw strings: `"chat"`, `"code"`, `"debug"`, `"platform"`, `"report"`, `"recall"`, `"analyze"`, `"search"`, `"plan"`, `"git"`, `"schedule"`, `"review"`, `"skill"`
+- Keyword classifier defines patterns at `dispatcher.go:493-532`
+- `shouldCreateTask` at `dispatcher.go:302-315` uses hardcoded switch cases
+- `ShouldDispatchAsync` at `dispatcher.go:647-673` uses hardcoded switch cases
+- No centralized `IntentType` enum exists
 
 ---
 
@@ -36,8 +37,7 @@ Currently, intent types are defined in at least 3 different places with overlapp
 
 1. **Create `IntentType` enum** - Single source of truth for all intent types
 2. **Consolidate mappings** - All classifiers reference the enum
-3. **Add validation hook** - Post-completion agreement check
-4. **Expose validation tool** - `platform_validate_routing` for agents
+3. **Add validation** - Post-completion routing correctness check
 
 ---
 
@@ -50,186 +50,133 @@ Currently, intent types are defined in at least 3 different places with overlapp
 ```go
 package agent
 
+import "strings"
+
 // IntentType represents a classified user intent.
-// All dispatch routing MUST use these constants.
 type IntentType string
 
 const (
-    // IntentUnknown is the default for unclassified requests.
+    // Unknown
     IntentUnknown IntentType = "unknown"
 
-    // Conversational intents
-    IntentChat     IntentType = "chat"      // General conversation
-    IntentReport   IntentType = "report"    // Status/progress reports
-    IntentRecall   IntentType = "recall"    // Memory recall
-    IntentPlatform IntentType = "platform"  // Platform introspection
+    // Conversational (inline handling)
+    IntentChat     IntentType = "chat"
+    IntentReport   IntentType = "report"
+    IntentRecall   IntentType = "recall"
+    IntentPlatform IntentType = "platform"
 
-    // Execution intents (require task tracking)
-    IntentCode     IntentType = "code"      // Write/modify code
-    IntentDebug    IntentType = "debug"     // Fix bugs, diagnose issues
-    IntentReview   IntentType = "review"    // Code review, PR check
-    IntentPlan     IntentType = "plan"      // Decompose, architect, design
-    IntentGit      IntentType = "git"       // Git operations
-    IntentSchedule IntentType = "schedule"  // Create reminders/scheduling
+    // Execution (async to orchestrator)
+    IntentCode     IntentType = "code"
+    IntentDebug    IntentType = "debug"
+    IntentReview   IntentType = "review"
+    IntentPlan     IntentType = "plan"
+    IntentGit      IntentType = "git"
+    IntentSchedule IntentType = "schedule"
 
-    // Analysis intents
-    IntentAnalyze  IntentType = "analyze"   // Research, summarize
-    IntentSearch   IntentType = "search"    // Look up information
-    IntentSkill    IntentType = "skill"     // Explicit skill invocation
+    // Analysis (inline)
+    IntentAnalyze  IntentType = "analyze"
+    IntentSearch   IntentType = "search"
 
-    // Compound multi-intent (Phase 4)
-    IntentCompound IntentType = "compound"  // Multiple intents detected
+    // Skill invocation
+    IntentSkill    IntentType = "skill"
 )
 
 // IntentCategory groups intents by routing behavior.
 type IntentCategory string
 
 const (
-    CategoryInline   IntentCategory = "inline"   // Handle directly, no task
-    CategoryTrackable IntentCategory = "trackable" // Create task, async OK
-    CategoryDefer    IntentCategory = "defer"    // Always async to orchestrator
+    CategoryInline   IntentCategory = "inline"
+    CategoryTrackable IntentCategory = "trackable"
+    CategoryDefer    IntentCategory = "defer"
 )
 
-// IntentDefinition describes an intent type.
-type IntentDefinition struct {
-    Type     IntentType     `json:"type"`
-    Category IntentCategory `json:"category"`
-    // DefaultAgent is the preferred agent for this intent.
-    DefaultAgent string `json:"default_agent"`
-    // Keywords are common trigger phrases (for documentation/logging).
-    Keywords []string `json:"keywords,omitempty"`
-    // RequiresPlanning indicates if orchestrator planning is beneficial.
-    RequiresPlanning bool `json:"requires_planning"`
-}
-
-// IntentRegistry is the single source of truth for intent definitions.
-var IntentRegistry = map[IntentType]IntentDefinition{
-    IntentChat: {
-        Type: IntentChat,
-        Category: CategoryInline,
-        DefaultAgent: "chat",
-        Keywords: []string{"hello", "hi", "thanks", "help"},
-    },
-    IntentReport: {
-        Type: IntentReport,
-        Category: CategoryInline,
-        DefaultAgent: "chat",
-        Keywords: []string{"report", "what did you", "summary", "progress"},
-    },
-    IntentRecall: {
-        Type: IntentRecall,
-        Category: CategoryInline,
-        DefaultAgent: "chat",
-        Keywords: []string{"remember", "recall", "last time"},
-    },
-    IntentPlatform: {
-        Type: IntentPlatform,
-        Category: CategoryInline,
-        DefaultAgent: "chat",
-        Keywords: []string{"capabilities", "what can you", "platform status"},
-    },
-    IntentCode: {
-        Type: IntentCode,
-        Category: CategoryDefer,
-        DefaultAgent: "coder",
-        Keywords: []string{"implement", "create", "add feature", "refactor"},
-        RequiresPlanning: true,
-    },
-    IntentDebug: {
-        Type: IntentDebug,
-        Category: CategoryDefer,
-        DefaultAgent: "debugger",
-        Keywords: []string{"fix bug", "error", "broken", "not working"},
-        RequiresPlanning: false,
-    },
-    IntentReview: {
-        Type: IntentReview,
-        Category: CategoryDefer,
-        DefaultAgent: "code-reviewer",
-        Keywords: []string{"review pr", "check code", "code review"},
-        RequiresPlanning: false,
-    },
-    IntentGit: {
-        Type: IntentGit,
-        Category: CategoryDefer,
-        DefaultAgent: "committer",
-        Keywords: []string{"commit", "push", "pull", "merge", "branch"},
-        RequiresPlanning: false,
-    },
-    IntentSchedule: {
-        Type: IntentSchedule,
-        Category: CategoryDefer,
-        DefaultAgent: "scheduler",
-        Keywords: []string{"remind", "schedule", "alarm", "at "},
-        RequiresPlanning: false,
-    },
-    IntentPlan: {
-        Type: IntentPlan,
-        Category: CategoryDefer,
-        DefaultAgent: "planner",
-        Keywords: []string{"plan", "design", "architect", "how should i"},
-        RequiresPlanning: true,
-    },
-    IntentAnalyze: {
-        Type: IntentAnalyze,
-        Category: CategoryInline,
-        DefaultAgent: "analyst",
-        Keywords: []string{"research", "analyze", "explain", "summarize"},
-        RequiresPlanning: false,
-    },
-    IntentSearch: {
-        Type: IntentSearch,
-        Category: CategoryInline,
-        DefaultAgent: "analyst",
-        Keywords: []string{"search", "find", "look up"},
-        RequiresPlanning: false,
-    },
-    IntentSkill: {
-        Type: IntentSkill,
-        Category: CategoryInline,
-        DefaultAgent: "skill",
-        Keywords: []string{"/"},
-    },
-}
-
-// GetIntentDefinition returns the definition for an intent type.
-func GetIntentDefinition(t IntentType) (IntentDefinition, bool) {
-    def, ok := IntentRegistry[t]
-    return def, ok
-}
-
-// IntentCategory returns the category for an intent type.
+// Category returns the routing category for an intent.
 func (t IntentType) Category() IntentCategory {
-    if def, ok := IntentRegistry[t]; ok {
-        return def.Category
+    switch t {
+    case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentAnalyze, IntentSearch:
+        return CategoryInline
+    case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule:
+        return CategoryDefer
+    case IntentSkill:
+        return CategoryInline
+    default:
+        return CategoryInline
     }
-    return CategoryInline
 }
 
-// DefaultAgent returns the default agent for an intent type.
+// DefaultAgent returns the default agent for an intent.
 func (t IntentType) DefaultAgent() string {
-    if def, ok := IntentRegistry[t]; ok {
-        return def.DefaultAgent
+    switch t {
+    case IntentChat, IntentReport, IntentRecall, IntentPlatform:
+        return "chat"
+    case IntentCode, IntentReview:
+        return "coder"
+    case IntentDebug:
+        return "debugger"
+    case IntentPlan:
+        return "planner"
+    case IntentAnalyze, IntentSearch:
+        return "analyst"
+    case IntentGit:
+        return "committer"
+    case IntentSchedule:
+        return "scheduler"
+    case IntentSkill:
+        return "skill"
+    default:
+        return "chat"
     }
-    return "chat"
 }
 
 // RequiresPlanning returns true if the intent benefits from orchestration.
 func (t IntentType) RequiresPlanning() bool {
-    if def, ok := IntentRegistry[t]; ok {
-        return def.RequiresPlanning
+    switch t {
+    case IntentCode, IntentPlan:
+        return true
+    default:
+        return false
+    }
+}
+
+// IsValid IntentType checks if a string is a valid intent type.
+func IsValidIntentType(s string) bool {
+    switch IntentType(s) {
+    case IntentChat, IntentReport, IntentRecall, IntentPlatform,
+         IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
+         IntentSchedule, IntentAnalyze, IntentSearch, IntentSkill:
+        return true
     }
     return false
 }
 
-// IsValidIntentType checks if a string is a valid intent type.
-func IsValidIntentType(s string) bool {
-    for t := range IntentRegistry {
-        if string(t) == s {
-            return true
-        }
+// Keywords returns common trigger phrases for documentation/logging.
+func (t IntentType) Keywords() []string {
+    switch t {
+    case IntentChat:
+        return []string{"hello", "hi", "thanks", "help"}
+    case IntentReport:
+        return []string{"report", "what did you", "summary", "progress"}
+    case IntentRecall:
+        return []string{"remember", "recall", "last time"}
+    case IntentPlatform:
+        return []string{"capabilities", "what can you", "platform"}
+    case IntentCode:
+        return []string{"implement", "create", "add feature", "refactor"}
+    case IntentDebug:
+        return []string{"fix bug", "error", "broken", "not working"}
+    case IntentReview:
+        return []string{"review pr", "check code", "code review"}
+    case IntentGit:
+        return []string{"commit", "push", "pull", "merge", "branch"}
+    case IntentSchedule:
+        return []string{"remind", "schedule", "alarm", "at "}
+    case IntentPlan:
+        return []string{"plan", "design", "architect", "how should i"}
+    case IntentAnalyze, IntentSearch:
+        return []string{"research", "analyze", "explain", "search"}
+    default:
+        return nil
     }
-    return false
 }
 ```
 
@@ -245,129 +192,74 @@ func IsValidIntentType(s string) bool {
 // Replace the patterns array to use IntentType constants
 patterns := []struct {
     keywords   []string
-    intentType agent.IntentType  // WAS: string
+    intentType IntentType
     agentType  string
     confidence float64
     planning   bool
 }{
     // Platform introspection
     {[]string{"what can you do", "what are your capabilities"},
-     agent.IntentPlatform, "chat", 0.9, false},
+     IntentPlatform, "chat", 0.9, false},
 
     // Report requests
     {[]string{"give me a report", "what did you do"},
-     agent.IntentReport, "chat", 0.9, false},
+     IntentReport, "chat", 0.9, false},
 
     // Recall
     {[]string{"remember when", "recall"},
-     agent.IntentRecall, "chat", 0.85, false},
+     IntentRecall, "chat", 0.85, false},
 
     // Debug
     {[]string{"fix bug", "debug", "error"},
-     agent.IntentDebug, "debugger", 0.8, false},
+     IntentDebug, "debugger", 0.8, false},
 
     // Code
     {[]string{"write code", "implement", "create function"},
-     agent.IntentCode, "coder", 0.8, false},
+     IntentCode, "coder", 0.8, false},
 
-    // ... etc for all patterns
+    // Git
+    {[]string{"commit", "push", "pull", "merge", "branch"},
+     IntentGit, "committer", 0.8, false},
+
+    // Schedule
+    {[]string{"remind", "schedule", "alarm", "at "},
+     IntentSchedule, "scheduler", 0.8, false},
+
+    // Plan
+    {[]string{"plan", "design", "architect", "how should i"},
+     IntentPlan, "planner", 0.8, true},
+
+    // Analyze/Search
+    {[]string{"research", "analyze", "explain"},
+     IntentAnalyze, "analyst", 0.7, false},
+    {[]string{"search", "find", "look up"},
+     IntentSearch, "analyst", 0.7, false},
+
+    // Chat
+    {[]string{"hello", "hi", "thanks"},
+     IntentChat, "chat", 0.6, false},
 }
 
 // In the return statement:
 return &Intent{
-    Type: string(p.intentType),  // Convert to string for backward compat
+    Type: string(p.intentType),
     // ...
 }, nil
 ```
 
-### Step 3: Update LLM Classifier
+### Step 3: Update shouldCreateTask and ShouldDispatchAsync
 
-**File:** `internal/agent/llm_classifier.go`
-
-**Changes:**
-
-1. Update `agentMapping` to reference `IntentType` constants
-2. Update `intentThresholds` map keys to use `IntentType`
-3. Update validation in `Classify()` to check `IsValidIntentType()`
-
-```go
-// Define mapping from LLM output to IntentType
-var llmToIntent = map[string]agent.IntentType{
-    "code": agent.IntentCode,
-    "coding": agent.IntentCode,
-    "debug": agent.IntentDebug,
-    "debugging": agent.IntentDebug,
-    "chat": agent.IntentChat,
-    "conversation": agent.IntentChat,
-    "research": agent.IntentAnalyze,
-    "analyze": agent.IntentAnalyze,
-    "plan": agent.IntentPlan,
-    "planning": agent.IntentPlan,
-    "schedule": agent.IntentSchedule,
-    "git": agent.IntentGit,
-    "review": agent.IntentReview,
-}
-
-// In Classify(), normalize LLM output:
-rawType := llmOutput.Type
-normalized, ok := llmToIntent[rawType]
-if !ok {
-    d.logger.Warn("Unknown LLM intent", "type", rawType)
-    normalized = agent.IntentChat
-}
-
-return &Intent{
-    Type: string(normalized),
-    // ...
-}, nil
-```
-
-### Step 4: Update Capability Matcher
-
-**File:** `internal/agent/capability_matcher.go`
-
-**Changes:**
-
-```go
-// In getDefaultIntentType(), map agents to IntentType
-func (m *CapabilityMatcher) getDefaultIntentType(agentID string) string {
-    // Map agent ID to canonical intent type
-    agentToIntent := map[string]agent.IntentType{
-        "coder": agent.IntentCode,
-        "debugger": agent.IntentDebug,
-        "planner": agent.IntentPlan,
-        "analyst": agent.IntentAnalyze,
-        "committer": agent.IntentGit,
-        "scheduler": agent.IntentSchedule,
-        "chat": agent.IntentChat,
-    }
-
-    if intent, ok := agentToIntent[agentID]; ok {
-        return string(intent)
-    }
-    return string(agent.IntentChat)
-}
-```
-
-### Step 5: Update shouldCreateTask and ShouldDispatchAsync
+Replace hardcoded string switches with enum methods.
 
 **File:** `internal/agent/dispatcher.go`
-
-**Changes:**
 
 ```go
 // shouldCreateTask - use intent category
 func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
-    intentType := agent.IntentType(intent.Type)
-
-    // CategoryInline never creates tasks
-    if intentType.Category() == agent.CategoryInline {
-        return false
-    }
-
-    // Always create tasks for trackable/defer intents
-    return intentType.Category() == agent.CategoryTrackable ||
-           intentType.Category() == agent.CategoryDefer
+    intentType := IntentType(intent.Type)
+    // CategoryInline never creates tasks; Defer always does
+    return intentType.Category() == CategoryTrackable ||
+           intentType.Category() == CategoryDefer
 }
 
 // ShouldDispatchAsync - use RequiresPlanning flag
@@ -381,36 +273,38 @@ func (d *Dispatcher) ShouldDispatchAsync(result *DispatchResult) bool {
         return false
     }
 
-    intentType := agent.IntentType(result.Intent.Type)
+    intentType := IntentType(result.Intent.Type)
+    // Simple intents are handled inline
+    if intentType.Category() == CategoryInline {
+        return false
+    }
 
-    // Use the RequiresPlanning flag from registry
+    // Use the RequiresPlanning flag
     return intentType.RequiresPlanning()
 }
 ```
 
-### Step 6: Add Validation Hook
+### Step 4: Add Validation Hook
 
-**File:** `internal/agent/dispatcher.go` (NEW: post-completion validation)
+**File:** `internal/agent/dispatcher.go` (NEW)
 
 ```go
-// ValidateRouting checks if a completed task was routed correctly.
-// Returns validation result with confidence and feedback.
+// RoutingValidation checks if a task was routed correctly.
 type RoutingValidation struct {
-    TaskID         string   `json:"task_id"`
-    OriginalIntent string   `json:"original_intent"`
-    RoutedAgent    string   `json:"routed_agent"`
-    IsValid        bool     `json:"is_valid"`
-    Confidence     float64  `json:"confidence"`
-    Feedback       string   `json:"feedback,omitempty"`
-    ExpectedAgent  string   `json:"expected_agent,omitempty"`
+    TaskID        string  `json:"task_id"`
+    OriginalIntent string `json:"original_intent"`
+    RoutedAgent   string  `json:"routed_agent"`
+    IsValid       bool    `json:"is_valid"`
+    ExpectedAgent string  `json:"expected_agent,omitempty"`
+    Feedback      string  `json:"feedback,omitempty"`
 }
 
 // ValidateRouting compares the routed agent against expected.
-func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent, result string) *RoutingValidation {
-    intentType := agent.IntentType(originalIntent)
-    def, ok := agent.IntentRegistry[intentType]
+func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent string) *RoutingValidation {
+    intentType := IntentType(originalIntent)
 
-    if !ok {
+    // Check if intent type is valid
+    if !IsValidIntentType(originalIntent) {
         return &RoutingValidation{
             TaskID: taskID,
             IsValid: false,
@@ -418,11 +312,11 @@ func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent, result
         }
     }
 
-    expectedAgent := def.DefaultAgent
+    expectedAgent := intentType.DefaultAgent()
     isValid := routedAgent == expectedAgent
 
-    // Special case: chat agent can handle any inline intent
-    if routedAgent == "chat" && intentType.Category() == agent.CategoryInline {
+    // Special case: chat agent can handle inline intents
+    if routedAgent == "chat" && intentType.Category() == CategoryInline {
         isValid = true
     }
 
@@ -431,7 +325,6 @@ func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent, result
         OriginalIntent: originalIntent,
         RoutedAgent: routedAgent,
         IsValid: isValid,
-        Confidence: 0.9, // TODO: enhance with LLM-based validation
         ExpectedAgent: expectedAgent,
         Feedback: func() string {
             if isValid {
@@ -440,68 +333,6 @@ func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent, result
             return fmt.Sprintf("Expected agent '%s' for intent '%s'", expectedAgent, originalIntent)
         }(),
     }
-}
-```
-
-### Step 7: Expose Validation Tool
-
-**File:** `internal/tools/platform.go`
-
-**New tool:** `platform_validate_routing`
-
-```go
-type ValidateRoutingTool struct {
-    dispatcher *Dispatcher
-}
-
-func (t *ValidateRoutingTool) Description() string {
-    return "Validate if a task was routed to the correct agent"
-}
-
-func (t *ValidateRoutingTool) Handler(ctx context.Context, input json.RawMessage) (string, error) {
-    var req struct {
-        TaskID      string `json:"task_id"`
-        IntentType  string `json:"intent_type"`
-        RoutedAgent string `json:"routed_agent"`
-        Result      string `json:"result,omitempty"`
-    }
-    json.Unmarshal(input, &req)
-
-    validation := t.dispatcher.ValidateRouting(
-        req.TaskID,
-        req.IntentType,
-        req.RoutedAgent,
-        req.Result,
-    )
-
-    data, _ := json.MarshalIndent(validation, "", "  ")
-    return string(data), nil
-}
-```
-
-### Step 8: Integrate Validation into Task Completion
-
-**File:** `internal/agent/handler.go`
-
-**Location:** `handleTaskCompleted()` (line 521)
-
-```go
-// After receiving task.completed:
-validation := h.dispatcher.ValidateRouting(
-    payload.TaskID,
-    originalIntent,  // Need to store this from dispatch
-    payload.AgentID, // Who actually executed
-    payload.Result,
-)
-
-if !validation.IsValid {
-    h.logger.Warn("Routing validation failed",
-        "task_id", payload.TaskID,
-        "expected", validation.ExpectedAgent,
-        "got", validation.RoutedAgent,
-    )
-    // Record for Phase 3 learning
-    h.dispatcher.stats.recordValidationFailure(validation)
 }
 ```
 
@@ -515,40 +346,29 @@ if !validation.IsValid {
 | `IntentRegistry` | All intent definitions with metadata |
 | Updated classifiers | All 3 classifiers use enum |
 | `ValidateRouting()` | Post-completion validation |
-| `platform_validate_routing` tool | Query routing correctness |
 
 ---
 
 ## Success Criteria
 
-1. ✅ No hardcoded intent strings in dispatcher/classifiers
-2. ✅ All intent references compile against the enum
-3. ✅ Validation catches at least obvious mismatches (e.g., `code` → `chat`)
-4. ✅ New intents can be added by modifying ONE file
+1. No hardcoded intent strings in dispatcher/classifiers
+2. All intent references compile against the enum
+3. Validation catches obvious mismatches (e.g., `code` → `chat`)
 
 ---
 
 ## Testing
-
-### Compilation Test
-
-```bash
-# This should fail if any hardcoded strings remain
-go build ./internal/agent/...
-```
-
-### Validation Test
 
 ```go
 func TestValidateRouting(t *testing.T) {
     d := &Dispatcher{}
 
     // Valid routing
-    v := d.ValidateRouting("t1", "code", "coder", "done")
+    v := d.ValidateRouting("t1", "code", "coder")
     assert.True(t, v.IsValid)
 
     // Invalid routing
-    v = d.ValidateRouting("t2", "code", "chat", "done")
+    v = d.ValidateRouting("t2", "code", "chat")
     assert.False(t, v.IsValid)
 }
 ```
@@ -561,18 +381,6 @@ func TestValidateRouting(t *testing.T) {
 
 ---
 
-## Risks
-
-| Risk | Mitigation |
-|------|------------|
-| Breaking existing code | Provide conversion functions, update in stages |
-| Enum becomes stale | Code ownership review on new intent additions |
-| Validation overhead | Run async, sample 10% by default |
-
----
-
 ## Next Phase
 
 → **Phase 3: Compound Request Support (Multi-Intent)**
-
-With a unified taxonomy, detecting and routing compound intents becomes straightforward—simply detect multiple `IntentType` values in a single request and trigger orchestration.

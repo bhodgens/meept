@@ -1,6 +1,7 @@
 package security
 
 import (
+	"io"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -761,6 +762,9 @@ func (e *Engine) Close() error {
 }
 
 // boolToInt converts a boolean to an integer (0 or 1).
+// Compile-time assertion that Engine implements io.Closer.
+var _ io.Closer = (*Engine)(nil)
+
 func boolToInt(b bool) int {
 	if b {
 		return 1

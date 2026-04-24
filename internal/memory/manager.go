@@ -1561,6 +1561,9 @@ func (m *Manager) Close() error {
 	return lastErr
 }
 
+// Compile-time assertion that Manager implements io.Closer.
+var _ io.Closer = (*Manager)(nil)
+
 // IsDistributed returns true if distributed memory sync is enabled.
 func (m *Manager) IsDistributed() bool {
 	m.mu.RLock()
@@ -1580,6 +1583,3 @@ func (m *Manager) IsInitialized() bool {
 func (m *Manager) DistributedConfig() config.DistributedMemoryConfig {
 	return m.distributedCfg
 }
-
-// Ensure Manager implements io.Closer
-var _ io.Closer = (*Manager)(nil)

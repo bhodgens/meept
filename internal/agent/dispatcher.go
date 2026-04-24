@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"sync"
 	"strings"
 	"time"
 
@@ -29,6 +31,14 @@ type Intent struct {
 	RequiresPlanning bool `json:"requires_planning"`
 	// Summary is a brief description of the intent.
 	Summary string `json:"summary,omitempty"`
+}
+
+// MemoryContext wraps memory results with conversation metadata.
+type MemoryContext struct {
+	Results      []memory.MemoryResult `json:"results"`
+	LastIntent   *Intent               `json:"last_intent,omitempty"`
+	LastAgent    string                `json:"last_agent,omitempty"`
+	IntentCounts map[string]int        `json:"intent_counts,omitempty"`
 }
 
 // DispatchResult is the result of dispatching a request.
@@ -58,11 +68,14 @@ type Dispatcher struct {
 	llmClassifier     *LLMClassifier
 	keywordClassifier *KeywordClassifier
 	capabilityMatcher *CapabilityMatcher
+	semanticIndex     *SemanticIndex
+	sessionTracker    *SessionTracker
+	stats             *DispatcherStats
 }
 
 // IntentClassifier is an interface for classifying intents.
 type IntentClassifier interface {
-	Classify(ctx context.Context, input string, context []memory.MemoryResult) (*Intent, error)
+	Classify(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error)
 }
 
 // DispatcherConfig holds configuration for creating a Dispatcher.
@@ -77,6 +90,8 @@ type DispatcherConfig struct {
 	LLMClient         *llm.Client
 	ClassifierModel   string
 	CapabilityMatcher *CapabilityMatcher
+	EmbeddingClient   EmbeddingClient
+	SessionMaxAge     time.Duration
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -110,6 +125,31 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		d.classifiers = append(d.classifiers, d.llmClassifier)
 	}
 
+	// Initialize semantic index if embedding client is provided
+	if cfg.EmbeddingClient != nil {
+		d.semanticIndex = NewSemanticIndex(cfg.EmbeddingClient)
+		// Build index in background
+		go func() {
+			if err := d.semanticIndex.BuildIndex(context.Background()); err != nil {
+				d.logger.Warn("Failed to build semantic index", "error", err)
+			}
+		}()
+	}
+
+	// Initialize session tracker
+	maxAge := cfg.SessionMaxAge
+	if maxAge == 0 {
+		maxAge = 30 * time.Minute
+	}
+	d.sessionTracker = NewSessionTracker(maxAge)
+
+	// Initialize stats tracking
+	d.stats = &DispatcherStats{
+		ByMethod: make(map[string]int),
+		ByAgent:  make(map[string]int),
+		ByIntent: make(map[string]int),
+	}
+
 	return d
 }
 
@@ -130,50 +170,20 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 		// Not a valid skill, fall through to normal routing
 	}
 
-	// 1. Search memory for relevant context using graph-aware search
-	var memoryContext []memory.MemoryResult
-	if d.memvid != nil && d.memvid.IsAvailable(ctx) {
-		results, err := d.memvid.Search(ctx, input, 10)
-		if err != nil {
-			d.logger.Warn("Memory search failed", "error", err)
-		} else {
-			for _, r := range results {
-				memoryContext = append(memoryContext, memory.MemoryResult{
-					Memory: memory.Memory{
-						ID:        r.Memory.ID,
-						Content:   r.Memory.Content,
-						CreatedAt: r.Memory.CreatedAt,
-					},
-					RelevanceScore: r.RelevanceScore,
-					Source:         r.Memory.Zone,
-				})
-			}
-		}
-	} else if d.memoryMgr != nil {
-		// Use graph-aware search for better ranking (alpha=0.3 = 30% PageRank influence)
-		results, err := d.memoryMgr.SearchWithGraph(ctx, memory.MemoryQuery{
-			Query: input,
-			Limit: 10,
-		}, 0.3)
-		if err != nil {
-			d.logger.Warn("Graph-aware memory search failed, falling back", "error", err)
-			// Fallback to regular search
-			results, err = d.memoryMgr.Search(ctx, memory.MemoryQuery{
-				Query: input,
-				Limit: 10,
-			})
-			if err != nil {
-				d.logger.Warn("Local memory search failed", "error", err)
-			} else {
-				memoryContext = results
-			}
-		} else {
-			memoryContext = results
-		}
+	// 1. Build memory context with session history
+	memCtx := d.buildMemoryContext(ctx, input, sessionID)
+
+	// 2. Resolve anaphora (context references)
+	resolvedInput := d.resolveAnaphora(input, memCtx)
+
+	// 3. Check for compound (multi-intent) requests
+	multiIntent := d.classifyMultiIntent(ctx, resolvedInput, memCtx)
+	if multiIntent.IsCompound {
+		return d.routeCompound(ctx, multiIntent, input, sessionID)
 	}
 
-	// 2. Classify intent
-	intent, err := d.classifyIntent(ctx, input, memoryContext)
+	// 4. Classify primary intent
+	intent, err := d.classifyIntent(ctx, resolvedInput, memCtx)
 	if err != nil {
 		d.logger.Error("Intent classification failed", "error", err)
 		// Default to chat agent
@@ -184,21 +194,21 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 		}
 	}
 
-	// 3. Extract memory refs for context continuity
-	intent.MemoryRefs = d.extractMemoryRefs(memoryContext)
+	// 5. Extract memory refs for context continuity
+	intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
 
-	// 4. Create task if needed (for trackable work)
+	// 6. Create task if needed (for trackable work)
 	var createdTask *task.Task
 	if d.shouldCreateTask(intent) && d.taskStore != nil {
 		createdTask = d.createTask(ctx, input, intent, sessionID)
 	}
 
-	// 5. Determine routing
+	// 7. Determine routing
 	result := &DispatchResult{
 		Task:          createdTask,
 		AgentID:       intent.AgentType,
 		Intent:        intent,
-		MemoryContext: memoryContext,
+		MemoryContext: memCtx.Results,
 	}
 
 	d.logger.Info("Dispatched request",
@@ -209,6 +219,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 		"has_task", createdTask != nil,
 	)
 
+	// Record intent in session tracker
+	d.sessionTracker.RecordIntent(sessionID, intent, intent.AgentType)
+
 	return result, nil
 }
 
@@ -217,7 +230,9 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 // 2. Try LLM classifier (if available)
 // 3. If LLM fails OR confidence < threshold → try Keyword classifier
 // 4. If Keyword fails → return Chat fallback
-func (d *Dispatcher) classifyIntent(ctx context.Context, input string, context []memory.MemoryResult) (*Intent, error) {
+func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error) {
+	d.recordTotalDispatch()
+
 	// Step 1: Try capability matcher first (fast, no LLM)
 	if d.capabilityMatcher != nil {
 		result := d.capabilityMatcher.Match(input)
@@ -228,12 +243,16 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, context [
 				"confidence", result.Confidence,
 				"match_type", result.MatchType,
 			)
-			return &Intent{
+			intent := &Intent{
 				Type:       result.IntentType,
 				Confidence: result.Confidence,
 				AgentType:  result.AgentID,
 				Summary:    extractSummary(input),
-			}, nil
+			}
+			d.recordClassificationMethod("capability_matcher")
+			d.recordAgent(result.AgentID)
+			d.recordIntentType(result.IntentType)
+			return d.applyContextWeighting(intent, memCtx, input), nil
 		}
 		if result != nil {
 			d.logger.Debug("Capability matcher result below threshold",
@@ -246,14 +265,17 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, context [
 
 	// Step 2: Try LLM classifier if available
 	if d.llmClassifier != nil {
-		intent, err := d.llmClassifier.Classify(ctx, input, context)
+		intent, err := d.llmClassifier.Classify(ctx, input, memCtx)
 		if err == nil && intent != nil {
 			if ShouldUseLLMResult(intent) {
 				d.logger.Debug("LLM classifier succeeded",
 					"intent", intent.Type,
 					"confidence", intent.Confidence,
 				)
-				return intent, nil
+				d.recordClassificationMethod("llm")
+				d.recordAgent(intent.AgentType)
+				d.recordIntentType(intent.Type)
+				return d.applyContextWeighting(intent, memCtx, input), nil
 			}
 			d.logger.Debug("LLM classifier result below threshold",
 				"intent", intent.Type,
@@ -267,24 +289,94 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, context [
 
 	// Step 3: Try Keyword classifier
 	if d.keywordClassifier != nil {
-		intent, err := d.keywordClassifier.Classify(ctx, input, context)
+		intent, err := d.keywordClassifier.Classify(ctx, input, memCtx)
 		if err == nil && intent != nil {
 			d.logger.Debug("Keyword classifier succeeded",
 				"intent", intent.Type,
 				"confidence", intent.Confidence,
 			)
-			return intent, nil
+			d.recordClassificationMethod("keyword")
+			d.recordAgent(intent.AgentType)
+			d.recordIntentType(intent.Type)
+			return d.applyContextWeighting(intent, memCtx, input), nil
 		}
 		d.logger.Warn("Keyword classifier failed", "error", err)
 	}
 
+	// Step 3.5: Semantic matching (before fallback)
+	if d.semanticIndex != nil {
+		match := d.semanticIndex.Match(input, 0.6)
+		if match != nil {
+			d.logger.Debug("Semantic classifier succeeded",
+				"intent", match.IntentType,
+				"confidence", match.Confidence,
+			)
+			intent := &Intent{
+				Type:       string(match.IntentType),
+				Confidence: match.Confidence,
+				AgentType:  match.IntentType.DefaultAgent(),
+				Summary:    extractSummary(input),
+			}
+			d.recordClassificationMethod("semantic")
+			d.recordAgent(intent.AgentType)
+			d.recordIntentType(intent.Type)
+			return d.applyContextWeighting(intent, memCtx, input), nil
+		}
+	}
+
 	// Step 4: Fallback to Chat for clarification
+	d.recordFallback(input, "all_classifiers_failed", 0.0, "chat")
+	d.recordClassificationMethod("fallback")
+	d.recordAgent("chat")
+	d.recordIntentType("chat")
 	return &Intent{
 		Type:       "chat",
 		Confidence: 0.3,
 		AgentType:  "chat",
 		Summary:    "Could not determine intent, clarifying with user",
 	}, nil
+}
+
+// buildMemoryContext builds memory context with session history.
+func (d *Dispatcher) buildMemoryContext(ctx context.Context, input string, sessionID string) *MemoryContext {
+	if d.memoryMgr == nil {
+		return &MemoryContext{
+			Results:      []memory.MemoryResult{},
+			IntentCounts: make(map[string]int),
+		}
+	}
+
+	// Search for relevant memories
+	results, err := d.memoryMgr.Search(ctx, memory.MemoryQuery{
+		Query: input,
+		Limit: 5,
+	})
+	if err != nil {
+		d.logger.Debug("Memory search failed", "error", err)
+		results = []memory.MemoryResult{}
+	}
+
+	// Build context from session tracker
+	memCtx := &MemoryContext{
+		Results:      results,
+		IntentCounts: make(map[string]int),
+	}
+
+	// Get session history if available
+	if d.sessionTracker != nil {
+		state := d.sessionTracker.GetSession(sessionID)
+		if state != nil {
+			// Get last intent
+			if lastIntent := d.sessionTracker.GetLastIntent(sessionID); lastIntent != nil {
+				memCtx.LastIntent = lastIntent
+				memCtx.LastAgent = lastIntent.AgentType
+			}
+			// Get intent counts
+			memCtx.IntentCounts = d.sessionTracker.GetIntentCounts(sessionID)
+		}
+	}
+
+	return memCtx
 }
 
 // extractMemoryRefs extracts memory IDs from search results.
@@ -300,19 +392,12 @@ func (d *Dispatcher) extractMemoryRefs(results []memory.MemoryResult) []string {
 
 // shouldCreateTask determines if a task should be created.
 func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
-	// Never create tasks for conversational/reporting intents
-	switch intent.Type {
-	case "chat", "report", "recall", "platform":
-		return false
-	}
-
-	// Create tasks for work that should be trackable
-	switch intent.Type {
-	case "code", "debug", "plan", "schedule", "git":
+	it := IntentType(intent.Type)
+	if it.ShouldCreateTask() {
 		return true
-	default:
-		return intent.RequiresPlanning
 	}
+	// Fallback for unknown intents with RequiresPlanning flag
+	return intent.RequiresPlanning
 }
 
 // createTask creates a new task for the request.
@@ -335,6 +420,105 @@ func (d *Dispatcher) createTask(ctx context.Context, input string, intent *Inten
 	}
 
 	return t
+}
+
+// MultiIntent represents multiple detected intents in a single request.
+type MultiIntent struct {
+	Intents      []*Intent `json:"intents"`
+	IsCompound   bool      `json:"is_compound"`
+	CompoundType string    `json:"compound_type,omitempty"` // "sequential" or "parallel"
+	Summary      string    `json:"summary"`
+}
+
+// DetectCompound analyzes intents and determines if they're compound.
+func (m *MultiIntent) DetectCompound() bool {
+	if len(m.Intents) < 2 {
+		m.IsCompound = false
+		return false
+	}
+	m.IsCompound = true
+	for _, intent := range m.Intents {
+		if intent.RequiresPlanning {
+			m.CompoundType = "sequential"
+			return true
+		}
+	}
+	m.CompoundType = "parallel"
+	return true
+}
+
+// routeCompound handles compound (multi-intent) request routing.
+func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, input string, sessionID string) (*DispatchResult, error) {
+	d.logger.Info("Compound intent detected",
+		"intents", len(multi.Intents),
+		"type", multi.CompoundType,
+	)
+
+	// Create a parent task to track the compound request
+	parentTask := d.createTask(ctx, multi.Summary, &Intent{
+		Type:    "compound",
+		Summary: multi.Summary,
+	}, sessionID)
+
+	if parentTask == nil {
+		return nil, fmt.Errorf("failed to create parent task for compound request")
+	}
+
+	// Record compound metadata
+	meta, err := json.Marshal(map[string]any{
+		"compound_type":    multi.CompoundType,
+		"compound_intents": len(multi.Intents),
+	})
+	if err == nil {
+		parentTask.Metadata = json.RawMessage(meta)
+	}
+	if d.taskStore != nil {
+		if err := d.taskStore.Update(parentTask); err != nil {
+			d.logger.Warn("Failed to update compound task metadata", "error", err)
+		}
+	}
+
+	// Record compound stats
+	d.recordClassificationMethod("compound")
+	d.recordAgent("orchestrator")
+	d.recordIntentType("compound")
+
+	return &DispatchResult{
+		Task:    parentTask,
+		AgentID: "orchestrator",
+		Intent: &Intent{
+			Type:    "compound",
+			Summary: multi.Summary,
+		},
+	}, nil
+}
+
+// classifyMultiIntent runs classification to detect all potential intents.
+func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memCtx *MemoryContext) *MultiIntent {
+	var intents []*Intent
+
+	// Run keyword classifier for all matches
+	if d.keywordClassifier != nil {
+		keywordIntents := d.keywordClassifier.ClassifyAll(ctx, input, memCtx)
+		intents = append(intents, keywordIntents...)
+	}
+
+	// Run LLM multi-intent classifier if available
+	if d.llmClassifier != nil {
+		llmIntents := d.llmClassifier.ClassifyMulti(ctx, input, nil)
+		intents = append(intents, llmIntents...)
+	}
+
+	// Deduplicate
+	intents = deduplicateIntents(intents)
+
+	multi := &MultiIntent{
+		Intents: intents,
+		Summary: extractSummary(input),
+	}
+	multi.DetectCompound()
+
+	return multi
 }
 
 // RouteToAgent routes a dispatch result to the appropriate agent.
@@ -425,6 +609,25 @@ func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context) (string, e
 	return sb.String(), nil
 }
 
+// handleStatsQuery returns dispatcher statistics as JSON.
+func (d *Dispatcher) handleStatsQuery(ctx context.Context) (string, error) {
+	stats := d.GetStats()
+
+	result := map[string]any{
+		"total_dispatched": stats.TotalDispatched,
+		"by_method":        stats.ByMethod,
+		"by_agent":         stats.ByAgent,
+		"by_intent":        stats.ByIntent,
+		"fallback_count":   stats.FallbackCount,
+	}
+
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal stats: %w", err)
+	}
+	return string(data), nil
+}
+
 // buildContextMessage builds a message with memory context injected.
 func (d *Dispatcher) buildContextMessage(result *DispatchResult) string {
 	var parts []string
@@ -486,7 +689,7 @@ func (d *Dispatcher) recordInteraction(ctx context.Context, result *DispatchResu
 type KeywordClassifier struct{}
 
 // Classify classifies intent based on keywords.
-func (c *KeywordClassifier) Classify(ctx context.Context, input string, context []memory.MemoryResult) (*Intent, error) {
+func (c *KeywordClassifier) Classify(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error) {
 	lower := strings.ToLower(input)
 
 	// Define keyword patterns and their mappings
@@ -501,35 +704,35 @@ func (c *KeywordClassifier) Classify(ctx context.Context, input string, context 
 		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status",
 			"internal capabilities", "your capabilities", "tell me about your", "built into", "agent harness", "memory system", "tool system",
 			"what models", "what agents are", "available tools", "your tools", "your features", "how are you built", "your architecture",
-			"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities"}, "platform", "chat", 0.9, false},
+			"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities"}, string(IntentPlatform), "chat", 0.9, false},
 
 		// Report/Summary requests (high priority - handle inline, not async)
-		{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, "report", "chat", 0.9, false},
+		{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, string(IntentReport), "chat", 0.9, false},
 
 		// Recall/Memory requests (high priority - handle inline)
-		{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, "recall", "chat", 0.85, false},
+		{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, string(IntentRecall), "chat", 0.85, false},
 
 		// Code-related
-		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, "debug", "debugger", 0.8, false},
-		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, "code", "coder", 0.8, false},
-		{[]string{"code review", "review pr", "check code"}, "review", "coder", 0.75, false},
+		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), "debugger", 0.8, false},
+		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, string(IntentCode), "coder", 0.8, false},
+		{[]string{"code review", "review pr", "check code"}, string(IntentReview), "coder", 0.75, false},
 
 		// Git operations
-		{[]string{"commit", "push", "pull", "merge", "branch", "git"}, "git", "committer", 0.8, false},
+		{[]string{"commit", "push", "pull", "merge", "branch", "git"}, string(IntentGit), "committer", 0.8, false},
 
 		// Scheduling
-		{[]string{"remind", "schedule", "alarm", "timer", "at ", "tomorrow", "next week"}, "schedule", "scheduler", 0.8, false},
+		{[]string{"remind", "schedule", "alarm", "timer", "at ", "tomorrow", "next week"}, string(IntentSchedule), "scheduler", 0.8, false},
 
 		// Planning
-		{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, "plan", "planner", 0.8, true},
+		{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, string(IntentPlan), "planner", 0.8, true},
 
 		// Analysis/Research ("summarize" alone stays here for document summarization;
 		// "summarize what" and "summary of work" are captured by report intent above)
-		{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, "analyze", "analyst", 0.7, false},
-		{[]string{"search", "find", "look up", "google"}, "search", "analyst", 0.7, false},
+		{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, string(IntentAnalyze), "analyst", 0.7, false},
+		{[]string{"search", "find", "look up", "google"}, string(IntentSearch), "analyst", 0.7, false},
 
 		// General chat (lower priority)
-		{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, "chat", "chat", 0.6, false},
+		{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), "chat", 0.6, false},
 	}
 
 	var bestMatch *Intent
@@ -561,6 +764,145 @@ func (c *KeywordClassifier) Classify(ctx context.Context, input string, context 
 	return bestMatch, nil
 }
 
+// ClassifyAll returns ALL keyword matches (not just best match).
+func (c *KeywordClassifier) ClassifyAll(ctx context.Context, input string, memCtx *MemoryContext) []*Intent {
+	lower := strings.ToLower(input)
+	var intents []*Intent
+
+	// Use the same patterns as Classify()
+	patterns := []struct {
+		keywords   []string
+		intentType string
+		agentType  string
+		confidence float64
+		planning   bool
+	}{
+		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents"}, "platform", "chat", 0.9, false},
+		{[]string{"give me a report", "report on", "what did you do"}, "report", "chat", 0.9, false},
+		{[]string{"remember when", "recall", "what do you remember"}, "recall", "chat", 0.85, false},
+		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, "debug", "debugger", 0.8, false},
+		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, "code", "coder", 0.8, false},
+		{[]string{"code review", "review pr", "check code"}, "review", "coder", 0.75, false},
+		{[]string{"commit", "push", "pull", "merge", "branch", "git"}, "git", "committer", 0.8, false},
+		{[]string{"remind", "schedule", "alarm", "timer", "at "}, "schedule", "scheduler", 0.8, false},
+		{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, "plan", "planner", 0.8, true},
+		{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, "analyze", "analyst", 0.7, false},
+		{[]string{"search", "find", "look up", "google"}, "search", "analyst", 0.7, false},
+		{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, "chat", "chat", 0.6, false},
+	}
+
+	for _, p := range patterns {
+		for _, kw := range p.keywords {
+			if strings.Contains(lower, kw) {
+				intents = append(intents, &Intent{
+					Type:             p.intentType,
+					Confidence:       p.confidence * 0.5,
+					AgentType:        p.agentType,
+					RequiresPlanning: p.planning,
+					Summary:          extractSummary(input),
+				})
+				break // one match per pattern is enough
+			}
+		}
+	}
+
+	return deduplicateIntents(intents)
+}
+
+// deduplicateIntents keeps only the highest confidence intent per type.
+func deduplicateIntents(intents []*Intent) []*Intent {
+	seen := make(map[string]*Intent)
+	for _, intent := range intents {
+		existing, ok := seen[intent.Type]
+		if !ok || intent.Confidence > existing.Confidence {
+			seen[intent.Type] = intent
+		}
+	}
+	result := make([]*Intent, 0, len(seen))
+	for _, intent := range seen {
+		result = append(result, intent)
+	}
+	return result
+}
+
+// applyContextWeighting adjusts confidence based on conversation context.
+func (d *Dispatcher) applyContextWeighting(intent *Intent, memCtx *MemoryContext, input string) *Intent {
+	// Skip context weighting if memCtx is nil (e.g., in tests)
+	if memCtx == nil {
+		return intent
+	}
+
+	boost := 0.0
+
+	if memCtx.LastIntent != nil && memCtx.LastIntent.Type == intent.Type {
+		boost += 0.15
+	}
+
+	if memCtx.LastAgent != "" && memCtx.LastAgent == intent.AgentType {
+		boost += 0.1
+	}
+
+	if count, ok := memCtx.IntentCounts[intent.Type]; ok && count >= 2 {
+		boost += 0.05 * float64(count)
+	}
+
+	if hasAnaphora(input) && memCtx.LastIntent != nil {
+		if intent.Type == memCtx.LastIntent.Type {
+			boost += 0.2
+		}
+	}
+
+	if boost > 0.3 {
+		boost = 0.3
+	}
+
+	intent.Confidence = min(intent.Confidence+boost, 1.0)
+	return intent
+}
+
+// hasAnaphora checks if input contains context-referring language.
+func hasAnaphora(input string) bool {
+	lower := strings.ToLower(input)
+	anaphora := []string{
+		"do the same", "same thing", "also", "too", "as well",
+		"this", "that", "these", "those",
+		"continue", "keep going", "next",
+	}
+	for _, word := range anaphora {
+		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveAnaphora replaces context references with actual content.
+func (d *Dispatcher) resolveAnaphora(input string, memCtx *MemoryContext) string {
+	if memCtx == nil || memCtx.LastIntent == nil {
+		return input
+	}
+
+	lower := strings.ToLower(input)
+
+	if strings.Contains(lower, "do the same") {
+		lastSummary := memCtx.LastIntent.Summary
+		forMatch := regexp.MustCompile(`do the same for (.+)`)
+		if match := forMatch.FindStringSubmatch(lower); match != nil {
+			return fmt.Sprintf("%s for %s", lastSummary, match[1])
+		}
+	}
+
+	return input
+}
+
+// min returns the minimum of two float64 values.
+func min(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // extractSummary extracts a brief summary from input.
 func extractSummary(input string) string {
 	// Take first sentence or first 100 chars
@@ -570,11 +912,129 @@ func extractSummary(input string) string {
 	return truncateString(input, 100)
 }
 
+// recordClassificationMethod records which method classified the intent.
+func (d *Dispatcher) recordClassificationMethod(method string) {
+	if d.stats == nil {
+		return
+	}
+	d.stats.mu.Lock()
+	defer d.stats.mu.Unlock()
+	if d.stats.ByMethod == nil {
+		d.stats.ByMethod = make(map[string]int)
+	}
+	d.stats.ByMethod[method]++
+}
+
+// recordAgent records which agent handled the request.
+func (d *Dispatcher) recordAgent(agentID string) {
+	if d.stats == nil {
+		return
+	}
+	d.stats.mu.Lock()
+	defer d.stats.mu.Unlock()
+	if d.stats.ByAgent == nil {
+		d.stats.ByAgent = make(map[string]int)
+	}
+	d.stats.ByAgent[agentID]++
+}
+
+// recordIntentType records the intent type.
+func (d *Dispatcher) recordIntentType(intentType string) {
+	if d.stats == nil {
+		return
+	}
+	d.stats.mu.Lock()
+	defer d.stats.mu.Unlock()
+	if d.stats.ByIntent == nil {
+		d.stats.ByIntent = make(map[string]int)
+	}
+	d.stats.ByIntent[intentType]++
+}
+
+// recordFallback records a fallback to chat agent with details.
+func (d *Dispatcher) recordFallback(input string, method string, confidence float64, routedTo string) {
+	if d.stats == nil {
+		return
+	}
+	d.stats.mu.Lock()
+	defer d.stats.mu.Unlock()
+	d.stats.FallbackCount++
+	d.stats.FallbackDetails = append(d.stats.FallbackDetails, FallbackEntry{
+		Timestamp:  time.Now().UTC(),
+		Input:      truncateString(input, 200),
+		Method:     method,
+		Confidence: confidence,
+		RoutedTo:   routedTo,
+	})
+	// Keep only last 100 fallbacks
+	if len(d.stats.FallbackDetails) > 100 {
+		d.stats.FallbackDetails = d.stats.FallbackDetails[len(d.stats.FallbackDetails)-100:]
+	}
+}
+
+// recordTotalDispatch increments the total dispatch counter.
+func (d *Dispatcher) recordTotalDispatch() {
+	if d.stats == nil {
+		return
+	}
+	d.stats.mu.Lock()
+	defer d.stats.mu.Unlock()
+	d.stats.TotalDispatched++
+}
+
+// GetStats returns a copy of dispatcher statistics.
+func (d *Dispatcher) GetStats() DispatcherStats {
+	if d.stats == nil {
+		return DispatcherStats{}
+	}
+	d.stats.mu.RLock()
+	defer d.stats.mu.RUnlock()
+	fallbackDetails := make([]FallbackEntry, len(d.stats.FallbackDetails))
+	copy(fallbackDetails, d.stats.FallbackDetails)
+	return DispatcherStats{
+		TotalDispatched: d.stats.TotalDispatched,
+		ByMethod:        d.stats.ByMethod,
+		ByAgent:         d.stats.ByAgent,
+		ByIntent:        d.stats.ByIntent,
+		FallbackCount:   d.stats.FallbackCount,
+		FallbackDetails: fallbackDetails,
+	}
+}
+
+// GetFallbackDetails returns recent fallback entries for analysis.
+func (d *Dispatcher) GetFallbackDetails(limit int) []FallbackEntry {
+	if d.stats == nil {
+		return nil
+	}
+	d.stats.mu.RLock()
+	defer d.stats.mu.RUnlock()
+	if limit <= 0 || limit > len(d.stats.FallbackDetails) {
+		limit = len(d.stats.FallbackDetails)
+	}
+	if limit == 0 {
+		return nil
+	}
+	return d.stats.FallbackDetails[len(d.stats.FallbackDetails)-limit:]
+}
+
 // DispatcherStats returns statistics about the dispatcher.
 type DispatcherStats struct {
+	mu              sync.RWMutex
 	TotalDispatched int            `json:"total_dispatched"`
+	ByMethod        map[string]int `json:"by_method"`
 	ByAgent         map[string]int `json:"by_agent"`
 	ByIntent        map[string]int `json:"by_intent"`
+	FallbackCount   int             `json:"fallback_count"`
+	FallbackDetails []FallbackEntry `json:"fallback_details,omitempty"`
+}
+
+// FallbackEntry captures details about a fallback routing decision.
+type FallbackEntry struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Input      string    `json:"input"`
+	Method     string    `json:"method"`
+	Confidence float64   `json:"confidence"`
+	RoutedTo   string    `json:"routed_to"`
 }
 
 // MarshalJSON implements json.Marshaler for Intent.
@@ -654,22 +1114,55 @@ func (d *Dispatcher) ShouldDispatchAsync(result *DispatchResult) bool {
 		return false
 	}
 
-	// Simple intents are always handled inline - never dispatch async
-	switch result.Intent.Type {
-	case "chat", "report", "recall", "platform", "analyze", "search":
-		return false
+	it := IntentType(result.Intent.Type)
+	if it.ShouldDispatchAsync(result.Intent.RequiresPlanning) {
+		return true
+	}
+	// Fallback for unknown intents with RequiresPlanning flag
+	return result.Intent.RequiresPlanning
+}
+
+// RoutingValidation checks if a task was routed correctly.
+type RoutingValidation struct {
+	TaskID         string `json:"task_id"`
+	OriginalIntent string `json:"original_intent"`
+	RoutedAgent    string `json:"routed_agent"`
+	IsValid        bool   `json:"is_valid"`
+	ExpectedAgent  string `json:"expected_agent,omitempty"`
+	Feedback       string `json:"feedback,omitempty"`
+}
+
+// ValidateRouting compares the routed agent against expected.
+func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent string) *RoutingValidation {
+	it := IntentType(originalIntent)
+
+	if !IsValidIntentType(originalIntent) {
+		return &RoutingValidation{
+			TaskID:   taskID,
+			Feedback: fmt.Sprintf("Unknown intent type: %s", originalIntent),
+		}
 	}
 
-	// Complex intents that benefit from task decomposition
-	switch result.Intent.Type {
-	case "code", "debug", "plan", "git":
-		return true
-	case "schedule":
-		// Only dispatch async for schedule if it requires planning
-		// Simple "remind me" requests should be inline
-		return result.Intent.RequiresPlanning
-	default:
-		return result.Intent.RequiresPlanning
+	expectedAgent := it.DefaultAgent()
+	isValid := routedAgent == expectedAgent
+
+	// Special case: chat agent can handle inline intents
+	if routedAgent == "chat" && it.Category() == CategoryInline {
+		isValid = true
+	}
+
+	feedback := "Correct routing"
+	if !isValid {
+		feedback = fmt.Sprintf("Expected agent '%s' for intent '%s'", expectedAgent, originalIntent)
+	}
+
+	return &RoutingValidation{
+		TaskID:         taskID,
+		OriginalIntent: originalIntent,
+		RoutedAgent:    routedAgent,
+		IsValid:        isValid,
+		ExpectedAgent:  expectedAgent,
+		Feedback:       feedback,
 	}
 }
 

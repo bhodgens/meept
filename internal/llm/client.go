@@ -639,6 +639,9 @@ func (c *Client) Close() error {
 }
 
 // Config returns the current model configuration.
+// Compile-time assertion that Client implements io.Closer.
+var _ io.Closer = (*Client)(nil)
+
 func (c *Client) Config() *ModelConfig {
 	return c.config
 }

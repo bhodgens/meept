@@ -19,6 +19,10 @@ type PlanRequest struct {
 	SessionID string `json:"session_id"`
 	Input     string `json:"input"`
 	Intent    string `json:"intent"`
+
+	// Compound support (Phase 3)
+	IsCompound   bool   `json:"is_compound,omitempty"`
+	CompoundType string `json:"compound_type,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.

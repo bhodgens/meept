@@ -97,7 +97,7 @@ type classificationResponse struct {
 	Reasoning  string  `json:"reasoning,omitempty"`
 }
 
-func (c *LLMClassifier) Classify(ctx context.Context, input string, ctxMemory []memory.MemoryResult) (*Intent, error) {
+func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("LLM classifier: no client configured")
 	}
@@ -125,6 +125,98 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, ctxMemory []
 	}
 
 	return c.parseResponse(resp.Content, input)
+}
+
+// multiIntentResponse is the response format for multi-intent classification.
+type multiIntentResponse struct {
+	Intents []struct {
+		Intent     string  `json:"intent"`
+		Confidence float64 `json:"confidence"`
+		Summary    string  `json:"summary"`
+	} `json:"intents"`
+}
+
+// ClassifyMulti detects multiple intents in a single input.
+func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemory []memory.MemoryResult) []*Intent {
+	if c.client == nil {
+		return nil
+	}
+
+	// Use a prompt that asks LLM to detect ALL intents
+	prompt := fmt.Sprintf(`Analyze this user request and identify ALL distinct intents.
+
+A request may contain multiple independent tasks joined by "and", "also", "then", "but", "while", etc.
+
+For EACH detected intent, output:
+- intent: one of [git, schedule, code, debug, review, plan, platform, report, recall, analyze, search, chat]
+- confidence: 0.0-1.0
+- summary: brief description
+
+User input: %s
+
+Return ONLY valid JSON array: [{"intent": "debug", "confidence": 0.8, "summary": "..."}]
+
+If only one intent is present, return a single-element array.
+If no intents detected, return empty array [].`, input)
+
+	messages := []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: "You are a multi-intent detector for an AI agent system. Identify ALL distinct intents in user requests."},
+		{Role: llm.RoleUser, Content: prompt},
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	resp, err := c.client.Chat(timeoutCtx, messages,
+		llm.WithMaxTokens(500),
+		llm.WithTemperature(0.1),
+	)
+	if err != nil {
+		c.logger.Debug("LLM multi-intent classification failed", "error", err)
+		return nil
+	}
+
+	if resp == nil || resp.Content == "" {
+		return nil
+	}
+
+	// Parse the JSON array response
+	jsonStr := extractJSONFromLLM(resp.Content)
+	if jsonStr == "" || jsonStr[0] != '[' {
+		return nil
+	}
+
+	var multiResp []struct {
+		Intent     string  `json:"intent"`
+		Confidence float64 `json:"confidence"`
+		Summary    string  `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &multiResp); err != nil {
+		c.logger.Debug("Failed to parse multi-intent response", "error", err)
+		return nil
+	}
+
+	var intents []*Intent
+	for _, r := range multiResp {
+		intent := strings.ToLower(strings.TrimSpace(r.Intent))
+		if !isValidIntent(intent) {
+			continue
+		}
+		agentType := agentMapping[intent]
+		if agentType == "" {
+			agentType = "chat"
+		}
+		requiresPlanning := intent == "plan"
+		intents = append(intents, &Intent{
+			Type:             intent,
+			Confidence:       clampConfidence(r.Confidence),
+			AgentType:        agentType,
+			RequiresPlanning: requiresPlanning,
+			Summary:          extractSummary(input),
+		})
+	}
+
+	return intents
 }
 
 func (c *LLMClassifier) buildClassificationPrompt(input string) string {

@@ -2,6 +2,7 @@
 package vector
 
 import (
+	"io"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -300,6 +301,9 @@ func (s *Store) Close() error {
 }
 
 // serializeVector converts a vector to a byte array.
+// Compile-time assertion that Store implements io.Closer.
+var _ io.Closer = (*Store)(nil)
+
 func serializeVector(vector []float32) ([]byte, error) {
 	// Each float32 is 4 bytes
 	data := make([]byte, len(vector)*4)

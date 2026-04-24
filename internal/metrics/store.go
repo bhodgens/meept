@@ -2,6 +2,7 @@
 package metrics
 
 import (
+	"io"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -451,6 +452,9 @@ func (s *Store) Close() error {
 }
 
 // expandPath expands ~ to the home directory.
+// Compile-time assertion that Store implements io.Closer.
+var _ io.Closer = (*Store)(nil)
+
 func expandPath(path string) string {
 	if path == "" || path[0] != '~' {
 		return path

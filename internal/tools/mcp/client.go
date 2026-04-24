@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"io"
 	"context"
 	"fmt"
 	"log/slog"
@@ -251,6 +252,9 @@ func (c *Client) Close() error {
 }
 
 // IsConnected returns true if the client is connected.
+// Compile-time assertion that Client implements io.Closer.
+var _ io.Closer = (*Client)(nil)
+
 func (c *Client) IsConnected() bool {
 	return c.connected.Load() && c.transport.IsRunning()
 }
