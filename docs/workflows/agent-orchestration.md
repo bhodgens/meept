@@ -30,9 +30,10 @@ Single-agent systems struggle with complex tasks requiring different expertise. 
 3. **Memory Search**: Relevant context retrieved from memory
 4. **Agent Discovery**: Available specialists identified via `platform_agents`
 5. **Delegation**: Task routed via `delegate_task`
-6. **Execution**: Specialist agent performs work
-7. **Review**: Optional collaborative review workflow
-8. **Completion**: Results returned to user
+6. **Execution**: Specialist agent performs work with evidence collection
+7. **Validation**: Evidence verified against claims (Deterministic Execution)
+8. **Review**: Optional collaborative review workflow
+9. **Completion**: Results returned to user
 
 ### Collaborative Planning
 - **Review/Approval Workflow**: Tasks can require reviewer approval

@@ -36,6 +36,11 @@ Autonomous agents require robust security to prevent misuse and protect sensitiv
 - **Taint Labels**: `UserInput`, `Secret`, `Untrusted`, `External`, `Shell`
 - **Sink Enforcement**: Blocks tainted data at sensitive operations
 
+### Evidence-Based Validation (NEW)
+- **Claim-Evidence Matching**: Verifies claims match evidence types
+- **Ground-Truth Verification**: Filesystem, API, database validation
+- **Validator Coverage**: 14 tool hints with type-specific validators
+
 ## Configuration
 
 ```toml

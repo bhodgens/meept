@@ -1,7 +1,13 @@
 # Collaborative Planning
 
 ## Overview
+
 Collaborative planning enables review and approval workflows for agent work, with specialized reviewer agents providing validation and feedback. This ensures quality control and enables iterative improvement of agent outputs.
+
+The system integrates with the **Deterministic Execution Framework** for evidence-based validation:
+- Steps are validated for evidence before review begins
+- Validation failures trigger `needs_info` status for human intervention
+- Review focuses on quality; validation focuses on correctness
 
 ## Problem
 Single-agent execution lacks validation mechanisms. Collaborative planning provides:

@@ -24,6 +24,7 @@ Feature specifications describing how each Meept subsystem works, with configura
 | [ClawSkills Marketplace](clawskills.md) | Third-party skill registry and security scanning |
 | [External Integrations](external-integrations.md) | Telegram, web API, and Google Calendar |
 | [Collaborative Planning](collaborative-planning.md) | Review/approval workflow for agent work |
+| [Deterministic Execution](deterministic-execution.md) | Evidence-based validation, concurrency control, retry logic |
 | [Taint Tracking](taint-tracking.md) | Lattice-based information flow security |
 | [Shadow Training](shadow-training.md) | Parallel teacher execution and training data export |
 
