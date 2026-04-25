@@ -781,10 +781,13 @@ func (m *TasksModel) renderHeader() string {
 
 	if m.viewMode == ViewModeTasks {
 		title = titleStyle.Render("Tasks")
-		tabs = activeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs")
+		tabs = activeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + modeStyle.Render("Lineage")
+	} else if m.viewMode == ViewModeLineage {
+		title = titleStyle.Render("Task Lineage")
+		tabs = modeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + activeStyle.Render("Lineage")
 	} else {
 		title = titleStyle.Render("Scheduled Jobs")
-		tabs = modeStyle.Render("Tasks") + " " + activeStyle.Render("Jobs")
+		tabs = modeStyle.Render("Tasks") + " " + activeStyle.Render("Jobs") + " " + modeStyle.Render("Lineage")
 	}
 
 	// Filter indicator
@@ -1344,6 +1347,184 @@ func (m *TasksModel) getStepPercent(state string) float64 {
 		return 100
 	default:
 		return 0
+	}
+}
+
+// renderLineageView renders the task lineage tree view.
+func (m *TasksModel) renderLineageView() string {
+	// Fetch tasks if empty
+	if len(m.tasks) == 0 {
+		if m.loading {
+			return m.renderLoading()
+		}
+		return m.renderError()
+	}
+
+	var b strings.Builder
+
+	// Header
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#7C3AED"))
+
+	modeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Background(lipgloss.Color("#1F2937")).
+		Padding(0, 1)
+
+	activeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#7C3AED")).
+		Bold(true).
+		Padding(0, 1)
+
+	tabs := modeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + activeStyle.Render("Lineage")
+	b.WriteString(titleStyle.Render("Task Lineage"))
+	b.WriteString("  ")
+	b.WriteString(tabs)
+	b.WriteString("\n\n")
+
+	// Build the tree from tasks
+	// Root tasks have no InheritedFrom, children reference their parent
+	parentTasks := make(map[string][]types.TaskExtended) // parent ID -> children
+	rootTasks := make([]types.TaskExtended, 0)
+	taskMap := make(map[string]types.TaskExtended)
+
+	for _, task := range m.tasks {
+		taskMap[task.ID] = task
+		if task.InheritedFrom == "" {
+			rootTasks = append(rootTasks, task)
+		} else {
+			parentTasks[task.InheritedFrom] = append(parentTasks[task.InheritedFrom], task)
+		}
+	}
+
+	// Render tree
+	panelStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7C3AED")).
+		Padding(1, 2).
+		Width(m.width - 4)
+
+	nameStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#E5E7EB"))
+
+	memStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F59E0B"))
+
+	if len(rootTasks) == 0 {
+		b.WriteString(panelStyle.Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Italic(true).Render("No tasks with lineage information"),
+		))
+	} else {
+		var treeContent strings.Builder
+		for i, root := range rootTasks {
+			if i > 0 {
+				treeContent.WriteString("\n")
+			}
+			m.renderTaskNode(&treeContent, root, parentTasks, "", true, i == len(rootTasks)-1)
+		}
+		b.WriteString(panelStyle.Render(treeContent.String()))
+	}
+
+	// Footer hints
+	hintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		MarginTop(1)
+	b.WriteString(hintStyle.Render("tab: tasks view | t: toggle | r: refresh | enter: details | ?: help"))
+
+	return b.String()
+}
+
+// renderTaskNode renders a single task node in the lineage tree.
+func (m *TasksModel) renderTaskNode(b *strings.Builder, task types.TaskExtended, parentTasks map[string][]types.TaskExtended, prefix string, isRoot, isLast bool) {
+	stateIcon := m.getStateIcon(task.State)
+	stateColor := m.getStateColor(task.State)
+	stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor))
+
+	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+	memStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+
+	// Task name
+	name := task.Name
+	if name == "" {
+		name = types.TruncateString(task.ID, 20)
+	}
+	name = fmt.Sprintf("%q", name)
+
+	// Connector for non-root nodes
+	connector := ""
+	if !isRoot {
+		if isLast {
+			connector = prefix + "└── "
+		} else {
+			connector = prefix + "├── "
+		}
+	}
+
+	// Render task line
+	b.WriteString(connector)
+	b.WriteString(stateStyle.Render(stateIcon))
+	b.WriteString(" ")
+	b.WriteString(nameStyle.Render(name))
+	b.WriteString(" ")
+	b.WriteString(stateStyle.Render(task.State))
+
+	// Show progress if applicable
+	if task.TotalJobs > 0 {
+		percent := float64(task.CompletedJobs) / float64(task.TotalJobs) * 100
+		b.WriteString(mutedStyle.Render(fmt.Sprintf(" (%.0f%%)", percent)))
+	}
+	b.WriteString("\n")
+
+	// Memory info line
+	memRefs := len(task.MemoryRefs)
+	createdMems := len(task.CreatedMemories)
+	if memRefs > 0 || createdMems > 0 || task.InheritedFrom != "" {
+		childPrefix := prefix + "│   "
+		if isRoot {
+			childPrefix = ""
+		} else if isLast {
+			childPrefix = prefix + "    "
+		}
+
+		var memParts []string
+		if task.InheritedFrom != "" {
+			parent := types.TruncateString(task.InheritedFrom, 20)
+			memParts = append(memParts, mutedStyle.Render("inherited from: ")+memStyle.Render(parent))
+		}
+		if memRefs > 0 {
+			refs := strings.Join(task.MemoryRefs, ", ")
+			if len(refs) > 30 {
+				refs = refs[:27] + "..."
+			}
+			memParts = append(memParts, memStyle.Render(fmt.Sprintf("refs: %s", refs)))
+		}
+		if createdMems > 0 {
+			refs := strings.Join(task.CreatedMemories, ", ")
+			if len(refs) > 30 {
+				refs = refs[:27] + "..."
+			}
+			memParts = append(memParts, memStyle.Render(fmt.Sprintf("created: %s", refs)))
+		}
+
+		if len(memParts) > 0 {
+			b.WriteString(childPrefix + strings.Join(memParts, " | ") + "\n")
+		}
+	}
+
+	// Render children
+	children := parentTasks[task.ID]
+	childPrefix := prefix + "│   "
+	if isRoot {
+		childPrefix = "│   "
+	} else if isLast {
+		childPrefix = prefix + "    "
+	}
+
+	for j, child := range children {
+		m.renderTaskNode(b, child, parentTasks, childPrefix, false, j == len(children)-1)
 	}
 }
 
