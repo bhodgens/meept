@@ -25,6 +25,7 @@ Autonomous agents require robust security to prevent misuse and protect sensitiv
 - **Tool Gating**: High-risk tools require explicit permissions
 - **Audit Logging**: All sensitive operations logged
 - **Session Tracking**: User session management
+- **Override Matching**: Configurable pattern matching for permission overrides (legacy lenient vs strict glob/exact)
 
 ### Tirith Shell Scanning
 - **Pre-execution Analysis**: Shell commands scanned before execution
@@ -65,6 +66,11 @@ tirith_binary = "tirith"
 # Audit logging
 enable_audit_log = false
 audit_db_path = "~/.meept/audit.db"
+
+# Override matching (opt-in strict mode)
+# When true, uses strict glob/exact matching for permission overrides
+# When false (default), uses lenient three-strategy cascade
+strict_override_matching = false
 
 # Taint tracking
 enable_taint_tracking = true

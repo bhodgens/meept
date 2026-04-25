@@ -121,6 +121,10 @@ allowed_paths = ["~/projects/*", "~/work/*", "/tmp/meept/*"]
 blocked_paths = ["~/.ssh/*", "~/.gnupg/*", "~/.meept/*", "/etc/*", "/var/*", "/root/*"]
 enable_audit_log = true
 audit_db_path = "~/.meept/audit.db"
+# Override matching: opt-in strict mode (default: false for backwards compatibility)
+# When true: uses strict glob/exact matching for permission overrides
+# When false: uses lenient three-strategy cascade (substring, glob, trimmed substring)
+strict_override_matching = false
 
 [scheduler]
 enabled = true

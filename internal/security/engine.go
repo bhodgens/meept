@@ -525,24 +525,55 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			detailStr := string(detailsJSON)
 
 			matched := false
-			if strings.Contains(detailStr, pattern) {
-				matched = true
-			} else {
-				// Try matching against specific detail values
-				for _, v := range details {
-					if m, _ := filepath.Match(pattern, v); m {
+
+			// Strict mode: use only glob/exact matching (opt-in via config)
+			if e.config != nil && e.config.StrictOverrideMatching {
+				// Try exact match first
+				if detailStr == pattern {
+					matched = true
+				} else {
+					// Try glob matching against the full JSON details
+					if m, _ := filepath.Match(pattern, detailStr); m {
 						matched = true
-						break
+					}
+				}
+
+				// If no match on full JSON, try matching against individual detail values
+				if !matched {
+					for _, v := range details {
+						if m, _ := filepath.Match(pattern, v); m {
+							matched = true
+							break
+						}
+						// Also try exact match on individual values
+						if v == pattern {
+							matched = true
+							break
+						}
+					}
+				}
+			} else {
+				// Legacy lenient mode: three-strategy cascade
+				if strings.Contains(detailStr, pattern) {
+					matched = true
+				} else {
+					// Try matching against specific detail values
+					for _, v := range details {
+						if m, _ := filepath.Match(pattern, v); m {
+							matched = true
+							break
+						}
+					}
+				}
+				if !matched {
+					// Try substring match with glob wildcards stripped
+					trimmed := strings.Trim(pattern, "*")
+					if trimmed != "" && strings.Contains(detailStr, trimmed) {
+						matched = true
 					}
 				}
 			}
-			if !matched {
-				// Try substring match with glob wildcards stripped
-				trimmed := strings.Trim(pattern, "*")
-				if trimmed != "" && strings.Contains(detailStr, trimmed) {
-					matched = true
-				}
-			}
+
 			if !matched {
 				continue
 			}

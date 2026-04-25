@@ -35,7 +35,29 @@ type Config struct {
 	Orchestrator      OrchestratorConfig      `toml:"orchestrator"`
 	Shadow            ShadowConfig            `toml:"shadow"`
 	DistributedMemory DistributedMemoryConfig `toml:"distributed_memory"`
+	QAgent            QAgentConfig            `toml:"q_agent"`
 	CodeIntel         CodeIntelConfig         `toml:"code_intel"`
+	Calendar          CalendarConfig          `toml:"calendar"`
+}
+
+// CalendarConfig holds Google Calendar integration settings.
+type CalendarConfig struct {
+	// Enabled turns on Google Calendar integration
+	Enabled bool `toml:"enabled"`
+	// ClientID is the Google OAuth2 client ID (supports ${ENV_VAR} expansion)
+	ClientID string `toml:"client_id"`
+	// ClientSecret is the Google OAuth2 client secret (supports ${ENV_VAR} expansion)
+	ClientSecret string `toml:"client_secret"`
+	// CalendarID is the Google Calendar ID (default: "primary")
+	CalendarID string `toml:"calendar_id"`
+	// RedirectURI is the OAuth2 redirect URI (default: "http://localhost:8888/callback")
+	RedirectURI string `toml:"redirect_uri"`
+	// ReminderEnabled turns on the reminder watcher for upcoming events
+	ReminderEnabled bool `toml:"reminder_enabled"`
+	// ReminderCheckInterval is how often to check for upcoming events (default: 5m)
+	ReminderCheckInterval string `toml:"reminder_check_interval"`
+	// ReminderAdvanceMinutes triggers reminders this many minutes before an event
+	ReminderAdvanceMinutes int `toml:"reminder_advance_minutes"`
 }
 
 // CodeIntelConfig holds code intelligence settings (AST/LSP).
@@ -299,6 +321,36 @@ type DistributedMemoryConfig struct {
 	Distillation DistillationConfig `toml:"distillation"`
 }
 
+// QAgentConfig holds configuration for the Q Agent (meta-agent for agent creation and optimization).
+type QAgentConfig struct {
+	// Enabled turns on Q Agent analysis and recommendations
+	Enabled bool `toml:"enabled"`
+	// SessionIdleTriggerHours is the idle time before a session is considered complete for analysis
+	SessionIdleTriggerHours int `toml:"session_idle_trigger_hours"`
+	// AnalysisTimeoutMinutes is the maximum duration for analysis runs
+	AnalysisTimeoutMinutes int `toml:"analysis_timeout_minutes"`
+	// MinSessionsForPattern is the minimum sessions required to detect a pattern
+	MinSessionsForPattern int `toml:"min_sessions_for_pattern"`
+	// MinConfidenceScore is the minimum confidence score for recommendations
+	MinConfidenceScore float64 `toml:"min_confidence_score"`
+	// HighErrorRateThreshold is the error rate threshold for flagging issues
+	HighErrorRateThreshold float64 `toml:"high_error_rate_threshold"`
+	// HighRejectionRateThreshold is the rejection rate threshold for flagging issues
+	HighRejectionRateThreshold float64 `toml:"high_rejection_rate_threshold"`
+	// DurationVarianceThreshold is the duration variance threshold for detecting misconfigurations
+	DurationVarianceThreshold float64 `toml:"duration_variance_threshold"`
+	// NotifyChat enables notifications via chat
+	NotifyChat bool `toml:"notify_chat"`
+	// NotifyCLI enables notifications via CLI
+	NotifyCLI bool `toml:"notify_cli"`
+	// NotifyMenuBar enables notifications via menu bar
+	NotifyMenuBar bool `toml:"notify_menu_bar"`
+	// AnalysisDir is the directory for cached analysis results
+	AnalysisDir string `toml:"analysis_dir"`
+	// OutcomesLog is the path for the outcomes log file
+	OutcomesLog string `toml:"outcomes_log"`
+}
+
 // SyncConfig holds sync timing and behavior settings.
 type SyncConfig struct {
 	// HydrateOnClaim fetches relevant memories when a job is claimed
@@ -474,6 +526,12 @@ type SecurityConfig struct {
 	// Audit logging
 	EnableAuditLog bool   `toml:"enable_audit_log"` // Enable security audit logging
 	AuditDBPath    string `toml:"audit_db_path"`    // Path to audit log database
+
+	// Override matching behavior
+	// When true, uses strict glob/exact matching for permission overrides.
+	// When false (default), uses lenient three-strategy cascade (substring, glob, trimmed substring).
+	// Changing this will affect existing overrides - migrate with caution.
+	StrictOverrideMatching bool `toml:"strict_override_matching"`
 }
 
 // SchedulerConfig holds scheduler settings.
@@ -504,9 +562,12 @@ type IsolationConfig struct {
 
 // TelegramConfig holds Telegram bot settings.
 type TelegramConfig struct {
-	Enabled   bool   `toml:"enabled"`
-	Token     string `toml:"token"`
-	CreatorID int64  `toml:"creator_id"`
+	Enabled      bool    `toml:"enabled"`
+	Token        string  `toml:"token"`
+	CreatorID    int64   `toml:"creator_id"`
+	AllowedUsers []int64 `toml:"allowed_users"` // Telegram user IDs allowed to interact (empty = all)
+	AllowedChats []int64 `toml:"allowed_chats"` // Telegram chat IDs allowed (empty = all)
+	PollTimeout  int     `toml:"poll_timeout"`  // Long polling timeout in seconds
 }
 
 // WebConfig holds web API settings.
@@ -962,9 +1023,10 @@ func DefaultConfig() *Config {
 			AutoTest:    true,
 		},
 		Telegram: TelegramConfig{
-			Enabled:   false,
-			Token:     "",
-			CreatorID: 0,
+			Enabled:     false,
+			Token:       "",
+			CreatorID:   0,
+			PollTimeout: 30,
 		},
 		Web: WebConfig{
 			Enabled:   false,
@@ -1152,6 +1214,21 @@ func DefaultConfig() *Config {
 				MinMemoryAgeMinutes:      5,
 			},
 		},
+		QAgent: QAgentConfig{
+			Enabled:                    true,
+			SessionIdleTriggerHours:    12,
+			AnalysisTimeoutMinutes:     30,
+			MinSessionsForPattern:      5,
+			MinConfidenceScore:         0.7,
+			HighErrorRateThreshold:     0.2,
+			HighRejectionRateThreshold: 0.3,
+			DurationVarianceThreshold:  3.0,
+			NotifyChat:                 true,
+			NotifyCLI:                  true,
+			NotifyMenuBar:              false,
+			AnalysisDir:                "~/.meept/q_analysis",
+			OutcomesLog:                "~/.meept/q_outcomes.jsonl",
+		},
 		CodeIntel: CodeIntelConfig{
 			Enabled: true,
 			AST: ASTConfig{
@@ -1165,6 +1242,14 @@ func DefaultConfig() *Config {
 				AutoStartServers:         true,
 				ConnectionTimeoutSeconds: 10,
 			},
+		},
+		Calendar: CalendarConfig{
+			Enabled:                false,
+			CalendarID:            "primary",
+			RedirectURI:           "http://localhost:8888/callback",
+			ReminderEnabled:       false,
+			ReminderCheckInterval: "5m",
+			ReminderAdvanceMinutes: 10,
 		},
 	}
 }

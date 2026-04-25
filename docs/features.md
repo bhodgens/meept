@@ -238,6 +238,12 @@ tirith_binary = "tirith"
 # Audit logging
 enable_audit_log = false
 audit_db_path = "~/.meept/audit.db"
+
+# Override matching (opt-in strict mode)
+# When true, uses strict glob/exact matching for permission overrides
+# When false (default), uses lenient three-strategy cascade (substring, glob, trimmed substring)
+# Changing this affects existing overrides - migrate with caution
+strict_override_matching = false
 ```
 
 **API:**
