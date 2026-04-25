@@ -67,6 +67,12 @@ make menubar-clean             # Clean menubar build artifacts
 ./bin/meept selfimprove detect
 ./bin/meept selfimprove full-cycle
 ./bin/meept selfimprove status
+
+# Q Agent commands (meta-agent for agent optimization)
+./bin/meept q status                   # Show Q Agent status and configuration
+./bin/meept q analyze                  # Analyze sessions for improvement opportunities
+./bin/meept q analyze --force          # Force analysis even if disabled
+./bin/meept q analyze --json           # Output results as JSON
 ```
 
 ## Architecture Overview

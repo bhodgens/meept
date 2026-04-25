@@ -77,8 +77,11 @@ timezone = "UTC"
 
 [telegram]
 enabled = false
-token = ""
+token = ""  # Bot API token (or use env var ${TELEGRAM_BOT_TOKEN})
 creator_id = 0  # Telegram user ID of the creator
+allowed_users = []  # Empty = allow all users
+allowed_chats = []  # Empty = allow all chats
+poll_timeout = 30   # Long polling timeout in seconds
 
 [web]
 enabled = false
@@ -236,3 +239,14 @@ reviewer_mapping = {coder = "code-reviewer", debugger = "debug-reviewer", planne
 max_revision_cycles = 3
 # Auto-approve low-risk file patterns
 auto_approve_patterns = ["*.md", "LICENSE", "*.txt"]
+
+[calendar]
+enabled = false
+# Google OAuth2 credentials (supports ${ENV_VAR} expansion)
+client_id = "${GOOGLE_CLIENT_ID}"
+client_secret = "${GOOGLE_CLIENT_SECRET}"
+calendar_id = "primary"                  # Calendar ID to use (default: "primary")
+redirect_uri = "http://localhost:8888/callback"  # OAuth2 redirect URI
+reminder_enabled = false                  # Enable reminder watcher for upcoming events
+reminder_check_interval = "5m"            # How often to check for upcoming events
+reminder_advance_minutes = 10             # Trigger reminders this many minutes before an event

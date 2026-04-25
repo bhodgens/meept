@@ -83,6 +83,7 @@ type Client struct {
 	httpClient  *http.Client
 	accessToken string
 	calendarID  string
+	baseURL     string // defaults to googleCalendarAPIBase; overridden in tests
 	logger      *slog.Logger
 }
 
@@ -110,6 +111,7 @@ func NewClient(cfg ClientConfig, logger *slog.Logger) (*Client, error) {
 		},
 		accessToken: cfg.AccessToken,
 		calendarID:  cfg.CalendarID,
+		baseURL:     googleCalendarAPIBase,
 		logger:      logger,
 	}, nil
 }
@@ -126,7 +128,7 @@ func (c *Client) ListEvents(ctx context.Context, timeMin, timeMax time.Time, max
 	}
 
 	apiURL := fmt.Sprintf("%s/calendars/%s/events?%s",
-		googleCalendarAPIBase, url.PathEscape(c.calendarID), params.Encode())
+		c.baseURL, url.PathEscape(c.calendarID), params.Encode())
 
 	data, err := c.doRequest(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
@@ -144,7 +146,7 @@ func (c *Client) ListEvents(ctx context.Context, timeMin, timeMax time.Time, max
 // GetEvent gets a single event by ID.
 func (c *Client) GetEvent(ctx context.Context, eventID string) (*Event, error) {
 	apiURL := fmt.Sprintf("%s/calendars/%s/events/%s",
-		googleCalendarAPIBase, url.PathEscape(c.calendarID), url.PathEscape(eventID))
+		c.baseURL, url.PathEscape(c.calendarID), url.PathEscape(eventID))
 
 	data, err := c.doRequest(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
@@ -162,7 +164,7 @@ func (c *Client) GetEvent(ctx context.Context, eventID string) (*Event, error) {
 // CreateEvent creates a new event.
 func (c *Client) CreateEvent(ctx context.Context, event *Event) (*Event, error) {
 	apiURL := fmt.Sprintf("%s/calendars/%s/events",
-		googleCalendarAPIBase, url.PathEscape(c.calendarID))
+		c.baseURL, url.PathEscape(c.calendarID))
 
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -185,7 +187,7 @@ func (c *Client) CreateEvent(ctx context.Context, event *Event) (*Event, error) 
 // UpdateEvent updates an existing event.
 func (c *Client) UpdateEvent(ctx context.Context, eventID string, event *Event) (*Event, error) {
 	apiURL := fmt.Sprintf("%s/calendars/%s/events/%s",
-		googleCalendarAPIBase, url.PathEscape(c.calendarID), url.PathEscape(eventID))
+		c.baseURL, url.PathEscape(c.calendarID), url.PathEscape(eventID))
 
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -208,7 +210,7 @@ func (c *Client) UpdateEvent(ctx context.Context, eventID string, event *Event) 
 // DeleteEvent deletes an event.
 func (c *Client) DeleteEvent(ctx context.Context, eventID string) error {
 	apiURL := fmt.Sprintf("%s/calendars/%s/events/%s",
-		googleCalendarAPIBase, url.PathEscape(c.calendarID), url.PathEscape(eventID))
+		c.baseURL, url.PathEscape(c.calendarID), url.PathEscape(eventID))
 
 	_, err := c.doRequest(ctx, http.MethodDelete, apiURL, nil)
 	return err
@@ -220,7 +222,7 @@ func (c *Client) QuickAdd(ctx context.Context, text string) (*Event, error) {
 	params.Set("text", text)
 
 	apiURL := fmt.Sprintf("%s/calendars/%s/events/quickAdd?%s",
-		googleCalendarAPIBase, url.PathEscape(c.calendarID), params.Encode())
+		c.baseURL, url.PathEscape(c.calendarID), params.Encode())
 
 	data, err := c.doRequest(ctx, http.MethodPost, apiURL, nil)
 	if err != nil {

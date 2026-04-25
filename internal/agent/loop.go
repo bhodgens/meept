@@ -762,6 +762,15 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	// Get or create conversation
 	conv := l.conversations.Get(conversationID)
 
+	// Add validation anchor instructions as an anchor message (persists through truncation)
+	// Only add once per conversation
+	if conv.Len() == 0 {
+		validationInstructions := l.buildValidationAnchorInstructions()
+		if validationInstructions != "" {
+			conv.AddAnchorMessage(llm.RoleSystem, validationInstructions)
+		}
+	}
+
 	// Discover relevant skills for this input (metadata-driven, lightweight)
 	discovered := l.discoverRelevantSkills(sanitizedMessage, l.skillDiscoveryThreshold())
 	if len(discovered) > 0 {
@@ -1989,6 +1998,29 @@ func (l *AgentLoop) buildSystemPrompt() string {
 	builder.AddSection("Evidence Requirements", evidenceSection)
 
 	return builder.Build()
+}
+
+// buildValidationAnchorInstructions builds the validation/escalation anchor message
+// that persists through context truncation. This ensures agents always have access
+// to validation requirements and escalation procedures.
+func (l *AgentLoop) buildValidationAnchorInstructions() string {
+	return `## Validation & Escalation Instructions
+
+**Before reporting completion**, you must verify:
+1. All described work in the task has been completed
+2. Evidence (file hashes, exit codes, command output) supports your claims
+3. No error indicators remain in the output
+
+**Evidence format** (include in your final response):
+` + "```" + `json
+{
+  "claims": ["description of what was done"],
+  "evidence": [{"type": "file_exists", "path": "/path/to/file"}]
+}
+` + "```" + `
+
+**If you cannot complete the task**: Report status as "partial" or "failed" with specific reasons.
+**If blocked**: Describe what you need and suggest next steps.`
 }
 
 // buildSystemPromptWithSkills builds system prompt with discovered skill context.

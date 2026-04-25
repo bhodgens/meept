@@ -8,13 +8,16 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/code/lsp"
 	codetools "github.com/caimlas/meept/internal/code/tools"
+	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -78,6 +81,10 @@ type Components struct {
 	// Learning pipeline
 	LearningPipeline *selfimprove.LearningPipeline
 
+	// Self-improvement controller (full 5-phase cycle)
+	SelfImproveCtrl    *selfimprove.Controller
+	SelfImproveSched   *selfimprove.Scheduler
+
 	// LLM provider manager (for multi-provider failover)
 	LLMProvider     llm.Chatter
 
@@ -107,9 +114,17 @@ type Components struct {
 	// Web API server
 	WebServer       *web.Server
 
+	// Telegram bot
+	TelegramBot     *telegram.Bot
+	TelegramHandler *telegram.AgentHandler
+
 	// Code intelligence
 	ASTParser       *ast.ParserManager
 	LSPManager      *lsp.Manager
+
+	// Calendar integration
+	CalendarClient    *calendar.Client
+	CalendarReminder  *calendar.ReminderWatcher
 
 	Logger          *slog.Logger
 }
@@ -251,6 +266,44 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			c.LearningPipeline = nil
 		} else {
 			logger.Info("Learning pipeline initialized", "data_dir", dataDir)
+		}
+
+		// Create self-improve controller for full 5-phase cycles
+		siDataPath := cfg.SelfImprove.DataDir
+		if siDataPath == "" {
+			siDataPath = filepath.Join(cfg.Daemon.DataDir, "selfimprove")
+		}
+		siCfg := selfimprove.DefaultConfig()
+		siCfg.Enabled = true
+		siCfg.DataPath = siDataPath
+		siCfg.MaxIterationsPerCycle = cfg.SelfImprove.MaxIterationsPerCycle
+		siCfg.MaxFixesPerCycle = cfg.SelfImprove.MaxFixesPerCycle
+		siCfg.Safety.RequireHumanApproval = cfg.SelfImprove.Safety.RequireHumanApproval
+
+		c.SelfImproveCtrl = selfimprove.NewController(
+			siCfg,
+			msgBus,
+			c.LLMClient,
+			"",
+			logger.With("component", "selfimprove"),
+		)
+		if err := c.SelfImproveCtrl.Initialize(context.Background()); err != nil {
+			logger.Error("Failed to initialize self-improve controller", "error", err)
+			c.SelfImproveCtrl = nil
+		} else {
+			logger.Info("Self-improve controller initialized", "data_path", siDataPath)
+		}
+
+		// Start scheduler if interval is configured
+		if cfg.SelfImprove.AutoRunIntervalHours > 0 && c.SelfImproveCtrl != nil {
+			interval := time.Duration(cfg.SelfImprove.AutoRunIntervalHours) * time.Hour
+			c.SelfImproveSched = selfimprove.NewScheduler(
+				c.SelfImproveCtrl,
+				interval,
+				logger.With("component", "selfimprove.scheduler"),
+			)
+			go c.SelfImproveSched.Start(context.Background())
+			logger.Info("Self-improve scheduler started", "interval", interval)
 		}
 	}
 
@@ -487,6 +540,11 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Initialize code intelligence if enabled
 	if cfg.CodeIntel.Enabled {
 		c.initializeCodeIntel(cfg, logger)
+	}
+
+	// Initialize calendar integration if enabled
+	if cfg.Calendar.Enabled {
+		c.initializeCalendar(cfg, msgBus, logger)
 	}
 
 	// Wire memvid client and task store to the main agent loop now that they're available
@@ -779,6 +837,39 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		)
 	}
 
+	// Create Telegram bot if enabled
+	if cfg.Telegram.Enabled {
+		tgDataDir := filepath.Join(cfg.Daemon.DataDir, "telegram")
+		tgHandler := telegram.NewAgentHandler(c.SessionStore, c.AgentLoop, tgDataDir, logger.With("component", "telegram-handler"))
+
+		// Resolve token from environment variable if it starts with ${
+		tgToken := cfg.Telegram.Token
+		if strings.HasPrefix(tgToken, "${") && strings.HasSuffix(tgToken, "}") {
+			envVar := tgToken[2 : len(tgToken)-1]
+			tgToken = os.Getenv(envVar)
+		}
+
+		botCfg := telegram.BotConfig{
+			Token:        tgToken,
+			AllowedUsers: cfg.Telegram.AllowedUsers,
+			AllowedChats: cfg.Telegram.AllowedChats,
+			PollTimeout:  cfg.Telegram.PollTimeout,
+		}
+
+		bot, err := telegram.NewBot(botCfg, tgHandler.Handle, logger.With("component", "telegram"))
+		if err != nil {
+			logger.Error("failed to create telegram bot", "error", err)
+		} else {
+			bot.SetResetter(tgHandler)
+			c.TelegramBot = bot
+			c.TelegramHandler = tgHandler
+			logger.Info("Telegram bot configured",
+				"allowed_users", len(cfg.Telegram.AllowedUsers),
+				"allowed_chats", len(cfg.Telegram.AllowedChats),
+			)
+		}
+	}
+
 	return c, nil
 }
 
@@ -880,6 +971,16 @@ func (c *Components) Start(ctx context.Context) error {
 		c.Logger.Info("Web server started")
 	}
 
+	// Start Telegram bot
+	if c.TelegramBot != nil {
+		go func() {
+			c.Logger.Info("Starting Telegram bot")
+			if err := c.TelegramBot.Start(ctx); err != nil && ctx.Err() == nil {
+				c.Logger.Error("Telegram bot error", "error", err)
+			}
+		}()
+	}
+
 	return nil
 }
 
@@ -893,6 +994,12 @@ func (c *Components) Stop(ctx context.Context) error {
 			c.Logger.Error("Failed to stop web server", "error", err)
 			lastErr = err
 		}
+	}
+
+	// Stop Telegram bot
+	if c.TelegramBot != nil {
+		c.TelegramBot.Stop()
+		c.Logger.Info("Telegram bot stopped")
 	}
 
 	// Stop sync handler and manager first (depends on queue events)
@@ -1025,6 +1132,18 @@ func (c *Components) Stop(ctx context.Context) error {
 		}
 	}
 
+	// Stop self-improve scheduler and controller
+	if c.SelfImproveSched != nil {
+		c.SelfImproveSched.Stop()
+		c.Logger.Info("Self-improve scheduler stopped")
+	}
+	if c.SelfImproveCtrl != nil {
+		if err := c.SelfImproveCtrl.Stop(); err != nil {
+			c.Logger.Error("Failed to stop self-improve controller", "error", err)
+			lastErr = err
+		}
+	}
+
 	// Stop all MCP server connections
 	if c.MCPManager != nil {
 		c.MCPManager.StopAll()
@@ -1036,6 +1155,12 @@ func (c *Components) Stop(ctx context.Context) error {
 			c.Logger.Error("Failed to stop LSP servers", "error", err)
 			lastErr = err
 		}
+	}
+
+	// Stop calendar reminder watcher
+	if c.CalendarReminder != nil {
+		c.CalendarReminder.Stop()
+		c.Logger.Debug("Calendar reminder watcher stopped")
 	}
 
 	// Stop result cache cleanup goroutine
@@ -1710,6 +1835,91 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 	}
 
 	logger.Info("Code intelligence initialized")
+}
+
+// initializeCalendar sets up Google Calendar integration including OAuth token management,
+// calendar tools, and optional reminder watcher.
+func (c *Components) initializeCalendar(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logger) {
+	calLogger := logger.With("component", "calendar")
+
+	// Expand environment variables in credentials
+	clientID := os.ExpandEnv(cfg.Calendar.ClientID)
+	clientSecret := os.ExpandEnv(cfg.Calendar.ClientSecret)
+
+	if clientID == "" || clientSecret == "" {
+		calLogger.Warn("calendar enabled but client_id or client_secret not configured")
+		return
+	}
+
+	redirectURI := cfg.Calendar.RedirectURI
+	if redirectURI == "" {
+		redirectURI = "http://localhost:8888/callback"
+	}
+
+	oauthCfg := calendar.DefaultOAuth2Config(clientID, clientSecret, redirectURI)
+	tokenPath := filepath.Join(cfg.Daemon.DataDir, "calendar_token.json")
+	auth := calendar.NewOAuth2Authenticator(oauthCfg, tokenPath)
+
+	// Try to load existing token
+	token, err := auth.GetValidToken(context.Background())
+	if err != nil {
+		calLogger.Warn("no valid calendar token found; run 'meept calendar auth' to authenticate", "error", err)
+		return
+	}
+
+	calendarID := cfg.Calendar.CalendarID
+	if calendarID == "" {
+		calendarID = "primary"
+	}
+
+	calClient, err := calendar.NewClient(calendar.ClientConfig{
+		AccessToken: token.AccessToken,
+		CalendarID:  calendarID,
+	}, calLogger)
+	if err != nil {
+		calLogger.Error("failed to create calendar client", "error", err)
+		return
+	}
+	c.CalendarClient = calClient
+
+	// Register calendar tools
+	c.ToolRegistry.Register(builtin.NewCalendarListTool(calClient))
+	c.ToolRegistry.Register(builtin.NewCalendarCreateTool(calClient))
+	c.ToolRegistry.Register(builtin.NewCalendarQuickAddTool(calClient))
+	c.ToolRegistry.Register(builtin.NewCalendarTodayTool(calClient))
+	calLogger.Info("calendar tools registered", "calendar_id", calendarID)
+
+	// Start reminder watcher if enabled
+	if cfg.Calendar.ReminderEnabled {
+		checkInterval, _ := time.ParseDuration(cfg.Calendar.ReminderCheckInterval)
+		if checkInterval <= 0 {
+			checkInterval = 5 * time.Minute
+		}
+		advanceMinutes := cfg.Calendar.ReminderAdvanceMinutes
+		if advanceMinutes <= 0 {
+			advanceMinutes = 10
+		}
+
+		var publish func(string, map[string]any)
+		if msgBus != nil {
+			publish = func(topic string, data map[string]any) {
+				msg, _ := models.NewBusMessage(models.MessageTypeEvent, "calendar", data)
+				msgBus.Publish(topic, msg)
+			}
+		}
+
+		watcher := calendar.NewReminderWatcher(calClient, publish, calendar.ReminderWatcherConfig{
+			Interval:       checkInterval,
+			AdvanceMinutes: advanceMinutes,
+		}, calLogger)
+
+		c.CalendarReminder = watcher
+		go watcher.Start(context.Background())
+		calLogger.Info("calendar reminder watcher started",
+			"check_interval", checkInterval,
+			"advance_minutes", advanceMinutes,
+		)
+	}
 }
 
 // initializeSkills sets up the skills system with lazy loading.

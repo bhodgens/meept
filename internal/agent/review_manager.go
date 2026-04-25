@@ -14,24 +14,43 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// CompletionStatus represents the result of a completion validation.
+type CompletionStatus string
+
+const (
+	CompletionValid    CompletionStatus = "valid"
+	CompletionInvalid  CompletionStatus = "invalid"
+	CompletionPartial  CompletionStatus = "partial"
+)
+
+// ValidationResult holds the result of ValidateCompletion().
+type ValidationResult struct {
+	Status   CompletionStatus `json:"status"`
+	Feedback string           `json:"feedback"`
+	Missing  []string         `json:"missing,omitempty"`  // Items not completed
+	Verified []string         `json:"verified,omitempty"`  // Items verified complete
+}
+
 // ReviewManager orchestrates the review process for task steps.
 type ReviewManager struct {
-	registry  *AgentRegistry
-	stepStore *task.StepStore
-	taskStore *task.Store
-	policy    *ReviewPolicy
-	bus       *bus.MessageBus
-	logger    *slog.Logger
+	registry          *AgentRegistry
+	stepStore         *task.StepStore
+	taskStore         *task.Store
+	policy            *ReviewPolicy
+	validationPolicy  *ValidationPolicy
+	bus               *bus.MessageBus
+	logger            *slog.Logger
 }
 
 // ReviewManagerConfig holds configuration for creating a ReviewManager.
 type ReviewManagerConfig struct {
-	Registry  *AgentRegistry
-	StepStore *task.StepStore
-	TaskStore *task.Store
-	Policy    *ReviewPolicy
-	Bus       *bus.MessageBus
-	Logger    *slog.Logger
+	Registry         *AgentRegistry
+	StepStore        *task.StepStore
+	TaskStore        *task.Store
+	Policy           *ReviewPolicy
+	ValidationPolicy *ValidationPolicy
+	Bus              *bus.MessageBus
+	Logger           *slog.Logger
 }
 
 // NewReviewManager creates a new review manager.
@@ -42,14 +61,18 @@ func NewReviewManager(cfg ReviewManagerConfig) *ReviewManager {
 	if cfg.Policy == nil {
 		cfg.Policy = DefaultReviewPolicy()
 	}
+	if cfg.ValidationPolicy == nil {
+		cfg.ValidationPolicy = DefaultValidationPolicy()
+	}
 
 	return &ReviewManager{
-		registry:  cfg.Registry,
-		stepStore: cfg.StepStore,
-		taskStore: cfg.TaskStore,
-		policy:    cfg.Policy,
-		bus:       cfg.Bus,
-		logger:    cfg.Logger,
+		registry:         cfg.Registry,
+		stepStore:        cfg.StepStore,
+		taskStore:        cfg.TaskStore,
+		policy:           cfg.Policy,
+		validationPolicy: cfg.ValidationPolicy,
+		bus:              cfg.Bus,
+		logger:           cfg.Logger,
 	}
 }
 
@@ -465,6 +488,199 @@ func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *Revie
 func (rm *ReviewManager) SetPolicy(policy *ReviewPolicy) {
 	rm.policy = policy
 	rm.logger.Info("Review policy updated")
+}
+
+// ValidateCompletion checks that all assigned work for a step is actually done.
+// It examines the step's result, evidence, and claims to determine if the work
+// described in the step was fully completed.
+func (rm *ReviewManager) ValidateCompletion(ctx context.Context, step *task.TaskStep, taskDesc string) (*ValidationResult, error) {
+	// Check if validation is needed
+	if !rm.validationPolicy.NeedsValidation(step) {
+		return &ValidationResult{
+			Status:   CompletionValid,
+			Feedback: "Validation not required for this step type",
+		}, nil
+	}
+
+	rm.logger.Info("Validating step completion",
+		"step_id", step.ID,
+		"task_id", step.TaskID,
+		"tool_hint", step.ToolHint,
+	)
+
+	// Check 1: Step has a non-empty result
+	if strings.TrimSpace(step.Result) == "" {
+		return &ValidationResult{
+			Status:   CompletionInvalid,
+			Feedback: "Step completed with empty result",
+			Missing:  []string{"result content"},
+		}, nil
+	}
+
+	// Check 2: Evidence was provided (if applicable)
+	if step.ToolHint == "code" || step.ToolHint == "refactor" || step.ToolHint == "fix" {
+		if len(step.Evidence) == 0 && len(step.Claims) == 0 {
+			return &ValidationResult{
+				Status:   CompletionPartial,
+				Feedback: "Code change completed without evidence or claims - cannot verify",
+				Missing:  []string{"evidence", "claims"},
+			}, nil
+		}
+	}
+
+	// Check 3: Verify claims match the step description
+	verified, missing := rm.checkClaimsAgainstDescription(step)
+	if len(missing) > 0 && len(step.Evidence) == 0 {
+		return &ValidationResult{
+			Status:   CompletionPartial,
+			Feedback: fmt.Sprintf("Step partially completed: %d items verified, %d items missing", len(verified), len(missing)),
+			Missing:  missing,
+			Verified: verified,
+		}, nil
+	}
+
+	// Check 4: Cross-reference with original task intent if available
+	if taskDesc != "" && len(step.Evidence) > 0 {
+		// When evidence is present, only flag if relevance is extremely low
+		taskKeywords := extractKeywords(taskDesc)
+		resultLower := strings.ToLower(step.Result)
+		matchedKeywords := 0
+		for _, kw := range taskKeywords {
+			if strings.Contains(resultLower, strings.ToLower(kw)) {
+				matchedKeywords++
+			}
+		}
+
+		// If less than 15% of task keywords appear in the result, flag as partial
+		if len(taskKeywords) > 0 && float64(matchedKeywords)/float64(len(taskKeywords)) < 0.15 {
+			return &ValidationResult{
+				Status:   CompletionPartial,
+				Feedback: "Step result has low relevance to original task description",
+				Missing:  []string{"task-relevant content"},
+				Verified: verified,
+			}, nil
+		}
+	} else if taskDesc != "" {
+		// No evidence - use stricter relevance check (30% threshold)
+		taskKeywords := extractKeywords(taskDesc)
+		resultLower := strings.ToLower(step.Result)
+		matchedKeywords := 0
+		for _, kw := range taskKeywords {
+			if strings.Contains(resultLower, strings.ToLower(kw)) {
+				matchedKeywords++
+			}
+		}
+
+		if len(taskKeywords) > 0 && float64(matchedKeywords)/float64(len(taskKeywords)) < 0.3 {
+			return &ValidationResult{
+				Status:   CompletionPartial,
+				Feedback: "Step result has low relevance to original task description",
+				Missing:  []string{"task-relevant content"},
+				Verified: verified,
+			}, nil
+		}
+	}
+
+	rm.logger.Info("Step validation passed",
+		"step_id", step.ID,
+		"verified_count", len(verified),
+	)
+
+	return &ValidationResult{
+		Status:   CompletionValid,
+		Feedback: "All assigned work verified complete",
+		Verified: verified,
+	}, nil
+}
+
+// checkClaimsAgainstDescription compares step claims against the step description
+// to verify the stated work was completed.
+func (rm *ReviewManager) checkClaimsAgainstDescription(step *task.TaskStep) ([]string, []string) {
+	var verified []string
+	var missing []string
+
+	descLower := strings.ToLower(step.Description)
+
+	// Check if claims are present
+	if len(step.Claims) > 0 {
+		for _, claim := range step.Claims {
+			verified = append(verified, claim)
+		}
+	} else {
+		// No explicit claims - check if the result mentions completing the description
+		resultLower := strings.ToLower(step.Result)
+		descKeywords := extractKeywords(step.Description)
+
+		for _, kw := range descKeywords {
+			if strings.Contains(resultLower, strings.ToLower(kw)) {
+				verified = append(verified, kw)
+			} else {
+				missing = append(missing, kw)
+			}
+		}
+	}
+
+	// If step had errors, it's not complete
+	if strings.Contains(descLower, "fix") || strings.Contains(descLower, "debug") {
+		// Check result for error indicators
+		resultLower := strings.ToLower(step.Result)
+		errorIndicators := []string{"error", "failed", "could not", "unable to", "not found"}
+		hasErrors := false
+		for _, indicator := range errorIndicators {
+			if strings.Contains(resultLower, indicator) && !strings.Contains(resultLower, "fixed") && !strings.Contains(resultLower, "resolved") {
+				hasErrors = true
+				break
+			}
+		}
+		if hasErrors && len(step.Claims) == 0 {
+			missing = append(missing, "error resolution confirmation")
+		}
+	}
+
+	return verified, missing
+}
+
+// extractKeywords extracts meaningful keywords from a description.
+func extractKeywords(desc string) []string {
+	// Remove common stop words and extract meaningful keywords
+	stopWords := map[string]bool{
+		"the": true, "a": true, "an": true, "is": true, "are": true,
+		"was": true, "were": true, "be": true, "been": true, "being": true,
+		"have": true, "has": true, "had": true, "do": true, "does": true,
+		"did": true, "will": true, "would": true, "could": true, "should": true,
+		"may": true, "might": true, "can": true, "shall": true, "to": true,
+		"of": true, "in": true, "for": true, "on": true, "with": true,
+		"at": true, "by": true, "from": true, "as": true, "into": true,
+		"through": true, "during": true, "before": true, "after": true,
+		"and": true, "but": true, "or": true, "nor": true, "not": true,
+		"so": true, "yet": true, "both": true, "either": true, "neither": true,
+		"this": true, "that": true, "these": true, "those": true,
+		"it": true, "its": true, "which": true, "who": true, "whom": true,
+		"what": true, "where": true, "when": true, "how": true, "why": true,
+	}
+
+	words := strings.Fields(strings.ToLower(desc))
+	var keywords []string
+	for _, word := range words {
+		// Remove punctuation
+		word = strings.Trim(word, ".,;:!?'\"()[]{}")
+		if len(word) > 2 && !stopWords[word] {
+			keywords = append(keywords, word)
+		}
+	}
+
+	return keywords
+}
+
+// SetValidationPolicy updates the validation policy.
+func (rm *ReviewManager) SetValidationPolicy(policy *ValidationPolicy) {
+	rm.validationPolicy = policy
+	rm.logger.Info("Validation policy updated")
+}
+
+// GetValidationPolicy returns the current validation policy.
+func (rm *ReviewManager) GetValidationPolicy() *ValidationPolicy {
+	return rm.validationPolicy
 }
 
 // GetPolicy returns the current review policy.

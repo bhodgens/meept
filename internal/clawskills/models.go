@@ -72,6 +72,10 @@ type InstalledSkill struct {
 	SHA256       string    `json:"sha256"`
 	AutoUpdate   bool      `json:"auto_update"`
 	Verified     bool      `json:"verified"`
+	// RiskLevel is always "high" for third-party clawskills (enforced at load).
+	RiskLevel string `json:"risk_level"`
+	// MaxIterations caps agent-loop iterations for this skill.
+	MaxIterations int `json:"max_iterations"`
 }
 
 // LocalIndex represents the local index of installed skills.

@@ -119,6 +119,8 @@ Memory & Skills:
 	rootCmd.AddCommand(newDevCmd())
 	rootCmd.AddCommand(newModelsCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newQCmd())
+	rootCmd.AddCommand(newCalendarCmd())
 	rootCmd.AddCommand(newHelpCmd(rootCmd))
 
 	if err := rootCmd.Execute(); err != nil {

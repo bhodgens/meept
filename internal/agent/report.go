@@ -260,3 +260,153 @@ type AggregatedTaskReport struct {
 	// ExecutionTime is the total execution time
 	ExecutionTime string `json:"execution_time"`
 }
+
+// TaskReportAggregator aggregates recommendations and results from all sub-agents
+// into a structured final report.
+type TaskReportAggregator struct {
+	// recommendations collects recommendations from all steps
+	recommendations []CategorizedRecommendation
+}
+
+// NewTaskReportAggregator creates a new report aggregator.
+func NewTaskReportAggregator() *TaskReportAggregator {
+	return &TaskReportAggregator{
+		recommendations: make([]CategorizedRecommendation, 0),
+	}
+}
+
+// ExtractRecommendations extracts recommendations from a step's result text.
+// It looks for structured recommendation blocks in the agent output.
+func (a *TaskReportAggregator) ExtractRecommendations(stepResult string, agentID string) []CategorizedRecommendation {
+	if stepResult == "" {
+		return nil
+	}
+
+	// Try to find recommendation blocks in the result
+	// Format: ```recommendations\n[{...}]\n```
+	var recs []CategorizedRecommendation
+
+	// Try JSON extraction from recommendation blocks
+	codeBlockPattern := regexp.MustCompile("(?s)```recommendations\\s*\\n(.*?)\\n```")
+	matches := codeBlockPattern.FindAllStringSubmatch(stepResult, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			var parsed []CategorizedRecommendation
+			if err := json.Unmarshal([]byte(strings.TrimSpace(match[1])), &parsed); err == nil {
+				// Fill in agent ID if not set
+				for i := range parsed {
+					if parsed[i].AgentID == "" {
+						parsed[i].AgentID = agentID
+					}
+				}
+				recs = append(recs, parsed...)
+			}
+		}
+	}
+
+	// Also try extracting from standard JSON blocks that contain "category" and "priority"
+	if len(recs) == 0 {
+		jsonPattern := regexp.MustCompile("(?s)```json\\s*\\n(.*?)\\n```")
+		jsonMatches := jsonPattern.FindAllStringSubmatch(stepResult, -1)
+		for _, match := range jsonMatches {
+			if len(match) > 1 {
+				var parsed []CategorizedRecommendation
+				candidate := strings.TrimSpace(match[1])
+				// Only parse if it looks like recommendations (array with category/priority)
+				if strings.Contains(candidate, `"category"`) && strings.Contains(candidate, `"priority"`) {
+					if err := json.Unmarshal([]byte(candidate), &parsed); err == nil {
+						for i := range parsed {
+							if parsed[i].AgentID == "" {
+								parsed[i].AgentID = agentID
+							}
+						}
+						recs = append(recs, parsed...)
+					}
+				}
+			}
+		}
+	}
+
+	return recs
+}
+
+// AddRecommendations adds extracted recommendations to the aggregator.
+func (a *TaskReportAggregator) AddRecommendations(recs []CategorizedRecommendation) {
+	a.recommendations = append(a.recommendations, recs...)
+}
+
+// BuildReport creates the final aggregated task report.
+func (a *TaskReportAggregator) BuildReport(summary string, stepsCompleted, stepsTotal int, executionTime string) *AggregatedTaskReport {
+	return &AggregatedTaskReport{
+		Summary:         summary,
+		StepsCompleted:  stepsCompleted,
+		StepsTotal:      stepsTotal,
+		Recommendations: a.DeduplicateRecommendations(),
+		ExecutionTime:   executionTime,
+	}
+}
+
+// DeduplicateRecommendations removes duplicate recommendations based on description.
+func (a *TaskReportAggregator) DeduplicateRecommendations() []CategorizedRecommendation {
+	seen := make(map[string]bool)
+	var deduped []CategorizedRecommendation
+
+	// Sort by priority: critical > high > medium > low
+	priorityOrder := map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+	// Sort recommendations by priority
+	sorted := make([]CategorizedRecommendation, len(a.recommendations))
+	copy(sorted, a.recommendations)
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			pi, ok1 := priorityOrder[sorted[i].Priority]
+			pj, ok2 := priorityOrder[sorted[j].Priority]
+			if !ok1 {
+				pi = 99
+			}
+			if !ok2 {
+				pj = 99
+			}
+			if pi > pj {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+
+	for _, rec := range sorted {
+		key := strings.ToLower(strings.TrimSpace(rec.Description))
+		if !seen[key] {
+			seen[key] = true
+			deduped = append(deduped, rec)
+		}
+	}
+
+	return deduped
+}
+
+// GetRecommendationsByCategory returns recommendations filtered by category.
+func (a *TaskReportAggregator) GetRecommendationsByCategory(category string) []CategorizedRecommendation {
+	var filtered []CategorizedRecommendation
+	for _, rec := range a.recommendations {
+		if rec.Category == category {
+			filtered = append(filtered, rec)
+		}
+	}
+	return filtered
+}
+
+// GetRecommendationsByPriority returns recommendations filtered by priority.
+func (a *TaskReportAggregator) GetRecommendationsByPriority(priority string) []CategorizedRecommendation {
+	var filtered []CategorizedRecommendation
+	for _, rec := range a.recommendations {
+		if rec.Priority == priority {
+			filtered = append(filtered, rec)
+		}
+	}
+	return filtered
+}
+
+// RecommendationCount returns the total number of collected recommendations.
+func (a *TaskReportAggregator) RecommendationCount() int {
+	return len(a.recommendations)
+}

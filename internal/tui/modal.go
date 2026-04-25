@@ -21,6 +21,7 @@ const (
 	ModalNewSession
 	ModalSessionRename
 	ModalConfirm
+	ModalFuzzyFinder
 )
 
 // ModalItem represents an item in a modal menu.
@@ -183,6 +184,7 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 		{Key: keys.Sessions, Label: "sessions...", Description: "manage sessions"},
 		{Key: keys.NewSession, Label: "new session", Description: "create a new session"},
 		{Key: keys.RenameSession, Label: "edit description", Description: "edit session description"},
+		{Key: "f", Label: "find...", Description: "search sessions and tasks"},
 	})
 
 	return m
@@ -225,6 +227,16 @@ func (s *SessionPickerModal) RefreshSessions() tea.Cmd {
 
 		return SessionListMsg{Sessions: resp.Sessions, Err: nil}
 	}
+}
+
+// FuzzyFinderSessionsMsg carries sessions for the fuzzy finder.
+type FuzzyFinderSessionsMsg struct {
+	Sessions []types.Session
+}
+
+// FuzzyFinderTasksMsg carries tasks for the fuzzy finder.
+type FuzzyFinderTasksMsg struct {
+	Tasks []types.TaskExtended
 }
 
 // SessionListMsg carries the session list response.
@@ -875,6 +887,280 @@ func (m *ConfirmModal) HandleKey(key string) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+
+// FuzzyFinderModal is a modal for searching sessions and tasks.
+type FuzzyFinderModal struct {
+	*Modal
+	sessions      []types.Session
+	tasks         []types.TaskExtended
+	inputBuffer   string
+	cursorX       int // left pane (0) or right pane (1)
+	selectedIndex int
+	rpc           *RPCClient
+	styles        *Styles
+	width         int
+	height        int
+}
+
+// NewFuzzyFinderModal creates a new fuzzy finder modal.
+func NewFuzzyFinderModal(styles *Styles, rpc *RPCClient) *FuzzyFinderModal {
+	return &FuzzyFinderModal{
+		sessions:    []types.Session{},
+		tasks:       []types.TaskExtended{},
+		inputBuffer: "",
+		cursorX:     0,
+		width:       100,
+		height:      30,
+		rpc:         rpc,
+		styles:      styles,
+	}
+}
+
+// Show makes the fuzzy finder visible and starts fetching data.
+func (f *FuzzyFinderModal) Show() {
+	f.visible = true
+	f.inputBuffer = ""
+	f.selectedIndex = 0
+	f.cursorX = 0
+}
+
+// Hide hides the fuzzy finder.
+func (f *FuzzyFinderModal) Hide() {
+	f.visible = false
+}
+
+// Visible returns whether the fuzzy finder is visible.
+func (f *FuzzyFinderModal) Visible() bool {
+	return f.visible
+}
+
+// FetchSessions returns a cmd to fetch sessions.
+func (f *FuzzyFinderModal) FetchSessions() tea.Cmd {
+	return func() tea.Msg {
+		if f.rpc == nil || !f.rpc.IsConnected() {
+			return FuzzyFinderSessionsMsg{Sessions: []types.Session{}}
+		}
+		resp, err := f.rpc.ListSessions()
+		if err != nil {
+			return FuzzyFinderSessionsMsg{Sessions: []types.Session{}}
+		}
+		return FuzzyFinderSessionsMsg{Sessions: resp.Sessions}
+	}
+}
+
+// FetchTasks returns a cmd to fetch tasks.
+func (f *FuzzyFinderModal) FetchTasks() tea.Cmd {
+	return func() tea.Msg {
+		if f.rpc == nil || !f.rpc.IsConnected() {
+			return FuzzyFinderTasksMsg{Tasks: []types.TaskExtended{}}
+		}
+		resp, err := f.rpc.ListTasksExtended()
+		if err != nil {
+			return FuzzyFinderTasksMsg{Tasks: []types.TaskExtended{}}
+		}
+		return FuzzyFinderTasksMsg{Tasks: resp.Tasks}
+	}
+}
+
+// SetSessions sets the session list.
+func (f *FuzzyFinderModal) SetSessions(sessions []types.Session) {
+	f.sessions = sessions
+}
+
+// SetTasks sets the task list.
+func (f *FuzzyFinderModal) SetTasks(tasks []types.TaskExtended) {
+	f.tasks = tasks
+}
+
+// GetSelectedSession returns the selected session if any.
+func (f *FuzzyFinderModal) GetSelectedSession() *types.Session {
+	items := f.getFilteredItems()
+	if f.selectedIndex >= 0 && f.selectedIndex < len(items) {
+		if items[f.selectedIndex].Session != nil {
+			return items[f.selectedIndex].Session
+		}
+	}
+	return nil
+}
+
+// GetSelectedTask returns the selected task if any.
+func (f *FuzzyFinderModal) GetSelectedTask() *types.TaskExtended {
+	items := f.getFilteredItems()
+	if f.selectedIndex >= 0 && f.selectedIndex < len(items) {
+		if items[f.selectedIndex].Task != nil {
+			return items[f.selectedIndex].Task
+		}
+	}
+	return nil
+}
+
+// fuzzyFinderItem represents a searchable item.
+type fuzzyFinderItem struct {
+	Session *types.Session
+	Task    *types.TaskExtended
+	Match   string // display text
+}
+
+// getFilteredItems returns items matching the search query.
+func (f *FuzzyFinderModal) getFilteredItems() []fuzzyFinderItem {
+	var items []fuzzyFinderItem
+	query := strings.ToLower(f.inputBuffer)
+
+	// Add sessions as items
+	for _, sess := range f.sessions {
+		name := strings.ToLower(sess.Name)
+		desc := strings.ToLower(sess.Description)
+		if query == "" || strings.Contains(name, query) || strings.Contains(desc, query) {
+			display := sess.Name
+			if sess.Description != "" {
+				display += " - " + sess.Description
+			}
+			items = append(items, fuzzyFinderItem{
+				Session: &sess,
+				Match:   display,
+			})
+		}
+	}
+
+	// Add tasks as items (nested under sessions conceptually)
+	for _, task := range f.tasks {
+		name := strings.ToLower(task.Name)
+		desc := strings.ToLower(task.Description)
+		if query == "" || strings.Contains(name, query) || strings.Contains(desc, query) {
+			display := task.Name
+			if task.Description != "" {
+				display += " - " + task.Description
+			}
+			items = append(items, fuzzyFinderItem{
+				Task:  &task,
+				Match: display,
+			})
+		}
+	}
+
+	return items
+}
+
+// View renders the fuzzy finder modal.
+func (f *FuzzyFinderModal) View(screenW, screenH int) string {
+	if !f.visible {
+		return ""
+	}
+
+	var b strings.Builder
+
+	// Modal box style
+	boxStyle := f.styles.ModalBox.Width(f.width).Height(f.height)
+
+	// Title
+	titleStyle := f.styles.ModalTitle.Width(f.width - 4)
+	b.WriteString(titleStyle.Render("find (sessions and tasks)"))
+	b.WriteString("\n")
+
+	// Separator
+	b.WriteString(f.styles.Muted.Render(strings.Repeat("─", f.width-4)))
+	b.WriteString("\n")
+
+	// Search input
+	inputStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7C3AED")).
+		Padding(0, 1).
+		Width(f.width - 10)
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Width(f.width-4).Render(
+		inputStyle.Render("search: "+f.inputBuffer+"█"),
+	))
+	b.WriteString("\n\n")
+
+	// Results pane
+	items := f.getFilteredItems()
+	resultsHeight := f.height - 12
+	if resultsHeight < 5 {
+		resultsHeight = 5
+	}
+	resultsStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#374151")).
+		Width(f.width - 4).
+		Height(resultsHeight)
+
+	var resultsContent strings.Builder
+	if len(items) == 0 {
+		resultsContent.WriteString(f.styles.Muted.Render("no matches found"))
+	} else {
+		for i, item := range items {
+			style := f.styles.ModalItem
+			if i == f.selectedIndex {
+				style = f.styles.ModalItemSelected
+			}
+			pointer := "  "
+			if i == f.selectedIndex {
+				pointer = "▸ "
+			}
+			label := item.Match
+			if len(label) > f.width-10 {
+				label = label[:f.width-13] + "..."
+			}
+			resultsContent.WriteString(style.Render(pointer + label))
+			resultsContent.WriteString("\n")
+		}
+	}
+	b.WriteString(resultsStyle.Render(resultsContent.String()))
+
+	// Footer hints
+	b.WriteString("\n")
+	hints := []string{
+		f.styles.HelpKey.Render("[↑/↓]") + f.styles.HelpValue.Render(" navigate"),
+		f.styles.HelpKey.Render("[enter]") + f.styles.HelpValue.Render(" select"),
+		f.styles.HelpKey.Render("[esc]") + f.styles.HelpValue.Render(" cancel"),
+	}
+	b.WriteString(f.styles.Muted.Render(strings.Join(hints, "  ")))
+
+	content := boxStyle.Render(b.String())
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, content)
+}
+
+// HandleKey processes key input for the fuzzy finder.
+func (f *FuzzyFinderModal) HandleKey(key string) string {
+	// Check for search input keys first
+	if len(key) == 1 && key[0] >= ' ' && key[0] <= '~' {
+		f.inputBuffer += key
+		f.selectedIndex = 0 // Reset selection on new search
+		return ""
+	}
+
+	switch key {
+	case "backspace":
+		if len(f.inputBuffer) > 0 {
+			f.inputBuffer = f.inputBuffer[:len(f.inputBuffer)-1]
+			f.selectedIndex = 0
+		}
+	case "ctrl+u":
+		f.inputBuffer = ""
+		f.selectedIndex = 0
+	case "up", "k":
+		if f.selectedIndex > 0 {
+			f.selectedIndex--
+		}
+	case "down", "j":
+		items := f.getFilteredItems()
+		if f.selectedIndex < len(items)-1 {
+			f.selectedIndex++
+		}
+	case "enter":
+		items := f.getFilteredItems()
+		if f.selectedIndex >= 0 && f.selectedIndex < len(items) {
+			f.Hide()
+			return "select"
+		}
+	case "esc", "q":
+		f.Hide()
+	}
+
+	return ""
 }
 
 // formatRelativeTime formats a time as relative to now (e.g., "2h ago", "1d ago").

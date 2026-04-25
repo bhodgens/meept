@@ -13,22 +13,24 @@ import (
 
 // TasksModel is the model for the tasks view.
 type TasksModel struct {
-	rpc            TasksRPCClient
-	jobs           []types.Job
-	tasks          []types.TaskExtended
-	table          table.Model
-	selectedJob    *types.Job
-	selectedTask   *types.TaskExtended
-	width          int
-	height         int
-	loading        bool
-	err            error
-	showingHelp    bool
-	showingDetail  bool         // Task detail modal
-	viewMode       TaskViewMode // jobs vs tasks
-	filter         TaskFilter
-	currentAgentID   string // Current agent ID for FilterMine (for agent-mode clients)
+	rpc             TasksRPCClient
+	jobs            []types.Job
+	tasks           []types.TaskExtended
+	table           table.Model
+	selectedJob     *types.Job
+	selectedTask    *types.TaskExtended
+	width           int
+	height          int
+	loading         bool
+	err             error
+	showingHelp     bool
+	showingDetail   bool          // Task detail modal
+	viewMode        TaskViewMode  // jobs vs tasks
+	filter          TaskFilter
+	currentAgentID  string // Current agent ID for FilterMine (for agent-mode clients)
 	currentSessionID string // Current session ID for FilterMine (for TUI clients)
+	expandedTaskIDs map[string]bool // Track which parent tasks are expanded
+	taskChildren    map[string][]types.TaskExtended // Map parent ID to children
 }
 
 // TaskViewMode selects between jobs and tasks view.
@@ -94,10 +96,12 @@ func NewTasksModel(rpc TasksRPCClient) *TasksModel {
 	t.SetStyles(s)
 
 	return &TasksModel{
-		rpc:      rpc,
-		table:    t,
-		viewMode: ViewModeTasks, // Default to tasks view
-		filter:   FilterAll,
+		rpc:             rpc,
+		table:           t,
+		viewMode:        ViewModeTasks, // Default to tasks view
+		filter:          FilterAll,
+		expandedTaskIDs: make(map[string]bool),
+		taskChildren:    make(map[string][]types.TaskExtended),
 	}
 }
 
@@ -125,6 +129,65 @@ func (m *TasksModel) SetCurrentAgent(agentID string) {
 // This is used by the TUI to filter tasks linked to the current session.
 func (m *TasksModel) SetCurrentSession(sessionID string) {
 	m.currentSessionID = sessionID
+}
+
+// buildTaskTree builds parent-child relationships from tasks.
+func (m *TasksModel) buildTaskTree(tasks []types.TaskExtended) {
+	m.taskChildren = make(map[string][]types.TaskExtended)
+	for _, task := range tasks {
+		if task.InheritedFrom != "" {
+			m.taskChildren[task.InheritedFrom] = append(m.taskChildren[task.InheritedFrom], task)
+		}
+	}
+}
+
+// isTaskCollapsible checks if a task has children (subtasks).
+func (m *TasksModel) isTaskCollapsible(taskID string) bool {
+	children, ok := m.taskChildren[taskID]
+	return ok && len(children) > 0
+}
+
+// isTaskExpanded checks if a parent task is currently expanded.
+func (m *TasksModel) isTaskExpanded(taskID string) bool {
+	return m.expandedTaskIDs[taskID]
+}
+
+// toggleTaskExpanded toggles the expanded state of a parent task.
+func (m *TasksModel) toggleTaskExpanded(taskID string) {
+	m.expandedTaskIDs[taskID] = !m.expandedTaskIDs[taskID]
+}
+
+// buildFlatListWithChildren builds a flat list for the table, respecting expanded/collapsed state.
+// Parent tasks appear first, followed by their subtasks if expanded.
+func (m *TasksModel) buildFlatListWithChildren(tasks []types.TaskExtended) []types.TaskExtended {
+	var result []types.TaskExtended
+
+	// Build a map of taskID to task for quick lookup
+	taskMap := make(map[string]types.TaskExtended)
+	for _, task := range tasks {
+		taskMap[task.ID] = task
+	}
+
+	// First pass: add all parent tasks (tasks with no InheritedFrom)
+	var parents []types.TaskExtended
+	for _, task := range tasks {
+		if task.InheritedFrom == "" {
+			parents = append(parents, task)
+		}
+	}
+
+	// Second pass: build result with parents and their children (if expanded)
+	for _, parent := range parents {
+		result = append(result, parent)
+
+		// Add children if parent is expanded
+		if m.isTaskExpanded(parent.ID) {
+			children := m.taskChildren[parent.ID]
+			result = append(result, children...)
+		}
+	}
+
+	return result
 }
 
 // SetSize updates the model dimensions.
@@ -250,6 +313,7 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 		}
 		m.err = nil
 		m.tasks = msg.Tasks
+		m.buildTaskTree(msg.Tasks)
 		m.updateTasksTable()
 		return nil
 
@@ -331,6 +395,38 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 			m.showingDetail = false
 			return nil
 
+		case "left":
+			// Collapse expanded parent task
+			if m.viewMode == ViewModeTasks {
+				filtered := m.filterTasks()
+				idx := m.table.Cursor()
+				if idx >= 0 && idx < len(filtered) {
+					task := filtered[idx]
+					// Only collapse if this task has children and is expanded
+					if m.isTaskCollapsible(task.ID) && m.isTaskExpanded(task.ID) {
+						m.toggleTaskExpanded(task.ID)
+						m.updateTasksTable()
+					}
+				}
+			}
+			return nil
+
+		case "right":
+			// Expand collapsed parent task
+			if m.viewMode == ViewModeTasks {
+				filtered := m.filterTasks()
+				idx := m.table.Cursor()
+				if idx >= 0 && idx < len(filtered) {
+					task := filtered[idx]
+					// Only expand if this task has children and is collapsed
+					if m.isTaskCollapsible(task.ID) && !m.isTaskExpanded(task.ID) {
+						m.toggleTaskExpanded(task.ID)
+						m.updateTasksTable()
+					}
+				}
+			}
+			return nil
+
 		case "up", "down", "j", "k":
 			// Let table handle navigation
 			var cmd tea.Cmd
@@ -397,24 +493,24 @@ func (m *TasksModel) updateTable() {
 }
 
 func (m *TasksModel) filterTasks() []types.TaskExtended {
-	if m.filter == FilterAll {
-		return m.tasks
-	}
-
 	var filtered []types.TaskExtended
+
 	for _, t := range m.tasks {
+		include := false
 		switch m.filter {
+		case FilterAll:
+			include = true
 		case FilterActive:
 			if t.State == "executing" || t.State == "planning" || t.State == "pending" {
-				filtered = append(filtered, t)
+				include = true
 			}
 		case FilterCompleted:
 			if t.State == "completed" {
-				filtered = append(filtered, t)
+				include = true
 			}
 		case FilterFailed:
 			if t.State == "failed" || t.State == "cancelled" {
-				filtered = append(filtered, t)
+				include = true
 			}
 		case FilterMine:
 			// Filter by session (for TUI) or agent (for agent-mode clients).
@@ -423,23 +519,30 @@ func (m *TasksModel) filterTasks() []types.TaskExtended {
 				// Check if current session is linked to this task
 				for _, linkedSess := range t.LinkedSessions {
 					if linkedSess == m.currentSessionID {
-						filtered = append(filtered, t)
+						include = true
 						break
 					}
 				}
 			} else if m.currentAgentID != "" {
 				if t.AssignedAgent == m.currentAgentID {
-					filtered = append(filtered, t)
+					include = true
 				}
 			} else if t.AssignedAgent != "" {
 				// Fallback: show all assigned tasks
-				filtered = append(filtered, t)
+				include = true
 			}
 		default:
+			include = true
+		}
+
+		if include {
 			filtered = append(filtered, t)
 		}
 	}
-	return filtered
+
+	// Build hierarchical list with children
+	m.buildTaskTree(filtered)
+	return m.buildFlatListWithChildren(filtered)
 }
 
 func (m *TasksModel) updateTasksTable() {
@@ -484,10 +587,23 @@ func (m *TasksModel) updateTasksTable() {
 		// Updated time
 		updated := m.formatTimeAgo(task.UpdatedAt)
 
-		// Name (truncated)
+		// Name with indentation and expand/collapse icons
 		name := task.Name
 		if name == "" {
 			name = types.TruncateString(task.ID, 15)
+		}
+
+		// Add tree indicators
+		if task.InheritedFrom != "" {
+			// This is a subtask - indent with tree character
+			name = "  └─ " + name
+		} else if m.isTaskCollapsible(task.ID) {
+			// This is a parent task with children
+			if m.isTaskExpanded(task.ID) {
+				name = "▼ " + name
+			} else {
+				name = "▶ " + name
+			}
 		}
 
 		rows[i] = table.Row{
@@ -609,7 +725,7 @@ func (m *TasksModel) View() string {
 		MarginTop(1)
 
 	if m.viewMode == ViewModeTasks {
-		b.WriteString(hintStyle.Render("r: refresh | tab: jobs view | f: filter | enter: details | ?: help"))
+		b.WriteString(hintStyle.Render("r: refresh | tab: jobs view | f: filter | ←/→: collapse/expand | enter: details | ?: help"))
 	} else {
 		b.WriteString(hintStyle.Render("r: refresh | tab: tasks view | enter: select | ?: help"))
 	}
@@ -723,6 +839,38 @@ func (m *TasksModel) renderTaskPreview() string {
 
 	content.WriteString(labelStyle.Render("Memory:"))
 	content.WriteString(memStyle.Render(fmt.Sprintf("⚡%d refs  📝%d created  %s", memRefs, createdMems, inherited)))
+	content.WriteString("\n")
+
+	// Stats: models used, error count
+	if len(task.ModelsUsed) > 0 {
+		models := strings.Join(task.ModelsUsed, ", ")
+		if len(models) > 40 {
+			models = models[:37] + "..."
+		}
+		content.WriteString(labelStyle.Render("Models:"))
+		content.WriteString(valueStyle.Render(models))
+		content.WriteString("\n")
+	}
+
+	if task.ErrorCount > 0 {
+		content.WriteString(labelStyle.Render("Errors:"))
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(fmt.Sprintf("%d", task.ErrorCount)))
+		content.WriteString("\n")
+	}
+
+	// Child tasks with progress
+	if len(task.ChildTasks) > 0 {
+		content.WriteString(labelStyle.Render("Children:"))
+		for i, child := range task.ChildTasks {
+			prefix := "├─"
+			if i == len(task.ChildTasks)-1 {
+				prefix = "└─"
+			}
+			percent := child.Progress()
+			name := types.TruncateString(child.Name, 18)
+			content.WriteString(fmt.Sprintf("    %s %s (%.0f%%)\n", prefix, name, percent))
+		}
+	}
 
 	return panelStyle.Render(content.String())
 }
@@ -1213,6 +1361,7 @@ func (m *TasksModel) renderHelp() string {
 	content += keyStyle.Render("tab") + descStyle.Render("Toggle between Tasks/Jobs views") + "\n"
 	content += keyStyle.Render("f") + descStyle.Render("Cycle through filters (All/Active/Mine/Done/Failed)") + "\n"
 	content += keyStyle.Render("r") + descStyle.Render("Refresh data") + "\n"
+	content += keyStyle.Render("←/→") + descStyle.Render("Collapse/expand task tree") + "\n"
 	content += keyStyle.Render("?") + descStyle.Render("Toggle this help") + "\n"
 
 	content += "\n" + sectionStyle.Render("Memory Indicators") + "\n"

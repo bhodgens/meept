@@ -367,6 +367,11 @@ type TaskExtended struct {
 
 	// Steps for orchestrator tasks
 	Steps []TaskStepView `json:"steps,omitempty"`
+
+	// Stats for enhanced task detail view
+	ModelsUsed []string `json:"models_used,omitempty"`
+	ErrorCount int `json:"error_count,omitempty"`
+	ChildTasks []Task `json:"child_tasks,omitempty"` // Active child tasks with progress
 }
 
 // TaskExtendedListResponse represents the extended task list response.

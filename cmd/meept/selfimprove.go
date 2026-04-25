@@ -1,19 +1,21 @@
 package main
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
-	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/spf13/cobra"
+
+	"github.com/caimlas/meept/internal/tui"
 )
 
 func newSelfImproveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "selfimprove",
-		Short: "Self-improvement commands",
+		Short: "self-improvement commands",
 		Long:  "Run self-improvement cycles to detect and fix issues automatically.",
 	}
 
@@ -23,6 +25,7 @@ func newSelfImproveCmd() *cobra.Command {
 		newSelfImproveGenerateCmd(),
 		newSelfImproveValidateCmd(),
 		newSelfImproveApplyCmd(),
+		newSelfImproveRejectCmd(),
 		newSelfImproveFullCycleCmd(),
 		newSelfImproveStatusCmd(),
 	)
@@ -30,27 +33,51 @@ func newSelfImproveCmd() *cobra.Command {
 	return cmd
 }
 
+func dialRPC() (*tui.RPCClient, error) {
+	client := tui.NewRPCClient(getSocketPath())
+	if err := client.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to connect to daemon: %w", err)
+	}
+	return client, nil
+}
+
 func newSelfImproveDetectCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "detect",
-		Short: "Detect issues in the codebase",
+		Short: "detect issues in the codebase",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := selfimprove.DefaultConfig()
-			controller := selfimprove.NewController(cfg, nil, nil, "", nil)
+			client, err := dialRPC()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
 
-			issues, err := controller.Detect(context.Background())
+			result, err := client.Call("selfimprove.detect", nil)
 			if err != nil {
 				return fmt.Errorf("detection failed: %w", err)
 			}
 
-			if len(issues) == 0 {
-				fmt.Println("No issues detected.")
+			var resp struct {
+				Issues []struct {
+					ID          string `json:"id"`
+					Type        string `json:"type"`
+					Severity    string `json:"severity"`
+					Description string `json:"description"`
+				} `json:"issues"`
+				Count int `json:"count"`
+			}
+			if err := json.Unmarshal(result, &resp); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if resp.Count == 0 {
+				fmt.Println("no issues detected.")
 				return nil
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "ID\tTYPE\tSEVERITY\tDESCRIPTION")
-			for _, issue := range issues {
+			for _, issue := range resp.Issues {
 				desc := issue.Description
 				if len(desc) > 60 {
 					desc = desc[:60] + "..."
@@ -60,7 +87,7 @@ func newSelfImproveDetectCmd() *cobra.Command {
 			}
 			w.Flush()
 
-			fmt.Printf("\nTotal: %d issues\n", len(issues))
+			fmt.Printf("\ntotal: %d issues\n", resp.Count)
 			return nil
 		},
 	}
@@ -69,10 +96,20 @@ func newSelfImproveDetectCmd() *cobra.Command {
 func newSelfImproveAnalyzeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "analyze",
-		Short: "Analyze detected issues",
+		Short: "analyze detected issues",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Analyzing issues... (requires LLM client)")
-			fmt.Println("Run 'meept selfimprove full-cycle' for a complete improvement cycle.")
+			client, err := dialRPC()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			result, err := client.Call("selfimprove.analyze", nil)
+			if err != nil {
+				return fmt.Errorf("analysis failed: %w", err)
+			}
+
+			fmt.Println(string(result))
 			return nil
 		},
 	}
@@ -81,10 +118,20 @@ func newSelfImproveAnalyzeCmd() *cobra.Command {
 func newSelfImproveGenerateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "generate-fixes",
-		Short: "Generate fixes for analyzed issues",
+		Short: "generate fixes for analyzed issues",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Generating fixes... (requires LLM client)")
-			fmt.Println("Run 'meept selfimprove full-cycle' for a complete improvement cycle.")
+			client, err := dialRPC()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			result, err := client.Call("selfimprove.generate", nil)
+			if err != nil {
+				return fmt.Errorf("fix generation failed: %w", err)
+			}
+
+			fmt.Println(string(result))
 			return nil
 		},
 	}
@@ -93,10 +140,20 @@ func newSelfImproveGenerateCmd() *cobra.Command {
 func newSelfImproveValidateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "validate",
-		Short: "Validate generated fixes",
+		Short: "validate generated fixes",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("Validating fixes...")
-			fmt.Println("Run 'meept selfimprove full-cycle' for a complete improvement cycle.")
+			client, err := dialRPC()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			result, err := client.Call("selfimprove.validate", nil)
+			if err != nil {
+				return fmt.Errorf("validation failed: %w", err)
+			}
+
+			fmt.Println(string(result))
 			return nil
 		},
 	}
@@ -107,14 +164,25 @@ func newSelfImproveApplyCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "apply",
-		Short: "Apply validated fixes",
+		Short: "approve and apply a pending fix",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if fixID == "" {
 				return fmt.Errorf("fix ID is required (use --fix-id)")
 			}
 
-			fmt.Printf("Applying fix %s...\n", fixID)
-			fmt.Println("Run 'meept selfimprove full-cycle --interactive' for guided application.")
+			client, err := dialRPC()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			result, err := client.Call("selfimprove.apply", map[string]string{"fix_id": fixID})
+			if err != nil {
+				return fmt.Errorf("apply failed: %w", err)
+			}
+
+			fmt.Printf("fix %s applied successfully\n", fixID)
+			fmt.Println(string(result))
 			return nil
 		},
 	}
@@ -124,35 +192,96 @@ func newSelfImproveApplyCmd() *cobra.Command {
 	return cmd
 }
 
+func newSelfImproveRejectCmd() *cobra.Command {
+	var fixID string
+	var reason string
+
+	cmd := &cobra.Command{
+		Use:   "reject",
+		Short: "reject a pending fix",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if fixID == "" {
+				return fmt.Errorf("fix ID is required (use --fix-id)")
+			}
+
+			client, err := dialRPC()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			params := map[string]string{
+				"fix_id": fixID,
+				"reason": reason,
+			}
+			_, err = client.Call("selfimprove.reject", params)
+			if err != nil {
+				return fmt.Errorf("reject failed: %w", err)
+			}
+
+			fmt.Printf("fix %s rejected\n", fixID)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&fixID, "fix-id", "", "ID of the fix to reject")
+	cmd.Flags().StringVar(&reason, "reason", "rejected via cli", "rejection reason")
+
+	return cmd
+}
+
 func newSelfImproveFullCycleCmd() *cobra.Command {
 	var interactive bool
 
 	cmd := &cobra.Command{
 		Use:   "full-cycle",
-		Short: "Run a complete improvement cycle",
+		Short: "run a complete improvement cycle",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := selfimprove.DefaultConfig()
-			controller := selfimprove.NewController(cfg, nil, nil, "", nil)
+			client, err := dialRPC()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
 
-			fmt.Println("Running full improvement cycle...")
+			client.SetTimeout(10 * time.Minute) // full cycle can take a while
 
-			cycle, err := controller.RunFullCycle(context.Background(), interactive)
+			fmt.Println("running full improvement cycle...")
+
+			result, err := client.Call("selfimprove.cycle", map[string]any{
+				"interactive": interactive,
+			})
 			if err != nil {
 				return fmt.Errorf("cycle failed: %w", err)
 			}
 
-			fmt.Printf("\nCycle %s completed:\n", cycle.ID)
-			fmt.Printf("  Issues detected:  %d\n", cycle.IssuesDetected)
-			fmt.Printf("  Issues analyzed:  %d\n", cycle.IssuesAnalyzed)
-			fmt.Printf("  Fixes generated:  %d\n", cycle.FixesGenerated)
-			fmt.Printf("  Fixes validated:  %d\n", cycle.FixesValidated)
-			fmt.Printf("  Fixes applied:    %d\n", cycle.FixesApplied)
+			var cycle struct {
+				ID             string `json:"id"`
+				Status         string `json:"status"`
+				IssuesDetected int    `json:"issues_detected"`
+				IssuesAnalyzed int    `json:"issues_analyzed"`
+				FixesGenerated int    `json:"fixes_generated"`
+				FixesValidated int    `json:"fixes_validated"`
+				FixesApplied   int    `json:"fixes_applied"`
+			}
+			if err := json.Unmarshal(result, &cycle); err != nil {
+				// Print raw result if parsing fails
+				fmt.Println(string(result))
+				return nil
+			}
+
+			fmt.Printf("\ncycle %s completed:\n", cycle.ID)
+			fmt.Printf("  status:          %s\n", cycle.Status)
+			fmt.Printf("  issues detected: %d\n", cycle.IssuesDetected)
+			fmt.Printf("  issues analyzed: %d\n", cycle.IssuesAnalyzed)
+			fmt.Printf("  fixes generated: %d\n", cycle.FixesGenerated)
+			fmt.Printf("  fixes validated: %d\n", cycle.FixesValidated)
+			fmt.Printf("  fixes applied:   %d\n", cycle.FixesApplied)
 
 			return nil
 		},
 	}
 
-	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "Run in interactive mode (approve fixes manually)")
+	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "run in interactive mode (approve fixes manually)")
 
 	return cmd
 }
@@ -160,31 +289,52 @@ func newSelfImproveFullCycleCmd() *cobra.Command {
 func newSelfImproveStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show self-improvement status",
+		Short: "show self-improvement status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := selfimprove.DefaultConfig()
-			controller := selfimprove.NewController(cfg, nil, nil, "", nil)
+			client, err := dialRPC()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
 
-			status := controller.GetStatus()
+			result, err := client.Call("selfimprove.status", nil)
+			if err != nil {
+				return fmt.Errorf("status query failed: %w", err)
+			}
 
-			fmt.Println("Self-Improvement Status")
+			var status struct {
+				IssuesCount         int              `json:"issues_count"`
+				AnalysesCount       int              `json:"analyses_count"`
+				FixesCount          int              `json:"fixes_count"`
+				ValidationsCount    int              `json:"validations_count"`
+				AppliedCount        int              `json:"applied_count"`
+				ConsecutiveFailures int              `json:"consecutive_failures"`
+				CircuitBreakerTripped bool            `json:"circuit_breaker_tripped"`
+				PendingApprovals    []string         `json:"pending_approvals"`
+				CyclesCompleted     int              `json:"cycles_completed"`
+			}
+			if err := json.Unmarshal(result, &status); err != nil {
+				return fmt.Errorf("failed to parse status: %w", err)
+			}
+
+			fmt.Println("self-improvement status")
 			fmt.Println("=======================")
-			fmt.Printf("Issues:       %d\n", status.IssuesCount)
-			fmt.Printf("Analyses:     %d\n", status.AnalysesCount)
-			fmt.Printf("Fixes:        %d\n", status.FixesCount)
-			fmt.Printf("Validations:  %d\n", status.ValidationsCount)
-			fmt.Printf("Applied:      %d\n", status.AppliedCount)
-			fmt.Printf("Cycles:       %d\n", status.CyclesCompleted)
+			fmt.Printf("issues:         %d\n", status.IssuesCount)
+			fmt.Printf("analyses:       %d\n", status.AnalysesCount)
+			fmt.Printf("fixes:          %d\n", status.FixesCount)
+			fmt.Printf("validations:    %d\n", status.ValidationsCount)
+			fmt.Printf("applied:        %d\n", status.AppliedCount)
+			fmt.Printf("cycles:         %d\n", status.CyclesCompleted)
 
 			if len(status.PendingApprovals) > 0 {
-				fmt.Printf("\nPending Approvals: %d\n", len(status.PendingApprovals))
+				fmt.Printf("\npending approvals: %d\n", len(status.PendingApprovals))
 				for _, id := range status.PendingApprovals {
 					fmt.Printf("  - %s\n", id)
 				}
 			}
 
 			if status.CircuitBreakerTripped {
-				fmt.Println("\n⚠️  Circuit breaker tripped - too many consecutive failures")
+				fmt.Println("\ncircuit breaker tripped - too many consecutive failures")
 			}
 
 			return nil

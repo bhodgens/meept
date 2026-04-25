@@ -130,6 +130,7 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("selfimprove.generate", p.makeProxy("selfimprove.generate", "selfimprove.result", 120*time.Second))
 	server.RegisterHandler("selfimprove.validate", p.makeProxy("selfimprove.validate", "selfimprove.result", 300*time.Second))
 	server.RegisterHandler("selfimprove.apply", p.makeProxy("selfimprove.apply", "selfimprove.result", 60*time.Second))
+	server.RegisterHandler("selfimprove.reject", p.makeProxy("selfimprove.reject", "selfimprove.result", 10*time.Second))
 	server.RegisterHandler("selfimprove.status", p.makeProxy("selfimprove.status", "selfimprove.result", 10*time.Second))
 	server.RegisterHandler("selfimprove.cycle", p.makeProxy("selfimprove.cycle", "selfimprove.result", 600*time.Second))
 

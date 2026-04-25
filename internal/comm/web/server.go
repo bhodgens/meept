@@ -101,6 +101,16 @@ type Server struct {
 	memorySearcher MemorySearcher
 	skillsLister   SkillsLister
 	jobsLister     JobsLister
+
+	// New service dependencies
+	wsHub          *WebSocketHub
+	chatStreamer   ChatStreamer
+	sessionManager SessionManager
+	agentLister    AgentLister
+	toolLister     ToolLister
+	memoryStore    MemoryStore
+	skillExecutor  SkillExecutor
+	jobScheduler   JobScheduler
 }
 
 // ServerOption is a functional option for configuring a Server.
@@ -127,6 +137,55 @@ func WithJobsLister(jl JobsLister) ServerOption {
 	}
 }
 
+// WithChatStreamer sets the streaming chat handler.
+func WithChatStreamer(cs ChatStreamer) ServerOption {
+	return func(s *Server) {
+		s.chatStreamer = cs
+	}
+}
+
+// WithSessionManager sets the session manager.
+func WithSessionManager(sm SessionManager) ServerOption {
+	return func(s *Server) {
+		s.sessionManager = sm
+	}
+}
+
+// WithAgentLister sets the agent lister.
+func WithAgentLister(al AgentLister) ServerOption {
+	return func(s *Server) {
+		s.agentLister = al
+	}
+}
+
+// WithToolLister sets the tool lister.
+func WithToolLister(tl ToolLister) ServerOption {
+	return func(s *Server) {
+		s.toolLister = tl
+	}
+}
+
+// WithMemoryStore sets the memory store.
+func WithMemoryStore(ms MemoryStore) ServerOption {
+	return func(s *Server) {
+		s.memoryStore = ms
+	}
+}
+
+// WithSkillExecutor sets the skill executor.
+func WithSkillExecutor(se SkillExecutor) ServerOption {
+	return func(s *Server) {
+		s.skillExecutor = se
+	}
+}
+
+// WithJobScheduler sets the job scheduler.
+func WithJobScheduler(js JobScheduler) ServerOption {
+	return func(s *Server) {
+		s.jobScheduler = js
+	}
+}
+
 // NewServer creates a new HTTP API server.
 func NewServer(cfg ServerConfig, handler Handler, auth Authenticator, logger *slog.Logger, opts ...ServerOption) *Server {
 	if cfg.Addr == "" {
@@ -141,6 +200,7 @@ func NewServer(cfg ServerConfig, handler Handler, auth Authenticator, logger *sl
 		handler: handler,
 		auth:    auth,
 		logger:  logger,
+		wsHub:   NewWebSocketHub(logger),
 	}
 
 	for _, opt := range opts {
@@ -208,6 +268,22 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// WSHub returns the WebSocket hub for broadcasting messages.
+func (s *Server) WSHub() *WebSocketHub {
+	return s.wsHub
+}
+
+// SetupRoutesForTest registers routes on the given mux without starting the server.
+// This is intended for integration tests.
+func (s *Server) SetupRoutesForTest(mux *http.ServeMux) {
+	s.setupRoutes(mux)
+}
+
+// TestMiddleware returns the middleware-wrapped handler for testing.
+func (s *Server) TestMiddleware(next http.Handler) http.Handler {
+	return s.middleware(next)
+}
+
 // setupRoutes configures the HTTP routes.
 func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Health check
@@ -217,16 +293,38 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// API routes
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
-	mux.HandleFunc("POST /api/v1/query", s.handleChat) // Alias
+	mux.HandleFunc("POST /api/v1/query", s.handleChat)         // Alias
+	mux.HandleFunc("POST /api/v1/chat/stream", s.handleChatStream) // SSE streaming
+
+	// Sessions
+	mux.HandleFunc("GET /api/v1/sessions", s.handleSessionsList)
+	mux.HandleFunc("POST /api/v1/sessions", s.handleSessionsCreate)
+	mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleSessionsGet)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleSessionsDelete)
 
 	// Memory
 	mux.HandleFunc("GET /api/v1/memory/search", s.handleMemorySearch)
+	mux.HandleFunc("POST /api/v1/memory", s.handleMemoryStore)
 
 	// Skills
 	mux.HandleFunc("GET /api/v1/skills", s.handleSkillsList)
+	mux.HandleFunc("POST /api/v1/skills/{name}/execute", s.handleSkillsExecute)
 
 	// Jobs
 	mux.HandleFunc("GET /api/v1/jobs", s.handleJobsList)
+	mux.HandleFunc("POST /api/v1/jobs", s.handleJobsCreate)
+	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleJobsGet)
+	mux.HandleFunc("DELETE /api/v1/jobs/{id}", s.handleJobsCancel)
+
+	// Agents
+	mux.HandleFunc("GET /api/v1/agents", s.handleAgentsList)
+	mux.HandleFunc("POST /api/v1/agents/{id}/delegate", s.handleAgentsDelegate)
+
+	// Tools
+	mux.HandleFunc("GET /api/v1/tools", s.handleToolsList)
+
+	// WebSocket
+	mux.HandleFunc("GET /api/v1/ws", s.handleWebSocket)
 }
 
 // middleware applies common middleware.
@@ -237,7 +335,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		// CORS headers
 		if s.config.EnableCORS {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 			if r.Method == http.MethodOptions {

@@ -25,6 +25,7 @@ func newClawSkillsCmd() *cobra.Command {
 		newClawSkillsListCmd(),
 		newClawSkillsUpdateCmd(),
 		newClawSkillsInfoCmd(),
+		newClawSkillsInspectCmd(),
 	)
 
 	return cmd
@@ -282,4 +283,39 @@ func newClawSkillsInfoCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+func newClawSkillsInspectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "inspect <slug>",
+		Short: "Show installed skill details",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			slug := args[0]
+
+			client := clawskills.NewClient()
+			defer client.Close()
+
+			installer, err := clawskills.NewInstaller(client, clawskills.DefaultInstallerConfig(), nil)
+			if err != nil {
+				return fmt.Errorf("failed to create installer: %w", err)
+			}
+			defer installer.Close()
+
+			skill := installer.Get(slug)
+			if skill == nil {
+				return fmt.Errorf("skill not installed: %s", slug)
+			}
+
+			fmt.Printf("Name:        %s\n", skill.Name)
+			fmt.Printf("Slug:        %s\n", skill.Slug)
+			fmt.Printf("Version:     %s\n", skill.Version)
+			fmt.Printf("Path:        %s\n", skill.Path)
+			fmt.Printf("Installed:   %s\n", skill.InstalledAt.Format("2006-01-02"))
+			fmt.Printf("Auto-Update: %v\n", skill.AutoUpdate)
+			fmt.Printf("Verified:    %v\n", skill.Verified)
+
+			return nil
+		},
+	}
 }

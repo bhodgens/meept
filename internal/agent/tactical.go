@@ -158,7 +158,7 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		"total_ready", len(readySteps),
 	)
 
-	// Publish progress event with current step info
+	// Publish progress event with current step info (silent=true so UI shows in sidebar only)
 	currentStepDesc := ""
 	if scheduledCount > 0 {
 		for _, step := range readySteps {
@@ -172,6 +172,7 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		"task_id":         taskID,
 		"scheduled_steps": scheduledCount,
 		"current_step":    currentStepDesc,
+		"silent":          true,
 	})
 
 	return nil
@@ -562,12 +563,13 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			nextStepDesc = readySteps[0].Description
 		}
 
-		// Publish progress update
+		// Publish progress update (silent=true so UI shows in sidebar only)
 		ts.publishEvent("task.progress", map[string]any{
 			"task_id":        step.TaskID,
 			"completed_jobs": t.CompletedJobs,
 			"total_jobs":     t.TotalJobs,
 			"current_step":   nextStepDesc,
+			"silent":         true,
 		})
 	}
 
@@ -770,6 +772,7 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 			"completed_jobs": t.CompletedJobs,
 			"total_jobs":     t.TotalJobs,
 			"current_step":   nextStepDesc,
+			"silent":         true,
 		})
 	}
 

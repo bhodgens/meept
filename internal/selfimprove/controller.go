@@ -22,6 +22,11 @@ import (
 // (started, detecting, analyzing, generating, validating, applying, completed).
 const statusTopic = "selfimprove.status"
 
+// ProgressCallback is invoked during cycle execution to report progress.
+// phase is one of "detecting", "analyzing", "generating", "validating",
+// "applying". progress is 0.0-1.0. message is a human-readable description.
+type ProgressCallback func(phase string, progress float64, message string)
+
 // Controller orchestrates the full self-improvement cycle.
 type Controller struct {
 	mu sync.RWMutex
@@ -52,6 +57,9 @@ type Controller struct {
 	// Error tracking for circuit breaker
 	failureCounts        map[string]int // issue_id -> failure count
 	consecutiveFailures  int
+
+	// Optional progress callback for external observers (TUI, RPC).
+	progressCallback ProgressCallback
 }
 
 // NewController creates a new Controller.
@@ -119,6 +127,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 
 	c.logger.Info("starting improvement cycle", "cycle_id", cycleID)
 	c.publishStatus("started", map[string]any{"cycle_id": cycleID})
+	c.emitProgress("started", 0.0, "cycle "+cycleID+" starting")
 
 	defer func() {
 		now := time.Now()
@@ -130,6 +139,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	// Phase 1: Detection
 	c.logger.Info("phase 1 - detecting issues")
 	c.publishStatus("detecting", map[string]any{"cycle_id": cycleID})
+	c.emitProgress("detecting", 0.1, "detecting issues in codebase")
 
 	issues, err := c.detector.DetectAll(ctx)
 	if err != nil {
@@ -139,6 +149,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	}
 	c.issues = issues
 	c.currentCycle.IssuesDetected = len(issues)
+	c.emitProgress("detecting", 0.2, fmt.Sprintf("detected %d issues", len(issues)))
 
 	if len(issues) == 0 {
 		c.logger.Info("no issues detected")
@@ -149,6 +160,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	// Phase 2: Analysis
 	c.logger.Info("phase 2 - analyzing issues", "count", len(issues))
 	c.publishStatus("analyzing", map[string]any{"cycle_id": cycleID, "issues_count": len(issues)})
+	c.emitProgress("analyzing", 0.3, fmt.Sprintf("analyzing %d issues", len(issues)))
 
 	c.analyses = nil
 	for _, issue := range issues[:min(len(issues), c.config.MaxIterationsPerCycle)] {
@@ -180,6 +192,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	// Phase 3: Generation
 	c.logger.Info("phase 3 - generating fixes", "analyses_count", len(c.analyses))
 	c.publishStatus("generating", map[string]any{"cycle_id": cycleID, "analyses_count": len(c.analyses)})
+	c.emitProgress("generating", 0.5, fmt.Sprintf("generating fixes for %d analyses", len(c.analyses)))
 
 	c.fixes = nil
 	issueMap := make(map[string]Issue)
@@ -218,6 +231,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	// Phase 4: Validation
 	c.logger.Info("phase 4 - validating fixes", "fixes_count", len(c.fixes))
 	c.publishStatus("validating", map[string]any{"cycle_id": cycleID, "fixes_count": len(c.fixes)})
+	c.emitProgress("validating", 0.7, fmt.Sprintf("validating %d fixes", len(c.fixes)))
 
 	c.validations = nil
 	for _, fix := range c.fixes {
@@ -245,6 +259,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 
 	c.logger.Info("phase 5 - applying fixes", "validated_count", len(validatedFixes))
 	c.publishStatus("applying", map[string]any{"cycle_id": cycleID, "validated_count": len(validatedFixes)})
+	c.emitProgress("applying", 0.9, fmt.Sprintf("applying %d validated fixes", len(validatedFixes)))
 
 	for _, pair := range validatedFixes {
 		approvedBy := "auto"
@@ -283,6 +298,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 		"applied", c.currentCycle.FixesApplied)
 
 	c.publishStatus("completed", c.currentCycle)
+	c.emitProgress("completed", 1.0, fmt.Sprintf("cycle completed: %d applied", c.currentCycle.FixesApplied))
 	return c.currentCycle, nil
 }
 
@@ -319,6 +335,11 @@ func (c *Controller) Detect(ctx context.Context) ([]Issue, error) {
 	return issues, nil
 }
 
+// GetApplier returns the change applier for direct testing access.
+func (c *Controller) GetApplier() *ChangeApplier {
+	return c.applier
+}
+
 // GetStatus returns the current status.
 func (c *Controller) GetStatus() *ControllerStatus {
 	c.mu.RLock()
@@ -342,6 +363,48 @@ func (c *Controller) GetStatus() *ControllerStatus {
 		PendingApprovals:      pendingApprovals,
 		CyclesCompleted:       len(c.cycles),
 	}
+}
+
+// SetProgressCallback sets an optional callback invoked during cycle execution
+// to report phase progress. Safe to call before or after Initialize.
+func (c *Controller) SetProgressCallback(cb ProgressCallback) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.progressCallback = cb
+}
+
+// emitProgress invokes the progress callback if one is registered.
+func (c *Controller) emitProgress(phase string, progress float64, message string) {
+	c.mu.RLock()
+	cb := c.progressCallback
+	c.mu.RUnlock()
+	if cb != nil {
+		cb(phase, progress, message)
+	}
+}
+
+// ApproveFix approves a pending fix and applies it.
+func (c *Controller) ApproveFix(ctx context.Context, fixID string) (*AppliedFix, error) {
+	if c.applier == nil {
+		return nil, fmt.Errorf("controller not initialized")
+	}
+	applied, err := c.applier.Approve(ctx, fixID)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.applied = append(c.applied, applied)
+	c.mu.Unlock()
+	c.logger.Info("fix approved and applied", "fix_id", fixID)
+	return applied, nil
+}
+
+// RejectFix rejects a pending fix.
+func (c *Controller) RejectFix(fixID, reason string) error {
+	if c.applier == nil {
+		return fmt.Errorf("controller not initialized")
+	}
+	return c.applier.Reject(fixID, reason)
 }
 
 // Stop stops the controller.

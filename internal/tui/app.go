@@ -70,11 +70,12 @@ type App struct {
 	clientConfig *ClientConfig
 
 	// Modal state
-	activeModal    ModalType
-	commandPalette *Modal
-	sessionPicker  *SessionPickerModal
-	sessionRename  *SessionRenameModal
-	confirmModal   *ConfirmModal
+	activeModal     ModalType
+	commandPalette  *Modal
+	sessionPicker   *SessionPickerModal
+	sessionRename   *SessionRenameModal
+	confirmModal    *ConfirmModal
+	fuzzyFinder     *FuzzyFinderModal
 
 	// Current session
 	currentSession *types.Session
@@ -183,6 +184,7 @@ func NewApp(socketPath string) *App {
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	app.sessionRename = NewSessionRenameModal(styles)
+	app.fuzzyFinder = NewFuzzyFinderModal(styles, rpc)
 
 	// Initialize slash autocomplete
 	app.slashAutocomplete = NewSlashAutocomplete(styles)
@@ -1073,6 +1075,8 @@ func (a *App) renderModalOverlay() string {
 		if a.confirmModal != nil {
 			return a.confirmModal.View(a.width, a.height)
 		}
+	case ModalFuzzyFinder:
+		return a.fuzzyFinder.View(a.width, a.height)
 	}
 	return ""
 }

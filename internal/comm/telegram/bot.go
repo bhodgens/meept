@@ -63,6 +63,12 @@ type getUpdatesResponse struct {
 // MessageHandler handles incoming messages.
 type MessageHandler func(ctx context.Context, msg *Message) (string, error)
 
+// SessionResetter is an optional interface that message handlers can implement
+// to support the /new command for resetting chat sessions.
+type SessionResetter interface {
+	ResetSession(chatID int64)
+}
+
 // BotConfig holds configuration for the Telegram bot.
 type BotConfig struct {
 	Token          string   // Bot API token
@@ -79,6 +85,7 @@ type Bot struct {
 	config     BotConfig
 	httpClient *http.Client
 	handler    MessageHandler
+	resetter   SessionResetter // optional: supports /new command
 	logger     *slog.Logger
 
 	running    bool
@@ -159,6 +166,11 @@ func (b *Bot) Stop() {
 	}
 }
 
+// SetResetter sets the session resetter for /new command support.
+func (b *Bot) SetResetter(r SessionResetter) {
+	b.resetter = r
+}
+
 // getUpdates fetches updates from Telegram.
 func (b *Bot) getUpdates(ctx context.Context) ([]Update, error) {
 	params := url.Values{}
@@ -210,7 +222,16 @@ func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 		"chat_id", msg.Chat.ID,
 		"text", truncate(msg.Text, 50))
 
-	// Process message
+	// Check for bot commands
+	if strings.HasPrefix(msg.Text, "/") {
+		b.handleCommand(ctx, msg)
+		return
+	}
+
+	// Send typing indicator
+	_ = b.SendTyping(ctx, msg.Chat.ID)
+
+	// Process message through handler
 	response, err := b.handler(ctx, msg)
 	if err != nil {
 		b.logger.Error("handler error", "error", err)
@@ -219,11 +240,66 @@ func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 
 	// Send response
 	if response != "" {
-		if err := b.SendMessage(ctx, msg.Chat.ID, response); err != nil {
+		formatted := FormatResponse(response)
+		if err := b.SendMessage(ctx, msg.Chat.ID, formatted); err != nil {
 			b.logger.Error("failed to send response", "error", err)
 		}
 	}
 }
+
+// handleCommand processes bot commands (/start, /help, /status, /new).
+func (b *Bot) handleCommand(ctx context.Context, msg *Message) {
+	parts := strings.SplitN(msg.Text, " ", 2)
+	cmd := strings.TrimPrefix(parts[0], "/")
+
+	// Strip @botname suffix if present
+	if atIdx := strings.Index(cmd, "@"); atIdx > 0 {
+		cmd = cmd[:atIdx]
+	}
+
+	switch cmd {
+	case "start":
+		_ = b.SendMessage(ctx, msg.Chat.ID,
+			"Hello! I'm Meept, your AI assistant\\. Send me a message to get started\\.")
+
+	case "help":
+		_ = b.SendMessage(ctx, msg.Chat.ID, helpMessage)
+
+	case "status":
+		_ = b.SendMessage(ctx, msg.Chat.ID,
+			"Meept daemon is running\\. Send a message to chat\\.")
+
+	case "new":
+		// Reset session if a resetter is configured
+		if b.resetter != nil {
+			b.resetter.ResetSession(msg.Chat.ID)
+		}
+		_ = b.SendMessage(ctx, msg.Chat.ID,
+			"Started a new conversation session\\.")
+
+	default:
+		// Unknown command - treat as regular message
+		response, err := b.handler(ctx, msg)
+		if err != nil {
+			b.logger.Error("handler error for command", "error", err, "command", cmd)
+			response = fmt.Sprintf("Error: %v", err)
+		}
+		if response != "" {
+			formatted := FormatResponse(response)
+			_ = b.SendMessage(ctx, msg.Chat.ID, formatted)
+		}
+	}
+}
+
+const helpMessage = `*Meept Bot Commands*
+
+/start \\- Start conversation
+/help \\- Show this help
+/status \\- Check daemon status
+/new \\- Start new session
+
+Just send me a message to chat\\!`
+
 
 // SendMessage sends a message to a chat.
 func (b *Bot) SendMessage(ctx context.Context, chatID int64, text string) error {

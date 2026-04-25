@@ -312,6 +312,59 @@ func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
 	return true
 }
 
+// ReplanFailedTask re-plans a failed task into smaller steps for retry.
+// This is called by the EscalationManager when a task fails and needs to be
+// broken down into more manageable pieces.
+func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID string, failureReason string) error {
+	sp.logger.Info("Re-planning failed task",
+		"task_id", taskID,
+		"failure_reason", failureReason,
+	)
+
+	if sp.taskStore == nil {
+		return fmt.Errorf("task store not available for re-planning")
+	}
+
+	t, err := sp.taskStore.GetByID(taskID)
+	if err != nil || t == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+
+	// Get any completed steps to avoid re-doing them
+	var completedSteps []*task.TaskStep
+	if sp.stepStore != nil {
+		var err error
+		completedSteps, err = sp.stepStore.ListByTaskID(taskID)
+		if err != nil {
+			sp.logger.Error("Failed to list steps for re-plan", "error", err)
+		}
+	}
+
+	// Build remaining work description
+	var completedDescs []string
+	for _, s := range completedSteps {
+		if s.State.IsSuccessfullyTerminal() {
+			completedDescs = append(completedDescs, s.Description)
+		}
+	}
+
+	replanDesc := fmt.Sprintf(
+		"RE-PLAN: Task '%s' failed with error: %s.\nCompleted steps (do not redo): %s\nRemaining work: %s",
+		t.Description,
+		failureReason,
+		fmt.Sprintf("%v", completedDescs),
+		t.Description,
+	)
+
+	req := PlanRequest{
+		TaskID: taskID,
+		Input:  replanDesc,
+		Intent: "plan",
+	}
+
+	return sp.Plan(ctx, req)
+}
+
 func (sp *StrategicPlanner) publishEvent(topic string, data map[string]any) {
 	if sp.bus == nil {
 		return
