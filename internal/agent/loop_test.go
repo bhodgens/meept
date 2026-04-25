@@ -594,9 +594,9 @@ func TestRecallModeDisabledGatesMemoryTools(t *testing.T) {
 	loop.executor = NewExecutor(registry, nil)
 
 	toolCalls := []llm.ToolCall{
-		{ID: "tc-1", Function: llm.FunctionCall{Name: "memory_search", Arguments: `{"query":"test"}`}},
-		{ID: "tc-2", Function: llm.FunctionCall{Name: "file_read", Arguments: `{"path":"/tmp/test"}`}},
-		{ID: "tc-3", Function: llm.FunctionCall{Name: "memory_store", Arguments: `{"content":"test"}`}},
+		{ID: "tc-1", Function: llm.ToolCallFunction{Name: "memory_search", Arguments: `{"query":"test"}`}},
+		{ID: "tc-2", Function: llm.ToolCallFunction{Name: "file_read", Arguments: `{"path":"/tmp/test"}`}},
+		{ID: "tc-3", Function: llm.ToolCallFunction{Name: "memory_store", Arguments: `{"content":"test"}`}},
 	}
 
 	results := loop.executeToolCalls(context.Background(), toolCalls)
@@ -643,7 +643,7 @@ func TestRecallModeAutoAllowsMemoryTools(t *testing.T) {
 	loop.executor = NewExecutor(registry, nil)
 
 	toolCalls := []llm.ToolCall{
-		{ID: "tc-1", Function: llm.FunctionCall{Name: "memory_search", Arguments: `{"query":"test"}`}},
+		{ID: "tc-1", Function: llm.ToolCallFunction{Name: "memory_search", Arguments: `{"query":"test"}`}},
 	}
 
 	results := loop.executeToolCalls(context.Background(), toolCalls)

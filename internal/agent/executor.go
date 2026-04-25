@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
+	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
@@ -114,7 +116,11 @@ func (r *ExecutionResult) ToCompressedJSON(maxTokens int) string {
 	// Handle the result based on type
 	switch result := r.Result.(type) {
 	case string:
-		compressed.Result = truncateWithMarker(result, maxChars-200) // Reserve space for JSON wrapper
+		if looksLikeCode(result) {
+			compressed.Result = compressCodeResult(result, maxChars-200)
+		} else {
+			compressed.Result = truncateWithMarker(result, maxChars-200) // Reserve space for JSON wrapper
+		}
 	case map[string]any:
 		compressed.Result = compressMapResult(result, maxChars-200)
 	default:
@@ -135,6 +141,9 @@ func (r *ExecutionResult) ToCompressedJSON(maxTokens int) string {
 
 // truncateWithMarker truncates a string and adds a truncation marker.
 func truncateWithMarker(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return "...[truncated]"
+	}
 	if len(s) <= maxLen {
 		return s
 	}
@@ -176,6 +185,142 @@ func compressMapResult(m map[string]any, maxChars int) map[string]any {
 	}
 
 	return compressed
+}
+
+// looksLikeCode performs a heuristic check to determine if a string resembles
+// source code. It checks for common code indicators like keywords, braces,
+// and structural patterns.
+func looksLikeCode(s string) bool {
+	if len(s) < 20 {
+		return false
+	}
+
+	// Check for common code keywords/patterns
+	codeIndicators := []string{
+		"func ", "package ", "import ", "type ", "struct ", "interface ",
+		"func(", "func (",
+		"def ", "class ", "async def ",
+		"fn ", "impl ", "pub fn ", "pub struct ",
+		"void ", "int main(", "public class ", "private ",
+		"function ", "const ", "let ", "var ",
+		"module ", "require(", "#include",
+	}
+
+	// Count how many indicators match
+	matches := 0
+	for _, indicator := range codeIndicators {
+		if strings.Contains(s, indicator) {
+			matches++
+		}
+	}
+
+	// If we find 2 or more indicators, it's likely code
+	if matches >= 2 {
+		return true
+	}
+
+	// Check for structural patterns: balanced braces with content
+	braceCount := 0
+	hasStructuralContent := false
+	lines := strings.Split(s, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+		for _, ch := range trimmed {
+			switch ch {
+			case '{':
+				braceCount++
+			case '}':
+				braceCount--
+			}
+		}
+		// Check for lines that look like declarations
+		if strings.HasSuffix(trimmed, "{") ||
+			strings.HasPrefix(trimmed, "//") ||
+			strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "#!") {
+			hasStructuralContent = true
+		}
+	}
+
+	// Balanced braces with structural content suggests code
+	return braceCount == 0 && hasStructuralContent && matches >= 1
+}
+
+// compressCodeResult compresses a code string using AST-aware compression.
+// It detects the language from content heuristics, then uses tree-sitter
+// to preserve function signatures and type definitions while compressing bodies.
+// Falls back to simple truncation if the language cannot be detected or parsed.
+func compressCodeResult(code string, maxChars int) string {
+	if len(code) <= maxChars {
+		return code
+	}
+
+	lang := detectLanguageFromContent(code)
+	if lang == ast.LangUnknown {
+		return truncateWithMarker(code, maxChars)
+	}
+
+	compressed := ast.CompressCodeAtBoundaries([]byte(code), lang, maxChars)
+	if len(compressed) > maxChars+50 {
+		// AST compression produced something still too large; fallback
+		return truncateWithMarker(code, maxChars)
+	}
+	return compressed
+}
+
+// detectLanguageFromContent attempts to determine the programming language
+// of a code string using content-based heuristics.
+func detectLanguageFromContent(s string) ast.Language {
+	// Go indicators
+	if strings.Contains(s, "package ") && (strings.Contains(s, "func ") || strings.Contains(s, "func(")) {
+		return ast.LangGo
+	}
+	if strings.Contains(s, "func (") && strings.Contains(s, "type ") {
+		return ast.LangGo
+	}
+
+	// Python indicators
+	if (strings.HasPrefix(s, "def ") || strings.Contains(s, "\ndef ")) &&
+		!strings.Contains(s, "func ") {
+		return ast.LangPython
+	}
+	if strings.Contains(s, "class ") && strings.Contains(s, "def ") &&
+		strings.Contains(s, "self") {
+		return ast.LangPython
+	}
+
+	// Rust indicators
+	if strings.Contains(s, "fn ") && (strings.Contains(s, "let ") || strings.Contains(s, "impl ") || strings.Contains(s, "pub ")) {
+		return ast.LangRust
+	}
+	if strings.Contains(s, "pub fn ") || strings.Contains(s, "pub struct ") {
+		return ast.LangRust
+	}
+
+	// JavaScript/TypeScript indicators
+	if (strings.Contains(s, "function ") || strings.Contains(s, "= function") || strings.Contains(s, "=> ")) &&
+		(strings.Contains(s, "const ") || strings.Contains(s, "let ") || strings.Contains(s, "var ")) {
+		return ast.LangJavaScript
+	}
+
+	// Java indicators
+	if strings.Contains(s, "public class ") || strings.Contains(s, "private ") && strings.Contains(s, "void ") {
+		return ast.LangJava
+	}
+
+	// C/C++ indicators
+	if strings.Contains(s, "#include") && (strings.Contains(s, "int main") || strings.Contains(s, "void ")) {
+		return ast.LangC
+	}
+
+	// Ruby indicators
+	if strings.Contains(s, "def ") && strings.Contains(s, "end") && !strings.Contains(s, "func ") {
+		return ast.LangRuby
+	}
+
+	return ast.LangUnknown
 }
 
 // ToChatMessage converts the result to a tool role chat message.

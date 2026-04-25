@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -256,4 +257,189 @@ func (pm *ParserManager) GetTree(ctx context.Context, source []byte, lang Langua
 	}
 
 	return parser.ParseCtx(ctx, nil, source)
+}
+
+// CompressCodeAtBoundaries compresses source code by keeping structural elements
+// (function/method signatures, type definitions, imports, package/module declarations)
+// while truncating function bodies. It returns the compressed code string with a
+// "...[compressed]" marker where bodies were removed.
+//
+// If the compressed output still exceeds maxChars, it falls back to simple truncation.
+// If parsing fails, it returns the original source truncated to maxChars with a marker.
+func CompressCodeAtBoundaries(source []byte, lang Language, maxChars int) string {
+	if len(source) <= maxChars {
+		return string(source)
+	}
+	if lang == LangUnknown || maxChars <= 0 {
+		return truncateByteFallback(source, maxChars)
+	}
+
+	grammar := GetLanguageGrammar(lang)
+	if grammar == nil {
+		return truncateByteFallback(source, maxChars)
+	}
+
+	parser := sitter.NewParser()
+	parser.SetLanguage(grammar)
+
+	tree, err := parser.ParseCtx(context.Background(), nil, source)
+	if err != nil || tree == nil {
+		return truncateByteFallback(source, maxChars)
+	}
+	defer tree.Close()
+
+	root := tree.RootNode()
+	if root.HasError() && root.ChildCount() == 0 {
+		return truncateByteFallback(source, maxChars)
+	}
+
+	// Collect ranges of "body" nodes to exclude (function bodies, method bodies)
+	bodyRanges := collectBodyRanges(root, source, lang)
+
+	// Reconstruct the source, skipping body ranges
+	var buf strings.Builder
+	prevEnd := 0
+	removed := 0
+
+	for _, br := range bodyRanges {
+		// Write everything before this body range
+		if br.start > prevEnd {
+			buf.Write(source[prevEnd:br.start])
+		}
+		removed += br.end - br.start
+		buf.WriteString(" { ...[compressed] }")
+		prevEnd = br.end
+	}
+
+	// Write remaining content after last body range
+	if prevEnd < len(source) {
+		buf.Write(source[prevEnd:])
+	}
+
+	result := buf.String()
+
+	// If still too large, fall back to truncation
+	if len(result) > maxChars {
+		return truncateStrFallback(result, maxChars)
+	}
+
+	return result
+}
+
+// bodyRange represents a byte range in the source to be compressed.
+type bodyRange struct {
+	start int
+	end   int
+}
+
+// collectBodyRanges finds function/method body ranges in the AST that should
+// be compressed. It prioritizes bodies from the end of the file so that
+// early code (signatures, types, imports) is preserved.
+func collectBodyRanges(root *sitter.Node, source []byte, lang Language) []bodyRange {
+	var ranges []bodyRange
+
+	var walk func(*sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+
+		if isBodyHolder(node, lang) {
+			body := node.ChildByFieldName("body")
+			if body != nil && body.EndByte()-body.StartByte() > 0 {
+				// Include the braces/brackets of the body
+				start := body.StartByte()
+				end := body.EndByte()
+				// Extend to include closing brace on same line
+				if end <= uint32(len(source)) {
+					ranges = append(ranges, bodyRange{start: int(start), end: int(end)})
+				}
+				// Don't recurse into the body itself
+				return
+			}
+			// For Go specifically, check for "block" child (function body)
+			if lang == LangGo {
+				block := findChildByType(node, "block")
+				if block != nil && block.EndByte()-block.StartByte() > 2 {
+					ranges = append(ranges, bodyRange{start: int(block.StartByte()), end: int(block.EndByte())})
+					return
+				}
+			}
+		}
+
+		for i := uint32(0); i < node.ChildCount(); i++ {
+			child := node.Child(int(i))
+			if child != nil {
+				walk(child)
+			}
+		}
+	}
+
+	walk(root)
+
+	return ranges
+}
+
+// isBodyHolder checks if a node type typically contains a body that can be compressed.
+func isBodyHolder(node *sitter.Node, lang Language) bool {
+	t := node.Type()
+	switch lang {
+	case LangGo:
+		return t == "function_declaration" || t == "method_declaration" || t == "func_literal"
+	case LangPython:
+		return t == "function_definition" || t == "class_definition"
+	case LangTypeScript, LangJavaScript:
+		return t == "function_declaration" || t == "class_declaration" || t == "method_definition" || t == "arrow_function" || t == "function_expression"
+	case LangRust:
+		return t == "function_item" || t == "impl_item"
+	case LangJava:
+		return t == "method_declaration" || t == "class_declaration" || t == "constructor_declaration"
+	case LangC, LangCpp:
+		return t == "function_definition" || t == "class_specifier" || t == "struct_specifier"
+	case LangRuby:
+		return t == "method" || t == "class" || t == "module"
+	default:
+		return false
+	}
+}
+
+// findChildByType finds the first direct child with the given type.
+func findChildByType(node *sitter.Node, childType string) *sitter.Node {
+	for i := uint32(0); i < node.ChildCount(); i++ {
+		child := node.Child(int(i))
+		if child != nil && child.Type() == childType {
+			return child
+		}
+	}
+	return nil
+}
+
+// truncateByteFallback truncates byte content to maxChars with a marker.
+func truncateByteFallback(source []byte, maxChars int) string {
+	if maxChars <= 0 {
+		return ""
+	}
+	if len(source) <= maxChars {
+		return string(source)
+	}
+	const marker = "\n...[truncated]"
+	if maxChars <= len(marker) {
+		return string(source[:maxChars])
+	}
+	return string(source[:maxChars-len(marker)]) + marker
+}
+
+// truncateStrFallback truncates a string to maxChars with a marker.
+func truncateStrFallback(s string, maxChars int) string {
+	if maxChars <= 0 {
+		return ""
+	}
+	if len(s) <= maxChars {
+		return s
+	}
+	const marker = "\n...[truncated]"
+	if maxChars <= len(marker) {
+		return s[:maxChars]
+	}
+	return s[:maxChars-len(marker)] + marker
 }

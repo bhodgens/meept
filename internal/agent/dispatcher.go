@@ -872,7 +872,7 @@ func (d *Dispatcher) applyContextWeighting(intent *Intent, memCtx *MemoryContext
 		boost = 0.3
 	}
 
-	intent.Confidence = min(intent.Confidence+boost, 1.0)
+	intent.Confidence = math.Min(intent.Confidence+boost, 1.0)
 	return intent
 }
 
