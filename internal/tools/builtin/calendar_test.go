@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/caimlas/meept/internal/calendar"
 )
@@ -14,13 +13,8 @@ import (
 // newTestCalendarClient creates a calendar client pointing at a test server.
 func newTestCalendarClient(handler http.HandlerFunc) (*calendar.Client, *httptest.Server) {
 	server := httptest.NewServer(handler)
-	// We need to create a client that talks to our test server.
-	// Since the client hardcodes the Google API base URL, we create it manually.
-	return &calendar.Client{
-		httpClient:  server.Client(),
-		accessToken: "test-token",
-		calendarID:  "primary",
-	}, server
+	client := calendar.NewClientForTesting(server.URL, "test-token", "primary")
+	return client, server
 }
 
 func TestCalendarListTool_Name(t *testing.T) {

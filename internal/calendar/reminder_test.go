@@ -258,9 +258,10 @@ func TestClient_CreateEvent(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  server.Client(),
 		accessToken: "test-token",
 		calendarID:  "primary",
+		baseURL:     server.URL,
 		logger:      nil,
 	}
 
@@ -297,9 +298,10 @@ func TestClient_QuickAdd(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  server.Client(),
 		accessToken: "test-token",
 		calendarID:  "primary",
+		baseURL:     server.URL,
 		logger:      nil,
 	}
 
@@ -323,9 +325,10 @@ func TestClient_DeleteEvent(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  server.Client(),
 		accessToken: "test-token",
 		calendarID:  "primary",
+		baseURL:     server.URL,
 		logger:      nil,
 	}
 
@@ -342,9 +345,10 @@ func TestClient_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  server.Client(),
 		accessToken: "bad-token",
 		calendarID:  "primary",
+		baseURL:     server.URL,
 		logger:      nil,
 	}
 
