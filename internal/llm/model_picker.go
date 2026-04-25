@@ -35,7 +35,7 @@ func (m modelModelItem) Title() string { return m.entry.Name }
 func (m modelModelItem) Description() string {
 	caps := strings.Join(m.entry.Capabilities, ", ")
 	ctxK := m.entry.ContextWindow / 1000
-	priceStr := fmt.Sprintf("$%.2f/$.2f", m.entry.InputCost, m.entry.OutputCost)
+	priceStr := fmt.Sprintf("$%.2f/$%.2f", m.entry.InputCost, m.entry.OutputCost)
 	return fmt.Sprintf("%s | Context: %dK | %s | %s", m.entry.ModelID, ctxK, priceStr, caps)
 }
 func (m modelModelItem) FilterValue() string { return m.entry.Name + " " + m.entry.ModelID }
