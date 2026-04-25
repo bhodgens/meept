@@ -48,20 +48,38 @@ type ContextFirewall struct {
 	dropEvents            atomic.Uint64
 }
 
-// FirewallStats is a snapshot of firewall counters.
+// FirewallStats is a snapshot of firewall counters including compression stats.
 type FirewallStats struct {
 	SummarizationFailures uint64
 	DroppedMessages       uint64
 	DropEvents            uint64
+	// Compression stats (populated when ProactiveCompression is enabled)
+	CompressionWarningEvents   uint64
+	CompressionSummarizeEvents uint64
+	CompressionAggressiveEvents uint64
+	CompressionHardLimitEvents uint64
+	CompressionTokensSaved     uint64
 }
 
-// Stats returns a snapshot of firewall counters.
+// Stats returns a snapshot of firewall counters. When proactive compression
+// is enabled, compression counters are populated from the internal compressor.
 func (f *ContextFirewall) Stats() FirewallStats {
-	return FirewallStats{
+	stats := FirewallStats{
 		SummarizationFailures: f.summarizationFailures.Load(),
 		DroppedMessages:       f.droppedMessages.Load(),
 		DropEvents:            f.dropEvents.Load(),
 	}
+
+	if f.compressor != nil {
+		cs := f.compressor.Stats()
+		stats.CompressionWarningEvents = cs.WarningEvents
+		stats.CompressionSummarizeEvents = cs.SummarizeEvents
+		stats.CompressionAggressiveEvents = cs.AggressiveEvents
+		stats.CompressionHardLimitEvents = cs.HardLimitEvents
+		stats.CompressionTokensSaved = cs.TotalTokensSaved
+	}
+
+	return stats
 }
 
 // Compress runs the multi-stage compressor on messages and returns the result.
