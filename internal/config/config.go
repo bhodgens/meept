@@ -116,7 +116,6 @@ func expandConfigPaths(cfg *Config) {
 	cfg.MCP.ConfigFile = expandPath(cfg.MCP.ConfigFile)
 	cfg.Plugins.Directory = expandPath(cfg.Plugins.Directory)
 	cfg.Workspace.BaseDir = expandPath(cfg.Workspace.BaseDir)
-	cfg.ClawSkills.InstallDir = expandPath(cfg.ClawSkills.InstallDir)
 	cfg.SelfImprove.DataDir = expandPath(cfg.SelfImprove.DataDir)
 	cfg.SelfImprove.Sandbox.WorktreeDir = expandPath(cfg.SelfImprove.Sandbox.WorktreeDir)
 	cfg.SelfImprove.Detection.LogFile = expandPath(cfg.SelfImprove.Detection.LogFile)

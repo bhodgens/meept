@@ -101,6 +101,7 @@ type Components struct {
 	SkillLoader     *skills.LazySkillLoader
 	CapabilityIndex *skills.CapabilityIndex
 
+
 	// Agent capabilities
 	CapabilitiesMap *agent.CapabilitiesMap
 
@@ -214,10 +215,6 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		c.initializeSkills(cfg, logger)
 	}
 
-	// Initialize ClawSkills system (third-party skills from ClawHub)
-	if cfg.ClawSkills.Enabled {
-		c.initializeClawSkills(cfg, logger)
-	}
 
 	// Create shadow training manager early (before agent loop) so it can be injected
 	if cfg.Shadow.Enabled {
@@ -292,12 +289,6 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			"",
 			logger.With("component", "selfimprove"),
 		)
-		// Wire security orchestrator so the controller can scan generated
-		// patches for credentials and sanitize output during improvement cycles.
-		if c.SecurityOrchestrator != nil {
-			c.SelfImproveCtrl.SetSecurityOrchestrator(c.SecurityOrchestrator)
-			logger.Info("Self-improve controller wired with security orchestrator")
-		}
 		if err := c.SelfImproveCtrl.Initialize(context.Background()); err != nil {
 			logger.Error("Failed to initialize self-improve controller", "error", err)
 			c.SelfImproveCtrl = nil
@@ -389,12 +380,6 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
-
-	// Wire memory caching config from global config into agent config
-	agentCfg := agent.DefaultAgentConfig()
-	agentCfg.Memory.SnapshotCachingEnabled = cfg.Memory.Caching.Enabled
-	agentOpts = append(agentOpts, agent.WithAgentConfig(agentCfg))
-
 	// Note: memvid and taskStore are wired AFTER their initialization below
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
 
@@ -2041,114 +2026,9 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 
 }
 
-// initializeClawSkills sets up the third-party ClawSkills system.
 // It scans the install directory, loads the index with claw: prefix enforcement,
 // applies the blocklist, and guarantees risk_level=high for all entries.
-// Loaded clawskills are registered into the skill index and skill registry
 // with the claw: prefix to prevent shadowing local skills.
-func (c *Components) initializeClawSkills(cfg *config.Config, logger *slog.Logger) {
-	clawLogger := logger.With("component", "clawskills")
-
-	// Create ClawSkills API client
-	clientOpts := []clawskills.ClientOption{}
-	if cfg.ClawSkills.RegistryURL != "" {
-		clientOpts = append(clientOpts, clawskills.WithBaseURL(cfg.ClawSkills.RegistryURL))
-	}
-	c.ClawSkillClient = clawskills.NewClient(clientOpts...)
-
-	// Resolve install directory
-	installDir := cfg.ClawSkills.InstallDir
-	if installDir == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			clawLogger.Error("Failed to resolve home directory for clawskills", "error", err)
-			return
-		}
-		installDir = filepath.Join(homeDir, ".meept", "clawskills")
-	}
-	// Expand ~ in path
-	installDir = expandHomePath(installDir)
-
-	// Ensure install directory exists
-	if err := os.MkdirAll(installDir, 0755); err != nil {
-		clawLogger.Error("Failed to create clawskills install directory", "path", installDir, "error", err)
-		return
-	}
-
-	// Scan and load installed clawskills with blocklist enforcement
-	blockedSlugs := cfg.ClawSkills.BlockedSlugs
-	if blockedSlugs == nil {
-		blockedSlugs = []string{}
-	}
-
-	idx, warnings, err := clawskills.ScanAndLoad(installDir, blockedSlugs, clawLogger)
-	if err != nil {
-		clawLogger.Error("Failed to scan clawskills directory", "error", err)
-		return
-	}
-
-	c.ClawSkillIndex = idx
-	clawLogger.Info("ClawSkills index loaded",
-		"count", idx.Count(),
-		"blocked_slugs", len(blockedSlugs),
-		"warnings", len(warnings),
-	)
-
-	// Register clawskills into the unified skill index with claw: prefix
-	if c.SkillIndex != nil {
-		for _, installed := range idx.List() {
-			entry := &skills.SkillIndexEntry{
-				Name:         installed.Name, // Already claw:-prefixed by ScanAndLoad
-				Description:  fmt.Sprintf("Third-party skill from ClawHub (v%s)", installed.Version),
-				Path:         filepath.Join(installed.Path, "SKILL.md"),
-				RiskLevel:    clawskills.DefaultRiskLevel,
-				AllowedTools: clawskills.FilterTools(nil), // Start with empty allowed; skill declares its own
-				Tags:         []string{"clawskill", "third-party"},
-			}
-			c.SkillIndex.Index(entry)
-		}
-	}
-
-	// Also register into the skill registry for backwards compatibility
-	if c.SkillRegistry != nil {
-		for _, installed := range idx.List() {
-			skillPath := filepath.Join(installed.Path, "SKILL.md")
-			if _, err := os.Stat(skillPath); err != nil {
-				clawLogger.Debug("ClawSkill has no SKILL.md, skipping registry load",
-					"slug", installed.Slug,
-				)
-				continue
-			}
-
-			skill, err := skills.ParseSkillFile(skillPath)
-			if err != nil {
-				clawLogger.Warn("Failed to parse clawskill SKILL.md",
-					"slug", installed.Slug,
-					"path", skillPath,
-					"error", err,
-				)
-				continue
-			}
-
-			// Enforce namespace prefix and security constraints
-			skill.Name = installed.Name // claw:-prefixed
-			skill.RiskLevel = clawskills.DefaultRiskLevel
-			if skill.MaxIterations <= 0 || skill.MaxIterations > clawskills.DefaultMaxIterations {
-				skill.MaxIterations = clawskills.DefaultMaxIterations
-			}
-			// Filter blocked tools from the skill's allowed tools
-			skill.AllowedTools = clawskills.FilterTools(skill.AllowedTools)
-
-			c.SkillRegistry.Register(skill)
-		}
-	}
-
-	clawLogger.Info("ClawSkills registered into skill system",
-		"indexed", idx.Count(),
-	)
-}
-
-// expandHomePath expands ~ to the user's home directory.
 func expandHomePath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		homeDir, err := os.UserHomeDir()

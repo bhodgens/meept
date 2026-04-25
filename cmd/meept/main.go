@@ -91,7 +91,7 @@ Multi-Agent Orchestration:
 Memory & Skills:
   meept memory                           # Search memory
   meept jobs                             # View scheduled jobs
-  meept clawskills                       # Manage third-party skills`,
+  meept config                           # View/edit configuration`,
 		SilenceUsage: true,
 		Args:         cobra.MaximumNArgs(1),
 		RunE:         runChat, // Default to chat when no subcommand
@@ -113,7 +113,6 @@ Memory & Skills:
 	rootCmd.AddCommand(newQueueCmd())
 	rootCmd.AddCommand(newWorkersCmd())
 	rootCmd.AddCommand(newSkillsCmd())
-	rootCmd.AddCommand(newClawSkillsCmd())
 	rootCmd.AddCommand(newSelfImproveCmd())
 	rootCmd.AddCommand(newShadowCmd())
 	rootCmd.AddCommand(newDevCmd())
