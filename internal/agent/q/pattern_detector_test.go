@@ -37,7 +37,7 @@ func makeSessionsWithToolFailureCount(n int, failRate float64) []*SessionAnalysi
 	sessions := make([]*SessionAnalysis, 0, n)
 	for i := 0; i < n; i++ {
 		success := true
-		if float64(i) < n*failRate {
+		if float64(i) < float64(n)*failRate {
 			success = false
 		}
 		sa := &SessionAnalysis{
@@ -565,5 +565,120 @@ func TestPatternDetectorConfidenceBounds(t *testing.T) {
 		if r.Confidence < 0.0 || r.Confidence > 1.0 {
 			t.Errorf("confidence out of bounds [0,1]: %.2f for pattern %s", r.Confidence, r.PatternType)
 		}
+	}
+}
+
+func TestPatternDetectorDetectSkillOpportunity(t *testing.T) {
+	tests := []struct {
+		name        string
+		sessions    []*SessionAnalysis
+		needPattern bool
+	}{
+		{
+			name: "few sessions - no pattern",
+			sessions: []*SessionAnalysis{
+				{
+					SessionID: "s1",
+					AgentID:   "coder",
+					Intents:   []string{"build"},
+					ToolCalls: []ToolCallRecord{
+						{ToolName: "shell_execute", Success: true},
+					},
+				},
+				{
+					SessionID: "s2",
+					AgentID:   "coder",
+					Intents:   []string{"build"},
+					ToolCalls: []ToolCallRecord{
+						{ToolName: "shell_execute", Success: true},
+					},
+				},
+			},
+			needPattern: false,
+		},
+		{
+			name: "repeated tool pattern - skill opportunity detected",
+			sessions: []*SessionAnalysis{
+				{
+					SessionID: "s1",
+					AgentID:   "coder",
+					Intents:   []string{"build"},
+					ToolCalls: []ToolCallRecord{
+						{ToolName: "shell_execute", Success: true},
+						{ToolName: "file_read", Success: true},
+					},
+				},
+				{
+					SessionID: "s2",
+					AgentID:   "coder",
+					Intents:   []string{"build"},
+					ToolCalls: []ToolCallRecord{
+						{ToolName: "shell_execute", Success: true},
+						{ToolName: "file_read", Success: true},
+					},
+				},
+				{
+					SessionID: "s3",
+					AgentID:   "coder",
+					Intents:   []string{"build"},
+					ToolCalls: []ToolCallRecord{
+						{ToolName: "shell_execute", Success: true},
+						{ToolName: "file_read", Success: true},
+					},
+				},
+				{
+					SessionID: "s4",
+					AgentID:   "coder",
+					Intents:   []string{"build"},
+					ToolCalls: []ToolCallRecord{
+						{ToolName: "shell_execute", Success: true},
+						{ToolName: "file_read", Success: true},
+					},
+				},
+				{
+					SessionID: "s5",
+					AgentID:   "coder",
+					Intents:   []string{"build"},
+					ToolCalls: []ToolCallRecord{
+						{ToolName: "shell_execute", Success: true},
+						{ToolName: "file_read", Success: true},
+					},
+				},
+			},
+			needPattern: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			detector := NewPatternDetector(testLogger, PatternDetectorConfig{
+				MinSessionsForPattern:      3,
+				HighErrorRateThreshold:     0.2,
+				HighRejectionRateThreshold: 0.3,
+				DurationVarianceThreshold:  3.0,
+			})
+
+			report := detector.DetectPatterns(tt.sessions)
+
+			patternsFound := 0
+			for _, r := range report {
+				if r.PatternType == "skill_opportunity" {
+					patternsFound++
+					if r.RecommendedAction != "add_skill" {
+						t.Errorf("skill_opportunity should recommend 'add_skill', got %q", r.RecommendedAction)
+					}
+					if r.MisconfigurationType != "automation_opportunity" {
+						t.Errorf("expected misconfiguration_type 'automation_opportunity', got %q", r.MisconfigurationType)
+					}
+				}
+			}
+
+			if tt.needPattern && patternsFound == 0 {
+				t.Error("expected skill_opportunity pattern, none found")
+			}
+			if !tt.needPattern && patternsFound > 0 {
+				t.Errorf("unexpected skill_opportunity pattern, got %d", patternsFound)
+			}
+		})
 	}
 }

@@ -290,3 +290,18 @@ func (c *Client) doRequest(ctx context.Context, method, apiURL string, body []by
 func (c *Client) SetAccessToken(token string) {
 	c.accessToken = token
 }
+
+// NewClientForTesting creates a Client pointing at a custom base URL (e.g. an httptest.Server).
+// This is intended for use in tests only.
+func NewClientForTesting(baseURL, accessToken, calendarID string) *Client {
+	if calendarID == "" {
+		calendarID = "primary"
+	}
+	return &Client{
+		httpClient:  &http.Client{Timeout: defaultTimeout},
+		accessToken: accessToken,
+		calendarID:  calendarID,
+		baseURL:     baseURL,
+		logger:      slog.Default(),
+	}
+}

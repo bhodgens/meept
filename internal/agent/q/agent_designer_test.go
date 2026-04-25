@@ -386,9 +386,6 @@ func TestAgentDesignerRecommendModel(t *testing.T) {
 func TestAgentDesignerGeneratePromptSections(t *testing.T) {
 	pattern := PatternReport{AffectedIntent: "debugging"}
 	research := &ResearchReport{RootCause: "agent confusion"}
-	analyses := []*SessionAnalysis{
-		makeAnalysisOnly("s1", "coder", []string{"debugging"}, 10*time.Minute, 5, 1, 2000, "completed", 0.3),
-	}
 
 	designer := NewAgentDesigner(designerLogger, AgentDesignerConfig{})
 	sections := designer.generatePromptSections(pattern, research, nil)

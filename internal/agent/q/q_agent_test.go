@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -376,4 +377,11 @@ func TestCompileResultsNullInput(t *testing.T) {
 	if result.Summary == "" {
 		t.Error("expected non-empty summary")
 	}
+}
+
+// Helper functions for testing
+
+// Helper functions for testing
+func containsStrQ(s, target string) bool {
+	return strings.Contains(s, target)
 }

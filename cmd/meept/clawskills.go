@@ -244,51 +244,8 @@ func newClawSkillsUpdateCmd() *cobra.Command {
 func newClawSkillsInfoCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "info <slug>",
-		Short: "Show information about a skill",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			slug := args[0]
-
-			client := clawskills.NewClient()
-			defer client.Close()
-
-			skill, err := client.SkillDetail(context.Background(), slug)
-			if err != nil {
-				return fmt.Errorf("failed to get skill info: %w", err)
-			}
-
-			fmt.Printf("Name:        %s\n", skill.Name)
-			fmt.Printf("Slug:        %s\n", skill.Slug)
-			fmt.Printf("Author:      %s\n", skill.Author)
-			fmt.Printf("Version:     %s\n", skill.Version)
-			fmt.Printf("Description: %s\n", skill.Description)
-			fmt.Printf("Downloads:   %d\n", skill.Downloads)
-			fmt.Printf("Stars:       %d\n", skill.Stars)
-			fmt.Printf("Verified:    %v\n", skill.Verified)
-
-			if len(skill.Tags) > 0 {
-				fmt.Printf("Tags:        %s\n", strings.Join(skill.Tags, ", "))
-			}
-
-			if len(skill.Requirements) > 0 {
-				fmt.Printf("Requires:    %s\n", strings.Join(skill.Requirements, ", "))
-			}
-
-			if len(skill.Capabilities) > 0 {
-				fmt.Printf("Capabilities: %s\n", strings.Join(skill.Capabilities, ", "))
-			}
-
-			return nil
-		},
-	}
-
-	return cmd
-}
-
-func newClawSkillsInspectCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "inspect <slug>",
-		Short: "Show installed skill details",
+		Short: "Show locally installed skill details",
+		Long:  "Display information about a skill that is installed on this system.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			slug := args[0]
@@ -314,6 +271,53 @@ func newClawSkillsInspectCmd() *cobra.Command {
 			fmt.Printf("Installed:   %s\n", skill.InstalledAt.Format("2006-01-02"))
 			fmt.Printf("Auto-Update: %v\n", skill.AutoUpdate)
 			fmt.Printf("Verified:    %v\n", skill.Verified)
+			fmt.Printf("Risk Level:  %s\n", skill.RiskLevel)
+			fmt.Printf("Max Iterations: %d\n", skill.MaxIterations)
+
+			return nil
+		},
+	}
+
+	return cmd
+}
+
+func newClawSkillsInspectCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "inspect <slug>",
+		Short: "Show remote skill details from ClawHub",
+		Long:  "Fetch and display details about a skill from the ClawHub registry (not installed).",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			slug := args[0]
+
+			client := clawskills.NewClient()
+			defer client.Close()
+
+			skill, err := client.SkillDetail(context.Background(), slug)
+			if err != nil {
+				return fmt.Errorf("failed to get skill detail: %w", err)
+			}
+
+			fmt.Printf("Name:         %s\n", skill.Name)
+			fmt.Printf("Slug:         %s\n", skill.Slug)
+			fmt.Printf("Author:       %s\n", skill.Author)
+			fmt.Printf("Version:      %s\n", skill.Version)
+			fmt.Printf("Description:  %s\n", skill.Description)
+			fmt.Printf("Downloads:    %d\n", skill.Downloads)
+			fmt.Printf("Stars:        %d\n", skill.Stars)
+			fmt.Printf("Verified:     %v\n", skill.Verified)
+
+			if len(skill.Tags) > 0 {
+				fmt.Printf("Tags:         %s\n", strings.Join(skill.Tags, ", "))
+			}
+
+			if len(skill.Requirements) > 0 {
+				fmt.Printf("Requires:     %s\n", strings.Join(skill.Requirements, ", "))
+			}
+
+			if len(skill.Capabilities) > 0 {
+				fmt.Printf("Capabilities: %s\n", strings.Join(skill.Capabilities, ", "))
+			}
 
 			return nil
 		},

@@ -2,8 +2,8 @@ package q
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
-	"time"
 )
 
 var impactLogger = slog.Default()
@@ -525,4 +525,11 @@ func TestImpactEstimatorToolAdditionImprovementCapped(t *testing.T) {
 	if estimate.ImprovementPercent > 90.0 {
 		t.Errorf("tool addition improvement should be capped at 90%%, got %.1f%%", estimate.ImprovementPercent)
 	}
+}
+
+// Helper functions for testing
+
+// Helper functions for testing
+func containsStr(s, target string) bool {
+	return strings.Contains(s, target)
 }

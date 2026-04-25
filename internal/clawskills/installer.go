@@ -130,14 +130,16 @@ func (i *Installer) Install(ctx context.Context, slug string, version string) (*
 
 	// Update index
 	installed := &InstalledSkill{
-		Slug:        slug,
-		Name:        skill.Name,
-		Version:     version,
-		InstalledAt: time.Now(),
-		Path:        skillPath,
-		SHA256:      download.SHA256,
-		AutoUpdate:  i.config.AutoUpdate,
-		Verified:    skill.Verified,
+		Slug:          slug,
+		Name:          PrefixedName(skill.Name),
+		Version:       version,
+		InstalledAt:   time.Now(),
+		Path:          skillPath,
+		SHA256:        download.SHA256,
+		AutoUpdate:    i.config.AutoUpdate,
+		Verified:      skill.Verified,
+		RiskLevel:     DefaultRiskLevel,
+		MaxIterations: DefaultMaxIterations,
 	}
 
 	i.index.Set(slug, installed)

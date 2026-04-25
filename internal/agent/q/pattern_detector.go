@@ -204,7 +204,7 @@ func (d *PatternDetector) detectWrongAgentAssignment(byIntent map[string][]*Sess
 			reports = append(reports, PatternReport{
 				ID:                 fmt.Sprintf("wrong_agent_%s", intent),
 				PatternType:        "wrong_agent_assignment",
-				Confidence:         float64(strugglingAgents) * 0.4,
+				Confidence:         min(1.0, float64(strugglingAgents)*0.4),
 				RecommendedAction:  "create_agent",
 				MisconfigurationType: "capability_gap",
 				AffectedIntent:     intent,

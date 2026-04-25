@@ -213,14 +213,13 @@ func TestClient_GetToday(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  server.Client(),
 		accessToken: "test-token",
 		calendarID:  "primary",
+		baseURL:     server.URL,
 		logger:      nil,
 	}
 
-	// Override the API base URL by using ListEvents with the test server URL
-	// Since we can't override the base URL directly, we'll test via the server
 	events, err := client.ListEvents(context.Background(), time.Now(), time.Now().Add(24*time.Hour), 10)
 	if err != nil {
 		t.Fatalf("ListEvents failed: %v", err)

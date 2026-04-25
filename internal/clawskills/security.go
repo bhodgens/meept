@@ -48,6 +48,32 @@ var forbiddenExtensions = []string{
 	".pyc", ".pyo",
 }
 
+// BlockedTools is the set of tools that clawskills are never allowed to use.
+// These tools grant system-level access that third-party skills must not have.
+var BlockedTools = []string{
+	"shell_execute",   // Arbitrary shell commands
+	"file_write",      // Direct file writing
+	"file_delete",     // File deletion
+	"sdk_install",     // SDK/package installation
+	"security_bypass", // Security mechanism bypass
+	"daemon_restart",  // Daemon control
+	"config_write",    // Configuration modification
+	"credential_set",  // Credential storage
+}
+
+// blockedToolPatterns are glob-like patterns for tool names that are blocked.
+// Any tool whose name matches one of these patterns is denied.
+var blockedToolPatterns = []string{
+	"shell_*",
+	"file_write*",
+	"file_delete*",
+	"security_*",
+	"daemon_*",
+	"config_*",
+	"credential_*",
+	"admin_*",
+}
+
 // SecurityChecker verifies skill downloads and extracted content.
 type SecurityChecker struct {
 	maxFileSize int64
@@ -228,4 +254,75 @@ func isTextFile(ext string) bool {
 		".xml":   true,
 	}
 	return textExtensions[ext]
+}
+
+// IsToolBlocked checks whether a specific tool name is blocked for clawskills.
+// It checks both the exact blocked list and the glob patterns.
+func IsToolBlocked(toolName string) bool {
+	lower := strings.ToLower(toolName)
+
+	// Check exact blocklist
+	for _, blocked := range BlockedTools {
+		if lower == strings.ToLower(blocked) {
+			return true
+		}
+	}
+
+	// Check pattern-based blocklist
+	for _, pattern := range blockedToolPatterns {
+		if matchToolPattern(lower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// FilterTools takes a list of requested tool names and returns only those
+// that are allowed for clawskills execution. Blocked tools are silently
+// removed.
+func FilterTools(tools []string) []string {
+	allowed := make([]string, 0, len(tools))
+	for _, t := range tools {
+		if !IsToolBlocked(t) {
+			allowed = append(allowed, t)
+		}
+	}
+	return allowed
+}
+
+// matchToolPattern matches a tool name against a glob pattern with "*"
+// wildcards. Supports only trailing wildcards (e.g., "shell_*").
+func matchToolPattern(name, pattern string) bool {
+	if !strings.Contains(pattern, "*") {
+		return name == pattern
+	}
+
+	parts := strings.SplitN(pattern, "*", 2)
+	if len(parts) != 2 {
+		return name == pattern
+	}
+
+	prefix := parts[0]
+	suffix := parts[1]
+
+	if prefix != "" && !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	if suffix != "" && !strings.HasSuffix(name, suffix) {
+		return false
+	}
+	return true
+}
+
+// EnforceRiskLevel ensures the risk level is at least "high".
+// ClawSkills cannot be assigned "low" or "medium" risk.
+// Returns the enforced risk level.
+func EnforceRiskLevel(requested string) string {
+	levels := map[string]int{"low": 1, "medium": 2, "high": 3}
+	requestedLevel, ok := levels[strings.ToLower(requested)]
+	if !ok || requestedLevel < 3 {
+		return DefaultRiskLevel
+	}
+	return DefaultRiskLevel
 }
