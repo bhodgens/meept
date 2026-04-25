@@ -27,15 +27,17 @@ const (
 
 	// Skill invocation
 	IntentSkill    IntentType = "skill"
+
+	// Compound (multi-intent)
+	IntentCompound IntentType = "compound"
 )
 
 // IntentCategory groups intents by routing behavior.
 type IntentCategory string
 
 const (
-	CategoryInline    IntentCategory = "inline"
-	CategoryTrackable IntentCategory = "trackable"
-	CategoryDefer     IntentCategory = "defer"
+	CategoryInline IntentCategory = "inline"
+	CategoryDefer  IntentCategory = "defer"
 )
 
 // Category returns the routing category for an intent.
@@ -44,6 +46,8 @@ func (t IntentType) Category() IntentCategory {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentAnalyze, IntentSearch:
 		return CategoryInline
 	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule:
+		return CategoryDefer
+	case IntentCompound:
 		return CategoryDefer
 	case IntentSkill:
 		return CategoryInline
@@ -71,6 +75,8 @@ func (t IntentType) DefaultAgent() string {
 		return "scheduler"
 	case IntentSkill:
 		return "skill"
+	case IntentCompound:
+		return "orchestrator"
 	default:
 		return "chat"
 	}
@@ -79,7 +85,7 @@ func (t IntentType) DefaultAgent() string {
 // RequiresPlanning returns true if the intent benefits from orchestration.
 func (t IntentType) RequiresPlanning() bool {
 	switch t {
-	case IntentCode, IntentPlan:
+	case IntentCode, IntentPlan, IntentCompound:
 		return true
 	default:
 		return false
@@ -89,7 +95,7 @@ func (t IntentType) RequiresPlanning() bool {
 // ShouldCreateTask returns true if the intent should create a trackable task.
 func (t IntentType) ShouldCreateTask() bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit:
+	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound:
 		return true
 	default:
 		return false
@@ -99,7 +105,7 @@ func (t IntentType) ShouldCreateTask() bool {
 // ShouldDispatchAsync returns true if the intent should be dispatched asynchronously.
 func (t IntentType) ShouldDispatchAsync(requiresPlanning bool) bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentGit:
+	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound:
 		return true
 	case IntentSchedule:
 		// Only dispatch async for schedule if it requires planning
@@ -114,7 +120,7 @@ func IsValidIntentType(s string) bool {
 	switch IntentType(s) {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform,
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
-		IntentSchedule, IntentAnalyze, IntentSearch, IntentSkill:
+		IntentSchedule, IntentAnalyze, IntentSearch, IntentSkill, IntentCompound:
 		return true
 	}
 	return false
@@ -145,6 +151,10 @@ func (t IntentType) Keywords() []string {
 		return []string{"plan", "design", "architect", "how should i"}
 	case IntentAnalyze, IntentSearch:
 		return []string{"research", "analyze", "explain", "search"}
+	case IntentSkill:
+		return []string{"/skill", "invoke", "run skill"}
+	case IntentCompound:
+		return []string{"and also", "as well as", "plus"}
 	default:
 		return nil
 	}

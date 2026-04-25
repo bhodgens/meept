@@ -298,3 +298,209 @@ func TestShouldDecompose(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordMethods(t *testing.T) {
+	d := &Dispatcher{
+		stats: &DispatcherStats{
+			ByMethod: make(map[string]int),
+			ByAgent:  make(map[string]int),
+			ByIntent: make(map[string]int),
+		},
+	}
+
+	d.recordClassificationMethod("keyword")
+	d.recordClassificationMethod("keyword")
+	d.recordClassificationMethod("llm")
+
+	d.recordAgent("coder")
+	d.recordAgent("coder")
+	d.recordAgent("chat")
+
+	d.recordIntentType("code")
+	d.recordIntentType("code")
+	d.recordIntentType("chat")
+
+	if d.stats.ByMethod["keyword"] != 2 {
+		t.Errorf("ByMethod[keyword] = %d, want 2", d.stats.ByMethod["keyword"])
+	}
+	if d.stats.ByMethod["llm"] != 1 {
+		t.Errorf("ByMethod[llm] = %d, want 1", d.stats.ByMethod["llm"])
+	}
+	if d.stats.ByAgent["coder"] != 2 {
+		t.Errorf("ByAgent[coder] = %d, want 2", d.stats.ByAgent["coder"])
+	}
+	if d.stats.ByIntent["code"] != 2 {
+		t.Errorf("ByIntent[code] = %d, want 2", d.stats.ByIntent["code"])
+	}
+}
+
+func TestGetStats(t *testing.T) {
+	d := &Dispatcher{
+		stats: &DispatcherStats{
+			TotalDispatched: 42,
+			ByMethod:        map[string]int{"keyword": 30, "llm": 12},
+			ByAgent:         map[string]int{"coder": 20, "chat": 22},
+			ByIntent:        map[string]int{"code": 20, "chat": 22},
+			FallbackCount:   5,
+			FallbackDetails: []FallbackEntry{{Input: "test"}},
+		},
+	}
+
+	stats := d.GetStats()
+	if stats.TotalDispatched != 42 {
+		t.Errorf("TotalDispatched = %d, want 42", stats.TotalDispatched)
+	}
+	if stats.ByMethod["keyword"] != 30 {
+		t.Errorf("ByMethod[keyword] = %d, want 30", stats.ByMethod["keyword"])
+	}
+}
+
+func TestGetStatsNil(t *testing.T) {
+	d := &Dispatcher{}
+	stats := d.GetStats()
+	if stats.TotalDispatched != 0 {
+		t.Errorf("expected zero stats, got %d", stats.TotalDispatched)
+	}
+}
+
+func TestGetFallbackDetails(t *testing.T) {
+	d := &Dispatcher{
+		stats: &DispatcherStats{
+			FallbackDetails: []FallbackEntry{
+				{Input: "first"},
+				{Input: "second"},
+				{Input: "third"},
+			},
+		},
+	}
+
+	details := d.GetFallbackDetails(2)
+	if len(details) != 2 {
+		t.Fatalf("len(details) = %d, want 2", len(details))
+	}
+	if details[0].Input != "second" {
+		t.Errorf("details[0].Input = %q, want %q", details[0].Input, "second")
+	}
+	if details[1].Input != "third" {
+		t.Errorf("details[1].Input = %q, want %q", details[1].Input, "third")
+	}
+}
+
+func TestGetFallbackDetailsLimitTruncation(t *testing.T) {
+	d := &Dispatcher{
+		stats: &DispatcherStats{
+			FallbackDetails: []FallbackEntry{
+				{Input: "only"},
+			},
+		},
+	}
+
+	details := d.GetFallbackDetails(10)
+	if len(details) != 1 {
+		t.Errorf("len(details) = %d, want 1", len(details))
+	}
+}
+
+func TestDetectCompound(t *testing.T) {
+	tests := []struct {
+		name         string
+		intents      []*Intent
+		wantCompound bool
+		wantType     string
+	}{
+		{
+			name:         "single intent",
+			intents:      []*Intent{{Type: "code", AgentType: "coder"}},
+			wantCompound: false,
+			wantType:     "",
+		},
+		{
+			name: "multi sequential",
+			intents: []*Intent{
+				{Type: "code", AgentType: "coder"},
+				{Type: "plan", AgentType: "planner", RequiresPlanning: true},
+			},
+			wantCompound: true,
+			wantType:     "sequential",
+		},
+		{
+			name: "multi parallel",
+			intents: []*Intent{
+				{Type: "code", AgentType: "coder"},
+				{Type: "chat", AgentType: "chat"},
+			},
+			wantCompound: true,
+			wantType:     "parallel",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &MultiIntent{Intents: tt.intents}
+			got := m.DetectCompound()
+			if got != tt.wantCompound {
+				t.Errorf("DetectCompound() = %v, want %v", got, tt.wantCompound)
+			}
+			if m.CompoundType != tt.wantType {
+				t.Errorf("CompoundType = %q, want %q", m.CompoundType, tt.wantType)
+			}
+		})
+	}
+}
+
+func TestDeduplicateIntents(t *testing.T) {
+	tests := []struct {
+		name    string
+		intents []*Intent
+		want    int
+	}{
+		{
+			name: "overlapping types",
+			intents: []*Intent{
+				{Type: "code", Confidence: 0.8},
+				{Type: "code", Confidence: 0.9},
+				{Type: "debug", Confidence: 0.7},
+			},
+			want: 2,
+		},
+		{
+			name: "all unique",
+			intents: []*Intent{
+				{Type: "code", Confidence: 0.8},
+				{Type: "debug", Confidence: 0.7},
+			},
+			want: 2,
+		},
+		{
+			name:    "empty",
+			intents: []*Intent{},
+			want:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := deduplicateIntents(tt.intents)
+			if len(result) != tt.want {
+				t.Errorf("len(deduplicateIntents()) = %d, want %d", len(result), tt.want)
+			}
+			if tt.name == "overlapping types" {
+				for _, intent := range result {
+					if intent.Type == "code" && intent.Confidence != 0.9 {
+						t.Errorf("deduplicated code confidence = %v, want 0.9", intent.Confidence)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestClassifyAll(t *testing.T) {
+	c := &KeywordClassifier{}
+	ctx := context.Background()
+
+	intents := c.ClassifyAll(ctx, "write code and debug the error", nil)
+	if len(intents) < 2 {
+		t.Errorf("ClassifyAll() returned %d intents, want >= 2", len(intents))
+	}
+}

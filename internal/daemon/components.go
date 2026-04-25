@@ -585,6 +585,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			SkillExecutor:     c.SkillExecutor,
 			Logger:            logger.With("component", "dispatcher"),
 			CapabilityMatcher: capMatcher,
+			LLMClient:         c.LLMClient,
+			ClassifierModel:   c.Config.MultiAgent.ClassifierModel,
+			SessionMaxAge:     30 * time.Minute,
 		})
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
@@ -594,6 +597,25 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		// Create chat handler with dispatcher for multi-agent routing
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, msgBus, logger)
 		logger.Info("ChatHandler initialized with dispatcher")
+
+		// Subscribe to dispatcher.stats requests
+		statsSub := msgBus.Subscribe("dispatcher-stats-handler", "dispatcher.stats")
+		go func() {
+			for msg := range statsSub.Channel {
+				stats := c.Dispatcher.GetStats()
+				payload, _ := json.Marshal(&stats)
+				resp := &models.BusMessage{
+					ID:        msg.ID + "-response",
+					Type:      models.MessageTypeResponse,
+					Topic:     "dispatcher.stats.result",
+					Source:    "dispatcher-stats-handler",
+					Timestamp: time.Now().UTC(),
+					Payload:   payload,
+					ReplyTo:   msg.ID,
+				}
+				msgBus.Publish("dispatcher.stats.result", resp)
+			}
+		}()
 
 		// Create orchestrator components if task registry and queue are available
 		if c.TaskRegistry != nil && c.Queue != nil {

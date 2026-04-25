@@ -127,15 +127,6 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 	return c.parseResponse(resp.Content, input)
 }
 
-// multiIntentResponse is the response format for multi-intent classification.
-type multiIntentResponse struct {
-	Intents []struct {
-		Intent     string  `json:"intent"`
-		Confidence float64 `json:"confidence"`
-		Summary    string  `json:"summary"`
-	} `json:"intents"`
-}
-
 // ClassifyMulti detects multiple intents in a single input.
 func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemory []memory.MemoryResult) []*Intent {
 	if c.client == nil {

@@ -399,6 +399,18 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 		Intent:    result.Intent.Type,
 	}
 
+	if result.Intent.Type == string(IntentCompound) {
+		req.IsCompound = true
+		if result.Task != nil && result.Task.Metadata != nil {
+			var meta map[string]any
+			if json.Unmarshal(result.Task.Metadata, &meta) == nil {
+				if ct, ok := meta["compound_type"]; ok {
+					req.CompoundType, _ = ct.(string)
+				}
+			}
+		}
+	}
+
 	payload, err := json.Marshal(req)
 	if err != nil {
 		h.logger.Error("Failed to marshal plan request", "error", err)
@@ -669,8 +681,8 @@ func (h *ChatHandler) formatAsyncTaskAck(result *DispatchResult) string {
 	sb.WriteString(fmt.Sprintf("**assigned to:** %s agent\n", result.AgentID))
 
 	status := "planning steps..."
-	if result.Intent.Type == "simple" {
-		status = "executing..."
+	if result.Intent.Type == string(IntentCompound) {
+		status = "coordinating multiple tasks..."
 	}
 	sb.WriteString(fmt.Sprintf("**status:** %s\n\n", status))
 	sb.WriteString("you will receive updates as the task progresses.\n")

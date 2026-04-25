@@ -44,64 +44,92 @@ func (t *SessionTracker) RecordIntent(sessionID string, intent *Intent, agentID 
 	}
 }
 
-// GetSession returns session state.
+// GetSession returns session state (read-only lookup, no cleanup).
 func (t *SessionTracker) GetSession(sessionID string) *SessionState {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	t.cleanupExpired()
 	return t.sessions[sessionID]
+}
+
+// Cleanup removes expired sessions. Must be called with full Lock.
+func (t *SessionTracker) Cleanup() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.cleanupExpired()
 }
 
 // GetDominantIntent returns the most frequent intent in session.
 func (t *SessionTracker) GetDominantIntent(sessionID string) string {
-	state := t.GetSession(sessionID)
-	if state == nil {
+	t.mu.RLock()
+	state, ok := t.sessions[sessionID]
+	if !ok || len(state.IntentHistory) == 0 {
+		t.mu.RUnlock()
 		return ""
 	}
+	// Copy intent types while holding lock
+	types := make([]string, len(state.IntentHistory))
+	for i, intent := range state.IntentHistory {
+		types[i] = intent.Type
+	}
+	t.mu.RUnlock()
 
 	counts := make(map[string]int)
 	var maxIntent string
 	maxCount := 0
-
-	for _, intent := range state.IntentHistory {
-		counts[intent.Type]++
-		if counts[intent.Type] > maxCount {
-			maxCount = counts[intent.Type]
-			maxIntent = intent.Type
+	for _, typ := range types {
+		counts[typ]++
+		if counts[typ] > maxCount {
+			maxCount = counts[typ]
+			maxIntent = typ
 		}
 	}
-
 	return maxIntent
 }
 
-// GetLastIntent returns the most recent intent.
+// GetLastIntent returns a copy of the most recent intent.
 func (t *SessionTracker) GetLastIntent(sessionID string) *Intent {
-	state := t.GetSession(sessionID)
-	if state == nil || len(state.IntentHistory) == 0 {
+	t.mu.RLock()
+	state, ok := t.sessions[sessionID]
+	if !ok || len(state.IntentHistory) == 0 {
+		t.mu.RUnlock()
 		return nil
 	}
-	return state.IntentHistory[len(state.IntentHistory)-1]
+	last := state.IntentHistory[len(state.IntentHistory)-1]
+	cp := *last // copy
+	t.mu.RUnlock()
+	return &cp
 }
 
-// GetLastAgent returns the most recent agent.
+// GetLastAgent returns the most recent agent type.
 func (t *SessionTracker) GetLastAgent(sessionID string) string {
-	state := t.GetSession(sessionID)
-	if state == nil || len(state.IntentHistory) == 0 {
+	t.mu.RLock()
+	state, ok := t.sessions[sessionID]
+	if !ok || len(state.IntentHistory) == 0 {
+		t.mu.RUnlock()
 		return ""
 	}
-	return state.IntentHistory[len(state.IntentHistory)-1].AgentType
+	agentType := state.IntentHistory[len(state.IntentHistory)-1].AgentType
+	t.mu.RUnlock()
+	return agentType
 }
 
 // GetIntentCounts returns intent frequency counts.
 func (t *SessionTracker) GetIntentCounts(sessionID string) map[string]int {
-	state := t.GetSession(sessionID)
-	if state == nil {
+	t.mu.RLock()
+	state, ok := t.sessions[sessionID]
+	if !ok || len(state.IntentHistory) == 0 {
+		t.mu.RUnlock()
 		return make(map[string]int)
 	}
+	types := make([]string, len(state.IntentHistory))
+	for i, intent := range state.IntentHistory {
+		types[i] = intent.Type
+	}
+	t.mu.RUnlock()
 
 	counts := make(map[string]int)
-	for _, intent := range state.IntentHistory {
-		counts[intent.Type]++
+	for _, typ := range types {
+		counts[typ]++
 	}
 	return counts
 }

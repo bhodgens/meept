@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"sync"
 	"strings"
@@ -16,6 +17,9 @@ import (
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 )
+
+// anaphoraForRegex matches "do the same for X" patterns for anaphora resolution.
+var anaphoraForRegex = regexp.MustCompile(`do the same for (.+)`)
 
 // Intent represents the classified intent of a user message.
 type Intent struct {
@@ -64,7 +68,6 @@ type Dispatcher struct {
 	skillRegistry     *skills.Registry
 	skillExecutor     *skills.Executor
 	logger            *slog.Logger
-	classifiers       []IntentClassifier
 	llmClassifier     *LLMClassifier
 	keywordClassifier *KeywordClassifier
 	capabilityMatcher *CapabilityMatcher
@@ -113,7 +116,6 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 
 	// Add keyword-based classifier
 	d.keywordClassifier = &KeywordClassifier{}
-	d.classifiers = append(d.classifiers, d.keywordClassifier)
 
 	// Add LLM-based classifier if client is provided
 	if cfg.LLMClient != nil {
@@ -122,7 +124,6 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 			Model:  cfg.ClassifierModel,
 			Logger: cfg.Logger,
 		})
-		d.classifiers = append(d.classifiers, d.llmClassifier)
 	}
 
 	// Initialize semantic index if embedding client is provided
@@ -449,6 +450,11 @@ func (m *MultiIntent) DetectCompound() bool {
 
 // routeCompound handles compound (multi-intent) request routing.
 func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, input string, sessionID string) (*DispatchResult, error) {
+	// Cap intents at 5 for safety
+	if len(multi.Intents) > 5 {
+		multi.Intents = multi.Intents[:5]
+	}
+
 	d.logger.Info("Compound intent detected",
 		"intents", len(multi.Intents),
 		"type", multi.CompoundType,
@@ -456,7 +462,7 @@ func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, inpu
 
 	// Create a parent task to track the compound request
 	parentTask := d.createTask(ctx, multi.Summary, &Intent{
-		Type:    "compound",
+		Type:    string(IntentCompound),
 		Summary: multi.Summary,
 	}, sessionID)
 
@@ -464,10 +470,15 @@ func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, inpu
 		return nil, fmt.Errorf("failed to create parent task for compound request")
 	}
 
-	// Record compound metadata
+	// Record compound metadata with individual intent types
+	intentTypes := make([]string, 0, len(multi.Intents))
+	for _, intent := range multi.Intents {
+		intentTypes = append(intentTypes, intent.Type)
+	}
 	meta, err := json.Marshal(map[string]any{
-		"compound_type":    multi.CompoundType,
-		"compound_intents": len(multi.Intents),
+		"compound_type":         multi.CompoundType,
+		"compound_intents":      len(multi.Intents),
+		"compound_intent_types": intentTypes,
 	})
 	if err == nil {
 		parentTask.Metadata = json.RawMessage(meta)
@@ -479,15 +490,13 @@ func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, inpu
 	}
 
 	// Record compound stats
-	d.recordClassificationMethod("compound")
-	d.recordAgent("orchestrator")
-	d.recordIntentType("compound")
+	d.recordCompoundDispatch(len(multi.Intents))
 
 	return &DispatchResult{
 		Task:    parentTask,
 		AgentID: "orchestrator",
 		Intent: &Intent{
-			Type:    "compound",
+			Type:    string(IntentCompound),
 			Summary: multi.Summary,
 		},
 	}, nil
@@ -529,7 +538,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 
 	// Handle platform introspection directly without LLM
 	if result.Intent != nil && result.Intent.Type == "platform" {
-		return d.handlePlatformIntrospection(ctx)
+		return d.handlePlatformIntrospection(ctx, result.Intent.Summary)
 	}
 
 	// Build context message with memory refs
@@ -567,7 +576,13 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 
 // handlePlatformIntrospection returns platform capabilities directly.
 // This bypasses the LLM for reliable introspection responses.
-func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context) (string, error) {
+func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context, input string) (string, error) {
+	// Check for stats-specific queries
+	lower := strings.ToLower(input)
+	if strings.Contains(lower, "dispatcher stats") || strings.Contains(lower, "routing stats") {
+		return d.handleStatsQuery(ctx)
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString("## Platform Capabilities\n\n")
@@ -749,9 +764,10 @@ func (c *KeywordClassifier) Classify(ctx context.Context, input string, memCtx *
 
 				if score > bestScore {
 					bestScore = score
+					adjustedConfidence := math.Min(score, 1.0)
 					bestMatch = &Intent{
 						Type:             p.intentType,
-						Confidence:       p.confidence,
+						Confidence:       adjustedConfidence,
 						AgentType:        p.agentType,
 						RequiresPlanning: p.planning,
 						Summary:          extractSummary(input),
@@ -777,18 +793,18 @@ func (c *KeywordClassifier) ClassifyAll(ctx context.Context, input string, memCt
 		confidence float64
 		planning   bool
 	}{
-		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents"}, "platform", "chat", 0.9, false},
-		{[]string{"give me a report", "report on", "what did you do"}, "report", "chat", 0.9, false},
-		{[]string{"remember when", "recall", "what do you remember"}, "recall", "chat", 0.85, false},
-		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, "debug", "debugger", 0.8, false},
-		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, "code", "coder", 0.8, false},
-		{[]string{"code review", "review pr", "check code"}, "review", "coder", 0.75, false},
-		{[]string{"commit", "push", "pull", "merge", "branch", "git"}, "git", "committer", 0.8, false},
-		{[]string{"remind", "schedule", "alarm", "timer", "at "}, "schedule", "scheduler", 0.8, false},
-		{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, "plan", "planner", 0.8, true},
-		{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, "analyze", "analyst", 0.7, false},
-		{[]string{"search", "find", "look up", "google"}, "search", "analyst", 0.7, false},
-		{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, "chat", "chat", 0.6, false},
+		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents"}, string(IntentPlatform), "chat", 0.9, false},
+		{[]string{"give me a report", "report on", "what did you do"}, string(IntentReport), "chat", 0.9, false},
+		{[]string{"remember when", "recall", "what do you remember"}, string(IntentRecall), "chat", 0.85, false},
+		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), "debugger", 0.8, false},
+		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, string(IntentCode), "coder", 0.8, false},
+		{[]string{"code review", "review pr", "check code"}, string(IntentReview), "coder", 0.75, false},
+		{[]string{"commit", "push", "pull", "merge", "branch", "git"}, string(IntentGit), "committer", 0.8, false},
+		{[]string{"remind", "schedule", "alarm", "timer", "at "}, string(IntentSchedule), "scheduler", 0.8, false},
+		{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, string(IntentPlan), "planner", 0.8, true},
+		{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, string(IntentAnalyze), "analyst", 0.7, false},
+		{[]string{"search", "find", "look up", "google"}, string(IntentSearch), "analyst", 0.7, false},
+		{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), "chat", 0.6, false},
 	}
 
 	for _, p := range patterns {
@@ -886,21 +902,13 @@ func (d *Dispatcher) resolveAnaphora(input string, memCtx *MemoryContext) string
 
 	if strings.Contains(lower, "do the same") {
 		lastSummary := memCtx.LastIntent.Summary
-		forMatch := regexp.MustCompile(`do the same for (.+)`)
+		forMatch := anaphoraForRegex
 		if match := forMatch.FindStringSubmatch(lower); match != nil {
 			return fmt.Sprintf("%s for %s", lastSummary, match[1])
 		}
 	}
 
 	return input
-}
-
-// min returns the minimum of two float64 values.
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // extractSummary extracts a brief summary from input.
@@ -949,6 +957,13 @@ func (d *Dispatcher) recordIntentType(intentType string) {
 		d.stats.ByIntent = make(map[string]int)
 	}
 	d.stats.ByIntent[intentType]++
+}
+
+// recordCompoundDispatch records a compound dispatch with all relevant stats.
+func (d *Dispatcher) recordCompoundDispatch(intentCount int) {
+	d.recordClassificationMethod("compound")
+	d.recordAgent("orchestrator")
+	d.recordIntentType(string(IntentCompound))
 }
 
 // recordFallback records a fallback to chat agent with details.
@@ -1169,19 +1184,4 @@ func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent string)
 // GetSkillRegistry returns the skill registry for external access.
 func (d *Dispatcher) GetSkillRegistry() *skills.Registry {
 	return d.skillRegistry
-}
-
-// GetSkillExecutor returns the skill executor for external access.
-func (d *Dispatcher) GetSkillExecutor() *skills.Executor {
-	return d.skillExecutor
-}
-
-// GetCapabilityMatcher returns the capability matcher for external access.
-func (d *Dispatcher) GetCapabilityMatcher() *CapabilityMatcher {
-	return d.capabilityMatcher
-}
-
-// SetCapabilityMatcher sets the capability matcher for fast routing.
-func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher) {
-	d.capabilityMatcher = matcher
 }
