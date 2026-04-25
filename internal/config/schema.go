@@ -165,6 +165,13 @@ type LLMContextFirewallConfig struct {
 	HardLimit float64 `toml:"hard_limit"` // default 0.80
 	// DropContextOnHardLimit enables context dropping when hard limit is hit
 	DropContextOnHardLimit bool `toml:"drop_context_on_hard_limit"` // default true
+	// ProactiveCompression enables the multi-stage ContextCompressor inside the
+	// firewall. When true, the compressor runs before the legacy
+	// chunk/summarize/drop pipeline.
+	ProactiveCompression bool `toml:"proactive_compression"` // default false
+	// ModelContextLimit overrides the model's ContextLimit for the compressor.
+	// When zero, model.ContextLimit is used.
+	ModelContextLimit int `toml:"model_context_limit"`
 }
 
 // LLMMetricsConfig configures HTTP-level metrics collection.
@@ -836,6 +843,7 @@ func DefaultConfig() *Config {
 				WrapUpThreshold:        0.50,
 				HardLimit:              0.80,
 				DropContextOnHardLimit: true,
+				ProactiveCompression:   false,
 			},
 			Metrics: LLMMetricsConfig{
 				Enabled:             true,

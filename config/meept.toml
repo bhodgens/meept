@@ -16,6 +16,14 @@ daily_token_limit = 1000000
 rate_limit_rpm = 30
 aggressiveness = 0.5  # 0.0 = very conservative, 1.0 = use full budget
 
+[llm.context_firewall]
+enabled = true
+# Proactive context compression (multi-stage: warning at 50%, summarize at 60%,
+# aggressive at 70%, hard limit at 80%). When enabled, the compressor runs before
+# the legacy chunk/summarize/drop pipeline.
+proactive_compression = false
+# model_context_limit = 0   # Override model context limit for compression (0 = use model's limit)
+
 [memory]
 data_dir = "~/.meept/memory"
 consolidation_interval_hours = 6

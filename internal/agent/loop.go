@@ -318,6 +318,13 @@ type AgentConfig struct {
 	MaxConversationTokens    int     // 0 means use DefaultConversationTokenBudget
 	SkillDiscoveryThreshold  float64 // Minimum confidence for skill discovery (default 0.5)
 	Memory                   AgentMemoryConfig
+	// ProactiveCompression enables multi-stage context compression inside the
+	// ContextFirewall. When true, the compressor runs before the legacy
+	// chunk/summarize/drop pipeline.
+	ProactiveCompression bool
+	// ModelContextLimit overrides the model's ContextLimit for the compressor.
+	// When zero, model.ContextLimit is used.
+	ModelContextLimit int
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -712,11 +719,13 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 			loop.llm,
 			model,
 			llm.ContextFirewallConfig{
-				Enabled:                  true,
-				SummarizeHistory:         true,
-				ChunkLargeInputs:         true,
-				IterationBudgetRatio:     0.30,
-				ConversationBudgetRatio:  0.50,
+				Enabled:                true,
+				SummarizeHistory:       true,
+				ChunkLargeInputs:       true,
+				IterationBudgetRatio:   0.30,
+				ConversationBudgetRatio: 0.50,
+				ProactiveCompression:   loop.config.ProactiveCompression,
+				ModelContextLimit:      loop.config.ModelContextLimit,
 			},
 			nil, // summaryModel - uses inner by default
 			loop.logger,
