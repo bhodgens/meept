@@ -138,6 +138,13 @@ func New(cfg *Config) (*Daemon, error) {
 		)
 	}
 
+	// Register self-improve handlers (native Go, calling Controller directly)
+	siHandler := rpc.NewSelfImproveHandler(components.SelfImproveCtrl)
+	siHandler.RegisterSelfImproveMethods(rpcServer)
+	if components.SelfImproveCtrl != nil {
+		logger.Info("Self-improve RPC handlers registered")
+	}
+
 	// Create config service for HTTP server
 	configService, err := http.NewConfigService()
 	if err != nil {

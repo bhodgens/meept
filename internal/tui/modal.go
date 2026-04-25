@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -1003,39 +1004,46 @@ type fuzzyFinderItem struct {
 	Match   string // display text
 }
 
-// getFilteredItems returns items matching the search query.
+// getFilteredItems returns items matching the search query using fuzzy matching.
 func (f *FuzzyFinderModal) getFilteredItems() []fuzzyFinderItem {
-	var items []fuzzyFinderItem
-	query := strings.ToLower(f.inputBuffer)
+	query := f.inputBuffer
 
-	// Add sessions as items
-	for _, sess := range f.sessions {
-		name := strings.ToLower(sess.Name)
-		desc := strings.ToLower(sess.Description)
-		if query == "" || strings.Contains(name, query) || strings.Contains(desc, query) {
-			display := sess.Name
-			if sess.Description != "" {
-				display += " - " + sess.Description
-			}
-			items = append(items, fuzzyFinderItem{
-				Session: &sess,
-				Match:   display,
-			})
+	// Build item list for the fuzzy matcher
+	searchItems := make([]struct{ Text string; Data any }, 0, len(f.sessions)+len(f.tasks))
+	for i := range f.sessions {
+		sess := &f.sessions[i]
+		display := sess.Name
+		if sess.Description != "" {
+			display += " - " + sess.Description
 		}
+		display += " [session]"
+		searchItems = append(searchItems, struct{ Text string; Data any }{Text: display, Data: sess})
+	}
+	for i := range f.tasks {
+		task := &f.tasks[i]
+		display := task.Name
+		if task.Description != "" {
+			display += " - " + task.Description
+		}
+		display += " [task]"
+		searchItems = append(searchItems, struct{ Text string; Data any }{Text: display, Data: task})
 	}
 
-	// Add tasks as items (nested under sessions conceptually)
-	for _, task := range f.tasks {
-		name := strings.ToLower(task.Name)
-		desc := strings.ToLower(task.Description)
-		if query == "" || strings.Contains(name, query) || strings.Contains(desc, query) {
-			display := task.Name
-			if task.Description != "" {
-				display += " - " + task.Description
-			}
+	matcher := components.NewFuzzyMatcher(searchItems)
+	matches := matcher.Match(query)
+
+	var items []fuzzyFinderItem
+	for _, m := range matches {
+		switch v := m.Item.(type) {
+		case *types.Session:
 			items = append(items, fuzzyFinderItem{
-				Task:  &task,
-				Match: display,
+				Session: v,
+				Match:   strings.TrimSuffix(m.Text, " [session]"),
+			})
+		case *types.TaskExtended:
+			items = append(items, fuzzyFinderItem{
+				Task:  v,
+				Match: strings.TrimSuffix(m.Text, " [task]"),
 			})
 		}
 	}

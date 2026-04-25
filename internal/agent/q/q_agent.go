@@ -26,11 +26,11 @@ type QAgent struct {
 	agentDesigner   *AgentDesigner
 	skillDesigner   *SkillDesigner
 	impactEstimator *ImpactEstimator
+	reviewer        *ReviewerValidator
 }
 
 // NewQAgent creates a new Q Agent orchestrator.
 func NewQAgent(logger *slog.Logger, cfg config.QAgentConfig, memvidClient *memvid.Client) *QAgent {
-	// Initialize components
 	sessionAnalyzer := NewSessionAnalyzer(
 		memvidClient,
 		logger,
@@ -78,6 +78,11 @@ func NewQAgent(logger *slog.Logger, cfg config.QAgentConfig, memvidClient *memvi
 		},
 	)
 
+	reviewer := NewReviewerValidator(
+		logger,
+		memvidClient,
+	)
+
 	return &QAgent{
 		logger:          logger,
 		config:          cfg,
@@ -88,6 +93,7 @@ func NewQAgent(logger *slog.Logger, cfg config.QAgentConfig, memvidClient *memvi
 		agentDesigner:   agentDesigner,
 		skillDesigner:   skillDesigner,
 		impactEstimator: impactEstimator,
+		reviewer:        reviewer,
 	}
 }
 
@@ -95,7 +101,6 @@ func NewQAgent(logger *slog.Logger, cfg config.QAgentConfig, memvidClient *memvi
 func (q *QAgent) RunAnalysis(ctx context.Context) (*AnalysisResult, error) {
 	q.logger.Info("starting Q Agent analysis cycle")
 
-	// Step 1: Fetch completed sessions from memvid
 	sessions, err := q.fetchCompletedSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch sessions: %w", err)
@@ -112,7 +117,6 @@ func (q *QAgent) RunAnalysis(ctx context.Context) (*AnalysisResult, error) {
 
 	q.logger.Info("fetched sessions for analysis", "count", len(sessions))
 
-	// Step 2: Analyze each session
 	sessionIDs := make([]string, 0, len(sessions))
 	for _, s := range sessions {
 		sessionIDs = append(sessionIDs, s.SessionID)
@@ -121,23 +125,19 @@ func (q *QAgent) RunAnalysis(ctx context.Context) (*AnalysisResult, error) {
 	analyses, err := q.sessionAnalyzer.AnalyzeMultipleSessions(ctx, sessionIDs)
 	if err != nil {
 		q.logger.Warn("session analysis encountered errors", "error", err)
-		// Continue with partial results
 	}
 
 	q.logger.Info("completed session analysis", "analyzed", len(analyses))
 
-	// Step 3: Detect patterns
 	patterns := q.patternDetector.DetectPatterns(analyses)
 	q.logger.Info("detected patterns", "count", len(patterns))
 
-	// Step 4: Conduct research on each pattern
 	researchReports := make([]*ResearchReport, 0, len(patterns))
 	for _, pattern := range patterns {
 		report := q.researchEngine.ConductResearch(ctx, pattern, analyses)
 		researchReports = append(researchReports, report)
 	}
 
-	// Step 5: Generate agent designs for recommendations
 	designs := make([]*AgentDesign, 0)
 	for i, pattern := range patterns {
 		if i < len(researchReports) && len(researchReports[i].Recommendations) > 0 {
@@ -146,7 +146,6 @@ func (q *QAgent) RunAnalysis(ctx context.Context) (*AnalysisResult, error) {
 		}
 	}
 
-	// Step 6: Estimate impact
 	impactEstimates := make([]*ImpactEstimate, 0)
 	for i, pattern := range patterns {
 		if i < len(researchReports) && len(researchReports[i].Recommendations) > 0 {
@@ -157,15 +156,41 @@ func (q *QAgent) RunAnalysis(ctx context.Context) (*AnalysisResult, error) {
 		}
 	}
 
-	// Step 7: Compile results
-	result := q.compileResults(analyses, patterns, researchReports, designs, impactEstimates)
+	// Validate recommendations through reviewer
+	ctxReviewer, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	initialRecs := make([]Recommendation, 0)
+	for _, rr := range researchReports {
+		if rr != nil {
+			initialRecs = append(initialRecs, rr.Recommendations...)
+		}
+	}
+	validationResults, err := q.reviewer.ValidateRecommendations(ctxReviewer, initialRecs, researchReports)
+	cancel()
+	if err != nil {
+		q.logger.Warn("recommendation validation failed", "error", err)
+	}
 
-	// Step 8: Save analysis artifacts
+	// Filter out rejected recommendations
+	validatedRecs := make([]Recommendation, 0)
+	for i, rec := range initialRecs {
+		if i < len(validationResults) && validationResults[i].Status != "rejected" {
+			validatedRecs = append(validatedRecs, rec)
+			if err := q.reviewer.LogValidationResult(ctx, rec, validationResults[i]); err != nil {
+				q.logger.Debug("failed to log validation result", "error", err)
+			}
+		} else if i < len(validationResults) {
+			q.logger.Info("recommendation rejected by reviewer",
+				"title", rec.Title,
+				"reason", validationResults[i].Feedback)
+		}
+	}
+
+	result := q.compileResults(analyses, patterns, researchReports, designs, impactEstimates, validatedRecs)
+
 	if err := q.saveArtifacts(result, designs); err != nil {
 		q.logger.Warn("failed to save analysis artifacts", "error", err)
 	}
 
-	// Step 9: Log outcome
 	if err := q.logOutcome(result); err != nil {
 		q.logger.Warn("failed to log outcome", "error", err)
 	}
@@ -181,8 +206,6 @@ func (q *QAgent) RunAnalysis(ctx context.Context) (*AnalysisResult, error) {
 
 // fetchCompletedSessions fetches completed sessions from memvid.
 func (q *QAgent) fetchCompletedSessions(ctx context.Context) ([]SessionData, error) {
-	// Search for session metadata in memvid
-	// Trigger: sessions idle for >= SessionIdleTriggerHours
 	cutoffTime := time.Now().Add(-time.Duration(q.config.SessionIdleTriggerHours) * time.Hour)
 
 	memories, err := q.memvidClient.Search(ctx, fmt.Sprintf("session:complete before:%s", cutoffTime.Format(time.RFC3339)), 100)
@@ -207,7 +230,6 @@ func (q *QAgent) parseSessionData(mem memvid.MemoryResult) SessionData {
 		Metrics: SessionMetrics{},
 	}
 
-	// Extract from metadata
 	if id := mem.Memory.ID; id != "" {
 		session.SessionID = id
 	}
@@ -262,13 +284,8 @@ func (q *QAgent) compileResults(
 	researchReports []*ResearchReport,
 	designs []*AgentDesign,
 	impactEstimates []*ImpactEstimate,
+	recommendations []Recommendation,
 ) *AnalysisResult {
-	recommendations := make([]Recommendation, 0)
-	for _, rr := range researchReports {
-		recommendations = append(recommendations, rr.Recommendations...)
-	}
-
-	// Convert pointer slices to value slices for AnalysisResult
 	researchReportValues := make([]ResearchReport, 0, len(researchReports))
 	for _, rr := range researchReports {
 		if rr != nil {
@@ -294,9 +311,7 @@ func (q *QAgent) compileResults(
 		Status:           "completed",
 	}
 
-	// Generate summary
 	result.Summary = q.generateSummary(result)
-
 	return result
 }
 
@@ -322,13 +337,11 @@ func (q *QAgent) generateSummary(result *AnalysisResult) string {
 
 // saveArtifacts saves analysis artifacts to disk.
 func (q *QAgent) saveArtifacts(result *AnalysisResult, designs []*AgentDesign) error {
-	// Ensure analysis directory exists
 	dir := expandPath(q.config.AnalysisDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create analysis directory: %w", err)
 	}
 
-	// Save analysis report
 	reportPath := filepath.Join(dir, fmt.Sprintf("%s_analysis.json", result.ID))
 	reportData, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
@@ -339,7 +352,6 @@ func (q *QAgent) saveArtifacts(result *AnalysisResult, designs []*AgentDesign) e
 	}
 	q.logger.Info("saved analysis report", "path", reportPath)
 
-	// Save skill designs
 	for _, rec := range result.Recommendations {
 		if rec.Type == "new_skill" && rec.Implementation.SkillSpec != nil {
 			skillDir := filepath.Join(dir, "skills", rec.Implementation.SkillSpec.ID)
@@ -356,7 +368,6 @@ func (q *QAgent) saveArtifacts(result *AnalysisResult, designs []*AgentDesign) e
 		}
 	}
 
-	// Save agent designs
 	for _, design := range designs {
 		agentDir := filepath.Join(dir, "agents", design.ID)
 		if err := os.MkdirAll(agentDir, 0755); err != nil {
@@ -378,13 +389,11 @@ func (q *QAgent) saveArtifacts(result *AnalysisResult, designs []*AgentDesign) e
 func (q *QAgent) logOutcome(result *AnalysisResult) error {
 	logPath := expandPath(q.config.OutcomesLog)
 
-	// Ensure directory exists
 	dir := filepath.Dir(logPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create outcomes directory: %w", err)
 	}
 
-	// Append to JSONL file
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open outcomes log: %w", err)
@@ -411,15 +420,12 @@ func (q *QAgent) logOutcome(result *AnalysisResult) error {
 
 // GetStatus returns the current status of Q Agent analysis.
 func (q *QAgent) GetStatus(ctx context.Context) (*QAgentStatus, error) {
-	// Check memvid availability
 	memvidHealthy := q.memvidClient.IsAvailable(ctx)
 
-	// Count sessions in memvid
 	sessionCount := 0
 	if memvidHealthy {
 		memories, err := q.memvidClient.Search(ctx, "session:", 1)
 		if err == nil && len(memories) > 0 {
-			// Estimate count from results
 			sessionCount = len(memories)
 		}
 	}
@@ -443,8 +449,6 @@ type QAgentStatus struct {
 	OutcomesLog   string
 	Config        config.QAgentConfig
 }
-
-// Helper functions
 
 func expandPath(path string) string {
 	if path == "" || path[0] != '~' {

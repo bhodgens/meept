@@ -33,12 +33,13 @@ type TasksModel struct {
 	taskChildren    map[string][]types.TaskExtended // Map parent ID to children
 }
 
-// TaskViewMode selects between jobs and tasks view.
+// TaskViewMode selects between jobs, tasks, and lineage view.
 type TaskViewMode int
 
 const (
 	ViewModeJobs TaskViewMode = iota
 	ViewModeTasks
+	ViewModeLineage
 )
 
 // TaskFilter defines filter options.
@@ -347,18 +348,35 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case "tab":
-			// Toggle view mode
-			if m.viewMode == ViewModeJobs {
-				m.viewMode = ViewModeTasks
-				m.setTasksColumns()
-				m.loading = true
-				return m.fetchTasks
-			} else {
+			// Cycle view mode: tasks -> jobs -> lineage -> tasks
+			switch m.viewMode {
+			case ViewModeTasks:
 				m.viewMode = ViewModeJobs
 				m.setJobsColumns()
 				m.loading = true
 				return m.fetchJobs
+			case ViewModeJobs:
+				m.viewMode = ViewModeLineage
+				m.loading = true
+				return m.fetchTasks
+			default: // ViewModeLineage
+				m.viewMode = ViewModeTasks
+				m.setTasksColumns()
+				m.loading = true
+				return m.fetchTasks
 			}
+
+		case "t":
+			// Quick toggle lineage view
+			if m.viewMode == ViewModeLineage {
+				m.viewMode = ViewModeTasks
+				m.setTasksColumns()
+				m.loading = true
+				return m.fetchTasks
+			}
+			m.viewMode = ViewModeLineage
+			m.loading = true
+			return m.fetchTasks
 
 		case "f":
 			// Cycle through filters
@@ -684,6 +702,11 @@ func (m *TasksModel) View() string {
 		return m.renderHelp()
 	}
 
+	// Lineage view has its own renderer
+	if m.viewMode == ViewModeLineage {
+		return m.renderLineageView()
+	}
+
 	// Check for loading/error based on view mode
 	isEmpty := (m.viewMode == ViewModeTasks && len(m.tasks) == 0) ||
 		(m.viewMode == ViewModeJobs && len(m.jobs) == 0)
@@ -725,9 +748,9 @@ func (m *TasksModel) View() string {
 		MarginTop(1)
 
 	if m.viewMode == ViewModeTasks {
-		b.WriteString(hintStyle.Render("r: refresh | tab: jobs view | f: filter | ←/→: collapse/expand | enter: details | ?: help"))
+		b.WriteString(hintStyle.Render("r: refresh | tab: jobs view | t: lineage | f: filter | <-/->: collapse/expand | enter: details | ?: help"))
 	} else {
-		b.WriteString(hintStyle.Render("r: refresh | tab: tasks view | enter: select | ?: help"))
+		b.WriteString(hintStyle.Render("r: refresh | tab: lineage view | enter: select | ?: help"))
 	}
 
 	return b.String()

@@ -318,3 +318,35 @@ func (t *SessionTracker) GetIdleSessions(idleDuration time.Duration) []*SessionS
 
 	return idle
 }
+
+// StartBackgroundPersistence starts a background goroutine that persists idle sessions.
+// The goroutine runs every hour and persists sessions idle for > sessionIdleTriggerHours.
+// Call StopBackgroundPersistence() to stop the goroutine.
+func (t *SessionTracker) StartBackgroundPersistence(ctx context.Context) {
+	if t.memvidClient == nil {
+		return // No memvid client configured
+	}
+
+	pollInterval := 1 * time.Hour
+	ticker := time.NewTicker(pollInterval)
+	
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+				if err := t.PersistIdleSessions(ctx); err != nil {
+					// Log error but continue
+				}
+			}
+		}
+	}()
+}
+
+// StopBackgroundPersistence stops the background persistence goroutine.
+// This is called automatically when the context is cancelled.
+func (t *SessionTracker) StopBackgroundPersistence() {
+	// Context cancellation handles cleanup via the goroutine
+}

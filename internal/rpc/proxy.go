@@ -124,15 +124,9 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	// Pipeline methods
 	server.RegisterHandler("pipeline.status", p.makeProxy("pipeline.status", "pipeline.result", 10*time.Second))
 
-	// Self-improvement methods
-	server.RegisterHandler("selfimprove.detect", p.makeProxy("selfimprove.detect", "selfimprove.result", 60*time.Second))
-	server.RegisterHandler("selfimprove.analyze", p.makeProxy("selfimprove.analyze", "selfimprove.result", 120*time.Second))
-	server.RegisterHandler("selfimprove.generate", p.makeProxy("selfimprove.generate", "selfimprove.result", 120*time.Second))
-	server.RegisterHandler("selfimprove.validate", p.makeProxy("selfimprove.validate", "selfimprove.result", 300*time.Second))
-	server.RegisterHandler("selfimprove.apply", p.makeProxy("selfimprove.apply", "selfimprove.result", 60*time.Second))
-	server.RegisterHandler("selfimprove.reject", p.makeProxy("selfimprove.reject", "selfimprove.result", 10*time.Second))
-	server.RegisterHandler("selfimprove.status", p.makeProxy("selfimprove.status", "selfimprove.result", 10*time.Second))
-	server.RegisterHandler("selfimprove.cycle", p.makeProxy("selfimprove.cycle", "selfimprove.result", 600*time.Second))
+	// Self-improvement methods are registered as native Go handlers by
+	// SelfImproveHandler (see selfimprove.go) because the Controller lives
+	// inside the Go daemon and does not need a bus proxy round-trip.
 
 	// Bus subscription methods for TUI event streaming
 	server.RegisterHandler("bus.subscribe", p.handleBusSubscribe)
