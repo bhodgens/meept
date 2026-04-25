@@ -1,13 +1,16 @@
 package tui
 
 import (
+	"bytes"
+	"context"
 	"strings"
-	"github.com/charmbracelet/x/ansi"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/models"
 )
 
@@ -39,6 +42,8 @@ func createTestApp() *App {
 	// Create modals
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
+	// Initialize notification manager
+	app.notifications = components.NewNotificationManager()
 	// Set sizes on sub-models
 	app.chat.SetSize(app.width-2, app.height-4)
 	app.tasks.SetSize(app.width-2, app.height-4)
@@ -425,9 +430,117 @@ func TestApp_NoMouseCapture(t *testing.T) {
 	// (there's no direct way to inspect batch commands)
 }
 
-// TODO: Re-enable teatest integration tests once a bubbletea v2-compatible
-// teatest package is available. The github.com/charmbracelet/x/exp/teatest
-// package currently depends on bubbletea v1.
-//
-// func TestApp_WithTeatest_BasicRender(t *testing.T) { ... }
-// func TestApp_WithTeatest_CommandPalette(t *testing.T) { ... }
+// TestApp_Program_BasicRender verifies that the App renders without panicking
+// when run under a bubbletea v2 Program with in-memory I/O.
+func TestApp_Program_BasicRender(t *testing.T) {
+	var buf bytes.Buffer
+	var in bytes.Buffer
+
+	rpc := NewRPCClient("/tmp/meept-test-nonexistent.sock")
+	styles := DefaultStyles()
+	clientConfig := DefaultClientConfig()
+	app := &App{
+		styles:       styles,
+		rpc:          rpc,
+		currentView:  ViewChat,
+		keys:         DefaultKeyMap(),
+		sidebar:      NewSidebarModel(rpc, nil, styles, clientConfig.Rendering.SidebarAnimation),
+		clientConfig: clientConfig,
+		width:        80,
+		height:       24,
+		projectDir:   "/test/project",
+		activeModal:  ModalNone,
+	}
+	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
+	app.tasks = models.NewTasksModel(rpc)
+	app.queue = models.NewQueueModel(rpc)
+	app.memory = models.NewMemoryModel(rpc)
+	app.commandPalette = CommandPaletteModal(styles, clientConfig)
+	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
+	app.notifications = components.NewNotificationManager()
+	app.chat.SetSize(app.width-2, app.height-4)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	p := tea.NewProgram(app,
+		tea.WithContext(ctx),
+		tea.WithInput(&in),
+		tea.WithOutput(&buf),
+	)
+
+	// Run in background; send quit after brief delay
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		p.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	}()
+
+	_, err := p.Run()
+	if err != nil && !strings.Contains(err.Error(), "context") {
+		t.Fatalf("program.Run() error: %v", err)
+	}
+
+	// Verify output was produced
+	if buf.Len() == 0 {
+		t.Error("expected program to produce output")
+	}
+}
+
+// TestApp_Program_CommandPalette verifies that the command palette can be
+// opened and closed without panicking under a real Program.
+func TestApp_Program_CommandPalette(t *testing.T) {
+	var buf bytes.Buffer
+	var in bytes.Buffer
+
+	rpc := NewRPCClient("/tmp/meept-test-nonexistent.sock")
+	styles := DefaultStyles()
+	clientConfig := DefaultClientConfig()
+	app := &App{
+		styles:       styles,
+		rpc:          rpc,
+		currentView:  ViewChat,
+		keys:         DefaultKeyMap(),
+		sidebar:      NewSidebarModel(rpc, nil, styles, clientConfig.Rendering.SidebarAnimation),
+		clientConfig: clientConfig,
+		width:        80,
+		height:       24,
+		projectDir:   "/test/project",
+		activeModal:  ModalNone,
+	}
+	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
+	app.tasks = models.NewTasksModel(rpc)
+	app.queue = models.NewQueueModel(rpc)
+	app.memory = models.NewMemoryModel(rpc)
+	app.commandPalette = CommandPaletteModal(styles, clientConfig)
+	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
+	app.notifications = components.NewNotificationManager()
+	app.chat.SetSize(app.width-2, app.height-4)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	p := tea.NewProgram(app,
+		tea.WithContext(ctx),
+		tea.WithInput(&in),
+		tea.WithOutput(&buf),
+	)
+
+	// Send: Ctrl+X (open palette), Escape (close), Ctrl+C (quit)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		p.Send(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+		time.Sleep(200 * time.Millisecond)
+		p.Send(tea.KeyPressMsg{Code: tea.KeyEscape})
+		time.Sleep(200 * time.Millisecond)
+		p.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	}()
+
+	_, err := p.Run()
+	if err != nil && !strings.Contains(err.Error(), "context") {
+		t.Fatalf("program.Run() error: %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Error("expected program to produce output")
+	}
+}

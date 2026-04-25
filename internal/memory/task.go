@@ -312,44 +312,12 @@ func (t *TaskMemory) Close() error {
 }
 
 // scanResults scans database rows into MemoryResult slice.
+// Delegates to the shared SQLiteFTSStore.ScanResults implementation.
 func (t *TaskMemory) scanResults(rows *sql.Rows, hasRank bool) ([]MemoryResult, error) {
-	var results []MemoryResult
-
-	for rows.Next() {
-		var id, content, domain, metaJSON, createdAtStr string
-		var rank float64
-
-		var err error
-		if hasRank {
-			err = rows.Scan(&id, &content, &domain, &metaJSON, &createdAtStr, &rank)
-		} else {
-			err = rows.Scan(&id, &content, &domain, &metaJSON, &createdAtStr)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
-
-		results = append(results, MemoryResult{
-			Memory: Memory{
-				ID:        id,
-				Content:   content,
-				Type:      MemoryTypeTask,
-				Category:  domain,
-				Metadata:  ParseMetadata(metaJSON),
-				CreatedAt: createdAt,
-			},
-			RelevanceScore: sqlite.NormalizeRank(rank),
-			Source:         fmt.Sprintf("task:%s", domain),
-		})
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return results, nil
+	return t.store.ScanResults(rows, hasRank, ScanRowConfig{
+		MemoryType: MemoryTypeTask,
+		SourceFmt:  "task:%s",
+	})
 }
 
 // Ensure TaskMemory implements io.Closer

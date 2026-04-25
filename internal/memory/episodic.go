@@ -122,10 +122,46 @@ func (e *EpisodicMemory) Store(ctx context.Context, content string, category str
 	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
 	metaJSON := (&Memory{Metadata: metadata}).MetadataJSON()
 
+	// Extract versioning fields from metadata to populate SQL columns
+	var parentID sql.NullString
+	var version sql.NullInt64
+	var isCurrent sql.NullInt64
+
+	if metadata != nil {
+		if pid, ok := metadata["parent_id"].(string); ok && pid != "" {
+			parentID = sql.NullString{String: pid, Valid: true}
+		}
+		if v, ok := metadata["version"]; ok {
+			switch n := v.(type) {
+			case int:
+				version = sql.NullInt64{Int64: int64(n), Valid: true}
+			case float64:
+				version = sql.NullInt64{Int64: int64(n), Valid: true}
+			}
+		}
+		if ic, ok := metadata["is_current"]; ok {
+			switch n := ic.(type) {
+			case int:
+				isCurrent = sql.NullInt64{Int64: int64(n), Valid: true}
+			case float64:
+				isCurrent = sql.NullInt64{Int64: int64(n), Valid: true}
+			}
+		}
+	}
+
+	// Default is_current to 1 when not explicitly set
+	if !isCurrent.Valid {
+		isCurrent = sql.NullInt64{Int64: 1, Valid: true}
+	}
+	// Default version to 1 when not explicitly set
+	if !version.Valid {
+		version = sql.NullInt64{Int64: 1, Valid: true}
+	}
+
 	err := e.store.Store(ctx,
-		`INSERT INTO episodic_memories (id, content, category, metadata_json, created_at, last_accessed_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-		id, content, category, metaJSON, nowISO, nowISO,
+		`INSERT INTO episodic_memories (id, content, category, metadata_json, created_at, last_accessed_at, version, parent_id, is_current)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, content, category, metaJSON, nowISO, nowISO, version, parentID, isCurrent,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to store memory: %w", err)
@@ -363,44 +399,12 @@ func (e *EpisodicMemory) Close() error {
 }
 
 // scanResults scans database rows into MemoryResult slice.
+// Delegates to the shared SQLiteFTSStore.ScanResults implementation.
 func (e *EpisodicMemory) scanResults(rows *sql.Rows, hasRank bool) ([]MemoryResult, error) {
-	var results []MemoryResult
-
-	for rows.Next() {
-		var id, content, category, metaJSON, createdAtStr string
-		var rank float64
-
-		var err error
-		if hasRank {
-			err = rows.Scan(&id, &content, &category, &metaJSON, &createdAtStr, &rank)
-		} else {
-			err = rows.Scan(&id, &content, &category, &metaJSON, &createdAtStr)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
-
-		results = append(results, MemoryResult{
-			Memory: Memory{
-				ID:        id,
-				Content:   content,
-				Type:      MemoryTypeEpisodic,
-				Category:  category,
-				Metadata:  ParseMetadata(metaJSON),
-				CreatedAt: createdAt,
-			},
-			RelevanceScore: sqlite.NormalizeRank(rank),
-			Source:         "episodic",
-		})
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return results, nil
+	return e.store.ScanResults(rows, hasRank, ScanRowConfig{
+		MemoryType: MemoryTypeEpisodic,
+		SourceFmt:  "episodic",
+	})
 }
 
 // Ensure EpisodicMemory implements io.Closer

@@ -1099,10 +1099,10 @@ func (m *Manager) StoreVersioned(ctx context.Context, mem Memory, opts StoreOpti
 		// Create new version
 		newMem := mem
 		newMem.ID = "" // Will get new ID
-		newMem.Metadata["parent_id"] = opts.ParentID
 		if newMem.Metadata == nil {
 			newMem.Metadata = make(map[string]any)
 		}
+		newMem.Metadata["parent_id"] = opts.ParentID
 		newMem.Metadata["version"] = currentVersion + 1
 		newMem.Metadata["is_current"] = 1
 
@@ -1129,6 +1129,7 @@ func (m *Manager) markVersionNonCurrent(ctx context.Context, id string) error {
 }
 
 // getCurrentVersion returns the current version number for a memory.
+// It uses the SQL version and parent_id columns directly.
 func (m *Manager) getCurrentVersion(id string) int {
 	if m.episodic == nil {
 		return 0
@@ -1142,67 +1143,44 @@ func (m *Manager) getCurrentVersion(id string) int {
 	}
 	defer pool.Put(db)
 
-	// First check if this ID has a version in metadata
-	var idToCheck string
+	// Find the parent_id of this memory (if it's a version) using the SQL column
+	var parentID sql.NullString
 	row := db.QueryRow(`
-		SELECT metadata_json, is_current 
-		FROM episodic_memories 
-		WHERE id = ? 
-		ORDER BY created_at DESC 
+		SELECT parent_id
+		FROM episodic_memories
+		WHERE id = ?
 		LIMIT 1
 	`, id)
-	
-	var metaJSON string
-	var isCurrent int
-	err = row.Scan(&metaJSON, &isCurrent)
+
+	err = row.Scan(&parentID)
 	if err != nil {
 		// Memory might not exist yet, start at version 0
 		return 0
 	}
 
-	// Check if this is the original memory (not a version)
-	idToCheck = id
-	
-	// Find parent ID if this is a version
-	metadata := ParseMetadata(metaJSON)
-	if parentID, ok := metadata["parent_id"].(string); ok && parentID != "" {
-		idToCheck = parentID
+	// Determine the root ID: if this memory has a parent, use that; otherwise use id
+	rootID := id
+	if parentID.Valid && parentID.String != "" {
+		rootID = parentID.String
 	}
 
-	// Get the root memory (original, not a version)
-	rootRow := db.QueryRow(`
-		SELECT id FROM episodic_memories 
-		WHERE id = ? OR parent_id = ? 
-		ORDER BY created_at ASC 
-		LIMIT 1
-	`, idToCheck, idToCheck)
-	
-	var rootID string
-	err = rootRow.Scan(&rootID)
-	if err != nil {
-		rootID = idToCheck
-	}
-
-	// Count versions starting from root
+	// Get max version from the SQL column for all memories in the version chain
 	var maxVersion int
 	err = db.QueryRow(`
-		SELECT COALESCE(MAX(CAST(JSON_EXTRACT(metadata_json, '$.version') AS INTEGER)), 0)
+		SELECT COALESCE(MAX(version), 0)
 		FROM episodic_memories
-		WHERE id = ? OR parent_id = ? OR 
-		      JSON_EXTRACT(metadata_json, '$.parent_id') = ? OR
-		      JSON_EXTRACT(metadata_json, '$.parent_id') IN (
-		          SELECT id FROM episodic_memories WHERE parent_id = ?
-		      )
-	`, rootID, rootID, rootID, rootID).Scan(&maxVersion)
-	
+		WHERE id = ? OR parent_id = ?
+	`, rootID, rootID).Scan(&maxVersion)
+
 	if err != nil {
 		return 0
 	}
-	
+
 	return maxVersion
 }
 
 // GetVersionHistory retrieves all versions of a memory by ID or parent ID.
+// Uses the SQL parent_id column for efficient querying.
 func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, error) {
 	if m.episodic == nil {
 		return nil, errors.New("episodic memory not available")
@@ -1215,19 +1193,15 @@ func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, e
 	}
 	defer pool.Put(db)
 
-	// Find all versions: the memory itself, its parent, and all children
+	// Find all versions using the SQL parent_id column
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at, last_accessed_at
 		FROM episodic_memories
-		WHERE id = ? 
+		WHERE id = ?
 		   OR parent_id = ?
-		   OR JSON_EXTRACT(metadata_json, '$.parent_id') = ?
-		   OR id IN (
-		       SELECT id FROM episodic_memories 
-		       WHERE JSON_EXTRACT(metadata_json, '$.parent_id') = ?
-		   )
+		   OR id = (SELECT parent_id FROM episodic_memories WHERE id = ?)
 		ORDER BY created_at ASC
-	`, id, id, id, id)
+	`, id, id, id)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query version history: %w", err)

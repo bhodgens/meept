@@ -1,11 +1,8 @@
 package tui
 
 import (
-	"encoding/base64"
 	"os"
 	"fmt"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -13,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/viz"
@@ -102,6 +100,9 @@ type App struct {
 
 	// Error state
 	err error
+
+	// Toast notifications
+	notifications *components.NotificationManager
 }
 
 // KeyMap defines the key bindings.
@@ -193,6 +194,9 @@ func NewApp(socketPath string) *App {
 	app.commandHandler = NewCommandHandler(rpc, WithChatModelGetter(func() *models.ChatModel {
 		return app.chat
 	}))
+
+	// Initialize notification manager
+	app.notifications = components.NewNotificationManager()
 
 	return app
 }
@@ -624,6 +628,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if cmd := a.chat.Update(resultMsg); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
+
+					// Push toast notification
+					if a.notifications != nil && resultMsg.TaskName != "" {
+						level := components.NotifySuccess
+						title := "task completed"
+						msg := resultMsg.TaskName
+						if e.Topic == "task.failed" {
+							level = components.NotifyError
+							title = "task failed"
+						}
+						_, expiryCmd := a.notifications.Push(level, title, msg)
+						if expiryCmd != nil {
+							cmds = append(cmds, expiryCmd)
+						}
+					}
 				}
 				// Flash the Tasks tab indicator if not currently viewing tasks
 				if a.currentView != ViewTasks {
@@ -739,6 +758,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StatusMessageClearMsg:
 		if time.Since(a.statusMessageTime) >= 2*time.Second {
 			a.statusMessage = ""
+		}
+		return a, nil
+
+	case components.NotificationExpiredMsg:
+		if a.notifications != nil {
+			a.notifications.Update(msg)
 		}
 		return a, nil
 
@@ -1055,6 +1080,15 @@ func (a *App) View() tea.View {
 	b.WriteString("\n")
 	b.WriteString(a.renderStatusBar())
 
+	// Render toast notifications overlay (positioned above status bar)
+	if a.notifications != nil && a.notifications.HasActive() {
+		notifView := a.notifications.View(a.width - a.sidebarWidth)
+		if notifView != "" {
+			b.WriteString("\n")
+			b.WriteString(notifView)
+		}
+	}
+
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	v.WindowTitle = a.getWindowTitle()
@@ -1142,8 +1176,7 @@ func (a *App) renderHeader() string {
 		Render(content)
 }
 
-// setTerminalTitle sets the terminal tab/window title using OSC escape sequence.
-// getWindowTitle returns the terminal title string.
+// getWindowTitle returns the terminal title string for the tea.View WindowTitle field.
 func (a *App) getWindowTitle() string {
 	title := "meept"
 	if a.currentSession != nil {
@@ -1156,19 +1189,6 @@ func (a *App) getWindowTitle() string {
 	return title
 }
 
-func (a *App) setTerminalTitle() {
-	title := "meept"
-	if a.currentSession != nil {
-		// Prefer description over name for the title
-		if a.currentSession.Description != "" {
-			title = "meept - " + a.currentSession.Description
-		} else if a.currentSession.Name != "" && a.currentSession.Name != "default" {
-			title = "meept - " + a.currentSession.Name
-		}
-	}
-	// OSC 0 sets window/tab title: \033]0;title\007
-	fmt.Fprintf(os.Stdout, "\033]0;%s\007", title)
-}
 
 func (a *App) renderTabs() string {
 	tabs := []struct {
@@ -1331,35 +1351,6 @@ func max(a, b int) int {
 	return b
 }
 
-// copyToClipboard copies text to the system clipboard using OSC52 and fallback methods.
-func copyToClipboard(text string) error {
-	// Try OSC52 first (works in most modern terminals)
-	encoded := base64.StdEncoding.EncodeToString([]byte(text))
-	osc52 := fmt.Sprintf("\x1b]52;c;%s\x07", encoded)
-	fmt.Print(osc52)
-
-	// Also try platform-specific clipboard as backup
-	switch runtime.GOOS {
-	case "darwin":
-		cmd := exec.Command("pbcopy")
-		cmd.Stdin = strings.NewReader(text)
-		_ = cmd.Run() // Ignore error, OSC52 might have worked
-	case "linux":
-		// Try xclip first, then xsel
-		if cmd := exec.Command("xclip", "-selection", "clipboard"); cmd != nil {
-			cmd.Stdin = strings.NewReader(text)
-			if err := cmd.Run(); err == nil {
-				return nil
-			}
-		}
-		if cmd := exec.Command("xsel", "--clipboard", "--input"); cmd != nil {
-			cmd.Stdin = strings.NewReader(text)
-			_ = cmd.Run()
-		}
-	}
-	return nil
-}
-
 // CopySuccessMsg indicates clipboard copy succeeded.
 type CopySuccessMsg struct {
 	Text string
@@ -1370,14 +1361,14 @@ type CopyErrorMsg struct {
 	Err error
 }
 
-// doCopy is a command that copies text to clipboard.
+// doCopy is a command that copies text to clipboard using bubbletea's built-in clipboard support.
 func doCopy(text string) tea.Cmd {
-	return func() tea.Msg {
-		if err := copyToClipboard(text); err != nil {
-			return CopyErrorMsg{Err: err}
-		}
-		return CopySuccessMsg{Text: text}
-	}
+	return tea.Batch(
+		tea.SetClipboard(text),
+		func() tea.Msg {
+			return CopySuccessMsg{Text: text}
+		},
+	)
 }
 
 // StatusMessageClearMsg clears the status message.

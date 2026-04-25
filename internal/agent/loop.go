@@ -37,6 +37,7 @@ var (
 	ErrCycleDetected                 = errors.New("agent detected a cycle in tool calls")
 	ErrConvergenceDetected           = errors.New("agent responses converged without progress")
 	ErrConversationBudgetExhausted   = errors.New("conversation token budget exhausted")
+	ErrNoSkill                       = errors.New("skill is nil")
 )
 
 // Evidence prompt section instructs agents to substantiate their claims.
@@ -298,6 +299,10 @@ const (
 // AgentMemoryConfig holds memory recall configuration for an agent.
 type AgentMemoryConfig struct {
 	RecallMode MemoryRecallMode `json:"recall_mode"`
+	// SnapshotCachingEnabled controls whether memory snapshots are frozen for
+	// LLM prefix caching (Hermes pattern). When false, FreezeMemorySnapshot is
+	// skipped and the live context is used each turn.
+	SnapshotCachingEnabled bool `json:"snapshot_caching_enabled"`
 }
 
 // AgentConfig holds configuration for the agent loop.
@@ -325,7 +330,8 @@ func DefaultAgentConfig() AgentConfig {
 		Purpose:       DefaultPurpose,
 		Personality:   "",
 		Memory: AgentMemoryConfig{
-			RecallMode: RecallModeAuto, // Default to auto for backwards compatibility
+			RecallMode:             RecallModeAuto, // Default to auto for backwards compatibility
+			SnapshotCachingEnabled: true,           // Default to enabled for backwards compatibility
 		},
 	}
 }
@@ -782,6 +788,24 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		)
 	}
 
+	// Apply tool filtering if top discovered skill restricts tools
+	if len(discovered) > 0 && len(discovered[0].Entry.AllowedTools) > 0 && l.registry != nil {
+		filtered := FilterToolsForSkill(l.registry, discovered[0].Entry.AllowedTools)
+		l.mu.Lock()
+		origRegistry := l.registry
+		l.registry = filtered
+		l.mu.Unlock()
+		defer func() {
+			l.mu.Lock()
+			l.registry = origRegistry
+			l.mu.Unlock()
+		}()
+		l.logger.Debug("Applied tool filtering for discovered skill",
+			"skill", discovered[0].Entry.Name,
+			"allowed_tools", discovered[0].Entry.AllowedTools,
+		)
+	}
+
 	// Build and set system prompt with skill context
 	systemPrompt := l.buildSystemPromptWithSkills(ctx, discovered)
 	conv.SetSystemPrompt(systemPrompt)
@@ -833,6 +857,77 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	}
 
 	return finalResponse, nil
+}
+
+// RunWithSkill executes a skill through the agent loop with the skill's
+// constraints applied (tool filtering, iteration limits). The skill body is
+// injected as the system prompt, and if the skill declares allowed-tools,
+// the tool registry is filtered to only include those tools for the duration
+// of execution.
+func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input string, conversationID string) (string, error) {
+	if skill == nil {
+		return "", ErrNoSkill
+	}
+	if l.llm == nil {
+		return "", ErrNoLLMClient
+	}
+
+	l.logger.Info("Executing skill through agent loop",
+		"skill", skill.Name,
+		"conversation", conversationID,
+	)
+
+	// Apply tool filtering if skill restricts tools
+	if len(skill.AllowedTools) > 0 && l.registry != nil {
+		originalRegistry := l.registry
+		filtered := FilterToolsForSkill(originalRegistry, skill.AllowedTools)
+		l.mu.Lock()
+		l.registry = filtered
+		l.mu.Unlock()
+		defer func() {
+			l.mu.Lock()
+			l.registry = originalRegistry
+			l.mu.Unlock()
+		}()
+	}
+
+	// Override max iterations if skill specifies it
+	originalMaxIter := l.config.MaxIterations
+	if skill.MaxIterations > 0 {
+		l.config.MaxIterations = skill.MaxIterations
+		defer func() {
+			l.config.MaxIterations = originalMaxIter
+		}()
+	}
+
+	// Get or create conversation
+	conv := l.conversations.Get(conversationID)
+
+	// Set skill body as system prompt
+	conv.SetSystemPrompt(skill.Body)
+
+	// Add user message
+	conv.AddUserMessage(strings.TrimSpace(input))
+
+	// Truncate if needed
+	conv.Truncate()
+
+	// Run reasoning cycle with skill constraints
+	response, err := l.reasoningCycle(ctx, conv, conversationID)
+	if err != nil {
+		l.logger.Error("Skill reasoning cycle failed",
+			"skill", skill.Name,
+			"conversation", conversationID,
+			"error", err,
+		)
+		errorMsg := "I encountered an error during skill execution."
+		conv.AddAssistantMessage(errorMsg)
+		return errorMsg, err
+	}
+
+	// Add response to conversation
+	conv.AddAssistantMessage(response)
+	return response, nil
 }
 
 // triggerLearning runs the JUDGE/DISTILL learning pipeline asynchronously.
@@ -1555,11 +1650,13 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		// Set the memory context on the conversation
 		conv.SetMemoryContext(fullContext)
 
-		// Freeze the memory snapshot for prefix caching efficiency
-		if err := conv.FreezeMemorySnapshot(ctx); err != nil {
-			l.logger.Warn("Failed to freeze memory snapshot", "error", err)
-		} else {
-			l.logger.Debug("Memory snapshot frozen for prefix caching", "conversation", conversationID)
+		// Freeze the memory snapshot for prefix caching efficiency (only when caching enabled)
+		if l.config.Memory.SnapshotCachingEnabled {
+			if err := conv.FreezeMemorySnapshot(ctx); err != nil {
+				l.logger.Warn("Failed to freeze memory snapshot", "error", err)
+			} else {
+				l.logger.Debug("Memory snapshot frozen for prefix caching", "conversation", conversationID)
+			}
 		}
 	}
 
@@ -1949,7 +2046,18 @@ func containsAnyKeyword(text string, keywords []string) bool {
 	return false
 }
 
+// memoryToolNames is the set of tool names that interact with the memory system.
+// When recall mode is "disabled", these tools are gated and return an error.
+var memoryToolNames = map[string]bool{
+	"memory_store":             true,
+	"memory_search":            true,
+	"memory_get_context":       true,
+	"memory_get_version":       true,
+	"memory_get_version_history": true,
+}
+
 // executeToolCalls executes tool calls using the executor.
+// Memory tools are gated when recall mode is "disabled".
 func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) []*ExecutionResult {
 	if l.executor == nil {
 		// No executor configured - return errors for all tool calls
@@ -1960,6 +2068,34 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 				Success:    false,
 				Error:      "tool execution not configured",
 			}
+		}
+		return results
+	}
+
+	// Gate memory tools when recall mode is disabled
+	if l.config.Memory.RecallMode == RecallModeDisabled {
+		filtered := make([]llm.ToolCall, 0, len(toolCalls))
+		results := make([]*ExecutionResult, 0, len(toolCalls))
+
+		for _, tc := range toolCalls {
+			if memoryToolNames[tc.Function.Name] {
+				l.logger.Debug("blocked memory tool call: recall mode disabled",
+					"tool", tc.Function.Name,
+				)
+				results = append(results, &ExecutionResult{
+					ToolCallID: tc.ID,
+					Success:    false,
+					Error:      fmt.Sprintf("memory tool %q blocked: recall mode is disabled", tc.Function.Name),
+				})
+			} else {
+				filtered = append(filtered, tc)
+			}
+		}
+
+		// Execute remaining (non-memory) tool calls
+		if len(filtered) > 0 {
+			execResults := l.executor.ExecuteAll(ctx, filtered)
+			results = append(results, execResults...)
 		}
 		return results
 	}

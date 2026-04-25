@@ -556,3 +556,157 @@ func TestTasksModel_ViewEmptyDetail(t *testing.T) {
 // implement the full tea.Model interface (missing quit command handling).
 // The App-level teatest tests provide full integration testing.
 // Sub-models are thoroughly tested via unit tests above.
+
+func TestTasksModel_LineageViewToggle(t *testing.T) {
+	mock := NewMockTasksRPCClient()
+	model := NewTasksModel(mock)
+	model.SetSize(80, 24)
+
+	// Default to tasks view
+	if model.viewMode != ViewModeTasks {
+		t.Error("expected tasks view by default")
+	}
+
+	// Press 't' to toggle lineage
+	msg := tea.KeyPressMsg{Code: 't', Text: "t"}
+	cmd := model.Update(msg)
+
+	if model.viewMode != ViewModeLineage {
+		t.Error("expected lineage view after pressing 't'")
+	}
+	if cmd == nil {
+		t.Error("expected fetch command on lineage toggle")
+	}
+}
+
+func TestTasksModel_LineageViewToggleOff(t *testing.T) {
+	mock := NewMockTasksRPCClient()
+	model := NewTasksModel(mock)
+	model.SetSize(80, 24)
+
+	// Toggle to lineage
+	model.viewMode = ViewModeLineage
+
+	// Press 't' again to toggle back
+	msg := tea.KeyPressMsg{Code: 't', Text: "t"}
+	model.Update(msg)
+
+	if model.viewMode != ViewModeTasks {
+		t.Error("expected tasks view after toggling lineage off")
+	}
+}
+
+func TestTasksModel_LineageViewRendering(t *testing.T) {
+	mock := NewMockTasksRPCClient()
+	// Set up tasks with parent-child relationships
+	mock.TasksExtendedResponse = &types.TaskExtendedListResponse{
+		Tasks: []types.TaskExtended{
+			{
+				Task: types.Task{
+					ID:    "parent-1",
+					Name:  "Build auth system",
+					State: "executing",
+				},
+				InheritedFrom: "",
+				MemoryRefs:    []string{"mem-1", "mem-2"},
+			},
+			{
+				Task: types.Task{
+					ID:           "child-1",
+					Name:         "Plan architecture",
+					State:        "completed",
+					CompletedJobs: 1,
+					TotalJobs:    1,
+				},
+				InheritedFrom:   "parent-1",
+				CreatedMemories: []string{"mem-3"},
+			},
+			{
+				Task: types.Task{
+					ID:    "child-2",
+					Name:  "Implement handlers",
+					State: "pending",
+				},
+				InheritedFrom: "parent-1",
+			},
+		},
+	}
+
+	model := NewTasksModel(mock)
+	model.SetSize(80, 24)
+	model.viewMode = ViewModeLineage
+
+	// Load data
+	msg := model.fetchTasks()
+	model.Update(msg)
+
+	view := model.View()
+
+	// Check that lineage view shows parent and children
+	if !strings.Contains(view, "Task Lineage") {
+		t.Error("expected 'Task Lineage' header")
+	}
+	if !strings.Contains(view, "Build auth system") {
+		t.Error("expected parent task name")
+	}
+	if !strings.Contains(view, "Plan architecture") {
+		t.Error("expected child task name")
+	}
+	if !strings.Contains(view, "Implement handlers") {
+		t.Error("expected child task name")
+	}
+}
+
+func TestTasksModel_LineageViewEmpty(t *testing.T) {
+	mock := NewMockTasksRPCClient()
+	mock.TasksExtendedResponse = &types.TaskExtendedListResponse{
+		Tasks: []types.TaskExtended{},
+	}
+
+	model := NewTasksModel(mock)
+	model.SetSize(80, 24)
+	model.viewMode = ViewModeLineage
+
+	// Load data
+	msg := model.fetchTasks()
+	model.Update(msg)
+
+	// With empty tasks, the lineage view falls back to renderLoading or renderError
+	// since tasks is empty and loading was cleared. The key thing is it doesn't panic.
+	view := model.View()
+
+	// Verify it renders something (either loading, empty state, or the lineage header)
+	if view == "" {
+		t.Error("expected non-empty view")
+	}
+}
+
+func TestTasksModel_TabCycleThroughViews(t *testing.T) {
+	mock := NewMockTasksRPCClient()
+	model := NewTasksModel(mock)
+	model.SetSize(80, 24)
+
+	// Start at tasks view
+	if model.viewMode != ViewModeTasks {
+		t.Error("expected tasks view initially")
+	}
+
+	// Tab to jobs
+	msg := tea.KeyPressMsg{Code: tea.KeyTab, Text: "tab"}
+	model.Update(msg)
+	if model.viewMode != ViewModeJobs {
+		t.Error("expected jobs view after first tab")
+	}
+
+	// Tab to lineage
+	model.Update(msg)
+	if model.viewMode != ViewModeLineage {
+		t.Error("expected lineage view after second tab")
+	}
+
+	// Tab back to tasks
+	model.Update(msg)
+	if model.viewMode != ViewModeTasks {
+		t.Error("expected tasks view after third tab")
+	}
+}

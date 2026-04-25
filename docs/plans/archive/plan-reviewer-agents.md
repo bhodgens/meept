@@ -464,7 +464,10 @@ test = "claude-haiku-4-5"    # Faster/cheaper for test-result verification
 - **Config**: `[review]` section in `config/meept.toml:227` with `enabled`, `require_review`, `skip_review`, `reviewer_mapping`, `max_revision_cycles`, and `auto_approve_patterns`.
 - **Human escalation**: When `RevisionCount > MaxRevisionCycles`, `ReviewStep` returns `ReviewNeedsInfo` with a "Human intervention required" feedback message (surfaces in the step result and TUI detail modal).
 
+### Shipped (2026-04-25 remediation)
+- **Revision count in TUI**: `TaskStepView` in `internal/tui/types/types.go` now includes `RevisionCount int`. The step detail modal in `internal/tui/models/tasks.go` renders a `(rev N)` badge when `RevisionCount > 0`.
+- **Review metrics emission**: `Collector` in `internal/metrics/collector.go` subscribes to `step.*` bus events. `recordReviewMetrics` extracts `status`, `reviewer`, `confidence`, and `revision_count` from review events and emits: `review.completed`, `review.confidence`, `review.pass_rate`, `review.revision_rate`, `review.escalation_rate`, and `review.revision_cycles`. `publishReviewEvent` in `internal/agent/review_manager.go` now includes `revision_count` in the event payload.
+
 ### Deferred / Out of scope
-- **Phase 3 — Task-level `StateTesting` final-review step**: `StateTesting` constant exists (`internal/task/task.go:16`) and is accepted by `IsActive`, but no final-review step is currently auto-injected on task completion. This is a speculative enhancement; nothing in the current agent flows requires it, and adding it would couple review into task-completion semantics. Tracked as a follow-up.
-- **Revision count UI surface**: `TaskStep.RevisionCount` is persisted but not yet projected through `TaskStepView` to the Tasks dashboard. Small typed-struct plumbing follow-up.
-- **Metrics (pass rate / avg revision cycles)**: not yet emitted; the `review` bus events provide everything needed for an external scraper.
+- **Phase 3 — Task-level `StateTesting` final-review step**: `StateTesting` constant exists (`internal/task/task.go:16`) and is accepted by `IsActive`, but no final-review step is currently auto-injected on task completion. This is a speculative enhancement; nothing in the current agent flows requires it, and adding it would couple review into task-completion semantics. Remains deferred.
+- **Reviewer agent prompts file**: Reviewer prompts are inlined in `ReviewManager.buildReviewPrompt()` rather than a separate `internal/agent/prompts/reviewer.go` file. This is acceptable since the prompts are review-specific and tightly coupled to the review manager's parsing logic.

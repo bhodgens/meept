@@ -569,3 +569,159 @@ func createTestCapabilityIndex() *skills.CapabilityIndex {
 
 	return skills.BuildCapabilityIndex(idx)
 }
+
+func TestRecallModeDisabledGatesMemoryTools(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	// Register a memory tool and a non-memory tool
+	registry.Register(NewMockTool("memory_search", "search memories", func(ctx context.Context, args map[string]any) (any, error) {
+		return map[string]any{"results": []any{}}, nil
+	}))
+	registry.Register(NewMockTool("memory_store", "store memories", func(ctx context.Context, args map[string]any) (any, error) {
+		return map[string]any{"success": true}, nil
+	}))
+	registry.Register(NewMockTool("file_read", "read files", func(ctx context.Context, args map[string]any) (any, error) {
+		return map[string]any{"content": "test"}, nil
+	}))
+
+	loop := NewAgentLoop(
+		WithAgentConfig(AgentConfig{
+			Memory: AgentMemoryConfig{
+				RecallMode: RecallModeDisabled,
+			},
+		}),
+		WithToolRegistry(registry),
+	)
+	loop.executor = NewExecutor(registry, nil)
+
+	toolCalls := []llm.ToolCall{
+		{ID: "tc-1", Function: llm.FunctionCall{Name: "memory_search", Arguments: `{"query":"test"}`}},
+		{ID: "tc-2", Function: llm.FunctionCall{Name: "file_read", Arguments: `{"path":"/tmp/test"}`}},
+		{ID: "tc-3", Function: llm.FunctionCall{Name: "memory_store", Arguments: `{"content":"test"}`}},
+	}
+
+	results := loop.executeToolCalls(context.Background(), toolCalls)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	// First tool (memory_search) should be blocked
+	if results[0].Success {
+		t.Error("memory_search should be blocked when recall mode is disabled")
+	}
+	if results[0].ToolCallID != "tc-1" {
+		t.Errorf("expected tool call ID tc-1, got %s", results[0].ToolCallID)
+	}
+	if !strings.Contains(results[0].Error, "blocked") {
+		t.Errorf("expected blocked error, got: %s", results[0].Error)
+	}
+
+	// Second tool (file_read) should succeed
+	if !results[1].Success {
+		t.Errorf("file_read should succeed, got error: %s", results[1].Error)
+	}
+
+	// Third tool (memory_store) should be blocked
+	if results[2].Success {
+		t.Error("memory_store should be blocked when recall mode is disabled")
+	}
+}
+
+func TestRecallModeAutoAllowsMemoryTools(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("memory_search", "search memories", func(ctx context.Context, args map[string]any) (any, error) {
+		return map[string]any{"results": []any{}}, nil
+	}))
+
+	loop := NewAgentLoop(
+		WithAgentConfig(AgentConfig{
+			Memory: AgentMemoryConfig{
+				RecallMode: RecallModeAuto,
+			},
+		}),
+		WithToolRegistry(registry),
+	)
+	loop.executor = NewExecutor(registry, nil)
+
+	toolCalls := []llm.ToolCall{
+		{ID: "tc-1", Function: llm.FunctionCall{Name: "memory_search", Arguments: `{"query":"test"}`}},
+	}
+
+	results := loop.executeToolCalls(context.Background(), toolCalls)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	// Memory tool should succeed when recall mode is auto
+	if !results[0].Success {
+		t.Errorf("memory_search should succeed with auto mode, got error: %s", results[0].Error)
+	}
+}
+
+func TestSnapshotCachingEnabledControlsFreeze(t *testing.T) {
+	// Test that the default config has SnapshotCachingEnabled=true (backwards compat)
+	defaultCfg := DefaultAgentConfig()
+	if !defaultCfg.Memory.SnapshotCachingEnabled {
+		t.Error("default SnapshotCachingEnabled should be true for backwards compatibility")
+	}
+
+	// Test that the config can disable it
+	cfg := AgentConfig{
+		Memory: AgentMemoryConfig{
+			RecallMode:             RecallModeAuto,
+			SnapshotCachingEnabled: false,
+		},
+	}
+	loop := NewAgentLoop(WithAgentConfig(cfg))
+
+	if loop.config.Memory.SnapshotCachingEnabled {
+		t.Error("SnapshotCachingEnabled should be false when explicitly set")
+	}
+}
+
+func TestShouldAutoInject(t *testing.T) {
+	tests := []struct {
+		mode     MemoryRecallMode
+		expected bool
+	}{
+		{RecallModeAuto, true},
+		{RecallModeOnQuery, false},
+		{RecallModeHybrid, true},
+		{RecallModeDisabled, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.mode), func(t *testing.T) {
+			loop := NewAgentLoop(WithAgentConfig(AgentConfig{
+				Memory: AgentMemoryConfig{RecallMode: tt.mode},
+			}))
+			got := loop.shouldAutoInject()
+			if got != tt.expected {
+				t.Errorf("shouldAutoInject(%s) = %v, want %v", tt.mode, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestShouldFetchOnQuery(t *testing.T) {
+	tests := []struct {
+		mode     MemoryRecallMode
+		expected bool
+	}{
+		{RecallModeAuto, false},
+		{RecallModeOnQuery, true},
+		{RecallModeHybrid, true},
+		{RecallModeDisabled, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.mode), func(t *testing.T) {
+			loop := NewAgentLoop(WithAgentConfig(AgentConfig{
+				Memory: AgentMemoryConfig{RecallMode: tt.mode},
+			}))
+			got := loop.shouldFetchOnQuery()
+			if got != tt.expected {
+				t.Errorf("shouldFetchOnQuery(%s) = %v, want %v", tt.mode, got, tt.expected)
+			}
+		})
+	}
+}

@@ -33,6 +33,45 @@ domains = ["general", "code", "commands"]
 enabled = true
 update_interval_conversations = 10
 
+[memory.security]
+enabled = true       # Enable security scanning on memory writes
+fail_closed = true   # Block memory operations when sanitizer unavailable
+log_blocked = true   # Log blocked attempts for audit
+
+[memory.caching]
+enabled = true                # Enable frozen snapshots for API prefix caching (Hermes pattern)
+refresh_on_session_end = true # Refresh snapshot at session end
+
+[memory.limits.episodic]
+enabled = true
+character_limit = 2200
+
+[memory.limits.task_code]
+enabled = true
+character_limit = 3000
+
+[memory.limits.task_general]
+enabled = true
+character_limit = 2200
+
+[memory.limits.task_commands]
+enabled = true
+character_limit = 1500
+
+[memory.limits.personality]
+enabled = true
+character_limit = 1375
+
+[memory.expiration]
+enabled = true
+access_expiration_days = 90       # Expire memories unused for 90 days
+summarize_before_delete = true    # Create summary before deleting expired memories
+summary_category = "archived"     # Category for summary memories
+
+[memory.versioning]
+enabled = true
+max_versions = 10  # Keep last 10 versions per memory
+
 # Multi-agent system with TOML-based agent definitions
 # and recombinant prompt components
 [agents]

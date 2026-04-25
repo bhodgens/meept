@@ -1,8 +1,9 @@
 # Plan: Skills Execution Integration
 
-**Status:** Not Started
+**Status:** Complete
 **Priority:** Medium
 **Estimated Effort:** 2-3 days
+**Completion Date:** 2026-04-25
 
 ---
 
@@ -359,3 +360,83 @@ var skillsRunCmd = &cobra.Command{
 4. Tool filtering works based on `allowed-tools`
 5. Model switching works based on `requires`
 6. Tests pass
+
+---
+
+## Design Deviations from Original Plan
+
+The implementation diverges from the original plan in several intentional ways. These deviations represent a richer, more capable design than what was originally specified.
+
+### 1. AgentSpec Fields (Phase 2)
+
+**Plan specified:** `PreferredSkill string` and `SkillTriggers []string`
+**Implemented:** `AvailableSkills []string` and `SkillTriggers map[string]string`
+
+The implementation uses a richer design:
+- `AvailableSkills []string` lists all skills the agent can invoke (not just one preferred skill)
+- `SkillTriggers map[string]string` maps keywords to specific skill names, enabling multiple trigger-keyword-to-skill mappings
+
+This is more expressive than the plan's single `PreferredSkill` field and provides structured trigger-to-skill routing rather than unstructured keyword lists.
+
+### 2. RunWithSkill on AgentLoop (Phase 4)
+
+**Plan specified:** `RunWithSkill()` method that calls `skillExecutor.Execute()` directly.
+**Implemented:** `RunWithSkill()` runs through the full agent loop with skill constraints applied (tool filtering, iteration limits, system prompt override).
+
+The implementation integrates skill execution into the agent loop rather than bypassing it, ensuring that:
+- Tool filtering is enforced via `FilterToolsForSkill()`
+- Max iterations from the skill are respected
+- The skill body becomes the system prompt
+- The full reasoning cycle (with cycle detection, convergence detection, token budget) runs
+
+Additionally, skills are automatically discovered and injected as context via `discoverRelevantSkills()` + `buildSystemPromptWithSkills()` in the normal `RunOnce()` path, providing seamless skill awareness without explicit invocation.
+
+### 3. Keyword-Based Skill Matching (Phase 3)
+
+**Plan specified:** Keyword matching in the dispatcher that scans all skills for trigger words.
+**Implemented:** Two complementary approaches:
+
+1. **Explicit `/skill-name` invocation** in the dispatcher for direct skill routing
+2. **Metadata-driven discovery** via `CapabilityIndex` with TF-IDF weighting for automatic skill context injection
+
+The plan's approach of scanning all skills for keyword triggers in the dispatcher was replaced with a more sophisticated system:
+- `CapabilityIndex` uses TF-IDF-like scoring for relevance ranking
+- `KeywordExtractor` generates keywords from skill metadata (name, tags, examples, description)
+- `SkillTriggers` on `AgentSpec` provides agent-level keyword-to-skill mapping
+
+### 4. Tool Filtering Integration (Phase 5)
+
+**Plan specified:** `Executor.FilterToolsForSkill()` method on the executor.
+**Implemented:** `FilterToolsForSkill()` as a standalone function in `executor.go`, wired into both:
+- `RunOnce()` - automatically filters tools when the top discovered skill has `allowed-tools`
+- `RunWithSkill()` - filters tools for explicit skill execution through the agent loop
+
+### 5. Dispatcher Integration (Phase 3)
+
+**Plan specified:** New `internal/agent/dispatcher.go` file.
+**Implemented:** Dispatcher already existed with full skill support including:
+- `parseSkillInvocation()` for `/skill-name` parsing
+- `getSkill()` for registry lookup
+- `executeSkill()` for skill execution via `skills.Executor`
+- `GetSkillRegistry()` for external access
+
+---
+
+## Files Actually Modified/Created
+
+| File | Status | Notes |
+|------|--------|-------|
+| `internal/skills/executor.go` | Pre-existing | Full executor implementation |
+| `internal/skills/registry.go` | Pre-existing | Thread-safe registry with tag/capability lookup |
+| `internal/skills/discovery.go` | Pre-existing | Three-tier discovery system |
+| `internal/skills/parser.go` | Pre-existing | YAML frontmatter parsing |
+| `internal/skills/models.go` | Pre-existing | Skill and result types |
+| `internal/skills/index.go` | Pre-existing | SkillIndex with metadata-only entries |
+| `internal/skills/capability_index.go` | Pre-existing | TF-IDF skill matching |
+| `internal/skills/keyword_extractor.go` | Pre-existing | Keyword extraction from metadata |
+| `internal/skills/lazy_loader.go` | Pre-existing | LRU-cached on-demand skill loading |
+| `internal/agent/dispatcher.go` | Pre-existing | Skill routing in ClassifyAndRoute |
+| `internal/agent/executor.go` | Pre-existing | FilteredToolRegistry, FilterToolsForSkill |
+| `internal/agent/spec.go` | Pre-existing | AgentSpec with AvailableSkills, SkillTriggers |
+| `internal/agent/loop.go` | **Modified** | Added RunWithSkill(), tool filtering in RunOnce() |
+| `tests/integration/skills_test.go` | **Modified** | Added 6 new comprehensive integration tests |

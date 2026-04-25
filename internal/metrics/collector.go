@@ -3,6 +3,8 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -85,6 +87,14 @@ func (c *Collector) subscribeToBus() {
 			c.handleBusMessage(msg)
 		}
 	}()
+
+	// Subscribe to review events for review metrics
+	reviewSub := c.bus.Subscribe("metrics-collector-review", "step.*")
+	go func() {
+		for msg := range reviewSub.Channel {
+			c.handleBusMessage(msg)
+		}
+	}()
 }
 
 // handleBusMessage processes bus messages for metrics collection.
@@ -110,6 +120,8 @@ func (c *Collector) handleBusMessage(msg *models.BusMessage) {
 		c.store.RecordEvent("model.failover", "warn", "Model failover occurred", map[string]any{
 			"source": msg.Source,
 		})
+	case "step.review_completed":
+		c.recordReviewMetrics(msg)
 	}
 }
 
@@ -204,6 +216,58 @@ func (c *Collector) RecordModelResolution(modelID string, provider string) {
 		"model_id": modelID,
 		"provider": provider,
 	})
+}
+
+// RecordReviewResult records a review result metric.
+func (c *Collector) RecordReviewResult(status string, reviewerID string, confidence float64) {
+	c.store.Record("review.completed", 1, map[string]string{
+		"status":   status,
+		"reviewer": reviewerID,
+	})
+	c.store.Record("review.confidence", confidence, map[string]string{
+		"reviewer": reviewerID,
+	})
+
+	switch status {
+	case "approved":
+		c.store.Record("review.pass_rate", 1, nil)
+	case "rejected":
+		c.store.Record("review.revision_rate", 1, nil)
+	case "needs_info":
+		c.store.Record("review.escalation_rate", 1, nil)
+	}
+}
+
+// recordReviewMetrics extracts review metrics from a bus message.
+func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
+	var payload struct {
+		Status        string  `json:"status"`
+		Reviewer      string  `json:"reviewer"`
+		Confidence    float64 `json:"confidence"`
+		RevisionCount int     `json:"revision_count"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		return
+	}
+
+	c.RecordReviewResult(payload.Status, payload.Reviewer, payload.Confidence)
+
+	// Track average revision cycles
+	if payload.RevisionCount > 0 {
+		c.store.Record("review.revision_cycles", float64(payload.RevisionCount), map[string]string{
+			"reviewer": payload.Reviewer,
+		})
+	}
+
+	c.store.RecordEvent("review.completed", "info",
+		fmt.Sprintf("Review %s by %s (confidence %.2f, revisions %d)", payload.Status, payload.Reviewer, payload.Confidence, payload.RevisionCount),
+		map[string]any{
+			"status":         payload.Status,
+			"reviewer":       payload.Reviewer,
+			"confidence":     payload.Confidence,
+			"revision_count": payload.RevisionCount,
+		},
+	)
 }
 
 // Shutdown stops the collector.

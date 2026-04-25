@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -490,5 +491,127 @@ func TestEpisodicMemoryMetadata(t *testing.T) {
 
 	if meta["channel"] != "general" {
 		t.Errorf("Expected channel 'general', got %v", meta["channel"])
+	}
+}
+
+func TestEpisodicMemoryStorePopulatesVersioningColumns(t *testing.T) {
+	tmpDir := t.TempDir()
+	ctx := context.Background()
+
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
+		DataDir: filepath.Join(tmpDir, "episodic"),
+	})
+
+	err := mem.Initialize(ctx)
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+	defer mem.Close()
+
+	// Store first memory (root) - should get default version=1, is_current=1
+	rootID, err := mem.Store(ctx, "Original content", "conversation", map[string]any{
+		"version":     1,
+		"is_current":  1,
+	})
+	if err != nil {
+		t.Fatalf("Failed to store root: %v", err)
+	}
+
+	// Store second memory (version 2) with parent_id
+	v2ID, err := mem.Store(ctx, "Updated content v2", "conversation", map[string]any{
+		"parent_id":   rootID,
+		"version":     2,
+		"is_current":  1,
+	})
+	if err != nil {
+		t.Fatalf("Failed to store v2: %v", err)
+	}
+
+	// Verify the SQL columns are populated by querying directly
+	pool := mem.store.GetPool()
+	db, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get db: %v", err)
+	}
+	defer pool.Put(db)
+
+	// Check root memory SQL columns
+	var rootVersion int
+	var rootParentID sql.NullString
+	var rootIsCurrent int
+	err = db.QueryRow("SELECT version, parent_id, is_current FROM episodic_memories WHERE id = ?", rootID).
+		Scan(&rootVersion, &rootParentID, &rootIsCurrent)
+	if err != nil {
+		t.Fatalf("Failed to query root: %v", err)
+	}
+	if rootVersion != 1 {
+		t.Errorf("Expected root version=1, got %d", rootVersion)
+	}
+	if rootParentID.Valid && rootParentID.String != "" {
+		t.Errorf("Expected root parent_id to be NULL, got %q", rootParentID.String)
+	}
+	if rootIsCurrent != 1 {
+		t.Errorf("Expected root is_current=1, got %d", rootIsCurrent)
+	}
+
+	// Check v2 memory SQL columns
+	var v2Version int
+	var v2ParentID sql.NullString
+	var v2IsCurrent int
+	err = db.QueryRow("SELECT version, parent_id, is_current FROM episodic_memories WHERE id = ?", v2ID).
+		Scan(&v2Version, &v2ParentID, &v2IsCurrent)
+	if err != nil {
+		t.Fatalf("Failed to query v2: %v", err)
+	}
+	if v2Version != 2 {
+		t.Errorf("Expected v2 version=2, got %d", v2Version)
+	}
+	if !v2ParentID.Valid || v2ParentID.String != rootID {
+		t.Errorf("Expected v2 parent_id=%q, got valid=%v value=%q", rootID, v2ParentID.Valid, v2ParentID.String)
+	}
+	if v2IsCurrent != 1 {
+		t.Errorf("Expected v2 is_current=1, got %d", v2IsCurrent)
+	}
+}
+
+func TestEpisodicMemoryStoreDefaultVersioning(t *testing.T) {
+	tmpDir := t.TempDir()
+	ctx := context.Background()
+
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
+		DataDir: filepath.Join(tmpDir, "episodic"),
+	})
+
+	err := mem.Initialize(ctx)
+	if err != nil {
+		t.Fatalf("Failed to initialize: %v", err)
+	}
+	defer mem.Close()
+
+	// Store with nil metadata - should get default version=1, is_current=1
+	id, err := mem.Store(ctx, "Simple memory", "conversation", nil)
+	if err != nil {
+		t.Fatalf("Failed to store: %v", err)
+	}
+
+	pool := mem.store.GetPool()
+	db, err := pool.Get(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get db: %v", err)
+	}
+	defer pool.Put(db)
+
+	var version int
+	var isCurrent int
+	err = db.QueryRow("SELECT version, is_current FROM episodic_memories WHERE id = ?", id).
+		Scan(&version, &isCurrent)
+	if err != nil {
+		t.Fatalf("Failed to query: %v", err)
+	}
+	if version != 1 {
+		t.Errorf("Expected default version=1, got %d", version)
+	}
+	if isCurrent != 1 {
+		t.Errorf("Expected default is_current=1, got %d", isCurrent)
 	}
 }

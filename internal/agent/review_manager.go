@@ -169,7 +169,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep) (*
 	)
 
 	// Publish review event
-	rm.publishReviewEvent(step.ID, step.TaskID, result)
+	rm.publishReviewEvent(step.ID, step.TaskID, result, step.RevisionCount)
 
 	return result, nil
 }
@@ -463,18 +463,19 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 }
 
 // publishReviewEvent publishes a review completion event.
-func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *ReviewResult) {
+func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *ReviewResult, revisionCount int) {
 	if rm.bus == nil {
 		return
 	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "review-manager", map[string]any{
-		"step_id":    stepID,
-		"task_id":    taskID,
-		"status":     string(result.Status),
-		"feedback":   result.Feedback,
-		"confidence": result.Confidence,
-		"reviewer":   result.ReviewerID,
+		"step_id":       stepID,
+		"task_id":       taskID,
+		"status":        string(result.Status),
+		"feedback":      result.Feedback,
+		"confidence":    result.Confidence,
+		"reviewer":      result.ReviewerID,
+		"revision_count": revisionCount,
 	})
 	if err != nil {
 		rm.logger.Error("Failed to create review message", "error", err)

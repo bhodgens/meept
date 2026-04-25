@@ -104,7 +104,7 @@ User Input (CLI/Telegram/Web/MenuBar)
 | **Security** | `internal/security` (engine, sanitizer, tirith, tls) |
 | **LLM** | `internal/llm` (client, resolver, budget, providers) |
 | **Skills** | `internal/skills` (discovery, registry, parser, models) |
-| **Memory** | `internal/memory` (manager, episodic, task, consolidation) |
+| **Memory** | `internal/memory` (manager, episodic, task, consolidation, ftstore) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp) |
 | **Code Intel** | `internal/code/ast` (tree-sitter parser + symbol extraction), `internal/code/lsp` (LSP client/manager), `internal/code/tools` (ast_* and lsp_* agent tools) |
 | **ClawSkills** | `internal/clawskills` (client, installer, security, index) |
@@ -118,6 +118,10 @@ User Input (CLI/Telegram/Web/MenuBar)
 ### Skill/Model Resolution
 
 Skills declare `requires: [code, reasoning]` in YAML frontmatter; models declare `capabilities: [code, tool_use]` in `config/models.json5`. The resolver (`internal/llm/resolver.go`) finds the cheapest model satisfying requirements.
+
+### Memory Storage Architecture
+
+`EpisodicMemory` and `TaskMemory` share a common `SQLiteFTSStore` base type (`internal/memory/ftstore.go`) that eliminates code duplication for SQLite pool management, FTS5 schema initialization, CRUD operations, timestamp queries, and result scanning. Each memory type creates an `FTSConfig` specifying its table name, schema SQL, FTS triggers, and category field name (`"category"` for episodic, `"domain"` for task). Row scanning is unified via `SQLiteFTSStore.ScanResults()` which accepts a `ScanRowConfig` parameter controlling the memory type label and source format string. `TaskMemory` retains its domain-specific `FindDuplicates()` method by delegating to `SQLiteFTSStore.FindDuplicateGroups()`.
 
 ### Security Layers
 

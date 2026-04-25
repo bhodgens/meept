@@ -13,6 +13,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/google/uuid"
 )
@@ -54,6 +55,9 @@ type Controller struct {
 	applied      []*AppliedFix
 	initialized  bool
 
+	// Security orchestrator for input/output scanning during improvement cycles.
+	securityOrch *intsecurity.Orchestrator
+
 	// Error tracking for circuit breaker
 	failureCounts        map[string]int // issue_id -> failure count
 	consecutiveFailures  int
@@ -91,6 +95,22 @@ func NewController(cfg Config, msgBus *bus.MessageBus, llmClient *llm.Client, pr
 	c.applier = NewChangeApplier(cfg.Safety, projectRoot, msgBus, logger)
 
 	return c
+}
+
+// SetSecurityOrchestrator sets the security orchestrator for scanning generated
+// patches and applied fixes. This should be called after NewController but
+// before Initialize or RunFullCycle.
+func (c *Controller) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.securityOrch = orch
+}
+
+// SecurityOrchestrator returns the security orchestrator, or nil if not set.
+func (c *Controller) SecurityOrchestrator() *intsecurity.Orchestrator {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.securityOrch
 }
 
 // Initialize loads persisted state.

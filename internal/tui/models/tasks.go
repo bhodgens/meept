@@ -1143,10 +1143,18 @@ func (m *TasksModel) renderTaskDetailModal() string {
 				desc = desc[:maxDescLen-3] + "..."
 			}
 
-			content.WriteString(fmt.Sprintf(" %d. %s %s  %s",
+			revisionBadge := ""
+			if step.RevisionCount > 0 {
+				revisionBadge = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#F59E0B")).
+					Render(fmt.Sprintf(" (rev %d)", step.RevisionCount))
+			}
+
+			content.WriteString(fmt.Sprintf(" %d. %s %s%s  %s",
 				step.Sequence,
 				agentLabel,
 				valueStyle.Render(desc),
+				revisionBadge,
 				stepStyle.Render(stepIcon+" "+stepLabel),
 			))
 			content.WriteString("\n")
@@ -1406,12 +1414,6 @@ func (m *TasksModel) renderLineageView() string {
 		Padding(1, 2).
 		Width(m.width - 4)
 
-	nameStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E5E7EB"))
-
-	memStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B"))
-
 	if len(rootTasks) == 0 {
 		b.WriteString(panelStyle.Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Italic(true).Render("No tasks with lineage information"),
@@ -1562,7 +1564,8 @@ func (m *TasksModel) renderHelp() string {
 	content += keyStyle.Render("esc") + descStyle.Render("Close modal / clear selection") + "\n"
 
 	content += "\n" + sectionStyle.Render("View Controls") + "\n"
-	content += keyStyle.Render("tab") + descStyle.Render("Toggle between Tasks/Jobs views") + "\n"
+	content += keyStyle.Render("tab") + descStyle.Render("Cycle Tasks/Jobs/Lineage views") + "\n"
+	content += keyStyle.Render("t") + descStyle.Render("Toggle lineage view") + "\n"
 	content += keyStyle.Render("f") + descStyle.Render("Cycle through filters (All/Active/Mine/Done/Failed)") + "\n"
 	content += keyStyle.Render("r") + descStyle.Render("Refresh data") + "\n"
 	content += keyStyle.Render("←/→") + descStyle.Render("Collapse/expand task tree") + "\n"

@@ -342,16 +342,17 @@ type BusEvent struct {
 
 // TaskStepView represents a step within a task for TUI display.
 type TaskStepView struct {
-	ID          string   `json:"id"`
-	TaskID      string   `json:"task_id"`
-	Description string   `json:"description"`
-	AgentID     string   `json:"agent_id,omitempty"`
-	State       string   `json:"state"`
-	Result      string   `json:"result,omitempty"`
-	Sequence    int      `json:"sequence"`
-	DependsOn   []string `json:"depends_on,omitempty"`
-	JobID       string   `json:"job_id,omitempty"`
-	ToolHint    string   `json:"tool_hint,omitempty"`
+	ID            string   `json:"id"`
+	TaskID        string   `json:"task_id"`
+	Description   string   `json:"description"`
+	AgentID       string   `json:"agent_id,omitempty"`
+	State         string   `json:"state"`
+	Result        string   `json:"result,omitempty"`
+	Sequence      int      `json:"sequence"`
+	DependsOn     []string `json:"depends_on,omitempty"`
+	JobID         string   `json:"job_id,omitempty"`
+	ToolHint      string   `json:"tool_hint,omitempty"`
+	RevisionCount int      `json:"revision_count,omitempty"`
 }
 
 // TaskExtended represents a task with memory context fields.

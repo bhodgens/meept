@@ -20,7 +20,6 @@ import (
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
-	"github.com/caimlas/meept/internal/clawskills"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
@@ -101,10 +100,6 @@ type Components struct {
 	SkillIndex      *skills.SkillIndex
 	SkillLoader     *skills.LazySkillLoader
 	CapabilityIndex *skills.CapabilityIndex
-
-	// ClawSkills (third-party skills from ClawHub)
-	ClawSkillIndex  *clawskills.Index
-	ClawSkillClient *clawskills.Client
 
 	// Agent capabilities
 	CapabilitiesMap *agent.CapabilitiesMap
@@ -297,6 +292,12 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			"",
 			logger.With("component", "selfimprove"),
 		)
+		// Wire security orchestrator so the controller can scan generated
+		// patches for credentials and sanitize output during improvement cycles.
+		if c.SecurityOrchestrator != nil {
+			c.SelfImproveCtrl.SetSecurityOrchestrator(c.SecurityOrchestrator)
+			logger.Info("Self-improve controller wired with security orchestrator")
+		}
 		if err := c.SelfImproveCtrl.Initialize(context.Background()); err != nil {
 			logger.Error("Failed to initialize self-improve controller", "error", err)
 			c.SelfImproveCtrl = nil
@@ -388,6 +389,12 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
+
+	// Wire memory caching config from global config into agent config
+	agentCfg := agent.DefaultAgentConfig()
+	agentCfg.Memory.SnapshotCachingEnabled = cfg.Memory.Caching.Enabled
+	agentOpts = append(agentOpts, agent.WithAgentConfig(agentCfg))
+
 	// Note: memvid and taskStore are wired AFTER their initialization below
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
 

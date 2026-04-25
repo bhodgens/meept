@@ -1,5 +1,74 @@
 # Meept Agentification Plan
 
+> **STATUS: COMPLETE (100%)** -- All planned items implemented. Design deviations documented below.
+
+## Design Deviations
+
+The following items deviate from the original plan. These are intentional improvements, not gaps:
+
+1. **Agent discovery: AGENT.md instead of custom.toml**
+   - Original plan: User-global agents loaded from `~/.meept/agents/custom.toml`
+   - Actual: Agents discovered via `AGENT.md` files in tiered directories (`.meept/agents/`, `~/.meept/agents/`, `~/.config/meept/agents/`)
+   - Reason: AGENT.md is a more flexible format, allows one-agent-per-file organization, and follows Claude Code conventions. The `internal/agents/discovery.go` module implements this with priority-based shadowing.
+
+2. **ChatDelegation implemented in protocol.go, not a separate file**
+   - Original plan: `ChatDelegation` struct in `internal/agent/chat.go`
+   - Actual: `ChatDelegation` is in `internal/agent/protocol.go` alongside the `TaskPayload` and other protocol types
+   - Reason: It's a protocol-level type, keeping it with related message types is better organization.
+
+3. **context_query field implemented across full stack**
+   - `internal/task/task.go`: `ContextQuery` field with `WithContextQuery()` and `HasContextQuery()` methods
+   - `internal/task/store.go`: Persisted in SQLite with migration support
+   - `internal/task/registry.go`: Serialized in task creation/retrieval
+   - `internal/agent/protocol.go`: Included in `TaskPayload` and `ChatDelegation.ToTaskPayload()`
+   - `internal/tools/builtin/task.go`: Exposed in task_create and task_update tools
+   - `internal/agent/loop.go`: Used for memvid context retrieval (`HasContextQuery()` check)
+
+## Completion Checklist
+
+### Part 1: Agent Configuration System
+- [x] Agent TOML definitions (`config/agents/core.toml`, `config/agents/specialists.toml`)
+- [x] Agent discovery via AGENT.md files (`internal/agents/`)
+- [x] AgentsConfig in schema (`internal/config/schema.go`)
+- [x] Agent registry (`internal/agent/registry.go`)
+
+### Part 2: Recombinant System Prompt Architecture
+- [x] Prompt loader (`internal/agent/prompt/loader.go`)
+- [x] Prompt builder with conditional injection (`internal/agent/prompt/builder.go`)
+- [x] Base prompts: constitution, restrictions, task_principles
+- [x] Dispatcher prompts: purpose, routing_rules
+- [x] Specialist prompts: coder, debugger, researcher, analyst, planner, committer, scheduler
+- [x] Conditional prompts: code_style, error_context, source_evaluation, analysis_depth, task_decomposition, git_safety
+- [x] Capability prompts: memory, tasks, platform
+- [x] Chat prompts: personality, delegation_rules
+- [x] Tool prompts: bash, file_ops, web, git
+- [x] Reminder prompts: plan_mode, memory_context, task_status
+
+### Part 3: Memvid Integration
+- [x] Memvid FastAPI service (`cmd/meept-memvid/`)
+- [x] Go HTTP client (`internal/memory/memvid/client.go`)
+- [x] Tiered memory zones (personality, episodic, task)
+
+### Part 4: Standardized Task Protocol
+- [x] TaskMessage and TaskPayload types (`internal/agent/protocol.go`)
+- [x] ChatDelegation struct (`internal/agent/protocol.go`)
+- [x] ResultPayload for completion messages
+
+### Part 5: Chat Agent Personality
+- [x] Chat personality prompt (`config/prompts/chat/personality.md`)
+- [x] Delegation rules prompt (`config/prompts/chat/delegation_rules.md`)
+
+### Part 6: Memory-Aware Task Handoff
+- [x] Task memory refs (MemoryRefs, ContextQuery, InheritedFrom, CreatedMemories)
+- [x] Memory injection in agent loop (`internal/agent/loop.go`)
+- [x] Context fencing in prompt builder
+
+### Part 7: Agent Registry & Dispatcher
+- [x] Agent registry with lazy creation (`internal/agent/registry.go`)
+- [x] Dispatcher with LLM-based intent classification (`internal/agent/dispatcher.go`)
+
+---
+
 ## Overview
 
 Transform Meept from a single-agent system to a multi-agent orchestration platform with:

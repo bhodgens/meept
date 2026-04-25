@@ -385,3 +385,64 @@ func (s *SQLiteFTSStore) Initialized() bool {
 	defer s.mu.RUnlock()
 	return s.initialized
 }
+
+// ScanRowConfig holds parameters that vary between EpisodicMemory and TaskMemory
+// when scanning SQL rows into MemoryResult slices.
+type ScanRowConfig struct {
+	// MemoryType is the type label (MemoryTypeEpisodic or MemoryTypeTask).
+	MemoryType MemoryType
+	// SourceFmt is the source label. Use a fixed string like "episodic" or
+	// a format string with one %s for the category/domain value.
+	SourceFmt string
+}
+
+// ScanResults scans database rows into a MemoryResult slice using the shared
+// logic previously duplicated across EpisodicMemory and TaskMemory. Each row
+// must produce columns: id, content, category_or_domain, metadata_json,
+// created_at[, rank].  When hasRank is true an additional float64 rank column
+// is expected.
+func (s *SQLiteFTSStore) ScanResults(rows *sql.Rows, hasRank bool, cfg ScanRowConfig) ([]MemoryResult, error) {
+	var results []MemoryResult
+
+	for rows.Next() {
+		var id, content, category, metaJSON, createdAtStr string
+		var rank float64
+
+		var err error
+		if hasRank {
+			err = rows.Scan(&id, &content, &category, &metaJSON, &createdAtStr, &rank)
+		} else {
+			err = rows.Scan(&id, &content, &category, &metaJSON, &createdAtStr)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
+
+		// Build the source label
+		source := cfg.SourceFmt
+		if strings.Contains(source, "%") {
+			source = fmt.Sprintf(source, category)
+		}
+
+		results = append(results, MemoryResult{
+			Memory: Memory{
+				ID:        id,
+				Content:   content,
+				Type:      cfg.MemoryType,
+				Category:  category,
+				Metadata:  ParseMetadata(metaJSON),
+				CreatedAt: createdAt,
+			},
+			RelevanceScore: sqlite.NormalizeRank(rank),
+			Source:         source,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}

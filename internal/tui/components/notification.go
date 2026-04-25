@@ -11,6 +11,9 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// noColor is a sentinel for no color.
+var noColor = lipgloss.Color("")
+
 // NotificationLevel represents the severity of a notification.
 type NotificationLevel int
 
@@ -171,8 +174,8 @@ func (nm *NotificationManager) View(screenWidth int) string {
 func renderNotification(n Notification, screenWidth int) string {
 	// Color scheme based on level
 	var icon string
-	var titleColor lipgloss.Color
-	var borderColor lipgloss.Color
+	titleColor := noColor
+	borderColor := noColor
 
 	switch n.Level {
 	case NotifyInfo:
