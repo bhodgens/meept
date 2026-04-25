@@ -23,6 +23,13 @@ type ContextFirewallConfig struct {
 	HardLimit float64 // default 0.80
 	// DropContextOnHardLimit enables context dropping when hard limit is hit
 	DropContextOnHardLimit bool // default true
+	// ProactiveCompression enables the multi-stage ContextCompressor inside the
+	// firewall. When true, the compressor runs before the legacy
+	// chunk/summarize/drop pipeline.
+	ProactiveCompression bool
+	// ModelContextLimit overrides the model's ContextLimit for the compressor.
+	// When zero, model.ContextLimit is used.
+	ModelContextLimit int
 }
 
 // ContextFirewall wraps a Chatter and enforces context budgets.
@@ -33,6 +40,7 @@ type ContextFirewall struct {
 	summaryModel Chatter
 	logger       *slog.Logger
 	tokenizer    Tokenizer
+	compressor   *ContextCompressor
 
 	// Counters (atomic-safe for concurrent callers)
 	summarizationFailures atomic.Uint64
@@ -54,6 +62,28 @@ func (f *ContextFirewall) Stats() FirewallStats {
 		DroppedMessages:       f.droppedMessages.Load(),
 		DropEvents:            f.dropEvents.Load(),
 	}
+}
+
+// Compress runs the multi-stage compressor on messages and returns the result.
+// If proactive compression is not enabled, it returns the messages unchanged
+// with CompressionStageNone.
+func (f *ContextFirewall) Compress(ctx context.Context, messages []ChatMessage) (CompressionResult, error) {
+	if f.compressor == nil {
+		tokens := f.countTokens(messages)
+		return CompressionResult{
+			Messages:     messages,
+			Compressed:   false,
+			Stage:        CompressionStageNone,
+			TokensBefore: tokens,
+			TokensAfter:  tokens,
+			DroppedCount: 0,
+		}, nil
+	}
+
+	currentTokens := f.countTokens(messages)
+	utilization := float64(currentTokens) / float64(f.model.ContextLimit)
+	result := f.compressor.Compress(ctx, messages, utilization)
+	return result, nil
 }
 
 // NewContextFirewall creates a new context firewall.
@@ -99,6 +129,24 @@ func NewContextFirewall(
 		tokenizer = &HeuristicTokenizer{}
 	}
 
+	// Optionally initialise the proactive multi-stage compressor.
+	var compressor *ContextCompressor
+	if cfg.ProactiveCompression {
+		contextLimit := cfg.ModelContextLimit
+		if contextLimit <= 0 && model != nil {
+			contextLimit = model.ContextLimit
+		}
+		compressorCfg := CompressionConfig{
+			Enabled:              true,
+			ModelContextLimit:    contextLimit,
+			Stage1WarningRatio:   DefaultWarningRatio,
+			Stage2SummarizeRatio: DefaultSummarizeRatio,
+			Stage3AggressiveRatio: DefaultAggressiveRatio,
+			Stage4HardLimitRatio:  DefaultHardLimitRatio,
+		}
+		compressor = NewContextCompressor(compressorCfg, logger, tokenizer)
+	}
+
 	return &ContextFirewall{
 		inner:        inner,
 		model:        model,
@@ -106,6 +154,7 @@ func NewContextFirewall(
 		summaryModel: summaryModel,
 		logger:       logger,
 		tokenizer:    tokenizer,
+		compressor:   compressor,
 	}
 }
 
@@ -199,6 +248,24 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	// Estimate current token usage using tokenizer
 	currentTokens := f.countTokens(result)
 	utilization := float64(currentTokens) / float64(f.model.ContextLimit)
+
+	// Proactive compression: run the multi-stage compressor before the
+	// legacy pipeline so that the more granular thresholds can reduce
+	// context pressure early.
+	if f.compressor != nil {
+		cr := f.compressor.Compress(ctx, result, utilization)
+		if cr.Compressed {
+			f.logger.Debug("proactive compression applied",
+				"stage", cr.Stage.String(),
+				"tokens_before", cr.TokensBefore,
+				"tokens_after", cr.TokensAfter,
+				"dropped", cr.DroppedCount,
+			)
+			result = cr.Messages
+			currentTokens = cr.TokensAfter
+			utilization = float64(currentTokens) / float64(f.model.ContextLimit)
+		}
+	}
 
 	// Check Hard Limit first - may force context drop
 	if utilization >= f.config.HardLimit {
