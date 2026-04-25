@@ -1088,6 +1088,152 @@ func isContextMessage(content string) bool {
 	return len(content) > 30 && content[:30] == "# Relevant Context from Memory"
 }
 
+// CompressionReport contains statistics about a compression operation.
+type CompressionReport struct {
+	TokensBefore   int
+	TokensAfter    int
+	TokensRemoved  int
+	MessagesBefore int
+	MessagesAfter  int
+}
+
+// CompressByImportance removes messages based on semantic importance to reach a target
+// token ratio. The targetRatio parameter (0.0-1.0) specifies what fraction of the current
+// token count to retain. For example, 0.5 means compress to 50% of current tokens.
+//
+// Messages are sorted by importance (lowest first), then by token count (highest first),
+// and removed in that order until the target is reached. Anchor messages are never removed.
+// User input messages are treated as ImportanceCritical and preserved.
+func (c *Conversation) CompressByImportance(targetRatio float64) CompressionReport {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	const charsPerToken = 3
+
+	report := CompressionReport{
+		MessagesBefore: len(c.messages),
+	}
+
+	if len(c.messages) == 0 {
+		return report
+	}
+
+	// Calculate current token usage across all messages
+	currentTokens := 0
+	msgTokens := make([]int, len(c.messages))
+	for i, msg := range c.messages {
+		tokens := len(msg.Content) / charsPerToken
+		// Count tool calls
+		for _, tc := range msg.ToolCalls {
+			tokens += len(tc.Function.Name) / charsPerToken
+			tokens += len(tc.Function.Arguments) / charsPerToken
+			tokens += 20
+		}
+		if msg.ToolCallID != "" {
+			tokens += 15
+		}
+		msgTokens[i] = tokens
+		currentTokens += tokens
+	}
+
+	report.TokensBefore = currentTokens
+
+	if currentTokens == 0 {
+		report.TokensAfter = 0
+		return report
+	}
+
+	targetTokens := int(float64(currentTokens) * targetRatio)
+
+	if currentTokens <= targetTokens {
+		report.TokensAfter = currentTokens
+		report.MessagesAfter = len(c.messages)
+		return report
+	}
+
+	// Build index list with importance info
+	type msgIndex struct {
+		idx        int
+		importance MessageImportance
+		tokens     int
+	}
+
+	indices := make([]msgIndex, len(c.messages))
+	for i := range c.messages {
+		msgType := MessageUnknown
+		if i < len(c.messageTypes) {
+			msgType = c.messageTypes[i]
+		}
+		importance := getMessageImportance(msgType)
+		// Anchor messages are treated as ImportanceCritical
+		if c.isAnchorMessageUnsafe(c.messages[i].Content) {
+			importance = ImportanceCritical
+		}
+		indices[i] = msgIndex{
+			idx:        i,
+			importance: importance,
+			tokens:     msgTokens[i],
+		}
+	}
+
+	// Sort by importance (lowest first), then by token count (highest first)
+	// This means low-importance, high-token messages are candidates for removal first.
+	for i := 0; i < len(indices)-1; i++ {
+		for j := i + 1; j < len(indices); j++ {
+			shouldSwap := false
+			if indices[i].importance > indices[j].importance {
+				shouldSwap = true
+			} else if indices[i].importance == indices[j].importance && indices[i].tokens < indices[j].tokens {
+				shouldSwap = true
+			}
+			if shouldSwap {
+				indices[i], indices[j] = indices[j], indices[i]
+			}
+		}
+	}
+
+	// Mark messages for removal: walk sorted list and remove until target reached.
+	// Never remove ImportanceCritical (anchor messages and user input).
+	keepMask := make([]bool, len(c.messages))
+	for i := range keepMask {
+		keepMask[i] = true
+	}
+
+	tokensRemoved := 0
+	for _, mi := range indices {
+		if currentTokens-tokensRemoved <= targetTokens {
+			break
+		}
+		// Never remove critical messages
+		if mi.importance == ImportanceCritical {
+			continue
+		}
+		keepMask[mi.idx] = false
+		tokensRemoved += mi.tokens
+	}
+
+	// Build new message and type slices
+	newMessages := make([]llm.ChatMessage, 0, len(c.messages))
+	newTypes := make([]MessageClassification, 0, len(c.messageTypes))
+	for i, msg := range c.messages {
+		if keepMask[i] {
+			newMessages = append(newMessages, msg)
+			if i < len(c.messageTypes) {
+				newTypes = append(newTypes, c.messageTypes[i])
+			}
+		}
+	}
+
+	c.messages = newMessages
+	c.messageTypes = newTypes
+
+	report.MessagesAfter = len(c.messages)
+	report.TokensAfter = currentTokens - tokensRemoved
+	report.TokensRemoved = tokensRemoved
+
+	return report
+}
+
 // ConversationStore manages multiple conversations with LRU eviction.
 type ConversationStore struct {
 	mu            sync.RWMutex
