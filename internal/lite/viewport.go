@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/caimlas/meept/internal/tui/render"

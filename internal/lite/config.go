@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/tailscale/hujson"
 )
 
