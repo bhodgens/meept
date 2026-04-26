@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ type SessionTracker struct {
 	sessionIdleTriggerHours int
 	stopCh                  chan struct{} // Used to signal background goroutine to stop
 	stopOnce                sync.Once     // Ensures Stop is only called once
+	logger                  *slog.Logger
 }
 
 // SessionState holds state for a single conversation session.
@@ -55,6 +57,7 @@ func NewSessionTracker(maxAge time.Duration) *SessionTracker {
 		sessions: make(map[string]*SessionState),
 		maxAge:   maxAge,
 		stopCh:   make(chan struct{}),
+		logger:   slog.Default(),
 	}
 }
 
@@ -66,6 +69,7 @@ func NewSessionTrackerWithConfig(cfg SessionTrackerConfig) *SessionTracker {
 		memvidClient:            cfg.MemvidClient,
 		sessionIdleTriggerHours: cfg.SessionIdleTriggerHours,
 		stopCh:                  make(chan struct{}),
+		logger:                  slog.Default(),
 	}
 }
 
@@ -215,7 +219,10 @@ func (t *SessionTracker) PersistIdleSessions(ctx context.Context) error {
 
 		if now.Sub(state.LastActivityAt) > idleThreshold {
 			if err := t.persistSession(ctx, state); err != nil {
-				// Log error but continue with other sessions
+				t.logger.Error("Failed to persist idle session",
+					"session_id", state.SessionID,
+					"error", err,
+				)
 				continue
 			}
 			state.Persisted = true
