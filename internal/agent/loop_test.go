@@ -76,18 +76,15 @@ func TestAgentLoopNoLLMClient(t *testing.T) {
 	}
 }
 
-func TestAgentLoopSimpleResponse(t *testing.T) {
+func TestConversationAndMockClient(t *testing.T) {
 	// Create a mock that returns a simple text response
 	mockClient := newMockLLMClient(&llm.Response{
 		Content:      "Hello! How can I help you?",
 		FinishReason: "stop",
 	})
 
-	// We need to create the loop with the mock client
+	// Test conversation management
 	loop := NewAgentLoop()
-	loop.llm = &llm.Client{} // Placeholder - we'll override the Chat method
-
-	// Since we can't easily inject the mock, let's test the conversation management instead
 	conv := loop.conversations.Get("test-conv")
 	conv.AddUserMessage("Hello")
 
@@ -305,17 +302,18 @@ func TestAgentResponse(t *testing.T) {
 
 func TestGenerateConversationID(t *testing.T) {
 	id1 := generateConversationID()
-	// Sleep briefly to ensure different timestamp
-	time.Sleep(time.Nanosecond)
 	id2 := generateConversationID()
 
 	if id1 == "" {
 		t.Error("expected non-empty ID")
 	}
 
-	// IDs should be unique (based on nanosecond timestamp)
-	// Note: In rare cases they could be the same if generated in the same nanosecond
-	// so we just verify they have the expected format
+	// Verify IDs are unique
+	if id1 == id2 {
+		t.Errorf("expected unique IDs, but got identical: %s", id1)
+	}
+
+	// Verify format: conv-<timestamp>
 	if !strings.HasPrefix(id1, "conv-") {
 		t.Errorf("expected 'conv-' prefix, got '%s'", id1)
 	}
@@ -324,7 +322,6 @@ func TestGenerateConversationID(t *testing.T) {
 		t.Errorf("expected 'conv-' prefix, got '%s'", id2)
 	}
 
-	// Verify format: conv-<timestamp>
 	if len(id1) < 10 {
 		t.Errorf("ID too short: %s", id1)
 	}
