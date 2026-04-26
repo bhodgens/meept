@@ -24,6 +24,7 @@ type Consolidator struct {
 	running     bool
 	lastRun     *time.Time
 	stopChan    chan struct{}
+	stopOnce    sync.Once // Guards against double-close of stopChan
 }
 
 // ConsolidatorConfig holds configuration for the consolidator.
@@ -135,10 +136,16 @@ func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*Consolida
 			// Create summary memory first
 			summary := c.createSummary(mem)
 			summary.Category = cfg.SummaryCategory
-			c.manager.Store(ctx, summary)
+			if _, err := c.manager.Store(ctx, summary); err != nil {
+				c.logger.Error("Failed to store summary before delete", "memory_id", mem.ID, "error", err)
+				// Continue with deletion even if summary fails
+			}
 		}
 		// Delete expired memory
-		c.manager.Delete(ctx, mem.ID)
+		if err := c.manager.Delete(ctx, mem.ID); err != nil {
+			c.logger.Error("Failed to delete expired memory", "memory_id", mem.ID, "error", err)
+			// Continue processing other memories
+		}
 	}
 
 	return &ConsolidationReport{Expired: len(expiredMemories)}, nil
@@ -257,13 +264,13 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 
 	for _, day := range days {
 		mems := groups[day]
-		ids := make([]string, len(mems))
+		var ids []string // Use append to avoid zero-value slots
 
 		// Build a compact summary from snippets
 		var snippets []string
 		totalChars := 0
-		for i, m := range mems {
-			ids[i] = m.Memory.ID
+		for _, m := range mems {
+			ids = append(ids, m.Memory.ID)
 			snippet := m.Memory.Content
 			if len(snippet) > 200 {
 				snippet = snippet[:200]
@@ -275,7 +282,7 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 				totalChars += len(snippet)
 			}
 			if totalChars > 2000 {
-				snippets = append(snippets, fmt.Sprintf("... and %d more", len(mems)-len(snippets)))
+				snippets = append(snippets, fmt.Sprintf("... and %d more", len(mems)-len(ids)))
 				break
 			}
 		}
@@ -391,8 +398,11 @@ func (c *Consolidator) StartPeriodicConsolidation(ctx context.Context, interval 
 }
 
 // Stop stops the periodic consolidation.
+// Safe to call multiple times - subsequent calls are no-ops.
 func (c *Consolidator) Stop() {
-	close(c.stopChan)
+	c.stopOnce.Do(func() {
+		close(c.stopChan)
+	})
 }
 
 // IsRunning returns true if consolidation is currently in progress.
