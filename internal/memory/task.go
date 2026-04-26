@@ -281,6 +281,51 @@ func (t *TaskMemory) Delete(ctx context.Context, id string) error {
 	return t.store.Delete(ctx, "DELETE FROM task_memories WHERE id = ?", id)
 }
 
+// GetByID retrieves a single memory by its ID.
+// Returns nil, nil if the memory is not found.
+func (t *TaskMemory) GetByID(ctx context.Context, id string) (*MemoryResult, error) {
+	if !t.store.Initialized() {
+		return nil, errors.New("task memory not initialized")
+	}
+
+	pool := t.store.GetPool()
+	db, err := pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Put(db)
+
+	row := db.QueryRowContext(ctx, `
+		SELECT id, content, domain, metadata_json, created_at
+		FROM task_memories
+		WHERE id = ?
+	`, id)
+
+	var memID, content, domain, metaJSON, createdAtStr string
+	err = row.Scan(&memID, &content, &domain, &metaJSON, &createdAtStr)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get memory by ID: %w", err)
+	}
+
+	createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
+	mem := Memory{
+		ID:        memID,
+		Content:   content,
+		Type:      MemoryTypeTask,
+		Category:  domain,
+		Metadata:  ParseMetadata(metaJSON),
+		CreatedAt: createdAt,
+	}
+
+	return &MemoryResult{
+		Memory: mem,
+		Source: fmt.Sprintf("task:%s", domain),
+	}, nil
+}
+
 // DeleteByIDs removes multiple memories by ID.
 func (t *TaskMemory) DeleteByIDs(ctx context.Context, ids []string) (int, error) {
 	return t.store.DeleteByIDs(ctx, "task_memories", ids)
