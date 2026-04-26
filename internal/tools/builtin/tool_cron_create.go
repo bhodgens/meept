@@ -348,15 +348,26 @@ func parseTime(timeStr string) (hour, minute int, err error) {
 }
 
 // parseInt parses an integer from a string with support for trailing non-digits.
+// Returns an error if no digits are found at the start of the string.
 func parseInt(s string) (int, error) {
 	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty string")
+	}
+
 	var result int
+	var foundDigit bool
 	for _, ch := range s {
 		if ch >= '0' && ch <= '9' {
 			result = result*10 + int(ch-'0')
+			foundDigit = true
 		} else {
 			break
 		}
+	}
+
+	if !foundDigit {
+		return 0, fmt.Errorf("no numeric digits found in %q", s)
 	}
 	return result, nil
 }
