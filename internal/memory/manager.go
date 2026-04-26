@@ -998,30 +998,31 @@ func (m *Manager) GetRelatedMemories(ctx context.Context, memoryID string, limit
 		return results, nil
 	}
 
-	// For SQLite, we need to search each ID
-	// This is less efficient but works for smaller datasets
+	// For SQLite, look up each ID directly using GetByID.
+	// Using Search() with UUIDs doesn't work because FTS5 tokenizes
+	// hyphens, breaking UUID searches.
 	var results []MemoryResult
 	for _, id := range relatedIDs {
 		// Try episodic first
 		if m.episodic != nil {
-			epResults, err := m.episodic.Search(ctx, id, 1)
-			if err == nil && len(epResults) > 0 && epResults[0].Memory.ID == id {
+			epResult, err := m.episodic.GetByID(ctx, id)
+			if err == nil && epResult != nil {
 				pr, _ := m.graph.GetPageRank(ctx, id)
-				epResults[0].RelevanceScore = pr
-				epResults[0].Source = "graph:episodic"
-				results = append(results, epResults[0])
+				epResult.RelevanceScore = pr
+				epResult.Source = "graph:episodic"
+				results = append(results, *epResult)
 				continue
 			}
 		}
 
 		// Try task memory
 		if m.task != nil {
-			taskResults, err := m.task.Search(ctx, id, "", 1)
-			if err == nil && len(taskResults) > 0 && taskResults[0].Memory.ID == id {
+			taskResult, err := m.task.GetByID(ctx, id)
+			if err == nil && taskResult != nil {
 				pr, _ := m.graph.GetPageRank(ctx, id)
-				taskResults[0].RelevanceScore = pr
-				taskResults[0].Source = "graph:task"
-				results = append(results, taskResults[0])
+				taskResult.RelevanceScore = pr
+				taskResult.Source = "graph:task"
+				results = append(results, *taskResult)
 			}
 		}
 	}
@@ -1332,8 +1333,10 @@ func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, e
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 		var lastAccessed *time.Time
 		if lastAccessedStr != "" {
-			t, _ := time.Parse(time.RFC3339Nano, lastAccessedStr)
-			lastAccessed = &t
+			if t, err := time.Parse(time.RFC3339Nano, lastAccessedStr); err == nil {
+				lastAccessed = &t
+			}
+			// If parse fails, leave lastAccessed as nil rather than zero time
 		}
 
 		memories = append(memories, Memory{
