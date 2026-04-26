@@ -315,6 +315,18 @@ func (rtc *RawToolCall) ToToolCall() ToolCall {
 	}
 }
 
+// SummaryExtract holds structured information extracted from a conversation
+// during content-aware summarization. Instead of generic "role: content"
+// concatenation, the summarizer produces this structured representation so
+// downstream consumers can query decisions, file paths, open questions, etc.
+type SummaryExtract struct {
+	Decisions          []string `json:"decisions"`    // Key decisions made
+	FilePaths          []string `json:"file_paths"`   // Files referenced/modified
+	UnresolvedQuestions []string `json:"unresolved"`   // Open questions remaining
+	TaskState          string   `json:"task_state"`    // Current task status
+	KeyFindings        []string `json:"findings"`      // Important discoveries
+}
+
 // Ptr returns a pointer to the given value.
 func Ptr[T any](v T) *T { return &v }
 

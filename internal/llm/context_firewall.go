@@ -2,11 +2,184 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync/atomic"
 )
+
+// structuredSummaryPromptTemplate is the prompt used for content-aware
+// summarization. It asks the LLM to return a structured response with
+// labeled sections that can be parsed via parseStructuredSummary.
+const structuredSummaryPromptTemplate = `Please summarize the following conversation, extracting structured information:
+
+DECISIONS:
+- [list key decisions made, one per line, prefixed with "- "]
+
+FILES:
+- [list all file paths mentioned, one per line, prefixed with "- "]
+
+QUESTIONS:
+- [list unresolved questions remaining, one per line, prefixed with "- "]
+
+STATUS:
+[one-line current task status]
+
+FINDINGS:
+- [list important discoveries, one per line, prefixed with "- "]
+
+SUMMARY:
+[A 3-sentence narrative summary of the conversation]
+
+<conversation>
+%s
+</conversation>`
+
+// parseStructuredSummary extracts a SummaryExtract from the LLM response
+// text produced by structuredSummaryPromptTemplate. It uses section headers
+// to split the text and then parses bullet items from each section.
+// If parsing fails for any section, that field is left empty rather than
+// causing an overall failure.
+func parseStructuredSummary(raw string) SummaryExtract {
+	var ext SummaryExtract
+
+	sections := splitStructuredSections(raw)
+
+	ext.Decisions = parseBulletItems(sections["DECISIONS"])
+	ext.FilePaths = parseBulletItems(sections["FILES"])
+	ext.UnresolvedQuestions = parseBulletItems(sections["QUESTIONS"])
+	ext.TaskState = strings.TrimSpace(sections["STATUS"])
+	ext.KeyFindings = parseBulletItems(sections["FINDINGS"])
+
+	return ext
+}
+
+// sectionRe matches section headers like "DECISIONS:", "FILES:", etc.
+var sectionRe = regexp.MustCompile(`(?m)^(DECISIONS|FILES|QUESTIONS|STATUS|FINDINGS|SUMMARY)\s*:\s*$`)
+
+// splitStructuredSections splits the raw response into named sections based
+// on the header pattern. Each header line starts a new section; text between
+// two headers belongs to the preceding header.
+func splitStructuredSections(raw string) map[string]string {
+	result := make(map[string]string)
+	matches := sectionRe.FindAllStringSubmatchIndex(raw, -1)
+	if len(matches) == 0 {
+		return result
+	}
+
+	for i, m := range matches {
+		name := raw[m[2]:m[3]]
+		start := m[1] // end of the header line
+		var end int
+		if i+1 < len(matches) {
+			end = matches[i+1][0]
+		} else {
+			end = len(raw)
+		}
+		result[name] = raw[start:end]
+	}
+
+	return result
+}
+
+// bulletItemRe matches lines starting with "- " (with optional leading whitespace).
+var bulletItemRe = regexp.MustCompile(`(?m)^\s*-\s+(.+)$`)
+
+// parseBulletItems extracts individual bullet items from a section body.
+func parseBulletItems(section string) []string {
+	if section == "" {
+		return nil
+	}
+	matches := bulletItemRe.FindAllStringSubmatch(section, -1)
+	if matches == nil {
+		return nil
+	}
+	items := make([]string, 0, len(matches))
+	for _, m := range matches {
+		item := strings.TrimSpace(m[1])
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return items
+}
+
+// formatStructuredSummary builds a human-readable summary string from a
+// SummaryExtract. The output is compact but parseable, designed to fit
+// within a context window as a replacement for raw history.
+func formatStructuredSummary(level int, ext SummaryExtract, narrative string) string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("[Conversation summary level %d]:", level))
+
+	if ext.TaskState != "" {
+		b.WriteString(fmt.Sprintf(" status: %s.", ext.TaskState))
+	}
+
+	if len(ext.Decisions) > 0 {
+		b.WriteString(" decisions:")
+		for _, d := range ext.Decisions {
+			b.WriteString(" ")
+			b.WriteString(d)
+			b.WriteString(";")
+		}
+	}
+
+	if len(ext.FilePaths) > 0 {
+		b.WriteString(" files:")
+		for _, f := range ext.FilePaths {
+			b.WriteString(" ")
+			b.WriteString(f)
+			b.WriteString(";")
+		}
+	}
+
+	if len(ext.UnresolvedQuestions) > 0 {
+		b.WriteString(" open questions:")
+		for _, q := range ext.UnresolvedQuestions {
+			b.WriteString(" ")
+			b.WriteString(q)
+			b.WriteString(";")
+		}
+	}
+
+	if len(ext.KeyFindings) > 0 {
+		b.WriteString(" findings:")
+		for _, f := range ext.KeyFindings {
+			b.WriteString(" ")
+			b.WriteString(f)
+			b.WriteString(";")
+		}
+	}
+
+	narrative = strings.TrimSpace(narrative)
+	if narrative != "" {
+		b.WriteString(" ")
+		b.WriteString(narrative)
+	}
+
+	return b.String()
+}
+
+// extractNarrative returns the SUMMARY section text from the raw LLM response.
+func extractNarrative(raw string) string {
+	sections := splitStructuredSections(raw)
+	return strings.TrimSpace(sections["SUMMARY"])
+}
+
+// marshalExtractAsJSON is a helper for logging/debugging.
+func marshalExtractAsJSON(ext SummaryExtract) string {
+	b, err := json.Marshal(ext)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
 
 // ContextFirewallConfig configures context budget and summarization behavior.
 type ContextFirewallConfig struct {
@@ -507,6 +680,11 @@ func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []Ch
 // initial summarization pass. If the resulting summary exceeds
 // SummaryLevelThreshold tokens and level < MaxSummaryLevel, the summary is
 // recursively re-summarized at level+1.
+//
+// At every level the method uses content-aware summarization: the prompt asks
+// the LLM to return structured sections (DECISIONS, FILES, QUESTIONS, STATUS,
+// FINDINGS, SUMMARY). The raw response is parsed into a SummaryExtract and
+// then formatted as a compact, information-dense summary message.
 func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []ChatMessage, level int) ([]ChatMessage, error) {
 	// Keep: system prompt + last 4 messages
 	keepCount := 4 + 1 // +1 for system
@@ -534,11 +712,12 @@ func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []Cha
 		return messages, nil
 	}
 
-	// Build summarization request
-	summaryPrompt := "Please summarize the following conversation concisely:\n\n"
+	// Build content-aware summarization request
+	var conversationText strings.Builder
 	for _, msg := range toSummarize {
-		summaryPrompt += fmt.Sprintf("%s: %s\n", msg.Role, msg.Content)
+		conversationText.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
 	}
+	summaryPrompt := fmt.Sprintf(structuredSummaryPromptTemplate, conversationText.String())
 
 	summaryResp, err := f.summaryModel.Chat(ctx, []ChatMessage{
 		{
@@ -550,7 +729,29 @@ func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []Cha
 		return nil, fmt.Errorf("summarization failed: %w", err)
 	}
 
-	summaryContent := fmt.Sprintf("[Conversation summary level %d]: %s", level, summaryResp.Content)
+	// Parse the structured response
+	extract := parseStructuredSummary(summaryResp.Content)
+	narrative := extractNarrative(summaryResp.Content)
+
+	// When the LLM response doesn't contain structured sections (e.g. stub
+	// responses or LLMs that ignore the template), fall back to using the
+	// raw response content as the narrative so the summary still carries
+	// the information through.
+	if narrative == "" && len(extract.Decisions) == 0 && len(extract.FilePaths) == 0 && len(extract.KeyFindings) == 0 {
+		narrative = summaryResp.Content
+	}
+
+	summaryContent := formatStructuredSummary(level, extract, narrative)
+
+	f.logger.Debug("structured summary extracted",
+		"level", level,
+		"decisions", len(extract.Decisions),
+		"file_paths", len(extract.FilePaths),
+		"unresolved", len(extract.UnresolvedQuestions),
+		"findings", len(extract.KeyFindings),
+		"extract_json", marshalExtractAsJSON(extract),
+	)
+
 	summaryMsg := ChatMessage{
 		Role:         RoleSystem,
 		Content:      summaryContent,
