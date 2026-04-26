@@ -94,7 +94,9 @@ func newSelfImproveDetectCmd() *cobra.Command {
 }
 
 func newSelfImproveAnalyzeCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
 		Use:   "analyze",
 		Short: "analyze detected issues",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -109,14 +111,54 @@ func newSelfImproveAnalyzeCmd() *cobra.Command {
 				return fmt.Errorf("analysis failed: %w", err)
 			}
 
-			fmt.Println(string(result))
+			if jsonOutput {
+				fmt.Println(string(result))
+				return nil
+			}
+
+			var resp struct {
+				Analyses []struct {
+					IssueID    string `json:"issue_id"`
+					RootCause  string `json:"root_cause"`
+					Confidence float64 `json:"confidence"`
+				} `json:"analyses"`
+				Count int `json:"count"`
+			}
+			if err := json.Unmarshal(result, &resp); err != nil {
+				// Fallback to raw output
+				fmt.Println(string(result))
+				return nil
+			}
+
+			if resp.Count == 0 {
+				fmt.Println("no analyses completed.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ISSUE ID\tROOT CAUSE\tCONFIDENCE")
+			for _, a := range resp.Analyses {
+				cause := a.RootCause
+				if len(cause) > 50 {
+					cause = cause[:50] + "..."
+				}
+				fmt.Fprintf(w, "%s\t%s\t%.2f\n", a.IssueID, cause, a.Confidence)
+			}
+			w.Flush()
+
+			fmt.Printf("\ntotal: %d analyses\n", resp.Count)
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	return cmd
 }
 
 func newSelfImproveGenerateCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
 		Use:   "generate-fixes",
 		Short: "generate fixes for analyzed issues",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -131,14 +173,55 @@ func newSelfImproveGenerateCmd() *cobra.Command {
 				return fmt.Errorf("fix generation failed: %w", err)
 			}
 
-			fmt.Println(string(result))
+			if jsonOutput {
+				fmt.Println(string(result))
+				return nil
+			}
+
+			var resp struct {
+				Fixes []struct {
+					ID          string `json:"id"`
+					IssueID     string `json:"issue_id"`
+					Description string `json:"description"`
+					FilesCount  int    `json:"files_count"`
+				} `json:"fixes"`
+				Count int `json:"count"`
+			}
+			if err := json.Unmarshal(result, &resp); err != nil {
+				// Fallback to raw output
+				fmt.Println(string(result))
+				return nil
+			}
+
+			if resp.Count == 0 {
+				fmt.Println("no fixes generated.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "FIX ID\tISSUE ID\tFILES\tDESCRIPTION")
+			for _, f := range resp.Fixes {
+				desc := f.Description
+				if len(desc) > 40 {
+					desc = desc[:40] + "..."
+				}
+				fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", f.ID, f.IssueID, f.FilesCount, desc)
+			}
+			w.Flush()
+
+			fmt.Printf("\ntotal: %d fixes\n", resp.Count)
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	return cmd
 }
 
 func newSelfImproveValidateCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "validate generated fixes",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -153,10 +236,54 @@ func newSelfImproveValidateCmd() *cobra.Command {
 				return fmt.Errorf("validation failed: %w", err)
 			}
 
-			fmt.Println(string(result))
+			if jsonOutput {
+				fmt.Println(string(result))
+				return nil
+			}
+
+			var resp struct {
+				Validations []struct {
+					FixID   string `json:"fix_id"`
+					Success bool   `json:"success"`
+					Message string `json:"message"`
+				} `json:"validations"`
+				Count int `json:"count"`
+			}
+			if err := json.Unmarshal(result, &resp); err != nil {
+				// Fallback to raw output
+				fmt.Println(string(result))
+				return nil
+			}
+
+			if resp.Count == 0 {
+				fmt.Println("no validations completed.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "FIX ID\tSTATUS\tMESSAGE")
+			passed := 0
+			for _, v := range resp.Validations {
+				status := "FAIL"
+				if v.Success {
+					status = "PASS"
+					passed++
+				}
+				msg := v.Message
+				if len(msg) > 50 {
+					msg = msg[:50] + "..."
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\n", v.FixID, status, msg)
+			}
+			w.Flush()
+
+			fmt.Printf("\ntotal: %d validations (%d passed)\n", resp.Count, passed)
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	return cmd
 }
 
 func newSelfImproveApplyCmd() *cobra.Command {
