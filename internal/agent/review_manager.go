@@ -425,7 +425,11 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		// This fixes the bug where revision count tracking was always 0
 		step.IncrementRevision()
 		if err := rm.stepStore.Update(step); err != nil {
-			rm.logger.Error("Failed to increment revision count", "error", err)
+			rm.logger.Error("Failed to increment revision count",
+				"step_id", step.ID,
+				"task_id", step.TaskID,
+				"error", err,
+			)
 		}
 
 		// Create revision step
