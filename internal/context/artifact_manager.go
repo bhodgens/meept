@@ -119,15 +119,18 @@ func (am *ArtifactManager) Cleanup() {
 
 // GetCacheStats returns cache statistics
 func (am *ArtifactManager) GetCacheStats() map[string]interface{} {
+	// Acquire cache lock first, then manager lock to avoid deadlock.
+	// Always acquire locks in consistent order: cache.mu before am.mu.
+	am.cache.mu.RLock()
+	cacheEntries := len(am.cache.entries)
+	am.cache.mu.RUnlock()
+
 	am.mu.RLock()
-	defer am.mu.RUnlock()
+	scannerCount := len(am.scanners)
+	am.mu.RUnlock()
 
 	return map[string]interface{}{
-		"scanners": len(am.scanners),
-		"cache_entries": func() int {
-			am.cache.mu.RLock()
-			defer am.cache.mu.RUnlock()
-			return len(am.cache.entries)
-		}(),
+		"scanners":      scannerCount,
+		"cache_entries": cacheEntries,
 	}
 }
