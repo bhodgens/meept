@@ -347,11 +347,12 @@ func TestRPCLoadTest(t *testing.T) {
 	t.Logf("  Duration: %v", duration)
 	t.Logf("  Throughput: %.0f req/sec", rps)
 
-	// Target: 2000 req/sec
-	if rps < 2000 {
-		t.Logf("  WARNING: Below 2000 req/sec target (got %.0f)", rps)
+	// Target: 2000 req/sec minimum
+	const targetRPS = 2000
+	if rps < targetRPS {
+		t.Errorf("Throughput %.0f req/sec below target %d req/sec", rps, targetRPS)
 	} else {
-		t.Logf("  PASS: Exceeds 2000 req/sec target")
+		t.Logf("  PASS: Exceeds %d req/sec target", targetRPS)
 	}
 
 	if fail > 0 {
