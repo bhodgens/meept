@@ -38,6 +38,10 @@ type Store struct {
 	batch        []metricValue
 	lastFlush    time.Time
 	stopChan     chan struct{}
+
+	// Subscriber management for real-time updates
+	subMu       sync.RWMutex
+	subscribers map[chan *LiveMetricsSnapshot]struct{}
 }
 
 // metricValue represents a single metric value to store.
@@ -99,6 +103,7 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 		batch:         make([]metricValue, 0, cfg.BatchSize),
 		lastFlush:     time.Now(),
 		stopChan:      make(chan struct{}),
+		subscribers:   make(map[chan *LiveMetricsSnapshot]struct{}),
 	}
 
 	// Initialize database schema
@@ -226,6 +231,9 @@ func (s *Store) flush() {
 	if err := tx.Commit(); err == nil {
 		s.batch = s.batch[:0]
 		s.lastFlush = time.Now()
+
+		// Notify subscribers after successful flush
+		go s.notifySubscribers()
 	}
 }
 
@@ -258,7 +266,6 @@ func (s *Store) aggregateHourly() {
 // Record records a metric value.
 func (s *Store) Record(name string, value float64, tags map[string]string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.batch = append(s.batch, metricValue{
 		name:      name,
@@ -267,11 +274,13 @@ func (s *Store) Record(name string, value float64, tags map[string]string) {
 		timestamp: time.Now(),
 	})
 
-	// Flush if batch is full
-	if len(s.batch) >= s.batchSize {
-		s.mu.Unlock()
+	// Check if batch is full
+	shouldFlush := len(s.batch) >= s.batchSize
+	s.mu.Unlock()
+
+	// Flush outside of lock to avoid deadlock
+	if shouldFlush {
 		s.flush()
-		s.mu.Lock()
 	}
 }
 
@@ -527,9 +536,47 @@ type Event struct {
 }
 
 // SubscribeMetrics returns a channel for receiving metric updates.
-// Currently returns a closed channel and nil stop function as placeholder.
+// The returned stop function must be called to unsubscribe and close the channel.
 func (s *Store) SubscribeMetrics() (<-chan *LiveMetricsSnapshot, func()) {
-	ch := make(chan *LiveMetricsSnapshot, 1)
-	// Placeholder - actual implementation would push metrics to channel
-	return ch, func() { close(ch) }
+	ch := make(chan *LiveMetricsSnapshot, 10)
+
+	s.subMu.Lock()
+	s.subscribers[ch] = struct{}{}
+	s.subMu.Unlock()
+
+	stop := func() {
+		s.subMu.Lock()
+		delete(s.subscribers, ch)
+		s.subMu.Unlock()
+		close(ch)
+	}
+
+	return ch, stop
+}
+
+// notifySubscribers sends a snapshot to all subscribers.
+func (s *Store) notifySubscribers() {
+	s.subMu.RLock()
+	if len(s.subscribers) == 0 {
+		s.subMu.RUnlock()
+		return
+	}
+	subs := make([]chan *LiveMetricsSnapshot, 0, len(s.subscribers))
+	for ch := range s.subscribers {
+		subs = append(subs, ch)
+	}
+	s.subMu.RUnlock()
+
+	snapshot, err := s.GetLiveMetrics()
+	if err != nil {
+		return
+	}
+
+	for _, ch := range subs {
+		select {
+		case ch <- snapshot:
+		default:
+			// Skip if channel buffer is full
+		}
+	}
 }
