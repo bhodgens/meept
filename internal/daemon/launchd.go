@@ -264,7 +264,10 @@ func parseElapsedTime(s string) time.Duration {
 		return 0
 	}
 
-	return time.Duration(days*24*int(time.Hour) + hours*int(time.Hour) + mins*int(time.Minute) + secs*int(time.Second))
+	return time.Duration(days)*24*time.Hour +
+		time.Duration(hours)*time.Hour +
+		time.Duration(mins)*time.Minute +
+		time.Duration(secs)*time.Second
 }
 
 // Load loads the launchd agent (creates plist and loads it).
