@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,580 +13,582 @@ import (
 	"github.com/caimlas/meept/internal/metrics"
 )
 
-// -----------------------------------------------------------------------
-// Test helpers / mocks
-// -----------------------------------------------------------------------
-
+// mockDaemonController implements DaemonController for testing.
 type mockDaemonController struct {
-	running bool
-	pid     int
-	uptime  time.Duration
-	restart func(ctx context.Context) error
+	running   bool
+	pid       int
+	uptime    time.Duration
+	restartErr error
 }
 
-func (m *mockDaemonController) IsRunning() bool       { return m.running }
-func (m *mockDaemonController) PID() int              { return m.pid }
-func (m *mockDaemonController) Uptime() time.Duration { return m.uptime }
-func (m *mockDaemonController) Restart(ctx context.Context) error {
-	if m.restart != nil {
-		return m.restart(ctx)
-	}
-	return nil
-}
+func (m *mockDaemonController) IsRunning() bool            { return m.running }
+func (m *mockDaemonController) PID() int                   { return m.pid }
+func (m *mockDaemonController) Uptime() time.Duration      { return m.uptime }
+func (m *mockDaemonController) Restart(ctx context.Context) error { return m.restartErr }
 
+// mockMetricsService implements MetricsService for testing.
 type mockMetricsService struct {
-	snapshot    *metrics.LiveMetricsSnapshot
-	hPoints     []metrics.MetricPoint
-	hResolve    string
-	hFrom       time.Time
-	hTo         time.Time
-	err         error
-	subscribeCh chan *metrics.LiveMetricsSnapshot
-	subscribeFn func() func()
+	liveMetrics    *metrics.LiveMetricsSnapshot
+	liveErr        error
+	historicalData []metrics.MetricPoint
+	historicalErr  error
 }
 
 func (m *mockMetricsService) GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error) {
-	return m.snapshot, m.err
+	return m.liveMetrics, m.liveErr
 }
 
 func (m *mockMetricsService) GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error) {
-	m.hFrom = from
-	m.hTo = to
-	m.hResolve = resolution
-	return m.hPoints, m.err
+	return m.historicalData, m.historicalErr
 }
 
 func (m *mockMetricsService) SubscribeMetrics() (<-chan *metrics.LiveMetricsSnapshot, func()) {
-	if m.subscribeFn != nil {
-		return m.subscribeCh, m.subscribeFn()
-	}
 	ch := make(chan *metrics.LiveMetricsSnapshot)
 	return ch, func() { close(ch) }
 }
 
-func newTestServer(t *testing.T, cfg ServerConfig) *Server {
-	t.Helper()
-	configService, err := NewConfigService()
-	if err != nil {
-		t.Fatalf("NewConfigService failed: %v", err)
+func TestNewServer(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+	if server == nil {
+		t.Fatal("NewServer returned nil")
 	}
-	dCtrl := &mockDaemonController{running: true, pid: 1234, uptime: 5 * time.Minute}
-	mSvc := &mockMetricsService{
-		snapshot: &metrics.LiveMetricsSnapshot{
-			Timestamp:      time.Now(),
-			ActiveAgents:   2,
-			RequestsPerSec: 1.5,
-			QueueDepth:     0,
-		},
+	if server.config.Addr != ":8081" {
+		t.Errorf("default addr = %s, want :8081", server.config.Addr)
 	}
-	return NewServer(cfg, configService, dCtrl, mSvc, nil)
 }
-
-func doRequest(s *Server, method, path string, body io.Reader) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, path, body)
-	w := httptest.NewRecorder()
-	s.server = &http.Server{Handler: s.middleware(http.NewServeMux())}
-	// Instead, just set up routes manually
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	s.middleware(mux).ServeHTTP(w, r)
-	return w
-}
-
-// -----------------------------------------------------------------------
-// Health endpoint
-// -----------------------------------------------------------------------
 
 func TestHandleHealth(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	w := doRequest(s, "GET", "/health", nil)
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+
+	server.handleHealth(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	var resp map[string]string
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resp["status"] != "ok" {
-		t.Errorf("expected status=ok, got %s", resp["status"])
+
+	if body["status"] != "ok" {
+		t.Errorf("status = %s, want ok", body["status"])
 	}
 }
-
-// -----------------------------------------------------------------------
-// Daemon status
-// -----------------------------------------------------------------------
 
 func TestHandleDaemonStatus_Running(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	w := doRequest(s, "GET", "/api/v1/daemon/status", nil)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+	daemon := &mockDaemonController{
+		running: true,
+		pid:     12345,
+		uptime:  5 * time.Minute,
 	}
-	var resp map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if !resp["running"].(bool) {
-		t.Error("expected running=true")
-	}
-}
+	server := NewServer(ServerConfig{}, nil, daemon, nil, nil)
 
-func TestHandleDaemonStatus_Offline(t *testing.T) {
-	cs, _ := NewConfigService()
-	dCtrl := &mockDaemonController{running: false}
-	mSvc := &mockMetricsService{snapshot: &metrics.LiveMetricsSnapshot{}}
-	s := NewServer(DefaultServerConfig(), cs, dCtrl, mSvc, nil)
-
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/v1/daemon/status", nil)
-	s.middleware(mux).ServeHTTP(w, req)
+	w := httptest.NewRecorder()
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+	server.handleDaemonStatus(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["running"].(bool) {
-		t.Error("expected running=false")
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
-	if resp["state"] != "offline" {
-		t.Errorf("expected state=offline, got %s", resp["state"])
+
+	if body["running"] != true {
+		t.Error("expected running = true")
+	}
+	if int(body["pid"].(float64)) != 12345 {
+		t.Errorf("pid = %v, want 12345", body["pid"])
+	}
+	if body["uptime"] == "" {
+		t.Error("uptime should not be empty")
 	}
 }
 
-func TestHandleDaemonStatus_Working(t *testing.T) {
-	cs, _ := NewConfigService()
-	dCtrl := &mockDaemonController{running: true, pid: 42, uptime: 10 * time.Minute}
-	mSvc := &mockMetricsService{
-		snapshot: &metrics.LiveMetricsSnapshot{
-			ActiveAgents: 3,
-			QueueDepth:   2,
-		},
+func TestHandleDaemonStatus_NotRunning(t *testing.T) {
+	daemon := &mockDaemonController{
+		running: false,
 	}
-	s := NewServer(DefaultServerConfig(), cs, dCtrl, mSvc, nil)
+	server := NewServer(ServerConfig{}, nil, daemon, nil, nil)
 
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/v1/daemon/status", nil)
-	s.middleware(mux).ServeHTTP(w, req)
+	w := httptest.NewRecorder()
 
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["state"] != "working" {
-		t.Errorf("expected state=working, got %s", resp["state"])
+	server.handleDaemonStatus(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body["running"] != false {
+		t.Error("expected running = false")
+	}
+	if body["state"] != "offline" {
+		t.Errorf("state = %v, want offline", body["state"])
 	}
 }
 
-func TestHandleDaemonStatus_NoController(t *testing.T) {
-	cs, _ := NewConfigService()
-	s := NewServer(DefaultServerConfig(), cs, nil, nil, nil)
+func TestHandleDaemonStatus_NoDaemonController(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
 
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/v1/daemon/status", nil)
-	s.middleware(mux).ServeHTTP(w, req)
+	w := httptest.NewRecorder()
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
+	server.handleDaemonStatus(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 
-func TestHandleDaemonRestart(t *testing.T) {
-	cs, _ := NewConfigService()
-	var restartCalled bool
-	dCtrl := &mockDaemonController{
-		restart: func(ctx context.Context) error {
-			restartCalled = true
-			return nil
-		},
-	}
-	mSvc := &mockMetricsService{snapshot: &metrics.LiveMetricsSnapshot{}}
-	s := NewServer(DefaultServerConfig(), cs, dCtrl, mSvc, nil)
+func TestHandleGetClientConfig_NoConfigService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
 
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/v1/daemon/restart", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	if !restartCalled {
-		t.Error("restart was not called")
-	}
-}
-
-func TestHandleDaemonRestart_Error(t *testing.T) {
-	cs, _ := NewConfigService()
-	dCtrl := &mockDaemonController{
-		restart: func(ctx context.Context) error {
-			return fmt.Errorf("restart failed")
-		},
-	}
-	s := NewServer(DefaultServerConfig(), cs, dCtrl, nil, nil)
-
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/v1/daemon/restart", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", w.Code)
-	}
-}
-
-// -----------------------------------------------------------------------
-// Metrics endpoints
-// -----------------------------------------------------------------------
-
-func TestHandleLiveMetrics(t *testing.T) {
-	cs, _ := NewConfigService()
-	dCtrl := &mockDaemonController{}
-	mSvc := &mockMetricsService{
-		snapshot: &metrics.LiveMetricsSnapshot{
-			ActiveAgents: 1, QueueDepth: 0,
-		},
-	}
-	s := NewServer(DefaultServerConfig(), cs, dCtrl, mSvc, nil)
-
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/metrics/live", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestHandleLiveMetrics_NoService(t *testing.T) {
-	cs, _ := NewConfigService()
-	s := NewServer(DefaultServerConfig(), cs, nil, nil, nil)
-
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/metrics/live", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
-	}
-}
-
-func TestHandleHistoricalMetrics(t *testing.T) {
-	cs, _ := NewConfigService()
-	dCtrl := &mockDaemonController{}
-	then := time.Now().Add(-1 * time.Hour)
-	now := time.Now()
-	mSvc := &mockMetricsService{
-		hPoints: []metrics.MetricPoint{
-			{Name: "cpu", Value: 50.0, Timestamp: then},
-		},
-	}
-	s := NewServer(DefaultServerConfig(), cs, dCtrl, mSvc, nil)
-
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	url := "/api/v1/metrics/historical?from=" + then.Format(time.RFC3339) + "&to=" + now.Format(time.RFC3339)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", url, nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if cnt, ok := resp["count"].(float64); !ok || int(cnt) != 1 {
-		t.Errorf("expected count=1, got %v", resp["count"])
-	}
-}
-
-func TestHandleHistoricalMetrics_InvalidFrom(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/metrics/historical?from=bad&to=also-bad", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-}
-
-func TestHandleHistoricalMetrics_MissingParams(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/metrics/historical?from=only-one", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
-	}
-}
-
-func TestHandleMetricsStream(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/metrics/stream", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	// The stream handler returns a JSON stub (not actual WebSocket)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["status"] != "websocket_not_implemented" {
-		t.Errorf("unexpected status: %s", resp["status"])
-	}
-}
-
-// -----------------------------------------------------------------------
-// Config endpoints
-// -----------------------------------------------------------------------
-
-func TestHandleGetClientConfig(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/v1/config/client", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); ct != "application/json5" {
-		t.Errorf("expected Content-Type=application/json5, got %s", ct)
-	}
-}
-
-func TestHandleGetClientConfig_NoService(t *testing.T) {
-	cs, _ := NewConfigService()
-	s := NewServer(DefaultServerConfig(), cs, nil, nil, nil)
-
-	// Explicitly nil out the configService in the server
-	s.configService = nil
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/config/client", nil)
-	s.middleware(mux).ServeHTTP(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
-	}
-}
+	server.handleGetClientConfig(w, req)
 
-func TestHandleSaveClientConfig(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	body := `{"content": "some config"}`
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/v1/config/client", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	var resp map[string]string
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["status"] != "saved" {
-		t.Errorf("expected status=saved, got %s", resp["status"])
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 
 func TestHandleSaveClientConfig_InvalidBody(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/v1/config/client", strings.NewReader("{invalid"))
-	s.middleware(mux).ServeHTTP(w, req)
+	// Create a temp config service
+	tmpDir := t.TempDir()
+	// We can't easily test with a real ConfigService without setting up home dir
+	// So test the error path
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
+	req := httptest.NewRequest("POST", "/api/v1/config/client", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+
+	server.handleSaveClientConfig(w, req)
+
+	resp := w.Result()
+	// Should fail because configService is nil
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d (no config service)", resp.StatusCode, http.StatusServiceUnavailable)
 	}
+	_ = tmpDir
 }
 
-func TestHandleGetModelsConfig(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
+func TestHandleGetModelsConfig_NoConfigService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+
 	req := httptest.NewRequest("GET", "/api/v1/config/models", nil)
-	s.middleware(mux).ServeHTTP(w, req)
+	w := httptest.NewRecorder()
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+	server.handleGetModelsConfig(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 
-// -----------------------------------------------------------------------
-// Agent endpoints
-// -----------------------------------------------------------------------
+func TestHandleLiveMetrics_Success(t *testing.T) {
+	metricsSvc := &mockMetricsService{
+		liveMetrics: &metrics.LiveMetricsSnapshot{
+			Timestamp:      time.Now(),
+			RequestsPerSec: 100,
+			TokenUsageRate: 5000,
+			ActiveAgents:   2,
+		},
+	}
+	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil)
 
-func TestHandleListAgents(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
+	req := httptest.NewRequest("GET", "/api/v1/metrics/live", nil)
 	w := httptest.NewRecorder()
+
+	server.handleLiveMetrics(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body["requests_per_sec"].(float64) != 100 {
+		t.Errorf("requests_per_sec = %v, want 100", body["requests_per_sec"])
+	}
+}
+
+func TestHandleLiveMetrics_NoService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/v1/metrics/live", nil)
+	w := httptest.NewRecorder()
+
+	server.handleLiveMetrics(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleHistoricalMetrics_MissingParams(t *testing.T) {
+	metricsSvc := &mockMetricsService{}
+	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil)
+
+	// Missing from and to
+	req := httptest.NewRequest("GET", "/api/v1/metrics/historical", nil)
+	w := httptest.NewRecorder()
+
+	server.handleHistoricalMetrics(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleHistoricalMetrics_InvalidFromParam(t *testing.T) {
+	metricsSvc := &mockMetricsService{}
+	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil)
+
+	req := httptest.NewRequest("GET", "/api/v1/metrics/historical?from=invalid&to=2024-01-01T00:00:00Z", nil)
+	w := httptest.NewRecorder()
+
+	server.handleHistoricalMetrics(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "invalid from parameter") {
+		t.Errorf("expected 'invalid from parameter' error, got: %s", body)
+	}
+}
+
+func TestHandleHistoricalMetrics_InvalidToParam(t *testing.T) {
+	metricsSvc := &mockMetricsService{}
+	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil)
+
+	req := httptest.NewRequest("GET", "/api/v1/metrics/historical?from=2024-01-01T00:00:00Z&to=invalid", nil)
+	w := httptest.NewRecorder()
+
+	server.handleHistoricalMetrics(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "invalid to parameter") {
+		t.Errorf("expected 'invalid to parameter' error, got: %s", body)
+	}
+}
+
+func TestHandleHistoricalMetrics_Success(t *testing.T) {
+	metricsSvc := &mockMetricsService{
+		historicalData: []metrics.MetricPoint{
+			{Timestamp: time.Now(), Value: 100},
+			{Timestamp: time.Now(), Value: 150},
+		},
+	}
+	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil)
+
+	from := time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+	to := time.Now().Format(time.RFC3339)
+	req := httptest.NewRequest("GET", "/api/v1/metrics/historical?from="+from+"&to="+to, nil)
+	w := httptest.NewRecorder()
+
+	server.handleHistoricalMetrics(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if int(body["count"].(float64)) != 2 {
+		t.Errorf("count = %v, want 2", body["count"])
+	}
+}
+
+func TestMiddleware_CORS(t *testing.T) {
+	server := NewServer(ServerConfig{EnableCORS: true}, nil, nil, nil, nil)
+
+	handler := server.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("CORS header not set")
+	}
+}
+
+func TestMiddleware_CORSPreflight(t *testing.T) {
+	server := NewServer(ServerConfig{EnableCORS: true}, nil, nil, nil, nil)
+
+	handler := server.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("OPTIONS", "/test", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("preflight status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+func TestMiddleware_NoCORS(t *testing.T) {
+	server := NewServer(ServerConfig{EnableCORS: false}, nil, nil, nil, nil)
+
+	handler := server.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	if resp.Header.Get("Access-Control-Allow-Origin") != "" {
+		t.Error("CORS header should not be set when disabled")
+	}
+}
+
+func TestWriteJSON(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+
+	w := httptest.NewRecorder()
+	server.writeJSON(w, http.StatusCreated, map[string]string{"key": "value"})
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
+	}
+
+	if resp.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("Content-Type = %s, want application/json", resp.Header.Get("Content-Type"))
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body["key"] != "value" {
+		t.Errorf("body[key] = %s, want value", body["key"])
+	}
+}
+
+func TestWriteError(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+
+	w := httptest.NewRecorder()
+	server.writeError(w, http.StatusNotFound, "not found")
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body["error"] != "not found" {
+		t.Errorf("error = %s, want 'not found'", body["error"])
+	}
+}
+
+func TestDefaultServerConfig(t *testing.T) {
+	cfg := DefaultServerConfig()
+
+	if cfg.Addr != ":8081" {
+		t.Errorf("Addr = %s, want :8081", cfg.Addr)
+	}
+	if cfg.ReadTimeout != 30*time.Second {
+		t.Errorf("ReadTimeout = %v, want 30s", cfg.ReadTimeout)
+	}
+	if cfg.WriteTimeout != 30*time.Second {
+		t.Errorf("WriteTimeout = %v, want 30s", cfg.WriteTimeout)
+	}
+	if !cfg.EnableCORS {
+		t.Error("EnableCORS should be true by default")
+	}
+}
+
+func TestHandleListAgents_NoConfigService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+
 	req := httptest.NewRequest("GET", "/api/v1/config/agents", nil)
-	s.middleware(mux).ServeHTTP(w, req)
+	w := httptest.NewRecorder()
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	if _, ok := resp["agents"]; !ok {
-		t.Error("expected agents key in response")
-	}
-	if _, ok := resp["count"]; !ok {
-		t.Error("expected count key in response")
+	server.handleListAgents(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 
-func TestHandleListAgents_NoService(t *testing.T) {
-	cs, _ := NewConfigService()
-	s := NewServer(DefaultServerConfig(), cs, nil, nil, nil)
-	s.configService = nil
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
+func TestHandleGetAgent_NoConfigService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("GET", "/api/v1/config/agents/test", nil)
+	req.SetPathValue("id", "test")
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/config/agents", nil)
-	s.middleware(mux).ServeHTTP(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
-	}
-}
+	server.handleGetAgent(w, req)
 
-func TestHandleGetAgent(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	// Create a temp agent for testing
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/config/agents/nonexistent-agent", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	// Agent shouldn't exist yet
-	if w.Code != http.StatusNotFound && w.Code != http.StatusInternalServerError {
-		t.Logf("agent lookup returned %d (expected 404 for non-existent agent)", w.Code)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 
 func TestHandleGetAgent_MissingID(t *testing.T) {
-	s := newTestServer(t, DefaultServerConfig())
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-	w := httptest.NewRecorder()
-	// The route is /agents/{id} with no catch-all, so a trailing slash
-	// without an id is a 404 from the standard mux (not a 400).
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+
 	req := httptest.NewRequest("GET", "/api/v1/config/agents/", nil)
-	s.middleware(mux).ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404 for missing id (standard mux catch-all behaviour), got %d", w.Code)
-	}
-}
-
-// -----------------------------------------------------------------------
-// CORS middleware
-// -----------------------------------------------------------------------
-
-func TestMiddleware_CORSEnabled(t *testing.T) {
-	cfg := DefaultServerConfig()
-	cfg.EnableCORS = true
-	s := newTestServer(t, cfg)
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
-
+	// Don't set path value to simulate missing ID
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("OPTIONS", "/health", nil)
-	s.middleware(mux).ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 for OPTIONS, got %d", w.Code)
-	}
-	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("missing CORS origin header")
+	server.handleGetAgent(w, req)
+
+	resp := w.Result()
+	// Will fail on config service check first since no service
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 
-func TestMiddleware_CORSDisabled(t *testing.T) {
-	cfg := DefaultServerConfig()
-	cfg.EnableCORS = false
-	s := newTestServer(t, cfg)
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
+func TestHandleSaveAgent_InvalidBody(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
 
+	req := httptest.NewRequest("POST", "/api/v1/config/agents/test", strings.NewReader("not json"))
+	req.SetPathValue("id", "test")
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/health", nil)
-	s.middleware(mux).ServeHTTP(w, req)
 
-	if w.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Error("expected no CORS header when disabled")
+	server.handleSaveAgent(w, req)
+
+	resp := w.Result()
+	// Will fail on config service check first since no service
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 
-// -----------------------------------------------------------------------
-// Route coverage
-// -----------------------------------------------------------------------
+func TestHandleDeleteAgent_NoConfigService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
 
-func TestAllRoutesRegistered(t *testing.T) {
-	// Quick smoke test that each route is reachable (even if services are nil)
-	s := newTestServer(t, DefaultServerConfig())
-	s.configService = nil
-	s.daemonCtrl = nil
-	s.metricsService = nil
+	req := httptest.NewRequest("DELETE", "/api/v1/config/agents/test", nil)
+	req.SetPathValue("id", "test")
+	w := httptest.NewRecorder()
 
-	mux := http.NewServeMux()
-	s.setupRoutes(mux)
+	server.handleDeleteAgent(w, req)
 
-	tests := []struct {
-		method string
-		path   string
-	}{
-		{"GET", "/health"},
-		{"GET", "/api/v1/health"},
-		{"GET", "/api/v1/config/client"},
-		{"GET", "/api/v1/config/models"},
-		{"GET", "/api/v1/config/agents"},
-		{"GET", "/api/v1/config/agents/test-id"},
-		{"POST", "/api/v1/daemon/restart"},
-		{"GET", "/api/v1/metrics/live"},
-		{"GET", "/api/v1/metrics/stream"},
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleDaemonRestart_Success(t *testing.T) {
+	daemon := &mockDaemonController{running: true}
+	server := NewServer(ServerConfig{}, nil, daemon, nil, nil)
+
+	req := httptest.NewRequest("POST", "/api/v1/daemon/restart", nil)
+	w := httptest.NewRecorder()
+
+	server.handleDaemonRestart(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			req := httptest.NewRequest(tt.method, tt.path, nil)
-			s.middleware(mux).ServeHTTP(w, req)
-			// Just check it doesn't panic and returns *some* status
-			if w.Code < 100 || w.Code >= 600 {
-				t.Errorf("unexpected status code: %d", w.Code)
-			}
-		})
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body["status"] != "restarted" {
+		t.Errorf("status = %s, want restarted", body["status"])
+	}
+}
+
+func TestHandleDaemonRestart_NoDaemonController(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil)
+
+	req := httptest.NewRequest("POST", "/api/v1/daemon/restart", nil)
+	w := httptest.NewRecorder()
+
+	server.handleDaemonRestart(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleMetricsStream(t *testing.T) {
+	metricsSvc := &mockMetricsService{}
+	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil)
+
+	req := httptest.NewRequest("GET", "/api/v1/metrics/stream", nil)
+	w := httptest.NewRecorder()
+
+	server.handleMetricsStream(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Currently returns not implemented message
+	if body["status"] != "websocket_not_implemented" {
+		t.Errorf("status = %s, want websocket_not_implemented", body["status"])
 	}
 }

@@ -6,398 +6,477 @@ import (
 	"testing"
 )
 
-func TestNewCacheKeyBuilder(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	if b == nil {
-		t.Fatal("expected non-nil builder")
-	}
-	if !b.FileAware {
-		t.Error("expected FileAware=true")
-	}
-	if b.Logger == nil {
-		t.Error("expected non-nil logger")
-	}
+func TestExtractFileReferences_VariousFormats(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
 
-	b2 := NewCacheKeyBuilder(false)
-	if b2.FileAware {
-		t.Error("expected FileAware=false")
-	}
-}
-
-// -----------------------------------------------------------------------
-// ExtractFileReferences
-// -----------------------------------------------------------------------
-
-func TestExtractFileReferences_FileAwareDisabled(t *testing.T) {
-	b := NewCacheKeyBuilder(false)
-	refs := b.ExtractFileReferences("see file:///path/to/file.go")
-	if refs != nil {
-		t.Fatalf("expected nil when file-aware disabled, got %v", refs)
-	}
-}
-
-func TestExtractFileReferences_EmptyPrompt(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	refs := b.ExtractFileReferences("")
-	if refs != nil {
-		t.Fatalf("expected nil for empty prompt, got %v", refs)
-	}
-}
-
-func TestExtractFileReferences_AbsolutePath(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	prompt := "Check /Users/caimlas/git/meept/internal/llm/client.go for issues"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 1 {
-		t.Fatalf("expected 1 reference, got %d: %v", len(refs), refs)
-	}
-	if refs[0] != "/Users/caimlas/git/meept/internal/llm/client.go" {
-		t.Errorf("expected absolute path, got %s", refs[0])
-	}
-}
-
-func TestExtractFileReferences_FilePrefix(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	prompt := "Review file: /path/to/code.go then move on"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 1 {
-		t.Fatalf("expected 1 reference, got %d: %v", len(refs), refs)
-	}
-	if refs[0] != "/path/to/code.go" {
-		t.Errorf("expected /path/to/code.go, got %s", refs[0])
-	}
-}
-
-func TestExtractFileReferences_AtNotation(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	prompt := "Use @src/main.go as entry point"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 1 {
-		t.Fatalf("expected 1 reference, got %d: %v", len(refs), refs)
-	}
-	if refs[0] != "src/main.go" {
-		t.Errorf("expected src/main.go, got %s", refs[0])
-	}
-}
-
-func TestExtractFileReferences_PathWithLine(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	prompt := "See path/to/file.go:42 for the bug"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 1 {
-		t.Fatalf("expected 1 reference, got %d: %v", len(refs), refs)
-	}
-	// The line number should be stripped
-	if refs[0] != "path/to/file.go" {
-		t.Errorf("expected path/to/file.go, got %s", refs[0])
-	}
-}
-
-func TestExtractFileReferences_Deduplication(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	// Same file appears in multiple patterns -- use relative paths so
-	// both patterns extract the identical string and can deduplicate.
-	prompt := "Check @src/main.go and also file: src/main.go"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 1 {
-		t.Fatalf("expected 1 (deduplicated) reference, got %d: %v", len(refs), refs)
-	}
-}
-
-func TestExtractFileReferences_Sorting(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	prompt := "Files: /z/file.go and /a/first.go and /m/middle.go"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 references, got %d: %v", len(refs), refs)
-	}
-	for i := 1; i < len(refs); i++ {
-		if refs[i] < refs[i-1] {
-			t.Errorf("paths not sorted: %q > %q", refs[i-1], refs[i])
-		}
-	}
-}
-
-func TestExtractFileReferences_KnownNonFileExtensions(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	prompt := "Visit example.com and foo.org for docs"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 0 {
-		t.Fatalf("expected no file refs, got %v", refs)
-	}
-
-	// .io should be excluded
-	prompt2 := "Check /tmp/test.io"
-	refs2 := b.ExtractFileReferences(prompt2)
-	if len(refs2) != 0 {
-		t.Errorf("expected .io to be excluded, got %v", refs2)
-	}
-
-	// .txt should be excluded
-	prompt3 := "Read /tmp/data.txt"
-	refs3 := b.ExtractFileReferences(prompt3)
-	if len(refs3) != 0 {
-		t.Errorf("expected .txt to be excluded, got %v", refs3)
-	}
-}
-
-func TestExtractFileReferences_MultiplePatterns(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	prompt := "@src/main.go and file: /path/lib.go and also /abs/cmd.go"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 3 {
-		t.Fatalf("expected 3 references, got %d: %v", len(refs), refs)
-	}
-	expected := map[string]bool{
-		"src/main.go":   true,
-		"/path/lib.go":  true,
-		"/abs/cmd.go":   true,
-	}
-	for _, r := range refs {
-		if !expected[r] {
-			t.Errorf("unexpected reference: %s", r)
-		}
-	}
-}
-
-func TestExtractFileReferences_CaseInsensitiveFilePrefix(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	// The file: prefix should be case-insensitive
-	prompt := "Check FILE: /path/to/upper.go"
-	refs := b.ExtractFileReferences(prompt)
-	if len(refs) != 1 {
-		t.Fatalf("expected 1 reference for uppercase FILE:, got %d: %v", len(refs), refs)
-	}
-}
-
-// -----------------------------------------------------------------------
-// CleanExtractedPath (exercised through ExtractFileReferences)
-// -----------------------------------------------------------------------
-
-func TestCleanExtractedPath_TrailingPunctuation(t *testing.T) {
 	tests := []struct {
-		input    string
-		expected string
+		name     string
+		prompt   string
+		expected []string
 	}{
-		{"file.go", "file.go"},
-		{"file.go.", "file.go"},
-		{"file.go,.", "file.go"},
-		{"file.go;", "file.go"},
+		{
+			name:     "file: prefix absolute path",
+			prompt:   "Check file: /Users/test/project/main.go for issues",
+			expected: []string{"/Users/test/project/main.go"},
+		},
+		{
+			name:     "file: prefix relative path",
+			prompt:   "Read file: src/utils.go please",
+			expected: []string{"src/utils.go"},
+		},
+		{
+			name:     "@ notation",
+			prompt:   "Look at @src/main.go and @lib/helper.ts",
+			expected: []string{"lib/helper.ts", "src/main.go"},
+		},
+		{
+			name:     "path with line number uses rePathWithLine",
+			prompt:   "Error at Users/name/project/file.go:42 on this line",
+			expected: []string{"Users/name/project/file.go"},
+		},
+		{
+			name:     "relative path with line number",
+			prompt:   " internal/pkg/service.go:123 has a bug",
+			expected: []string{"internal/pkg/service.go"},
+		},
+		{
+			name:     "bare absolute path",
+			prompt:   "The file /Users/dev/code/app.ts needs changes",
+			expected: []string{"/Users/dev/code/app.ts"},
+		},
+		{
+			name:     "multiple references",
+			prompt:   "Compare file: /path/one.go with @path/two.go and check path/three.go:10",
+			expected: []string{"/path/one.go", "path/three.go", "path/two.go"},
+		},
+		{
+			name:     "empty prompt",
+			prompt:   "",
+			expected: nil,
+		},
+		{
+			name:     "no file references",
+			prompt:   "This is just a plain question with no files",
+			expected: nil,
+		},
+		{
+			name:     "deduplication",
+			prompt:   "Check file: /path/file.go and also @path/file.go for issues",
+			expected: []string{"/path/file.go", "path/file.go"},
+		},
 	}
 
 	for _, tt := range tests {
-		got := cleanExtractedPath(tt.input)
-		if got != tt.expected {
-			t.Errorf("cleanExtractedPath(%q) = %q, want %q", tt.input, got, tt.expected)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			result := builder.ExtractFileReferences(tt.prompt)
+			if len(result) != len(tt.expected) {
+				t.Errorf("expected %d paths, got %d: %v", len(tt.expected), len(result), result)
+				return
+			}
+			for i, path := range result {
+				if path != tt.expected[i] {
+					t.Errorf("path[%d] = %q, want %q", i, path, tt.expected[i])
+				}
+			}
+		})
 	}
 }
 
-func TestCleanExtractedPath_TooShort(t *testing.T) {
-	got := cleanExtractedPath("a")
-	if got != "" {
-		t.Errorf("expected empty for too-short path, got %q", got)
+func TestExtractFileReferences_FiltersTLDExtensions(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
+
+	tests := []struct {
+		name          string
+		prompt        string
+		shouldInclude bool
+	}{
+		{
+			name:          ".com is filtered",
+			prompt:        "Visit example.com for more info",
+			shouldInclude: false,
+		},
+		{
+			name:          ".io is filtered",
+			prompt:        "Check github.io docs",
+			shouldInclude: false,
+		},
+		{
+			name:          ".org is filtered",
+			prompt:        "See golang.org/pkg/os",
+			shouldInclude: false,
+		},
+		{
+			name:          ".go is included",
+			prompt:        "Check @path/to/main.go",
+			shouldInclude: true,
+		},
+		{
+			name:          ".ts is included",
+			prompt:        "Look at @src/component.ts",
+			shouldInclude: true,
+		},
+		{
+			name:          ".py is included",
+			prompt:        "file: scripts/test.py",
+			shouldInclude: true,
+		},
+		{
+			name:          ".js is included",
+			prompt:        "Review @lib/utils.js code",
+			shouldInclude: true,
+		},
+		{
+			name:          ".rs is included",
+			prompt:        "file: src/main.rs",
+			shouldInclude: true,
+		},
 	}
 
-	got2 := cleanExtractedPath("ab")
-	if got2 != "" {
-		t.Errorf("expected empty for 2-char path, got %q", got2)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := builder.ExtractFileReferences(tt.prompt)
+			hasResult := len(result) > 0
+			if hasResult != tt.shouldInclude {
+				t.Errorf("shouldInclude = %v, got results: %v", tt.shouldInclude, result)
+			}
+		})
 	}
 }
 
-// -----------------------------------------------------------------------
-// isKnownNonFile
-// -----------------------------------------------------------------------
+func TestExtractFileReferences_FileAwareDisabled(t *testing.T) {
+	builder := NewCacheKeyBuilder(false)
+
+	result := builder.ExtractFileReferences("Check file: /path/to/main.go")
+	if result != nil {
+		t.Errorf("expected nil when FileAware is false, got %v", result)
+	}
+}
+
+func TestCleanExtractedPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "strips trailing punctuation",
+			input:    "file.go.",
+			expected: "file.go",
+		},
+		{
+			name:     "strips trailing colon and digits",
+			input:    "path/to/file.go:42",
+			expected: "path/to/file.go",
+		},
+		{
+			name:     "strips multiple trailing punctuation",
+			input:    "file.go...,",
+			expected: "file.go",
+		},
+		{
+			name:     "trims whitespace",
+			input:    "  file.go  ",
+			expected: "file.go",
+		},
+		{
+			name:     "returns empty for too short",
+			input:    "a",
+			expected: "",
+		},
+		{
+			name:     "keeps valid path",
+			input:    "/path/to/file.go",
+			expected: "/path/to/file.go",
+		},
+		{
+			name:     "handles complex line reference",
+			input:    "path/file.go:123:45",
+			expected: "path/file.go:123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cleanExtractedPath(tt.input)
+			if result != tt.expected {
+				t.Errorf("cleanExtractedPath(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsAllDigits(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{"123", true},
+		{"0", true},
+		{"999999", true},
+		{"", false},
+		{"12a3", false},
+		{"abc", false},
+		{" 123", false},
+		{"123 ", false},
+		{"-1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := isAllDigits(tt.input)
+			if result != tt.expected {
+				t.Errorf("isAllDigits(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
 
 func TestIsKnownNonFile(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	// Directly test through ExtractFileReferences since isKnownNonFile is unexported.
-	for _, ext := range []string{".com", ".org", ".net", ".io", ".dev", ".ai", ".co", ".uk", ".gov", ".edu", ".mil", ".us", ".eu", ".tv", ".me", ".app", ".txt"} {
-		path := "/tmp/test" + ext
-		refs := b.ExtractFileReferences("see " + path)
-		if len(refs) != 0 {
-			t.Errorf("expected %s to be excluded, got %v", ext, refs)
-		}
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"example.com", true},
+		{"github.io", true},
+		{"golang.org", true},
+		{"site.net", true},
+		{"main.go", false},
+		{"app.ts", false},
+		{"script.py", false},
+		{"noextension", false},
+		{"file.json", false},
+		{"config.yaml", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := isKnownNonFile(tt.path)
+			if result != tt.expected {
+				t.Errorf("isKnownNonFile(%q) = %v, want %v", tt.path, result, tt.expected)
+			}
+		})
 	}
 }
 
-func TestIsKnownNonFile_ValidExtensions(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	gotFiles := []string{}
-	for _, ext := range []string{".go", ".rs", ".py", ".js", ".ts", ".tsx", ".java", ".cpp", ".c", ".h", ".rb", ".php"} {
-		path := "/tmp/test" + ext
-		refs := b.ExtractFileReferences("see " + path)
-		if len(refs) == 1 && refs[0] == "/tmp/test"+ext {
-			gotFiles = append(gotFiles, ext)
+func TestComputeFileHashes_ExistingFiles(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
+	tmpDir := t.TempDir()
+
+	// Create test files
+	file1 := filepath.Join(tmpDir, "file1.txt")
+	file2 := filepath.Join(tmpDir, "file2.txt")
+
+	if err := os.WriteFile(file1, []byte("content1"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+	if err := os.WriteFile(file2, []byte("content2"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	paths := []string{file1, file2}
+	hashes := builder.ComputeFileHashes(paths)
+
+	if len(hashes) != 2 {
+		t.Fatalf("expected 2 hashes, got %d", len(hashes))
+	}
+
+	// Verify hashes exist and are non-empty
+	for _, path := range paths {
+		hash, ok := hashes[path]
+		if !ok {
+			t.Errorf("missing hash for %s", path)
+			continue
+		}
+		if hash == "" {
+			t.Errorf("empty hash for %s", path)
+		}
+		// SHA256 hex string should be 64 characters
+		if len(hash) != 64 {
+			t.Errorf("hash length for %s = %d, want 64", path, len(hash))
 		}
 	}
-	if len(gotFiles) == 0 {
-		t.Error("at least some valid extensions should be matched")
+
+	// Different content should produce different hashes
+	if hashes[file1] == hashes[file2] {
+		t.Error("different files should have different hashes")
 	}
 }
 
-// -----------------------------------------------------------------------
-// ComputeFileHashes
-// -----------------------------------------------------------------------
+func TestComputeFileHashes_MissingFiles(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
 
-func TestComputeFileHashes(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
+	paths := []string{"/nonexistent/file1.go", "/nonexistent/file2.go"}
+	hashes := builder.ComputeFileHashes(paths)
+
+	// Should return empty map (files skipped)
+	if len(hashes) != 0 {
+		t.Errorf("expected 0 hashes for missing files, got %d", len(hashes))
+	}
+
+	// Map should never be nil
+	if hashes == nil {
+		t.Error("hashes should not be nil")
+	}
+}
+
+func TestComputeFileHashes_MixedExisting(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
+	tmpDir := t.TempDir()
+
+	existingFile := filepath.Join(tmpDir, "exists.txt")
+	if err := os.WriteFile(existingFile, []byte("content"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	paths := []string{existingFile, "/nonexistent/missing.go"}
+	hashes := builder.ComputeFileHashes(paths)
+
+	// Only the existing file should have a hash
+	if len(hashes) != 1 {
+		t.Errorf("expected 1 hash, got %d", len(hashes))
+	}
+	if _, ok := hashes[existingFile]; !ok {
+		t.Error("expected hash for existing file")
+	}
+}
+
+func TestComputePromptHash_EmptyMessages(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
+
+	// Empty slice
+	hash1 := builder.ComputePromptHash([]ChatMessage{})
+	if hash1 == "" {
+		t.Error("hash should not be empty for empty slice")
+	}
+
+	// Nil slice
+	hash2 := builder.ComputePromptHash(nil)
+	if hash2 == "" {
+		t.Error("hash should not be empty for nil slice")
+	}
+
+	// Both should produce the same hash
+	if hash1 != hash2 {
+		t.Error("empty and nil slices should produce same hash")
+	}
+}
+
+func TestComputePromptHash_DeterministicOrdering(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
+
+	messages := []ChatMessage{
+		{Role: RoleUser, Content: "Hello"},
+		{Role: RoleAssistant, Content: "Hi there"},
+		{Role: RoleUser, Content: "How are you?"},
+	}
+
+	hash1 := builder.ComputePromptHash(messages)
+	hash2 := builder.ComputePromptHash(messages)
+
+	if hash1 != hash2 {
+		t.Error("same messages should produce same hash")
+	}
+
+	// Different order should produce different hash
+	reversedMessages := []ChatMessage{
+		{Role: RoleUser, Content: "How are you?"},
+		{Role: RoleAssistant, Content: "Hi there"},
+		{Role: RoleUser, Content: "Hello"},
+	}
+
+	hash3 := builder.ComputePromptHash(reversedMessages)
+	if hash1 == hash3 {
+		t.Error("different message order should produce different hash")
+	}
+}
+
+func TestComputePromptHash_IncludesAllFields(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
+
+	baseMsg := []ChatMessage{{Role: RoleUser, Content: "test"}}
+	baseHash := builder.ComputePromptHash(baseMsg)
+
+	// Different role
+	diffRole := []ChatMessage{{Role: RoleAssistant, Content: "test"}}
+	if builder.ComputePromptHash(diffRole) == baseHash {
+		t.Error("different role should produce different hash")
+	}
+
+	// Different content
+	diffContent := []ChatMessage{{Role: RoleUser, Content: "test2"}}
+	if builder.ComputePromptHash(diffContent) == baseHash {
+		t.Error("different content should produce different hash")
+	}
+
+	// Different name
+	diffName := []ChatMessage{{Role: RoleUser, Content: "test", Name: "user1"}}
+	if builder.ComputePromptHash(diffName) == baseHash {
+		t.Error("different name should produce different hash")
+	}
+
+	// Different tool call ID
+	diffToolCallID := []ChatMessage{{Role: RoleUser, Content: "test", ToolCallID: "call_123"}}
+	if builder.ComputePromptHash(diffToolCallID) == baseHash {
+		t.Error("different tool call ID should produce different hash")
+	}
+
+	// Different tool calls
+	diffToolCalls := []ChatMessage{{
+		Role:    RoleUser,
+		Content: "test",
+		ToolCalls: []ToolCall{{
+			ID:   "tc1",
+			Type: "function",
+			Function: ToolCallFunction{
+				Name:      "get_weather",
+				Arguments: `{"city":"NYC"}`,
+			},
+		}},
+	}}
+	if builder.ComputePromptHash(diffToolCalls) == baseHash {
+		t.Error("different tool calls should produce different hash")
+	}
+}
+
+func TestBuild_FullKeyConstruction(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
 	tmpDir := t.TempDir()
 
 	// Create a test file
 	testFile := filepath.Join(tmpDir, "test.go")
-	content := []byte("package test\n\nfunc Main() {}")
-	if err := os.WriteFile(testFile, content, 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("package main"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	hashes := b.ComputeFileHashes([]string{testFile})
-	if len(hashes) != 1 {
-		t.Fatalf("expected 1 hash, got %d", len(hashes))
-	}
-	if hashes[testFile] == "" {
-		t.Error("expected non-empty hash")
-	}
-}
-
-func TestComputeFileHashes_MissingFile(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	// Non-existent file should be silently skipped
-	hashes := b.ComputeFileHashes([]string{"/nonexistent/path/file.go"})
-	if len(hashes) != 0 {
-		t.Fatalf("expected 0 hashes for missing file, got %d", len(hashes))
-	}
-}
-
-func TestComputeFileHashes_EmptyInput(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	hashes := b.ComputeFileHashes([]string{})
-	if len(hashes) != 0 {
-		t.Fatalf("expected empty map, got %d entries", len(hashes))
-	}
-}
-
-// -----------------------------------------------------------------------
-// isAllDigits
-// -----------------------------------------------------------------------
-
-func TestIsAllDigits(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"12345", true},
-		{"0", true},
-		{"12a5", false},
-		{"", false},
-		{"abc", false},
-	}
-	for _, tt := range tests {
-		got := isAllDigits(tt.input)
-		if got != tt.want {
-			t.Errorf("isAllDigits(%q) = %v, want %v", tt.input, got, tt.want)
-		}
-	}
-}
-
-// -----------------------------------------------------------------------
-// ComputePromptHash
-// -----------------------------------------------------------------------
-
-func TestComputePromptHash_Deterministic(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
+	prompt := "Check file: " + testFile
+	modelID := "test-model"
 	messages := []ChatMessage{
-		{Role: RoleUser, Content: "hello", Name: "", ToolCallID: ""},
-		{Role: RoleAssistant, Content: "hi there", Name: "", ToolCallID: ""},
+		{Role: RoleUser, Content: "What's in this file?"},
 	}
 
-	hash1 := b.ComputePromptHash(messages)
-	hash2 := b.ComputePromptHash(messages)
+	key := builder.Build(prompt, modelID, messages)
 
-	if hash1 != hash2 {
-		t.Fatal("same messages should produce same hash")
+	// Verify model ID
+	if key.ModelID != modelID {
+		t.Errorf("ModelID = %q, want %q", key.ModelID, modelID)
 	}
-	if hash1 == "" {
-		t.Error("expected non-empty hash")
+
+	// Verify prompt hash is set
+	if key.PromptHash == "" {
+		t.Error("PromptHash should not be empty")
 	}
-}
 
-func TestComputePromptHash_DifferentContent(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	messages1 := []ChatMessage{{Role: RoleUser, Content: "hello"}}
-	messages2 := []ChatMessage{{Role: RoleUser, Content: "goodbye"}}
-
-	if b.ComputePromptHash(messages1) == b.ComputePromptHash(messages2) {
-		t.Error("different content should produce different hashes")
+	// Verify file hashes are populated
+	if len(key.FileHashes) != 1 {
+		t.Errorf("expected 1 file hash, got %d", len(key.FileHashes))
 	}
-}
-
-func TestComputePromptHash_DifferentRole(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	messages1 := []ChatMessage{{Role: RoleUser, Content: "hello"}}
-	messages2 := []ChatMessage{{Role: RoleAssistant, Content: "hello"}}
-
-	if b.ComputePromptHash(messages1) == b.ComputePromptHash(messages2) {
-		t.Error("different roles should produce different hashes")
+	if _, ok := key.FileHashes[testFile]; !ok {
+		t.Error("expected hash for test file")
 	}
 }
-
-func TestComputePromptHash_WithToolCalls(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	messages := []ChatMessage{
-		{
-			Role: RoleAssistant,
-			Content: "",
-			ToolCalls: []ToolCall{
-				{
-					ID:     "call_1",
-					Type:   "function",
-					Function: ToolCallFunction{Name: "read_file", Arguments: `{"path":"a.go"}`},
-				},
-			},
-		},
-	}
-
-	hash := b.ComputePromptHash(messages)
-	if hash == "" {
-		t.Error("expected non-empty hash with tool calls")
-	}
-}
-
-// -----------------------------------------------------------------------
-// Build
-// -----------------------------------------------------------------------
 
 func TestBuild_FileAwareDisabled(t *testing.T) {
-	b := NewCacheKeyBuilder(false)
-	key := b.Build("check file.go", "model-1", []ChatMessage{
-		{Role: RoleUser, Content: "look at file.go"},
-	})
-
-	if key.ModelID != "model-1" {
-		t.Errorf("expected model-1, got %s", key.ModelID)
-	}
-	if key.PromptHash == "" {
-		t.Error("expected non-empty prompt hash")
-	}
-	if key.FileHashes != nil {
-		t.Errorf("expected nil FileHashes when file-aware disabled, got %v", key.FileHashes)
-	}
-}
-
-func TestBuild_FileAwareEnabled_NoFiles(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
-	key := b.Build("just some text", "model-2", []ChatMessage{
-		{Role: RoleUser, Content: "no file references here"},
-	})
-
-	if key.FileHashes != nil {
-		t.Errorf("expected nil FileHashes when no files found, got %v", key.FileHashes)
-	}
-}
-
-func TestBuild_FileAwareEnabled_WithFiles(t *testing.T) {
-	b := NewCacheKeyBuilder(true)
+	builder := NewCacheKeyBuilder(false)
 	tmpDir := t.TempDir()
 
 	testFile := filepath.Join(tmpDir, "test.go")
@@ -405,24 +484,54 @@ func TestBuild_FileAwareEnabled_WithFiles(t *testing.T) {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
-	prompt := "Check " + testFile + " for bugs"
-	messages := []ChatMessage{
-		{Role: RoleUser, Content: ""},
-	}
+	prompt := "Check file: " + testFile
+	key := builder.Build(prompt, "model", nil)
 
-	key := b.Build(prompt, "model-3", messages)
-	if key.FileHashes == nil {
-		t.Fatal("expected FileHashes when file-aware enabled")
-	}
-	if _, ok := key.FileHashes[testFile]; !ok {
-		t.Errorf("expected hash for %s, got %v", testFile, key.FileHashes)
+	// File hashes should not be populated when FileAware is false
+	if key.FileHashes != nil {
+		t.Errorf("FileHashes should be nil when FileAware is false, got %v", key.FileHashes)
 	}
 }
 
-func TestBuild_EmptyMessages(t *testing.T) {
-	b := NewCacheKeyBuilder(false)
-	key := b.Build("", "model-4", nil)
-	if key.PromptHash == "" {
-		t.Error("expected non-empty hash for empty messages")
+func TestBuild_ExtractsFromMessages(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
+	tmpDir := t.TempDir()
+
+	testFile := filepath.Join(tmpDir, "message_file.go")
+	if err := os.WriteFile(testFile, []byte("package test"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	// File reference in message content, not prompt
+	messages := []ChatMessage{
+		{Role: RoleUser, Content: "Check file: " + testFile},
+	}
+
+	key := builder.Build("", "model", messages)
+
+	// Should find file from message content
+	if len(key.FileHashes) != 1 {
+		t.Errorf("expected 1 file hash from message, got %d", len(key.FileHashes))
+	}
+	if _, ok := key.FileHashes[testFile]; !ok {
+		t.Error("expected hash for file referenced in message")
+	}
+}
+
+func TestNewCacheKeyBuilder(t *testing.T) {
+	builder := NewCacheKeyBuilder(true)
+	if builder == nil {
+		t.Fatal("NewCacheKeyBuilder returned nil")
+	}
+	if !builder.FileAware {
+		t.Error("FileAware should be true")
+	}
+	if builder.Logger == nil {
+		t.Error("Logger should not be nil")
+	}
+
+	builder2 := NewCacheKeyBuilder(false)
+	if builder2.FileAware {
+		t.Error("FileAware should be false")
 	}
 }
