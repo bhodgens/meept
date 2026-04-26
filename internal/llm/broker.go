@@ -37,11 +37,12 @@ type brokerEntry struct {
 
 // ModelBroker manages multiple LLM providers and routes requests with health awareness.
 type ModelBroker struct {
-	mu       sync.RWMutex
-	entries  map[string]*brokerEntry // keyed by "provider/model-id"
-	config   BrokerConfig
-	logger   *slog.Logger
-	fallback Chatter // fallback model if primary fails
+	mu        sync.RWMutex
+	entries   map[string]*brokerEntry // keyed by "provider/model-id"
+	entryKeys []string                // maintains deterministic iteration order
+	config    BrokerConfig
+	logger    *slog.Logger
+	fallback  Chatter // fallback model if primary fails
 }
 
 // BrokerStatus provides a snapshot of broker health.
@@ -79,10 +80,11 @@ func NewModelBroker(cfg BrokerConfig) *ModelBroker {
 			chatter := b.newChatterFor(modelCfg)
 			key := fmt.Sprintf("%s/%s", modelCfg.ProviderID, modelCfg.ModelID)
 			b.entries[key] = &brokerEntry{
-				model:  modelCfg,
+				model:   modelCfg,
 				chatter: chatter,
-				status: ProviderStatusHealthy,
+				status:  ProviderStatusHealthy,
 			}
+			b.entryKeys = append(b.entryKeys, key) // maintain insertion order
 		}
 
 		// Set fallback to SmallModel if configured
@@ -146,9 +148,10 @@ func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	// Try to find a healthy provider
+	// Try to find a healthy provider (iterate in deterministic order)
 	var healthyEntry *brokerEntry
-	for _, entry := range b.entries {
+	for _, key := range b.entryKeys {
+		entry := b.entries[key]
 		if entry.status == ProviderStatusHealthy {
 			healthyEntry = entry
 			break
@@ -174,9 +177,10 @@ func (b *ModelBroker) ChatWithProgress(ctx context.Context, messages []ChatMessa
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	// Try to find a healthy provider
+	// Try to find a healthy provider (iterate in deterministic order)
 	var healthyEntry *brokerEntry
-	for _, entry := range b.entries {
+	for _, key := range b.entryKeys {
+		entry := b.entries[key]
 		if entry.status == ProviderStatusHealthy {
 			healthyEntry = entry
 			break
@@ -324,14 +328,16 @@ func (b *ModelBroker) GetStatus() BrokerStatus {
 func (b *ModelBroker) Config() *ModelConfig {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	for _, entry := range b.entries {
+	// Iterate in deterministic order to get consistent "first healthy" result
+	for _, key := range b.entryKeys {
+		entry := b.entries[key]
 		if entry.status == ProviderStatusHealthy {
 			return entry.chatter.Config()
 		}
 	}
 	// Fall back to the first entry even if unhealthy
-	for _, entry := range b.entries {
-		return entry.chatter.Config()
+	if len(b.entryKeys) > 0 {
+		return b.entries[b.entryKeys[0]].chatter.Config()
 	}
 	return &ModelConfig{}
 }
