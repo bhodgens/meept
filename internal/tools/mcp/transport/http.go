@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+const (
+	// MaxResponseSize is the maximum allowed response body size (10MB).
+	// This prevents memory exhaustion from malicious or misconfigured servers.
+	MaxResponseSize = 10 * 1024 * 1024
+)
+
 // HTTPTransport implements MCP transport over HTTP.
 //
 // Requests are sent via HTTP POST to the server URL.
@@ -102,19 +108,24 @@ func (t *HTTPTransport) Send(ctx context.Context, message []byte) ([]byte, error
 
 	// Handle error status codes
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		// Limit error body size to prevent memory exhaustion
+		limitedReader := io.LimitReader(resp.Body, MaxResponseSize)
+		body, _ := io.ReadAll(limitedReader)
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	contentType := resp.Header.Get("Content-Type")
 
+	// Wrap body in a limited reader to prevent memory exhaustion
+	limitedBody := io.LimitReader(resp.Body, MaxResponseSize)
+
 	// Handle SSE response
 	if strings.Contains(contentType, "text/event-stream") {
-		return t.parseSSEResponse(resp.Body)
+		return t.parseSSEResponse(limitedBody)
 	}
 
 	// Handle JSON response
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(limitedBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
