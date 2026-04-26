@@ -157,7 +157,7 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 		return
 	}
 
-	o.logger.Info("DONE job completed event received", "job_id", event.JobID)
+	o.logger.Info("Job completed event received", "job_id", event.JobID)
 
 	if err := o.tactical.OnJobCompleted(ctx, event.JobID, event.Result); err != nil {
 		o.logger.Error("Failed to handle job completion",
@@ -177,7 +177,7 @@ func (o *Orchestrator) handleJobFailed(ctx context.Context, msg *models.BusMessa
 		return
 	}
 
-	o.logger.Info("FAIL job failed event received",
+	o.logger.Info("Job failed event received",
 		"job_id", event.JobID,
 		"error", event.Error,
 	)
