@@ -158,13 +158,6 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 		defer cancel()
 	}
 
-	// LLM-3 DEBUG: verify ctx has deadline
-	if dl, ok := ctx.Deadline(); ok {
-		println("LLM-3 DEBUG: ctx has deadline", dl.String())
-	} else {
-		println("LLM-3 DEBUG: ctx has NO deadline")
-	}
-
 	// Build Anthropic API request
 	reqBody, err := c.buildRequest(messages, chatOpts, false)
 	if err != nil {
