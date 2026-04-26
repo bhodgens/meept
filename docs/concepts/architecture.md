@@ -36,6 +36,7 @@ flowchart TB
         LLMClient["LLM Client<br/>internal/llm"]
         Resolver["Model Resolver<br/>internal/llm"]
         Budget["Budget Tracker<br/>internal/llm"]
+        TokenCache["Token Cache<br/>internal/llm (L1+L2)"]
         Providers["Provider Adapters<br/>OpenAI-compatible"]
     end
 
@@ -132,6 +133,7 @@ flowchart TB
 | Component | Package | Description |
 |-----------|---------|-------------|
 | LLM Client | `internal/llm` | Multi-provider LLM integration |
+| Token Cache | `internal/llm` | L1+L2 response caching with file-aware invalidation |
 | Tool Registry | `internal/tools` | Tool registration and dispatch |
 | Security | `internal/security` | Sanitization, taint tracking, permissions |
 | Memory | `internal/memory` | Multi-tier memory with FTS5 |

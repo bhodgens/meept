@@ -756,3 +756,35 @@ func (c *RPCClient) ScaleWorkerPool(targetCount int) error {
 	_, err := c.Call("worker.scale", params)
 	return err
 }
+
+// ============================================================================
+// Cache Methods
+// ============================================================================
+
+// CacheStats gets token cache statistics.
+func (c *RPCClient) CacheStats() (*types.CacheStatsResponse, error) {
+	result, err := c.Call("cache.stats", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.CacheStatsResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse cache stats response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// CacheClear clears all cache entries.
+func (c *RPCClient) CacheClear() error {
+	_, err := c.Call("cache.clear", nil)
+	return err
+}
+
+// CacheInvalidate invalidates cache entries for a specific file.
+func (c *RPCClient) CacheInvalidate(filePath string) error {
+	params := map[string]string{"file_path": filePath}
+	_, err := c.Call("cache.invalidate", params)
+	return err
+}

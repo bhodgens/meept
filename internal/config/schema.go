@@ -130,6 +130,16 @@ type LLMConfig struct {
 	AdaptiveTimeout LLMAdaptiveTimeoutConfig `toml:"adaptive_timeout"`
 	ContextFirewall LLMContextFirewallConfig `toml:"context_firewall"`
 	Metrics         LLMMetricsConfig      `toml:"metrics"`
+	Cache           LLMSimpleFeatureConfig `toml:"cache"`
+}
+
+// LLMSimpleFeatureConfig configures a simple feature with enabled flag and optional settings.
+type LLMSimpleFeatureConfig struct {
+	Enabled         bool   `toml:"enabled"`
+	L1MaxEntries    int    `toml:"l1_max_entries"`
+	L2Enabled       bool   `toml:"l2_enabled"`
+	L2DBPath        string `toml:"l2_db_path"`
+	DefaultTTLMin   int    `toml:"default_ttl_min"`
 }
 
 // LLMBrokerConfig configures the model broker.

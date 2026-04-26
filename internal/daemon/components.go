@@ -88,6 +88,9 @@ type Components struct {
 	// LLM provider manager (for multi-provider failover)
 	LLMProvider     llm.Chatter
 
+	// Token cache for LLM responses
+	TokenCache    *llm.TokenCacheCoordinator
+
 	// MCP integration
 	MCPManager      *mcp.Manager
 
@@ -180,10 +183,41 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			Aggressiveness: cfg.LLM.Budget.Aggressiveness,
 		}, logger.With("component", "budget"))
 
+		// Create token cache if enabled
+		var tokenCache *llm.TokenCacheCoordinator
+		if cfg.LLM.Cache.Enabled {
+			cacheCfg := llm.DefaultCacheConfig()
+			cacheCfg.L2DBPath = filepath.Join(cfg.Daemon.DataDir, "token_cache.db")
+			// Apply config from TOML if specified
+			if cfg.LLM.Cache.L1MaxEntries > 0 {
+				cacheCfg.L1MaxEntries = cfg.LLM.Cache.L1MaxEntries
+			}
+			if cfg.LLM.Cache.L2Enabled {
+				cacheCfg.L2Enabled = true
+			}
+			if cfg.LLM.Cache.DefaultTTLMin > 0 {
+				cacheCfg.DefaultTTL = time.Duration(cfg.LLM.Cache.DefaultTTLMin) * time.Minute
+			}
+			var err error
+			tokenCache, err = llm.NewTokenCacheCoordinatorWithMetrics(cacheCfg, nil)
+			if err != nil {
+				logger.Warn("Failed to create token cache", "error", err)
+			} else {
+				logger.Info("Token cache initialized",
+					"l1_max_entries", cacheCfg.L1MaxEntries,
+					"l2_enabled", cacheCfg.L2Enabled,
+					"db_path", cacheCfg.L2DBPath,
+					"default_ttl", cacheCfg.DefaultTTL,
+				)
+			}
+		}
+
 		c.LLMClient = llm.NewClient(llmCfg,
 			llm.WithLogger(logger),
 			llm.WithBudget(budgetTracker),
+			llm.WithTokenCache(tokenCache),
 		)
+		c.TokenCache = tokenCache
 		logger.Info("LLM client initialized successfully",
 			"provider", llmCfg.ProviderID,
 			"model", llmCfg.ModelID,

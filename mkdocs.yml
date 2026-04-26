@@ -76,6 +76,7 @@ nav:
       - Tools: concepts/tools.md
       - Memory: concepts/memory.md
       - Skills: concepts/skills.md
+      - Token Caching: concepts/token-caching.md
   - Configuration:
       - configuration/index.md
       - Daemon: configuration/daemon.md
@@ -107,6 +108,7 @@ nav:
   - Reference:
       - reference/index.md
       - CLI Commands: reference/cli.md
+      - Token Cache CLI: reference/token-cache-cli.md
       - Models CLI Reference: reference/models-cli.md
       - RPC API: reference/rpc.md
       - Tool Reference: reference/tools.md

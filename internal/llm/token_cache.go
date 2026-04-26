@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/metrics"
 )
 
 // CacheKey uniquely identifies a cached LLM response.
@@ -79,15 +81,21 @@ type ResponseCache interface {
 
 // TokenCacheCoordinator orchestrates L1 (in-memory) and L2 (SQLite) caches.
 type TokenCacheCoordinator struct {
-	l1Cache *L1Cache
-	l2Cache *L2Cache
-	config  CacheConfig
-	mu      sync.RWMutex
-	stats   CacheStats
+	l1Cache      *L1Cache
+	l2Cache      *L2Cache
+	config       CacheConfig
+	mu           sync.RWMutex
+	stats        CacheStats
+	metricsStore *metrics.Store
 }
 
 // NewTokenCacheCoordinator creates a new token cache coordinator.
 func NewTokenCacheCoordinator(config CacheConfig) (*TokenCacheCoordinator, error) {
+	return NewTokenCacheCoordinatorWithMetrics(config, nil)
+}
+
+// NewTokenCacheCoordinatorWithMetrics creates a new token cache coordinator with optional metrics recording.
+func NewTokenCacheCoordinatorWithMetrics(config CacheConfig, metricsStore *metrics.Store) (*TokenCacheCoordinator, error) {
 	// Create L1 cache
 	l1Config := L1CacheConfig{
 		MaxEntries:  config.L1MaxEntries,
@@ -112,9 +120,10 @@ func NewTokenCacheCoordinator(config CacheConfig) (*TokenCacheCoordinator, error
 	}
 
 	coordinator := &TokenCacheCoordinator{
-		l1Cache: l1,
-		l2Cache: l2,
-		config:  config,
+		l1Cache:      l1,
+		l2Cache:      l2,
+		config:       config,
+		metricsStore: metricsStore,
 	}
 
 	// Start background cleanup
@@ -133,6 +142,7 @@ func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEn
 
 	if !c.config.Enabled {
 		c.stats.Misses++
+		c.recordMetric("cache.miss", 1, key)
 		return nil, false
 	}
 
@@ -140,6 +150,7 @@ func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEn
 	if entry, found := c.l1Cache.Get(key); found {
 		c.stats.Hits++
 		c.stats.L1Hits++
+		c.recordMetric("cache.hit", 1, key)
 		return entry, true
 	}
 	c.stats.L1Misses++
@@ -151,12 +162,14 @@ func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEn
 			c.l1Cache.Put(key, entry)
 			c.stats.Hits++
 			c.stats.L2Hits++
+			c.recordMetric("cache.hit", 1, key)
 			return entry, true
 		}
 		c.stats.L2Misses++
 	}
 
 	c.stats.Misses++
+	c.recordMetric("cache.miss", 1, key)
 	return nil, false
 }
 
@@ -242,6 +255,20 @@ func (c *TokenCacheCoordinator) Stats() CacheStats {
 	stats.EntryCount = l1Count + l2Count
 
 	return stats
+}
+
+// recordMetric records a cache metric if metrics store is available.
+func (c *TokenCacheCoordinator) recordMetric(name string, value float64, key CacheKey) {
+	if c.metricsStore == nil {
+		return
+	}
+	tags := map[string]string{
+		"model_id": key.ModelID,
+	}
+	if key.AgentID != "" {
+		tags["agent_id"] = key.AgentID
+	}
+	c.metricsStore.Record(name, value, tags)
 }
 
 // Close closes the cache and releases resources.

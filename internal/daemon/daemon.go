@@ -147,6 +147,13 @@ func New(cfg *Config) (*Daemon, error) {
 		logger.Info("Self-improve RPC handlers registered")
 	}
 
+	// Register cache handler (native Go)
+	cacheHandler := rpc.NewCacheHandler(components.TokenCache, logger)
+	cacheHandler.RegisterCacheMethods(rpcServer)
+	if components.TokenCache != nil {
+		logger.Info("Token cache RPC handlers registered")
+	}
+
 	// Create config service for HTTP server
 	configService, err := http.NewConfigService()
 	if err != nil {

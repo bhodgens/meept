@@ -384,3 +384,16 @@ type TaskExtendedListResponse struct {
 type TaskStepsResponse struct {
 	Steps []TaskStepView `json:"steps"`
 }
+
+// CacheStatsResponse represents the token cache statistics RPC response.
+type CacheStatsResponse struct {
+	L1Entries   int     `json:"l1_entries"`
+	L1Hits      int     `json:"l1_hits"`
+	L1Misses    int     `json:"l1_misses"`
+	Evictions   int     `json:"evictions"`
+	L2Entries   int     `json:"l2_entries"`
+	L2Hits      int     `json:"l2_hits"`
+	L2Misses    int     `json:"l2_misses"`
+	TotalHits   int     `json:"total_hits"`
+	HitRate     float64 `json:"hit_rate"`
+}

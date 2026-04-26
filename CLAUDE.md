@@ -102,7 +102,7 @@ User Input (CLI/Telegram/Web/MenuBar)
 | **Server Core** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` |
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace) |
 | **Security** | `internal/security` (engine, sanitizer, tirith, tls) |
-| **LLM** | `internal/llm` (client, resolver, budget, providers) |
+| **LLM** | `internal/llm` (client, resolver, budget, providers, token cache) |
 | **Skills** | `internal/skills` (discovery, registry, parser, models) |
 | **Memory** | `internal/memory` (manager, episodic, task, consolidation, ftstore) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp) |

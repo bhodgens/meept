@@ -124,6 +124,11 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	// Pipeline methods
 	server.RegisterHandler("pipeline.status", p.makeProxy("pipeline.status", "pipeline.result", 10*time.Second))
 
+	// Cache methods
+	server.RegisterHandler("cache.stats", p.makeProxy("cache.stats", "cache.result", 10*time.Second))
+	server.RegisterHandler("cache.clear", p.makeProxy("cache.clear", "cache.result", 10*time.Second))
+	server.RegisterHandler("cache.invalidate", p.makeProxy("cache.invalidate", "cache.result", 10*time.Second))
+
 	// Self-improvement methods are registered as native Go handlers by
 	// SelfImproveHandler (see selfimprove.go) because the Controller lives
 	// inside the Go daemon and does not need a bus proxy round-trip.

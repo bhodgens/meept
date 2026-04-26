@@ -109,6 +109,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newDaemonCmd())
 	rootCmd.AddCommand(newJobsCmd())
 	rootCmd.AddCommand(newMemoryCmd())
+	rootCmd.AddCommand(newCacheCmd())
 	rootCmd.AddCommand(newTaskCmd())
 	rootCmd.AddCommand(newQueueCmd())
 	rootCmd.AddCommand(newWorkersCmd())
