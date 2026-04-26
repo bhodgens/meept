@@ -296,7 +296,7 @@ func isRetryableError(errMsg string, patterns []*regexp.Regexp) bool {
 // Returns the result of the first successful execution or the last error.
 func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[string]any) (*ToolResult, error) {
 	policy := getRetryPolicy(name)
-	
+
 	if !policy.Retryable {
 		// No retry - execute once
 		return r.Execute(ctx, name, args)
@@ -307,7 +307,7 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 
 	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
 		result, err := r.Execute(ctx, name, args)
-		
+
 		if err == nil && result != nil && result.Success {
 			// Success - return immediately
 			return result, nil
@@ -319,6 +319,11 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 		} else if result != nil && result.Error != "" {
 			lastErr = fmt.Errorf("%s", result.Error)
 			lastResult = result
+		}
+
+		// Guard against nil lastErr (shouldn't happen, but defensive)
+		if lastErr == nil {
+			lastErr = fmt.Errorf("unknown error during tool execution")
 		}
 
 		// Check if error is retryable
@@ -341,7 +346,7 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 			if policy.Exponential {
 				delay = delay * time.Duration(1<<uint(attempt))
 			}
-			
+
 			select {
 			case <-ctx.Done():
 				return NewErrorResult(ctx.Err().Error()), ctx.Err()
@@ -355,13 +360,17 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 		}
 	}
 
-	// All retries exhausted
+	// All retries exhausted - guard against nil lastErr
+	if lastErr == nil {
+		lastErr = fmt.Errorf("tool execution failed with no error recorded")
+	}
+
 	r.logger.Warn("Tool execution failed after all retries",
 		"name", name,
 		"max_retries", policy.MaxRetries,
 		"error", lastErr,
 	)
-	
+
 	if lastResult != nil {
 		return lastResult, nil
 	}
