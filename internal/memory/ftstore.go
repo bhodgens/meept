@@ -16,6 +16,9 @@ import (
 	"github.com/caimlas/meept/pkg/sqlite"
 )
 
+// ErrNotFound is returned when a memory is not found.
+var ErrNotFound = errors.New("memory not found")
+
 // FTSConfig holds configuration for SQLite FTS5 storage.
 type FTSConfig struct {
 	// TableName is the SQLite table name
@@ -163,6 +166,7 @@ func (s *SQLiteFTSStore) Store(ctx context.Context, query string, args ...any) e
 }
 
 // Delete executes a delete operation.
+// Returns ErrNotFound if no rows are deleted.
 func (s *SQLiteFTSStore) Delete(ctx context.Context, query string, args ...any) error {
 	s.mu.RLock()
 	if !s.initialized {
@@ -171,8 +175,20 @@ func (s *SQLiteFTSStore) Delete(ctx context.Context, query string, args ...any) 
 	}
 	s.mu.RUnlock()
 
-	_, err := s.pool.Exec(ctx, query, args...)
-	return err
+	result, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
 }
 
 // DeleteByIDs removes multiple items by ID.
