@@ -23,6 +23,10 @@ type ChatMessage struct {
 	Name       string      `json:"name,omitempty"`
 	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
 	ToolCallID string      `json:"tool_call_id,omitempty"`
+	// SummaryLevel tracks the hierarchical summarization depth for this
+	// message. 0 = original, 1 = first-level summary, 2 = summary of
+	// summaries, etc. Not serialized to external APIs.
+	SummaryLevel int `json:"-"`
 }
 
 // ToOpenAIDict converts the message to the format expected by OpenAI API.

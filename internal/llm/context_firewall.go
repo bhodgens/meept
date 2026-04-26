@@ -30,6 +30,16 @@ type ContextFirewallConfig struct {
 	// ModelContextLimit overrides the model's ContextLimit for the compressor.
 	// When zero, model.ContextLimit is used.
 	ModelContextLimit int
+	// HierarchicalSummarization enables recursive summarization where
+	// summaries that exceed SummaryLevelThreshold tokens are themselves
+	// summarized at the next level up to MaxSummaryLevel.
+	HierarchicalSummarization bool
+	// MaxSummaryLevel is the maximum recursion depth for hierarchical
+	// summarization (default 3).
+	MaxSummaryLevel int
+	// SummaryLevelThreshold is the token count at which a summary is
+	// re-summarized at the next level (default 500).
+	SummaryLevelThreshold int
 }
 
 // ContextFirewall wraps a Chatter and enforces context budgets.
@@ -137,6 +147,12 @@ func NewContextFirewall(
 	}
 	if cfg.HardLimit <= 0 {
 		cfg.HardLimit = 0.80
+	}
+	if cfg.MaxSummaryLevel <= 0 {
+		cfg.MaxSummaryLevel = 3
+	}
+	if cfg.SummaryLevelThreshold <= 0 {
+		cfg.SummaryLevelThreshold = 500
 	}
 
 	if summaryModel == nil {
@@ -481,7 +497,17 @@ func (f *ContextFirewall) countTokens(messages []ChatMessage) int {
 }
 
 // summarizeOldHistory summarizes old messages, keeping the system prompt and last few messages.
+// When HierarchicalSummarization is enabled, the summary is recursively re-summarized
+// if it exceeds SummaryLevelThreshold tokens, up to MaxSummaryLevel depth.
 func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []ChatMessage) ([]ChatMessage, error) {
+	return f.summarizeWithLevel(ctx, messages, 1)
+}
+
+// summarizeWithLevel performs summarization at the given level. Level 1 is the
+// initial summarization pass. If the resulting summary exceeds
+// SummaryLevelThreshold tokens and level < MaxSummaryLevel, the summary is
+// recursively re-summarized at level+1.
+func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []ChatMessage, level int) ([]ChatMessage, error) {
 	// Keep: system prompt + last 4 messages
 	keepCount := 4 + 1 // +1 for system
 
@@ -493,7 +519,9 @@ func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []Ch
 	var toSummarize []ChatMessage
 
 	for i, msg := range messages {
-		if msg.Role == RoleSystem {
+		if msg.Role == RoleSystem && level == 1 {
+			// Only preserve original system messages at level 1.
+			// At higher levels, system-tagged summaries are fair game for re-summarization.
 			result = append(result, msg)
 		} else if i >= len(messages)-keepCount {
 			result = append(result, msg)
@@ -522,13 +550,36 @@ func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []Ch
 		return nil, fmt.Errorf("summarization failed: %w", err)
 	}
 
+	summaryContent := fmt.Sprintf("[Conversation summary level %d]: %s", level, summaryResp.Content)
+	summaryMsg := ChatMessage{
+		Role:         RoleSystem,
+		Content:      summaryContent,
+		SummaryLevel: level,
+	}
+
+	// Hierarchical summarization: if the summary itself exceeds the threshold,
+	// and we haven't hit max depth, re-summarize.
+	if f.config.HierarchicalSummarization && level < f.config.MaxSummaryLevel {
+		summaryTokens := f.tokenizer.CountTokens(summaryContent)
+		if summaryTokens > f.config.SummaryLevelThreshold {
+			f.logger.Debug("hierarchical summarization: re-summarizing at next level",
+				"current_level", level,
+				"next_level", level+1,
+				"summary_tokens", summaryTokens,
+				"threshold", f.config.SummaryLevelThreshold,
+			)
+
+			// Build a synthetic message list from the summary + kept messages
+			// so the recursive call can summarize the summary itself.
+			subMessages := []ChatMessage{summaryMsg}
+			subMessages = append(subMessages, result...)
+
+			return f.summarizeWithLevel(ctx, subMessages, level+1)
+		}
+	}
+
 	// Prepend summary to the kept messages
-	final := append([]ChatMessage{
-		{
-			Role:    RoleSystem,
-			Content: "[Conversation summary]: " + summaryResp.Content,
-		},
-	}, result...)
+	final := append([]ChatMessage{summaryMsg}, result...)
 
 	return final, nil
 }

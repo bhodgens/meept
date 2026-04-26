@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -39,7 +40,7 @@ type ProviderHealth struct {
 // ProviderEntry represents a configured provider with its health state.
 type ProviderEntry struct {
 	Config   *ModelConfig
-	Client   *Client
+	Chatter  Chatter
 	Health   *ProviderHealth
 	Priority int // Lower = higher priority (0 = primary)
 }
@@ -85,6 +86,37 @@ type ProviderManager struct {
 	initialized     bool
 }
 
+// isAnthropic checks whether the given ModelConfig points to an Anthropic endpoint.
+func isAnthropic(cfg *ModelConfig) bool {
+	if cfg.ProviderID == "anthropic" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(cfg.BaseURL), "anthropic")
+}
+
+// createChatterFor creates a Chatter for a ModelConfig, selecting the right
+// client implementation (Anthropic vs OpenAI-compatible) based on provider ID
+// and base URL.
+func createChatterFor(cfg *ModelConfig, budget *Budget, logger *slog.Logger) Chatter {
+	if isAnthropic(cfg) {
+		opts := []AnthropicClientOption{
+			WithAnthropicLogger(logger),
+		}
+		if budget != nil {
+			opts = append(opts, WithAnthropicBudget(budget))
+		}
+		return NewAnthropicClient(cfg, opts...)
+	}
+
+	opts := []ClientOption{
+		WithLogger(logger),
+	}
+	if budget != nil {
+		opts = append(opts, WithBudget(budget))
+	}
+	return NewClient(cfg, opts...)
+}
+
 // NewProviderManager creates a new provider manager.
 func NewProviderManager(cfg ProviderManagerConfig) *ProviderManager {
 	if cfg.Logger == nil {
@@ -109,15 +141,9 @@ func NewProviderManager(cfg ProviderManagerConfig) *ProviderManager {
 
 	// Initialize providers
 	for i, providerCfg := range cfg.Providers {
-		var clientOpts []ClientOption
-		if cfg.Budget != nil {
-			clientOpts = append(clientOpts, WithBudget(cfg.Budget))
-		}
-		clientOpts = append(clientOpts, WithLogger(cfg.Logger))
-
 		entry := &ProviderEntry{
 			Config:   providerCfg,
-			Client:   NewClient(providerCfg, clientOpts...),
+			Chatter:  createChatterFor(providerCfg, cfg.Budget, cfg.Logger),
 			Priority: i,
 			Health: &ProviderHealth{
 				ProviderID: providerCfg.ProviderID,
@@ -173,7 +199,7 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 		} else {
 			attemptCtx, cancel = context.WithCancel(ctx)
 		}
-		resp, err := entry.Client.Chat(attemptCtx, messages, opts...)
+		resp, err := entry.Chatter.Chat(attemptCtx, messages, opts...)
 		cancel()
 
 		latency := time.Since(start)
@@ -449,15 +475,9 @@ func (pm *ProviderManager) AddProvider(cfg *ModelConfig, priority int) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	var clientOpts []ClientOption
-	if pm.config.Budget != nil {
-		clientOpts = append(clientOpts, WithBudget(pm.config.Budget))
-	}
-	clientOpts = append(clientOpts, WithLogger(pm.logger))
-
 	entry := &ProviderEntry{
 		Config:   cfg,
-		Client:   NewClient(cfg, clientOpts...),
+		Chatter:  createChatterFor(cfg, pm.config.Budget, pm.logger),
 		Priority: priority,
 		Health: &ProviderHealth{
 			ProviderID: cfg.ProviderID,
@@ -476,8 +496,10 @@ func (pm *ProviderManager) RemoveProvider(providerID string) error {
 
 	for i, p := range pm.providers {
 		if p.Config.ProviderID == providerID {
-			// Close the client
-			p.Client.Close()
+			// Close the chatter if it implements io.Closer
+			if closer, ok := p.Chatter.(interface{ Close() }); ok {
+				closer.Close()
+			}
 
 			// Remove from slice
 			pm.providers = append(pm.providers[:i], pm.providers[i+1:]...)
@@ -564,7 +586,7 @@ func (pm *ProviderManager) runHealthCheck(ctx context.Context) {
 			}
 
 			start := time.Now()
-			_, err := entry.Client.Chat(checkCtx, messages, WithMaxTokens(1))
+			_, err := entry.Chatter.Chat(checkCtx, messages, WithMaxTokens(1))
 			latency := time.Since(start)
 			cancel()
 
@@ -591,7 +613,9 @@ func (pm *ProviderManager) Stop() {
 	defer pm.mu.Unlock()
 
 	for _, p := range pm.providers {
-		p.Client.Close()
+		if closer, ok := p.Chatter.(interface{ Close() }); ok {
+			closer.Close()
+		}
 	}
 
 	pm.initialized = false
