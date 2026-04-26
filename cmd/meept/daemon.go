@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -152,6 +153,9 @@ func startDaemon(foreground bool) error {
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
+	// Close log file in parent process - the child inherits the fd
+	f.Close()
+
 	// Wait briefly to check if it started successfully
 	time.Sleep(200 * time.Millisecond)
 
@@ -228,7 +232,7 @@ func isDaemonRunning(pidFile string) (int, bool) {
 		return 0, false
 	}
 
-	pid, err := strconv.Atoi(string(data))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return 0, false
 	}
