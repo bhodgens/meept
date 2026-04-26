@@ -33,6 +33,12 @@ type AgentRegistry struct {
 	globalRules string
 
 	// Shared dependencies
+	// AGENT-21 DEFERRED: AgentRegistry depends on a concrete *llm.Client.
+	// After the provider-manager refactor (llm.ProviderManager) the registry
+	// should accept an interface (llm.Chatter) or hold both the concrete
+	// client and the provider-manager; for now we keep *llm.Client as the
+	// backing field but callers should be aware this is a coupling that may
+	// need decoupling in a future refactor.
 	memvid          *memvid.Client
 	taskStore       *task.Store
 	llm             *llm.Client

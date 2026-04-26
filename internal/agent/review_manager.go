@@ -425,11 +425,10 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 		// This fixes the bug where revision count tracking was always 0
 		step.IncrementRevision()
 		if err := rm.stepStore.Update(step); err != nil {
-			rm.logger.Error("Failed to increment revision count",
-				"step_id", step.ID,
-				"task_id", step.TaskID,
-				"error", err,
-			)
+			// AGENT-23 FIX: Return the error so callers that manage the
+			// scheduling lifecycle (e.g. TacticalScheduler) can observe
+			// revision-count failures and surface them to the operator.
+			return nil, fmt.Errorf("failed to increment revision count: %w", err)
 		}
 
 		// Create revision step

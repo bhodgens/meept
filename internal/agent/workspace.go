@@ -391,6 +391,9 @@ func (w *WorkspaceManager) RestoreCheckpoint(ctx context.Context, taskID, label 
 }
 
 // ListCheckpoints returns all checkpoints for a task.
+// AGENT-17 FIX: Tag parsing extracts timestamp from the end (last numeric segment
+// after the final dash) and joins everything between taskID and timestamp as the
+// label, correctly handling labels containing dashes (e.g. "fix-a-bug-1712345678").
 func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) ([]Checkpoint, error) {
 	w.mu.RLock()
 	workspace, ok := w.workspaces[taskID]

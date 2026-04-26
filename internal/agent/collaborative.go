@@ -111,6 +111,16 @@ type CollaborativePlanner struct {
 }
 
 // NewCollaborativePlanner creates a new collaborative planner.
+// AGENT-18 DEFERRED: CollaborativePlanner is not wired into the main request path.
+// The planner struct, its methods, and all supporting types remain in place;
+// however NewCollaborativePlanner is never invoked outside this file and no
+// caller passes user input through PlanAndReview for interactive review.
+//
+// Re-connection requires plumbing through AgentLoop (or a top-level controller)
+// so that programming tasks are routed through PlanAndReview and the
+// approval/rejection/revision workflow is surfaced to the operator (CLI prompt,
+// Telegram reply, MenuBar button, etc.). Until then this type is effectively
+// unused.
 func NewCollaborativePlanner(
 	planner Planner,
 	llmClient *llm.Client,

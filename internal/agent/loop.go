@@ -390,8 +390,7 @@ type AgentLoop struct {
 	cache *ResultCache
 
 	// Progress tracking
-	progressEnabled  bool          // Enable/disable progress events
-	progressInterval time.Duration // Minimum interval between progress events (reserved for future use)
+	progressEnabled bool // Enable/disable progress events
 
 	// Configuration
 	config          AgentConfig
@@ -605,13 +604,7 @@ func WithProgressEnabled(enabled bool) LoopOption {
 	}
 }
 
-// WithProgressInterval sets the minimum interval between progress events.
-// Reserved for future use to throttle high-frequency progress updates.
-func WithProgressInterval(interval time.Duration) LoopOption {
-	return func(l *AgentLoop) {
-		l.progressInterval = interval
-	}
-}
+// (WithProgressInterval removed — AGENT-19: field was never read after agent loop refactors)
 
 // WithSecurityOrchestrator sets the security orchestrator for input/output processing.
 func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
@@ -1741,7 +1734,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	}
 
 	// Log task completion
-	l.logger.Info("DONE agent completed task",
+	l.logger.Info("Agent completed task",
 		"agent_id", l.agentID,
 		"task_id", t.ID,
 		"model", modelID,

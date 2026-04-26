@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -17,9 +18,10 @@ type SessionTracker struct {
 	maxAge                  time.Duration
 	memvidClient            *memvid.Client
 	sessionIdleTriggerHours int
-	stopCh                  chan struct{} // Used to signal background goroutine to stop
-	stopOnce                sync.Once     // Ensures Stop is only called once
+	stopCh                  chan struct{}        // Used to signal background goroutine to stop
+	stopOnce                sync.Once            // Ensures Stop is only called once
 	logger                  *slog.Logger
+	lastErr                 error                // AGENT-20: tracks the last persist error
 }
 
 // SessionState holds state for a single conversation session.
@@ -201,6 +203,11 @@ func (t *SessionTracker) cleanupExpired() {
 }
 
 // PersistIdleSessions persists sessions that have been idle for the configured threshold.
+// Returns the last persistence error encountered, or nil if all sessions persisted
+// successfully (or were not idle / had already been persisted).
+// AGENT-20 FIX: Previously returned nil even when persistSession failed. Now tracks
+// the last error and returns it after the loop. Callsites that need per-session error
+// reporting should inspect the error return value.
 func (t *SessionTracker) PersistIdleSessions(ctx context.Context) error {
 	if t.memvidClient == nil {
 		return nil // No memvid client configured
@@ -211,6 +218,7 @@ func (t *SessionTracker) PersistIdleSessions(ctx context.Context) error {
 
 	idleThreshold := time.Duration(t.sessionIdleTriggerHours) * time.Hour
 	now := time.Now()
+	var lastErr error
 
 	for _, state := range t.sessions {
 		if state.Persisted {
@@ -223,13 +231,14 @@ func (t *SessionTracker) PersistIdleSessions(ctx context.Context) error {
 					"session_id", state.SessionID,
 					"error", err,
 				)
+				lastErr = fmt.Errorf("session %s: %w", state.SessionID, err)
 				continue
 			}
 			state.Persisted = true
 		}
 	}
 
-	return nil
+	return lastErr
 }
 
 // persistSession persists a single session to memvid.
@@ -351,7 +360,7 @@ func (t *SessionTracker) StartBackgroundPersistence(ctx context.Context) {
 				return
 			case <-ticker.C:
 				if err := t.PersistIdleSessions(ctx); err != nil {
-					// Log error but continue
+					t.logger.Error("Background persistence failed", "error", err)
 				}
 			}
 		}
