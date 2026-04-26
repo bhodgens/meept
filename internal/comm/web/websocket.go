@@ -68,14 +68,21 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 		return
 	}
 
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	// Collect failed connections to unregister after releasing the read lock
+	var failedConns []*websocket.Conn
 
+	h.mu.RLock()
 	for conn := range h.clients {
 		if _, err := conn.Write(payload); err != nil {
-			h.logger.Warn("ws write error, removing client", "error", err)
-			go h.Unregister(conn)
+			h.logger.Warn("ws write error, will remove client", "error", err)
+			failedConns = append(failedConns, conn)
 		}
+	}
+	h.mu.RUnlock()
+
+	// Unregister failed connections outside the read lock to avoid deadlock
+	for _, conn := range failedConns {
+		h.Unregister(conn)
 	}
 }
 
