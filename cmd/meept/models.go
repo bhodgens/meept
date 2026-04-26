@@ -72,8 +72,7 @@ func runModelsSetup(cmd *cobra.Command, args []string) error {
 		apiKey := os.Getenv(provider.APIKeyEnvVar)
 		if apiKey == "" {
 			fmt.Printf("\nWarning: API key not found in %s\n", provider.APIKeyEnvVar)
-			fmt.Print("Enter API key (or press enter to skip): ")
-			// For now, just warn - full credential management is in credentials subcommand
+			fmt.Printf("You can set it with: meept models credentials add %s\n", provider.ID)
 		}
 	}
 
