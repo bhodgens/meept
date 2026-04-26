@@ -12,12 +12,6 @@ import (
 
 const tirithTimeout = 2 * time.Second
 
-// tirithAvailable caches whether tirith is available.
-var (
-	tirithOnce      sync.Once
-	tirithAvailable bool
-)
-
 // TirithResult represents the result of a tirith scan.
 type TirithResult struct {
 	Blocked  bool    // True only for BLOCKED findings
@@ -30,23 +24,46 @@ type TirithResult struct {
 // detailRE extracts [SEVERITY] rule_id from tirith output.
 var detailRE = regexp.MustCompile(`\[(\w+)]\s+(\S+)`)
 
+// tirithAvailabilityCache caches availability by binary path.
+// SEC-2 FIX: Per-binary caching instead of package-level Once.
+var (
+	tirithCacheMu  sync.RWMutex
+	tirithCacheMap = make(map[string]bool)
+)
+
 // CheckTirithAvailable checks whether the tirith binary is reachable on PATH.
+// SEC-2 FIX: Now caches per binary path instead of using a single package-level sync.Once.
 func CheckTirithAvailable(ctx context.Context, binary string) bool {
 	if binary == "" {
 		binary = "tirith"
 	}
 
-	tirithOnce.Do(func() {
-		ctx, cancel := context.WithTimeout(ctx, tirithTimeout)
-		defer cancel()
+	// Check cache first with read lock
+	tirithCacheMu.RLock()
+	available, cached := tirithCacheMap[binary]
+	tirithCacheMu.RUnlock()
 
-		cmd := exec.CommandContext(ctx, binary, "--version")
-		if err := cmd.Run(); err == nil {
-			tirithAvailable = true
-		}
-	})
+	if cached {
+		return available
+	}
 
-	return tirithAvailable
+	// Check availability and cache with write lock
+	tirithCacheMu.Lock()
+	defer tirithCacheMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if available, cached = tirithCacheMap[binary]; cached {
+		return available
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, tirithTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, binary, "--version")
+	available = cmd.Run() == nil
+	tirithCacheMap[binary] = available
+
+	return available
 }
 
 // ScanCommand runs tirith check on a shell command and parses the output.

@@ -363,3 +363,167 @@ func TestCheckPath_FailClosedOnDBError(t *testing.T) {
 		t.Errorf("expected RuleSource=fail_closed, got %q", decision.RuleSource)
 	}
 }
+
+// TestEngineCheckFinancial_DisabledByConfig verifies that when BlockFinancial is false,
+// financial operations are not blocked. (SEC-1 fix verification)
+func TestEngineCheckFinancial_DisabledByConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "security.db")
+
+	// BlockFinancial is explicitly false
+	cfg := &config.SecurityConfig{
+		BlockFinancial: false,
+	}
+
+	engine, err := NewEngine(dbPath, cfg, nil)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	defer engine.Close()
+
+	// Financial operations should NOT be blocked when BlockFinancial is false
+	decision := engine.Check("send_message", "send_message", map[string]string{
+		"content": "Please transfer funds to my bank account",
+	}, "")
+
+	// Since BlockFinancial is false, financial check should pass through
+	// The action will be evaluated by other rules but not blocked by financial check
+	if decision.RuleSource == "immutable" && decision.Reason == "Financial operations are blocked by policy" {
+		t.Errorf("Financial operations should NOT be blocked when BlockFinancial=false, got: %+v", decision)
+	}
+}
+
+// TestEngineCheckFinancial_NilConfig verifies that when config is nil,
+// financial operations are not blocked. (SEC-1 fix verification)
+func TestEngineCheckFinancial_NilConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "security.db")
+
+	// Pass nil config
+	engine, err := NewEngine(dbPath, nil, nil)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	defer engine.Close()
+
+	// Financial operations should NOT be blocked when config is nil
+	decision := engine.Check("send_message", "send_message", map[string]string{
+		"content": "Please transfer funds to my bank account",
+	}, "")
+
+	// Since config is nil, financial check should pass through
+	if decision.RuleSource == "immutable" && decision.Reason == "Financial operations are blocked by policy" {
+		t.Errorf("Financial operations should NOT be blocked when config is nil, got: %+v", decision)
+	}
+}
+
+// TestCheckPath_PathTraversalBypass verifies that path traversal attacks are blocked.
+// /tmp_backup/secret should NOT match allow rule for /tmp (SEC-4 fix verification)
+func TestCheckPath_PathTraversalBypass(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "security.db")
+
+	cfg := &config.SecurityConfig{}
+
+	engine, err := NewEngine(dbPath, cfg, nil)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	defer engine.Close()
+
+	// Add an allow rule for /tmp
+	_, err = engine.db.Exec(`
+		INSERT INTO path_rules (pattern, rule_type, risk_level, description, immutable, enabled)
+		VALUES ('/tmp', 'allow', 1, 'Allow temp directory', 0, 1)`)
+	if err != nil {
+		t.Fatalf("Failed to add allow rule: %v", err)
+	}
+
+	// /tmp/test should be allowed (it's under /tmp)
+	decision := engine.checkPath("/tmp/test", "file_read")
+	if decision != nil {
+		t.Errorf("/tmp/test should be allowed under /tmp rule, got: %+v", decision)
+	}
+
+	// /tmp_backup/secret should NOT be allowed (it's not under /tmp, just has /tmp as prefix)
+	decision = engine.checkPath("/tmp_backup/secret", "file_read")
+	if decision == nil {
+		t.Errorf("/tmp_backup/secret should NOT be allowed - it's not under /tmp directory")
+	}
+}
+
+// TestCheckPath_BlockedPathTraversal verifies that blocked path rules also work correctly.
+// /etc_backup should NOT be blocked by rule for /etc (SEC-4 fix verification)
+func TestCheckPath_BlockedPathTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "security.db")
+
+	cfg := &config.SecurityConfig{}
+
+	engine, err := NewEngine(dbPath, cfg, nil)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	defer engine.Close()
+
+	// /etc/passwd should be blocked (it's under /etc which is blocked by default seeds)
+	decision := engine.checkPath("/etc/passwd", "file_read")
+	if decision == nil || decision.Allowed {
+		t.Errorf("/etc/passwd should be blocked, got: %+v", decision)
+	}
+
+	// /etc_backup/passwd should NOT be blocked by the /etc rule
+	// since /etc_backup is a different directory
+	decision = engine.checkPath("/etc_backup/passwd", "file_read")
+	// This should either be nil (no rule matches) or allowed
+	if decision != nil && !decision.Allowed {
+		// Check if it was blocked by the /etc pattern incorrectly
+		if contains(decision.Reason, "/etc") {
+			t.Errorf("/etc_backup/passwd should NOT be blocked by /etc rule - different directory, got: %+v", decision)
+		}
+	}
+}
+
+// TestNormalizePathForComparison tests the path normalization helper.
+func TestNormalizePathForComparison(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"/tmp", "/tmp/"},
+		{"/tmp/", "/tmp/"},
+		{"/var/log", "/var/log/"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		result := normalizePathForComparison(tt.input)
+		if result != tt.expected {
+			t.Errorf("normalizePathForComparison(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
+// TestIsPathUnderDir tests the directory containment helper.
+func TestIsPathUnderDir(t *testing.T) {
+	tests := []struct {
+		path     string
+		dir      string
+		expected bool
+	}{
+		{"/tmp/test", "/tmp", true},
+		{"/tmp/sub/file", "/tmp", true},
+		{"/tmp", "/tmp", true},
+		{"/tmp_backup", "/tmp", false},
+		{"/tmp_backup/secret", "/tmp", false},
+		{"/var/log", "/var", true},
+		{"/variable", "/var", false},
+	}
+
+	for _, tt := range tests {
+		result := isPathUnderDir(tt.path, tt.dir)
+		if result != tt.expected {
+			t.Errorf("isPathUnderDir(%q, %q) = %v, want %v", tt.path, tt.dir, result, tt.expected)
+		}
+	}
+}
