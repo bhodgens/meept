@@ -510,6 +510,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			}
 		}
 
+		// Clean up validation gate counter for completed task
+		ts.cleanupValidationGateCounter(step.TaskID)
+
 		t.SetState(task.StateCompleted)
 		if err := ts.taskStore.Update(t); err != nil {
 			ts.logger.Error("Failed to set task completed", "error", err)
@@ -737,6 +740,9 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 			ts.logger.Error("Failed to set task failed", "error", err)
 		}
 
+		// Clean up validation gate counter for failed task
+		ts.cleanupValidationGateCounter(step.TaskID)
+
 		ts.publishEvent("task.failed", map[string]any{
 			"task_id":         step.TaskID,
 			"name":            t.Name,
@@ -962,4 +968,12 @@ func (ts *TacticalScheduler) buildResultSummary(steps []map[string]any) string {
 	}
 
 	return sb.String()
+}
+
+// cleanupValidationGateCounter removes the validation gate counter entry for a task.
+// Called when a task completes or fails to prevent unbounded map growth.
+func (ts *TacticalScheduler) cleanupValidationGateCounter(taskID string) {
+	ts.validationGateMu.Lock()
+	defer ts.validationGateMu.Unlock()
+	delete(ts.validationGateCounter, taskID)
 }
