@@ -507,13 +507,18 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 	resp, err := c.httpClient.Do(req)
 	latencyMs := time.Since(start).Milliseconds()
 
-	// Record metrics if metrics store is configured
-	if c.metricsStore != nil && payload["max_tokens"] != nil {
+	// Record error metrics only here; successful requests are recorded after parsing
+	// with actual token counts (see below after parseResponse)
+	if c.metricsStore != nil && (err != nil || (resp != nil && resp.StatusCode != http.StatusOK)) {
 		errType := metrics.ErrorTypeNone
 		if err != nil {
 			errType = metrics.ClassifyError(err, 0)
 		} else if resp != nil {
 			errType = metrics.ClassifyError(nil, resp.StatusCode)
+		}
+		httpStatus := 0
+		if resp != nil {
+			httpStatus = resp.StatusCode
 		}
 		go func() {
 			record := metrics.RequestRecord{
@@ -521,16 +526,9 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 				ProviderID: c.config.ProviderID,
 				ModelID:    c.config.ModelID,
 				LatencyMs:  latencyMs,
-				HTTPStatus: 0,
+				HTTPStatus: httpStatus,
 				ErrorType:  errType,
-				Success:    err == nil && (resp == nil || resp.StatusCode == http.StatusOK),
-			}
-			if resp != nil {
-				record.HTTPStatus = resp.StatusCode
-			}
-			// Estimate tokens (rough)
-			if maxTok, ok := payload["max_tokens"].(int); ok {
-				record.CompletionTokens = maxTok / 2 // Very rough estimate
+				Success:    false,
 			}
 			if rerr := c.metricsStore.Record(context.Background(), record); rerr != nil {
 				c.logger.Debug("metrics record failed", "error", rerr)
