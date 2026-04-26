@@ -414,17 +414,36 @@ func (w *WorkspaceManager) ListCheckpoints(ctx context.Context, taskID string) (
 			continue
 		}
 		// Parse tag: checkpoint-{taskID}-{label}-{timestamp}
-		parts := strings.Split(tag, "-")
+		// Use SplitN with limit 4 to handle labels with dashes (e.g., "fix-my-bug")
+		// Format: checkpoint-{taskID}-{label-with-dashes}-{timestamp}
+		parts := strings.SplitN(tag, "-", 4)
 		if len(parts) < 4 {
 			continue
 		}
-		label := parts[2]
-		// Timestamp might have multiple parts if label had dashes
-		timestampStr := strings.Join(parts[3:], "")
+		// parts[0] = "checkpoint", parts[1] = taskID, parts[2] = label (may contain dashes), parts[3] = timestamp
+		// However, since label can have dashes and timestamp is at the end, we need to split from the end
+		// Actually, the tag format is: checkpoint-{taskID}-{label}-{timestamp}
+		// where timestamp is the last numeric part
+		// Let's find the last hyphen before a pure numeric segment
+		lastDash := strings.LastIndex(tag, "-")
+		if lastDash == -1 {
+			continue
+		}
+		timestampStr := tag[lastDash+1:]
 		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
 		if err != nil {
 			continue
 		}
+
+		// Extract prefix (everything before the timestamp)
+		prefix := tag[:lastDash]
+		// prefix is: checkpoint-{taskID}-{label}
+		// We need to extract label by removing "checkpoint-{taskID}-"
+		expectedPrefix := fmt.Sprintf("checkpoint-%s-", taskID)
+		if !strings.HasPrefix(prefix, expectedPrefix) {
+			continue
+		}
+		label := strings.TrimPrefix(prefix, expectedPrefix)
 
 		checkpoints = append(checkpoints, Checkpoint{
 			TaskID:    taskID,
