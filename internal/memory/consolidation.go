@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/llm"
 )
 
 // Consolidator compacts and summarizes old memories.
@@ -18,12 +20,13 @@ import (
 // 3. Creating summary memories and archiving the originals
 // 4. Identifying and removing duplicate task memories
 type Consolidator struct {
-	manager     *Manager
-	logger      *slog.Logger
-	mu          sync.Mutex
-	running     bool
-	lastRun     *time.Time
-	stopChan    chan struct{}
+	manager  *Manager
+	logger   *slog.Logger
+	llm      llm.Chatter // optional: if nil, falls back to date-based grouping
+	mu       sync.Mutex
+	running  bool
+	lastRun  *time.Time
+	stopChan chan struct{}
 }
 
 // ConsolidatorConfig holds configuration for the consolidator.
@@ -32,6 +35,9 @@ type ConsolidatorConfig struct {
 	Manager *Manager
 	// Logger for consolidation operations.
 	Logger *slog.Logger
+	// LLM is an optional chat client used for intelligent summarization.
+	// If nil, the consolidator falls back to naive date-based grouping.
+	LLM llm.Chatter
 }
 
 // NewConsolidator creates a new consolidator.
@@ -42,6 +48,7 @@ func NewConsolidator(cfg ConsolidatorConfig) *Consolidator {
 	return &Consolidator{
 		manager:  cfg.Manager,
 		logger:   cfg.Logger,
+		llm:      cfg.LLM,
 		stopChan: make(chan struct{}),
 	}
 }
@@ -180,8 +187,20 @@ func (c *Consolidator) consolidateEpisodic(ctx context.Context, cutoff time.Time
 		return report, nil
 	}
 
-	// Group memories by date
-	summaries := c.summarizeByDate(oldMemories)
+	// Group memories — prefer LLM-based summarization, fall back to date-based.
+	var summaries []Summary
+	if c.llm != nil {
+		var err error
+		summaries, err = c.summarizeWithLLM(ctx, oldMemories)
+		if err != nil {
+			c.logger.Warn("LLM summarization failed, falling back to date-based grouping",
+				"error", err,
+			)
+			summaries = c.summarizeByDate(oldMemories)
+		}
+	} else {
+		summaries = c.summarizeByDate(oldMemories)
+	}
 
 	// Store summaries and collect IDs to archive
 	var archivedIDs []string
@@ -295,15 +314,89 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 
 // MergeRelated groups memories into consolidated summaries.
 //
-// NOTE: The current implementation groups strictly by date (calendar day).
-// It does NOT perform semantic clustering, content similarity analysis, or
-// keyword-based grouping — callers must not rely on "relatedness" beyond
-// same-day co-occurrence. See docs/bugs-and-gaps.md issue #16 (M9.1).
-//
-// A future implementation may incorporate embeddings or keyword clustering;
-// when that happens, callers may observe different grouping behaviour.
+// When an LLM client is configured, semantic grouping is used.
+// Otherwise, the implementation groups strictly by date (calendar day).
 func (c *Consolidator) MergeRelated(ctx context.Context, memories []MemoryResult) ([]Summary, error) {
+	if c.llm != nil {
+		summaries, err := c.summarizeWithLLM(ctx, memories)
+		if err != nil {
+			c.logger.Warn("LLM summarization in MergeRelated failed, falling back to date-based",
+				"error", err,
+			)
+			return c.summarizeByDate(memories), nil
+		}
+		return summaries, nil
+	}
 	return c.summarizeByDate(memories), nil
+}
+
+// summarizeWithLLM sends memories to the LLM for intelligent topic-based
+// grouping and summarization. It returns up to 5 summary groups.
+func (c *Consolidator) summarizeWithLLM(ctx context.Context, memories []MemoryResult) ([]Summary, error) {
+	// Build the user prompt from memory content.
+	var b strings.Builder
+	b.WriteString("Memories:\n")
+	for _, m := range memories {
+		content := m.Memory.Content
+		if len(content) > 200 {
+			content = content[:200]
+		}
+		content = strings.ReplaceAll(content, "\n", " ")
+		fmt.Fprintf(&b, "- ID: %s, Content: %s\n", m.Memory.ID, strings.TrimSpace(content))
+	}
+
+	const systemPrompt = `Please summarize these memory snippets into coherent topics.
+Return a JSON array where each element has these fields:
+- "topic": a short label for the group
+- "summary": a concise summary of the grouped memories
+- "ids": an array of memory IDs that belong to this group
+
+Group related memories together and create a concise summary for each group.
+Maximum 5 summary groups. Return ONLY the JSON array, no other text.`
+
+	messages := []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: systemPrompt},
+		{Role: llm.RoleUser, Content: b.String()},
+	}
+
+	resp, err := c.llm.Chat(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("LLM chat request failed: %w", err)
+	}
+
+	if resp.Content == "" {
+		return nil, fmt.Errorf("LLM returned empty response")
+	}
+
+	summaries, err := ParseSummarizeResponse(resp.Content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse LLM summarization response: %w", err)
+	}
+
+	// Validate: every returned ID must exist in the input set.
+	inputIDs := make(map[string]struct{}, len(memories))
+	for _, m := range memories {
+		inputIDs[m.Memory.ID] = struct{}{}
+	}
+	for i := range summaries {
+		var valid []string
+		for _, id := range summaries[i].IDs {
+			if _, ok := inputIDs[id]; ok {
+				valid = append(valid, id)
+			}
+		}
+		summaries[i].IDs = valid
+	}
+
+	// Drop summaries that ended up with no valid IDs.
+	var filtered []Summary
+	for _, s := range summaries {
+		if len(s.IDs) > 0 {
+			filtered = append(filtered, s)
+		}
+	}
+
+	return filtered, nil
 }
 
 // deduplicateTasks removes duplicate task memories.
@@ -409,8 +502,7 @@ func (c *Consolidator) LastRun() *time.Time {
 	return c.lastRun
 }
 
-// SummarizeWithLLM is a placeholder for LLM-based summarization.
-// The actual implementation would use the LLM client to create intelligent summaries.
+// SummarizeRequest represents a batch of memories to be summarized by the LLM.
 type SummarizeRequest struct {
 	Memories    []MemoryResult `json:"memories"`
 	MaxSummaries int           `json:"max_summaries"`
