@@ -513,6 +513,10 @@ func (c *Conversation) Truncate() int {
 
 	// Keep the most recent messages
 	c.messages = c.messages[removed:]
+	// Sync messageTypes slice to match messages (AGENT-3 fix)
+	if len(c.messageTypes) > 0 {
+		c.messageTypes = c.messageTypes[removed:]
+	}
 	return removed
 }
 
@@ -885,18 +889,28 @@ func (c *Conversation) Clone() *Conversation {
 
 	clone := &Conversation{
 		messages:     make([]llm.ChatMessage, len(c.messages)),
+		messageTypes: make([]MessageClassification, len(c.messageTypes)),
 		systemPrompt: c.systemPrompt,
 		maxMessages:  c.maxMessages,
 		contextLimit: c.contextLimit,
 	}
 
 	copy(clone.messages, c.messages)
+	copy(clone.messageTypes, c.messageTypes)
 
 	// Deep copy tool calls for each message
 	for i, msg := range clone.messages {
 		if len(msg.ToolCalls) > 0 {
 			clone.messages[i].ToolCalls = make([]llm.ToolCall, len(msg.ToolCalls))
 			copy(clone.messages[i].ToolCalls, msg.ToolCalls)
+		}
+	}
+
+	// Clone anchorMessages map (AGENT-4 fix)
+	if c.anchorMessages != nil {
+		clone.anchorMessages = make(map[string]bool, len(c.anchorMessages))
+		for k, v := range c.anchorMessages {
+			clone.anchorMessages[k] = v
 		}
 	}
 

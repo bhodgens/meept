@@ -554,22 +554,23 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 				}
 			} else {
 				// Legacy lenient mode: three-strategy cascade
-				if strings.Contains(detailStr, pattern) {
+				// SEC-3 FIX: Use exact match or glob match instead of contains()
+				// to prevent substring bypass attacks
+				if detailStr == pattern {
+					matched = true
+				} else if m, _ := filepath.Match(pattern, detailStr); m {
 					matched = true
 				} else {
-					// Try matching against specific detail values
+					// Try matching against individual detail values
 					for _, v := range details {
+						if v == pattern {
+							matched = true
+							break
+						}
 						if m, _ := filepath.Match(pattern, v); m {
 							matched = true
 							break
 						}
-					}
-				}
-				if !matched {
-					// Try substring match with glob wildcards stripped
-					trimmed := strings.Trim(pattern, "*")
-					if trimmed != "" && strings.Contains(detailStr, trimmed) {
-						matched = true
 					}
 				}
 			}

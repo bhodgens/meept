@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // CredentialStore manages API credentials.
 type CredentialStore struct {
 	filepath string
 	creds    map[string]string // provider_id -> api_key
+	mu       sync.RWMutex      // Protects concurrent access to creds
 }
 
 // NewCredentialStore creates a new credential store.
@@ -32,6 +34,8 @@ func (cs *CredentialStore) load() error {
 	if err != nil {
 		return err
 	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
 	return json.Unmarshal(data, &cs.creds)
 }
 
@@ -48,24 +52,32 @@ func (cs *CredentialStore) save() error {
 
 // Get returns the API key for a provider.
 func (cs *CredentialStore) Get(providerID string) (string, bool) {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
 	key, ok := cs.creds[providerID]
 	return key, ok
 }
 
 // Set stores an API key for a provider.
 func (cs *CredentialStore) Set(providerID, apiKey string) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
 	cs.creds[providerID] = apiKey
 	return cs.save()
 }
 
 // Delete removes an API key.
 func (cs *CredentialStore) Delete(providerID string) error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
 	delete(cs.creds, providerID)
 	return cs.save()
 }
 
 // List returns all stored provider IDs.
 func (cs *CredentialStore) List() []string {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
 	ids := make([]string, 0, len(cs.creds))
 	for id := range cs.creds {
 		ids = append(ids, id)

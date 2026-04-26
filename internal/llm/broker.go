@@ -23,6 +23,7 @@ type BrokerConfig struct {
 	MetricsStore    *metrics.Store
 	TimeoutCalc     *metrics.Calculator
 	Budget          *Budget
+	TokenCache      ResponseCache
 	Logger          *slog.Logger
 }
 
@@ -114,6 +115,9 @@ func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 		if b.config.TimeoutCalc != nil {
 			opts = append(opts, WithAnthropicTimeoutCalculator(b.config.TimeoutCalc))
 		}
+		if b.config.TokenCache != nil {
+			opts = append(opts, WithAnthropicTokenCache(b.config.TokenCache))
+		}
 		return NewAnthropicClient(cfg, opts...)
 	}
 
@@ -129,6 +133,9 @@ func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 	}
 	if b.config.TimeoutCalc != nil {
 		opts = append(opts, WithTimeoutCalculator(b.config.TimeoutCalc))
+	}
+	if b.config.TokenCache != nil {
+		opts = append(opts, WithTokenCache(b.config.TokenCache))
 	}
 	return NewClient(cfg, opts...)
 }

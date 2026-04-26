@@ -256,9 +256,6 @@ func (m *Manager) IsServerConnected(name string) bool {
 // It stops servers that are no longer configured, starts new servers,
 // and restarts servers whose configuration has changed.
 func (m *Manager) Reload(ctx context.Context, configs []ServerConfig) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.logger.Info("reloading MCP configuration", "server_count", len(configs))
 
 	// Build a map of new configs by name
@@ -267,47 +264,67 @@ func (m *Manager) Reload(ctx context.Context, configs []ServerConfig) error {
 		newConfigs[cfg.Name] = cfg
 	}
 
-	// Stop servers that are no longer in the config
-	for name, client := range m.clients {
+	// Phase 1: Determine what servers to stop (under lock)
+	var serversToStop []string
+	m.mu.Lock()
+	for name := range m.clients {
 		if _, exists := newConfigs[name]; !exists {
-			m.logger.Info("stopping removed MCP server", "name", name)
-			if err := client.Close(); err != nil {
-				m.logger.Error("error closing MCP client during reload", "name", name, "error", err)
-			}
-			delete(m.clients, name)
+			serversToStop = append(serversToStop, name)
 		}
 	}
 
-	// Start or restart servers
-	var lastErr error
-	for name, cfg := range newConfigs {
-		existingClient, exists := m.clients[name]
+	// Determine what servers to start/refresh
+	var serversToStart []string
+	for name := range newConfigs {
+		serversToStart = append(serversToStart, name)
+	}
 
-		if exists {
-			// Server exists - check if config changed (for now, always restart)
-			// A more sophisticated implementation could compare configs
+	// Stop servers that are no longer in the config
+	for _, name := range serversToStop {
+		client := m.clients[name]
+		m.logger.Info("stopping removed MCP server", "name", name)
+		if err := client.Close(); err != nil {
+			m.logger.Error("error closing MCP client during reload", "name", name, "error", err)
+		}
+		delete(m.clients, name)
+	}
+
+	// Mark servers for restart (close them but don't start yet)
+	for _, name := range serversToStart {
+		if existingClient, exists := m.clients[name]; exists {
 			m.logger.Info("restarting MCP server", "name", name)
 			if err := existingClient.Close(); err != nil {
 				m.logger.Error("error closing MCP client during restart", "name", name, "error", err)
 			}
 			delete(m.clients, name)
 		}
+	}
 
-		// Start the server (we need to release the lock temporarily)
-		m.mu.Unlock()
+	// Store configs to start, then release lock
+	configsToStart := make([]ServerConfig, 0, len(serversToStart))
+	for _, name := range serversToStart {
+		configsToStart = append(configsToStart, newConfigs[name])
+	}
+
+	m.mu.Unlock()
+
+	// Phase 2: Start servers (outside lock to avoid deadlock with StartServer)
+	var lastErr error
+	for _, cfg := range configsToStart {
 		if err := m.StartServer(ctx, cfg); err != nil {
 			m.logger.Error("failed to start MCP server during reload",
-				"name", name,
+				"name", cfg.Name,
 				"error", err,
 			)
 			lastErr = err
 		}
-		m.mu.Lock()
 	}
 
+	m.mu.Lock()
 	m.logger.Info("MCP configuration reloaded",
 		"active_servers", len(m.clients),
 	)
+	m.mu.Unlock()
 
 	return lastErr
 }

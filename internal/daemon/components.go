@@ -304,8 +304,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 				interval,
 				logger.With("component", "selfimprove.scheduler"),
 			)
-			go c.SelfImproveSched.Start(context.Background())
-			logger.Info("Self-improve scheduler started", "interval", interval)
+			// Note: Scheduler.Start() is called in Components.Start(ctx) with proper context
 		}
 	}
 
@@ -949,6 +948,18 @@ func (c *Components) Start(ctx context.Context) error {
 		if err := c.Orchestrator.Start(ctx); err != nil {
 			c.Logger.Error("Failed to start orchestrator", "error", err)
 		}
+	}
+
+	// Start self-improve scheduler (if configured)
+	if c.SelfImproveSched != nil {
+		go c.SelfImproveSched.Start(ctx)
+		c.Logger.Info("Self-improve scheduler started")
+	}
+
+	// Start calendar reminder watcher (if configured)
+	if c.CalendarReminder != nil {
+		go c.CalendarReminder.Start(ctx)
+		c.Logger.Info("Calendar reminder watcher started")
 	}
 
 	// Start sync manager and handler
@@ -1916,8 +1927,8 @@ func (c *Components) initializeCalendar(cfg *config.Config, msgBus *bus.MessageB
 		}, calLogger)
 
 		c.CalendarReminder = watcher
-		go watcher.Start(context.Background())
-		calLogger.Info("calendar reminder watcher started",
+		// Note: CalendarReminder.Start() is called in Components.Start(ctx) with proper context
+		calLogger.Info("calendar reminder watcher configured",
 			"check_interval", checkInterval,
 			"advance_minutes", advanceMinutes,
 		)

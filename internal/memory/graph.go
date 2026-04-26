@@ -736,7 +736,9 @@ func (g *KnowledgeGraph) persistCommunities(ctx context.Context, communities map
 		defer stmt.Close()
 
 		for id, communityID := range communities {
-			stmt.ExecContext(ctx, communityID, id)
+			if _, err := stmt.ExecContext(ctx, communityID, id); err != nil {
+				return fmt.Errorf("failed to update community for memory %s: %w", id, err)
+			}
 		}
 
 		return tx.Commit()

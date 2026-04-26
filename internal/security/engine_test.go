@@ -237,7 +237,8 @@ func TestEngineBlockAction(t *testing.T) {
 	defer engine.Close()
 
 	// Record a block override
-	_, err = engine.BlockAction("network_request", "*dangerous.com*", "Blocked by admin")
+	// SEC-3 fix: Use proper glob pattern that matches entire value (filepath.Match semantics)
+	_, err = engine.BlockAction("network_request", "https://dangerous.com/*", "Blocked by admin")
 	if err != nil {
 		t.Fatalf("BlockAction failed: %v", err)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/registry"
 	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/pkg/models"
@@ -31,7 +32,8 @@ type Daemon struct {
 	rpc          *rpc.Server
 	httpServer   *http.Server
 	components   *Components // Agent, tools, LLM, etc.
-	metricsStore *metrics.Store
+	metricsStore    *metrics.Store
+	metricsCollector *metrics.Collector
 	logger       *slog.Logger
 
 	status    models.DaemonStatus
@@ -167,9 +169,26 @@ func New(cfg *Config) (*Daemon, error) {
 		logger.Warn("Failed to create metrics store", "error", err)
 	}
 
-	// Create metrics collector
-	if metricsStore != nil {
-		metrics.NewCollector(metricsStore, msgBus, nil)
+	// Create metrics collector with getter functions for actual values
+	var coll *metrics.Collector
+	if metricsStore != nil && components != nil {
+		coll = metrics.NewCollector(metricsStore, msgBus, &metrics.CollectorConfig{
+			GetQueueDepth: func() int {
+				ctx := context.Background()
+				stats, err := components.Queue.Stats(ctx)
+				if err != nil || stats.ByState == nil {
+					return 0
+				}
+				return stats.ByState[queue.StatePending] + stats.ByState[queue.StateClaimed]
+			},
+			GetActiveAgents: func() int {
+				stats := components.WorkerPool.GetStats()
+				return stats.BusyWorkers
+			},
+		})
+	} else if metricsStore != nil {
+		// metricsStore exists but components is nil - create collector without getters
+		coll = metrics.NewCollector(metricsStore, msgBus, nil)
 	}
 
 	// Create HTTP server - use metricsStore as the MetricsService
@@ -181,17 +200,18 @@ func New(cfg *Config) (*Daemon, error) {
 	}
 
 	return &Daemon{
-		config:       cfg,
-		fullConfig:   fullCfg,
-		bus:          msgBus,
-		registry:     reg,
-		rpc:          rpcServer,
-		httpServer:   httpSrv,
-		components:   components,
-		metricsStore: metricsStore,
-		logger:       logger,
-		status:       models.StatusStopped,
-		pidFile:      cfg.PIDFile,
+		config:         cfg,
+		fullConfig:     fullCfg,
+		bus:            msgBus,
+		registry:       reg,
+		rpc:            rpcServer,
+		httpServer:     httpSrv,
+		components:     components,
+		metricsStore:   metricsStore,
+		metricsCollector: coll,
+		logger:         logger,
+		status:         models.StatusStopped,
+		pidFile:        cfg.PIDFile,
 	}, nil
 }
 
@@ -300,6 +320,9 @@ func (d *Daemon) shutdown() error {
 	}
 
 	// Stop metrics collector
+	if d.metricsCollector != nil {
+		d.metricsCollector.Shutdown()
+	}
 	if d.metricsStore != nil {
 		d.metricsStore.Close()
 	}

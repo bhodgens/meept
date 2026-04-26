@@ -41,7 +41,8 @@ type Server struct {
 	connMu  sync.Mutex
 	conns   map[net.Conn]struct{}
 	connWg  sync.WaitGroup
-	closeCh chan struct{}
+	closeCh    chan struct{}
+	stopOnce sync.Once
 }
 
 // Config holds server configuration.
@@ -120,7 +121,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	s.running.Store(false)
-	close(s.closeCh)
+
+	// CORE-2 FIX: Use sync.Once to prevent double-close panic
+	s.stopOnce.Do(func() {
+		close(s.closeCh)
+	})
 
 	// Close listener
 	if s.listener != nil {

@@ -1255,12 +1255,19 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 
 	var mem Memory
 	var metaJSON string
-	err = row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &mem.CreatedAt, &mem.LastAccessedAt)
+	var lastAccessedStr sql.NullString
+	err = row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &mem.CreatedAt, &lastAccessedStr)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
+	}
+	// Handle empty string or NULL for last_accessed_at
+	if lastAccessedStr.Valid && lastAccessedStr.String != "" {
+		if t, err := time.Parse(time.RFC3339Nano, lastAccessedStr.String); err == nil {
+			mem.LastAccessedAt = &t
+		}
 	}
 
 	mem.Metadata = ParseMetadata(metaJSON)
@@ -1396,7 +1403,11 @@ func (m *Manager) StartPrefetchService(ctx context.Context) {
 		for {
 			select {
 			case req := <-m.prefetchQueue:
-				go m.doPrefetch(ctx, req)
+				m.prefetchWg.Add(1)
+				go func() {
+					defer m.prefetchWg.Done()
+					m.doPrefetch(ctx, req)
+				}()
 			case <-m.prefetchShutdown:
 				return
 			}
@@ -1497,6 +1508,14 @@ func (m *Manager) Close() error {
 
 	if m.consolidator != nil {
 		m.consolidator.Stop()
+	}
+
+	// MEM-5 FIX: Stop prefetch service before closing other subsystems
+	if m.prefetchQueue != nil {
+		// Need to unlock mutex temporarily for StopPrefetchService to acquire it
+		m.mu.Unlock()
+		m.StopPrefetchService()
+		m.mu.Lock()
 	}
 
 	if m.episodic != nil {

@@ -14,17 +14,21 @@ import (
 
 // Collector collects metrics from various sources.
 type Collector struct {
-	mu       sync.RWMutex
-	store    *Store
-	bus      *bus.MessageBus
-	stopChan chan struct{}
-	wg       sync.WaitGroup
+	mu             sync.RWMutex
+	store          *Store
+	bus            *bus.MessageBus
+	stopChan       chan struct{}
+	wg             sync.WaitGroup
+	getQueueDepth  func() int
+	getActiveAgents func() int
 }
 
 // CollectorConfig configures the metrics collector.
 type CollectorConfig struct {
 	CollectionInterval time.Duration
 	Enabled            bool
+	GetQueueDepth      func() int  // Returns total pending + claimed jobs
+	GetActiveAgents    func() int  // Returns active agent count
 }
 
 // DefaultCollectorConfig returns default collector configuration.
@@ -42,9 +46,11 @@ func NewCollector(store *Store, messageBus *bus.MessageBus, cfg *CollectorConfig
 	}
 
 	c := &Collector{
-		store:    store,
-		bus:      messageBus,
-		stopChan: make(chan struct{}),
+		store:          store,
+		bus:            messageBus,
+		stopChan:       make(chan struct{}),
+		getQueueDepth:  cfg.GetQueueDepth,
+		getActiveAgents: cfg.GetActiveAgents,
 	}
 
 	if cfg.Enabled {
@@ -127,11 +133,19 @@ func (c *Collector) handleBusMessage(msg *models.BusMessage) {
 
 // collect collects system-wide metrics.
 func (c *Collector) collect() {
-	// Collect queue depth if available
-	c.store.Record("queue.depth", 0, nil) // Placeholder - actual value from queue
+	// Collect queue depth if getter is available
+	queueDepth := 0
+	if c.getQueueDepth != nil {
+		queueDepth = c.getQueueDepth()
+	}
+	c.store.Record("queue.depth", float64(queueDepth), nil)
 
-	// Collect active agents count
-	c.store.Record("agent.active", 1, nil) // Placeholder - actual count from agent registry
+	// Collect active agents count if getter is available
+	activeAgents := 0
+	if c.getActiveAgents != nil {
+		activeAgents = c.getActiveAgents()
+	}
+	c.store.Record("agent.active", float64(activeAgents), nil)
 
 	// Collect memory usage
 	// c.store.Record("memory.entities", count, nil)

@@ -67,6 +67,8 @@ type Client struct {
 	logger        *slog.Logger
 	metricsStore  *metrics.Store
 	timeoutCalc   *metrics.Calculator
+	tokenCache    ResponseCache
+	keyBuilder    *CacheKeyBuilder
 }
 
 // ClientOption is a functional option for configuring a Client.
@@ -107,6 +109,14 @@ func WithTimeoutCalculator(calc *metrics.Calculator) ClientOption {
 	}
 }
 
+// WithTokenCache sets the token cache for the client.
+func WithTokenCache(cache ResponseCache) ClientOption {
+	return func(c *Client) {
+		c.tokenCache = cache
+		c.keyBuilder = NewCacheKeyBuilder(true) // Enable file-aware caching
+	}
+}
+
 // NewClient creates a new LLM client.
 func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
 	c := &Client{
@@ -137,6 +147,14 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
+	}
+
+	// Check cache
+	if c.tokenCache != nil && c.keyBuilder != nil {
+		cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
+			return cached.Response, nil
+		}
 	}
 
 	// Budget gate
@@ -222,6 +240,12 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 			c.budget.RecordUsage(resp.Usage)
 		}
 
+		// Store in cache
+		if c.tokenCache != nil && c.keyBuilder != nil {
+			cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+			c.tokenCache.Put(ctx, cacheKey, resp)
+		}
+
 		return resp, nil
 	}
 
@@ -265,6 +289,15 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
+	}
+
+	// Check cache
+	if c.tokenCache != nil && c.keyBuilder != nil {
+		cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
+			reportProgress(ProgressStageDone, "Cache hit")
+			return cached.Response, nil
+		}
 	}
 
 	// Budget gate
@@ -353,6 +386,12 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		// Record usage
 		if c.budget != nil {
 			c.budget.RecordUsage(resp.Usage)
+		}
+
+		// Store in cache
+		if c.tokenCache != nil && c.keyBuilder != nil {
+			cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
 		// Check if response contains tool calls

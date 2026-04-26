@@ -42,6 +42,8 @@ type AnthropicClient struct {
 	logger        *slog.Logger
 	metricsStore  *metrics.Store
 	timeoutCalc   *metrics.Calculator
+	tokenCache    ResponseCache
+	keyBuilder    *CacheKeyBuilder
 }
 
 // AnthropicClientOption is a functional option for configuring an AnthropicClient.
@@ -82,6 +84,14 @@ func WithAnthropicTimeoutCalculator(calc *metrics.Calculator) AnthropicClientOpt
 	}
 }
 
+// WithAnthropicTokenCache sets the token cache for the Anthropic client.
+func WithAnthropicTokenCache(cache ResponseCache) AnthropicClientOption {
+	return func(c *AnthropicClient) {
+		c.tokenCache = cache
+		c.keyBuilder = NewCacheKeyBuilder(true) // Enable file-aware caching
+	}
+}
+
 // NewAnthropicClient creates a new Anthropic API client.
 func NewAnthropicClient(config *ModelConfig, opts ...AnthropicClientOption) *AnthropicClient {
 	c := &AnthropicClient{
@@ -110,6 +120,14 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
+	}
+
+	// Check cache
+	if c.tokenCache != nil && c.keyBuilder != nil {
+		cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
+			return cached.Response, nil
+		}
 	}
 
 	if c.budget != nil {
@@ -172,6 +190,12 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 			c.budget.RecordUsage(resp.Usage)
 		}
 
+		// Store in cache
+		if c.tokenCache != nil && c.keyBuilder != nil {
+			cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+			c.tokenCache.Put(ctx, cacheKey, resp)
+		}
+
 		return resp, nil
 	}
 
@@ -209,6 +233,15 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
+	}
+
+	// Check cache
+	if c.tokenCache != nil && c.keyBuilder != nil {
+		cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
+			reportProgress(ProgressStageDone, "Cache hit")
+			return cached.Response, nil
+		}
 	}
 
 	if c.budget != nil {
@@ -292,6 +325,12 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 
 		if c.budget != nil {
 			c.budget.RecordUsage(resp.Usage)
+		}
+
+		// Store in cache
+		if c.tokenCache != nil && c.keyBuilder != nil {
+			cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
 		if resp.HasToolCalls() {
@@ -446,17 +485,17 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 				systemPrompt = msg.Content
 			}
 		case RoleTool:
-			// Tool result messages are added to the last assistant message
-			if len(apiMessages) > 0 && apiMessages[len(apiMessages)-1].Role == "assistant" {
-				// Find the last assistant message and append tool result
-				lastMsg := &apiMessages[len(apiMessages)-1]
-				lastMsg.Content = append(lastMsg.Content, anthropicContent{
-					Type:       "tool_result",
-					ToolUseID:  msg.ToolCallID,
-					Content:    msg.Content,
-					IsError:    strings.Contains(strings.ToLower(msg.Content), "error"),
-				})
-			}
+			// LLM-1 FIX: Tool results must be separate user messages per Anthropic API spec
+			// Do NOT append to assistant message content - create a new user message
+			apiMessages = append(apiMessages, anthropicMessage{
+				Role: "user",
+				Content: []anthropicContent{{
+					Type:      "tool_result",
+					ToolUseID: msg.ToolCallID,
+					Content:   msg.Content,
+					IsError:   strings.Contains(strings.ToLower(msg.Content), "error"),
+				}},
+			})
 		case RoleUser, RoleAssistant:
 			apiMessages = append(apiMessages, anthropicMessage{
 				Role: string(msg.Role),

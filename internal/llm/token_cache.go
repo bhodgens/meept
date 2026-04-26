@@ -225,18 +225,23 @@ func (c *TokenCacheCoordinator) Clear() {
 // Stats returns current cache statistics.
 func (c *TokenCacheCoordinator) Stats() CacheStats {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	total := c.stats.L1Hits + c.stats.L1Misses
-	if total > 0 {
-		c.stats.HitRate = float64(c.stats.L1Hits+c.stats.L2Hits) / float64(total) * 100
-	}
-	c.stats.EntryCount = c.l1Cache.Count()
+	// Copy stats to avoid holding lock during calculations
+	stats := c.stats
+	l1Count := c.l1Cache.Count()
+	l2Count := 0
 	if c.l2Cache != nil {
-		c.stats.EntryCount += c.l2Cache.Count()
+		l2Count = c.l2Cache.Count()
 	}
+	c.mu.RUnlock()
 
-	return c.stats
+	// Compute derived values on local copy (no lock needed)
+	total := stats.L1Hits + stats.L1Misses
+	if total > 0 {
+		stats.HitRate = float64(stats.L1Hits+stats.L2Hits) / float64(total) * 100
+	}
+	stats.EntryCount = l1Count + l2Count
+
+	return stats
 }
 
 // Close closes the cache and releases resources.
