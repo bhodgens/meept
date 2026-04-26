@@ -281,6 +281,16 @@ func (ac *ArtifactCache) Clear() {
 	ac.entries = make(map[string]*CacheEntry)
 }
 
+// SetLastAccessForTest sets the lastAccess time for a cache entry (testing only)
+func (ac *ArtifactCache) SetLastAccessForTest(dir string, t time.Time) {
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
+
+	if entry, exists := ac.entries[dir]; exists {
+		entry.lastAccess = t
+	}
+}
+
 // NormalizePath normalizes a file path
 func NormalizePath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
