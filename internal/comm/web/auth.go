@@ -22,16 +22,12 @@ func (NoAuth) Authenticate(r *http.Request) bool {
 
 // BearerAuth authenticates using a Bearer token.
 type BearerAuth struct {
-	tokens map[string]bool
+	tokens []string
 }
 
 // NewBearerAuth creates a new BearerAuth with the given tokens.
 func NewBearerAuth(tokens ...string) *BearerAuth {
-	m := make(map[string]bool, len(tokens))
-	for _, t := range tokens {
-		m[t] = true
-	}
-	return &BearerAuth{tokens: m}
+	return &BearerAuth{tokens: tokens}
 }
 
 // Authenticate checks the Authorization header for a valid Bearer token.
@@ -47,7 +43,13 @@ func (a *BearerAuth) Authenticate(r *http.Request) bool {
 	}
 
 	token := parts[1]
-	return a.tokens[token]
+	// Use constant-time comparison to prevent timing attacks
+	for _, validToken := range a.tokens {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(validToken)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // BasicAuth authenticates using HTTP Basic Auth.
@@ -78,7 +80,7 @@ func (a *BasicAuth) Authenticate(r *http.Request) bool {
 
 // APIKeyAuth authenticates using an API key header or query parameter.
 type APIKeyAuth struct {
-	keys       map[string]bool
+	keys       []string
 	headerName string
 	queryParam string
 }
@@ -92,13 +94,8 @@ func NewAPIKeyAuth(keys []string, headerName, queryParam string) *APIKeyAuth {
 		queryParam = "api_key"
 	}
 
-	m := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		m[k] = true
-	}
-
 	return &APIKeyAuth{
-		keys:       m,
+		keys:       keys,
 		headerName: headerName,
 		queryParam: queryParam,
 	}
@@ -108,14 +105,25 @@ func NewAPIKeyAuth(keys []string, headerName, queryParam string) *APIKeyAuth {
 func (a *APIKeyAuth) Authenticate(r *http.Request) bool {
 	// Check header first
 	if key := r.Header.Get(a.headerName); key != "" {
-		return a.keys[key]
+		return a.constantTimeKeyCheck(key)
 	}
 
 	// Check query parameter
 	if key := r.URL.Query().Get(a.queryParam); key != "" {
-		return a.keys[key]
+		return a.constantTimeKeyCheck(key)
 	}
 
+	return false
+}
+
+// constantTimeKeyCheck checks if the provided key matches any valid key using
+// constant-time comparison to prevent timing attacks.
+func (a *APIKeyAuth) constantTimeKeyCheck(key string) bool {
+	for _, validKey := range a.keys {
+		if subtle.ConstantTimeCompare([]byte(key), []byte(validKey)) == 1 {
+			return true
+		}
+	}
 	return false
 }
 
