@@ -26,6 +26,9 @@ const (
 	MaxResultLimit = 30
 	// MinRequestInterval is the minimum interval between requests to respect rate limits.
 	MinRequestInterval = 500 * time.Millisecond
+	// MaxSearchResponseSize is the maximum allowed response body size (5MB).
+	// This prevents memory exhaustion from malicious or oversized responses.
+	MaxSearchResponseSize = 5 * 1024 * 1024
 )
 
 // SearchResult represents a single search result.
@@ -153,8 +156,9 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, 
 		return nil, fmt.Errorf("search returned HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	// Read response
-	body, err := io.ReadAll(resp.Body)
+	// Read response with size limit to prevent memory exhaustion
+	limitedReader := io.LimitReader(resp.Body, MaxSearchResponseSize)
+	body, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

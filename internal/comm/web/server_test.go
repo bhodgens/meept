@@ -764,7 +764,7 @@ func TestChatStream_EmptyMessage(t *testing.T) {
 func TestAuth_Unauthorized(t *testing.T) {
 	cfg := DefaultServerConfig()
 	handler := &mockHandler{chatResponse: "hi"}
-	s := NewServer(cfg, handler, &BearerAuth{tokens: map[string]bool{"valid-token": true}}, nil)
+	s := NewServer(cfg, handler, NewBearerAuth("valid-token"), nil)
 
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
@@ -781,7 +781,7 @@ func TestAuth_Unauthorized(t *testing.T) {
 func TestAuth_Authorized(t *testing.T) {
 	cfg := DefaultServerConfig()
 	handler := &mockHandler{chatResponse: "hi"}
-	s := NewServer(cfg, handler, &BearerAuth{tokens: map[string]bool{"valid-token": true}}, nil)
+	s := NewServer(cfg, handler, NewBearerAuth("valid-token"), nil)
 
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)

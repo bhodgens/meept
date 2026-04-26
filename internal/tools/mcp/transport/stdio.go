@@ -129,27 +129,37 @@ func (t *StdioTransport) Send(ctx context.Context, message []byte) ([]byte, erro
 		timeout = 30 * time.Second
 	}
 
-	responseCh := make(chan []byte, 1)
-	errCh := make(chan error, 1)
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	resultCh := make(chan readResult, 1)
+
+	// Create a context with timeout for the read operation
+	readCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	go func() {
 		line, err := t.stdout.ReadBytes('\n')
 		if err != nil {
-			errCh <- fmt.Errorf("failed to read response: %w", err)
+			resultCh <- readResult{nil, fmt.Errorf("failed to read response: %w", err)}
 			return
 		}
-		responseCh <- line
+		resultCh <- readResult{line, nil}
 	}()
 
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(timeout):
+	case <-readCtx.Done():
+		// Context cancelled or timed out - we cannot interrupt the blocked read,
+		// but marking the transport as not running will cause the goroutine to
+		// eventually exit when the process is closed or produces output.
+		// The goroutine will be cleaned up when Close() is called.
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("request timed out after %v", timeout)
-	case err := <-errCh:
-		return nil, err
-	case response := <-responseCh:
-		return response, nil
+	case result := <-resultCh:
+		return result.data, result.err
 	}
 }
 
