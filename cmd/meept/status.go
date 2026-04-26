@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -49,7 +50,7 @@ func runStatus(jsonOutput bool) error {
 		return fmt.Errorf("failed to read PID file: %w", err)
 	}
 
-	pid, err := strconv.Atoi(string(pidData))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
 	if err != nil {
 		// Invalid PID file
 		fmt.Println("Daemon is not running (invalid PID file)")
