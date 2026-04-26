@@ -99,6 +99,7 @@ func (s *Store) initialize() error {
 }
 
 // Store stores an embedding for a memory.
+// Uses a transaction to ensure atomicity of embedding and metadata inserts.
 func (s *Store) Store(ctx context.Context, memoryID, content string, metadata map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,8 +116,15 @@ func (s *Store) Store(ctx context.Context, memoryID, content string, metadata ma
 		return fmt.Errorf("failed to serialize vector: %w", err)
 	}
 
+	// Begin transaction to ensure atomicity
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
 	// Store embedding
-	_, err = s.db.Exec(`
+	_, err = tx.ExecContext(ctx, `
 		INSERT OR REPLACE INTO embeddings (id, vector)
 		VALUES (?, ?)
 	`, memoryID, vectorBlob)
@@ -127,7 +135,7 @@ func (s *Store) Store(ctx context.Context, memoryID, content string, metadata ma
 	// Store metadata
 	for key, value := range metadata {
 		valueJSON, _ := json.Marshal(value)
-		_, err = s.db.Exec(`
+		_, err = tx.ExecContext(ctx, `
 			INSERT OR REPLACE INTO metadata (memory_id, key, value)
 			VALUES (?, ?, ?)
 		`, memoryID, key, string(valueJSON))
@@ -136,7 +144,12 @@ func (s *Store) Store(ctx context.Context, memoryID, content string, metadata ma
 		}
 	}
 
-	// Cache the embedding
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Cache the embedding (only after successful commit)
 	s.embeddingCache.Store(memoryID, embedding)
 
 	return nil
