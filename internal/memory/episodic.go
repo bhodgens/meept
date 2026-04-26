@@ -190,7 +190,6 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	defer pool.Put(db)
 
 	var rows *sql.Rows
 
@@ -219,19 +218,30 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	}
 
 	if err != nil {
+		pool.Put(db)
 		return nil, fmt.Errorf("failed to search: %w", err)
 	}
-	defer rows.Close()
 
 	results, err := e.scanResults(rows, hasFTS5)
+	rows.Close()
+	pool.Put(db) // Release connection before updating last_accessed_at
+
 	if err != nil {
 		return nil, err
 	}
 
-	// Update last_accessed_at for retrieved memories
-	if err := e.updateLastAccessed(ctx, results); err != nil {
-		e.logger.Warn("Failed to update last_accessed_at", "error", err)
-	}
+	// Update last_accessed_at asynchronously to avoid deadlock risk.
+	// With pool size N and N concurrent searches, synchronous updates could
+	// cause deadlock since Search holds one connection and updateLastAccessed
+	// requests another.
+	go func() {
+		// Use a fresh context to avoid cancellation issues
+		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := e.updateLastAccessed(updateCtx, results); err != nil {
+			e.logger.Warn("Failed to update last_accessed_at", "error", err)
+		}
+	}()
 
 	return results, nil
 }
@@ -371,6 +381,51 @@ func (e *EpisodicMemory) GetOldMemories(ctx context.Context, olderThan time.Time
 // Delete removes a memory by ID.
 func (e *EpisodicMemory) Delete(ctx context.Context, id string) error {
 	return e.store.Delete(ctx, "DELETE FROM episodic_memories WHERE id = ?", id)
+}
+
+// GetByID retrieves a single memory by its ID.
+// Returns nil, nil if the memory is not found.
+func (e *EpisodicMemory) GetByID(ctx context.Context, id string) (*MemoryResult, error) {
+	if !e.store.Initialized() {
+		return nil, errors.New("episodic memory not initialized")
+	}
+
+	pool := e.store.GetPool()
+	db, err := pool.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Put(db)
+
+	row := db.QueryRowContext(ctx, `
+		SELECT id, content, category, metadata_json, created_at
+		FROM episodic_memories
+		WHERE id = ?
+	`, id)
+
+	var memID, content, category, metaJSON, createdAtStr string
+	err = row.Scan(&memID, &content, &category, &metaJSON, &createdAtStr)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get memory by ID: %w", err)
+	}
+
+	createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
+	mem := Memory{
+		ID:        memID,
+		Content:   content,
+		Type:      MemoryTypeEpisodic,
+		Category:  category,
+		Metadata:  ParseMetadata(metaJSON),
+		CreatedAt: createdAt,
+	}
+
+	return &MemoryResult{
+		Memory: mem,
+		Source: "episodic",
+	}, nil
 }
 
 // DeleteByIDs removes multiple memories by ID.
