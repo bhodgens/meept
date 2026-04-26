@@ -162,13 +162,16 @@ type ProviderOptions struct {
 
 // Model represents a model configuration.
 type Model struct {
-	Name         string   `json:"name"`
-	Capabilities []string `json:"capabilities"`
-	InputCost    float64  `json:"input_cost"`
-	OutputCost   float64  `json:"output_cost"`
-	ContextLimit int      `json:"context_limit"`
-	MaxOutput    int      `json:"max_output"`
-	Temperature  float64  `json:"temperature"`
+	Name             string   `json:"name"`
+	Capabilities     []string `json:"capabilities"`
+	InputCost        float64  `json:"input_cost"`
+	OutputCost       float64  `json:"output_cost"`
+	ContextLimit     int      `json:"context_limit"`
+	MaxOutput        int      `json:"max_output"`
+	Temperature      float64  `json:"temperature"`
+	TopP             float64  `json:"top_p,omitempty"`
+	FrequencyPenalty float64  `json:"frequency_penalty,omitempty"`
+	PresencePenalty  float64  `json:"presence_penalty,omitempty"`
 }
 
 // LoadModelsConfig loads models configuration from a JSON5 file.

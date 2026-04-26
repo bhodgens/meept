@@ -22,12 +22,14 @@ type ProxyHandler struct {
 
 // busSubscription holds state for a bus subscription.
 type busSubscription struct {
-	ID         string
-	Topics     []string
-	Subscriber *bus.Subscriber
-	Events     []*busEventRecord
-	MaxEvents  int
-	mu         sync.Mutex
+	ID           string
+	Topics       []string
+	Subscriber   *bus.Subscriber
+	TopicSubs    []*bus.Subscriber // per-topic subscribers
+	Events       []*busEventRecord
+	MaxEvents    int
+	mu           sync.Mutex
+	cancelFunc   context.CancelFunc // cancels goroutines when client disconnects
 }
 
 // busEventRecord is an event captured for polling.
@@ -251,12 +253,17 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	// Create subscription ID
 	subID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
 
+	// Create cancellable context for cleanup when client disconnects
+	subCtx, cancelFunc := context.WithCancel(ctx)
+
 	// Create internal subscription state
 	sub := &busSubscription{
-		ID:        subID,
-		Topics:    req.Topics,
-		Events:    make([]*busEventRecord, 0),
-		MaxEvents: 100, // Keep last 100 events
+		ID:         subID,
+		Topics:     req.Topics,
+		Events:     make([]*busEventRecord, 0),
+		MaxEvents:  100, // Keep last 100 events
+		TopicSubs:  make([]*bus.Subscriber, 0, len(req.Topics)),
+		cancelFunc: cancelFunc,
 	}
 
 	// Subscribe to all topics (using wildcard support)
@@ -266,13 +273,45 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	sub.Subscriber = subscriber
 
 	// Start goroutine to collect events from all topics
+	// This goroutine monitors context cancellation for cleanup
 	go func() {
-		for _, topic := range req.Topics {
-			slog.Debug("Creating bus subscription for TUI", "subscription_id", subID, "topic", topic)
-			topicSub := p.bus.Subscribe(subID+"-"+topic, topic)
-			go func(ts *bus.Subscriber, topicName string) {
-				slog.Debug("Started event collector for topic", "topic", topicName)
-				for msg := range ts.Channel {
+		// Wait for context cancellation (client disconnect)
+		<-subCtx.Done()
+
+		// Unsubscribe all topic subscriptions
+		sub.mu.Lock()
+		for _, ts := range sub.TopicSubs {
+			p.bus.Unsubscribe(ts)
+		}
+		sub.TopicSubs = nil
+		sub.mu.Unlock()
+
+		// Remove from subscriptions map
+		p.subscriptions.Delete(subID)
+		slog.Debug("Cleaned up subscription on context cancellation", "subscription_id", subID)
+	}()
+
+	// Start collector goroutines for each topic
+	for _, topic := range req.Topics {
+		slog.Debug("Creating bus subscription for TUI", "subscription_id", subID, "topic", topic)
+		topicSub := p.bus.Subscribe(subID+"-"+topic, topic)
+
+		sub.mu.Lock()
+		sub.TopicSubs = append(sub.TopicSubs, topicSub)
+		sub.mu.Unlock()
+
+		go func(ts *bus.Subscriber, topicName string) {
+			slog.Debug("Started event collector for topic", "topic", topicName)
+			for {
+				select {
+				case <-subCtx.Done():
+					slog.Debug("Event collector stopped by context", "topic", topicName)
+					return
+				case msg, ok := <-ts.Channel:
+					if !ok {
+						slog.Debug("Event collector stopped for topic", "topic", topicName)
+						return
+					}
 					slog.Debug("TUI subscription received event",
 						"subscription_id", subID,
 						"subscribed_topic", topicName,
@@ -304,10 +343,9 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 					}
 					sub.mu.Unlock()
 				}
-				slog.Debug("Event collector stopped for topic", "topic", topicName)
-			}(topicSub, topic)
-		}
-	}()
+			}
+		}(topicSub, topic)
+	}
 
 	p.subscriptions.Store(subID, sub)
 
@@ -389,9 +427,24 @@ func (p *ProxyHandler) handleBusUnsubscribe(ctx context.Context, params json.Raw
 	}
 
 	sub := subVal.(*busSubscription)
+
+	// Cancel the context to trigger cleanup of goroutines
+	if sub.cancelFunc != nil {
+		sub.cancelFunc()
+	}
+
+	// Unsubscribe the combined subscriber
 	if sub.Subscriber != nil {
 		p.bus.Unsubscribe(sub.Subscriber)
 	}
+
+	// Unsubscribe all topic-specific subscribers
+	sub.mu.Lock()
+	for _, ts := range sub.TopicSubs {
+		p.bus.Unsubscribe(ts)
+	}
+	sub.TopicSubs = nil
+	sub.mu.Unlock()
 
 	p.subscriptions.Delete(req.SubscriptionID)
 

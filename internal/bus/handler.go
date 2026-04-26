@@ -63,14 +63,16 @@ func (h *SubscriptionHandler) Stop() {
 // handleTopic runs the subscription loop for a single topic
 func (h *SubscriptionHandler) handleTopic(ctx context.Context, sub *Subscriber, topic string) {
 	defer h.wg.Done()
+	// Ensure unsubscribe is called in all exit paths
+	defer h.bus.Unsubscribe(sub)
 
 	for {
 		select {
 		case <-ctx.Done():
-			h.bus.Unsubscribe(sub)
 			return
 		case msg, ok := <-sub.Channel:
 			if !ok {
+				// Channel closed by bus
 				return
 			}
 			callback := h.callbacks[topic]

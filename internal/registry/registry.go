@@ -80,20 +80,30 @@ func (r *Registry) StartAll(ctx context.Context) error {
 
 // StopAll stops all components in reverse registration order.
 func (r *Registry) StopAll(ctx context.Context) error {
+	// Collect components under lock to avoid holding lock during Stop()
+	// This prevents deadlock if component's Stop() calls back into registry
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var lastErr error
+	type componentEntry struct {
+		name      string
+		component Component
+	}
+	toStop := make([]componentEntry, 0, len(r.order))
 	for i := len(r.order) - 1; i >= 0; i-- {
 		name := r.order[i]
 		c := r.components[name]
-		if !c.Running() {
-			continue
+		if c.Running() {
+			toStop = append(toStop, componentEntry{name: name, component: c})
 		}
-		r.logger.Info("registry: stopping component", "name", name)
-		if err := c.Stop(ctx); err != nil {
+	}
+	r.mu.RUnlock()
+
+	// Now stop components without holding lock
+	var lastErr error
+	for _, entry := range toStop {
+		r.logger.Info("registry: stopping component", "name", entry.name)
+		if err := entry.component.Stop(ctx); err != nil {
 			r.logger.Error("registry: failed to stop component",
-				"name", name,
+				"name", entry.name,
 				"error", err,
 			)
 			lastErr = err
