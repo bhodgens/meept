@@ -545,12 +545,13 @@ func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 }
 
 // updateSession updates a session in the database.
+// Returns an error if no rows are affected (session was deleted).
 func (s *SQLiteStore) updateSession(session *Session) error {
 	attachedJSON, _ := json.Marshal(session.AttachedClients)
 	workersJSON, _ := json.Marshal(session.WorkerIDs)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := s.db.Exec(`
+	result, err := s.db.Exec(`
 		UPDATE sessions
 		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?
 		WHERE id = ?`,
@@ -564,8 +565,19 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 
 	if err != nil {
 		s.logger.Error("Failed to update session", "id", session.ID, "error", err)
+		return err
 	}
-	return err
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		s.logger.Warn("Failed to read RowsAffected after update", "id", session.ID, "error", err)
+		return nil // Update succeeded but couldn't verify
+	}
+	if rows == 0 {
+		return fmt.Errorf("session not found or was deleted: %s", session.ID)
+	}
+
+	return nil
 }
 
 // Ensure SQLiteStore implements Store interface.
