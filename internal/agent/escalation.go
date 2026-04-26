@@ -109,10 +109,17 @@ func (em *EscalationManager) Escalate(ctx context.Context, failure FailureContex
 	em.mu.Lock()
 	level, exists := em.escalations[failure.TaskID]
 	if !exists {
+		// Fetch the original task description from the store
+		originalTaskDesc := ""
+		if em.taskStore != nil {
+			if t, err := em.taskStore.GetByID(failure.TaskID); err == nil && t != nil {
+				originalTaskDesc = t.Description
+			}
+		}
 		level = &EscalationLevel{
 			TaskID:       failure.TaskID,
 			Level:        0,
-			OriginalTask: failure.Error,
+			OriginalTask: originalTaskDesc,
 			Timestamp:    time.Now(),
 		}
 		em.escalations[failure.TaskID] = level
