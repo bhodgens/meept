@@ -138,24 +138,45 @@ func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*Consolida
 		return nil, err
 	}
 
+	var expiredCount int
+	var storeErrors, deleteErrors int
 	for _, mem := range expiredMemories {
 		if cfg.SummarizeBeforeDelete {
 			// Create summary memory first
 			summary := c.createSummary(mem)
 			summary.Category = cfg.SummaryCategory
 			if _, err := c.manager.Store(ctx, summary); err != nil {
-				c.logger.Error("Failed to store summary before delete", "memory_id", mem.ID, "error", err)
+				storeErrors++
+				c.logger.Error("Failed to store summary before delete",
+					"memory_id", mem.ID,
+					"error", err,
+				)
 				// Continue with deletion even if summary fails
 			}
 		}
 		// Delete expired memory
 		if err := c.manager.Delete(ctx, mem.ID); err != nil {
-			c.logger.Error("Failed to delete expired memory", "memory_id", mem.ID, "error", err)
+			deleteErrors++
+			c.logger.Error("Failed to delete expired memory",
+				"memory_id", mem.ID,
+				"error", err,
+			)
 			// Continue processing other memories
+		} else {
+			expiredCount++
 		}
 	}
 
-	return &ConsolidationReport{Expired: len(expiredMemories)}, nil
+	if storeErrors > 0 || deleteErrors > 0 {
+		c.logger.Warn("Access-based expiration completed with errors",
+			"total_candidates", len(expiredMemories),
+			"successfully_expired", expiredCount,
+			"store_errors", storeErrors,
+			"delete_errors", deleteErrors,
+		)
+	}
+
+	return &ConsolidationReport{Expired: expiredCount}, nil
 }
 
 // createSummary creates a summary memory from an expired memory.
@@ -289,7 +310,10 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 		var snippets []string
 		totalChars := 0
 		for _, m := range mems {
-			ids = append(ids, m.Memory.ID)
+			// Filter out empty/zero-value IDs
+			if m.Memory.ID != "" {
+				ids = append(ids, m.Memory.ID)
+			}
 			snippet := m.Memory.Content
 			if len(snippet) > 200 {
 				snippet = snippet[:200]
