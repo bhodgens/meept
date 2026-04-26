@@ -11,11 +11,13 @@ import (
 
 // SessionTracker tracks conversation patterns per session.
 type SessionTracker struct {
-	mu            sync.RWMutex
-	sessions      map[string]*SessionState
-	maxAge        time.Duration
-	memvidClient  *memvid.Client
+	mu                      sync.RWMutex
+	sessions                map[string]*SessionState
+	maxAge                  time.Duration
+	memvidClient            *memvid.Client
 	sessionIdleTriggerHours int
+	stopCh                  chan struct{} // Used to signal background goroutine to stop
+	stopOnce                sync.Once     // Ensures Stop is only called once
 }
 
 // SessionState holds state for a single conversation session.
@@ -52,16 +54,18 @@ func NewSessionTracker(maxAge time.Duration) *SessionTracker {
 	return &SessionTracker{
 		sessions: make(map[string]*SessionState),
 		maxAge:   maxAge,
+		stopCh:   make(chan struct{}),
 	}
 }
 
 // NewSessionTrackerWithConfig creates a new session tracker with memvid persistence.
 func NewSessionTrackerWithConfig(cfg SessionTrackerConfig) *SessionTracker {
 	return &SessionTracker{
-		sessions:                  make(map[string]*SessionState),
-		maxAge:                    cfg.MaxAge,
-		memvidClient:              cfg.MemvidClient,
-		sessionIdleTriggerHours:   cfg.SessionIdleTriggerHours,
+		sessions:                make(map[string]*SessionState),
+		maxAge:                  cfg.MaxAge,
+		memvidClient:            cfg.MemvidClient,
+		sessionIdleTriggerHours: cfg.SessionIdleTriggerHours,
+		stopCh:                  make(chan struct{}),
 	}
 }
 
@@ -329,12 +333,14 @@ func (t *SessionTracker) StartBackgroundPersistence(ctx context.Context) {
 
 	pollInterval := 1 * time.Hour
 	ticker := time.NewTicker(pollInterval)
-	
+
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
-				ticker.Stop()
+				return
+			case <-t.stopCh:
 				return
 			case <-ticker.C:
 				if err := t.PersistIdleSessions(ctx); err != nil {
@@ -346,7 +352,9 @@ func (t *SessionTracker) StartBackgroundPersistence(ctx context.Context) {
 }
 
 // StopBackgroundPersistence stops the background persistence goroutine.
-// This is called automatically when the context is cancelled.
+// Safe to call multiple times; only the first call has any effect.
 func (t *SessionTracker) StopBackgroundPersistence() {
-	// Context cancellation handles cleanup via the goroutine
+	t.stopOnce.Do(func() {
+		close(t.stopCh)
+	})
 }

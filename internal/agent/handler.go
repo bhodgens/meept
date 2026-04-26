@@ -3,6 +3,8 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -696,6 +698,9 @@ func generateWorkerID() string {
 }
 
 // generateMessageID creates a unique message ID.
+// Uses timestamp with nanoseconds plus random suffix to avoid collisions.
 func generateMessageID() string {
-	return time.Now().Format("20060102150405.000000000")
+	var randBytes [4]byte
+	rand.Read(randBytes[:])
+	return time.Now().Format("20060102150405.000000000") + "-" + hex.EncodeToString(randBytes[:])
 }
