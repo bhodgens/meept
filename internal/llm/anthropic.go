@@ -140,18 +140,29 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 	}
 
 	// Compute adaptive timeout if a calculator is configured.
+	// LLM-3 FIX: use per-request context timeout instead of mutating shared httpClient.Timeout
 	if c.timeoutCalc != nil {
 		estimatedTokens := chatOpts.maxTokens
 		if estimatedTokens <= 0 {
 			estimatedTokens = 4096
 		}
-		c.httpClient.Timeout = c.timeoutCalc.Calculate(
+		timeout := c.timeoutCalc.Calculate(
 			ctx,
 			c.config.ProviderID,
 			c.config.ModelID,
 			estimatedTokens,
 			anthropicDefaultTimeout,
 		)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	// LLM-3 DEBUG: verify ctx has deadline
+	if dl, ok := ctx.Deadline(); ok {
+		println("LLM-3 DEBUG: ctx has deadline", dl.String())
+	} else {
+		println("LLM-3 DEBUG: ctx has NO deadline")
 	}
 
 	// Build Anthropic API request
@@ -257,18 +268,22 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	}
 
 	// Compute adaptive timeout if a calculator is configured.
+	// LLM-3 FIX: use per-request context timeout instead of mutating shared httpClient.Timeout
 	if c.timeoutCalc != nil {
 		estimatedTokens := chatOpts.maxTokens
 		if estimatedTokens <= 0 {
 			estimatedTokens = 4096
 		}
-		c.httpClient.Timeout = c.timeoutCalc.Calculate(
+		timeout := c.timeoutCalc.Calculate(
 			ctx,
 			c.config.ProviderID,
 			c.config.ModelID,
 			estimatedTokens,
 			anthropicDefaultTimeout,
 		)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
 
 	// Build Anthropic API request with streaming enabled for progress

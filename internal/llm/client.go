@@ -167,14 +167,16 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		}
 	}
 
-	// Compute adaptive timeout if available
+	// Compute adaptive timeout if available (LLM-3 FIX: use per-request context timeout instead of mutating shared httpClient.Timeout)
 	if c.timeoutCalc != nil {
 		estimatedTokens := chatOpts.maxTokens
 		if estimatedTokens <= 0 {
 			estimatedTokens = 4096 // Safe default
 		}
 		timeout := c.timeoutCalc.Calculate(ctx, c.config.ProviderID, c.config.ModelID, estimatedTokens, defaultTimeout)
-		c.httpClient.Timeout = timeout
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
 
 	// Build request payload

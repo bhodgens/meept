@@ -20,12 +20,22 @@ func discardLogger() *slog.Logger {
 
 // TestAnthropicClient_AdaptiveTimeout verifies that when a
 // *metrics.Calculator is configured, the client consults it before issuing
-// a request (Calculate is invoked and its result is applied to the HTTP
-// client). The concrete Calculator returns the static default while the
-// store is in warmup; we assert that the static default (not some stale
-// pre-set value) is what ends up on the client's httpClient.Timeout.
+// a request. The timeout is applied via context.WithTimeout (LLM-3 FIX:
+// not by mutating the shared httpClient.Timeout) so concurrent calls
+// are safe. The concrete Calculator returns the static default while the
+// store is in warmup; we assert the context received the correct deadline.
 func TestAnthropicClient_AdaptiveTimeout(t *testing.T) {
+
+	// Capture the deadline from the HTTP request's context.
+	var capturedDeadline time.Time
+	var hasDeadline bool
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deadline, ok := r.Context().Deadline()
+		hasDeadline = ok
+		if ok {
+			capturedDeadline = deadline
+		}
 		resp := map[string]any{
 			"id":          "m_test",
 			"type":        "message",
@@ -80,9 +90,8 @@ func TestAnthropicClient_AdaptiveTimeout(t *testing.T) {
 		WithAnthropicTimeoutCalculator(calc),
 	)
 
-	// Set a sentinel timeout; if the adaptive-timeout path runs, it will
-	// be overwritten with the static default (anthropicDefaultTimeout).
-	c.httpClient.Timeout = 1234 * time.Millisecond
+	// Store original timeout so we can assert it is NOT mutated by the adaptive path.
+	originalTimeout := c.httpClient.Timeout
 
 	_, err = c.Chat(context.Background(), []ChatMessage{
 		{Role: RoleUser, Content: "hi"},
@@ -91,12 +100,22 @@ func TestAnthropicClient_AdaptiveTimeout(t *testing.T) {
 		t.Fatalf("Chat failed: %v", err)
 	}
 
-	if c.httpClient.Timeout == 1234*time.Millisecond {
-		t.Error("httpClient.Timeout unchanged; adaptive timeout path did not run")
+	// The adaptive timeout path should have set a deadline on the request context.
+	if !hasDeadline {
+		t.Error("request context has no deadline; adaptive timeout was not applied")
 	}
-	if c.httpClient.Timeout != anthropicDefaultTimeout {
-		t.Errorf("httpClient.Timeout = %v, want %v (static default during warmup)",
-			c.httpClient.Timeout, anthropicDefaultTimeout)
+
+	// The deadline should be approximately originalTimeout from now.
+	expectedWall := time.Now().Add(-originalTimeout).Add(-5 * time.Second)
+	if capturedDeadline.Before(expectedWall) {
+		t.Errorf("captured deadline %v is too early; expected >= %v",
+			capturedDeadline, expectedWall)
+	}
+
+	// The HTTP client's timeout must not have been mutated (LLM-3 FIX verification).
+	if c.httpClient.Timeout != originalTimeout {
+		t.Errorf("httpClient.Timeout was mutated from %v to %v (should be unchanged)",
+			originalTimeout, c.httpClient.Timeout)
 	}
 }
 
