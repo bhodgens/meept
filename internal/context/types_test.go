@@ -186,9 +186,9 @@ func TestArtifactCache(t *testing.T) {
 		t.Error("Cache entry found after Clear")
 	}
 
-	// Test TTL expiration
+	// Test TTL expiration by setting lastAccess to the past
 	cache.Put("/test/dir", artifacts)
-	time.Sleep(1100 * time.Millisecond)
+	cache.SetLastAccessForTest("/test/dir", time.Now().Add(-2*time.Second))
 	_, found = cache.Get("/test/dir")
 	if found {
 		t.Error("Cache entry found after TTL expiration")

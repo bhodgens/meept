@@ -356,6 +356,12 @@ func TestTokenCacheCoordinator_L2Fallback(t *testing.T) {
 	if !found {
 		t.Fatal("expected to find entry in L2 even if evicted from L1")
 	}
+
+	// Verify the entry was retrieved from L2 (not L1)
+	stats := coordinator.Stats()
+	if stats.L2Hits == 0 {
+		t.Fatal("expected L2Hits > 0 when entry is evicted from L1 and found in L2")
+	}
 }
 
 func TestCacheKey_String(t *testing.T) {
