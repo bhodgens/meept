@@ -27,6 +27,10 @@ type ChatMessage struct {
 	// message. 0 = original, 1 = first-level summary, 2 = summary of
 	// summaries, etc. Not serialized to external APIs.
 	SummaryLevel int `json:"-"`
+	// Critical marks a message that must never be dropped by the context
+	// compressor. Critical messages are counted in QualityMetrics so callers
+	// can verify retention. Not serialized to external APIs.
+	Critical bool `json:"-"`
 }
 
 // ToOpenAIDict converts the message to the format expected by OpenAI API.

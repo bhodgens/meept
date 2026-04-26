@@ -10,6 +10,24 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 )
 
+// isAnthropic checks whether the given ModelConfig points to an Anthropic endpoint.
+func isAnthropic(cfg *llm.ModelConfig) bool {
+	if cfg.ProviderID == "anthropic" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(cfg.BaseURL), "anthropic")
+}
+
+// createChatter creates a Chatter for a ModelConfig, selecting the right
+// client implementation (Anthropic vs OpenAI-compatible) based on provider ID
+// and base URL.
+func createChatter(cfg *llm.ModelConfig, logger *slog.Logger) llm.Chatter {
+	if isAnthropic(cfg) {
+		return llm.NewAnthropicClient(cfg, llm.WithAnthropicLogger(logger))
+	}
+	return llm.NewClient(cfg, llm.WithLogger(logger))
+}
+
 // Executor errors.
 var (
 	ErrNoSkill       = errors.New("skill is nil")
@@ -39,7 +57,7 @@ func (e *ExecutorError) Unwrap() error {
 // Executor executes skills using the LLM client.
 type Executor struct {
 	resolver   *llm.Resolver
-	client     *llm.Client
+	client     llm.Chatter
 	logger     *slog.Logger
 	lazyLoader *LazySkillLoader
 }
@@ -56,7 +74,8 @@ func WithExecutorLogger(logger *slog.Logger) ExecutorOption {
 
 // WithClient sets a specific LLM client for the executor.
 // If not set, the executor will create a client based on resolved model.
-func WithClient(client *llm.Client) ExecutorOption {
+// Accepts any Chatter (e.g., *llm.Client or *llm.AnthropicClient).
+func WithClient(client llm.Chatter) ExecutorOption {
 	return func(e *Executor) {
 		e.client = client
 	}
@@ -117,15 +136,14 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 	prompt := e.buildPrompt(skill, input)
 
 	// Create or use existing client
-	client := e.client
-	if client == nil {
-		client = llm.NewClient(modelConfig, llm.WithLogger(e.logger))
-		defer client.Close()
+	var chatter llm.Chatter
+	if e.client == nil {
+		chatter = createChatter(modelConfig, e.logger)
+	} else if e.client.Config().ModelID != modelConfig.ModelID {
+		// AnthropicClient doesn't support SwitchModel, so create a new one
+		chatter = createChatter(modelConfig, e.logger)
 	} else {
-		// Switch to resolved model if different
-		if client.Config().ModelID != modelConfig.ModelID {
-			client.SwitchModel(modelConfig)
-		}
+		chatter = e.client
 	}
 
 	// Build messages
@@ -150,7 +168,7 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 	}
 
 	// Execute
-	resp, err := client.Chat(ctx, messages, chatOpts...)
+	resp, err := chatter.Chat(ctx, messages, chatOpts...)
 	if err != nil {
 		return nil, &ExecutorError{
 			SkillName: skill.Name,
@@ -232,14 +250,14 @@ func (e *Executor) ExecuteWithMessages(
 	}
 
 	// Create or use existing client
-	client := e.client
-	if client == nil {
-		client = llm.NewClient(modelConfig, llm.WithLogger(e.logger))
-		defer client.Close()
+	var chatter llm.Chatter
+	if e.client == nil {
+		chatter = createChatter(modelConfig, e.logger)
+	} else if e.client.Config().ModelID != modelConfig.ModelID {
+		// AnthropicClient doesn't support SwitchModel, so create a new one
+		chatter = createChatter(modelConfig, e.logger)
 	} else {
-		if client.Config().ModelID != modelConfig.ModelID {
-			client.SwitchModel(modelConfig)
-		}
+		chatter = e.client
 	}
 
 	// Prepend system message with skill body if not already present
@@ -261,7 +279,7 @@ func (e *Executor) ExecuteWithMessages(
 	}
 
 	// Execute
-	resp, err := client.Chat(ctx, messages, chatOpts...)
+	resp, err := chatter.Chat(ctx, messages, chatOpts...)
 	if err != nil {
 		return nil, &ExecutorError{
 			SkillName: skill.Name,

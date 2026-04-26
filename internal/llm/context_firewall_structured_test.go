@@ -36,6 +36,10 @@ func (s *sequencedMockChatter) ChatWithProgress(_ context.Context, messages []Ch
 	return s.Chat(context.Background(), messages)
 }
 
+func (s *sequencedMockChatter) Config() *ModelConfig {
+	return &ModelConfig{}
+}
+
 func (m *mockStructuredChatter) Chat(_ context.Context, messages []ChatMessage, _ ...ChatOption) (*Response, error) {
 	if m.err != nil {
 		return nil, m.err
@@ -45,6 +49,10 @@ func (m *mockStructuredChatter) Chat(_ context.Context, messages []ChatMessage, 
 
 func (m *mockStructuredChatter) ChatWithProgress(_ context.Context, messages []ChatMessage, _ ProgressCallback, _ ...ChatOption) (*Response, error) {
 	return m.Chat(context.Background(), messages)
+}
+
+func (m *mockStructuredChatter) Config() *ModelConfig {
+	return &ModelConfig{}
 }
 
 // codeHeavyStructuredResponse is a realistic structured response from a

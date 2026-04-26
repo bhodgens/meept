@@ -52,15 +52,26 @@ func TestL1Cache_Expiration(t *testing.T) {
 		PromptHash: "abc123",
 		ModelID:    "test-model",
 	}
+
+	// Verify entry is not expired at creation
 	entry := &CacheEntry{
 		Response:  &Response{Content: "test response"},
 		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(50 * time.Millisecond),
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+	}
+	if entry.IsExpired() {
+		t.Fatal("entry should not be expired at creation")
 	}
 
-	cache.Put(key, entry)
-	time.Sleep(100 * time.Millisecond)
+	// Put with an already-expired entry
+	expiredEntry := &CacheEntry{
+		Response:  &Response{Content: "expired response"},
+		CreatedAt: time.Now().Add(-1 * time.Hour),
+		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	}
+	cache.Put(key, expiredEntry)
 
+	// Get should detect expiration and return not-found
 	_, found := cache.Get(key)
 	if found {
 		t.Fatal("expected entry to be expired")

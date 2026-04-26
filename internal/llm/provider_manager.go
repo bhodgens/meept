@@ -621,6 +621,15 @@ func (pm *ProviderManager) Stop() {
 	pm.initialized = false
 }
 
+// Config returns the model configuration of the primary provider.
+func (pm *ProviderManager) Config() *ModelConfig {
+	pp := pm.GetPrimaryProvider()
+	if pp != nil {
+		return pp.Config
+	}
+	return nil
+}
+
 // ProviderCount returns the number of configured providers.
 func (pm *ProviderManager) ProviderCount() int {
 	pm.mu.RLock()

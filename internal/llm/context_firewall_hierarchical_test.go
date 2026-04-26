@@ -33,6 +33,10 @@ func (c *countingStubChatter) ChatWithProgress(ctx context.Context, messages []C
 	return c.Chat(ctx, messages, opts...)
 }
 
+func (c *countingStubChatter) Config() *ModelConfig {
+	return &ModelConfig{}
+}
+
 // tieredStubChatter returns responses whose size shrinks with each call,
 // simulating the behavior where a summarizer produces shorter and shorter
 // summaries. Each successive call returns respSize - shrinkBy*tokens tokens.
@@ -58,6 +62,10 @@ func (t *tieredStubChatter) Chat(ctx context.Context, messages []ChatMessage, op
 
 func (t *tieredStubChatter) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
 	return t.Chat(ctx, messages, opts...)
+}
+
+func (t *tieredStubChatter) Config() *ModelConfig {
+	return &ModelConfig{}
 }
 
 func TestHierarchicalSummarization_Disabled(t *testing.T) {

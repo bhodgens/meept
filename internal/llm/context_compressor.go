@@ -54,6 +54,15 @@ const (
 	DefaultHardLimitRatio  = 0.80
 )
 
+// QualityMetrics tracks compression quality for a single compression pass.
+type QualityMetrics struct {
+	TokenRatio       float64           // tokensAfter / tokensBefore (1.0 when no compression)
+	CriticalRetained int               // Count of critical messages kept
+	CriticalDropped  int               // Count of critical messages dropped (should always be 0)
+	SummaryLevel     int               // Highest summary level in the output messages
+	CompressionStage CompressionStage  // Stage that produced this result
+}
+
 // CompressionResult holds the outcome of a compression pass.
 type CompressionResult struct {
 	Messages     []ChatMessage
@@ -62,15 +71,19 @@ type CompressionResult struct {
 	TokensBefore int
 	TokensAfter  int
 	DroppedCount int
+	Metrics      QualityMetrics
 }
 
 // CompressionStats tracks cumulative compression events with atomic-safe counters.
 type CompressionStats struct {
-	WarningEvents    atomic.Uint64
-	SummarizeEvents  atomic.Uint64
-	AggressiveEvents atomic.Uint64
-	HardLimitEvents  atomic.Uint64
-	TotalTokensSaved atomic.Uint64
+	WarningEvents      atomic.Uint64
+	SummarizeEvents    atomic.Uint64
+	AggressiveEvents   atomic.Uint64
+	HardLimitEvents    atomic.Uint64
+	TotalTokensSaved   atomic.Uint64
+	TotalCompressions  atomic.Uint64
+	QualityScoreSum    atomic.Uint64 // Scaled by 1000 to use uint64 for float accumulation
+	QualityScoreCount  atomic.Uint64
 }
 
 // Snapshot returns a point-in-time copy of the stats fields as plain values.
@@ -80,16 +93,25 @@ type CompressionStatsSnapshot struct {
 	AggressiveEvents uint64
 	HardLimitEvents  uint64
 	TotalTokensSaved uint64
+	TotalCompressions uint64
+	AvgQualityScore  float64 // Running average of quality scores (0.0-1.0)
 }
 
 // Snapshot reads all atomic counters and returns a plain-value snapshot.
 func (s *CompressionStats) Snapshot() CompressionStatsSnapshot {
+	count := s.QualityScoreCount.Load()
+	var avg float64
+	if count > 0 {
+		avg = float64(s.QualityScoreSum.Load()) / float64(count) / 1000.0
+	}
 	return CompressionStatsSnapshot{
 		WarningEvents:    s.WarningEvents.Load(),
 		SummarizeEvents:  s.SummarizeEvents.Load(),
 		AggressiveEvents: s.AggressiveEvents.Load(),
 		HardLimitEvents:  s.HardLimitEvents.Load(),
 		TotalTokensSaved: s.TotalTokensSaved.Load(),
+		TotalCompressions: s.TotalCompressions.Load(),
+		AvgQualityScore:  avg,
 	}
 }
 
@@ -139,13 +161,15 @@ func NewContextCompressor(cfg CompressionConfig, logger *slog.Logger, tokenizer 
 // represents the fraction of the model's context limit already consumed.
 func (c *ContextCompressor) Compress(ctx context.Context, messages []ChatMessage, utilization float64) CompressionResult {
 	if !c.config.Enabled {
+		tokens := c.countTokens(messages)
 		return CompressionResult{
 			Messages:     messages,
 			Compressed:   false,
 			Stage:        CompressionStageNone,
-			TokensBefore: c.countTokens(messages),
-			TokensAfter:  c.countTokens(messages),
+			TokensBefore: tokens,
+			TokensAfter:  tokens,
 			DroppedCount: 0,
+			Metrics:      c.buildQualityMetrics(messages, messages, tokens, tokens, CompressionStageNone),
 		}
 	}
 
@@ -160,6 +184,7 @@ func (c *ContextCompressor) Compress(ctx context.Context, messages []ChatMessage
 			TokensBefore: tokensBefore,
 			TokensAfter:  tokensBefore,
 			DroppedCount: 0,
+			Metrics:      c.buildQualityMetrics(messages, messages, tokensBefore, tokensBefore, CompressionStageNone),
 		}
 	}
 
@@ -178,12 +203,14 @@ func (c *ContextCompressor) Compress(ctx context.Context, messages []ChatMessage
 			TokensBefore: tokensBefore,
 			TokensAfter:  tokensBefore,
 			DroppedCount: 0,
+			Metrics:      c.buildQualityMetrics(messages, messages, tokensBefore, tokensBefore, CompressionStageWarning),
 		}
 	}
 
 	// Stage 2: summarize old history (keep system + last 4)
 	if utilization < c.config.Stage3AggressiveRatio {
 		c.stats.SummarizeEvents.Add(1)
+		c.stats.TotalCompressions.Add(1)
 		compressed := c.summarizeOldHistory(ctx, messages)
 		tokensAfter := c.countTokens(compressed)
 		saved := tokensBefore - tokensAfter
@@ -203,12 +230,14 @@ func (c *ContextCompressor) Compress(ctx context.Context, messages []ChatMessage
 			TokensBefore: tokensBefore,
 			TokensAfter:  tokensAfter,
 			DroppedCount: len(messages) - len(compressed),
+			Metrics:      c.buildQualityMetrics(messages, compressed, tokensBefore, tokensAfter, CompressionStageSummarize),
 		}
 	}
 
 	// Stage 3: aggressive compression (keep system + last 2)
 	if utilization < c.config.Stage4HardLimitRatio {
 		c.stats.AggressiveEvents.Add(1)
+		c.stats.TotalCompressions.Add(1)
 		compressed := c.aggressiveCompress(ctx, messages)
 		tokensAfter := c.countTokens(compressed)
 		saved := tokensBefore - tokensAfter
@@ -228,11 +257,13 @@ func (c *ContextCompressor) Compress(ctx context.Context, messages []ChatMessage
 			TokensBefore: tokensBefore,
 			TokensAfter:  tokensAfter,
 			DroppedCount: len(messages) - len(compressed),
+			Metrics:      c.buildQualityMetrics(messages, compressed, tokensBefore, tokensAfter, CompressionStageAggressive),
 		}
 	}
 
 	// Stage 4: hard limit -- drop old context (keep system + last 2)
 	c.stats.HardLimitEvents.Add(1)
+	c.stats.TotalCompressions.Add(1)
 	compressed := c.dropOldContext(messages)
 	tokensAfter := c.countTokens(compressed)
 	saved := tokensBefore - tokensAfter
@@ -252,6 +283,7 @@ func (c *ContextCompressor) Compress(ctx context.Context, messages []ChatMessage
 		TokensBefore: tokensBefore,
 		TokensAfter:  tokensAfter,
 		DroppedCount: len(messages) - len(compressed),
+		Metrics:      c.buildQualityMetrics(messages, compressed, tokensBefore, tokensAfter, CompressionStageHardLimit),
 	}
 }
 
@@ -262,6 +294,59 @@ func (c *ContextCompressor) countTokens(messages []ChatMessage) int {
 		total += c.tokenizer.CountTokens(msg.Content)
 	}
 	return total
+}
+
+// countCritical returns the number of critical messages in the slice.
+func countCritical(messages []ChatMessage) int {
+	n := 0
+	for _, msg := range messages {
+		if msg.Critical {
+			n++
+		}
+	}
+	return n
+}
+
+// maxSummaryLevel returns the highest SummaryLevel among the messages.
+func maxSummaryLevel(messages []ChatMessage) int {
+	max := 0
+	for _, msg := range messages {
+		if msg.SummaryLevel > max {
+			max = msg.SummaryLevel
+		}
+	}
+	return max
+}
+
+// buildQualityMetrics constructs a QualityMetrics for the compression pass.
+func (c *ContextCompressor) buildQualityMetrics(before, after []ChatMessage, tokensBefore, tokensAfter int, stage CompressionStage) QualityMetrics {
+	var ratio float64
+	if tokensBefore > 0 {
+		ratio = float64(tokensAfter) / float64(tokensBefore)
+	}
+
+	criticalBefore := countCritical(before)
+	criticalAfter := countCritical(after)
+
+	qm := QualityMetrics{
+		TokenRatio:       ratio,
+		CriticalRetained: criticalAfter,
+		CriticalDropped:  criticalBefore - criticalAfter,
+		SummaryLevel:     maxSummaryLevel(after),
+		CompressionStage: stage,
+	}
+
+	// Record quality score for running average. The quality score is the
+	// token ratio weighted by critical retention: if any critical messages
+	// were dropped the score is 0, otherwise it's the token ratio.
+	var score float64
+	if qm.CriticalDropped == 0 {
+		score = ratio
+	}
+	c.stats.QualityScoreSum.Add(uint64(score * 1000))
+	c.stats.QualityScoreCount.Add(1)
+
+	return qm
 }
 
 // summarizeOldHistory keeps the system messages plus the last 4 non-system
@@ -288,8 +373,10 @@ func (c *ContextCompressor) Stats() CompressionStatsSnapshot {
 	return c.stats.Snapshot()
 }
 
-// keepTail is the shared helper that preserves all system messages and the
-// last n non-system messages from the input slice.
+// keepTail is the shared helper that preserves all system messages, all
+// critical messages, and the last n non-system messages from the input slice.
+// Critical messages that would otherwise fall outside the tail window are
+// retained in their original order.
 func keepTail(messages []ChatMessage, n int) []ChatMessage {
 	var systemMsgs []ChatMessage
 	var nonSystemMsgs []ChatMessage
@@ -302,13 +389,29 @@ func keepTail(messages []ChatMessage, n int) []ChatMessage {
 		}
 	}
 
-	result := make([]ChatMessage, 0, len(systemMsgs)+n)
-	result = append(result, systemMsgs...)
+	// Determine which non-system messages to keep: the tail of n plus any
+	// critical messages that fall outside the tail window.
+	keepSet := make(map[int]bool)
+	tailStart := len(nonSystemMsgs) - n
+	if tailStart < 0 {
+		tailStart = 0
+	}
+	for i := tailStart; i < len(nonSystemMsgs); i++ {
+		keepSet[i] = true
+	}
+	// Mark critical messages outside the tail for retention.
+	for i, msg := range nonSystemMsgs {
+		if msg.Critical {
+			keepSet[i] = true
+		}
+	}
 
-	if len(nonSystemMsgs) > n {
-		result = append(result, nonSystemMsgs[len(nonSystemMsgs)-n:]...)
-	} else {
-		result = append(result, nonSystemMsgs...)
+	result := make([]ChatMessage, 0, len(systemMsgs)+len(keepSet))
+	result = append(result, systemMsgs...)
+	for i, msg := range nonSystemMsgs {
+		if keepSet[i] {
+			result = append(result, msg)
+		}
 	}
 
 	return result

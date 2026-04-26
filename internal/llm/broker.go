@@ -320,5 +320,21 @@ func (b *ModelBroker) GetStatus() BrokerStatus {
 	}
 }
 
+// Config returns the model configuration of the primary (first healthy) provider.
+func (b *ModelBroker) Config() *ModelConfig {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, entry := range b.entries {
+		if entry.status == ProviderStatusHealthy {
+			return entry.chatter.Config()
+		}
+	}
+	// Fall back to the first entry even if unhealthy
+	for _, entry := range b.entries {
+		return entry.chatter.Config()
+	}
+	return &ModelConfig{}
+}
+
 // Ensure ModelBroker implements Chatter
 var _ Chatter = (*ModelBroker)(nil)

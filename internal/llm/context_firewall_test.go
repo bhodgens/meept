@@ -24,6 +24,10 @@ func (s *stubChatter) ChatWithProgress(ctx context.Context, messages []ChatMessa
 	return s.Chat(ctx, messages, opts...)
 }
 
+func (s *stubChatter) Config() *ModelConfig {
+	return &ModelConfig{}
+}
+
 // makeFiller returns a string whose heuristic-tokenizer count is approximately n tokens.
 func makeFiller(tokens int) string {
 	return strings.Repeat("x", tokens*3)

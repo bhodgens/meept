@@ -34,6 +34,9 @@ type Chatter interface {
 	// The progress callback is invoked at various stages of the request lifecycle.
 	// If progress is nil, no progress reporting is done.
 	ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error)
+
+	// Config returns the current model configuration.
+	Config() *ModelConfig
 }
 
 // Ensure implementations satisfy the interface

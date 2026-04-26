@@ -237,11 +237,14 @@ type FirewallStats struct {
 	DroppedMessages       uint64
 	DropEvents            uint64
 	// Compression stats (populated when ProactiveCompression is enabled)
-	CompressionWarningEvents   uint64
-	CompressionSummarizeEvents uint64
+	CompressionWarningEvents    uint64
+	CompressionSummarizeEvents  uint64
 	CompressionAggressiveEvents uint64
-	CompressionHardLimitEvents uint64
-	CompressionTokensSaved     uint64
+	CompressionHardLimitEvents  uint64
+	CompressionTokensSaved      uint64
+	// Quality metrics (populated when ProactiveCompression is enabled)
+	AvgQualityScore   float64 // Running average quality score across compressions
+	TotalCompressions uint64  // Total number of compression passes applied
 }
 
 // Stats returns a snapshot of firewall counters. When proactive compression
@@ -260,6 +263,8 @@ func (f *ContextFirewall) Stats() FirewallStats {
 		stats.CompressionAggressiveEvents = cs.AggressiveEvents
 		stats.CompressionHardLimitEvents = cs.HardLimitEvents
 		stats.CompressionTokensSaved = cs.TotalTokensSaved
+		stats.AvgQualityScore = cs.AvgQualityScore
+		stats.TotalCompressions = cs.TotalCompressions
 	}
 
 	return stats
@@ -818,6 +823,14 @@ func (f *ContextFirewall) ValidateContextSize(messages []ChatMessage) error {
 	}
 
 	return nil
+}
+
+// Config returns the model configuration of the inner chatter.
+func (f *ContextFirewall) Config() *ModelConfig {
+	if f.model != nil {
+		return f.model
+	}
+	return f.inner.Config()
 }
 
 // Ensure ContextFirewall implements Chatter
