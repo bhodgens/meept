@@ -391,6 +391,13 @@ func NewExecutor(registry ToolRegistry, security *security.PermissionChecker, op
 	return e
 }
 
+// SetRegistry updates the tool registry used by this executor.
+// This is used when the registry needs to be swapped (e.g., for skill execution
+// with filtered tools). AGENT-6 fix.
+func (e *Executor) SetRegistry(registry ToolRegistry) {
+	e.registry = registry
+}
+
 // Execute runs a single tool call with security checks.
 func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *ExecutionResult {
 	toolName := toolCall.Function.Name

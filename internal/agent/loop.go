@@ -798,15 +798,22 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	}
 
 	// Apply tool filtering if top discovered skill restricts tools
+	// AGENT-6 fix: also propagate registry change to executor
 	if len(discovered) > 0 && len(discovered[0].Entry.AllowedTools) > 0 && l.registry != nil {
 		filtered := FilterToolsForSkill(l.registry, discovered[0].Entry.AllowedTools)
 		l.mu.Lock()
 		origRegistry := l.registry
 		l.registry = filtered
+		if l.executor != nil {
+			l.executor.SetRegistry(filtered)
+		}
 		l.mu.Unlock()
 		defer func() {
 			l.mu.Lock()
 			l.registry = origRegistry
+			if l.executor != nil {
+				l.executor.SetRegistry(origRegistry)
+			}
 			l.mu.Unlock()
 		}()
 		l.logger.Debug("Applied tool filtering for discovered skill",
@@ -887,25 +894,36 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 	)
 
 	// Apply tool filtering if skill restricts tools
+	// AGENT-6 fix: also propagate registry change to executor
 	if len(skill.AllowedTools) > 0 && l.registry != nil {
 		originalRegistry := l.registry
 		filtered := FilterToolsForSkill(originalRegistry, skill.AllowedTools)
 		l.mu.Lock()
 		l.registry = filtered
+		if l.executor != nil {
+			l.executor.SetRegistry(filtered)
+		}
 		l.mu.Unlock()
 		defer func() {
 			l.mu.Lock()
 			l.registry = originalRegistry
+			if l.executor != nil {
+				l.executor.SetRegistry(originalRegistry)
+			}
 			l.mu.Unlock()
 		}()
 	}
 
-	// Override max iterations if skill specifies it
-	originalMaxIter := l.config.MaxIterations
+	// Override max iterations if skill specifies it (AGENT-5 fix: hold lock during modification)
 	if skill.MaxIterations > 0 {
+		l.mu.Lock()
+		originalMaxIter := l.config.MaxIterations
 		l.config.MaxIterations = skill.MaxIterations
+		l.mu.Unlock()
 		defer func() {
+			l.mu.Lock()
 			l.config.MaxIterations = originalMaxIter
+			l.mu.Unlock()
 		}()
 	}
 
