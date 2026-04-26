@@ -255,3 +255,161 @@ func TestBroker_InjectsMetricsAndTimeout(t *testing.T) {
 		t.Error("Client timeoutCalc not wired")
 	}
 }
+
+// TestAnthropicClient_BuildRequest_ToolResultPlacement verifies that tool results
+// are placed in user messages (LLM-1 FIX) and that index mapping is correct
+// when system messages cause index divergence between messages and apiMessages (LLM-2 FIX).
+func TestAnthropicClient_BuildRequest_ToolResultPlacement(t *testing.T) {
+	cfg := &ModelConfig{
+		ProviderID: "anthropic",
+		ModelID:    "claude-test",
+		BaseURL:    "https://api.anthropic.com",
+		APIKey:     "test",
+		MaxTokens:  1024,
+	}
+	c := NewAnthropicClient(cfg)
+
+	// Test case: System message + User + Assistant with tool calls + Tool result
+	// This is the scenario that breaks with incorrect index mapping
+	messages := []ChatMessage{
+		{Role: RoleSystem, Content: "You are a helpful assistant."},
+		{Role: RoleUser, Content: "What's the weather?"},
+		{Role: RoleAssistant, Content: "Let me check.", ToolCalls: []ToolCall{
+			{
+				ID:   "tool_123",
+				Type: "function",
+				Function: ToolCallFunction{
+					Name:      "get_weather",
+					Arguments: `{"location": "Seattle"}`,
+				},
+			},
+		}},
+		{Role: RoleTool, Content: "72F and sunny", ToolCallID: "tool_123"},
+		{Role: RoleAssistant, Content: "The weather is 72F and sunny."},
+	}
+
+	req, err := c.buildRequest(messages, &chatOptions{maxTokens: 1024}, false)
+	if err != nil {
+		t.Fatalf("buildRequest failed: %v", err)
+	}
+
+	// Verify system prompt was extracted
+	if req.System != "You are a helpful assistant." {
+		t.Errorf("System prompt not extracted correctly, got: %q", req.System)
+	}
+
+	// Verify apiMessages structure:
+	// [0] user: "What's the weather?"
+	// [1] assistant: "Let me check." + tool_use
+	// [2] user: tool_result
+	// [3] assistant: "The weather is 72F and sunny."
+	if len(req.Messages) != 4 {
+		t.Fatalf("Expected 4 apiMessages, got %d", len(req.Messages))
+	}
+
+	// Check message roles
+	expectedRoles := []string{"user", "assistant", "user", "assistant"}
+	for i, expected := range expectedRoles {
+		if req.Messages[i].Role != expected {
+			t.Errorf("Message[%d] role: expected %q, got %q", i, expected, req.Messages[i].Role)
+		}
+	}
+
+	// LLM-1 FIX: Verify tool result is in a user message (index 2)
+	toolResultMsg := req.Messages[2]
+	if toolResultMsg.Role != "user" {
+		t.Errorf("Tool result should be in user message, got role: %q", toolResultMsg.Role)
+	}
+	if len(toolResultMsg.Content) != 1 {
+		t.Fatalf("Tool result message should have 1 content block, got %d", len(toolResultMsg.Content))
+	}
+	if toolResultMsg.Content[0].Type != "tool_result" {
+		t.Errorf("Tool result content type: expected 'tool_result', got %q", toolResultMsg.Content[0].Type)
+	}
+	if toolResultMsg.Content[0].ToolUseID != "tool_123" {
+		t.Errorf("Tool result ToolUseID: expected 'tool_123', got %q", toolResultMsg.Content[0].ToolUseID)
+	}
+
+	// LLM-2 FIX: Verify assistant message with tool calls has correct content
+	// (index mapping should correctly find apiMessages[1] for messages[2])
+	assistantWithTools := req.Messages[1]
+	if assistantWithTools.Role != "assistant" {
+		t.Errorf("Expected assistant role at index 1, got %q", assistantWithTools.Role)
+	}
+	// Should have text + tool_use
+	if len(assistantWithTools.Content) != 2 {
+		t.Fatalf("Assistant with tools should have 2 content blocks, got %d", len(assistantWithTools.Content))
+	}
+	// First content should be text
+	if assistantWithTools.Content[0].Type != "text" {
+		t.Errorf("First content should be text, got %q", assistantWithTools.Content[0].Type)
+	}
+	if assistantWithTools.Content[0].Text != "Let me check." {
+		t.Errorf("Text content mismatch: got %q", assistantWithTools.Content[0].Text)
+	}
+	// Second content should be tool_use
+	if assistantWithTools.Content[1].Type != "tool_use" {
+		t.Errorf("Second content should be tool_use, got %q", assistantWithTools.Content[1].Type)
+	}
+	if assistantWithTools.Content[1].ID != "tool_123" {
+		t.Errorf("Tool use ID mismatch: got %q", assistantWithTools.Content[1].ID)
+	}
+	if assistantWithTools.Content[1].Name != "get_weather" {
+		t.Errorf("Tool use name mismatch: got %q", assistantWithTools.Content[1].Name)
+	}
+}
+
+// TestAnthropicClient_BuildRequest_MultipleSystemMessages verifies correct handling
+// when multiple system messages are present (they should all be concatenated).
+func TestAnthropicClient_BuildRequest_MultipleSystemMessages(t *testing.T) {
+	cfg := &ModelConfig{
+		ProviderID: "anthropic",
+		ModelID:    "claude-test",
+		BaseURL:    "https://api.anthropic.com",
+		APIKey:     "test",
+		MaxTokens:  1024,
+	}
+	c := NewAnthropicClient(cfg)
+
+	messages := []ChatMessage{
+		{Role: RoleSystem, Content: "System message 1."},
+		{Role: RoleSystem, Content: "System message 2."},
+		{Role: RoleUser, Content: "Hello"},
+		{Role: RoleAssistant, Content: "Hi there", ToolCalls: []ToolCall{
+			{ID: "tc1", Type: "function", Function: ToolCallFunction{Name: "greet", Arguments: "{}"}},
+		}},
+	}
+
+	req, err := c.buildRequest(messages, &chatOptions{maxTokens: 1024}, false)
+	if err != nil {
+		t.Fatalf("buildRequest failed: %v", err)
+	}
+
+	// System prompts should be concatenated
+	expectedSystem := "System message 1.\n\nSystem message 2."
+	if req.System != expectedSystem {
+		t.Errorf("System prompt mismatch:\nExpected: %q\nGot: %q", expectedSystem, req.System)
+	}
+
+	// apiMessages should only have user and assistant (2 messages)
+	if len(req.Messages) != 2 {
+		t.Fatalf("Expected 2 apiMessages (system excluded), got %d", len(req.Messages))
+	}
+
+	// Verify user message is at index 0
+	if req.Messages[0].Role != "user" {
+		t.Errorf("Expected user at index 0, got %q", req.Messages[0].Role)
+	}
+
+	// LLM-2 FIX: Verify assistant tool calls are patched correctly despite 2 system messages
+	// messages[3] maps to apiMessages[1] (not apiMessages[3])
+	if req.Messages[1].Role != "assistant" {
+		t.Errorf("Expected assistant at index 1, got %q", req.Messages[1].Role)
+	}
+	if len(req.Messages[1].Content) != 2 {
+		t.Fatalf("Expected 2 content blocks (text + tool_use), got %d", len(req.Messages[1].Content))
+	}
+	if req.Messages[1].Content[1].Type != "tool_use" {
+		t.Errorf("Expected tool_use content, got %q", req.Messages[1].Content[1].Type)
+	}
+}
