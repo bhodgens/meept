@@ -321,7 +321,13 @@ func (e *Engine) Check(action, toolName string, details map[string]string, conve
 }
 
 // checkFinancial returns a deny decision if details contain financial operations.
+// SEC-1 FIX: Respects BlockFinancial config field - if nil or false, returns nil early.
 func (e *Engine) checkFinancial(details map[string]string) *Decision {
+	// Honor the BlockFinancial config flag
+	if e.config == nil || !e.config.BlockFinancial {
+		return nil
+	}
+
 	for _, value := range details {
 		for _, pattern := range e.compiledFinancial {
 			if pattern.MatchString(value) {
@@ -385,6 +391,31 @@ func (e *Engine) evaluateCommand(command string) (RiskLevel, string, bool) {
 	return RiskMedium, "shell_execute", false
 }
 
+// normalizePathForComparison ensures a directory path ends with a path separator
+// to prevent prefix matching attacks (e.g., /tmp_backup matching /tmp).
+// SEC-4 FIX: Proper directory boundary comparison.
+func normalizePathForComparison(p string) string {
+	if p == "" {
+		return p
+	}
+	if !strings.HasSuffix(p, string(filepath.Separator)) {
+		return p + string(filepath.Separator)
+	}
+	return p
+}
+
+// isPathUnderDir checks if path is under or equal to dir using proper boundary checks.
+// SEC-4 FIX: Prevents /tmp_backup/secret from matching /tmp.
+func isPathUnderDir(path, dir string) bool {
+	// Exact match
+	if path == dir {
+		return true
+	}
+	// Check if path is under dir (with proper directory boundary)
+	normalizedDir := normalizePathForComparison(dir)
+	return strings.HasPrefix(path, normalizedDir)
+}
+
 // checkPath checks a filesystem path against path rules.
 func (e *Engine) checkPath(pathStr, action string) *Decision {
 	resolved := pathutil.ExpandPath(pathStr)
@@ -393,7 +424,8 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 	}
 
 	// Check block rules first (precedence)
-	rows, err := e.db.Query(`
+	// SEC-5 FIX: Use separate variable for block rows
+	blockRows, err := e.db.Query(`
 		SELECT pattern, description, immutable, risk_level
 		FROM path_rules
 		WHERE rule_type = 'block' AND enabled = 1`)
@@ -406,13 +438,13 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 			RuleSource: "fail_closed",
 		}
 	}
-	defer rows.Close()
+	defer blockRows.Close()
 
-	for rows.Next() {
+	for blockRows.Next() {
 		var pattern, description string
 		var immutable, riskLevel int
 
-		if err := rows.Scan(&pattern, &description, &immutable, &riskLevel); err != nil {
+		if err := blockRows.Scan(&pattern, &description, &immutable, &riskLevel); err != nil {
 			continue
 		}
 
@@ -430,8 +462,8 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 			}
 		}
 
-		// Check if path starts with blocked directory
-		if strings.HasPrefix(resolved, expandedPattern) {
+		// SEC-4 FIX: Use proper directory boundary comparison
+		if isPathUnderDir(resolved, expandedPattern) {
 			ruleSource := "path_rule"
 			if immutable == 1 {
 				ruleSource = "immutable"
@@ -446,8 +478,9 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 	}
 
 	// Check allow rules
+	// SEC-5 FIX: Use separate variable for allow rows
 	hasAllowRules := false
-	rows, err = e.db.Query(`
+	allowRows, err := e.db.Query(`
 		SELECT pattern
 		FROM path_rules
 		WHERE rule_type = 'allow' AND enabled = 1`)
@@ -460,12 +493,12 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 			RuleSource: "fail_closed",
 		}
 	}
-	defer rows.Close()
+	defer allowRows.Close()
 
-	for rows.Next() {
+	for allowRows.Next() {
 		hasAllowRules = true
 		var pattern string
-		if err := rows.Scan(&pattern); err != nil {
+		if err := allowRows.Scan(&pattern); err != nil {
 			continue
 		}
 
@@ -473,7 +506,8 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
 			return nil // Allowed
 		}
-		if strings.HasPrefix(resolved, expandedPattern) {
+		// SEC-4 FIX: Use proper directory boundary comparison
+		if isPathUnderDir(resolved, expandedPattern) {
 			return nil // Allowed
 		}
 	}
@@ -491,6 +525,7 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 }
 
 // checkOverrides checks for creator permission overrides.
+// SEC-6 FIX: Uses atomic UPDATE...WHERE to prevent TOCTOU race on usage_count.
 func (e *Engine) checkOverrides(action string, details map[string]string) *Decision {
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -514,7 +549,7 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			continue
 		}
 
-		// Check max_uses
+		// Check max_uses (preliminary check - atomic check below)
 		if maxUses > 0 && usageCount >= maxUses {
 			continue
 		}
@@ -580,14 +615,24 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			}
 		}
 
-		// Increment usage count; log on error but don't fail the decision path.
-		if _, uerr := e.db.Exec(`
+		// SEC-6 FIX: Atomic usage count increment with max_uses check.
+		// Only increment if usage_count < max_uses (or max_uses is 0/unlimited).
+		// If no rows affected, the override was already exhausted by another concurrent request.
+		result, uerr := e.db.Exec(`
 			UPDATE permission_overrides
 			SET usage_count = usage_count + 1,
 			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-			WHERE id = ?`, id); uerr != nil {
+			WHERE id = ? AND (max_uses = 0 OR usage_count < max_uses)`, id)
+		if uerr != nil {
 			e.logger.Warn("failed to update permission_overrides usage_count",
 				"override_id", id, "error", uerr)
+			continue
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			// Override was already exhausted (max_uses reached) - skip to next
+			continue
 		}
 
 		if decisionStr == "allow" {
