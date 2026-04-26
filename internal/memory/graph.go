@@ -224,7 +224,7 @@ func (g *KnowledgeGraph) AddEdge(ctx context.Context, edge MemoryEdge) error {
 	g.mu.RUnlock()
 
 	if edge.ID == "" {
-		edge.ID = fmt.Sprintf("%s-%s-%s", edge.SourceID[:8], edge.TargetID[:8], edge.EdgeType)
+		edge.ID = fmt.Sprintf("%s-%s-%s", edge.SourceID[:min(8, len(edge.SourceID))], edge.TargetID[:min(8, len(edge.TargetID))], edge.EdgeType)
 	}
 	if edge.CreatedAt.IsZero() {
 		edge.CreatedAt = time.Now()
@@ -282,7 +282,7 @@ func (g *KnowledgeGraph) AddEdges(ctx context.Context, edges []MemoryEdge) error
 
 		for _, edge := range edges {
 			if edge.ID == "" {
-				edge.ID = fmt.Sprintf("%s-%s-%s", edge.SourceID[:8], edge.TargetID[:8], edge.EdgeType)
+				edge.ID = fmt.Sprintf("%s-%s-%s", edge.SourceID[:min(8, len(edge.SourceID))], edge.TargetID[:min(8, len(edge.TargetID))], edge.EdgeType)
 			}
 			if edge.CreatedAt.IsZero() {
 				edge.CreatedAt = time.Now()
@@ -736,8 +736,14 @@ func (g *KnowledgeGraph) persistCommunities(ctx context.Context, communities map
 		defer stmt.Close()
 
 		for id, communityID := range communities {
-			if _, err := stmt.ExecContext(ctx, communityID, id); err != nil {
+			result, err := stmt.ExecContext(ctx, communityID, id)
+			if err != nil {
 				return fmt.Errorf("failed to update community for memory %s: %w", id, err)
+			}
+			// Check that at least one row was affected (memory exists in pagerank table)
+			if affected, _ := result.RowsAffected(); affected == 0 {
+				// Node might not exist in pagerank table yet - log but continue
+				g.logger.Debug("Community update affected 0 rows", "memory_id", id)
 			}
 		}
 
