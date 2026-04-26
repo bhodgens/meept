@@ -483,10 +483,15 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 	var systemPrompt string
 	var apiMessages []anthropicMessage
 
-	for _, msg := range messages {
+	// LLM-2 FIX: Track mapping from input messages index to apiMessages index
+	// This is needed because system messages are extracted and don't appear in apiMessages,
+	// causing index divergence between the input slice and output slice.
+	msgIndexToAPIIndex := make(map[int]int)
+
+	for i, msg := range messages {
 		switch msg.Role {
 		case RoleSystem:
-			// Accumulate system prompts
+			// Accumulate system prompts - these do NOT get added to apiMessages
 			if systemPrompt != "" {
 				systemPrompt += "\n\n" + msg.Content
 			} else {
@@ -495,6 +500,7 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 		case RoleTool:
 			// LLM-1 FIX: Tool results must be separate user messages per Anthropic API spec
 			// Do NOT append to assistant message content - create a new user message
+			msgIndexToAPIIndex[i] = len(apiMessages)
 			apiMessages = append(apiMessages, anthropicMessage{
 				Role: "user",
 				Content: []anthropicContent{{
@@ -505,6 +511,7 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 				}},
 			})
 		case RoleUser, RoleAssistant:
+			msgIndexToAPIIndex[i] = len(apiMessages)
 			apiMessages = append(apiMessages, anthropicMessage{
 				Role: string(msg.Role),
 				Content: []anthropicContent{{
@@ -516,8 +523,13 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 	}
 
 	// Handle tool calls in assistant messages
+	// LLM-2 FIX: Use the mapping to find the correct apiMessages index
 	for i, msg := range messages {
 		if msg.Role == RoleAssistant && len(msg.ToolCalls) > 0 {
+			apiIdx, ok := msgIndexToAPIIndex[i]
+			if !ok {
+				continue // System message or other non-mapped message
+			}
 			// Replace the simple text content with structured content
 			var content []anthropicContent
 			if msg.Content != "" {
@@ -534,8 +546,8 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 					Input: json.RawMessage(tc.Function.Arguments),
 				})
 			}
-			if i < len(apiMessages) && apiMessages[i].Role == "assistant" {
-				apiMessages[i].Content = content
+			if apiIdx < len(apiMessages) && apiMessages[apiIdx].Role == "assistant" {
+				apiMessages[apiIdx].Content = content
 			}
 		}
 	}
