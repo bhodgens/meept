@@ -211,14 +211,25 @@ func (b *Bot) getUpdates(ctx context.Context) ([]Update, error) {
 func (b *Bot) handleMessage(ctx context.Context, msg *Message) {
 	// Check if user/chat is allowed
 	if !b.isAllowed(msg) {
-		b.logger.Warn("unauthorized access attempt",
-			"user_id", msg.From.ID,
-			"chat_id", msg.Chat.ID)
+		// Guard against nil From (channel posts have nil From)
+		if msg.From != nil {
+			b.logger.Warn("unauthorized access attempt",
+				"user_id", msg.From.ID,
+				"chat_id", msg.Chat.ID)
+		} else {
+			b.logger.Warn("unauthorized access attempt",
+				"chat_id", msg.Chat.ID)
+		}
 		return
 	}
 
+	// Guard against nil From for logging (channel posts have nil From)
+	fromUsername := ""
+	if msg.From != nil {
+		fromUsername = msg.From.Username
+	}
 	b.logger.Info("received message",
-		"from", msg.From.Username,
+		"from", fromUsername,
 		"chat_id", msg.Chat.ID,
 		"text", truncate(msg.Text, 50))
 
