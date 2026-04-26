@@ -336,8 +336,8 @@ func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label s
 	}
 
 	// Create git tag
-	_, output := w.gitCmd(ctx, workspace, "tag", tagName)
-	if tagName == "" {
+	ok, output := w.gitCmd(ctx, workspace, "tag", tagName)
+	if !ok {
 		return nil, fmt.Errorf("failed to create checkpoint tag: %s", output)
 	}
 
