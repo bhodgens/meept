@@ -157,7 +157,13 @@ func (p *PresetConfig) ApplyPreset(model *Model, presetName string) error {
 		model.Temperature = preset.Params.Temperature
 	}
 	if preset.Params.TopP > 0 {
-		// Note: TopP would need to be added to Model struct if needed
+		model.TopP = preset.Params.TopP
+	}
+	if preset.Params.FrequencyPenalty != 0 {
+		model.FrequencyPenalty = preset.Params.FrequencyPenalty
+	}
+	if preset.Params.PresencePenalty != 0 {
+		model.PresencePenalty = preset.Params.PresencePenalty
 	}
 
 	return nil
