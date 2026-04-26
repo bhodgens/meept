@@ -700,6 +700,53 @@ func (d *Dispatcher) recordInteraction(ctx context.Context, result *DispatchResu
 	}
 }
 
+// keywordPattern defines a keyword-to-intent mapping.
+type keywordPattern struct {
+	keywords   []string
+	intentType string
+	agentType  string
+	confidence float64
+	planning   bool
+}
+
+// keywordPatterns is the shared table of keyword patterns for intent classification.
+// Used by both Classify (best match) and ClassifyAll (all matches).
+var keywordPatterns = []keywordPattern{
+	// Platform introspection (highest priority - matches first)
+	{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status",
+		"internal capabilities", "your capabilities", "tell me about your", "built into", "agent harness", "memory system", "tool system",
+		"what models", "what agents are", "available tools", "your tools", "your features", "how are you built", "your architecture",
+		"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities"}, string(IntentPlatform), "chat", 0.9, false},
+
+	// Report/Summary requests (high priority - handle inline, not async)
+	{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, string(IntentReport), "chat", 0.9, false},
+
+	// Recall/Memory requests (high priority - handle inline)
+	{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, string(IntentRecall), "chat", 0.85, false},
+
+	// Code-related
+	{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), "debugger", 0.8, false},
+	{[]string{"write code", "implement", "create function", "add feature", "refactor"}, string(IntentCode), "coder", 0.8, false},
+	{[]string{"code review", "review pr", "check code"}, string(IntentReview), "coder", 0.75, false},
+
+	// Git operations
+	{[]string{"commit", "push", "pull", "merge", "branch", "git"}, string(IntentGit), "committer", 0.8, false},
+
+	// Scheduling
+	{[]string{"remind", "schedule", "alarm", "timer", "at ", "tomorrow", "next week"}, string(IntentSchedule), "scheduler", 0.8, false},
+
+	// Planning
+	{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, string(IntentPlan), "planner", 0.8, true},
+
+	// Analysis/Research ("summarize" alone stays here for document summarization;
+	// "summarize what" and "summary of work" are captured by report intent above)
+	{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, string(IntentAnalyze), "analyst", 0.7, false},
+	{[]string{"search", "find", "look up", "google"}, string(IntentSearch), "analyst", 0.7, false},
+
+	// General chat (lower priority)
+	{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), "chat", 0.6, false},
+}
+
 // KeywordClassifier is a simple keyword-based intent classifier.
 type KeywordClassifier struct{}
 
@@ -707,53 +754,10 @@ type KeywordClassifier struct{}
 func (c *KeywordClassifier) Classify(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error) {
 	lower := strings.ToLower(input)
 
-	// Define keyword patterns and their mappings
-	patterns := []struct {
-		keywords   []string
-		intentType string
-		agentType  string
-		confidence float64
-		planning   bool
-	}{
-		// Platform introspection (highest priority - matches first)
-		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status",
-			"internal capabilities", "your capabilities", "tell me about your", "built into", "agent harness", "memory system", "tool system",
-			"what models", "what agents are", "available tools", "your tools", "your features", "how are you built", "your architecture",
-			"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities"}, string(IntentPlatform), "chat", 0.9, false},
-
-		// Report/Summary requests (high priority - handle inline, not async)
-		{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, string(IntentReport), "chat", 0.9, false},
-
-		// Recall/Memory requests (high priority - handle inline)
-		{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, string(IntentRecall), "chat", 0.85, false},
-
-		// Code-related
-		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), "debugger", 0.8, false},
-		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, string(IntentCode), "coder", 0.8, false},
-		{[]string{"code review", "review pr", "check code"}, string(IntentReview), "coder", 0.75, false},
-
-		// Git operations
-		{[]string{"commit", "push", "pull", "merge", "branch", "git"}, string(IntentGit), "committer", 0.8, false},
-
-		// Scheduling
-		{[]string{"remind", "schedule", "alarm", "timer", "at ", "tomorrow", "next week"}, string(IntentSchedule), "scheduler", 0.8, false},
-
-		// Planning
-		{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, string(IntentPlan), "planner", 0.8, true},
-
-		// Analysis/Research ("summarize" alone stays here for document summarization;
-		// "summarize what" and "summary of work" are captured by report intent above)
-		{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, string(IntentAnalyze), "analyst", 0.7, false},
-		{[]string{"search", "find", "look up", "google"}, string(IntentSearch), "analyst", 0.7, false},
-
-		// General chat (lower priority)
-		{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), "chat", 0.6, false},
-	}
-
 	var bestMatch *Intent
 	bestScore := 0.0
 
-	for _, p := range patterns {
+	for _, p := range keywordPatterns {
 		for _, kw := range p.keywords {
 			if strings.Contains(lower, kw) {
 				// Score based on keyword length and position
@@ -785,29 +789,7 @@ func (c *KeywordClassifier) ClassifyAll(ctx context.Context, input string, memCt
 	lower := strings.ToLower(input)
 	var intents []*Intent
 
-	// Use the same patterns as Classify()
-	patterns := []struct {
-		keywords   []string
-		intentType string
-		agentType  string
-		confidence float64
-		planning   bool
-	}{
-		{[]string{"what are your capabilities", "what can you do", "what tools", "what agents"}, string(IntentPlatform), "chat", 0.9, false},
-		{[]string{"give me a report", "report on", "what did you do"}, string(IntentReport), "chat", 0.9, false},
-		{[]string{"remember when", "recall", "what do you remember"}, string(IntentRecall), "chat", 0.85, false},
-		{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), "debugger", 0.8, false},
-		{[]string{"write code", "implement", "create function", "add feature", "refactor"}, string(IntentCode), "coder", 0.8, false},
-		{[]string{"code review", "review pr", "check code"}, string(IntentReview), "coder", 0.75, false},
-		{[]string{"commit", "push", "pull", "merge", "branch", "git"}, string(IntentGit), "committer", 0.8, false},
-		{[]string{"remind", "schedule", "alarm", "timer", "at "}, string(IntentSchedule), "scheduler", 0.8, false},
-		{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, string(IntentPlan), "planner", 0.8, true},
-		{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, string(IntentAnalyze), "analyst", 0.7, false},
-		{[]string{"search", "find", "look up", "google"}, string(IntentSearch), "analyst", 0.7, false},
-		{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), "chat", 0.6, false},
-	}
-
-	for _, p := range patterns {
+	for _, p := range keywordPatterns {
 		for _, kw := range p.keywords {
 			if strings.Contains(lower, kw) {
 				intents = append(intents, &Intent{
