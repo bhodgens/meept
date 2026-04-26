@@ -90,21 +90,19 @@ type PatternMatch struct {
 // DetectSuspiciousPatterns checks a command for suspicious shell patterns.
 // Returns the detected pattern name and true if found.
 func DetectSuspiciousPatterns(command string) (string, bool) {
+	// High-confidence patterns that are always suspicious
 	patterns := map[string]string{
-		"curl_pipe_sh":     "curl | sh",
-		"curl_pipe_bash":   "curl | bash",
-		"wget_pipe_sh":     "wget | sh",
-		"wget_pipe_bash":   "wget | bash",
-		"base64_decode":    "base64 -d",
-		"subshell_curl":    "$(curl",
-		"subshell_wget":    "$(wget",
-		"backtick_curl":    "`curl",
-		"backtick_wget":    "`wget",
-		"eval_statement":   "eval ",
-		"eval_subshell":    "eval $(",
-		"command_injection": ";",
-		"pipe_injection":    "|",
-		"redirect_injection": ">",
+		"curl_pipe_sh":   "curl | sh",
+		"curl_pipe_bash": "curl | bash",
+		"wget_pipe_sh":   "wget | sh",
+		"wget_pipe_bash": "wget | bash",
+		"base64_decode":  "base64 -d",
+		"subshell_curl":  "$(curl",
+		"subshell_wget":  "$(wget",
+		"backtick_curl":  "`curl",
+		"backtick_wget":  "`wget",
+		"eval_statement": "eval ",
+		"eval_subshell":  "eval $(",
 	}
 
 	lowerCmd := strings.ToLower(command)
@@ -115,12 +113,89 @@ func DetectSuspiciousPatterns(command string) (string, bool) {
 		}
 	}
 
+	// Context-aware detection for ; and | to reduce false positives
+	// Only flag these when combined with dangerous commands
+	if detected, name := detectContextualInjection(lowerCmd); detected {
+		return name, true
+	}
+
 	// Check for command substitution patterns
 	if ShellInjectionPattern.MatchString(command) {
 		return "shell_injection", true
 	}
 
 	return "", false
+}
+
+// detectContextualInjection checks for ; and | only in suspicious contexts.
+// This reduces false positives from legitimate uses like "echo 'a;b'" or "ls | grep".
+func detectContextualInjection(lowerCmd string) (bool, string) {
+	// Dangerous commands that, when combined with ; or |, indicate injection
+	dangerousCommands := []string{
+		"rm ", "rm\t", "rm;",
+		"curl ", "curl\t",
+		"wget ", "wget\t",
+		"sh ", "sh\t", "sh;",
+		"bash ", "bash\t", "bash;",
+		"chmod ", "chmod\t",
+		"chown ", "chown\t",
+		"nc ", "nc\t",
+		"netcat ", "netcat\t",
+		"/bin/", "/usr/bin/",
+		"python ", "python\t", "python3 ",
+		"perl ", "perl\t",
+		"ruby ", "ruby\t",
+		"node ", "node\t",
+	}
+
+	// Check for semicolon with dangerous commands
+	if strings.Contains(lowerCmd, ";") {
+		for _, cmd := range dangerousCommands {
+			if strings.Contains(lowerCmd, cmd) {
+				return true, "command_injection"
+			}
+		}
+	}
+
+	// Check for pipe with dangerous commands (excluding common safe patterns)
+	if strings.Contains(lowerCmd, "|") {
+		// Skip common safe pipe patterns
+		safePipePatterns := []string{
+			"| grep", "| head", "| tail", "| wc", "| sort", "| uniq",
+			"| awk", "| sed", "| cut", "| tr", "| less", "| more",
+			"| xargs", "| tee",
+		}
+		isSafe := false
+		for _, safe := range safePipePatterns {
+			if strings.Contains(lowerCmd, safe) {
+				isSafe = true
+				break
+			}
+		}
+		if !isSafe {
+			for _, cmd := range dangerousCommands {
+				if strings.Contains(lowerCmd, cmd) {
+					return true, "pipe_injection"
+				}
+			}
+		}
+	}
+
+	// Check for redirect with dangerous targets
+	if strings.Contains(lowerCmd, ">") {
+		dangerousTargets := []string{
+			"> /etc/", "> /root/", "> /bin/", "> /usr/",
+			"> /var/", "> /tmp/", ">/etc/", ">/root/",
+			">> /etc/", ">> /root/",
+		}
+		for _, target := range dangerousTargets {
+			if strings.Contains(lowerCmd, target) {
+				return true, "redirect_injection"
+			}
+		}
+	}
+
+	return false, ""
 }
 
 // DetectExfiltration checks a URL for potential data exfiltration patterns.
