@@ -124,15 +124,25 @@ func (t *CalendarCreateTool) Execute(ctx context.Context, args map[string]any) (
 		return tools.NewErrorResult("summary is required"), nil
 	}
 
+	startStr, ok := args["start"].(string)
+	if !ok || startStr == "" {
+		return tools.NewErrorResult("start time is required"), nil
+	}
+
+	endStr, ok := args["end"].(string)
+	if !ok || endStr == "" {
+		return tools.NewErrorResult("end time is required"), nil
+	}
+
 	event := &calendar.Event{
 		Summary:     summary,
 		Description: calendarGetString(args, "description"),
 		Location:    calendarGetString(args, "location"),
 		Start: calendar.EventTime{
-			DateTime: args["start"].(string),
+			DateTime: startStr,
 		},
 		End: calendar.EventTime{
-			DateTime: args["end"].(string),
+			DateTime: endStr,
 		},
 	}
 
