@@ -157,8 +157,6 @@ func TestStopAll(t *testing.T) {
 			// service was stopped as expected
 		}
 	}
-		// Note: mockComponent doesn't export Stopped() -- we check indirectly
-	}
 }
 
 // -----------------------------------------------------------------------

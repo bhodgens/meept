@@ -202,7 +202,7 @@ func (d *IssueDetector) ScanCode(ctx context.Context) ([]Issue, error) {
 		}
 
 		// Skip vendor and test directories
-		if strings.Contains(path, "/vendor/") || strings.Contains(path, "/_test.go") {
+		if strings.Contains(path, "/vendor/") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 

@@ -342,9 +342,10 @@ func TestGenerateBatch_NoLLMClient(t *testing.T) {
 	}
 
 	fixes, err := g.GenerateBatch(context.Background(), analyses, issues)
-	// Should return error (LLM client not available)
-	if err == nil {
-		t.Fatal("expected error from GenerateBatch")
+	// GenerateBatch logs warnings but does not propagate per-issue errors;
+	// it returns an empty fixes slice with a nil error.
+	if err != nil {
+		t.Fatalf("unexpected error from GenerateBatch: %v", err)
 	}
 	if len(fixes) != 0 {
 		t.Errorf("expected 0 fixes, got %d", len(fixes))
