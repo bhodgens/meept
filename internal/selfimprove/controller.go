@@ -139,11 +139,13 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	}
 
 	cycleID := fmt.Sprintf("cycle-%s", uuid.New().String()[:8])
+	c.mu.Lock()
 	c.currentCycle = &ImprovementCycle{
 		ID:        cycleID,
 		Status:    CycleStatusRunning,
 		StartedAt: time.Now(),
 	}
+	c.mu.Unlock()
 
 	c.logger.Info("starting improvement cycle", "cycle_id", cycleID)
 	c.publishStatus("started", map[string]any{"cycle_id": cycleID})
@@ -163,18 +165,26 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 
 	issues, err := c.detector.DetectAll(ctx)
 	if err != nil {
+		c.mu.Lock()
 		c.currentCycle.Status = CycleStatusFailed
 		c.currentCycle.Error = err.Error()
-		return c.currentCycle, err
+		cycle := c.currentCycle
+		c.mu.Unlock()
+		return cycle, err
 	}
+	c.mu.Lock()
 	c.issues = issues
 	c.currentCycle.IssuesDetected = len(issues)
+	c.mu.Unlock()
 	c.emitProgress("detecting", 0.2, fmt.Sprintf("detected %d issues", len(issues)))
 
 	if len(issues) == 0 {
 		c.logger.Info("no issues detected")
+		c.mu.Lock()
 		c.currentCycle.Status = CycleStatusCompleted
-		return c.currentCycle, nil
+		cycle := c.currentCycle
+		c.mu.Unlock()
+		return cycle, nil
 	}
 
 	// Phase 2: Analysis
@@ -182,7 +192,9 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	c.publishStatus("analyzing", map[string]any{"cycle_id": cycleID, "issues_count": len(issues)})
 	c.emitProgress("analyzing", 0.3, fmt.Sprintf("analyzing %d issues", len(issues)))
 
+	c.mu.Lock()
 	c.analyses = nil
+	c.mu.Unlock()
 	for _, issue := range issues[:min(len(issues), c.config.MaxIterationsPerCycle)] {
 		if c.checkCircuitBreaker() {
 			c.logger.Warn("stopping analysis due to circuit breaker")
@@ -198,29 +210,43 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 			c.recordFailure(issue.ID)
 			continue
 		}
+		c.mu.Lock()
 		c.analyses = append(c.analyses, analysis)
 		c.currentCycle.IssuesAnalyzed++
+		c.mu.Unlock()
 		c.recordSuccess(issue.ID)
 	}
 
-	if len(c.analyses) == 0 {
+	c.mu.RLock()
+	analysesCount := len(c.analyses)
+	c.mu.RUnlock()
+	if analysesCount == 0 {
 		c.logger.Warn("no analyses completed")
+		c.mu.Lock()
 		c.currentCycle.Status = CycleStatusCompleted
-		return c.currentCycle, nil
+		cycle := c.currentCycle
+		c.mu.Unlock()
+		return cycle, nil
 	}
 
 	// Phase 3: Generation
-	c.logger.Info("phase 3 - generating fixes", "analyses_count", len(c.analyses))
-	c.publishStatus("generating", map[string]any{"cycle_id": cycleID, "analyses_count": len(c.analyses)})
-	c.emitProgress("generating", 0.5, fmt.Sprintf("generating fixes for %d analyses", len(c.analyses)))
+	c.logger.Info("phase 3 - generating fixes", "analyses_count", analysesCount)
+	c.publishStatus("generating", map[string]any{"cycle_id": cycleID, "analyses_count": analysesCount})
+	c.emitProgress("generating", 0.5, fmt.Sprintf("generating fixes for %d analyses", analysesCount))
 
+	c.mu.Lock()
 	c.fixes = nil
+	// Copy analyses to avoid holding lock during generation
+	analysesCopy := make([]*RootCauseAnalysis, len(c.analyses))
+	copy(analysesCopy, c.analyses)
+	c.mu.Unlock()
+
 	issueMap := make(map[string]Issue)
 	for _, issue := range issues {
 		issueMap[issue.ID] = issue
 	}
 
-	for _, analysis := range c.analyses[:min(len(c.analyses), c.config.MaxFixesPerCycle)] {
+	for _, analysis := range analysesCopy[:min(len(analysesCopy), c.config.MaxFixesPerCycle)] {
 		if c.checkCircuitBreaker() {
 			break
 		}
@@ -236,33 +262,51 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 			continue
 		}
 		if fix != nil {
+			c.mu.Lock()
 			c.fixes = append(c.fixes, fix)
 			c.currentCycle.FixesGenerated++
+			c.mu.Unlock()
 			c.recordSuccess(analysis.IssueID)
 		}
 	}
 
-	if len(c.fixes) == 0 {
+	c.mu.RLock()
+	fixesCount := len(c.fixes)
+	c.mu.RUnlock()
+	if fixesCount == 0 {
 		c.logger.Warn("no fixes generated")
+		c.mu.Lock()
 		c.currentCycle.Status = CycleStatusCompleted
-		return c.currentCycle, nil
+		cycle := c.currentCycle
+		c.mu.Unlock()
+		return cycle, nil
 	}
 
 	// Phase 4: Validation
-	c.logger.Info("phase 4 - validating fixes", "fixes_count", len(c.fixes))
-	c.publishStatus("validating", map[string]any{"cycle_id": cycleID, "fixes_count": len(c.fixes)})
-	c.emitProgress("validating", 0.7, fmt.Sprintf("validating %d fixes", len(c.fixes)))
-
+	c.mu.Lock()
 	c.validations = nil
-	for _, fix := range c.fixes {
+	// Copy fixes to avoid holding lock during validation
+	fixesCopy := make([]*ProposedFix, len(c.fixes))
+	copy(fixesCopy, c.fixes)
+	c.mu.Unlock()
+
+	c.logger.Info("phase 4 - validating fixes", "fixes_count", len(fixesCopy))
+	c.publishStatus("validating", map[string]any{"cycle_id": cycleID, "fixes_count": len(fixesCopy)})
+	c.emitProgress("validating", 0.7, fmt.Sprintf("validating %d fixes", len(fixesCopy)))
+
+	for _, fix := range fixesCopy {
 		result, err := c.validator.Validate(ctx, fix)
 		if err != nil {
 			c.recordFailure(fix.IssueID)
 			continue
 		}
+		c.mu.Lock()
 		c.validations = append(c.validations, result)
 		if result.Success {
 			c.currentCycle.FixesValidated++
+		}
+		c.mu.Unlock()
+		if result.Success {
 			c.recordSuccess(fix.IssueID)
 		} else {
 			c.recordFailure(fix.IssueID)
@@ -273,8 +317,11 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	validatedFixes := c.getValidatedFixes()
 	if len(validatedFixes) == 0 {
 		c.logger.Warn("no fixes passed validation")
+		c.mu.Lock()
 		c.currentCycle.Status = CycleStatusCompleted
-		return c.currentCycle, nil
+		cycle := c.currentCycle
+		c.mu.Unlock()
+		return cycle, nil
 	}
 
 	c.logger.Info("phase 5 - applying fixes", "validated_count", len(validatedFixes))
@@ -302,24 +349,29 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 			c.recordFailure(pair.fix.IssueID)
 			continue
 		}
+		c.mu.Lock()
 		c.applied = append(c.applied, applied)
 		c.currentCycle.FixesApplied++
+		c.mu.Unlock()
 		c.recordSuccess(pair.fix.IssueID)
 	}
 
+	c.mu.Lock()
 	c.currentCycle.Status = CycleStatusCompleted
+	cycle := c.currentCycle
+	c.mu.Unlock()
 
 	c.logger.Info("cycle completed",
 		"cycle_id", cycleID,
-		"detected", c.currentCycle.IssuesDetected,
-		"analyzed", c.currentCycle.IssuesAnalyzed,
-		"generated", c.currentCycle.FixesGenerated,
-		"validated", c.currentCycle.FixesValidated,
-		"applied", c.currentCycle.FixesApplied)
+		"detected", cycle.IssuesDetected,
+		"analyzed", cycle.IssuesAnalyzed,
+		"generated", cycle.FixesGenerated,
+		"validated", cycle.FixesValidated,
+		"applied", cycle.FixesApplied)
 
-	c.publishStatus("completed", c.currentCycle)
-	c.emitProgress("completed", 1.0, fmt.Sprintf("cycle completed: %d applied", c.currentCycle.FixesApplied))
-	return c.currentCycle, nil
+	c.publishStatus("completed", cycle)
+	c.emitProgress("completed", 1.0, fmt.Sprintf("cycle completed: %d applied", cycle.FixesApplied))
+	return cycle, nil
 }
 
 type fixValidationPair struct {
@@ -328,6 +380,9 @@ type fixValidationPair struct {
 }
 
 func (c *Controller) getValidatedFixes() []fixValidationPair {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	fixMap := make(map[string]*ProposedFix)
 	for _, fix := range c.fixes {
 		fixMap[fix.ID] = fix
@@ -436,19 +491,27 @@ func (c *Controller) Stop() error {
 }
 
 func (c *Controller) recordFailure(issueID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.failureCounts[issueID]++
 	c.consecutiveFailures++
 }
 
 func (c *Controller) recordSuccess(issueID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.consecutiveFailures = 0
 }
 
 func (c *Controller) shouldSkipIssue(issueID string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.failureCounts[issueID] >= c.config.Safety.MaxFailuresPerIssue
 }
 
 func (c *Controller) checkCircuitBreaker() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.consecutiveFailures >= c.config.Safety.MaxConsecutiveFailures
 }
 
