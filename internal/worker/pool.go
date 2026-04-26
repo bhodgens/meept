@@ -286,15 +286,16 @@ func (p *Pool) Scale(ctx context.Context, targetCount int) error {
 		// If we still need to remove more, remove any worker
 		if removed < toRemove {
 			p.mu.RLock()
+			var anyWorkers []string
 			for id := range p.workers {
 				if removed >= toRemove {
 					break
 				}
-				idleWorkers = append(idleWorkers, id)
+				anyWorkers = append(anyWorkers, id)
 			}
 			p.mu.RUnlock()
 
-			for _, id := range idleWorkers {
+			for _, id := range anyWorkers {
 				if removed >= toRemove {
 					break
 				}
