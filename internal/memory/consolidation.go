@@ -351,6 +351,10 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 //
 // When an LLM client is configured, semantic grouping is used.
 // Otherwise, the implementation groups strictly by date (calendar day).
+//
+// MEM-17 DEFERRED: Without LLM, only groups by calendar day rather than
+// semantic similarity. Fix requires implementing topic-aware non-LLM
+// grouping (e.g., keyword-based TF-IDF clustering).
 func (c *Consolidator) MergeRelated(ctx context.Context, memories []MemoryResult) ([]Summary, error) {
 	if c.llm != nil {
 		summaries, err := c.summarizeWithLLM(ctx, memories)

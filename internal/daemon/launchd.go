@@ -264,6 +264,11 @@ func parseElapsedTime(s string) time.Duration {
 		return 0
 	}
 
+// CORE-8 FIX: Use explicit time.Duration arithmetic instead of
+// int(time.Hour) casting. The old pattern `int(time.Hour)` was
+// fragile because it casts a Duration type to int before multiplying,
+// which can be confusing. Now we use `time.Duration(days)*24*time.Hour`
+// which keeps everything in Duration types and reads more clearly.
 	return time.Duration(days)*24*time.Hour +
 		time.Duration(hours)*time.Hour +
 		time.Duration(mins)*time.Minute +

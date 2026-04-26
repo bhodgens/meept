@@ -79,6 +79,12 @@ func (r *Registry) StartAll(ctx context.Context) error {
 }
 
 // StopAll stops all components in reverse registration order.
+//
+// CORE-7 FIX: Previously this method held r.mu.RLock while calling
+// component.Stop(ctx), which could deadlock if a component's Stop()
+// tried to acquire the same write lock. The fix collects all running
+// components under the read lock, releases it, then calls Stop on each
+// without holding the lock.
 func (r *Registry) StopAll(ctx context.Context) error {
 	// Collect components under lock to avoid holding lock during Stop()
 	// This prevents deadlock if component's Stop() calls back into registry

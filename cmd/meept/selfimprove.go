@@ -33,6 +33,17 @@ func newSelfImproveCmd() *cobra.Command {
 	return cmd
 }
 
+// CLI-8 FIX: helper to print raw JSON bytes as pretty-printed JSON.
+func printJSON(data []byte) error {
+	var parsed any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return fmt.Errorf("failed to parse response as JSON: %w", err)
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(&parsed)
+}
+
 func dialRPC() (*tui.RPCClient, error) {
 	client := tui.NewRPCClient(getSocketPath())
 	if err := client.Connect(); err != nil {
@@ -112,8 +123,8 @@ func newSelfImproveAnalyzeCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				fmt.Println(string(result))
-				return nil
+				// CLI-8 FIX: use pretty-printed JSON instead of raw bytes
+				return printJSON(result)
 			}
 
 			var resp struct {
@@ -125,8 +136,8 @@ func newSelfImproveAnalyzeCmd() *cobra.Command {
 				Count int `json:"count"`
 			}
 			if err := json.Unmarshal(result, &resp); err != nil {
-				// Fallback to raw output
-				fmt.Println(string(result))
+				// CLI-8 FIX: fallback to pretty-printed JSON instead of raw bytes
+				return printJSON(result)
 				return nil
 			}
 
@@ -174,8 +185,8 @@ func newSelfImproveGenerateCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				fmt.Println(string(result))
-				return nil
+				// CLI-8 FIX: use pretty-printed JSON instead of raw bytes
+				return printJSON(result)
 			}
 
 			var resp struct {
@@ -188,8 +199,8 @@ func newSelfImproveGenerateCmd() *cobra.Command {
 				Count int `json:"count"`
 			}
 			if err := json.Unmarshal(result, &resp); err != nil {
-				// Fallback to raw output
-				fmt.Println(string(result))
+				// CLI-8 FIX: fallback to pretty-printed JSON instead of raw bytes
+				return printJSON(result)
 				return nil
 			}
 

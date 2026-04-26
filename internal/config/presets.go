@@ -152,19 +152,15 @@ func (p *PresetConfig) ApplyPreset(model *Model, presetName string) error {
 		return fmt.Errorf("preset not found: %s", presetName)
 	}
 
-	// Apply preset parameters to model
-	if preset.Params.Temperature > 0 {
-		model.Temperature = preset.Params.Temperature
-	}
-	if preset.Params.TopP > 0 {
-		model.TopP = preset.Params.TopP
-	}
-	if preset.Params.FrequencyPenalty != 0 {
-		model.FrequencyPenalty = preset.Params.FrequencyPenalty
-	}
-	if preset.Params.PresencePenalty != 0 {
-		model.PresencePenalty = preset.Params.PresencePenalty
-	}
+	// CORE-5 FIX: Always apply preset parameters unconditionally.
+	// Previously, the code checked `> 0` or `!= 0` which caused preset
+	// values of 0 (e.g., TopP=0, FrequencyPenalty=0) to be silently
+	// ignored, leaving the model with its (potentially default) values
+	// instead of the explicit zeros specified by the preset.
+	model.Temperature = preset.Params.Temperature
+	model.TopP = preset.Params.TopP
+	model.FrequencyPenalty = preset.Params.FrequencyPenalty
+	model.PresencePenalty = preset.Params.PresencePenalty
 
 	return nil
 }

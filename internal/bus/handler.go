@@ -12,13 +12,19 @@ type MessageCallback func(ctx context.Context, topic string, msg interface{})
 // SubscriptionHandler manages bus subscriptions with automatic lifecycle
 // management. It handles subscribe/dispatch/teardown to eliminate
 // duplicated handler boilerplate.
+//
+// CORE-6 FIX: Track all subscribers so Stop() can unsubscribe from each
+// one instead of relying only on per-goroutine defer. Without this list,
+// if the context is cancelled but a goroutine never reaches its defer
+// (e.g., due to channel read blocking), the subscription leaks.
 type SubscriptionHandler struct {
-	bus       *MessageBus
-	callbacks map[string]MessageCallback  // topic → callback
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	logger    *slog.Logger
+	bus        *MessageBus
+	callbacks  map[string]MessageCallback // topic → callback
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	subscribers []*Subscriber              // all live subscribers
+	logger     *slog.Logger
 }
 
 // NewSubscriptionHandler creates a new handler
@@ -44,6 +50,7 @@ func (h *SubscriptionHandler) Start(parentCtx context.Context) {
 
 	for topic := range h.callbacks {
 		sub := h.bus.Subscribe("handler-"+topic, topic)
+		h.subscribers = append(h.subscribers, sub)
 		h.wg.Add(1)
 		go h.handleTopic(h.ctx, sub, topic)
 	}
@@ -53,6 +60,11 @@ func (h *SubscriptionHandler) Start(parentCtx context.Context) {
 
 // Stop gracefully shuts down all subscription goroutines
 func (h *SubscriptionHandler) Stop() {
+	// CORE-6 FIX: Unsubscribe from all tracked subscribers to ensure
+	// the bus clean up its subscriber map and channel.
+	for _, sub := range h.subscribers {
+		h.bus.Unsubscribe(sub)
+	}
 	if h.cancel != nil {
 		h.cancel()
 	}
