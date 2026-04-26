@@ -264,9 +264,39 @@ func (m *Manager) Reload(ctx context.Context, configs []ServerConfig) error {
 		newConfigs[cfg.Name] = cfg
 	}
 
-	// Phase 1: Determine what servers to stop (under lock)
-	var serversToStop []string
+	// Phase 1: Determine what servers to stop and close them (under lock)
+	// We use a helper function to ensure the lock is always released properly
+	configsToStart := m.reloadPhase1(newConfigs)
+
+	// Phase 2: Start servers (outside lock to avoid deadlock with StartServer)
+	var lastErr error
+	for _, cfg := range configsToStart {
+		if err := m.StartServer(ctx, cfg); err != nil {
+			m.logger.Error("failed to start MCP server during reload",
+				"name", cfg.Name,
+				"error", err,
+			)
+			lastErr = err
+		}
+	}
+
+	m.mu.RLock()
+	activeCount := len(m.clients)
+	m.mu.RUnlock()
+
+	m.logger.Info("MCP configuration reloaded", "active_servers", activeCount)
+
+	return lastErr
+}
+
+// reloadPhase1 handles the locked portion of reload - stopping old servers
+// and preparing configs to start. Returns configs that need to be started.
+func (m *Manager) reloadPhase1(newConfigs map[string]ServerConfig) []ServerConfig {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Determine what servers to stop
+	var serversToStop []string
 	for name := range m.clients {
 		if _, exists := newConfigs[name]; !exists {
 			serversToStop = append(serversToStop, name)
@@ -300,31 +330,11 @@ func (m *Manager) Reload(ctx context.Context, configs []ServerConfig) error {
 		}
 	}
 
-	// Store configs to start, then release lock
+	// Store configs to start
 	configsToStart := make([]ServerConfig, 0, len(serversToStart))
 	for _, name := range serversToStart {
 		configsToStart = append(configsToStart, newConfigs[name])
 	}
 
-	m.mu.Unlock()
-
-	// Phase 2: Start servers (outside lock to avoid deadlock with StartServer)
-	var lastErr error
-	for _, cfg := range configsToStart {
-		if err := m.StartServer(ctx, cfg); err != nil {
-			m.logger.Error("failed to start MCP server during reload",
-				"name", cfg.Name,
-				"error", err,
-			)
-			lastErr = err
-		}
-	}
-
-	m.mu.Lock()
-	m.logger.Info("MCP configuration reloaded",
-		"active_servers", len(m.clients),
-	)
-	m.mu.Unlock()
-
-	return lastErr
+	return configsToStart
 }

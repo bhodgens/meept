@@ -13,10 +13,12 @@ import (
 
 // ParserManager manages tree-sitter parsers for multiple languages.
 // It provides thread-safe parsing with an optional parse cache.
+// Each parser has its own mutex to prevent concurrent use of tree-sitter's C state.
 type ParserManager struct {
-	mu      sync.RWMutex
-	parsers map[Language]*sitter.Parser
-	cache   *ParseCache
+	mu         sync.RWMutex
+	parsers    map[Language]*sitter.Parser
+	parserLock map[Language]*sync.Mutex // per-language mutex for parsing
+	cache      *ParseCache
 }
 
 // ParserConfig configures the parser manager.
@@ -41,7 +43,8 @@ func DefaultParserConfig() ParserConfig {
 // NewParserManager creates a new parser manager.
 func NewParserManager(config ParserConfig) *ParserManager {
 	pm := &ParserManager{
-		parsers: make(map[Language]*sitter.Parser),
+		parsers:    make(map[Language]*sitter.Parser),
+		parserLock: make(map[Language]*sync.Mutex),
 	}
 	if config.CacheEnabled {
 		pm.cache = NewParseCache(config.CacheMaxSize, config.CacheTTL)
@@ -49,14 +52,16 @@ func NewParserManager(config ParserConfig) *ParserManager {
 	return pm
 }
 
-// getParser returns a parser for the given language, creating one if needed.
-func (pm *ParserManager) getParser(lang Language) (*sitter.Parser, error) {
+// getParserWithLock returns a parser for the given language and its associated mutex.
+// The caller must lock the mutex before using the parser and unlock it when done.
+func (pm *ParserManager) getParserWithLock(lang Language) (*sitter.Parser, *sync.Mutex, error) {
 	pm.mu.RLock()
 	parser, exists := pm.parsers[lang]
+	lock := pm.parserLock[lang]
 	pm.mu.RUnlock()
 
 	if exists {
-		return parser, nil
+		return parser, lock, nil
 	}
 
 	// Need to create new parser
@@ -65,19 +70,20 @@ func (pm *ParserManager) getParser(lang Language) (*sitter.Parser, error) {
 
 	// Double-check after acquiring write lock
 	if parser, exists = pm.parsers[lang]; exists {
-		return parser, nil
+		return parser, pm.parserLock[lang], nil
 	}
 
 	grammar := GetLanguageGrammar(lang)
 	if grammar == nil {
-		return nil, fmt.Errorf("unsupported language: %s", lang)
+		return nil, nil, fmt.Errorf("unsupported language: %s", lang)
 	}
 
 	parser = sitter.NewParser()
 	parser.SetLanguage(grammar)
 	pm.parsers[lang] = parser
+	pm.parserLock[lang] = &sync.Mutex{}
 
-	return parser, nil
+	return parser, pm.parserLock[lang], nil
 }
 
 // Parse parses source code and returns the AST.
@@ -86,10 +92,14 @@ func (pm *ParserManager) Parse(ctx context.Context, source []byte, lang Language
 		return nil, fmt.Errorf("unknown language")
 	}
 
-	parser, err := pm.getParser(lang)
+	parser, lock, err := pm.getParserWithLock(lang)
 	if err != nil {
 		return nil, err
 	}
+
+	// Lock the parser to prevent concurrent use of tree-sitter's C state
+	lock.Lock()
+	defer lock.Unlock()
 
 	tree, err := parser.ParseCtx(ctx, nil, source)
 	if err != nil {
@@ -246,15 +256,20 @@ func collectErrors(n *sitter.Node, source []byte) []string {
 
 // GetTree parses source and returns the raw tree-sitter tree.
 // This is useful for running queries against the tree.
+// Note: The returned tree must be used carefully as tree-sitter is not thread-safe.
 func (pm *ParserManager) GetTree(ctx context.Context, source []byte, lang Language) (*sitter.Tree, error) {
 	if lang == LangUnknown {
 		return nil, fmt.Errorf("unknown language")
 	}
 
-	parser, err := pm.getParser(lang)
+	parser, lock, err := pm.getParserWithLock(lang)
 	if err != nil {
 		return nil, err
 	}
+
+	// Lock the parser to prevent concurrent use of tree-sitter's C state
+	lock.Lock()
+	defer lock.Unlock()
 
 	return parser.ParseCtx(ctx, nil, source)
 }
