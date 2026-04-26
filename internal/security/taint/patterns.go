@@ -325,8 +325,20 @@ func ScoreSuspiciousness(command string) int {
 	return score
 }
 
-// SanitizeShellCommand removes or escapes potentially dangerous shell constructs.
-// Returns the sanitized command and a list of modifications made.
+// SanitizeShellCommand attempts to remove or escape potentially dangerous
+// shell constructs.
+//
+// SEC-11: This function is intentionally conservative - it strips the
+// most dangerous patterns and replaces command-substitution syntax with
+// neutral markers. However, it CANNOT guarantee shell safety because:
+//  1. Shell escaping is Turing-complete (nested quotes, heredocs, etc.)
+//  2. Raw string replacement can split meaningful tokens (e.g., "curl |
+//     bash" → "curl " leaving a dangling command)
+//  3. The full input space is unbounded
+//
+// Callers MUST still run the sanitized result through DetectSuspiciousPatterns
+// and ScoreSuspiciousness, and MUST treat the returned command as
+// best-effort that may require human review before execution.
 func SanitizeShellCommand(command string) (string, []string) {
 	modifications := []string{}
 	sanitized := command
@@ -355,6 +367,13 @@ func SanitizeShellCommand(command string) (string, []string) {
 	if strings.Contains(sanitized, "`") {
 		sanitized = strings.ReplaceAll(sanitized, "`", "[BACKTICK]")
 		modifications = append(modifications, "neutralized: backticks")
+	}
+
+	// Flag that the result is untrusted if modifications were made
+	if len(modifications) > 0 {
+		modifications = append(modifications,
+			"WARNING: command was modified; do not assume safe without further validation",
+		)
 	}
 
 	return sanitized, modifications

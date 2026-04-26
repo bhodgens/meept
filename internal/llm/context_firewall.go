@@ -529,7 +529,16 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	}
 
 	// Step 2: Summarize old history if too much context is used
-	// Use hard limit as the summarization threshold
+	// Uses the configured summaryModel (a real LLM) to produce a content-aware
+	// structured summary. Fallback on failure is to continue without
+	// summarization – this is a deliberate scope limitation (the firewall
+	// does not perform offline/local summarization). The caller must accept
+	// that context pressure remains elevated when summarization fails.
+	//
+	// LLM-12 FIX: Documented that this stage is scope-limited: on failure
+	// the firewall silently continues with the unsummarized context rather
+	// than escalating or blocking. This means the subsequent request may
+	// still hit the hard limit.
 	if f.config.SummarizeHistory && currentTokens > int(float64(f.model.ContextLimit)*f.config.HardLimit) {
 		summarized, err := f.summarizeOldHistory(ctx, result)
 		if err != nil {

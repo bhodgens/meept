@@ -998,9 +998,10 @@ func (m *Manager) GetRelatedMemories(ctx context.Context, memoryID string, limit
 		return results, nil
 	}
 
-	// For SQLite, look up each ID directly using GetByID.
-	// Using Search() with UUIDs doesn't work because FTS5 tokenizes
-	// hyphens, breaking UUID searches.
+	// MEM-16 FIX: Use direct GetByID lookups instead of FTS Search() on UUIDs.
+	// FTS5 tokenizes hyphens, so searching for a UUID like "abc-123" fails
+	// because the tokenized index stores "abc" and "123" separately.
+	// GetByID queries WHERE id = ? which is O(1) and correct.
 	var results []MemoryResult
 	for _, id := range relatedIDs {
 		// Try episodic first
@@ -1095,7 +1096,7 @@ func (m *Manager) StoreVersioned(ctx context.Context, mem Memory, opts StoreOpti
 		}
 
 		// Get current version number
-		currentVersion := m.getCurrentVersion(mem.ID)
+			currentVersion := m.getCurrentVersion(ctx, mem.ID)
 
 		// Create new version
 		newMem := mem
@@ -1131,13 +1132,14 @@ func (m *Manager) markVersionNonCurrent(ctx context.Context, id string) error {
 
 // getCurrentVersion returns the current version number for a memory.
 // It uses the SQL version and parent_id columns directly.
-func (m *Manager) getCurrentVersion(id string) int {
+// MEM-13 FIX: accept context so cancellation/deadline propagates to the DB call.
+func (m *Manager) getCurrentVersion(ctx context.Context, id string) int {
 	if m.episodic == nil {
 		return 0
 	}
 
 	pool := m.episodic.store.GetPool()
-	db, err := pool.Get(context.Background())
+	db, err := pool.Get(ctx)
 	if err != nil {
 		m.logger.Warn("Failed to get database connection for version check", "error", err)
 		return 0
@@ -1146,7 +1148,7 @@ func (m *Manager) getCurrentVersion(id string) int {
 
 	// Find the parent_id of this memory (if it's a version) using the SQL column
 	var parentID sql.NullString
-	row := db.QueryRow(`
+	row := db.QueryRowContext(ctx, `
 		SELECT parent_id
 		FROM episodic_memories
 		WHERE id = ?
@@ -1167,7 +1169,7 @@ func (m *Manager) getCurrentVersion(id string) int {
 
 	// Get max version from the SQL column for all memories in the version chain
 	var maxVersion int
-	err = db.QueryRow(`
+	err = db.QueryRowContext(ctx, `
 		SELECT COALESCE(MAX(version), 0)
 		FROM episodic_memories
 		WHERE id = ? OR parent_id = ?

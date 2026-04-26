@@ -131,6 +131,10 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 }
 
 // runAccessBasedExpiration performs access-based memory expiration.
+// MEM-11 FIX: accumulate Store/Delete error counts instead of silently
+// discarding them.  The report's Expired field now only reflects cleanly
+// removed memories; non-zero storeErrors/deleteErrors are logged at
+// warn level above.
 func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*ConsolidationReport, error) {
 	cfg := c.manager.Config().Expiration
 	expiredMemories, err := c.manager.GetExpiredMemories(ctx, cfg.AccessExpirationDays)

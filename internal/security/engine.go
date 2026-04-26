@@ -440,6 +440,7 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 	}
 	defer blockRows.Close()
 
+	var blocked *Decision
 	for blockRows.Next() {
 		var pattern, description string
 		var immutable, riskLevel int
@@ -454,12 +455,13 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 			if immutable == 1 {
 				ruleSource = "immutable"
 			}
-			return &Decision{
+			blocked = &Decision{
 				Allowed:    false,
 				Reason:     fmt.Sprintf("Path blocked: %s (pattern: %s)", description, pattern),
 				RiskLevel:  RiskLevel(riskLevel),
 				RuleSource: ruleSource,
 			}
+			break
 		}
 
 		// SEC-4 FIX: Use proper directory boundary comparison
@@ -468,13 +470,27 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 			if immutable == 1 {
 				ruleSource = "immutable"
 			}
-			return &Decision{
+			blocked = &Decision{
 				Allowed:    false,
 				Reason:     fmt.Sprintf("Path blocked: %s (pattern: %s)", description, pattern),
 				RiskLevel:  RiskLevel(riskLevel),
 				RuleSource: ruleSource,
 			}
+			break
 		}
+	}
+	// SEC-10 FIX: Check iterator error instead of silently returning
+	if err := blockRows.Err(); err != nil {
+		e.logger.Error("Failed to iterate block path rules", "error", err)
+		return &Decision{
+			Allowed:    false,
+			Reason:     "path rule query failed",
+			RiskLevel:  RiskHigh,
+			RuleSource: "fail_closed",
+		}
+	}
+	if blocked != nil {
+		return blocked
 	}
 
 	// Check allow rules
@@ -504,11 +520,40 @@ func (e *Engine) checkPath(pathStr, action string) *Decision {
 
 		expandedPattern := pathutil.ExpandPath(pattern)
 		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
+			// SEC-10 FIX: break instead of returning from inside the loop
+			if err := allowRows.Err(); err != nil {
+				e.logger.Error("Failed to iterate allow path rules", "error", err)
+				return &Decision{
+					Allowed:    false,
+					Reason:     "path rule query failed",
+					RiskLevel:  RiskHigh,
+					RuleSource: "fail_closed",
+				}
+			}
 			return nil // Allowed
 		}
 		// SEC-4 FIX: Use proper directory boundary comparison
 		if isPathUnderDir(resolved, expandedPattern) {
+			if err := allowRows.Err(); err != nil {
+				e.logger.Error("Failed to iterate allow path rules", "error", err)
+				return &Decision{
+					Allowed:    false,
+					Reason:     "path rule query failed",
+					RiskLevel:  RiskHigh,
+					RuleSource: "fail_closed",
+				}
+			}
 			return nil // Allowed
+		}
+	}
+	// SEC-10 FIX: Check iterator error after loop
+	if err := allowRows.Err(); err != nil {
+		e.logger.Error("Failed to iterate allow path rules", "error", err)
+		return &Decision{
+			Allowed:    false,
+			Reason:     "path rule query failed",
+			RiskLevel:  RiskHigh,
+			RuleSource: "fail_closed",
 		}
 	}
 

@@ -569,13 +569,21 @@ func (pm *ProviderManager) StartHealthChecks(ctx context.Context) {
 	}()
 }
 
-// runHealthCheck performs a simple health check on all providers.
+// runHealthCheck performs a health check on unhealthy providers by sending
+// a minimal chat request ("test", 1 token) to elicit a response.
+//
+// LLM-13: Health checks make live API calls and consume real budget
+// (each check counts against the provider's token quota and cost tracking).
+// Operators should set HealthCheckInterval high enough (default 5m) to
+// avoid significant cumulative cost, especially with providers that have
+// per-request minimum charges. For zero-cost providers (local models) this
+// is not a concern.
 func (pm *ProviderManager) runHealthCheck(ctx context.Context) {
 	pm.mu.Lock()
 	pm.lastHealthCheck = time.Now()
 	pm.mu.Unlock()
 
-	// Simple health check: try a minimal request on unhealthy providers
+	// Health check: try a minimal request on unhealthy providers only
 	for _, entry := range pm.providers {
 		if entry.Health.Status == ProviderStatusUnhealthy {
 			// Try a minimal request
