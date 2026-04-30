@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode"
 )
 
 // AgentDesigner generates new agent specifications based on research findings.
@@ -376,8 +377,13 @@ func (d *AgentDesigner) generateAgentName(pattern PatternReport) string {
 		intent = "Specialist"
 	}
 
-	// Capitalize first letter
-	name := strings.Title(strings.ToLower(intent))
+	// Capitalize first letter (strings.Title is deprecated, use unicode.ToUpper for first char)
+	name := strings.ToLower(intent)
+	if len(name) > 0 {
+		runes := []rune(name)
+		runes[0] = unicode.ToUpper(runes[0])
+		name = string(runes)
+	}
 	return fmt.Sprintf("%s Specialist Agent", name)
 }
 

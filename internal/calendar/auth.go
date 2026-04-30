@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -251,7 +252,7 @@ func (a *OAuth2Authenticator) GetValidToken(ctx context.Context) (*Token, error)
 	// Save the new token
 	if err := a.SaveToken(newToken); err != nil {
 		// Log but don't fail
-		fmt.Printf("Warning: failed to save refreshed token: %v\n", err)
+		slog.Default().Warn("failed to save refreshed token", "error", err)
 	}
 
 	return newToken, nil
