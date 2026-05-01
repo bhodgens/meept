@@ -112,8 +112,10 @@ func WithTimeoutCalculator(calc *metrics.Calculator) ClientOption {
 // WithTokenCache sets the token cache for the client.
 func WithTokenCache(cache ResponseCache) ClientOption {
 	return func(c *Client) {
-		c.tokenCache = cache
-		c.keyBuilder = NewCacheKeyBuilder(true) // Enable file-aware caching
+		if cache != nil {
+			c.tokenCache = cache
+			c.keyBuilder = NewCacheKeyBuilder(true) // Enable file-aware caching
+		}
 	}
 }
 

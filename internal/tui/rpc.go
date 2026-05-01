@@ -3,6 +3,7 @@ package tui
 
 import (
 	"bufio"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -136,12 +137,17 @@ func (c *RPCClient) isConnectionError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Check for EOF explicitly (daemon exited/crashed)
+	if errors.Is(err, io.EOF) {
+		return true
+	}
 	errStr := err.Error()
 	return strings.Contains(errStr, "failed to write") ||
 		strings.Contains(errStr, "failed to read") ||
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "not connected")
+		strings.Contains(errStr, "not connected") ||
+		strings.Contains(errStr, "connection refused")
 }
 
 // callOnce makes a single RPC call attempt.

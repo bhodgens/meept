@@ -87,8 +87,10 @@ func WithAnthropicTimeoutCalculator(calc *metrics.Calculator) AnthropicClientOpt
 // WithAnthropicTokenCache sets the token cache for the Anthropic client.
 func WithAnthropicTokenCache(cache ResponseCache) AnthropicClientOption {
 	return func(c *AnthropicClient) {
-		c.tokenCache = cache
-		c.keyBuilder = NewCacheKeyBuilder(true) // Enable file-aware caching
+		if cache != nil {
+			c.tokenCache = cache
+			c.keyBuilder = NewCacheKeyBuilder(true) // Enable file-aware caching
+		}
 	}
 }
 

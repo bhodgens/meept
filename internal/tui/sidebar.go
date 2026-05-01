@@ -293,9 +293,9 @@ type SidebarDataMsg struct {
 
 func (s *SidebarModel) refreshData() tea.Cmd {
 	return func() tea.Msg {
-		// Fetch status data
+		// Fetch status data - start assuming disconnected
 		status := &SidebarStatusData{
-			DaemonRunning: s.rpc.IsConnected(),
+			DaemonRunning: false,
 		}
 
 		var tasks []SidebarTaskItem
@@ -305,6 +305,8 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 		if s.rpc.IsConnected() {
 			// Try to get status info
 			if statusResp, err := s.rpc.Status(); err == nil {
+				// Only mark as running if Status() succeeds
+				status.DaemonRunning = true
 				status.Uptime = types.FormatUptime(statusResp.UptimeSeconds)
 				status.ConversationCnt = statusResp.BusSubscribers // Use bus subscribers as proxy
 			}
