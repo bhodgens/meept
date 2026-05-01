@@ -2,6 +2,7 @@ package skills
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 
@@ -228,14 +229,17 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 		return nil, ErrInvalidYAML
 	}
 
-	// Handle alternative field names (with underscores instead of hyphens)
+	// Handle alternative field names (with underscores instead of hyphens).
+	// The frontmatter was already validated above, so this parse cannot fail.
 	var altMeta struct {
 		AllowedTools  []string `yaml:"allowed_tools"`
 		RiskLevel     string   `yaml:"risk_level"`
 		MaxIterations int      `yaml:"max_iterations"`
 		MaxTokens     *int     `yaml:"max_tokens"`
 	}
-	_ = yaml.Unmarshal([]byte(frontmatter), &altMeta)
+	if err := yaml.Unmarshal([]byte(frontmatter), &altMeta); err != nil {
+		return nil, fmt.Errorf("parse alt skill metadata: %w", err)
+	}
 
 	// Merge alternative field values if primary is empty/zero
 	if len(meta.AllowedTools) == 0 && len(altMeta.AllowedTools) > 0 {

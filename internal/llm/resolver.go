@@ -313,7 +313,7 @@ func (r *Resolver) HasHealthyModels(aliasName string) bool {
 	}
 
 	now := time.Now()
-	for i, model := range alias.Models {
+	for i := range alias.Models {
 		health := r.getOrCreateHealth(aliasName)
 		// Check if this model is the current one and not in cooldown
 		if i == health.CurrentIndex {
@@ -324,7 +324,6 @@ func (r *Resolver) HasHealthyModels(aliasName string) bool {
 			// Non-current models are always available for rotation
 			return true
 		}
-		_ = model // Silence unused variable warning
 	}
 	return false
 }

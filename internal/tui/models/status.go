@@ -123,7 +123,7 @@ func (m *StatusModel) renderLoading() string {
 		Align(lipgloss.Center).
 		Padding(4, 0)
 
-	return style.Render("Loading status...")
+	return style.Render("loading status...")
 }
 
 func (m *StatusModel) renderError() string {
@@ -134,11 +134,11 @@ func (m *StatusModel) renderError() string {
 		Width(m.width - 4)
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("Error") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("error") +
 			"\n\n" +
 			fmt.Sprintf("%v", m.err) +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("press 'r' to refresh"),
 	)
 }
 
@@ -200,9 +200,9 @@ func (m *StatusModel) renderStatusPanel(width int) string {
 		Foreground(lipgloss.Color(statusColor)).
 		Bold(true)
 
-	content := titleStyle.Render("Daemon Status") + "\n\n"
-	content += labelStyle.Render("Status:") + statusStyle.Render(m.status.Status) + "\n"
-	content += labelStyle.Render("Uptime:") + valueStyle.Render(types.FormatUptime(m.status.UptimeSeconds)) + "\n"
+	content := titleStyle.Render("daemon status") + "\n\n"
+	content += labelStyle.Render("status:") + statusStyle.Render(m.status.Status) + "\n"
+	content += labelStyle.Render("uptime:") + valueStyle.Render(types.FormatUptime(m.status.UptimeSeconds)) + "\n"
 
 	// Model
 	model := m.status.Model
@@ -212,14 +212,14 @@ func (m *StatusModel) renderStatusPanel(width int) string {
 	if model == "" {
 		model = "n/a"
 	}
-	content += labelStyle.Render("LLM Model:") + valueStyle.Render(model) + "\n"
+	content += labelStyle.Render("llm model:") + valueStyle.Render(model) + "\n"
 
 	// RPC methods
 	methodCount := len(m.status.RegisteredMethods)
-	content += labelStyle.Render("RPC Methods:") + valueStyle.Render(fmt.Sprintf("%d", methodCount)) + "\n"
+	content += labelStyle.Render("rpc methods:") + valueStyle.Render(fmt.Sprintf("%d", methodCount)) + "\n"
 
 	// Bus subscribers
-	content += labelStyle.Render("Bus Subs:") + valueStyle.Render(fmt.Sprintf("%d", m.status.BusSubscribers)) + "\n"
+	content += labelStyle.Render("bus subs:") + valueStyle.Render(fmt.Sprintf("%d", m.status.BusSubscribers)) + "\n"
 
 	return panelStyle.Render(content)
 }
@@ -240,7 +240,7 @@ func (m *StatusModel) renderMetricsPanel(width int) string {
 	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6B7280"))
 
-	content := titleStyle.Render("Token Budget") + "\n\n"
+	content := titleStyle.Render("token budget") + "\n\n"
 
 	// Token usage bar
 	tokensUsed := m.status.TokensUsed
@@ -251,7 +251,7 @@ func (m *StatusModel) renderMetricsPanel(width int) string {
 	}
 
 	tokenPercent := float64(tokensUsed) / float64(totalTokens)
-	content += labelStyle.Render("Tokens Used:") + "\n"
+	content += labelStyle.Render("tokens used:") + "\n"
 	content += m.renderProgressBar(width-8, tokenPercent) + "\n"
 	content += fmt.Sprintf("%d / %d\n\n", tokensUsed, totalTokens)
 
@@ -264,7 +264,7 @@ func (m *StatusModel) renderMetricsPanel(width int) string {
 	}
 
 	budgetPercent := budgetUsed / totalBudget
-	content += labelStyle.Render("Budget Used:") + "\n"
+	content += labelStyle.Render("budget used:") + "\n"
 	content += m.renderProgressBar(width-8, budgetPercent) + "\n"
 	content += fmt.Sprintf("$%.2f / $%.2f\n", budgetUsed, totalBudget)
 

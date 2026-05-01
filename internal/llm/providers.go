@@ -231,7 +231,7 @@ func GetAllModels(cfg *ProvidersConfig) []*ModelConfig {
 
 			models = append(models, &ModelConfig{
 				BaseURL:              provider.Options.BaseURL,
-				ModelID:              modelDef.Name,
+				ModelID:              modelID,
 				APIKey:               provider.Options.APIKey,
 				CostPerMillionInput:  modelDef.InputCost,
 				CostPerMillionOutput: modelDef.OutputCost,
@@ -241,7 +241,6 @@ func GetAllModels(cfg *ProvidersConfig) []*ModelConfig {
 				Capabilities:         caps,
 				ProviderID:           providerID,
 			})
-			_ = modelID // unused but shows the iteration variable
 		}
 	}
 

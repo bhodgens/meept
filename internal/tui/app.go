@@ -1288,10 +1288,10 @@ func (a *App) getQuickActions() []string {
 			chatMode := a.chat.GetMode()
 			switch chatMode {
 			case "insert":
-				actions = append(actions, a.styles.HelpKey.Render("Esc")+" "+a.styles.HelpValue.Render("normal"))
-				actions = append(actions, a.styles.HelpKey.Render("Enter")+" "+a.styles.HelpValue.Render("send"))
+				actions = append(actions, a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("normal"))
+				actions = append(actions, a.styles.HelpKey.Render("enter")+" "+a.styles.HelpValue.Render("send"))
 			case "visual":
-				actions = append(actions, a.styles.HelpKey.Render("Esc")+" "+a.styles.HelpValue.Render("normal"))
+				actions = append(actions, a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("normal"))
 				actions = append(actions, a.styles.HelpKey.Render("y")+" "+a.styles.HelpValue.Render("copy"))
 			default: // normal mode
 				actions = append(actions, a.styles.HelpKey.Render("i")+" "+a.styles.HelpValue.Render("insert"))
@@ -1299,19 +1299,19 @@ func (a *App) getQuickActions() []string {
 				actions = append(actions, a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"))
 			}
 		} else {
-			actions = append(actions, a.styles.HelpKey.Render("Esc")+" "+a.styles.HelpValue.Render("input"))
+			actions = append(actions, a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("input"))
 		}
 
 	case ViewTasks:
 		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))
-		actions = append(actions, a.styles.HelpKey.Render("Enter")+" "+a.styles.HelpValue.Render("details"))
+		actions = append(actions, a.styles.HelpKey.Render("enter")+" "+a.styles.HelpValue.Render("details"))
 		actions = append(actions, a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"))
-		actions = append(actions, a.styles.HelpKey.Render("Tab")+" "+a.styles.HelpValue.Render("toggle view"))
+		actions = append(actions, a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("toggle view"))
 
 	case ViewQueue:
 		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))
 		actions = append(actions, a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"))
-		actions = append(actions, a.styles.HelpKey.Render("Tab")+" "+a.styles.HelpValue.Render("toggle view"))
+		actions = append(actions, a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("toggle view"))
 
 	case ViewMemory:
 		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))

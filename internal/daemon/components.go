@@ -405,10 +405,6 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Wire progress tracking
 	if cfg.Agent.ProgressEnabled {
 		agentOpts = append(agentOpts, agent.WithProgressEnabled(true))
-		interval := time.Duration(cfg.Agent.ProgressIntervalSeconds) * time.Second
-		if interval > 0 {
-			agentOpts = append(agentOpts, agent.WithProgressInterval(interval))
-		}
 		logger.Info("Agent loop configured with progress tracking")
 	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled

@@ -41,11 +41,13 @@ type RenderingConfig struct {
 }
 
 // InputConfig defines input textarea behavior settings.
-// Note: EnterBehavior and AutoExpand are deprecated and no longer used.
+// Note: EnterBehavior and AutoExpand were deprecated in favor of hardcoded behavior;
 // Enter always sends, Shift+Enter inserts newline, and input has fixed height.
 type InputConfig struct {
-	EnterBehavior string `json:"enter_behavior"` // Deprecated: Enter always sends, Shift+Enter inserts newline
-	AutoExpand    bool   `json:"auto_expand"`    // Deprecated: Input height is now fixed at 3 lines
+	// Deprecated: these fields were used in earlier versions but are now ignored.
+	// They are retained only for config file backwards-compatibility.
+	EnterBehavior string `json:"enter_behavior"`
+	AutoExpand    bool   `json:"auto_expand"`
 }
 // ChatConfig defines chat viewport behavior settings.
 type ChatConfig struct {

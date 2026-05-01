@@ -267,10 +267,6 @@ func (c *Canvas) setCirclePoints(cx, cy, x, y int, color ansi.Color) {
 
 // DrawArc draws a partial arc (for halo effect).
 func (c *Canvas) DrawArc(cx, cy, r int, startAngle, endAngle float64, color ansi.Color) {
-	// Simple arc approximation using discrete points
-	import_math := func(x float64) float64 { return x }
-	_ = import_math // placeholder - we'll use integer math
-
 	// Draw points around the arc using integer approximation
 	steps := r * 2
 	if steps < 8 {

@@ -28,7 +28,7 @@ func main() {
 	}
 
 	// Display results
-	fmt.Println("=== Claude Artifact Scan Results ===\n")
+	fmt.Println("=== Claude Artifact Scan Results ===")
 
 	if !artifacts.Available {
 		fmt.Println("No Claude artifacts found in this directory.")
@@ -36,7 +36,7 @@ func main() {
 		return
 	}
 
-	fmt.Println("✓ Claude artifacts detected!\n")
+	fmt.Println("✓ Claude artifacts detected!")
 
 	// CLAUDE.md
 	if artifacts.HasCLAUDEMD() {
@@ -117,7 +117,7 @@ func main() {
 	}
 
 	// Demonstrate context building
-	fmt.Println("\n=== Context Building Demo ===\n")
+	fmt.Println("=== Context Building Demo ===")
 
 	builder := context.NewContextBuilder(artifacts)
 

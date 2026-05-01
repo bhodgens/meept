@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -428,5 +427,4 @@ func TestHierarchicalSummarization_ContentFormat(t *testing.T) {
 		t.Errorf("expected content to start with %q, got %q", expectedPrefix, summary.Content[:min(50, len(summary.Content))])
 	}
 
-	_ = fmt.Sprintf("checked") // suppress unused import if min is built-in
 }

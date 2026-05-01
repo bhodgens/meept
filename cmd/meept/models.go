@@ -200,7 +200,7 @@ func runModelsList(jsonOutput bool) error {
 	}
 
 	// Table output
-	fmt.Println("Configured Models:\n")
+	fmt.Println("Configured Models:")
 	for providerID, provider := range cfg.Providers {
 		fmt.Printf("[%s]\n", providerID)
 		for modelID, model := range provider.Models {

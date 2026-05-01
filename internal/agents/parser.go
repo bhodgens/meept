@@ -2,6 +2,7 @@ package agents
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 
@@ -191,7 +192,8 @@ func parseMetadata(frontmatter string) (*AgentMetadata, error) {
 		return nil, ErrInvalidYAML
 	}
 
-	// Handle alternative field names (with underscores instead of hyphens)
+	// Handle alternative field names (with underscores instead of hyphens).
+	// The frontmatter was already validated above, so this parse cannot fail.
 	var altMeta struct {
 		AdditionalTools       []string          `yaml:"additional_tools"`
 		AvailableSkills       []string          `yaml:"available_skills"`
@@ -203,7 +205,9 @@ func parseMetadata(frontmatter string) (*AgentMetadata, error) {
 		MaxMemoryRefs         int               `yaml:"max_memory_refs"`
 		TopP                  *float64          `yaml:"top_p"`
 	}
-	_ = yaml.Unmarshal([]byte(frontmatter), &altMeta)
+	if err := yaml.Unmarshal([]byte(frontmatter), &altMeta); err != nil {
+		return nil, fmt.Errorf("parse alt agent metadata: %w", err)
+	}
 
 	// Merge alternative field values if primary is empty/zero
 	if len(meta.AdditionalTools) == 0 && len(altMeta.AdditionalTools) > 0 {
