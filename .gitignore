@@ -1,6 +1,6 @@
 
-meept-daemon
-meept
+/meept-daemon
+/bin/meept
 /meept-lite
 
 # IDE
