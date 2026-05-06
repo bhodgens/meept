@@ -1061,7 +1061,7 @@ func DefaultConfig() *Config {
 		},
 		MCP: MCPConfig{
 			Enabled:    false,
-			ConfigFile: "~/.meept/mcp_servers.json",
+			ConfigFile: "~/.meept/mcp_servers.json5",
 		},
 		Plugins: PluginsConfig{
 			Enabled:   true,
