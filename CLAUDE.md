@@ -83,7 +83,7 @@ Meept is a **Go daemon** with skill-based task orchestration, LLM integration, m
 
 ```
 User Input (CLI/Telegram/Web/MenuBar)
-    → CommServer (Unix socket JSON-RPC) OR HTTP REST API
+    → CommServer (Unix socket JSON-RPC or HTTP REST API)
     → MessageBus (pub/sub)
     → AgentLoop
         → Planner.Decompose() → TaskSteps
@@ -132,13 +132,47 @@ Skills declare `requires: [code, reasoning]` in YAML frontmatter; models declare
 
 ## Configuration
 
-- **Main config**: `~/.meept/meept.toml` (see `config/meept.toml` for template)
-- **Models**: `config/models.json5` (JSON5 format with capability tags)
-- **Client**: `~/.meept/client.json5` (menubar app settings)
-- **Presets**: `config/presets.json5` (model presets), `~/.meept/presets.json5` (user overrides)
-- **MCP servers**: `~/.meept/mcp_servers.json`
-- **Metrics DB**: `~/.meept/metrics.db` (SQLite time-series storage)
-- **launchd Plist**: `~/Library/LaunchAgents/com.caimlas.meept-daemon.plist` (macOS)
+All configuration uses **JSON5** format (JSON with comments and trailing commas).
+
+| File | Runtime Path | Description |
+|------|-------------|-------------|
+| **Main config** | `~/.meept/meept.json5` | Daemon and core settings |
+| **Models** | `~/.meept/models.json5` | LLM providers, model definitions, capabilities |
+| **Presets** | `~/.meept/presets.json5` | Model temperature/prompt presets (user overrides) |
+| **Client** | `~/.meept/client.json5` | TUI keybindings and rendering |
+| **Menubar** | `~/.meept/menubar.json5` | Menu bar app settings |
+| **MCP servers** | `~/.meept/mcp_servers.json5` | MCP server definitions |
+| **Q Agent** | `~/.meept/q_agent.json5` | Meta-agent analysis settings |
+| **Agents** | `~/.meept/agents.json5` | Agent definitions (replaces `config/agents/*.toml`) |
+| **Metrics DB** | `~/.meept/metrics.db` | SQLite time-series storage |
+| **launchd Plist** | `~/Library/LaunchAgents/com.caimlas.meept-daemon.plist` | macOS service |
+
+Templates live in `config/` and are copied to `~/.meept/` by `make install` if missing. Legacy TOML/JSON files are still read as fallback.
+
+### Transport Configuration
+
+The daemon supports both **RPC** (Unix socket JSON-RPC) and **HTTP** (REST API) transports, independently enabled:
+
+```json5
+{
+  transport: {
+    rpc: {
+      enabled: true,
+      socket_path: "~/.meept/meept.sock",
+    },
+    http: {
+      enabled: true,
+      addr: ":8081",
+    },
+  },
+}
+```
+
+At least one transport must be enabled or the daemon refuses to start.
+
+### make install
+
+`make install` compiles binaries and copies any missing config templates from `config/` to `~/.meept/` (skipping existing files). It also copies `config/agents/` and `config/prompts/` contents.
 
 ### Programmatic component options
 
@@ -240,8 +274,15 @@ internal/
   selfimprove/     # Self-improvement system
   skills/          # Skill discovery and parsing
   tools/           # Tool registry and builtins
-config/            # Configuration templates
-  presets.json5    # Model presets (NEW)
+config/            # Configuration templates (copied by make install)
+  meept.json5      # Main daemon configuration
+  models.json5     # LLM provider configuration
+  presets.json5    # Model presets
+  client.json5     # TUI client settings
+  menubar.json5    # Menu bar app settings
+  mcp_servers.json5 # MCP server definitions
+  q_agent.json5    # Q Agent configuration
+  agents.json5     # Multi-agent definitions
 docs/              # MkDocs documentation site
 menubar/           # macOS MenuBar app (NEW)
   MeeptMenuBar/    # Main SwiftUI app
@@ -276,6 +317,7 @@ Daemon components
 **Config:**
 - `GET/POST /api/v1/config/client` - Client configuration
 - `GET/POST /api/v1/config/models` - Models configuration
+- `GET/POST /api/v1/config/menubar` - Menu bar configuration
 - `GET/POST/DELETE /api/v1/config/agents/:id` - Agent management
 
 **Daemon:**
