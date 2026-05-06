@@ -71,6 +71,35 @@ func (s *ConfigService) getAgentsDir() string {
 	return filepath.Join(s.meeptDir, "agents")
 }
 
+// getMenubarConfigPath returns the path to menubar.json5.
+func (s *ConfigService) getMenubarConfigPath() string {
+	return filepath.Join(s.meeptDir, "menubar.json5")
+}
+
+// LoadMenubarConfig loads the menubar.json5 content.
+func (s *ConfigService) LoadMenubarConfig() (string, error) {
+	path := s.getMenubarConfigPath()
+
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "", nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read menubar config: %w", err)
+	}
+	return string(data), nil
+}
+
+// SaveMenubarConfig saves the menubar.json5 content.
+func (s *ConfigService) SaveMenubarConfig(content string) error {
+	path := s.getMenubarConfigPath()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write menubar config: %w", err)
+	}
+	return nil
+}
+
 // LoadClientConfig loads the client.json5 content.
 func (s *ConfigService) LoadClientConfig() (string, error) {
 	path := s.getClientConfigPath()
