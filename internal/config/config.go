@@ -139,6 +139,7 @@ func expandPath(path string) string {
 // expandConfigPaths expands all path fields in the config.
 func expandConfigPaths(cfg *Config) {
 	cfg.Daemon.SocketPath = expandPath(cfg.Daemon.SocketPath)
+	cfg.Transport.RPC.SocketPath = expandPath(cfg.Transport.RPC.SocketPath)
 	cfg.Daemon.PIDFile = expandPath(cfg.Daemon.PIDFile)
 	cfg.Daemon.DataDir = expandPath(cfg.Daemon.DataDir)
 	cfg.Memory.DataDir = expandPath(cfg.Memory.DataDir)

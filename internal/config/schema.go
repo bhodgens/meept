@@ -37,6 +37,7 @@ type Config struct {
 	QAgent            QAgentConfig            `toml:"q_agent" json:"q_agent"`
 	CodeIntel         CodeIntelConfig         `toml:"code_intel" json:"code_intel"`
 	Calendar          CalendarConfig          `toml:"calendar" json:"calendar"`
+	Transport         TransportConfig         `toml:"transport" json:"transport"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -117,6 +118,24 @@ type DaemonConfig struct {
 	PIDFile    string `toml:"pid_file" json:"pid_file"`
 	LogLevel   string `toml:"log_level" json:"log_level"`
 	DataDir    string `toml:"data_dir" json:"data_dir"`
+}
+
+// TransportConfig controls which transports the daemon exposes.
+type TransportConfig struct {
+	RPC  RPCTransportConfig  `toml:"rpc" json:"rpc"`
+	HTTP HTTPTransportConfig `toml:"http" json:"http"`
+}
+
+// RPCTransportConfig configures the Unix socket RPC transport.
+type RPCTransportConfig struct {
+	Enabled    bool   `toml:"enabled" json:"enabled"`       // Enable Unix socket RPC (default: true)
+	SocketPath string `toml:"socket_path" json:"socket_path"` // Unix socket path (default: "~/.meept/meept.sock")
+}
+
+// HTTPTransportConfig configures the HTTP REST transport.
+type HTTPTransportConfig struct {
+	Enabled bool   `toml:"enabled" json:"enabled"` // Enable HTTP server (default: true)
+	Addr    string `toml:"addr" json:"addr"`    // Listen address (default: ":8081")
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.
@@ -1246,6 +1265,16 @@ func DefaultConfig() *Config {
 			ReminderEnabled:       false,
 			ReminderCheckInterval: "5m",
 			ReminderAdvanceMinutes: 10,
+		},
+		Transport: TransportConfig{
+			RPC: RPCTransportConfig{
+				Enabled:    true,
+				SocketPath: "~/.meept/meept.sock",
+			},
+			HTTP: HTTPTransportConfig{
+				Enabled: true,
+				Addr:    ":8081",
+			},
 		},
 	}
 }
