@@ -1,0 +1,289 @@
+// Meept Configuration
+// Copy to ~/.meept/meept.json5 and customize
+{
+  // Daemon settings
+  daemon: {
+    socket_path: "~/.meept/meept.sock",
+    pid_file: "~/.meept/meept.pid",
+    log_level: "INFO",
+    data_dir: "~/.meept",
+  },
+
+  // Transport configuration - enable/disable RPC and HTTP independently
+  transport: {
+    rpc: {
+      enabled: true,
+      socket_path: "~/.meept/meept.sock",
+    },
+    http: {
+      enabled: true,
+      addr: ":8081",
+    },
+  },
+
+  // LLM configuration (models moved to models.json5)
+  llm: {
+    budget: {
+      hourly_token_limit: 100000,
+      daily_token_limit: 1000000,
+      rate_limit_rpm: 30,
+      aggressiveness: 0.5,
+    },
+    context_firewall: {
+      enabled: true,
+      proactive_compression: false,
+    },
+  },
+
+  // Memory configuration
+  memory: {
+    data_dir: "~/.meept/memory",
+    consolidation_interval_hours: 6,
+    episodic: {
+      enabled: true,
+      max_context_items: 20,
+    },
+    task: {
+      enabled: true,
+      domains: ["general", "code", "commands"],
+    },
+    personality: {
+      enabled: true,
+      update_interval_conversations: 10,
+    },
+    security: {
+      enabled: true,
+      fail_closed: true,
+      log_blocked: true,
+    },
+    caching: {
+      enabled: true,
+      refresh_on_session_end: true,
+    },
+    limits: {
+      episodic: {
+        enabled: true,
+        character_limit: 2200,
+      },
+      task_code: {
+        enabled: true,
+        character_limit: 3000,
+      },
+      task_general: {
+        enabled: true,
+        character_limit: 2200,
+      },
+      task_commands: {
+        enabled: true,
+        character_limit: 1500,
+      },
+      personality: {
+        enabled: true,
+        character_limit: 1375,
+      },
+    },
+    expiration: {
+      enabled: true,
+      access_expiration_days: 90,
+      summarize_before_delete: true,
+      summary_category: "archived",
+    },
+    versioning: {
+      enabled: true,
+      max_versions: 10,
+    },
+  },
+
+  // Multi-agent configuration
+  agents: {
+    enabled: false,
+    config_dirs: ["~/.meept/agents", "config/agents"],
+    prompts_dir: "config/prompts",
+    default_model: "",
+    dispatcher_id: "dispatcher",
+  },
+
+  // Security configuration
+  security: {
+    sanitize_inputs: true,
+    sanitize_strictness: "standard",
+    llm_filter_external: false,
+    monitor_output: true,
+    redact_output: true,
+    scan_shell_commands: true,
+    tirith_binary: "tirith",
+    require_confirmation_high: true,
+    require_confirmation_critical: true,
+    block_financial: true,
+    allowed_paths: ["~/*"],
+    blocked_paths: ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"],
+    enable_audit_log: false,
+    audit_db_path: "~/.meept/audit.db",
+  },
+
+  // Scheduler configuration
+  scheduler: {
+    enabled: true,
+    timezone: "UTC",
+  },
+
+  // Telegram bot configuration
+  telegram: {
+    enabled: false,
+    token: "",
+    creator_id: 0,
+    allowed_users: [],
+    allowed_chats: [],
+    poll_timeout: 30,
+  },
+
+  // Web server configuration
+  web: {
+    enabled: false,
+    host: "127.0.0.1",
+    port: 8420,
+    secret_key: "",
+  },
+
+  // MCP server configuration
+  mcp: {
+    enabled: false,
+    config_file: "~/.meept/mcp_servers.json5",
+  },
+
+  // Plugins configuration
+  plugins: {
+    enabled: true,
+    directory: "~/.meept/plugins",
+  },
+
+  // Workspace configuration
+  workspace: {
+    enabled: true,
+    base_dir: "~/.meept/workspaces",
+    auto_commit: true,
+    commit_on_plan: true,
+    commit_on_step: true,
+    cleanup_completed: false,
+  },
+
+  // Skills configuration
+  skills: {
+    enabled: false,
+    search_paths: [],
+    auto_reload: false,
+  },
+
+  // ClawSkills (third-party skills)
+  clawskills: {
+    enabled: false,
+    registry_url: "https://clawhub.ai",
+    install_dir: "~/.meept/clawskills",
+    auto_update: false,
+    max_installed: 50,
+    default_risk_level: "high",
+    max_iterations: 10,
+    blocked_slugs: [],
+  },
+
+  // Self-improvement configuration
+  selfimprove: {
+    enabled: false,
+    data_dir: "~/.meept/selfimprove",
+    max_iterations_per_cycle: 5,
+    max_fixes_per_cycle: 10,
+    auto_run_interval_hours: 0,
+    ai_infra: {
+      enabled: false,
+      base_url: "http://localhost:8100",
+      api_key_env: "MEEPT_AI_INFRA_KEY",
+      analysis_model: "claude-opus-4-5-20251101",
+      generation_model: "claude-sonnet-4-5-20241022",
+      review_model: "claude-opus-4-5-20251101",
+      timeout_seconds: 120.0,
+      max_retries: 3,
+    },
+    sandbox: {
+      worktree_dir: "~/.meept/selfimprove/worktrees",
+      cleanup_on_success: true,
+      cleanup_on_failure: false,
+      max_worktrees: 5,
+      test_timeout_seconds: 300.0,
+    },
+    safety: {
+      require_human_approval: true,
+      max_files_per_fix: 10,
+      max_lines_changed_per_fix: 500,
+      blocked_paths: [],
+      allowed_risk_levels: ["low", "medium", "high"],
+      block_critical_risk: true,
+      require_tests_pass: true,
+      min_confidence_threshold: 0.7,
+    },
+    detection: {
+      scan_pytest: true,
+      scan_runtime_logs: true,
+      scan_type_check: true,
+      scan_lint: true,
+      log_file: "~/.meept/meept.log",
+      log_lookback_hours: 24,
+      pytest_args: ["-v", "--tb=short"],
+      mypy_args: ["--ignore-missing-imports"],
+      ruff_args: [],
+    },
+  },
+
+  // Agent loop configuration
+  agent: {
+    progress_enabled: true,
+    progress_interval_seconds: 30,
+    cache: {
+      enabled: true,
+      max_entries: 1000,
+      default_ttl_seconds: 300,
+      cleanup_freq_seconds: 60,
+      enabled_tools: [
+        "file_read",
+        "list_directory",
+        "memory_search",
+        "memory_get_context",
+        "platform_status",
+        "platform_agents",
+        "platform_tools",
+      ],
+    },
+    errors: {
+      detailed_errors: true,
+      include_examples: true,
+      max_suggestion_length: 500,
+    },
+  },
+
+  // Review configuration
+  review: {
+    enabled: true,
+    require_review: ["code", "refactor", "debug", "git", "fix"],
+    skip_review: ["chat", "report", "recall", "search", "analyze"],
+    reviewer_mapping: {
+      coder: "code-reviewer",
+      debugger: "debug-reviewer",
+      planner: "planner-reviewer",
+      analyst: "analyst-reviewer",
+      committer: "code-reviewer",
+    },
+    max_revision_cycles: 3,
+    auto_approve_patterns: ["*.md", "LICENSE", "*.txt"],
+  },
+
+  // Calendar configuration
+  calendar: {
+    enabled: false,
+    client_id: "${GOOGLE_CLIENT_ID}",
+    client_secret: "${GOOGLE_CLIENT_SECRET}",
+    calendar_id: "primary",
+    redirect_uri: "http://localhost:8888/callback",
+    reminder_enabled: false,
+    reminder_check_interval: "5m",
+    reminder_advance_minutes: 10,
+  },
+}
