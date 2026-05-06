@@ -1,0 +1,40 @@
+// Q Agent (Quartermaster) configuration
+// Meta-agent that analyzes session transcripts to identify opportunities
+// for creating new specialized agents or improving existing ones.
+{
+  // Enable Q Agent analysis and recommendations
+  enabled: true,
+
+  // Number of hours a session must be idle before it's considered complete
+  // and eligible for analysis
+  session_idle_trigger_hours: 12,
+
+  // Maximum duration for analysis runs (in minutes)
+  analysis_timeout_minutes: 30,
+
+  // Minimum number of sessions required to detect a pattern
+  min_sessions_for_pattern: 5,
+
+  // Minimum confidence score (0.0-1.0) for recommendations
+  min_confidence_score: 0.7,
+
+  // Error rate threshold for flagging high error rate patterns
+  high_error_rate_threshold: 0.2,
+
+  // Rejection rate threshold for flagging high rejection patterns
+  high_rejection_rate_threshold: 0.3,
+
+  // Duration variance threshold for detecting model misconfigurations
+  duration_variance_threshold: 3.0,
+
+  // Notification channels
+  notify_chat: true,
+  notify_cli: true,
+  notify_menu_bar: false,
+
+  // Directory for cached analysis results
+  analysis_dir: "~/.meept/q_analysis",
+
+  // Path for the outcomes log (JSONL format)
+  outcomes_log: "~/.meept/q_outcomes.jsonl",
+}

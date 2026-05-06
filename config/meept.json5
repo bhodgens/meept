@@ -233,6 +233,23 @@
     },
   },
 
+  // Q Agent (meta-agent) configuration
+  q_agent: {
+    enabled: true,
+    session_idle_trigger_hours: 12,
+    analysis_timeout_minutes: 30,
+    min_sessions_for_pattern: 5,
+    min_confidence_score: 0.7,
+    high_error_rate_threshold: 0.2,
+    high_rejection_rate_threshold: 0.3,
+    duration_variance_threshold: 3.0,
+    notify_chat: true,
+    notify_cli: true,
+    notify_menu_bar: false,
+    analysis_dir: "~/.meept/q_analysis",
+    outcomes_log: "~/.meept/q_outcomes.jsonl",
+  },
+
   // Agent loop configuration
   agent: {
     progress_enabled: true,
