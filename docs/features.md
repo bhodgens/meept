@@ -2,24 +2,26 @@
 
 ## Overview
 
-Meept is a Go-based autonomous agent platform with multi-agent orchestration, persistent memory, LLM integration, and extensibility through skills and tools. It operates as a daemon process with a CLI frontend, supporting multiple communication channels (CLI, Telegram, Web API).
+Meept is a Go-based autonomous agent daemon with multi-agent orchestration, persistent hybrid memory, LLM integration with failover, production-grade execution controls, and extensibility through skills and tools. It operates as a background process with multiple frontends (CLI/TUI, Telegram, Web API, macOS MenuBar).
 
 ### Architecture Summary
 
 ```
-User Input (CLI/Telegram/Web)
+User Input (CLI/Telegram/Web/MenuBar)
     ↓
-CommServer (Unix socket JSON-RPC)
+CommServer (Unix socket JSON-RPC or HTTP REST)
     ↓
 MessageBus (pub/sub)
     ↓
 AgentLoop
+    ├── Skill Discovery (capability-index matching)
+    ├── ContextFirewall (compression, summarization, budget)
     ├── Planner (task decomposition)
     ├── CollaborativePlanner (review/approval)
     ├── WorkspaceManager (git-backed tracking)
-    ├── SecurityEngine (permission checks)
-    ├── Tool execution
-    └── Memory injection
+    ├── SecurityEngine (taint, sanitize, audit)
+    ├── Evidence Pipeline (tool evidence → validation)
+    └── Memory injection (5-tier)
     ↓
 Response
 ```
@@ -28,9 +30,91 @@ Response
 
 ## Core Architecture
 
+### Agent Loop & Execution Controls
+
+The agent loop is the heart of Meept. Unlike simple `while (!done)` loops, it implements multiple independent safety and efficiency mechanisms:
+
+#### Reasoning Cycle (`loop.go:reasoningCycle`)
+
+Runs up to `MaxIterations` (default 25) with three termination cases:
+1. **LLM returns text** — turn complete, return response
+2. **LLM returns tool calls** — execute tools, feed results back, continue loop
+3. **Budget/safety limit hit** — graceful wrap-up with partial results
+
+#### Safety Mechanisms
+
+| Mechanism | Description | Trigger |
+|-----------|-------------|---------|
+| **Cycle Detector** | SHA256 hashes of tool name + normalized args; detects exact repeats | Same tool+args seen twice |
+| **Convergence Detector** | Content-hash history; detects stagnant non-tool responses | Last N responses identical (no tools) |
+| **Watchdog** | Heartbeat monitoring per worker with stage tracking | Timeout, missed heartbeat, stuck state |
+| **Token Budgets** | Three nested budgets: per-iteration, per-conversation, per-session | Budget exhausted |
+| **Model Failover** | Alias resolution with rate-limit rotation | Rate limit or model failure |
+| **Empty Response Nudge** | Injects system prompt when LLM returns empty content | Empty assistant response |
+
+#### Token Budget Hierarchy
+
+```
+Session Budget: 100,000 tokens / 10 turns max
+    │
+    ├── Turn Budget: 30,000 tokens per iteration
+    │       ├── Tool Definition Overhead: accurately counted
+    │       └── Message Budget: residual after tool overhead
+    │
+    └── Conversation Budget: 50,000 tokens total
+            ├── Warning at 80%: tools removed, wrap-up instruction injected
+            └── Dynamic tool result compression scales with consumption
+```
+
+#### Evidence Requirements
+
+Agents are instructed to substantiate claims with evidence. The loop injects validation anchor instructions into every new conversation.
+
+**Configuration:**
+```toml
+[agent]
+max_iterations = 25
+timeout_seconds = 300
+max_conversation_tokens = 50000
+
+[agent.memory]
+recall_mode = "auto"  # auto, on-query, hybrid, disabled
+snapshot_caching_enabled = true
+```
+
+---
+
+### Context Firewall
+
+A transparent wrapper around the LLM client that manages context pressure before it causes failures.
+
+#### Features
+
+- **Hierarchical Compression**: Multi-stage summarization with structured extraction (DECISIONS, FILES, QUESTIONS, STATUS, FINDINGS)
+- **Proactive Compression**: Runs before legacy chunk/summarize/drop pipeline
+- **Token-Aware Truncation**: `TruncateByTokens()` considers tool definition overhead
+- **Windowed Messages**: Preserves system prompt + original user message + recent context
+- **Budget Ratios**: Configurable iteration (30%) and conversation (50%) budget allocation
+
+**Structured Summarization Output:**
+```
+[Conversation summary level 1]: status: debugging auth issue.
+decisions: using jwt middleware; files: auth.go, middleware.go;
+open questions: should refresh tokens be rotated?;
+```
+
+**Configuration:**
+```toml
+[agent]
+proactive_compression = true
+model_context_limit = 32768  # override model default
+```
+
+---
+
 ### Multi-Agent System
 
-Meept uses a multi-agent architecture where specialist agents handle different types of tasks.
+Meept uses a specialist-agent architecture where different agents handle different task types.
 
 | Agent ID | Role | Description |
 |----------|------|-------------|
@@ -74,6 +158,128 @@ dispatcher_id = "dispatcher"
 
 ---
 
+### Deterministic Execution Framework
+
+A comprehensive framework ensuring reliable, verifiable task completion.
+
+#### Evidence Pipeline
+
+```
+ToolResult.Evidence → ExecutionResult.Evidence → TaskStep.Evidence → Validator
+```
+
+**Evidence Types:**
+| Type | Description | Produced By |
+|------|-------------|-------------|
+| `file_exists` | File exists at path with metadata | ReadFile, WriteFile, DeleteFile, ListDirectory |
+| `file_hash` | SHA256 hash of file content | ReadFile, WriteFile |
+| `process_exit` | Process exit code | Shell |
+| `shell_output` | Command output (hashed) | Shell |
+| `api_response` | HTTP status and response size | WebFetch, WebSearch |
+| `db_row` | Database operation metadata | Memory operations |
+
+**Claim-Evidence Matching:**
+The validator detects mismatches between agent claims and evidence:
+
+| Claim Pattern | Required Evidence |
+|---------------|-------------------|
+| "created", "wrote", "modified", "updated" | `file_exists` or `file_hash` |
+| "executed", "ran", "command", "shell" | `process_exit` |
+| "fetch", "api", "http", "web" | `api_response` |
+| "memory", "stored", "retrieved", "context" | `db_row` |
+
+#### Concurrency Control
+
+- Global semaphore (default 10 concurrent jobs)
+- Per-agent semaphore (default 3 per agent)
+- Non-blocking acquisition with immediate fallback
+- Blocked steps remain in "ready" state for next scheduling cycle
+
+#### Retry Logic Hierarchy
+
+| Level | Location | Behavior |
+|-------|----------|----------|
+| L1 | Per-tool | Tool-specific policies (0-2 retries), exponential backoff for network |
+| L2 | Job-level | Rate limit retry with backoff (2s, 4s, 8s) |
+| L3 | Agent loop | Model failover + exponential backoff (max 5 attempts) |
+
+#### Validation Gates
+
+- Configurable interval (default every 3 steps)
+- Non-blocking: logs warnings without stopping execution
+- Checks all completed steps have `Validated = true`
+
+#### Checkpoints
+
+Git-based checkpoints enable recovery:
+- `CreateCheckpoint(taskID, label)` → git tag `checkpoint-{taskID}-{label}-{timestamp}`
+- `RestoreCheckpoint(taskID, label)` → checkout most recent checkpoint tag
+- `ListCheckpoints(taskID)` → all checkpoints for task
+
+**Configuration:**
+```toml
+[execution]
+max_concurrent_jobs = 10
+max_concurrent_per_agent = 3
+validation_gate_interval = 3
+
+[retry]
+max_retries = 3
+retry_delay_base = "2s"
+transient_error_patterns = ["timeout", "connection refused", "network"]
+
+[validation]
+require_evidence = true
+fail_unknown_evidence_types = true
+enable_checkpoints = true
+```
+
+**API:**
+```go
+// Evidence is attached automatically by built-in tools
+result := &ToolResult{
+    Result: "file written",
+    Evidence: []models.Evidence{
+        models.NewEvidence(models.EvidenceFileHash, "/tmp/test.txt", "sha256:abc...", "file_write"),
+    },
+}
+
+// Validator checks claims against evidence
+validationResult := validator.ValidateStep(ctx, step)
+if !validationResult.Valid {
+    log.Warn("validation failed", "errors", validationResult.Errors)
+}
+```
+
+---
+
+### Hallucination Detection
+
+A configurable detector that analyzes LLM output for hallucination indicators.
+
+**Detection Types:**
+- **Confident Claims**: Unsubstantiated assertions without tool evidence
+- **Fabricated References**: Mentions of files, functions, or URLs not in tool results
+- **Contradictions**: Output contradicts previous conversation history
+- **Impossible Responses**: Claims that violate known constraints
+
+**Sensitivity Levels:**
+- `low` (default): Conservative, minimal false positives
+- `medium`: Balanced detection
+- `high`: Aggressive, may flag legitimate creative responses
+
+**Recovery:** When `MaxIndicators` threshold is exceeded, recovery is recommended.
+
+**Configuration:**
+```toml
+[agent.hallucination]
+enabled = true
+sensitivity = "low"
+max_indicators = 2
+```
+
+---
+
 ### Memory System
 
 Meept implements a multi-tiered memory architecture with different storage backends and query modes.
@@ -100,7 +306,7 @@ Meept implements a multi-tiered memory architecture with different storage backe
 - Distillation: promote important memories to shared storage
 - Configurable promotion policies (PageRank threshold, hub connectivity)
 
-#### Semantic Memory (Vector Embeddings) **NEW**
+#### Semantic Memory (Vector Embeddings)
 - Vector similarity search using embeddings
 - Hybrid search combining keyword (FTS) and vector scores
 - Supports OpenAI and Ollama providers
@@ -151,8 +357,6 @@ promote_task_completions = true
 **API:**
 ```go
 // Vector search
-import "github.com/caimlas/meept/internal/memory/vector"
-
 provider := vector.NewOpenAIProvider(vector.OpenAIProviderConfig{
     APIKey: apiKey,
     Model:  "text-embedding-3-small",
@@ -167,7 +371,7 @@ results, err := store.Search(ctx, "similar memories", 10)
 hybrid := vector.NewHybridSearcher(vector.HybridSearcherConfig{
     VectorStore: store,
     MemManager:  memManager,
-    Alpha:       0.5,  // 0=pure keyword, 1=pure vector
+    Alpha:       0.5,
 })
 results, err := hybrid.Search(ctx, "query", 20)
 ```
@@ -181,7 +385,7 @@ results, err := hybrid.Search(ctx, "query", 20)
 
 ### Security
 
-Meept implements multiple layers of security to protect against prompt injection, data exfiltration, and unauthorized access.
+Meept implements multiple layers of security.
 
 #### Input Sanitization
 - Pattern-based prompt injection detection
@@ -198,7 +402,7 @@ Meept implements multiple layers of security to protect against prompt injection
 - Blocks dangerous patterns
 - Configurable binary path
 
-#### Taint Tracking **NEW**
+#### Taint Tracking
 - Lattice-based taint propagation model
 - Tracks data provenance through operations
 - Sink enforcement to prevent data leakage
@@ -227,29 +431,20 @@ block_financial = true
 allowed_paths = ["~/*"]
 blocked_paths = ["~/.ssh/*", "~/.gnupg/*"]
 
-# Output monitoring
 monitor_output = true
 redact_output = true
 
-# Shell security
 scan_shell_commands = true
 tirith_binary = "tirith"
 
-# Audit logging
 enable_audit_log = false
 audit_db_path = "~/.meept/audit.db"
 
-# Override matching (opt-in strict mode)
-# When true, uses strict glob/exact matching for permission overrides
-# When false (default), uses lenient three-strategy cascade (substring, glob, trimmed substring)
-# Changing this affects existing overrides - migrate with caution
 strict_override_matching = false
 ```
 
 **API:**
 ```go
-import "github.com/caimlas/meept/internal/security/taint"
-
 tracker := taint.NewTracker(logger)
 
 // Mark input as tainted
@@ -258,8 +453,7 @@ tainted := tracker.MarkUserInput(userInput, "cli:args")
 // Check before shell execution
 violation := tracker.CheckShellCommand(cmd)
 if violation != nil {
-    // Block execution
-    log.Warn("Shell command blocked by taint tracking", "violation", violation)
+    log.Warn("Shell command blocked", "violation", violation)
 }
 
 // Explicit declassification after sanitization
@@ -288,11 +482,17 @@ Meept supports multiple LLM providers with model resolution based on capabilitie
 - Rate limiting (requests per minute)
 - Aggressiveness setting for cost control
 
-#### Native Anthropic Driver **NEW**
+#### Native Anthropic Driver
 - Native implementation of Anthropic's Messages API
 - Extended thinking mode support
 - Streaming with progress callbacks
 - SSE parsing for real-time updates
+
+#### Model Failover
+When rate limits hit:
+1. Rotate to next model in alias (immediate retry)
+2. Exponential backoff if alias exhausted (2s → 4s → 8s → 16s → 32s)
+3. Max 5 attempts before returning error
 
 **Configuration:**
 ```toml
@@ -323,8 +523,6 @@ aggressiveness = 0.5
 
 **API:**
 ```go
-import "github.com/caimlas/meept/internal/llm"
-
 client := llm.NewAnthropicClient(config, opts...)
 
 // Simple chat
@@ -334,8 +532,6 @@ resp, err := client.Chat(ctx, messages)
 resp, err := client.ChatWithProgress(ctx, messages, func(stage llm.ProgressStage, detail string) {
     log.Info("Progress", "stage", stage, "detail", detail)
 })
-
-// Extended thinking is auto-enabled for models with "extended_thinking" capability
 ```
 
 ---
@@ -350,7 +546,7 @@ Meept provides built-in tools and supports MCP (Model Context Protocol) for exte
 - Platform: `platform_agents`, `platform_status`, `platform_tools`, `delegate_task`
 - Git: `git_commit`, `git_diff`, `git_status`
 
-#### Knowledge Graph Tools **NEW**
+#### Knowledge Graph Tools
 | Tool | Description |
 |------|-------------|
 | `entity_create` | Create graph nodes |
@@ -361,7 +557,7 @@ Meept provides built-in tools and supports MCP (Model Context Protocol) for exte
 | `detect_communities` | Find clusters |
 | `community_siblings` | Find entities in same community |
 
-#### Scheduling Tools **NEW**
+#### Scheduling Tools
 | Tool | Description |
 |------|-------------|
 | `schedule_create` | Create scheduled jobs |
@@ -377,11 +573,23 @@ Meept provides built-in tools and supports MCP (Model Context Protocol) for exte
 - `shell`: Execute shell command
 - `reminder`: Send reminder message
 
-#### Web Search **NEW**
+#### Web Search
 - DuckDuckGo HTML search (no API key required)
 - Rate limiting (configurable)
 - Returns title, URL, snippet
 - Automatic URL cleaning and HTML entity decoding
+
+#### Code Intelligence Tools
+| Tool | Category | Description |
+|------|----------|-------------|
+| `ast_parse` | AST | Parse source file into AST (tree-sitter) |
+| `ast_symbols` | AST | Extract symbols (functions, types, imports) |
+| `ast_query` | AST | Run tree-sitter queries |
+| `lsp_goto_definition` | LSP | Navigate to symbol definition |
+| `lsp_find_references` | LSP | Find symbol references |
+| `lsp_hover` | LSP | Get type/documentation info |
+| `lsp_workspace_symbols` | LSP | Search symbols across workspace |
+| `lsp_diagnostics` | LSP | Get errors/warnings from language server |
 
 **Configuration:**
 ```toml
@@ -392,8 +600,6 @@ timezone = "UTC"
 
 **API:**
 ```go
-import "github.com/caimlas/meept/internal/tools/builtin"
-
 // Knowledge graph tools
 kgTool := builtin.NewEntityQueryTool(graph)
 result, err := kgTool.Execute(ctx, map[string]any{
@@ -420,9 +626,27 @@ result, err := searchTool.Execute(ctx, map[string]any{
 
 ---
 
-### Markdown Agent Definitions **NEW**
+### Code Intelligence
 
-Agents can be defined using AGENT.md files with YAML frontmatter, following the same ergonomic pattern as skills. This enables user customization without code changes.
+Meept includes multi-language code understanding via tree-sitter parsing and LSP client integration.
+
+**AST Tools (`internal/code/ast/`):**
+- Tree-sitter parser for 10+ languages
+- Symbol extraction (functions, types, imports, structs)
+- Tree-sitter query execution
+- Language detection from file extension
+
+**LSP Client (`internal/code/lsp/`):**
+- Multi-server management (different servers per language)
+- JSON-RPC 2.0 communication
+- Go-to-definition, find-references, hover, workspace symbols, diagnostics
+- Document synchronization
+
+---
+
+### Markdown Agent Definitions
+
+Agents can be defined using `AGENT.md` files with YAML frontmatter.
 
 #### Agent Discovery Hierarchy (Priority)
 1. `.meept/agents/` - Project-local (highest priority)
@@ -466,7 +690,7 @@ You implement, modify, and maintain code with precision.
 
 #### Global Rules System
 
-Global rules are injected into all agent prompts, enabling platform-wide behavior requirements.
+Global rules are injected into all agent prompts.
 
 **Discovery:** `.meept/RULES.md` > `~/.meept/RULES.md` > embedded default
 
@@ -496,7 +720,7 @@ The dispatcher evaluates agent reports to determine next actions:
 | partial/needs_input | true | - | Notify user, await input |
 | failed | - | - | Notify user with error |
 
-Agent report JSON is automatically stripped from user-facing responses; only the clean output is returned.
+Agent report JSON is automatically stripped from user-facing responses.
 
 **Configuration:**
 ```toml
@@ -516,6 +740,12 @@ Meept supports a three-tier skill discovery system and a third-party marketplace
 2. `~/.meept/skills/` - User-global
 3. `~/.config/meept/skills/` - System-wide
 4. `~/.meept/clawskills/` - Third-party (claw: prefix)
+
+#### Runtime Skill Discovery
+- **CapabilityIndex**: Metadata-driven matching without loading full skill bodies
+- **LazySkillLoader**: On-demand loading with caching
+- **Tool Filtering**: When a skill declares `allowed-tools`, the registry is filtered for that execution
+- **Confidence Threshold**: Minimum confidence for skill matching (default 0.5)
 
 #### ClawSkills Marketplace
 - Registry-based third-party skills
@@ -541,6 +771,40 @@ default_risk_level = "high"
 
 ---
 
+### Q Agent (Meta-Optimization)
+
+The Q Agent (Quartermaster) is a meta-agent that analyzes system performance and designs improvements.
+
+**Pipeline:**
+1. **Fetch** completed sessions from memory
+2. **Analyze** sessions for error patterns, duration variance, rejection rates
+3. **Detect** recurring patterns across sessions
+4. **Research** root causes via memory search
+5. **Design** new agent configurations or skills
+6. **Estimate** impact (token savings, time reduction)
+7. **Validate** proposals before applying
+
+**CLI Commands:**
+```bash
+./bin/meept q status                   # Show Q Agent status
+./bin/meept q analyze                  # Analyze sessions
+./bin/meept q analyze --force          # Force analysis
+./bin/meept q analyze --json           # Output as JSON
+```
+
+**Configuration:**
+```toml
+[q_agent]
+enabled = false
+analysis_interval_hours = 24
+session_idle_trigger_hours = 6
+min_sessions_for_pattern = 5
+high_error_rate_threshold = 0.3
+high_rejection_rate_threshold = 0.25
+```
+
+---
+
 ### Learning & Self-Improvement
 
 Meept can learn from its operations and automatically fix issues.
@@ -555,6 +819,8 @@ Meept can learn from its operations and automatically fix issues.
 - JUDGE: Evaluate trajectory quality
 - DISTILL: Extract reusable patterns
 - CONSOLIDATE: Merge into knowledge base
+
+Triggered asynchronously after every successful conversation.
 
 #### Automated Code Fixing
 - Detect issues from pytest, runtime logs, type checking
@@ -599,10 +865,14 @@ scan_type_check = true
 
 | Feature | Description |
 |---------|-------------|
+| **Evidence-Based Execution** | All agent claims validated against tool-produced evidence |
+| **Context Firewall** | Hierarchical compression with structured summarization |
+| **Deterministic Execution** | Concurrency control, validation gates, checkpoints, retry hierarchy |
 | **MCP Protocol Support** | First-class Model Context Protocol integration for external tools |
-| **Agent Coworker Awareness** | Agents can discover and delegate to each other via platform tools |
-| **Markdown Agent Definitions** | User-customizable AGENT.md files with YAML frontmatter, 4-tier discovery with shadowing |
-| **Global Rules & Reporting** | Platform-wide rules with structured JSON reports enabling dispatcher feedback loop |
+| **Agent Coworker Awareness** | Agents discover and delegate to each other via platform tools |
+| **Markdown Agent Definitions** | User-customizable AGENT.md files with YAML frontmatter, 4-tier discovery |
+| **Global Rules & Reporting** | Platform-wide rules with structured JSON reports |
+| **Q Agent** | Meta-agent for session analysis and optimization design |
 | **Learning Pipeline** | Shadow training, trajectory learning, and automated fixing |
 | **ClawSkills Marketplace** | Third-party skill marketplace with security scanning |
 | **Self-Improvement System** | Automated detection, fixing, and validation of code issues |
@@ -611,7 +881,9 @@ scan_type_check = true
 | **Taint Tracking** | Lattice-based information flow tracking for security |
 | **Native Anthropic Driver** | Extended thinking mode with progress reporting |
 | **Web Search (No API Key)** | DuckDuckGo integration without API requirements |
-| **Code Intelligence (AST+LSP)** | Tree-sitter parsing and LSP client tools (`ast_parse`, `ast_symbols`, `ast_query`, `lsp_goto_definition`, `lsp_find_references`, `lsp_hover`, `lsp_workspace_symbols`, `lsp_diagnostics`) for multi-language code understanding |
+| **Code Intelligence (AST+LSP)** | Tree-sitter parsing and LSP client tools |
+| **Model Failover** | Alias rotation with exponential backoff |
+| **Hallucination Detection** | Pattern-based detection with configurable sensitivity |
 
 ### External Integrations
 
@@ -619,8 +891,10 @@ scan_type_check = true
 |-------------|-------------|
 | **Telegram Bot** | Two-way communication via Telegram |
 | **Web API** | HTTP/JSON API for external clients |
+| **HTTP REST** | REST API for macOS MenuBar app |
 | **Google Calendar** | Calendar event management |
 | **Git Worktrees** | Isolated task execution environments |
+| **macOS MenuBar** | Native SwiftUI monitoring and control app |
 
 ---
 
@@ -644,6 +918,16 @@ dispatcher_model = ""
 enabled = true
 config_dirs = ["~/.meept/agents", "config/agents"]
 
+# Agent Loop
+[agent]
+max_iterations = 25
+timeout_seconds = 300
+max_conversation_tokens = 50000
+
+[agent.memory]
+recall_mode = "auto"
+snapshot_caching_enabled = true
+
 # Memory
 [memory]
 backend = "memvid"
@@ -666,6 +950,16 @@ enabled = true
 [llm.budget]
 hourly_token_limit = 100000
 daily_token_limit = 1000000
+
+# Execution Framework
+[execution]
+max_concurrent_jobs = 10
+max_concurrent_per_agent = 3
+validation_gate_interval = 3
+
+[validation]
+require_evidence = true
+enable_checkpoints = true
 ```
 
 ---
@@ -694,6 +988,10 @@ daily_token_limit = 1000000
 ./bin/meept memory search "query"  # Search memories
 ./bin/meept memory stats           # Memory statistics
 
+# Q Agent
+./bin/meept q status               # Q Agent status
+./bin/meept q analyze              # Analyze sessions
+
 # ClawSkills
 ./bin/meept clawskills list        # List installed skills
 ./bin/meept clawskills install <slug>  # Install skill
@@ -701,6 +999,10 @@ daily_token_limit = 1000000
 # Self-Improve
 ./bin/meept selfimprove detect     # Detect issues
 ./bin/meept selfimprove full-cycle # Run full improvement cycle
+
+# Models
+./bin/meept models setup           # Interactive model configuration
+./bin/meept models list            # List configured models
 ```
 
 ---
@@ -731,7 +1033,6 @@ vectorStore.Store(ctx, memID, content, metadata)
 
 // Hybrid search
 results := hybridSearcher.Search(ctx, "authentication", 20)
-// Returns combined keyword + vector scores
 ```
 
 ### Taint Tracking
@@ -748,6 +1049,23 @@ if violation := tracker.CheckSink(tainted, taint.NetFetchSink()); violation != n
 combined := tracker.Propagate(tainted1, tainted2)
 ```
 
+### Evidence Pipeline
+```go
+// Tool produces evidence automatically
+toolResult := &ToolResult{
+    Result: "file written",
+    Evidence: []models.Evidence{
+        models.NewEvidence(models.EvidenceFileHash, "/tmp/test.txt", "sha256:abc...", "file_write"),
+    },
+}
+
+// Executor propagates to ExecutionResult
+execResult := executor.Execute(ctx, toolCall)
+
+// Tactical scheduler persists to TaskStep
+// Validator checks claims against evidence
+```
+
 ---
 
 ## See Also
@@ -755,4 +1073,4 @@ combined := tracker.Propagate(tainted1, tainted2)
 - **CLAUDE.md**: Development guidelines and architecture
 - **README.md**: Installation and quick start
 - **diagram.md**: Architecture diagrams
-- **docs/test-plan-openfang-features.md**: Testing strategy for new features
+- **docs/workflows/**: Feature specifications

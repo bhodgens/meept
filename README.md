@@ -1,244 +1,322 @@
 <div align="center">
   <img src="meept.jpg" alt="Meept" width="200"/>
   <h1>Meept</h1>
-  <p><strong>Self-executing autonomous agent daemon with multi-agent orchestration, hybrid memory, and skill-based task execution.</strong></p>
+  <p><strong>Production-grade autonomous agent daemon with multi-agent orchestration, hybrid memory, evidence-based execution, and self-optimizing infrastructure.</strong></p>
+  <p>
+    <a href="./docs/getting-started/">Getting Started</a> &middot;
+    <a href="./docs/concepts/architecture.md">Architecture</a> &middot;
+    <a href="./docs/features.md">Features</a> &middot;
+    <a href="./docs/reference/cli.md">CLI Reference</a>
+  </p>
 </div>
 
 ---
 
-Meept is a Go-based daemon that runs AI agents as background processes. It supports multi-agent collaboration, persistent memory, tool execution, and multiple frontends (TUI, Telegram, web). Unlike single-session CLI tools, Meept runs continuously as a daemon, enabling persistent context, job scheduling, and multi-agent workflows.
+## What Is Meept?
+
+Meept is a Go daemon that runs AI agents as persistent background processes. Unlike single-session CLI tools that vanish when you close the terminal, Meept maintains continuous state: memory, scheduled jobs, multi-agent collaboration, and learned patterns accumulate over time.
+
+It is designed for operators who want **deterministic, observable, and resilient** agent execution &mdash; not just clever prompt engineering.
 
 ## What Makes Meept Different
 
-| Tool | Approach | Meept's Advantage |
-|------|----------|-------------------|
-| **Claude Code** | Single-session CLI | **Daemon architecture** with persistent memory and job scheduling |
-| **OpenCode** | Terminal-only execution | **Multi-agent collaboration** with specialist agents routing work |
-| **Cursor** | IDE integration | **Background processing** with continuous learning and self-improvement |
+| Platform | Model | Meept's Advantage |
+|----------|-------|-------------------|
+| **Hermes / OpenCode** | Terminal-only, ephemeral | **Daemon architecture** with persistent memory, job scheduling, and continuous learning |
+| **Claude Code** | Single-session CLI | **Multi-agent orchestration** &mdash; 8 specialist agents that discover and delegate to each other |
+| **Cursor** | IDE-integrated copilot | **Background operation** &mdash; runs independently, works across any editor or no editor at all |
+| **General agents** | Trust LLM claims | **Evidence-based validation** &mdash; every claim is checked against verifiable tool output |
 
-Meept combines the best features from these tools while adding unique capabilities:
-- **Daemon-first**: Runs continuously with persistent state
-- **Multi-agent**: 8 specialist agents that collaborate and delegate
-- **Hybrid memory**: memvid + SQLite fallback for robust context retention
-- **Self-improvement**: Automated code improvement and learning
-- **Skill ecosystem**: Third-party skills via ClawSkills registry
+Meept does not replace these tools for quick edits. It replaces them for **sustained, autonomous work** that runs overnight, resumes after crashes, and learns from its mistakes.
 
-## But What Is It, Really?
+## Core Differentiators
 
-Meept is my feeble attempt at, "This irritates me, I could do better than this." I've been playing with chatbots since Python was new and ELIZA was barely known, even on IRC. Could I make something convincing?
+### 1. Evidence-Based Deterministic Execution
 
-Instead of a chatbot, I need a useful tool, and I wanted to see if I could borrow the features I liked from the different tools, while exploring my apparent love for complex data queuing and routing, and perhaps stretching some of my performance engineering experience in the process.
+Most agents trust the LLM when it says "I fixed the bug." Meept does not.
 
-So I figured I'd do it in Golang, because the world needs more beauty - especially since Python somehow ended up popular.
+- Every tool produces structured `Evidence` (file hashes, process exit codes, API responses)
+- The executor propagates evidence through the pipeline
+- Validators cross-check agent claims against ground truth
+- Claims without evidence trigger `needs_info` status for human review
 
-## Quick Start
-
-### 1. Build from Source
-
-```bash
-git clone https://github.com/caimlas/meept.git
-cd meept
-make go-build-all
+```go
+// A tool result carries verifiable evidence
+result := &ToolResult{
+    Result: "file written",
+    Evidence: []Evidence{
+        {Type: EvidenceFileHash, Value: "sha256:abc123...", Source: "file_write"},
+    },
+}
 ```
 
-### 2. Configure API Keys
+### 2. Production-Grade Agent Loop
 
-```bash
-mkdir -p ~/.meept
-cp config/meept.toml ~/.meept/meept.toml
-cp config/models.json5 ~/.meept/models.json5
+The agent loop is not a naive `while` loop. It has seven independent safety mechanisms:
 
-# Edit ~/.meept/models.json5 to add your API keys
-# The daemon REQUIRES a valid models.json5 to start
-```
+| Mechanism | What It Does |
+|-----------|-------------|
+| **Context Firewall** | Hierarchical compression, structured summarization, token-aware truncation |
+| **Cycle Detector** | Detects repeated identical tool calls and aborts |
+| **Convergence Detector** | Detects stagnating responses without progress |
+| **Watchdog** | Monitors worker heartbeats, kills stuck agents, captures partial state |
+| **Budget Tracker** | Multi-turn token accounting (per-iteration, per-conversation, per-session) |
+| **Model Failover** | Rate-limit detection &rarr; model rotation &rarr; exponential backoff |
+| **Hallucination Recovery** | Pattern-based detection with configurable sensitivity |
 
-### 3. Run Meept
+Learn more: [Agent Orchestration](docs/workflows/agent-orchestration.md) &middot; [Deterministic Execution](docs/workflows/deterministic-execution.md) &middot; [Context Firewall](docs/workflows/context-firewall.md)
 
-```bash
-# Terminal 1: Start daemon
-./bin/meept-daemon -f
-
-# Terminal 2: Interactive chat
-./bin/meept chat
-
-# Or single message
-./bin/meept chat "What files are in this directory?"
-```
-
-**Need more help?** See [Getting Started](docs/getting-started/) for detailed setup instructions.
-
-## Feature Highlights
-
-| Feature | Status | Description | Docs |
-|---------|--------|-------------|------|
-| **Daemon Core** | ✅ Working | Full lifecycle, config, RPC server | [Architecture](docs/concepts/architecture.md) |
-| **Multi-Agent System** | ✅ Working | 8 specialist agents with routing | [Multi-Agent](docs/concepts/multi-agent.md) |
-| **Memory Management** | ✅ Working | Hybrid memvid + SQLite memory | [Memory](docs/concepts/memory.md) |
-| **Tool Execution** | ✅ Working | File ops, shell, web fetch, memory | [Tools](docs/concepts/tools.md) |
-| **Interactive TUI** | ✅ Working | Vim keybindings, markdown rendering | [CLI Reference](docs/reference/cli.md) |
-| **Models CLI** | ✅ Working | Interactive provider/model management | [Models CLI](docs/reference/models-cli.md) |
-| **Job Scheduling** | ✅ Working | SQLite-backed queue with priorities | [Workflows](docs/workflows/) |
-| **Skills System** | 🔄 Partial | Discovery works; execution in progress | [Skills](docs/concepts/skills.md) |
-| **Security Engine** | 🔄 Partial | Permission system; sanitizers not wired | [Configuration](docs/configuration/) |
-| **Self-Improvement** | 🚧 Stubbed | Detection works; full cycle planned | [Workflows](docs/workflows/) |
-
-## Project Status
-
-Meept is **actively developed** with a working core system. The daemon, multi-agent orchestration, memory system, and basic tools are fully functional. Several advanced features are in progress or planned.
-
-**What's working:** Daemon lifecycle, agent loop, 8 specialist agents, hybrid memory, job queue, interactive TUI, tool execution, configuration system
-
-**In progress:** Skills execution, security integration, external integrations (Telegram, web)
-
-**Planned:** Self-improvement system, MCP tool integration, calendar integration
-
-See [Concepts](docs/concepts/) for detailed architecture documentation.
-
-## Architecture Overview
-
-Meept uses a multi-layer architecture with specialist agents:
+### 3. Five-Tier Memory System
 
 ```
-User Interfaces → RPC Server → Message Bus → Agent Registry → Tool Execution
-    (TUI/CLI)     (JSON-RPC)   (pub/sub)    (8 specialists)   (file/shell/web)
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│ Episodic (FTS5)  │  │   Knowledge Graph │  │  Semantic (Vector)│
+│  BM25 ranking    │  │ PageRank scoring  │  │  Cosine similarity│
+└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
+         │                     │                     │
+         └─────────────────────┼─────────────────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │  Task Memory (domain) │
+                    │  code / commands / gen  │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │  Distributed (memvid)  │
+                    │  Hydration / Distillation│
+                    └──────────────────────┘
 ```
 
-**Key components:**
-- **Daemon**: Background process with RPC server
-- **Message Bus**: Pub/sub for internal communication
-- **Agent Registry**: 8 specialist agents with routing
-- **Memory System**: Hybrid memvid + SQLite storage
-- **Tool Registry**: Built-in and extensible tools
-- **Job Queue**: SQLite-backed task scheduling
+Learn more: [Memory System](docs/workflows/memory.md)
 
-For detailed architecture diagrams and component descriptions, see [Architecture](docs/concepts/architecture.md).
+### 4. Multi-Agent Collaboration
 
-## Multi-Agent System
+Eight specialist agents (`dispatcher`, `chat`, `coder`, `debugger`, `planner`, `analyst`, `committer`, `scheduler`) discover each other via platform tools and delegate work:
 
-Meept runs 8 specialist agents that collaborate on complex tasks:
+```
+ User: "Fix the auth bug and deploy it"
+    │
+    ▼
+ dispatcher ──► planner (decompose)
+                  │
+                  ├──► debugger (diagnose)
+                  │      └── "auth.go:47 nil dereference"
+                  │
+                  ├──► coder (fix code)
+                  │      └── Evidence: file_hash, file_exists
+                  │
+                  ├──► committer (git operations)
+                  │      └── Evidence: process_exit=0
+                  │
+                  └──► scheduler (deploy job)
+                         └── "scheduled for 02:00 UTC"
+```
 
-| Agent | Role | Specialization |
-|-------|------|---------------|
-| `dispatcher` | Intake & routing | Task classification and delegation |
-| `chat` | General conversation | Natural language interaction |
-| `coder` | Code operations | File editing, shell commands, programming |
-| `debugger` | Troubleshooting | Problem diagnosis and fixing |
-| `planner` | Task decomposition | Breaking down complex problems |
-| `analyst` | Research & analysis | Data gathering and summarization |
-| `committer` | Git operations | Version control and collaboration |
-| `scheduler` | Job management | Task scheduling and monitoring |
-
-Agents can discover each other using platform tools (`platform_agents`, `platform_status`) and delegate work using `delegate_task`. Each agent has customized instructions and tool access based on its specialization.
+Agents are defined via `AGENT.md` files with YAML frontmatter &mdash; no code changes required.
 
 Learn more: [Multi-Agent System](docs/concepts/multi-agent.md)
 
-## Configuration
+### 5. Self-Optimizing Infrastructure (Q Agent)
 
-Meept uses a hierarchical configuration system:
+The Q Agent (Quartermaster) is a meta-agent that analyzes completed sessions, detects failure patterns, and designs new agents or skills to address them:
 
-### Main Config: `~/.meept/meept.toml`
-```toml
-[daemon]
-socket_path = "~/.meept/meept.sock"
-log_level = "INFO"
-data_dir = "~/.meept"
+1. **Analyze** completed sessions for error patterns
+2. **Detect** recurring issues (high error rate, duration variance)
+3. **Research** root causes via memory search
+4. **Design** new agent configurations or skills
+5. **Estimate** impact (token savings, time reduction)
+6. **Validate** proposals before applying
 
-[llm.budget]
-hourly_token_limit = 100000
-daily_token_limit = 1000000
+Learn more: [Q Agent](docs/workflows/q-agent.md)
 
-[memory]
-enabled = true
-data_dir = "~/.meept/memory"
-```
-
-### Models Config: `~/.meept/models.json5` (REQUIRED)
-
-**Quick Setup:** Use `meept models setup` for interactive configuration instead of manual editing.
-Meept requires a valid models configuration with API keys. See the template in `config/models.json5`.
-
-### Agent Customization
-Agents can be customized using `AGENT.md` files with YAML frontmatter. Discovery hierarchy:
-- `.meept/agents/<id>/AGENT.md` (project-local)
-- `~/.meept/agents/<id>/AGENT.md` (user-global)
-- `~/.config/meept/agents/` (system-wide)
-- `config/agents/` (bundled defaults)
-
-Full configuration details: [Configuration Guide](docs/configuration/)
-
-## CLI Commands
+## Quick Start
 
 ```bash
-# Chat and interaction
-./bin/meept chat              # Interactive TUI
-./bin/meept chat "message"    # Single message
-./bin/meept status            # Daemon status
+# 1. Clone and build
+git clone https://github.com/caimlas/meept.git
+cd meept
+make go-build-all
 
-# Session management
-./bin/meept sessions list     # List sessions
-./bin/meept sessions attach <id>  # Attach to session
+# 2. Configure (interactive setup)
+./bin/meept models setup
 
-# Job and task management
-./bin/meept jobs list         # List jobs
-./bin/meept tasks list        # List tasks
+# 3. Start daemon
+./bin/meept-daemon -f
 
-# Memory operations
-./bin/meept memory search "query"  # Search memories
+# 4. Chat
+./bin/meept chat
+```
 
-# Skills system
-./bin/meept clawskills list   # List available skills
-./bin/meept clawskills search "query"  # Search skills
+**Detailed setup**: [Getting Started Guide](docs/getting-started/)
 
-# Self-improvement
-./bin/meept selfimprove detect  # Detect improvement opportunities
+## Architecture
+
+```
+User Input (CLI / HTTP REST / MenuBar)
+    │
+    ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  CommServer     │───▶│  Message Bus    │───▶│  Agent Loop     │
+│  (JSON-RPC /    │    │  (pub/sub)       │    │                 │
+│   HTTP REST)    │    │                  │    │ • Skill discovery│
+└─────────────────┘    └─────────────────┘    │ • Tool filtering  │
+                                              │ • Context firewall│
+                                              │ • Evidence pipeline│
+                                              │ • Failover        │
+                                              └────────┬────────┘
+                                                       │
+                              ┌────────────────────────┼────────────────────────┐
+                              │                        │                        │
+                              ▼                        ▼                        ▼
+                        ┌──────────┐            ┌──────────┐            ┌──────────┐
+                        │  Memory  │            │  Tools   │            │  Security│
+                        │ (5-tier) │            │ (builtin │            │ (taint,  │
+                        │          │            │  + MCP)  │            │ sanitize)│
+                        └──────────┘            └──────────┘            └──────────┘
+```
+
+For complete feature details, see [Features](docs/features.md).
+
+## Feature Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Daemon core | ✅ Stable | Lifecycle, RPC, config, HTTP REST |
+| **Agent loop** | ✅ Working | Full safety stack (watchdog, cycle/convergence detection, budget) |
+| **Context firewall** | ✅ Working | Hierarchical compression, structured summarization |
+| **Evidence pipeline** | ✅ Working | Tool evidence &rarr; validator &rarr; claim checking |
+| Multi-agent system | ✅ Working | 8 agents, routing, delegation via platform tools |
+| Memory system | ✅ Working | 5-tier: episodic, task, knowledge graph, semantic, distributed |
+| Code intelligence | ✅ Working | Tree-sitter AST + LSP client tools |
+| LLM management | ✅ Working | Multi-provider, alias resolution, failover, budgeting |
+| Job scheduling | ✅ Working | Cron, reminders, SQLite queue |
+| **Skills system** | 🔄 Partial | Discovery works, runtime execution in progress |
+| Security engine | 🔄 Partial | Taint tracking wired, sanitizers partially integrated |
+| Collaborative planning | 🔄 Partial | Implementation complete, not wired into main path |
+| Self-improvement | 🔄 Partial | Detection works, full cycle in progress |
+| Shadow training | 🔄 Partial | Infrastructure ready, data collection not active |
+| **External integrations** | 🔄 Partial | macOS MenuBar working, Telegram planned, web UI in progress |
+
+## CLI Quick Reference
+
+```bash
+# Interaction
+./bin/meept chat                           # Interactive TUI
+./bin/meept chat "refactor auth.go"        # Single message
+./bin/meept status                         # Daemon health
+
+# Agent inspection
+./bin/meept agents                         # List agents
+./bin/meept tools                          # List tools
+
+# Jobs and memory
+./bin/meept jobs list                      # Scheduled jobs
+./bin/meept memory search "auth bug"       # Search memory
+
+# Q Agent (meta-optimization)
+./bin/meept q status                       # Q Agent state
+./bin/meept q analyze                      # Analyze sessions
+
+# Skills
+./bin/meept clawskills list                # Installed skills
+./bin/meept clawskills search "kubernetes" # Search marketplace
 ```
 
 Complete reference: [CLI Reference](docs/reference/cli.md)
 
-## Development
+## Agent and Skill Customization
 
-```bash
-# Run tests
-go test ./... -v
+Agents and skills are defined via markdown files with YAML frontmatter &mdash; no code changes required.
 
-# Run with race detection
-go test -race ./...
+### Agent Definitions (`AGENT.md`)
 
-# Build debug version
-go build -gcflags="all=-N -l" -o bin/meept ./cmd/meept
+```markdown
+---
+id: coder
+name: Code Specialist
+role: executor
+additional_tools:
+  - file_read
+  - file_write
+  - shell_execute
+capabilities:
+  - code
+  - reasoning
+max_iterations: 15
+temperature: 0.3
+---
 
-# TUI testing with agent-tui (https://lib.rs/crates/agent-tui)
-agent-tui ./bin/meept chat
+# Code Specialist
+
+You implement, modify, and maintain code with precision...
 ```
+
+**Discovery hierarchy (priority order):**
+1. `.meept/agents/<id>/AGENT.md` &mdash; Project-local
+2. `~/.meept/agents/<id>/AGENT.md` &mdash; User-global
+3. `config/agents/` &mdash; Bundled defaults
+
+### Skill Definitions (`SKILL.md`)
+
+```markdown
+---
+name: code-review
+description: Review code for bugs and style issues
+requires:
+  - code
+  - reasoning
+allowed-tools:
+  - file_read
+  - ast_symbols
+max-iterations: 10
+---
+
+# Code Review Skill
+
+When reviewing code, check for...
+```
+
+**Discovery hierarchy:**
+1. `.meept/skills/` &mdash; Project-local
+2. `~/.meept/skills/` &mdash; User-global
+3. `~/.config/meept/skills/` &mdash; System-wide
+
+Learn more: [Skill System](docs/workflows/skills.md)
 
 ## Documentation
 
-- **[Getting Started](docs/getting-started/)**: Installation and first steps
-- **[Concepts](docs/concepts/)**: Architecture, multi-agent system, memory, tools
-- **[Configuration](docs/configuration/)**: Setup and customization guide
-- **[Workflows](docs/workflows/)**: Common usage patterns and features
-- **[Reference](docs/reference/cli.md)**: CLI commands and API documentation
+- **[Getting Started](docs/getting-started/)** &mdash; Installation and first steps
+- **[Concepts](docs/concepts/)** &mdash; Architecture, multi-agent system, memory, tools
+- **[Features](docs/features.md)** &mdash; Complete capability reference with configuration and examples
+- **[Workflows](docs/workflows/)** &mdash; Feature specifications with edge cases
+- **[Reference](docs/reference/)** &mdash; CLI, API, configuration reference
 
 ## Project Structure
 
 ```
-cmd/meept/           # CLI application
-cmd/meept-daemon/    # Daemon application
+cmd/
+  meept/              # CLI application
+  meept-daemon/       # Daemon process
+  gendoc/             # Documentation generator
 internal/
-  agent/             # Agent loop, planning, execution
-  bus/               # Message bus (pub/sub)
-  llm/               # LLM client and resolution
-  memory/            # Memory management
-  tools/             # Tool registry and builtins
-  security/          # Security engine
-  skills/            # Skill system
-  selfimprove/       # Self-improvement system
-config/              # Configuration templates
+  agent/              # Agent loop, planner, orchestrator, Q agent
+  bus/                # Message bus (pub/sub)
+  llm/                # LLM client, resolver, context firewall, budget
+  memory/             # 5-tier memory system
+  tools/              # Tool registry, builtins, MCP
+  security/           # Engine, sanitizer, taint, tirith
+  code/               # AST (tree-sitter) + LSP client
+  selfimprove/        # Detection, analysis, fixing
+  skills/             # Discovery, registry, parser
+  comm/               # HTTP REST, MenuBar (Telegram planned)
+config/               # Configuration templates
+menubar/              # macOS SwiftUI MenuBar app
+docs/                 # MkDocs documentation
 ```
 
 ## Contributing
 
-Meept is an open-source project. Contributions are welcome! Please see the contributing guidelines for details.
+Meept is open-source (MIT). See the contributing guidelines for details.
 
 ## License
 
