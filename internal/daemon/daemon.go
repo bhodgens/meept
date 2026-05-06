@@ -98,32 +98,38 @@ func New(cfg *Config) (*Daemon, error) {
 	// Create registry
 	reg := registry.New(logger)
 
-	// Create RPC server
-	rpcServer := rpc.New(&rpc.Config{
-		SocketPath: cfg.SocketPath,
-	}, msgBus, logger)
+	// Create RPC server (if enabled)
+	var rpcServer *rpc.Server
+	if fullCfg.Transport.RPC.Enabled {
+		rpcServer = rpc.New(&rpc.Config{
+			SocketPath: cfg.SocketPath,
+		}, msgBus, logger)
 
-	// Register proxy handlers that forward to bus subscribers
-	proxy := rpc.NewProxyHandler(msgBus)
-	proxy.RegisterProxyMethods(rpcServer)
+		// Register proxy handlers that forward to bus subscribers
+		proxy := rpc.NewProxyHandler(msgBus)
+		proxy.RegisterProxyMethods(rpcServer)
 
-	// Register security handlers (Go-native, high-performance)
-	securityCfg := security.Config{
-		AllowedPaths:              cfg.AllowedPaths,
-		BlockedPaths:              cfg.BlockedPaths,
-		BlockFinancial:            cfg.BlockFinancial,
-		RequireConfirmationHigh:   cfg.RequireConfirmationHigh,
-		RequireConfirmationCritical: cfg.RequireConfirmationCritical,
+		// Register security handlers (Go-native, high-performance)
+		securityCfg := security.Config{
+			AllowedPaths:              cfg.AllowedPaths,
+			BlockedPaths:              cfg.BlockedPaths,
+			BlockFinancial:            cfg.BlockFinancial,
+			RequireConfirmationHigh:   cfg.RequireConfirmationHigh,
+			RequireConfirmationCritical: cfg.RequireConfirmationCritical,
+		}
+		securityHandler := rpc.NewSecurityHandler(securityCfg)
+		securityHandler.RegisterSecurityMethods(rpcServer)
+
+		// Register dev handlers (model switching, testing, etc.)
+		devHandler := rpc.NewDevHandler()
+		devHandler.RegisterDevMethods(rpcServer)
+
+		// Register RPC server as a component
+		reg.Register(rpcServer)
+		logger.Info("RPC transport enabled", "socket", cfg.SocketPath)
+	} else {
+		logger.Info("RPC transport disabled by config")
 	}
-	securityHandler := rpc.NewSecurityHandler(securityCfg)
-	securityHandler.RegisterSecurityMethods(rpcServer)
-
-	// Register dev handlers (model switching, testing, etc.)
-	devHandler := rpc.NewDevHandler()
-	devHandler.RegisterDevMethods(rpcServer)
-
-	// Register RPC server as a component
-	reg.Register(rpcServer)
 
 	// Create agent components (LLM, tools, agent loop, chat handler)
 	components, err := NewComponents(fullCfg, msgBus, logger)
@@ -131,8 +137,8 @@ func New(cfg *Config) (*Daemon, error) {
 		return nil, fmt.Errorf("failed to create components: %w", err)
 	}
 
-	// Register skills handlers (both direct and bus-based)
-	if fullCfg.Skills.Enabled && components.SkillRegistry != nil {
+	// Register skills handlers (both direct and bus-based) — only if RPC enabled
+	if rpcServer != nil && fullCfg.Skills.Enabled && components.SkillRegistry != nil {
 		rpc.RegisterSkillsHandlers(rpcServer, components.SkillRegistry, components.SkillExecutor)
 		logger.Info("Skills RPC handlers registered",
 			"skill_count", components.SkillRegistry.Count(),
@@ -141,69 +147,82 @@ func New(cfg *Config) (*Daemon, error) {
 	}
 
 	// Register self-improve handlers (native Go, calling Controller directly)
-	siHandler := rpc.NewSelfImproveHandler(components.SelfImproveCtrl)
-	siHandler.RegisterSelfImproveMethods(rpcServer)
-	if components.SelfImproveCtrl != nil {
-		logger.Info("Self-improve RPC handlers registered")
+	if rpcServer != nil {
+		siHandler := rpc.NewSelfImproveHandler(components.SelfImproveCtrl)
+		siHandler.RegisterSelfImproveMethods(rpcServer)
+		if components.SelfImproveCtrl != nil {
+			logger.Info("Self-improve RPC handlers registered")
+		}
+
+		// Register cache handler (native Go)
+		cacheHandler := rpc.NewCacheHandler(components.TokenCache, logger)
+		cacheHandler.RegisterCacheMethods(rpcServer)
+		if components.TokenCache != nil {
+			logger.Info("Token cache RPC handlers registered")
+		}
 	}
 
-	// Register cache handler (native Go)
-	cacheHandler := rpc.NewCacheHandler(components.TokenCache, logger)
-	cacheHandler.RegisterCacheMethods(rpcServer)
-	if components.TokenCache != nil {
-		logger.Info("Token cache RPC handlers registered")
-	}
-
-	// Create config service for HTTP server
-	configService, err := http.NewConfigService()
-	if err != nil {
-		logger.Warn("Failed to create config service", "error", err)
-	}
-
-	// Create daemon control for HTTP server
-	daemonControl, err := NewDaemonControl()
-	if err != nil {
-		logger.Warn("Failed to create daemon control", "error", err)
-	}
-
-	// Create metrics store
-	metricsStore, err := metrics.NewStore(&metrics.StoreConfig{
-		DatabasePath:  filepath.Join(cfg.StateDir, "metrics.db"),
-		BatchSize:     100,
-		FlushInterval: 10 * time.Second,
-	})
-	if err != nil {
-		logger.Warn("Failed to create metrics store", "error", err)
-	}
-
-	// Create metrics collector with getter functions for actual values
+	// Create HTTP server (if enabled)
+	var metricsStore *metrics.Store
 	var coll *metrics.Collector
-	if metricsStore != nil && components != nil {
-		coll = metrics.NewCollector(metricsStore, msgBus, &metrics.CollectorConfig{
-			GetQueueDepth: func() int {
-				ctx := context.Background()
-				stats, err := components.Queue.Stats(ctx)
-				if err != nil || stats.ByState == nil {
-					return 0
-				}
-				return stats.ByState[queue.StatePending] + stats.ByState[queue.StateClaimed]
-			},
-			GetActiveAgents: func() int {
-				stats := components.WorkerPool.GetStats()
-				return stats.BusyWorkers
-			},
+	var httpSrv *http.Server
+	if fullCfg.Transport.HTTP.Enabled {
+		configService, err := http.NewConfigService()
+		if err != nil {
+			logger.Warn("Failed to create config service", "error", err)
+		}
+
+		daemonControl, err := NewDaemonControl()
+		if err != nil {
+			logger.Warn("Failed to create daemon control", "error", err)
+		}
+
+		var err2 error
+		metricsStore, err2 = metrics.NewStore(&metrics.StoreConfig{
+			DatabasePath:  filepath.Join(cfg.StateDir, "metrics.db"),
+			BatchSize:     100,
+			FlushInterval: 10 * time.Second,
 		})
-	} else if metricsStore != nil {
-		// metricsStore exists but components is nil - create collector without getters
-		coll = metrics.NewCollector(metricsStore, msgBus, nil)
+		if err2 != nil {
+			logger.Warn("Failed to create metrics store", "error", err2)
+		}
+
+		if metricsStore != nil && components != nil {
+			coll = metrics.NewCollector(metricsStore, msgBus, &metrics.CollectorConfig{
+				GetQueueDepth: func() int {
+					ctx := context.Background()
+					stats, err := components.Queue.Stats(ctx)
+					if err != nil || stats.ByState == nil {
+						return 0
+					}
+					return stats.ByState[queue.StatePending] + stats.ByState[queue.StateClaimed]
+				},
+				GetActiveAgents: func() int {
+					stats := components.WorkerPool.GetStats()
+					return stats.BusyWorkers
+				},
+			})
+		} else if metricsStore != nil {
+			coll = metrics.NewCollector(metricsStore, msgBus, nil)
+		}
+
+		if configService != nil && daemonControl != nil && metricsStore != nil {
+			httpCfg := http.ServerConfig{
+				Addr:           fullCfg.Transport.HTTP.Addr,
+				ReadTimeout:    30 * time.Second,
+				WriteTimeout:   30 * time.Second,
+				MaxHeaderBytes: 1 << 20,
+				EnableCORS:     true,
+			}
+			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, logger)
+			logger.Info("HTTP transport enabled", "addr", httpCfg.Addr)
+		}
+	} else {
+		logger.Info("HTTP transport disabled by config")
 	}
 
-	// Create HTTP server - use metricsStore as the MetricsService
-	var httpSrv *http.Server
-	if configService != nil && daemonControl != nil && metricsStore != nil {
-		httpCfg := http.DefaultServerConfig()
-		httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, logger)
-		logger.Info("HTTP server created", "addr", httpCfg.Addr)
+	if rpcServer == nil && httpSrv == nil {
+		return nil, fmt.Errorf("at least one transport (rpc or http) must be enabled")
 	}
 
 	return &Daemon{
