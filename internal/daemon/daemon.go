@@ -215,6 +215,8 @@ func New(cfg *Config) (*Daemon, error) {
 				EnableCORS:     true,
 			}
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, logger)
+			// Set up bus proxy so HTTP clients can call RPC methods
+			httpSrv.SetBusProxy(NewBusProxyAdapter(msgBus))
 			logger.Info("HTTP transport enabled", "addr", httpCfg.Addr)
 		}
 	} else {

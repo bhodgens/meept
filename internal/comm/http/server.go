@@ -41,6 +41,11 @@ type DaemonController interface {
 	Restart(ctx context.Context) error
 }
 
+// BusProxy provides a way to call RPC methods via the message bus.
+type BusProxy interface {
+	Call(method string, params json.RawMessage) (json.RawMessage, error)
+}
+
 // MetricsService provides metrics access.
 type MetricsService interface {
 	GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error)
@@ -56,6 +61,7 @@ type Server struct {
 	configService  *ConfigService
 	daemonCtrl     DaemonController
 	metricsService MetricsService
+	busProxy       BusProxy
 	logger         *slog.Logger
 	server         *http.Server
 	running        bool
@@ -95,6 +101,13 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 		metricsService: metricsSvc,
 		logger:         logger,
 	}
+}
+
+// SetBusProxy sets the bus proxy for RPC-over-HTTP calls.
+func (s *Server) SetBusProxy(proxy BusProxy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.busProxy = proxy
 }
 
 // Start starts the HTTP server.
@@ -183,6 +196,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/live", s.handleLiveMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/historical", s.handleHistoricalMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
+
+	// Bus proxy - allows HTTP clients to call RPC methods
+	mux.HandleFunc("POST /api/v1/bus/call", s.handleBusCall)
 }
 
 // middleware applies common middleware (CORS, logging).
@@ -577,5 +593,41 @@ func (s *Server) handleMetricsStream(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "websocket_not_implemented",
 		"message": "use polling as fallback",
+	})
+}
+
+// handleBusCall handles POST /api/v1/bus/call - proxies RPC calls over HTTP.
+func (s *Server) handleBusCall(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	proxy := s.busProxy
+	s.mu.RUnlock()
+
+	if proxy == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "bus proxy not available")
+		return
+	}
+
+	var req struct {
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	result, err := proxy.Call(req.Method, req.Params)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{
+			"error": map[string]any{
+				"code":    -32603,
+				"message": err.Error(),
+			},
+		})
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"result": result,
 	})
 }

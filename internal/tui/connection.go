@@ -89,6 +89,9 @@ func resolveConnection() *clientConnection {
 // It respects client.transport ("rpc", "http", "auto") and client.connection settings.
 func NewDaemonClient() DaemonClient {
 	conn := resolveConnection()
+	if conn.transport == "http" {
+		return NewHTTPClient(conn.address)
+	}
 	return NewRPCClient(conn.address)
 }
 
