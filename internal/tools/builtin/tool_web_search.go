@@ -184,7 +184,7 @@ func (t *WebSearchTool) parseDuckDuckGoHTML(html string, limit int) ([]SearchRes
 
 	// DuckDuckGo HTML search result patterns
 	// Results are typically in <div class="result__body" ...> blocks
-	resultBlockPattern := regexp.MustCompile(`(?si)<div[^>]*class="result__body[^"]*"[^>]*>(.*?)</div>\s*(?:</div>\s*){0,2}(?=<div[^>]*class="result__body|$)`)
+	resultBlockPattern := regexp.MustCompile(`(?si)<div[^>]*class="result__body[^"]*"[^>]*>(.*?)</div>`)
 
 	// Title/URL link pattern: <a class="result__a" href="URL">TITLE</a>
 	titleLinkPattern := regexp.MustCompile(`<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>`)

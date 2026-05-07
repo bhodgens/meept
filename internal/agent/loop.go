@@ -2096,35 +2096,39 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 		return results
 	}
 
-	// Gate memory tools when recall mode is disabled
-	if l.config.Memory.RecallMode == RecallModeDisabled {
-		filtered := make([]llm.ToolCall, 0, len(toolCalls))
-		results := make([]*ExecutionResult, 0, len(toolCalls))
-
-		for _, tc := range toolCalls {
-			if memoryToolNames[tc.Function.Name] {
-				l.logger.Debug("blocked memory tool call: recall mode disabled",
-					"tool", tc.Function.Name,
-				)
-				results = append(results, &ExecutionResult{
-					ToolCallID: tc.ID,
-					Success:    false,
-					Error:      fmt.Sprintf("memory tool %q blocked: recall mode is disabled", tc.Function.Name),
-				})
-			} else {
-				filtered = append(filtered, tc)
-			}
-		}
-
-		// Execute remaining (non-memory) tool calls
-		if len(filtered) > 0 {
-			execResults := l.executor.ExecuteAll(ctx, filtered)
-			results = append(results, execResults...)
-		}
-		return results
+	if l.config.Memory.RecallMode != RecallModeDisabled {
+		return l.executor.ExecuteAll(ctx, toolCalls)
 	}
 
-	return l.executor.ExecuteAll(ctx, toolCalls)
+	// RecallModeDisabled: gate memory tools but preserve result ordering.
+	toExecute := make([]llm.ToolCall, 0, len(toolCalls))
+	executeIdx := make([]int, 0, len(toolCalls))
+	results := make([]*ExecutionResult, len(toolCalls))
+
+	for i, tc := range toolCalls {
+		if memoryToolNames[tc.Function.Name] {
+			l.logger.Debug("blocked memory tool call: recall mode disabled",
+				"tool", tc.Function.Name,
+			)
+			results[i] = &ExecutionResult{
+				ToolCallID: tc.ID,
+				Success:    false,
+				Error:      fmt.Sprintf("memory tool %q blocked: recall mode is disabled", tc.Function.Name),
+			}
+		} else {
+			toExecute = append(toExecute, tc)
+			executeIdx = append(executeIdx, i)
+		}
+	}
+
+	if len(toExecute) > 0 {
+		execResults := l.executor.ExecuteAll(ctx, toExecute)
+		for j, execResult := range execResults {
+			results[executeIdx[j]] = execResult
+		}
+	}
+
+	return results
 }
 
 // buildSystemPrompt constructs the system prompt.

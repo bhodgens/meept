@@ -187,8 +187,8 @@ func TestApp_RenderStatusBar(t *testing.T) {
 	if !strings.Contains(statusBar, "menu") {
 		t.Error("expected menu hint in status bar")
 	}
-	if !strings.Contains(statusBar, "Esc") {
-		t.Error("expected Esc hint in status bar")
+	if !strings.Contains(statusBar, "esc") {
+		t.Error("expected esc hint in status bar")
 	}
 	// Status indicator dot should be present
 	if !strings.Contains(statusBar, "●") {

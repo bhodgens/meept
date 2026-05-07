@@ -134,29 +134,37 @@ type Components struct {
 }
 
 // NewComponents creates all daemon components from configuration.
-func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logger) (*Components, error) {
+// NewComponents creates agent components. If modelsCfg is non-nil, it uses the
+// injected config instead of loading from disk.
+func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logger, modelsCfg ...*config.ModelsConfig) (*Components, error) {
 	c := &Components{
 		Config: cfg,
 		Logger: logger,
 	}
 
 	// Load models configuration - fail explicitly if not found
-	modelsCfg, configPath, err := loadModelsConfigWithPath(logger)
-	if err != nil {
-		logger.Error("FATAL: Failed to load models configuration",
-			"error", err,
-			"searched_paths", []string{"config/models.json5", "~/.meept/models.json5"},
-			"hint", "Copy config/models.json5 to ~/.meept/models.json5 or run daemon from project directory",
-		)
-		return nil, fmt.Errorf("models configuration required: %w", err)
+	var configPath string
+	var err error
+	if len(modelsCfg) > 0 && modelsCfg[0] != nil {
+		c.ModelsConfig = modelsCfg[0]
+		configPath = "<injected>"
+	} else {
+		c.ModelsConfig, configPath, err = loadModelsConfigWithPath(logger)
+		if err != nil {
+			logger.Error("FATAL: Failed to load models configuration",
+				"error", err,
+				"searched_paths", []string{"config/models.json5", "~/.meept/models.json5"},
+				"hint", "Copy config/models.json5 to ~/.meept/models.json5 or run daemon from project directory",
+			)
+			return nil, fmt.Errorf("models configuration required: %w", err)
+		}
 	}
 	logger.Info("Loaded models configuration",
 		"path", configPath,
-		"default_model", modelsCfg.Model,
-		"small_model", modelsCfg.SmallModel,
-		"providers", getProviderNames(modelsCfg),
+		"default_model", c.ModelsConfig.Model,
+		"small_model", c.ModelsConfig.SmallModel,
+		"providers", getProviderNames(c.ModelsConfig),
 	)
-	c.ModelsConfig = modelsCfg
 
 	// Create security checker
 	secCfg := security.Config{
@@ -172,7 +180,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	c.SecurityOrchestrator = createSecurityOrchestrator(cfg, logger)
 
 	// Create LLM client with budget tracking
-	llmCfg := createLLMConfig(modelsCfg, logger)
+	llmCfg := createLLMConfig(c.ModelsConfig, logger)
 	var budgetTracker *llm.Budget
 	if llmCfg != nil {
 		// Create budget tracker from config
@@ -270,9 +278,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 
 	// Create multi-provider LLM manager if multiple providers configured
-	providerCount := len(modelsCfg.Providers)
+	providerCount := len(c.ModelsConfig.Providers)
 	if providerCount > 1 {
-		providerConfigs := buildProviderConfigs(modelsCfg, logger)
+		providerConfigs := buildProviderConfigs(c.ModelsConfig, logger)
 		if len(providerConfigs) > 1 {
 			pmCfg := llm.ProviderManagerConfig{
 				Providers: providerConfigs,

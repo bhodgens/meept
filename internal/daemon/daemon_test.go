@@ -11,7 +11,33 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/config"
 )
+
+func createTestModelsConfig() *config.ModelsConfig {
+	return &config.ModelsConfig{
+		Model: "test/test",
+		Providers: map[string]config.Provider{
+			"test": {
+				API: "openai",
+				Options: config.ProviderOptions{
+					BaseURL: "http://localhost:9999",
+					APIKey:  "test",
+					Timeout: 5,
+				},
+				Models: map[string]config.Model{
+					"test": {
+						Name:         "test",
+						Capabilities: []string{"chat"},
+						ContextLimit: 4096,
+						Temperature:  0.7,
+					},
+				},
+			},
+		},
+	}
+}
 
 func TestDaemonStartup(t *testing.T) {
 	// Create temp directory
@@ -22,6 +48,7 @@ func TestDaemonStartup(t *testing.T) {
 		PIDFile:         filepath.Join(tmpDir, "meept.pid"),
 		StateDir:        tmpDir,
 		ShutdownTimeout: 2 * time.Second,
+		ModelsConfig:    createTestModelsConfig(),
 	}
 
 	d, err := New(cfg)
@@ -71,6 +98,7 @@ func BenchmarkDaemonStartup(b *testing.B) {
 			PIDFile:         filepath.Join(tmpDir, "meept.pid"),
 			StateDir:        tmpDir,
 			ShutdownTimeout: 1 * time.Second,
+			ModelsConfig:    createTestModelsConfig(),
 		}
 
 		b.StartTimer()
@@ -112,6 +140,7 @@ func BenchmarkRPCThroughput(b *testing.B) {
 		PIDFile:         filepath.Join(tmpDir, "meept.pid"),
 		StateDir:        tmpDir,
 		ShutdownTimeout: 2 * time.Second,
+		ModelsConfig:    createTestModelsConfig(),
 	}
 
 	d, err := New(cfg)
@@ -175,6 +204,7 @@ func BenchmarkConcurrentRPC(b *testing.B) {
 		PIDFile:         filepath.Join(tmpDir, "meept.pid"),
 		StateDir:        tmpDir,
 		ShutdownTimeout: 2 * time.Second,
+		ModelsConfig:    createTestModelsConfig(),
 	}
 
 	d, err := New(cfg)
@@ -263,6 +293,7 @@ func TestRPCLoadTest(t *testing.T) {
 		PIDFile:         filepath.Join(tmpDir, "meept.pid"),
 		StateDir:        tmpDir,
 		ShutdownTimeout: 5 * time.Second,
+		ModelsConfig:    createTestModelsConfig(),
 	}
 
 	d, err := New(cfg)

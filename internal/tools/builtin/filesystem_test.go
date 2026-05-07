@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/caimlas/meept/internal/tools"
 )
 
 func TestReadFileTool(t *testing.T) {
@@ -25,8 +27,9 @@ func TestReadFileTool(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if result != content {
-			t.Errorf("expected %q, got %q", content, result)
+		toolResult := result.(tools.ToolResult)
+		if toolResult.Result != content {
+			t.Errorf("expected %q, got %q", content, toolResult.Result)
 		}
 	})
 
@@ -40,8 +43,9 @@ func TestReadFileTool(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		expected := "line 2\nline 3\nline 4\nline 5"
-		if result != expected {
-			t.Errorf("expected %q, got %q", expected, result)
+		toolResult := result.(tools.ToolResult)
+		if toolResult.Result != expected {
+			t.Errorf("expected %q, got %q", expected, toolResult.Result)
 		}
 	})
 
@@ -56,8 +60,9 @@ func TestReadFileTool(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		expected := "line 2\nline 3"
-		if result != expected {
-			t.Errorf("expected %q, got %q", expected, result)
+		toolResult := result.(tools.ToolResult)
+		if toolResult.Result != expected {
+			t.Errorf("expected %q, got %q", expected, toolResult.Result)
 		}
 	})
 
@@ -242,9 +247,10 @@ func TestListDirectoryTool(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		listResult, ok := result.(ListResult)
+		toolResult := result.(tools.ToolResult)
+		listResult, ok := toolResult.Result.(ListResult)
 		if !ok {
-			t.Fatalf("expected ListResult, got %T", result)
+			t.Fatalf("expected ListResult, got %T", toolResult.Result)
 		}
 
 		if listResult.Count != 3 {
@@ -262,9 +268,10 @@ func TestListDirectoryTool(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		listResult, ok := result.(ListResult)
+		toolResult := result.(tools.ToolResult)
+		listResult, ok := toolResult.Result.(ListResult)
 		if !ok {
-			t.Fatalf("expected ListResult, got %T", result)
+			t.Fatalf("expected ListResult, got %T", toolResult.Result)
 		}
 
 		if listResult.Count != 4 {
@@ -282,9 +289,10 @@ func TestListDirectoryTool(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		listResult, ok := result.(ListResult)
+		toolResult := result.(tools.ToolResult)
+		listResult, ok := toolResult.Result.(ListResult)
 		if !ok {
-			t.Fatalf("expected ListResult, got %T", result)
+			t.Fatalf("expected ListResult, got %T", toolResult.Result)
 		}
 
 		if listResult.Count != 2 {

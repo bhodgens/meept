@@ -84,7 +84,7 @@ func (d *AgentDesigner) extractRequirements(research *ResearchReport, analyses [
 		requirements = append(requirements, "Possess specialized domain knowledge")
 	}
 	if strings.Contains(research.RootCause, "tool") {
-		requirements = append(requirements, "Expert proficiency with required tools")
+		requirements = append(requirements, "Demonstrate tool proficiency")
 	}
 
 	return requirements
@@ -103,11 +103,15 @@ func (d *AgentDesigner) determineRoleAndPurpose(pattern PatternReport, requireme
 	}
 
 	var purpose strings.Builder
-	purpose.WriteString(fmt.Sprintf("You are a %s specialist agent. ", intent))
+	purpose.WriteString(fmt.Sprintf("You are a %s specialist %s agent. ", intent, role))
 	purpose.WriteString("Your responsibilities:\n")
 
-	for i, req := range requirements[:minInt(len(requirements), 3)] {
-		purpose.WriteString(fmt.Sprintf("%d. %s\n", i+1, req))
+	reqCount := minInt(len(requirements), 3)
+	for i := 0; i < reqCount; i++ {
+		purpose.WriteString(fmt.Sprintf("%d. %s\n", i+1, requirements[i]))
+	}
+	if reqCount == 0 {
+		purpose.WriteString(fmt.Sprintf("1. Execute %s tasks with high quality\n", intent))
 	}
 
 	purpose.WriteString(fmt.Sprintf("\nYou do NOT handle: tasks outside %s domain, general chat, unrelated requests", intent))
@@ -178,6 +182,16 @@ func (d *AgentDesigner) determineCapabilities(pattern PatternReport, research *R
 
 // deriveConstraints derives operational constraints from session analysis.
 func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentConstraints {
+	if len(analyses) == 0 {
+		return AgentConstraints{
+			MaxIterations:    25,
+			TimeoutSeconds:   300,
+			MaxTokensPerTurn: 4096,
+			MaxMemoryRefs:    20,
+			Temperature:      ptrFloat(0.3),
+		}
+	}
+
 	// Compute average metrics
 	var totalIterations, totalTokens, totalDuration int
 	for _, a := range analyses {
@@ -191,15 +205,13 @@ func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentCons
 	avgDuration := totalDuration / len(analyses)
 
 	// Set constraints based on averages with headroom
-	constraints := AgentConstraints{
+	return AgentConstraints{
 		MaxIterations:    maxInt(avgIterations+5, 25),
 		TimeoutSeconds:   maxInt(avgDuration+60, 300),
 		MaxTokensPerTurn: maxInt(avgTokens+1000, 4096),
 		MaxMemoryRefs:    20,
-		Temperature:      ptrFloat(0.3), // Default to low temperature for specialists
+		Temperature:      ptrFloat(0.3),
 	}
-
-	return constraints
 }
 
 // generatePromptSections generates system prompt sections.

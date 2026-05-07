@@ -3,6 +3,7 @@ package q
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -496,11 +497,7 @@ func sqrt(x float64) float64 {
 	if x <= 0 {
 		return 0
 	}
-	z := x
-	for i := 0; i < 10; i++ {
-		z = (z + x/z) / 2
-	}
-	return z
+	return math.Sqrt(x)
 }
 
 // detectSkillOpportunity detects repetitive deterministic tasks suitable for skill automation.

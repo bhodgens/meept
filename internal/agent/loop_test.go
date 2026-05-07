@@ -580,6 +580,7 @@ func TestRecallModeDisabledGatesMemoryTools(t *testing.T) {
 		return map[string]any{"content": "test"}, nil
 	}))
 
+	secChecker := security.NewPermissionChecker(security.Config{})
 	loop := NewAgentLoop(
 		WithAgentConfig(AgentConfig{
 			Memory: AgentMemoryConfig{
@@ -587,8 +588,9 @@ func TestRecallModeDisabledGatesMemoryTools(t *testing.T) {
 			},
 		}),
 		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
 	)
-	loop.executor = NewExecutor(registry, nil)
+	loop.executor = NewExecutor(registry, secChecker)
 
 	toolCalls := []llm.ToolCall{
 		{ID: "tc-1", Function: llm.ToolCallFunction{Name: "memory_search", Arguments: `{"query":"test"}`}},

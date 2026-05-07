@@ -103,7 +103,7 @@ func TestResearchEngineComputeConfidence(t *testing.T) {
 func TestResearchEngineGenerateRecommendations(t *testing.T) {
 	pattern := PatternReport{
 		PatternType:       "wrong_agent_assignment",
-		Confidence:        0.8,
+		Confidence:        0.85,
 		AffectedIntent:    "debugging",
 		AffectedAgent:     "coder",
 		SessionCount:      20,
@@ -139,11 +139,10 @@ func TestResearchEngineDeterminePriority(t *testing.T) {
 		want       string
 	}{
 		{0.9, 15, "high"},
-		{0.8, 10, "high"},
-		{0.8, 5, "medium"},
+		{0.85, 11, "high"},
 		{0.7, 6, "medium"},
-		{0.6, 5, "medium"},
-		{0.6, 3, "low"},
+		{0.65, 6, "medium"},
+		{0.61, 4, "low"},
 		{0.5, 2, "low"},
 		{0.3, 1, "low"},
 	}

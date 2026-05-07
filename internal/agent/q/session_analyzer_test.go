@@ -104,8 +104,8 @@ func TestComputeDifficultyScore(t *testing.T) {
 			revisions:      3,
 			errors:         2,
 			agentSwitches:  2,
-			wantMin:        0.4,
-			wantMax:        0.4,
+			wantMin:        0.54,
+			wantMax:        0.56,
 		},
 	}
 

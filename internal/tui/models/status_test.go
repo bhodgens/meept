@@ -216,8 +216,8 @@ func TestStatusModel_ViewLoading(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Loading") {
-		t.Error("expected 'Loading' in view when no status")
+	if !strings.Contains(view, "loading") {
+		t.Error("expected 'loading' in view when no status")
 	}
 }
 
@@ -229,8 +229,8 @@ func TestStatusModel_ViewError(t *testing.T) {
 
 	view := model.View()
 
-	if !strings.Contains(view, "Error") {
-		t.Error("expected 'Error' in view")
+	if !strings.Contains(view, "error") {
+		t.Error("expected 'error' in view")
 	}
 	if !strings.Contains(view, "test error") {
 		t.Error("expected error message in view")
@@ -250,14 +250,14 @@ func TestStatusModel_ViewDashboard(t *testing.T) {
 	view := model.View()
 
 	// Check for panel content
-	if !strings.Contains(view, "Daemon Status") {
-		t.Error("expected 'Daemon Status' panel")
+	if !strings.Contains(view, "daemon status") {
+		t.Error("expected 'daemon status' panel")
 	}
 	if !strings.Contains(view, "running") {
 		t.Error("expected 'running' status")
 	}
-	if !strings.Contains(view, "Token Budget") {
-		t.Error("expected 'Token Budget' panel")
+	if !strings.Contains(view, "token budget") {
+		t.Error("expected 'token budget' panel")
 	}
 	if !strings.Contains(view, "Quick Actions") {
 		t.Error("expected 'Quick Actions' panel")
@@ -275,8 +275,8 @@ func TestStatusModel_RenderStatusPanel(t *testing.T) {
 
 	panel := model.renderStatusPanel(30)
 
-	if !strings.Contains(panel, "Daemon Status") {
-		t.Error("expected 'Daemon Status' title")
+	if !strings.Contains(panel, "daemon status") {
+		t.Error("expected 'daemon status' title")
 	}
 	if !strings.Contains(panel, "running") {
 		t.Error("expected status value")
@@ -323,14 +323,14 @@ func TestStatusModel_RenderMetricsPanel(t *testing.T) {
 
 	panel := model.renderMetricsPanel(30)
 
-	if !strings.Contains(panel, "Token Budget") {
-		t.Error("expected 'Token Budget' title")
+	if !strings.Contains(panel, "token budget") {
+		t.Error("expected 'token budget' title")
 	}
-	if !strings.Contains(panel, "Tokens Used") {
-		t.Error("expected 'Tokens Used' label")
+	if !strings.Contains(panel, "tokens used") {
+		t.Error("expected 'tokens used' label")
 	}
-	if !strings.Contains(panel, "Budget Used") {
-		t.Error("expected 'Budget Used' label")
+	if !strings.Contains(panel, "budget used") {
+		t.Error("expected 'budget used' label")
 	}
 }
 

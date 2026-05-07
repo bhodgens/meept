@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/tools"
 )
 
 func TestWebFetchTool_Execute(t *testing.T) {
@@ -51,10 +53,7 @@ func TestWebFetchTool_Execute(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		fetchResult, ok := result.(FetchResult)
-		if !ok {
-			t.Fatalf("expected FetchResult, got %T", result)
-		}
+		fetchResult := unwrapFetchResult(t, result)
 
 		if fetchResult.StatusCode != 200 {
 			t.Errorf("expected status 200, got %d", fetchResult.StatusCode)
@@ -73,10 +72,7 @@ func TestWebFetchTool_Execute(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		fetchResult, ok := result.(FetchResult)
-		if !ok {
-			t.Fatalf("expected FetchResult, got %T", result)
-		}
+		fetchResult := unwrapFetchResult(t, result)
 
 		// Should not contain script or style content
 		if strings.Contains(fetchResult.Content, "alert") {
@@ -140,10 +136,7 @@ func TestWebFetchTool_Execute(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		fetchResult, ok := result.(FetchResult)
-		if !ok {
-			t.Fatalf("expected FetchResult, got %T", result)
-		}
+		fetchResult := unwrapFetchResult(t, result)
 
 		if len(fetchResult.Content) != 5 {
 			t.Errorf("expected content length 5, got %d", len(fetchResult.Content))
@@ -248,10 +241,7 @@ func TestWebFetchTool_Redirects(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	fetchResult, ok := result.(FetchResult)
-	if !ok {
-		t.Fatalf("expected FetchResult, got %T", result)
-	}
+	fetchResult := unwrapFetchResult(t, result)
 
 	if fetchResult.Content != "final destination" {
 		t.Errorf("expected 'final destination', got %q", fetchResult.Content)
@@ -259,4 +249,17 @@ func TestWebFetchTool_Redirects(t *testing.T) {
 	if !strings.Contains(fetchResult.URL, "/final") {
 		t.Errorf("expected final URL to contain '/final', got %q", fetchResult.URL)
 	}
+}
+
+func unwrapFetchResult(t *testing.T, result any) FetchResult {
+	t.Helper()
+	toolResult, ok := result.(tools.ToolResult)
+	if !ok {
+		t.Fatalf("expected tools.ToolResult, got %T", result)
+	}
+	fetchResult, ok := toolResult.Result.(FetchResult)
+	if !ok {
+		t.Fatalf("expected FetchResult in ToolResult.Result, got %T", toolResult.Result)
+	}
+	return fetchResult
 }

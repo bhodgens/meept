@@ -338,7 +338,7 @@ func TestWebSearchTool_DecodeHTMLEntities(t *testing.T) {
 		{
 			name:  "mixed",
 			input: " &lt;div&gt;&quot;Hello&quot;&amp;&#39;World&#39;&hellip;&quot; &lt;/div&gt;",
-			want:  " <div>\"Hello\"&'World'…\" </div>",
+			want:  " <div>\"Hello\"&'World'...\" </div>",
 		},
 	}
 

@@ -197,7 +197,9 @@ func TestCompileResults(t *testing.T) {
 				{Type: "new_agent", Title: "Debug specialist", Priority: "high"},
 			},
 		},
-	}, []*AgentDesign{}, []*ImpactEstimate{}, nil)
+	}, []*AgentDesign{}, []*ImpactEstimate{}, []Recommendation{
+		{Type: "new_agent", Title: "Debug specialist", Priority: "high"},
+	})
 	if len(withRecs.Recommendations) != 1 {
 		t.Errorf("expected 1 recommendation, got %d", len(withRecs.Recommendations))
 	}

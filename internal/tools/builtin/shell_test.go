@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/tools"
 )
 
 func TestShellExecuteTool_Execute(t *testing.T) {
@@ -20,11 +22,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		shellResult, ok := result.(ShellResult)
-		if !ok {
-			t.Fatalf("expected ShellResult, got %T", result)
-		}
-
+		shellResult := unwrapShellResult(t, result)
 		if shellResult.ReturnCode != 0 {
 			t.Errorf("expected return code 0, got %d", shellResult.ReturnCode)
 		}
@@ -42,11 +40,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		shellResult, ok := result.(ShellResult)
-		if !ok {
-			t.Fatalf("expected ShellResult, got %T", result)
-		}
-
+		shellResult := unwrapShellResult(t, result)
 		if !strings.Contains(shellResult.Stderr, "error") {
 			t.Errorf("expected stderr to contain 'error', got %q", shellResult.Stderr)
 		}
@@ -61,11 +55,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		shellResult, ok := result.(ShellResult)
-		if !ok {
-			t.Fatalf("expected ShellResult, got %T", result)
-		}
-
+		shellResult := unwrapShellResult(t, result)
 		if shellResult.ReturnCode != 42 {
 			t.Errorf("expected return code 42, got %d", shellResult.ReturnCode)
 		}
@@ -197,11 +187,7 @@ func TestShellExecuteTool_WorkingDir(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		shellResult, ok := result.(ShellResult)
-		if !ok {
-			t.Fatalf("expected ShellResult, got %T", result)
-		}
-
+		shellResult := unwrapShellResult(t, result)
 		if !strings.Contains(shellResult.Stdout, dir) {
 			t.Errorf("expected working dir %q in output, got %q", dir, shellResult.Stdout)
 		}
@@ -217,16 +203,25 @@ func TestShellExecuteTool_WorkingDir(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		shellResult, ok := result.(ShellResult)
-		if !ok {
-			t.Fatalf("expected ShellResult, got %T", result)
-		}
-
+		shellResult := unwrapShellResult(t, result)
 		// /tmp might be a symlink to /private/tmp on macOS
 		if !strings.Contains(shellResult.Stdout, "tmp") {
 			t.Errorf("expected '/tmp' or '/private/tmp' in output, got %q", shellResult.Stdout)
 		}
 	})
+}
+
+func unwrapShellResult(t *testing.T, result any) ShellResult {
+	t.Helper()
+	toolResult, ok := result.(tools.ToolResult)
+	if !ok {
+		t.Fatalf("expected tools.ToolResult, got %T", result)
+	}
+	shellResult, ok := toolResult.Result.(ShellResult)
+	if !ok {
+		t.Fatalf("expected ShellResult in ToolResult.Result, got %T", toolResult.Result)
+	}
+	return shellResult
 }
 
 // TestShellRisk_ConfigurableAllowlist verifies that an unknown command is

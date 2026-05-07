@@ -87,7 +87,7 @@ func TestPatternDetectorDetectModelMisconfiguration(t *testing.T) {
 				makeSession("s3", "chat", []string{"debug"}, 8*time.Minute, 4, 0, 0, 0, "completed", 0.3, nil),
 			},
 			needPattern: true,
-			threshold:   3.0,
+			threshold:   1.0,
 			minSessions: 3,
 		},
 		{

@@ -49,11 +49,14 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	LogLevel        slog.Level
 
+	// Optional pre-loaded models config (used by tests to avoid loading real config)
+	ModelsConfig *config.ModelsConfig
+
 	// Security settings
-	AllowedPaths              []string
-	BlockedPaths              []string
-	BlockFinancial            bool
-	RequireConfirmationHigh   bool
+	AllowedPaths                []string
+	BlockedPaths                []string
+	BlockFinancial              bool
+	RequireConfirmationHigh     bool
 	RequireConfirmationCritical bool
 }
 
@@ -133,7 +136,7 @@ func New(cfg *Config) (*Daemon, error) {
 	}
 
 	// Create agent components (LLM, tools, agent loop, chat handler)
-	components, err := NewComponents(fullCfg, msgBus, logger)
+	components, err := NewComponents(fullCfg, msgBus, logger, cfg.ModelsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create components: %w", err)
 	}
