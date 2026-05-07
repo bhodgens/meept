@@ -158,7 +158,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#F97316")).
@@ -193,11 +193,13 @@ func (m model) View() string {
 	content += m.viz.View() + "\n\n"
 	content += helpStyle.Render("Keys: 1-6 set states | q quit | Auto-cycling every 2s")
 
-	return borderStyle.Render(content)
+	v := tea.NewView(borderStyle.Render(content))
+	v.AltScreen = true
+	return v
 }
 
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
