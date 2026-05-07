@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/tui"
 )
 
@@ -32,13 +33,18 @@ Examples:
 	return cmd
 }
 
-func runChat(cmd *cobra.Command, args []string) error {
-	socket := getSocketPath()
+func getTransportConfig() *transport.Config {
+	cfg := transport.DefaultConfig()
+	cfg.Transport = transportFlag
+	cfg.SocketPath = getSocketPath()
+	return cfg
+}
 
+func runChat(cmd *cobra.Command, args []string) error {
 	// Check if we have a message argument
 	if len(args) == 0 {
 		// No arguments - launch TUI
-		return runTUI(socket)
+		return runTUI(getSocketPath())
 	}
 
 	message := args[0]
@@ -64,7 +70,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	}
 
 	// Single message mode
-	return sendSingleMessage(socket, message)
+	return sendSingleMessage(getSocketPath(), message)
 }
 
 func runTUI(socketPath string) error {

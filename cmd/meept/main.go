@@ -14,12 +14,11 @@ import (
 )
 
 var (
-	
-
 	// Global flags
-	socketPath string
-	stateDir   string
-	debugFile  string // Empty = no debug, "-" = stderr, "filename" = file
+	socketPath    string
+	stateDir      string
+	debugFile     string // Empty = no debug, "-" = stderr, "filename" = file
+	transportFlag string // "rpc" or "http"
 )
 
 // debugEnabled returns whether debug mode is active.
@@ -98,9 +97,10 @@ Memory & Skills:
 	}
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVarP(&socketPath, "socket", "s", defaultSocket, "Unix socket path")
+	rootCmd.PersistentFlags().StringVarP(&socketPath, "socket", "s", defaultSocket, "Unix socket path (for RPC)")
 	rootCmd.PersistentFlags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
 	rootCmd.PersistentFlags().StringVar(&debugFile, "debug", "", "Enable debug output (--debug or --debug=file, use '-' for stderr)")
+	rootCmd.PersistentFlags().StringVar(&transportFlag, "transport", "rpc", "Transport: rpc or http")
 	rootCmd.PersistentFlags().Lookup("debug").NoOptDefVal = "debug.log"
 
 	// Add subcommands

@@ -46,13 +46,40 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// LoadDefault loads configuration from the default location (~/.meept/meept.toml).
+// LoadDefault loads configuration from the default location.
+// Prefers JSON5, falls back to TOML for backward compatibility.
 func LoadDefault() (*Config, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return DefaultConfig(), nil
 	}
-	return Load(filepath.Join(homeDir, ".meept", "meept.toml"))
+
+	// Try JSON5 first
+	json5Path := filepath.Join(homeDir, ".meept", "meept.json5")
+	if _, err := os.Stat(json5Path); err == nil {
+		return LoadJSON5Config(json5Path)
+	}
+
+	// Fall back to TOML
+	tomlPath := filepath.Join(homeDir, ".meept", "meept.toml")
+	return Load(tomlPath)
+}
+
+// LoadJSON5Config loads configuration from a JSON5 file.
+func LoadJSON5Config(path string) (*Config, error) {
+	path = expandPath(path)
+
+	cfg := DefaultConfig()
+	if err := LoadJSON5(path, cfg); err != nil {
+		if os.IsNotExist(err) {
+			expandConfigPaths(cfg)
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("failed to load JSON5 config: %w", err)
+	}
+
+	expandConfigPaths(cfg)
+	return cfg, nil
 }
 
 // ExpandEnvVars expands environment variables in a string.

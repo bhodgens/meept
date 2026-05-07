@@ -1,0 +1,158 @@
+// Meept Configuration
+// Copy to ~/.meept/meept.json5 and customize
+{
+  // Daemon settings
+  daemon: {
+    socket_path: "~/.meept/meept.sock",
+    pid_file: "~/.meept/meept.pid",
+    log_level: "INFO",
+    data_dir: "~/.meept",
+  },
+
+  // Transport configuration (RPC and HTTP)
+  transport: {
+    rpc: {
+      enabled: true,
+      socket_path: "~/.meept/meept.sock",
+    },
+    http: {
+      enabled: true,
+      addr: ":8081",
+    },
+  },
+
+  // LLM configuration (models moved to models.json5)
+  llm: {
+    budget: {
+      hourly_token_limit: 100000,
+      daily_token_limit: 1000000,
+      rate_limit_rpm: 30,
+      aggressiveness: 0.5,
+    },
+    context_firewall: {
+      enabled: true,
+      proactive_compression: false,
+    },
+  },
+
+  // Memory configuration
+  memory: {
+    data_dir: "~/.meept/memory",
+    consolidation_interval_hours: 6,
+    episodic: {
+      enabled: true,
+      max_context_items: 20,
+    },
+    task: {
+      enabled: true,
+      domains: ["general", "code", "commands"],
+    },
+    personality: {
+      enabled: true,
+      update_interval_conversations: 10,
+    },
+    security: {
+      enabled: true,
+      fail_closed: true,
+      log_blocked: true,
+    },
+    caching: {
+      enabled: true,
+    },
+  },
+
+  // Multi-agent configuration
+  multiagent: {
+    enabled: true,
+    routing_mode: "auto",
+  },
+
+  // Security configuration
+  security: {
+    max_file_size_mb: 10,
+    allowed_paths: [],
+    blocked_paths: [],
+    block_financial: true,
+    allowed_domains: [],
+    require_confirmation_high: true,
+    require_confirmation_critical: true,
+  },
+
+  // Scheduler configuration
+  scheduler: {
+    enabled: false,
+    tick_interval: "1m",
+    max_concurrent_jobs: 5,
+  },
+
+  // Queue configuration
+  queue: {
+    db_path: "~/.meept/queue.db",
+    max_workers: 10,
+    worker_timeout: "5m",
+    retry_policy: {
+      max_retries: 3,
+      initial_delay: "5s",
+      max_delay: "5m",
+      backoff_multiplier: 2,
+    },
+  },
+
+  // Workers configuration
+  workers: {
+    default_pool_size: 5,
+    max_pool_size: 20,
+  },
+
+  // Telegram bot configuration
+  telegram: {
+    enabled: false,
+    token: "",
+    admin_chat_id: 0,
+  },
+
+  // Web server configuration
+  web: {
+    enabled: false,
+    port: 8080,
+    host: "127.0.0.1",
+    api_path: "/api/v1",
+  },
+
+  // MCP server configuration
+  mcp: {
+    enabled: false,
+    config_file: "~/.meept/mcp_servers.json5",
+  },
+
+  // Plugins configuration
+  plugins: {
+    enabled: false,
+    directory: "~/.meept/plugins",
+  },
+
+  // Self-improvement configuration
+  selfimprove: {
+    enabled: true,
+    scan_interval: "1h",
+    auto_apply: false,
+    opportunity_threshold: 0.7,
+    max_recommendations: 10,
+  },
+
+  // Orchestrator configuration
+  orchestrator: {
+    enabled: true,
+    max_agents: 10,
+    load_balance: true,
+  },
+
+  // Context window management
+  context_window: {
+    enabled: true,
+    max_input_tokens: 100000,
+    token_reserve: 8192,
+    compression_threshold: 0.8,
+    summarization_model: "",
+  },
+}

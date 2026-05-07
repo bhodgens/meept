@@ -225,7 +225,7 @@ func newModelsProvidersCmd() *cobra.Command {
 }
 
 func runModelsProviders(cmd *cobra.Command, args []string) error {
-	fmt.Println("Available Providers:\n")
+	fmt.Println("Available Providers:")
 	for _, p := range llm.CanonicalProviders {
 		fmt.Printf("  %-20s %s\n", p.Name, p.ID)
 		fmt.Printf("    Auth: %s, Transport: %s\n", p.AuthType, p.Transport)

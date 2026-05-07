@@ -138,7 +138,6 @@ func newSelfImproveAnalyzeCmd() *cobra.Command {
 			if err := json.Unmarshal(result, &resp); err != nil {
 				// CLI-8 FIX: fallback to pretty-printed JSON instead of raw bytes
 				return printJSON(result)
-				return nil
 			}
 
 			if resp.Count == 0 {
@@ -201,7 +200,6 @@ func newSelfImproveGenerateCmd() *cobra.Command {
 			if err := json.Unmarshal(result, &resp); err != nil {
 				// CLI-8 FIX: fallback to pretty-printed JSON instead of raw bytes
 				return printJSON(result)
-				return nil
 			}
 
 			if resp.Count == 0 {
@@ -263,7 +261,6 @@ func newSelfImproveValidateCmd() *cobra.Command {
 			if err := json.Unmarshal(result, &resp); err != nil {
 				// CLI-8 FIX: fallback to pretty-printed JSON instead of raw bytes
 				return printJSON(result)
-				return nil
 			}
 
 			if resp.Count == 0 {
@@ -322,7 +319,6 @@ func newSelfImproveApplyCmd() *cobra.Command {
 			fmt.Printf("fix %s applied successfully\n", fixID)
 			// CLI-8 FIX: use pretty-printed JSON instead of raw bytes
 			return printJSON(result)
-			return nil
 		},
 	}
 

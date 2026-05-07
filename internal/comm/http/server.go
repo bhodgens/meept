@@ -166,6 +166,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/config/client", s.handleSaveClientConfig)
 	mux.HandleFunc("GET /api/v1/config/models", s.handleGetModelsConfig)
 	mux.HandleFunc("POST /api/v1/config/models", s.handleSaveModelsConfig)
+	mux.HandleFunc("GET /api/v1/config/menubar", s.handleGetMenubarConfig)
+	mux.HandleFunc("POST /api/v1/config/menubar", s.handleSaveMenubarConfig)
 	mux.HandleFunc("GET /api/v1/config/agents", s.handleListAgents)
 	mux.HandleFunc("GET /api/v1/config/agents/{id}", s.handleGetAgent)
 	mux.HandleFunc("POST /api/v1/config/agents/{id}", s.handleSaveAgent)
@@ -538,4 +540,38 @@ func (s *Server) handleMetricsStream(w http.ResponseWriter, r *http.Request) {
 		"status":  "websocket_not_implemented",
 		"message": "use polling as fallback",
 	})
+}
+
+// handleGetMenubarConfig handles GET /api/v1/config/menubar.
+func (s *Server) handleGetMenubarConfig(w http.ResponseWriter, r *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+	content, err := s.configService.LoadMenubarConfig()
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json5")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(content))
+}
+
+// handleSaveMenubarConfig handles POST /api/v1/config/menubar.
+func (s *Server) handleSaveMenubarConfig(w http.ResponseWriter, r *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+	var body struct{ Content string `json:"content"` }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := s.configService.SaveMenubarConfig(body.Content); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }

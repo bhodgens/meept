@@ -79,21 +79,23 @@ GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 # Setup
 # =============================================================================
 
+# Config templates to install
+CONFIG_FILES := \
+	$(MEEPT_HOME)/meept.json5 \
+	$(MEEPT_HOME)/models.json5 \
+	$(MEEPT_HOME)/presets.json5 \
+	$(MEEPT_HOME)/client.json5 \
+	$(MEEPT_HOME)/mcp_servers.json5 \
+	$(MEEPT_HOME)/q_agent.json5 \
+	$(MEEPT_HOME)/menubar.json5
+
 setup:
-	mkdir -p $(MEEPT_HOME)
-	@if [ ! -f $(MEEPT_HOME)/meept.toml ]; then \
-		cp config/meept.toml $(MEEPT_HOME)/meept.toml; \
-		echo "Created $(MEEPT_HOME)/meept.toml - edit with your LLM settings"; \
+	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
+	@if [ ! -f $(MEEPT_HOME)/meept.json5 ] && [ ! -f $(MEEPT_HOME)/meept.toml ]; then \
+		cp config/meept.json5 $(MEEPT_HOME)/meept.json5; \
+		echo "Created $(MEEPT_HOME)/meept.json5"; \
 	fi
-	@if [ ! -d $(MEEPT_HOME)/plugins ]; then \
-		mkdir -p $(MEEPT_HOME)/plugins; \
-	fi
-	@if [ ! -d $(MEEPT_HOME)/memory ]; then \
-		mkdir -p $(MEEPT_HOME)/memory; \
-	fi
-	@if [ ! -d $(MEEPT_HOME)/workspaces ]; then \
-		mkdir -p $(MEEPT_HOME)/workspaces; \
-	fi
+	@echo "Setup complete."
 
 deps:
 	@echo "Downloading Go dependencies..."
@@ -132,11 +134,38 @@ build-release: GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 build-release: build-all
 	@echo "Release build with version $(VERSION)"
 
-install:
+install: build
 	@echo "Installing binaries to GOPATH/bin..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
-	@echo "Installed: meept-daemon, meept"
+	@echo "Installing config files..."
+	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
+	@echo "Copying config templates (if not present)..."
+	@for f in $(CONFIG_FILES); do \
+		if [ ! -f $$f ]; then \
+			src="config/$$(basename $$f)"; \
+			if [ -f $$src ]; then \
+				cp $$src $$f; \
+				echo "  created $$f"; \
+			else \
+				echo "  template $$src not found (skipping $$f)"; \
+			fi; \
+		else \
+			echo "  skipping $$f (already exists)"; \
+		fi; \
+	done
+	@echo "Copying agent definitions..."
+	@if [ -d config/agents ]; then \
+		cp -r config/agents/* $(MEEPT_HOME)/agents/ 2>/dev/null || true; \
+		echo "  copied agent definitions"; \
+	fi
+	@echo "Copying prompts..."
+	@if [ -d config/prompts ]; then \
+		cp -r config/prompts/* $(MEEPT_HOME)/prompts/ 2>/dev/null || true; \
+		echo "  copied prompts"; \
+	fi
+	@echo ""
+	@echo "Install complete. Edit $(MEEPT_HOME)/meept.json5 to configure."
 
 # =============================================================================
 # Testing

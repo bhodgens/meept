@@ -1,0 +1,29 @@
+// Menubar app configuration
+{
+  // Connection to meept daemon
+  daemon: {
+    // Transport: "http" or "rpc" (menubar always uses HTTP for now)
+    transport: "http",
+    // HTTP endpoint (ignored for RPC)
+    http_url: "http://localhost:8081",
+    // Unix socket path (for future RPC support)
+    socket_path: "~/.meept/meept.sock",
+  },
+
+  // UI preferences
+  ui: {
+    // Show panel in menu bar
+    show_in_menu_bar: true,
+    // Start at login
+    start_at_login: false,
+    // Menu bar icon style: "icon", "text", "both"
+    icon_style: "icon",
+  },
+
+  // Notifications
+  notifications: {
+    enabled: true,
+    // Notify on: "all", "errors_only", "none"
+    level: "errors_only",
+  },
+}

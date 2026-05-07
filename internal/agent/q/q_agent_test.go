@@ -170,7 +170,7 @@ func TestCompileResults(t *testing.T) {
 		{PatternType: "high_error_rate", Confidence: 0.8, SessionCount: 5},
 	}
 
-	result := qa.compileResults(analyses, patterns, []*ResearchReport{}, []*AgentDesign{}, []*ImpactEstimate{})
+	result := qa.compileResults(analyses, patterns, []*ResearchReport{}, []*AgentDesign{}, []*ImpactEstimate{}, nil)
 
 	if result == nil {
 		t.Fatal("compileResults returned nil")
@@ -197,7 +197,7 @@ func TestCompileResults(t *testing.T) {
 				{Type: "new_agent", Title: "Debug specialist", Priority: "high"},
 			},
 		},
-	}, []*AgentDesign{}, []*ImpactEstimate{})
+	}, []*AgentDesign{}, []*ImpactEstimate{}, nil)
 	if len(withRecs.Recommendations) != 1 {
 		t.Errorf("expected 1 recommendation, got %d", len(withRecs.Recommendations))
 	}
@@ -206,7 +206,7 @@ func TestCompileResults(t *testing.T) {
 func TestCompileResultsEmpty(t *testing.T) {
 	qa := &QAgent{}
 
-	result := qa.compileResults(nil, nil, []*ResearchReport{}, []*AgentDesign{}, []*ImpactEstimate{})
+	result := qa.compileResults(nil, nil, []*ResearchReport{}, []*AgentDesign{}, []*ImpactEstimate{}, nil)
 
 	if result == nil {
 		t.Fatal("compileResults returned nil for empty inputs")
@@ -369,7 +369,7 @@ func TestMinIntEdgeCases(t *testing.T) {
 
 func TestCompileResultsNullInput(t *testing.T) {
 	qa := &QAgent{}
-	result := qa.compileResults(nil, nil, nil, nil, nil)
+	result := qa.compileResults(nil, nil, nil, nil, nil, nil)
 
 	if result == nil {
 		t.Fatal("expected non-nil result for null inputs")

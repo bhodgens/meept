@@ -186,4 +186,46 @@ class ConfigService {
             completion(.success(()))
         }.resume()
     }
+
+    func getMenubarConfig(completion: @escaping (Result<String, Error>) -> Void) {
+        let url = baseURL.appendingPathComponent("/api/v1/config/menubar")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode),
+                  let data = data else {
+                completion(.failure(APIError.invalidResponse))
+                return
+            }
+            completion(.success(String(data: data, encoding: .utf8) ?? "{}"))
+        }.resume()
+    }
+
+    func saveMenubarConfig(content: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        let url = baseURL.appendingPathComponent("/api/v1/config/menubar")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: String] = ["content": content]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200..<300).contains(httpResponse.statusCode) else {
+                completion(.failure(APIError.invalidResponse))
+                return
+            }
+            completion(.success(()))
+        }.resume()
+    }
 }

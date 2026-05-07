@@ -132,13 +132,54 @@ Skills declare `requires: [code, reasoning]` in YAML frontmatter; models declare
 
 ## Configuration
 
-- **Main config**: `~/.meept/meept.toml` (see `config/meept.toml` for template)
+All configuration uses **JSON5** format (JSON with comments and trailing commas). Legacy TOML config is still readable for backward compatibility.
+
+- **Main config**: `~/.meept/meept.json5` (see `config/meept.json5` for template)
 - **Models**: `config/models.json5` (JSON5 format with capability tags)
-- **Client**: `~/.meept/client.json5` (menubar app settings)
 - **Presets**: `config/presets.json5` (model presets), `~/.meept/presets.json5` (user overrides)
-- **MCP servers**: `~/.meept/mcp_servers.json`
+- **MCP servers**: `~/.meept/mcp_servers.json5`
+- **Q Agent**: `~/.meept/q_agent.json5`
+- **Client**: `~/.meept/client.json5` (TUI keybindings/rendering)
+- **Menubar**: `~/.meept/menubar.json5` (menubar app settings)
 - **Metrics DB**: `~/.meept/metrics.db` (SQLite time-series storage)
 - **launchd Plist**: `~/Library/LaunchAgents/com.caimlas.meept-daemon.plist` (macOS)
+
+Templates are in `config/` and copied on `make install` if not present.
+
+### Transport Configuration
+
+The daemon supports two transports (can be enabled independently):
+
+```json5
+{
+  transport: {
+    rpc: {
+      enabled: true,                // Unix socket JSON-RPC
+      socket_path: "~/.meept/meept.sock",
+    },
+    http: {
+      enabled: true,                // REST API for menubar
+      addr: ":8081",
+    },
+  },
+}
+```
+
+Clients connect via `--transport` flag:
+```bash
+meept --transport=rpc chat          // Default; uses Unix socket
+meept --transport=http --http-url=http://localhost:8081 chat
+```
+
+Menubar app uses HTTP exclusively. Its config (`menubar.json5`) controls the daemon URL:
+```json5
+{
+  daemon: {
+    transport: "http",
+    http_url: "http://localhost:8081",
+  },
+}
+```
 
 ### Programmatic component options
 

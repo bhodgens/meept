@@ -185,3 +185,118 @@ func TestParseLogLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadJSON5(t *testing.T) {
+	f, err := os.CreateTemp("", "test*.json5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+
+	content := `{
+		// This is a comment
+		"name": "test",
+		"value": 42,
+		"nested": {
+			/* block comment */
+			"enabled": true
+		}
+	}`
+	f.WriteString(content)
+	f.Close()
+
+	var result struct {
+		Name   string `json:"name"`
+		Value  int    `json:"value"`
+		Nested struct {
+			Enabled bool `json:"enabled"`
+		} `json:"nested"`
+	}
+
+	if err := LoadJSON5(f.Name(), &result); err != nil {
+		t.Fatalf("LoadJSON5 failed: %v", err)
+	}
+
+	if result.Name != "test" || result.Value != 42 || !result.Nested.Enabled {
+		t.Errorf("unexpected result: %+v", result)
+	}
+}
+
+func TestLoadJSON5EnvVars(t *testing.T) {
+	os.Setenv("TEST_VAR", "hello")
+	defer os.Unsetenv("TEST_VAR")
+
+	f, err := os.CreateTemp("", "test*.json5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+
+	f.WriteString(`{"msg": "${TEST_VAR}"}`)
+	f.Close()
+
+	var result struct {
+		Msg string `json:"msg"`
+	}
+	if err := LoadJSON5(f.Name(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Msg != "hello" {
+		t.Errorf("expected hello, got %s", result.Msg)
+	}
+}
+
+func TestLoadJSON5Config(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "meept.json5")
+
+	content := `{
+		// JSON5 config with comments
+		"daemon": {
+			"log_level": "DEBUG",
+			"socket_path": "/tmp/test.sock"
+		},
+		"transport": {
+			"rpc": {
+				"enabled": false,
+				"socket_path": "/tmp/rpc.sock"
+			},
+			"http": {
+				"enabled": true,
+				"addr": ":9090"
+			}
+		}
+	}`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadJSON5Config(configPath)
+	if err != nil {
+		t.Fatalf("LoadJSON5Config failed: %v", err)
+	}
+
+	if cfg.Daemon.LogLevel != "DEBUG" {
+		t.Errorf("Log level = %q, want DEBUG", cfg.Daemon.LogLevel)
+	}
+	if cfg.Transport.RPC.Enabled != false {
+		t.Error("RPC should be disabled")
+	}
+	if cfg.Transport.HTTP.Addr != ":9090" {
+		t.Errorf("HTTP addr = %q, want :9090", cfg.Transport.HTTP.Addr)
+	}
+}
+
+func TestDefaultConfigTransport(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.Transport.RPC.Enabled {
+		t.Error("RPC transport should be enabled by default")
+	}
+	if !cfg.Transport.HTTP.Enabled {
+		t.Error("HTTP transport should be enabled by default")
+	}
+	if cfg.Transport.HTTP.Addr != ":8081" {
+		t.Errorf("expected HTTP addr :8081, got %s", cfg.Transport.HTTP.Addr)
+	}
+}
+

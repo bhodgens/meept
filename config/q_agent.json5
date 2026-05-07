@@ -1,0 +1,20 @@
+// Q Agent configuration
+{
+  enabled: true,
+  // Analysis settings
+  analysis: {
+    min_sessions: 5,
+    lookback_hours: 168,
+  },
+  // Skill designer settings
+  skill_designer: {
+    enabled: true,
+    auto_publish: false,
+    review_required: true,
+  },
+  // Reporting
+  reporting: {
+    log_level: "info",
+    output_format: "markdown",
+  },
+}
