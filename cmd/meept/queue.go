@@ -37,7 +37,7 @@ func newQueueStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show queue statistics",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -97,7 +97,7 @@ func newQueueListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List jobs in the queue",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -163,7 +163,7 @@ func newQueueRetryCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			jobID := args[0]
 
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}

@@ -24,9 +24,8 @@ schedule, next run time, and current status.`,
 }
 
 func runJobs(cmd *cobra.Command, args []string) error {
-	socket := getSocketPath()
+	client := tui.NewDaemonClient()
 
-	client := tui.NewRPCClient(socket)
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}

@@ -43,7 +43,7 @@ func newTaskListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List tasks",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -102,7 +102,7 @@ func newTaskCreateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -137,7 +137,7 @@ func newTaskGetCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
 
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -187,7 +187,7 @@ func newTaskDeleteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
 
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -212,7 +212,7 @@ func newTaskLinkCmd() *cobra.Command {
 			taskID := args[0]
 			sessionID := args[1]
 
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -237,7 +237,7 @@ func newTaskUnlinkCmd() *cobra.Command {
 			taskID := args[0]
 			sessionID := args[1]
 
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}

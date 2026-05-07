@@ -85,8 +85,7 @@ func newDevConfigCmd() *cobra.Command {
 }
 
 func runDevModels(cmd *cobra.Command, args []string) error {
-	socket := getSocketPath()
-	client := tui.NewRPCClient(socket)
+	client := tui.NewDaemonClient()
 
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept-daemon -f", err)
@@ -138,8 +137,7 @@ func runDevModels(cmd *cobra.Command, args []string) error {
 }
 
 func runDevModel(cmd *cobra.Command, args []string) error {
-	socket := getSocketPath()
-	client := tui.NewRPCClient(socket)
+	client := tui.NewDaemonClient()
 
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept-daemon -f", err)
@@ -210,8 +208,7 @@ func runDevModel(cmd *cobra.Command, args []string) error {
 }
 
 func runDevTest(message string) error {
-	socket := getSocketPath()
-	client := tui.NewRPCClient(socket)
+	client := tui.NewDaemonClient()
 
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept-daemon -f", err)
@@ -250,8 +247,7 @@ func runDevTest(message string) error {
 }
 
 func runDevConfig(cmd *cobra.Command, args []string) error {
-	socket := getSocketPath()
-	client := tui.NewRPCClient(socket)
+	client := tui.NewDaemonClient()
 
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept-daemon -f", err)

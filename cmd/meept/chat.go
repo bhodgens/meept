@@ -75,7 +75,7 @@ func runTUI(socketPath string) error {
 }
 
 func sendSingleMessage(socketPath, message string) error {
-	client := tui.NewRPCClient(socketPath)
+	client := tui.NewDaemonClientWithAddress(socketPath)
 
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)

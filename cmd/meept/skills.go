@@ -37,7 +37,7 @@ func newSkillsListCmd() *cobra.Command {
 		Short: "List available skills",
 		Long:  "List all skills discovered from the skill directories.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c := tui.NewRPCClient(getSocketPath())
+			c := tui.NewDaemonClient()
 			if err := c.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -153,7 +153,7 @@ func newSkillsShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			skillName := args[0]
 
-			c := tui.NewRPCClient(getSocketPath())
+			c := tui.NewDaemonClient()
 			if err := c.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -260,7 +260,7 @@ Examples:
 				input = strings.Join(args[1:], " ")
 			}
 
-			c := tui.NewRPCClient(getSocketPath())
+			c := tui.NewDaemonClient()
 			if err := c.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}

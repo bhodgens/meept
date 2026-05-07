@@ -37,6 +37,7 @@ type Config struct {
 	QAgent            QAgentConfig            `toml:"q_agent" json:"q_agent"`
 	CodeIntel         CodeIntelConfig         `toml:"code_intel" json:"code_intel"`
 	Calendar          CalendarConfig          `toml:"calendar" json:"calendar"`
+	Menubar           MenubarConfig           `toml:"menubar" json:"menubar"`
 	Transport         TransportConfig         `toml:"transport" json:"transport"`
 }
 
@@ -58,6 +59,12 @@ type CalendarConfig struct {
 	ReminderCheckInterval string `toml:"reminder_check_interval" json:"reminder_check_interval"`
 	// ReminderAdvanceMinutes triggers reminders this many minutes before an event
 	ReminderAdvanceMinutes int `toml:"reminder_advance_minutes" json:"reminder_advance_minutes"`
+}
+
+// MenubarConfig holds menubar app settings.
+type MenubarConfig struct {
+	// Enabled enables the menubar HTTP endpoint (default: true)
+	Enabled bool `toml:"enabled" json:"enabled"`
 }
 
 // CodeIntelConfig holds code intelligence settings (AST/LSP).
@@ -1265,6 +1272,9 @@ func DefaultConfig() *Config {
 			ReminderEnabled:       false,
 			ReminderCheckInterval: "5m",
 			ReminderAdvanceMinutes: 10,
+		},
+		Menubar: MenubarConfig{
+			Enabled: true,
 		},
 		Transport: TransportConfig{
 			RPC: RPCTransportConfig{

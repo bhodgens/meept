@@ -292,6 +292,11 @@
     auto_approve_patterns: ["*.md", "LICENSE", "*.txt"],
   },
 
+  // Menubar configuration
+  menubar: {
+    enabled: true,
+  },
+
   // Calendar configuration
   calendar: {
     enabled: false,

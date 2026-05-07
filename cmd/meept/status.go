@@ -37,7 +37,7 @@ Shows:
 }
 
 func runStatus(jsonOutput bool) error {
-	socket := getSocketPath()
+	client := tui.NewDaemonClient()
 
 	// First check if daemon is running via PID file
 	pidFile := stateDir + "/meept.pid"
@@ -58,7 +58,6 @@ func runStatus(jsonOutput bool) error {
 	}
 
 	// Try to connect and get detailed status
-	client := tui.NewRPCClient(socket)
 	if err := client.Connect(); err != nil {
 		// Daemon PID exists but can't connect
 		fmt.Printf("Daemon process exists (PID %d) but not responding\n", pid)

@@ -44,7 +44,7 @@ func newWorkersStatusCmd() *cobra.Command {
 }
 
 func runWorkersStatus(cmd *cobra.Command, args []string) error {
-	client := tui.NewRPCClient(getSocketPath())
+	client := tui.NewDaemonClient()
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w", err)
 	}
@@ -71,7 +71,7 @@ func newWorkersListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all workers with details",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
@@ -141,7 +141,7 @@ func newWorkersScaleCmd() *cobra.Command {
 				return fmt.Errorf("count must be non-negative")
 			}
 
-			client := tui.NewRPCClient(getSocketPath())
+			client := tui.NewDaemonClient()
 			if err := client.Connect(); err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
