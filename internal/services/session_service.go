@@ -96,3 +96,51 @@ func (s *SessionService) List(ctx context.Context, req ListSessionsRequest) ([]*
 	}
 	return sessions, nil
 }
+
+// AttachSessionRequest contains attach parameters.
+type AttachSessionRequest struct {
+	ID      string `json:"id"`
+	AgentID string `json:"agent_id"`
+}
+
+// Attach adds an agent to a session.
+func (s *SessionService) Attach(ctx context.Context, req AttachSessionRequest) (*session.Session, error) {
+	if req.ID == "" || req.AgentID == "" {
+		return nil, wrapError("session", "Attach", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "Attach", ErrUnavailable)
+	}
+	if err := s.store.Attach(req.ID, req.AgentID); err != nil {
+		return nil, wrapError("session", "Attach", err)
+	}
+	sess := s.store.Get(req.ID)
+	if sess == nil {
+		return nil, wrapError("session", "Attach", ErrNotFound)
+	}
+	return sess, nil
+}
+
+// DetachSessionRequest contains detach parameters.
+type DetachSessionRequest struct {
+	ID      string `json:"id"`
+	AgentID string `json:"agent_id"`
+}
+
+// Detach removes an agent from a session.
+func (s *SessionService) Detach(ctx context.Context, req DetachSessionRequest) (*session.Session, error) {
+	if req.ID == "" || req.AgentID == "" {
+		return nil, wrapError("session", "Detach", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "Detach", ErrUnavailable)
+	}
+	if err := s.store.Detach(req.ID, req.AgentID); err != nil {
+		return nil, wrapError("session", "Detach", err)
+	}
+	sess := s.store.Get(req.ID)
+	if sess == nil {
+		return nil, wrapError("session", "Detach", ErrNotFound)
+	}
+	return sess, nil
+}

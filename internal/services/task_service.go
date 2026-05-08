@@ -132,3 +132,45 @@ func (s *TaskService) Delete(ctx context.Context, req DeleteTaskRequest) error {
 	}
 	return s.registry.Delete(ctx, req.ID)
 }
+
+// CancelTaskRequest contains cancel parameters.
+type CancelTaskRequest struct {
+	ID string `json:"id"`
+}
+
+// Cancel marks a task as cancelled.
+func (s *TaskService) Cancel(ctx context.Context, req CancelTaskRequest) error {
+	if req.ID == "" {
+		return wrapError("task", "Cancel", ErrInvalidInput)
+	}
+	if s.registry == nil {
+		return wrapError("task", "Cancel", ErrUnavailable)
+	}
+	// Use UpdateState to set task to cancelled state
+	return s.registry.UpdateState(ctx, req.ID, task.StateCancelled)
+}
+
+// GetTaskStepsRequest contains get steps parameters.
+type GetTaskStepsRequest struct {
+	ID string `json:"id"`
+}
+
+// GetSteps retrieves steps for a task.
+func (s *TaskService) GetSteps(ctx context.Context, req GetTaskStepsRequest) ([]*task.TaskStep, error) {
+	if req.ID == "" {
+		return nil, wrapError("task", "GetSteps", ErrInvalidInput)
+	}
+	if s.registry == nil {
+		return nil, wrapError("task", "GetSteps", ErrUnavailable)
+	}
+	// Verify task exists first
+	t, err := s.registry.Get(ctx, req.ID)
+	if err != nil {
+		return nil, wrapError("task", "GetSteps", err)
+	}
+	if t == nil {
+		return nil, wrapError("task", "GetSteps", ErrNotFound)
+	}
+	// Get steps from the step store
+	return s.registry.StepStore().ListByTaskID(req.ID)
+}

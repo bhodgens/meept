@@ -838,68 +838,314 @@ func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
 
 // ===== Additional Task Endpoints =====
 
+// ===== Additional Task Endpoints =====
+
 // handleTaskCancel handles POST /api/v1/tasks/{id}/cancel.
 func (s *Server) handleTaskCancel(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "task cancel not implemented")
+	if s.services == nil || s.services.Task == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "task service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "task id is required")
+		return
+	}
+
+	if err := s.services.Task.Cancel(r.Context(), services.CancelTaskRequest{ID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
 // handleTaskSteps handles GET /api/v1/tasks/{id}/steps.
 func (s *Server) handleTaskSteps(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "task steps not implemented")
+	if s.services == nil || s.services.Task == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "task service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "task id is required")
+		return
+	}
+
+	steps, err := s.services.Task.GetSteps(r.Context(), services.GetTaskStepsRequest{ID: id})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"steps": steps,
+		"count": len(steps),
+	})
 }
 
 // ===== Additional Session Endpoints =====
 
 // handleSessionAttach handles POST /api/v1/sessions/{id}/attach.
 func (s *Server) handleSessionAttach(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "session attach not implemented")
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	var req struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	session, err := s.services.Session.Attach(r.Context(), services.AttachSessionRequest{
+		ID:      id,
+		AgentID: req.AgentID,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, session)
 }
 
 // handleSessionDetach handles POST /api/v1/sessions/{id}/detach.
 func (s *Server) handleSessionDetach(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "session detach not implemented")
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	var req struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	session, err := s.services.Session.Detach(r.Context(), services.DetachSessionRequest{
+		ID:      id,
+		AgentID: req.AgentID,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, session)
 }
 
 // ===== Additional Worker Endpoints =====
 
 // handleWorkerAdd handles POST /api/v1/workers.
 func (s *Server) handleWorkerAdd(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "worker add not implemented")
+	if s.services == nil || s.services.Worker == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "worker service not available")
+		return
+	}
+
+	var req struct {
+		ID           string   `json:"id"`
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	worker, err := s.services.Worker.Add(r.Context(), services.AddWorkerRequest{
+		ID:           req.ID,
+		Capabilities: req.Capabilities,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusCreated, worker)
 }
 
 // handleWorkerRemove handles DELETE /api/v1/workers/{id}.
 func (s *Server) handleWorkerRemove(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "worker remove not implemented")
+	if s.services == nil || s.services.Worker == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "worker service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "worker id is required")
+		return
+	}
+
+	if err := s.services.Worker.Remove(r.Context(), services.RemoveWorkerRequest{ID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 // handleWorkerScale handles POST /api/v1/workers/scale.
 func (s *Server) handleWorkerScale(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "worker scale not implemented")
+	if s.services == nil || s.services.Worker == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "worker service not available")
+		return
+	}
+
+	var req struct {
+		DesiredCount int `json:"desired_count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Worker.Scale(r.Context(), services.ScaleWorkersRequest{
+		DesiredCount: req.DesiredCount,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "scaled"})
 }
 
 // ===== Additional Self-Improve Endpoints =====
 
 // handleSelfImproveAnalyze handles POST /api/v1/selfimprove/analyze.
 func (s *Server) handleSelfImproveAnalyze(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "self-improve analyze not implemented")
+	if s.services == nil || s.services.SelfImprove == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "self-improve service not available")
+		return
+	}
+
+	if err := s.services.SelfImprove.Analyze(r.Context()); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "analyzed"})
 }
 
 // handleSelfImproveGenerate handles POST /api/v1/selfimprove/generate.
 func (s *Server) handleSelfImproveGenerate(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "self-improve generate not implemented")
+	if s.services == nil || s.services.SelfImprove == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "self-improve service not available")
+		return
+	}
+
+	var req struct {
+		ImprovementID string `json:"improvement_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.SelfImprove.Generate(r.Context(), services.GenerateImprovementRequest{
+		ImprovementID: req.ImprovementID,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "generated"})
 }
 
 // handleSelfImproveValidate handles POST /api/v1/selfimprove/validate.
 func (s *Server) handleSelfImproveValidate(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "self-improve validate not implemented")
+	if s.services == nil || s.services.SelfImprove == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "self-improve service not available")
+		return
+	}
+
+	var req struct {
+		ImprovementID string `json:"improvement_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	result, err := s.services.SelfImprove.Validate(r.Context(), services.ValidateImprovementRequest{
+		ImprovementID: req.ImprovementID,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
 }
 
 // handleSelfImproveApply handles POST /api/v1/selfimprove/apply.
 func (s *Server) handleSelfImproveApply(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "self-improve apply not implemented")
+	if s.services == nil || s.services.SelfImprove == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "self-improve service not available")
+		return
+	}
+
+	var req struct {
+		ImprovementID string `json:"improvement_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.SelfImprove.Apply(r.Context(), services.ApplyImprovementRequest{
+		ImprovementID: req.ImprovementID,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "applied"})
 }
 
 // handleSelfImproveReject handles POST /api/v1/selfimprove/reject.
 func (s *Server) handleSelfImproveReject(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, http.StatusNotImplemented, "self-improve reject not implemented")
+	if s.services == nil || s.services.SelfImprove == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "self-improve service not available")
+		return
+	}
+
+	var req struct {
+		ImprovementID string `json:"improvement_id"`
+		Reason        string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.SelfImprove.Reject(r.Context(), services.RejectImprovementRequest{
+		ImprovementID: req.ImprovementID,
+		Reason:        req.Reason,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
 }
