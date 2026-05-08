@@ -7,18 +7,12 @@ import (
 	"log/slog"
 
 	"github.com/caimlas/meept/internal/bus"
-	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/selfimprove"
 )
 
 // TaskService handles task operations.
 type TaskService struct{}
-
-// QueueService wraps the queue.Queue interface.
-type QueueService struct {
-	queue queue.Queue
-}
 
 // SessionService handles session operations.
 type SessionService struct{}

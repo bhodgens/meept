@@ -429,10 +429,16 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 	}
 
 	delivered := h.bus.Publish("orchestrator.plan", msg)
-	h.logger.Debug("Published plan request",
-		"task_id", result.Task.ID,
-		"delivered", delivered,
-	)
+	if delivered == 0 {
+		h.logger.Warn("Plan request published with no subscribers",
+			"task_id", result.Task.ID,
+		)
+	} else {
+		h.logger.Debug("Published plan request",
+			"task_id", result.Task.ID,
+			"delivered", delivered,
+		)
+	}
 }
 
 // sendResponse publishes a chat response.
