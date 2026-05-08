@@ -1,0 +1,162 @@
+# Superpowers Plans Implementation Progress
+
+**Started:** 2026-05-08
+**Overall Status:** In Progress
+
+---
+
+## Plans Overview
+
+| Plan | Status | % Complete | Notes |
+|------|--------|------------|-------|
+| 1. Task Interrupt & Amendment System | In Progress | 60% | Handlers + wiring done, queue cancel + TUI remain |
+| 2. Unified Config Format & Transport | In Progress | 65% | services fix applied, build passes |
+| 3. Fix Build and Test Failures | Done | 95% | Build succeeds, lite excluded |
+| 4. Fix Progress Event Reliability | Not Started | 0% | |
+| 5. Improve Compound Task Acknowledgment | Not Started | 0% | |
+| 6. Orchestrator Plan Flow Verification | Mostly Done | 70% | Docs & some tests done |
+| 7. Token Usage Trickle-Up | Not Started | 0% | |
+| 8. Memory/Context Propagation | Not Started | 0% | |
+
+---
+
+## Plan 1: Task Interrupt & Amendment System (60%)
+
+### Completed Tasks
+- [x] Task 1: InterruptToken type implemented
+- [x] Task 2: InterruptManager implemented
+- [x] Task 3: AmendmentRequest types defined
+- [x] Task 4: AmendmentManager implemented
+- [x] Task 5: AmendmentHandlers implementation (5 handlers: inject_context, skip_step, add_step, reprioritize, change_agent)
+- [x] Task 6: Wire AmendmentManager into Registry (auto-initialized with handlers in NewRegistry)
+
+### Remaining Tasks
+- [ ] Task 7: Job Queue Cancellation (interrupt-token-aware Claim)
+- [ ] Task 8: TUI Integration (slash commands: /cancel, /amend, /tasks)
+
+**Next Action:** Implement Task 7 - Job Queue Cancellation
+
+---
+
+## Plan 2: Unified Config Format & Transport (60%)
+
+### Completed Tasks
+- [x] JSON5 format working (falls back to TOML)
+- [x] Config template created (config/meept.json5)
+- [x] Transport section in config example
+
+### Remaining Tasks
+- [ ] Add transport struct to internal/config/config.go
+- [ ] Implement ClientConnection abstraction in CLI
+- [ ] Create menubar.json5 config
+- [ ] Update make install for template copying
+
+**Next Action:** Add transport struct to config.go
+
+---
+
+## Plan 3: Fix Build and Test Failures (95%)
+
+### Completed Tasks
+- [x] Bubbletea v2 API migration (animation demo)
+- [x] Config transport implemented
+- [x] Orchestrator flow docs written
+- [x] Build issues resolved (commit 5d5adc2)
+- [x] services fix applied to api_handlers.go/server.go
+- [x] Build succeeds for all packages except lite
+
+### Remaining Tasks
+- [ ] Fix internal/lite Bubbletea v2 migration (blocking: bubbles components incompatible)
+- [x] MCP integration tests timing out - **Analyzed**: Root cause is `StdioTransport.Send()` blocking in stdio.go:151. Tests timeout after 60s waiting for MCP server response. This is a pre-existing issue with the MCP stdio transport layer, not related to current plans.
+
+**Note:** Build passes for all main packages. Lite package needs significant rework for Bubbletea v2.
+
+---
+
+## Plan 4: Fix Progress Event Reliability (0%)
+
+### Tasks
+- [ ] Task 1: Add ChatVisible field to ProgressUpdateMsg
+- [ ] Task 2: Replace silent with chat_visible in TacticalScheduler
+- [ ] Task 3: Remove rate limiting from task event handler
+- [ ] Task 4: Handle chat_visible in TUI app
+- [ ] Task 5: Handle chat_visible in sidebar
+- [ ] Task 6: Add error escalation for step failures
+- [ ] Task 7: Integration testing
+
+**Status:** Not started
+
+---
+
+## Plan 5: Improve Compound Task Acknowledgment (0%)
+
+### Tasks
+- [ ] Task 1: Add TaskStepSummary parameter to formatAsyncTaskAck
+- [ ] Task 2: Add Steps to DispatchResult
+- [ ] Task 3: Add metrics-based duration estimates
+- [ ] Task 4: Truncate long descriptions
+- [ ] Task 5: Handle multi-agent compound tasks
+- [ ] Task 6: Update old formatAsyncTaskAck calls
+- [ ] Task 7: Integration testing
+
+**Status:** Not started
+
+---
+
+## Plan 6: Orchestrator Plan Flow Verification (70%)
+
+### Completed Tasks
+- [x] Task 1: Verify ChatHandler.publishPlanRequest
+- [x] Task 2: Verify Orchestrator subscription
+- [x] Task 3: Verify StrategicPlanner.Plan execution
+- [x] Task 5: Document architecture (docs/reference/orchestrator-flow.md)
+
+### Remaining Tasks
+- [ ] Task 4: Full flow integration test
+- [ ] Task 6: Integration verification
+
+**Status:** Mostly complete, integration test pending
+
+---
+
+## Plan 7: Token Usage Trickle-Up (0%)
+
+### Tasks
+- [ ] Task 1: Add TokenUsage field to Task
+- [ ] Task 2: Add TokenUsage field to TaskStep
+- [ ] Task 3: Publish token events from AgentLoop
+- [ ] Task 4: Aggregate tokens in TacticalScheduler
+- [ ] Task 5: Display tokens in sidebar
+- [ ] Task 6: Display tokens in chat
+- [ ] Task 7: Add token usage to task completion message
+- [ ] Task 8: Integration testing
+
+**Status:** Not started
+
+---
+
+## Plan 8: Memory/Context Propagation (0%)
+
+### Tasks
+- [ ] Task 1: Add MemoryRefs field to TaskStep
+- [ ] Task 2: Add AccumulatedContext field to TaskStep
+- [ ] Task 3: Copy parent MemoryRefs to steps during planning
+- [ ] Task 4: Propagate context on job completion
+- [ ] Task 5: Include step context in agent prompt
+- [ ] Task 6: Add context to task completion
+- [ ] Task 7: Integration testing
+
+**Status:** Not started
+
+---
+
+## Execution Order
+
+1. **Plan 3** - Verify build/tests (quick win, unblocks testing)
+2. **Plan 2** - Complete config transport (foundational)
+3. **Plan 1** - Finish interrupt/amendment (depends on Plan 2)
+4. **Plan 6** - Complete orchestrator verification (can run parallel)
+5. **Plan 4** - Progress event reliability (UI improvement)
+6. **Plan 5** - Compound task ACK (UI improvement)
+7. **Plan 7** - Token usage tracking (observability)
+8. **Plan 8** - Context propagation (feature parity)

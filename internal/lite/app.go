@@ -163,7 +163,6 @@ func (a *App) Init() tea.Cmd {
 		a.connectDaemon,
 		a.connectEventStream,
 		a.dashboard.Init(),
-		tea.SetWindowTitle("meept-lite"),
 	)
 }
 
@@ -1188,24 +1187,24 @@ config:
 // View renders the application.
 // In scroll region mode, we only render the fixed area (prompt + dashboard).
 // Chat messages are printed via tea.Println and stay in the terminal's scrolling region.
-func (a *App) View() string {
+func (a *App) View() tea.View {
 	if a.width == 0 || a.height == 0 {
-		return "loading..."
+		return tea.NewView("loading...")
 	}
 
 	// If menu is visible, render overlay
 	if a.showMenu {
-		return a.menu.View()
+		return tea.NewView(a.menu.View())
 	}
 
 	// Render error state if not connected
 	if a.err != nil {
-		return a.renderError()
+		return tea.NewView(a.renderError())
 	}
 
 	// Render only the fixed area (prompt + dashboard)
 	// The scrolling region above is handled by tea.Println
-	return a.scrollPrinter.RenderFixedArea(a.prompt.View(), a.dashboard.View())
+	return tea.NewView(a.scrollPrinter.RenderFixedArea(a.prompt.View(), a.dashboard.View()))
 }
 
 // renderError renders the error state.
