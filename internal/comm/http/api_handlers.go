@@ -702,3 +702,204 @@ func (s *Server) handleBusStats(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, stats)
 }
+
+// ===== Additional Queue Endpoints =====
+// ===== Additional Queue Endpoints =====
+
+// handleQueueGet handles GET /api/v1/queue/jobs/{id}.
+func (s *Server) handleQueueGet(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Queue == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "queue service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	job, err := s.services.Queue.Get(r.Context(), services.GetRequest{JobID: id})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, job)
+}
+
+// handleQueueClaim handles POST /api/v1/queue/claim.
+// Claims the next available job for a worker.
+func (s *Server) handleQueueClaim(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Queue == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "queue service not available")
+		return
+	}
+
+	var req services.ClaimRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	job, err := s.services.Queue.Claim(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, job)
+}
+
+// handleQueueComplete handles POST /api/v1/queue/jobs/{id}/complete.
+func (s *Server) handleQueueComplete(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Queue == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "queue service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	var req struct {
+		Result any `json:"result"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Queue.Complete(r.Context(), services.CompleteRequest{
+		JobID:  id,
+		Result: req.Result,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "completed"})
+}
+
+// handleQueueFail handles POST /api/v1/queue/jobs/{id}/fail.
+func (s *Server) handleQueueFail(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Queue == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "queue service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	var req struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Queue.Fail(r.Context(), services.FailRequest{
+		JobID: id,
+		Error: req.Error,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "failed"})
+}
+
+// handleQueueRetry handles POST /api/v1/queue/jobs/{id}/retry.
+func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Queue == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "queue service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	if err := s.services.Queue.Retry(r.Context(), services.RetryRequest{JobID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "retried"})
+}
+
+// ===== Additional Task Endpoints =====
+
+// handleTaskCancel handles POST /api/v1/tasks/{id}/cancel.
+func (s *Server) handleTaskCancel(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "task cancel not implemented")
+}
+
+// handleTaskSteps handles GET /api/v1/tasks/{id}/steps.
+func (s *Server) handleTaskSteps(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "task steps not implemented")
+}
+
+// ===== Additional Session Endpoints =====
+
+// handleSessionAttach handles POST /api/v1/sessions/{id}/attach.
+func (s *Server) handleSessionAttach(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "session attach not implemented")
+}
+
+// handleSessionDetach handles POST /api/v1/sessions/{id}/detach.
+func (s *Server) handleSessionDetach(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "session detach not implemented")
+}
+
+// ===== Additional Worker Endpoints =====
+
+// handleWorkerAdd handles POST /api/v1/workers.
+func (s *Server) handleWorkerAdd(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "worker add not implemented")
+}
+
+// handleWorkerRemove handles DELETE /api/v1/workers/{id}.
+func (s *Server) handleWorkerRemove(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "worker remove not implemented")
+}
+
+// handleWorkerScale handles POST /api/v1/workers/scale.
+func (s *Server) handleWorkerScale(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "worker scale not implemented")
+}
+
+// ===== Additional Self-Improve Endpoints =====
+
+// handleSelfImproveAnalyze handles POST /api/v1/selfimprove/analyze.
+func (s *Server) handleSelfImproveAnalyze(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "self-improve analyze not implemented")
+}
+
+// handleSelfImproveGenerate handles POST /api/v1/selfimprove/generate.
+func (s *Server) handleSelfImproveGenerate(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "self-improve generate not implemented")
+}
+
+// handleSelfImproveValidate handles POST /api/v1/selfimprove/validate.
+func (s *Server) handleSelfImproveValidate(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "self-improve validate not implemented")
+}
+
+// handleSelfImproveApply handles POST /api/v1/selfimprove/apply.
+func (s *Server) handleSelfImproveApply(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "self-improve apply not implemented")
+}
+
+// handleSelfImproveReject handles POST /api/v1/selfimprove/reject.
+func (s *Server) handleSelfImproveReject(w http.ResponseWriter, r *http.Request) {
+	s.writeError(w, http.StatusNotImplemented, "self-improve reject not implemented")
+}
