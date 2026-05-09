@@ -19,10 +19,12 @@ import (
 
 // StepJobPayload is the payload stored in a queue job for a task step.
 type StepJobPayload struct {
-	StepID      string `json:"step_id"`
-	TaskID      string `json:"task_id"`
-	Description string `json:"description"`
-	ToolHint    string `json:"tool_hint,omitempty"`
+	StepID             string   `json:"step_id"`
+	TaskID             string   `json:"task_id"`
+	Description        string   `json:"description"`
+	ToolHint           string   `json:"tool_hint,omitempty"`
+	MemoryRefs         []string `json:"memory_refs,omitempty"`
+	AccumulatedContext string   `json:"accumulated_context,omitempty"`
 }
 
 // TacticalScheduler schedules ready steps as queue jobs and handles completion callbacks.
@@ -230,12 +232,14 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 		return fmt.Errorf("no available execution slot for agent %s", agentID)
 	}
 
-	// Create job payload
+	// Create job payload with step context
 	payload := StepJobPayload{
-		StepID:      step.ID,
-		TaskID:      step.TaskID,
-		Description: step.Description,
-		ToolHint:    step.ToolHint,
+		StepID:             step.ID,
+		TaskID:             step.TaskID,
+		Description:        step.Description,
+		ToolHint:           step.ToolHint,
+		MemoryRefs:         step.MemoryRefs,
+		AccumulatedContext: step.AccumulatedContext,
 	}
 
 	job, err := queue.NewJob(queue.JobTypeProjectTask, payload)

@@ -2238,10 +2238,12 @@ func (p *AgentJobProcessor) WithRegistry(registry *agent.AgentRegistry) *AgentJo
 func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, error) {
 	// Try step-based payload first (from orchestrator)
 	var stepPayload struct {
-		StepID      string `json:"step_id"`
-		TaskID      string `json:"task_id"`
-		Description string `json:"description"`
-		ToolHint    string `json:"tool_hint,omitempty"`
+		StepID             string   `json:"step_id"`
+		TaskID             string   `json:"task_id"`
+		Description        string   `json:"description"`
+		ToolHint           string   `json:"tool_hint,omitempty"`
+		MemoryRefs         []string `json:"memory_refs,omitempty"`
+		AccumulatedContext string   `json:"accumulated_context,omitempty"`
 	}
 
 	// Try legacy payload format
@@ -2283,16 +2285,44 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 		return nil, fmt.Errorf("no agent loop available")
 	}
 
-	// Build prompt and conversation ID
+	// Build prompt and conversation ID with context
 	var prompt, conversationID string
 	if isStepJob {
-		prompt = stepPayload.Description
+		// Build context section from step's MemoryRefs and AccumulatedContext
+		var contextSection string
+		if len(stepPayload.MemoryRefs) > 0 || stepPayload.AccumulatedContext != "" {
+			var sb strings.Builder
+			sb.WriteString("## Context for this Step\n\n")
+			if len(stepPayload.MemoryRefs) > 0 {
+				sb.WriteString("**Available Memories:**\n")
+				for i, ref := range stepPayload.MemoryRefs {
+					sb.WriteString(fmt.Sprintf("%d. Memory: `%s`\n", i+1, ref))
+				}
+				sb.WriteString("\n")
+			}
+			if stepPayload.AccumulatedContext != "" {
+				sb.WriteString("**Results from Prior Steps:**\n\n")
+				sb.WriteString(stepPayload.AccumulatedContext)
+				sb.WriteString("\n\n")
+			}
+			contextSection = sb.String()
+		}
+		
+		// Prepend context to the step description
+		if contextSection != "" {
+			prompt = contextSection + "\n## Your Task\n\n" + stepPayload.Description
+		} else {
+			prompt = stepPayload.Description
+		}
+		
 		conversationID = fmt.Sprintf("step-%s-%s", stepPayload.TaskID, stepPayload.StepID)
 		p.logger.Info("Processing step job",
 			"job_id", job.ID,
 			"step_id", stepPayload.StepID,
 			"task_id", stepPayload.TaskID,
 			"agent_id", job.AgentID,
+			"memory_refs", len(stepPayload.MemoryRefs),
+			"has_context", stepPayload.AccumulatedContext != "",
 		)
 	} else {
 		prompt = legacyPayload.Prompt
