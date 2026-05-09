@@ -1,6 +1,6 @@
 # Memory/Context Propagation to Subtasks Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Enable child steps to inherit parent task context and accumulate knowledge from prior completed steps, ensuring agents have full context during execution.
 
@@ -30,13 +30,13 @@
 - Modify: `internal/task/step.go`
 - Test: `internal/task/step_test.go`
 
-- [ ] **Step 1: Read current TaskStep structure**
+- [x] **Step 1: Read current TaskStep structure**
 
 ```bash
 grep -A 30 "type TaskStep struct" internal/task/step.go
 ```
 
-- [ ] **Step 2: Write failing test**
+- [x] **Step 2: Write failing test**
 
 ```go
 func TestTaskStep_MemoryRefs(t *testing.T) {
@@ -63,7 +63,7 @@ func TestTaskStep_MemoryRefs(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 ```bash
 go test ./internal/task/... -run TestTaskStep_MemoryRefs -v
@@ -71,7 +71,7 @@ go test ./internal/task/... -run TestTaskStep_MemoryRefs -v
 
 Expected: FAIL
 
-- [ ] **Step 4: Add MemoryRefs field to TaskStep**
+- [x] **Step 4: Add MemoryRefs field to TaskStep**
 
 In `internal/task/step.go`, add to struct:
 
@@ -80,7 +80,7 @@ In `internal/task/step.go`, add to struct:
 MemoryRefs []string `json:"memory_refs,omitempty"`
 ```
 
-- [ ] **Step 5: Add AddMemoryRef method**
+- [x] **Step 5: Add AddMemoryRef method**
 
 ```go
 // AddMemoryRef adds a memory reference to the step.
@@ -95,7 +95,7 @@ func (s *TaskStep) AddMemoryRef(ref string) {
 }
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 ```bash
 go test ./internal/task/... -run TestTaskStep_MemoryRefs -v
@@ -103,7 +103,7 @@ go test ./internal/task/... -run TestTaskStep_MemoryRefs -v
 
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/task/step.go internal/task/step_test.go
@@ -118,7 +118,7 @@ git commit -m "feat: add MemoryRefs field to TaskStep"
 - Modify: `internal/task/step.go`
 - Test: `internal/task/step_test.go`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```go
 func TestTaskStep_AccumulatedContext(t *testing.T) {
@@ -135,7 +135,7 @@ func TestTaskStep_AccumulatedContext(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 go test ./internal/task/... -run TestTaskStep_AccumulatedContext -v
@@ -143,7 +143,7 @@ go test ./internal/task/... -run TestTaskStep_AccumulatedContext -v
 
 Expected: FAIL
 
-- [ ] **Step 3: Add AccumulatedContext field**
+- [x] **Step 3: Add AccumulatedContext field**
 
 In `internal/task/step.go`:
 
@@ -152,7 +152,7 @@ In `internal/task/step.go`:
 AccumulatedContext string `json:"accumulated_context,omitempty"`
 ```
 
-- [ ] **Step 4: Add AppendToContext method**
+- [x] **Step 4: Add AppendToContext method**
 
 ```go
 // AppendToContext appends content to the accumulated context.
@@ -166,7 +166,7 @@ func (s *TaskStep) AppendToContext(content string) {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 go test ./internal/task/... -run TestTaskStep_AccumulatedContext -v
@@ -174,7 +174,7 @@ go test ./internal/task/... -run TestTaskStep_AccumulatedContext -v
 
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/task/step.go internal/task/step_test.go
@@ -189,13 +189,13 @@ git commit -m "feat: add AccumulatedContext field to TaskStep"
 - Modify: `internal/agent/strategic.go`
 - Test: `internal/agent/strategic_test.go`
 
-- [ ] **Step 1: Find where steps are created in StrategicPlanner**
+- [x] **Step 1: Find where steps are created in StrategicPlanner**
 
 ```bash
 grep -n "NewTaskStep\|createFallbackSteps" internal/agent/strategic.go
 ```
 
-- [ ] **Step 2: Modify Plan() to fetch task and copy MemoryRefs**
+- [x] **Step 2: Modify Plan() to fetch task and copy MemoryRefs**
 
 After line 121 (after fetching task), add:
 
@@ -204,7 +204,7 @@ After line 121 (after fetching task), add:
 parentMemoryRefs := t.MemoryRefs
 ```
 
-- [ ] **Step 3: Modify parsePlanOutput to inject MemoryRefs**
+- [x] **Step 3: Modify parsePlanOutput to inject MemoryRefs**
 
 After step creation loop, add:
 
@@ -221,7 +221,7 @@ if len(steps) > 0 && len(parentMemoryRefs) > 0 {
 }
 ```
 
-- [ ] **Step 4: Update createFallbackSteps to copy MemoryRefs**
+- [x] **Step 4: Update createFallbackSteps to copy MemoryRefs**
 
 ```go
 func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []string) []*task.TaskStep {
@@ -235,14 +235,14 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 }
 ```
 
-- [ ] **Step 5: Update call site to pass parent refs**
+- [x] **Step 5: Update call site to pass parent refs**
 
 ```go
 // In Plan(), after fetching task:
 steps = sp.createFallbackSteps(req, t.MemoryRefs)
 ```
 
-- [ ] **Step 6: Write and run test**
+- [x] **Step 6: Write and run test**
 
 ```go
 func TestStrategicPlanner_CopyMemoryRefs(t *testing.T) {
@@ -252,7 +252,7 @@ func TestStrategicPlanner_CopyMemoryRefs(t *testing.T) {
 }
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/agent/strategic.go
@@ -267,13 +267,13 @@ git commit -m "feat: copy parent MemoryRefs to first step during planning"
 - Modify: `internal/agent/tactical.go`
 - Test: `internal/agent/tactical_test.go`
 
-- [ ] **Step 1: Find OnJobCompleted and understand step/task access**
+- [x] **Step 1: Find OnJobCompleted and understand step/task access**
 
 ```bash
 grep -n "OnJobCompleted\|step.Result" internal/agent/tactical.go
 ```
 
-- [ ] **Step 2: Add context propagation after step completion**
+- [x] **Step 2: Add context propagation after step completion**
 
 After line 447 (after setting step to completed/approved), add:
 
@@ -287,7 +287,7 @@ if err := ts.propagateContextToNextSteps(step); err != nil {
 }
 ```
 
-- [ ] **Step 3: Implement propagateContextToNextSteps method**
+- [x] **Step 3: Implement propagateContextToNextSteps method**
 
 ```go
 // propagateContextToNextSteps copies completed step's result to next ready steps.
@@ -335,7 +335,7 @@ func (ts *TacticalScheduler) propagateContextToNextSteps(completedStep *task.Tas
 }
 ```
 
-- [ ] **Step 4: Write and run test**
+- [x] **Step 4: Write and run test**
 
 ```go
 func TestTacticalScheduler_PropagateContext(t *testing.T) {
@@ -345,7 +345,7 @@ func TestTacticalScheduler_PropagateContext(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/tactical.go
@@ -360,13 +360,13 @@ git commit -m "feat: propagate context from completed steps to next steps"
 - Modify: `internal/agent/loop.go`
 - Modify: `internal/agent/prompts/executor.md` (or equivalent)
 
-- [ ] **Step 1: Find where agent prompt is built**
+- [x] **Step 1: Find where agent prompt is built**
 
 ```bash
 grep -n "buildPrompt\|systemPrompt\|prompt" internal/agent/loop.go | head -20
 ```
 
-- [ ] **Step 2: Add context injection to prompt building**
+- [x] **Step 2: Add context injection to prompt building**
 
 In the prompt building code, add section:
 
@@ -378,7 +378,7 @@ if step != nil {
 }
 ```
 
-- [ ] **Step 3: Implement buildContextSection**
+- [x] **Step 3: Implement buildContextSection**
 
 ```go
 // buildContextSection builds the context section for the agent prompt.
@@ -403,7 +403,7 @@ func buildContextSection(memoryRefs []string, accumulatedContext string) string 
 }
 ```
 
-- [ ] **Step 4: Add context section to prompt template**
+- [x] **Step 4: Add context section to prompt template**
 
 Find the prompt template and inject:
 
@@ -416,13 +416,13 @@ const executorPromptTemplate = `...existing content...
 ...remaining content...`
 ```
 
-- [ ] **Step 5: Test compilation**
+- [x] **Step 5: Test compilation**
 
 ```bash
 go build ./internal/agent/...
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/loop.go
@@ -437,7 +437,7 @@ git commit -m "feat: include step context in agent prompt"
 - Modify: `internal/agent/tactical.go`
 - Modify: `internal/agent/handler.go`
 
-- [ ] **Step 1: Add AccumulatedContext to TaskStepSummary**
+- [x] **Step 1: Add AccumulatedContext to TaskStepSummary**
 
 In `internal/agent/handler.go`, find TaskStepSummary:
 
@@ -452,7 +452,7 @@ type TaskStepSummary struct {
 }
 ```
 
-- [ ] **Step 2: Update buildStepSummaries to include context**
+- [x] **Step 2: Update buildStepSummaries to include context**
 
 In `internal/agent/tactical.go`:
 
@@ -467,7 +467,7 @@ summaries[i] = map[string]any{
 }
 ```
 
-- [ ] **Step 3: Include context summary in completion message**
+- [x] **Step 3: Include context summary in completion message**
 
 In `formatTaskCompletedMessage`:
 
@@ -485,13 +485,13 @@ if hasContext {
 }
 ```
 
-- [ ] **Step 4: Test compilation**
+- [x] **Step 4: Test compilation**
 
 ```bash
 go build ./internal/agent/...
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/handler.go internal/agent/tactical.go
@@ -505,7 +505,7 @@ git commit -m "feat: include accumulated context in task completion"
 **Files:**
 - Create: `tests/context_propagation_test.go`
 
-- [ ] **Step 1: Write full context flow test**
+- [x] **Step 1: Write full context flow test**
 
 ```go
 func TestContextPropagation_FullFlow(t *testing.T) {
@@ -536,13 +536,13 @@ func TestContextPropagation_FullFlow(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 ```bash
 go test ./... -run Context -v
 ```
 
-- [ ] **Step 3: Manual test with multi-step task**
+- [x] **Step 3: Manual test with multi-step task**
 
 ```bash
 make go-daemon
@@ -550,11 +550,11 @@ make go-daemon
 # Observe if later steps reference earlier findings
 ```
 
-- [ ] **Step 4: Verify context in agent prompts**
+- [x] **Step 4: Verify context in agent prompts**
 
 Check logs for context section injection.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/context_propagation_test.go

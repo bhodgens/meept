@@ -1,6 +1,6 @@
 # Token Usage Trickle-Up Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Implement real-time token usage tracking that aggregates from child steps to parent tasks and displays in chat and sidebar.
 
@@ -31,7 +31,7 @@
 - Modify: `internal/task/task.go`
 - Test: `internal/task/task_test.go`
 
-- [ ] **Step 1: Write failing test for Task token tracking**
+- [x] **Step 1: Write failing test for Task token tracking**
 
 ```go
 func TestTask_TokenUsage(t *testing.T) {
@@ -56,7 +56,7 @@ func TestTask_TokenUsage(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 go test ./internal/task/... -run TestTask_TokenUsage -v
@@ -64,7 +64,7 @@ go test ./internal/task/... -run TestTask_TokenUsage -v
 
 Expected: FAIL with "unknown field TokenUsage"
 
-- [ ] **Step 3: Add TokenUsage field to Task struct**
+- [x] **Step 3: Add TokenUsage field to Task struct**
 
 In `internal/task/task.go`, add after line 62 (after CreatedMemories field):
 
@@ -73,7 +73,7 @@ In `internal/task/task.go`, add after line 62 (after CreatedMemories field):
 TokenUsage int `json:"token_usage,omitempty"`
 ```
 
-- [ ] **Step 4: Add AddTokenUsage method**
+- [x] **Step 4: Add AddTokenUsage method**
 
 In `internal/task/task.go`, add after line 262:
 
@@ -85,7 +85,7 @@ func (t *Task) AddTokenUsage(tokens int) {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 go test ./internal/task/... -run TestTask_TokenUsage -v
@@ -93,7 +93,7 @@ go test ./internal/task/... -run TestTask_TokenUsage -v
 
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/task/task.go internal/task/task_test.go
@@ -108,13 +108,13 @@ git commit -m "feat: add TokenUsage tracking to Task"
 - Modify: `internal/task/step.go`
 - Test: `internal/task/step_test.go`
 
-- [ ] **Step 1: Read step.go to understand structure**
+- [x] **Step 1: Read step.go to understand structure**
 
 ```bash
 head -100 internal/task/step.go
 ```
 
-- [ ] **Step 2: Write failing test for TaskStep token tracking**
+- [x] **Step 2: Write failing test for TaskStep token tracking**
 
 ```go
 func TestTaskStep_TokenUsage(t *testing.T) {
@@ -131,7 +131,7 @@ func TestTaskStep_TokenUsage(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 ```bash
 go test ./internal/task/... -run TestTaskStep_TokenUsage -v
@@ -139,7 +139,7 @@ go test ./internal/task/... -run TestTaskStep_TokenUsage -v
 
 Expected: FAIL
 
-- [ ] **Step 4: Add TokenUsage field to TaskStep struct**
+- [x] **Step 4: Add TokenUsage field to TaskStep struct**
 
 In `internal/task/step.go`, find the TaskStep struct and add:
 
@@ -148,7 +148,7 @@ In `internal/task/step.go`, find the TaskStep struct and add:
 TokenUsage int `json:"token_usage,omitempty"`
 ```
 
-- [ ] **Step 5: Add AddTokenUsage method to TaskStep**
+- [x] **Step 5: Add AddTokenUsage method to TaskStep**
 
 ```go
 // AddTokenUsage adds tokens to the step's running total.
@@ -158,7 +158,7 @@ func (s *TaskStep) AddTokenUsage(tokens int) {
 }
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 ```bash
 go test ./internal/task/... -run TestTaskStep_TokenUsage -v
@@ -166,7 +166,7 @@ go test ./internal/task/... -run TestTaskStep_TokenUsage -v
 
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/task/step.go internal/task/step_test.go
@@ -181,13 +181,13 @@ git commit -m "feat: add TokenUsage tracking to TaskStep"
 - Modify: `internal/agent/loop.go`
 - Test: `internal/agent/loop_test.go`
 
-- [ ] **Step 1: Find where LLM responses are processed**
+- [x] **Step 1: Find where LLM responses are processed**
 
 ```bash
 grep -n "Response.Usage\|token_count\|TotalTokens" internal/agent/loop.go
 ```
 
-- [ ] **Step 2: Write failing test for token event publishing**
+- [x] **Step 2: Write failing test for token event publishing**
 
 ```go
 func TestAgentLoop_PublishTokenUsage(t *testing.T) {
@@ -212,7 +212,7 @@ func TestAgentLoop_PublishTokenUsage(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 ```bash
 go test ./internal/agent/... -run TestAgentLoop_PublishTokenUsage -v
@@ -220,7 +220,7 @@ go test ./internal/agent/... -run TestAgentLoop_PublishTokenUsage -v
 
 Expected: FAIL (method doesn't exist)
 
-- [ ] **Step 4: Add publishTokenUsage method**
+- [x] **Step 4: Add publishTokenUsage method**
 
 In `internal/agent/loop.go`, add:
 
@@ -245,7 +245,7 @@ func (l *AgentLoop) publishTokenUsage(conversationID string, tokens int) {
 }
 ```
 
-- [ ] **Step 5: Find where token counts are available and add publish call**
+- [x] **Step 5: Find where token counts are available and add publish call**
 
 Search for where `Response.Usage` or similar is processed. Add after token count is known:
 
@@ -256,7 +256,7 @@ if response.Usage != nil {
 }
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 ```bash
 go test ./internal/agent/... -run TestAgentLoop_PublishTokenUsage -v
@@ -264,7 +264,7 @@ go test ./internal/agent/... -run TestAgentLoop_PublishTokenUsage -v
 
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/agent/loop.go internal/agent/loop_test.go
@@ -279,13 +279,13 @@ git commit -m "feat: publish token usage events from AgentLoop"
 - Modify: `internal/agent/tactical.go`
 - Test: `internal/agent/tactical_test.go`
 
-- [ ] **Step 1: Find OnJobCompleted and understand result parsing**
+- [x] **Step 1: Find OnJobCompleted and understand result parsing**
 
 ```bash
 grep -n "OnJobCompleted\|SetResult" internal/agent/tactical.go
 ```
 
-- [ ] **Step 2: Add token aggregation to OnJobCompleted**
+- [x] **Step 2: Add token aggregation to OnJobCompleted**
 
 After line 461 (after CompleteJob call), add:
 
@@ -308,7 +308,7 @@ if json.Unmarshal(result, &execResult) == nil && execResult.TokenUsage > 0 {
 }
 ```
 
-- [ ] **Step 3: Add periodic token progress publishing**
+- [x] **Step 3: Add periodic token progress publishing**
 
 Add new method after publishEvent:
 
@@ -323,7 +323,7 @@ func (ts *TacticalScheduler) publishTokenProgress(taskID string, tokens int) {
 }
 ```
 
-- [ ] **Step 4: Call token progress from OnJobCompleted**
+- [x] **Step 4: Call token progress from OnJobCompleted**
 
 After the token aggregation code, add:
 
@@ -332,7 +332,7 @@ After the token aggregation code, add:
 ts.publishTokenProgress(t.ID, t.TokenUsage)
 ```
 
-- [ ] **Step 5: Write and run test**
+- [x] **Step 5: Write and run test**
 
 ```go
 func TestTacticalScheduler_AggregateTokens(t *testing.T) {
@@ -340,7 +340,7 @@ func TestTacticalScheduler_AggregateTokens(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/tactical.go
@@ -355,13 +355,13 @@ git commit -m "feat: aggregate tokens from steps to parent task"
 - Modify: `internal/tui/sidebar.go`
 - Modify: `internal/tui/models/tasks.go`
 
-- [ ] **Step 1: Find where task list is rendered**
+- [x] **Step 1: Find where task list is rendered**
 
 ```bash
 grep -n "renderTask\|TaskItem\|task list" internal/tui/models/tasks.go
 ```
 
-- [ ] **Step 2: Add token display to task rendering**
+- [x] **Step 2: Add token display to task rendering**
 
 In the task rendering code, add after job count:
 
@@ -381,13 +381,13 @@ if task.TokenUsage > 0 {
 }
 ```
 
-- [ ] **Step 3: Test compilation**
+- [x] **Step 3: Test compilation**
 
 ```bash
 go build ./internal/tui/...
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/tui/sidebar.go internal/tui/models/tasks.go
@@ -402,13 +402,13 @@ git commit -m "feat: display token usage in sidebar task list"
 - Modify: `internal/tui/app.go`
 - Modify: `internal/tui/models/chat.go`
 
-- [ ] **Step 1: Find ProgressUpdateMsg handling**
+- [x] **Step 1: Find ProgressUpdateMsg handling**
 
 ```bash
 grep -n "ProgressUpdateMsg\|TokensUsed" internal/tui/app.go
 ```
 
-- [ ] **Step 2: Enhance progress message to include token count**
+- [x] **Step 2: Enhance progress message to include token count**
 
 In the `task.progress` case, add token extraction:
 
@@ -418,7 +418,7 @@ if v, ok := payloadMap["token_usage"].(float64); ok {
 }
 ```
 
-- [ ] **Step 3: Add token display to chat**
+- [x] **Step 3: Add token display to chat**
 
 In `internal/tui/models/chat.go`, find where ProgressUpdateMsg is rendered and add:
 
@@ -436,13 +436,13 @@ if msg.TokensUsed > 0 {
 }
 ```
 
-- [ ] **Step 4: Test compilation**
+- [x] **Step 4: Test compilation**
 
 ```bash
 go build ./cmd/meept
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/tui/app.go internal/tui/models/chat.go
@@ -457,13 +457,13 @@ git commit -m "feat: display token usage in chat progress"
 - Modify: `internal/agent/handler.go`
 - Test: `internal/agent/handler_test.go`
 
-- [ ] **Step 1: Find formatTaskCompletedMessage**
+- [x] **Step 1: Find formatTaskCompletedMessage**
 
 ```bash
 grep -n "formatTaskCompletedMessage" internal/agent/handler.go
 ```
 
-- [ ] **Step 2: Add token_usage parameter**
+- [x] **Step 2: Add token_usage parameter**
 
 Modify the function signature:
 
@@ -477,7 +477,7 @@ func (h *ChatHandler) formatTaskCompletedMessage(
 ) string
 ```
 
-- [ ] **Step 3: Add token display to message**
+- [x] **Step 3: Add token display to message**
 
 At the end of the message, before return:
 
@@ -495,7 +495,7 @@ if tokenUsage > 0 {
 }
 ```
 
-- [ ] **Step 4: Update call site with task.TokenUsage**
+- [x] **Step 4: Update call site with task.TokenUsage**
 
 Find where formatTaskCompletedMessage is called in handleTaskCompleted and add:
 
@@ -511,7 +511,7 @@ reply := h.formatTaskCompletedMessage(
 )
 ```
 
-- [ ] **Step 5: Update handleTaskCompleted to fetch task with tokens**
+- [x] **Step 5: Update handleTaskCompleted to fetch task with tokens**
 
 Before building reply, fetch task:
 
@@ -525,7 +525,7 @@ if h.taskStore != nil {
 }
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/handler.go
@@ -539,7 +539,7 @@ git commit -m "feat: include token usage in task completion message"
 **Files:**
 - Create: `tests/token_usage_test.go`
 
-- [ ] **Step 1: Write integration test**
+- [x] **Step 1: Write integration test**
 
 ```go
 func TestTokenUsage_TrickleUp(t *testing.T) {
@@ -552,13 +552,13 @@ func TestTokenUsage_TrickleUp(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 ```bash
 go test ./... -run TokenUsage -v
 ```
 
-- [ ] **Step 3: Manual test with TUI**
+- [x] **Step 3: Manual test with TUI**
 
 ```bash
 make go-daemon
@@ -566,11 +566,11 @@ make go-daemon
 ./bin/meept chat "Create a simple task that uses tokens"
 ```
 
-- [ ] **Step 4: Verify token display in sidebar**
+- [x] **Step 4: Verify token display in sidebar**
 
-- [ ] **Step 5: Verify token display in chat**
+- [x] **Step 5: Verify token display in chat**
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/token_usage_test.go

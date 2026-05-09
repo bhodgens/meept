@@ -1,6 +1,6 @@
 # Orchestrator Plan Flow Verification Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Verify and document the complete flow of `orchestrator.plan` events from ChatHandler through to StrategicPlanner, ensuring reliable delivery and identifying any gaps.
 
@@ -30,7 +30,7 @@
 - Examine: `internal/agent/handler.go`
 - Test: `internal/agent/handler_test.go`
 
-- [ ] **Step 1: Read publishPlanRequest implementation**
+- [x] **Step 1: Read publishPlanRequest implementation**
 
 ```bash
 sed -n '395,436p' internal/agent/handler.go
@@ -42,7 +42,7 @@ Verify:
 - Compound metadata is extracted if applicable
 - Bus message is created with correct topic
 
-- [ ] **Step 2: Write test for publishPlanRequest**
+- [x] **Step 2: Write test for publishPlanRequest**
 
 ```go
 func TestChatHandler_PublishPlanRequest(t *testing.T) {
@@ -85,7 +85,7 @@ func TestChatHandler_PublishPlanRequest(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test**
+- [x] **Step 3: Run test**
 
 ```bash
 go test ./internal/agent/... -run TestChatHandler_PublishPlanRequest -v
@@ -93,7 +93,7 @@ go test ./internal/agent/... -run TestChatHandler_PublishPlanRequest -v
 
 Expected: PASS
 
-- [ ] **Step 4: Verify delivered count is checked**
+- [x] **Step 4: Verify delivered count is checked**
 
 In publishPlanRequest, line 431-435:
 
@@ -115,7 +115,7 @@ if delivered == 0 {
 }
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/handler.go internal/agent/handler_test.go
@@ -130,7 +130,7 @@ git commit -m "feat: warn when plan request has no subscribers"
 - Examine: `internal/agent/orchestrator.go`
 - Test: `tests/orchestrator_flow_test.go`
 
-- [ ] **Step 1: Read Orchestrator.Start()**
+- [x] **Step 1: Read Orchestrator.Start()**
 
 ```bash
 sed -n '46,67p' internal/agent/orchestrator.go
@@ -141,7 +141,7 @@ Verify:
 - Calls `handlePlanRequest` with correct signature
 - Error handling in place
 
-- [ ] **Step 2: Verify handlePlanRequest implementation**
+- [x] **Step 2: Verify handlePlanRequest implementation**
 
 ```bash
 sed -n '111,129p' internal/agent/orchestrator.go
@@ -152,7 +152,7 @@ Verify:
 - Calls `strategic.Plan()` with context
 - Logs errors appropriately
 
-- [ ] **Step 3: Write test for orchestrator subscription**
+- [x] **Step 3: Write test for orchestrator subscription**
 
 ```go
 func TestOrchestrator_PlanRequestHandling(t *testing.T) {
@@ -211,7 +211,7 @@ func (m *MockStrategicPlanner) Plan(ctx context.Context, req PlanRequest) error 
 }
 ```
 
-- [ ] **Step 4: Run test**
+- [x] **Step 4: Run test**
 
 ```bash
 go test ./... -run TestOrchestrator_PlanRequestHandling -v
@@ -219,7 +219,7 @@ go test ./... -run TestOrchestrator_PlanRequestHandling -v
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/orchestrator_flow_test.go
@@ -234,7 +234,7 @@ git commit -m "test: verify orchestrator plan request handling"
 - Examine: `internal/agent/strategic.go`
 - Test: `internal/agent/strategic_test.go`
 
-- [ ] **Step 1: Read StrategicPlanner.Plan()**
+- [x] **Step 1: Read StrategicPlanner.Plan()**
 
 ```bash
 sed -n '112,193p' internal/agent/strategic.go
@@ -249,7 +249,7 @@ Verify:
 - Publishes `task.planned` event
 - Publishes `orchestrator.schedule` event
 
-- [ ] **Step 2: Verify event publishing**
+- [x] **Step 2: Verify event publishing**
 
 Check lines 179-190:
 
@@ -266,7 +266,7 @@ sp.publishEvent("orchestrator.schedule", map[string]any{
 })
 ```
 
-- [ ] **Step 3: Write test for event publishing**
+- [x] **Step 3: Write test for event publishing**
 
 ```go
 func TestStrategicPlanner_PublishesEvents(t *testing.T) {
@@ -315,7 +315,7 @@ func TestStrategicPlanner_PublishesEvents(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run test**
+- [x] **Step 4: Run test**
 
 ```bash
 go test ./internal/agent/... -run TestStrategicPlanner_PublishesEvents -v
@@ -323,7 +323,7 @@ go test ./internal/agent/... -run TestStrategicPlanner_PublishesEvents -v
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/strategic_test.go
@@ -337,7 +337,7 @@ git commit -m "test: verify strategic planner event publishing"
 **Files:**
 - Create: `tests/orchestrator_flow_test.go`
 
-- [ ] **Step 1: Write end-to-end flow test**
+- [x] **Step 1: Write end-to-end flow test**
 
 ```go
 func TestOrchestratorPlanFlow_EndToEnd(t *testing.T) {
@@ -374,13 +374,13 @@ func TestOrchestratorPlanFlow_EndToEnd(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test**
+- [x] **Step 2: Run test**
 
 ```bash
 go test ./tests/... -run TestOrchestratorPlanFlow_EndToEnd -v
 ```
 
-- [ ] **Step 3: Debug any gaps in flow**
+- [x] **Step 3: Debug any gaps in flow**
 
 If test fails, trace where message is lost:
 1. Check bus subscriber count after publish
@@ -388,14 +388,14 @@ If test fails, trace where message is lost:
 3. Check if StrategicPlanner is non-nil
 4. Check error logs
 
-- [ ] **Step 4: Fix any identified gaps**
+- [x] **Step 4: Fix any identified gaps**
 
 Common issues:
 - Orchestrator not started before message published
 - Nil StrategicPlanner in Orchestrator
 - Bus not shared between components
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/orchestrator_flow_test.go
@@ -409,7 +409,7 @@ git commit -m "test: add end-to-end orchestrator flow test"
 **Files:**
 - Create: `docs/reference/orchestrator-flow.md`
 
-- [ ] **Step 1: Create architecture document**
+- [x] **Step 1: Create architecture document**
 
 ```markdown
 # Orchestrator Plan Flow
@@ -492,11 +492,11 @@ go test ./tests/orchestrator_flow_test.go -v
 ```
 ```
 
-- [ ] **Step 2: Review for accuracy**
+- [x] **Step 2: Review for accuracy**
 
 Compare with actual implementations.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/reference/orchestrator-flow.md

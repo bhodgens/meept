@@ -1,6 +1,6 @@
 # Unified Config Format & Transport Architecture Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Unify all configuration to JSON5 format, add selectable transports (RPC socket / HTTP) for both daemon and clients, make `make install` copy templates if missing, and give the menubar its own config file.
 
@@ -92,7 +92,7 @@ Does NOT copy config templates. `make setup` copies only `meept.toml` and create
 - Modify: `internal/config/config.go`
 - Test: `internal/config/config_test.go`
 
-- [ ] **Step 1: Write JSON5 loader utility**
+- [x] **Step 1: Write JSON5 loader utility**
 
 ```go
 package config
@@ -133,7 +133,7 @@ func LoadJSON5WithDefault(path string, v any) error {
 }
 ```
 
-- [ ] **Step 2: Write test for JSON5 loader**
+- [x] **Step 2: Write test for JSON5 loader**
 
 ```go
 func TestLoadJSON5(t *testing.T) {
@@ -198,12 +198,12 @@ func TestLoadJSON5EnvVars(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `go test ./internal/config -run TestLoadJSON5 -v`
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/config/json5_loader.go internal/config/config_test.go
@@ -219,7 +219,7 @@ git commit -m "feat(config): add JSON5 loader with env var expansion"
 - Modify: `internal/config/config.go`
 - Test: `internal/config/config_test.go`
 
-- [ ] **Step 1: Add TransportConfig to schema**
+- [x] **Step 1: Add TransportConfig to schema**
 
 Add to `internal/config/schema.go` after DaemonConfig:
 
@@ -244,7 +244,7 @@ type HTTPTransportConfig struct {
 }
 ```
 
-- [ ] **Step 2: Add Transport to Config struct and default**
+- [x] **Step 2: Add Transport to Config struct and default**
 
 In `Config` struct, add:
 ```go
@@ -265,7 +265,7 @@ Transport: TransportConfig{
 },
 ```
 
-- [ ] **Step 3: Add JSON5 loading path alongside TOML**
+- [x] **Step 3: Add JSON5 loading path alongside TOML**
 
 In `internal/config/config.go`, modify `LoadDefault` to prefer JSON5:
 
@@ -290,7 +290,7 @@ func LoadDefault() (*Config, error) {
 }
 ```
 
-- [ ] **Step 4: Create LoadJSON5Config function**
+- [x] **Step 4: Create LoadJSON5Config function**
 
 ```go
 // LoadJSON5Config loads configuration from a JSON5 file.
@@ -311,7 +311,7 @@ func LoadJSON5Config(path string) (*Config, error) {
 }
 ```
 
-- [ ] **Step 5: Test schema defaults**
+- [x] **Step 5: Test schema defaults**
 
 ```go
 func TestDefaultConfigTransport(t *testing.T) {
@@ -331,7 +331,7 @@ func TestDefaultConfigTransport(t *testing.T) {
 Run: `go test ./internal/config -run TestDefaultConfigTransport -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/config/
@@ -346,7 +346,7 @@ git commit -m "feat(config): add TransportConfig with RPC/HTTP enable flags"
 - Create: `config/meept.json5`
 - Modify: `Makefile`
 
-- [ ] **Step 1: Write JSON5 template matching current TOML**
+- [x] **Step 1: Write JSON5 template matching current TOML**
 
 ```go
 // Write to config/meept.json5
@@ -518,7 +518,7 @@ git commit -m "feat(config): add TransportConfig with RPC/HTTP enable flags"
 }
 ```
 
-- [ ] **Step 2: Update Makefile install target**
+- [x] **Step 2: Update Makefile install target**
 
 Modify `Makefile` — update `setup` and `install` targets:
 
@@ -577,11 +577,11 @@ setup:
 	@echo "Setup complete."
 ```
 
-- [ ] **Step 3: Test Makefile**
+- [x] **Step 3: Test Makefile**
 
 Run: `make install --dry-run 2>&1 | head -20` (or manually test with a fresh temp home)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add config/meept.json5 Makefile
@@ -597,7 +597,7 @@ git commit -m "feat(config): add meept.json5 template and update make install"
 - Modify: `internal/config/mcp.go`
 - Test: `internal/config/mcp_test.go` (or create)
 
-- [ ] **Step 1: Write mcp_servers.json5 template**
+- [x] **Step 1: Write mcp_servers.json5 template**
 
 ```json5
 // MCP server definitions. All servers disabled by default.
@@ -629,7 +629,7 @@ git commit -m "feat(config): add meept.json5 template and update make install"
 }
 ```
 
-- [ ] **Step 2: Update MCP loader for JSON5**
+- [x] **Step 2: Update MCP loader for JSON5**
 
 ```go
 package config
@@ -670,7 +670,7 @@ func LoadMCPConfigDefault() (*MCPConfig, error) {
 }
 ```
 
-- [ ] **Step 3: Handle legacy JSON fallback**
+- [x] **Step 3: Handle legacy JSON fallback**
 
 ```go
 // LoadMCPConfigWithLegacy loads JSON5 config, falling back to legacy JSON.
@@ -704,7 +704,7 @@ func LoadMCPConfigWithLegacy(path string) (*MCPConfig, error) {
 }
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add config/mcp_servers.json5 internal/config/mcp.go
@@ -719,7 +719,7 @@ git commit -m "feat(config): add mcp_servers.json5 format and loader"
 - Create: `config/q_agent.json5`
 - Modify: `internal/config/schema.go` (add QAgentConfig)
 
-- [ ] **Step 1: Write q_agent.json5**
+- [x] **Step 1: Write q_agent.json5**
 
 ```json5
 // Q Agent configuration
@@ -744,7 +744,7 @@ git commit -m "feat(config): add mcp_servers.json5 format and loader"
 }
 ```
 
-- [ ] **Step 2: Add QAgentConfig to schema**
+- [x] **Step 2: Add QAgentConfig to schema**
 
 ```go
 type QAgentConfig struct {
@@ -796,7 +796,7 @@ QAgent: QAgentConfig{
 },
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add config/q_agent.json5 internal/config/schema.go
@@ -812,13 +812,13 @@ git commit -m "feat(config): add q_agent.json5 config and schema"
 - Create: `internal/config/agents_json5.go`
 - Modify: `internal/config/agents.go` (add legacy fallback)
 
-- [ ] **Step 1: Read existing agent definitions**
+- [x] **Step 1: Read existing agent definitions**
 
 ```bash
 cat config/agents/core.toml
 ```
 
-- [ ] **Step 2: Create agents.json5 template**
+- [x] **Step 2: Create agents.json5 template**
 
 ```json5
 // Agent definitions for the Meept multi-agent system
@@ -922,7 +922,7 @@ cat config/agents/core.toml
 }
 ```
 
-- [ ] **Step 3: Create JSON5 agent loader**
+- [x] **Step 3: Create JSON5 agent loader**
 
 ```go
 package config
@@ -1011,7 +1011,7 @@ func LoadAgentDefinitionsDefaultWithJSON5(cfg *AgentsConfig) (map[string]*AgentD
 }
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add config/agents.json5 internal/config/agents_json5.go
@@ -1026,7 +1026,7 @@ git commit -m "feat(config): add agents.json5 format and loader"
 - Create: `config/menubar.json5`
 - Modify: `menubar/MeeptMenuBar/Services/ConfigService.swift`
 
-- [ ] **Step 1: Write menubar.json5**
+- [x] **Step 1: Write menubar.json5**
 
 ```json5
 // Menubar app configuration
@@ -1060,7 +1060,7 @@ git commit -m "feat(config): add agents.json5 format and loader"
 }
 ```
 
-- [ ] **Step 2: Update Go HTTP ConfigService to handle menubar config**
+- [x] **Step 2: Update Go HTTP ConfigService to handle menubar config**
 
 In `internal/comm/http/config_service.go`, add:
 
@@ -1127,7 +1127,7 @@ func (s *Server) handleSaveMenubarConfig(w http.ResponseWriter, r *http.Request)
 }
 ```
 
-- [ ] **Step 3: Update Swift ConfigService**
+- [x] **Step 3: Update Swift ConfigService**
 
 Add to `menubar/MeeptMenuBar/Services/ConfigService.swift`:
 
@@ -1175,7 +1175,7 @@ func saveMenubarConfig(content: String, completion: @escaping (Result<Void, Erro
 }
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add config/menubar.json5 internal/comm/http/
@@ -1193,7 +1193,7 @@ git commit -m "feat(config): add menubar.json5 config and HTTP endpoints"
 - Modify: `internal/tui/rpc.go` (rename/reuse methods)
 - Modify: `cmd/meept/main.go` (add --transport flag)
 
-- [ ] **Step 1: Define transport interface**
+- [x] **Step 1: Define transport interface**
 
 ```go
 package transport
@@ -1283,7 +1283,7 @@ func DefaultConfig() *Config {
 }
 ```
 
-- [ ] **Step 2: Create factory function**
+- [x] **Step 2: Create factory function**
 
 ```go
 // New creates a transport client based on config.
@@ -1303,7 +1303,7 @@ func New(cfg *Config) (Client, error) {
 }
 ```
 
-- [ ] **Step 3: Create RPC adapter**
+- [x] **Step 3: Create RPC adapter**
 
 `internal/transport/rpc_client.go` wraps the existing `internal/tui/rpc.go` RPCClient:
 
@@ -1347,7 +1347,7 @@ func (a *rpcAdapter) Chat(message, conversationID string) (string, error) {
 
 (Repeat delegation for every method in the interface.)
 
-- [ ] **Step 4: Create HTTP client implementation**
+- [x] **Step 4: Create HTTP client implementation**
 
 `internal/transport/http_client.go`:
 
@@ -1449,7 +1449,7 @@ func (c *httpClient) ListJobs() (*types.JobListResponse, error) { return nil, fm
 // ... stub remaining methods similarly
 ```
 
-- [ ] **Step 5: Update CLI main.go with transport flags**
+- [x] **Step 5: Update CLI main.go with transport flags**
 
 ```go
 // Global flags
@@ -1469,7 +1469,7 @@ rootCmd.PersistentFlags().StringVar(&debugFile, "debug", "", "Enable debug outpu
 rootCmd.PersistentFlags().StringVar(&transport, "transport", "rpc", "Transport: rpc or http")
 ```
 
-- [ ] **Step 6: Update cmd/meept/chat.go to use transport abstraction**
+- [x] **Step 6: Update cmd/meept/chat.go to use transport abstraction**
 
 ```go
 func runChat(cmd *cobra.Command, args []string) error {
@@ -1496,7 +1496,7 @@ func runTUITransport(cfg *transport.Config) error {
 }
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/transport/ cmd/meept/
@@ -1511,7 +1511,7 @@ git commit -m "feat(transport): add unified client transport abstraction (RPC/HT
 - Modify: `internal/daemon/daemon.go`
 - Modify: `cmd/meept-daemon/main.go`
 
-- [ ] **Step 1: Conditionally create RPC server**
+- [x] **Step 1: Conditionally create RPC server**
 
 In `internal/daemon/daemon.go` `New()`:
 
@@ -1532,7 +1532,7 @@ if fullCfg.Transport.RPC.Enabled {
 }
 ```
 
-- [ ] **Step 2: Conditionally create HTTP server**
+- [x] **Step 2: Conditionally create HTTP server**
 
 ```go
 // Create HTTP server (if enabled)
@@ -1560,7 +1560,7 @@ if fullCfg.Transport.HTTP.Enabled {
 }
 ```
 
-- [ ] **Step 3: Handle case where no transports enabled**
+- [x] **Step 3: Handle case where no transports enabled**
 
 ```go
 if rpcServer == nil && httpSrv == nil {
@@ -1569,7 +1569,7 @@ if rpcServer == nil && httpSrv == nil {
 }
 ```
 
-- [ ] **Step 4: Update Run() to start/stop conditionally**
+- [x] **Step 4: Update Run() to start/stop conditionally**
 
 In `Run()`:
 ```go
@@ -1581,7 +1581,7 @@ if err := d.registry.StartAll(ctx); err != nil {
 
 HTTP start already guarded by nil check in current code (line 261).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/daemon/ cmd/meept-daemon/
@@ -1595,7 +1595,7 @@ git commit -m "feat(daemon): conditionally start RPC and HTTP transports per con
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1: Update configuration section**
+- [x] **Step 1: Update configuration section**
 
 Replace the config section with:
 
@@ -1661,7 +1661,7 @@ Menubar app uses HTTP exclusively. Its config (`menubar.json5`) controls the dae
 ```
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add CLAUDE.md
@@ -1675,22 +1675,22 @@ git commit -m "docs(CLAUDE): update config docs for JSON5 and transport architec
 **Files:**
 - Test: `tests/` (run full suite)
 
-- [ ] **Step 1: Build both binaries**
+- [x] **Step 1: Build both binaries**
 
 Run: `make build`
 Expected: Clean build, no errors
 
-- [ ] **Step 2: Run config tests**
+- [x] **Step 2: Run config tests**
 
 Run: `go test ./internal/config -v`
 Expected: All config tests PASS including new JSON5 tests
 
-- [ ] **Step 3: Run transport tests** (if any written)
+- [x] **Step 3: Run transport tests** (if any written)
 
 Run: `go test ./internal/transport -v`
 Expected: PASS
 
-- [ ] **Step 4: Test daemon with both transports**
+- [x] **Step 4: Test daemon with both transports**
 
 ```bash
 # Test RPC only
@@ -1700,7 +1700,7 @@ Expected: PASS
 ./bin/meept --transport=rpc status
 ```
 
-- [ ] **Step 5: Test make install in fresh directory**
+- [x] **Step 5: Test make install in fresh directory**
 
 ```bash
 mkdir -p /tmp/meept-test
@@ -1709,7 +1709,7 @@ ls -la /tmp/meept-test/.meept/
 # Verify all config files present
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "test: verify unified config and transport architecture"
