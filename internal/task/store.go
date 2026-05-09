@@ -72,7 +72,8 @@ func (s *Store) migrate() error {
 		context_query     TEXT,
 		inherited_from    TEXT,
 		created_memories  TEXT,
-		assigned_agent    TEXT
+		assigned_agent    TEXT,
+		token_usage       INTEGER DEFAULT 0
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_state ON tasks(state);
@@ -103,6 +104,7 @@ func (s *Store) migrate() error {
 		"ALTER TABLE tasks ADD COLUMN inherited_from TEXT",
 		"ALTER TABLE tasks ADD COLUMN created_memories TEXT",
 		"ALTER TABLE tasks ADD COLUMN assigned_agent TEXT",
+		"ALTER TABLE tasks ADD COLUMN token_usage INTEGER DEFAULT 0",
 	}
 
 	for _, m := range migrations {
@@ -127,8 +129,8 @@ func (s *Store) Create(task *Task) error {
 		INSERT INTO tasks (id, name, description, project_dir, workspace_dir, state,
 		                   git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
 		                   failed_jobs, created_at, updated_at, memory_refs, context_query,
-		                   inherited_from, created_memories, assigned_agent)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                   inherited_from, created_memories, assigned_agent, token_usage)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.ID,
 		task.Name,
 		nullableString(task.Description),
@@ -148,6 +150,7 @@ func (s *Store) Create(task *Task) error {
 		nullableString(task.InheritedFrom),
 		nullableString(createdMemoriesJSON),
 		nullableString(task.AssignedAgent),
+		task.TokenUsage,
 	)
 
 	if err != nil {
@@ -165,7 +168,7 @@ func (s *Store) GetByID(id string) (*Task, error) {
 		SELECT id, name, description, project_dir, workspace_dir, state,
 		       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
 		       failed_jobs, created_at, updated_at, memory_refs, context_query,
-		       inherited_from, created_memories, assigned_agent
+		       inherited_from, created_memories, assigned_agent, token_usage
 		FROM tasks WHERE id = ?`, id)
 
 	task, err := s.scanTask(row)
@@ -202,7 +205,7 @@ func (s *Store) Update(task *Task) error {
 		    git_repo = ?, memvid_zone = ?, metadata = ?, total_jobs = ?,
 		    completed_jobs = ?, failed_jobs = ?, updated_at = ?,
 		    memory_refs = ?, context_query = ?, inherited_from = ?,
-		    created_memories = ?, assigned_agent = ?
+		    created_memories = ?, assigned_agent = ?, token_usage = ?
 		WHERE id = ?`,
 		task.Name,
 		nullableString(task.Description),
@@ -221,6 +224,7 @@ func (s *Store) Update(task *Task) error {
 		nullableString(task.InheritedFrom),
 		nullableString(createdMemoriesJSON),
 		nullableString(task.AssignedAgent),
+		task.TokenUsage,
 		task.ID,
 	)
 
@@ -258,7 +262,7 @@ func (s *Store) List(state *TaskState, limit int) ([]*Task, error) {
 			SELECT id, name, description, project_dir, workspace_dir, state,
 			       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
 			       failed_jobs, created_at, updated_at, memory_refs, context_query,
-			       inherited_from, created_memories, assigned_agent
+			       inherited_from, created_memories, assigned_agent, token_usage
 			FROM tasks
 			WHERE state = ?
 			ORDER BY updated_at DESC
@@ -268,7 +272,7 @@ func (s *Store) List(state *TaskState, limit int) ([]*Task, error) {
 			SELECT id, name, description, project_dir, workspace_dir, state,
 			       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
 			       failed_jobs, created_at, updated_at, memory_refs, context_query,
-			       inherited_from, created_memories, assigned_agent
+			       inherited_from, created_memories, assigned_agent, token_usage
 			FROM tasks
 			ORDER BY updated_at DESC
 			LIMIT ?`, limit)
@@ -301,7 +305,7 @@ func (s *Store) ListActive() ([]*Task, error) {
 		SELECT id, name, description, project_dir, workspace_dir, state,
 		       git_repo, memvid_zone, metadata, total_jobs, completed_jobs,
 		       failed_jobs, created_at, updated_at, memory_refs, context_query,
-		       inherited_from, created_memories, assigned_agent
+		       inherited_from, created_memories, assigned_agent, token_usage
 		FROM tasks
 		WHERE state IN ('pending', 'planning', 'executing', 'testing')
 		ORDER BY updated_at DESC`)
@@ -383,7 +387,7 @@ func (s *Store) GetTasksForSession(sessionID string) ([]*Task, error) {
 		SELECT t.id, t.name, t.description, t.project_dir, t.workspace_dir, t.state,
 		       t.git_repo, t.memvid_zone, t.metadata, t.total_jobs, t.completed_jobs,
 		       t.failed_jobs, t.created_at, t.updated_at, t.memory_refs, t.context_query,
-		       t.inherited_from, t.created_memories, t.assigned_agent
+		       t.inherited_from, t.created_memories, t.assigned_agent, t.token_usage
 		FROM tasks t
 		JOIN session_tasks st ON t.id = st.task_id
 		WHERE st.session_id = ?
@@ -427,7 +431,7 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 		workspaceDir, gitRepo    sql.NullString
 		memvidZone, metadata     sql.NullString
 		totalJobs, completedJobs int
-		failedJobs               int
+		failedJobs, tokenUsage   int
 		createdAt, updatedAt     string
 		memoryRefs, contextQuery sql.NullString
 		inheritedFrom            sql.NullString
@@ -438,7 +442,7 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 	err := row.Scan(&id, &name, &description, &projectDir, &workspaceDir, &state,
 		&gitRepo, &memvidZone, &metadata, &totalJobs, &completedJobs,
 		&failedJobs, &createdAt, &updatedAt, &memoryRefs, &contextQuery,
-		&inheritedFrom, &createdMemories, &assignedAgent)
+		&inheritedFrom, &createdMemories, &assignedAgent, &tokenUsage)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -447,7 +451,7 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 	}
 
 	return s.buildTask(id, name, state, description, projectDir, workspaceDir,
-		gitRepo, memvidZone, metadata, totalJobs, completedJobs, failedJobs,
+		gitRepo, memvidZone, metadata, totalJobs, completedJobs, failedJobs, tokenUsage,
 		createdAt, updatedAt, memoryRefs, contextQuery, inheritedFrom,
 		createdMemories, assignedAgent)
 }
@@ -459,7 +463,7 @@ func (s *Store) scanTaskRows(rows *sql.Rows) (*Task, error) {
 		workspaceDir, gitRepo    sql.NullString
 		memvidZone, metadata     sql.NullString
 		totalJobs, completedJobs int
-		failedJobs               int
+		failedJobs, tokenUsage   int
 		createdAt, updatedAt     string
 		memoryRefs, contextQuery sql.NullString
 		inheritedFrom            sql.NullString
@@ -470,20 +474,20 @@ func (s *Store) scanTaskRows(rows *sql.Rows) (*Task, error) {
 	err := rows.Scan(&id, &name, &description, &projectDir, &workspaceDir, &state,
 		&gitRepo, &memvidZone, &metadata, &totalJobs, &completedJobs,
 		&failedJobs, &createdAt, &updatedAt, &memoryRefs, &contextQuery,
-		&inheritedFrom, &createdMemories, &assignedAgent)
+		&inheritedFrom, &createdMemories, &assignedAgent, &tokenUsage)
 	if err != nil {
 		return nil, err
 	}
 
 	return s.buildTask(id, name, state, description, projectDir, workspaceDir,
-		gitRepo, memvidZone, metadata, totalJobs, completedJobs, failedJobs,
+		gitRepo, memvidZone, metadata, totalJobs, completedJobs, failedJobs, tokenUsage,
 		createdAt, updatedAt, memoryRefs, contextQuery, inheritedFrom,
 		createdMemories, assignedAgent)
 }
 
 func (s *Store) buildTask(id, name, state string,
 	description, projectDir, workspaceDir, gitRepo, memvidZone, metadata sql.NullString,
-	totalJobs, completedJobs, failedJobs int,
+	totalJobs, completedJobs, failedJobs, tokenUsage int,
 	createdAt, updatedAt string,
 	memoryRefs, contextQuery, inheritedFrom, createdMemories, assignedAgent sql.NullString) (*Task, error) {
 
@@ -494,6 +498,7 @@ func (s *Store) buildTask(id, name, state string,
 		TotalJobs:     totalJobs,
 		CompletedJobs: completedJobs,
 		FailedJobs:    failedJobs,
+		TokenUsage:    tokenUsage,
 	}
 
 	if description.Valid {
