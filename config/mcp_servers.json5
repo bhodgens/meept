@@ -1,27 +1,24 @@
-// MCP server definitions. All servers disabled by default.
-// Enable by setting "enabled": true in the server block.
+// MCP server definitions. Disabled by default; enable by setting enabled: true.
+// Each server maps to a name used in the tool registry.
 {
   servers: [
-    // Example: local server via subprocess
+    // Example: local server via stdio subprocess
     {
       name: "github",
-      type: "local",
+      type: "stdio",
       command: ["npx", "-y", "@modelcontextprotocol/server-github"],
-      environment: {
+      env: {
         GITHUB_TOKEN: "${GITHUB_TOKEN}",
       },
-      enabled: false,
     },
-    // Example: remote server with static auth
+    // Example: remote server with API key auth
     {
       name: "example",
-      type: "remote",
+      type: "http",
       url: "https://mcp.example.com/mcp",
       headers: {
         Authorization: "Bearer ${MCP_TOKEN}",
       },
-      timeout: 30000,
-      enabled: false,
     },
   ],
 }

@@ -17,6 +17,11 @@ type ClientConfig struct {
 	Rendering   RenderingConfig   `json:"rendering"`
 	Input       InputConfig       `json:"input"`
 	Chat        ChatConfig        `json:"chat"`
+
+	// Connection configures how the CLI connects to the daemon.
+	// Transport: "rpc", "http", or "auto" (default: "auto" -> rpc)
+	// Address: overrides socket path or HTTP endpoint
+	Connection ConnectionConfig `json:"connection"`
 }
 
 // VimConfig defines vim mode settings.

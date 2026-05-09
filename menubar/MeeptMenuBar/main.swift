@@ -8,7 +8,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var dashboardWindow: NSWindow?
 
-    private let apiClient = APIClient()
+    private let menubarConfig = MenubarConfigService()
+    private lazy var apiClient = APIClient(baseURL: menubarConfig.daemonBaseURL)
     private let daemonController = DaemonController()
     private var daemonStatus = DaemonStatus()
     private var isUpdating = false

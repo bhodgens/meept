@@ -77,8 +77,7 @@ Examples:
 }
 
 func runCacheStatus() error {
-	socket := getSocketPath()
-	client := tui.NewRPCClient(socket)
+	client := tui.NewDaemonClient()
 
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
@@ -111,8 +110,7 @@ func runCacheStatus() error {
 }
 
 func runCacheClear() error {
-	socket := getSocketPath()
-	client := tui.NewRPCClient(socket)
+	client := tui.NewDaemonClient()
 
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
@@ -128,8 +126,7 @@ func runCacheClear() error {
 }
 
 func runCacheInvalidate(filePath string) error {
-	socket := getSocketPath()
-	client := tui.NewRPCClient(socket)
+	client := tui.NewDaemonClient()
 
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)

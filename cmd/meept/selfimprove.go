@@ -44,8 +44,8 @@ func printJSON(data []byte) error {
 	return enc.Encode(&parsed)
 }
 
-func dialRPC() (*tui.RPCClient, error) {
-	client := tui.NewRPCClient(getSocketPath())
+func dialRPC() (tui.DaemonClient, error) {
+	client := tui.NewDaemonClient()
 	if err := client.Connect(); err != nil {
 		return nil, fmt.Errorf("failed to connect to daemon: %w", err)
 	}

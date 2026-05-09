@@ -10,33 +10,33 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// AgentDefinition represents an agent definition from a TOML file.
+// AgentDefinition represents an agent definition from a TOML or JSON5 file.
 type AgentDefinition struct {
-	ID          string   `toml:"id"`
-	Name        string   `toml:"name"`
-	Role        string   `toml:"role"` // "dispatcher", "executor", "conversational", "reviewer"
-	Description string   `toml:"description"`
-	Model       string   `toml:"model"`
-	Enabled     bool     `toml:"enabled"`
-	CanDelegate bool     `toml:"can_delegate"`
+	ID          string   `toml:"id" json:"id"`
+	Name        string   `toml:"name" json:"name"`
+	Role        string   `toml:"role" json:"role"` // "dispatcher", "executor", "conversational", "reviewer"
+	Description string   `toml:"description" json:"description"`
+	Model       string   `toml:"model" json:"model"`
+	Enabled     bool     `toml:"enabled" json:"enabled"`
+	CanDelegate bool     `toml:"can_delegate" json:"can_delegate"`
 
 	// Tools and capabilities
-	AdditionalTools []string `toml:"additional_tools"`
-	Capabilities    []string `toml:"capabilities"`
+	AdditionalTools []string `toml:"additional_tools" json:"additional_tools"`
+	Capabilities    []string `toml:"capabilities" json:"capabilities"`
 
 	// Prompt composition
-	PromptComponents []string `toml:"prompt_components"`
+	PromptComponents []string `toml:"prompt_components" json:"prompt_components"`
 
 	// Constraints
-	Constraints AgentConstraintsConfig `toml:"constraints"`
+	Constraints AgentConstraintsConfig `toml:"constraints" json:"constraints"`
 }
 
 // AgentConstraintsConfig holds agent operational constraints.
 type AgentConstraintsConfig struct {
-	MaxIterations    int `toml:"max_iterations"`
-	TimeoutSeconds   int `toml:"timeout_seconds"`
-	MaxTokensPerTurn int `toml:"max_tokens_per_turn"`
-	MaxMemoryRefs    int `toml:"max_memory_refs"`
+	MaxIterations    int `toml:"max_iterations" json:"max_iterations"`
+	TimeoutSeconds   int `toml:"timeout_seconds" json:"timeout_seconds"`
+	MaxTokensPerTurn int `toml:"max_tokens_per_turn" json:"max_tokens_per_turn"`
+	MaxMemoryRefs    int `toml:"max_memory_refs" json:"max_memory_refs"`
 }
 
 // ToTimeout converts TimeoutSeconds to time.Duration.
@@ -125,14 +125,55 @@ func loadAgentFile(path string) ([]AgentDefinition, error) {
 }
 
 // LoadAgentDefinitionsDefault loads agents from default locations.
+// Prefers JSON5 single file, falls back to TOML directory format.
 func LoadAgentDefinitionsDefault(cfg *AgentsConfig) (map[string]*AgentDefinition, error) {
+	// Try JSON5 single-file format first
+	json5Path := expandPath("~/.meept/agents.json5")
+	if _, err := os.Stat(json5Path); err == nil {
+		return LoadAgentDefinitionsJSON5(json5Path)
+	}
+
+	// Try project-local JSON5
+	projectJSON5 := "config/agents.json5"
+	if _, err := os.Stat(projectJSON5); err == nil {
+		return LoadAgentDefinitionsJSON5(projectJSON5)
+	}
+
+	// Fall back to TOML directory format
 	if cfg == nil {
 		cfg = &AgentsConfig{
 			ConfigDirs: []string{"~/.meept/agents", "config/agents"},
 		}
 	}
-
 	return LoadAgentDefinitions(cfg.ConfigDirs)
+}
+
+// agentsJSON5File is the root of the agents.json5 file.
+type agentsJSON5File struct {
+	Agents []AgentDefinition `json:"agents"`
+}
+
+// LoadAgentDefinitionsJSON5 loads all agent definitions from a JSON5 file.
+func LoadAgentDefinitionsJSON5(path string) (map[string]*AgentDefinition, error) {
+	path = expandPath(path)
+
+	var file agentsJSON5File
+	if err := LoadJSON5(path, &file); err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]*AgentDefinition), nil
+		}
+		return nil, err
+	}
+
+	agents := make(map[string]*AgentDefinition)
+	for _, agent := range file.Agents {
+		if agent.ID == "" {
+			continue
+		}
+		agentCopy := agent
+		agents[agent.ID] = &agentCopy
+	}
+	return agents, nil
 }
 
 // ValidateAgentDefinition validates an agent definition.

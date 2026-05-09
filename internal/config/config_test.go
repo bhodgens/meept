@@ -165,6 +165,128 @@ block_financial = false
 	}
 }
 
+func TestLoadJSON5(t *testing.T) {
+	f, err := os.CreateTemp("", "test*.json5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+
+	content := `{
+		// This is a comment
+		"name": "test",
+		"value": 42,
+		"nested": {
+			/* block comment */
+			"enabled": true
+		}
+	}`
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	var result struct {
+		Name   string `json:"name"`
+		Value  int    `json:"value"`
+		Nested struct {
+			Enabled bool `json:"enabled"`
+		} `json:"nested"`
+	}
+
+	if err := LoadJSON5(f.Name(), &result); err != nil {
+		t.Fatalf("LoadJSON5 failed: %v", err)
+	}
+
+	if result.Name != "test" {
+		t.Errorf("Name = %q, want test", result.Name)
+	}
+	if result.Value != 42 {
+		t.Errorf("Value = %d, want 42", result.Value)
+	}
+	if !result.Nested.Enabled {
+		t.Error("Nested.Enabled should be true")
+	}
+}
+
+func TestLoadJSON5EnvVars(t *testing.T) {
+	os.Setenv("TEST_JSON5_VAR", "hello")
+	defer os.Unsetenv("TEST_JSON5_VAR")
+
+	f, err := os.CreateTemp("", "test*.json5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+
+	if _, err := f.WriteString(`{"msg": "${TEST_JSON5_VAR}"}`); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	var result struct {
+		Msg string `json:"msg"`
+	}
+	if err := LoadJSON5(f.Name(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Msg != "hello" {
+		t.Errorf("Msg = %q, want hello", result.Msg)
+	}
+}
+
+func TestLoadJSON5Config(t *testing.T) {
+	f, err := os.CreateTemp("", "meept*.json5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+
+	content := `{
+		"daemon": {
+			"log_level": "DEBUG",
+			"socket_path": "/tmp/test-json5.sock"
+		},
+		"llm": {
+			"budget": {
+				"hourly_token_limit": 50000
+			}
+		}
+	}`
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	cfg, err := LoadJSON5Config(f.Name())
+	if err != nil {
+		t.Fatalf("LoadJSON5Config failed: %v", err)
+	}
+
+	if cfg.Daemon.LogLevel != "DEBUG" {
+		t.Errorf("LogLevel = %q, want DEBUG", cfg.Daemon.LogLevel)
+	}
+	if cfg.Daemon.SocketPath != "/tmp/test-json5.sock" {
+		t.Errorf("SocketPath = %q, want /tmp/test-json5.sock", cfg.Daemon.SocketPath)
+	}
+	if cfg.LLM.Budget.HourlyTokenLimit != 50000 {
+		t.Errorf("HourlyTokenLimit = %d, want 50000", cfg.LLM.Budget.HourlyTokenLimit)
+	}
+}
+
+func TestDefaultConfigTransport(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.Transport.RPC.Enabled {
+		t.Error("RPC transport should be enabled by default")
+	}
+	if !cfg.Transport.HTTP.Enabled {
+		t.Error("HTTP transport should be enabled by default")
+	}
+	if cfg.Transport.HTTP.Addr != ":8081" {
+		t.Errorf("expected HTTP addr :8081, got %s", cfg.Transport.HTTP.Addr)
+	}
+}
+
 func TestParseLogLevel(t *testing.T) {
 	tests := []struct {
 		input    string

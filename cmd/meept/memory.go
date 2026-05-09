@@ -39,9 +39,8 @@ Examples:
 }
 
 func runMemorySearch(query string, limit int) error {
-	socket := getSocketPath()
+	client := tui.NewDaemonClient()
 
-	client := tui.NewRPCClient(socket)
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}
