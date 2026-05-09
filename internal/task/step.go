@@ -77,7 +77,9 @@ type TaskStep struct {
 	Validated bool `json:"validated"`
 	// ValidationError contains the reason validation failed
 	ValidationError string `json:"validation_error,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	// TokenUsage tracks tokens consumed by this step.
+	TokenUsage    int `json:"token_usage,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
@@ -197,6 +199,7 @@ func (s *StepStore) migrate() error {
 		claims         TEXT,
 		validated      BOOLEAN DEFAULT FALSE,
 		validation_error TEXT,
+		token_usage    INTEGER DEFAULT 0,
 		created_at     TEXT NOT NULL,
 		updated_at     TEXT NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -232,6 +235,7 @@ func (s *StepStore) migrate() error {
 		"ALTER TABLE task_steps ADD COLUMN claims TEXT",
 		"ALTER TABLE task_steps ADD COLUMN validated BOOLEAN DEFAULT FALSE",
 		"ALTER TABLE task_steps ADD COLUMN validation_error TEXT",
+		"ALTER TABLE task_steps ADD COLUMN token_usage INTEGER DEFAULT 0",
 	} {
 		s.db.Exec(col)
 	}
@@ -250,8 +254,8 @@ func (s *StepStore) Create(step *TaskStep) error {
 		INSERT INTO task_steps (id, task_id, description, depends_on, tool_hint, agent_id,
 		                        job_id, state, result, sequence, revision_count,
 		                        recommendations, evidence, claims, validated, validation_error,
-		                        created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                        token_usage, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.ID,
 		step.TaskID,
 		step.Description,
@@ -268,6 +272,7 @@ func (s *StepStore) Create(step *TaskStep) error {
 		nullableString(claimsJSON),
 		step.Validated,
 		nullableString(step.ValidationError),
+		step.TokenUsage,
 		step.CreatedAt.Format(time.RFC3339),
 		step.UpdatedAt.Format(time.RFC3339),
 	)
@@ -294,7 +299,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 		SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
 		    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
 		    recommendations = ?, evidence = ?, claims = ?, validated = ?,
-		    validation_error = ?, updated_at = ?
+		    validation_error = ?, token_usage = ?, updated_at = ?
 		WHERE id = ?`,
 		step.Description,
 		nullableString(depsJSON),
@@ -310,6 +315,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 		nullableString(claimsJSON),
 		step.Validated,
 		nullableString(step.ValidationError),
+		step.TokenUsage,
 		now,
 		step.ID,
 	)
@@ -328,7 +334,7 @@ func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
-		       created_at, updated_at
+		       token_usage, created_at, updated_at
 		FROM task_steps WHERE id = ?`, id)
 
 	return s.scanStep(row)
@@ -340,7 +346,7 @@ func (s *StepStore) GetByJobID(jobID string) (*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
-		       created_at, updated_at
+		       token_usage, created_at, updated_at
 		FROM task_steps WHERE job_id = ?`, jobID)
 
 	return s.scanStep(row)
@@ -352,7 +358,7 @@ func (s *StepStore) ListByTaskID(taskID string) ([]*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
-		       created_at, updated_at
+		       token_usage, created_at, updated_at
 		FROM task_steps
 		WHERE task_id = ?
 		ORDER BY sequence ASC`, taskID)
