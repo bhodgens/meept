@@ -468,8 +468,24 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		return nil
 	}
 	t.CompleteJob()
+
+	// Aggregate token usage from step to parent task
+	if step.TokenUsage > 0 {
+		t.AddTokenUsage(step.TokenUsage)
+		ts.logger.Debug("Aggregated token usage from step to task",
+			"step_id", step.ID,
+			"step_tokens", step.TokenUsage,
+			"task_total_tokens", t.TokenUsage,
+		)
+	}
+
 	if err := ts.taskStore.Update(t); err != nil {
 		ts.logger.Error("Failed to update task after job completion", "error", err)
+	}
+
+	// Publish token progress event
+	if step.TokenUsage > 0 {
+		ts.publishTokenProgress(t)
 	}
 
 	// Check for newly unblocked steps (only if step was approved/completed)
@@ -557,6 +573,7 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"execution_time":  executionTime,
 			"result":          resultSummary,
 			"agents_used":     agentsUsed,
+			"token_usage":     t.TokenUsage,
 		})
 
 		ts.logger.Info("Task completed",
@@ -833,6 +850,16 @@ func (ts *TacticalScheduler) publishEvent(topic string, data map[string]any) {
 	}
 
 	ts.bus.Publish(topic, msg)
+}
+
+// publishTokenProgress publishes a task.progress event with token_usage data.
+func (ts *TacticalScheduler) publishTokenProgress(t *task.Task) {
+	ts.publishEvent("task.progress", map[string]any{
+		"task_id":        t.ID,
+		"completed_jobs": t.CompletedJobs,
+		"total_jobs":     t.TotalJobs,
+		"token_usage":    t.TokenUsage,
+	})
 }
 
 // isRateLimitError checks if an error message indicates a rate limit error.

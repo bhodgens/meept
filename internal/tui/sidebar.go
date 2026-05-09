@@ -103,6 +103,7 @@ type SidebarTaskItem struct {
 	TotalJobs     int
 	Created       string
 	CurrentStep   string // Description of the currently executing step
+	TokenUsage    int
 }
 
 // SidebarMemoryItem represents a recent memory item in the sidebar.
@@ -377,6 +378,7 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 						CompletedJobs: t.CompletedJobs,
 						TotalJobs:     t.TotalJobs,
 						Created:       t.CreatedAt,
+						TokenUsage:    t.TokenUsage,
 					})
 				}
 				status.PendingTasks = 0
@@ -750,6 +752,10 @@ func (s *SidebarModel) handleTaskProgressEvent(e BusEvent) {
 			}
 			if total, ok := payloadMap["total_jobs"].(float64); ok {
 				s.tasksData[i].TotalJobs = int(total)
+			}
+			// Update token usage from event data
+			if tokenUsage, ok := payloadMap["token_usage"].(float64); ok {
+				s.tasksData[i].TokenUsage = int(tokenUsage)
 			}
 			break
 		}
@@ -1281,6 +1287,11 @@ func (s *SidebarModel) renderTasksPanel() string {
 					}
 					b.WriteString(fmt.Sprintf("    -> %s\n", s.styles.Muted.Render(stepDesc)))
 				}
+
+				// Line 4 (optional): token usage when > 0
+				if task.TokenUsage > 0 {
+					b.WriteString(fmt.Sprintf("    %s\n", s.styles.Muted.Render(formatTokenCount(task.TokenUsage)+" tok")))
+				}
 			}
 		}
 	}
@@ -1442,4 +1453,16 @@ func (s *SidebarModel) renderActivityFeedPanel() string {
 	}
 
 	return b.String()
+}
+
+// formatTokenCount formats a token count for compact display.
+// >= 1,000,000 -> "1.2M", >= 1,000 -> "1.5K", otherwise -> "42"
+func formatTokenCount(count int) string {
+	if count >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(count)/1_000_000)
+	}
+	if count >= 1_000 {
+		return fmt.Sprintf("%.1fK", float64(count)/1_000)
+	}
+	return fmt.Sprintf("%d", count)
 }
