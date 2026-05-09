@@ -573,6 +573,7 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			"execution_time":  executionTime,
 			"result":          resultSummary,
 			"agents_used":     agentsUsed,
+			"token_usage":     t.TokenUsage,
 		})
 
 		ts.logger.Info("Task completed",

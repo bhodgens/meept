@@ -549,6 +549,7 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 		Steps          []TaskStepSummary `json:"steps,omitempty"`
 		ExecutionTime  string            `json:"execution_time,omitempty"`
 		Result         string            `json:"result,omitempty"`
+		TokenUsage     int               `json:"token_usage,omitempty"`
 	}
 
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
@@ -564,7 +565,7 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	)
 
 	// Build human-readable completion message
-	reply := h.formatTaskCompletedMessage(payload.Name, payload.Steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs)
+	reply := h.formatTaskCompletedMessage(payload.Name, payload.Steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs, payload.TokenUsage)
 
 	response := ChatResponse{
 		Reply: reply,
@@ -583,7 +584,7 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 }
 
 // formatTaskCompletedMessage builds a human-readable task completion message.
-func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSummary, executionTime, result string, completed, total int) string {
+func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSummary, executionTime, result string, completed, total, tokenUsage int) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## task completed: %s\n\n", strings.ToLower(name)))
 
@@ -611,6 +612,13 @@ func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSu
 
 	if executionTime != "" {
 		sb.WriteString(fmt.Sprintf("completed in %s\n", executionTime))
+	}
+
+	if tokenUsage > 0 {
+		if executionTime != "" {
+			sb.WriteString(" | ")
+		}
+		sb.WriteString(fmt.Sprintf("**token usage:** %s\n", formatTokenCount(tokenUsage)))
 	}
 
 	return sb.String()
