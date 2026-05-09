@@ -115,6 +115,12 @@ func (s *TaskStep) WithAgentID(agentID string) *TaskStep {
 	return s
 }
 
+// AddTokenUsage adds tokens to the step's running total.
+func (s *TaskStep) AddTokenUsage(tokens int) {
+	s.TokenUsage += tokens
+	s.UpdatedAt = time.Now().UTC()
+}
+
 // IncrementRevision increments the revision count.
 func (s *TaskStep) IncrementRevision() {
 	s.RevisionCount++
@@ -603,7 +609,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		id, taskID, description, state      string
 		dependsOn, toolHint                 sql.NullString
 		agentID, jobID, result              sql.NullString
-		sequence, revisionCount             int
+		sequence, revisionCount, tokenUsage int
 		recommendations, evidence, claims    sql.NullString
 		validated                           bool
 		validationError                     sql.NullString
@@ -613,7 +619,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	err := row.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
-		&createdAt, &updatedAt)
+		&tokenUsage, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -622,7 +628,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	}
 
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
-		agentID, jobID, result, sequence, revisionCount,
+		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
 		createdAt, updatedAt), nil
 }
@@ -632,7 +638,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		id, taskID, description, state      string
 		dependsOn, toolHint                 sql.NullString
 		agentID, jobID, result              sql.NullString
-		sequence, revisionCount             int
+		sequence, revisionCount, tokenUsage int
 		recommendations, evidence, claims    sql.NullString
 		validated                           bool
 		validationError                     sql.NullString
@@ -642,20 +648,20 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 	err := rows.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
-		&createdAt, &updatedAt)
+		&tokenUsage, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
 
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
-		agentID, jobID, result, sequence, revisionCount,
+		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
 		createdAt, updatedAt), nil
 }
 
 func buildStep(id, taskID, description, state string,
 	dependsOn, toolHint, agentID, jobID, result sql.NullString,
-	sequence, revisionCount int,
+	sequence, revisionCount, tokenUsage int,
 	recommendations, evidence, claims sql.NullString,
 	validated bool, validationError sql.NullString,
 	createdAt, updatedAt string) *TaskStep {
@@ -667,6 +673,7 @@ func buildStep(id, taskID, description, state string,
 		State:         StepState(state),
 		Sequence:      sequence,
 		RevisionCount: revisionCount,
+		TokenUsage:    tokenUsage,
 		Validated:     validated,
 	}
 
