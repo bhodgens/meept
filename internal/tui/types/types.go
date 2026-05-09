@@ -212,6 +212,7 @@ type Task struct {
 	LinkedSessions []string `json:"linked_sessions,omitempty"`
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
+	TokenUsage     int      `json:"token_usage,omitempty"`
 }
 
 // Progress returns the task completion percentage.
