@@ -105,6 +105,12 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeStop()
 	case "status":
 		return h.executeStatus()
+	case "tasks":
+		return h.executeTasks(cmd.Args)
+	case "cancel":
+		return h.executeCancel(cmd.Args)
+	case "amend":
+		return h.executeAmend(cmd.Args)
 	case "vim":
 		return h.executeVim()
 	default:
@@ -187,6 +193,39 @@ show comprehensive platform health status including:
 
 toggle vim-style keybindings in the chat input. when enabled,
 use vim keys for navigation (h/j/k/l) and modal editing.`,
+
+		"tasks": `usage: /tasks [state]
+
+list tasks with their current status. optionally filter by state.
+
+examples:
+  /tasks              list all tasks
+  /tasks running      list only running tasks
+  /tasks pending      list only pending tasks`,
+
+		"cancel": `usage: /cancel <task-id>
+
+cancel a task by ID. stops any in-flight work for the task.
+
+examples:
+  /cancel task-123    cancel specific task
+  /cancel             list recent active tasks`,
+
+		"amend": `usage: /amend <task-id> <type> [content]
+
+submit an amendment to modify a task in progress.
+
+amendment types:
+  inject_context  - add context to the task
+  skip_step       - skip a step (requires step_id)
+  add_step        - add a new step (requires description)
+  reprioritize    - reorder steps (requires step_ids)
+  change_agent    - reassign step to different agent
+
+examples:
+  /amend task-123 inject_context "skip testing"
+  /amend task-123 skip_step step-456
+  /amend task-123 add_step "write tests"`,
 	}
 
 	if text, ok := helpTexts[name]; ok {
@@ -457,5 +496,119 @@ func (h *CommandHandler) executeVim() *CommandResult {
 	return &CommandResult{
 		Output:        fmt.Sprintf("vim mode %s", mode),
 		ToggleVimMode: true,
+	}
+}
+
+// executeTasks lists tasks with their status.
+func (h *CommandHandler) executeTasks(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  "not connected to daemon",
+			IsError: true,
+		}
+	}
+
+	// Get all tasks
+	tasksResp, err := h.rpc.ListTasksExtended()
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to list tasks: %v", err),
+			IsError: true,
+		}
+	}
+	tasks := tasksResp.Tasks
+
+	if len(tasks) == 0 {
+		return &CommandResult{Output: "no tasks"}
+	}
+
+	var sb s.Builder
+	sb.WriteString("tasks:\n\n")
+	
+	// Filter by state if provided
+	stateFilter := ""
+	if len(args) > 0 {
+		stateFilter = args[0]
+	}
+
+	count := 0
+	for _, t := range tasks {
+		// Apply state filter if specified
+		if stateFilter != "" && !s.EqualFold(t.State, stateFilter) {
+			continue
+		}
+		
+		name := coalesce(t.Name, truncate(t.ID, 12), "unnamed")
+		progress := ""
+		if t.TotalJobs > 0 {
+			progress = fmt.Sprintf(" [%d/%d]", t.CompletedJobs, t.TotalJobs)
+		}
+		sb.WriteString(fmt.Sprintf("  %s: %s%s\n", t.State, name, progress))
+		count++
+	}
+
+	if count == 0 && stateFilter != "" {
+		return &CommandResult{Output: fmt.Sprintf("no tasks in state: %s", stateFilter)}
+	}
+
+	return &CommandResult{Output: sb.String()}
+}
+
+// executeCancel cancels a task by ID.
+func (h *CommandHandler) executeCancel(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  "not connected to daemon",
+			IsError: true,
+		}
+	}
+
+	if len(args) == 0 {
+		return &CommandResult{
+			Output:  "usage: /cancel <task-id>\n\n cancel a task by ID. stops any in-flight work for the task.\n\nexamples:\n  /cancel task-123    cancel task by ID\n  /cancel             lists recent active tasks",
+			IsError:   true,
+		}
+	}
+
+	taskID := args[0]
+	
+	// If no task ID provided, show recent active tasks
+	if taskID == "" {
+		return h.executeTasks([]string{"executing", "planning"})
+	}
+
+	err := h.rpc.CancelTask(taskID)
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to cancel task: %v", err),
+			IsError: true,
+		}
+	}
+
+	return &CommandResult{
+		Output: fmt.Sprintf("task %s cancelled", taskID),
+	}
+}
+
+// executeAmend submits an amendment for a task.
+func (h *CommandHandler) executeAmend(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  "not connected to daemon",
+			IsError: true,
+		}
+	}
+
+	if len(args) < 2 {
+		return &CommandResult{
+			Output:  "usage: /amend <task-id> <type> [content]\n\n submit an amendment to modify a task.\n\namendment types:\n  inject_context  - add context to the task\n  skip_step       - skip a step (requires step_id in content)\n  add_step        - add a new step (requires description in content)\n  reprioritize    - reorder steps (requires step_ids in content)\n  change_agent    - reassign step to different agent\n\nexamples:\n  /amend task-123 inject_context \"skip testing, go straight to deployment\"\n  /amend task-123 skip_step step-456\n  /amend task-123 add_step \"write unit tests\"",
+			IsError:   true,
+		}
+	}
+
+	// Amendment submission not yet implemented - requires AmendmentManager integration
+	return &CommandResult{
+		Output:  "amendment submission not yet implemented - use /help amend for usage",
+		IsError: true,
 	}
 }

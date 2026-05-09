@@ -540,6 +540,18 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	} else {
 		c.TaskRegistry = taskRegistry
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
+
+		// Wire up queue with task cancellation callback for interrupt-aware job claiming
+		if c.Queue != nil && taskRegistry.InterruptManager() != nil {
+			c.Queue.(*queue.PersistentQueue).SetTaskCancelledCallback(func(taskID string) bool {
+				token, exists := taskRegistry.InterruptManager().Get(taskID)
+				if !exists {
+					return false
+				}
+				return token.IsTriggered()
+			})
+			logger.Info("Queue interrupt-aware claiming enabled")
+		}
 	}
 
 	// Initialize MCP manager and register MCP tools

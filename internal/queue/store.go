@@ -798,3 +798,36 @@ func nullableRawJSON(j json.RawMessage) interface{} {
 	}
 	return string(j)
 }
+
+// ClaimNextByID attempts to claim a specific job by ID.
+// Returns the job if successfully claimed, nil if already claimed or not found.
+func (s *Store) ClaimNextByID(jobID string, workerID string) (*Job, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Try to claim the specific job
+	result, err := tx.Exec(`
+		UPDATE jobs SET state = 'claimed', claimed_by = ?, updated_at = ?
+		WHERE id = ? AND state = 'pending'`,
+		workerID, now, jobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to claim job: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return nil, nil // Job not found or already claimed
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit claim: %w", err)
+	}
+
+	// Fetch and return the claimed job
+	return s.GetByID(jobID)
+}

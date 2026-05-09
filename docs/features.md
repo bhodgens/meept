@@ -30,6 +30,95 @@ Response
 
 ## Core Architecture
 
+### Task Interrupt & Amendment System
+
+Meept supports real-time task interruption and dynamic plan amendment during execution.
+
+#### Interrupt System
+
+| Component | Description |
+|-----------|-------------|
+| **InterruptToken** | Thread-safe trigger mechanism for task cancellation |
+| **InterruptManager** | Manages lifecycle of interrupt tokens per task |
+| **Job Queue Integration** | Skips jobs from cancelled tasks during Claim() |
+
+**Interrupt-Aware Queue Claiming:**
+```go
+// Queue skips jobs from cancelled tasks
+pendingJobs, err := q.store.ListByState(StatePending, 50)
+for _, job := range pendingJobs {
+    if job.TaskID != "" && q.isTaskCancelled(job.TaskID) {
+        continue // Skip cancelled tasks
+    }
+    if job.CanBeClaimedBy(caps) {
+        return q.store.ClaimNextByID(job.ID, workerID)
+    }
+}
+```
+
+#### Amendment System
+
+| Amendment Type | Description |
+|----------------|-------------|
+| **inject_context** | Add new context/constraints to task |
+| **skip_step** | Skip a specific step (removes dependencies) |
+| **add_step** | Insert new step into task plan |
+| **reprioritize** | Reorder step execution sequence |
+| **change_agent** | Reassign step to different specialist agent |
+
+**TUI Slash Commands:**
+| Command | Description |
+|---------|-------------|
+| `/tasks [state]` | List tasks with optional state filter |
+| `/cancel <task-id>` | Cancel task by ID |
+| `/amend <type> <args>` | Submit amendment request |
+
+**Architecture:**
+```
+User Input (TUI slash command)
+    ↓
+CommandHandler.executeCancel() / executeAmend()
+    ↓
+InterruptManager.Trigger() / AmendmentHandlers.handle*()
+    ↓
+Task Registry Update + Bus Event
+    ↓
+Queue Claim() skips cancelled jobs
+```
+
+**Configuration:**
+```toml
+[agent.interrupt]
+enabled = true
+propagate_to_subtasks = true
+```
+
+**API:**
+```go
+// Cancel a task
+token, exists := registry.InterruptManager().Get(taskID)
+if exists {
+    token.Trigger() // Marks task as cancelled
+}
+
+// Set queue callback for interrupt-aware claiming
+queue.SetTaskCancelledCallback(func(taskID string) bool {
+    token, exists := interruptMgr.Get(taskID)
+    return exists && token.IsTriggered()
+})
+
+// Submit amendment
+amendment := &AmendmentRequest{
+    Type:    AmendmentSkipStep,
+    TaskID:  taskID,
+    StepID:  stepID,
+    Content: "skipped due to user request",
+}
+reply := handlers.handleSkipStep(ctx, amendment)
+```
+
+---
+
 ### Agent Loop & Execution Controls
 
 The agent loop is the heart of Meept. Unlike simple `while (!done)` loops, it implements multiple independent safety and efficiency mechanisms:
@@ -974,6 +1063,11 @@ enable_checkpoints = true
 # Chat
 ./bin/meept chat "What's the weather?"  # One-shot query
 ./bin/meept chat                         # Interactive TUI mode
+
+# TUI Slash Commands (Interactive Mode)
+/tasks [state]                    # List tasks (optionally filter by state)
+/cancel <task-id>                 # Cancel task by ID
+/amend <type> <args>              # Submit amendment request
 
 # Status
 ./bin/meept status                 # Show daemon status
