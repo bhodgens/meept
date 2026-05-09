@@ -1,8 +1,13 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"log/slog"
 	"testing"
+	"time"
+
+	"github.com/caimlas/meept/internal/bus"
 )
 
 func TestExtractJSON_DirectJSON(t *testing.T) {
@@ -155,5 +160,103 @@ func TestCreateFallbackSteps(t *testing.T) {
 	}
 	if steps[0].TaskID != "task-1" {
 		t.Errorf("expected task_id %q, got %q", "task-1", steps[0].TaskID)
+	}
+}
+
+// TestStrategicPlanner_PublishesEvents verifies that Plan() publishes both
+// a "task.planned" event (for TUI consumers) and an "orchestrator.schedule"
+// event (to trigger tactical scheduling). The test uses a real bus and SQLite
+// stores but nil registry so it exercises the fallback step path.
+func TestStrategicPlanner_PublishesEvents(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	stepStore := taskStore.StepStore()
+
+	// Subscribe to both expected event topics BEFORE creating the planner
+	taskPlannedSub := msgBus.Subscribe("test-observer", "task.planned")
+	defer msgBus.Unsubscribe(taskPlannedSub)
+
+	orchScheduleSub := msgBus.Subscribe("test-observer", "orchestrator.schedule")
+	defer msgBus.Unsubscribe(orchScheduleSub)
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		Registry:       nil, // triggers fallback path (no LLM needed)
+		TaskStore:      taskStore,
+		StepStore:      stepStore,
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	// Create a task in the store so Plan() can look it up
+	tsk := newTestTask("task-events-test", "implement auth module")
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	req := PlanRequest{
+		TaskID:    tsk.ID,
+		SessionID: "session-events-test",
+		Input:     "implement auth module",
+		Intent:    "code",
+	}
+
+	err = sp.Plan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Plan() failed: %v", err)
+	}
+
+	// Verify task.planned event was published
+	select {
+	case msg := <-taskPlannedSub.Channel:
+		if msg.Topic != "task.planned" {
+			t.Errorf("expected topic 'task.planned', got %q", msg.Topic)
+		}
+		var event map[string]any
+		if err := json.Unmarshal(msg.Payload, &event); err != nil {
+			t.Fatalf("failed to unmarshal task.planned payload: %v", err)
+		}
+		if event["task_id"] != tsk.ID {
+			t.Errorf("task.planned task_id = %v, want %s", event["task_id"], tsk.ID)
+		}
+		if event["session_id"] != "session-events-test" {
+			t.Errorf("task.planned session_id = %v, want session-events-test", event["session_id"])
+		}
+		totalSteps, ok := event["total_steps"].(float64)
+		if !ok || totalSteps < 1 {
+			t.Errorf("task.planned total_steps = %v, want >= 1", event["total_steps"])
+		}
+		readySteps, ok := event["ready_steps"].(float64)
+		if !ok || readySteps < 1 {
+			t.Errorf("task.planned ready_steps = %v, want >= 1", event["ready_steps"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for task.planned event")
+	}
+
+	// Verify orchestrator.schedule event was published
+	select {
+	case msg := <-orchScheduleSub.Channel:
+		if msg.Topic != "orchestrator.schedule" {
+			t.Errorf("expected topic 'orchestrator.schedule', got %q", msg.Topic)
+		}
+		var event map[string]any
+		if err := json.Unmarshal(msg.Payload, &event); err != nil {
+			t.Fatalf("failed to unmarshal orchestrator.schedule payload: %v", err)
+		}
+		if event["task_id"] != tsk.ID {
+			t.Errorf("orchestrator.schedule task_id = %v, want %s", event["task_id"], tsk.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for orchestrator.schedule event")
 	}
 }
