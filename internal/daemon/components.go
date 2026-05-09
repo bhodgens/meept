@@ -60,6 +60,7 @@ type Components struct {
 	QueueHandler    *queue.Handler
 	TaskRegistry    *task.Registry
 	TaskHandler     *task.Handler
+	AmendmentMgr    *task.AmendmentManager
 	WorkerPool      *worker.Pool
 	WorkerHandler   *worker.Handler
 	JobProcessor    worker.JobProcessor
@@ -540,15 +541,19 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	} else {
 		c.TaskRegistry = taskRegistry
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
+		c.AmendmentMgr = taskRegistry.AmendmentManager()
 
 		// Wire up queue with task cancellation callback for interrupt-aware job claiming
 		if c.Queue != nil && taskRegistry.InterruptManager() != nil {
-			c.Queue.(*queue.PersistentQueue).SetTaskCancelledCallback(func(taskID string) bool {
+			c.Queue.(*queue.PersistentQueue).SetTaskCancelledCallback(func(taskID string) (bool, string) {
 				token, exists := taskRegistry.InterruptManager().Get(taskID)
 				if !exists {
-					return false
+					return false, ""
 				}
-				return token.IsTriggered()
+				if token.IsTriggered() {
+					return true, string(token.Reason())
+				}
+				return false, ""
 			})
 			logger.Info("Queue interrupt-aware claiming enabled")
 		}
@@ -690,6 +695,8 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			MemvidClient:      c.MemvidClient,
 			MemoryMgr:         c.MemoryManager,
 			TaskStore:         taskStore,
+			TaskRegistry:      c.TaskRegistry,
+			AmendmentManager:  c.AmendmentMgr,
 			SkillRegistry:     c.SkillRegistry,
 			SkillExecutor:     c.SkillExecutor,
 			Logger:            logger.With("component", "dispatcher"),

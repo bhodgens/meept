@@ -52,6 +52,8 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"orchestrator.schedule": o.handleScheduleRequest,
 		"queue.job.completed":   o.handleJobCompleted,
 		"queue.job.failed":      o.handleJobFailed,
+		"task.amend.applied":    o.handleAmendmentApplied,
+		"task.amend.rejected":   o.handleAmendmentRejected,
 	}
 
 	for topic, handler := range topics {
@@ -188,4 +190,57 @@ func (o *Orchestrator) handleJobFailed(ctx context.Context, msg *models.BusMessa
 			"error", err,
 		)
 	}
+}
+
+// handleAmendmentApplied handles events when an amendment is successfully applied.
+func (o *Orchestrator) handleAmendmentApplied(ctx context.Context, msg *models.BusMessage) {
+	var req struct {
+		ID       string `json:"id"`
+		TaskID   string `json:"task_id"`
+		Type     string `json:"type"`
+		StepID   string `json:"step_id,omitempty"`
+		Result   string `json:"result,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		o.logger.Error("Failed to parse amendment applied event", "error", err)
+		return
+	}
+
+	o.logger.Info("Amendment applied",
+		"request_id", req.ID,
+		"task_id", req.TaskID,
+		"type", req.Type,
+		"step_id", req.StepID,
+	)
+
+	// If the amendment affects steps, trigger re-scheduling of ready steps
+	if req.StepID != "" || req.Type == "add_step" || req.Type == "skip_step" || req.Type == "reprioritize" {
+		if err := o.tactical.ScheduleReadySteps(ctx, req.TaskID); err != nil {
+			o.logger.Error("Failed to re-schedule steps after amendment",
+				"task_id", req.TaskID,
+				"error", err,
+			)
+		}
+	}
+}
+
+// handleAmendmentRejected handles events when an amendment is rejected.
+func (o *Orchestrator) handleAmendmentRejected(ctx context.Context, msg *models.BusMessage) {
+	var req struct {
+		ID      string `json:"id"`
+		TaskID  string `json:"task_id"`
+		Type    string `json:"type"`
+		Reason  string `json:"reason,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		o.logger.Error("Failed to parse amendment rejected event", "error", err)
+		return
+	}
+
+	o.logger.Warn("Amendment rejected",
+		"request_id", req.ID,
+		"task_id", req.TaskID,
+		"type", req.Type,
+		"reason", req.Reason,
+	)
 }

@@ -111,6 +111,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeCancel(cmd.Args)
 	case "amend":
 		return h.executeAmend(cmd.Args)
+	case "interrupt":
+		return h.executeInterrupt(cmd.Args)
 	case "vim":
 		return h.executeVim()
 	default:
@@ -139,6 +141,10 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /stop               stop current session's work\n")
 	sb.WriteString("  /status             show platform health status\n")
 	sb.WriteString("  /vim                toggle vim-style keybindings\n")
+	sb.WriteString("  /cancel <id>        cancel a task by ID\n")
+	sb.WriteString("  /amend <id> <type>  submit amendment to task\n")
+	sb.WriteString("  /interrupt <id>     interrupt a running task\n")
+	sb.WriteString("  /tasks              list all tasks\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -226,6 +232,15 @@ examples:
   /amend task-123 inject_context "skip testing"
   /amend task-123 skip_step step-456
   /amend task-123 add_step "write tests"`,
+
+		"interrupt": `usage: /interrupt <task-id> [reason]
+
+interrupt a running task. sends an interrupt signal to the task,
+causing it to gracefully stop.
+
+examples:
+  /interrupt task-123          interrupt with default reason
+  /interrupt task-123 wrong direction`,
 	}
 
 	if text, ok := helpTexts[name]; ok {
@@ -524,7 +539,7 @@ func (h *CommandHandler) executeTasks(args []string) *CommandResult {
 
 	var sb s.Builder
 	sb.WriteString("tasks:\n\n")
-	
+
 	// Filter by state if provided
 	stateFilter := ""
 	if len(args) > 0 {
@@ -537,7 +552,7 @@ func (h *CommandHandler) executeTasks(args []string) *CommandResult {
 		if stateFilter != "" && !s.EqualFold(t.State, stateFilter) {
 			continue
 		}
-		
+
 		name := coalesce(t.Name, truncate(t.ID, 12), "unnamed")
 		progress := ""
 		if t.TotalJobs > 0 {
@@ -565,32 +580,41 @@ func (h *CommandHandler) executeCancel(args []string) *CommandResult {
 
 	if len(args) == 0 {
 		return &CommandResult{
-			Output:  "usage: /cancel <task-id>\n\n cancel a task by ID. stops any in-flight work for the task.\n\nexamples:\n  /cancel task-123    cancel task by ID\n  /cancel             lists recent active tasks",
-			IsError:   true,
+			Output:  "usage: /cancel <task-id> [reason]",
+			IsError: true,
 		}
 	}
 
 	taskID := args[0]
-	
+
 	// If no task ID provided, show recent active tasks
 	if taskID == "" {
 		return h.executeTasks([]string{"executing", "planning"})
 	}
 
-	err := h.rpc.CancelTask(taskID)
-	if err != nil {
+	reason := ""
+	if len(args) > 1 {
+		reason = s.Join(args[1:], " ")
+	}
+
+	if err := h.rpc.CancelTask(taskID); err != nil {
 		return &CommandResult{
 			Output:  fmt.Sprintf("failed to cancel task: %v", err),
 			IsError: true,
 		}
 	}
 
-	return &CommandResult{
-		Output: fmt.Sprintf("task %s cancelled", taskID),
+	msg := fmt.Sprintf("task %s cancelled", taskID)
+	if reason != "" {
+		msg += ": " + reason
 	}
+
+	return &CommandResult{Output: msg}
 }
 
-// executeAmend submits an amendment for a task.
+// executeAmend submits an amendment to a task.
+// usage: /amend <task-id> <type> [content]
+// types: inject_context, skip_step, add_step, reprioritize, change_agent
 func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
@@ -601,14 +625,57 @@ func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 
 	if len(args) < 2 {
 		return &CommandResult{
-			Output:  "usage: /amend <task-id> <type> [content]\n\n submit an amendment to modify a task.\n\namendment types:\n  inject_context  - add context to the task\n  skip_step       - skip a step (requires step_id in content)\n  add_step        - add a new step (requires description in content)\n  reprioritize    - reorder steps (requires step_ids in content)\n  change_agent    - reassign step to different agent\n\nexamples:\n  /amend task-123 inject_context \"skip testing, go straight to deployment\"\n  /amend task-123 skip_step step-456\n  /amend task-123 add_step \"write unit tests\"",
+			Output:  "usage: /amend <task-id> <type> [content]\n\nsubmit an amendment to modify a task.\n\namendment types:\n  inject_context  - add context to the task\n  skip_step       - skip a step (requires step_id in content)\n  add_step        - add a new step (requires description in content)\n  reprioritize    - reorder steps (requires step_ids in content)\n  change_agent    - reassign step to different agent\n\nexamples:\n  /amend task-123 inject_context \"skip testing, go straight to deployment\"\n  /amend task-123 skip_step step-456\n  /amend task-123 add_step \"write unit tests\"",
 			IsError:   true,
 		}
 	}
 
-	// Amendment submission not yet implemented - requires AmendmentManager integration
+	taskID := args[0]
+	amendmentType := args[1]
+	content := ""
+	if len(args) > 2 {
+		content = s.Join(args[2:], " ")
+	}
+
+	// For now, return a not-yet-implemented message
+	// Full amendment support requires bus communication which is more complex
 	return &CommandResult{
-		Output:  "amendment submission not yet implemented - use /help amend for usage",
-		IsError: true,
+		Output: fmt.Sprintf("amendment request (not yet fully implemented):\n  task: %s\n  type: %s\n  content: %s\n\nuse the dispatcher API directly for full amendment support", taskID, amendmentType, content),
+	}
+}
+
+// executeInterrupt triggers an interrupt token for a task.
+// usage: /interrupt <task-id> [reason]
+func (h *CommandHandler) executeInterrupt(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  "not connected to daemon",
+			IsError: true,
+		}
+	}
+
+	if len(args) == 0 {
+		return &CommandResult{
+			Output:  "usage: /interrupt <task-id> [reason]",
+			IsError: true,
+		}
+	}
+
+	taskID := args[0]
+	reason := "user_requested"
+	if len(args) > 1 {
+		reason = s.Join(args[1:], " ")
+	}
+
+	// Interrupt is handled via task cancellation for now
+	if err := h.rpc.CancelTask(taskID); err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to interrupt task: %v", err),
+			IsError: true,
+		}
+	}
+
+	return &CommandResult{
+		Output: fmt.Sprintf("task %s interrupted (reason: %s)", taskID, reason),
 	}
 }

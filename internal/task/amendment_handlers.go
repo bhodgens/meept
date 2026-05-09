@@ -189,7 +189,9 @@ func (h *AmendmentHandlers) handleReprioritize(ctx context.Context, req *Amendme
 			continue // Skip missing steps
 		}
 		step.Sequence = i
-		h.stepStore.Update(step)
+		if err := h.stepStore.Update(step); err != nil {
+			h.stepStore.logger.Warn("Failed to update step sequence", "step_id", stepID, "error", err)
+		}
 	}
 
 	return &AmendmentReply{
@@ -253,6 +255,7 @@ func (h *AmendmentHandlers) handleChangeAgent(ctx context.Context, req *Amendmen
 		Message:   fmt.Sprintf("Step %s reassigned to %s", metadata.StepID, metadata.AgentID),
 	}, nil
 }
+
 
 // truncateString truncates a string to maxLength, adding "..." if truncated.
 func truncateString(s string, maxLength int) string {

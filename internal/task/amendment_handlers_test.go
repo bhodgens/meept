@@ -5,42 +5,51 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/queue"
 )
 
-func setupTestHandlers(t *testing.T) (*AmendmentHandlers, *Registry, *AmendmentManager, *bus.MessageBus) {
-	tmpDir := t.TempDir()
-	queuePath := tmpDir + "/queue.db"
+func setupTestHandlers(t *testing.T) (*AmendmentHandlers, *AmendmentManager, *Registry, func()) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	msgBus := bus.New(nil, logger)
 
-	msgBus := bus.New(nil, slog.Default())
-	q, err := queue.NewPersistentQueue(queuePath, msgBus, slog.Default())
+	tmpDir := t.TempDir()
+	registry := setupTestRegistry(t, tmpDir, msgBus, logger)
+
+	queuePath := filepath.Join(tmpDir, "queue.db")
+	q, err := queue.NewPersistentQueue(queuePath, msgBus, logger)
 	if err != nil {
 		t.Fatalf("Failed to create queue: %v", err)
 	}
 
-	registry, err := setupTestRegistry(tmpDir, msgBus)
+	handlers := NewAmendmentHandlers(registry, q)
+	amendmentMgr := NewAmendmentManager(msgBus, logger)
+	handlers.RegisterAll(amendmentMgr)
+
+	cleanup := func() {
+		q.Close()
+		registry.Close()
+	}
+
+	return handlers, amendmentMgr, registry, cleanup
+}
+
+func setupTestRegistry(t *testing.T, tmpDir string, msgBus *bus.MessageBus, logger *slog.Logger) *Registry {
+	t.Helper()
+	dbPath := filepath.Join(tmpDir, "tasks.db")
+	registry, err := NewRegistry(dbPath, msgBus, logger)
 	if err != nil {
 		t.Fatalf("Failed to create registry: %v", err)
 	}
-
-	handlers := NewAmendmentHandlers(registry, q)
-	manager := NewAmendmentManager(msgBus, slog.Default())
-	handlers.RegisterAll(manager)
-
-	return handlers, registry, manager, msgBus
-}
-
-func setupTestRegistry(tmpDir string, msgBus *bus.MessageBus) (*Registry, error) {
-	dbPath := tmpDir + "/tasks.db"
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return NewRegistry(dbPath, msgBus, logger)
+	return registry
 }
 
 func TestHandleInjectContext(t *testing.T) {
-	handlers, registry, _, _ := setupTestHandlers(t)
+	handlers, _, registry, cleanup := setupTestHandlers(t)
+	defer cleanup()
 	ctx := context.Background()
 
 	// Create a task
@@ -65,23 +74,72 @@ func TestHandleInjectContext(t *testing.T) {
 		t.Errorf("Expected success, got: %s", reply.Message)
 	}
 
-	// Verify context was injected
+	// Verify context was injected with [AMENDMENT] tag
 	updatedTask, err := registry.Get(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("Failed to get updated task: %v", err)
 	}
 
+	if !stringsContains(updatedTask.ContextQuery, "[AMENDMENT]") {
+		t.Errorf("Expected [AMENDMENT] tag in context, got: %s", updatedTask.ContextQuery)
+	}
 	if !stringsContains(updatedTask.ContextQuery, "skip the tests") {
 		t.Errorf("Expected context to be injected, got: %s", updatedTask.ContextQuery)
 	}
 }
 
+func TestHandleInjectContext_WithExistingContext(t *testing.T) {
+	handlers, _, registry, cleanup := setupTestHandlers(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	task, err := registry.Create(ctx, "test-task", "test task")
+	if err != nil {
+		t.Fatalf("Failed to create task: %v", err)
+	}
+
+	// Set initial context
+	task.ContextQuery = "initial context"
+	if err := registry.Update(ctx, task); err != nil {
+		t.Fatalf("Failed to update task: %v", err)
+	}
+
+	req := &AmendmentRequest{
+		ID:      "inject-2",
+		TaskID:  task.ID,
+		Type:    AmendmentInjectContext,
+		Content: "additional context",
+	}
+
+	reply, err := handlers.handleInjectContext(ctx, req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if !reply.Success {
+		t.Errorf("Expected success, got: %s", reply.Message)
+	}
+
+	updatedTask, err := registry.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("Failed to get task: %v", err)
+	}
+
+	if !stringsContains(updatedTask.ContextQuery, "initial context") {
+		t.Errorf("Expected initial context preserved, got: %s", updatedTask.ContextQuery)
+	}
+	if !stringsContains(updatedTask.ContextQuery, "[AMENDMENT] additional context") {
+		t.Errorf("Expected amendment context appended, got: %s", updatedTask.ContextQuery)
+	}
+}
+
 func TestHandleSkipStep(t *testing.T) {
-	handlers, registry, _, _ := setupTestHandlers(t)
+	handlers, _, _, cleanup := setupTestHandlers(t)
+	defer cleanup()
 	ctx := context.Background()
 
 	// Create a task with two steps (step 2 depends on step 1)
-	task, err := registry.Create(ctx, "test-task", "test task")
+	task, err := handlers.registry.Create(ctx, "test-task", "test task")
 	if err != nil {
 		t.Fatalf("Failed to create task: %v", err)
 	}
@@ -125,8 +183,31 @@ func TestHandleSkipStep(t *testing.T) {
 	}
 }
 
+func TestHandleSkipStep_MissingStepID(t *testing.T) {
+	handlers, _, _, cleanup := setupTestHandlers(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	req := &AmendmentRequest{
+		ID:      "skip-missing",
+		TaskID:  "nonexistent",
+		Type:    AmendmentSkipStep,
+		Content: "test",
+	}
+
+	reply, err := handlers.handleSkipStep(ctx, req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if reply.Success {
+		t.Error("Expected failure when step_id is missing")
+	}
+}
+
 func TestHandleAddStep(t *testing.T) {
-	handlers, registry, _, _ := setupTestHandlers(t)
+	handlers, _, registry, cleanup := setupTestHandlers(t)
+	defer cleanup()
 	ctx := context.Background()
 
 	// Create a task
@@ -168,12 +249,88 @@ func TestHandleAddStep(t *testing.T) {
 	}
 }
 
+func TestHandleAddStep_WithAgentID(t *testing.T) {
+	handlers, _, registry, cleanup := setupTestHandlers(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	task, err := registry.Create(ctx, "test-task", "test task")
+	if err != nil {
+		t.Fatalf("Failed to create task: %v", err)
+	}
+
+	metadata, _ := json.Marshal(map[string]string{
+		"description": "new step",
+		"agent_id":    "debugger",
+	})
+
+	req := &AmendmentRequest{
+		ID:       "add-agent",
+		TaskID:   task.ID,
+		Type:     AmendmentAddStep,
+		Content:  "add step with agent",
+		Metadata: metadata,
+	}
+
+	reply, err := handlers.handleAddStep(ctx, req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if !reply.Success {
+		t.Errorf("Expected success, got: %s", reply.Message)
+	}
+
+	// Verify the step was created with the agent ID
+	steps, _ := handlers.stepStore.ListByTaskID(task.ID)
+	found := false
+	for _, s := range steps {
+		if s.AgentID == "debugger" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected to find step with agent_id=debugger")
+	}
+}
+
+func TestHandleAddStep_MissingDescription(t *testing.T) {
+	handlers, _, _, cleanup := setupTestHandlers(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	task, err := handlers.registry.Create(ctx, "test-task", "test task")
+	if err != nil {
+		t.Fatalf("Failed to create task: %v", err)
+	}
+
+	metadata, _ := json.Marshal(map[string]string{
+		"description": "",
+	})
+	req := &AmendmentRequest{
+		ID:       "add-empty",
+		TaskID:   task.ID,
+		Type:     AmendmentAddStep,
+		Metadata: metadata,
+	}
+
+	reply, err := handlers.handleAddStep(ctx, req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if reply.Success {
+		t.Error("Expected failure for missing description")
+	}
+}
+
 func TestHandleReprioritize(t *testing.T) {
-	handlers, registry, _, _ := setupTestHandlers(t)
+	handlers, _, _, cleanup := setupTestHandlers(t)
+	defer cleanup()
 	ctx := context.Background()
 
 	// Create a task with steps
-	task, err := registry.Create(ctx, "test-task", "test task")
+	task, err := handlers.registry.Create(ctx, "test-task", "test task")
 	if err != nil {
 		t.Fatalf("Failed to create task: %v", err)
 	}
@@ -217,12 +374,35 @@ func TestHandleReprioritize(t *testing.T) {
 	}
 }
 
+func TestHandleReprioritize_EmptyStepIDs(t *testing.T) {
+	handlers, _, _, cleanup := setupTestHandlers(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	req := &AmendmentRequest{
+		ID:      "reprio-empty",
+		TaskID:  "task-1",
+		Type:    AmendmentReprioritize,
+		Content: "reorder",
+	}
+
+	reply, err := handlers.handleReprioritize(ctx, req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if reply.Success {
+		t.Error("Expected failure for empty step_ids")
+	}
+}
+
 func TestHandleChangeAgent(t *testing.T) {
-	handlers, registry, _, _ := setupTestHandlers(t)
+	handlers, _, _, cleanup := setupTestHandlers(t)
+	defer cleanup()
 	ctx := context.Background()
 
 	// Create a task with step
-	task, err := registry.Create(ctx, "test-task", "test task")
+	task, err := handlers.registry.Create(ctx, "test-task", "test task")
 	if err != nil {
 		t.Fatalf("Failed to create task: %v", err)
 	}
@@ -264,8 +444,47 @@ func TestHandleChangeAgent(t *testing.T) {
 	}
 }
 
+func TestHandleChangeAgent_MissingFields(t *testing.T) {
+	handlers, _, _, cleanup := setupTestHandlers(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Test missing step_id
+	req := &AmendmentRequest{
+		ID:       "agent-missing-step",
+		TaskID:   "task-1",
+		Type:     AmendmentChangeAgent,
+		Metadata: json.RawMessage(`{"agent_id":"debugger"}`),
+	}
+
+	reply, err := handlers.handleChangeAgent(ctx, req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if reply.Success {
+		t.Error("Expected failure for missing step_id")
+	}
+
+	// Test missing agent_id
+	req = &AmendmentRequest{
+		ID:       "agent-missing-agent",
+		TaskID:   "task-1",
+		Type:     AmendmentChangeAgent,
+		Metadata: json.RawMessage(`{"step_id":"step-1"}`),
+	}
+
+	reply, err = handlers.handleChangeAgent(ctx, req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if reply.Success {
+		t.Error("Expected failure for missing agent_id")
+	}
+}
+
 func TestHandleAmendmentErrors(t *testing.T) {
-	handlers, _, _, _ := setupTestHandlers(t)
+	handlers, _, _, cleanup := setupTestHandlers(t)
+	defer cleanup()
 	ctx := context.Background()
 
 	// Test skip with missing step_id
@@ -283,25 +502,6 @@ func TestHandleAmendmentErrors(t *testing.T) {
 	// This should fail because step doesn't exist
 	if reply.Success {
 		t.Error("Expected failure for nonexistent step")
-	}
-
-	// Test add step with missing description
-	metadata, _ := json.Marshal(map[string]string{
-		"description": "",
-	})
-	req = &AmendmentRequest{
-		ID:       "error-2",
-		TaskID:   "nonexistent",
-		Type:     AmendmentAddStep,
-		Metadata: metadata,
-	}
-
-	reply, err = handlers.handleAddStep(ctx, req)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-	if reply.Success {
-		t.Error("Expected failure for missing description")
 	}
 }
 

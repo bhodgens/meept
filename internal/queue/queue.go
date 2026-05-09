@@ -13,6 +13,9 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// IsTaskCancelledFunc defines a function type for checking task cancellation.
+type IsTaskCancelledFunc func(taskID string) (bool, string)
+
 // Queue defines the interface for job queue operations.
 type Queue interface {
 	// Enqueue adds a job to the queue.
@@ -58,9 +61,6 @@ type Queue interface {
 	Close() error
 }
 
-// IsTaskCancelledFunc is a callback to check if a task is cancelled.
-type IsTaskCancelledFunc func(taskID string) bool
-
 // PersistentQueue implements Queue with SQLite persistence and bus notifications.
 type PersistentQueue struct {
 	store           *Store
@@ -87,7 +87,7 @@ func NewPersistentQueue(dbPath string, msgBus *bus.MessageBus, logger *slog.Logg
 		store:           store,
 		bus:             msgBus,
 		logger:          logger,
-		isTaskCancelled: func(taskID string) bool { return false }, // Default: no tasks cancelled
+		isTaskCancelled: func(taskID string) (bool, string) { return false, "" }, // Default: no tasks cancelled
 	}
 
 	logger.Info("Persistent queue initialized", "path", dbPath)
@@ -145,9 +145,11 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 	var targetJob *Job
 	for _, job := range pendingJobs {
 		// Skip cancelled tasks
-		if job.TaskID != "" && q.isTaskCancelled(job.TaskID) {
-			q.logger.Debug("Skipping job from cancelled task", "job_id", job.ID, "task_id", job.TaskID)
-			continue
+		if job.TaskID != "" {
+			if cancelled, _ := q.isTaskCancelled(job.TaskID); cancelled {
+				q.logger.Debug("Skipping job from cancelled task", "job_id", job.ID, "task_id", job.TaskID)
+				continue
+			}
 		}
 		// Check if worker can claim this job
 		if job.CanBeClaimedBy(caps) {

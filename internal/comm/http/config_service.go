@@ -407,26 +407,3 @@ func (s *ConfigService) DeleteAgent(id string) error {
 	return nil
 }
 
-// getMenubarConfigPath returns the path to menubar.json5.
-func (s *ConfigService) getMenubarConfigPath() string {
-	return filepath.Join(s.meeptDir, "menubar.json5")
-}
-
-// LoadMenubarConfig loads the menubar app configuration.
-func (s *ConfigService) LoadMenubarConfig() (string, error) {
-	path := s.getMenubarConfigPath()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "{}", nil
-		}
-		return "", err
-	}
-	return string(data), nil
-}
-
-// SaveMenubarConfig saves the menubar app configuration.
-func (s *ConfigService) SaveMenubarConfig(content string) error {
-	path := s.getMenubarConfigPath()
-	return os.WriteFile(path, []byte(content), 0644)
-}

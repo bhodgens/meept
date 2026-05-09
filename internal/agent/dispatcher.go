@@ -65,6 +65,8 @@ type Dispatcher struct {
 	memvid            *memvid.Client
 	memoryMgr         *memory.Manager
 	taskStore         *task.Store
+	taskRegistry      *task.Registry
+	amendmentMgr      *task.AmendmentManager
 	skillRegistry     *skills.Registry
 	skillExecutor     *skills.Executor
 	logger            *slog.Logger
@@ -87,6 +89,8 @@ type DispatcherConfig struct {
 	MemvidClient      *memvid.Client
 	MemoryMgr         *memory.Manager
 	TaskStore         *task.Store
+	TaskRegistry      *task.Registry
+	AmendmentManager  *task.AmendmentManager
 	SkillRegistry     *skills.Registry
 	SkillExecutor     *skills.Executor
 	Logger            *slog.Logger
@@ -108,6 +112,8 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		memvid:            cfg.MemvidClient,
 		memoryMgr:         cfg.MemoryMgr,
 		taskStore:         cfg.TaskStore,
+		taskRegistry:      cfg.TaskRegistry,
+		amendmentMgr:      cfg.AmendmentManager,
 		skillRegistry:     cfg.SkillRegistry,
 		skillExecutor:     cfg.SkillExecutor,
 		logger:            cfg.Logger,
@@ -1166,4 +1172,113 @@ func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent string)
 // GetSkillRegistry returns the skill registry for external access.
 func (d *Dispatcher) GetSkillRegistry() *skills.Registry {
 	return d.skillRegistry
+}
+
+// GetSkillExecutor returns the skill executor for external access.
+func (d *Dispatcher) GetSkillExecutor() *skills.Executor {
+	return d.skillExecutor
+}
+
+// GetCapabilityMatcher returns the capability matcher for external access.
+func (d *Dispatcher) GetCapabilityMatcher() *CapabilityMatcher {
+	return d.capabilityMatcher
+}
+
+// SetCapabilityMatcher sets the capability matcher for fast routing.
+func (d *Dispatcher) SetCapabilityMatcher(matcher *CapabilityMatcher) {
+	d.capabilityMatcher = matcher
+}
+
+// GetActiveTasks returns all active tasks from the task store.
+func (d *Dispatcher) GetActiveTasks(ctx context.Context) ([]*task.Task, error) {
+	if d.taskStore == nil {
+		return nil, fmt.Errorf("task store not configured")
+	}
+	return d.taskStore.ListActive()
+}
+
+// GetInterruptStatus returns the interrupt status for a task.
+// Returns (isInterrupted, reason, message) or an error if the task is not found.
+func (d *Dispatcher) GetInterruptStatus(ctx context.Context, taskID string) (bool, string, string, error) {
+	if d.taskStore == nil {
+		return false, "", "", fmt.Errorf("task store not configured")
+	}
+
+	t, err := d.taskStore.GetByID(taskID)
+	if err != nil {
+		return false, "", "", err
+	}
+	if t == nil {
+		return false, "", "", fmt.Errorf("task not found: %s", taskID)
+	}
+
+	// Check task state first
+	if t.State == task.StateCancelled {
+		return true, string(task.ReasonUserCancelled), "Task was cancelled", nil
+	}
+
+	return false, "", "", nil
+}
+
+// SubmitAmendment submits an amendment request for a task.
+func (d *Dispatcher) SubmitAmendment(ctx context.Context, taskID string, amendmentType task.AmendmentType, content string, metadata map[string]any) (*task.AmendmentRequest, error) {
+	if d.taskStore == nil {
+		return nil, fmt.Errorf("task store not configured")
+	}
+	if d.amendmentMgr == nil {
+		return nil, fmt.Errorf("amendment manager not configured")
+	}
+
+	// Verify task exists
+	t, err := d.taskStore.GetByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+	if t == nil {
+		return nil, fmt.Errorf("task not found: %s", taskID)
+	}
+
+	// Marshal metadata if provided
+	var metadataJSON json.RawMessage
+	if metadata != nil {
+		metadataJSON, err = json.Marshal(metadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+	}
+
+	// Create amendment request
+	req := task.NewAmendmentRequest(taskID, amendmentType, content)
+	req.Metadata = metadataJSON
+
+	// Submit through amendment manager
+	if err := d.amendmentMgr.Submit(ctx, req); err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// ProcessAmendment processes a pending amendment request.
+func (d *Dispatcher) ProcessAmendment(ctx context.Context, requestID string) (*task.AmendmentReply, error) {
+	if d.amendmentMgr == nil {
+		return nil, fmt.Errorf("amendment manager not configured")
+	}
+	return d.amendmentMgr.Process(ctx, requestID)
+}
+
+// GetPendingAmendments returns all pending amendments for a task.
+func (d *Dispatcher) GetPendingAmendments(taskID string) []*task.AmendmentRequest {
+	if d.amendmentMgr == nil {
+		return nil
+	}
+	return d.amendmentMgr.GetPendingForTask(taskID)
+}
+
+// GetTask returns a task by ID.
+func (d *Dispatcher) GetTask(ctx context.Context, taskID string) (*task.Task, error) {
+	if d.taskStore == nil {
+		return nil, fmt.Errorf("task store not configured")
+	}
+	return d.taskStore.GetByID(taskID)
 }

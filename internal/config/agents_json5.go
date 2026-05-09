@@ -25,40 +25,6 @@ type AgentsFileJSON5 struct {
 	Agents []AgentDefinitionJSON5 `json:"agents"`
 }
 
-// LoadAgentDefinitionsJSON5 loads all agent definitions from a JSON5 file.
-func LoadAgentDefinitionsJSON5(path string) (map[string]*AgentDefinition, error) {
-	path = expandPath(path)
-
-	var file AgentsFileJSON5
-	if err := LoadJSON5(path, &file); err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]*AgentDefinition), nil
-		}
-		return nil, err
-	}
-
-	agents := make(map[string]*AgentDefinition)
-	for _, a := range file.Agents {
-		if a.ID == "" {
-			continue
-		}
-		agents[a.ID] = &AgentDefinition{
-			ID:               a.ID,
-			Name:             a.Name,
-			Role:             a.Role,
-			Description:      a.Description,
-			Model:            a.Model,
-			Enabled:          a.Enabled,
-			CanDelegate:      a.CanDelegate,
-			AdditionalTools:  a.AdditionalTools,
-			Capabilities:     a.Capabilities,
-			PromptComponents: a.PromptComponents,
-			Constraints:      a.Constraints,
-		}
-	}
-	return agents, nil
-}
-
 // LoadAgentDefinitionsDefaultWithJSON5 tries JSON5 first, then TOML.
 func LoadAgentDefinitionsDefaultWithJSON5(cfg *AgentsConfig) (map[string]*AgentDefinition, error) {
 	// Try JSON5 format first
