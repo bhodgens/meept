@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"github.com/caimlas/meept/internal/tui"
 )
 
 func newWorkersCmd() *cobra.Command {
@@ -44,8 +42,8 @@ func newWorkersStatusCmd() *cobra.Command {
 }
 
 func runWorkersStatus(cmd *cobra.Command, args []string) error {
-	client := tui.NewDaemonClient()
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w", err)
 	}
 	defer client.Close()
@@ -71,8 +69,8 @@ func newWorkersListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all workers with details",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := tui.NewDaemonClient()
-			if err := client.Connect(); err != nil {
+			client, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
@@ -141,8 +139,8 @@ func newWorkersScaleCmd() *cobra.Command {
 				return fmt.Errorf("count must be non-negative")
 			}
 
-			client := tui.NewDaemonClient()
-			if err := client.Connect(); err != nil {
+			client, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()

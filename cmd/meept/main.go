@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/version"
 )
 
@@ -19,6 +20,7 @@ var (
 	stateDir      string
 	debugFile     string // Empty = no debug, "-" = stderr, "filename" = file
 	transportFlag string // "rpc" or "http"
+	httpURLFlag   string // HTTP base URL (e.g. "http://localhost:8081")
 )
 
 // debugEnabled returns whether debug mode is active.
@@ -101,6 +103,7 @@ Memory & Skills:
 	rootCmd.PersistentFlags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
 	rootCmd.PersistentFlags().StringVar(&debugFile, "debug", "", "Enable debug output (--debug or --debug=file, use '-' for stderr)")
 	rootCmd.PersistentFlags().StringVar(&transportFlag, "transport", "rpc", "Transport: rpc or http")
+	rootCmd.PersistentFlags().StringVar(&httpURLFlag, "http-url", "", "HTTP base URL for daemon (default: http://localhost:8081)")
 	rootCmd.PersistentFlags().Lookup("debug").NoOptDefVal = "debug.log"
 
 	// Add subcommands
@@ -167,4 +170,30 @@ func getSocketPath() string {
 	}
 	homeDir, _ := os.UserHomeDir()
 	return filepath.Join(homeDir, ".meept", "meept.sock")
+}
+
+// getTransportConfig builds a transport.Config from the CLI flags.
+func getTransportConfig() *transport.Config {
+	cfg := transport.DefaultConfig()
+	cfg.Transport = transportFlag
+	cfg.SocketPath = getSocketPath()
+	if httpURLFlag != "" {
+		cfg.HTTPBaseURL = httpURLFlag
+	}
+	return cfg
+}
+
+// connectDaemon creates and connects a transport.Client based on CLI flags.
+// It returns the connected client; the caller is responsible for calling Close().
+func connectDaemon() (transport.Client, error) {
+	cfg := getTransportConfig()
+	client, err := transport.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Connect(); err != nil {
+		client.Close()
+		return nil, err
+	}
+	return client, nil
 }

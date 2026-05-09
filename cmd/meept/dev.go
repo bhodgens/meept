@@ -9,8 +9,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-
-	"github.com/caimlas/meept/internal/tui"
 )
 
 func newDevCmd() *cobra.Command {
@@ -85,9 +83,8 @@ func newDevConfigCmd() *cobra.Command {
 }
 
 func runDevModels(cmd *cobra.Command, args []string) error {
-	client := tui.NewDaemonClient()
-
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept-daemon -f", err)
 	}
 	defer client.Close()
@@ -137,9 +134,8 @@ func runDevModels(cmd *cobra.Command, args []string) error {
 }
 
 func runDevModel(cmd *cobra.Command, args []string) error {
-	client := tui.NewDaemonClient()
-
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept-daemon -f", err)
 	}
 	defer client.Close()
@@ -208,9 +204,8 @@ func runDevModel(cmd *cobra.Command, args []string) error {
 }
 
 func runDevTest(message string) error {
-	client := tui.NewDaemonClient()
-
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept-daemon -f", err)
 	}
 	defer client.Close()
@@ -247,9 +242,8 @@ func runDevTest(message string) error {
 }
 
 func runDevConfig(cmd *cobra.Command, args []string) error {
-	client := tui.NewDaemonClient()
-
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept-daemon -f", err)
 	}
 	defer client.Close()

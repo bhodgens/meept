@@ -7,7 +7,6 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/caimlas/meept/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -37,8 +36,8 @@ func newSkillsListCmd() *cobra.Command {
 		Short: "List available skills",
 		Long:  "List all skills discovered from the skill directories.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c := tui.NewDaemonClient()
-			if err := c.Connect(); err != nil {
+			c, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer c.Close()
@@ -153,8 +152,8 @@ func newSkillsShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			skillName := args[0]
 
-			c := tui.NewDaemonClient()
-			if err := c.Connect(); err != nil {
+			c, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer c.Close()
@@ -260,8 +259,8 @@ Examples:
 				input = strings.Join(args[1:], " ")
 			}
 
-			c := tui.NewDaemonClient()
-			if err := c.Connect(); err != nil {
+			c, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer c.Close()

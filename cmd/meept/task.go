@@ -5,8 +5,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"github.com/caimlas/meept/internal/tui"
 )
 
 func newTaskCmd() *cobra.Command {
@@ -43,8 +41,8 @@ func newTaskListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List tasks",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := tui.NewDaemonClient()
-			if err := client.Connect(); err != nil {
+			client, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
@@ -102,8 +100,8 @@ func newTaskCreateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			client := tui.NewDaemonClient()
-			if err := client.Connect(); err != nil {
+			client, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
@@ -137,8 +135,8 @@ func newTaskGetCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
 
-			client := tui.NewDaemonClient()
-			if err := client.Connect(); err != nil {
+			client, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
@@ -187,8 +185,8 @@ func newTaskDeleteCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
 
-			client := tui.NewDaemonClient()
-			if err := client.Connect(); err != nil {
+			client, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
@@ -212,8 +210,8 @@ func newTaskLinkCmd() *cobra.Command {
 			taskID := args[0]
 			sessionID := args[1]
 
-			client := tui.NewDaemonClient()
-			if err := client.Connect(); err != nil {
+			client, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()
@@ -237,8 +235,8 @@ func newTaskUnlinkCmd() *cobra.Command {
 			taskID := args[0]
 			sessionID := args[1]
 
-			client := tui.NewDaemonClient()
-			if err := client.Connect(); err != nil {
+			client, err := connectDaemon()
+			if err != nil {
 				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
 			defer client.Close()

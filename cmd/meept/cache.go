@@ -5,8 +5,6 @@ import (
 	"log"
 
 	"github.com/spf13/cobra"
-
-	"github.com/caimlas/meept/internal/tui"
 )
 
 func newCacheCmd() *cobra.Command {
@@ -77,9 +75,8 @@ Examples:
 }
 
 func runCacheStatus() error {
-	client := tui.NewDaemonClient()
-
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}
 	defer client.Close()
@@ -110,9 +107,8 @@ func runCacheStatus() error {
 }
 
 func runCacheClear() error {
-	client := tui.NewDaemonClient()
-
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}
 	defer client.Close()
@@ -126,9 +122,8 @@ func runCacheClear() error {
 }
 
 func runCacheInvalidate(filePath string) error {
-	client := tui.NewDaemonClient()
-
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}
 	defer client.Close()
