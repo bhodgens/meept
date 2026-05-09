@@ -429,10 +429,16 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 	}
 
 	delivered := h.bus.Publish("orchestrator.plan", msg)
-	h.logger.Debug("Published plan request",
-		"task_id", result.Task.ID,
-		"delivered", delivered,
-	)
+	if delivered == 0 {
+		h.logger.Warn("Plan request published with no subscribers",
+			"task_id", result.Task.ID,
+		)
+	} else {
+		h.logger.Debug("Published plan request",
+			"task_id", result.Task.ID,
+			"delivered", delivered,
+		)
+	}
 }
 
 // sendResponse publishes a chat response.
@@ -524,11 +530,12 @@ func (h *ChatHandler) publishWorkerEvent(topic string, w *Worker) {
 
 // TaskStepSummary represents a step in a task completion payload.
 type TaskStepSummary struct {
-	ID          string `json:"id"`
-	Description string `json:"description"`
-	State       string `json:"state"`
-	Result      string `json:"result,omitempty"`
-	AgentID     string `json:"agent_id,omitempty"`
+	ID                 string `json:"id"`
+	Description        string `json:"description"`
+	State              string `json:"state"`
+	Result             string `json:"result,omitempty"`
+	AgentID            string `json:"agent_id,omitempty"`
+	AccumulatedContext string `json:"accumulated_context,omitempty"`
 }
 
 // handleTaskCompleted handles task.completed events and pushes results back to chat.

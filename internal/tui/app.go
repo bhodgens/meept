@@ -601,6 +601,53 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.chat.Update(progressMsg)
 					}
 				}
+			case "task.progress":
+				// Extract chat_visible flag and update chat if visible
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					chatVisible := true // Default to visible for backwards compatibility
+					if cv, ok := payloadMap["chat_visible"].(bool); ok {
+						chatVisible = cv
+					}
+
+					// Only update chat if chat_visible is true
+					if chatVisible {
+						currentStep, _ := payloadMap["current_step"].(string)
+						if currentStep != "" {
+							progressMsg := models.ProgressUpdateMsg{
+								Stage:       "task progress",
+								CurrentTool: currentStep,
+							}
+							if completed, ok := payloadMap["completed_jobs"].(float64); ok {
+								total, _ := payloadMap["total_jobs"].(float64)
+								if total > 0 {
+									progressMsg.Percent = (completed / total) * 100
+								}
+							}
+							if cmd := a.chat.Update(progressMsg); cmd != nil {
+								cmds = append(cmds, cmd)
+							}
+						}
+					}
+				}
+			case "task.error":
+				// Handle step errors - display in chat immediately
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					errMsg, _ := payloadMap["error"].(string)
+					stepDesc, _ := payloadMap["step_id"].(string)
+					taskID, _ := payloadMap["task_id"].(string)
+
+					if errMsg != "" {
+						// Display error in chat as a task result message
+						resultMsg := models.ChatTaskResultMsg{
+							State:        "failed",
+							TaskID:       taskID,
+							ResultSummary: fmt.Sprintf("step %s failed: %s", stepDesc, errMsg),
+						}
+						if cmd := a.chat.Update(resultMsg); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					}
+				}
 			case "task.completed", "task.failed":
 				// Inject task result message into chat
 				if payloadMap, ok := e.Payload.(map[string]any); ok {

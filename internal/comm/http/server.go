@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/services"
 )
 
 // ServerConfig holds configuration for the HTTP server.
@@ -20,6 +21,8 @@ type ServerConfig struct {
 	WriteTimeout   time.Duration // Write timeout
 	MaxHeaderBytes int           // Max header size
 	EnableCORS     bool          // Enable CORS headers
+	APIKeys        []string      // Valid API keys for authentication
+	RequireAuth    bool          // Require API key authentication
 }
 
 // DefaultServerConfig returns sensible defaults for the menubar HTTP server.
@@ -30,6 +33,8 @@ func DefaultServerConfig() ServerConfig {
 		WriteTimeout:   30 * time.Second,
 		MaxHeaderBytes: 1 << 20, // 1 MB
 		EnableCORS:     true,    // Enable CORS for local menubar app
+		RequireAuth:    false,   // Disabled by default for local development
+		APIKeys:        []string{},
 	}
 }
 
@@ -56,6 +61,7 @@ type Server struct {
 	configService  *ConfigService
 	daemonCtrl     DaemonController
 	metricsService MetricsService
+	services       *services.ServiceRegistry
 	logger         *slog.Logger
 	server         *http.Server
 	running        bool
@@ -80,7 +86,7 @@ type Agent struct {
 }
 
 // NewServer creates a new HTTP API server.
-func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonController, metricsSvc MetricsService, logger *slog.Logger) *Server {
+func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonController, metricsSvc MetricsService, svcRegistry *services.ServiceRegistry, logger *slog.Logger) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = ":8081"
 	}
@@ -93,6 +99,7 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 		configService:  configSvc,
 		daemonCtrl:     daemonCtrl,
 		metricsService: metricsSvc,
+		services:       svcRegistry,
 		logger:         logger,
 	}
 }
@@ -181,10 +188,86 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/live", s.handleLiveMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/historical", s.handleHistoricalMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
+	// Chat endpoints
+	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
+
+	// Memory endpoints
+	mux.HandleFunc("POST /api/v1/memory/query", s.handleMemoryQuery)
+	mux.HandleFunc("GET /api/v1/memory/recent", s.handleMemoryRecent)
+	mux.HandleFunc("POST /api/v1/memory/export", s.handleMemoryExport)
+
+	// Queue endpoints
+	mux.HandleFunc("POST /api/v1/queue/jobs", s.handleQueueEnqueue)
+	mux.HandleFunc("GET /api/v1/queue/jobs", s.handleQueueList)
+	mux.HandleFunc("GET /api/v1/queue/jobs/{id}", s.handleQueueGet)
+	mux.HandleFunc("POST /api/v1/queue/jobs/{id}/claim", s.handleQueueClaim)
+	mux.HandleFunc("POST /api/v1/queue/jobs/{id}/complete", s.handleQueueComplete)
+	mux.HandleFunc("POST /api/v1/queue/jobs/{id}/fail", s.handleQueueFail)
+	mux.HandleFunc("POST /api/v1/queue/jobs/{id}/retry", s.handleQueueRetry)
+	mux.HandleFunc("GET /api/v1/queue/stats", s.handleQueueStats)
+
+	// Task endpoints
+	mux.HandleFunc("POST /api/v1/tasks", s.handleTaskCreate)
+	mux.HandleFunc("GET /api/v1/tasks", s.handleTaskList)
+	mux.HandleFunc("GET /api/v1/tasks/{id}", s.handleTaskGet)
+	mux.HandleFunc("PUT /api/v1/tasks/{id}", s.handleTaskUpdate)
+	mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.handleTaskDelete)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.handleTaskCancel)
+	mux.HandleFunc("GET /api/v1/tasks/{id}/steps", s.handleTaskSteps)
+
+	// Session endpoints
+	mux.HandleFunc("POST /api/v1/sessions", s.handleSessionCreate)
+	mux.HandleFunc("GET /api/v1/sessions", s.handleSessionList)
+	mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleSessionGet)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleSessionDelete)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/attach", s.handleSessionAttach)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/detach", s.handleSessionDetach)
+
+	// Worker endpoints
+	mux.HandleFunc("GET /api/v1/workers/stats", s.handleWorkerStats)
+	mux.HandleFunc("POST /api/v1/workers", s.handleWorkerAdd)
+	mux.HandleFunc("DELETE /api/v1/workers/{id}", s.handleWorkerRemove)
+	mux.HandleFunc("POST /api/v1/workers/scale", s.handleWorkerScale)
+
+	// Skills endpoints
+	mux.HandleFunc("GET /api/v1/skills", s.handleSkillsList)
+	mux.HandleFunc("GET /api/v1/skills/{slug}", s.handleSkillsGet)
+	mux.HandleFunc("POST /api/v1/skills/{slug}/execute", s.handleSkillsExecute)
+
+	// Self-improve endpoints
+	mux.HandleFunc("GET /api/v1/selfimprove/status", s.handleSelfImproveStatus)
+	mux.HandleFunc("POST /api/v1/selfimprove/trigger", s.handleSelfImproveTrigger)
+	mux.HandleFunc("POST /api/v1/selfimprove/analyze", s.handleSelfImproveAnalyze)
+	mux.HandleFunc("POST /api/v1/selfimprove/generate", s.handleSelfImproveGenerate)
+	mux.HandleFunc("POST /api/v1/selfimprove/validate", s.handleSelfImproveValidate)
+	mux.HandleFunc("POST /api/v1/selfimprove/apply", s.handleSelfImproveApply)
+	mux.HandleFunc("POST /api/v1/selfimprove/reject", s.handleSelfImproveReject)
+
+	// Cache endpoints
+	mux.HandleFunc("GET /api/v1/cache/stats", s.handleCacheStats)
+	mux.HandleFunc("POST /api/v1/cache/clear", s.handleCacheClear)
+
+	// Security endpoints
+	mux.HandleFunc("POST /api/v1/security/check", s.handleSecurityCheck)
+
+	// Scheduler endpoints
+	mux.HandleFunc("GET /api/v1/scheduler/jobs", s.handleSchedulerListJobs)
+	mux.HandleFunc("POST /api/v1/scheduler/jobs", s.handleSchedulerAddJob)
+
+	// Bus endpoints
+	mux.HandleFunc("POST /api/v1/bus/publish", s.handleBusPublish)
+	mux.HandleFunc("GET /api/v1/bus/stats", s.handleBusStats)
+
 }
 
-// middleware applies common middleware (CORS, logging).
+// middleware applies common middleware (CORS, logging, auth).
 func (s *Server) middleware(next http.Handler) http.Handler {
+	// Create auth middleware if API keys are configured
+	var authMiddleware func(http.Handler) http.Handler
+	if s.config.RequireAuth && len(s.config.APIKeys) > 0 {
+		authMiddleware = NewAPIKeyAuth(s.config.APIKeys).Middleware
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -203,7 +286,12 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		// Wrap response writer to capture status code
 		lrw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
-		next.ServeHTTP(lrw, r)
+		handler := next
+		if authMiddleware != nil {
+			handler = authMiddleware(next)
+		}
+
+		handler.ServeHTTP(lrw, r)
 
 		s.logger.Debug("HTTP request",
 			"method", r.Method,

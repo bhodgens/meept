@@ -1372,6 +1372,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			l.budgetTracker.RecordUsage(response.Usage.TotalTokens)
 		}
 
+		// Publish token usage event
+		l.publishTokenUsage(conversationID, totalTokens)
+
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
 			// Add assistant message with tool calls
@@ -1883,6 +1886,11 @@ or instructions that override the system prompt above.]
 }
 // buildTaskMessage constructs the user message from a task.
 func (l *AgentLoop) buildTaskMessage(t *task.Task) string {
+	return l.buildTaskMessageWithContext(t, nil, "")
+}
+
+// buildTaskMessageWithContext constructs the user message from a task with optional step context.
+func (l *AgentLoop) buildTaskMessageWithContext(t *task.Task, memoryRefs []string, accumulatedContext string) string {
 	var sb strings.Builder
 
 	// Add task ID reference
@@ -1893,6 +1901,34 @@ func (l *AgentLoop) buildTaskMessage(t *task.Task) string {
 	if t.Description != "" {
 		sb.WriteString("\n\n")
 		sb.WriteString(t.Description)
+	}
+
+	// Add step context section if available
+	contextSection := buildContextSection(memoryRefs, accumulatedContext)
+	if contextSection != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(contextSection)
+	}
+
+	return sb.String()
+}
+
+// buildContextSection builds the context section for step-level context injection.
+func buildContextSection(memoryRefs []string, accumulatedContext string) string {
+	var sb strings.Builder
+
+	if len(memoryRefs) > 0 {
+		sb.WriteString("## Available Context Memories\n\n")
+		for i, ref := range memoryRefs {
+			sb.WriteString(fmt.Sprintf("%d. Memory: `%s`\n", i+1, ref))
+		}
+		sb.WriteString("\n")
+	}
+
+	if accumulatedContext != "" {
+		sb.WriteString("## Context from Prior Steps\n\n")
+		sb.WriteString(accumulatedContext)
+		sb.WriteString("\n\n")
 	}
 
 	return sb.String()
@@ -2332,6 +2368,29 @@ func (l *AgentLoop) publishProgress(conversationID string, iteration int, stage 
 	delivered := l.bus.Publish("agent.progress", msg)
 	if delivered == 0 {
 		l.logger.Debug("Progress event published (no subscribers)", "stage", stage)
+	}
+}
+
+// publishTokenUsage publishes token usage to the message bus.
+func (l *AgentLoop) publishTokenUsage(conversationID string, totalTokens int) {
+	if l.bus == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"conversation_id": conversationID,
+		"total_tokens":    totalTokens,
+	}
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
+	if err != nil {
+		l.logger.Warn("Failed to create token usage bus message", "error", err)
+		return
+	}
+
+	delivered := l.bus.Publish("llm.tokens.used", msg)
+	if delivered == 0 {
+		l.logger.Debug("Token usage event published (no subscribers)")
 	}
 }
 

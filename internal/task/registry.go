@@ -19,6 +19,8 @@ type Registry struct {
 	logger          *slog.Logger
 	interruptMgr    *InterruptManager
 	interruptMgrBus *bus.MessageBus
+	amendmentMgr    *AmendmentManager
+	amendmentMgrBus *bus.MessageBus
 
 	mu     sync.RWMutex
 	closed bool
@@ -41,7 +43,13 @@ func NewRegistry(dbPath string, msgBus *bus.MessageBus, logger *slog.Logger) (*R
 		logger:          logger,
 		interruptMgr:    NewInterruptManager(logger.With("component", "interrupt-mgr")),
 		interruptMgrBus: msgBus,
+		amendmentMgr:    NewAmendmentManager(msgBus, logger.With("component", "amendment-mgr")),
+		amendmentMgrBus: msgBus,
 	}
+
+	// Wire up amendment handlers
+	amendmentHandlers := NewAmendmentHandlers(reg, nil)
+	amendmentHandlers.RegisterAll(reg.amendmentMgr)
 
 	logger.Info("Task registry initialized", "path", dbPath)
 	return reg, nil
@@ -294,6 +302,11 @@ func (r *Registry) Store() *Store {
 // InterruptManager returns the interrupt manager.
 func (r *Registry) InterruptManager() *InterruptManager {
 	return r.interruptMgr
+}
+
+// AmendmentManager returns the amendment manager.
+func (r *Registry) AmendmentManager() *AmendmentManager {
+	return r.amendmentMgr
 }
 
 func (r *Registry) Close() error {

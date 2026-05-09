@@ -1,0 +1,1271 @@
+openapi: 3.0.3
+info:
+  title: Meept HTTP API
+  description: REST API for Meept daemon - exposes chat, memory, task queue, skills, and self-improvement capabilities
+  version: 0.2.0
+  contact:
+    name: Meept
+    url: https://github.com/caimlas/meept
+
+servers:
+  - url: http://localhost:8081
+    description: Local development server
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Chat
+    description: Chat and conversation endpoints
+  - name: Memory
+    description: Memory query and management
+  - name: Tasks
+    description: Task CRUD operations
+  - name: Queue
+    description: Job queue management
+  - name: Sessions
+    description: Session management
+  - name: Workers
+    description: Worker management
+  - name: Skills
+    description: Skill discovery and execution
+  - name: Self-Improve
+    description: Self-improvement system
+  - name: Cache
+    description: Token cache management
+  - name: Security
+    description: Security engine queries
+  - name: Scheduler
+    description: Job scheduling
+  - name: Bus
+    description: Message bus operations
+  - name: Config
+    description: Configuration management
+  - name: Daemon
+    description: Daemon lifecycle control
+  - name: Metrics
+    description: Metrics and monitoring
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "API key authentication. Use: Authorization: Bearer YOUR_API_KEY"
+
+  schemas:
+    # Common error response
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+
+    # Chat
+    ChatRequest:
+      type: object
+      required:
+        - message
+        - conversation_id
+      properties:
+        message:
+          type: string
+          description: User message to send
+        conversation_id:
+          type: string
+          description: Conversation identifier
+    ChatResponse:
+      type: object
+      properties:
+        reply:
+          type: string
+          description: Assistant response
+        model:
+          type: string
+          description: Model used for response
+        tokens_used:
+          type: integer
+          description: Tokens consumed
+
+    # Memory
+    MemoryResult:
+      type: object
+      properties:
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Memory'
+        count:
+          type: integer
+
+    Memory:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        category:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # Tasks
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+          enum: [pending, in_progress, completed, cancelled]
+        created_at:
+          type: string
+          format: date-time
+
+    # Queue
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        state:
+          type: string
+          enum: [pending, claimed, completed, failed]
+        task_id:
+          type: string
+        priority:
+          type: integer
+        payload:
+          type: object
+
+    QueueStats:
+      type: object
+      properties:
+        pending:
+          type: integer
+        claimed:
+          type: integer
+        completed:
+          type: integer
+        failed:
+          type: integer
+
+    # Skills
+    Skill:
+      type: object
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        frontmatter:
+          type: object
+
+    # Self-Improve
+    SelfImproveStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        last_analysis:
+          type: string
+          format: date-time
+        pending_improvements:
+          type: integer
+
+    # Cache
+    CacheStats:
+      type: object
+      properties:
+        hits:
+          type: integer
+        misses:
+          type: integer
+        size:
+          type: integer
+        eviction_count:
+          type: integer
+
+    # Security
+    SecurityCheckRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+        path:
+          type: string
+        risk_level:
+          type: string
+          enum: [low, medium, high, critical]
+    SecurityCheckResponse:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+        reason:
+          type: string
+
+    # Scheduler
+    ScheduledJob:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        schedule:
+          type: string
+          description: Cron expression
+        enabled:
+          type: boolean
+
+    # Bus
+    BusStats:
+      type: object
+      properties:
+        topics:
+          type: integer
+        subscribers:
+          type: integer
+        messages_published:
+          type: integer
+
+    # Metrics
+    LiveMetricsSnapshot:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        active_agents:
+          type: integer
+        queue_depth:
+          type: integer
+        cache_hit_rate:
+          type: number
+        model_failovers:
+          type: integer
+        tokens_used:
+          type: integer
+        requests_total:
+          type: integer
+
+    # Daemon
+    DaemonStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        pid:
+          type: integer
+        uptime:
+          type: string
+        state:
+          type: string
+          enum: [offline, idle, working, error]
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # Chat Endpoints
+  /api/v1/chat:
+    post:
+      summary: Send a chat message
+      tags: [Chat]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Chat response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Service error
+
+  # Memory Endpoints
+  /api/v1/memory/query:
+    post:
+      summary: Search memories
+      tags: [Memory]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                limit:
+                  type: integer
+                category:
+                  type: string
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryResult'
+
+  /api/v1/memory/recent:
+    get:
+      summary: Get recent memories
+      tags: [Memory]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Recent memories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryResult'
+
+  /api/v1/memory/export:
+    post:
+      summary: Export memories
+      tags: [Memory]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format:
+                  type: string
+                category:
+                  type: string
+      responses:
+        '200':
+          description: Exported data
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+
+  # Task Endpoints
+  /api/v1/tasks:
+    get:
+      summary: List tasks
+      tags: [Tasks]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Task'
+                  count:
+                    type: integer
+    post:
+      summary: Create a task
+      tags: [Tasks]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+
+  /api/v1/tasks/{id}:
+    get:
+      summary: Get task by ID
+      tags: [Tasks]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          description: Task not found
+    put:
+      summary: Update task
+      tags: [Tasks]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state:
+                  type: string
+      responses:
+        '200':
+          description: Task updated
+    delete:
+      summary: Delete task
+      tags: [Tasks]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task deleted
+
+  /api/v1/tasks/{id}/cancel:
+    post:
+      summary: Cancel a task
+      tags: [Tasks]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task cancelled
+        '501':
+          description: Not implemented
+
+  /api/v1/tasks/{id}/steps:
+    get:
+      summary: Get task steps
+      tags: [Tasks]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task steps
+        '501':
+          description: Not implemented
+
+  # Queue Endpoints
+  /api/v1/queue/jobs:
+    get:
+      summary: List jobs
+      tags: [Queue]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+                  count:
+                    type: integer
+    post:
+      summary: Enqueue a job
+      tags: [Queue]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - prompt
+              properties:
+                type:
+                  type: string
+                priority:
+                  type: integer
+                task_id:
+                  type: string
+                prompt:
+                  type: string
+                session_id:
+                  type: string
+                required_caps:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+
+  /api/v1/queue/jobs/{id}:
+    get:
+      summary: Get job by ID
+      tags: [Queue]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+
+  /api/v1/queue/jobs/{id}/claim:
+    post:
+      summary: Claim next job
+      tags: [Queue]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                worker_id:
+                  type: string
+                capabilities:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Job claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+
+  /api/v1/queue/jobs/{id}/complete:
+    post:
+      summary: Complete a job
+      tags: [Queue]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                result:
+                  type: object
+      responses:
+        '200':
+          description: Job completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: completed
+
+  /api/v1/queue/jobs/{id}/fail:
+    post:
+      summary: Fail a job
+      tags: [Queue]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+      responses:
+        '200':
+          description: Job failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: failed
+
+  /api/v1/queue/jobs/{id}/retry:
+    post:
+      summary: Retry a failed job
+      tags: [Queue]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job queued for retry
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: retried
+
+  /api/v1/queue/stats:
+    get:
+      summary: Get queue statistics
+      tags: [Queue]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Queue stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStats'
+
+  # Session Endpoints
+  /api/v1/sessions:
+    get:
+      summary: List sessions
+      tags: [Sessions]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of sessions
+    post:
+      summary: Create a session
+      tags: [Sessions]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '201':
+          description: Session created
+
+  /api/v1/sessions/{id}:
+    get:
+      summary: Get session by ID
+      tags: [Sessions]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session details
+    delete:
+      summary: Delete session
+      tags: [Sessions]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session deleted
+
+  /api/v1/sessions/{id}/attach:
+    post:
+      summary: Attach to session
+      tags: [Sessions]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Attached
+        '501':
+          description: Not implemented
+
+  /api/v1/sessions/{id}/detach:
+    post:
+      summary: Detach from session
+      tags: [Sessions]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Detached
+        '501':
+          description: Not implemented
+
+  # Worker Endpoints
+  /api/v1/workers/stats:
+    get:
+      summary: Get worker statistics
+      tags: [Workers]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Worker stats
+
+  /api/v1/workers:
+    post:
+      summary: Add a worker
+      tags: [Workers]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '201':
+          description: Worker added
+        '501':
+          description: Not implemented
+
+  /api/v1/workers/{id}:
+    delete:
+      summary: Remove a worker
+      tags: [Workers]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Worker removed
+        '501':
+          description: Not implemented
+
+  /api/v1/workers/scale:
+    post:
+      summary: Scale workers
+      tags: [Workers]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Scaled
+        '501':
+          description: Not implemented
+
+  # Skills Endpoints
+  /api/v1/skills:
+    get:
+      summary: List skills
+      tags: [Skills]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of skills
+
+  /api/v1/skills/{slug}:
+    get:
+      summary: Get skill details
+      tags: [Skills]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Skill details
+
+  /api/v1/skills/{slug}/execute:
+    post:
+      summary: Execute a skill
+      tags: [Skills]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Execution result
+
+  # Self-Improve Endpoints
+  /api/v1/selfimprove/status:
+    get:
+      summary: Get self-improve status
+      tags: [Self-Improve]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Status info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelfImproveStatus'
+
+  /api/v1/selfimprove/trigger:
+    post:
+      summary: Trigger self-improvement
+      tags: [Self-Improve]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Triggered
+
+  /api/v1/selfimprove/analyze:
+    post:
+      summary: Analyze for improvements
+      tags: [Self-Improve]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Analysis started
+        '501':
+          description: Not implemented
+
+  /api/v1/selfimprove/generate:
+    post:
+      summary: Generate improvement
+      tags: [Self-Improve]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '501':
+          description: Not implemented
+
+  /api/v1/selfimprove/validate:
+    post:
+      summary: Validate improvement
+      tags: [Self-Improve]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '501':
+          description: Not implemented
+
+  /api/v1/selfimprove/apply:
+    post:
+      summary: Apply improvement
+      tags: [Self-Improve]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '501':
+          description: Not implemented
+
+  /api/v1/selfimprove/reject:
+    post:
+      summary: Reject improvement
+      tags: [Self-Improve]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '501':
+          description: Not implemented
+
+  # Cache Endpoints
+  /api/v1/cache/stats:
+    get:
+      summary: Get cache statistics
+      tags: [Cache]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Cache stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStats'
+
+  /api/v1/cache/clear:
+    post:
+      summary: Clear cache
+      tags: [Cache]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Cache cleared
+
+  # Security Endpoints
+  /api/v1/security/check:
+    post:
+      summary: Check security for an action
+      tags: [Security]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SecurityCheckRequest'
+      responses:
+        '200':
+          description: Security check result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityCheckResponse'
+
+  # Scheduler Endpoints
+  /api/v1/scheduler/jobs:
+    get:
+      summary: List scheduled jobs
+      tags: [Scheduler]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScheduledJob'
+    post:
+      summary: Add scheduled job
+      tags: [Scheduler]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '201':
+          description: Job created
+
+  # Bus Endpoints
+  /api/v1/bus/publish:
+    post:
+      summary: Publish message to bus
+      tags: [Bus]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Published
+
+  /api/v1/bus/stats:
+    get:
+      summary: Get bus statistics
+      tags: [Bus]
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Bus stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusStats'
+
+  # Daemon Endpoints
+  /api/v1/daemon/status:
+    get:
+      summary: Get daemon status
+      tags: [Daemon]
+      responses:
+        '200':
+          description: Daemon status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DaemonStatus'
+
+  /api/v1/daemon/restart:
+    post:
+      summary: Restart daemon
+      tags: [Daemon]
+      responses:
+        '200':
+          description: Daemon restarted
+
+  # Metrics Endpoints
+  /api/v1/metrics/live:
+    get:
+      summary: Get live metrics
+      tags: [Metrics]
+      responses:
+        '200':
+          description: Live metrics snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveMetricsSnapshot'
+
+  /api/v1/metrics/historical:
+    get:
+      summary: Get historical metrics
+      tags: [Metrics]
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: resolution
+          in: query
+          schema:
+            type: string
+            enum: [minute, hour, day]
+            default: hour
+      responses:
+        '200':
+          description: Historical metrics
+
+  /api/v1/metrics/stream:
+    get:
+      summary: Stream metrics (WebSocket)
+      tags: [Metrics]
+      responses:
+        '200':
+          description: WebSocket stream endpoint
+
+  # Config Endpoints
+  /api/v1/config/client:
+    get:
+      summary: Get client config
+      tags: [Config]
+      responses:
+        '200':
+          description: Client configuration
+          content:
+            application/json5:
+              schema:
+                type: string
+    post:
+      summary: Save client config
+      tags: [Config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+      responses:
+        '200':
+          description: Config saved
+
+  /api/v1/config/models:
+    get:
+      summary: Get models config
+      tags: [Config]
+      responses:
+        '200':
+          description: Models configuration
+    post:
+      summary: Save models config
+      tags: [Config]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+      responses:
+        '200':
+          description: Config saved
+
+  /api/v1/config/agents:
+    get:
+      summary: List agents
+      tags: [Config]
+      responses:
+        '200':
+          description: List of agents
+
+  /api/v1/config/agents/{id}:
+    get:
+      summary: Get agent config
+      tags: [Config]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent configuration
+    post:
+      summary: Save agent config
+      tags: [Config]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent saved
+    delete:
+      summary: Delete agent
+      tags: [Config]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent deleted

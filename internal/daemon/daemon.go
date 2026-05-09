@@ -19,6 +19,7 @@ import (
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/registry"
 	"github.com/caimlas/meept/internal/rpc"
+	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -210,13 +211,73 @@ func New(cfg *Config) (*Daemon, error) {
 		coll = metrics.NewCollector(metricsStore, msgBus, nil)
 	}
 
+	// Create service registry with dependencies
+	svcRegistry := &services.ServiceRegistry{}
+	if components != nil {
+		// Wire up services with their dependencies
+		if components.Queue != nil {
+			svcRegistry.Queue = services.NewQueueService(components.Queue)
+		}
+		if components.MemoryManager != nil {
+			svcRegistry.Memory = services.NewMemoryService(components.MemoryManager)
+		}
+		// Chat service uses the message bus
+		svcRegistry.Chat = services.NewChatService(msgBus, logger)
+
+		// Task service
+		if components.TaskRegistry != nil {
+			svcRegistry.Task = services.NewTaskService(components.TaskRegistry)
+		}
+
+		// Session service
+		if components.SessionStore != nil {
+			svcRegistry.Session = services.NewSessionService(components.SessionStore)
+		}
+
+		// Worker service
+		if components.WorkerPool != nil {
+			svcRegistry.Worker = services.NewWorkerService(components.WorkerPool)
+		}
+
+		// Pipeline service (placeholder)
+		svcRegistry.Pipeline = services.NewPipelineService()
+
+		// Skills service
+		if components.SkillRegistry != nil {
+			svcRegistry.Skills = services.NewSkillsService(components.SkillRegistry, components.SkillExecutor)
+		}
+
+		// Self-improve service
+		if components.SelfImproveCtrl != nil {
+			svcRegistry.SelfImprove = services.NewSelfImproveService(components.SelfImproveCtrl)
+		}
+
+		// Cache service
+		if components.TokenCache != nil {
+			svcRegistry.Cache = services.NewCacheService(components.TokenCache)
+		}
+
+		// Security service
+		if components.SecurityChecker != nil {
+			svcRegistry.Security = services.NewSecurityService(components.SecurityChecker)
+		}
+
+		// Scheduler service
+		if components.Scheduler != nil {
+			svcRegistry.Scheduler = services.NewSchedulerService(components.Scheduler)
+		}
+
+		// Bus service
+		svcRegistry.Bus = services.NewBusService(msgBus)
+	}
+
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server
 	if fullCfg.Transport.HTTP.Enabled {
 		if configService != nil && daemonControl != nil && metricsStore != nil {
 			httpCfg := http.DefaultServerConfig()
 			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
-			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, logger)
+			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, svcRegistry, logger)
 			logger.Info("HTTP server created", "addr", httpCfg.Addr)
 		}
 	} else {

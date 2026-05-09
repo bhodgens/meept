@@ -160,6 +160,8 @@ The daemon supports two transports (can be enabled independently):
     http: {
       enabled: true,                // REST API for menubar
       addr: ":8081",
+      require_auth: false,          // Require API key authentication
+      api_keys: [],                 // List of valid API keys
     },
   },
 }
@@ -180,6 +182,46 @@ Menubar app uses HTTP exclusively. Its config (`menubar.json5`) controls the dae
   },
 }
 ```
+
+### HTTP API Architecture
+
+The HTTP API uses a **service layer pattern** to share business logic between RPC and HTTP transports:
+
+```
+┌─────────────┐    ┌──────────────┐    ┌─────────────────┐
+│ HTTP Client │───▶│ HTTP Handlers│───▶│ Service Layer   │
+└─────────────┘    └──────────────┘    └────────┬────────┘
+                                                │
+┌─────────────┐    ┌──────────────┐    ┌────────▼────────┐
+│ RPC Client  │───▶│ RPC Handlers │───▶│ (same funcs)    │
+└─────────────┘    └──────────────┘    └─────────────────┘
+```
+
+**Service Layer** (`internal/services/`):
+- `ServiceRegistry` - holds all service instances
+- `ChatService` - conversation management via message bus
+- `MemoryService` - query, recent, export operations
+- `TaskService` - task CRUD operations
+- `QueueService` - job queue management (enqueue, claim, complete, fail, retry)
+- `SessionService` - session lifecycle
+- `WorkerService` - worker management
+- `SkillsService` - skill discovery and execution
+- `SelfImproveService` - self-improvement workflow
+- `CacheService` - token cache management
+- `SecurityService` - security checks and overrides
+- `SchedulerService` - cron job management
+- `BusService` - message bus operations
+
+**HTTP Handlers** (`internal/comm/http/api_handlers.go`):
+- RESTful endpoints under `/api/v1/*`
+- CORS support for web clients
+- Optional API key authentication via `Authorization: Bearer <key>` header
+- Error responses in JSON format: `{"error": "message"}`
+
+**Authentication**: When `require_auth: true`, all endpoints except `/health` require a valid API key. Keys are validated using constant-time comparison to prevent timing attacks.
+
+**Full endpoint documentation**: `docs/reference/http-api.md`
+**OpenAPI specification**: `docs/reference/http-api/openapi.yaml`
 
 ### Programmatic component options
 

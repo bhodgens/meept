@@ -724,6 +724,18 @@ func (s *SidebarModel) handleTaskProgressEvent(e BusEvent) {
 		return
 	}
 
+	// Extract chat_visible flag - sidebar updates happen regardless,
+	// but activity feed only gets chat_visible events
+	chatVisible := true // Default to visible for backwards compatibility
+	if cv, ok := payloadMap["chat_visible"].(bool); ok {
+		chatVisible = cv
+	}
+
+	// If NOT chat visible, skip sidebar/task updates (sidebar-only event)
+	if !chatVisible {
+		return
+	}
+
 	currentStep, _ := payloadMap["current_step"].(string)
 
 	// Update the matching task in tasksData

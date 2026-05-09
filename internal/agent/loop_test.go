@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/pkg/security"
@@ -722,5 +724,34 @@ func TestShouldFetchOnQuery(t *testing.T) {
 				t.Errorf("shouldFetchOnQuery(%s) = %v, want %v", tt.mode, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestAgentLoop_PublishTokenUsage(t *testing.T) {
+	bus := bus.New(nil, slogDiscardLogger())
+
+	// Subscribe to llm.tokens.used
+	sub := bus.Subscribe("test", "llm.tokens.used")
+	defer bus.Unsubscribe(sub)
+
+	loop := NewAgentLoop(WithMessageBus(bus))
+
+	// Publish token usage
+	loop.publishTokenUsage("conv-1", 1500)
+
+	select {
+	case msg := <-sub.Channel:
+		var payload map[string]any
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("failed to unmarshal payload: %v", err)
+		}
+		if tokens, ok := payload["total_tokens"].(float64); !ok || tokens != 1500 {
+			t.Errorf("expected 1500 tokens, got %v", payload["total_tokens"])
+		}
+		if convID, ok := payload["conversation_id"].(string); !ok || convID != "conv-1" {
+			t.Errorf("expected conversation_id=conv-1, got %v", payload["conversation_id"])
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for token usage event")
 	}
 }

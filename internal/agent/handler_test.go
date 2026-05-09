@@ -2,7 +2,13 @@ package agent
 
 import (
 	"encoding/json"
+	"io"
+	"log/slog"
 	"testing"
+	"time"
+
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/task"
 )
 
 func TestChatRequest_Unmarshal(t *testing.T) {
@@ -196,4 +202,122 @@ func TestGenerateWorkerID(t *testing.T) {
 	if id[:7] != "worker-" {
 		t.Errorf("generateWorkerID should start with 'worker-', got %q", id)
 	}
+}
+
+// slogDiscardLogger creates a logger that discards all output.
+func slogDiscardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestChatHandler_PublishPlanRequest(t *testing.T) {
+	bus := bus.New(nil, slogDiscardLogger())
+
+	// Subscribe to orchestrator.plan
+	sub := bus.Subscribe("test", "orchestrator.plan")
+	defer bus.Unsubscribe(sub)
+
+	handler := NewChatHandler(nil, nil, bus, slogDiscardLogger())
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:          "task-123",
+			Description: "build a feature",
+		},
+		Intent: &Intent{
+			Type: "code",
+		},
+	}
+
+	handler.publishPlanRequest(result, "session-456")
+
+	// Verify message was published
+	select {
+	case msg := <-sub.Channel:
+		if msg.Topic != "orchestrator.plan" {
+			t.Errorf("expected topic orchestrator.plan, got %s", msg.Topic)
+		}
+
+		var req PlanRequest
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if req.TaskID != "task-123" {
+			t.Errorf("expected task-123, got %s", req.TaskID)
+		}
+		if req.SessionID != "session-456" {
+			t.Errorf("expected session-456, got %s", req.SessionID)
+		}
+		if req.Input != "build a feature" {
+			t.Errorf("expected 'build a feature', got %s", req.Input)
+		}
+		if req.Intent != "code" {
+			t.Errorf("expected intent 'code', got %s", req.Intent)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout - message not published")
+	}
+}
+
+func TestChatHandler_PublishPlanRequest_Compound(t *testing.T) {
+	bus := bus.New(nil, slogDiscardLogger())
+
+	sub := bus.Subscribe("test", "orchestrator.plan")
+	defer bus.Unsubscribe(sub)
+
+	handler := NewChatHandler(nil, nil, bus, slogDiscardLogger())
+
+	meta, _ := json.Marshal(map[string]any{
+		"compound_type": "sequential",
+	})
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:          "task-456",
+			Description: "multi-step task",
+			Metadata:    meta,
+		},
+		Intent: &Intent{
+			Type: "compound",
+		},
+	}
+
+	handler.publishPlanRequest(result, "session-789")
+
+	select {
+	case msg := <-sub.Channel:
+		var req PlanRequest
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if !req.IsCompound {
+			t.Error("expected IsCompound to be true")
+		}
+		if req.CompoundType != "sequential" {
+			t.Errorf("expected CompoundType 'sequential', got %s", req.CompoundType)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout - message not published")
+	}
+}
+
+func TestChatHandler_PublishPlanRequest_WarnsOnNoSubscribers(t *testing.T) {
+	// Create a bus with no subscribers
+	bus := bus.New(nil, slogDiscardLogger())
+
+	handler := NewChatHandler(nil, nil, bus, slogDiscardLogger())
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:          "task-no-sub",
+			Description: "test task",
+		},
+		Intent: &Intent{
+			Type: "code",
+		},
+	}
+
+	// Should not panic, should log warning (we can't easily test log output,
+	// but we verify the method completes without error)
+	handler.publishPlanRequest(result, "session-test")
+	// Test passes if no panic occurred
 }

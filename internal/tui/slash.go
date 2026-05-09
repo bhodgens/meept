@@ -26,6 +26,9 @@ var builtinCommands = map[string]struct{}{
 	"vim":     {},
 	"session": {},
 	"task":    {},
+	"cancel":  {},
+	"amend":   {},
+	"tasks":   {},
 }
 
 // ParseSlash parses a slash command from input text.

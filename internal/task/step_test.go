@@ -552,3 +552,54 @@ func TestNewTaskStep(t *testing.T) {
 		t.Error("expected ID to be set")
 	}
 }
+
+func TestTaskStep_TokenUsage(t *testing.T) {
+	step := NewTaskStep("task-1", "test step", 0)
+
+	if step.TokenUsage != 0 {
+		t.Errorf("expected 0 initial tokens, got %d", step.TokenUsage)
+	}
+
+	step.AddTokenUsage(800)
+	if step.TokenUsage != 800 {
+		t.Errorf("expected 800 tokens, got %d", step.TokenUsage)
+	}
+
+	step.AddTokenUsage(200)
+	if step.TokenUsage != 1000 {
+		t.Errorf("expected 1000 tokens, got %d", step.TokenUsage)
+	}
+}
+
+func TestStepStore_TokenUsage(t *testing.T) {
+	store := newTestStepStore(t)
+
+	step := NewTaskStep("task-1", "test step", 0)
+	step.TokenUsage = 500
+
+	if err := store.Create(step); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if got.TokenUsage != 500 {
+		t.Errorf("expected token usage 500, got %d", got.TokenUsage)
+	}
+
+	// Test Update
+	got.AddTokenUsage(300)
+	if err := store.Update(got); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	got2, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if got2.TokenUsage != 800 {
+		t.Errorf("expected token usage 800 after update, got %d", got2.TokenUsage)
+	}
+}

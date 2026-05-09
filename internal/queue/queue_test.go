@@ -319,3 +319,95 @@ func TestHandler_StatsViaBus(t *testing.T) {
 type errForTest string
 
 func (e errForTest) Error() string { return string(e) }
+
+// TestPersistentQueue_ClaimWithCancelledTaskCallback tests that jobs from cancelled tasks are skipped.
+func TestPersistentQueue_ClaimWithCancelledTaskCallback(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	// Create two jobs: one for a "cancelled" task, one for a normal task
+	job1, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "cancelled task"})
+	job1.WithTaskID("task-cancelled")
+	job2, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "normal task"})
+	job2.WithTaskID("task-active")
+
+	q.Enqueue(ctx, job1)
+	q.Enqueue(ctx, job2)
+
+	// Set up callback that marks task-cancelled as cancelled
+	q.SetTaskCancelledCallback(func(taskID string) bool {
+		return taskID == "task-cancelled"
+	})
+
+	// Claim should skip the cancelled task and return the active one
+	claimed, err := q.Claim(ctx, "worker-1", nil)
+	if err != nil {
+		t.Fatalf("Claim failed: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected to claim a job")
+	}
+	if claimed.ID != job2.ID {
+		t.Errorf("expected job %q (active task), got %q", job2.ID, claimed.ID)
+	}
+
+	// Verify the cancelled job is still in pending state
+	cancelledJob, err := q.Get(ctx, job1.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if cancelledJob.State != StatePending {
+		t.Errorf("expected cancelled job to remain pending, got %q", cancelledJob.State)
+	}
+}
+
+// TestPersistentQueue_ClaimAllTasksCancelled tests that claiming returns nil when all tasks are cancelled.
+func TestPersistentQueue_ClaimAllTasksCancelled(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	job, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "cancelled"})
+	job.WithTaskID("task-cancelled")
+	q.Enqueue(ctx, job)
+
+	// Set up callback that marks all tasks as cancelled
+	q.SetTaskCancelledCallback(func(taskID string) bool {
+		return true
+	})
+
+	// Claim should return nil when all tasks are cancelled
+	claimed, err := q.Claim(ctx, "worker-1", nil)
+	if err != nil {
+		t.Fatalf("Claim failed: %v", err)
+	}
+	if claimed != nil {
+		t.Errorf("expected nil when all tasks cancelled, got job %q", claimed.ID)
+	}
+}
+
+// TestPersistentQueue_ClaimNoTaskID tests that jobs without task_id are claimable.
+func TestPersistentQueue_ClaimNoTaskID(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+
+	// Job without task_id (one-off job)
+	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "one-off"})
+	q.Enqueue(ctx, job)
+
+	// Set up callback (should not affect jobs without task_id)
+	q.SetTaskCancelledCallback(func(taskID string) bool {
+		return true // Always cancelled
+	})
+
+	// Claim should still work for jobs without task_id
+	claimed, err := q.Claim(ctx, "worker-1", nil)
+	if err != nil {
+		t.Fatalf("Claim failed: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("expected to claim job without task_id")
+	}
+	if claimed.ID != job.ID {
+		t.Errorf("expected job %q, got %q", job.ID, claimed.ID)
+	}
+}

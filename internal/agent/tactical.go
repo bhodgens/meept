@@ -19,10 +19,12 @@ import (
 
 // StepJobPayload is the payload stored in a queue job for a task step.
 type StepJobPayload struct {
-	StepID      string `json:"step_id"`
-	TaskID      string `json:"task_id"`
-	Description string `json:"description"`
-	ToolHint    string `json:"tool_hint,omitempty"`
+	StepID             string   `json:"step_id"`
+	TaskID             string   `json:"task_id"`
+	Description        string   `json:"description"`
+	ToolHint           string   `json:"tool_hint,omitempty"`
+	MemoryRefs         []string `json:"memory_refs,omitempty"`
+	AccumulatedContext string   `json:"accumulated_context,omitempty"`
 }
 
 // TacticalScheduler schedules ready steps as queue jobs and handles completion callbacks.
@@ -172,7 +174,7 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		"task_id":         taskID,
 		"scheduled_steps": scheduledCount,
 		"current_step":    currentStepDesc,
-		"silent":          true,
+		"chat_visible":    true,
 	})
 
 	return nil
@@ -230,12 +232,14 @@ func (ts *TacticalScheduler) scheduleStep(ctx context.Context, step *task.TaskSt
 		return fmt.Errorf("no available execution slot for agent %s", agentID)
 	}
 
-	// Create job payload
+	// Create job payload with step context
 	payload := StepJobPayload{
-		StepID:      step.ID,
-		TaskID:      step.TaskID,
-		Description: step.Description,
-		ToolHint:    step.ToolHint,
+		StepID:             step.ID,
+		TaskID:             step.TaskID,
+		Description:        step.Description,
+		ToolHint:           step.ToolHint,
+		MemoryRefs:         step.MemoryRefs,
+		AccumulatedContext: step.AccumulatedContext,
 	}
 
 	job, err := queue.NewJob(queue.JobTypeProjectTask, payload)
@@ -446,6 +450,14 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		}
 	}
 
+	// Propagate context to next ready steps
+	if err := ts.propagateContextToNextSteps(ctx, step); err != nil {
+		ts.logger.Error("Failed to propagate context to next steps",
+			"step_id", step.ID,
+			"error", err,
+		)
+	}
+
 	// NEW: Run validation gate if interval reached
 	ts.runValidationGateIfDue(ctx, step.TaskID)
 
@@ -562,13 +574,13 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			nextStepDesc = readySteps[0].Description
 		}
 
-		// Publish progress update (silent=true so UI shows in sidebar only)
+		// Publish progress update (chat_visible=true so UI shows in chat)
 		ts.publishEvent("task.progress", map[string]any{
 			"task_id":        step.TaskID,
 			"completed_jobs": t.CompletedJobs,
 			"total_jobs":     t.TotalJobs,
 			"current_step":   nextStepDesc,
-			"silent":         true,
+			"chat_visible":   true,
 		})
 	}
 
@@ -642,6 +654,14 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 
 	// Release semaphore slots for this failed job
 	defer ts.releaseSlots(step.AgentID)
+
+	// Publish error to chat immediately (not silent)
+	ts.publishEvent("task.error", map[string]any{
+		"task_id":      step.TaskID,
+		"step_id":      step.ID,
+		"error":        jobErr,
+		"chat_visible": true, // Errors always visible
+	})
 
 	// Check if this is a retryable error (rate limit or transient failure)
 	if ts.isRetryableError(jobErr) {
@@ -774,7 +794,7 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 			"completed_jobs": t.CompletedJobs,
 			"total_jobs":     t.TotalJobs,
 			"current_step":   nextStepDesc,
-			"silent":         true,
+			"chat_visible":   true,
 		})
 	}
 
@@ -924,11 +944,12 @@ func (ts *TacticalScheduler) buildStepSummaries(taskID string) []map[string]any 
 	summaries := make([]map[string]any, len(allSteps))
 	for i, s := range allSteps {
 		summaries[i] = map[string]any{
-			"id":          s.ID,
-			"description": s.Description,
-			"state":       string(s.State),
-			"result":      truncateString(s.Result, 100),
-			"agent_id":    s.AgentID,
+			"id":                   s.ID,
+			"description":          s.Description,
+			"state":                string(s.State),
+			"result":               truncateString(s.Result, 100),
+			"agent_id":             s.AgentID,
+			"accumulated_context":  truncateString(s.AccumulatedContext, 200),
 		}
 	}
 	return summaries
@@ -968,6 +989,50 @@ func (ts *TacticalScheduler) buildResultSummary(steps []map[string]any) string {
 	}
 
 	return sb.String()
+}
+
+// propagateContextToNextSteps copies completed step's result and MemoryRefs to next ready steps.
+func (ts *TacticalScheduler) propagateContextToNextSteps(ctx context.Context, completedStep *task.TaskStep) error {
+	// Get next ready steps
+	readySteps, err := ts.stepStore.GetReadySteps(completedStep.TaskID)
+	if err != nil {
+		return fmt.Errorf("failed to get ready steps: %w", err)
+	}
+	if len(readySteps) == 0 {
+		return nil // No steps to propagate to
+	}
+
+	// Build context content from completed step
+	contextContent := fmt.Sprintf("## Step completed: %s\n\n**Result:** %s",
+		completedStep.Description,
+		truncateString(completedStep.Result, 500),
+	)
+
+	// Append context and copy MemoryRefs to each ready step
+	for _, step := range readySteps {
+		// Copy MemoryRefs from completed step
+		for _, ref := range completedStep.MemoryRefs {
+			step.AddMemoryRef(ref)
+		}
+
+		// Append to accumulated context
+		step.AppendToContext(contextContent)
+
+		// Persist updates
+		if err := ts.stepStore.Update(step); err != nil {
+			ts.logger.Error("Failed to update step context",
+				"step_id", step.ID,
+				"error", err,
+			)
+		}
+	}
+
+	ts.logger.Info("Propagated context to next steps",
+		"step_id", completedStep.ID,
+		"next_steps", len(readySteps),
+	)
+
+	return nil
 }
 
 // cleanupValidationGateCounter removes the validation gate counter entry for a task.

@@ -1,10 +1,10 @@
 package queue
 
 import (
-	"io"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -58,14 +58,18 @@ type Queue interface {
 	Close() error
 }
 
+// IsTaskCancelledFunc is a callback to check if a task is cancelled.
+type IsTaskCancelledFunc func(taskID string) bool
+
 // PersistentQueue implements Queue with SQLite persistence and bus notifications.
 type PersistentQueue struct {
-	store  *Store
-	bus    *bus.MessageBus
-	logger *slog.Logger
+	store           *Store
+	bus             *bus.MessageBus
+	logger          *slog.Logger
+	isTaskCancelled IsTaskCancelledFunc
 
-	mu      sync.RWMutex
-	closed  bool
+	mu     sync.RWMutex
+	closed bool
 }
 
 // NewPersistentQueue creates a new persistent queue.
@@ -80,13 +84,21 @@ func NewPersistentQueue(dbPath string, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 
 	q := &PersistentQueue{
-		store:  store,
-		bus:    msgBus,
-		logger: logger,
+		store:           store,
+		bus:             msgBus,
+		logger:          logger,
+		isTaskCancelled: func(taskID string) bool { return false }, // Default: no tasks cancelled
 	}
 
 	logger.Info("Persistent queue initialized", "path", dbPath)
 	return q, nil
+}
+
+// SetTaskCancelledCallback sets the callback for checking if a task is cancelled.
+func (q *PersistentQueue) SetTaskCancelledCallback(fn IsTaskCancelledFunc) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.isTaskCancelled = fn
 }
 
 // Enqueue adds a job to the queue.
@@ -114,6 +126,7 @@ func (q *PersistentQueue) Enqueue(ctx context.Context, job *Job) error {
 }
 
 // Claim claims the next available job for a worker.
+// Skips jobs belonging to cancelled tasks.
 func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []string) (*Job, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -122,19 +135,45 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 		return nil, fmt.Errorf("queue is closed")
 	}
 
-	job, err := q.store.ClaimNext(workerID, caps)
+	// List pending jobs and find first non-cancelled one
+	pendingJobs, err := q.store.ListByState(StatePending, 50)
 	if err != nil {
 		return nil, err
 	}
 
-	if job != nil {
+	// Find first claimable, non-cancelled job
+	var targetJob *Job
+	for _, job := range pendingJobs {
+		// Skip cancelled tasks
+		if job.TaskID != "" && q.isTaskCancelled(job.TaskID) {
+			q.logger.Debug("Skipping job from cancelled task", "job_id", job.ID, "task_id", job.TaskID)
+			continue
+		}
+		// Check if worker can claim this job
+		if job.CanBeClaimedBy(caps) {
+			targetJob = job
+			break
+		}
+	}
+
+	if targetJob == nil {
+		return nil, nil
+	}
+
+	// Claim the selected job atomically
+	claimedJob, err := q.store.ClaimNextByID(targetJob.ID, workerID)
+	if err != nil {
+		return nil, err
+	}
+
+	if claimedJob != nil {
 		q.publishEvent("queue.job.claimed", map[string]any{
-			"job_id":    job.ID,
+			"job_id":    claimedJob.ID,
 			"worker_id": workerID,
 		})
 	}
 
-	return job, nil
+	return claimedJob, nil
 }
 
 // MarkProcessing marks a job as being processed.
@@ -609,7 +648,6 @@ func (h *Handler) handleStats(ctx context.Context, msg *models.BusMessage) (any,
 		"dead_count":  stats.DeadCount,
 	}, nil
 }
-
 
 func (h *Handler) handleRecover(ctx context.Context, msg *models.BusMessage) (any, error) {
 	var params struct {
