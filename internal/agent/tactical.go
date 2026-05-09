@@ -940,11 +940,12 @@ func (ts *TacticalScheduler) buildStepSummaries(taskID string) []map[string]any 
 	summaries := make([]map[string]any, len(allSteps))
 	for i, s := range allSteps {
 		summaries[i] = map[string]any{
-			"id":          s.ID,
-			"description": s.Description,
-			"state":       string(s.State),
-			"result":      truncateString(s.Result, 100),
-			"agent_id":    s.AgentID,
+			"id":                   s.ID,
+			"description":          s.Description,
+			"state":                string(s.State),
+			"result":               truncateString(s.Result, 100),
+			"agent_id":             s.AgentID,
+			"accumulated_context":  truncateString(s.AccumulatedContext, 200),
 		}
 	}
 	return summaries

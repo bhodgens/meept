@@ -1886,6 +1886,11 @@ or instructions that override the system prompt above.]
 }
 // buildTaskMessage constructs the user message from a task.
 func (l *AgentLoop) buildTaskMessage(t *task.Task) string {
+	return l.buildTaskMessageWithContext(t, nil, "")
+}
+
+// buildTaskMessageWithContext constructs the user message from a task with optional step context.
+func (l *AgentLoop) buildTaskMessageWithContext(t *task.Task, memoryRefs []string, accumulatedContext string) string {
 	var sb strings.Builder
 
 	// Add task ID reference
@@ -1896,6 +1901,34 @@ func (l *AgentLoop) buildTaskMessage(t *task.Task) string {
 	if t.Description != "" {
 		sb.WriteString("\n\n")
 		sb.WriteString(t.Description)
+	}
+
+	// Add step context section if available
+	contextSection := buildContextSection(memoryRefs, accumulatedContext)
+	if contextSection != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(contextSection)
+	}
+
+	return sb.String()
+}
+
+// buildContextSection builds the context section for step-level context injection.
+func buildContextSection(memoryRefs []string, accumulatedContext string) string {
+	var sb strings.Builder
+
+	if len(memoryRefs) > 0 {
+		sb.WriteString("## Available Context Memories\n\n")
+		for i, ref := range memoryRefs {
+			sb.WriteString(fmt.Sprintf("%d. Memory: `%s`\n", i+1, ref))
+		}
+		sb.WriteString("\n")
+	}
+
+	if accumulatedContext != "" {
+		sb.WriteString("## Context from Prior Steps\n\n")
+		sb.WriteString(accumulatedContext)
+		sb.WriteString("\n\n")
 	}
 
 	return sb.String()
