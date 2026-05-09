@@ -172,7 +172,7 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		"task_id":         taskID,
 		"scheduled_steps": scheduledCount,
 		"current_step":    currentStepDesc,
-		"silent":          true,
+		"chat_visible":    true,
 	})
 
 	return nil
@@ -562,13 +562,13 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			nextStepDesc = readySteps[0].Description
 		}
 
-		// Publish progress update (silent=true so UI shows in sidebar only)
+		// Publish progress update (chat_visible=true so UI shows in chat)
 		ts.publishEvent("task.progress", map[string]any{
 			"task_id":        step.TaskID,
 			"completed_jobs": t.CompletedJobs,
 			"total_jobs":     t.TotalJobs,
 			"current_step":   nextStepDesc,
-			"silent":         true,
+			"chat_visible":   true,
 		})
 	}
 
@@ -774,7 +774,7 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 			"completed_jobs": t.CompletedJobs,
 			"total_jobs":     t.TotalJobs,
 			"current_step":   nextStepDesc,
-			"silent":         true,
+			"chat_visible":   true,
 		})
 	}
 
