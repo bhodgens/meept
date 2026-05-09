@@ -335,8 +335,11 @@ func TestPersistentQueue_ClaimWithCancelledTaskCallback(t *testing.T) {
 	q.Enqueue(ctx, job2)
 
 	// Set up callback that marks task-cancelled as cancelled
-	q.SetTaskCancelledCallback(func(taskID string) bool {
-		return taskID == "task-cancelled"
+	q.SetTaskCancelledCallback(func(taskID string) (bool, string) {
+		if taskID == "task-cancelled" {
+			return true, "test cancellation"
+		}
+		return false, ""
 	})
 
 	// Claim should skip the cancelled task and return the active one
@@ -371,8 +374,8 @@ func TestPersistentQueue_ClaimAllTasksCancelled(t *testing.T) {
 	q.Enqueue(ctx, job)
 
 	// Set up callback that marks all tasks as cancelled
-	q.SetTaskCancelledCallback(func(taskID string) bool {
-		return true
+	q.SetTaskCancelledCallback(func(taskID string) (bool, string) {
+		return true, "test cancellation"
 	})
 
 	// Claim should return nil when all tasks are cancelled
@@ -395,8 +398,8 @@ func TestPersistentQueue_ClaimNoTaskID(t *testing.T) {
 	q.Enqueue(ctx, job)
 
 	// Set up callback (should not affect jobs without task_id)
-	q.SetTaskCancelledCallback(func(taskID string) bool {
-		return true // Always cancelled
+	q.SetTaskCancelledCallback(func(taskID string) (bool, string) {
+		return true, "test cancellation"
 	})
 
 	// Claim should still work for jobs without task_id
