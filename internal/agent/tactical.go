@@ -160,7 +160,7 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		"total_ready", len(readySteps),
 	)
 
-	// Publish progress event with current step info (silent=true so UI shows in sidebar only)
+	// Publish progress event with current step info (chat_visible=true so UI displays in chat)
 	currentStepDesc := ""
 	if scheduledCount > 0 {
 		for _, step := range readySteps {
