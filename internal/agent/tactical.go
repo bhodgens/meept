@@ -643,6 +643,14 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 	// Release semaphore slots for this failed job
 	defer ts.releaseSlots(step.AgentID)
 
+	// Publish error to chat immediately (not silent)
+	ts.publishEvent("task.error", map[string]any{
+		"task_id":      step.TaskID,
+		"step_id":      step.ID,
+		"error":        jobErr,
+		"chat_visible": true, // Errors always visible
+	})
+
 	// Check if this is a retryable error (rate limit or transient failure)
 	if ts.isRetryableError(jobErr) {
 		// Get the job from queue
