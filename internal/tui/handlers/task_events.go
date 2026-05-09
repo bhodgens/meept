@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 )
 
 // TaskEventPayload represents common task event data.
@@ -40,18 +39,12 @@ type TaskNotification struct {
 
 // TaskEventHandler processes task events and produces notifications.
 type TaskEventHandler struct {
-	// Rate limiting for progress notifications
-	lastProgressTime map[string]time.Time
-	progressInterval time.Duration
-	mu               sync.Mutex
+	mu sync.Mutex
 }
 
 // NewTaskEventHandler creates a new task event handler.
 func NewTaskEventHandler() *TaskEventHandler {
-	return &TaskEventHandler{
-		lastProgressTime: make(map[string]time.Time),
-		progressInterval: 2 * time.Second, // Only show progress every 2 seconds per task
-	}
+	return &TaskEventHandler{}
 }
 
 // HandleTaskCompleted processes a task.completed event.
@@ -105,7 +98,7 @@ func (h *TaskEventHandler) HandleTaskFailed(payload map[string]any) *TaskNotific
 }
 
 // HandleTaskProgress processes a task.progress event.
-// Returns nil if rate-limited (to avoid flooding).
+// No rate limiting - all progress events are delivered.
 func (h *TaskEventHandler) HandleTaskProgress(payload map[string]any) *TaskNotification {
 	taskID := getString(payload, "task_id", "")
 	currentStep := getString(payload, "current_step", "")
@@ -113,17 +106,6 @@ func (h *TaskEventHandler) HandleTaskProgress(payload map[string]any) *TaskNotif
 	if currentStep == "" {
 		return nil
 	}
-
-	// Rate limiting: only show progress every progressInterval per task
-	h.mu.Lock()
-	lastTime, exists := h.lastProgressTime[taskID]
-	now := time.Now()
-	if exists && now.Sub(lastTime) < h.progressInterval {
-		h.mu.Unlock()
-		return nil
-	}
-	h.lastProgressTime[taskID] = now
-	h.mu.Unlock()
 
 	completed := getInt(payload, "completed_jobs", 0)
 	total := getInt(payload, "total_jobs", 0)
@@ -164,13 +146,6 @@ func (h *TaskEventHandler) HandleStepCompleted(payload map[string]any) *TaskNoti
 		Message: sb.String(),
 		TaskID:  getString(payload, "task_id", ""),
 	}
-}
-
-// ClearTaskProgress clears rate limiting state for a completed/failed task.
-func (h *TaskEventHandler) ClearTaskProgress(taskID string) {
-	h.mu.Lock()
-	delete(h.lastProgressTime, taskID)
-	h.mu.Unlock()
 }
 
 // Helper functions for extracting values from payload maps
