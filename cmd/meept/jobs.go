@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"github.com/caimlas/meept/internal/tui"
 )
 
 func newJobsCmd() *cobra.Command {
@@ -24,9 +22,8 @@ schedule, next run time, and current status.`,
 }
 
 func runJobs(cmd *cobra.Command, args []string) error {
-	client := tui.NewDaemonClient()
-
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}
 	defer client.Close()

@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -62,6 +63,12 @@ type Client interface {
 	ListPoolWorkers() (*types.WorkerPoolResponse, error)
 	GetWorkerPoolStats() (*types.WorkerPoolStats, error)
 	ScaleWorkerPool(targetCount int) error
+
+	// Low-level call for extensibility (skills, dev, selfimprove commands).
+	Call(method string, params any) (json.RawMessage, error)
+
+	// SetTimeout adjusts the per-call timeout.
+	SetTimeout(d time.Duration)
 }
 
 // Config holds client-side transport configuration.

@@ -7,9 +7,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/caimlas/meept/internal/transport"
 	"github.com/spf13/cobra"
-
-	"github.com/caimlas/meept/internal/tui"
 )
 
 func newSelfImproveCmd() *cobra.Command {
@@ -44,12 +43,8 @@ func printJSON(data []byte) error {
 	return enc.Encode(&parsed)
 }
 
-func dialRPC() (tui.DaemonClient, error) {
-	client := tui.NewDaemonClient()
-	if err := client.Connect(); err != nil {
-		return nil, fmt.Errorf("failed to connect to daemon: %w", err)
-	}
-	return client, nil
+func dialRPC() (transport.Client, error) {
+	return connectDaemon()
 }
 
 func newSelfImproveDetectCmd() *cobra.Command {

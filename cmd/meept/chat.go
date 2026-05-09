@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
-	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/tui"
 )
 
@@ -33,17 +32,11 @@ Examples:
 	return cmd
 }
 
-func getTransportConfig() *transport.Config {
-	cfg := transport.DefaultConfig()
-	cfg.Transport = transportFlag
-	cfg.SocketPath = getSocketPath()
-	return cfg
-}
-
 func runChat(cmd *cobra.Command, args []string) error {
 	// Check if we have a message argument
 	if len(args) == 0 {
 		// No arguments - launch TUI
+		// TUI always uses RPC directly (it needs streaming/event RPC)
 		return runTUI(getSocketPath())
 	}
 
@@ -69,21 +62,9 @@ func runChat(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("empty message")
 	}
 
-	// Single message mode
-	return sendSingleMessage(getSocketPath(), message)
-}
-
-func runTUI(socketPath string) error {
-	app := tui.NewApp(socketPath)
-	p := tea.NewProgram(app)
-	_, err := p.Run()
-	return err
-}
-
-func sendSingleMessage(socketPath, message string) error {
-	client := tui.NewDaemonClientWithAddress(socketPath)
-
-	if err := client.Connect(); err != nil {
+	// Single message mode - uses transport.Client for --transport flag support
+	client, err := connectDaemon()
+	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}
 	defer client.Close()
@@ -98,4 +79,11 @@ func sendSingleMessage(socketPath, message string) error {
 
 	fmt.Println(reply)
 	return nil
+}
+
+func runTUI(socketPath string) error {
+	app := tui.NewApp(socketPath)
+	p := tea.NewProgram(app)
+	_, err := p.Run()
+	return err
 }

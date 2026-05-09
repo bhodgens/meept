@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/caimlas/meept/internal/tui"
@@ -61,3 +62,5 @@ func (a *rpcAdapter) RetryQueueJob(jobID string) error                          
 func (a *rpcAdapter) ListPoolWorkers() (*types.WorkerPoolResponse, error)                                    { return a.client.ListPoolWorkers() }
 func (a *rpcAdapter) GetWorkerPoolStats() (*types.WorkerPoolStats, error)                                     { return a.client.GetWorkerPoolStats() }
 func (a *rpcAdapter) ScaleWorkerPool(targetCount int) error                                                   { return a.client.ScaleWorkerPool(targetCount) }
+func (a *rpcAdapter) Call(method string, params any) (json.RawMessage, error)                                { return a.client.Call(method, params) }
+func (a *rpcAdapter) SetTimeout(d time.Duration)                                                              { a.client.SetTimeout(d) }

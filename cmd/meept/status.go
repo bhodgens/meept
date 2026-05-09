@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/caimlas/meept/internal/tui"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
@@ -37,8 +36,6 @@ Shows:
 }
 
 func runStatus(jsonOutput bool) error {
-	client := tui.NewDaemonClient()
-
 	// First check if daemon is running via PID file
 	pidFile := stateDir + "/meept.pid"
 	pidData, err := os.ReadFile(pidFile)
@@ -58,7 +55,8 @@ func runStatus(jsonOutput bool) error {
 	}
 
 	// Try to connect and get detailed status
-	if err := client.Connect(); err != nil {
+	client, err := connectDaemon()
+	if err != nil {
 		// Daemon PID exists but can't connect
 		fmt.Printf("Daemon process exists (PID %d) but not responding\n", pid)
 		fmt.Println("Try restarting: meept daemon restart")
