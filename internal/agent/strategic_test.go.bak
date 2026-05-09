@@ -143,7 +143,7 @@ func TestCreateFallbackSteps(t *testing.T) {
 		Intent: "code",
 	}
 
-	steps := sp.createFallbackSteps(req, nil)
+	steps := sp.createFallbackSteps(req)
 	if len(steps) != 1 {
 		t.Fatalf("expected 1 fallback step, got %d", len(steps))
 	}
