@@ -62,6 +62,8 @@ type Task struct {
 	CreatedMemories []string `json:"created_memories,omitempty"`
 	// AssignedAgent is the agent ID assigned to this task.
 	AssignedAgent string `json:"assigned_agent,omitempty"`
+	// TokenUsage tracks total tokens consumed during task execution.
+	TokenUsage int `json:"token_usage,omitempty"`
 }
 
 // NewTask creates a new task with default values.
@@ -269,6 +271,12 @@ func (t *Task) HasMemoryRefs() bool {
 // HasContextQuery returns true if the task has a context query.
 func (t *Task) HasContextQuery() bool {
 	return t.ContextQuery != ""
+}
+
+// AddTokenUsage adds tokens to the task's running total.
+func (t *Task) AddTokenUsage(tokens int) {
+	t.TokenUsage += tokens
+	t.UpdatedAt = time.Now().UTC()
 }
 
 func generateTaskID() string {

@@ -204,3 +204,24 @@ func TestTaskState_IsTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestTask_TokenUsage(t *testing.T) {
+	task := NewTask("test", "test task")
+
+	// Initial state
+	if task.TokenUsage != 0 {
+		t.Errorf("expected 0 initial tokens, got %d", task.TokenUsage)
+	}
+
+	// Add tokens
+	task.AddTokenUsage(1500)
+	if task.TokenUsage != 1500 {
+		t.Errorf("expected 1500 tokens, got %d", task.TokenUsage)
+	}
+
+	// Add more tokens
+	task.AddTokenUsage(500)
+	if task.TokenUsage != 2000 {
+		t.Errorf("expected 2000 tokens, got %d", task.TokenUsage)
+	}
+}
