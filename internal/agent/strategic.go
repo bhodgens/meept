@@ -127,6 +127,9 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		sp.logger.Error("Failed to update task state to planning", "error", err)
 	}
 
+	// Copy parent MemoryRefs for context inheritance
+	parentMemoryRefs := t.MemoryRefs
+
 	var steps []*task.TaskStep
 
 	// Fast-path: simple requests don't need LLM decomposition
@@ -135,7 +138,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			"task_id", req.TaskID,
 			"intent", req.Intent,
 		)
-		steps = sp.createFallbackSteps(req)
+		steps = sp.createFallbackSteps(req, parentMemoryRefs)
 	} else {
 		// Use planner agent to generate plan
 		var err error
@@ -145,8 +148,19 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 				"task_id", req.TaskID,
 				"error", err,
 			)
-			steps = sp.createFallbackSteps(req)
+			steps = sp.createFallbackSteps(req, parentMemoryRefs)
 		}
+	}
+
+	// Inject parent MemoryRefs to first step (if any exist and steps were created)
+	if len(steps) > 0 && len(parentMemoryRefs) > 0 {
+		for _, ref := range parentMemoryRefs {
+			steps[0].AddMemoryRef(ref)
+		}
+		sp.logger.Info("Copied parent MemoryRefs to first step",
+			"task_id", req.TaskID,
+			"refs", len(parentMemoryRefs),
+		)
 	}
 
 	// Persist steps
@@ -272,9 +286,13 @@ func (sp *StrategicPlanner) parsePlanOutput(taskID, output string) ([]*task.Task
 }
 
 // createFallbackSteps creates a single step when planning fails.
-func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest) []*task.TaskStep {
+func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []string) []*task.TaskStep {
 	step := task.NewTaskStep(req.TaskID, req.Input, 0)
 	step.ToolHint = req.Intent
+	// Copy parent refs
+	for _, ref := range parentRefs {
+		step.AddMemoryRef(ref)
+	}
 	return []*task.TaskStep{step}
 }
 

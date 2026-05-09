@@ -446,6 +446,14 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		}
 	}
 
+	// Propagate context to next ready steps
+	if err := ts.propagateContextToNextSteps(ctx, step); err != nil {
+		ts.logger.Error("Failed to propagate context to next steps",
+			"step_id", step.ID,
+			"error", err,
+		)
+	}
+
 	// NEW: Run validation gate if interval reached
 	ts.runValidationGateIfDue(ctx, step.TaskID)
 
@@ -976,6 +984,50 @@ func (ts *TacticalScheduler) buildResultSummary(steps []map[string]any) string {
 	}
 
 	return sb.String()
+}
+
+// propagateContextToNextSteps copies completed step's result and MemoryRefs to next ready steps.
+func (ts *TacticalScheduler) propagateContextToNextSteps(ctx context.Context, completedStep *task.TaskStep) error {
+	// Get next ready steps
+	readySteps, err := ts.stepStore.GetReadySteps(completedStep.TaskID)
+	if err != nil {
+		return fmt.Errorf("failed to get ready steps: %w", err)
+	}
+	if len(readySteps) == 0 {
+		return nil // No steps to propagate to
+	}
+
+	// Build context content from completed step
+	contextContent := fmt.Sprintf("## Step completed: %s\n\n**Result:** %s",
+		completedStep.Description,
+		truncateString(completedStep.Result, 500),
+	)
+
+	// Append context and copy MemoryRefs to each ready step
+	for _, step := range readySteps {
+		// Copy MemoryRefs from completed step
+		for _, ref := range completedStep.MemoryRefs {
+			step.AddMemoryRef(ref)
+		}
+
+		// Append to accumulated context
+		step.AppendToContext(contextContent)
+
+		// Persist updates
+		if err := ts.stepStore.Update(step); err != nil {
+			ts.logger.Error("Failed to update step context",
+				"step_id", step.ID,
+				"error", err,
+			)
+		}
+	}
+
+	ts.logger.Info("Propagated context to next steps",
+		"step_id", completedStep.ID,
+		"next_steps", len(readySteps),
+	)
+
+	return nil
 }
 
 // cleanupValidationGateCounter removes the validation gate counter entry for a task.
