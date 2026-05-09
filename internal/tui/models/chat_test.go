@@ -991,3 +991,19 @@ func TestChatModel_SessionDescription(t *testing.T) {
 // implement the full tea.Model interface (missing quit command handling).
 // The App-level teatest tests provide full integration testing.
 // Sub-models are thoroughly tested via unit tests above.
+
+func TestProgressUpdateMsg_ChatVisible(t *testing.T) {
+	msg := ProgressUpdateMsg{
+		ChatVisible: true,
+		Stage:       "test progress",
+	}
+
+	if !msg.IsChatVisible() {
+		t.Error("expected ChatVisible to be true")
+	}
+
+	msg.ChatVisible = false
+	if msg.IsChatVisible() {
+		t.Error("expected ChatVisible to be false")
+	}
+}

@@ -396,6 +396,12 @@ type ProgressUpdateMsg struct {
 	CurrentTool   string
 	TokensUsed    int
 	ContextResets int
+	ChatVisible   bool
+}
+
+// IsChatVisible returns true if this progress update should display in chat.
+func (m ProgressUpdateMsg) IsChatVisible() bool {
+	return m.ChatVisible
 }
 
 // ProgressState holds current progress for display in chat.
