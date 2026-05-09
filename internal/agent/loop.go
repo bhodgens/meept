@@ -1372,6 +1372,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			l.budgetTracker.RecordUsage(response.Usage.TotalTokens)
 		}
 
+		// Publish token usage event
+		l.publishTokenUsage(conversationID, totalTokens)
+
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
 			// Add assistant message with tool calls
@@ -2332,6 +2335,29 @@ func (l *AgentLoop) publishProgress(conversationID string, iteration int, stage 
 	delivered := l.bus.Publish("agent.progress", msg)
 	if delivered == 0 {
 		l.logger.Debug("Progress event published (no subscribers)", "stage", stage)
+	}
+}
+
+// publishTokenUsage publishes token usage to the message bus.
+func (l *AgentLoop) publishTokenUsage(conversationID string, totalTokens int) {
+	if l.bus == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"conversation_id": conversationID,
+		"total_tokens":    totalTokens,
+	}
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
+	if err != nil {
+		l.logger.Warn("Failed to create token usage bus message", "error", err)
+		return
+	}
+
+	delivered := l.bus.Publish("llm.tokens.used", msg)
+	if delivered == 0 {
+		l.logger.Debug("Token usage event published (no subscribers)")
 	}
 }
 
