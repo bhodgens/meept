@@ -165,7 +165,7 @@ func (m *StatusModel) renderDashboard() string {
 	hint := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6B7280")).
 		MarginTop(1).
-		Render(fmt.Sprintf("Last updated: %s | Press 'r' to refresh",
+		Render(fmt.Sprintf("last updated: %s | press 'r' to refresh",
 			m.lastUpdate.Format("15:04:05")))
 
 	return lipgloss.JoinVertical(lipgloss.Left, panels, hint)
@@ -284,7 +284,7 @@ func (m *StatusModel) renderInfoPanel(width int) string {
 		Foreground(lipgloss.Color("#7C3AED")).
 		MarginBottom(1)
 
-	content := titleStyle.Render("Quick Actions") + "\n\n"
+	content := titleStyle.Render("quick actions") + "\n\n"
 
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6B7280"))

@@ -259,10 +259,10 @@ func TestStatusModel_ViewDashboard(t *testing.T) {
 	if !strings.Contains(view, "token budget") {
 		t.Error("expected 'token budget' panel")
 	}
-	if !strings.Contains(view, "Quick Actions") {
-		t.Error("expected 'Quick Actions' panel")
+	if !strings.Contains(view, "quick actions") {
+		t.Error("expected 'quick actions' panel")
 	}
-	if !strings.Contains(view, "Last updated") {
+	if !strings.Contains(view, "last updated") {
 		t.Error("expected last updated hint")
 	}
 }
@@ -341,8 +341,8 @@ func TestStatusModel_RenderInfoPanel(t *testing.T) {
 
 	panel := model.renderInfoPanel(30)
 
-	if !strings.Contains(panel, "Quick Actions") {
-		t.Error("expected 'Quick Actions' title")
+	if !strings.Contains(panel, "quick actions") {
+		t.Error("expected 'quick actions' title")
 	}
 	if !strings.Contains(panel, "Chat view") {
 		t.Error("expected chat hint")
