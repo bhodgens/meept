@@ -1,6 +1,6 @@
 # Improve Compound Task Acknowledgment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Enhance the async task acknowledgment to include subtask count, brief bulleted summary, estimated duration, and plan reference while keeping the message concise (under 15 lines).
 
@@ -28,7 +28,7 @@
 - Modify: `internal/agent/handler.go`
 - Test: `internal/agent/handler_test.go`
 
-- [ ] **Step 1: Read current formatAsyncTaskAck implementation**
+- [x] **Step 1: Read current formatAsyncTaskAck implementation**
 
 ```bash
 sed -n '677,693p' internal/agent/handler.go
@@ -46,7 +46,7 @@ Current output:
 you will receive updates as subtasks complete.
 ```
 
-- [ ] **Step 2: Write failing test for enhanced ACK**
+- [x] **Step 2: Write failing test for enhanced ACK**
 
 ```go
 func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
@@ -86,7 +86,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 ```bash
 go test ./internal/agent/... -run TestChatHandler_FormatEnhancedAsyncTaskAck -v
@@ -94,7 +94,7 @@ go test ./internal/agent/... -run TestChatHandler_FormatEnhancedAsyncTaskAck -v
 
 Expected: FAIL (method doesn't exist)
 
-- [ ] **Step 4: Create new formatEnhancedAsyncTaskAck method**
+- [x] **Step 4: Create new formatEnhancedAsyncTaskAck method**
 
 ```go
 // formatEnhancedAsyncTaskAck builds a concise acknowledgment for async task dispatch.
@@ -149,7 +149,7 @@ func (h *ChatHandler) formatEnhancedAsyncTaskAck(
 }
 ```
 
-- [ ] **Step 5: Update handleRequest to call enhanced method**
+- [x] **Step 5: Update handleRequest to call enhanced method**
 
 In `handleRequest()`, find where formatAsyncTaskAck is called (around line 348):
 
@@ -164,7 +164,7 @@ planRef := h.getPlanReference(result.Task.ID)
 reply = h.formatEnhancedAsyncTaskAck(result, steps, estimatedDuration, planRef)
 ```
 
-- [ ] **Step 6: Add helper methods**
+- [x] **Step 6: Add helper methods**
 
 ```go
 // fetchStepSummaries retrieves step summaries for a task.
@@ -209,7 +209,7 @@ func (h *ChatHandler) getPlanReference(taskID string) string {
 }
 ```
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 ```bash
 go test ./internal/agent/... -run TestChatHandler_FormatEnhancedAsyncTaskAck -v
@@ -217,7 +217,7 @@ go test ./internal/agent/... -run TestChatHandler_FormatEnhancedAsyncTaskAck -v
 
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/agent/handler.go internal/agent/handler_test.go
@@ -232,7 +232,7 @@ git commit -m "feat: enhance async task acknowledgment with details"
 - Modify: `internal/agent/dispatcher.go`
 - Test: `internal/agent/dispatcher_test.go`
 
-- [ ] **Step 1: Add Steps field to DispatchResult**
+- [x] **Step 1: Add Steps field to DispatchResult**
 
 In `internal/agent/dispatcher.go`:
 
@@ -243,7 +243,7 @@ type DispatchResult struct {
 }
 ```
 
-- [ ] **Step 2: Update routeCompound to populate steps**
+- [x] **Step 2: Update routeCompound to populate steps**
 
 After creating parent task, add:
 
@@ -252,17 +252,17 @@ After creating parent task, add:
 parentTask.TotalJobs = len(multi.Intents)
 ```
 
-- [ ] **Step 3: Pass steps from StrategicPlanner to handler**
+- [x] **Step 3: Pass steps from StrategicPlanner to handler**
 
 In StrategicPlanner.Plan(), after creating steps, publish early to step store so handler can fetch.
 
-- [ ] **Step 4: Test compilation**
+- [x] **Step 4: Test compilation**
 
 ```bash
 go build ./internal/agent/...
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/dispatcher.go
@@ -277,13 +277,13 @@ git commit -m "feat: add Steps to DispatchResult for ACK"
 - Modify: `internal/agent/handler.go`
 - Modify: `internal/metrics/store.go` (if exists)
 
-- [ ] **Step 1: Check if metrics store exists**
+- [x] **Step 1: Check if metrics store exists**
 
 ```bash
 find . -name "metrics*" -type f | grep -E "\.go$"
 ```
 
-- [ ] **Step 2: Add duration tracking to metrics**
+- [x] **Step 2: Add duration tracking to metrics**
 
 If metrics store exists, add method:
 
@@ -295,7 +295,7 @@ func (m *Store) GetAverageStepDuration(agentType string) time.Duration {
 }
 ```
 
-- [ ] **Step 3: Update estimateDuration to use metrics**
+- [x] **Step 3: Update estimateDuration to use metrics**
 
 ```go
 func (h *ChatHandler) estimateDuration(taskID string, stepCount int) int {
@@ -310,7 +310,7 @@ func (h *ChatHandler) estimateDuration(taskID string, stepCount int) int {
 }
 ```
 
-- [ ] **Step 4: If no metrics store, skip for now**
+- [x] **Step 4: If no metrics store, skip for now**
 
 Document in code comment:
 
@@ -318,7 +318,7 @@ Document in code comment:
 // TODO: Integrate with metrics store for historical duration estimates
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/handler.go
@@ -332,7 +332,7 @@ git commit -m "feat: add metrics-based duration estimates (with fallback)"
 **Files:**
 - Modify: `internal/agent/handler.go`
 
-- [ ] **Step 1: Add description truncation**
+- [x] **Step 1: Add description truncation**
 
 In formatEnhancedAsyncTaskAck, truncate step descriptions:
 
@@ -347,7 +347,7 @@ sb.WriteString(fmt.Sprintf("- %s (%s)\n",
 ))
 ```
 
-- [ ] **Step 2: Test with long descriptions**
+- [x] **Step 2: Test with long descriptions**
 
 ```go
 func TestFormatEnhancedAsyncTaskAck_Truncation(t *testing.T) {
@@ -374,13 +374,13 @@ func TestFormatEnhancedAsyncTaskAck_Truncation(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test**
+- [x] **Step 3: Run test**
 
 ```bash
 go test ./internal/agent/... -run TestFormatEnhancedAsyncTaskAck_Truncation -v
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/handler.go
@@ -394,7 +394,7 @@ git commit -m "feat: truncate long step descriptions in ACK"
 **Files:**
 - Modify: `internal/agent/handler.go`
 
-- [ ] **Step 1: Add multi-agent detection**
+- [x] **Step 1: Add multi-agent detection**
 
 In formatEnhancedAsyncTaskAck, detect when multiple agents are used:
 
@@ -417,7 +417,7 @@ if len(agentSet) > 1 {
 }
 ```
 
-- [ ] **Step 2: Test multi-agent output**
+- [x] **Step 2: Test multi-agent output**
 
 ```go
 func TestFormatEnhancedAsyncTaskAck_MultiAgent(t *testing.T) {
@@ -439,13 +439,13 @@ func TestFormatEnhancedAsyncTaskAck_MultiAgent(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test**
+- [x] **Step 3: Run test**
 
 ```bash
 go test ./internal/agent/... -run TestFormatEnhancedAsyncTaskAck_MultiAgent -v
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/handler.go
@@ -460,13 +460,13 @@ git commit -m "feat: show agent list for multi-agent compound tasks"
 - Modify: `internal/agent/handler.go`
 - Search for other callers
 
-- [ ] **Step 1: Find all formatAsyncTaskAck calls**
+- [x] **Step 1: Find all formatAsyncTaskAck calls**
 
 ```bash
 grep -rn "formatAsyncTaskAck" internal/agent/
 ```
 
-- [ ] **Step 2: Update or deprecate old method**
+- [x] **Step 2: Update or deprecate old method**
 
 Either:
 A) Update all callers to use new method, or
@@ -481,11 +481,11 @@ func (h *ChatHandler) formatAsyncTaskAck(result *DispatchResult) string {
 }
 ```
 
-- [ ] **Step 3: Remove deprecated method after all callers updated**
+- [x] **Step 3: Remove deprecated method after all callers updated**
 
 Once all callers use the new method, delete the old one.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/handler.go
@@ -499,7 +499,7 @@ git commit -m "refactor: deprecate old formatAsyncTaskAck"
 **Files:**
 - Create: `tests/compound_ack_test.go`
 
-- [ ] **Step 1: Write full integration test**
+- [x] **Step 1: Write full integration test**
 
 ```go
 func TestCompoundTaskAck_FullFlow(t *testing.T) {
@@ -513,20 +513,20 @@ func TestCompoundTaskAck_FullFlow(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 ```bash
 go test ./... -run Ack -v
 ```
 
-- [ ] **Step 3: Manual test**
+- [x] **Step 3: Manual test**
 
 ```bash
 make go-daemon
 ./bin/meept chat "Build a feature with API, database, and tests"
 ```
 
-- [ ] **Step 4: Verify ACK output format**
+- [x] **Step 4: Verify ACK output format**
 
 Should look like:
 ```
@@ -547,11 +547,11 @@ Should look like:
 you will receive updates as subtasks complete.
 ```
 
-- [ ] **Step 5: Verify line count**
+- [x] **Step 5: Verify line count**
 
 Count lines - should be ≤ 15.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/compound_ack_test.go

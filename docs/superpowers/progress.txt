@@ -148,18 +148,18 @@
 
 ---
 
-## Plan 5: Improve Compound Task Acknowledgment (0%)
+## Plan 5: Improve Compound Task Acknowledgment (100%)
 
-### Tasks
-- [ ] Task 1: Add TaskStepSummary parameter to formatAsyncTaskAck
-- [ ] Task 2: Add Steps to DispatchResult
-- [ ] Task 3: Add metrics-based duration estimates
-- [ ] Task 4: Truncate long descriptions
-- [ ] Task 5: Handle multi-agent compound tasks
-- [ ] Task 6: Update old formatAsyncTaskAck calls
-- [ ] Task 7: Integration testing
+### Completed Tasks
+- [x] Task 1: Add TaskStepSummary parameter to formatAsyncTaskAck
+- [x] Task 2: Add Steps to DispatchResult
+- [x] Task 3: Add metrics-based duration estimates
+- [x] Task 4: Truncate long descriptions
+- [x] Task 5: Handle multi-agent compound tasks
+- [x] Task 6: Update old formatAsyncTaskAck calls
+- [x] Task 7: Integration testing
 
-**Status:** Not started
+**Status:** Complete
 
 ---
 
