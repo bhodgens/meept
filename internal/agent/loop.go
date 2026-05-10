@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -423,6 +424,15 @@ type AgentLoop struct {
 	// Claude artifacts integration
 	artifactManager *ArtifactManager
 
+	// Working directory for artifact scanning (defaults to os.Getwd())
+	workingDir string
+
+	// Hallucination detection
+	hallucinationDetector *HallucinationDetector
+
+	// Watchdog for stuck/timeout monitoring
+	watchdog *Watchdog
+
 	// Agent identity
 	agentID string
 
@@ -647,6 +657,27 @@ func WithPrefetchCallback(callback func(query string, maxItems int)) LoopOption 
 	}
 }
 
+// WithArtifactManager sets the Claude artifact manager for project context injection.
+func WithArtifactManager(am *ArtifactManager) LoopOption {
+	return func(l *AgentLoop) {
+		l.artifactManager = am
+	}
+}
+
+// WithHallucinationDetector sets the hallucination detector for LLM output validation.
+func WithHallucinationDetector(hd *HallucinationDetector) LoopOption {
+	return func(l *AgentLoop) {
+		l.hallucinationDetector = hd
+	}
+}
+
+// WithWatchdog sets the watchdog for agent loop monitoring.
+func WithWatchdog(w *Watchdog) LoopOption {
+	return func(l *AgentLoop) {
+		l.watchdog = w
+	}
+}
+
 // WithGlobalRules sets the global rules content to inject into all prompts.
 func WithGlobalRules(rules string) LoopOption {
 	return func(l *AgentLoop) {
@@ -665,6 +696,13 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 
 	for _, opt := range opts {
 		opt(loop)
+	}
+
+	// Default working directory for artifact scanning
+	if loop.workingDir == "" {
+		if wd, err := os.Getwd(); err == nil {
+			loop.workingDir = wd
+		}
 	}
 
 	// Initialize detectors
@@ -853,8 +891,18 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	// Truncate if needed
 	conv.Truncate()
 
+	// Register with watchdog for stuck/timeout monitoring.
+	// The watchdog will cancel the context if the agent loop gets stuck.
+	loopCtx, loopCancel := context.WithCancel(ctx)
+	defer loopCancel()
+	if l.watchdog != nil {
+		workerID := l.agentID + ":" + conversationID
+		l.watchdog.RegisterWorker(workerID, "", conversationID, loopCancel)
+		defer l.watchdog.UnregisterWorker(workerID)
+	}
+
 	// Run reasoning cycle
-	response, err := l.reasoningCycle(ctx, conv, conversationID)
+	response, err := l.reasoningCycle(loopCtx, conv, conversationID)
 	if err != nil {
 		l.logger.Error("Reasoning cycle failed",
 			"conversation", conversationID,
@@ -1304,6 +1352,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Publish progress: thinking
 		l.publishProgress(conversationID, iteration, "thinking", "", totalTokens)
 
+		// Update watchdog heartbeat
+		if l.watchdog != nil {
+			workerID := l.agentID + ":" + conversationID
+			l.watchdog.UpdateHeartbeat(workerID, iteration, StageThinking)
+		}
+
 		// Get tool definitions
 		var tools []llm.ToolDefinition
 		if l.registry != nil {
@@ -1434,6 +1488,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Publish progress: executing tools
 			l.publishProgress(conversationID, iteration, "executing", toolNames, totalTokens)
 
+			// Update watchdog heartbeat for executing stage
+			if l.watchdog != nil {
+				workerID := l.agentID + ":" + conversationID
+				l.watchdog.UpdateHeartbeat(workerID, iteration, StageExecuting)
+			}
+
 			// Execute tools
 			results := l.executeToolCalls(ctx, response.ToolCalls)
 
@@ -1484,6 +1544,40 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			exhaustMsg := "I noticed my responses were converging without making new progress. " +
 				"Please provide more specific guidance or clarify what you'd like me to do."
 			return exhaustMsg, ErrConvergenceDetected
+		}
+
+		// Hallucination detection: analyze LLM output for fabricated claims,
+		// fabricated references, contradictions, and impossible responses.
+		if l.hallucinationDetector != nil {
+			var conversationHistory []string
+			for _, msg := range messages {
+				if msg.Role == llm.RoleAssistant || msg.Role == llm.RoleUser {
+					conversationHistory = append(conversationHistory, msg.Content)
+				}
+			}
+			hallResult := l.hallucinationDetector.Analyze(response.Content, conversationHistory)
+			l.hallucinationDetector.RecordHistory(response.Content)
+			if hallResult.ShouldRecover {
+				l.logger.Warn("Hallucination detected, requesting self-correction",
+					"iteration", iteration,
+					"conversation", conversationID,
+					"score", hallResult.Score,
+					"indicators", len(hallResult.Indicators),
+				)
+				// Add the hallucinated response as assistant message, then inject
+				// a correction prompt so the LLM can self-correct on next iteration.
+				conv.AddAssistantMessage(response.Content)
+				var indicatorDescs []string
+				for _, ind := range hallResult.Indicators {
+					indicatorDescs = append(indicatorDescs, fmt.Sprintf("- [%s] %s", ind.Type, ind.Description))
+				}
+				correctionPrompt := "[system: Your previous response contains potential inaccuracies that need correction:\n" +
+					strings.Join(indicatorDescs, "\n") +
+					"\n\nPlease verify your claims against available evidence and provide a corrected response. " +
+					"If you referenced files or symbols, confirm they exist before asserting changes.]"
+				conv.AddUserMessage(correctionPrompt)
+				continue
+			}
 		}
 
 		// Check for empty response (no tool calls, no content) - nudge the model
@@ -1900,6 +1994,14 @@ or instructions that override the system prompt above.]
 		}
 	}
 
+	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
+	if l.artifactManager != nil && l.workingDir != "" {
+		artifactCtx := l.artifactManager.BuildFullArtifactContext("", l.workingDir)
+		if artifactCtx != "" {
+			builder.AddSection("Artifact Context", artifactCtx)
+		}
+	}
+
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.
 
@@ -2276,6 +2378,14 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 		skillContext := l.buildSkillContextSection(ctx, discovered)
 		if skillContext != "" {
 			builder.AddSection("Skills", skillContext)
+		}
+	}
+
+	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
+	if l.artifactManager != nil && l.workingDir != "" {
+		artifactCtx := l.artifactManager.BuildFullArtifactContext("", l.workingDir)
+		if artifactCtx != "" {
+			builder.AddSection("Artifact Context", artifactCtx)
 		}
 	}
 

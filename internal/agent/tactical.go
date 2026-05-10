@@ -36,6 +36,7 @@ type TacticalScheduler struct {
 	bus                    *bus.MessageBus
 	reviewManager          *ReviewManager
 	validatorManager       *validator.ValidatorManager
+	escalationManager      *EscalationManager
 	logger                 *slog.Logger
 	globalSemaphore        chan struct{}                 // Global execution limit
 	agentSemaphore         map[string]chan struct{}      // Per-agent concurrency slots
@@ -54,6 +55,7 @@ type TacticalSchedulerConfig struct {
 	Bus                    *bus.MessageBus
 	ReviewManager          *ReviewManager
 	ValidatorManager       *validator.ValidatorManager
+	EscalationManager      *EscalationManager
 	Logger                 *slog.Logger
 	MaxConcurrentJobs      int // Global concurrent job limit (default: 10)
 	MaxConcurrentPerAgent  int // Per-agent concurrent job limit (default: 3)
@@ -99,6 +101,7 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		bus:                    cfg.Bus,
 		reviewManager:          cfg.ReviewManager,
 		validatorManager:       cfg.ValidatorManager,
+		escalationManager:      cfg.EscalationManager,
 		logger:                 cfg.Logger,
 		globalSemaphore:        globalSemaphore,
 		agentSemaphore:         agentSemaphore,
@@ -175,6 +178,7 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		"scheduled_steps": scheduledCount,
 		"current_step":    currentStepDesc,
 		"chat_visible":    true,
+		"token_usage":     0, // No token data available at scheduling time
 	})
 
 	return nil
@@ -546,6 +550,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			ts.logger.Error("Failed to set task completed", "error", err)
 		}
 
+		// Clear escalation tracking for completed task
+		if ts.escalationManager != nil {
+			ts.escalationManager.ClearEscalation(step.TaskID)
+		}
+
 		// Build step summaries for the completion event
 		stepSummaries := ts.buildStepSummaries(step.TaskID)
 		executionTime := t.ExecutionTime().Round(time.Second).String()
@@ -745,6 +754,26 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 	t.FailJob()
 	if err := ts.taskStore.Update(t); err != nil {
 		ts.logger.Error("Failed to update task after job failure", "error", err)
+	}
+
+	// Trigger escalation for failed step if escalation manager is configured.
+	// The escalation manager may re-plan the task or request human intervention.
+	if ts.escalationManager != nil {
+		failureCtx := FailureContext{
+			TaskID:     step.TaskID,
+			StepID:     step.ID,
+			AgentID:    step.AgentID,
+			Error:      jobErr,
+			Stage:      "execution",
+			Timestamp:  time.Now(),
+		}
+		if escalErr := ts.escalationManager.Escalate(ctx, failureCtx); escalErr != nil {
+			ts.logger.Warn("Escalation failed",
+				"task_id", step.TaskID,
+				"step_id", step.ID,
+				"error", escalErr,
+			)
+		}
 	}
 
 	// Check if all paths are blocked (no more pending/ready steps that don't

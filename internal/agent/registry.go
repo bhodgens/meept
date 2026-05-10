@@ -50,6 +50,11 @@ type AgentRegistry struct {
 	capabilityIndex *skills.CapabilityIndex
 	skillLoader     *skills.LazySkillLoader
 	logger          *slog.Logger
+
+	// Agent validation components (shared across all agent loops)
+	watchdog              *Watchdog
+	hallucinationDetector *HallucinationDetector
+	artifactManager       *ArtifactManager
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -63,6 +68,11 @@ type RegistryConfig struct {
 	ToolRegistry    ToolRegistry
 	ShadowManager   *shadow.Manager
 	Logger          *slog.Logger
+
+	// Agent validation components (shared across all agent loops)
+	Watchdog             *Watchdog
+	HallucinationDetector *HallucinationDetector
+	ArtifactManager      *ArtifactManager
 
 	// BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	BundledAgentsPath string
@@ -79,17 +89,20 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 	}
 
 	r := &AgentRegistry{
-		specs:     make(map[string]*AgentSpec),
-		loops:     make(map[string]*AgentLoop),
-		memvid:    cfg.MemvidClient,
-		taskStore: cfg.TaskStore,
-		llm:       cfg.LLMClient,
-		resolver:  cfg.Resolver,
-		bus:       cfg.MessageBus,
-		security:  cfg.SecurityChecker,
-		tools:     cfg.ToolRegistry,
-		shadowMgr: cfg.ShadowManager,
-		logger:    cfg.Logger,
+		specs:                 make(map[string]*AgentSpec),
+		loops:                 make(map[string]*AgentLoop),
+		memvid:                cfg.MemvidClient,
+		taskStore:             cfg.TaskStore,
+		llm:                   cfg.LLMClient,
+		resolver:              cfg.Resolver,
+		bus:                   cfg.MessageBus,
+		security:              cfg.SecurityChecker,
+		tools:                 cfg.ToolRegistry,
+		shadowMgr:             cfg.ShadowManager,
+		logger:                cfg.Logger,
+		watchdog:              cfg.Watchdog,
+		hallucinationDetector: cfg.HallucinationDetector,
+		artifactManager:       cfg.ArtifactManager,
 	}
 
 	// Load global rules
@@ -248,6 +261,17 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
 
 	if r.skillLoader != nil {
 		opts = append(opts, WithSkillLoader(r.skillLoader))
+	}
+
+	// Wire shared validation components into each agent loop
+	if r.watchdog != nil {
+		opts = append(opts, WithWatchdog(r.watchdog))
+	}
+	if r.hallucinationDetector != nil {
+		opts = append(opts, WithHallucinationDetector(r.hallucinationDetector))
+	}
+	if r.artifactManager != nil {
+		opts = append(opts, WithArtifactManager(r.artifactManager))
 	}
 
 	return NewAgentLoop(opts...), nil

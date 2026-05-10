@@ -67,6 +67,12 @@ type Components struct {
 	Orchestrator    *agent.Orchestrator
 	ReviewManager   *agent.ReviewManager
 
+	// Agent validation watchdog
+	Watchdog             *agent.Watchdog
+	HallucinationDetector *agent.HallucinationDetector
+	EscalationManager    *agent.EscalationManager
+	ArtifactManager      *agent.ArtifactManager
+
 	// Memory
 	MemoryManager   *memory.Manager
 	MemoryHandler   *memory.Handler
@@ -375,6 +381,23 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		logger.Info("Result cache disabled")
 	}
 
+	// Create agent validation components
+	c.Watchdog = agent.NewWatchdog(cfg.Agent.Watchdog, logger.With("component", "watchdog"))
+	logger.Info("Watchdog initialized",
+		"enabled", cfg.Agent.Watchdog.Enabled,
+		"timeout_min", cfg.Agent.Watchdog.TimeoutMinutes,
+		"heartbeat_interval", cfg.Agent.Watchdog.HeartbeatIntervalSec,
+	)
+
+	c.HallucinationDetector = agent.NewHallucinationDetector(
+		agent.DefaultHallucinationConfig(),
+		logger.With("component", "hallucination-detector"),
+	)
+	logger.Info("Hallucination detector initialized")
+
+	c.ArtifactManager = agent.NewArtifactManager(logger.With("component", "artifact-manager"))
+	logger.Info("Artifact manager initialized")
+
 	// Create agent loop
 	agentOpts := []agent.LoopOption{
 		agent.WithMessageBus(msgBus),
@@ -415,6 +438,21 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if cfg.Agent.ProgressEnabled {
 		agentOpts = append(agentOpts, agent.WithProgressEnabled(true))
 		logger.Info("Agent loop configured with progress tracking")
+	}
+	// Wire watchdog for stuck/timeout monitoring
+	if c.Watchdog != nil {
+		agentOpts = append(agentOpts, agent.WithWatchdog(c.Watchdog))
+		logger.Info("Agent loop configured with watchdog")
+	}
+	// Wire hallucination detection
+	if c.HallucinationDetector != nil {
+		agentOpts = append(agentOpts, agent.WithHallucinationDetector(c.HallucinationDetector))
+		logger.Info("Agent loop configured with hallucination detection")
+	}
+	// Wire artifact manager for CLAUDE.md context injection
+	if c.ArtifactManager != nil {
+		agentOpts = append(agentOpts, agent.WithArtifactManager(c.ArtifactManager))
+		logger.Info("Agent loop configured with artifact manager")
 	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
@@ -639,16 +677,19 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 
 		c.AgentRegistry = agent.NewAgentRegistry(agent.RegistryConfig{
-			MemvidClient:      c.MemvidClient,
-			TaskStore:         taskStore,
-			LLMClient:         c.LLMClient,
-			Resolver:          c.LLMResolver,
-			MessageBus:        msgBus,
-			SecurityChecker:   c.SecurityChecker,
-			ToolRegistry:      c.ToolRegistry,
-			ShadowManager:     c.ShadowManager,
-			Logger:            logger,
-			BundledAgentsPath: "config/agents",
+			MemvidClient:         c.MemvidClient,
+			TaskStore:            taskStore,
+			LLMClient:            c.LLMClient,
+			Resolver:             c.LLMResolver,
+			MessageBus:           msgBus,
+			SecurityChecker:      c.SecurityChecker,
+			ToolRegistry:         c.ToolRegistry,
+			ShadowManager:        c.ShadowManager,
+			Logger:               logger,
+			BundledAgentsPath:     "config/agents",
+			Watchdog:              c.Watchdog,
+			HallucinationDetector: c.HallucinationDetector,
+			ArtifactManager:       c.ArtifactManager,
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
@@ -760,14 +801,25 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			})
 			c.ReviewManager = reviewManager
 
+			// Create escalation manager for automatic re-planning on failures
+			c.EscalationManager = agent.NewEscalationManager(agent.EscalationManagerConfig{
+				Config:    agent.DefaultEscalationConfig(),
+				Planner:   strategicPlanner,
+				TaskStore: orchTaskStore,
+				Bus:       msgBus,
+				Logger:    logger.With("component", "escalation"),
+			})
+			logger.Info("Escalation manager initialized")
+
 			tacticalScheduler := agent.NewTacticalScheduler(agent.TacticalSchedulerConfig{
-				StepStore:     stepStore,
-				TaskStore:     orchTaskStore,
-				Queue:         c.Queue,
-				Registry:      c.AgentRegistry,
-				Bus:           msgBus,
-				Logger:        logger.With("component", "tactical"),
-				ReviewManager: reviewManager,
+				StepStore:         stepStore,
+				TaskStore:         orchTaskStore,
+				Queue:             c.Queue,
+				Registry:          c.AgentRegistry,
+				Bus:               msgBus,
+				Logger:            logger.With("component", "tactical"),
+				ReviewManager:     reviewManager,
+				EscalationManager: c.EscalationManager,
 			})
 
 			c.Orchestrator = agent.NewOrchestrator(agent.OrchestratorDeps{
@@ -1010,6 +1062,11 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start watchdog monitor for agent stuck/timeout detection
+	if c.Watchdog != nil {
+		c.Watchdog.Start(ctx)
+	}
+
 	// Start self-improve scheduler (if configured)
 	if c.SelfImproveSched != nil {
 		go c.SelfImproveSched.Start(ctx)
@@ -1095,6 +1152,11 @@ func (c *Components) Stop(ctx context.Context) error {
 			c.Logger.Error("Failed to stop orchestrator", "error", err)
 			lastErr = err
 		}
+	}
+
+	// Stop watchdog monitor
+	if c.Watchdog != nil {
+		c.Watchdog.Stop()
 	}
 
 	// Stop scheduler first to prevent new job executions

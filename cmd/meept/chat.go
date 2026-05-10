@@ -37,7 +37,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		// No arguments - launch TUI
 		// TUI always uses RPC directly (it needs streaming/event RPC)
-		return runTUI(getSocketPath())
+		return runTUI()
 	}
 
 	message := args[0]
@@ -81,8 +81,13 @@ func runChat(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runTUI(socketPath string) error {
-	app := tui.NewApp(socketPath)
+func runTUI() error {
+	// The TUI requires RPC for event streaming and real-time updates.
+	// If --transport=http is set, warn and fall back to RPC.
+	if transportFlag == "http" {
+		fmt.Fprintln(os.Stderr, "warning: TUI requires RPC transport (event streaming); falling back to RPC socket")
+	}
+	app := tui.NewApp(getSocketPath())
 	p := tea.NewProgram(app)
 	_, err := p.Run()
 	return err
