@@ -382,3 +382,93 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_NoSteps(t *testing.T) {
 		t.Error("missing plan reference")
 	}
 }
+
+func TestChatHandler_FormatEnhancedAsyncTaskAck_Truncation(t *testing.T) {
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	steps := []TaskStepSummary{
+		{
+			Description: "This is a very long description that should be truncated to fit within the line limit of fifty characters",
+			AgentID:     "coder",
+		},
+	}
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:   "task-trunc",
+			Name: "truncation test",
+		},
+		AgentID: "coder",
+	}
+
+	ack := h.formatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
+
+	lines := strings.Split(ack, "\n")
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "this is a very long") {
+			found = true
+			if len(line) > 70 {
+				t.Errorf("step line too long (%d chars): %s", len(line), line)
+			}
+			if !strings.Contains(line, "...") {
+				t.Error("expected truncation indicator '...'")
+			}
+		}
+	}
+	if !found {
+		t.Error("could not find the step line with description")
+	}
+}
+
+func TestChatHandler_FormatEnhancedAsyncTaskAck_MultiAgent(t *testing.T) {
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	steps := []TaskStepSummary{
+		{Description: "step 1", AgentID: "coder"},
+		{Description: "step 2", AgentID: "tester"},
+	}
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:   "task-multi",
+			Name: "multi agent task",
+		},
+		AgentID: "orchestrator",
+	}
+
+	ack := h.formatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
+
+	if !strings.Contains(ack, "agents:") {
+		t.Error("missing agents line for multi-agent task")
+	}
+	if !strings.Contains(ack, "coder") {
+		t.Error("missing coder agent")
+	}
+	if !strings.Contains(ack, "tester") {
+		t.Error("missing tester agent")
+	}
+}
+
+func TestChatHandler_FormatEnhancedAsyncTaskAck_SingleAgent(t *testing.T) {
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	steps := []TaskStepSummary{
+		{Description: "step 1", AgentID: "coder"},
+		{Description: "step 2", AgentID: "coder"},
+	}
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:   "task-single",
+			Name: "single agent task",
+		},
+		AgentID: "coder",
+	}
+
+	ack := h.formatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
+
+	if strings.Contains(ack, "agents:") {
+		t.Error("agents line should not appear for single-agent task")
+	}
+}

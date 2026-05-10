@@ -554,6 +554,23 @@ func (s *Store) SubscribeMetrics() (<-chan *LiveMetricsSnapshot, func()) {
 	return ch, stop
 }
 
+// GetAverageStepDuration returns the average duration per step for similar tasks.
+// Returns 0 if no historical data is available.
+func (s *Store) GetAverageStepDuration(agentType string) time.Duration {
+	query := `
+	SELECT AVG(value) FROM metrics_live
+	WHERE metric_name = 'step.duration'
+	AND json_extract(tags, '$.agent_type') = ?
+	AND timestamp > datetime('now', '-24 hours')
+	`
+	var avgSecs float64
+	err := s.db.QueryRow(query, agentType).Scan(&avgSecs)
+	if err != nil || avgSecs <= 0 {
+		return 0
+	}
+	return time.Duration(avgSecs * float64(time.Second))
+}
+
 // notifySubscribers sends a snapshot to all subscribers.
 func (s *Store) notifySubscribers() {
 	s.subMu.RLock()

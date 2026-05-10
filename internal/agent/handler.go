@@ -8,21 +8,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/pkg/models"
 )
 
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
-	loop       *AgentLoop
-	dispatcher *Dispatcher // Optional: if set, routes through multi-agent dispatch
-	bus        *bus.MessageBus
-	logger     *slog.Logger
+	loop         *AgentLoop
+	dispatcher   *Dispatcher // Optional: if set, routes through multi-agent dispatch
+	bus          *bus.MessageBus
+	logger       *slog.Logger
+	metricsStore *metrics.Store // Optional: metrics store for duration estimates
 
 	// Worker tracking
 	workers   map[string]*Worker
@@ -717,6 +720,25 @@ func (h *ChatHandler) formatEnhancedAsyncTaskAck(
 	sb.WriteString(planLine + "\n")
 
 	sb.WriteString("\n")
+
+	// Detect agent diversity
+	agentSet := make(map[string]bool)
+	for _, step := range steps {
+		if step.AgentID != "" {
+			agentSet[step.AgentID] = true
+		}
+	}
+
+	// Add agent summary line if multiple agents
+	if len(agentSet) > 1 {
+		agents := make([]string, 0, len(agentSet))
+		for agent := range agentSet {
+			agents = append(agents, agent)
+		}
+		sort.Strings(agents)
+		sb.WriteString(fmt.Sprintf("**agents:** %s\n", strings.Join(agents, ", ")))
+	}
+
 	sb.WriteString("**subtasks:**\n")
 
 	displayLimit := 5
@@ -728,7 +750,11 @@ func (h *ChatHandler) formatEnhancedAsyncTaskAck(
 		if agentLabel == "" {
 			agentLabel = "agent"
 		}
-		sb.WriteString(fmt.Sprintf("- %s (%s)\n", strings.ToLower(step.Description), agentLabel))
+		desc := step.Description
+		if len(desc) > 50 {
+			desc = desc[:47] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("- %s (%s)\n", strings.ToLower(desc), agentLabel))
 	}
 
 	if len(steps) > displayLimit {
@@ -747,12 +773,21 @@ func (h *ChatHandler) fetchStepSummaries(taskID string) []TaskStepSummary {
 	return nil
 }
 
-// estimateDuration returns estimated duration based on step count.
+// estimateDuration returns estimated duration based on step count and historical data.
 func (h *ChatHandler) estimateDuration(taskID string, stepCount int) int {
 	if stepCount <= 0 {
 		return 0
 	}
-	return stepCount * 4 // 4 minutes per step average
+	if h.metricsStore != nil {
+		avgDuration := h.metricsStore.GetAverageStepDuration("orchestrator")
+		if avgDuration > 0 {
+			totalMin := int(avgDuration.Minutes()) * stepCount
+			if totalMin > 0 {
+				return totalMin
+			}
+		}
+	}
+	return stepCount * 4 // fallback: 4 minutes per step
 }
 
 // getPlanReference returns the plan reference for a task.
