@@ -14,8 +14,8 @@ type CompressionStage int
 const (
 	CompressionStageNone       CompressionStage = iota // No compression needed
 	CompressionStageWarning                             // Context is filling up; log a warning only
-	CompressionStageSummarize                           // Summarize old history (keep system + last 4)
-	CompressionStageAggressive                          // Aggressively compress (keep system + last 2)
+	CompressionStageSummarize                           // LLM-summarize old history, keep system + summary + last 4
+	CompressionStageAggressive                          // Drop low-importance messages (keep system + critical + last 4)
 	CompressionStageHardLimit                           // Drop old context entirely (keep system + last 2)
 )
 
@@ -238,7 +238,7 @@ func (c *ContextCompressor) Compress(ctx context.Context, messages []ChatMessage
 		}
 	}
 
-	// Stage 3: aggressive compression (keep system + last 2)
+	// Stage 3: aggressive compression (keep system + critical + last 4)
 	if utilization < c.config.Stage4HardLimitRatio {
 		c.stats.AggressiveEvents.Add(1)
 		c.stats.TotalCompressions.Add(1)
