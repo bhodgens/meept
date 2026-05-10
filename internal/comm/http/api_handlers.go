@@ -597,6 +597,49 @@ func (s *Server) handleCacheClear(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }
 
+// handleCacheInvalidate handles POST /api/v1/cache/invalidate.
+func (s *Server) handleCacheInvalidate(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Cache == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "cache service not available")
+		return
+	}
+
+	var req services.InvalidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Cache.Invalidate(r.Context(), req); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "invalidated"})
+}
+
+// handleCacheInspect handles GET /api/v1/cache/inspect.
+func (s *Server) handleCacheInspect(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Cache == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "cache service not available")
+		return
+	}
+
+	hash := r.URL.Query().Get("hash")
+	if hash == "" {
+		s.writeError(w, http.StatusBadRequest, "missing hash query parameter")
+		return
+	}
+
+	results, err := s.services.Cache.Inspect(r.Context(), hash)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, results)
+}
+
 // ===== Security Endpoints =====
 
 // handleSecurityCheck handles POST /api/v1/security/check.

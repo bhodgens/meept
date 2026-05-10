@@ -246,6 +246,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Cache endpoints
 	mux.HandleFunc("GET /api/v1/cache/stats", s.handleCacheStats)
 	mux.HandleFunc("POST /api/v1/cache/clear", s.handleCacheClear)
+	mux.HandleFunc("POST /api/v1/cache/invalidate", s.handleCacheInvalidate)
+	mux.HandleFunc("GET /api/v1/cache/inspect", s.handleCacheInspect)
 
 	// Security endpoints
 	mux.HandleFunc("POST /api/v1/security/check", s.handleSecurityCheck)

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -50,4 +51,53 @@ func (s *CacheService) Clear(ctx context.Context, req ClearCacheRequest) error {
 
 	s.cache.Clear()
 	return nil
+}
+
+// InvalidateRequest contains invalidation parameters.
+type InvalidateRequest struct {
+	FilePath string `json:"path,omitempty"`
+}
+
+// Invalidate removes cache entries for a given file path.
+func (s *CacheService) Invalidate(ctx context.Context, req InvalidateRequest) error {
+	if s.cache == nil {
+		return nil
+	}
+	if req.FilePath != "" {
+		s.cache.InvalidateByFile(ctx, req.FilePath)
+	}
+	return nil
+}
+
+// CacheInspectResult mirrors llm.InspectResult for HTTP serialization.
+type CacheInspectResult struct {
+	PromptHash string            `json:"prompt_hash"`
+	ModelID    string            `json:"model_id"`
+	CreatedAt  time.Time         `json:"created_at"`
+	ExpiresAt  time.Time         `json:"expires_at"`
+	HitCount   int               `json:"hit_count"`
+	FileHashes map[string]string `json:"file_hashes,omitempty"`
+	Source     string            `json:"source"`
+}
+
+// Inspect searches cache entries matching the given prompt hash.
+func (s *CacheService) Inspect(ctx context.Context, hash string) ([]CacheInspectResult, error) {
+	if s.cache == nil {
+		return nil, nil
+	}
+
+	results := s.cache.Inspect(hash)
+	out := make([]CacheInspectResult, len(results))
+	for i, r := range results {
+		out[i] = CacheInspectResult{
+			PromptHash: r.PromptHash,
+			ModelID:    r.ModelID,
+			CreatedAt:  r.CreatedAt,
+			ExpiresAt:  r.ExpiresAt,
+			HitCount:   r.HitCount,
+			FileHashes: r.FileHashes,
+			Source:     r.Source,
+		}
+	}
+	return out, nil
 }
