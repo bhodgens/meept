@@ -3,6 +3,8 @@ package llm
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -269,6 +271,97 @@ func (c *TokenCacheCoordinator) recordMetric(name string, value float64, key Cac
 		tags["agent_id"] = key.AgentID
 	}
 	c.metricsStore.Record(name, value, tags)
+}
+
+// InspectResult holds the details of a single inspected cache entry.
+type InspectResult struct {
+	PromptHash string
+	ModelID    string
+	Response   *Response
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	HitCount   int
+	FileHashes map[string]string
+	Source     string // "l1", "l2", or "l1+l2"
+}
+
+// Inspect searches both L1 and L2 caches for entries matching the given prompt hash.
+// It returns all matching entries across models and file hash combinations.
+func (c *TokenCacheCoordinator) Inspect(promptHash string) []InspectResult {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var results []InspectResult
+	seen := make(map[string]bool) // modelID+fileHashKey -> already added
+
+	// Search L2 first (authoritative, has all entries)
+	if c.l2Cache != nil {
+		for _, entry := range c.l2Cache.Inspect(promptHash) {
+			key := entry.ModelID + ":" + fileHashKey(entry.FileHashes)
+			if !seen[key] {
+				seen[key] = true
+				results = append(results, InspectResult{
+					PromptHash: promptHash,
+					ModelID:    entry.ModelID,
+					Response:   entry.Response,
+					CreatedAt:  entry.CreatedAt,
+					ExpiresAt:  entry.ExpiresAt,
+					HitCount:   entry.HitCount,
+					FileHashes: entry.FileHashes,
+					Source:     "l2",
+				})
+			}
+		}
+	}
+
+	// Search L1 for entries not already found in L2
+	for _, entry := range c.l1Cache.Inspect(promptHash) {
+		key := entry.ModelID + ":" + fileHashKey(entry.FileHashes)
+		if !seen[key] {
+			seen[key] = true
+			results = append(results, InspectResult{
+				PromptHash: promptHash,
+				ModelID:    entry.ModelID,
+				Response:   entry.Response,
+				CreatedAt:  entry.CreatedAt,
+				ExpiresAt:  entry.ExpiresAt,
+				HitCount:   entry.HitCount,
+				FileHashes: entry.FileHashes,
+				Source:     "l1",
+			})
+		} else {
+			// Entry exists in both; update source label
+			for i := range results {
+				if results[i].ModelID == entry.ModelID &&
+					fileHashKey(results[i].FileHashes) == fileHashKey(entry.FileHashes) {
+					results[i].Source = "l1+l2"
+					break
+				}
+			}
+		}
+	}
+
+	return results
+}
+
+// fileHashKey produces a deterministic key from a file hash map for deduplication.
+func fileHashKey(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(m[k])
+		b.WriteByte(';')
+	}
+	return b.String()
 }
 
 // Close closes the cache and releases resources.

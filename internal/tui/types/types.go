@@ -398,3 +398,22 @@ type CacheStatsResponse struct {
 	TotalHits   int     `json:"total_hits"`
 	HitRate     float64 `json:"hit_rate"`
 }
+
+// CacheInspectEntry represents a single cache entry returned by cache.inspect.
+type CacheInspectEntry struct {
+	PromptHash string            `json:"prompt_hash"`
+	ModelID    string            `json:"model_id"`
+	Response   string            `json:"response"`
+	CreatedAt  string            `json:"created_at"`
+	ExpiresAt  string            `json:"expires_at"`
+	HitCount   int               `json:"hit_count"`
+	FileHashes map[string]string `json:"file_hashes"`
+	Source     string            `json:"source"`
+}
+
+// CacheInspectResponse represents the response from the cache.inspect RPC method.
+type CacheInspectResponse struct {
+	Found   bool                `json:"found"`
+	Count   int                 `json:"count"`
+	Entries []CacheInspectEntry `json:"entries"`
+}

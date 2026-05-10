@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -28,6 +29,7 @@ func (h *CacheHandler) RegisterCacheMethods(server *Server) {
 	server.RegisterHandler("cache.stats", h.handleStats)
 	server.RegisterHandler("cache.clear", h.handleClear)
 	server.RegisterHandler("cache.invalidate", h.handleInvalidate)
+	server.RegisterHandler("cache.inspect", h.handleInspect)
 }
 
 // handleStats returns cache statistics.
@@ -88,5 +90,56 @@ func (h *CacheHandler) handleInvalidate(ctx context.Context, params json.RawMess
 	return map[string]any{
 		"status":   "invalidated",
 		"file":     req.FilePath,
+	}, nil
+}
+
+// handleInspect inspects cache entries matching a prompt hash.
+func (h *CacheHandler) handleInspect(ctx context.Context, params json.RawMessage) (any, error) {
+	if h.cache == nil {
+		return nil, fmt.Errorf("cache not enabled")
+	}
+
+	var req struct {
+		PromptHash string `json:"prompt_hash"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+
+	if req.PromptHash == "" {
+		return nil, fmt.Errorf("prompt_hash is required")
+	}
+
+	results := h.cache.Inspect(req.PromptHash)
+	if len(results) == 0 {
+		return map[string]any{
+			"found":  false,
+			"count":  0,
+			"entries": []any{},
+		}, nil
+	}
+
+	entries := make([]any, 0, len(results))
+	for _, r := range results {
+		responseContent := ""
+		if r.Response != nil {
+			responseContent = r.Response.Content
+		}
+		entries = append(entries, map[string]any{
+			"prompt_hash": r.PromptHash,
+			"model_id":    r.ModelID,
+			"response":    responseContent,
+			"created_at":  r.CreatedAt.Format(time.RFC3339),
+			"expires_at":  r.ExpiresAt.Format(time.RFC3339),
+			"hit_count":   r.HitCount,
+			"file_hashes": r.FileHashes,
+			"source":      r.Source,
+		})
+	}
+
+	return map[string]any{
+		"found":   true,
+		"count":   len(entries),
+		"entries": entries,
 	}, nil
 }

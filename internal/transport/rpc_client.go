@@ -40,6 +40,7 @@ func (a *rpcAdapter) GetTask(taskID string) (*types.Task, error)                
 func (a *rpcAdapter) CacheStats() (*types.CacheStatsResponse, error)    { return a.client.CacheStats() }
 func (a *rpcAdapter) CacheClear() error                                  { return a.client.CacheClear() }
 func (a *rpcAdapter) CacheInvalidate(filePath string) error              { return a.client.CacheInvalidate(filePath) }
+func (a *rpcAdapter) CacheInspect(promptHash string) (*types.CacheInspectResponse, error) { return a.client.CacheInspect(promptHash) }
 func (a *rpcAdapter) ListSessions() (*types.SessionListResponse, error)  { return a.client.ListSessions() }
 func (a *rpcAdapter) CreateSession(name string) (*types.Session, error)  { return a.client.CreateSession(name) }
 func (a *rpcAdapter) AttachSession(sessionID, clientID string) error     { return a.client.AttachSession(sessionID, clientID) }

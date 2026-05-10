@@ -33,6 +33,7 @@ type Client interface {
 	CacheStats() (*types.CacheStatsResponse, error)
 	CacheClear() error
 	CacheInvalidate(filePath string) error
+	CacheInspect(promptHash string) (*types.CacheInspectResponse, error)
 
 	// Session methods
 	ListSessions() (*types.SessionListResponse, error)

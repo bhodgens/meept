@@ -298,6 +298,19 @@ func (c *httpClient) CacheInvalidate(filePath string) error {
 	return err
 }
 
+// CacheInspect inspects cache entries matching a prompt hash.
+func (c *httpClient) CacheInspect(promptHash string) (*types.CacheInspectResponse, error) {
+	result, err := c.callAPI("cache.inspect", map[string]string{"prompt_hash": promptHash})
+	if err != nil {
+		return nil, err
+	}
+	var resp types.CacheInspectResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // Session methods
 
 // ListSessions lists all sessions.
