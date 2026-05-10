@@ -166,6 +166,8 @@ func (c *L1Cache) InvalidateByFile(filePath string) {
 	}
 
 	if evicted > 0 {
+		c.recordEvictionMetricBatch(evicted, "file_invalidation")
+		c.recordEntryCountMetric()
 		c.logger.Debug("L1 cache invalidated by file", "file", filePath, "evicted", evicted)
 	}
 }
@@ -283,6 +285,7 @@ func (c *L1Cache) evictLRU() {
 		delete(c.entries, lruKey)
 		c.stats.Evictions++
 		c.recordEvictionMetric()
+		c.recordEntryCountMetric()
 		c.logger.Debug("L1 cache LRU eviction", "key", lruKey[:min(16, len(lruKey))])
 	}
 }
@@ -316,12 +319,28 @@ func (c *L1Cache) SetMetricsStore(store *metrics.Store) {
 	c.metricsStore = store
 }
 
-// recordEvictionMetric records a cache eviction metric if metrics store is available.
+// recordEvictionMetric records a single LRU cache eviction metric if metrics store is available.
 func (c *L1Cache) recordEvictionMetric() {
 	if c.metricsStore == nil {
 		return
 	}
-	c.metricsStore.Record("cache.eviction", 1, map[string]string{"level": "l1"})
+	c.metricsStore.Record("cache.eviction", 1, map[string]string{"level": "l1", "reason": "lru"})
+}
+
+// recordEvictionMetricBatch records a batch eviction metric with a reason tag.
+func (c *L1Cache) recordEvictionMetricBatch(count int, reason string) {
+	if c.metricsStore == nil {
+		return
+	}
+	c.metricsStore.Record("cache.eviction", float64(count), map[string]string{"level": "l1", "reason": reason})
+}
+
+// recordEntryCountMetric records the current L1 entry count as a metric.
+func (c *L1Cache) recordEntryCountMetric() {
+	if c.metricsStore == nil {
+		return
+	}
+	c.metricsStore.Record("cache.entry_count", float64(len(c.entries)), map[string]string{"level": "l1"})
 }
 
 // cleanupExpired removes all expired entries.
@@ -340,6 +359,8 @@ func (c *L1Cache) cleanupExpired() {
 	}
 
 	if expired > 0 {
+		c.recordEvictionMetricBatch(expired, "ttl_expired")
+		c.recordEntryCountMetric()
 		c.logger.Debug("L1 cache cleanup", "expired", expired)
 	}
 }

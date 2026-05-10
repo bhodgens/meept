@@ -21,6 +21,15 @@ func getSlashCommands() []string {
 	return []string{"help", "new", "clear", "retry", "undo", "usage", "stop", "status", "vim", "session", "task"}
 }
 
+// LayoutMode determines how the TUI arranges panels based on terminal size.
+type LayoutMode int
+
+const (
+	LayoutCompact  LayoutMode = iota // < 80 cols: no sidebar, single panel
+	LayoutStandard                   // 80-120 cols: narrow sidebar (25 chars)
+	LayoutWide                       // > 120 cols: normal sidebar (35 chars)
+)
+
 // ViewType represents the different views in the TUI.
 type ViewType int
 
@@ -44,6 +53,7 @@ type App struct {
 	width        int
 	height       int
 	sidebarWidth int // cached for status bar width calculation
+	layoutMode   LayoutMode
 	styles       *Styles
 	rpc         *RPCClient
 	eventRPC    *RPCClient // Separate connection for event polling
@@ -269,6 +279,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 
+		// Calculate responsive layout based on terminal width
+		a.calculateLayout()
+
 		// Calculate reserved height for chrome (header + status bar)
 		chromeHeight := 1 // status bar
 		headerOffset := 0
@@ -277,15 +290,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			headerOffset = 2 // header line + newline
 		}
 
-		// Calculate sidebar width (30% of screen when visible, max 40 chars)
+		// Calculate sidebar width based on layout mode
 		a.sidebarWidth = 0
-		if a.sidebar.IsVisible() {
-			a.sidebarWidth = msg.Width * 30 / 100
-			if a.sidebarWidth > 40 {
-				a.sidebarWidth = 40
-			}
-			if a.sidebarWidth < 20 {
-				a.sidebarWidth = 20
+		if a.sidebar.IsVisible() && a.layoutMode != LayoutCompact {
+			switch a.layoutMode {
+			case LayoutStandard:
+				a.sidebarWidth = 25
+			case LayoutWide:
+				a.sidebarWidth = msg.Width * 30 / 100
+				if a.sidebarWidth > 35 {
+					a.sidebarWidth = 35
+				}
+				if a.sidebarWidth < 25 {
+					a.sidebarWidth = 25
+				}
 			}
 		}
 		a.sidebar.SetSize(a.sidebarWidth, msg.Height-chromeHeight)
@@ -366,6 +384,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalSessionPicker
 			a.sessionPicker.Show()
 			return a, a.sessionPicker.RefreshSessions()
+		}
+
+		// Check for Ctrl+P to open fuzzy finder
+		if msg.String() == "ctrl+p" {
+			a.activeModal = ModalFuzzyFinder
+			a.fuzzyFinder.Show()
+			return a, tea.Batch(a.fuzzyFinder.FetchSessions(), a.fuzzyFinder.FetchTasks())
 		}
 
 		// Global escape handler
@@ -546,6 +571,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SidebarDataMsg:
 		// Delegate to sidebar
 		return a, a.sidebar.Update(msg)
+
+	case FuzzyFinderSessionsMsg:
+		if a.fuzzyFinder != nil {
+			a.fuzzyFinder.SetSessions(msg.Sessions)
+		}
+		return a, nil
+
+	case FuzzyFinderTasksMsg:
+		if a.fuzzyFinder != nil {
+			a.fuzzyFinder.SetTasks(msg.Tasks)
+		}
+		return a, nil
 
 	case EventStreamTickMsg:
 		// Forward event stream tick to sidebar for polling
@@ -950,6 +987,34 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, cmd
 		}
+
+	case ModalFuzzyFinder:
+		action := a.fuzzyFinder.HandleKey(keyStr)
+		if !a.fuzzyFinder.Visible() {
+			a.activeModal = ModalNone
+		}
+		// Handle selection from fuzzy finder
+		if action == "select" {
+			if sess := a.fuzzyFinder.GetSelectedSession(); sess != nil {
+				// Switch to selected session
+				a.currentSession = sess
+				a.tasks.SetCurrentSession(sess.ID)
+				sessionCmd := a.chat.SetSession(sess)
+				a.statusMessage = fmt.Sprintf("Switched to: %s", sess.Name)
+				a.statusMessageTime = time.Now()
+				clearCmd := tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+					return StatusMessageClearMsg{}
+				})
+				return a, tea.Batch(sessionCmd, clearCmd)
+			}
+			if task := a.fuzzyFinder.GetSelectedTask(); task != nil {
+				// Switch to tasks view and select the task
+				a.currentView = ViewTasks
+				a.tasks.SetFilter(models.FilterAll)
+				return a, a.initCurrentView()
+			}
+		}
+		return a, nil
 	}
 
 	return a, nil
@@ -1223,6 +1288,26 @@ func (a *App) renderHeader() string {
 		Render(content)
 }
 
+// calculateLayout determines the layout mode based on terminal width.
+// Compact: < 80 cols (no sidebar, single panel)
+// Standard: 80-120 cols (narrow sidebar 25 chars)
+// Wide: > 120 cols (normal sidebar up to 35 chars)
+func (a *App) calculateLayout() {
+	switch {
+	case a.width < 80:
+		a.layoutMode = LayoutCompact
+	case a.width <= 120:
+		a.layoutMode = LayoutStandard
+	default:
+		a.layoutMode = LayoutWide
+	}
+
+	// Auto-hide sidebar in compact mode
+	if a.layoutMode == LayoutCompact && a.sidebar.IsVisible() {
+		a.sidebar.SetVisible(false)
+	}
+}
+
 // getWindowTitle returns the terminal title string for the tea.View WindowTitle field.
 func (a *App) getWindowTitle() string {
 	title := "meept"
@@ -1318,9 +1403,10 @@ func (a *App) renderStatusBar() string {
 func (a *App) getQuickActions() []string {
 	var actions []string
 
-	// Always show menu, sessions, and quit
+	// Always show menu, sessions, find, and quit
 	actions = append(actions, a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"))
 	actions = append(actions, a.styles.HelpKey.Render("^S")+" "+a.styles.HelpValue.Render("sessions"))
+	actions = append(actions, a.styles.HelpKey.Render("^P")+" "+a.styles.HelpValue.Render("find"))
 	actions = append(actions, a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"))
 
 	switch a.currentView {

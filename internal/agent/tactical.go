@@ -19,12 +19,13 @@ import (
 
 // StepJobPayload is the payload stored in a queue job for a task step.
 type StepJobPayload struct {
-	StepID             string   `json:"step_id"`
-	TaskID             string   `json:"task_id"`
-	Description        string   `json:"description"`
-	ToolHint           string   `json:"tool_hint,omitempty"`
-	MemoryRefs         []string `json:"memory_refs,omitempty"`
-	AccumulatedContext string   `json:"accumulated_context,omitempty"`
+	StepID               string   `json:"step_id"`
+	TaskID               string   `json:"task_id"`
+	Description          string   `json:"description"`
+	ToolHint             string   `json:"tool_hint,omitempty"`
+	MemoryRefs           []string `json:"memory_refs,omitempty"`
+	AccumulatedContext   string   `json:"accumulated_context,omitempty"`
+	ValidationRetryCount int      `json:"validation_retry_count,omitempty"`
 }
 
 // TacticalScheduler schedules ready steps as queue jobs and handles completion callbacks.
@@ -399,11 +400,78 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		validationErr := ts.validatorManager.ValidateStep(ctx, step)
 		if validationErr != nil {
 			ts.logger.Error("Validation failed", "step_id", step.ID, "error", validationErr)
-			// Mark step as needs_info to trigger human review
 			step.Validated = false
 			step.ValidationError = validationErr.Error()
+
+			// Determine max validation retries from policy (default 2)
+			maxRetries := 2
+			if ts.reviewManager != nil {
+				policy := ts.reviewManager.GetValidationPolicy()
+				if policy.MaxValidationLoops > 0 {
+					maxRetries = policy.MaxValidationLoops - 1 // MaxValidationLoops is total attempts; retries = attempts - 1
+				}
+			}
+			if maxRetries < 1 {
+				maxRetries = 1
+			}
+
+			if step.ValidationRetryCount < maxRetries {
+				// Re-queue step for validation retry
+				step.ValidationRetryCount++
+				ts.stepStore.Update(step) // Persist retry count
+
+				retryPayload := StepJobPayload{
+					StepID:               step.ID,
+					TaskID:               step.TaskID,
+					Description:          step.Description,
+					ToolHint:             step.ToolHint,
+					MemoryRefs:           step.MemoryRefs,
+					AccumulatedContext:   step.AccumulatedContext,
+					ValidationRetryCount: step.ValidationRetryCount,
+				}
+				retryJob, jobErr := queue.NewJob(queue.JobTypeProjectTask, retryPayload)
+				if jobErr != nil {
+					ts.logger.Error("Failed to create validation-retry job", "step_id", step.ID, "error", jobErr)
+					return fmt.Errorf("validation failed and retry job creation failed: %w", validationErr)
+				}
+				retryJob.WithTaskID(step.TaskID).WithAgentID(step.AgentID)
+
+				if enqueueErr := ts.queue.Enqueue(ctx, retryJob); enqueueErr != nil {
+					ts.logger.Error("Failed to enqueue validation-retry job", "step_id", step.ID, "error", enqueueErr)
+					return fmt.Errorf("validation failed and retry enqueue failed: %w", validationErr)
+				}
+
+				// Reset step state to scheduled for retry
+				if err := ts.stepStore.SetState(step.ID, task.StepScheduled); err != nil {
+					ts.logger.Error("Failed to reset step state for validation retry", "step_id", step.ID, "error", err)
+				}
+				if err := ts.stepStore.SetJobID(step.ID, retryJob.ID); err != nil {
+					ts.logger.Error("Failed to update step job_id for validation retry", "step_id", step.ID, "error", err)
+				}
+
+				ts.logger.Info("Validation retry enqueued",
+					"step_id", step.ID,
+					"retry_count", step.ValidationRetryCount,
+					"max_retries", maxRetries,
+				)
+				ts.publishEvent("task.validation_retry", map[string]any{
+					"task_id":     step.TaskID,
+					"step_id":     step.ID,
+					"retry_count": step.ValidationRetryCount,
+					"max_retries": maxRetries,
+					"error":       validationErr.Error(),
+				})
+				return nil // Don't proceed to completion; step will be retried
+			}
+
+			// Max retries exceeded - mark step as needs_info for human review
+			ts.logger.Warn("Validation max retries exceeded",
+				"step_id", step.ID,
+				"retry_count", step.ValidationRetryCount,
+				"max_retries", maxRetries,
+			)
 			ts.stepStore.Update(step) // Persist
-			return validationErr      // Don't proceed to completion
+			return validationErr // Don't proceed to completion
 		}
 		step.Validated = true
 		step.ValidationError = ""

@@ -83,7 +83,9 @@ type TaskStep struct {
 	MemoryRefs []string `json:"memory_refs,omitempty"`
 	// AccumulatedContext contains evidence/outputs from prior steps.
 	AccumulatedContext string `json:"accumulated_context,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	// ValidationRetryCount tracks how many times this step has been re-queued for validation retry.
+	ValidationRetryCount int `json:"validation_retry_count,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 

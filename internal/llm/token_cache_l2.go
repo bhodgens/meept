@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/pkg/sqlite"
 )
 
@@ -51,11 +52,12 @@ CREATE INDEX IF NOT EXISTS idx_token_cache_expires ON token_cache(expires_at);
 // It provides durable, process-spanning cache storage with file-aware
 // invalidation and TTL-based eviction.
 type L2Cache struct {
-	pool   *sqlite.Pool
-	config L2CacheConfig
-	mu     sync.RWMutex
-	logger *slog.Logger
-	stopCh chan struct{}
+	pool         *sqlite.Pool
+	config       L2CacheConfig
+	mu           sync.RWMutex
+	logger       *slog.Logger
+	stopCh       chan struct{}
+	metricsStore *metrics.Store
 }
 
 // NewL2Cache creates a new L2 SQLite-backed cache.
@@ -330,6 +332,8 @@ func (c *L2Cache) InvalidateByFile(ctx context.Context, filePath string) {
 
 	removed, _ := result.RowsAffected()
 	if removed > 0 {
+		c.recordEvictionMetric(removed, "file_invalidation")
+		c.recordEntryCountMetric()
 		c.logger.Debug("L2 invalidated by file", "file", filePath, "removed", removed)
 	}
 }
@@ -449,6 +453,34 @@ func (c *L2Cache) Start() {
 	}()
 }
 
+// SetMetricsStore sets the metrics store for recording eviction metrics.
+func (c *L2Cache) SetMetricsStore(store *metrics.Store) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metricsStore = store
+}
+
+// recordEvictionMetric records a cache eviction metric if metrics store is available.
+func (c *L2Cache) recordEvictionMetric(count int64, reason string) {
+	if c.metricsStore == nil {
+		return
+	}
+	c.metricsStore.Record("cache.eviction", float64(count), map[string]string{
+		"level":  "l2",
+		"reason": reason,
+	})
+}
+
+// recordEntryCountMetric records the current L2 entry count as a metric.
+func (c *L2Cache) recordEntryCountMetric() {
+	if c.metricsStore == nil {
+		return
+	}
+	c.metricsStore.Record("cache.entry_count", float64(c.Count()), map[string]string{
+		"level": "l2",
+	})
+}
+
 // Close stops the background cleanup and releases the connection pool.
 func (c *L2Cache) Close() error {
 	// Signal cleanup goroutine to stop
@@ -482,6 +514,8 @@ func (c *L2Cache) cleanupExpired() {
 
 	removed, _ := result.RowsAffected()
 	if removed > 0 {
+		c.recordEvictionMetric(removed, "ttl_expired")
+		c.recordEntryCountMetric()
 		c.logger.Debug("L2 cleanup removed expired entries", "count", removed)
 	}
 }

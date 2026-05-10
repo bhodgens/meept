@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -465,4 +466,264 @@ func TestTruncateStrFallback(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Parse
+// ---------------------------------------------------------------------------
+
+func TestParse_ValidGo(t *testing.T) {
+	skipIfNoGrammar(t, LangGo)
+
+	pm := NewParserManager(ParserConfig{CacheEnabled: false})
+	ctx := context.Background()
+
+	source := []byte(`package main
+
+import "fmt"
+
+func Hello(name string) string {
+	return "Hello, " + name
+}
+`)
+
+	result, err := pm.Parse(ctx, source, LangGo)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if result.Language != LangGo {
+		t.Errorf("expected language %q, got %q", LangGo, result.Language)
+	}
+
+	if result.RootNode.Type != "source_file" {
+		t.Errorf("expected root type %q, got %q", "source_file", result.RootNode.Type)
+	}
+
+	if len(result.Errors) > 0 {
+		t.Errorf("expected no parse errors, got: %v", result.Errors)
+	}
+
+	// Root node should have children (package, import, func)
+	if len(result.RootNode.Children) == 0 {
+		t.Error("expected root node to have children")
+	}
+}
+
+func TestParse_EmptySource(t *testing.T) {
+	skipIfNoGrammar(t, LangGo)
+
+	pm := NewParserManager(ParserConfig{CacheEnabled: false})
+	ctx := context.Background()
+
+	result, err := pm.Parse(ctx, []byte(""), LangGo)
+	if err != nil {
+		t.Fatalf("Parse of empty source failed: %v", err)
+	}
+
+	if result.Language != LangGo {
+		t.Errorf("expected language %q, got %q", LangGo, result.Language)
+	}
+}
+
+func TestParse_InvalidSource(t *testing.T) {
+	skipIfNoGrammar(t, LangGo)
+
+	pm := NewParserManager(ParserConfig{CacheEnabled: false})
+	ctx := context.Background()
+
+	result, err := pm.Parse(ctx, []byte("package main\nfunc ( { { {"), LangGo)
+	if err != nil {
+		t.Fatalf("Parse of invalid source returned error: %v", err)
+	}
+
+	// Invalid source should produce parse errors but not a nil result
+	if result == nil {
+		t.Fatal("expected non-nil result for invalid source")
+	}
+
+	if len(result.Errors) == 0 {
+		t.Error("expected parse errors for invalid Go source")
+	}
+}
+
+func TestParse_UnknownLanguage(t *testing.T) {
+	pm := NewParserManager(ParserConfig{CacheEnabled: false})
+	ctx := context.Background()
+
+	_, err := pm.Parse(ctx, []byte("hello"), LangUnknown)
+	if err == nil {
+		t.Error("expected error for unknown language")
+	}
+}
+
+func TestParse_UnsupportedLanguage(t *testing.T) {
+	// LangUnknown will fail at the language check, but let's verify
+	// that a non-existent grammar also fails properly.
+	pm := NewParserManager(ParserConfig{CacheEnabled: false})
+	ctx := context.Background()
+
+	// Use a language that has no registered grammar (empty string is LangUnknown)
+	_, err := pm.Parse(ctx, []byte("test"), "")
+	if err == nil {
+		t.Error("expected error for empty language")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DetectLanguage
+// ---------------------------------------------------------------------------
+
+func TestDetectLanguage(t *testing.T) {
+	tests := []struct {
+		filePath string
+		want     Language
+	}{
+		{"main.go", LangGo},
+		{"parser.go", LangGo},
+		{"script.py", LangPython},
+		{"app.ts", LangTypeScript},
+		{"index.tsx", LangTypeScript},
+		{"server.js", LangJavaScript},
+		{"app.jsx", LangJavaScript},
+		{"lib.rs", LangRust},
+		{"header.h", LangC},
+		{"module.cpp", LangCpp},
+		{"App.java", LangJava},
+		{"Gemfile", LangRuby},
+		{"config.yaml", LangYAML},
+		{"data.toml", LangTOML},
+		{"run.sh", LangBash},
+		{"index.html", LangHTML},
+		{"style.css", LangCSS},
+		{"query.sql", LangSQL},
+		{"Makefile", LangBash},
+		{"Dockerfile", LangBash},
+		{"Rakefile", LangRuby},
+		{"unknown.xyz", LangUnknown},
+		{"noextension", LangUnknown},
+		{".hidden", LangUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filePath, func(t *testing.T) {
+			got := DetectLanguage(tt.filePath)
+			if got != tt.want {
+				t.Errorf("DetectLanguage(%q) = %q, want %q", tt.filePath, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LanguageFromString
+// ---------------------------------------------------------------------------
+
+func TestLanguageFromString(t *testing.T) {
+	tests := []struct {
+		input string
+		want  Language
+	}{
+		{"go", LangGo},
+		{"golang", LangGo},
+		{"python", LangPython},
+		{"py", LangPython},
+		{"typescript", LangTypeScript},
+		{"ts", LangTypeScript},
+		{"javascript", LangJavaScript},
+		{"js", LangJavaScript},
+		{"rust", LangRust},
+		{"rs", LangRust},
+		{"c", LangC},
+		{"cpp", LangCpp},
+		{"c++", LangCpp},
+		{"cxx", LangCpp},
+		{"java", LangJava},
+		{"ruby", LangRuby},
+		{"rb", LangRuby},
+		{"yaml", LangYAML},
+		{"yml", LangYAML},
+		{"toml", LangTOML},
+		{"bash", LangBash},
+		{"sh", LangBash},
+		{"shell", LangBash},
+		{"html", LangHTML},
+		{"css", LangCSS},
+		{"sql", LangSQL},
+		{"unknown", LangUnknown},
+		{"", LangUnknown},
+		{"FORTRAN", LangUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := LanguageFromString(tt.input)
+			if got != tt.want {
+				t.Errorf("LanguageFromString(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SupportedLanguages / IsSupported
+// ---------------------------------------------------------------------------
+
+func TestSupportedLanguages(t *testing.T) {
+	langs := SupportedLanguages()
+	if len(langs) == 0 {
+		t.Error("expected at least one supported language")
+	}
+
+	// Check that common languages are in the list
+	found := map[Language]bool{}
+	for _, l := range langs {
+		found[l] = true
+	}
+
+	for _, expected := range []Language{LangGo, LangPython, LangTypeScript, LangRust, LangC} {
+		if !found[expected] {
+			t.Errorf("expected %q in supported languages", expected)
+		}
+	}
+}
+
+func TestIsSupported(t *testing.T) {
+	if !IsSupported(LangGo) {
+		t.Error("expected Go to be supported")
+	}
+	if !IsSupported(LangPython) {
+		t.Error("expected Python to be supported")
+	}
+	if IsSupported(LangUnknown) {
+		t.Error("expected LangUnknown to not be supported")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ParserManager configuration
+// ---------------------------------------------------------------------------
+
+func TestNewParserManager(t *testing.T) {
+	cfg := DefaultParserConfig()
+	if !cfg.CacheEnabled {
+		t.Error("default config should have cache enabled")
+	}
+	if cfg.CacheMaxSize != 100 {
+		t.Errorf("default cache max size = %d, want 100", cfg.CacheMaxSize)
+	}
+	if cfg.CacheTTL != 5*60*1000000000 {
+		t.Errorf("default cache TTL = %v, want 5m", cfg.CacheTTL)
+	}
+
+	pm := NewParserManager(cfg)
+	if pm == nil {
+		t.Fatal("expected non-nil ParserManager")
+	}
+}
+
+func TestParserManager_CacheOperations(t *testing.T) {
+	pm := NewParserManager(ParserConfig{CacheEnabled: true, CacheMaxSize: 10, CacheTTL: 0})
+	pm.InvalidateCache("nonexistent.go")   // should not panic
+	pm.ClearCache()                        // should not panic
 }

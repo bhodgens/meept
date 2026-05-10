@@ -907,21 +907,16 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		} else {
 			// Check if the reply is an async task ack
 			if isAsyncAck, taskID, taskMessage := parseAsyncAck(msg.Reply); isAsyncAck {
-				// Render enhanced markdown ACK as assistant message for proper markdown rendering
-				if strings.HasPrefix(strings.TrimSpace(msg.Reply), "## starting task") {
-					m.addMessage("assistant", msg.Reply)
-				} else {
-					// Legacy JSON ACK - render as detached task card
-					content := fmt.Sprintf("┌ task detached ─────────────────────────────┐\n"+
-						"│ %s\n"+
-						"│ Task ID: %s\n"+
-						"│ View progress: [ctrl+x 2] tasks\n"+
-						"└─────────────────────────────────────────────┘",
-						types.TruncateString(taskMessage, 45),
-						types.TruncateString(taskID, 40),
-					)
-					m.addMessage("system", content)
-				}
+				// Render as a detached task message
+				content := fmt.Sprintf("┌ task detached ─────────────────────────────┐\n"+
+					"│ %s\n"+
+					"│ Task ID: %s\n"+
+					"│ View progress: [ctrl+x 2] tasks\n"+
+					"└─────────────────────────────────────────────┘",
+					types.TruncateString(taskMessage, 45),
+					types.TruncateString(taskID, 40),
+				)
+				m.addMessage("system", content)
 			} else if result := parseTaskResult(msg.Reply); result != nil {
 				// Render as a task result message
 				var content string
@@ -1472,10 +1467,18 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 func (m *ChatModel) updateViewport() {
 	var content strings.Builder
 
-	separator := m.separatorStyle.Render(strings.Repeat("─", m.width-6))
+	thinSep := m.separatorStyle.Render(strings.Repeat("─", m.width-6))
+
+	// Turn separator: a more visible line with turn number
+	turnSepStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#374151"))
+	turnLabelStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#6B7280")).
+		Bold(true)
 
 	selectedStartLine := -1
 	currentLine := 0
+	turnNumber := 0
 
 	for i, msg := range m.messages {
 		var style lipgloss.Style
@@ -1495,6 +1498,39 @@ func (m *ChatModel) updateViewport() {
 		if isSelected {
 			selectedStartLine = currentLine
 			style = style.Background(lipgloss.Color("#374151"))
+		}
+
+		// Message threading: user messages and system messages that follow a user
+		// message start a new conversation turn. Consecutive assistant/system
+		// messages belong to the same turn.
+		isNewTurn := false
+		if msg.Role == "user" {
+			isNewTurn = true
+		} else if msg.Role == "system" {
+			// System message starts a new turn only if the previous message
+			// was not also a system message
+			if i == 0 || m.messages[i-1].Role != "system" {
+				isNewTurn = true
+			}
+		}
+
+		// Add turn separator before new turns (except the very first message)
+		if isNewTurn && i > 0 {
+			turnNumber++
+			turnLabel := turnLabelStyle.Render(fmt.Sprintf(" turn %d ", turnNumber))
+			sepWidth := m.width - 6 - lipgloss.Width(turnLabel)
+			if sepWidth < 10 {
+				sepWidth = 10
+			}
+			turnSep := turnSepStyle.Render(strings.Repeat("─", sepWidth))
+			content.WriteString(turnLabel + turnSep)
+			content.WriteString("\n")
+			currentLine++
+		} else if i > 0 && !isNewTurn {
+			// Thin separator between messages in the same turn
+			content.WriteString(thinSep)
+			content.WriteString("\n")
+			currentLine++
 		}
 
 		// Get message content (handles collapse state)
@@ -1546,13 +1582,6 @@ func (m *ChatModel) updateViewport() {
 				Italic(true).
 				Render("  [expanded]")
 			content.WriteString(indicator)
-			content.WriteString("\n")
-			currentLine++
-		}
-
-		// Add separator between messages
-		if i < len(m.messages)-1 {
-			content.WriteString(separator)
 			content.WriteString("\n")
 			currentLine++
 		}
@@ -2113,20 +2142,11 @@ func (m *ChatModel) isClickInViewportArea(mouse tea.Mouse) bool {
 		mouse.X >= 0 && mouse.X <= m.width
 }
 
-// parseAsyncAck checks if a reply is an async task acknowledgment.
-// Supports both markdown format ("## starting task") and legacy JSON format.
+// parseAsyncAck checks if a reply is an async task acknowledgment JSON.
 // Returns (isAsync, taskID, message).
 func parseAsyncAck(reply string) (bool, string, string) {
+	// Quick check: must start with { to be JSON
 	trimmed := strings.TrimSpace(reply)
-
-	// Try markdown format: "## starting task"
-	if strings.HasPrefix(trimmed, "## starting task") {
-		taskID := extractMarkdownTaskID(trimmed)
-		taskMsg := extractMarkdownTaskMessage(trimmed)
-		return true, taskID, taskMsg
-	}
-
-	// Try JSON format (legacy)
 	if !strings.HasPrefix(trimmed, "{") {
 		return false, "", ""
 	}
@@ -2143,39 +2163,6 @@ func parseAsyncAck(reply string) (bool, string, string) {
 		return false, "", ""
 	}
 	return true, ack.TaskID, ack.Message
-}
-
-// extractMarkdownTaskID extracts the task ID from a markdown ACK.
-// Looks for **id:** `task-xxx` pattern.
-func extractMarkdownTaskID(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "**id:**") {
-			// Extract backtick-enclosed ID
-			start := strings.Index(line, "`")
-			if start == -1 {
-				continue
-			}
-			end := strings.Index(line[start+1:], "`")
-			if end == -1 {
-				continue
-			}
-			return line[start+1 : start+1+end]
-		}
-	}
-	return ""
-}
-
-// extractMarkdownTaskMessage extracts the task name from a markdown ACK.
-// Looks for **task:** line and returns the task description.
-func extractMarkdownTaskMessage(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "**task:**") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "**task:**"))
-		}
-	}
-	return "task started"
 }
 
 // taskResultInfo holds parsed task completion/failure info.

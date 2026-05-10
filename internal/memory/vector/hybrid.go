@@ -4,22 +4,34 @@ package vector
 import (
 	"context"
 	"fmt"
-
-	"github.com/caimlas/meept/internal/memory"
 )
+
+// KeywordSearcher is an interface for keyword-based memory search.
+// This avoids an import cycle with the memory package.
+type KeywordSearcher interface {
+	SearchKeyword(ctx context.Context, query string, limit int) ([]KeywordResult, error)
+}
+
+// KeywordResult represents a result from keyword search.
+type KeywordResult struct {
+	ID            string
+	Content       string
+	Metadata      map[string]any
+	RelevanceScore float64
+}
 
 // HybridSearcher combines keyword (FTS) and vector similarity search.
 type HybridSearcher struct {
-	vectorStore *Store
-	memManager  *memory.Manager
-	alpha       float64 // Weight for vector similarity (0-1)
+	vectorStore    *Store
+	keywordSearcher KeywordSearcher
+	alpha          float64 // Weight for vector similarity (0-1)
 }
 
 // HybridSearcherConfig holds configuration for the hybrid searcher.
 type HybridSearcherConfig struct {
-	VectorStore *Store
-	MemManager  *memory.Manager
-	Alpha       float64 // Weight for vector similarity: 0 = pure keyword, 1 = pure vector
+	VectorStore     *Store
+	KeywordSearcher KeywordSearcher
+	Alpha           float64 // Weight for vector similarity: 0 = pure keyword, 1 = pure vector
 }
 
 // NewHybridSearcher creates a new hybrid searcher.
@@ -27,17 +39,17 @@ func NewHybridSearcher(cfg HybridSearcherConfig) (*HybridSearcher, error) {
 	if cfg.VectorStore == nil {
 		return nil, fmt.Errorf("vector store is required")
 	}
-	if cfg.MemManager == nil {
-		return nil, fmt.Errorf("memory manager is required")
+	if cfg.KeywordSearcher == nil {
+		return nil, fmt.Errorf("keyword searcher is required")
 	}
 	if cfg.Alpha < 0 || cfg.Alpha > 1 {
 		cfg.Alpha = 0.5 // Default to equal weight
 	}
 
 	return &HybridSearcher{
-		vectorStore: cfg.VectorStore,
-		memManager:  cfg.MemManager,
-		alpha:       cfg.Alpha,
+		vectorStore:    cfg.VectorStore,
+		keywordSearcher: cfg.KeywordSearcher,
+		alpha:          cfg.Alpha,
 	}, nil
 }
 
@@ -54,12 +66,9 @@ type HybridResult struct {
 // Search performs a hybrid search combining keyword and vector similarity.
 func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([]HybridResult, error) {
 	// Get keyword search results
-	keywordResults, err := h.memManager.Search(ctx, memory.MemoryQuery{
-		Query: query,
-		Limit: limit * 2, // Fetch more to re-rank
-	})
+	keywordResults, err := h.keywordSearcher.SearchKeyword(ctx, query, limit*2)
 	if err != nil {
-		keywordResults = []memory.MemoryResult{}
+		keywordResults = []KeywordResult{}
 	}
 
 	// Get vector search results
@@ -71,7 +80,7 @@ func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([
 	// Build score maps
 	keywordScores := make(map[string]float64)
 	for _, r := range keywordResults {
-		keywordScores[r.Memory.ID] = r.RelevanceScore
+		keywordScores[r.ID] = r.RelevanceScore
 	}
 
 	vectorScores := make(map[string]float64)
@@ -84,10 +93,10 @@ func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([
 
 	// Add keyword results
 	for _, r := range keywordResults {
-		combined[r.Memory.ID] = &HybridResult{
-			MemoryID:     r.Memory.ID,
-			Content:      r.Memory.Content,
-			Metadata:     r.Memory.Metadata,
+		combined[r.ID] = &HybridResult{
+			MemoryID:     r.ID,
+			Content:      r.Content,
+			Metadata:     r.Metadata,
 			KeywordScore: r.RelevanceScore,
 			VectorScore:  0,
 		}
@@ -121,22 +130,16 @@ func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([
 
 	// Calculate combined scores
 	for _, r := range combined {
-		// Normalize scores to 0-1 range if needed
 		kwScore := r.KeywordScore
 		vecScore := r.VectorScore
-
-		// Combined score: weighted average
 		r.CombinedScore = (1-h.alpha)*kwScore + h.alpha*vecScore
 	}
 
-	// Convert to slice and sort by combined score
+	// Convert to slice and sort by combined score descending
 	results := make([]HybridResult, 0, len(combined))
 	for _, r := range combined {
 		results = append(results, *r)
 	}
-
-	// Sort by combined score descending
-	// Using a simple sort here
 	for i := 0; i < len(results); i++ {
 		for j := i + 1; j < len(results); j++ {
 			if results[j].CombinedScore > results[i].CombinedScore {
@@ -159,11 +162,8 @@ func (h *HybridSearcher) SemanticOnly(ctx context.Context, query string, limit i
 }
 
 // KeywordOnly performs keyword-only search (FTS).
-func (h *HybridSearcher) KeywordOnly(ctx context.Context, query string, limit int) ([]memory.MemoryResult, error) {
-	return h.memManager.Search(ctx, memory.MemoryQuery{
-		Query: query,
-		Limit: limit,
-	})
+func (h *HybridSearcher) KeywordOnly(ctx context.Context, query string, limit int) ([]KeywordResult, error) {
+	return h.keywordSearcher.SearchKeyword(ctx, query, limit)
 }
 
 // SetAlpha changes the weighting factor for hybrid search.

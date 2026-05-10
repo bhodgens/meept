@@ -16,7 +16,7 @@ import (
 // Consolidator compacts and summarizes old memories.
 // It performs:
 // 1. Fetching old episodic memories (older than a configurable threshold)
-// 2. Grouping them by date and topic
+// 2. Grouping them by date, topic, and semantic similarity
 // 3. Creating summary memories and archiving the originals
 // 4. Identifying and removing duplicate task memories
 type Consolidator struct {
@@ -24,6 +24,7 @@ type Consolidator struct {
 	backend  ConsolidationBackend
 	logger   *slog.Logger
 	llm      llm.Chatter // optional: if nil, falls back to date-based grouping
+	embedder EmbeddingProvider // optional: if set, enables semantic similarity clustering
 	mu       sync.Mutex
 	running  bool
 	lastRun  *time.Time
@@ -42,6 +43,10 @@ type ConsolidatorConfig struct {
 	// LLM is an optional chat client used for intelligent summarization.
 	// If nil, the consolidator falls back to naive date-based grouping.
 	LLM llm.Chatter
+	// Embedder is an optional embedding provider for semantic similarity clustering.
+	// If set, MergeRelated will cluster memories by embedding similarity before
+	// falling back to LLM or date-based grouping.
+	Embedder EmbeddingProvider
 }
 
 // NewConsolidator creates a new consolidator.
@@ -54,6 +59,7 @@ func NewConsolidator(cfg ConsolidatorConfig) *Consolidator {
 		backend:  cfg.Backend,
 		logger:   cfg.Logger,
 		llm:      cfg.LLM,
+		embedder: cfg.Embedder,
 		stopChan: make(chan struct{}),
 	}
 }
@@ -335,13 +341,31 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 
 // MergeRelated groups memories into consolidated summaries.
 //
-// When an LLM client is configured, semantic grouping is used.
-// Otherwise, the implementation groups strictly by date (calendar day).
+// When an embedding provider is configured, memories are first clustered by
+// semantic similarity. Each cluster is then either summarized by the LLM (if
+// available) or by date-based grouping.
 //
-// MEM-17 DEFERRED: Without LLM, only groups by calendar day rather than
-// semantic similarity. Fix requires implementing topic-aware non-LLM
-// grouping (e.g., keyword-based TF-IDF clustering).
+// When no embedder is set but an LLM client is configured, LLM-based topic
+// grouping is used. Otherwise, the implementation groups strictly by date
+// (calendar day).
 func (c *Consolidator) MergeRelated(ctx context.Context, memories []MemoryResult) ([]Summary, error) {
+	if len(memories) == 0 {
+		return nil, nil
+	}
+
+	// Strategy 1: Embedding-based semantic clustering + LLM summarization.
+	if c.embedder != nil {
+		clusters, err := ClusterBySimilarityFromResults(ctx, memories, 0.7, c.embedder, c.logger)
+		if err != nil {
+			c.logger.Warn("semantic clustering failed, falling back to LLM/date grouping",
+				"error", err,
+			)
+		} else {
+			return c.summarizeClusters(ctx, clusters)
+		}
+	}
+
+	// Strategy 2: LLM-based topic grouping.
 	if c.llm != nil {
 		summaries, err := c.summarizeWithLLM(ctx, memories)
 		if err != nil {
@@ -352,7 +376,79 @@ func (c *Consolidator) MergeRelated(ctx context.Context, memories []MemoryResult
 		}
 		return summaries, nil
 	}
+
+	// Strategy 3: Date-based grouping (fallback).
 	return c.summarizeByDate(memories), nil
+}
+
+// summarizeClusters converts clusters of Memory into Summary objects.
+// Each cluster becomes one Summary. If the LLM is available, it generates
+// a semantic topic label and summary text; otherwise it falls back to
+// concatenating snippets.
+func (c *Consolidator) summarizeClusters(ctx context.Context, clusters [][]Memory) ([]Summary, error) {
+	var summaries []Summary
+
+	for _, cluster := range clusters {
+		if len(cluster) == 0 {
+			continue
+		}
+
+		ids := make([]string, 0, len(cluster))
+		for _, m := range cluster {
+			if m.ID != "" {
+				ids = append(ids, m.ID)
+			}
+		}
+
+		// Build MemoryResult slice for LLM summarization.
+		results := make([]MemoryResult, len(cluster))
+		for i, m := range cluster {
+			results[i] = MemoryResult{Memory: m}
+		}
+
+		if c.llm != nil {
+			llmSummaries, err := c.summarizeWithLLM(ctx, results)
+			if err == nil && len(llmSummaries) > 0 {
+				// Merge LLM summaries from this cluster into the output.
+				summaries = append(summaries, llmSummaries...)
+				continue
+			}
+			c.logger.Debug("LLM summarization for cluster failed, using snippet fallback",
+				"error", err,
+			)
+		}
+
+		// Fallback: build a snippet-based summary from the cluster.
+		var snippets []string
+		totalChars := 0
+		for _, m := range cluster {
+			snippet := m.Content
+			if len(snippet) > 200 {
+				snippet = snippet[:200]
+			}
+			snippet = strings.ReplaceAll(snippet, "\n", " ")
+			snippet = strings.TrimSpace(snippet)
+			if snippet != "" {
+				snippets = append(snippets, snippet)
+				totalChars += len(snippet)
+			}
+			if totalChars > 2000 {
+				snippets = append(snippets, fmt.Sprintf("... and %d more", len(cluster)-len(snippets)))
+				break
+			}
+		}
+
+		summaryText := fmt.Sprintf("Semantic cluster (%d items): %s",
+			len(cluster), strings.Join(snippets, "; "))
+
+		summaries = append(summaries, Summary{
+			Topic:   fmt.Sprintf("cluster-%d", len(summaries)),
+			Summary: summaryText,
+			IDs:     ids,
+		})
+	}
+
+	return summaries, nil
 }
 
 // summarizeWithLLM sends memories to the LLM for intelligent topic-based

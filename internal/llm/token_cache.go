@@ -127,6 +127,10 @@ func NewTokenCacheCoordinatorWithMetrics(config CacheConfig, metricsStore *metri
 		if err != nil {
 			return nil, err
 		}
+		// Wire metrics store to L2 for eviction metrics
+		if metricsStore != nil {
+			l2.SetMetricsStore(metricsStore)
+		}
 	}
 
 	coordinator := &TokenCacheCoordinator{
@@ -279,6 +283,9 @@ func (c *TokenCacheCoordinator) SetMetricsStore(store *metrics.Store) {
 	defer c.mu.Unlock()
 	c.metricsStore = store
 	c.l1Cache.SetMetricsStore(store)
+	if c.l2Cache != nil {
+		c.l2Cache.SetMetricsStore(store)
+	}
 }
 
 // recordMetric records a cache metric if metrics store is available.

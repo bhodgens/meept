@@ -1823,6 +1823,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	systemPrompt := l.buildSystemPromptWithContextAndSkills(ctx, conv, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
+	// Add anchor message for step context preservation during summarization.
+	// This ensures important task execution context survives context pruning.
+	if conv != nil {
+		conv.AddAnchorMessage(llm.RoleSystem, "[step-context] Current task execution context - preserve during summarization")
+	}
+
 	// Build user message from task
 	userMessage := l.buildTaskMessage(t)
 	conv.AddUserMessage(userMessage)

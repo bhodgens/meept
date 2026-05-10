@@ -19,7 +19,7 @@ type TCPTransport struct {
 
 // NewTCPTransport creates a transport by connecting to a TCP endpoint.
 func NewTCPTransport(host string, port int, timeout time.Duration) (*TCPTransport, error) {
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 
 	var conn net.Conn
 	var err error
