@@ -29,8 +29,12 @@ func (s *CacheService) Stats(ctx context.Context) (*CacheStatsResponse, error) {
 		return &CacheStatsResponse{}, nil
 	}
 
-	// TODO: Get actual stats from cache coordinator
-	return &CacheStatsResponse{}, nil
+	stats := s.cache.Stats()
+	return &CacheStatsResponse{
+		Hits:   int64(stats.Hits),
+		Misses: int64(stats.Misses),
+		Size:   stats.EntryCount,
+	}, nil
 }
 
 // ClearRequest contains clear parameters.
@@ -40,6 +44,10 @@ type ClearCacheRequest struct {
 
 // Clear removes cached entries.
 func (s *CacheService) Clear(ctx context.Context, req ClearCacheRequest) error {
-	// TODO: Implement cache clear
+	if s.cache == nil {
+		return nil
+	}
+
+	s.cache.Clear()
 	return nil
 }
