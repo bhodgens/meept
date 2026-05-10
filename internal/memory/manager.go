@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/security"
 )
@@ -52,6 +53,9 @@ type Manager struct {
 	sanitizer    *security.InputSanitizer
 	securityCfg  config.MemorySecurityConfig
 
+	// LLM client for intelligent summarization (optional; nil falls back to date-based grouping)
+	llm llm.Chatter
+
 	// Prefetch cache and service for automatic context retrieval (Hermes pattern)
 	prefetchCache    sync.Map // map[string]string - query -> cached context
 	prefetchQueue    chan prefetchRequest
@@ -79,6 +83,9 @@ type ManagerConfig struct {
 	Sanitizer *security.InputSanitizer
 	// SecurityConfig is the memory security configuration.
 	SecurityConfig config.MemorySecurityConfig
+	// LLM is an optional chat client used for intelligent memory summarization.
+	// If nil, the consolidator falls back to naive date-based grouping.
+	LLM llm.Chatter
 }
 
 // NewManager creates a new memory manager.
@@ -93,6 +100,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		logger:         cfg.Logger,
 		sanitizer:      cfg.Sanitizer,
 		securityCfg:    cfg.SecurityConfig,
+		llm:            cfg.LLM,
 	}
 }
 
@@ -179,6 +187,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		m.consolidator = NewConsolidator(ConsolidatorConfig{
 			Manager: m,
 			Logger:  m.logger.With("subsystem", "consolidator"),
+			LLM:     m.llm,
 		})
 	}
 
