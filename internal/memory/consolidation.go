@@ -560,25 +560,127 @@ func (r *SummarizeRequest) ToJSON() string {
 	return string(data)
 }
 
-// ParseSummarizeResponse parses an LLM response into summaries.
-func ParseSummarizeResponse(content string) ([]Summary, error) {
-	// Strip potential markdown fences
-	content = strings.TrimSpace(content)
-	if strings.HasPrefix(content, "```") {
-		lines := strings.SplitN(content, "\n", 2)
-		if len(lines) > 1 {
-			content = lines[1]
+// extractJSONFromFences finds JSON inside markdown code fences anywhere in the text.
+// It tries ```json fences first, then generic ``` fences.
+func extractJSONFromFences(content string) string {
+	// Try ```json fences first
+	const jsonFence = "```json"
+	idx := strings.Index(content, jsonFence)
+	if idx != -1 {
+		after := content[idx+len(jsonFence):]
+		closeIdx := strings.Index(after, "```")
+		if closeIdx != -1 {
+			candidate := strings.TrimSpace(after[:closeIdx])
+			if json.Valid([]byte(candidate)) {
+				return candidate
+			}
 		}
 	}
-	if strings.HasSuffix(content, "```") {
-		content = strings.TrimSuffix(content, "```")
+
+	// Try generic ``` fences
+	const genericFence = "```"
+	idx = strings.Index(content, genericFence)
+	if idx != -1 {
+		after := content[idx+len(genericFence):]
+		// Skip language tag line if present
+		if newlineIdx := strings.Index(after, "\n"); newlineIdx != -1 {
+			after = after[newlineIdx+1:]
+		}
+		closeIdx := strings.Index(after, genericFence)
+		if closeIdx != -1 {
+			candidate := strings.TrimSpace(after[:closeIdx])
+			if json.Valid([]byte(candidate)) {
+				return candidate
+			}
+		}
 	}
+
+	return ""
+}
+
+// extractJSONArray finds the first valid JSON array in text by bracket matching.
+func extractJSONArray(content string) string {
+	start := strings.Index(content, "[")
+	if start == -1 {
+		return ""
+	}
+
+	depth := 0
+	inString := false
+	escape := false
+
+	for i := start; i < len(content); i++ {
+		ch := content[i]
+
+		if escape {
+			escape = false
+			continue
+		}
+
+		if ch == '\\' {
+			if inString {
+				escape = true
+			}
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		switch ch {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				candidate := content[start : i+1]
+				if json.Valid([]byte(candidate)) {
+					return candidate
+				}
+				// Continue searching after this point
+				rest := content[i+1:]
+				next := extractJSONArray(rest)
+				if next != "" {
+					return next
+				}
+				return ""
+			}
+		}
+	}
+	return ""
+}
+
+// ParseSummarizeResponse parses an LLM response into summaries using a
+// multi-strategy approach that handles fenced JSON, prose-wrapped JSON,
+// and bare JSON arrays.
+func ParseSummarizeResponse(content string) ([]Summary, error) {
 	content = strings.TrimSpace(content)
 
+	// Strategy 1: Direct JSON parse (fastest path for clean responses)
 	var summaries []Summary
-	if err := json.Unmarshal([]byte(content), &summaries); err != nil {
-		return nil, fmt.Errorf("failed to parse summaries: %w", err)
+	if err := json.Unmarshal([]byte(content), &summaries); err == nil {
+		return summaries, nil
 	}
 
-	return summaries, nil
+	// Strategy 2: Extract from markdown code fences (anywhere in text)
+	if extracted := extractJSONFromFences(content); extracted != "" {
+		if err := json.Unmarshal([]byte(extracted), &summaries); err == nil {
+			return summaries, nil
+		}
+	}
+
+	// Strategy 3: Find JSON array via bracket matching
+	if extracted := extractJSONArray(content); extracted != "" {
+		if err := json.Unmarshal([]byte(extracted), &summaries); err == nil {
+			return summaries, nil
+		}
+	}
+
+	return nil, fmt.Errorf("failed to parse summaries from LLM response: no valid JSON array found")
 }

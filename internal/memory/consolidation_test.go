@@ -269,3 +269,81 @@ func TestNewConsolidator_WithoutLLM(t *testing.T) {
 		t.Error("expected LLM to be nil on Consolidator")
 	}
 }
+
+func TestParseSummarizeResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantLen int
+		wantErr bool
+	}{
+		{
+			name:    "clean JSON array",
+			input:   `[{"topic":"test","summary":"s","ids":["1"]}]`,
+			wantLen: 1,
+		},
+		{
+			name:    "fenced with json tag",
+			input:   "```json\n[{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}]\n```",
+			wantLen: 1,
+		},
+		{
+			name:    "prose before fence",
+			input:   "Here are the summaries:\n\n```json\n[{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}]\n```\n",
+			wantLen: 1,
+		},
+		{
+			name:    "prose before and after fence",
+			input:   "Sure, here you go:\n```json\n[{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}]\n```\nHope that helps!",
+			wantLen: 1,
+		},
+		{
+			name:    "bare JSON in prose",
+			input:   "The result is [{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}] as requested.",
+			wantLen: 1,
+		},
+		{
+			name:    "multiple summaries",
+			input:   "```json\n[{\"topic\":\"a\",\"summary\":\"sa\",\"ids\":[\"1\"]},{\"topic\":\"b\",\"summary\":\"sb\",\"ids\":[\"2\"]}]\n```",
+			wantLen: 2,
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "no JSON at all",
+			input:   "I couldn't summarize those memories.",
+			wantErr: true,
+		},
+		{
+			name:    "generic fence without language tag",
+			input:   "```\n[{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}]\n```",
+			wantLen: 1,
+		},
+		{
+			name:    "fenced with trailing whitespace",
+			input:   "```json\n[{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}]  \n```  ",
+			wantLen: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ParseSummarizeResponse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error for invalid input")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(result) != tt.wantLen {
+				t.Errorf("got %d summaries, want %d", len(result), tt.wantLen)
+			}
+		})
+	}
+}
