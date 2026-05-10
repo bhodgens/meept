@@ -202,6 +202,16 @@ type LLMContextFirewallConfig struct {
 	// ModelContextLimit overrides the model's ContextLimit for the compressor.
 	// When zero, model.ContextLimit is used.
 	ModelContextLimit int `toml:"model_context_limit" json:"model_context_limit"`
+	// HierarchicalSummarization enables recursive re-summarization where
+	// summaries that exceed SummaryLevelThreshold tokens are themselves
+	// summarized at the next level up to MaxSummaryLevel.
+	HierarchicalSummarization bool `toml:"hierarchical_summarization" json:"hierarchical_summarization"`
+	// MaxSummaryLevel is the maximum recursion depth for hierarchical
+	// summarization (default 3).
+	MaxSummaryLevel int `toml:"max_summary_level" json:"max_summary_level"`
+	// SummaryLevelThreshold is the token count at which a summary is
+	// re-summarized at the next level (default 500).
+	SummaryLevelThreshold int `toml:"summary_level_threshold" json:"summary_level_threshold"`
 }
 
 // LLMMetricsConfig configures HTTP-level metrics collection.
@@ -883,7 +893,9 @@ func DefaultConfig() *Config {
 				WrapUpThreshold:        0.50,
 				HardLimit:              0.80,
 				DropContextOnHardLimit: true,
-				ProactiveCompression:   false,
+				ProactiveCompression:      false,
+				MaxSummaryLevel:           3,
+				SummaryLevelThreshold:     500,
 			},
 			Metrics: LLMMetricsConfig{
 				Enabled:             true,

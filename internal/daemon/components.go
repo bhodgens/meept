@@ -420,6 +420,8 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
 	// Note: memvid and taskStore are wired AFTER their initialization below
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
+	// Wire context firewall settings from LLM config
+	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 
 	// Chat handler created later after dispatcher (if multi-agent enabled)
 

@@ -23,6 +23,9 @@ enabled = true
 # the legacy chunk/summarize/drop pipeline.
 proactive_compression = false
 # model_context_limit = 0   # Override model context limit for compression (0 = use model's limit)
+# hierarchical_summarization = false  # enable recursive re-summarization
+# max_summary_level = 3               # max recursion depth
+# summary_level_threshold = 500       # token threshold to trigger re-summarization
 
 [memory]
 data_dir = "~/.meept/memory"
