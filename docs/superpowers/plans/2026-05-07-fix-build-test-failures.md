@@ -37,7 +37,7 @@
 
 **Context:** The project upgraded to Bubbletea v2. The v2 API changed `tea.Model.View()` from returning `string` to returning `tea.View`. It also removed `tea.WithAltScreen()` (alt-screen is now a property on `tea.View`) and replaced `tea.KeyMsg` with `tea.KeyPressMsg`.
 
-- [ ] **Step 1: Change `View()` return type and use `tea.NewView()`**
+- [x] **Step 1: Change `View()` return type and use `tea.NewView()`**
 
 ```go
 // In cmd/animation/main.go, replace:
@@ -53,7 +53,7 @@ func (m model) View() tea.View {
 }
 ```
 
-- [ ] **Step 2: Remove `tea.WithAltScreen()` from program start**
+- [x] **Step 2: Remove `tea.WithAltScreen()` from program start**
 
 ```go
 // Replace:
@@ -62,7 +62,7 @@ p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 p := tea.NewProgram(initialModel())
 ```
 
-- [ ] **Step 3: Change `tea.KeyMsg` to `tea.KeyPressMsg`**
+- [x] **Step 3: Change `tea.KeyMsg` to `tea.KeyPressMsg`**
 
 ```go
 // Replace:
@@ -73,12 +73,12 @@ case tea.KeyPressMsg:
 	switch msg.String() {
 ```
 
-- [ ] **Step 4: Build and verify**
+- [x] **Step 4: Build and verify**
 
 Run: `go build ./cmd/animation`
 Expected: builds cleanly with no errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/animation/main.go
@@ -94,7 +94,7 @@ git commit -m "fix: update animation demo to Bubbletea v2 API"
 
 **Context:** Same v2 migration as Task 1 plus `tea.SetWindowTitle` was removed in v2.
 
-- [ ] **Step 1: Change `View()` return type and use `tea.NewView()`**
+- [x] **Step 1: Change `View()` return type and use `tea.NewView()`**
 
 ```go
 // In internal/lite/app.go, replace:
@@ -115,7 +115,7 @@ func (a *App) View() tea.View {
 }
 ```
 
-- [ ] **Step 2: Remove `tea.SetWindowTitle` from `Init()`**
+- [x] **Step 2: Remove `tea.SetWindowTitle` from `Init()`**
 
 ```go
 // In internal/lite/app.go Init(), replace:
@@ -135,7 +135,7 @@ func (a *App) View() tea.View {
 	)
 ```
 
-- [ ] **Step 3: Change `tea.KeyMsg` to `tea.KeyPressMsg`**
+- [x] **Step 3: Change `tea.KeyMsg` to `tea.KeyPressMsg`**
 
 ```go
 // Replace:
@@ -146,12 +146,12 @@ case tea.KeyPressMsg:
 
 Also update any `tea.KeyMsg{}` in tests if present (search `grep -rn "tea.KeyMsg" internal/lite/`).
 
-- [ ] **Step 4: Build and verify**
+- [x] **Step 4: Build and verify**
 
 Run: `go build ./cmd/meept-lite`
 Expected: builds cleanly.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/lite/app.go
@@ -167,7 +167,7 @@ git commit -m "fix: update meept-lite to Bubbletea v2 API"
 
 **Context:** Per project UI conventions, all UI text is lowercase. The `StatusModel` renders "loading status...", "error", "daemon status", "token budget", "press 'r' to refresh" (all lowercase). Tests currently expect capitalized strings.
 
-- [ ] **Step 1: Fix `TestStatusModel_ViewLoading`**
+- [x] **Step 1: Fix `TestStatusModel_ViewLoading`**
 
 ```go
 // Change line ~219 from:
@@ -178,7 +178,7 @@ git commit -m "fix: update meept-lite to Bubbletea v2 API"
 		t.Error("expected 'loading' in view when no status")
 ```
 
-- [ ] **Step 2: Fix `TestStatusModel_ViewError`**
+- [x] **Step 2: Fix `TestStatusModel_ViewError`**
 
 ```go
 // Change line ~232 from:
@@ -189,7 +189,7 @@ git commit -m "fix: update meept-lite to Bubbletea v2 API"
 		t.Error("expected 'error' in view")
 ```
 
-- [ ] **Step 3: Fix `TestStatusModel_ViewDashboard`**
+- [x] **Step 3: Fix `TestStatusModel_ViewDashboard`**
 
 ```go
 // Change line ~253 from:
@@ -202,7 +202,7 @@ git commit -m "fix: update meept-lite to Bubbletea v2 API"
 
 Also change line ~259 "Token Budget" to "token budget", line ~262 "Quick Actions" to "quick actions", line ~265 "Last updated" to "last updated".
 
-- [ ] **Step 4: Fix `TestStatusModel_RenderStatusPanel`**
+- [x] **Step 4: Fix `TestStatusModel_RenderStatusPanel`**
 
 ```go
 // Change line ~278 from:
@@ -211,7 +211,7 @@ Also change line ~259 "Token Budget" to "token budget", line ~262 "Quick Actions
 	if !strings.Contains(panel, "daemon status") {
 ```
 
-- [ ] **Step 5: Fix `TestStatusModel_RenderMetricsPanel`**
+- [x] **Step 5: Fix `TestStatusModel_RenderMetricsPanel`**
 
 ```go
 // Change line ~326 from:
@@ -220,7 +220,7 @@ Also change line ~259 "Token Budget" to "token budget", line ~262 "Quick Actions
 	if !strings.Contains(panel, "token budget") {
 ```
 
-- [ ] **Step 6: Fix `TestStatusModel_RenderInfoPanel`**
+- [x] **Step 6: Fix `TestStatusModel_RenderInfoPanel`**
 
 ```go
 // Change line ~344 from:
@@ -229,12 +229,12 @@ Also change line ~259 "Token Budget" to "token budget", line ~262 "Quick Actions
 	if !strings.Contains(panel, "quick actions") {
 ```
 
-- [ ] **Step 7: Run tests and verify**
+- [x] **Step 7: Run tests and verify**
 
 Run: `go test ./internal/tui/models/... -v`
 Expected: all status model tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/tui/models/status_test.go
@@ -250,7 +250,7 @@ git commit -m "test: align status model tests with lowercase UI convention"
 
 **Context:** The status bar renders "esc" (lowercase) for the escape hint. The test at line 191 expects "Esc" (capitalized).
 
-- [ ] **Step 1: Update status bar test expectation**
+- [x] **Step 1: Update status bar test expectation**
 
 ```go
 // In internal/tui/app_test.go TestApp_RenderStatusBar, change:
@@ -261,12 +261,12 @@ git commit -m "test: align status model tests with lowercase UI convention"
 		t.Error("expected esc hint in status bar")
 ```
 
-- [ ] **Step 2: Run test and verify**
+- [x] **Step 2: Run test and verify**
 
 Run: `go test ./internal/tui/... -run TestApp_RenderStatusBar -v`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/tui/app_test.go
@@ -282,7 +282,7 @@ git commit -m "test: align status bar test with lowercase UI convention"
 
 **Context:** When `RecallMode` is `disabled`, memory tool calls are filtered out and returned as blocked results. Non-memory tools are executed and their results appended. This changes the result order relative to input tool calls, breaking `TestRecallModeDisabledGatesMemoryTools` which expects results to preserve input indices.
 
-- [ ] **Step 1: Rewrite `executeToolCalls` to preserve result ordering**
+- [x] **Step 1: Rewrite `executeToolCalls` to preserve result ordering**
 
 ```go
 // In internal/agent/loop.go, replace the entire executeToolCalls function (~2085-2128) with:
@@ -338,12 +338,12 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 }
 ```
 
-- [ ] **Step 2: Run tests and verify**
+- [x] **Step 2: Run tests and verify**
 
 Run: `go test ./internal/agent/... -run TestRecallModeDisabledGatesMemoryTools -v`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/agent/loop.go
@@ -363,7 +363,7 @@ git commit -m "fix: preserve tool call result ordering when gating memory tools"
 2. `extractRequirements` checks for `capability` in root cause but the test `TestAgentDesignerExtractRequirementsTool` expects "tool proficiency" from root cause containing "tool".
 3. `determineRoleAndPurpose` panics when `requirements` is empty because it slices `requirements[:minInt(len(requirements), 3)]` which is valid but then the purpose doesn't contain the role.
 
-- [ ] **Step 1: Fix divide-by-zero in `deriveConstraints`**
+- [x] **Step 1: Fix divide-by-zero in `deriveConstraints`**
 
 ```go
 // In internal/agent/q/agent_designer.go, replace ~lines 180-202:
@@ -400,7 +400,7 @@ func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentCons
 }
 ```
 
-- [ ] **Step 2: Fix `extractRequirements` tool check**
+- [x] **Step 2: Fix `extractRequirements` tool check**
 
 ```go
 // In internal/agent/q/agent_designer.go, replace lines 82-88:
@@ -419,7 +419,7 @@ func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentCons
 	}
 ```
 
-- [ ] **Step 3: Fix `determineRoleAndPurpose` empty requirements handling**
+- [x] **Step 3: Fix `determineRoleAndPurpose` empty requirements handling**
 
 ```go
 // Replace lines 105-115 with:
@@ -440,7 +440,7 @@ func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentCons
 	return role, purpose.String()
 ```
 
-- [ ] **Step 4: Update test expectations for `TestAgentDesignerGenerateRoleAndPurpose`**
+- [x] **Step 4: Update test expectations for `TestAgentDesignerGenerateRoleAndPurpose`**
 
 ```go
 // In internal/agent/q/agent_designer_test.go, replace the test body (~lines 489-518):
@@ -463,12 +463,12 @@ func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentCons
 	}
 ```
 
-- [ ] **Step 5: Run tests and verify**
+- [x] **Step 5: Run tests and verify**
 
 Run: `go test ./internal/agent/q/... -v`
 Expected: all tests pass, no panics.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/q/agent_designer.go internal/agent/q/agent_designer_test.go
@@ -487,7 +487,7 @@ git commit -m "fix: resolve Q Agent designer divide-by-zero and logic bugs"
 
 The fix: add an optional `FullConfig` field to `daemon.Config` so tests can inject a test config.
 
-- [ ] **Step 1: Add `FullConfig` to daemon.Config**
+- [x] **Step 1: Add `FullConfig` to daemon.Config**
 
 ```go
 // In internal/daemon/daemon.go Config struct (line ~45), add:
@@ -504,7 +504,7 @@ type Config struct {
 	// Security settings ... (rest unchanged)
 ```
 
-- [ ] **Step 2: Use injected config in `New()`**
+- [x] **Step 2: Use injected config in `New()`**
 
 ```go
 // In internal/daemon/daemon.go New(), replace lines 88-93:
@@ -527,7 +527,7 @@ type Config struct {
 	}
 ```
 
-- [ ] **Step 3: Update `TestDaemonStartup` to inject a valid config**
+- [x] **Step 3: Update `TestDaemonStartup` to inject a valid config**
 
 ```go
 // In internal/daemon/daemon_test.go TestDaemonStartup, replace lines 16-29:
@@ -572,7 +572,7 @@ func TestDaemonStartup(t *testing.T) {
 
 Add import for `github.com/caimlas/meept/internal/config` if not already present.
 
-- [ ] **Step 4: Update `TestRPCLoadTest` similarly**
+- [x] **Step 4: Update `TestRPCLoadTest` similarly**
 
 ```go
 // In internal/daemon/daemon_test.go TestRPCLoadTest, add before cfg:
@@ -606,16 +606,16 @@ Add import for `github.com/caimlas/meept/internal/config` if not already present
 	}
 ```
 
-- [ ] **Step 5: Update `BenchmarkDaemonStartup` similarly if needed**
+- [x] **Step 5: Update `BenchmarkDaemonStartup` similarly if needed**
 
 Check if benchmark also calls `New()`. If yes, add `FullConfig: config.DefaultConfig()`.
 
-- [ ] **Step 6: Run tests and verify**
+- [x] **Step 6: Run tests and verify**
 
 Run: `go test ./internal/daemon/... -v -run "TestDaemonStartup|TestRPCLoadTest"`
 Expected: both tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/daemon/daemon.go internal/daemon/daemon_test.go
@@ -639,11 +639,11 @@ The correct fix: change the test to assert that during warmup, a deadline IS sti
 
 If the implementation only applies the timeout when `calc.Recommend()` returns a non-zero value, and during warmup it returns zero, then the test expectation is wrong. In that case, update the test to match the implementation.
 
-- [ ] **Step 1: Examine the adaptive timeout implementation**
+- [x] **Step 1: Examine the adaptive timeout implementation**
 
 Read `internal/llm/anthropic.go` and search for where `timeoutCalculator` is used. Determine if timeout is applied during warmup.
 
-- [ ] **Step 2: Fix the test**
+- [x] **Step 2: Fix the test**
 
 If deadline is not applied during warmup, update the test to reflect this:
 
@@ -660,12 +660,12 @@ If deadline is not applied during warmup, update the test to reflect this:
 
 Or, if the test should verify that the calculator is consulted even during warmup, fix the production code to always apply at least MinTimeout.
 
-- [ ] **Step 3: Run test and verify**
+- [x] **Step 3: Run test and verify**
 
 Run: `go test ./internal/llm/... -run TestAnthropicClient_AdaptiveTimeout -v`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/llm/anthropic_test.go
@@ -682,12 +682,12 @@ git commit -m "test: fix adaptive timeout test for warmup behavior"
 
 **Context:** `ShellTool.Execute()` and `FileReadTool.Execute()` now return `tools.ToolResult` instead of `ShellResult` or string. Tests are doing type assertions against the old types.
 
-- [ ] **Step 1: Find filesystem test file**
+- [x] **Step 1: Find filesystem test file**
 
 Run: `find internal/tools/builtin -name "*file*test*" -o -name "*fs*test*"`
 If not found, the file tests might be in a combined test file or a file not matching the pattern. Search for `TestReadFileTool` or `TestListDirectoryTool`.
 
-- [ ] **Step 2: Fix shell test type assertions**
+- [x] **Step 2: Fix shell test type assertions**
 
 ```go
 // In internal/tools/builtin/shell_test.go, for each failing subtest,
@@ -721,7 +721,7 @@ if !strings.Contains(toolResult.Content, "hello") {
 }
 ```
 
-- [ ] **Step 3: Fix filesystem test type assertions**
+- [x] **Step 3: Fix filesystem test type assertions**
 
 Similarly update `TestReadFileTool` and `TestListDirectoryTool` to expect `tools.ToolResult`:
 
@@ -737,12 +737,12 @@ Similarly update `TestReadFileTool` and `TestListDirectoryTool` to expect `tools
 	}
 ```
 
-- [ ] **Step 4: Run tests and verify**
+- [x] **Step 4: Run tests and verify**
 
 Run: `go test ./internal/tools/builtin/... -run "TestReadFileTool|TestListDirectoryTool|TestShellExecuteTool" -v`
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/tools/builtin/shell_test.go internal/tools/builtin/filesystem_test.go
@@ -759,11 +759,11 @@ git commit -m "test: update builtin tool tests for tools.ToolResult return type"
 
 **Context:** The regex at line 187 uses `(?=` (positive lookahead) which Go's `regexp` package does not support. This causes a panic at compile time.
 
-- [ ] **Step 1: Find and examine the problematic regex**
+- [x] **Step 1: Find and examine the problematic regex**
 
 Read `internal/tools/builtin/tool_web_search.go` around line 187 to see the exact regex and its usage context.
 
-- [ ] **Step 2: Replace with Go-compatible regex**
+- [x] **Step 2: Replace with Go-compatible regex**
 
 Rewrite the parsing logic without lookahead. Common approaches:
 1. Use a simpler regex that doesn't need lookahead
@@ -780,16 +780,16 @@ matches := re.FindAllStringSubmatch(html, -1)
 
 This simpler regex captures the content inside each result__body div without needing lookahead. The deduplication that the lookahead was providing can be done manually if needed.
 
-- [ ] **Step 3: Update or verify test expectations**
+- [x] **Step 3: Update or verify test expectations**
 
 `tool_web_search_test.go` tests the `parseDuckDuckGoHTML` method. Update any test expectations that depend on the exact parsing behavior if it changed slightly.
 
-- [ ] **Step 4: Run tests and verify**
+- [x] **Step 4: Run tests and verify**
 
 Run: `go test ./internal/tools/builtin/... -run TestWebSearchTool -v`
 Expected: tests pass, no panic.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/tools/builtin/tool_web_search.go internal/tools/builtin/tool_web_search_test.go
@@ -800,7 +800,7 @@ git commit -m "fix: replace unsupported regex lookahead with Go-compatible versi
 
 ## Task 11: Verify Everything Passes
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 ```bash
 go test ./... 2>&1 | grep -E '^(FAIL|ok|panic|--- FAIL)'
@@ -808,7 +808,7 @@ go test ./... 2>&1 | grep -E '^(FAIL|ok|panic|--- FAIL)'
 
 Expected output: every package shows `ok`, zero `FAIL`, zero `panic`, zero build errors.
 
-- [ ] **Step 2: Run build for all commands**
+- [x] **Step 2: Run build for all commands**
 
 ```bash
 go build ./cmd/...
@@ -816,7 +816,7 @@ go build ./cmd/...
 
 Expected: all commands build cleanly.
 
-- [ ] **Step 3: Run `go vet`**
+- [x] **Step 3: Run `go vet`**
 
 ```bash
 go vet ./...
@@ -824,7 +824,7 @@ go vet ./...
 
 Expected: no issues reported.
 
-- [ ] **Step 4: Commit if everything passes**
+- [x] **Step 4: Commit if everything passes**
 
 ```bash
 git commit --allow-empty -m "test: all tests and builds pass clean"

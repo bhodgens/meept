@@ -30,13 +30,13 @@
 - Modify: `pkg/models/progress.go`
 - Test: `pkg/models/progress_test.go`
 
-- [ ] **Step 1: Read current ProgressUpdateMsg structure**
+- [x] **Step 1: Read current ProgressUpdateMsg structure**
 
 ```bash
 cat pkg/models/progress.go
 ```
 
-- [ ] **Step 2: Write failing test**
+- [x] **Step 2: Write failing test**
 
 ```go
 func TestProgressUpdateMsg_ChatVisible(t *testing.T) {
@@ -56,7 +56,7 @@ func TestProgressUpdateMsg_ChatVisible(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 ```bash
 go test ./pkg/models/... -run TestProgressUpdateMsg_ChatVisible -v
@@ -64,7 +64,7 @@ go test ./pkg/models/... -run TestProgressUpdateMsg_ChatVisible -v
 
 Expected: FAIL
 
-- [ ] **Step 4: Add ChatVisible field and helper method**
+- [x] **Step 4: Add ChatVisible field and helper method**
 
 In `pkg/models/progress.go`:
 
@@ -81,7 +81,7 @@ func (m ProgressUpdateMsg) IsChatVisible() bool {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 go test ./pkg/models/... -run TestProgressUpdateMsg_ChatVisible -v
@@ -89,7 +89,7 @@ go test ./pkg/models/... -run TestProgressUpdateMsg_ChatVisible -v
 
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pkg/models/progress.go pkg/models/progress_test.go
@@ -103,7 +103,7 @@ git commit -m "feat: add ChatVisible field to ProgressUpdateMsg"
 **Files:**
 - Modify: `internal/agent/tactical.go`
 
-- [ ] **Step 1: Find all `silent: true` usages**
+- [x] **Step 1: Find all `silent: true` usages**
 
 ```bash
 grep -n '"silent":.*true' internal/agent/tactical.go
@@ -111,7 +111,7 @@ grep -n '"silent":.*true' internal/agent/tactical.go
 
 Expected locations: lines ~175, ~571, ~777
 
-- [ ] **Step 2: Replace first occurrence (ScheduleReadySteps)**
+- [x] **Step 2: Replace first occurrence (ScheduleReadySteps)**
 
 Change from:
 ```go
@@ -133,7 +133,7 @@ ts.publishEvent("task.progress", map[string]any{
 })
 ```
 
-- [ ] **Step 3: Replace second occurrence (OnJobCompleted progress update)**
+- [x] **Step 3: Replace second occurrence (OnJobCompleted progress update)**
 
 Change from:
 ```go
@@ -157,7 +157,7 @@ ts.publishEvent("task.progress", map[string]any{
 })
 ```
 
-- [ ] **Step 4: Replace third occurrence (OnJobFailed progress update)**
+- [x] **Step 4: Replace third occurrence (OnJobFailed progress update)**
 
 Change from:
 ```go
@@ -183,13 +183,13 @@ ts.publishEvent("task.progress", map[string]any{
 })
 ```
 
-- [ ] **Step 5: Test compilation**
+- [x] **Step 5: Test compilation**
 
 ```bash
 go build ./internal/agent/...
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/tactical.go
@@ -204,13 +204,13 @@ git commit -m "fix: replace silent with chat_visible for progress events"
 - Modify: `internal/tui/handlers/task_events.go`
 - Test: `internal/tui/handlers/task_events_test.go`
 
-- [ ] **Step 1: Read current rate limiting code**
+- [x] **Step 1: Read current rate limiting code**
 
 ```bash
 sed -n '107,144p' internal/tui/handlers/task_events.go
 ```
 
-- [ ] **Step 2: Write test that rate limiting drops events**
+- [x] **Step 2: Write test that rate limiting drops events**
 
 ```go
 func TestTaskEventHandler_NoRateLimiting(t *testing.T) {
@@ -241,7 +241,7 @@ func TestTaskEventHandler_NoRateLimiting(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run test to verify it fails (rate limiting is active)**
+- [x] **Step 3: Run test to verify it fails (rate limiting is active)**
 
 ```bash
 go test ./internal/tui/handlers/... -run TestTaskEventHandler_NoRateLimiting -v
@@ -249,7 +249,7 @@ go test ./internal/tui/handlers/... -run TestTaskEventHandler_NoRateLimiting -v
 
 Expected: FAIL - only 1-2 events produced due to rate limiting
 
-- [ ] **Step 4: Remove rate limiting from HandleTaskProgress**
+- [x] **Step 4: Remove rate limiting from HandleTaskProgress**
 
 Replace the entire method. Remove:
 - `lastProgressTime` field from struct
@@ -286,7 +286,7 @@ func (h *TaskEventHandler) HandleTaskProgress(payload map[string]any) *TaskNotif
 }
 ```
 
-- [ ] **Step 5: Clean up struct fields**
+- [x] **Step 5: Clean up struct fields**
 
 Remove from TaskEventHandler:
 ```go
@@ -311,11 +311,11 @@ func NewTaskEventHandler() *TaskEventHandler {
 }
 ```
 
-- [ ] **Step 6: Remove ClearTaskProgress (no longer needed)**
+- [x] **Step 6: Remove ClearTaskProgress (no longer needed)**
 
 Delete the `ClearTaskProgress` method entirely.
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 ```bash
 go test ./internal/tui/handlers/... -run TestTaskEventHandler_NoRateLimiting -v
@@ -323,7 +323,7 @@ go test ./internal/tui/handlers/... -run TestTaskEventHandler_NoRateLimiting -v
 
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/tui/handlers/task_events.go internal/tui/handlers/task_events_test.go
@@ -337,13 +337,13 @@ git commit -m "fix: remove rate limiting from progress events"
 **Files:**
 - Modify: `internal/tui/app.go`
 
-- [ ] **Step 1: Find task.progress event handling**
+- [x] **Step 1: Find task.progress event handling**
 
 ```bash
 grep -n "task.progress" internal/tui/app.go
 ```
 
-- [ ] **Step 2: Add chat_visible handling**
+- [x] **Step 2: Add chat_visible handling**
 
 In the `task.progress` case, add:
 
@@ -374,13 +374,13 @@ case "task.progress":
     }
 ```
 
-- [ ] **Step 3: Test compilation**
+- [x] **Step 3: Test compilation**
 
 ```bash
 go build ./internal/tui/...
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/tui/app.go
@@ -394,13 +394,13 @@ git commit -m "feat: handle chat_visible flag for progress events"
 **Files:**
 - Modify: `internal/tui/sidebar.go`
 
-- [ ] **Step 1: Find handleTaskProgressEvent**
+- [x] **Step 1: Find handleTaskProgressEvent**
 
 ```bash
 grep -n "handleTaskProgressEvent" internal/tui/sidebar.go
 ```
 
-- [ ] **Step 2: Add chat_visible handling**
+- [x] **Step 2: Add chat_visible handling**
 
 In `handleTaskProgressEvent`, add:
 
@@ -432,13 +432,13 @@ func (s *SidebarModel) handleTaskProgressEvent(e BusEvent) {
 }
 ```
 
-- [ ] **Step 3: Test compilation**
+- [x] **Step 3: Test compilation**
 
 ```bash
 go build ./internal/tui/...
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/tui/sidebar.go
@@ -453,7 +453,7 @@ git commit -m "feat: handle chat_visible in sidebar"
 - Modify: `internal/agent/tactical.go`
 - Modify: `internal/tui/handlers/task_events.go`
 
-- [ ] **Step 1: Add task.error topic publishing**
+- [x] **Step 1: Add task.error topic publishing**
 
 In `OnJobFailed`, before the silent progress update, add:
 
@@ -467,7 +467,7 @@ ts.publishEvent("task.error", map[string]any{
 })
 ```
 
-- [ ] **Step 2: Add task.error handler in TUI**
+- [x] **Step 2: Add task.error handler in TUI**
 
 In `internal/tui/app.go`, add new case:
 
@@ -485,13 +485,13 @@ case "task.error":
     }
 ```
 
-- [ ] **Step 3: Test compilation**
+- [x] **Step 3: Test compilation**
 
 ```bash
 go build ./internal/agent/... ./internal/tui/...
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/tactical.go internal/tui/app.go
@@ -505,7 +505,7 @@ git commit -m "feat: add error escalation for step failures"
 **Files:**
 - Create: `tests/progress_reliability_test.go`
 
-- [ ] **Step 1: Write integration test**
+- [x] **Step 1: Write integration test**
 
 ```go
 func TestProgressEvents_ReachChat(t *testing.T) {
@@ -523,24 +523,24 @@ func TestErrorEvents_EscalateToChat(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 ```bash
 go test ./... -run "Progress|Error" -v
 ```
 
-- [ ] **Step 3: Manual test with TUI**
+- [x] **Step 3: Manual test with TUI**
 
 ```bash
 make go-daemon
 ./bin/meept chat "Run a multi-step task"
 ```
 
-- [ ] **Step 4: Verify progress appears in chat (not just sidebar)**
+- [x] **Step 4: Verify progress appears in chat (not just sidebar)**
 
-- [ ] **Step 5: Verify errors appear in chat immediately**
+- [x] **Step 5: Verify errors appear in chat immediately**
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/progress_reliability_test.go

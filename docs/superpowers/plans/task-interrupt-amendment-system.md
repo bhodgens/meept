@@ -119,7 +119,7 @@ func (t *InterruptToken) Reset() {
 }
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 // interrupt_test.go
@@ -194,21 +194,21 @@ func TestInterruptToken_DoubleTrigger(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/task -run TestInterruptToken -v`
 Expected: FAIL with "file does not exist"
 
-- [ ] **Step 3: Write interrupt.go implementation**
+- [x] **Step 3: Write interrupt.go implementation**
 
 Create the file with the code above.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/task -run TestInterruptToken -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/task/interrupt.go internal/task/interrupt_test.go
@@ -330,7 +330,7 @@ func (m *InterruptManager) Close() error {
 }
 ```
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 // interrupt_manager_test.go
@@ -411,19 +411,19 @@ func TestInterruptManager_ListActive(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/task -run TestInterruptManager -v`
 Expected: FAIL with "file does not exist"
 
-- [ ] **Step 3: Write interrupt_manager.go implementation**
+- [x] **Step 3: Write interrupt_manager.go implementation**
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/task -run TestInterruptManager -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/task/interrupt_manager.go internal/task/interrupt_manager_test.go
@@ -437,7 +437,7 @@ git commit -m "feat: add InterruptManager for tracking task tokens"
 **Files:**
 - Modify: `internal/task/registry.go:15-23`, `26-44`, `621-657`
 
-- [ ] **Step 1: Add InterruptManager to Registry struct**
+- [x] **Step 1: Add InterruptManager to Registry struct**
 
 ```go
 // registry.go (line 15-23)
@@ -451,7 +451,7 @@ type Registry struct {
 }
 ```
 
-- [ ] **Step 2: Initialize InterruptManager in NewRegistry**
+- [x] **Step 2: Initialize InterruptManager in NewRegistry**
 
 ```go
 // registry.go (NewRegistry function)
@@ -469,7 +469,7 @@ func NewRegistry(dbPath string, msgBus *bus.MessageBus, logger *slog.Logger) (*R
 }
 ```
 
-- [ ] **Step 3: Update handleCancel to use InterruptManager**
+- [x] **Step 3: Update handleCancel to use InterruptManager**
 
 ```go
 // registry.go (handleCancel function - line 621+)
@@ -538,7 +538,7 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
 }
 ```
 
-- [ ] **Step 4: Add InterruptManager getter**
+- [x] **Step 4: Add InterruptManager getter**
 
 ```go
 // Add after StepStore() method
@@ -547,12 +547,12 @@ func (r *Registry) InterruptManager() *InterruptManager {
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `go test ./internal/task/... -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/task/registry.go
@@ -632,7 +632,7 @@ func NewAmendmentRequest(taskID string, typ AmendmentType, content string) *Amen
 }
 ```
 
-- [ ] **Step 1: Write tests**
+- [x] **Step 1: Write tests**
 
 ```go
 // amendment_test.go
@@ -667,9 +667,9 @@ func TestNewAmendmentRequest(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test, implement, verify**
+- [x] **Step 2: Run test, implement, verify**
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/task/amendment.go internal/task/amendment_test.go
@@ -860,9 +860,9 @@ func (m *AmendmentManager) publishEvent(topic string, data any) {
 }
 ```
 
-- [ ] **Step 1-4: Test and implement**
+- [x] **Step 1-4: Test and implement**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/task/amendment_manager.go
@@ -1102,9 +1102,9 @@ func (h *AmendmentHandlers) handleChangeAgent(ctx context.Context, req *Amendmen
 }
 ```
 
-- [ ] **Step 1-4: Test and implement**
+- [x] **Step 1-4: Test and implement**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/task/amendment_handlers.go
@@ -1121,7 +1121,7 @@ git commit -m "feat: add built-in amendment handlers"
 - Modify: `internal/queue/queue.go`
 - Modify: `internal/queue/store.go` (if exists)
 
-- [ ] **Step 1: Add interrupt check to Claim**
+- [x] **Step 1: Add interrupt check to Claim**
 
 ```go
 // queue.go - Modify Claim to check for task cancellation
@@ -1155,9 +1155,9 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 }
 ```
 
-- [ ] **Step 2: Update worker to observe cancellation**
+- [x] **Step 2: Update worker to observe cancellation**
 
-- [ ] **Step 3: Tests and commit**
+- [x] **Step 3: Tests and commit**
 
 ---
 
@@ -1169,7 +1169,7 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 - Modify: `internal/tui/slash_autocomplete.go`
 - Modify: `internal/tui/app.go`
 
-- [ ] **Step 1: Add slash commands**
+- [x] **Step 1: Add slash commands**
 
 ```go
 // New slash commands:
@@ -1179,9 +1179,9 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 // /tasks - list active tasks
 ```
 
-- [ ] **Step 2: Implement command handlers**
+- [x] **Step 2: Implement command handlers**
 
-- [ ] **Step 3: Tests and commit**
+- [x] **Step 3: Tests and commit**
 
 ---
 

@@ -41,11 +41,11 @@ func (h *CacheHandler) handleStats(ctx context.Context, params json.RawMessage) 
 	stats := h.cache.Stats()
 
 	return map[string]any{
-		"l1_entries":  stats.EntryCount, // L1 count (L2 count would require separate query)
+		"l1_entries":  stats.L1Entries,
 		"l1_hits":     stats.L1Hits,
 		"l1_misses":   stats.L1Misses,
 		"evictions":   stats.Evictions,
-		"l2_entries":  0, // Would need L2 cache access for accurate count
+		"l2_entries":  stats.L2Entries,
 		"l2_hits":     stats.L2Hits,
 		"l2_misses":   stats.L2Misses,
 		"total_hits":  stats.L1Hits + stats.L2Hits,

@@ -180,7 +180,11 @@ func compressMapResult(m map[string]any, maxChars int) map[string]any {
 		case string:
 			remaining := maxChars - totalChars
 			if len(val) > remaining {
-				compressed[k] = truncateWithMarker(val, remaining)
+				if looksLikeCode(val) {
+					compressed[k] = compressCodeResult(val, remaining)
+				} else {
+					compressed[k] = truncateWithMarker(val, remaining)
+				}
 				totalChars = maxChars
 			} else {
 				compressed[k] = val
