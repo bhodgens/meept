@@ -707,6 +707,71 @@ func (h *ChatHandler) formatAsyncTaskAck(result *DispatchResult) string {
 	return sb.String()
 }
 
+// formatEnhancedAsyncTaskAck builds an enhanced acknowledgment for async task
+// dispatch that includes subtask count, bulleted summary, estimated duration,
+// and plan reference.
+func (h *ChatHandler) formatEnhancedAsyncTaskAck(
+	result *DispatchResult,
+	steps []TaskStepSummary,
+	estimatedMinutes int,
+	planRef string,
+) string {
+	var sb strings.Builder
+	sb.WriteString("## starting task\n\n")
+	sb.WriteString(fmt.Sprintf("**task:** %s\n", strings.ToLower(result.Task.Name)))
+	sb.WriteString(fmt.Sprintf("**id:** `%s`\n", result.Task.ID))
+
+	// Plan line: plan reference | subtask count | optional duration
+	planLine := fmt.Sprintf("**plan:** `%s` | %d subtasks", planRef, len(steps))
+	if estimatedMinutes > 0 {
+		planLine += fmt.Sprintf(" | est. %d-%d min", estimatedMinutes, estimatedMinutes+5)
+	}
+	sb.WriteString(planLine + "\n")
+
+	sb.WriteString("\n")
+	sb.WriteString("**subtasks:**\n")
+
+	displayLimit := 5
+	for i, step := range steps {
+		if i >= displayLimit {
+			break
+		}
+		agentLabel := step.AgentID
+		if agentLabel == "" {
+			agentLabel = "agent"
+		}
+		sb.WriteString(fmt.Sprintf("- %s (%s)\n", strings.ToLower(step.Description), agentLabel))
+	}
+
+	if len(steps) > displayLimit {
+		sb.WriteString(fmt.Sprintf("- ... and %d more\n", len(steps)-displayLimit))
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString("you will receive updates as subtasks complete.\n")
+
+	return sb.String()
+}
+
+// fetchStepSummaries retrieves step summaries for a task.
+func (h *ChatHandler) fetchStepSummaries(taskID string) []TaskStepSummary {
+	// Returns nil for now - ChatHandler doesn't have a stepStore field yet
+	return nil
+}
+
+// estimateDuration returns estimated duration based on step count.
+func (h *ChatHandler) estimateDuration(taskID string, stepCount int) int {
+	if stepCount <= 0 {
+		return 0
+	}
+	return stepCount * 4 // 4 minutes per step average
+}
+
+// getPlanReference returns the plan reference for a task.
+func (h *ChatHandler) getPlanReference(taskID string) string {
+	return taskID
+}
+
 // generateWorkerID creates a unique worker ID.
 func generateWorkerID() string {
 	return "worker-" + generateMessageID()

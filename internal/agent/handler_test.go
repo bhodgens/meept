@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -320,4 +321,64 @@ func TestChatHandler_PublishPlanRequest_WarnsOnNoSubscribers(t *testing.T) {
 	// but we verify the method completes without error)
 	handler.publishPlanRequest(result, "session-test")
 	// Test passes if no panic occurred
+}
+
+func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	steps := []TaskStepSummary{
+		{Description: "Create database migrations", AgentID: "committer"},
+		{Description: "Implement API endpoints", AgentID: "coder"},
+		{Description: "Write integration tests", AgentID: "tester"},
+	}
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:   "task-123",
+			Name: "build new feature",
+		},
+		AgentID: "orchestrator",
+	}
+
+	ack := h.formatEnhancedAsyncTaskAck(result, steps, 5, "plan-456")
+
+	// Verify required elements
+	if !strings.Contains(ack, "3 subtasks") {
+		t.Error("missing subtask count")
+	}
+	if !strings.Contains(ack, "plan-456") {
+		t.Error("missing plan reference")
+	}
+	if !strings.Contains(ack, "create database migrations") {
+		t.Error("missing first step")
+	}
+	if !strings.Contains(ack, "est.") {
+		t.Error("missing estimated duration")
+	}
+	// Verify line count (should be under 15)
+	lines := strings.Split(ack, "\n")
+	if len(lines) > 15 {
+		t.Errorf("ack too long: %d lines", len(lines))
+	}
+}
+
+func TestChatHandler_FormatEnhancedAsyncTaskAck_NoSteps(t *testing.T) {
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:   "task-456",
+			Name: "simple task",
+		},
+		AgentID: "chat",
+	}
+
+	ack := h.formatEnhancedAsyncTaskAck(result, nil, 0, "plan-789")
+
+	if !strings.Contains(ack, "0 subtasks") {
+		t.Error("missing subtask count for empty steps")
+	}
+	if !strings.Contains(ack, "plan-789") {
+		t.Error("missing plan reference")
+	}
 }
