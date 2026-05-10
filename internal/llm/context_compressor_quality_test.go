@@ -17,7 +17,7 @@ func TestQualityMetrics_TokenRatio(t *testing.T) {
 		Stage3AggressiveRatio: DefaultAggressiveRatio,
 		Stage4HardLimitRatio:  DefaultHardLimitRatio,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	tests := []struct {
 		name        string
@@ -70,7 +70,7 @@ func TestQualityMetrics_CriticalRetained_NoCriticals(t *testing.T) {
 		Stage3AggressiveRatio: DefaultAggressiveRatio,
 		Stage4HardLimitRatio:  DefaultHardLimitRatio,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	msgs := makeCompressorMessages(10, 100)
 	result := c.Compress(context.Background(), msgs, 0.65)
@@ -95,7 +95,7 @@ func TestQualityMetrics_CriticalRetained_AllInTail(t *testing.T) {
 		Stage3AggressiveRatio: DefaultAggressiveRatio,
 		Stage4HardLimitRatio:  DefaultHardLimitRatio,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	msgs := makeCompressorMessages(10, 100)
 	// Mark the last 2 messages as critical (they are in the tail of 4)
@@ -123,7 +123,7 @@ func TestQualityMetrics_CriticalRetained_OutsideTail(t *testing.T) {
 		Stage3AggressiveRatio: DefaultAggressiveRatio,
 		Stage4HardLimitRatio:  DefaultHardLimitRatio,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	msgs := makeCompressorMessages(10, 100)
 	// Mark the 2nd and 3rd messages as critical (far outside the tail of 4)
@@ -152,7 +152,7 @@ func TestQualityMetrics_CompressionStage(t *testing.T) {
 		Stage3AggressiveRatio: DefaultAggressiveRatio,
 		Stage4HardLimitRatio:  DefaultHardLimitRatio,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	msgs := makeCompressorMessages(10, 100)
 
@@ -188,7 +188,7 @@ func TestQualityMetrics_SummaryLevel(t *testing.T) {
 		Stage3AggressiveRatio: DefaultAggressiveRatio,
 		Stage4HardLimitRatio:  DefaultHardLimitRatio,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	// Build messages with mixed summary levels
 	msgs := []ChatMessage{
@@ -217,7 +217,7 @@ func TestQualityMetrics_QualityScoreAverages(t *testing.T) {
 		Stage3AggressiveRatio: DefaultAggressiveRatio,
 		Stage4HardLimitRatio:  DefaultHardLimitRatio,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	msgs := makeCompressorMessages(10, 100)
 
@@ -261,7 +261,7 @@ func TestQualityMetrics_QualityScoreZeroOnCriticalDrop(t *testing.T) {
 		Stage3AggressiveRatio: DefaultAggressiveRatio,
 		Stage4HardLimitRatio:  DefaultHardLimitRatio,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	// buildQualityMetrics is the scoring function; test it directly with
 	// a scenario where critical messages are dropped.

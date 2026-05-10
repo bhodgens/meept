@@ -356,7 +356,7 @@ func NewContextFirewall(
 			Stage3AggressiveRatio: DefaultAggressiveRatio,
 			Stage4HardLimitRatio:  DefaultHardLimitRatio,
 		}
-		compressor = NewContextCompressor(compressorCfg, logger, tokenizer)
+		compressor = NewContextCompressor(compressorCfg, logger, tokenizer, summaryModel)
 	}
 
 	return &ContextFirewall{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 )
 
@@ -118,16 +119,18 @@ func (s *CompressionStats) Snapshot() CompressionStatsSnapshot {
 // ContextCompressor implements multi-stage context compression based on
 // utilization thresholds. It is safe for concurrent use.
 type ContextCompressor struct {
-	config    CompressionConfig
-	stats     CompressionStats
-	logger    *slog.Logger
-	tokenizer Tokenizer
+	config     CompressionConfig
+	stats      CompressionStats
+	summarizer Chatter // Optional: when set, enables LLM-based summarization at stage 2
+	logger     *slog.Logger
+	tokenizer  Tokenizer
 }
 
 // NewContextCompressor creates a new compressor with the given configuration.
 // If logger is nil, slog.Default() is used. If tokenizer is nil,
-// HeuristicTokenizer is used.
-func NewContextCompressor(cfg CompressionConfig, logger *slog.Logger, tokenizer Tokenizer) *ContextCompressor {
+// HeuristicTokenizer is used. summarizer may be nil; when nil, summarization
+// stages fall back to tail-keep truncation.
+func NewContextCompressor(cfg CompressionConfig, logger *slog.Logger, tokenizer Tokenizer, summarizer Chatter) *ContextCompressor {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -150,9 +153,10 @@ func NewContextCompressor(cfg CompressionConfig, logger *slog.Logger, tokenizer 
 	}
 
 	return &ContextCompressor{
-		config:    cfg,
-		logger:    logger,
-		tokenizer: tokenizer,
+		config:     cfg,
+		summarizer: summarizer,
+		logger:     logger,
+		tokenizer:  tokenizer,
 	}
 }
 
@@ -328,10 +332,15 @@ func (c *ContextCompressor) buildQualityMetrics(before, after []ChatMessage, tok
 	criticalBefore := countCritical(before)
 	criticalAfter := countCritical(after)
 
+	dropped := criticalBefore - criticalAfter
+	if dropped < 0 {
+		dropped = 0 // Compression can only drop messages, not add critical ones
+	}
+
 	qm := QualityMetrics{
 		TokenRatio:       ratio,
 		CriticalRetained: criticalAfter,
-		CriticalDropped:  criticalBefore - criticalAfter,
+		CriticalDropped:  dropped,
 		SummaryLevel:     maxSummaryLevel(after),
 		CompressionStage: stage,
 	}
@@ -350,15 +359,74 @@ func (c *ContextCompressor) buildQualityMetrics(before, after []ChatMessage, tok
 }
 
 // summarizeOldHistory keeps the system messages plus the last 4 non-system
-// messages. It does not perform LLM summarization itself -- callers that want
-// a true summary should wrap this in an LLM call.
-func (c *ContextCompressor) summarizeOldHistory(_ context.Context, messages []ChatMessage) []ChatMessage {
+// messages. When a summarizer is available, it uses LLM-based summarization
+// to produce a content-aware summary of the older messages instead of
+// discarding them outright.
+func (c *ContextCompressor) summarizeOldHistory(ctx context.Context, messages []ChatMessage) []ChatMessage {
+	if c.summarizer != nil {
+		summarized, err := c.summarizeWithLLM(ctx, messages)
+		if err != nil {
+			c.logger.Warn("LLM summarization failed, falling back to tail-keep", "error", err)
+		} else {
+			return summarized
+		}
+	}
 	return keepTail(messages, 4)
 }
 
-// aggressiveCompress keeps system messages plus the last 2 non-system messages.
+// summarizeWithLLM performs real LLM-based summarization. It separates system
+// messages, sends the older non-system messages to the summarizer, and
+// returns system messages + summary + tail of 4 recent messages.
+func (c *ContextCompressor) summarizeWithLLM(ctx context.Context, messages []ChatMessage) ([]ChatMessage, error) {
+	var systemMsgs, nonSystemMsgs []ChatMessage
+	for _, msg := range messages {
+		if msg.Role == RoleSystem {
+			systemMsgs = append(systemMsgs, msg)
+		} else {
+			nonSystemMsgs = append(nonSystemMsgs, msg)
+		}
+	}
+
+	keepCount := 4
+	if len(nonSystemMsgs) <= keepCount {
+		return messages, nil
+	}
+
+	tailStart := len(nonSystemMsgs) - keepCount
+	toSummarize := nonSystemMsgs[:tailStart]
+	tail := nonSystemMsgs[tailStart:]
+
+	var sb strings.Builder
+	sb.WriteString("Summarize the following conversation history into a concise summary preserving:\n")
+	sb.WriteString("- Key decisions made\n- Important file paths mentioned\n- Unresolved questions\n- Current task status\n\n")
+	for _, msg := range toSummarize {
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+	}
+
+	summaryPrompt := ChatMessage{Role: RoleUser, Content: sb.String()}
+	resp, err := c.summarizer.Chat(ctx, append(systemMsgs, summaryPrompt))
+	if err != nil {
+		return nil, fmt.Errorf("summarizer chat failed: %w", err)
+	}
+
+	summaryMsg := ChatMessage{
+		Role:     RoleSystem,
+		Content:  fmt.Sprintf("[Conversation Summary]\n%s", resp.Content),
+		Critical: true,
+	}
+
+	result := make([]ChatMessage, 0, len(systemMsgs)+1+len(tail))
+	result = append(result, systemMsgs...)
+	result = append(result, summaryMsg)
+	result = append(result, tail...)
+	return result, nil
+}
+
+// aggressiveCompress keeps system messages, critical messages outside the tail,
+// plus the last 4 non-system messages. This is differentiated from
+// dropOldContext (which keeps only the last 2).
 func (c *ContextCompressor) aggressiveCompress(_ context.Context, messages []ChatMessage) []ChatMessage {
-	return keepTail(messages, 2)
+	return keepTail(messages, 4)
 }
 
 // dropOldContext keeps system messages plus the last 2 non-system messages.

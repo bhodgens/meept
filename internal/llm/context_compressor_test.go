@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,7 @@ func makeCompressorMessages(count, tokensPerMsg int) []ChatMessage {
 
 func TestCompress_Disabled(t *testing.T) {
 	cfg := CompressionConfig{Enabled: false}
-	c := NewContextCompressor(cfg, nil, nil)
+	c := NewContextCompressor(cfg, nil, nil, nil)
 
 	msgs := makeCompressorMessages(10, 100)
 	result := c.Compress(context.Background(), msgs, 0.9)
@@ -78,7 +79,7 @@ func TestCompress_AllStages(t *testing.T) {
 			utilization:          0.75,
 			wantStage:            CompressionStageAggressive,
 			wantCompressed:       true,
-			wantMinMessages:      3, // 1 system + 2 kept
+			wantMinMessages:      5, // 1 system + 4 kept
 			statsAggressiveDelta: 1,
 		},
 		{
@@ -101,7 +102,7 @@ func TestCompress_AllStages(t *testing.T) {
 				Stage3AggressiveRatio: DefaultAggressiveRatio,
 				Stage4HardLimitRatio:  DefaultHardLimitRatio,
 			}
-			c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+			c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 			msgs := makeCompressorMessages(10, 100) // 1 system + 10 user messages
 			before := len(msgs)
@@ -177,7 +178,7 @@ func TestCompress_ExactThresholds(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+			c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 			msgs := makeCompressorMessages(10, 100)
 			result := c.Compress(context.Background(), msgs, tc.utilization)
 			if result.Stage != tc.wantStage {
@@ -197,7 +198,7 @@ func TestCompress_SystemMessagesPreserved(t *testing.T) {
 		Stage3AggressiveRatio: 0.70,
 		Stage4HardLimitRatio:  0.80,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	msgs := []ChatMessage{
 		{Role: RoleSystem, Content: "system 1"},
@@ -244,7 +245,7 @@ func TestCompress_TokensSavedAccumulates(t *testing.T) {
 		Stage3AggressiveRatio: 0.70,
 		Stage4HardLimitRatio:  0.80,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	msgs := makeCompressorMessages(10, 100)
 
@@ -270,7 +271,7 @@ func TestCompress_ShortMessageList(t *testing.T) {
 		Stage3AggressiveRatio: 0.70,
 		Stage4HardLimitRatio:  0.80,
 	}
-	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{})
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
 	// Only 1 system + 1 user -- fewer than any keep count.
 	msgs := []ChatMessage{
@@ -289,7 +290,7 @@ func TestCompress_ShortMessageList(t *testing.T) {
 
 func TestCompress_DefaultRatiosApplied(t *testing.T) {
 	cfg := CompressionConfig{Enabled: true} // all ratios zero
-	c := NewContextCompressor(cfg, nil, nil)
+	c := NewContextCompressor(cfg, nil, nil, nil)
 
 	if c.config.Stage1WarningRatio != DefaultWarningRatio {
 		t.Errorf("Stage1WarningRatio: got %f, want %f", c.config.Stage1WarningRatio, DefaultWarningRatio)
@@ -321,5 +322,228 @@ func TestCompressionStage_String(t *testing.T) {
 		if got := tc.stage.String(); got != tc.want {
 			t.Errorf("CompressionStage(%d).String() = %q, want %q", tc.stage, got, tc.want)
 		}
+	}
+}
+
+// mockChatter is a test mock that implements Chatter for LLM summarization tests.
+type mockChatter struct {
+	response *Response
+	err      error
+	called   bool
+}
+
+func (m *mockChatter) Chat(_ context.Context, messages []ChatMessage, _ ...ChatOption) (*Response, error) {
+	m.called = true
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.response, nil
+}
+
+func (m *mockChatter) ChatWithProgress(_ context.Context, messages []ChatMessage, _ ProgressCallback, _ ...ChatOption) (*Response, error) {
+	return m.Chat(context.Background(), messages)
+}
+
+func (m *mockChatter) Config() *ModelConfig {
+	return &ModelConfig{}
+}
+
+// TestSummarizeOldHistory_WithLLM verifies that when a summarizer is available,
+// summarizeOldHistory produces a summary message plus the tail of recent messages.
+func TestSummarizeOldHistory_WithLLM(t *testing.T) {
+	mock := &mockChatter{
+		response: &Response{Content: "The user discussed file parsing and decided to use tree-sitter."},
+	}
+	cfg := CompressionConfig{
+		Enabled:               true,
+		ModelContextLimit:     10000,
+		Stage2SummarizeRatio:  DefaultSummarizeRatio,
+		Stage3AggressiveRatio: DefaultAggressiveRatio,
+		Stage4HardLimitRatio:  DefaultHardLimitRatio,
+	}
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, mock)
+
+	// 1 system + 8 user messages
+	msgs := makeCompressorMessages(8, 100)
+	result := c.Compress(context.Background(), msgs, 0.65)
+
+	if result.Stage != CompressionStageSummarize {
+		t.Fatalf("expected Summarize stage, got %s", result.Stage)
+	}
+	if !mock.called {
+		t.Error("expected summarizer Chat to be called")
+	}
+
+	// Result should be: system msgs + summary msg + last 4 user msgs = 6
+	if len(result.Messages) != 6 {
+		t.Errorf("expected 6 messages (1 system + 1 summary + 4 tail), got %d", len(result.Messages))
+	}
+
+	// Find the summary message (should be system role, marked critical)
+	foundSummary := false
+	for _, msg := range result.Messages {
+		if msg.Role == RoleSystem && msg.Critical && strings.Contains(msg.Content, "[Conversation Summary]") {
+			foundSummary = true
+			if !strings.Contains(msg.Content, "tree-sitter") {
+				t.Error("summary content should contain the LLM response text")
+			}
+		}
+	}
+	if !foundSummary {
+		t.Error("expected to find a summary system message marked critical")
+	}
+
+	// Last 4 messages should be the original user messages
+	lastFour := result.Messages[len(result.Messages)-4:]
+	for i, msg := range lastFour {
+		if msg.Role != RoleUser {
+			t.Errorf("tail message %d: expected user role, got %s", i, msg.Role)
+		}
+	}
+}
+
+// TestSummarizeOldHistory_FallbackOnLLMError verifies that when the summarizer
+// returns an error, summarizeOldHistory falls back to keepTail(4).
+func TestSummarizeOldHistory_FallbackOnLLMError(t *testing.T) {
+	mock := &mockChatter{
+		err: fmt.Errorf("LLM unavailable"),
+	}
+	cfg := CompressionConfig{
+		Enabled:               true,
+		ModelContextLimit:     10000,
+		Stage2SummarizeRatio:  DefaultSummarizeRatio,
+		Stage3AggressiveRatio: DefaultAggressiveRatio,
+		Stage4HardLimitRatio:  DefaultHardLimitRatio,
+	}
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, mock)
+
+	msgs := makeCompressorMessages(8, 100)
+	result := c.Compress(context.Background(), msgs, 0.65)
+
+	if result.Stage != CompressionStageSummarize {
+		t.Fatalf("expected Summarize stage, got %s", result.Stage)
+	}
+	if !mock.called {
+		t.Error("expected summarizer Chat to be attempted")
+	}
+
+	// Fallback to keepTail(4): 1 system + 4 user = 5
+	if len(result.Messages) != 5 {
+		t.Errorf("expected 5 messages on fallback (1 system + 4 tail), got %d", len(result.Messages))
+	}
+}
+
+// TestSummarizeOldHistory_NilSummarizer verifies that when summarizer is nil,
+// summarizeOldHistory falls back to keepTail(4) without attempting an LLM call.
+func TestSummarizeOldHistory_NilSummarizer(t *testing.T) {
+	cfg := CompressionConfig{
+		Enabled:               true,
+		ModelContextLimit:     10000,
+		Stage2SummarizeRatio:  DefaultSummarizeRatio,
+		Stage3AggressiveRatio: DefaultAggressiveRatio,
+		Stage4HardLimitRatio:  DefaultHardLimitRatio,
+	}
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
+
+	msgs := makeCompressorMessages(8, 100)
+	result := c.Compress(context.Background(), msgs, 0.65)
+
+	if result.Stage != CompressionStageSummarize {
+		t.Fatalf("expected Summarize stage, got %s", result.Stage)
+	}
+
+	// keepTail(4): 1 system + 4 user = 5
+	if len(result.Messages) != 5 {
+		t.Errorf("expected 5 messages (1 system + 4 tail), got %d", len(result.Messages))
+	}
+}
+
+// TestAggressiveCompress_PreservesCritical verifies that aggressiveCompress
+// keeps critical messages that fall outside the tail window.
+func TestAggressiveCompress_PreservesCritical(t *testing.T) {
+	cfg := CompressionConfig{
+		Enabled:               true,
+		ModelContextLimit:     10000,
+		Stage2SummarizeRatio:  DefaultSummarizeRatio,
+		Stage3AggressiveRatio: DefaultAggressiveRatio,
+		Stage4HardLimitRatio:  DefaultHardLimitRatio,
+	}
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
+
+	msgs := makeCompressorMessages(10, 100)
+	// Mark messages outside the tail of 4 as critical
+	msgs[1].Critical = true
+	msgs[2].Critical = true
+
+	result := c.Compress(context.Background(), msgs, 0.75)
+
+	if result.Stage != CompressionStageAggressive {
+		t.Fatalf("expected Aggressive stage, got %s", result.Stage)
+	}
+
+	// Should have: 1 system + 2 critical outside tail + 4 tail = 7
+	if len(result.Messages) != 7 {
+		t.Errorf("expected 7 messages (1 system + 2 critical + 4 tail), got %d", len(result.Messages))
+	}
+
+	// Verify critical messages are retained
+	criticalCount := 0
+	for _, msg := range result.Messages {
+		if msg.Critical {
+			criticalCount++
+		}
+	}
+	if criticalCount != 2 {
+		t.Errorf("expected 2 critical messages retained, got %d", criticalCount)
+	}
+}
+
+// TestCompressionStages_Differentiate verifies that stages 2 (summarize),
+// 3 (aggressive), and 4 (hard limit) produce different output sizes.
+func TestCompressionStages_Differentiate(t *testing.T) {
+	cfg := CompressionConfig{
+		Enabled:               true,
+		ModelContextLimit:     10000,
+		Stage1WarningRatio:    DefaultWarningRatio,
+		Stage2SummarizeRatio:  DefaultSummarizeRatio,
+		Stage3AggressiveRatio: DefaultAggressiveRatio,
+		Stage4HardLimitRatio:  DefaultHardLimitRatio,
+	}
+	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
+
+	msgs := makeCompressorMessages(10, 100) // 1 system + 10 user = 11
+
+	// Stage 2: summarize -> keepTail(4) = 1 system + 4 user = 5
+	r2 := c.Compress(context.Background(), msgs, 0.65)
+	// Stage 3: aggressive -> keepTail(4) = 1 system + 4 user = 5
+	r3 := c.Compress(context.Background(), msgs, 0.75)
+	// Stage 4: hard limit -> keepTail(2) = 1 system + 2 user = 3
+	r4 := c.Compress(context.Background(), msgs, 0.85)
+
+	if r2.Stage != CompressionStageSummarize {
+		t.Errorf("stage 2: expected Summarize, got %s", r2.Stage)
+	}
+	if r3.Stage != CompressionStageAggressive {
+		t.Errorf("stage 3: expected Aggressive, got %s", r3.Stage)
+	}
+	if r4.Stage != CompressionStageHardLimit {
+		t.Errorf("stage 4: expected HardLimit, got %s", r4.Stage)
+	}
+
+	// Stages 2 and 3 keep the same count (both use keepTail(4)) but stage 4
+	// keeps fewer (keepTail(2)).
+	if len(r2.Messages) != 5 {
+		t.Errorf("stage 2: expected 5 messages, got %d", len(r2.Messages))
+	}
+	if len(r3.Messages) != 5 {
+		t.Errorf("stage 3: expected 5 messages, got %d", len(r3.Messages))
+	}
+	if len(r4.Messages) != 3 {
+		t.Errorf("stage 4: expected 3 messages, got %d", len(r4.Messages))
+	}
+
+	// Stage 4 should produce fewer messages than stage 3
+	if len(r4.Messages) >= len(r3.Messages) {
+		t.Error("hard limit should produce fewer messages than aggressive")
 	}
 }

@@ -85,18 +85,18 @@ func TestContextFirewallMultiStageCompression(t *testing.T) {
 		if !result.Compressed {
 			t.Error("summarize stage should set Compressed=true")
 		}
-		// After summarization: system + last 4 non-system messages
+		// After LLM summarization: original system + summary system message + last 4 non-system
 		systemCount := 0
 		for _, m := range result.Messages {
 			if m.Role == RoleSystem {
 				systemCount++
 			}
 		}
-		if systemCount != 1 {
-			t.Errorf("expected 1 system message, got %d", systemCount)
+		if systemCount != 2 {
+			t.Errorf("expected 2 system messages (original + summary), got %d", systemCount)
 		}
-		if len(result.Messages) > 5 {
-			t.Errorf("expected at most 5 messages (1 system + 4 kept), got %d", len(result.Messages))
+		if len(result.Messages) > 6 {
+			t.Errorf("expected at most 6 messages (1 system + 1 summary + 4 kept), got %d", len(result.Messages))
 		}
 		if result.DroppedCount == 0 {
 			t.Error("expected DroppedCount > 0 at summarize stage")
@@ -119,9 +119,9 @@ func TestContextFirewallMultiStageCompression(t *testing.T) {
 		if !result.Compressed {
 			t.Error("aggressive stage should set Compressed=true")
 		}
-		// After aggressive compression: system + last 2 non-system messages
-		if len(result.Messages) > 3 {
-			t.Errorf("expected at most 3 messages (1 system + 2 kept), got %d", len(result.Messages))
+		// After aggressive compression: system + last 4 non-system messages
+		if len(result.Messages) > 5 {
+			t.Errorf("expected at most 5 messages (1 system + 4 kept), got %d", len(result.Messages))
 		}
 		if result.TokensAfter >= result.TokensBefore {
 			t.Errorf("TokensAfter (%d) should be less than TokensBefore (%d)",
