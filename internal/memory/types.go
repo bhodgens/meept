@@ -2,6 +2,7 @@
 package memory
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
@@ -144,4 +145,33 @@ type Backend interface {
 	Count() (int, error)
 	// Close releases resources.
 	Close() error
+}
+
+// ConsolidationBackend provides the data operations needed for memory consolidation.
+// Implementations wrap specific storage backends (SQLite, memvid, etc.).
+type ConsolidationBackend interface {
+	// GetOldMemories returns memories older than the cutoff time, up to limit.
+	GetOldMemories(ctx context.Context, olderThan time.Time, limit int) ([]MemoryResult, error)
+
+	// GetExpiredMemories returns memories not accessed within the given number of days.
+	// Returns an error if the backend does not support access tracking.
+	GetExpiredMemories(ctx context.Context, notAccessedSinceDays int) ([]Memory, error)
+
+	// StoreSummary persists a consolidated summary and returns its ID.
+	StoreSummary(ctx context.Context, content string, category string, metadata map[string]any) (string, error)
+
+	// DeleteByIDs removes memories by their IDs.
+	DeleteByIDs(ctx context.Context, ids []string) (int, error)
+
+	// FindDuplicates finds groups of similar memory IDs.
+	// Returns an error if the backend does not support similarity search.
+	FindDuplicates(ctx context.Context, threshold int) ([][]string, error)
+
+	// StoreExpiredSummary stores a summary of an expired memory before deletion.
+	// Returns an error if the backend does not support this operation.
+	StoreExpiredSummary(ctx context.Context, mem Memory, category string) (string, error)
+
+	// DeleteSingle removes a single memory by ID.
+	// Returns an error if the backend does not support this operation.
+	DeleteSingle(ctx context.Context, id string) error
 }

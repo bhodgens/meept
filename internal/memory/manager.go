@@ -20,6 +20,21 @@ import (
 	"github.com/caimlas/meept/internal/security"
 )
 
+// VectorSearchResult represents a single result from vector similarity search.
+type VectorSearchResult struct {
+	MemoryID         string
+	Content          string
+	Metadata         map[string]any
+	RelevanceScore   float64
+	VectorSimilarity float64
+}
+
+// VectorSearcher is the interface the Manager uses for semantic/vector search.
+// This avoids an import cycle between the memory and memory/vector packages.
+type VectorSearcher interface {
+	Search(ctx context.Context, query string, limit int) ([]VectorSearchResult, error)
+}
+
 // Manager is the unified facade over episodic, task, and personality memory.
 // It provides a single entry-point for the rest of meept to interact with
 // the memory system. Supports memvid as primary backend with SQLite fallback.
@@ -56,6 +71,9 @@ type Manager struct {
 	// LLM client for intelligent summarization (optional; nil falls back to date-based grouping)
 	llm llm.Chatter
 
+	// Vector store for semantic search (optional; nil means semantic search unavailable)
+	vectorStore VectorSearcher
+
 	// Prefetch cache and service for automatic context retrieval (Hermes pattern)
 	prefetchCache    sync.Map // map[string]string - query -> cached context
 	prefetchQueue    chan prefetchRequest
@@ -86,6 +104,9 @@ type ManagerConfig struct {
 	// LLM is an optional chat client used for intelligent memory summarization.
 	// If nil, the consolidator falls back to naive date-based grouping.
 	LLM llm.Chatter
+	// VectorStore is an optional vector store for semantic search.
+	// If nil, SearchSemantic and SearchHybrid will fall back to keyword search.
+	VectorStore VectorSearcher
 }
 
 // NewManager creates a new memory manager.
@@ -101,6 +122,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		sanitizer:      cfg.Sanitizer,
 		securityCfg:    cfg.SecurityConfig,
 		llm:            cfg.LLM,
+		vectorStore:    cfg.VectorStore,
 	}
 }
 
@@ -182,14 +204,19 @@ func (m *Manager) Initialize(ctx context.Context) error {
 		m.logger.Info("Personality model disabled by configuration")
 	}
 
-	// Initialize consolidator (only useful for SQLite backends)
-	if !m.useMemvid {
-		m.consolidator = NewConsolidator(ConsolidatorConfig{
-			Manager: m,
-			Logger:  m.logger.With("subsystem", "consolidator"),
-			LLM:     m.llm,
-		})
+	// Initialize consolidator with backend abstraction
+	var consolidationBackend ConsolidationBackend
+	if m.useMemvid && m.memvid != nil {
+		consolidationBackend = NewMemvidConsolidationBackend(m.memvid, "episodic")
+	} else {
+		consolidationBackend = NewSQLiteConsolidationBackend(m.episodic, m.task, m)
 	}
+	m.consolidator = NewConsolidator(ConsolidatorConfig{
+		Manager: m,
+		Backend: consolidationBackend,
+		Logger:  m.logger.With("subsystem", "consolidator"),
+		LLM:     m.llm,
+	})
 
 	// Initialize knowledge graph
 	graphDir := filepath.Join(dataDir, "graph")
@@ -876,7 +903,7 @@ func (m *Manager) Consolidate(ctx context.Context) (*ConsolidationReport, error)
 	m.mu.RUnlock()
 
 	if m.consolidator == nil {
-		return nil, errors.New("consolidator not initialized (not applicable for memvid backend)")
+		return nil, errors.New("consolidator not initialized")
 	}
 
 	hours := m.config.ConsolidationIntervalHours
@@ -887,7 +914,7 @@ func (m *Manager) Consolidate(ctx context.Context) (*ConsolidationReport, error)
 	return m.consolidator.Run(ctx, hours)
 }
 
-// StartPeriodicConsolidation starts background consolidation (SQLite backend only).
+// StartPeriodicConsolidation starts background consolidation.
 func (m *Manager) StartPeriodicConsolidation(ctx context.Context) {
 	m.mu.RLock()
 	if !m.initialized || m.consolidator == nil {
@@ -1589,4 +1616,143 @@ func (m *Manager) IsInitialized() bool {
 // DistributedConfig returns the distributed memory configuration.
 func (m *Manager) DistributedConfig() config.DistributedMemoryConfig {
 	return m.distributedCfg
+}
+
+// SearchSemantic performs vector similarity search for memories.
+// If the vector store is not configured, it falls back to keyword search.
+func (m *Manager) SearchSemantic(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
+	m.mu.RLock()
+	if !m.initialized {
+		m.mu.RUnlock()
+		return nil, errors.New("memory manager not initialized")
+	}
+	m.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 10
+	}
+
+	// If vector store is available, use semantic search
+	if m.vectorStore != nil {
+		results, err := m.vectorStore.Search(ctx, query, limit)
+		if err != nil {
+			return nil, fmt.Errorf("semantic search failed: %w", err)
+		}
+
+		memResults := make([]MemoryResult, 0, len(results))
+		for _, r := range results {
+			mem := Memory{
+				ID:       r.MemoryID,
+				Content:  r.Content,
+				Metadata: r.Metadata,
+			}
+			memResults = append(memResults, MemoryResult{
+				Memory:         mem,
+				RelevanceScore: r.RelevanceScore,
+				Source:         "semantic",
+			})
+		}
+		return memResults, nil
+	}
+
+	// Fallback to keyword search
+	m.logger.Debug("Vector store not configured, falling back to keyword search for SearchSemantic")
+	return m.Search(ctx, MemoryQuery{
+		Query: query,
+		Limit: limit,
+	})
+}
+
+// SearchHybrid performs a hybrid search combining keyword and vector similarity.
+// If the vector store is not configured, it falls back to keyword search.
+func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
+	m.mu.RLock()
+	if !m.initialized {
+		m.mu.RUnlock()
+		return nil, errors.New("memory manager not initialized")
+	}
+	m.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 10
+	}
+
+	// If vector store is available, perform hybrid search
+	if m.vectorStore != nil {
+		// Get keyword results
+		keywordResults, err := m.searchViaSQLite(ctx, MemoryQuery{
+			Query: query,
+			Limit: limit * 2, // Fetch more to re-rank
+		})
+		if err != nil {
+			keywordResults = []MemoryResult{}
+		}
+
+		// Get vector results
+		vectorResults, err := m.vectorStore.Search(ctx, query, limit*2)
+		if err != nil {
+			vectorResults = []VectorSearchResult{}
+		}
+
+		// Build score maps for merging
+		keywordScores := make(map[string]float64)
+		for _, r := range keywordResults {
+			keywordScores[r.Memory.ID] = r.RelevanceScore
+		}
+
+		vectorScores := make(map[string]float64)
+		for _, r := range vectorResults {
+			vectorScores[r.MemoryID] = r.VectorSimilarity
+		}
+
+		// Merge results: use keyword results as base, enrich with vector scores
+		combined := make(map[string]*MemoryResult)
+		for i := range keywordResults {
+			r := keywordResults[i]
+			combined[r.Memory.ID] = &r
+		}
+
+		// Add vector-only results
+		for _, vr := range vectorResults {
+			if _, exists := combined[vr.MemoryID]; !exists {
+				combined[vr.MemoryID] = &MemoryResult{
+					Memory: Memory{
+						ID:       vr.MemoryID,
+						Content:  vr.Content,
+						Metadata: vr.Metadata,
+					},
+					Source: "hybrid",
+				}
+			}
+		}
+
+		// Calculate combined scores (equal weighting)
+		const alpha = 0.5
+		results := make([]MemoryResult, 0, len(combined))
+		for id, r := range combined {
+			kwScore := keywordScores[id]
+			vecScore := vectorScores[id]
+			r.RelevanceScore = (1-alpha)*kwScore + alpha*vecScore
+			r.Source = "hybrid"
+			results = append(results, *r)
+		}
+
+		// Sort by combined score descending
+		sort.Slice(results, func(i, j int) bool {
+			return results[i].RelevanceScore > results[j].RelevanceScore
+		})
+
+		if len(results) > limit {
+			results = results[:limit]
+		}
+
+		return results, nil
+	}
+
+	// Fallback to keyword search
+	m.logger.Debug("Vector store not configured, falling back to keyword search for SearchHybrid")
+	return m.Search(ctx, MemoryQuery{
+		Query: query,
+		Limit: limit,
+	})
 }

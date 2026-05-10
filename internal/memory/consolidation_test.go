@@ -30,6 +30,39 @@ func (s *stubChatter) Config() *llm.ModelConfig {
 	return &llm.ModelConfig{ModelID: "stub"}
 }
 
+// stubConsolidationBackend implements ConsolidationBackend for testing.
+// All methods return errors since the tests that use it only exercise
+// LLM summarization and MergeRelated, which don't call the backend.
+type stubConsolidationBackend struct{}
+
+func (s *stubConsolidationBackend) GetOldMemories(_ context.Context, _ time.Time, _ int) ([]MemoryResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *stubConsolidationBackend) GetExpiredMemories(_ context.Context, _ int) ([]Memory, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *stubConsolidationBackend) StoreSummary(_ context.Context, _ string, _ string, _ map[string]any) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (s *stubConsolidationBackend) DeleteByIDs(_ context.Context, _ []string) (int, error) {
+	return 0, errors.New("not implemented")
+}
+
+func (s *stubConsolidationBackend) FindDuplicates(_ context.Context, _ int) ([][]string, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *stubConsolidationBackend) StoreExpiredSummary(_ context.Context, _ Memory, _ string) (string, error) {
+	return "", errors.New("not implemented")
+}
+
+func (s *stubConsolidationBackend) DeleteSingle(_ context.Context, _ string) error {
+	return errors.New("not implemented")
+}
+
 // makeMemories creates n MemoryResult entries with sequential IDs.
 func makeMemories(n int, baseTime time.Time) []MemoryResult {
 	results := make([]MemoryResult, n)
@@ -52,8 +85,9 @@ func TestSummarizeWithLLM_Success(t *testing.T) {
 	}
 
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 
 	memories := makeMemories(3, time.Now().Add(-48*time.Hour))
@@ -81,8 +115,9 @@ func TestSummarizeWithLLM_FiltersInvalidIDs(t *testing.T) {
 	}
 
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 
 	memories := makeMemories(1, time.Now().Add(-48*time.Hour))
@@ -107,8 +142,9 @@ func TestSummarizeWithLLM_DropsEmptyGroups(t *testing.T) {
 	}
 
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 
 	memories := makeMemories(2, time.Now().Add(-48*time.Hour))
@@ -128,8 +164,9 @@ func TestSummarizeWithLLM_LLMError(t *testing.T) {
 	}
 
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 
 	memories := makeMemories(3, time.Now().Add(-48*time.Hour))
@@ -146,8 +183,9 @@ func TestSummarizeWithLLM_EmptyResponse(t *testing.T) {
 	}
 
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 
 	memories := makeMemories(3, time.Now().Add(-48*time.Hour))
@@ -164,8 +202,9 @@ func TestSummarizeWithLLM_UnparseableResponse(t *testing.T) {
 	}
 
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 
 	memories := makeMemories(3, time.Now().Add(-48*time.Hour))
@@ -183,8 +222,9 @@ func TestSummarizeWithLLM_MarkdownFencedResponse(t *testing.T) {
 	}
 
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 
 	memories := makeMemories(1, time.Now().Add(-48*time.Hour))
@@ -207,7 +247,8 @@ func TestConsolidateEpisodic_FallbackWhenLLMNil(t *testing.T) {
 	// Manager, so we test the branching logic via the public MergeRelated
 	// method instead.
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
 		// LLM is nil
 	})
 
@@ -234,8 +275,9 @@ func TestConsolidateEpisodic_FallbackOnLLMError(t *testing.T) {
 	}
 
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 
 	memories := makeMemories(3, time.Now().Add(-48*time.Hour))
@@ -253,8 +295,9 @@ func TestConsolidateEpisodic_FallbackOnLLMError(t *testing.T) {
 func TestNewConsolidator_WithLLM(t *testing.T) {
 	chatter := &stubChatter{}
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
-		LLM:    chatter,
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
+		LLM:     chatter,
 	})
 	if consolidator.llm == nil {
 		t.Error("expected LLM to be set on Consolidator, got nil")
@@ -263,7 +306,8 @@ func TestNewConsolidator_WithLLM(t *testing.T) {
 
 func TestNewConsolidator_WithoutLLM(t *testing.T) {
 	consolidator := NewConsolidator(ConsolidatorConfig{
-		Logger: slog.Default(),
+		Backend: &stubConsolidationBackend{},
+		Logger:  slog.Default(),
 	})
 	if consolidator.llm != nil {
 		t.Error("expected LLM to be nil on Consolidator")
@@ -325,6 +369,31 @@ func TestParseSummarizeResponse(t *testing.T) {
 		{
 			name:    "fenced with trailing whitespace",
 			input:   "```json\n[{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}]  \n```  ",
+			wantLen: 1,
+		},
+		{
+			name:    "nested fences (LLM wraps inner fence in outer block)",
+			input:   "```\n```json\n[{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}]\n```\n```",
+			wantLen: 1,
+		},
+		{
+			name:    "nested fences with prose around outer fence",
+			input:   "Here are the summaries:\n```\n```json\n[{\"topic\":\"test\",\"summary\":\"s\",\"ids\":[\"1\"]}]\n```\n```\nDone!",
+			wantLen: 1,
+		},
+		{
+			name:    "no valid JSON - only prose",
+			input:   "I couldn't summarize those memories because they were empty.",
+			wantErr: true,
+		},
+		{
+			name:    "no valid JSON - malformed array",
+			input:   "```json\n[{broken json}]\n```",
+			wantErr: true,
+		},
+		{
+			name:    "bare JSON array no fences no prose",
+			input:   `[{"topic":"bare","summary":"no fences at all","ids":["1","2"]}]`,
 			wantLen: 1,
 		},
 	}

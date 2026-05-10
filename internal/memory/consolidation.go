@@ -21,6 +21,7 @@ import (
 // 4. Identifying and removing duplicate task memories
 type Consolidator struct {
 	manager  *Manager
+	backend  ConsolidationBackend
 	logger   *slog.Logger
 	llm      llm.Chatter // optional: if nil, falls back to date-based grouping
 	mu       sync.Mutex
@@ -32,8 +33,10 @@ type Consolidator struct {
 
 // ConsolidatorConfig holds configuration for the consolidator.
 type ConsolidatorConfig struct {
-	// Manager is the memory manager to consolidate.
+	// Manager is the memory manager (used for Config() access).
 	Manager *Manager
+	// Backend provides data operations for consolidation.
+	Backend ConsolidationBackend
 	// Logger for consolidation operations.
 	Logger *slog.Logger
 	// LLM is an optional chat client used for intelligent summarization.
@@ -48,6 +51,7 @@ func NewConsolidator(cfg ConsolidatorConfig) *Consolidator {
 	}
 	return &Consolidator{
 		manager:  cfg.Manager,
+		backend:  cfg.Backend,
 		logger:   cfg.Logger,
 		llm:      cfg.LLM,
 		stopChan: make(chan struct{}),
@@ -91,30 +95,29 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	}
 
 	// Episodic consolidation
-	if c.manager.episodic != nil {
-		cutoff := time.Now().Add(-time.Duration(olderThanHours) * time.Hour)
-		episodicReport, err := c.consolidateEpisodic(ctx, cutoff)
-		if err != nil {
-			report.Error = err.Error()
-			c.logger.Error("Episodic consolidation failed", "error", err)
-		} else {
-			report.EpisodicArchived = episodicReport.archived
-			report.SummariesCreated = episodicReport.created
+	cutoff := time.Now().Add(-time.Duration(olderThanHours) * time.Hour)
+	episodicReport, err := c.consolidateEpisodic(ctx, cutoff)
+	if err != nil {
+		if report.Error != "" {
+			report.Error += "; "
 		}
+		report.Error += err.Error()
+		c.logger.Error("Episodic consolidation failed", "error", err)
+	} else {
+		report.EpisodicArchived = episodicReport.archived
+		report.SummariesCreated = episodicReport.created
 	}
 
 	// Task deduplication
-	if c.manager.task != nil {
-		removed, err := c.deduplicateTasks(ctx)
-		if err != nil {
-			if report.Error != "" {
-				report.Error += "; "
-			}
-			report.Error += err.Error()
-			c.logger.Error("Task deduplication failed", "error", err)
-		} else {
-			report.DuplicatesRemoved = removed
+	removed, err := c.deduplicateTasks(ctx)
+	if err != nil {
+		if report.Error != "" {
+			report.Error += "; "
 		}
+		report.Error += err.Error()
+		c.logger.Error("Task deduplication failed", "error", err)
+	} else {
+		report.DuplicatesRemoved = removed
 	}
 
 	report.Duration = time.Since(start)
@@ -137,9 +140,10 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 // warn level above.
 func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*ConsolidationReport, error) {
 	cfg := c.manager.Config().Expiration
-	expiredMemories, err := c.manager.GetExpiredMemories(ctx, cfg.AccessExpirationDays)
+	expiredMemories, err := c.backend.GetExpiredMemories(ctx, cfg.AccessExpirationDays)
 	if err != nil {
-		return nil, err
+		c.logger.Debug("skipping access-based expiration", "reason", err.Error())
+		return &ConsolidationReport{}, nil
 	}
 
 	var expiredCount int
@@ -147,9 +151,7 @@ func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*Consolida
 	for _, mem := range expiredMemories {
 		if cfg.SummarizeBeforeDelete {
 			// Create summary memory first
-			summary := c.createSummary(mem)
-			summary.Category = cfg.SummaryCategory
-			if _, err := c.manager.Store(ctx, summary); err != nil {
+			if _, err := c.backend.StoreExpiredSummary(ctx, mem, cfg.SummaryCategory); err != nil {
 				storeErrors++
 				c.logger.Error("Failed to store summary before delete",
 					"memory_id", mem.ID,
@@ -159,7 +161,7 @@ func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*Consolida
 			}
 		}
 		// Delete expired memory
-		if err := c.manager.Delete(ctx, mem.ID); err != nil {
+		if err := c.backend.DeleteSingle(ctx, mem.ID); err != nil {
 			deleteErrors++
 			c.logger.Error("Failed to delete expired memory",
 				"memory_id", mem.ID,
@@ -183,22 +185,6 @@ func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*Consolida
 	return &ConsolidationReport{Expired: expiredCount}, nil
 }
 
-// createSummary creates a summary memory from an expired memory.
-func (c *Consolidator) createSummary(mem Memory) Memory {
-	summaryContent := fmt.Sprintf("Summary of expired memory: %s", mem.Content)
-	if len(summaryContent) > 500 {
-		summaryContent = summaryContent[:500] + "..."
-	}
-
-	return Memory{
-		Content:   summaryContent,
-		Type:      mem.Type,
-		Category:  "summary",
-		Metadata:  mem.Metadata,
-		CreatedAt: time.Now(),
-	}
-}
-
 // episodicReport holds internal episodic consolidation results.
 type episodicReport struct {
 	archived int
@@ -210,7 +196,7 @@ func (c *Consolidator) consolidateEpisodic(ctx context.Context, cutoff time.Time
 	report := &episodicReport{}
 
 	// Get old memories
-	oldMemories, err := c.manager.episodic.GetOldMemories(ctx, cutoff, 500)
+	oldMemories, err := c.backend.GetOldMemories(ctx, cutoff, 500)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get old memories: %w", err)
 	}
@@ -240,7 +226,7 @@ func (c *Consolidator) consolidateEpisodic(ctx context.Context, cutoff time.Time
 
 	for _, summary := range summaries {
 		// Store the summary as a new memory
-		summaryID, err := c.manager.episodic.Store(ctx,
+		summaryID, err := c.backend.StoreSummary(ctx,
 			summary.Summary,
 			fmt.Sprintf("summary:%s", summary.Topic),
 			map[string]any{
@@ -255,7 +241,7 @@ func (c *Consolidator) consolidateEpisodic(ctx context.Context, cutoff time.Time
 				"error", err,
 			)
 			if len(createdIDs) > 0 {
-				_, _ = c.manager.episodic.DeleteByIDs(ctx, createdIDs)
+				_, _ = c.backend.DeleteByIDs(ctx, createdIDs)
 			}
 			return nil, fmt.Errorf("failed to store summary: %w", err)
 		}
@@ -267,7 +253,7 @@ func (c *Consolidator) consolidateEpisodic(ctx context.Context, cutoff time.Time
 
 	// Delete archived memories
 	if len(archivedIDs) > 0 {
-		deleted, err := c.manager.episodic.DeleteByIDs(ctx, archivedIDs)
+		deleted, err := c.backend.DeleteByIDs(ctx, archivedIDs)
 		if err != nil {
 			// Log but don't fail - summaries are already created
 			c.logger.Warn("Failed to delete some archived memories",
@@ -441,7 +427,7 @@ Maximum 5 summary groups. Return ONLY the JSON array, no other text.`
 // deduplicateTasks removes duplicate task memories.
 func (c *Consolidator) deduplicateTasks(ctx context.Context) (int, error) {
 	// Find duplicate groups
-	dupGroups, err := c.manager.task.FindDuplicates(ctx, 50)
+	dupGroups, err := c.backend.FindDuplicates(ctx, 50)
 	if err != nil {
 		return 0, fmt.Errorf("failed to find duplicates: %w", err)
 	}
@@ -458,7 +444,7 @@ func (c *Consolidator) deduplicateTasks(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	removed, err := c.manager.task.DeleteByIDs(ctx, idsToRemove)
+	removed, err := c.backend.DeleteByIDs(ctx, idsToRemove)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete duplicates: %w", err)
 	}
@@ -476,24 +462,22 @@ func (c *Consolidator) PruneOld(ctx context.Context, maxAge time.Duration) (int,
 	cutoff := time.Now().Add(-maxAge)
 	pruned := 0
 
-	// Prune episodic memories
-	if c.manager.episodic != nil {
-		oldMemories, err := c.manager.episodic.GetOldMemories(ctx, cutoff, 1000)
-		if err != nil {
-			return 0, fmt.Errorf("failed to get old episodic memories: %w", err)
-		}
+	// Prune old memories via backend
+	oldMemories, err := c.backend.GetOldMemories(ctx, cutoff, 1000)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get old memories: %w", err)
+	}
 
-		if len(oldMemories) > 0 {
-			ids := make([]string, len(oldMemories))
-			for i, m := range oldMemories {
-				ids[i] = m.Memory.ID
-			}
-			deleted, err := c.manager.episodic.DeleteByIDs(ctx, ids)
-			if err != nil {
-				return pruned, fmt.Errorf("failed to prune episodic memories: %w", err)
-			}
-			pruned += deleted
+	if len(oldMemories) > 0 {
+		ids := make([]string, len(oldMemories))
+		for i, m := range oldMemories {
+			ids[i] = m.Memory.ID
 		}
+		deleted, err := c.backend.DeleteByIDs(ctx, ids)
+		if err != nil {
+			return pruned, fmt.Errorf("failed to prune memories: %w", err)
+		}
+		pruned += deleted
 	}
 
 	return pruned, nil
