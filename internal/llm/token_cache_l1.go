@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/metrics"
 )
 
 // L1CacheConfig holds configuration for the L1 in-memory cache.
@@ -27,12 +29,13 @@ type l1CacheEntry struct {
 
 // L1Cache is an in-memory exact-match cache.
 type L1Cache struct {
-	entries map[string]*l1CacheEntry
-	config  L1CacheConfig
-	mu      sync.RWMutex
-	stats   CacheStats
-	logger  *slog.Logger
-	stopCh  chan struct{}
+	entries      map[string]*l1CacheEntry
+	config       L1CacheConfig
+	mu           sync.RWMutex
+	stats        CacheStats
+	logger       *slog.Logger
+	stopCh       chan struct{}
+	metricsStore *metrics.Store
 }
 
 // NewL1Cache creates a new L1 in-memory cache.
@@ -100,9 +103,10 @@ func (c *L1Cache) Get(key CacheKey) (*CacheEntry, bool) {
 		return nil, false
 	}
 
-	// Increment hit count
+	// Increment hit count and update last access time
 	c.mu.Lock()
 	entry.Entry.HitCount++
+	entry.Entry.LastAccessedAt = time.Now()
 	c.stats.L1Hits++
 	c.mu.Unlock()
 
@@ -120,7 +124,7 @@ func (c *L1Cache) Put(key CacheKey, entry *CacheEntry) {
 	// Evict if at capacity and new key
 	if len(c.entries) >= c.config.MaxEntries {
 		if _, exists := c.entries[cacheKey]; !exists {
-			c.evictOldest()
+			c.evictLRU()
 		}
 	}
 
@@ -253,28 +257,33 @@ func containsPromptHash(key, promptHash string) bool {
 	return false
 }
 
-// evictOldest removes the oldest entry.
-func (c *L1Cache) evictOldest() {
+// evictLRU removes the least recently used entry.
+func (c *L1Cache) evictLRU() {
 	if len(c.entries) == 0 {
 		return
 	}
 
-	var oldestKey string
-	var oldestTime time.Time
+	var lruKey string
+	var lruTime time.Time
 	first := true
 
 	for key, entry := range c.entries {
-		if first || entry.Entry.CreatedAt.Before(oldestTime) {
-			oldestKey = key
-			oldestTime = entry.Entry.CreatedAt
+		accessTime := entry.Entry.LastAccessedAt
+		if accessTime.IsZero() {
+			accessTime = entry.Entry.CreatedAt // fallback for entries created before this field existed
+		}
+		if first || accessTime.Before(lruTime) {
+			lruKey = key
+			lruTime = accessTime
 			first = false
 		}
 	}
 
-	if oldestKey != "" {
-		delete(c.entries, oldestKey)
+	if lruKey != "" {
+		delete(c.entries, lruKey)
 		c.stats.Evictions++
-		c.logger.Debug("L1 cache eviction", "key", oldestKey[:min(16, len(oldestKey))])
+		c.recordEvictionMetric()
+		c.logger.Debug("L1 cache LRU eviction", "key", lruKey[:min(16, len(lruKey))])
 	}
 }
 
@@ -298,6 +307,21 @@ func (c *L1Cache) Start() {
 // Stop stops the background cleanup.
 func (c *L1Cache) Stop() {
 	close(c.stopCh)
+}
+
+// SetMetricsStore sets the metrics store for recording eviction metrics.
+func (c *L1Cache) SetMetricsStore(store *metrics.Store) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metricsStore = store
+}
+
+// recordEvictionMetric records a cache eviction metric if metrics store is available.
+func (c *L1Cache) recordEvictionMetric() {
+	if c.metricsStore == nil {
+		return
+	}
+	c.metricsStore.Record("cache.eviction", 1, map[string]string{"level": "l1"})
 }
 
 // cleanupExpired removes all expired entries.

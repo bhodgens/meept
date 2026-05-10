@@ -37,11 +37,12 @@ func (k CacheKey) String() string {
 
 // CacheEntry represents a single cached response.
 type CacheEntry struct {
-	Response   *Response
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	HitCount   int
-	FileHashes map[string]string
+	Response       *Response
+	CreatedAt      time.Time
+	LastAccessedAt time.Time `json:"last_accessed_at"`
+	ExpiresAt      time.Time
+	HitCount       int
+	FileHashes     map[string]string
 }
 
 // IsExpired checks if the cache entry has expired.
@@ -60,6 +61,8 @@ type CacheStats struct {
 	L1Misses      int
 	L2Hits        int
 	L2Misses      int
+	L1Entries     int
+	L2Entries     int
 }
 
 // ResponseCache defines the interface for LLM response token caching.
@@ -105,6 +108,11 @@ func NewTokenCacheCoordinatorWithMetrics(config CacheConfig, metricsStore *metri
 		CleanupFreq: config.CleanupFreq,
 	}
 	l1 := NewL1Cache(l1Config)
+
+	// Wire metrics store to L1 for eviction metrics
+	if metricsStore != nil {
+		l1.SetMetricsStore(metricsStore)
+	}
 
 	// Create L2 cache if enabled
 	var l2 *L2Cache
@@ -185,12 +193,14 @@ func (c *TokenCacheCoordinator) Put(ctx context.Context, key CacheKey, response 
 	}
 
 	// Create cache entry
+	now := time.Now()
 	entry := &CacheEntry{
-		Response:   response,
-		CreatedAt:  time.Now(),
-		ExpiresAt:  time.Now().Add(c.config.DefaultTTL),
-		HitCount:   0,
-		FileHashes: key.FileHashes,
+		Response:       response,
+		CreatedAt:      now,
+		LastAccessedAt: now,
+		ExpiresAt:      now.Add(c.config.DefaultTTL),
+		HitCount:       0,
+		FileHashes:     key.FileHashes,
 	}
 
 	// Store in L1
@@ -255,6 +265,8 @@ func (c *TokenCacheCoordinator) Stats() CacheStats {
 		stats.HitRate = float64(stats.L1Hits+stats.L2Hits) / float64(total) * 100
 	}
 	stats.EntryCount = l1Count + l2Count
+	stats.L1Entries = l1Count
+	stats.L2Entries = l2Count
 
 	return stats
 }
@@ -266,6 +278,7 @@ func (c *TokenCacheCoordinator) SetMetricsStore(store *metrics.Store) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.metricsStore = store
+	c.l1Cache.SetMetricsStore(store)
 }
 
 // recordMetric records a cache metric if metrics store is available.
