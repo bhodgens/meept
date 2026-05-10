@@ -16,7 +16,7 @@
       socket_path: "~/.meept/meept.sock",
     },
     http: {
-      enabled: true,
+      enabled: false,
       addr: ":8081",
     },
   },

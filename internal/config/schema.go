@@ -135,7 +135,7 @@ type RPCTransportConfig struct {
 
 // HTTPTransportConfig configures the HTTP REST transport.
 type HTTPTransportConfig struct {
-	Enabled bool   `toml:"enabled" json:"enabled"` // Enable HTTP server (default: true)
+	Enabled bool   `toml:"enabled" json:"enabled"` // Enable HTTP server (default: false)
 	Addr    string `toml:"addr" json:"addr"`       // Listen address (default: ":8081")
 }
 
@@ -857,7 +857,7 @@ func DefaultConfig() *Config {
 				SocketPath: "~/.meept/meept.sock",
 			},
 			HTTP: HTTPTransportConfig{
-				Enabled: true,
+				Enabled: false,
 				Addr:    ":8081",
 			},
 		},

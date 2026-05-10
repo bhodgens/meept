@@ -130,6 +130,9 @@ Runs up to `MaxIterations` (default 25) with three termination cases:
 2. **LLM returns tool calls** — execute tools, feed results back, continue loop
 3. **Budget/safety limit hit** — graceful wrap-up with partial results
 
+#### Anchor Messages
+System messages injected into conversation history to preserve context during summarization/compression. When running with a task, the loop injects `[step-context]` anchors that survive context pruning so task execution state is maintained.
+
 #### Safety Mechanisms
 
 | Mechanism | Description | Trigger |
@@ -180,7 +183,8 @@ A transparent wrapper around the LLM client that manages context pressure before
 #### Features
 
 - **Hierarchical Compression**: Multi-stage summarization with structured extraction (DECISIONS, FILES, QUESTIONS, STATUS, FINDINGS)
-- **Proactive Compression**: Runs before legacy chunk/summarize/drop pipeline
+- **Proactive Compression**: Multi-stage context compressor with LLM-summarized compression at stage 2 (keeps system + summary + last 4 messages), aggressive compression at stage 3 (keeps system + critical + last 4), and hard limit at stage 4 (keeps system + last 2)
+- **LLM Summarization**: When a summarizer model is available, old conversation history is summarized via LLM rather than silently dropped, preserving key decisions, file paths, and task status
 - **Token-Aware Truncation**: `TruncateByTokens()` considers tool definition overhead
 - **Windowed Messages**: Preserves system prompt + original user message + recent context
 - **Budget Ratios**: Configurable iteration (30%) and conversation (50%) budget allocation
@@ -297,6 +301,7 @@ The validator detects mismatches between agent claims and evidence:
 - Configurable interval (default every 3 steps)
 - Non-blocking: logs warnings without stopping execution
 - Checks all completed steps have `Validated = true`
+- **Validation retry loop**: On validation failure, steps are re-queued up to `MaxValidationLoops` (default 2) before escalating to human review
 
 #### Checkpoints
 
@@ -397,9 +402,16 @@ Meept implements a multi-tiered memory architecture with different storage backe
 
 #### Semantic Memory (Vector Embeddings)
 - Vector similarity search using embeddings
-- Hybrid search combining keyword (FTS) and vector scores
+- Hybrid search combining keyword (FTS) and vector scores via `KeywordSearcher` interface
 - Supports OpenAI and Ollama providers
 - Cosine similarity for ranking
+
+#### Memory Consolidation & Clustering
+- **Semantic clustering**: Union-find algorithm groups memories by cosine similarity threshold
+- **3-tier MergeRelated strategy**: (1) embedding clustering + LLM summarization, (2) LLM topic grouping, (3) date-based fallback
+- **Robust JSON parsing**: Multi-strategy extraction from LLM responses (direct parse, markdown fence extraction, bracket matching with string/escape awareness)
+- **ConsolidationBackend interface**: Pluggable storage backends for consolidation — `SQLiteConsolidationBackend` (default) and `MemvidConsolidationBackend` for distributed memory
+- Configurable consolidation interval
 
 **Configuration:**
 ```toml
@@ -458,9 +470,9 @@ results, err := store.Search(ctx, "similar memories", 10)
 
 // Hybrid search
 hybrid := vector.NewHybridSearcher(vector.HybridSearcherConfig{
-    VectorStore: store,
-    MemManager:  memManager,
-    Alpha:       0.5,
+    VectorStore:     store,
+    KeywordSearcher: memManager, // Manager satisfies KeywordSearcher interface
+    Alpha:           0.5,
 })
 results, err := hybrid.Search(ctx, "query", 20)
 ```
@@ -570,6 +582,12 @@ Meept supports multiple LLM providers with model resolution based on capabilitie
 - Hourly and daily token limits
 - Rate limiting (requests per minute)
 - Aggressiveness setting for cost control
+
+#### Token Cache Metrics
+- L1 cache uses LRU eviction (based on `LastAccessedAt` timestamp) instead of FIFO
+- L1/L2 cache eviction events recorded to metrics store (`cache.eviction` with reason tags: `lru`, `ttl_expired`, `file_invalidation`)
+- Entry count tracking (`cache.entry_count` per level)
+- Hit/miss counters for both cache levels
 
 #### Native Anthropic Driver
 - Native implementation of Anthropic's Messages API
@@ -724,6 +742,7 @@ Meept includes multi-language code understanding via tree-sitter parsing and LSP
 - Symbol extraction (functions, types, imports, structs)
 - Tree-sitter query execution
 - Language detection from file extension
+- AST-based code compression (`CompressCodeAtBoundaries`): truncates at function/block boundaries for 10+ languages with fallback to byte/line truncation
 
 **LSP Client (`internal/code/lsp/`):**
 - Multi-server management (different servers per language)
@@ -955,7 +974,7 @@ scan_type_check = true
 | Feature | Description |
 |---------|-------------|
 | **Evidence-Based Execution** | All agent claims validated against tool-produced evidence |
-| **Context Firewall** | Hierarchical compression with structured summarization |
+| **Context Firewall** | Multi-stage proactive compression with LLM summarization, hierarchical re-summarization |
 | **Deterministic Execution** | Concurrency control, validation gates, checkpoints, retry hierarchy |
 | **MCP Protocol Support** | First-class Model Context Protocol integration for external tools |
 | **Agent Coworker Awareness** | Agents discover and delegate to each other via platform tools |
@@ -970,7 +989,10 @@ scan_type_check = true
 | **Taint Tracking** | Lattice-based information flow tracking for security |
 | **Native Anthropic Driver** | Extended thinking mode with progress reporting |
 | **Web Search (No API Key)** | DuckDuckGo integration without API requirements |
-| **Code Intelligence (AST+LSP)** | Tree-sitter parsing and LSP client tools |
+| **Code Intelligence (AST+LSP)** | Tree-sitter parsing, AST-based code compression, and LSP client tools |
+| **Semantic Memory Clustering** | Union-find cosine similarity grouping for memory consolidation |
+| **Responsive TUI** | Adaptive layout with fuzzy finder, message threading, task detail modal |
+| **Validation Retry Loop** | Automatic step re-queue on validation failure with configurable max retries |
 | **Model Failover** | Alias rotation with exponential backoff |
 | **Hallucination Detection** | Pattern-based detection with configurable sensitivity |
 
@@ -980,10 +1002,29 @@ scan_type_check = true
 |-------------|-------------|
 | **Telegram Bot** | Two-way communication via Telegram |
 | **Web API** | HTTP/JSON API for external clients |
-| **HTTP REST** | REST API for macOS MenuBar app |
+| **HTTP REST** | REST API for macOS MenuBar app (disabled by default; cache invalidate/inspect endpoints) |
 | **Google Calendar** | Calendar event management |
 | **Git Worktrees** | Isolated task execution environments |
 | **macOS MenuBar** | Native SwiftUI monitoring and control app |
+
+---
+
+### TUI (Terminal User Interface)
+
+The interactive TUI provides a rich terminal interface built with Bubbletea v2.
+
+#### Layout Modes
+- **Compact** (<80 cols): No sidebar, single panel
+- **Standard** (80-120 cols): Narrow sidebar (25 chars)
+- **Wide** (>120 cols): Full sidebar (up to 35 chars)
+
+#### Features
+- **Responsive layout**: Automatically adapts to terminal width
+- **Fuzzy finder**: `Ctrl+P` opens session/task search modal
+- **Message threading**: Conversation turns grouped with visual separators
+- **Task detail modal**: Enter on a task shows full step breakdown, progress bars, memory context
+- **Slash commands**: `/tasks`, `/cancel`, `/amend` for task management
+- **Multi-panel view**: Chat, tasks, and sidebar panels
 
 ---
 
