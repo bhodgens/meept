@@ -440,6 +440,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		Logger:            logger.With("component", "memory"),
 		Sanitizer:         c.SecurityOrchestrator.InputSanitizer(),
 		SecurityConfig:    cfg.Memory.Security,
+		LLM:               c.LLMProvider,
 	})
 	if err := c.MemoryManager.Initialize(context.Background()); err != nil {
 		logger.Error("Failed to initialize memory manager", "error", err)
