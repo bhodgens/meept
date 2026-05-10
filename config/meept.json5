@@ -32,6 +32,9 @@
     context_firewall: {
       enabled: true,
       proactive_compression: false,
+      hierarchical_summarization: false,  // enable recursive re-summarization
+      max_summary_level: 3,               // max recursion depth
+      summary_level_threshold: 500,       // token threshold to trigger re-summarization
     },
   },
 

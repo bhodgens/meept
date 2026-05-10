@@ -14,6 +14,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent/prompts"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	intsecurity "github.com/caimlas/meept/internal/security"
@@ -329,6 +330,16 @@ type AgentConfig struct {
 	// ModelContextLimit overrides the model's ContextLimit for the compressor.
 	// When zero, model.ContextLimit is used.
 	ModelContextLimit int
+	// HierarchicalSummarization enables recursive re-summarization where
+	// summaries that exceed SummaryLevelThreshold tokens are themselves
+	// summarized at the next level up to MaxSummaryLevel.
+	HierarchicalSummarization bool
+	// MaxSummaryLevel is the maximum recursion depth for hierarchical
+	// summarization (default 3).
+	MaxSummaryLevel int
+	// SummaryLevelThreshold is the token count at which a summary is
+	// re-summarized at the next level (default 500).
+	SummaryLevelThreshold int
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -721,8 +732,11 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 				ChunkLargeInputs:       true,
 				IterationBudgetRatio:   0.30,
 				ConversationBudgetRatio: 0.50,
-				ProactiveCompression:   loop.config.ProactiveCompression,
-				ModelContextLimit:      loop.config.ModelContextLimit,
+				ProactiveCompression:      loop.config.ProactiveCompression,
+				ModelContextLimit:         loop.config.ModelContextLimit,
+				HierarchicalSummarization: loop.config.HierarchicalSummarization,
+				MaxSummaryLevel:           loop.config.MaxSummaryLevel,
+				SummaryLevelThreshold:     loop.config.SummaryLevelThreshold,
 			},
 			nil, // summaryModel - uses inner by default
 			loop.logger,
@@ -743,6 +757,16 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 // This is used to wire the memory manager's QueuePrefetch method after construction.
 func (l *AgentLoop) SetPrefetchCallback(callback func(query string, maxItems int)) {
 	l.prefetchCallback = callback
+}
+
+// SetContextFirewallConfig wires context firewall settings from the user-facing
+// config schema into the agent loop config.
+func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig) {
+	l.config.ProactiveCompression = fw.ProactiveCompression
+	l.config.ModelContextLimit = fw.ModelContextLimit
+	l.config.HierarchicalSummarization = fw.HierarchicalSummarization
+	l.config.MaxSummaryLevel = fw.MaxSummaryLevel
+	l.config.SummaryLevelThreshold = fw.SummaryLevelThreshold
 }
 
 // RunOnce processes a single user turn through the full reasoning loop.
