@@ -158,7 +158,7 @@ The daemon supports two transports (can be enabled independently):
       socket_path: "~/.meept/meept.sock",
     },
     http: {
-      enabled: true,                // REST API for menubar
+      enabled: false,               // REST API for menubar (enable if using menubar app)
       addr: ":8081",
       require_auth: false,          // Require API key authentication
       api_keys: [],                 // List of valid API keys

@@ -232,6 +232,35 @@ Meept uses a specialist-agent architecture where different agents handle differe
 - `platform_tools`: List registered tools
 - `delegate_task`: Route a task to a specific agent
 
+#### Compound Task Acknowledgment
+
+When the dispatcher detects a compound (multi-intent) request, it sends an enhanced async acknowledgment to the user before orchestration begins:
+
+```
+## starting task
+
+**task:** build a feature with api, database, and tests
+**id:** `task-xxx`
+**plan:** `plan-xxx` | 4 subtasks | est. 12-17 min
+
+**agents:** committer, coder, tester
+
+**subtasks:**
+- create database migrations (committer)
+- implement api endpoints (coder)
+- write integration tests (tester)
+- deploy to staging (devops)
+
+you will receive updates as subtasks complete.
+```
+
+**Features:**
+- Subtask count and bulleted summary (max 5 displayed, with overflow indicator)
+- Estimated duration from historical metrics (with 4 min/step fallback heuristic)
+- Multi-agent detection showing which specialists are involved
+- Rune-safe description truncation at 50 characters
+- TUI renders markdown ACKs with full formatting; legacy JSON ACKs render as detached task cards
+
 **Configuration:**
 ```toml
 [multiagent]
@@ -978,6 +1007,7 @@ scan_type_check = true
 | **Deterministic Execution** | Concurrency control, validation gates, checkpoints, retry hierarchy |
 | **MCP Protocol Support** | First-class Model Context Protocol integration for external tools |
 | **Agent Coworker Awareness** | Agents discover and delegate to each other via platform tools |
+| **Compound Task ACK** | Enhanced async acknowledgment with subtask summary, duration estimates, multi-agent detection |
 | **Markdown Agent Definitions** | User-customizable AGENT.md files with YAML frontmatter, 4-tier discovery |
 | **Global Rules & Reporting** | Platform-wide rules with structured JSON reports |
 | **Q Agent** | Meta-agent for session analysis and optimization design |
