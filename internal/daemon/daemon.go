@@ -193,6 +193,9 @@ func New(cfg *Config) (*Daemon, error) {
 	if metricsStore != nil && components != nil && components.TokenCache != nil {
 		components.TokenCache.SetMetricsStore(metricsStore)
 	}
+	if metricsStore != nil && components != nil && components.ChatHandler != nil {
+		components.ChatHandler.SetMetricsStore(metricsStore)
+	}
 
 	// Create metrics collector with getter functions for actual values
 	var coll *metrics.Collector

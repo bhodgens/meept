@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
@@ -256,6 +257,14 @@ func (h *ChatHandler) handleWorkerListRequest(msg *models.BusMessage) {
 	}
 
 	h.bus.Publish("agent.workers.result", respMsg)
+}
+
+// SetMetricsStore sets the metrics store for duration estimates.
+// Must be called before Start to avoid data races.
+func (h *ChatHandler) SetMetricsStore(store *metrics.Store) {
+	h.workersMu.Lock()
+	h.metricsStore = store
+	h.workersMu.Unlock()
 }
 
 // Stop gracefully stops the handler.
@@ -692,12 +701,6 @@ func (h *ChatHandler) formatTaskFailedMessage(name, errMsg, failedStep string, f
 	return sb.String()
 }
 
-// formatAsyncTaskAck builds a human-readable acknowledgment for async task dispatch.
-// It delegates to formatEnhancedAsyncTaskAck with no step details.
-func (h *ChatHandler) formatAsyncTaskAck(result *DispatchResult) string {
-	return h.formatEnhancedAsyncTaskAck(result, nil, 0, result.Task.ID)
-}
-
 // formatEnhancedAsyncTaskAck builds an enhanced acknowledgment for async task
 // dispatch that includes subtask count, bulleted summary, estimated duration,
 // and plan reference.
@@ -751,8 +754,9 @@ func (h *ChatHandler) formatEnhancedAsyncTaskAck(
 			agentLabel = "agent"
 		}
 		desc := step.Description
-		if len(desc) > 50 {
-			desc = desc[:47] + "..."
+		if utf8.RuneCountInString(desc) > 50 {
+			runes := []rune(desc)
+			desc = string(runes[:47]) + "..."
 		}
 		sb.WriteString(fmt.Sprintf("- %s (%s)\n", strings.ToLower(desc), agentLabel))
 	}
@@ -767,19 +771,16 @@ func (h *ChatHandler) formatEnhancedAsyncTaskAck(
 	return sb.String()
 }
 
-// fetchStepSummaries retrieves step summaries for a task.
-func (h *ChatHandler) fetchStepSummaries(taskID string) []TaskStepSummary {
-	// Returns nil for now - ChatHandler doesn't have a stepStore field yet
-	return nil
-}
-
 // estimateDuration returns estimated duration based on step count and historical data.
 func (h *ChatHandler) estimateDuration(taskID string, stepCount int) int {
 	if stepCount <= 0 {
 		return 0
 	}
-	if h.metricsStore != nil {
-		avgDuration := h.metricsStore.GetAverageStepDuration("orchestrator")
+	h.workersMu.RLock()
+	store := h.metricsStore
+	h.workersMu.RUnlock()
+	if store != nil {
+		avgDuration := store.GetAverageStepDuration("orchestrator")
 		if avgDuration > 0 {
 			totalMin := int(avgDuration.Minutes()) * stepCount
 			if totalMin > 0 {

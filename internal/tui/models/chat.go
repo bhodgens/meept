@@ -907,16 +907,21 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		} else {
 			// Check if the reply is an async task ack
 			if isAsyncAck, taskID, taskMessage := parseAsyncAck(msg.Reply); isAsyncAck {
-				// Render as a detached task message
-				content := fmt.Sprintf("┌ task detached ─────────────────────────────┐\n"+
-					"│ %s\n"+
-					"│ Task ID: %s\n"+
-					"│ View progress: [ctrl+x 2] tasks\n"+
-					"└─────────────────────────────────────────────┘",
-					types.TruncateString(taskMessage, 45),
-					types.TruncateString(taskID, 40),
-				)
-				m.addMessage("system", content)
+				// Render enhanced markdown ACK as assistant message for proper markdown rendering
+				if strings.HasPrefix(strings.TrimSpace(msg.Reply), "## starting task") {
+					m.addMessage("assistant", msg.Reply)
+				} else {
+					// Legacy JSON ACK - render as detached task card
+					content := fmt.Sprintf("┌ task detached ─────────────────────────────┐\n"+
+						"│ %s\n"+
+						"│ Task ID: %s\n"+
+						"│ View progress: [ctrl+x 2] tasks\n"+
+						"└─────────────────────────────────────────────┘",
+						types.TruncateString(taskMessage, 45),
+						types.TruncateString(taskID, 40),
+					)
+					m.addMessage("system", content)
+				}
 			} else if result := parseTaskResult(msg.Reply); result != nil {
 				// Render as a task result message
 				var content string
@@ -2108,11 +2113,20 @@ func (m *ChatModel) isClickInViewportArea(mouse tea.Mouse) bool {
 		mouse.X >= 0 && mouse.X <= m.width
 }
 
-// parseAsyncAck checks if a reply is an async task acknowledgment JSON.
+// parseAsyncAck checks if a reply is an async task acknowledgment.
+// Supports both markdown format ("## starting task") and legacy JSON format.
 // Returns (isAsync, taskID, message).
 func parseAsyncAck(reply string) (bool, string, string) {
-	// Quick check: must start with { to be JSON
 	trimmed := strings.TrimSpace(reply)
+
+	// Try markdown format: "## starting task"
+	if strings.HasPrefix(trimmed, "## starting task") {
+		taskID := extractMarkdownTaskID(trimmed)
+		taskMsg := extractMarkdownTaskMessage(trimmed)
+		return true, taskID, taskMsg
+	}
+
+	// Try JSON format (legacy)
 	if !strings.HasPrefix(trimmed, "{") {
 		return false, "", ""
 	}
@@ -2129,6 +2143,39 @@ func parseAsyncAck(reply string) (bool, string, string) {
 		return false, "", ""
 	}
 	return true, ack.TaskID, ack.Message
+}
+
+// extractMarkdownTaskID extracts the task ID from a markdown ACK.
+// Looks for **id:** `task-xxx` pattern.
+func extractMarkdownTaskID(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "**id:**") {
+			// Extract backtick-enclosed ID
+			start := strings.Index(line, "`")
+			if start == -1 {
+				continue
+			}
+			end := strings.Index(line[start+1:], "`")
+			if end == -1 {
+				continue
+			}
+			return line[start+1 : start+1+end]
+		}
+	}
+	return ""
+}
+
+// extractMarkdownTaskMessage extracts the task name from a markdown ACK.
+// Looks for **task:** line and returns the task description.
+func extractMarkdownTaskMessage(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "**task:**") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "**task:**"))
+		}
+	}
+	return "task started"
 }
 
 // taskResultInfo holds parsed task completion/failure info.
