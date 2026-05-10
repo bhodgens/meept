@@ -257,6 +257,15 @@ func (c *TokenCacheCoordinator) Stats() CacheStats {
 	return stats
 }
 
+// SetMetricsStore sets the metrics store for recording cache metrics.
+// This allows the metrics store to be wired after coordinator creation
+// when the store is not yet available at construction time.
+func (c *TokenCacheCoordinator) SetMetricsStore(store *metrics.Store) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.metricsStore = store
+}
+
 // recordMetric records a cache metric if metrics store is available.
 func (c *TokenCacheCoordinator) recordMetric(name string, value float64, key CacheKey) {
 	if c.metricsStore == nil {

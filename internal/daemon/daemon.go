@@ -189,6 +189,11 @@ func New(cfg *Config) (*Daemon, error) {
 		logger.Warn("Failed to create metrics store", "error", err)
 	}
 
+	// Wire metrics store to cache coordinator (created in NewComponents before metrics store existed)
+	if metricsStore != nil && components != nil && components.TokenCache != nil {
+		components.TokenCache.SetMetricsStore(metricsStore)
+	}
+
 	// Create metrics collector with getter functions for actual values
 	var coll *metrics.Collector
 	if metricsStore != nil && components != nil {
