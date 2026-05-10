@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -470,5 +471,157 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_SingleAgent(t *testing.T) {
 
 	if strings.Contains(ack, "agents:") {
 		t.Error("agents line should not appear for single-agent task")
+	}
+}
+
+func TestCompoundTaskAck_FullFlow(t *testing.T) {
+	// Simulate a compound task with 4 subtasks across multiple agents
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	steps := []TaskStepSummary{
+		{Description: "Create database migrations", AgentID: "committer"},
+		{Description: "Implement API endpoints", AgentID: "coder"},
+		{Description: "Write integration tests", AgentID: "tester"},
+		{Description: "Deploy to staging", AgentID: "devops"},
+	}
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:   "task-compound-full",
+			Name: "Build a feature with API, database, and tests",
+		},
+		AgentID: "orchestrator",
+	}
+
+	ack := h.formatEnhancedAsyncTaskAck(result, steps, 16, "plan-compound-001")
+
+	// 1. Subtask count
+	if !strings.Contains(ack, "4 subtasks") {
+		t.Error("missing subtask count '4 subtasks'")
+	}
+
+	// 2. Plan reference
+	if !strings.Contains(ack, "plan-compound-001") {
+		t.Error("missing plan reference")
+	}
+
+	// 3. Estimated duration
+	if !strings.Contains(ack, "est.") {
+		t.Error("missing estimated duration")
+	}
+
+	// 4. All steps present (all under 5 so none truncated)
+	expectedSteps := []string{"create database migrations", "implement api endpoints", "write integration tests", "deploy to staging"}
+	for _, step := range expectedSteps {
+		if !strings.Contains(ack, step) {
+			t.Errorf("missing step: %s", step)
+		}
+	}
+
+	// 5. Multi-agent line
+	if !strings.Contains(ack, "agents:") {
+		t.Error("missing agents line for multi-agent compound task")
+	}
+	for _, agent := range []string{"committer", "coder", "tester", "devops"} {
+		if !strings.Contains(ack, agent) {
+			t.Errorf("missing agent: %s", agent)
+		}
+	}
+
+	// 6. Line count under 15
+	lines := strings.Split(ack, "\n")
+	// Filter out empty trailing lines
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty > 15 {
+		t.Errorf("ack has too many non-empty lines: %d\nfull output:\n%s", nonEmpty, ack)
+	}
+}
+
+func TestCompoundTaskAck_TruncationOverflow(t *testing.T) {
+	// Test with more than 5 steps (should truncate with overflow message)
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	steps := []TaskStepSummary{
+		{Description: "Step 1", AgentID: "coder"},
+		{Description: "Step 2", AgentID: "coder"},
+		{Description: "Step 3", AgentID: "tester"},
+		{Description: "Step 4", AgentID: "coder"},
+		{Description: "Step 5", AgentID: "devops"},
+		{Description: "Step 6", AgentID: "coder"},
+		{Description: "Step 7", AgentID: "tester"},
+	}
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:   "task-overflow",
+			Name: "overflow test",
+		},
+		AgentID: "orchestrator",
+	}
+
+	ack := h.formatEnhancedAsyncTaskAck(result, steps, 28, "plan-overflow")
+
+	// Should show 7 subtasks
+	if !strings.Contains(ack, "7 subtasks") {
+		t.Error("expected '7 subtasks'")
+	}
+
+	// Should show first 5 steps
+	for i := 1; i <= 5; i++ {
+		if !strings.Contains(ack, fmt.Sprintf("step %d", i)) {
+			t.Errorf("missing step %d", i)
+		}
+	}
+
+	// Should NOT show steps 6 and 7
+	if strings.Contains(ack, "step 6") {
+		t.Error("step 6 should be hidden (overflow)")
+	}
+
+	// Should show overflow message
+	if !strings.Contains(ack, "... and 2 more") {
+		t.Error("missing overflow message")
+	}
+
+	// Line count under 15
+	lines := strings.Split(ack, "\n")
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty > 15 {
+		t.Errorf("ack has too many non-empty lines: %d\nfull output:\n%s", nonEmpty, ack)
+	}
+}
+
+func TestCompoundTaskAck_MinimalTask(t *testing.T) {
+	// Test simplest case: no steps, no duration
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
+
+	result := &DispatchResult{
+		Task: &task.Task{
+			ID:   "task-minimal",
+			Name: "minimal task",
+		},
+		AgentID: "chat",
+	}
+
+	ack := h.formatEnhancedAsyncTaskAck(result, nil, 0, "plan-min")
+
+	if !strings.Contains(ack, "0 subtasks") {
+		t.Error("expected '0 subtasks'")
+	}
+	if strings.Contains(ack, "agents:") {
+		t.Error("agents line should not appear with no steps")
+	}
+	if strings.Contains(ack, "est.") {
+		t.Error("duration should not appear when 0")
 	}
 }
