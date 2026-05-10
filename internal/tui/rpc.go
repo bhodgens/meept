@@ -794,3 +794,19 @@ func (c *RPCClient) CacheInvalidate(filePath string) error {
 	_, err := c.Call("cache.invalidate", params)
 	return err
 }
+
+// CacheInspect inspects cache entries matching a prompt hash.
+func (c *RPCClient) CacheInspect(promptHash string) (*types.CacheInspectResponse, error) {
+	params := map[string]string{"prompt_hash": promptHash}
+	result, err := c.Call("cache.inspect", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.CacheInspectResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse cache inspect response: %w", err)
+	}
+
+	return &resp, nil
+}

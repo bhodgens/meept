@@ -362,6 +362,73 @@ func (c *L2Cache) Count() int {
 	return count
 }
 
+// l2InspectEntry is a lightweight result for inspection.
+type l2InspectEntry struct {
+	ModelID    string
+	Response   *Response
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	HitCount   int
+	FileHashes map[string]string
+}
+
+// Inspect searches for entries matching the given prompt hash in the L2 cache.
+func (c *L2Cache) Inspect(promptHash string) []l2InspectEntry {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := c.pool.Query(ctx, `
+		SELECT model_id, response_json, created_at, expires_at, hit_count, file_hashes_json
+		FROM token_cache
+		WHERE prompt_hash = ?`, promptHash)
+	if err != nil {
+		c.logger.Error("L2 inspect query failed", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var results []l2InspectEntry
+	for rows.Next() {
+		var (
+			modelID        string
+			responseJSON   string
+			createdAtStr   string
+			expiresAtStr   string
+			hitCount       int
+			fileHashesJSON string
+		)
+		if err := rows.Scan(&modelID, &responseJSON, &createdAtStr, &expiresAtStr, &hitCount, &fileHashesJSON); err != nil {
+			c.logger.Warn("L2 inspect scan failed", "error", err)
+			continue
+		}
+
+		var response Response
+		if err := json.Unmarshal([]byte(responseJSON), &response); err != nil {
+			c.logger.Warn("L2 inspect corrupt response_json", "error", err)
+			continue
+		}
+
+		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
+		expiresAt, _ := time.Parse(time.RFC3339Nano, expiresAtStr)
+
+		var fileHashes map[string]string
+		if fileHashesJSON != "" && fileHashesJSON != "{}" {
+			_ = json.Unmarshal([]byte(fileHashesJSON), &fileHashes)
+		}
+
+		results = append(results, l2InspectEntry{
+			ModelID:    modelID,
+			Response:   &response,
+			CreatedAt:  createdAt,
+			ExpiresAt:  expiresAt,
+			HitCount:   hitCount,
+			FileHashes: fileHashes,
+		})
+	}
+
+	return results
+}
+
 // Start begins the background TTL cleanup goroutine.
 func (c *L2Cache) Start() {
 	go func() {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -179,6 +180,77 @@ func (c *L1Cache) Count() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.entries)
+}
+
+// l1InspectEntry is a lightweight result for inspection without the composite cache key.
+type l1InspectEntry struct {
+	ModelID    string
+	Response   *Response
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	HitCount   int
+	FileHashes map[string]string
+}
+
+// Inspect searches for entries matching the given prompt hash.
+// It scans all entries and returns those whose composite key contains the prompt hash.
+func (c *L1Cache) Inspect(promptHash string) []l1InspectEntry {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var results []l1InspectEntry
+	for _, entry := range c.entries {
+		// The composite key format is: modelID:promptHash[:fileHashSuffix]
+		// Check if this entry's key contains the prompt hash
+		if !containsPromptHash(entry.Key, promptHash) {
+			continue
+		}
+		// Skip expired entries
+		if entry.Entry.IsExpired() {
+			continue
+		}
+		// Extract model ID from the key (everything before the first colon)
+		modelID := entry.Key
+		if idx := strings.Index(entry.Key, ":"); idx >= 0 {
+			modelID = entry.Key[:idx]
+		}
+		results = append(results, l1InspectEntry{
+			ModelID:    modelID,
+			Response:   entry.Entry.Response,
+			CreatedAt:  entry.Entry.CreatedAt,
+			ExpiresAt:  entry.Entry.ExpiresAt,
+			HitCount:   entry.Entry.HitCount,
+			FileHashes: entry.FileMap,
+		})
+	}
+	return results
+}
+
+// containsPromptHash checks if a composite key contains the given prompt hash.
+func containsPromptHash(key, promptHash string) bool {
+	// Keys are format: modelID:promptHash[:fileHashSuffix]
+	// We need to find promptHash after the first colon
+	idx := strings.Index(key, ":")
+	if idx < 0 {
+		return false
+	}
+	rest := key[idx+1:]
+	// The prompt hash is 64 hex chars (SHA256)
+	if len(promptHash) > 16 {
+		// Match truncated form if provided
+		if len(rest) >= len(promptHash) && rest[:len(promptHash)] == promptHash {
+			return true
+		}
+	}
+	// Match full hash
+	if len(rest) >= 64 && rest[:64] == promptHash {
+		return true
+	}
+	// Check if the full key segment matches
+	if rest == promptHash {
+		return true
+	}
+	return false
 }
 
 // evictOldest removes the oldest entry.
