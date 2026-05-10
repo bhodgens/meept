@@ -57,6 +57,8 @@ type DispatchResult struct {
 	Response string `json:"response,omitempty"`
 	// MemoryContext are memories retrieved for context.
 	MemoryContext []memory.MemoryResult `json:"memory_context,omitempty"`
+	// Steps are step summaries for the ACK message.
+	Steps []TaskStepSummary `json:"steps,omitempty"`
 }
 
 // Dispatcher handles intake classification and routing of requests.
@@ -498,6 +500,15 @@ func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, inpu
 	// Record compound stats
 	d.recordCompoundDispatch(len(multi.Intents))
 
+	// Build step summaries from compound intents
+	steps := make([]TaskStepSummary, 0, len(multi.Intents))
+	for _, intent := range multi.Intents {
+		steps = append(steps, TaskStepSummary{
+			Description: intent.Summary,
+			AgentID:     intent.AgentType,
+		})
+	}
+
 	return &DispatchResult{
 		Task:    parentTask,
 		AgentID: "orchestrator",
@@ -505,6 +516,7 @@ func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, inpu
 			Type:    string(IntentCompound),
 			Summary: multi.Summary,
 		},
+		Steps: steps,
 	}, nil
 }
 

@@ -345,7 +345,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				"intent", result.Intent.Type,
 			)
 			// Build human-readable acknowledgment
-			reply = h.formatAsyncTaskAck(result)
+			reply = h.formatEnhancedAsyncTaskAck(result, result.Steps, h.estimateDuration(result.Task.ID, len(result.Steps)), h.getPlanReference(result.Task.ID))
 
 			// Publish plan request to orchestrator
 			h.publishPlanRequest(result, conversationID)
@@ -690,21 +690,9 @@ func (h *ChatHandler) formatTaskFailedMessage(name, errMsg, failedStep string, f
 }
 
 // formatAsyncTaskAck builds a human-readable acknowledgment for async task dispatch.
+// It delegates to formatEnhancedAsyncTaskAck with no step details.
 func (h *ChatHandler) formatAsyncTaskAck(result *DispatchResult) string {
-	var sb strings.Builder
-	sb.WriteString("## starting task\n\n")
-	sb.WriteString(fmt.Sprintf("**task:** %s\n", strings.ToLower(result.Task.Name)))
-	sb.WriteString(fmt.Sprintf("**id:** `%s`\n", result.Task.ID))
-	sb.WriteString(fmt.Sprintf("**assigned to:** %s agent\n", result.AgentID))
-
-	status := "planning steps..."
-	if result.Intent.Type == string(IntentCompound) {
-		status = "coordinating multiple tasks..."
-	}
-	sb.WriteString(fmt.Sprintf("**status:** %s\n\n", status))
-	sb.WriteString("you will receive updates as the task progresses.\n")
-
-	return sb.String()
+	return h.formatEnhancedAsyncTaskAck(result, nil, 0, result.Task.ID)
 }
 
 // formatEnhancedAsyncTaskAck builds an enhanced acknowledgment for async task
