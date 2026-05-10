@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	s "strings"
 
@@ -637,11 +638,58 @@ func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 		content = s.Join(args[2:], " ")
 	}
 
-	// For now, return a not-yet-implemented message
-	// Full amendment support requires bus communication which is more complex
-	return &CommandResult{
-		Output: fmt.Sprintf("amendment request (not yet fully implemented):\n  task: %s\n  type: %s\n  content: %s\n\nuse the dispatcher API directly for full amendment support", taskID, amendmentType, content),
+	// Validate amendment type
+	validTypes := map[string]bool{
+		"inject_context": true,
+		"skip_step":      true,
+		"add_step":       true,
+		"reprioritize":   true,
+		"change_agent":   true,
 	}
+	if !validTypes[amendmentType] {
+		return &CommandResult{
+			Output:  fmt.Sprintf("invalid amendment type: %s\n\nvalid types: inject_context, skip_step, add_step, reprioritize, change_agent", amendmentType),
+			IsError: true,
+		}
+	}
+
+	// Build amendment request and send via RPC bus publish
+	amendmentReq := map[string]any{
+		"task_id": taskID,
+		"type":    amendmentType,
+		"content": content,
+	}
+
+	result, err := h.rpc.Call("task.amend.submit", amendmentReq)
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to submit amendment: %v", err),
+			IsError: true,
+		}
+	}
+
+	// Parse the response for confirmation
+	var resp struct {
+		ID      string `json:"id"`
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to parse amendment response: %v", err),
+			IsError: true,
+		}
+	}
+
+	msg := fmt.Sprintf("amendment submitted:\n  id: %s\n  task: %s\n  type: %s", resp.ID, taskID, amendmentType)
+	if resp.Message != "" {
+		msg += "\n  " + resp.Message
+	}
+	if content != "" {
+		msg += fmt.Sprintf("\n  content: %s", content)
+	}
+
+	return &CommandResult{Output: msg}
 }
 
 // executeInterrupt triggers an interrupt token for a task.

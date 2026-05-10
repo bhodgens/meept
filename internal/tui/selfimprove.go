@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // PendingFix represents a fix awaiting human approval.
@@ -101,7 +101,7 @@ func (p *SelfImprovePanel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return p, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "a":
 			return p, p.approveCurrent()
@@ -160,7 +160,7 @@ func (p *SelfImprovePanel) rejectCurrent() tea.Cmd {
 }
 
 // View implements tea.Model.
-func (p *SelfImprovePanel) View() string {
+func (p *SelfImprovePanel) View() tea.View {
 	var b strings.Builder
 
 	b.WriteString(siTitleStyle.Render("self-improve - pending approvals"))
@@ -168,19 +168,19 @@ func (p *SelfImprovePanel) View() string {
 
 	if p.loading {
 		b.WriteString("loading...\n")
-		return b.String()
+		return tea.NewView(b.String())
 	}
 
 	if p.err != "" {
 		b.WriteString(siErrorStyle.Render("error: " + p.err))
 		b.WriteString("\n")
-		return b.String()
+		return tea.NewView(b.String())
 	}
 
 	if len(p.pendingFixes) == 0 {
 		b.WriteString(siOkStyle.Render("no pending approvals"))
 		b.WriteString("\n")
-		return b.String()
+		return tea.NewView(b.String())
 	}
 
 	for i, fix := range p.pendingFixes {
@@ -214,7 +214,7 @@ func (p *SelfImprovePanel) View() string {
 	b.WriteString(siHelpStyle.Render("a: approve  r: reject  j/k: navigate  R: refresh"))
 	b.WriteString("\n")
 
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 // SetSize sets the panel dimensions.

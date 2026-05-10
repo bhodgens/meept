@@ -62,10 +62,20 @@ var ToolActionMap = map[string]string{
 }
 
 // ToolRegistry provides access to available tools.
-// Production implementation lives in internal/tools/registry.go; the
-// executor depends on this narrower interface so that unit tests can
-// substitute NewPlaceholderToolRegistry without dragging in the full
-// tool registry graph.
+//
+// This is the agent-layer interface for looking up and listing tools. It is
+// intentionally narrower than the production [tools.Registry] so that unit
+// tests can substitute [PlaceholderToolRegistry] without dragging in the
+// full tool registry graph.
+//
+// Relationship to other interfaces:
+//   - [tools.Tool]           -- interface for a single tool (Name, Description, Parameters, Execute)
+//   - agent.ToolRegistry     -- this interface: a collection of tools with lookup (Get, List, GetDefinitions)
+//   - [tools.Registry]       -- production implementation that satisfies agent.ToolRegistry
+//   - [tools.ToolExecutor]   -- interface for executing a tool by name with permission checks
+//
+// The production [tools.Registry] satisfies this interface; see
+// [tools.Registry.GetDefinitions] which is an alias for compatibility.
 type ToolRegistry interface {
 	// Get retrieves a tool by name.
 	Get(name string) tools.Tool

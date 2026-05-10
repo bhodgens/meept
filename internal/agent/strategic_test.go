@@ -167,6 +167,111 @@ func TestCreateFallbackSteps(t *testing.T) {
 // a "task.planned" event (for TUI consumers) and an "orchestrator.schedule"
 // event (to trigger tactical scheduling). The test uses a real bus and SQLite
 // stores but nil registry so it exercises the fallback step path.
+// TestStrategicPlanner_CopyMemoryRefs verifies that when Plan() is called on a
+// task that has MemoryRefs, the first step created by the planner inherits those
+// refs. It exercises the full Plan() path (fallback) via a real task store.
+func TestStrategicPlanner_CopyMemoryRefs(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	stepStore := taskStore.StepStore()
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		Registry:       nil, // triggers fallback path
+		TaskStore:      taskStore,
+		StepStore:      stepStore,
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	t.Run("fallback_step_inherits_parent_refs", func(t *testing.T) {
+		tsk := newTestTask("task-memref-test", "do something with memory")
+		tsk.AddMemoryRef("mem-parent-alpha")
+		tsk.AddMemoryRef("mem-parent-beta")
+		if err := taskStore.Create(tsk); err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+
+		req := PlanRequest{
+			TaskID:    tsk.ID,
+			SessionID: "session-memref",
+			Input:     "do something with memory",
+			Intent:    "chat", // simple intent -> fallback path
+		}
+
+		err = sp.Plan(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Plan() failed: %v", err)
+		}
+
+		// Retrieve persisted steps and verify first step has parent refs
+		steps, err := stepStore.ListByTaskID(tsk.ID)
+		if err != nil {
+			t.Fatalf("failed to list steps: %v", err)
+		}
+		if len(steps) == 0 {
+			t.Fatal("expected at least one step")
+		}
+
+		firstStep := steps[0]
+		if len(firstStep.MemoryRefs) != 2 {
+			t.Errorf("expected first step to have 2 memory refs, got %d: %v",
+				len(firstStep.MemoryRefs), firstStep.MemoryRefs)
+		}
+
+		// Verify the specific refs are present
+		refSet := make(map[string]bool)
+		for _, ref := range firstStep.MemoryRefs {
+			refSet[ref] = true
+		}
+		if !refSet["mem-parent-alpha"] {
+			t.Error("missing mem-parent-alpha in first step refs")
+		}
+		if !refSet["mem-parent-beta"] {
+			t.Error("missing mem-parent-beta in first step refs")
+		}
+	})
+
+	t.Run("no_refs_no_crash", func(t *testing.T) {
+		tsk := newTestTask("task-norefs-test", "task without memory refs")
+		if err := taskStore.Create(tsk); err != nil {
+			t.Fatalf("failed to create task: %v", err)
+		}
+
+		req := PlanRequest{
+			TaskID:    tsk.ID,
+			SessionID: "session-norefs",
+			Input:     "simple task",
+			Intent:    "chat",
+		}
+
+		err = sp.Plan(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Plan() failed: %v", err)
+		}
+
+		steps, err := stepStore.ListByTaskID(tsk.ID)
+		if err != nil {
+			t.Fatalf("failed to list steps: %v", err)
+		}
+		if len(steps) == 0 {
+			t.Fatal("expected at least one step")
+		}
+		if len(steps[0].MemoryRefs) != 0 {
+			t.Errorf("expected no memory refs, got %d", len(steps[0].MemoryRefs))
+		}
+	})
+}
+
 func TestStrategicPlanner_PublishesEvents(t *testing.T) {
 	msgBus := bus.New(nil, slogDiscardLogger())
 	defer msgBus.Close()

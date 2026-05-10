@@ -2,10 +2,18 @@ package security
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // OrchestratorConfig holds configuration for the security orchestrator.
@@ -51,6 +59,7 @@ type Orchestrator struct {
 	promptGuard   *PromptGuard
 	tirithScanner *TirithScanner
 	logger        *slog.Logger
+	auditDB       *sql.DB // SQLite database for audit logging (nil when disabled)
 
 	// Metrics tracking (atomic for thread safety)
 	inputsProcessed       atomic.Int64
@@ -101,6 +110,20 @@ func NewOrchestrator(cfg OrchestratorConfig, logger *slog.Logger) *Orchestrator 
 		)
 	}
 
+	// Initialize audit logging if enabled
+	if cfg.EnableAuditLog && cfg.AuditDBPath != "" {
+		if err := o.initAuditDB(cfg.AuditDBPath); err != nil {
+			logger.Error("Failed to initialize audit log database",
+				"path", cfg.AuditDBPath,
+				"error", err,
+			)
+		} else {
+			logger.Info("Audit logging enabled",
+				"path", cfg.AuditDBPath,
+			)
+		}
+	}
+
 	return o
 }
 
@@ -128,6 +151,11 @@ func (o *Orchestrator) SanitizeInput(text string) (string, bool, []Warning) {
 				"threat_type", threat.Type,
 				"threat_message", threat.Message,
 			)
+			o.logAuditEvent("input_blocked", "critical", map[string]any{
+				"threat_type": threat.Type,
+				"message":     threat.Message,
+				"text_length": len(text),
+			}, "sanitizer")
 			break
 		}
 	}
@@ -138,6 +166,10 @@ func (o *Orchestrator) SanitizeInput(text string) (string, bool, []Warning) {
 			"threats_detected", len(result.ThreatsDetected),
 			"was_modified", result.WasModified,
 		)
+		o.logAuditEvent("input_sanitized", "warning", map[string]any{
+			"threats":    result.ThreatsDetected,
+			"text_length": len(text),
+		}, "sanitizer")
 	}
 
 	// Also run prompt guard detection for additional warnings
@@ -173,6 +205,12 @@ func (o *Orchestrator) ScanOutput(text string) (string, bool, []Warning) {
 		o.logger.Warn("Credentials detected in output",
 			"warning_count", len(result.Warnings),
 		)
+
+		o.logAuditEvent("output_credentials", "warning", map[string]any{
+			"warnings":      result.Warnings,
+			"text_length":   len(text),
+			"was_redacted":  o.config.RedactOutput,
+		}, "output_monitor")
 
 		if o.config.RedactOutput {
 			o.outputsRedacted.Add(1)
@@ -219,6 +257,12 @@ func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (bl
 			"rule_id", ptrStringValue(result.RuleID),
 			"reason", reason,
 		)
+		o.logAuditEvent("command_blocked", "critical", map[string]any{
+			"command":  truncateCommand(command),
+			"severity": ptrStringValue(result.Severity),
+			"rule_id":  ptrStringValue(result.RuleID),
+			"reason":   reason,
+		}, "tirith")
 		return true, false, reason
 	}
 
@@ -234,6 +278,12 @@ func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (bl
 			"rule_id", ptrStringValue(result.RuleID),
 			"reason", reason,
 		)
+		o.logAuditEvent("command_warning", "warning", map[string]any{
+			"command":  truncateCommand(command),
+			"severity": ptrStringValue(result.Severity),
+			"rule_id":  ptrStringValue(result.RuleID),
+			"reason":   reason,
+		}, "tirith")
 		return false, true, reason
 	}
 
@@ -287,6 +337,90 @@ func (o *Orchestrator) InputSanitizer() *InputSanitizer {
 // IsEnabled returns whether the orchestrator has any security features enabled.
 func (o *Orchestrator) IsEnabled() bool {
 	return o.config.SanitizeInputs || o.config.MonitorOutput || o.config.ScanShellCommands
+}
+
+// Close cleans up resources held by the orchestrator (audit DB connection).
+func (o *Orchestrator) Close() {
+	if o.auditDB != nil {
+		if err := o.auditDB.Close(); err != nil {
+			o.logger.Warn("Failed to close audit database", "error", err)
+		}
+	}
+}
+
+// AuditEvent represents a single row in the orchestrator audit log.
+type AuditEvent struct {
+	ID         int64           `json:"id"`
+	Timestamp  time.Time       `json:"timestamp"`
+	EventType  string          `json:"event_type"`  // e.g. "input_sanitized", "input_blocked", "output_scan", "command_blocked", "command_warning"
+	Severity   string          `json:"severity"`    // e.g. "info", "warning", "critical"
+	Details    json.RawMessage `json:"details"`     // event-specific details as JSON
+	Source     string          `json:"source"`      // e.g. "sanitizer", "output_monitor", "tirith"
+}
+
+// initAuditDB opens (or creates) the SQLite audit database and ensures the
+// audit_log table exists.
+func (o *Orchestrator) initAuditDB(dbPath string) error {
+	// Ensure parent directory exists
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create audit db directory: %w", err)
+	}
+
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	if err != nil {
+		return fmt.Errorf("open audit db: %w", err)
+	}
+
+	// Create the audit_log table if it does not exist.
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_log (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+			event_type TEXT    NOT NULL,
+			severity   TEXT    NOT NULL DEFAULT 'info',
+			details    TEXT    NOT NULL DEFAULT '{}',
+			source     TEXT    NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log(event_type);
+		CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
+	`)
+	if err != nil {
+		db.Close()
+		return fmt.Errorf("create audit_log table: %w", err)
+	}
+
+	o.auditDB = db
+	return nil
+}
+
+// logAuditEvent inserts an audit event row. It is safe to call when audit
+// logging is disabled (no-op) and silently drops errors so that audit
+// failures never block security operations.
+func (o *Orchestrator) logAuditEvent(eventType, severity string, details any, source string) {
+	if o.auditDB == nil {
+		return
+	}
+
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		detailsJSON = []byte(fmt.Sprintf(`{"marshal_error": %q}`, err))
+	}
+
+	_, err = o.auditDB.Exec(
+		`INSERT INTO audit_log (timestamp, event_type, severity, details, source) VALUES (?, ?, ?, ?, ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		eventType,
+		severity,
+		string(detailsJSON),
+		source,
+	)
+	if err != nil {
+		o.logger.Warn("Failed to write audit event",
+			"event_type", eventType,
+			"error", err,
+		)
+	}
 }
 
 // isCriticalThreat determines if a threat type should cause input blocking.

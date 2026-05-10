@@ -341,7 +341,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
 		AgentID: "orchestrator",
 	}
 
-	ack := h.formatEnhancedAsyncTaskAck(result, steps, 5, "plan-456")
+	ack := h.FormatEnhancedAsyncTaskAck(result, steps, 5, "plan-456")
 
 	// Verify required elements
 	if !strings.Contains(ack, "3 subtasks") {
@@ -374,7 +374,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_NoSteps(t *testing.T) {
 		AgentID: "chat",
 	}
 
-	ack := h.formatEnhancedAsyncTaskAck(result, nil, 0, "plan-789")
+	ack := h.FormatEnhancedAsyncTaskAck(result, nil, 0, "plan-789")
 
 	if !strings.Contains(ack, "0 subtasks") {
 		t.Error("missing subtask count for empty steps")
@@ -402,7 +402,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_Truncation(t *testing.T) {
 		AgentID: "coder",
 	}
 
-	ack := h.formatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
+	ack := h.FormatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
 
 	lines := strings.Split(ack, "\n")
 	found := false
@@ -438,7 +438,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_MultiAgent(t *testing.T) {
 		AgentID: "orchestrator",
 	}
 
-	ack := h.formatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
+	ack := h.FormatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
 
 	if !strings.Contains(ack, "agents:") {
 		t.Error("missing agents line for multi-agent task")
@@ -467,7 +467,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_SingleAgent(t *testing.T) {
 		AgentID: "coder",
 	}
 
-	ack := h.formatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
+	ack := h.FormatEnhancedAsyncTaskAck(result, steps, 0, "plan-123")
 
 	if strings.Contains(ack, "agents:") {
 		t.Error("agents line should not appear for single-agent task")
@@ -493,7 +493,7 @@ func TestCompoundTaskAck_FullFlow(t *testing.T) {
 		AgentID: "orchestrator",
 	}
 
-	ack := h.formatEnhancedAsyncTaskAck(result, steps, 16, "plan-compound-001")
+	ack := h.FormatEnhancedAsyncTaskAck(result, steps, 16, "plan-compound-001")
 
 	// 1. Subtask count
 	if !strings.Contains(ack, "4 subtasks") {
@@ -564,7 +564,7 @@ func TestCompoundTaskAck_TruncationOverflow(t *testing.T) {
 		AgentID: "orchestrator",
 	}
 
-	ack := h.formatEnhancedAsyncTaskAck(result, steps, 28, "plan-overflow")
+	ack := h.FormatEnhancedAsyncTaskAck(result, steps, 28, "plan-overflow")
 
 	// Should show 7 subtasks
 	if !strings.Contains(ack, "7 subtasks") {
@@ -613,7 +613,7 @@ func TestCompoundTaskAck_MinimalTask(t *testing.T) {
 		AgentID: "chat",
 	}
 
-	ack := h.formatEnhancedAsyncTaskAck(result, nil, 0, "plan-min")
+	ack := h.FormatEnhancedAsyncTaskAck(result, nil, 0, "plan-min")
 
 	if !strings.Contains(ack, "0 subtasks") {
 		t.Error("expected '0 subtasks'")

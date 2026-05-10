@@ -2,7 +2,9 @@ package task
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -601,5 +603,214 @@ func TestStepStore_TokenUsage(t *testing.T) {
 	}
 	if got2.TokenUsage != 800 {
 		t.Errorf("expected token usage 800 after update, got %d", got2.TokenUsage)
+	}
+}
+
+func TestTaskStep_MemoryRefs(t *testing.T) {
+	t.Run("initial_state_empty", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		if len(step.MemoryRefs) != 0 {
+			t.Errorf("expected empty MemoryRefs, got %v", step.MemoryRefs)
+		}
+	})
+
+	t.Run("add_memory_ref", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		step.AddMemoryRef("mem-1")
+		step.AddMemoryRef("mem-2")
+
+		if len(step.MemoryRefs) != 2 {
+			t.Errorf("expected 2 memory refs, got %d", len(step.MemoryRefs))
+		}
+	})
+
+	t.Run("deduplication", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		step.AddMemoryRef("mem-1")
+		step.AddMemoryRef("mem-2")
+		step.AddMemoryRef("mem-1") // duplicate
+
+		if len(step.MemoryRefs) != 2 {
+			t.Errorf("expected 2 memory refs after duplicate, got %d", len(step.MemoryRefs))
+		}
+	})
+
+	t.Run("triple_duplicate", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		step.AddMemoryRef("mem-x")
+		step.AddMemoryRef("mem-x")
+		step.AddMemoryRef("mem-x")
+
+		if len(step.MemoryRefs) != 1 {
+			t.Errorf("expected 1 memory ref after triple duplicate, got %d", len(step.MemoryRefs))
+		}
+	})
+
+	t.Run("updates_timestamp", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+		original := step.UpdatedAt
+
+		time.Sleep(time.Millisecond)
+
+		step.AddMemoryRef("mem-1")
+
+		if !step.UpdatedAt.After(original) {
+			t.Error("UpdatedAt should be refreshed after AddMemoryRef")
+		}
+	})
+}
+
+func TestTaskStep_AccumulatedContext(t *testing.T) {
+	t.Run("initial_state_empty", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		if step.AccumulatedContext != "" {
+			t.Errorf("expected empty AccumulatedContext, got %q", step.AccumulatedContext)
+		}
+	})
+
+	t.Run("first_append_sets_directly", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		step.AppendToContext("first context")
+
+		if step.AccumulatedContext != "first context" {
+			t.Errorf("expected %q, got %q", "first context", step.AccumulatedContext)
+		}
+	})
+
+	t.Run("subsequent_appends_add_separator", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		step.AppendToContext("first context")
+		step.AppendToContext("second context")
+
+		if !strings.Contains(step.AccumulatedContext, "first context") {
+			t.Error("missing first context")
+		}
+		if !strings.Contains(step.AccumulatedContext, "second context") {
+			t.Error("missing second context")
+		}
+		if !strings.Contains(step.AccumulatedContext, "---") {
+			t.Error("expected separator between contexts")
+		}
+	})
+
+	t.Run("multiple_appends_all_separated", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		step.AppendToContext("A")
+		step.AppendToContext("B")
+		step.AppendToContext("C")
+
+		// Should have exactly 2 separators
+		sepCount := strings.Count(step.AccumulatedContext, "---")
+		if sepCount != 2 {
+			t.Errorf("expected 2 separators, got %d", sepCount)
+		}
+	})
+
+	t.Run("empty_string_appended_to_empty", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+
+		step.AppendToContext("")
+
+		// AppendToContext sets the field directly when context is empty,
+		// even if the content is empty.
+		if step.AccumulatedContext != "" {
+			t.Errorf("expected empty context after appending empty string to empty context, got %q", step.AccumulatedContext)
+		}
+	})
+
+	t.Run("updates_timestamp", func(t *testing.T) {
+		step := NewTaskStep("task-1", "test step", 0)
+		// Ensure the step has existing context so the separator path runs
+		step.AccumulatedContext = "existing"
+		original := step.UpdatedAt
+
+		time.Sleep(time.Millisecond)
+
+		step.AppendToContext("some context")
+
+		if !step.UpdatedAt.After(original) {
+			t.Error("UpdatedAt should be refreshed after AppendToContext")
+		}
+	})
+}
+
+func TestStepStore_MemoryRefsRoundTrip(t *testing.T) {
+	store := newTestStepStore(t)
+
+	step := NewTaskStep("task-1", "step with refs", 0)
+	step.AddMemoryRef("mem-alpha")
+	step.AddMemoryRef("mem-beta")
+
+	if err := store.Create(step); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if len(got.MemoryRefs) != 2 {
+		t.Errorf("expected 2 memory refs after round-trip, got %d", len(got.MemoryRefs))
+	}
+
+	// Update: add another ref
+	got.AddMemoryRef("mem-gamma")
+	if err := store.Update(got); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	got2, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID after update failed: %v", err)
+	}
+	if len(got2.MemoryRefs) != 3 {
+		t.Errorf("expected 3 memory refs after update, got %d", len(got2.MemoryRefs))
+	}
+}
+
+func TestStepStore_AccumulatedContextRoundTrip(t *testing.T) {
+	store := newTestStepStore(t)
+
+	step := NewTaskStep("task-1", "step with context", 0)
+	step.AppendToContext("initial finding")
+
+	if err := store.Create(step); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	got, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+	if got.AccumulatedContext != "initial finding" {
+		t.Errorf("expected %q, got %q", "initial finding", got.AccumulatedContext)
+	}
+
+	// Update: append more context
+	got.AppendToContext("second finding")
+	if err := store.Update(got); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	got2, err := store.GetByID(step.ID)
+	if err != nil {
+		t.Fatalf("GetByID after update failed: %v", err)
+	}
+	if !strings.Contains(got2.AccumulatedContext, "initial finding") {
+		t.Error("missing initial finding after update")
+	}
+	if !strings.Contains(got2.AccumulatedContext, "second finding") {
+		t.Error("missing second finding after update")
+	}
+	if !strings.Contains(got2.AccumulatedContext, "---") {
+		t.Error("missing separator in accumulated context after update")
 	}
 }

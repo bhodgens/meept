@@ -350,6 +350,49 @@ func (s *Server) registerBuiltinHandlers() {
 	s.RegisterHandler("bus.stats", func(ctx context.Context, params json.RawMessage) (any, error) {
 		return s.bus.Stats(), nil
 	})
+
+	// Task amendment submission - publishes to task.amend.request bus topic
+	s.RegisterHandler("task.amend.submit", func(ctx context.Context, params json.RawMessage) (any, error) {
+		var req struct {
+			TaskID  string `json:"task_id"`
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("invalid amendment request: %w", err)
+		}
+		if req.TaskID == "" || req.Type == "" {
+			return nil, fmt.Errorf("task_id and type are required")
+		}
+
+		amendmentID := fmt.Sprintf("amend-%d", atomicCounter())
+
+		// Publish the amendment request on the bus for the orchestrator to handle
+		payload, err := json.Marshal(map[string]any{
+			"id":      amendmentID,
+			"task_id": req.TaskID,
+			"type":    req.Type,
+			"content": req.Content,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal amendment payload: %w", err)
+		}
+
+		msg := &models.BusMessage{
+			ID:        fmt.Sprintf("rpc-%d", atomicCounter()),
+			Type:      models.MessageTypeRequest,
+			Topic:     "task.amend.request",
+			Source:    "rpc.client",
+			Payload:   payload,
+		}
+		s.bus.Publish("task.amend.request", msg)
+
+		return map[string]string{
+			"id":      amendmentID,
+			"status":  "submitted",
+			"message": fmt.Sprintf("amendment %s submitted for task %s", req.Type, req.TaskID),
+		}, nil
+	})
 }
 
 var counter atomic.Int64

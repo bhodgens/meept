@@ -11,11 +11,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"unicode/utf8"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -26,7 +26,8 @@ type ChatHandler struct {
 	dispatcher   *Dispatcher // Optional: if set, routes through multi-agent dispatch
 	bus          *bus.MessageBus
 	logger       *slog.Logger
-	metricsStore *metrics.Store // Optional: metrics store for duration estimates
+	metricsStore *metrics.Store   // Optional: metrics store for duration estimates
+	stepStore    *task.StepStore  // Optional: step store for fetching step summaries
 
 	// Worker tracking
 	workers   map[string]*Worker
@@ -259,14 +260,6 @@ func (h *ChatHandler) handleWorkerListRequest(msg *models.BusMessage) {
 	h.bus.Publish("agent.workers.result", respMsg)
 }
 
-// SetMetricsStore sets the metrics store for duration estimates.
-// Must be called before Start to avoid data races.
-func (h *ChatHandler) SetMetricsStore(store *metrics.Store) {
-	h.workersMu.Lock()
-	h.metricsStore = store
-	h.workersMu.Unlock()
-}
-
 // Stop gracefully stops the handler.
 func (h *ChatHandler) Stop(ctx context.Context) error {
 	if h.cancel != nil {
@@ -357,7 +350,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				"intent", result.Intent.Type,
 			)
 			// Build human-readable acknowledgment
-			reply = h.formatEnhancedAsyncTaskAck(result, result.Steps, h.estimateDuration(result.Task.ID, len(result.Steps)), h.getPlanReference(result.Task.ID))
+			reply = h.FormatEnhancedAsyncTaskAck(result, result.Steps, h.estimateDuration(result.Task.ID, len(result.Steps)), h.getPlanReference(result.Task.ID))
 
 			// Publish plan request to orchestrator
 			h.publishPlanRequest(result, conversationID)
@@ -701,10 +694,16 @@ func (h *ChatHandler) formatTaskFailedMessage(name, errMsg, failedStep string, f
 	return sb.String()
 }
 
-// formatEnhancedAsyncTaskAck builds an enhanced acknowledgment for async task
+// FormatAsyncTaskAck builds a human-readable acknowledgment for async task dispatch.
+// It delegates to FormatEnhancedAsyncTaskAck with no step details.
+func (h *ChatHandler) FormatAsyncTaskAck(result *DispatchResult) string {
+	return h.FormatEnhancedAsyncTaskAck(result, nil, 0, result.Task.ID)
+}
+
+// FormatEnhancedAsyncTaskAck builds an enhanced acknowledgment for async task
 // dispatch that includes subtask count, bulleted summary, estimated duration,
 // and plan reference.
-func (h *ChatHandler) formatEnhancedAsyncTaskAck(
+func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 	result *DispatchResult,
 	steps []TaskStepSummary,
 	estimatedMinutes int,
@@ -753,11 +752,7 @@ func (h *ChatHandler) formatEnhancedAsyncTaskAck(
 		if agentLabel == "" {
 			agentLabel = "agent"
 		}
-		desc := step.Description
-		if utf8.RuneCountInString(desc) > 50 {
-			runes := []rune(desc)
-			desc = string(runes[:47]) + "..."
-		}
+		desc := truncateString(step.Description, 50)
 		sb.WriteString(fmt.Sprintf("- %s (%s)\n", strings.ToLower(desc), agentLabel))
 	}
 
@@ -771,16 +766,37 @@ func (h *ChatHandler) formatEnhancedAsyncTaskAck(
 	return sb.String()
 }
 
+// fetchStepSummaries retrieves step summaries for a task from the step store.
+func (h *ChatHandler) fetchStepSummaries(taskID string) []TaskStepSummary {
+	if h.stepStore == nil {
+		return nil
+	}
+	steps, err := h.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		h.logger.Debug("Failed to fetch steps for ACK",
+			"task_id", taskID,
+			"error", err,
+		)
+		return nil
+	}
+
+	summaries := make([]TaskStepSummary, len(steps))
+	for i, s := range steps {
+		summaries[i] = TaskStepSummary{
+			Description: s.Description,
+			AgentID:     s.AgentID,
+		}
+	}
+	return summaries
+}
+
 // estimateDuration returns estimated duration based on step count and historical data.
 func (h *ChatHandler) estimateDuration(taskID string, stepCount int) int {
 	if stepCount <= 0 {
 		return 0
 	}
-	h.workersMu.RLock()
-	store := h.metricsStore
-	h.workersMu.RUnlock()
-	if store != nil {
-		avgDuration := store.GetAverageStepDuration("orchestrator")
+	if h.metricsStore != nil {
+		avgDuration := h.metricsStore.GetAverageStepDuration("orchestrator")
 		if avgDuration > 0 {
 			totalMin := int(avgDuration.Minutes()) * stepCount
 			if totalMin > 0 {
@@ -794,6 +810,16 @@ func (h *ChatHandler) estimateDuration(taskID string, stepCount int) int {
 // getPlanReference returns the plan reference for a task.
 func (h *ChatHandler) getPlanReference(taskID string) string {
 	return taskID
+}
+
+// SetMetricsStore sets the metrics store for duration estimates.
+func (h *ChatHandler) SetMetricsStore(store *metrics.Store) {
+	h.metricsStore = store
+}
+
+// SetStepStore sets the step store for fetching step summaries.
+func (h *ChatHandler) SetStepStore(store *task.StepStore) {
+	h.stepStore = store
 }
 
 // generateWorkerID creates a unique worker ID.
