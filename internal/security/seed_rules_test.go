@@ -260,7 +260,7 @@ func TestSeedRulesCategories(t *testing.T) {
 func containsSubstring(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		match := true
-		for j := 0; j < len(substr); j++ {
+		for j := range len(substr) {
 			// Case-insensitive comparison
 			sc := s[i+j]
 			tc := substr[j]

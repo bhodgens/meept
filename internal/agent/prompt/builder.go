@@ -3,6 +3,7 @@ package prompt
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -49,8 +50,8 @@ func (c *PromptContext) WithVariable(key, value string) *PromptContext {
 
 // Builder composes system prompts from components.
 type Builder struct {
-	loader     *Loader
-	separator  string
+	loader    *Loader
+	separator string
 }
 
 // NewBuilder creates a new prompt builder with the given loader.
@@ -128,13 +129,7 @@ func (b *Builder) BuildWithDefaults(components []string, defaults []string, ctx 
 
 	// Add defaults that aren't already included
 	for _, def := range defaults {
-		found := false
-		for _, comp := range finalComponents {
-			if comp == def {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(finalComponents, def)
 		if !found && b.loader.Exists(def) {
 			finalComponents = append(finalComponents, def)
 		}
@@ -147,12 +142,12 @@ func (b *Builder) BuildWithDefaults(components []string, defaults []string, ctx 
 func (b *Builder) shouldInclude(ref string, ctx *PromptContext) bool {
 	// Map conditional refs to condition keys
 	conditionMap := map[string]string{
-		"conditional.code_style":        "has_code_task",
-		"conditional.error_context":     "has_error",
-		"conditional.source_evaluation": "researching",
-		"conditional.analysis_depth":    "analyzing",
+		"conditional.code_style":         "has_code_task",
+		"conditional.error_context":      "has_error",
+		"conditional.source_evaluation":  "researching",
+		"conditional.analysis_depth":     "analyzing",
 		"conditional.task_decomposition": "planning",
-		"conditional.git_safety":        "git_operation",
+		"conditional.git_safety":         "git_operation",
 	}
 
 	conditionKey, ok := conditionMap[ref]

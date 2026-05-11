@@ -130,10 +130,7 @@ func (a *RootCauseAnalyzer) extractRelevantCode(content string, issue Issue) str
 	}
 
 	// Extract context around the line
-	start := lineNum - 10
-	if start < 0 {
-		start = 0
-	}
+	start := max(lineNum-10, 0)
 	end := lineNum + 10
 	if end > len(lines) {
 		end = len(lines)
@@ -151,28 +148,28 @@ func (a *RootCauseAnalyzer) parseAnalysisResponse(issueID, response string) *Roo
 		Confidence: 0.5, // Default
 	}
 
-	lines := strings.Split(response, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(response, "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
 
-		if strings.HasPrefix(line, "ROOT_CAUSE:") {
-			analysis.RootCause = strings.TrimSpace(strings.TrimPrefix(line, "ROOT_CAUSE:"))
-		} else if strings.HasPrefix(line, "FACTORS:") {
-			factorsStr := strings.TrimSpace(strings.TrimPrefix(line, "FACTORS:"))
-			for _, f := range strings.Split(factorsStr, ",") {
+		if after, ok := strings.CutPrefix(line, "ROOT_CAUSE:"); ok {
+			analysis.RootCause = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "FACTORS:"); ok {
+			factorsStr := strings.TrimSpace(after)
+			for f := range strings.SplitSeq(factorsStr, ",") {
 				if f = strings.TrimSpace(f); f != "" {
 					analysis.Contributing = append(analysis.Contributing, f)
 				}
 			}
-		} else if strings.HasPrefix(line, "FILES:") {
-			filesStr := strings.TrimSpace(strings.TrimPrefix(line, "FILES:"))
-			for _, f := range strings.Split(filesStr, ",") {
+		} else if after, ok := strings.CutPrefix(line, "FILES:"); ok {
+			filesStr := strings.TrimSpace(after)
+			for f := range strings.SplitSeq(filesStr, ",") {
 				if f = strings.TrimSpace(f); f != "" {
 					analysis.AffectedFiles = append(analysis.AffectedFiles, f)
 				}
 			}
-		} else if strings.HasPrefix(line, "CONFIDENCE:") {
-			confStr := strings.TrimSpace(strings.TrimPrefix(line, "CONFIDENCE:"))
+		} else if after, ok := strings.CutPrefix(line, "CONFIDENCE:"); ok {
+			confStr := strings.TrimSpace(after)
 			var conf float64
 			fmt.Sscanf(confStr, "%f", &conf)
 			if conf >= 0 && conf <= 1 {

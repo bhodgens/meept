@@ -21,15 +21,18 @@ type FuzzyMatcher struct {
 }
 
 type fuzzyItem struct {
-	data    any
-	text    string
-	lower   string
-	words   []string // Pre-split words for scoring
+	data  any
+	text  string
+	lower string
+	words []string // Pre-split words for scoring
 }
 
 // NewFuzzyMatcher creates a new fuzzy matcher with the given items.
 // Each item is a (text, data) pair where text is searchable and data is any payload.
-func NewFuzzyMatcher(items []struct{ Text string; Data any }) *FuzzyMatcher {
+func NewFuzzyMatcher(items []struct {
+	Text string
+	Data any
+}) *FuzzyMatcher {
 	fm := &FuzzyMatcher{
 		items: make([]fuzzyItem, len(items)),
 	}
@@ -89,7 +92,7 @@ func (fm *FuzzyMatcher) score(item fuzzyItem, query string) (float64, []int) {
 	// Strategy 1: Exact substring match (highest priority)
 	if idx := strings.Index(item.lower, query); idx >= 0 {
 		indices := make([]int, len(query))
-		for i := 0; i < len(query); i++ {
+		for i := range len(query) {
 			indices[i] = idx + i
 		}
 		score := 100.0

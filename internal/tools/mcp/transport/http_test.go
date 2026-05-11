@@ -34,7 +34,7 @@ func TestHTTPTransport_StartStop(t *testing.T) {
 func TestHTTPTransport_Send(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		if r.Header.Get("Content-Type") != "application/json" {

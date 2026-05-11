@@ -7,7 +7,7 @@ import (
 )
 
 // MessageCallback is invoked when a message arrives on a subscribed topic.
-type MessageCallback func(ctx context.Context, topic string, msg interface{})
+type MessageCallback func(ctx context.Context, topic string, msg any)
 
 // SubscriptionHandler manages bus subscriptions with automatic lifecycle
 // management. It handles subscribe/dispatch/teardown to eliminate
@@ -18,13 +18,13 @@ type MessageCallback func(ctx context.Context, topic string, msg interface{})
 // if the context is cancelled but a goroutine never reaches its defer
 // (e.g., due to channel read blocking), the subscription leaks.
 type SubscriptionHandler struct {
-	bus        *MessageBus
-	callbacks  map[string]MessageCallback // topic → callback
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	subscribers []*Subscriber              // all live subscribers
-	logger     *slog.Logger
+	bus         *MessageBus
+	callbacks   map[string]MessageCallback // topic → callback
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	subscribers []*Subscriber // all live subscribers
+	logger      *slog.Logger
 }
 
 // NewSubscriptionHandler creates a new handler

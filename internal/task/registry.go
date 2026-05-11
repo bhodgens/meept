@@ -389,43 +389,43 @@ func (h *Handler) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (h *Handler) handleTaskCreate(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskCreate(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskGet(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskGet(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskUpdate(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskUpdate(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskDelete(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskDelete(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskCancel(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskCancel(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskList(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskList(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskListExtended(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskListExtended(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskLink(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskLink(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskUnlink(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskUnlink(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleTaskSteps(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleTaskSteps(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
@@ -549,25 +549,25 @@ func (h *Handler) handleList(ctx context.Context, msg *models.BusMessage) (any, 
 
 // TaskExtendedResponse represents a task with all extended fields for TUI display.
 type TaskExtendedResponse struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Description     string   `json:"description,omitempty"`
-	ProjectDir      string   `json:"project_dir,omitempty"`
-	WorkspaceDir    string   `json:"workspace_dir,omitempty"`
-	State           string   `json:"state"`
-	GitRepo         string   `json:"git_repo,omitempty"`
-	MemvidZone      string   `json:"memvid_zone,omitempty"`
-	TotalJobs       int      `json:"total_jobs"`
-	CompletedJobs   int      `json:"completed_jobs"`
-	FailedJobs      int      `json:"failed_jobs"`
-	LinkedSessions  []string `json:"linked_sessions,omitempty"`
-	MemoryRefs      []string `json:"memory_refs,omitempty"`
-	ContextQuery    string   `json:"context_query,omitempty"`
-	InheritedFrom   string   `json:"inherited_from,omitempty"`
-	CreatedMemories []string `json:"created_memories,omitempty"`
-	AssignedAgent   string   `json:"assigned_agent,omitempty"`
-	CreatedAt       string   `json:"created_at"`
-	UpdatedAt       string   `json:"updated_at"`
+	ID              string      `json:"id"`
+	Name            string      `json:"name"`
+	Description     string      `json:"description,omitempty"`
+	ProjectDir      string      `json:"project_dir,omitempty"`
+	WorkspaceDir    string      `json:"workspace_dir,omitempty"`
+	State           string      `json:"state"`
+	GitRepo         string      `json:"git_repo,omitempty"`
+	MemvidZone      string      `json:"memvid_zone,omitempty"`
+	TotalJobs       int         `json:"total_jobs"`
+	CompletedJobs   int         `json:"completed_jobs"`
+	FailedJobs      int         `json:"failed_jobs"`
+	LinkedSessions  []string    `json:"linked_sessions,omitempty"`
+	MemoryRefs      []string    `json:"memory_refs,omitempty"`
+	ContextQuery    string      `json:"context_query,omitempty"`
+	InheritedFrom   string      `json:"inherited_from,omitempty"`
+	CreatedMemories []string    `json:"created_memories,omitempty"`
+	AssignedAgent   string      `json:"assigned_agent,omitempty"`
+	CreatedAt       string      `json:"created_at"`
+	UpdatedAt       string      `json:"updated_at"`
 	Steps           []*TaskStep `json:"steps,omitempty"`
 }
 

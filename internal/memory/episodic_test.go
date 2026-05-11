@@ -23,7 +23,7 @@ func TestEpisodicMemoryInitialize(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -44,7 +44,7 @@ func TestEpisodicMemoryStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -80,7 +80,7 @@ func TestEpisodicMemorySearch(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -131,7 +131,7 @@ func TestEpisodicMemoryGetRecent(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -142,7 +142,7 @@ func TestEpisodicMemoryGetRecent(t *testing.T) {
 	defer mem.Close()
 
 	// Store memories
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		_, err = mem.Store(ctx, "Memory "+string(rune('A'+i)), "conversation", nil)
 		if err != nil {
 			t.Fatalf("Failed to store: %v", err)
@@ -170,7 +170,7 @@ func TestEpisodicMemoryGetByCategory(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -206,7 +206,7 @@ func TestEpisodicMemoryDelete(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -245,7 +245,7 @@ func TestEpisodicMemoryDeleteByIDs(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -287,7 +287,7 @@ func TestEpisodicMemoryTimestamps(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -341,7 +341,7 @@ func TestEpisodicMemoryTimestamps(t *testing.T) {
 }
 
 func TestEpisodicMemoryNotInitialized(t *testing.T) {
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: "/tmp/test",
 	})
 
@@ -368,7 +368,7 @@ func TestEpisodicMemoryEmptySearch(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -407,7 +407,7 @@ func TestEpisodicMemoryGetOldMemories(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -449,7 +449,7 @@ func TestEpisodicMemoryMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	mem := mustNewEpisodicMemory(t,EpisodicConfig{
+	mem := mustNewEpisodicMemory(t, EpisodicConfig{
 		DataDir: filepath.Join(tmpDir, "episodic"),
 	})
 
@@ -510,8 +510,8 @@ func TestEpisodicMemoryStorePopulatesVersioningColumns(t *testing.T) {
 
 	// Store first memory (root) - should get default version=1, is_current=1
 	rootID, err := mem.Store(ctx, "Original content", "conversation", map[string]any{
-		"version":     1,
-		"is_current":  1,
+		"version":    1,
+		"is_current": 1,
 	})
 	if err != nil {
 		t.Fatalf("Failed to store root: %v", err)
@@ -519,9 +519,9 @@ func TestEpisodicMemoryStorePopulatesVersioningColumns(t *testing.T) {
 
 	// Store second memory (version 2) with parent_id
 	v2ID, err := mem.Store(ctx, "Updated content v2", "conversation", map[string]any{
-		"parent_id":   rootID,
-		"version":     2,
-		"is_current":  1,
+		"parent_id":  rootID,
+		"version":    2,
+		"is_current": 1,
 	})
 	if err != nil {
 		t.Fatalf("Failed to store v2: %v", err)

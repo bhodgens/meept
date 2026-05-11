@@ -11,14 +11,14 @@ import (
 
 // mockTransport implements transport.Transport for testing.
 type mockTransport struct {
-	mu          sync.Mutex
-	readData    chan []byte
-	writeData   [][]byte
-	writeErr    error
-	readErr     error
-	closed      bool
-	closeErr    error
-	onWrite     func(data []byte) // optional callback for inspection
+	mu        sync.Mutex
+	readData  chan []byte
+	writeData [][]byte
+	writeErr  error
+	readErr   error
+	closed    bool
+	closeErr  error
+	onWrite   func(data []byte) // optional callback for inspection
 }
 
 func newMockTransport() *mockTransport {
@@ -408,8 +408,7 @@ func TestOnNotification(t *testing.T) {
 	})
 
 	// Start the client's read loop
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	client.Start(ctx)
 
 	// Inject a notification

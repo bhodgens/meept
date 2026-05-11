@@ -147,10 +147,7 @@ func extractSimpleResult(text string) *SummarizeResult {
 	}
 
 	// Description: first few words
-	maxWords := 6
-	if len(words) < maxWords {
-		maxWords = len(words)
-	}
+	maxWords := min(len(words), 6)
 	desc := "new conversation"
 	if maxWords > 0 {
 		desc = strings.Join(words[:maxWords], " ")

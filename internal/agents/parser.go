@@ -132,13 +132,13 @@ func splitFrontmatter(text string) (frontmatter string, body string, err error) 
 	}
 
 	// Find the opening ---
-	openIndex := strings.Index(trimmed, "---")
-	if openIndex == -1 {
+	_, after, ok := strings.Cut(trimmed, "---")
+	if !ok {
 		return "", "", ErrNoFrontmatter
 	}
 
 	// Skip past the opening marker and any trailing content on that line
-	rest := trimmed[openIndex+3:]
+	rest := after
 	newlinePos := strings.Index(rest, "\n")
 	if newlinePos == -1 {
 		return "", "", ErrNoFrontmatter
@@ -148,9 +148,9 @@ func splitFrontmatter(text string) (frontmatter string, body string, err error) 
 	// Check for --- at start of remaining content (empty frontmatter case)
 	if strings.HasPrefix(rest, "---") {
 		afterClose := rest[3:]
-		newlineAfterClose := strings.Index(afterClose, "\n")
-		if newlineAfterClose != -1 {
-			body = afterClose[newlineAfterClose+1:]
+		_, after, ok := strings.Cut(afterClose, "\n")
+		if ok {
+			body = after
 		} else {
 			body = strings.TrimPrefix(afterClose, "\n")
 		}
@@ -174,9 +174,9 @@ func splitFrontmatter(text string) (frontmatter string, body string, err error) 
 	frontmatter = rest[:closePos]
 	// Skip the \n--- and any content after the closing marker line
 	afterClose := rest[closePos+4:]
-	newlineAfterClose := strings.Index(afterClose, "\n")
-	if newlineAfterClose != -1 {
-		body = afterClose[newlineAfterClose+1:]
+	_, after0, ok0 := strings.Cut(afterClose, "\n")
+	if ok0 {
+		body = after0
 	} else {
 		body = ""
 	}

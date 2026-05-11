@@ -12,18 +12,18 @@ func makeSession(sessionID string, agentID string, intents []string, duration ti
 	iterations, revisions, errors, switches int, outcome string, difficulty float64, anomalyFlags []string,
 ) *SessionAnalysis {
 	sa := &SessionAnalysis{
-		SessionID:      sessionID,
-		AgentID:        agentID,
-		Intents:        intents,
-		Duration:       duration,
-		IterationCount: iterations,
-		RevisionCycles: revisions,
-		TokenUsage:     iterations * 500,
-		Outcome:        outcome,
+		SessionID:       sessionID,
+		AgentID:         agentID,
+		Intents:         intents,
+		Duration:        duration,
+		IterationCount:  iterations,
+		RevisionCycles:  revisions,
+		TokenUsage:      iterations * 500,
+		Outcome:         outcome,
 		DifficultyScore: difficulty,
-		AnomalyFlags:   anomalyFlags,
-		StartTime:      time.Now().Add(-duration),
-		EndTime:        time.Now(),
+		AnomalyFlags:    anomalyFlags,
+		StartTime:       time.Now().Add(-duration),
+		EndTime:         time.Now(),
 	}
 	// Add tool call records for testing tool failure detection
 	sa.ToolCalls = []ToolCallRecord{
@@ -35,7 +35,7 @@ func makeSession(sessionID string, agentID string, intents []string, duration ti
 
 func makeSessionsWithToolFailureCount(n int, failRate float64) []*SessionAnalysis {
 	sessions := make([]*SessionAnalysis, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		success := true
 		if float64(i) < float64(n)*failRate {
 			success = false
@@ -50,10 +50,10 @@ func makeSessionsWithToolFailureCount(n int, failRate float64) []*SessionAnalysi
 			ToolCalls: []ToolCallRecord{
 				{ToolName: "shell_execute", Success: success},
 			},
-			Outcome:       "completed",
+			Outcome:         "completed",
 			DifficultyScore: 0.3,
-			StartTime:     time.Now().Add(-10 * time.Minute),
-			EndTime:       time.Now(),
+			StartTime:       time.Now().Add(-10 * time.Minute),
+			EndTime:         time.Now(),
 		}
 		sessions = append(sessions, sa)
 	}
@@ -62,11 +62,11 @@ func makeSessionsWithToolFailureCount(n int, failRate float64) []*SessionAnalysi
 
 func TestPatternDetectorDetectModelMisconfiguration(t *testing.T) {
 	tests := []struct {
-		name            string
-		sessions        []*SessionAnalysis
-		needPattern     bool
-		threshold       float64
-		minSessions     int
+		name        string
+		sessions    []*SessionAnalysis
+		needPattern bool
+		threshold   float64
+		minSessions int
 	}{
 		{
 			name: "no pattern - low variance",
@@ -259,11 +259,11 @@ func TestPatternDetectorDetectWrongAgentAssignment(t *testing.T) {
 
 func TestPatternDetectorDetectHighToolFailureRate(t *testing.T) {
 	tests := []struct {
-		name         string
-		totalCalls   int
-		failRatio    float64
-		needPattern  bool
-		minTotal     int
+		name        string
+		totalCalls  int
+		failRatio   float64
+		needPattern bool
+		minTotal    int
 	}{
 		{
 			name:        "low failure rate - no pattern",
@@ -465,12 +465,12 @@ func TestPatternDetectorEmptyInput(t *testing.T) {
 func TestPatternDetectorSessionWithNoAgentID(t *testing.T) {
 	sessions := []*SessionAnalysis{
 		{
-			SessionID:      "s1",
-			AgentID:        "",
-			Intents:        []string{"debug"},
-			Duration:       10 * time.Minute,
-			IterationCount: 5,
-			Outcome:        "completed",
+			SessionID:       "s1",
+			AgentID:         "",
+			Intents:         []string{"debug"},
+			Duration:        10 * time.Minute,
+			IterationCount:  5,
+			Outcome:         "completed",
 			DifficultyScore: 0.3,
 		},
 	}

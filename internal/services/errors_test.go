@@ -84,7 +84,7 @@ func TestServiceError_Unwrap(t *testing.T) {
 	}
 
 	unwrapped := serviceErr.Unwrap()
-	if unwrapped != baseErr {
+	if !errors.Is(unwrapped, baseErr) {
 		t.Errorf("Unwrap() returned %v, want %v", unwrapped, baseErr)
 	}
 }
@@ -165,7 +165,8 @@ func TestWrapError(t *testing.T) {
 			}
 
 			if !tt.wantNil {
-				serviceErr, ok := got.(*ServiceError)
+				serviceErr := &ServiceError{}
+				ok := errors.As(got, &serviceErr)
 				if !ok {
 					t.Fatalf("wrapError() returned %T, want *ServiceError", got)
 				}

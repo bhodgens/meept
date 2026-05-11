@@ -32,33 +32,33 @@ func TestHallucinationDetector_Disabled(t *testing.T) {
 
 func TestHallucinationDetector_ConfidentClaims(t *testing.T) {
 	tests := []struct {
-		name          string
-		output        string
-		sensitivity   HallucinationSensitivity
+		name             string
+		output           string
+		sensitivity      HallucinationSensitivity
 		expectIndicators bool
 	}{
 		{
-			name:          "confident file creation claim",
-			output:        "I have created the file config.yaml with the required settings.",
-			sensitivity:   SensitivityMedium,
+			name:             "confident file creation claim",
+			output:           "I have created the file config.yaml with the required settings.",
+			sensitivity:      SensitivityMedium,
 			expectIndicators: true,
 		},
 		{
-			name:          "confident modification claim",
-			output:        "I have modified the function StartServer in server.go to add timeout support.",
-			sensitivity:   SensitivityMedium,
+			name:             "confident modification claim",
+			output:           "I have modified the function StartServer in server.go to add timeout support.",
+			sensitivity:      SensitivityMedium,
 			expectIndicators: true,
 		},
 		{
-			name:          "factual statement not a claim",
-			output:        "The file config.yaml contains database connection settings.",
-			sensitivity:   SensitivityMedium,
+			name:             "factual statement not a claim",
+			output:           "The file config.yaml contains database connection settings.",
+			sensitivity:      SensitivityMedium,
 			expectIndicators: false,
 		},
 		{
-			name:          "verification claim",
-			output:        "I can confirm that the fix resolves the issue.",
-			sensitivity:   SensitivityHigh,
+			name:             "verification claim",
+			output:           "I can confirm that the fix resolves the issue.",
+			sensitivity:      SensitivityHigh,
 			expectIndicators: true,
 		},
 	}
@@ -205,9 +205,9 @@ func TestHallucinationDetector_SensitivityFiltering(t *testing.T) {
 		sensitivity HallucinationSensitivity
 		expectZero  bool // whether we expect 0 indicators after sensitivity filtering
 	}{
-		{"low sensitivity", SensitivityLow, false},     // Low filters aggressively, may have some
+		{"low sensitivity", SensitivityLow, false}, // Low filters aggressively, may have some
 		{"medium sensitivity", SensitivityMedium, false},
-		{"high sensitivity", SensitivityHigh, false},    // High catches more
+		{"high sensitivity", SensitivityHigh, false}, // High catches more
 	}
 
 	for _, tt := range tests {
@@ -229,7 +229,7 @@ func TestHallucinationDetector_RecordHistory(t *testing.T) {
 	hd := NewHallucinationDetector(cfg, nil)
 
 	// Record many entries
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		hd.RecordHistory("history entry")
 	}
 

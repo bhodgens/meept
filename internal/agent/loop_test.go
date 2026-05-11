@@ -73,7 +73,7 @@ func TestAgentLoopNoLLMClient(t *testing.T) {
 	loop := NewAgentLoop()
 
 	_, err := loop.RunOnce(context.Background(), "Hello", "test-conv")
-	if err != ErrNoLLMClient {
+	if !errors.Is(err, ErrNoLLMClient) {
 		t.Errorf("expected ErrNoLLMClient, got %v", err)
 	}
 }
@@ -208,7 +208,7 @@ func TestAgentLoopHandleMessage(t *testing.T) {
 
 	// Without LLM client, should return error
 	_, err := loop.HandleMessage(context.Background(), "Hello")
-	if err != ErrNoLLMClient {
+	if !errors.Is(err, ErrNoLLMClient) {
 		t.Errorf("expected ErrNoLLMClient, got %v", err)
 	}
 }
@@ -393,7 +393,7 @@ func TestAgentLoopRunWithContextCancel(t *testing.T) {
 	// Wait for the loop to finish
 	select {
 	case err := <-errCh:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Errorf("expected context.Canceled, got %v", err)
 		}
 	case <-time.After(time.Second):

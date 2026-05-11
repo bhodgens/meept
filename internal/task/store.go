@@ -546,7 +546,7 @@ func (s *Store) buildTask(id, name, state string,
 	return task, nil
 }
 
-func nullableString(s string) interface{} {
+func nullableString(s string) any {
 	if s == "" {
 		return nil
 	}

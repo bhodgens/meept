@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func TestStdioTransport_SendContextCancel(t *testing.T) {
 	}
 
 	// Should either timeout or be canceled
-	if err != context.Canceled && !strings.Contains(err.Error(), "canceled") {
+	if !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "canceled") {
 		// This is fine - cat might have responded quickly
 	}
 }

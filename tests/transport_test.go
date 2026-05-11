@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func mockHTTPServer(t *testing.T, handler func(method string, params json.RawMes
 	// Chat endpoint (dedicated, not via bus/call)
 	mux.HandleFunc("/api/v1/chat", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Message       string `json:"message"`
+			Message        string `json:"message"`
 			ConversationID string `json:"conversation_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -147,7 +148,7 @@ func (s *mockRPCServer) handleConn(conn net.Conn) {
 
 	for {
 		// Read length-prefixed frame: "<length>\n<payload>"
-		var lengthStr string
+		var lengthStr strings.Builder
 		buf := make([]byte, 1)
 		for {
 			_, err := conn.Read(buf)
@@ -157,11 +158,11 @@ func (s *mockRPCServer) handleConn(conn net.Conn) {
 			if buf[0] == '\n' {
 				break
 			}
-			lengthStr += string(buf)
+			lengthStr.WriteString(string(buf))
 		}
 
 		var length int
-		fmt.Sscanf(lengthStr, "%d", &length)
+		fmt.Sscanf(lengthStr.String(), "%d", &length)
 
 		payload := make([]byte, length)
 		n, err := conn.Read(payload)
@@ -220,16 +221,16 @@ func statusHandler(method string, params json.RawMessage) (any, error) {
 	switch method {
 	case "status":
 		return map[string]any{
-			"status":            "running",
-			"uptime_seconds":    3600.0,
-			"tokens_used":       1000,
-			"tokens_remaining":  9000,
-			"budget_used":       0.5,
-			"budget_remaining":  9.5,
-			"model":             "test-model",
-			"default_model":     "",
+			"status":             "running",
+			"uptime_seconds":     3600.0,
+			"tokens_used":        1000,
+			"tokens_remaining":   9000,
+			"budget_used":        0.5,
+			"budget_remaining":   9.5,
+			"model":              "test-model",
+			"default_model":      "",
 			"registered_methods": []string{"status", "chat"},
-			"bus_subscribers":   2,
+			"bus_subscribers":    2,
 		}, nil
 	case "chat":
 		return map[string]string{"reply": "Hello from daemon!"}, nil
@@ -243,9 +244,9 @@ func statusHandler(method string, params json.RawMessage) (any, error) {
 		return map[string]any{"workers": []any{}}, nil
 	case "queue.stats":
 		return map[string]any{
-			"by_state":   map[string]int{"pending": 0},
+			"by_state":    map[string]int{"pending": 0},
 			"by_priority": map[string]int{},
-			"dead_count": 0,
+			"dead_count":  0,
 		}, nil
 	case "queue.list":
 		return map[string]any{"jobs": []any{}}, nil
@@ -327,8 +328,8 @@ func statusHandler(method string, params json.RawMessage) (any, error) {
 		}, nil
 	case "session.stop":
 		return map[string]any{
-			"status":           "stopped",
-			"session_id":       "sess-123",
+			"status":          "stopped",
+			"session_id":      "sess-123",
 			"workers_stopped": []string{},
 		}, nil
 	case "session.get_child_tasks":
@@ -749,8 +750,8 @@ func TestTransportClient_InterfaceCompliance(t *testing.T) {
 	// at compile time. This is also enforced by the compiler, but we verify
 	// dynamically here for documentation purposes.
 
-	var _ transport.Client = transport.NewHTTPClient("http://localhost:8081", 0)
-	var _ transport.Client = transport.NewRPCClient("/tmp/test.sock", 0)
+	var _ = transport.NewHTTPClient("http://localhost:8081", 0)
+	var _ = transport.NewRPCClient("/tmp/test.sock", 0)
 }
 
 // ============================================================================

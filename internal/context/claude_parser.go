@@ -30,7 +30,7 @@ func ParseCLAUDEMD(path string) (*CLAUDEDocument, error) {
 	}
 
 	doc := &CLAUDEDocument{
-		Path:        path,
+		Path:         path,
 		RawContent:   string(content),
 		WorkingDir:   workingDir,
 		LastModified: info.ModTime(),
@@ -73,8 +73,8 @@ func extractBuildCommands(content string) []BuildCommand {
 	codeBlocks := extractCodeBlocks(section, "bash", "sh", "shell")
 
 	for _, block := range codeBlocks {
-		lines := strings.Split(block, "\n")
-		for _, line := range lines {
+		lines := strings.SplitSeq(block, "\n")
+		for line := range lines {
 			line = strings.TrimSpace(line)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
@@ -115,12 +115,12 @@ func findCommandDescriptions(section string) []commandDescription {
 	var descriptions []commandDescription
 
 	lines := strings.Split(section, "\n")
-	for i := 0; i < len(lines); i++ {
+	for i := range lines {
 		line := strings.TrimSpace(lines[i])
 
 		// Look for "```bash" or similar
-		if strings.HasPrefix(line, "```") {
-			lang := strings.TrimPrefix(line, "```")
+		if after, ok := strings.CutPrefix(line, "```"); ok {
+			lang := after
 			if lang == "bash" || lang == "sh" || lang == "shell" {
 				// Next line is the command
 				if i+1 < len(lines) {
@@ -200,7 +200,7 @@ func findSection(content string, titles ...string) string {
 	level := 0
 	levelFound := false
 
-	for i := 0; i < len(lines); i++ {
+	for i := range lines {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
@@ -280,8 +280,8 @@ func extractFlowSteps(section string) []string {
 	var steps []string
 
 	// Look for flow diagram or numbered list
-	lines := strings.Split(section, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(section, "\n")
+	for line := range lines {
 		trimmed := strings.TrimSpace(line)
 		// Match numbered list items
 		if match := regexp.MustCompile(`^(\d+\.|•|\-)\s+(.+)`).FindStringSubmatch(trimmed); len(match) > 2 {
@@ -297,8 +297,8 @@ func extractDataFlow(section string) []DataFlowStep {
 	var steps []DataFlowStep
 
 	// Look for "->" arrows indicating flow
-	lines := strings.Split(section, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(section, "\n")
+	for line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.Contains(trimmed, "->") {
 			parts := strings.Split(trimmed, "->")
@@ -383,8 +383,8 @@ func parsePackageList(s string) []string {
 	var packages []string
 
 	// Split by comma
-	parts := strings.Split(s, ",")
-	for _, part := range parts {
+	parts := strings.SplitSeq(s, ",")
+	for part := range parts {
 		pkg := strings.TrimSpace(part)
 		if pkg != "" {
 			packages = append(packages, pkg)
@@ -465,8 +465,8 @@ func extractSecurityLayers(content string) []SecurityLayer {
 	}
 
 	// Look for numbered lists of security layers
-	lines := strings.Split(section, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(section, "\n")
+	for line := range lines {
 		trimmed := strings.TrimSpace(line)
 
 		// Match numbered list
@@ -554,8 +554,8 @@ func inferLanguage(content string) string {
 func extractPatterns(section string) []string {
 	var patterns []string
 
-	lines := strings.Split(section, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(section, "\n")
+	for line := range lines {
 		trimmed := strings.TrimSpace(line)
 		// Match list items
 		if match := regexp.MustCompile(`^[-*]\s+(.+)`).FindStringSubmatch(trimmed); len(match) > 1 {
@@ -570,12 +570,12 @@ func extractPatterns(section string) []string {
 func extractUIDirectives(section string) []string {
 	var directives []string
 
-	lines := strings.Split(section, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(section, "\n")
+	for line := range lines {
 		trimmed := strings.TrimSpace(line)
 		// Look for "lowercase" or UI-related directives
 		if strings.Contains(strings.ToLower(trimmed), "lowercase") ||
-		   strings.Contains(strings.ToLower(trimmed), "ui element") {
+			strings.Contains(strings.ToLower(trimmed), "ui element") {
 			directives = append(directives, trimmed)
 		}
 	}
@@ -599,8 +599,8 @@ func extractProjectStructure(content string) *ProjectTree {
 	// Parse tree structure from code block
 	codeBlocks := extractCodeBlocks(section, "")
 	for _, block := range codeBlocks {
-		lines := strings.Split(block, "\n")
-		for _, line := range lines {
+		lines := strings.SplitSeq(block, "\n")
+		for line := range lines {
 			trimmed := strings.TrimSpace(line)
 			// Identify directories (ending with /)
 			if strings.HasSuffix(trimmed, "/") {

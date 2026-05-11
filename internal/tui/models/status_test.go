@@ -165,7 +165,7 @@ func TestStatusModel_UpdateWithError(t *testing.T) {
 	if model.loading {
 		t.Error("expected loading to be false")
 	}
-	if model.err != testErr {
+	if !errors.Is(model.err, testErr) {
 		t.Errorf("expected error to be set, got %v", model.err)
 	}
 }

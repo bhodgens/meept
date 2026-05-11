@@ -5,6 +5,8 @@
 // hierarchy where higher-priority tiers shadow lower ones.
 package agents
 
+import "slices"
+
 import "time"
 
 // Priority levels for agent discovery (lower is higher priority).
@@ -88,32 +90,17 @@ func (d *AgentDefinition) Timeout() time.Duration {
 
 // HasTool checks if the agent has a specific additional tool.
 func (d *AgentDefinition) HasTool(tool string) bool {
-	for _, t := range d.AdditionalTools {
-		if t == tool {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(d.AdditionalTools, tool)
 }
 
 // HasCapability checks if the agent has a specific capability.
 func (d *AgentDefinition) HasCapability(cap string) bool {
-	for _, c := range d.Capabilities {
-		if c == cap {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(d.Capabilities, cap)
 }
 
 // HasSkill checks if the agent has access to a specific skill.
 func (d *AgentDefinition) HasSkill(skill string) bool {
-	for _, s := range d.AvailableSkills {
-		if s == skill {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(d.AvailableSkills, skill)
 }
 
 // GetSkillForTrigger returns the skill name for a trigger keyword.

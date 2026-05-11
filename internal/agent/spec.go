@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"time"
 )
 
@@ -142,7 +143,7 @@ Always include relevant memory_refs when creating tasks to provide context conti
 - NEVER assume what agents or tools exist - always query first
 - When users ask about capabilities, respond with actual data from platform_* tools
 - If you're uncertain which agent to use, call platform_agents to review options`,
-		Model:           "", // Use default model
+		Model:           "",         // Use default model
 		AdditionalTools: []string{}, // delegate_task is in BaselineTools
 		Constraints: AgentConstraints{
 			MaxIterations:    5,
@@ -290,9 +291,9 @@ func SchedulerAgentSpec() *AgentSpec {
 // CodeReviewerSpec returns the spec for the code reviewer agent.
 func CodeReviewerSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "code-reviewer",
-		Name:    "Code Reviewer Agent",
-		Role:    RoleReviewer,
+		ID:   "code-reviewer",
+		Name: "Code Reviewer Agent",
+		Role: RoleReviewer,
 		Purpose: `You are a code review specialist. Your role is to review code changes for:
 1. Correctness: Does the code accomplish what was intended?
 2. Style: Does the code follow best practices and idiomatic patterns?
@@ -320,9 +321,9 @@ Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedba
 // TestReviewerSpec returns the spec for the test reviewer agent.
 func TestReviewerSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "test-reviewer",
-		Name:    "Test Reviewer Agent",
-		Role:    RoleReviewer,
+		ID:   "test-reviewer",
+		Name: "Test Reviewer Agent",
+		Role: RoleReviewer,
 		Purpose: `You are a test verification specialist. Your role is to verify that work is complete and correct by:
 1. Checking that the stated work was actually done
 2. Verifying outputs match expectations
@@ -349,9 +350,9 @@ Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedba
 // DebugReviewerSpec returns the spec for the debug reviewer agent.
 func DebugReviewerSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "debug-reviewer",
-		Name:    "Debug Reviewer Agent",
-		Role:    RoleReviewer,
+		ID:   "debug-reviewer",
+		Name: "Debug Reviewer Agent",
+		Role: RoleReviewer,
 		Purpose: `You are a debugging review specialist. Your role is to review debugging work for:
 1. Root cause analysis: Was the actual problem identified?
 2. Solution effectiveness: Will the fix actually resolve the issue?
@@ -377,9 +378,9 @@ Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedba
 // AnalystReviewerSpec returns the spec for the analyst reviewer agent.
 func AnalystReviewerSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "analyst-reviewer",
-		Name:    "Analyst Reviewer Agent",
-		Role:    RoleReviewer,
+		ID:   "analyst-reviewer",
+		Name: "Analyst Reviewer Agent",
+		Role: RoleReviewer,
 		Purpose: `You are an analysis review specialist. Your role is to review analytical work for:
 1. Accuracy: Is the information correct and well-sourced?
 2. Completeness: Are all relevant aspects considered?
@@ -406,9 +407,9 @@ Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedba
 // PlannerReviewerSpec returns the spec for the planner reviewer agent.
 func PlannerReviewerSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "planner-reviewer",
-		Name:    "Planner Reviewer Agent",
-		Role:    RoleReviewer,
+		ID:   "planner-reviewer",
+		Name: "Planner Reviewer Agent",
+		Role: RoleReviewer,
 		Purpose: `You are a planning review specialist. Your role is to review execution plans for:
 1. Feasibility: Can the plan actually be executed as described?
 2. Completeness: Are all necessary steps included?
@@ -452,18 +453,11 @@ func DefaultSpecs() []*AgentSpec {
 // HasTool checks if the agent spec includes a tool (baseline or additional).
 func (s *AgentSpec) HasTool(tool string) bool {
 	// Check baseline tools
-	for _, t := range BaselineTools {
-		if t == tool {
-			return true
-		}
+	if slices.Contains(BaselineTools, tool) {
+		return true
 	}
 	// Check additional tools
-	for _, t := range s.AdditionalTools {
-		if t == tool {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.AdditionalTools, tool)
 }
 
 // AllTools returns all tools available to this agent.
@@ -476,12 +470,7 @@ func (s *AgentSpec) AllTools() []string {
 
 // HasSkill checks if the agent spec includes a specific skill.
 func (s *AgentSpec) HasSkill(skillName string) bool {
-	for _, sk := range s.AvailableSkills {
-		if sk == skillName {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.AvailableSkills, skillName)
 }
 
 // GetSkillForTrigger returns the skill name for a trigger keyword, or empty string if not found.

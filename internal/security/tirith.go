@@ -3,6 +3,7 @@ package security
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -86,7 +87,8 @@ func ScanCommand(ctx context.Context, command string, binary string) *TirithResu
 	// If timeout or other error, allow execution (graceful degradation)
 	if ctx.Err() != nil || err != nil {
 		// Check if it's just a non-zero exit code (expected for blocked/warning)
-		if _, ok := err.(*exec.ExitError); !ok && err != nil {
+		exitError := &exec.ExitError{}
+		if errors.As(err, &exitError) {
 			return nil
 		}
 	}
@@ -96,7 +98,7 @@ func ScanCommand(ctx context.Context, command string, binary string) *TirithResu
 	var severity, ruleID *string
 
 	// Extract severity and rule_id
-	for _, line := range strings.Split(outputStr, "\n") {
+	for line := range strings.SplitSeq(outputStr, "\n") {
 		if m := detailRE.FindStringSubmatch(line); len(m) == 3 {
 			s, r := m[1], m[2]
 			severity = &s

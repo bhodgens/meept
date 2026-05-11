@@ -328,10 +328,3 @@ func TestToCompressedJSON_NonCodeString(t *testing.T) {
 		t.Errorf("expected JSON output, got: %q", compressed[:min(50, len(compressed))])
 	}
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

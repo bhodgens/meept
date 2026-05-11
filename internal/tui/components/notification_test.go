@@ -72,7 +72,7 @@ func TestNotificationManager_MaxVisible(t *testing.T) {
 	nm := NewNotificationManager()
 	nm.maxVisible = 3
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		nm.Push(NotifyInfo, "test", "message")
 	}
 
@@ -118,9 +118,9 @@ func TestNotificationManager_View(t *testing.T) {
 
 func TestNotificationLevels(t *testing.T) {
 	tests := []struct {
-		level   NotificationLevel
-		icon    string
-		name    string
+		level NotificationLevel
+		icon  string
+		name  string
 	}{
 		{NotifyInfo, "i", "info"},
 		{NotifySuccess, "+", "success"},

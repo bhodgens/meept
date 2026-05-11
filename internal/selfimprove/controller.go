@@ -4,6 +4,7 @@ package selfimprove
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -59,8 +60,8 @@ type Controller struct {
 	securityOrch *intsecurity.Orchestrator
 
 	// Error tracking for circuit breaker
-	failureCounts        map[string]int // issue_id -> failure count
-	consecutiveFailures  int
+	failureCounts       map[string]int // issue_id -> failure count
+	consecutiveFailures int
 
 	// Optional progress callback for external observers (TUI, RPC).
 	progressCallback ProgressCallback
@@ -340,7 +341,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 		}
 
 		applied, err := c.applier.Apply(ctx, pair.fix, pair.validation, approvedBy)
-		if err == ErrApprovalRequired {
+		if errors.Is(err, ErrApprovalRequired) {
 			c.logger.Info("fix pending approval", "fix_id", pair.fix.ID)
 			continue
 		}
@@ -543,15 +544,15 @@ func (c *Controller) publishStatus(phase string, data any) {
 // as a distinct type so that loadState can deserialize it deterministically
 // and populate the controller's in-memory fields.
 type persistedState struct {
-	Issues              []Issue                `json:"issues"`
-	Analyses            []*RootCauseAnalysis   `json:"analyses"`
-	Fixes               []*ProposedFix         `json:"fixes"`
-	Validations         []*ValidationResult    `json:"validations"`
-	Applied             []*AppliedFix          `json:"applied"`
-	Cycles              []*ImprovementCycle    `json:"cycles"`
-	FailureCounts       map[string]int         `json:"failure_counts"`
-	ConsecutiveFailures int                    `json:"consecutive_failures"`
-	Timestamp           time.Time              `json:"timestamp"`
+	Issues              []Issue              `json:"issues"`
+	Analyses            []*RootCauseAnalysis `json:"analyses"`
+	Fixes               []*ProposedFix       `json:"fixes"`
+	Validations         []*ValidationResult  `json:"validations"`
+	Applied             []*AppliedFix        `json:"applied"`
+	Cycles              []*ImprovementCycle  `json:"cycles"`
+	FailureCounts       map[string]int       `json:"failure_counts"`
+	ConsecutiveFailures int                  `json:"consecutive_failures"`
+	Timestamp           time.Time            `json:"timestamp"`
 }
 
 func (c *Controller) saveState() error {
@@ -613,11 +614,4 @@ func (c *Controller) loadState() error {
 		"applied", len(c.applied),
 		"cycles", len(c.cycles))
 	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

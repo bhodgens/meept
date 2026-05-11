@@ -87,11 +87,11 @@ type ToolRegistry interface {
 
 // ExecutionResult represents the result of a tool execution.
 type ExecutionResult struct {
-	ToolCallID string          `json:"tool_call_id"`
-	Success    bool            `json:"success"`
-	Result     any             `json:"result,omitempty"`
-	Error      string          `json:"error,omitempty"`
-	Cached     bool            `json:"cached,omitempty"` // True if result came from cache
+	ToolCallID string            `json:"tool_call_id"`
+	Success    bool              `json:"success"`
+	Result     any               `json:"result,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	Cached     bool              `json:"cached,omitempty"`   // True if result came from cache
 	Evidence   []models.Evidence `json:"evidence,omitempty"` // Evidence of tool side-effects
 }
 
@@ -236,8 +236,8 @@ func looksLikeCode(s string) bool {
 	// Check for structural patterns: balanced braces with content
 	braceCount := 0
 	hasStructuralContent := false
-	lines := strings.Split(s, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(s, "\n")
+	for line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if len(trimmed) == 0 {
 			continue
@@ -469,10 +469,10 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	if e.security == nil {
 		// Fail-closed: security not configured, block all tool execution except safe introspection
 		allowedSafeTools := map[string]bool{
-			"platform_status": true,
-			"platform_agents": true,
-			"platform_tools":  true,
-			"memory_search":   true,
+			"platform_status":    true,
+			"platform_agents":    true,
+			"platform_tools":     true,
+			"memory_search":      true,
 			"memory_get_context": true,
 		}
 		if !allowedSafeTools[toolName] {

@@ -218,7 +218,7 @@ func TestContextPropagation_AgentPromptContext(t *testing.T) {
 		if len(memoryRefs) > 0 {
 			sb.WriteString("## Available Context Memories\n\n")
 			for i, ref := range memoryRefs {
-				sb.WriteString(fmt.Sprintf("%d. Memory: `%s`\n", i+1, ref))
+				fmt.Fprintf(&sb, "%d. Memory: `%s`\n", i+1, ref)
 			}
 			sb.WriteString("\n")
 		}
@@ -266,7 +266,7 @@ func TestContextPropagation_AgentPromptContext(t *testing.T) {
 		if len(memoryRefs) > 0 {
 			sb.WriteString("## Available Context Memories\n\n")
 			for i, ref := range memoryRefs {
-				sb.WriteString(fmt.Sprintf("%d. Memory: `%s`\n", i+1, ref))
+				fmt.Fprintf(&sb, "%d. Memory: `%s`\n", i+1, ref)
 			}
 			sb.WriteString("\n")
 		}
@@ -340,10 +340,10 @@ func TestContextPropagation_FullBusFlow(t *testing.T) {
 
 		// Simulate step completion with context propagation data
 		data := map[string]any{
-			"step_id":    "step-001",
-			"task_id":    "task-001",
-			"result":     "Found config at /etc/app/config.yaml",
-			"memory_refs": []string{"mem-1", "mem-2"},
+			"step_id":         "step-001",
+			"task_id":         "task-001",
+			"result":          "Found config at /etc/app/config.yaml",
+			"memory_refs":     []string{"mem-1", "mem-2"},
 			"context_snippet": "Config file located and parsed successfully",
 		}
 		msg, err := models.NewBusMessage(models.MessageTypeEvent, "tactical", data)

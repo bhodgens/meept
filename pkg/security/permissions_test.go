@@ -137,7 +137,7 @@ func BenchmarkCheckPath(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		for _, path := range paths {
 			pc.CheckPath(path)
 		}
@@ -154,7 +154,7 @@ func BenchmarkEvaluateShellRisk(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		for _, cmd := range commands {
 			EvaluateShellRisk(cmd)
 		}
@@ -170,7 +170,7 @@ func BenchmarkIsFinancial(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		for _, text := range texts {
 			IsFinancial(text)
 		}
@@ -195,7 +195,7 @@ func BenchmarkCheckPermission(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		for _, a := range actions {
 			pc.CheckPermission(a.action, a.details)
 		}

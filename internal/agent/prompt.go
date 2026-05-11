@@ -304,11 +304,7 @@ func ToolsFromDefinitions(definitions []ToolDefinitionInfo) []ToolDescription {
 
 		// Convert parameters
 		for _, param := range def.Parameters {
-			tools[i].Parameters = append(tools[i].Parameters, ToolParameter{
-				Name:     param.Name,
-				Type:     param.Type,
-				Required: param.Required,
-			})
+			tools[i].Parameters = append(tools[i].Parameters, ToolParameter(param))
 		}
 	}
 	return tools

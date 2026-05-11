@@ -372,17 +372,17 @@ func NewHandler(queue Queue, msgBus *bus.MessageBus, logger *slog.Logger) *Handl
 
 	// Subscribe to all queue topics
 	topics := map[string]bus.MessageCallback{
-		"queue.enqueue":      h.handleQueueEnqueue,
-		"queue.claim":        h.handleQueueClaim,
-		"queue.complete":     h.handleQueueComplete,
-		"queue.fail":         h.handleQueueFail,
-		"queue.retry":        h.handleQueueRetry,
-		"queue.get":          h.handleQueueGet,
-		"queue.list":         h.handleQueueList,
-		"queue.stats":        h.handleQueueStats,
-		"queue.recover":      h.handleQueueRecover,
-		"queue.dead_letter":  h.handleQueueDeadLetter,
-		"queue.dead_stats":   h.handleQueueDeadStats,
+		"queue.enqueue":     h.handleQueueEnqueue,
+		"queue.claim":       h.handleQueueClaim,
+		"queue.complete":    h.handleQueueComplete,
+		"queue.fail":        h.handleQueueFail,
+		"queue.retry":       h.handleQueueRetry,
+		"queue.get":         h.handleQueueGet,
+		"queue.list":        h.handleQueueList,
+		"queue.stats":       h.handleQueueStats,
+		"queue.recover":     h.handleQueueRecover,
+		"queue.dead_letter": h.handleQueueDeadLetter,
+		"queue.dead_stats":  h.handleQueueDeadStats,
 	}
 
 	for topic, callback := range topics {
@@ -405,47 +405,47 @@ func (h *Handler) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (h *Handler) handleQueueEnqueue(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueEnqueue(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueClaim(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueClaim(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueComplete(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueComplete(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueFail(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueFail(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueRetry(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueRetry(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueGet(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueGet(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueList(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueList(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueStats(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueStats(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueRecover(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueRecover(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueDeadLetter(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueDeadLetter(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleQueueDeadStats(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleQueueDeadStats(ctx context.Context, topic string, msg any) {
 	h.handleMessage(ctx, topic, msg.(*models.BusMessage))
 }
 

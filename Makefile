@@ -1,10 +1,11 @@
-.PHONY: help build build-all build-daemon build-cli test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app
+.PHONY: help build build-all build-daemon build-cli test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app
 
 help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Setup:"
 	@echo "  setup            Create ~/.meept directory and default config"
+	@echo "  hooks            Install git hooks (pre-commit lint)"
 	@echo "  deps             Download Go dependencies"
 	@echo ""
 	@echo "Build:"
@@ -96,6 +97,12 @@ setup:
 		echo "Created $(MEEPT_HOME)/meept.json5"; \
 	fi
 	@echo "Setup complete."
+
+hooks:
+	@echo "Installing git hooks..."
+	@cp scripts/pre-commit .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Installed pre-commit hook (runs golangci-lint on staged packages)"
 
 deps:
 	@echo "Downloading Go dependencies..."

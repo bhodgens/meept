@@ -8,17 +8,17 @@ import (
 
 // ArtifactManager manages artifacts for multiple directories
 type ArtifactManager struct {
-	mu        sync.RWMutex
-	scanners  map[string]*ArtifactScanner // workingDir -> scanner
-	cache     *ArtifactCache
+	mu         sync.RWMutex
+	scanners   map[string]*ArtifactScanner // workingDir -> scanner
+	cache      *ArtifactCache
 	defaultTTL time.Duration
 }
 
 // NewArtifactManager creates a new artifact manager
 func NewArtifactManager(ttl time.Duration) *ArtifactManager {
 	return &ArtifactManager{
-		scanners:  make(map[string]*ArtifactScanner),
-		cache:     NewArtifactCache(ttl),
+		scanners:   make(map[string]*ArtifactScanner),
+		cache:      NewArtifactCache(ttl),
 		defaultTTL: ttl,
 	}
 }
@@ -118,7 +118,7 @@ func (am *ArtifactManager) Cleanup() {
 }
 
 // GetCacheStats returns cache statistics
-func (am *ArtifactManager) GetCacheStats() map[string]interface{} {
+func (am *ArtifactManager) GetCacheStats() map[string]any {
 	// Acquire cache lock first, then manager lock to avoid deadlock.
 	// Always acquire locks in consistent order: cache.mu before am.mu.
 	am.cache.mu.RLock()
@@ -129,7 +129,7 @@ func (am *ArtifactManager) GetCacheStats() map[string]interface{} {
 	scannerCount := len(am.scanners)
 	am.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"scanners":      scannerCount,
 		"cache_entries": cacheEntries,
 	}

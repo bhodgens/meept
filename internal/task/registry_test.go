@@ -277,8 +277,7 @@ func TestHandler_MessageRouting(t *testing.T) {
 
 	handler := NewHandler(reg, msgBus, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := handler.Start(ctx); err != nil {
 		t.Fatalf("failed to start handler: %v", err)

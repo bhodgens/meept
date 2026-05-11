@@ -148,8 +148,7 @@ func BenchmarkRPCThroughput(b *testing.B) {
 		b.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
 	go d.Run(ctx)
 
@@ -212,8 +211,7 @@ func BenchmarkConcurrentRPC(b *testing.B) {
 		b.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
 	go d.Run(ctx)
 
@@ -301,8 +299,7 @@ func TestRPCLoadTest(t *testing.T) {
 		t.Fatalf("Failed to create daemon: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go d.Run(ctx)
 
@@ -325,7 +322,7 @@ func TestRPCLoadTest(t *testing.T) {
 
 	start := time.Now()
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
@@ -346,7 +343,7 @@ func TestRPCLoadTest(t *testing.T) {
 			frame := fmt.Sprintf("%d\n%s", len(reqData), reqData)
 			buf := make([]byte, 256)
 
-			for j := 0; j < numRequests/concurrency; j++ {
+			for range numRequests / concurrency {
 				conn.SetWriteDeadline(time.Now().Add(time.Second))
 				if _, err := conn.Write([]byte(frame)); err != nil {
 					failCount.Add(1)

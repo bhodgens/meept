@@ -25,13 +25,13 @@ type Rows interface {
 
 // Pool manages a pool of SQLite database connections.
 type Pool struct {
-	dbPath    string
-	poolSize  int
-	conns     chan *sql.DB
-	mu        sync.Mutex
-	closed    bool
-	logger    *slog.Logger
-	pragmas   []string
+	dbPath   string
+	poolSize int
+	conns    chan *sql.DB
+	mu       sync.Mutex
+	closed   bool
+	logger   *slog.Logger
+	pragmas  []string
 }
 
 // PoolConfig holds configuration for a connection pool.
@@ -95,7 +95,7 @@ func NewPool(cfg PoolConfig) (*Pool, error) {
 	}
 
 	// Pre-create connections
-	for i := 0; i < cfg.PoolSize; i++ {
+	for range cfg.PoolSize {
 		db, err := p.createConn()
 		if err != nil {
 			// Close any connections we've already created

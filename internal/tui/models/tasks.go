@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/table"
@@ -13,24 +14,24 @@ import (
 
 // TasksModel is the model for the tasks view.
 type TasksModel struct {
-	rpc             TasksRPCClient
-	jobs            []types.Job
-	tasks           []types.TaskExtended
-	table           table.Model
-	selectedJob     *types.Job
-	selectedTask    *types.TaskExtended
-	width           int
-	height          int
-	loading         bool
-	err             error
-	showingHelp     bool
-	showingDetail   bool          // Task detail modal
-	viewMode        TaskViewMode  // jobs vs tasks
-	filter          TaskFilter
-	currentAgentID  string // Current agent ID for FilterMine (for agent-mode clients)
-	currentSessionID string // Current session ID for FilterMine (for TUI clients)
-	expandedTaskIDs map[string]bool // Track which parent tasks are expanded
-	taskChildren    map[string][]types.TaskExtended // Map parent ID to children
+	rpc              TasksRPCClient
+	jobs             []types.Job
+	tasks            []types.TaskExtended
+	table            table.Model
+	selectedJob      *types.Job
+	selectedTask     *types.TaskExtended
+	width            int
+	height           int
+	loading          bool
+	err              error
+	showingHelp      bool
+	showingDetail    bool         // Task detail modal
+	viewMode         TaskViewMode // jobs vs tasks
+	filter           TaskFilter
+	currentAgentID   string                          // Current agent ID for FilterMine (for agent-mode clients)
+	currentSessionID string                          // Current session ID for FilterMine (for TUI clients)
+	expandedTaskIDs  map[string]bool                 // Track which parent tasks are expanded
+	taskChildren     map[string][]types.TaskExtended // Map parent ID to children
 }
 
 // TaskViewMode selects between jobs, tasks, and lineage view.
@@ -197,10 +198,9 @@ func (m *TasksModel) SetSize(width, height int) {
 	m.height = height
 
 	// Update table dimensions
-	tableHeight := height - 12 // Account for detail panel and padding
-	if tableHeight < 5 {
-		tableHeight = 5
-	}
+	tableHeight := max(
+		// Account for detail panel and padding
+		height-12, 5)
 	m.table.SetHeight(tableHeight)
 
 	// Update column widths based on view mode
@@ -215,10 +215,7 @@ func (m *TasksModel) setJobsColumns() {
 	// Clear rows before changing columns to prevent panic from row/column mismatch
 	m.table.SetRows([]table.Row{})
 
-	colWidth := (m.width - 20) / 4
-	if colWidth < 10 {
-		colWidth = 10
-	}
+	colWidth := max((m.width-20)/4, 10)
 	m.table.SetColumns([]table.Column{
 		{Title: "Name", Width: colWidth},
 		{Title: "Schedule", Width: colWidth},
@@ -534,11 +531,8 @@ func (m *TasksModel) filterTasks() []types.TaskExtended {
 			switch {
 			case m.currentSessionID != "":
 				// Check if current session is linked to this task
-				for _, linkedSess := range t.LinkedSessions {
-					if linkedSess == m.currentSessionID {
-						include = true
-						break
-					}
+				if slices.Contains(t.LinkedSessions, m.currentSessionID) {
+					include = true
 				}
 			case m.currentAgentID != "":
 				if t.AssignedAgent == m.currentAgentID {
@@ -779,11 +773,11 @@ func (m *TasksModel) renderHeader() string {
 	var title string
 	var tabs string
 
-	switch {
-	case m.viewMode == ViewModeTasks:
+	switch m.viewMode {
+	case ViewModeTasks:
 		title = titleStyle.Render("Tasks")
 		tabs = activeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + modeStyle.Render("Lineage")
-	case m.viewMode == ViewModeLineage:
+	case ViewModeLineage:
 		title = titleStyle.Render("Task Lineage")
 		tabs = modeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + activeStyle.Render("Lineage")
 	default:
@@ -895,7 +889,7 @@ func (m *TasksModel) renderTaskPreview() string {
 			}
 			percent := child.Progress()
 			name := types.TruncateString(child.Name, 18)
-			content.WriteString(fmt.Sprintf("    %s %s (%.0f%%)\n", prefix, name, percent))
+			fmt.Fprintf(&content, "    %s %s (%.0f%%)\n", prefix, name, percent)
 		}
 	}
 
@@ -904,7 +898,7 @@ func (m *TasksModel) renderTaskPreview() string {
 
 func (m *TasksModel) renderLoading() string {
 	style := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(4, 0)
 
@@ -1020,10 +1014,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	}
 
 	// Modal style - centered overlay
-	modalWidth := m.width - 8
-	if modalWidth > 80 {
-		modalWidth = 80
-	}
+	modalWidth := min(m.width-8, 80)
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
@@ -1100,10 +1091,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	failedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
 	pendingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
 
-	pending := task.TotalJobs - task.CompletedJobs - task.FailedJobs
-	if pending < 0 {
-		pending = 0
-	}
+	pending := max(task.TotalJobs-task.CompletedJobs-task.FailedJobs, 0)
 
 	content.WriteString("              ")
 	content.WriteString(completedStyle.Render(fmt.Sprintf("✓ %d completed", task.CompletedJobs)))
@@ -1136,10 +1124,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 			}
 
 			desc := step.Description
-			maxDescLen := modalWidth - 30
-			if maxDescLen < 20 {
-				maxDescLen = 20
-			}
+			maxDescLen := max(modalWidth-30, 20)
 			if len(desc) > maxDescLen {
 				desc = desc[:maxDescLen-3] + "..."
 			}
@@ -1151,13 +1136,12 @@ func (m *TasksModel) renderTaskDetailModal() string {
 					Render(fmt.Sprintf(" (rev %d)", step.RevisionCount))
 			}
 
-			content.WriteString(fmt.Sprintf(" %d. %s %s%s  %s",
+			fmt.Fprintf(&content, " %d. %s %s%s  %s",
 				step.Sequence,
 				agentLabel,
 				valueStyle.Render(desc),
 				revisionBadge,
-				stepStyle.Render(stepIcon+" "+stepLabel),
-			))
+				stepStyle.Render(stepIcon+" "+stepLabel))
 			content.WriteString("\n")
 
 			// Line 2: progress bar  percent%  (blocked indicator)
@@ -1176,11 +1160,10 @@ func (m *TasksModel) renderTaskDetailModal() string {
 				blockedIndicator = pendingStyle.Render("  (blocked)")
 			}
 
-			content.WriteString(fmt.Sprintf("    %s %3.0f%%%s",
+			fmt.Fprintf(&content, "    %s %3.0f%%%s",
 				stepStyle.Render(bar),
 				stepPercent,
-				blockedIndicator,
-			))
+				blockedIndicator)
 			content.WriteString("\n")
 		}
 	}

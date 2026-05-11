@@ -179,9 +179,9 @@ func (a *SessionAnalyzer) parseMessage(mem memvid.MemoryResult) (Message, error)
 	}
 
 	// Parse tool calls if present
-	if toolCallsRaw, ok := mem.Memory.Metadata["tool_calls"].([]interface{}); ok {
+	if toolCallsRaw, ok := mem.Memory.Metadata["tool_calls"].([]any); ok {
 		for _, tc := range toolCallsRaw {
-			if tcMap, ok := tc.(map[string]interface{}); ok {
+			if tcMap, ok := tc.(map[string]any); ok {
 				toolCall := ToolCall{
 					Name:      getString(tcMap, "name"),
 					Arguments: getString(tcMap, "arguments"),
@@ -316,14 +316,14 @@ func (a *SessionAnalyzer) detectAnomalies(analysis *SessionAnalysis) []string {
 
 // Helper functions for parsing metadata
 
-func getString(m map[string]interface{}, key string) string {
+func getString(m map[string]any, key string) string {
 	if v, ok := m[key].(string); ok {
 		return v
 	}
 	return ""
 }
 
-func getBool(m map[string]interface{}, key string) bool {
+func getBool(m map[string]any, key string) bool {
 	if v, ok := m[key].(bool); ok {
 		return v
 	}

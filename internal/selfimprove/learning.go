@@ -23,52 +23,52 @@ import (
 type PatternType string
 
 const (
-	PatternTypeStrategy   PatternType = "strategy"   // High-level approach
-	PatternTypeTactic     PatternType = "tactic"     // Specific technique
+	PatternTypeStrategy    PatternType = "strategy"     // High-level approach
+	PatternTypeTactic      PatternType = "tactic"       // Specific technique
 	PatternTypeAntiPattern PatternType = "anti_pattern" // What NOT to do
-	PatternTypeHeuristic  PatternType = "heuristic"  // Rule of thumb
+	PatternTypeHeuristic   PatternType = "heuristic"    // Rule of thumb
 )
 
 // PatternStatus represents the lifecycle status of a pattern.
 type PatternStatus string
 
 const (
-	PatternStatusPending   PatternStatus = "pending"   // Awaiting judgment
-	PatternStatusActive    PatternStatus = "active"    // In use
+	PatternStatusPending    PatternStatus = "pending"    // Awaiting judgment
+	PatternStatusActive     PatternStatus = "active"     // In use
 	PatternStatusDeprecated PatternStatus = "deprecated" // Superseded
-	PatternStatusRejected  PatternStatus = "rejected"  // Failed judgment
+	PatternStatusRejected   PatternStatus = "rejected"   // Failed judgment
 )
 
 // LearnedPattern represents a pattern extracted from successful trajectories.
 type LearnedPattern struct {
-	ID          string        `json:"id"`
-	Type        PatternType   `json:"type"`
-	Status      PatternStatus `json:"status"`
-	Domain      string        `json:"domain"`       // e.g., "code", "debugging", "planning"
-	Description string        `json:"description"`  // Human-readable description
-	Pattern     string        `json:"pattern"`      // The actual pattern/rule
-	Examples    []string      `json:"examples"`     // Example applications
-	Confidence  float64       `json:"confidence"`   // 0.0-1.0, how confident we are
-	SuccessRate float64       `json:"success_rate"` // Historical success rate
-	UseCount    int           `json:"use_count"`    // How many times used
-	SuccessCount int          `json:"success_count"` // Successful applications
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
-	SupersededBy string       `json:"superseded_by,omitempty"` // ID of newer pattern
-	ContentHash string        `json:"content_hash"` // For deduplication
-	Tags        []string      `json:"tags"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+	ID           string         `json:"id"`
+	Type         PatternType    `json:"type"`
+	Status       PatternStatus  `json:"status"`
+	Domain       string         `json:"domain"`        // e.g., "code", "debugging", "planning"
+	Description  string         `json:"description"`   // Human-readable description
+	Pattern      string         `json:"pattern"`       // The actual pattern/rule
+	Examples     []string       `json:"examples"`      // Example applications
+	Confidence   float64        `json:"confidence"`    // 0.0-1.0, how confident we are
+	SuccessRate  float64        `json:"success_rate"`  // Historical success rate
+	UseCount     int            `json:"use_count"`     // How many times used
+	SuccessCount int            `json:"success_count"` // Successful applications
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	SupersededBy string         `json:"superseded_by,omitempty"` // ID of newer pattern
+	ContentHash  string         `json:"content_hash"`            // For deduplication
+	Tags         []string       `json:"tags"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // Trajectory represents a sequence of actions and their outcome.
 type Trajectory struct {
-	ID        string    `json:"id"`
-	SessionID string    `json:"session_id"`
-	Domain    string    `json:"domain"`
-	Steps     []TrajectoryStep `json:"steps"`
+	ID        string            `json:"id"`
+	SessionID string            `json:"session_id"`
+	Domain    string            `json:"domain"`
+	Steps     []TrajectoryStep  `json:"steps"`
 	Outcome   TrajectoryOutcome `json:"outcome"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   time.Time `json:"ended_at"`
+	StartedAt time.Time         `json:"started_at"`
+	EndedAt   time.Time         `json:"ended_at"`
 }
 
 // TrajectoryStep represents a single step in a trajectory.
@@ -82,35 +82,35 @@ type TrajectoryStep struct {
 
 // TrajectoryOutcome represents the outcome of a trajectory.
 type TrajectoryOutcome struct {
-	Success     bool    `json:"success"`
-	Quality     float64 `json:"quality"`      // 0.0-1.0 quality score
-	Feedback    string  `json:"feedback"`     // User or system feedback
-	TaskCompleted bool  `json:"task_completed"`
+	Success       bool    `json:"success"`
+	Quality       float64 `json:"quality"`  // 0.0-1.0 quality score
+	Feedback      string  `json:"feedback"` // User or system feedback
+	TaskCompleted bool    `json:"task_completed"`
 }
 
 // JudgmentResult represents the result of evaluating a trajectory or pattern.
 type JudgmentResult struct {
-	TrajectoryID string    `json:"trajectory_id,omitempty"`
-	PatternID    string    `json:"pattern_id,omitempty"`
-	Quality      float64   `json:"quality"`       // 0.0-1.0
-	Correctness  float64   `json:"correctness"`   // Was the approach correct?
-	Efficiency   float64   `json:"efficiency"`    // Was it efficient?
-	Generalizability float64 `json:"generalizability"` // Can it be reused?
-	ShouldStore  bool      `json:"should_store"`  // Should we store this?
-	Reason       string    `json:"reason"`        // Explanation
-	JudgedAt     time.Time `json:"judged_at"`
+	TrajectoryID     string    `json:"trajectory_id,omitempty"`
+	PatternID        string    `json:"pattern_id,omitempty"`
+	Quality          float64   `json:"quality"`          // 0.0-1.0
+	Correctness      float64   `json:"correctness"`      // Was the approach correct?
+	Efficiency       float64   `json:"efficiency"`       // Was it efficient?
+	Generalizability float64   `json:"generalizability"` // Can it be reused?
+	ShouldStore      bool      `json:"should_store"`     // Should we store this?
+	Reason           string    `json:"reason"`           // Explanation
+	JudgedAt         time.Time `json:"judged_at"`
 }
 
 // ConsolidationResult represents the result of pattern consolidation.
 type ConsolidationResult struct {
-	PatternsReviewed     int       `json:"patterns_reviewed"`
-	DuplicatesRemoved    int       `json:"duplicates_removed"`
-	ContradictionsFound  int       `json:"contradictions_found"`
-	PatternsDeprecated   int       `json:"patterns_deprecated"`
-	PatternsMerged       int       `json:"patterns_merged"`
-	LowConfidencePruned  int       `json:"low_confidence_pruned"`
-	ConsolidatedAt       time.Time `json:"consolidated_at"`
-	Duration             time.Duration `json:"duration"`
+	PatternsReviewed    int           `json:"patterns_reviewed"`
+	DuplicatesRemoved   int           `json:"duplicates_removed"`
+	ContradictionsFound int           `json:"contradictions_found"`
+	PatternsDeprecated  int           `json:"patterns_deprecated"`
+	PatternsMerged      int           `json:"patterns_merged"`
+	LowConfidencePruned int           `json:"low_confidence_pruned"`
+	ConsolidatedAt      time.Time     `json:"consolidated_at"`
+	Duration            time.Duration `json:"duration"`
 }
 
 // LearningConfig holds configuration for the learning pipeline.
@@ -150,7 +150,7 @@ type LearningPipeline struct {
 	logger    *slog.Logger
 
 	// In-memory caches
-	patterns    map[string]*LearnedPattern
+	patterns          map[string]*LearnedPattern
 	lastConsolidation time.Time
 
 	initialized bool
@@ -323,22 +323,22 @@ Respond in JSON format:
 
 func (lp *LearningPipeline) buildJudgmentPrompt(trajectory Trajectory) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Domain: %s\n", trajectory.Domain))
-	sb.WriteString(fmt.Sprintf("Outcome: success=%v, quality=%.2f\n\n", trajectory.Outcome.Success, trajectory.Outcome.Quality))
+	fmt.Fprintf(&sb, "Domain: %s\n", trajectory.Domain)
+	fmt.Fprintf(&sb, "Outcome: success=%v, quality=%.2f\n\n", trajectory.Outcome.Success, trajectory.Outcome.Quality)
 	sb.WriteString("Steps:\n")
 
 	for i, step := range trajectory.Steps {
-		sb.WriteString(fmt.Sprintf("%d. Action: %s\n", i+1, step.Action))
+		fmt.Fprintf(&sb, "%d. Action: %s\n", i+1, step.Action)
 		if len(step.Input) > 200 {
-			sb.WriteString(fmt.Sprintf("   Input: %s...\n", step.Input[:200]))
+			fmt.Fprintf(&sb, "   Input: %s...\n", step.Input[:200])
 		} else {
-			sb.WriteString(fmt.Sprintf("   Input: %s\n", step.Input))
+			fmt.Fprintf(&sb, "   Input: %s\n", step.Input)
 		}
-		sb.WriteString(fmt.Sprintf("   Success: %v\n", step.Success))
+		fmt.Fprintf(&sb, "   Success: %v\n", step.Success)
 	}
 
 	if trajectory.Outcome.Feedback != "" {
-		sb.WriteString(fmt.Sprintf("\nFeedback: %s\n", trajectory.Outcome.Feedback))
+		fmt.Fprintf(&sb, "\nFeedback: %s\n", trajectory.Outcome.Feedback)
 	}
 
 	return sb.String()
@@ -353,18 +353,18 @@ func (lp *LearningPipeline) parseJudgmentResponse(content string, trajectoryID s
 			content = lines[1]
 		}
 	}
-	if strings.HasSuffix(content, "```") {
-		content = strings.TrimSuffix(content, "```")
+	if before, ok := strings.CutSuffix(content, "```"); ok {
+		content = before
 	}
 	content = strings.TrimSpace(content)
 
 	var parsed struct {
-		Quality         float64 `json:"quality"`
-		Correctness     float64 `json:"correctness"`
-		Efficiency      float64 `json:"efficiency"`
+		Quality          float64 `json:"quality"`
+		Correctness      float64 `json:"correctness"`
+		Efficiency       float64 `json:"efficiency"`
 		Generalizability float64 `json:"generalizability"`
-		ShouldStore     bool    `json:"should_store"`
-		Reason          string  `json:"reason"`
+		ShouldStore      bool    `json:"should_store"`
+		Reason           string  `json:"reason"`
 	}
 
 	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
@@ -464,14 +464,14 @@ Respond in JSON array format:
 
 func (lp *LearningPipeline) buildDistillPrompt(trajectory Trajectory, judgment *JudgmentResult) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Domain: %s\n", trajectory.Domain))
-	sb.WriteString(fmt.Sprintf("Quality Score: %.2f\n", judgment.Quality))
-	sb.WriteString(fmt.Sprintf("Generalizability: %.2f\n\n", judgment.Generalizability))
+	fmt.Fprintf(&sb, "Domain: %s\n", trajectory.Domain)
+	fmt.Fprintf(&sb, "Quality Score: %.2f\n", judgment.Quality)
+	fmt.Fprintf(&sb, "Generalizability: %.2f\n\n", judgment.Generalizability)
 
 	sb.WriteString("Successful trajectory:\n")
 	for i, step := range trajectory.Steps {
 		if step.Success {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, step.Action))
+			fmt.Fprintf(&sb, "%d. %s\n", i+1, step.Action)
 		}
 	}
 
@@ -488,8 +488,8 @@ func (lp *LearningPipeline) parseDistillResponse(content string, domain string, 
 			content = lines[1]
 		}
 	}
-	if strings.HasSuffix(content, "```") {
-		content = strings.TrimSuffix(content, "```")
+	if before, ok := strings.CutSuffix(content, "```"); ok {
+		content = before
 	}
 	content = strings.TrimSpace(content)
 
@@ -509,20 +509,20 @@ func (lp *LearningPipeline) parseDistillResponse(content string, domain string, 
 
 	for _, p := range parsed {
 		pattern := &LearnedPattern{
-			ID:          lp.generatePatternID(p.Pattern),
-			Type:        PatternType(p.Type),
-			Status:      PatternStatusPending,
-			Domain:      domain,
-			Description: p.Description,
-			Pattern:     p.Pattern,
-			Tags:        p.Tags,
-			Confidence:  judgment.Quality * judgment.Generalizability,
-			SuccessRate: 1.0, // First occurrence was successful
-			UseCount:    1,
+			ID:           lp.generatePatternID(p.Pattern),
+			Type:         PatternType(p.Type),
+			Status:       PatternStatusPending,
+			Domain:       domain,
+			Description:  p.Description,
+			Pattern:      p.Pattern,
+			Tags:         p.Tags,
+			Confidence:   judgment.Quality * judgment.Generalizability,
+			SuccessRate:  1.0, // First occurrence was successful
+			UseCount:     1,
 			SuccessCount: 1,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			ContentHash: lp.hashContent(p.Pattern),
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			ContentHash:  lp.hashContent(p.Pattern),
 		}
 		patterns = append(patterns, pattern)
 	}
@@ -549,20 +549,20 @@ func (lp *LearningPipeline) distillHeuristic(trajectory Trajectory, judgment *Ju
 	patternText := fmt.Sprintf("For %s tasks: %s", trajectory.Domain, strings.Join(actions, " → "))
 
 	pattern := &LearnedPattern{
-		ID:          lp.generatePatternID(patternText),
-		Type:        PatternTypeTactic,
-		Status:      PatternStatusPending,
-		Domain:      trajectory.Domain,
-		Description: fmt.Sprintf("Successful approach for %s", trajectory.Domain),
-		Pattern:     patternText,
-		Tags:        []string{trajectory.Domain, "auto-extracted"},
-		Confidence:  judgment.Quality * 0.7, // Lower confidence for heuristic extraction
-		SuccessRate: 1.0,
-		UseCount:    1,
+		ID:           lp.generatePatternID(patternText),
+		Type:         PatternTypeTactic,
+		Status:       PatternStatusPending,
+		Domain:       trajectory.Domain,
+		Description:  fmt.Sprintf("Successful approach for %s", trajectory.Domain),
+		Pattern:      patternText,
+		Tags:         []string{trajectory.Domain, "auto-extracted"},
+		Confidence:   judgment.Quality * 0.7, // Lower confidence for heuristic extraction
+		SuccessRate:  1.0,
+		UseCount:     1,
 		SuccessCount: 1,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		ContentHash: lp.hashContent(patternText),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		ContentHash:  lp.hashContent(patternText),
 	}
 
 	return []*LearnedPattern{pattern}
@@ -812,14 +812,14 @@ func (lp *LearningPipeline) GetStats() map[string]any {
 	}
 
 	return map[string]any{
-		"total_patterns":      len(lp.patterns),
-		"patterns_by_domain":  domainCounts,
-		"patterns_by_type":    typeCounts,
-		"patterns_by_status":  statusCounts,
-		"avg_confidence":      avgConfidence,
-		"avg_success_rate":    avgSuccessRate,
-		"last_consolidation":  lp.lastConsolidation,
-		"initialized":         lp.initialized,
+		"total_patterns":     len(lp.patterns),
+		"patterns_by_domain": domainCounts,
+		"patterns_by_type":   typeCounts,
+		"patterns_by_status": statusCounts,
+		"avg_confidence":     avgConfidence,
+		"avg_success_rate":   avgSuccessRate,
+		"last_consolidation": lp.lastConsolidation,
+		"initialized":        lp.initialized,
 	}
 }
 
@@ -860,14 +860,14 @@ func (lp *LearningPipeline) hashContent(content string) string {
 func (lp *LearningPipeline) similarity(a, b string) float64 {
 	// Simple word-based Jaccard similarity
 	wordsA := make(map[string]bool)
-	for _, w := range strings.Fields(strings.ToLower(a)) {
+	for w := range strings.FieldsSeq(strings.ToLower(a)) {
 		if len(w) > 2 {
 			wordsA[w] = true
 		}
 	}
 
 	wordsB := make(map[string]bool)
-	for _, w := range strings.Fields(strings.ToLower(b)) {
+	for w := range strings.FieldsSeq(strings.ToLower(b)) {
 		if len(w) > 2 {
 			wordsB[w] = true
 		}

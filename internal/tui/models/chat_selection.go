@@ -105,12 +105,9 @@ func (m *ChatModel) selectLineAt(y int) {
 	for i := range y {
 		lineStart += len(lines[i]) + 1 // +1 for newline
 	}
-	lineEnd := lineStart + len(lines[y])
-
-	// Ensure lineEnd doesn't exceed content length
-	if lineEnd > len(content) {
-		lineEnd = len(content)
-	}
+	lineEnd := min(
+		// Ensure lineEnd doesn't exceed content length
+		lineStart+len(lines[y]), len(content))
 
 	m.selectionStart = lineStart
 	m.selectionEnd = lineEnd

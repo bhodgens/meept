@@ -140,7 +140,7 @@ func TestBudgetWaitForRateLimitBelowLimit(t *testing.T) {
 	}, nil)
 
 	// Record a few requests (below limit)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		b.RecordUsage(TokenUsage{TotalTokens: 10})
 	}
 

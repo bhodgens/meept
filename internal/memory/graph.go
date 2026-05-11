@@ -36,32 +36,32 @@ const (
 
 // MemoryEdge represents a directed edge between two memories.
 type MemoryEdge struct {
-	ID         string    `json:"id"`
-	SourceID   string    `json:"source_id"`
-	TargetID   string    `json:"target_id"`
-	EdgeType   EdgeType  `json:"edge_type"`
-	Weight     float64   `json:"weight"`     // 0.0-1.0, higher = stronger relationship
-	Confidence float64   `json:"confidence"` // 0.0-1.0, how confident we are in this edge
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string         `json:"id"`
+	SourceID   string         `json:"source_id"`
+	TargetID   string         `json:"target_id"`
+	EdgeType   EdgeType       `json:"edge_type"`
+	Weight     float64        `json:"weight"`     // 0.0-1.0, higher = stronger relationship
+	Confidence float64        `json:"confidence"` // 0.0-1.0, how confident we are in this edge
+	CreatedAt  time.Time      `json:"created_at"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 // MemoryNode represents a memory with its graph properties.
 type MemoryNode struct {
-	Memory     Memory  `json:"memory"`
-	PageRank   float64 `json:"page_rank"`   // Importance score [0, 1]
-	InDegree   int     `json:"in_degree"`   // Number of incoming edges
-	OutDegree  int     `json:"out_degree"`  // Number of outgoing edges
-	CommunityID string `json:"community_id"` // Cluster/community membership
+	Memory      Memory  `json:"memory"`
+	PageRank    float64 `json:"page_rank"`    // Importance score [0, 1]
+	InDegree    int     `json:"in_degree"`    // Number of incoming edges
+	OutDegree   int     `json:"out_degree"`   // Number of outgoing edges
+	CommunityID string  `json:"community_id"` // Cluster/community membership
 }
 
 // GraphStats holds statistics about the knowledge graph.
 type GraphStats struct {
-	NodeCount     int       `json:"node_count"`
-	EdgeCount     int       `json:"edge_count"`
-	AvgDegree     float64   `json:"avg_degree"`
-	CommunityCount int      `json:"community_count"`
-	LastUpdated   time.Time `json:"last_updated"`
+	NodeCount      int       `json:"node_count"`
+	EdgeCount      int       `json:"edge_count"`
+	AvgDegree      float64   `json:"avg_degree"`
+	CommunityCount int       `json:"community_count"`
+	LastUpdated    time.Time `json:"last_updated"`
 }
 
 // KnowledgeGraph manages relationships between memories.
@@ -89,9 +89,9 @@ type KnowledgeGraph struct {
 type KnowledgeGraphConfig struct {
 	DataDir       string
 	Logger        *slog.Logger
-	DampingFactor float64 // PageRank damping (default: 0.85)
-	MaxIterations int     // Max PageRank iterations (default: 100)
-	Tolerance     float64 // PageRank convergence (default: 1e-6)
+	DampingFactor float64       // PageRank damping (default: 0.85)
+	MaxIterations int           // Max PageRank iterations (default: 100)
+	Tolerance     float64       // PageRank convergence (default: 1e-6)
 	CacheTTL      time.Duration // Cache validity (default: 5m)
 }
 
@@ -152,13 +152,13 @@ func NewKnowledgeGraph(cfg KnowledgeGraphConfig) *KnowledgeGraph {
 	}
 
 	return &KnowledgeGraph{
-		dataDir:       cfg.DataDir,
-		logger:        cfg.Logger,
-		dampingFactor: cfg.DampingFactor,
-		maxIterations: cfg.MaxIterations,
-		tolerance:     cfg.Tolerance,
-		cacheTTL:      cfg.CacheTTL,
-		pageRankCache: make(map[string]float64),
+		dataDir:        cfg.DataDir,
+		logger:         cfg.Logger,
+		dampingFactor:  cfg.DampingFactor,
+		maxIterations:  cfg.MaxIterations,
+		tolerance:      cfg.Tolerance,
+		cacheTTL:       cfg.CacheTTL,
+		pageRankCache:  make(map[string]float64),
 		communityCache: make(map[string]string),
 	}
 }
@@ -483,7 +483,7 @@ func (g *KnowledgeGraph) ComputePageRank(ctx context.Context) error {
 		}
 
 		// Distribute scores through links
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if outDegree := len(outLinks[i]); outDegree > 0 {
 				contribution := d * scores[i] / float64(outDegree)
 				for _, j := range outLinks[i] {
@@ -492,7 +492,7 @@ func (g *KnowledgeGraph) ComputePageRank(ctx context.Context) error {
 			} else {
 				// Dangling node: distribute to all
 				contribution := d * scores[i] / float64(n)
-				for j := 0; j < n; j++ {
+				for j := range n {
 					newScores[j] += contribution
 				}
 			}
@@ -500,7 +500,7 @@ func (g *KnowledgeGraph) ComputePageRank(ctx context.Context) error {
 
 		// Check convergence
 		diff := 0.0
-		for i := 0; i < n; i++ {
+		for i := range n {
 			diff += math.Abs(newScores[i] - scores[i])
 		}
 		scores = newScores
@@ -581,7 +581,7 @@ func (g *KnowledgeGraph) GetPageRank(ctx context.Context, memoryID string) (floa
 			`SELECT score FROM memory_pagerank WHERE memory_id = ?`,
 			memoryID).Scan(&score)
 	})
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
 	return score, err
@@ -668,7 +668,7 @@ func (g *KnowledgeGraph) DetectCommunities(ctx context.Context) (map[string]stri
 
 	// Label propagation iterations
 	maxIter := 10
-	for iter := 0; iter < maxIter; iter++ {
+	for iter := range maxIter {
 		changed := false
 
 		for i := range nodes {
@@ -775,7 +775,7 @@ func (g *KnowledgeGraph) GetCommunity(ctx context.Context, memoryID string) (str
 			`SELECT community_id FROM memory_pagerank WHERE memory_id = ?`,
 			memoryID).Scan(&community)
 	})
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	return community, err
@@ -927,7 +927,7 @@ func (g *KnowledgeGraph) CreateSimilarityEdges(ctx context.Context, memories []M
 	wordSets := make([]map[string]bool, len(memories))
 	for i, m := range memories {
 		wordSets[i] = make(map[string]bool)
-		for _, word := range strings.Fields(strings.ToLower(m.Content)) {
+		for word := range strings.FieldsSeq(strings.ToLower(m.Content)) {
 			if len(word) > 3 {
 				wordSets[i][word] = true
 			}
@@ -935,7 +935,7 @@ func (g *KnowledgeGraph) CreateSimilarityEdges(ctx context.Context, memories []M
 	}
 
 	var edges []MemoryEdge
-	for i := 0; i < len(memories); i++ {
+	for i := range memories {
 		for j := i + 1; j < len(memories); j++ {
 			sim := jaccardSimilarity(wordSets[i], wordSets[j])
 			if sim >= threshold {

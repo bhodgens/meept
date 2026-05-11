@@ -23,7 +23,7 @@ type Consolidator struct {
 	manager  *Manager
 	backend  ConsolidationBackend
 	logger   *slog.Logger
-	llm      llm.Chatter // optional: if nil, falls back to date-based grouping
+	llm      llm.Chatter       // optional: if nil, falls back to date-based grouping
 	embedder EmbeddingProvider // optional: if set, enables semantic similarity clustering
 	mu       sync.Mutex
 	running  bool
@@ -626,8 +626,8 @@ func (c *Consolidator) LastRun() *time.Time {
 
 // SummarizeRequest represents a batch of memories to be summarized by the LLM.
 type SummarizeRequest struct {
-	Memories    []MemoryResult `json:"memories"`
-	MaxSummaries int           `json:"max_summaries"`
+	Memories     []MemoryResult `json:"memories"`
+	MaxSummaries int            `json:"max_summaries"`
 }
 
 type SummarizeResponse struct {
@@ -648,9 +648,9 @@ func extractJSONFromFences(content string) string {
 	idx := strings.Index(content, jsonFence)
 	if idx != -1 {
 		after := content[idx+len(jsonFence):]
-		closeIdx := strings.Index(after, "```")
-		if closeIdx != -1 {
-			candidate := strings.TrimSpace(after[:closeIdx])
+		before, _, ok := strings.Cut(after, "```")
+		if ok {
+			candidate := strings.TrimSpace(before)
 			if json.Valid([]byte(candidate)) {
 				return candidate
 			}
@@ -666,9 +666,9 @@ func extractJSONFromFences(content string) string {
 		if newlineIdx := strings.Index(after, "\n"); newlineIdx != -1 {
 			after = after[newlineIdx+1:]
 		}
-		closeIdx := strings.Index(after, genericFence)
-		if closeIdx != -1 {
-			candidate := strings.TrimSpace(after[:closeIdx])
+		before, _, ok := strings.Cut(after, genericFence)
+		if ok {
+			candidate := strings.TrimSpace(before)
 			if json.Valid([]byte(candidate)) {
 				return candidate
 			}

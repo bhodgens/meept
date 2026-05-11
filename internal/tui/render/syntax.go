@@ -97,7 +97,7 @@ func ExtractCodeBlocks(content string) []CodeBlock {
 	var codeLines []string
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "```") {
+		if after, ok := strings.CutPrefix(line, "```"); ok {
 			if inBlock {
 				// End of code block
 				currentBlock.Code = strings.Join(codeLines, "\n")
@@ -108,7 +108,7 @@ func ExtractCodeBlocks(content string) []CodeBlock {
 				// Start of code block
 				inBlock = true
 				currentBlock = CodeBlock{
-					Language: strings.TrimPrefix(line, "```"),
+					Language: after,
 				}
 				currentBlock.Language = strings.TrimSpace(currentBlock.Language)
 			}

@@ -27,8 +27,7 @@ func TestOrchestrator_SubscriptionSetup(t *testing.T) {
 		logger: slogDiscardLogger(),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Start orchestrator
 	if err := orchestrator.Start(ctx); err != nil {
@@ -219,8 +218,7 @@ func TestOrchestrator_PlanRequestHandling(t *testing.T) {
 		Logger:    slogDiscardLogger(),
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Subscribe to task.planned to verify the full flow completes
 	taskPlannedSub := msgBus.Subscribe("test-observer", "task.planned")

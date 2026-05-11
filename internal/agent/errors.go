@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -39,10 +40,10 @@ func (e *ToolExecutionError) Error() string {
 // ToJSON converts the error to a JSON-serializable map
 func (e *ToolExecutionError) ToJSON() map[string]any {
 	result := map[string]any{
-		"code":        string(e.Code),
-		"error_code":  string(e.Code),
+		"code":          string(e.Code),
+		"error_code":    string(e.Code),
 		"error_message": e.Message,
-		"tool":        e.ToolName,
+		"tool":          e.ToolName,
 	}
 
 	if e.Suggestion != "" {
@@ -88,10 +89,10 @@ func (b *ErrorBuilder) JSONSyntaxError(parseErr error, argsJSON string) *ToolExe
 
 	if strings.Contains(parseErr.Error(), "unexpected end") {
 		suggestion = "The JSON appears to be incomplete. Ensure all objects, arrays, and strings are properly closed."
-		example = fmt.Sprintf("Correct: {\"path\": \"/tmp/file.txt\", \"offset\": 10}\nIncorrect: {\"path\": \"/tmp/file.txt\", \"offset\":")
+		example = "Correct: {\"path\": \"/tmp/file.txt\", \"offset\": 10}\nIncorrect: {\"path\": \"/tmp/file.txt\", \"offset\":"
 	} else if strings.Contains(parseErr.Error(), "invalid character") {
 		suggestion = "Check for unquoted keys, missing commas between fields, or invalid escape sequences."
-		example = fmt.Sprintf("Correct: {\"path\": \"/tmp/file.txt\"}\nIncorrect: {path: \"/tmp/file.txt\"}")
+		example = "Correct: {\"path\": \"/tmp/file.txt\"}\nIncorrect: {path: \"/tmp/file.txt\"}"
 	}
 
 	return &ToolExecutionError{
@@ -244,7 +245,8 @@ func CreateErrorFromJSON(toolName string, errMsg string) *ToolExecutionError {
 
 // SerializeError converts a ToolExecutionError or standard error to a JSON map
 func SerializeError(toolName string, err error) map[string]any {
-	if toolErr, ok := err.(*ToolExecutionError); ok {
+	toolErr := &ToolExecutionError{}
+	if errors.As(err, &toolErr) {
 		return toolErr.ToJSON()
 	}
 

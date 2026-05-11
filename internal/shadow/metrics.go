@@ -14,10 +14,10 @@ type Metrics struct {
 	RecordsLowQuality  atomic.Int64
 
 	// Teacher call metrics
-	TeacherCalls        atomic.Int64
-	TeacherCallsFailed  atomic.Int64
-	TeacherTokensIn     atomic.Int64
-	TeacherTokensOut    atomic.Int64
+	TeacherCalls       atomic.Int64
+	TeacherCallsFailed atomic.Int64
+	TeacherTokensIn    atomic.Int64
+	TeacherTokensOut   atomic.Int64
 
 	// Scoring distribution
 	ScoreSum     atomic.Int64 // Sum * 1000 for precision
@@ -25,13 +25,13 @@ type Metrics struct {
 	ScoreBuckets [10]atomic.Int64 // 0.0-0.1, 0.1-0.2, ..., 0.9-1.0
 
 	// Example selection metrics
-	ExampleSelections    atomic.Int64
-	ExampleCacheHits     atomic.Int64
-	ExampleCacheMisses   atomic.Int64
+	ExampleSelections  atomic.Int64
+	ExampleCacheHits   atomic.Int64
+	ExampleCacheMisses atomic.Int64
 
 	// Export metrics
-	ExportCount         atomic.Int64
-	ExportRecordsTotal  atomic.Int64
+	ExportCount        atomic.Int64
+	ExportRecordsTotal atomic.Int64
 
 	// Timing metrics
 	mu                  sync.RWMutex
@@ -127,16 +127,16 @@ type MetricsSnapshot struct {
 	ScoreDistribution [10]float64 `json:"score_distribution"`
 
 	// Teacher metrics
-	TeacherCalls        int64   `json:"teacher_calls"`
-	TeacherCallsFailed  int64   `json:"teacher_calls_failed"`
-	TeacherSuccessRate  float64 `json:"teacher_success_rate"`
-	TeacherTokensIn     int64   `json:"teacher_tokens_in"`
-	TeacherTokensOut    int64   `json:"teacher_tokens_out"`
+	TeacherCalls       int64   `json:"teacher_calls"`
+	TeacherCallsFailed int64   `json:"teacher_calls_failed"`
+	TeacherSuccessRate float64 `json:"teacher_success_rate"`
+	TeacherTokensIn    int64   `json:"teacher_tokens_in"`
+	TeacherTokensOut   int64   `json:"teacher_tokens_out"`
 
 	// Example selection metrics
-	ExampleSelections  int64   `json:"example_selections"`
-	ExampleCacheHits   int64   `json:"example_cache_hits"`
-	ExampleCacheMisses int64   `json:"example_cache_misses"`
+	ExampleSelections   int64   `json:"example_selections"`
+	ExampleCacheHits    int64   `json:"example_cache_hits"`
+	ExampleCacheMisses  int64   `json:"example_cache_misses"`
 	ExampleCacheHitRate float64 `json:"example_cache_hit_rate"`
 
 	// Export metrics
@@ -179,7 +179,7 @@ func (m *Metrics) Snapshot() *MetricsSnapshot {
 	}
 
 	// Score distribution
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if scoreCount > 0 {
 			s.ScoreDistribution[i] = float64(m.ScoreBuckets[i].Load()) / float64(scoreCount) * 100.0
 		}
@@ -226,7 +226,7 @@ func (m *Metrics) Reset() {
 
 	m.ScoreSum.Store(0)
 	m.ScoreCount.Store(0)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		m.ScoreBuckets[i].Store(0)
 	}
 

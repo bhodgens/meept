@@ -3,12 +3,13 @@ package tui
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/models"
@@ -233,7 +234,7 @@ func TestApp_ConnectMessages(t *testing.T) {
 	connectErr := &testError{"new connection error"}
 	newModel, _ = app.Update(ConnectErrorMsg{Err: connectErr})
 	newApp = newModel.(*App)
-	if newApp.err != connectErr {
+	if !errors.Is(newApp.err, connectErr) {
 		t.Error("expected error to be set on connect error")
 	}
 }

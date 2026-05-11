@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,8 +36,8 @@ type ChangeApplier struct {
 }
 
 type pendingFix struct {
-	Fix        *ProposedFix
-	Validation *ValidationResult
+	Fix         *ProposedFix
+	Validation  *ValidationResult
 	RequestedAt time.Time
 }
 
@@ -209,9 +210,7 @@ func (a *ChangeApplier) PendingApprovals() map[string]*pendingFix {
 	defer a.mu.RUnlock()
 	// Return a copy
 	result := make(map[string]*pendingFix)
-	for k, v := range a.pendingApprovals {
-		result[k] = v
-	}
+	maps.Copy(result, a.pendingApprovals)
 	return result
 }
 

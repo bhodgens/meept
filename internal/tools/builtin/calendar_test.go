@@ -246,7 +246,7 @@ func TestCalendarTools_Interface(t *testing.T) {
 	// Verify all tools implement the tools.Tool interface by checking non-nil creation
 	var client *calendar.Client // nil is ok for interface check
 
-	tools := []interface{}{
+	tools := []any{
 		NewCalendarListTool(client),
 		NewCalendarCreateTool(client),
 		NewCalendarQuickAddTool(client),

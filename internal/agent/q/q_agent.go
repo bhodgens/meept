@@ -400,7 +400,7 @@ func (q *QAgent) logOutcome(result *AnalysisResult) error {
 	}
 	defer f.Close()
 
-	entry := map[string]interface{}{
+	entry := map[string]any{
 		"timestamp":         result.AnalyzedAt,
 		"analysis_id":       result.ID,
 		"sessions_analyzed": result.SessionsAnalyzed,

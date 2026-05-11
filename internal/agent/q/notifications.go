@@ -126,7 +126,7 @@ func (s *NotificationService) sendMenuBar(ctx context.Context, notification *Not
 		return
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", s.config.MenuBarURL, strings.NewReader(string(payload)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.MenuBarURL, strings.NewReader(string(payload)))
 	if err != nil {
 		s.logger.Debug("failed to create menu bar request", "error", err)
 		return

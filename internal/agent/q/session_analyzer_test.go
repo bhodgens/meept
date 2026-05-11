@@ -8,104 +8,104 @@ import (
 
 func TestComputeDifficultyScore(t *testing.T) {
 	tests := []struct {
-		name           string
-		duration       time.Duration
-		iterations     int
-		revisions      int
-		errors         int
-		agentSwitches  int
-		wantMin        float64
-		wantMax        float64
+		name          string
+		duration      time.Duration
+		iterations    int
+		revisions     int
+		errors        int
+		agentSwitches int
+		wantMin       float64
+		wantMax       float64
 	}{
 		{
-			name:           "easy session - short and simple",
-			duration:       5 * time.Minute,
-			iterations:     3,
-			revisions:      0,
-			errors:         0,
-			agentSwitches:  0,
-			wantMin:        0.0,
-			wantMax:        0.0,
+			name:          "easy session - short and simple",
+			duration:      5 * time.Minute,
+			iterations:    3,
+			revisions:     0,
+			errors:        0,
+			agentSwitches: 0,
+			wantMin:       0.0,
+			wantMax:       0.0,
 		},
 		{
-			name:           "moderate - several iterations",
-			duration:       10 * time.Minute,
-			iterations:     12,
-			revisions:      1,
-			errors:         0,
-			agentSwitches:  0,
-			wantMin:        0.15,
-			wantMax:        0.15,
+			name:          "moderate - several iterations",
+			duration:      10 * time.Minute,
+			iterations:    12,
+			revisions:     1,
+			errors:        0,
+			agentSwitches: 0,
+			wantMin:       0.15,
+			wantMax:       0.15,
 		},
 		{
-			name:           "hard - long duration and many iterations",
-			duration:       35 * time.Minute,
-			iterations:     25,
-			revisions:      6,
-			errors:         4,
-			agentSwitches:  5,
-			wantMin:        1.0,
-			wantMax:        1.0,
+			name:          "hard - long duration and many iterations",
+			duration:      35 * time.Minute,
+			iterations:    25,
+			revisions:     6,
+			errors:        4,
+			agentSwitches: 5,
+			wantMin:       1.0,
+			wantMax:       1.0,
 		},
 		{
-			name:           "medium - duration and agent switches",
-			duration:       15 * time.Minute,
-			iterations:     5,
-			revisions:      0,
-			errors:         0,
-			agentSwitches:  2,
-			wantMin:        0.2,
-			wantMax:        0.2,
+			name:          "medium - duration and agent switches",
+			duration:      15 * time.Minute,
+			iterations:    5,
+			revisions:     0,
+			errors:        0,
+			agentSwitches: 2,
+			wantMin:       0.2,
+			wantMax:       0.2,
 		},
 		{
-			name:           "high revisions only",
-			duration:       5 * time.Minute,
-			iterations:     2,
-			revisions:      10,
-			errors:         0,
-			agentSwitches:  0,
-			wantMin:        0.25,
-			wantMax:        0.25,
+			name:          "high revisions only",
+			duration:      5 * time.Minute,
+			iterations:    2,
+			revisions:     10,
+			errors:        0,
+			agentSwitches: 0,
+			wantMin:       0.25,
+			wantMax:       0.25,
 		},
 		{
-			name:           "many errors only",
-			duration:       5 * time.Minute,
-			iterations:     2,
-			revisions:      0,
-			errors:         5,
-			agentSwitches:  0,
-			wantMin:        0.25,
-			wantMax:        0.25,
+			name:          "many errors only",
+			duration:      5 * time.Minute,
+			iterations:    2,
+			revisions:     0,
+			errors:        5,
+			agentSwitches: 0,
+			wantMin:       0.25,
+			wantMax:       0.25,
 		},
 		{
-			name:           "all thresholds maxed out",
-			duration:       1 * time.Hour,
-			iterations:     30,
-			revisions:      10,
-			errors:         10,
-			agentSwitches:  10,
-			wantMin:        1.0,
-			wantMax:        1.0,
+			name:          "all thresholds maxed out",
+			duration:      1 * time.Hour,
+			iterations:    30,
+			revisions:     10,
+			errors:        10,
+			agentSwitches: 10,
+			wantMin:       1.0,
+			wantMax:       1.0,
 		},
 		{
-			name:           "edge case - exactly at boundary (10 min)",
-			duration:       10 * time.Minute,
-			iterations:     10,
-			revisions:      2,
-			errors:         1,
-			agentSwitches:  1,
-			wantMin:        0.0,
-			wantMax:        0.0,
+			name:          "edge case - exactly at boundary (10 min)",
+			duration:      10 * time.Minute,
+			iterations:    10,
+			revisions:     2,
+			errors:        1,
+			agentSwitches: 1,
+			wantMin:       0.0,
+			wantMax:       0.0,
 		},
 		{
-			name:           "edge case - just over boundary (10m1s)",
-			duration:       10*time.Minute + 1,
-			iterations:     11,
-			revisions:      3,
-			errors:         2,
-			agentSwitches:  2,
-			wantMin:        0.54,
-			wantMax:        0.56,
+			name:          "edge case - just over boundary (10m1s)",
+			duration:      10*time.Minute + 1,
+			iterations:    11,
+			revisions:     3,
+			errors:        2,
+			agentSwitches: 2,
+			wantMin:       0.54,
+			wantMax:       0.56,
 		},
 	}
 
@@ -260,7 +260,7 @@ func TestExtractToolCalls(t *testing.T) {
 			name: "single tool call",
 			messages: []Message{
 				{
-					Role: "assistant",
+					Role:    "assistant",
 					Content: "Let me check that for you",
 					ToolCalls: []ToolCall{
 						{Name: "file_read", Arguments: "file.txt", Success: true},
@@ -324,32 +324,32 @@ func TestExtractToolCalls(t *testing.T) {
 
 func TestGetString(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  map[string]interface{}
-		key    string
-		want   string
+		name  string
+		input map[string]any
+		key   string
+		want  string
 	}{
 		{
 			name:  "existing string key",
-			input: map[string]interface{}{"foo": "bar"},
+			input: map[string]any{"foo": "bar"},
 			key:   "foo",
 			want:  "bar",
 		},
 		{
 			name:  "missing key",
-			input: map[string]interface{}{"foo": "bar"},
+			input: map[string]any{"foo": "bar"},
 			key:   "baz",
 			want:  "",
 		},
 		{
 			name:  "non-string value",
-			input: map[string]interface{}{"foo": 42},
+			input: map[string]any{"foo": 42},
 			key:   "foo",
 			want:  "",
 		},
 		{
 			name:  "empty map",
-			input: map[string]interface{}{},
+			input: map[string]any{},
 			key:   "foo",
 			want:  "",
 		},
@@ -367,32 +367,32 @@ func TestGetString(t *testing.T) {
 
 func TestGetBool(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  map[string]interface{}
-		key    string
-		want   bool
+		name  string
+		input map[string]any
+		key   string
+		want  bool
 	}{
 		{
 			name:  "existing true bool",
-			input: map[string]interface{}{"enabled": true},
+			input: map[string]any{"enabled": true},
 			key:   "enabled",
 			want:  true,
 		},
 		{
 			name:  "existing false bool",
-			input: map[string]interface{}{"enabled": false},
+			input: map[string]any{"enabled": false},
 			key:   "enabled",
 			want:  false,
 		},
 		{
 			name:  "missing key",
-			input: map[string]interface{}{"foo": "bar"},
+			input: map[string]any{"foo": "bar"},
 			key:   "enabled",
 			want:  false,
 		},
 		{
 			name:  "non-bool value",
-			input: map[string]interface{}{"enabled": "yes"},
+			input: map[string]any{"enabled": "yes"},
 			key:   "enabled",
 			want:  false,
 		},

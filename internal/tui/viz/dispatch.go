@@ -26,24 +26,21 @@ type WorkerData struct {
 
 // DispatchViz is the main visualization model showing robots around a central dispatcher.
 type DispatchViz struct {
-	width      int         // Width in characters
-	height     int         // Height in characters (square)
+	width      int // Width in characters
+	height     int // Height in characters (square)
 	canvas     *Canvas
 	robots     []*Robot
 	dispatcher *Dispatcher
 	center     Point
-	frame int
-	fps   int
+	frame      int
+	fps        int
 }
 
 // NewDispatchViz creates a new dispatch visualization with the given width.
 // Height is calculated to give more vertical space for the animation.
 func NewDispatchViz(width int) *DispatchViz {
 	// Calculate height - visualization (compact, width/5 ratio)
-	height := width / 5
-	if height < 4 {
-		height = 4
-	}
+	height := max(width/5, 4)
 
 	v := &DispatchViz{
 		width:  width,
@@ -84,9 +81,9 @@ func (v *DispatchViz) initCanvas() {
 	// Leave margin of 1 pixel from edge for compact layout
 	margin := 1
 	positions := []Point{
-		{margin, margin},                                        // Top-left
-		{pixelWidth - RobotWidth - margin, margin},              // Top-right
-		{margin, pixelHeight - RobotHeight - margin},            // Bottom-left
+		{margin, margin}, // Top-left
+		{pixelWidth - RobotWidth - margin, margin},                             // Top-right
+		{margin, pixelHeight - RobotHeight - margin},                           // Bottom-left
 		{pixelWidth - RobotWidth - margin, pixelHeight - RobotHeight - margin}, // Bottom-right
 	}
 
@@ -104,10 +101,7 @@ func (v *DispatchViz) SetSize(width int) {
 	}
 
 	v.width = width
-	v.height = width / 5
-	if v.height < 4 {
-		v.height = 4
-	}
+	v.height = max(width/5, 4)
 
 	// Preserve robot states before reinitializing
 	oldStates := make([]RobotState, len(v.robots))
@@ -171,10 +165,11 @@ func (v *DispatchViz) SyncWithData(agents []AgentActivityData, workers []WorkerD
 			newState := mapAgentState(agent.State)
 			if r.State != newState {
 				r.SetState(newState)
-				if newState == RobotMovingToCenter || newState == RobotDispatchingSubtask {
+				switch newState {
+				case RobotMovingToCenter, RobotDispatchingSubtask:
 					// Move toward center
 					r.MoveTo(v.center)
-				} else if newState == RobotTaskComplete {
+				case RobotTaskComplete:
 					// Move back home
 					r.MoveToHome()
 				}
@@ -265,9 +260,10 @@ func (v *DispatchViz) View() string {
 func (v *DispatchViz) SetRobotState(index int, state RobotState) {
 	if index >= 0 && index < len(v.robots) {
 		v.robots[index].SetState(state)
-		if state == RobotMovingToCenter || state == RobotDispatchingSubtask {
+		switch state {
+		case RobotMovingToCenter, RobotDispatchingSubtask:
 			v.robots[index].MoveTo(v.center)
-		} else if state == RobotTaskComplete || state == RobotIdle {
+		case RobotTaskComplete, RobotIdle:
 			v.robots[index].MoveToHome()
 		}
 	}

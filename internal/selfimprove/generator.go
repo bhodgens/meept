@@ -159,11 +159,11 @@ func (g *PatchGenerator) readAffectedFiles(files []string) string {
 
 		content, err := os.ReadFile(fullPath)
 		if err != nil {
-			sb.WriteString(fmt.Sprintf("// Unable to read %s: %v\n", file, err))
+			fmt.Fprintf(&sb, "// Unable to read %s: %v\n", file, err)
 			continue
 		}
 
-		sb.WriteString(fmt.Sprintf("// File: %s\n", file))
+		fmt.Fprintf(&sb, "// File: %s\n", file)
 		sb.WriteString(string(content))
 		sb.WriteString("\n\n")
 	}
@@ -194,12 +194,12 @@ func (g *PatchGenerator) parseGenerationResponse(issueID, response string) (*Pro
 	var diffLines []string
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "FILE:") {
-			fix.FilePath = strings.TrimSpace(strings.TrimPrefix(line, "FILE:"))
-		} else if strings.HasPrefix(line, "RISK:") {
-			fix.Risk = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(line, "RISK:")))
-		} else if strings.HasPrefix(line, "DESCRIPTION:") {
-			fix.Description = strings.TrimSpace(strings.TrimPrefix(line, "DESCRIPTION:"))
+		if after, ok := strings.CutPrefix(line, "FILE:"); ok {
+			fix.FilePath = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "RISK:"); ok {
+			fix.Risk = strings.ToLower(strings.TrimSpace(after))
+		} else if after, ok := strings.CutPrefix(line, "DESCRIPTION:"); ok {
+			fix.Description = strings.TrimSpace(after)
 		} else if strings.HasPrefix(line, "DIFF:") {
 			inDiff = true
 		} else if inDiff {

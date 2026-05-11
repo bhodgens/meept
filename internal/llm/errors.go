@@ -30,11 +30,12 @@ func (e *ContextSizeExceededError) SuggestionsString() string {
 	if len(e.Suggestions) == 0 {
 		return ""
 	}
-	s := "\nSuggestions:\n"
+	var s strings.Builder
+	s.WriteString("\nSuggestions:\n")
 	for i, sug := range e.Suggestions {
-		s += fmt.Sprintf("  %d. %s\n", i+1, sug)
+		s.WriteString(fmt.Sprintf("  %d. %s\n", i+1, sug))
 	}
-	return s
+	return s.String()
 }
 
 // NonRetryable marks ContextSizeExceededError as non-retryable

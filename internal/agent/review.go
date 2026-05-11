@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -18,11 +19,11 @@ const (
 
 // ReviewResult represents the outcome of a review.
 type ReviewResult struct {
-	Status     ReviewStatus `json:"status"`
-	Feedback   string       `json:"feedback"`
-	Issues     []string     `json:"issues,omitempty"`
-	Confidence float64      `json:"confidence"`
-	ReviewerID string       `json:"reviewer_id"`
+	Status     ReviewStatus  `json:"status"`
+	Feedback   string        `json:"feedback"`
+	Issues     []string      `json:"issues,omitempty"`
+	Confidence float64       `json:"confidence"`
+	ReviewerID string        `json:"reviewer_id"`
 	Duration   time.Duration `json:"duration"`
 }
 
@@ -80,17 +81,13 @@ func (p *ReviewPolicy) NeedsReview(step *task.TaskStep) bool {
 	}
 
 	// Check if tool hint is in skip list
-	for _, skip := range p.SkipReview {
-		if step.ToolHint == skip {
-			return false
-		}
+	if slices.Contains(p.SkipReview, step.ToolHint) {
+		return false
 	}
 
 	// Check if tool hint is in require list
-	for _, req := range p.RequireReview {
-		if step.ToolHint == req {
-			return true
-		}
+	if slices.Contains(p.RequireReview, step.ToolHint) {
+		return true
 	}
 
 	// Default: review if tool hint is set
@@ -178,10 +175,10 @@ type ValidationPolicy struct {
 // DefaultValidationPolicy returns sensible defaults for validation policy.
 func DefaultValidationPolicy() *ValidationPolicy {
 	return &ValidationPolicy{
-		Enabled:             true,
-		RequireValidation:   []string{"code", "refactor", "debug", "git", "fix", "commit"},
-		SkipValidation:      []string{"chat", "report", "recall", "search", "analyze", "platform"},
-		MaxValidationLoops:  3,
+		Enabled:              true,
+		RequireValidation:    []string{"code", "refactor", "debug", "git", "fix", "commit"},
+		SkipValidation:       []string{"chat", "report", "recall", "search", "analyze", "platform"},
+		MaxValidationLoops:   3,
 		SkipValidationAgents: []string{"chat", "analyst"},
 	}
 }
@@ -193,24 +190,18 @@ func (p *ValidationPolicy) NeedsValidation(step *task.TaskStep) bool {
 	}
 
 	// Check if tool hint is in skip list
-	for _, skip := range p.SkipValidation {
-		if step.ToolHint == skip {
-			return false
-		}
+	if slices.Contains(p.SkipValidation, step.ToolHint) {
+		return false
 	}
 
 	// Check if agent is in skip list
-	for _, skipAgent := range p.SkipValidationAgents {
-		if step.AgentID == skipAgent {
-			return false
-		}
+	if slices.Contains(p.SkipValidationAgents, step.AgentID) {
+		return false
 	}
 
 	// Check if tool hint is in require list
-	for _, req := range p.RequireValidation {
-		if step.ToolHint == req {
-			return true
-		}
+	if slices.Contains(p.RequireValidation, step.ToolHint) {
+		return true
 	}
 
 	// Default: validation if tool hint is set and not in skip lists

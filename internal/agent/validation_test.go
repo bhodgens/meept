@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/caimlas/meept/internal/task"
@@ -225,13 +226,7 @@ func TestExtractKeywords(t *testing.T) {
 				t.Errorf("expected %d keywords, got %d: %v", tt.expected, len(keywords), keywords)
 			}
 			for _, kw := range tt.contains {
-				found := false
-				for _, k := range keywords {
-					if k == kw {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(keywords, kw)
 				if !found {
 					t.Errorf("expected keyword %q not found in %v", kw, keywords)
 				}

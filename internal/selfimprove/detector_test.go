@@ -220,7 +220,7 @@ func TestScanLogs_ContextCancellation(t *testing.T) {
 	logPath := filepath.Join(dir, "big.log")
 	// Create a large log that won't complete before context is cancelled
 	var lines []string
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		lines = append(lines, "2024-01-01 INFO line "+string(rune('0'+i%10)))
 	}
 	writeLog(t, logPath, lines[0]) // just one line is fine for this test

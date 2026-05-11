@@ -4,6 +4,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"maps"
 )
 
 // KeywordSearcher is an interface for keyword-based memory search.
@@ -14,17 +15,17 @@ type KeywordSearcher interface {
 
 // KeywordResult represents a result from keyword search.
 type KeywordResult struct {
-	ID            string
-	Content       string
-	Metadata      map[string]any
+	ID             string
+	Content        string
+	Metadata       map[string]any
 	RelevanceScore float64
 }
 
 // HybridSearcher combines keyword (FTS) and vector similarity search.
 type HybridSearcher struct {
-	vectorStore    *Store
+	vectorStore     *Store
 	keywordSearcher KeywordSearcher
-	alpha          float64 // Weight for vector similarity (0-1)
+	alpha           float64 // Weight for vector similarity (0-1)
 }
 
 // HybridSearcherConfig holds configuration for the hybrid searcher.
@@ -47,9 +48,9 @@ func NewHybridSearcher(cfg HybridSearcherConfig) (*HybridSearcher, error) {
 	}
 
 	return &HybridSearcher{
-		vectorStore:    cfg.VectorStore,
+		vectorStore:     cfg.VectorStore,
 		keywordSearcher: cfg.KeywordSearcher,
-		alpha:          cfg.Alpha,
+		alpha:           cfg.Alpha,
 	}, nil
 }
 
@@ -113,9 +114,7 @@ func (h *HybridSearcher) Search(ctx context.Context, query string, limit int) ([
 				if existing.Metadata == nil {
 					existing.Metadata = make(map[string]any)
 				}
-				for k, v := range r.Metadata {
-					existing.Metadata[k] = v
-				}
+				maps.Copy(existing.Metadata, r.Metadata)
 			}
 		} else {
 			combined[r.MemoryID] = &HybridResult{

@@ -12,31 +12,31 @@ import (
 
 // AgentDefinition represents an agent definition from a TOML or JSON5 file.
 type AgentDefinition struct {
-	ID          string   `toml:"id" json:"id"`
-	Name        string   `toml:"name" json:"name"`
-	Role        string   `toml:"role" json:"role"` // "dispatcher", "executor", "conversational", "reviewer"
-	Description string   `toml:"description" json:"description"`
-	Model       string   `toml:"model" json:"model"`
-	Enabled     bool     `toml:"enabled" json:"enabled"`
-	CanDelegate bool     `toml:"can_delegate" json:"can_delegate"`
+	ID          string `json:"id"           toml:"id"`
+	Name        string `json:"name"         toml:"name"`
+	Role        string `json:"role"         toml:"role"` // "dispatcher", "executor", "conversational", "reviewer"
+	Description string `json:"description"  toml:"description"`
+	Model       string `json:"model"        toml:"model"`
+	Enabled     bool   `json:"enabled"      toml:"enabled"`
+	CanDelegate bool   `json:"can_delegate" toml:"can_delegate"`
 
 	// Tools and capabilities
-	AdditionalTools []string `toml:"additional_tools" json:"additional_tools"`
-	Capabilities    []string `toml:"capabilities" json:"capabilities"`
+	AdditionalTools []string `json:"additional_tools" toml:"additional_tools"`
+	Capabilities    []string `json:"capabilities"     toml:"capabilities"`
 
 	// Prompt composition
-	PromptComponents []string `toml:"prompt_components" json:"prompt_components"`
+	PromptComponents []string `json:"prompt_components" toml:"prompt_components"`
 
 	// Constraints
-	Constraints AgentConstraintsConfig `toml:"constraints" json:"constraints"`
+	Constraints AgentConstraintsConfig `json:"constraints" toml:"constraints"`
 }
 
 // AgentConstraintsConfig holds agent operational constraints.
 type AgentConstraintsConfig struct {
-	MaxIterations    int `toml:"max_iterations" json:"max_iterations"`
-	TimeoutSeconds   int `toml:"timeout_seconds" json:"timeout_seconds"`
-	MaxTokensPerTurn int `toml:"max_tokens_per_turn" json:"max_tokens_per_turn"`
-	MaxMemoryRefs    int `toml:"max_memory_refs" json:"max_memory_refs"`
+	MaxIterations    int `json:"max_iterations"      toml:"max_iterations"`
+	TimeoutSeconds   int `json:"timeout_seconds"     toml:"timeout_seconds"`
+	MaxTokensPerTurn int `json:"max_tokens_per_turn" toml:"max_tokens_per_turn"`
+	MaxMemoryRefs    int `json:"max_memory_refs"     toml:"max_memory_refs"`
 }
 
 // ToTimeout converts TimeoutSeconds to time.Duration.

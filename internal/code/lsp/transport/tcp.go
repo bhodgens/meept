@@ -61,8 +61,8 @@ func (t *TCPTransport) Read(ctx context.Context) ([]byte, error) {
 			break
 		}
 
-		if strings.HasPrefix(line, "Content-Length:") {
-			lengthStr := strings.TrimSpace(strings.TrimPrefix(line, "Content-Length:"))
+		if after, ok := strings.CutPrefix(line, "Content-Length:"); ok {
+			lengthStr := strings.TrimSpace(after)
 			contentLength, err = strconv.Atoi(lengthStr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid content length: %w", err)

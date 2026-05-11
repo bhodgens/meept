@@ -133,7 +133,7 @@ func TestLazySkillLoader_CacheEviction(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create multiple skill files
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		name := filepath.Join("skill", string(rune('a'+i)))
 		skillContent := `---
 name: skill-` + string(rune('a'+i)) + `
@@ -147,7 +147,7 @@ Body.
 
 	// Create index
 	idx := NewSkillIndex()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		name := "skill-" + string(rune('a'+i))
 		skillPath := filepath.Join(tmpDir, "skill", string(rune('a'+i)), "SKILL.md")
 		idx.Index(&SkillIndexEntry{
@@ -161,7 +161,7 @@ Body.
 	ctx := context.Background()
 
 	// Load more skills than cache size
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		name := "skill-" + string(rune('a'+i))
 		_, err := loader.Load(ctx, name)
 		if err != nil {
@@ -238,7 +238,7 @@ Body.
 func TestLazySkillLoader_Clear(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		name := "skill-" + string(rune('a'+i))
 		skillContent := `---
 name: ` + name + `
@@ -251,7 +251,7 @@ Body.
 	}
 
 	idx := NewSkillIndex()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		name := "skill-" + string(rune('a'+i))
 		skillPath := filepath.Join(tmpDir, name, "SKILL.md")
 		idx.Index(&SkillIndexEntry{
@@ -264,7 +264,7 @@ Body.
 	ctx := context.Background()
 
 	// Load all skills
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		name := "skill-" + string(rune('a'+i))
 		loader.Load(ctx, name)
 	}

@@ -213,7 +213,7 @@ func (v *FixValidator) runBuild(ctx context.Context, sandboxPath string) error {
 	cmd.Dir = sandboxPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%v: %s", err, string(output))
+		return fmt.Errorf("%w: %s", err, string(output))
 	}
 	return nil
 }
@@ -233,7 +233,7 @@ func (v *FixValidator) runTests(ctx context.Context, sandboxPath string) (passed
 	failed = strings.Count(outputStr, `"Action":"fail"`)
 
 	if err != nil {
-		return passed, failed, fmt.Errorf("%v: %s", err, outputStr)
+		return passed, failed, fmt.Errorf("%w: %s", err, outputStr)
 	}
 
 	return passed, failed, nil

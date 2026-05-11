@@ -3,6 +3,7 @@ package models
 
 import (
 	"encoding/json"
+	"slices"
 
 	"fmt"
 	"os"
@@ -16,7 +17,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/tui/render"
-		"github.com/caimlas/meept/internal/tui/types"
+	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
 )
 
@@ -206,7 +207,7 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 	ta.CharLimit = 4000
 	ta.SetWidth(80)
 	ta.ShowLineNumbers = false
-	
+
 	// Dynamic height: starts at 3 lines, grows up to 8 lines as content increases
 	ta.DynamicHeight = true
 	ta.MinHeight = 3
@@ -219,7 +220,7 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 	styles.Cursor.Blink = true
 	styles.Cursor.Shape = tea.CursorBar
 	ta.SetStyles(styles)
-	
+
 	// Use virtual cursor - rendered as part of textarea content
 	ta.SetVirtualCursor(true)
 
@@ -261,7 +262,7 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		inputHeight:       3, // Fixed input height
 		autoCopyOnRelease: chatConfig.AutoCopyOnRelease,
 		scrollSpeed:       chatConfig.ScrollSpeed,
-		compressedPastes: make(map[int]string),
+		compressedPastes:  make(map[int]string),
 		userStyle:         userStyle,
 		assistantStyle:    assistantStyle,
 		systemStyle:       systemStyle,
@@ -297,11 +298,11 @@ func (m *ChatModel) SetSize(width, height int) {
 	// Minimum input height (dynamic height enabled)
 	const minInputHeight = 3
 	m.inputHeight = minInputHeight
-	
+
 	// Set textarea width
 	m.textarea.SetWidth(width - 4)
 	// Don't call SetHeight - DynamicHeight auto-calculates based on content
-	
+
 	// Set textarea width (height is dynamic)
 	m.textarea.SetWidth(width - 4)
 	m.viewport.SetWidth(width - 2)
@@ -767,25 +768,27 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case "up":
-			if m.focused == FocusInput {
+			switch m.focused {
+			case FocusInput:
 				// Navigate history if at first line or empty
 				if m.textarea.Value() == "" || m.historyIdx >= 0 {
 					m.navigateHistory(-1)
 					return nil
 				}
-			} else if m.focused == FocusViewport {
+			case FocusViewport:
 				m.selectPreviousMessage()
 				return nil
 			}
 
 		case "down":
-			if m.focused == FocusInput {
+			switch m.focused {
+			case FocusInput:
 				// Navigate history if browsing
 				if m.historyIdx >= 0 {
 					m.navigateHistory(1)
 					return nil
 				}
-			} else if m.focused == FocusViewport {
+			case FocusViewport:
 				m.selectNextMessage()
 				return nil
 			}
@@ -1331,10 +1334,7 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 // extractDescription extracts the first 4-7 words from text for a session description.
 func extractDescription(text string) string {
 	words := strings.Fields(text)
-	maxWords := 7
-	if len(words) < maxWords {
-		maxWords = len(words)
-	}
+	maxWords := min(len(words), 7)
 	if maxWords < 4 && len(words) > 0 {
 		maxWords = len(words)
 	}
@@ -1484,9 +1484,10 @@ func (m *ChatModel) updateViewport() {
 		// message start a new conversation turn. Consecutive assistant/system
 		// messages belong to the same turn.
 		isNewTurn := false
-		if msg.Role == "user" {
+		switch msg.Role {
+		case "user":
 			isNewTurn = true
-		} else if msg.Role == "system" {
+		case "system":
 			// System message starts a new turn only if the previous message
 			// was not also a system message
 			if i == 0 || m.messages[i-1].Role != "system" {
@@ -1498,10 +1499,7 @@ func (m *ChatModel) updateViewport() {
 		if isNewTurn && i > 0 {
 			turnNumber++
 			turnLabel := turnLabelStyle.Render(fmt.Sprintf(" turn %d ", turnNumber))
-			sepWidth := m.width - 6 - lipgloss.Width(turnLabel)
-			if sepWidth < 10 {
-				sepWidth = 10
-			}
+			sepWidth := max(m.width-6-lipgloss.Width(turnLabel), 10)
 			turnSep := turnSepStyle.Render(strings.Repeat("─", sepWidth))
 			content.WriteString(turnLabel + turnSep)
 			content.WriteString("\n")
@@ -1548,7 +1546,8 @@ func (m *ChatModel) updateViewport() {
 		currentLine += strings.Count(rendered, "\n") + 1
 
 		// Add state indicator for collapsed/expanded
-		if msg.State == MessageCollapsed {
+		switch msg.State {
+		case MessageCollapsed:
 			indicator := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#6B7280")).
 				Italic(true).
@@ -1556,7 +1555,7 @@ func (m *ChatModel) updateViewport() {
 			content.WriteString(indicator)
 			content.WriteString("\n")
 			currentLine++
-		} else if msg.State == MessageExpanded {
+		case MessageExpanded:
 			indicator := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#6B7280")).
 				Italic(true).
@@ -1588,9 +1587,9 @@ func formatMessage(text string, width int) string {
 	}
 
 	var lines []string
-	paragraphs := strings.Split(text, "\n")
+	paragraphs := strings.SplitSeq(text, "\n")
 
-	for _, para := range paragraphs {
+	for para := range paragraphs {
 		if len(para) <= width {
 			lines = append(lines, para)
 			continue
@@ -1629,10 +1628,7 @@ func (m *ChatModel) View() string {
 	}
 
 	// Calculate viewport height to fill available space
-	inputLines := m.textarea.LineCount()
-	if inputLines < 3 {
-		inputLines = 3
-	}
+	inputLines := max(m.textarea.LineCount(), 3)
 	if inputLines > 8 {
 		inputLines = 8
 	}
@@ -1648,18 +1644,15 @@ func (m *ChatModel) View() string {
 		completionsLines = 1
 	}
 	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - 1(statusbar)
-	viewportContentHeight := m.height - copyHintLines - inputLines - completionsLines - 5
+	viewportContentHeight := max(m.height-copyHintLines-inputLines-completionsLines-5, 1)
 	if viewportContentHeight < 1 {
 		viewportContentHeight = 1
 	}
-	if viewportContentHeight < 1 {
-		viewportContentHeight = 1
-	}
-	
+
 	// Update viewport dimensions BEFORE rendering
 	m.viewport.SetWidth(m.width - 2)
 	m.viewport.SetHeight(viewportContentHeight)
-	
+
 	viewportStyle := viewportBorder.
 		Width(m.width - 2).
 		Height(viewportContentHeight)
@@ -1757,7 +1750,6 @@ func (m *ChatModel) View() string {
 
 	return b.String()
 }
-
 
 // SetSlashAutocompletePopup sets the autocomplete popup string to render.
 func (m *ChatModel) SetSlashAutocompletePopup(popup string) {
@@ -1936,7 +1928,6 @@ func (m *ChatModel) SetMarkdownEnabled(enabled bool) {
 	m.updateViewport()
 }
 
-
 // expandPasteTokens replaces {paste: N lines} tokens with their original content.
 func (m *ChatModel) expandPasteTokens(text string) string {
 	if len(m.compressedPastes) == 0 {
@@ -1964,7 +1955,6 @@ func (m *ChatModel) expandPasteTokens(text string) string {
 
 	return result
 }
-
 
 // handleMousePress handles mouse button press for text selection.
 func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
@@ -2071,10 +2061,7 @@ func (m *ChatModel) getTextareaBounds() (startY, endY int) {
 	}
 
 	// Textarea content lines (what we render, not the full textarea.Model height)
-	inputLines := m.textarea.LineCount()
-	if inputLines < 3 {
-		inputLines = 3
-	}
+	inputLines := max(m.textarea.LineCount(), 3)
 	if inputLines > 8 {
 		inputLines = 8
 	}
@@ -2090,6 +2077,7 @@ func (m *ChatModel) getTextareaBounds() (startY, endY int) {
 
 	return startY, endY
 }
+
 // parseAsyncAck checks if a reply is an async task acknowledgment JSON.
 // Returns (isAsync, taskID, message).
 func parseAsyncAck(reply string) (bool, string, string) {
@@ -2206,10 +2194,8 @@ func (m *ChatModel) detectAndAttachFile(oldValue, newValue string) {
 	}
 
 	// Avoid duplicates
-	for _, existing := range m.attachments {
-		if existing == candidate {
-			return
-		}
+	if slices.Contains(m.attachments, candidate) {
+		return
 	}
 
 	// Add to attachments and remove from textarea
@@ -2261,10 +2247,10 @@ func findBestSlashMatch(input string) string {
 	if !strings.HasPrefix(input, "/") {
 		return ""
 	}
-	
+
 	commands := builtinCommands()
 	inputLower := strings.ToLower(strings.TrimPrefix(input, "/"))
-	
+
 	if inputLower == "" {
 		// No filter - return first command (will be "/help")
 		if len(commands) > 0 {
@@ -2272,14 +2258,14 @@ func findBestSlashMatch(input string) string {
 		}
 		return ""
 	}
-	
+
 	// Find exact prefix match
 	for _, cmd := range commands {
 		if strings.HasPrefix(cmd, inputLower) {
 			return "/" + cmd
 		}
 	}
-	
+
 	return ""
 }
 
@@ -2288,25 +2274,25 @@ func findBestSlashMatch(input string) string {
 // Returns the styled text without cursor - textarea handles cursor natively.
 func (m *ChatModel) renderInputWithGhostText() string {
 	inputValue := m.textarea.Value()
-	
+
 	// Check if we should show ghost completion (slash commands at start)
 	if !strings.HasPrefix(inputValue, "/") {
 		return "" // Let textarea render normally
 	}
-	
+
 	// Only show ghost if input is a prefix of a command (not complete)
 	bestMatch := findBestSlashMatch(inputValue)
 	if bestMatch == "" || bestMatch == inputValue {
 		return "" // No ghost - let textarea render normally
 	}
-	
+
 	// Build styled input: orange for typed, grey for ghost
 	orangeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316"))
 	greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	
+
 	typedPortion := inputValue
 	ghostPortion := bestMatch[len(inputValue):]
-	
+
 	return orangeStyle.Render(typedPortion) + greyStyle.Render(ghostPortion)
 }
 
@@ -2324,8 +2310,8 @@ func (m *ChatModel) RetryLast() bool {
 
 	// Find the last user message
 	lastUserIdx := -1
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].Role == "user" {
+	for i, v := range slices.Backward(m.messages) {
+		if v.Role == "user" {
 			lastUserIdx = i
 			break
 		}
@@ -2352,9 +2338,9 @@ func (m *ChatModel) RetryLast() bool {
 
 // GetLastUserMessage returns the content of the last user message, or empty string if none.
 func (m *ChatModel) GetLastUserMessage() string {
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].Role == "user" {
-			return m.messages[i].Content
+	for _, v := range slices.Backward(m.messages) {
+		if v.Role == "user" {
+			return v.Content
 		}
 	}
 	return ""
@@ -2369,8 +2355,8 @@ func (m *ChatModel) UndoLast() bool {
 
 	// Find the last user message
 	lastUserIdx := -1
-	for i := len(m.messages) - 1; i >= 0; i-- {
-		if m.messages[i].Role == "user" {
+	for i, v := range slices.Backward(m.messages) {
+		if v.Role == "user" {
 			lastUserIdx = i
 			break
 		}

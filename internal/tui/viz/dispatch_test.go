@@ -223,7 +223,7 @@ func TestDispatcherUpdate(t *testing.T) {
 	d.MoveTo(target)
 
 	// Update several times
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		d.Update()
 	}
 

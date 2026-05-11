@@ -20,16 +20,16 @@ const (
 
 // Event represents a calendar event.
 type Event struct {
-	ID          string    `json:"id"`
-	Summary     string    `json:"summary"`
-	Description string    `json:"description,omitempty"`
-	Location    string    `json:"location,omitempty"`
-	Start       EventTime `json:"start"`
-	End         EventTime `json:"end"`
-	Status      string    `json:"status,omitempty"`
-	HTMLLink    string    `json:"htmlLink,omitempty"`
-	Created     time.Time `json:"created,omitempty"`
-	Updated     time.Time `json:"updated,omitempty"`
+	ID          string     `json:"id"`
+	Summary     string     `json:"summary"`
+	Description string     `json:"description,omitempty"`
+	Location    string     `json:"location,omitempty"`
+	Start       EventTime  `json:"start"`
+	End         EventTime  `json:"end"`
+	Status      string     `json:"status,omitempty"`
+	HTMLLink    string     `json:"htmlLink,omitempty"`
+	Created     time.Time  `json:"created,omitempty"`
+	Updated     time.Time  `json:"updated,omitempty"`
 	Attendees   []Attendee `json:"attendees,omitempty"`
 	Reminders   *Reminders `json:"reminders,omitempty"`
 }

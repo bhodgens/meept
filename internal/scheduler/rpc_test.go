@@ -203,7 +203,7 @@ func TestRPCListJobs(t *testing.T) {
 	}
 
 	// Add jobs
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		scheduler.ScheduleConfig(JobConfig{
 			ID:       string(rune('a' + i)),
 			Name:     "Job",

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -152,12 +153,7 @@ func (c *ResultCache) hashArgs(args map[string]any) string {
 
 // isToolEnabled checks if a tool is enabled for caching.
 func (c *ResultCache) isToolEnabled(toolName string) bool {
-	for _, tool := range c.config.EnabledTools {
-		if tool == toolName {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.config.EnabledTools, toolName)
 }
 
 // Get retrieves a cached result for the given tool and arguments.
@@ -326,12 +322,12 @@ func (c *ResultCache) Stats() map[string]any {
 	}
 
 	return map[string]any{
-		"hits":         c.stats.Hits,
-		"misses":       c.stats.Misses,
-		"evictions":    c.stats.Evictions,
-		"entries":      len(c.entries),
-		"max_entries":  c.config.MaxEntries,
-		"hit_rate":     hitRate,
+		"hits":          c.stats.Hits,
+		"misses":        c.stats.Misses,
+		"evictions":     c.stats.Evictions,
+		"entries":       len(c.entries),
+		"max_entries":   c.config.MaxEntries,
+		"hit_rate":      hitRate,
 		"enabled_tools": c.config.EnabledTools,
 	}
 }

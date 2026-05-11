@@ -1069,11 +1069,10 @@ func (s *SidebarModel) renderAgentActivityPanel() string {
 				// Progress indicator
 				progress := fmt.Sprintf("[%d/%d]", agent.Iteration, agent.MaxIter)
 
-				b.WriteString(fmt.Sprintf("  %s %s %s",
+				fmt.Fprintf(&b, "  %s %s %s",
 					stateStyle.Render(stateIcon),
 					s.styles.Paragraph.Render(agentName),
-					s.styles.Muted.Render(progress),
-				))
+					s.styles.Muted.Render(progress))
 				b.WriteString("\n")
 
 				// Show tool calls if any
@@ -1109,11 +1108,10 @@ func (s *SidebarModel) renderAgentActivityPanel() string {
 						toolName = toolName[:maxToolLen-3] + "..."
 					}
 
-					b.WriteString(fmt.Sprintf("    %s %s %s",
+					fmt.Fprintf(&b, "    %s %s %s",
 						s.styles.Muted.Render(toolIcon),
 						toolStyle.Render(toolState),
-						s.styles.Paragraph.Render(toolName),
-					))
+						s.styles.Paragraph.Render(toolName))
 					b.WriteString("\n")
 				}
 
@@ -1240,11 +1238,10 @@ func (s *SidebarModel) renderTasksPanel() string {
 					title = title[:maxLen-3] + "..."
 				}
 
-				b.WriteString(fmt.Sprintf("  %s %s%s",
+				fmt.Fprintf(&b, "  %s %s%s",
 					statusStyle.Render(statusIcon),
 					s.styles.Paragraph.Render(title),
-					agentLabel,
-				))
+					agentLabel)
 				b.WriteString("\n")
 
 				// Line 2: progress bar completed/total
@@ -1264,14 +1261,13 @@ func (s *SidebarModel) renderTasksPanel() string {
 						empty = 0
 					}
 					bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
-					b.WriteString(fmt.Sprintf("    %s %d/%d",
+					fmt.Fprintf(&b, "    %s %d/%d",
 						statusStyle.Render(bar),
 						task.CompletedJobs,
-						task.TotalJobs,
-					))
+						task.TotalJobs)
 				} else {
 					bar := strings.Repeat("░", barWidth)
-					b.WriteString(fmt.Sprintf("    %s", s.styles.Muted.Render(bar)))
+					fmt.Fprintf(&b, "    %s", s.styles.Muted.Render(bar))
 				}
 				b.WriteString("\n")
 
@@ -1285,12 +1281,12 @@ func (s *SidebarModel) renderTasksPanel() string {
 					if len(stepDesc) > stepMaxLen {
 						stepDesc = stepDesc[:stepMaxLen-3] + "..."
 					}
-					b.WriteString(fmt.Sprintf("    -> %s\n", s.styles.Muted.Render(stepDesc)))
+					fmt.Fprintf(&b, "    -> %s\n", s.styles.Muted.Render(stepDesc))
 				}
 
 				// Line 4 (optional): token usage when > 0
 				if task.TokenUsage > 0 {
-					b.WriteString(fmt.Sprintf("    %s\n", s.styles.Muted.Render(formatTokenCount(task.TokenUsage)+" tok")))
+					fmt.Fprintf(&b, "    %s\n", s.styles.Muted.Render(formatTokenCount(task.TokenUsage)+" tok"))
 				}
 			}
 		}
@@ -1331,10 +1327,9 @@ func (s *SidebarModel) renderMemoryPanel() string {
 					typeStyle = lipgloss.NewStyle().Foreground(ColorAccent)
 				}
 
-				b.WriteString(fmt.Sprintf("  %s %s",
+				fmt.Fprintf(&b, "  %s %s",
 					typeStyle.Render(fmt.Sprintf("[%s]", mem.Type)),
-					s.styles.Paragraph.Render(preview),
-				))
+					s.styles.Paragraph.Render(preview))
 				b.WriteString("\n")
 			}
 		}
@@ -1443,10 +1438,9 @@ func (s *SidebarModel) renderActivityFeedPanel() string {
 					summary = summary[:maxSummaryLen-3] + "..."
 				}
 
-				b.WriteString(fmt.Sprintf("  %s %s",
+				fmt.Fprintf(&b, "  %s %s",
 					s.styles.Muted.Render(timeStr),
-					topicStyle.Render(summary),
-				))
+					topicStyle.Render(summary))
 				b.WriteString("\n")
 			}
 		}

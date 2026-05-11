@@ -3,6 +3,7 @@ package security
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -50,14 +51,15 @@ func (a *AuditLog) LogDecision(
 
 // QueryHistory retrieves audit entries matching the given filters.
 func (a *AuditLog) QueryHistory(filters QueryFilters) ([]AuditEntry, error) {
-	query := `
+	var query strings.Builder
+	query.WriteString(`
 		SELECT id, timestamp, action, tool_name, details_json,
 		       risk_level, decision, reason, rule_source,
 		       override_id, conversation_id
-		FROM decision_log`
+		FROM decision_log`)
 
 	var conditions []string
-	var args []interface{}
+	var args []any
 
 	if filters.Action != "" {
 		conditions = append(conditions, "action = ?")
@@ -73,24 +75,24 @@ func (a *AuditLog) QueryHistory(filters QueryFilters) ([]AuditEntry, error) {
 	}
 
 	if len(conditions) > 0 {
-		query += " WHERE "
+		query.WriteString(" WHERE ")
 		for i, cond := range conditions {
 			if i > 0 {
-				query += " AND "
+				query.WriteString(" AND ")
 			}
-			query += cond
+			query.WriteString(cond)
 		}
 	}
 
-	query += " ORDER BY timestamp DESC"
+	query.WriteString(" ORDER BY timestamp DESC")
 
 	limit := filters.Limit
 	if limit <= 0 {
 		limit = 100
 	}
-	query += fmt.Sprintf(" LIMIT %d", limit)
+	query.WriteString(fmt.Sprintf(" LIMIT %d", limit))
 
-	rows, err := a.db.Query(query, args...)
+	rows, err := a.db.Query(query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query audit log: %w", err)
 	}

@@ -218,7 +218,7 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	var targetIdx int = -1
+	var targetIdx = -1
 
 	// Switch by index
 	if req.Index != nil {

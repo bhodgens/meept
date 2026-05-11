@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -84,10 +85,10 @@ var dangerousPattern = regexp.MustCompile(
 
 // ShellExecuteTool executes shell commands in a sandboxed subprocess.
 type ShellExecuteTool struct {
-	workingDir         string
-	defaultTimeout     time.Duration
-	securityOrch       *intsecurity.Orchestrator
-	knownSafeCommands  map[string]struct{}
+	workingDir        string
+	defaultTimeout    time.Duration
+	securityOrch      *intsecurity.Orchestrator
+	knownSafeCommands map[string]struct{}
 }
 
 // NewShellExecuteTool creates a new shell execution tool.
@@ -234,7 +235,8 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("command timed out after %v", timeout)
 		}
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			returnCode = exitErr.ExitCode()
 		} else {
 			return nil, fmt.Errorf("failed to execute command: %w", err)
@@ -265,7 +267,7 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	))
 
 	return tools.ToolResult{
-		Success:  returnCode == 0,
+		Success: returnCode == 0,
 		Result: ShellResult{
 			Stdout:     stdoutStr,
 			Stderr:     stderrStr,
@@ -352,8 +354,8 @@ func extractBaseCommand(command string) string {
 	}
 
 	// Skip environment variable assignments (FOO=bar cmd ...)
-	parts := strings.Fields(command)
-	for _, part := range parts {
+	parts := strings.FieldsSeq(command)
+	for part := range parts {
 		if strings.Contains(part, "=") && !strings.HasPrefix(part, "-") {
 			continue
 		}

@@ -3,6 +3,7 @@ package sync
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"github.com/caimlas/meept/internal/memory"
 )
@@ -229,9 +230,7 @@ func (c *EdgeCodec) BuildDistilledMetadata(
 	metadata := make(map[string]any)
 
 	// Copy original metadata
-	for k, v := range original {
-		metadata[k] = v
-	}
+	maps.Copy(metadata, original)
 
 	// Add distillation metadata
 	metadata[MetadataKeyDistilled] = true

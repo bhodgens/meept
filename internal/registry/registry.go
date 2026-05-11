@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/caimlas/meept/pkg/models"
@@ -94,8 +95,8 @@ func (r *Registry) StopAll(ctx context.Context) error {
 		component Component
 	}
 	toStop := make([]componentEntry, 0, len(r.order))
-	for i := len(r.order) - 1; i >= 0; i-- {
-		name := r.order[i]
+	for _, v := range slices.Backward(r.order) {
+		name := v
 		c := r.components[name]
 		if c.Running() {
 			toStop = append(toStop, componentEntry{name: name, component: c})

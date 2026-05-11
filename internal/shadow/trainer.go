@@ -17,9 +17,9 @@ import (
 type TrainerBackend string
 
 const (
-	TrainerUnsloth    TrainerBackend = "unsloth"
-	TrainerAxolotl    TrainerBackend = "axolotl"
-	TrainerTRL        TrainerBackend = "trl"
+	TrainerUnsloth      TrainerBackend = "unsloth"
+	TrainerAxolotl      TrainerBackend = "axolotl"
+	TrainerTRL          TrainerBackend = "trl"
 	TrainerLlamaFactory TrainerBackend = "llama-factory"
 )
 
@@ -57,7 +57,7 @@ type TrainOptions struct {
 	BatchSize    int
 
 	// Callbacks
-	OnOutput func(line string)
+	OnOutput   func(line string)
 	OnProgress func(epoch int, loss float64)
 }
 
@@ -538,15 +538,15 @@ print("Training complete!")
 
 // generateLlamaFactoryDataset generates a LLaMA-Factory dataset configuration.
 func (t *Trainer) generateLlamaFactoryDataset(opts TrainOptions) string {
-	config := map[string]interface{}{
-		"meept_dpo": map[string]interface{}{
-			"file_name":     opts.DataPath,
-			"ranking":       true,
-			"formatting":    "sharegpt",
+	config := map[string]any{
+		"meept_dpo": map[string]any{
+			"file_name":  opts.DataPath,
+			"ranking":    true,
+			"formatting": "sharegpt",
 			"columns": map[string]string{
-				"messages":  "prompt",
-				"chosen":    "chosen",
-				"rejected":  "rejected",
+				"messages": "prompt",
+				"chosen":   "chosen",
+				"rejected": "rejected",
 			},
 		},
 	}

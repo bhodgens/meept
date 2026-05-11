@@ -72,7 +72,7 @@ func parsePackage(pkgPath string) ([]StructInfo, error) {
 
 	files, err := filepath.Glob(fsPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find Go files: %v", err)
+		return nil, fmt.Errorf("failed to find Go files: %w", err)
 	}
 
 	var structs []StructInfo
@@ -94,7 +94,7 @@ func parseFile(filename string) ([]StructInfo, error) {
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse %s: %v", filename, err)
+		return nil, fmt.Errorf("failed to parse %s: %w", filename, err)
 	}
 
 	var structs []StructInfo
@@ -187,11 +187,11 @@ func parseStruct(typeSpec *ast.TypeSpec, structType *ast.StructType, comments []
 func parseGendocTags(comment string) []GendocTag {
 	var tags []GendocTag
 
-	lines := strings.Split(comment, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(comment, "\n")
+	for line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "//gendoc:") {
-			parts := strings.SplitN(strings.TrimPrefix(line, "//gendoc:"), " ", 2)
+		if after, ok := strings.CutPrefix(line, "//gendoc:"); ok {
+			parts := strings.SplitN(after, " ", 2)
 			if len(parts) == 2 {
 				tags = append(tags, GendocTag{
 					Key:   strings.TrimSpace(parts[0]),
@@ -227,12 +227,12 @@ func exprToString(expr ast.Expr) string {
 // generateDocs creates markdown files for each struct
 func generateDocs(structs []StructInfo, outputDir string) error {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %v", err)
+		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	tmpl, err := template.New("config").Parse(markdownTemplate)
 	if err != nil {
-		return fmt.Errorf("failed to parse template: %v", err)
+		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
 	for _, structInfo := range structs {
@@ -243,7 +243,7 @@ func generateDocs(structs []StructInfo, outputDir string) error {
 		filename := filepath.Join(outputDir, structInfo.Section+".md")
 		file, err := os.Create(filename)
 		if err != nil {
-			return fmt.Errorf("failed to create file %s: %v", filename, err)
+			return fmt.Errorf("failed to create file %s: %w", filename, err)
 		}
 		defer file.Close()
 
@@ -255,7 +255,7 @@ func generateDocs(structs []StructInfo, outputDir string) error {
 		}
 
 		if err := tmpl.Execute(file, data); err != nil {
-			return fmt.Errorf("failed to execute template for %s: %v", structInfo.Section, err)
+			return fmt.Errorf("failed to execute template for %s: %w", structInfo.Section, err)
 		}
 	}
 

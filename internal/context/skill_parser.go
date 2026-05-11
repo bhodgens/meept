@@ -151,8 +151,8 @@ func parseYAMLArray(yaml, field string) []string {
 	inlineMatch := inlinePattern.FindStringSubmatch(yaml)
 	if len(inlineMatch) > 1 {
 		// Parse inline array
-		values := strings.Split(inlineMatch[1], ",")
-		for _, v := range values {
+		values := strings.SplitSeq(inlineMatch[1], ",")
+		for v := range values {
 			item := strings.TrimSpace(v)
 			item = strings.Trim(item, `"`)
 			item = strings.Trim(item, `'`)

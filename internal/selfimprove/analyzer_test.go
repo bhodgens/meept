@@ -2,6 +2,7 @@ package selfimprove
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -49,7 +50,7 @@ func TestNewRootCauseAnalyzer(t *testing.T) {
 
 func TestAnalyze_Fallback(t *testing.T) {
 	a := newTestAnalyzer(t)
-_issue := Issue{
+	_issue := Issue{
 		ID:          "issue-1",
 		Type:        IssueTypeError,
 		Severity:    SeverityHigh,
@@ -145,7 +146,7 @@ func TestAnalyzeBatch_ContextCancellation(t *testing.T) {
 	cancel() // Cancel before start
 
 	analyses, err := a.AnalyzeBatch(ctx, issues)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Logf("expected context.Canceled, got err=%v (behavior may vary)", err)
 	}
 	_ = analyses

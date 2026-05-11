@@ -112,10 +112,7 @@ func (t *ASTQueryTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	// Limit matches
 	if result.Count > maxMatches {
-		limit := maxMatches
-		if limit > len(result.Matches) {
-			limit = len(result.Matches)
-		}
+		limit := min(maxMatches, len(result.Matches))
 		result.Matches = result.Matches[:limit]
 		result.Count = limit
 	}

@@ -15,15 +15,15 @@ import (
 
 // Pool manages a collection of workers.
 type Pool struct {
-	workers    map[string]*Worker
-	queue      queue.Queue
-	processor  JobProcessor
-	bus        *bus.MessageBus
-	logger     *slog.Logger
+	workers   map[string]*Worker
+	queue     queue.Queue
+	processor JobProcessor
+	bus       *bus.MessageBus
+	logger    *slog.Logger
 
-	mu         sync.RWMutex
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	mu     sync.RWMutex
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	// Configuration
 	defaultCaps []string
@@ -32,12 +32,12 @@ type Pool struct {
 
 // PoolConfig holds pool configuration.
 type PoolConfig struct {
-	Queue           queue.Queue
-	Processor       JobProcessor
-	MessageBus      *bus.MessageBus
-	Logger          *slog.Logger
-	DefaultCaps     []string
-	IdleTimeout     time.Duration
+	Queue       queue.Queue
+	Processor   JobProcessor
+	MessageBus  *bus.MessageBus
+	Logger      *slog.Logger
+	DefaultCaps []string
+	IdleTimeout time.Duration
 }
 
 // NewPool creates a new worker pool.
@@ -77,7 +77,7 @@ func (p *Pool) Start(ctx context.Context, workerCount int) error {
 	p.mu.Unlock()
 
 	// Start workers
-	for i := 0; i < workerCount; i++ {
+	for i := range workerCount {
 		if _, err := p.AddWorker(p.defaultCaps); err != nil {
 			p.logger.Error("Failed to add worker", "index", i, "error", err)
 		}

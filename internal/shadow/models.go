@@ -2,6 +2,7 @@ package shadow
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,14 +99,14 @@ func (r *ShadowRecord) HasTeacherResponse() bool {
 
 // PreferencePair represents a DPO training pair.
 type PreferencePair struct {
-	ID               string    `json:"id"`
-	SourceRecordID   string    `json:"source_record_id"`
-	PromptMessages   []Message `json:"prompt_messages"`
-	ChosenResponse   string    `json:"chosen_response"`
-	ChosenModel      string    `json:"chosen_model"`
-	RejectedResponse string    `json:"rejected_response"`
-	RejectedModel    string    `json:"rejected_model"`
-	Margin           float64   `json:"margin"`
+	ID               string     `json:"id"`
+	SourceRecordID   string     `json:"source_record_id"`
+	PromptMessages   []Message  `json:"prompt_messages"`
+	ChosenResponse   string     `json:"chosen_response"`
+	ChosenModel      string     `json:"chosen_model"`
+	RejectedResponse string     `json:"rejected_response"`
+	RejectedModel    string     `json:"rejected_model"`
+	Margin           float64    `json:"margin"`
 	ExportedAt       *time.Time `json:"exported_at,omitempty"`
 }
 
@@ -170,9 +171,9 @@ type FewShotExample struct {
 func NewFewShotExample(record *ShadowRecord) *FewShotExample {
 	// Get the last user message
 	var userMsg string
-	for i := len(record.Messages) - 1; i >= 0; i-- {
-		if record.Messages[i].Role == "user" {
-			userMsg = record.Messages[i].Content
+	for _, v := range slices.Backward(record.Messages) {
+		if v.Role == "user" {
+			userMsg = v.Content
 			break
 		}
 	}

@@ -92,10 +92,10 @@ var financialPatternsRE = regexp.MustCompile(
 
 // Config holds permission checker configuration.
 type Config struct {
-	AllowedPaths              []string
-	BlockedPaths              []string
-	BlockFinancial            bool
-	RequireConfirmationHigh   bool
+	AllowedPaths                []string
+	BlockedPaths                []string
+	BlockFinancial              bool
+	RequireConfirmationHigh     bool
 	RequireConfirmationCritical bool
 }
 
@@ -277,10 +277,8 @@ func (pc *PermissionChecker) CheckPermission(action string, details map[string]s
 	}
 
 	// Confirmation gating
-	needsConfirm := false
-	if effectiveRisk >= RiskHigh && pc.config.RequireConfirmationHigh {
-		needsConfirm = true
-	}
+	needsConfirm := effectiveRisk >= RiskHigh && pc.config.RequireConfirmationHigh
+
 	if effectiveRisk >= RiskCritical && pc.config.RequireConfirmationCritical {
 		needsConfirm = true
 	}

@@ -13,17 +13,17 @@ import (
 
 // QueueModel is the model for the job queue view.
 type QueueModel struct {
-	rpc          QueueRPCClient
-	jobs         []types.QueueJob
-	stats        *types.QueueStatsResponse
-	table        table.Model
-	selectedJob  *types.QueueJob
-	width        int
-	height       int
-	loading      bool
-	err          error
-	showingHelp  bool
-	filterState  string // Filter by job state
+	rpc         QueueRPCClient
+	jobs        []types.QueueJob
+	stats       *types.QueueStatsResponse
+	table       table.Model
+	selectedJob *types.QueueJob
+	width       int
+	height      int
+	loading     bool
+	err         error
+	showingHelp bool
+	filterState string // Filter by job state
 }
 
 // QueueRPCClient interface for the queue model.
@@ -78,18 +78,14 @@ func (m *QueueModel) SetSize(width, height int) {
 	m.height = height
 
 	// Update table dimensions
-	tableHeight := height - 16 // Account for stats panel, detail panel and padding
-	if tableHeight < 5 {
-		tableHeight = 5
-	}
+	tableHeight := max(
+		// Account for stats panel, detail panel and padding
+		height-16, 5)
 	m.table.SetHeight(tableHeight)
 
 	// Update column widths based on available space
 	remaining := width - 54 // ID(20) + type(12) + priority(10) + state(12)
-	taskWidth := remaining
-	if taskWidth < 10 {
-		taskWidth = 10
-	}
+	taskWidth := max(remaining, 10)
 	m.table.SetColumns([]table.Column{
 		{Title: "ID", Width: 20},
 		{Title: "Type", Width: 12},
@@ -389,7 +385,7 @@ func (m *QueueModel) renderStatsPanel() string {
 
 func (m *QueueModel) renderLoading() string {
 	style := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(4, 0)
 

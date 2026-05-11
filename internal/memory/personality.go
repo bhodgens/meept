@@ -281,8 +281,8 @@ func parsePersonality(document string) map[string][]string {
 
 	for _, line := range lines {
 		stripped := strings.TrimSpace(line)
-		if strings.HasPrefix(stripped, "## ") {
-			currentSection = strings.TrimPrefix(stripped, "## ")
+		if after, ok := strings.CutPrefix(stripped, "## "); ok {
+			currentSection = after
 			result[currentSection] = []string{}
 			continue
 		}
@@ -314,8 +314,8 @@ func (s *PersonalityStore) Get(ctx context.Context, key string) (string, error) 
 	personality := s.memory.GetPersonality()
 	for _, entries := range personality {
 		for _, entry := range entries {
-			if strings.HasPrefix(entry, key+":") {
-				return strings.TrimSpace(strings.TrimPrefix(entry, key+":")), nil
+			if after, ok := strings.CutPrefix(entry, key+":"); ok {
+				return strings.TrimSpace(after), nil
 			}
 		}
 	}

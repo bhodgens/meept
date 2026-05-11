@@ -324,7 +324,7 @@ func TestDiscovery_Count(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		content := `---
 name: skill-` + string(rune('a'+i)) + `
 description: Test

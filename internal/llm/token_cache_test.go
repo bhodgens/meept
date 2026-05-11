@@ -340,7 +340,7 @@ func TestTokenCacheCoordinator_L2Fallback(t *testing.T) {
 
 	ctx := context.Background()
 
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		key := CacheKey{
 			PromptHash: string(rune('a' + i)),
 			ModelID:    "test-model",

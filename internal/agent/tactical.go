@@ -39,12 +39,12 @@ type TacticalScheduler struct {
 	validatorManager       *validator.ValidatorManager
 	escalationManager      *EscalationManager
 	logger                 *slog.Logger
-	globalSemaphore        chan struct{}                 // Global execution limit
-	agentSemaphore         map[string]chan struct{}      // Per-agent concurrency slots
-	semaphoreMu            sync.Mutex                    // Protects agentSemaphore map
-	validationGateInterval int                           // Run validation gate every N steps
-	validationGateCounter  map[string]int                // Per-task validation gate counter
-	validationGateMu       sync.Mutex                    // Protects validationGateCounter
+	globalSemaphore        chan struct{}            // Global execution limit
+	agentSemaphore         map[string]chan struct{} // Per-agent concurrency slots
+	semaphoreMu            sync.Mutex               // Protects agentSemaphore map
+	validationGateInterval int                      // Run validation gate every N steps
+	validationGateCounter  map[string]int           // Per-task validation gate counter
+	validationGateMu       sync.Mutex               // Protects validationGateCounter
 }
 
 // TacticalSchedulerConfig holds configuration for the tactical scheduler.
@@ -317,7 +317,7 @@ func (ts *TacticalScheduler) acquireSlots(agentID string) bool {
 		// Got agent slot
 	default:
 		<-ts.globalSemaphore // Release global slot
-		return false // Agent semaphore full
+		return false         // Agent semaphore full
 	}
 
 	return true
@@ -471,7 +471,7 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				"max_retries", maxRetries,
 			)
 			ts.stepStore.Update(step) // Persist
-			return validationErr // Don't proceed to completion
+			return validationErr      // Don't proceed to completion
 		}
 		step.Validated = true
 		step.ValidationError = ""
@@ -832,12 +832,12 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 	// The escalation manager may re-plan the task or request human intervention.
 	if ts.escalationManager != nil {
 		failureCtx := FailureContext{
-			TaskID:     step.TaskID,
-			StepID:     step.ID,
-			AgentID:    step.AgentID,
-			Error:      jobErr,
-			Stage:      "execution",
-			Timestamp:  time.Now(),
+			TaskID:    step.TaskID,
+			StepID:    step.ID,
+			AgentID:   step.AgentID,
+			Error:     jobErr,
+			Stage:     "execution",
+			Timestamp: time.Now(),
 		}
 		if escalErr := ts.escalationManager.Escalate(ctx, failureCtx); escalErr != nil {
 			ts.logger.Warn("Escalation failed",
@@ -1072,12 +1072,12 @@ func (ts *TacticalScheduler) buildStepSummaries(taskID string) []map[string]any 
 	summaries := make([]map[string]any, len(allSteps))
 	for i, s := range allSteps {
 		summaries[i] = map[string]any{
-			"id":                   s.ID,
-			"description":          s.Description,
-			"state":                string(s.State),
-			"result":               truncateString(s.Result, 100),
-			"agent_id":             s.AgentID,
-			"accumulated_context":  truncateString(s.AccumulatedContext, 200),
+			"id":                  s.ID,
+			"description":         s.Description,
+			"state":               string(s.State),
+			"result":              truncateString(s.Result, 100),
+			"agent_id":            s.AgentID,
+			"accumulated_context": truncateString(s.AccumulatedContext, 200),
 		}
 	}
 	return summaries
@@ -1097,7 +1097,7 @@ func (ts *TacticalScheduler) buildResultSummary(steps []map[string]any) string {
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("Completed %d/%d steps: ", completedCount, len(steps)))
+	fmt.Fprintf(&sb, "Completed %d/%d steps: ", completedCount, len(steps))
 
 	// List the first few completed step descriptions
 	shown := 0

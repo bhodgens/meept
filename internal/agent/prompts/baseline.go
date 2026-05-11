@@ -121,23 +121,23 @@ func BuildSkillsPromptSection(skills []SkillInfo) string {
 	sb.WriteString("You can invoke the following skills using the /skill-name format:\n\n")
 
 	for _, skill := range skills {
-		sb.WriteString(fmt.Sprintf("## /%s\n", skill.Name))
+		fmt.Fprintf(&sb, "## /%s\n", skill.Name)
 		if skill.Description != "" {
-			sb.WriteString(fmt.Sprintf("%s\n", skill.Description))
+			fmt.Fprintf(&sb, "%s\n", skill.Description)
 		}
 
 		if len(skill.Requires) > 0 {
-			sb.WriteString(fmt.Sprintf("Requires: %s\n", strings.Join(skill.Requires, ", ")))
+			fmt.Fprintf(&sb, "Requires: %s\n", strings.Join(skill.Requires, ", "))
 		}
 
 		if len(skill.Tags) > 0 {
-			sb.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(skill.Tags, ", ")))
+			fmt.Fprintf(&sb, "Tags: %s\n", strings.Join(skill.Tags, ", "))
 		}
 
 		if len(skill.Examples) > 0 {
 			sb.WriteString("\nExamples:\n")
 			for _, ex := range skill.Examples {
-				sb.WriteString(fmt.Sprintf("  - %s\n", ex))
+				fmt.Fprintf(&sb, "  - %s\n", ex)
 			}
 		}
 

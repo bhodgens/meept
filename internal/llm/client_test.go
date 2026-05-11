@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -248,7 +249,8 @@ func TestClientChatAPIError(t *testing.T) {
 		t.Fatal("Expected error")
 	}
 
-	apiErr, ok := err.(*APIError)
+	apiErr := &APIError{}
+	ok := errors.As(err, &apiErr)
 	if !ok {
 		t.Fatalf("Expected APIError, got %T", err)
 	}
@@ -340,7 +342,8 @@ func TestClientBudgetExceeded(t *testing.T) {
 		t.Fatal("Expected error")
 	}
 
-	_, ok := err.(*BudgetExceededError)
+	budgetExceededError := &BudgetExceededError{}
+	ok := errors.As(err, &budgetExceededError)
 	if !ok {
 		t.Errorf("Expected BudgetExceededError, got %T: %v", err, err)
 	}

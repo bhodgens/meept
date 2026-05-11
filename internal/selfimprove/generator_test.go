@@ -2,6 +2,7 @@ package selfimprove
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -48,9 +49,9 @@ func TestNewPatchGenerator(t *testing.T) {
 func TestGenerate_NoLLMClient(t *testing.T) {
 	g := newTestGenerator(t)
 	analysis := &RootCauseAnalysis{
-		IssueID:      "issue-1",
-		RootCause:    "test root cause",
-		Confidence:   0.8,
+		IssueID:       "issue-1",
+		RootCause:     "test root cause",
+		Confidence:    0.8,
 		AffectedFiles: []string{"file.go"},
 	}
 	issue := Issue{
@@ -77,9 +78,9 @@ func TestGenerate_ProtectedFile(t *testing.T) {
 	g := newTestGenerator(t)
 	// Create a real LLM client mock by using the test directory's analysis
 	analysis := &RootCauseAnalysis{
-		IssueID:      "issue-2",
-		RootCause:    "secret file issue",
-		Confidence:   0.7,
+		IssueID:       "issue-2",
+		RootCause:     "secret file issue",
+		Confidence:    0.7,
 		AffectedFiles: []string{"config.key"},
 	}
 	issue := Issue{ID: "issue-2", Type: IssueTypeSecurity, Description: "sensitive file"}
@@ -367,7 +368,7 @@ func TestGenerateBatch_ContextCancellation(t *testing.T) {
 	cancel() // Already cancelled
 
 	fixes, err := g.GenerateBatch(ctx, analyses, issues)
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Logf("expected context.Canceled, got err=%v", err)
 	}
 	_ = fixes

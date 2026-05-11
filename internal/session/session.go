@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -158,10 +159,8 @@ func (s *MemoryStore) Attach(sessionID, clientID string) error {
 	}
 
 	// Check if already attached
-	for _, c := range session.AttachedClients {
-		if c == clientID {
-			return nil // Already attached
-		}
+	if slices.Contains(session.AttachedClients, clientID) {
+		return nil // Already attached
 	}
 
 	session.AttachedClients = append(session.AttachedClients, clientID)
@@ -214,10 +213,8 @@ func (s *MemoryStore) AddWorker(sessionID, workerID string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 
-	for _, w := range session.WorkerIDs {
-		if w == workerID {
-			return nil
-		}
+	if slices.Contains(session.WorkerIDs, workerID) {
+		return nil
 	}
 
 	session.WorkerIDs = append(session.WorkerIDs, workerID)
@@ -274,10 +271,7 @@ func (s *MemoryStore) GetMessages(sessionID string, offset, limit int) ([]Messag
 	if offset >= len(msgs) {
 		return nil, nil
 	}
-	end := offset + limit
-	if end > len(msgs) {
-		end = len(msgs)
-	}
+	end := min(offset+limit, len(msgs))
 	result := make([]Message, end-offset)
 	copy(result, msgs[offset:end])
 	return result, nil
@@ -408,55 +402,55 @@ func (h *Handler) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (h *Handler) handleSessionCreate(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionCreate(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionList(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionList(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionGet(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionGet(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionGetMostRecent(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionGetMostRecent(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionAttach(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionAttach(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionDetach(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionDetach(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionDelete(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionDelete(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionSaveMessages(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionSaveMessages(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionGetMessages(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionGetMessages(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionUpdateDescription(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionUpdateDescription(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionGenerateDescription(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionGenerateDescription(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionStop(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionStop(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
-func (h *Handler) handleSessionGetChildTasks(ctx context.Context, topic string, msg interface{}) {
+func (h *Handler) handleSessionGetChildTasks(ctx context.Context, topic string, msg any) {
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 

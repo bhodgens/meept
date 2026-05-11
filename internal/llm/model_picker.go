@@ -162,14 +162,15 @@ func (m *ModelPicker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "enter":
-			if m.mode == ModeSelectProvider {
+			switch m.mode {
+			case ModeSelectProvider:
 				// Provider selected
 				if item, ok := m.providerList.SelectedItem().(modelProviderItem); ok {
 					m.selectedProvider = &item.def
 					m.loadModelsForProvider(&item.def)
 					m.mode = ModeSelectModel
 				}
-			} else if m.mode == ModeSelectModel {
+			case ModeSelectModel:
 				// Model selected
 				if item, ok := m.modelList.SelectedItem().(modelModelItem); ok {
 					m.selectedModel = &item.entry
@@ -217,7 +218,7 @@ func (m *ModelPicker) View() tea.View {
 		b.WriteString(helpStyle.Render("Use arrow keys to navigate, type to filter, enter to select, q/esc to cancel\n\n"))
 		b.WriteString(m.providerList.View())
 	} else {
-		b.WriteString(fmt.Sprintf("Provider: %s\n\n", highlightStyle.Render(m.selectedProvider.Name)))
+		fmt.Fprintf(&b, "Provider: %s\n\n", highlightStyle.Render(m.selectedProvider.Name))
 		b.WriteString(helpStyle.Render("Use arrow keys to navigate, type to filter, enter to select, esc to go back, q to cancel\n\n"))
 		b.WriteString(m.modelList.View())
 	}

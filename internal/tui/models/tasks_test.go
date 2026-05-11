@@ -225,7 +225,7 @@ func TestTasksModel_UpdateWithError(t *testing.T) {
 	if model.loading {
 		t.Error("expected loading to be false")
 	}
-	if model.err != testErr {
+	if !errors.Is(model.err, testErr) {
 		t.Errorf("expected error to be set, got %v", model.err)
 	}
 }
@@ -612,11 +612,11 @@ func TestTasksModel_LineageViewRendering(t *testing.T) {
 			},
 			{
 				Task: types.Task{
-					ID:           "child-1",
-					Name:         "Plan architecture",
-					State:        "completed",
+					ID:            "child-1",
+					Name:          "Plan architecture",
+					State:         "completed",
 					CompletedJobs: 1,
-					TotalJobs:    1,
+					TotalJobs:     1,
 				},
 				InheritedFrom:   "parent-1",
 				CreatedMemories: []string{"mem-3"},

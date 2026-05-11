@@ -290,7 +290,7 @@ func TestDispatcherSkillInvocation(t *testing.T) {
 	}
 
 	// Test non-skill invocation falls through to normal routing
-	var result interface{}
+	var result any
 	result, err = dispatcher.ClassifyAndRoute(ctx, "hello world", "test-session")
 	if err != nil {
 		t.Errorf("Non-skill invocation should not error: %v", err)
@@ -596,22 +596,22 @@ func TestSkillIndexCapabilityMatching(t *testing.T) {
 	// Build skill index from entries
 	skillIndex := skills.NewSkillIndex()
 	skillIndex.Index(&skills.SkillIndexEntry{
-		Name:        "code-review",
-		Description: "Automated code review",
-		Requires:    []string{"code", "reasoning"},
-		Tags:        []string{"review", "code"},
+		Name:         "code-review",
+		Description:  "Automated code review",
+		Requires:     []string{"code", "reasoning"},
+		Tags:         []string{"review", "code"},
 		AllowedTools: []string{"file_read", "shell_execute"},
-		RiskLevel:   "low",
-		Examples:    []string{"review my PR", "check code quality"},
+		RiskLevel:    "low",
+		Examples:     []string{"review my PR", "check code quality"},
 	})
 	skillIndex.Index(&skills.SkillIndexEntry{
-		Name:        "deploy",
-		Description: "Deploy application",
-		Requires:    []string{"code", "tool_use"},
-		Tags:        []string{"deploy", "devops"},
+		Name:         "deploy",
+		Description:  "Deploy application",
+		Requires:     []string{"code", "tool_use"},
+		Tags:         []string{"deploy", "devops"},
 		AllowedTools: []string{"shell_execute"},
-		RiskLevel:   "high",
-		Examples:    []string{"deploy to staging", "push to production"},
+		RiskLevel:    "high",
+		Examples:     []string{"deploy to staging", "push to production"},
 	})
 
 	// Build capability index

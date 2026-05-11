@@ -210,7 +210,7 @@ func runCacheInspect(promptHash string) error {
 				response = response[:500] + "..."
 			}
 			fmt.Println("  Response:")
-			for _, line := range strings.Split(response, "\n") {
+			for line := range strings.SplitSeq(response, "\n") {
 				fmt.Printf("    %s\n", line)
 			}
 		}

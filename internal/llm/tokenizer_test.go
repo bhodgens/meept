@@ -12,7 +12,7 @@ func TestHeuristicTokenizer(t *testing.T) {
 		expected int
 	}{
 		{"empty", "", 0},
-		{"single word", "hello", 2},     // 5 chars / 3 = 1.67 -> 2
+		{"single word", "hello", 2},          // 5 chars / 3 = 1.67 -> 2
 		{"short sentence", "hello world", 4}, // 11 chars / 3 = 3.67 -> 4
 		{"longer text", "The quick brown fox jumps over the lazy dog", 15}, // 44 chars / 3 = 14.67 -> 15
 	}
@@ -138,12 +138,12 @@ func TestNewTokenizerForModel(t *testing.T) {
 
 func TestTokenizerFamilyDetection(t *testing.T) {
 	tests := []struct {
-		name    string
-		modelID string
-		isQwen  bool
-		isGLM   bool
+		name      string
+		modelID   string
+		isQwen    bool
+		isGLM     bool
 		isMistral bool
-		isLlama bool
+		isLlama   bool
 	}{
 		{"qwen detection", "qwen2.5-coder", true, false, false, false},
 		{"qwen detection 2", "qwen-72b", true, false, false, false},
@@ -200,21 +200,21 @@ func BenchmarkTokenizer(b *testing.B) {
 
 	b.Run("Heuristic", func(b *testing.B) {
 		tokenizer := &HeuristicTokenizer{}
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = tokenizer.CountTokens(sampleText)
 		}
 	})
 
 	b.Run("Tiktoken_cl100k_base", func(b *testing.B) {
 		tokenizer := NewTiktokenTokenizer("cl100k_base")
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = tokenizer.CountTokens(sampleText)
 		}
 	})
 
 	b.Run("TokenCache", func(b *testing.B) {
 		tokenizer := NewTokenCache(NewTiktokenTokenizer("cl100k_base"))
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			_ = tokenizer.CountTokens(sampleText)
 		}
 	})

@@ -10,7 +10,7 @@ func TestTaskEventHandler_NoRateLimiting(t *testing.T) {
 
 	// Send 10 progress events rapidly
 	payloads := make([]map[string]any, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		payloads[i] = map[string]any{
 			"task_id":        "task-1",
 			"current_step":   fmt.Sprintf("step %d", i),
@@ -98,9 +98,9 @@ func TestTaskEventHandler_HandleTaskCompleted(t *testing.T) {
 	h := NewTaskEventHandler()
 
 	payload := map[string]any{
-		"task_id":       "task-1",
-		"name":          "My Task",
-		"result":        "Task completed successfully",
+		"task_id":        "task-1",
+		"name":           "My Task",
+		"result":         "Task completed successfully",
 		"execution_time": "5s",
 	}
 

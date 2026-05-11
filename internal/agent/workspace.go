@@ -153,13 +153,13 @@ func (w *WorkspaceManager) WritePlan(ctx context.Context, taskID string, plan Ta
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Plan: %s\n\n", plan.Description))
+	fmt.Fprintf(&sb, "# Plan: %s\n\n", plan.Description)
 	for i, step := range plan.Steps {
 		deps := ""
 		if len(step.DependsOn) > 0 {
 			deps = fmt.Sprintf(" (depends on: %s)", strings.Join(step.DependsOn, ", "))
 		}
-		sb.WriteString(fmt.Sprintf("%d. **%s**: %s%s\n", i+1, step.ID, step.Description, deps))
+		fmt.Fprintf(&sb, "%d. **%s**: %s%s\n", i+1, step.ID, step.Description, deps)
 	}
 	sb.WriteString("\n")
 
@@ -475,8 +475,8 @@ func (w *WorkspaceManager) DeleteCheckpoint(ctx context.Context, taskID, label s
 		return fmt.Errorf("checkpoint not found: %s", label)
 	}
 
-	tags := strings.Split(strings.TrimSpace(output), "\n")
-	for _, tag := range tags {
+	tags := strings.SplitSeq(strings.TrimSpace(output), "\n")
+	for tag := range tags {
 		if tag == "" {
 			continue
 		}

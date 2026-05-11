@@ -15,10 +15,10 @@ type Point struct {
 // Canvas provides a Braille-based pixel canvas for rendering graphics.
 // Each character cell contains a 2x4 grid of dots (U+2800 block).
 type Canvas struct {
-	charWidth  int                 // Width in characters
-	charHeight int                 // Height in characters
-	pixels     [][]bool            // Pixel data [y][x] in dot coordinates
-	colors     [][]ansi.Color  // Per-character color [charY][charX]
+	charWidth  int            // Width in characters
+	charHeight int            // Height in characters
+	pixels     [][]bool       // Pixel data [y][x] in dot coordinates
+	colors     [][]ansi.Color // Per-character color [charY][charX]
 }
 
 // Braille dot weights for the 2x4 grid:
@@ -165,11 +165,7 @@ func (c *Canvas) DrawDottedLine(from, to Point, dashLen, gapLen int) {
 
 	// Calculate line length
 	var length int
-	if abs(dx) > abs(dy) {
-		length = abs(dx)
-	} else {
-		length = abs(dy)
-	}
+	length = max(abs(dx), abs(dy))
 	if length == 0 {
 		return
 	}
@@ -266,10 +262,7 @@ func (c *Canvas) setCirclePoints(cx, cy, x, y int, color ansi.Color) {
 // DrawArc draws a partial arc (for halo effect).
 func (c *Canvas) DrawArc(cx, cy, r int, startAngle, endAngle float64, color ansi.Color) {
 	// Draw points around the arc using integer approximation
-	steps := r * 2
-	if steps < 8 {
-		steps = 8
-	}
+	steps := max(r*2, 8)
 	for i := 0; i <= steps; i++ {
 		// Map i to angle range
 		angle := startAngle + (endAngle-startAngle)*float64(i)/float64(steps)
@@ -307,14 +300,14 @@ func (c *Canvas) Render() string {
 	for charY := 0; charY < c.charHeight; charY++ {
 		for charX := 0; charX < c.charWidth; charX++ {
 			// Build the Braille character for this cell
-			var char rune = brailleBase
+			var char = brailleBase
 
 			// Map pixels to Braille dots
 			basePixelX := charX * 2
 			basePixelY := charY * 4
 
-			for dotY := 0; dotY < 4; dotY++ {
-				for dotX := 0; dotX < 2; dotX++ {
+			for dotY := range 4 {
+				for dotX := range 2 {
 					px := basePixelX + dotX
 					py := basePixelY + dotY
 					if py < len(c.pixels) && px < len(c.pixels[py]) && c.pixels[py][px] {

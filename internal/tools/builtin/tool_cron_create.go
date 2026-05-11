@@ -82,11 +82,11 @@ func (t *CronCreateTool) Parameters() llm.FunctionParameters {
 
 // CronCreateResult is the result of creating a cron job.
 type CronCreateResult struct {
-	Success bool   `json:"success"`
-	JobID   string `json:"job_id,omitempty"`
-	Name    string `json:"name,omitempty"`
+	Success  bool   `json:"success"`
+	JobID    string `json:"job_id,omitempty"`
+	Name     string `json:"name,omitempty"`
 	Schedule string `json:"schedule,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -301,15 +301,15 @@ func parseTime(timeStr string) (hour, minute int, err error) {
 		// Minute part might have am/pm attached (e.g., "30am")
 		if strings.Contains(minPart, "am") || strings.Contains(minPart, "pm") {
 			// Parse minute number before am/pm
-			var minNum string
+			var minNum strings.Builder
 			for _, ch := range minPart {
 				if ch >= '0' && ch <= '9' {
-					minNum += string(ch)
+					minNum.WriteString(string(ch))
 				} else {
 					break
 				}
 			}
-			minStr = minNum
+			minStr = minNum.String()
 		} else {
 			minStr = minPart
 		}

@@ -117,7 +117,7 @@ func TestTacticalScheduler_Semaphore(t *testing.T) {
 		})
 
 		// Acquire all global slots
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if !ts2.acquireSlots("coder") {
 				t.Errorf("should acquire global slot %d", i)
 			}
@@ -129,7 +129,7 @@ func TestTacticalScheduler_Semaphore(t *testing.T) {
 		}
 
 		// Release all
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			ts2.releaseSlots("coder")
 		}
 	})
@@ -150,10 +150,8 @@ func TestTacticalScheduler_Semaphore(t *testing.T) {
 		done := make(chan struct{})
 
 		// Try to acquire from multiple goroutines, holding slots until done
-		for i := 0; i < 20; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 20 {
+			wg.Go(func() {
 				if ts3.acquireSlots("coder") {
 					acquired <- true
 					<-done // Hold slot until signaled
@@ -161,7 +159,7 @@ func TestTacticalScheduler_Semaphore(t *testing.T) {
 				} else {
 					acquired <- false
 				}
-			}()
+			})
 		}
 
 		// Give goroutines time to acquire

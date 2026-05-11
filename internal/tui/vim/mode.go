@@ -410,14 +410,14 @@ func (s *State) executeCommand(cmd string) Action {
 	}
 
 	// Handle :session <name> commands
-	if strings.HasPrefix(cmd, "session ") {
-		name := strings.TrimPrefix(cmd, "session ")
+	if after, ok := strings.CutPrefix(cmd, "session "); ok {
+		name := after
 		return Action{Type: ActionCommand, Target: "session", Payload: name}
 	}
 
 	// Handle :task <id> commands
-	if strings.HasPrefix(cmd, "task ") {
-		id := strings.TrimPrefix(cmd, "task ")
+	if after, ok := strings.CutPrefix(cmd, "task "); ok {
+		id := after
 		return Action{Type: ActionCommand, Target: "task", Payload: id}
 	}
 

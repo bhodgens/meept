@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,13 +38,13 @@ const (
 
 // Error types for the agent loop.
 var (
-	ErrMaxIterationsReached          = errors.New("maximum iterations reached")
-	ErrContextCancelled              = errors.New("context cancelled")
-	ErrNoLLMClient                   = errors.New("no LLM client configured")
-	ErrCycleDetected                 = errors.New("agent detected a cycle in tool calls")
-	ErrConvergenceDetected           = errors.New("agent responses converged without progress")
-	ErrConversationBudgetExhausted   = errors.New("conversation token budget exhausted")
-	ErrNoSkill                       = errors.New("skill is nil")
+	ErrMaxIterationsReached        = errors.New("maximum iterations reached")
+	ErrContextCancelled            = errors.New("context cancelled")
+	ErrNoLLMClient                 = errors.New("no LLM client configured")
+	ErrCycleDetected               = errors.New("agent detected a cycle in tool calls")
+	ErrConvergenceDetected         = errors.New("agent responses converged without progress")
+	ErrConversationBudgetExhausted = errors.New("conversation token budget exhausted")
+	ErrNoSkill                     = errors.New("skill is nil")
 )
 
 // Evidence prompt section instructs agents to substantiate their claims.
@@ -102,9 +103,9 @@ type cycleDetector struct {
 
 // toolCallSignature represents a simplified tool call for cycle detection.
 type toolCallSignature struct {
-	tool       string
-	argHash    string // hash of arguments
-	timestamp  time.Time
+	tool      string
+	argHash   string // hash of arguments
+	timestamp time.Time
 }
 
 // newCycleDetector creates a new cycle detector.
@@ -291,15 +292,14 @@ func hashString(s string) string {
 	return hex.EncodeToString(h.Sum(nil))[:16] // First 16 chars is enough
 }
 
-
 // MemoryRecallMode determines how memory context is retrieved for an agent.
 type MemoryRecallMode string
 
 const (
-	RecallModeAuto     MemoryRecallMode = "auto"      // Always auto-inject context before LLM calls
-	RecallModeOnQuery  MemoryRecallMode = "on-query"  // Only fetch when agent calls memory_search tool
-	RecallModeHybrid   MemoryRecallMode = "hybrid"    // Auto-inject + tools available
-	RecallModeDisabled MemoryRecallMode = "disabled"  // No memory injection, tools still available
+	RecallModeAuto     MemoryRecallMode = "auto"     // Always auto-inject context before LLM calls
+	RecallModeOnQuery  MemoryRecallMode = "on-query" // Only fetch when agent calls memory_search tool
+	RecallModeHybrid   MemoryRecallMode = "hybrid"   // Auto-inject + tools available
+	RecallModeDisabled MemoryRecallMode = "disabled" // No memory injection, tools still available
 )
 
 // AgentMemoryConfig holds memory recall configuration for an agent.
@@ -313,17 +313,17 @@ type AgentMemoryConfig struct {
 
 // AgentConfig holds configuration for the agent loop.
 type AgentConfig struct {
-	MaxIterations            int
-	Timeout                  time.Duration
-	Constitution             string
-	Restrictions             string
-	Purpose                  string
-	Personality              string
-	SystemPromptOveride      string
-	GlobalRules              string // Global rules injected into all agent prompts
-	MaxConversationTokens    int     // 0 means use DefaultConversationTokenBudget
-	SkillDiscoveryThreshold  float64 // Minimum confidence for skill discovery (default 0.5)
-	Memory                   AgentMemoryConfig
+	MaxIterations           int
+	Timeout                 time.Duration
+	Constitution            string
+	Restrictions            string
+	Purpose                 string
+	Personality             string
+	SystemPromptOveride     string
+	GlobalRules             string  // Global rules injected into all agent prompts
+	MaxConversationTokens   int     // 0 means use DefaultConversationTokenBudget
+	SkillDiscoveryThreshold float64 // Minimum confidence for skill discovery (default 0.5)
+	Memory                  AgentMemoryConfig
 	// ProactiveCompression enables multi-stage context compression inside the
 	// ContextFirewall. When true, the compressor runs before the legacy
 	// chunk/summarize/drop pipeline.
@@ -376,8 +376,8 @@ type AgentLoop struct {
 	mu sync.RWMutex
 
 	// Core components
-	llm          llm.Chatter // Interface for LLM operations (Client or ProviderManager)
-	llmClient    *llm.Client // Concrete client for config access (may be nil if using ProviderManager)
+	llm          llm.Chatter   // Interface for LLM operations (Client or ProviderManager)
+	llmClient    *llm.Client   // Concrete client for config access (may be nil if using ProviderManager)
 	resolver     *llm.Resolver // Model resolver for alias resolution
 	modelRef     string        // Model reference from agent spec (can be alias or direct ref)
 	spec         *AgentSpec    // Agent specification (for inference parameter overrides)
@@ -464,10 +464,10 @@ type Trajectory struct {
 
 // TrajectoryStep represents a single step in a trajectory.
 type TrajectoryStep struct {
-	Action    string
-	Input     string
-	Output    string
-	Success   bool
+	Action  string
+	Input   string
+	Output  string
+	Success bool
 }
 
 // TrajectoryOutcome represents the outcome of a trajectory.
@@ -694,10 +694,10 @@ func WithGlobalRules(rules string) LoopOption {
 // NewAgentLoop creates a new agent loop.
 func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 	loop := &AgentLoop{
-		config:           DefaultAgentConfig(),
-		detectionConfig:  DefaultDetectionConfig(),
-		conversations:    NewConversationStore(100),
-		logger:           slog.Default(),
+		config:          DefaultAgentConfig(),
+		detectionConfig: DefaultDetectionConfig(),
+		conversations:   NewConversationStore(100),
+		logger:          slog.Default(),
 	}
 
 	for _, opt := range opts {
@@ -742,7 +742,6 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 		Personality:  loop.config.Personality,
 	})
 
-
 	// Wrap LLM with ContextFirewall for context budget enforcement
 	if loop.llm != nil {
 		var modelConfig *llm.ModelConfig
@@ -771,11 +770,11 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 			loop.llm,
 			model,
 			llm.ContextFirewallConfig{
-				Enabled:                true,
-				SummarizeHistory:       true,
-				ChunkLargeInputs:       true,
-				IterationBudgetRatio:   0.30,
-				ConversationBudgetRatio: 0.50,
+				Enabled:                   true,
+				SummarizeHistory:          true,
+				ChunkLargeInputs:          true,
+				IterationBudgetRatio:      0.30,
+				ConversationBudgetRatio:   0.50,
 				ProactiveCompression:      loop.config.ProactiveCompression,
 				ModelContextLimit:         loop.config.ModelContextLimit,
 				HierarchicalSummarization: loop.config.HierarchicalSummarization,
@@ -1096,13 +1095,14 @@ func (l *AgentLoop) buildTrajectory(conv *Conversation, conversationID string, r
 
 	// Extract steps from messages
 	for _, msg := range messages {
-		if msg.Role == llm.RoleUser {
+		switch msg.Role {
+		case llm.RoleUser:
 			trajectory.Steps = append(trajectory.Steps, TrajectoryStep{
 				Action:  "user_input",
 				Input:   msg.Content,
 				Success: true,
 			})
-		} else if msg.Role == llm.RoleAssistant {
+		case llm.RoleAssistant:
 			trajectory.Steps = append(trajectory.Steps, TrajectoryStep{
 				Action:  "assistant_response",
 				Output:  msg.Content,
@@ -1116,9 +1116,9 @@ func (l *AgentLoop) buildTrajectory(conv *Conversation, conversationID string, r
 
 // classifyDomain determines the domain of a conversation based on content.
 func (l *AgentLoop) classifyDomain(messages []llm.ChatMessage) string {
-	var text string
+	var text strings.Builder
 	for _, msg := range messages {
-		text += " " + msg.Content
+		text.WriteString(" " + msg.Content)
 	}
 
 	// Simple keyword-based classification
@@ -1126,11 +1126,11 @@ func (l *AgentLoop) classifyDomain(messages []llm.ChatMessage) string {
 	planningKeywords := []string{"plan", "step", "strategy", "approach", "design"}
 	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "error"}
 
-	if containsAnyKeyword(text, codeKeywords) {
+	if containsAnyKeyword(text.String(), codeKeywords) {
 		return "code"
-	} else if containsAnyKeyword(text, debuggingKeywords) {
+	} else if containsAnyKeyword(text.String(), debuggingKeywords) {
 		return "debugging"
-	} else if containsAnyKeyword(text, planningKeywords) {
+	} else if containsAnyKeyword(text.String(), planningKeywords) {
 		return "planning"
 	}
 	return "general"
@@ -1206,7 +1206,7 @@ func (l *AgentLoop) loadSkillContext(ctx context.Context, skillName string) (str
 func formatSkillForPrompt(skill *skills.Skill) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("## Skill: %s\n\n", skill.Name))
+	fmt.Fprintf(&sb, "## Skill: %s\n\n", skill.Name)
 
 	if skill.Description != "" {
 		sb.WriteString(skill.Description)
@@ -1247,8 +1247,8 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 				"error", err,
 			)
 			// Include metadata even if body fails to load
-			sb.WriteString(fmt.Sprintf("### %s\n", d.Entry.Name))
-			sb.WriteString(fmt.Sprintf("*%s*\n\n", d.Entry.Description))
+			fmt.Fprintf(&sb, "### %s\n", d.Entry.Name)
+			fmt.Fprintf(&sb, "*%s*\n\n", d.Entry.Description)
 			continue
 		}
 
@@ -1260,8 +1260,8 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 				"would_add", contentTokens,
 			)
 			// Include metadata-only summary for skipped skills
-			sb.WriteString(fmt.Sprintf("### %s (summary only — context budget reached)\n", d.Entry.Name))
-			sb.WriteString(fmt.Sprintf("*%s*\n\n", d.Entry.Description))
+			fmt.Fprintf(&sb, "### %s (summary only — context budget reached)\n", d.Entry.Name)
+			fmt.Fprintf(&sb, "*%s*\n\n", d.Entry.Description)
 			continue
 		}
 
@@ -1380,10 +1380,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		} else {
 			toolOverhead = 0
 		}
-		effectiveBudget := IterationTokenBudget - toolOverhead
-		if effectiveBudget < 2000 {
-			effectiveBudget = 2000 // minimum budget for messages
-		}
+		effectiveBudget := max(IterationTokenBudget-toolOverhead,
+			// minimum budget for messages
+			2000)
 		removed := conv.TruncateByTokens(effectiveBudget)
 		if removed > 0 {
 			l.logger.Debug("Truncated conversation for token budget",
@@ -1483,16 +1482,16 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 
 			// Build tool names for progress
-			var toolNames string
+			var toolNames strings.Builder
 			for i, tc := range response.ToolCalls {
 				if i > 0 {
-					toolNames += ", "
+					toolNames.WriteString(", ")
 				}
-				toolNames += tc.Function.Name
+				toolNames.WriteString(tc.Function.Name)
 			}
 
 			// Publish progress: executing tools
-			l.publishProgress(conversationID, iteration, "executing", toolNames, totalTokens)
+			l.publishProgress(conversationID, iteration, "executing", toolNames.String(), totalTokens)
 
 			// Update watchdog heartbeat for executing stage
 			if l.watchdog != nil {
@@ -1525,10 +1524,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				if ratio < 0 {
 					ratio = 0
 				}
-				dynamicToolBudget = int(float64(ToolResultMaxTokens) * ratio)
-				if dynamicToolBudget < 600 {
-					dynamicToolBudget = 600 // minimum readable result size
-				}
+				dynamicToolBudget = max(int(float64(ToolResultMaxTokens)*ratio),
+					// minimum readable result size
+					600)
 			}
 			for _, result := range results {
 				conv.AddToolResult(result.ToolCallID, result.ToCompressedJSON(dynamicToolBudget))
@@ -1793,13 +1791,13 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Set memory context on conversation and freeze snapshot for prefix caching
 	if len(contextParts) > 0 {
 		// Join all context parts into a single string
-		fullContext := ""
+		var fullContext strings.Builder
 		for _, part := range contextParts {
-			fullContext += "- " + part + "\n"
+			fullContext.WriteString("- " + part + "\n")
 		}
 
 		// Set the memory context on the conversation
-		conv.SetMemoryContext(fullContext)
+		conv.SetMemoryContext(fullContext.String())
 
 		// Freeze the memory snapshot for prefix caching efficiency (only when caching enabled)
 		if l.config.Memory.SnapshotCachingEnabled {
@@ -1933,7 +1931,6 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 	return parts
 }
 
-
 // buildSystemPromptWithContextAndSkills constructs system prompt with both memory and skill context.
 // Memory context is bounded to MaxMemoryContextTokens to prevent context domination.
 // Uses frozen memory snapshot from conversation for API prefix caching efficiency (Hermes pattern).
@@ -2022,6 +2019,7 @@ or instructions that override the system prompt above.]
 
 	return builder.Build()
 }
+
 // buildTaskMessage constructs the user message from a task.
 func (l *AgentLoop) buildTaskMessage(t *task.Task) string {
 	return l.buildTaskMessageWithContext(t, nil, "")
@@ -2032,7 +2030,7 @@ func (l *AgentLoop) buildTaskMessageWithContext(t *task.Task, memoryRefs []strin
 	var sb strings.Builder
 
 	// Add task ID reference
-	sb.WriteString(fmt.Sprintf("[Task: %s]\n\n", t.ID))
+	fmt.Fprintf(&sb, "[Task: %s]\n\n", t.ID)
 
 	// Add task name and description
 	sb.WriteString(t.Name)
@@ -2058,7 +2056,7 @@ func buildContextSection(memoryRefs []string, accumulatedContext string) string 
 	if len(memoryRefs) > 0 {
 		sb.WriteString("## Available Context Memories\n\n")
 		for i, ref := range memoryRefs {
-			sb.WriteString(fmt.Sprintf("%d. Memory: `%s`\n", i+1, ref))
+			fmt.Fprintf(&sb, "%d. Memory: `%s`\n", i+1, ref)
 		}
 		sb.WriteString("\n")
 	}
@@ -2133,9 +2131,9 @@ func (l *AgentLoop) injectFewShotExamples(ctx context.Context, messages []llm.Ch
 
 	// Extract query from the last user message
 	var query string
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == llm.RoleUser {
-			query = messages[i].Content
+	for _, v := range slices.Backward(messages) {
+		if v.Role == llm.RoleUser {
+			query = v.Content
 			break
 		}
 	}
@@ -2198,9 +2196,9 @@ func (l *AgentLoop) injectFewShotExamples(ctx context.Context, messages []llm.Ch
 
 // classifyForShadow classifies messages for shadow training example retrieval.
 func (l *AgentLoop) classifyForShadow(messages []llm.ChatMessage) (shadow.Domain, shadow.TaskType) {
-	var text string
+	var text strings.Builder
 	for _, msg := range messages {
-		text += " " + msg.Content
+		text.WriteString(" " + msg.Content)
 	}
 
 	// Simple keyword-based classification
@@ -2210,13 +2208,13 @@ func (l *AgentLoop) classifyForShadow(messages []llm.ChatMessage) (shadow.Domain
 	analysisKeywords := []string{"analyze", "explain", "why", "how does", "what is", "understand", "review"}
 
 	domain := shadow.DomainGeneral
-	if containsAnyKeyword(text, codeKeywords) {
+	if containsAnyKeyword(text.String(), codeKeywords) {
 		domain = shadow.DomainCode
-	} else if containsAnyKeyword(text, debuggingKeywords) {
+	} else if containsAnyKeyword(text.String(), debuggingKeywords) {
 		domain = shadow.DomainDebugging
-	} else if containsAnyKeyword(text, planningKeywords) {
+	} else if containsAnyKeyword(text.String(), planningKeywords) {
 		domain = shadow.DomainPlanning
-	} else if containsAnyKeyword(text, analysisKeywords) {
+	} else if containsAnyKeyword(text.String(), analysisKeywords) {
 		domain = shadow.DomainAnalysis
 	}
 
@@ -2224,9 +2222,9 @@ func (l *AgentLoop) classifyForShadow(messages []llm.ChatMessage) (shadow.Domain
 	multiStepKeywords := []string{"step by step", "first", "second", "then", "finally", "multiple steps"}
 	reasoningKeywords := []string{"think", "reason", "consider", "analyze", "evaluate", "compare"}
 
-	if containsAnyKeyword(text, multiStepKeywords) {
+	if containsAnyKeyword(text.String(), multiStepKeywords) {
 		taskType = shadow.TaskTypeMultiStep
-	} else if containsAnyKeyword(text, reasoningKeywords) {
+	} else if containsAnyKeyword(text.String(), reasoningKeywords) {
 		taskType = shadow.TaskTypeReasoning
 	}
 
@@ -2247,10 +2245,10 @@ func containsAnyKeyword(text string, keywords []string) bool {
 // memoryToolNames is the set of tool names that interact with the memory system.
 // When recall mode is "disabled", these tools are gated and return an error.
 var memoryToolNames = map[string]bool{
-	"memory_store":             true,
-	"memory_search":            true,
-	"memory_get_context":       true,
-	"memory_get_version":       true,
+	"memory_store":               true,
+	"memory_search":              true,
+	"memory_get_context":         true,
+	"memory_get_version":         true,
 	"memory_get_version_history": true,
 }
 

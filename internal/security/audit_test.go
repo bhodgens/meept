@@ -96,7 +96,7 @@ func TestAuditLogGetRecentEntries(t *testing.T) {
 	defer engine.Close()
 
 	// Generate some decisions
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_ = engine.Check("file_read", "file_read", nil, "")
 	}
 
@@ -191,7 +191,7 @@ func TestAuditLogPurgeOldEntries(t *testing.T) {
 	defer engine.Close()
 
 	// Generate some decisions
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_ = engine.Check("file_read", "file_read", nil, "")
 	}
 

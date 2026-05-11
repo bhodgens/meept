@@ -214,10 +214,7 @@ func (t *TaskListTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	limit := 20
 	if l, ok := args["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
+		limit = min(int(l), 100)
 	}
 
 	activeOnly, _ := args["active_only"].(bool)

@@ -113,7 +113,7 @@ func TestConversationTruncate(t *testing.T) {
 	conv := NewConversation(WithMaxMessages(5))
 
 	// Add 10 messages
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		conv.AddUserMessage("Message")
 	}
 
@@ -136,7 +136,7 @@ func TestConversationTruncateByTokens(t *testing.T) {
 	conv := NewConversation()
 
 	// Each message is roughly 100 characters = 25 tokens
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msg := "This is a test message that is approximately one hundred characters in length for token testing."
 		conv.AddUserMessage(msg)
 	}

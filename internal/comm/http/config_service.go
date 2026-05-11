@@ -253,13 +253,13 @@ func (s *ConfigService) ListAgents() ([]AgentInfo, error) {
 				parts := strings.SplitN(content, "---", 3)
 				if len(parts) >= 2 {
 					frontmatter := parts[1]
-					lines := strings.Split(frontmatter, "\n")
-					for _, line := range lines {
-						if strings.HasPrefix(line, "name:") {
-							name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+					lines := strings.SplitSeq(frontmatter, "\n")
+					for line := range lines {
+						if after, ok := strings.CutPrefix(line, "name:"); ok {
+							name = strings.TrimSpace(after)
 						}
-						if strings.HasPrefix(line, "description:") {
-							description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+						if after, ok := strings.CutPrefix(line, "description:"); ok {
+							description = strings.TrimSpace(after)
 						}
 					}
 				}
@@ -326,9 +326,10 @@ func (s *ConfigService) GetAgent(id string) (*Agent, error) {
 					agent.Frontmatter[key] = value
 
 					// Extract common fields
-					if key == "name" {
+					switch key {
+					case "name":
 						agent.Name = value
-					} else if key == "description" {
+					case "description":
 						agent.Description = value
 					}
 				}
@@ -352,13 +353,13 @@ func (s *ConfigService) SaveAgent(id string, agent *Agent) error {
 	// Build AGENT.md content
 	var content strings.Builder
 	content.WriteString("---\n")
-	content.WriteString(fmt.Sprintf("name: %s\n", agent.Name))
-	content.WriteString(fmt.Sprintf("description: %s\n", agent.Description))
+	fmt.Fprintf(&content, "name: %s\n", agent.Name)
+	fmt.Fprintf(&content, "description: %s\n", agent.Description)
 
 	// Add other frontmatter fields
 	for key, value := range agent.Frontmatter {
 		if key != "name" && key != "description" {
-			content.WriteString(fmt.Sprintf("%s: %v\n", key, value))
+			fmt.Fprintf(&content, "%s: %v\n", key, value)
 		}
 	}
 
@@ -389,4 +390,3 @@ func (s *ConfigService) DeleteAgent(id string) error {
 
 	return nil
 }
-

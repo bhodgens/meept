@@ -3,6 +3,7 @@ package ast
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -108,10 +109,10 @@ func (e *SymbolExtractor) extractGoSymbols(node *sitter.Node, source []byte, fil
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindFunction, filter) {
 			sym := Symbol{
-				Name:      name,
-				Kind:      SymbolKindFunction,
-				Range:     nodeToRange(node),
-				Signature: e.getGoFunctionSignature(node, source),
+				Name:       name,
+				Kind:       SymbolKindFunction,
+				Range:      nodeToRange(node),
+				Signature:  e.getGoFunctionSignature(node, source),
 				DocComment: e.getPrecedingComment(node, source),
 			}
 			symbols = append(symbols, sym)
@@ -121,10 +122,10 @@ func (e *SymbolExtractor) extractGoSymbols(node *sitter.Node, source []byte, fil
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindMethod, filter) {
 			sym := Symbol{
-				Name:      name,
-				Kind:      SymbolKindMethod,
-				Range:     nodeToRange(node),
-				Signature: e.getGoMethodSignature(node, source),
+				Name:       name,
+				Kind:       SymbolKindMethod,
+				Range:      nodeToRange(node),
+				Signature:  e.getGoMethodSignature(node, source),
 				DocComment: e.getPrecedingComment(node, source),
 			}
 			symbols = append(symbols, sym)
@@ -148,9 +149,9 @@ func (e *SymbolExtractor) extractGoSymbols(node *sitter.Node, source []byte, fil
 				}
 				if name != "" && e.shouldInclude(name, kind, filter) {
 					sym := Symbol{
-						Name:      name,
-						Kind:      kind,
-						Range:     nodeToRange(child),
+						Name:       name,
+						Kind:       kind,
+						Range:      nodeToRange(child),
 						DocComment: e.getPrecedingComment(node, source),
 					}
 					symbols = append(symbols, sym)
@@ -200,10 +201,10 @@ func (e *SymbolExtractor) extractPythonSymbols(node *sitter.Node, source []byte,
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindFunction, filter) {
 			sym := Symbol{
-				Name:      name,
-				Kind:      SymbolKindFunction,
-				Range:     nodeToRange(node),
-				Signature: e.getPythonFunctionSignature(node, source),
+				Name:       name,
+				Kind:       SymbolKindFunction,
+				Range:      nodeToRange(node),
+				Signature:  e.getPythonFunctionSignature(node, source),
 				DocComment: e.getPythonDocstring(node, source),
 			}
 			symbols = append(symbols, sym)
@@ -213,9 +214,9 @@ func (e *SymbolExtractor) extractPythonSymbols(node *sitter.Node, source []byte,
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindClass, filter) {
 			sym := Symbol{
-				Name:      name,
-				Kind:      SymbolKindClass,
-				Range:     nodeToRange(node),
+				Name:       name,
+				Kind:       SymbolKindClass,
+				Range:      nodeToRange(node),
 				DocComment: e.getPythonDocstring(node, source),
 			}
 			// Extract methods as children
@@ -612,13 +613,7 @@ func (e *SymbolExtractor) getIdentifierFromDeclarator(node *sitter.Node, source 
 func (e *SymbolExtractor) shouldInclude(name string, kind SymbolKind, filter SymbolFilter) bool {
 	// Check if kind is in filter
 	if len(filter.Kinds) > 0 {
-		found := false
-		for _, k := range filter.Kinds {
-			if k == kind {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(filter.Kinds, kind)
 		if !found {
 			return false
 		}

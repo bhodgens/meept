@@ -325,10 +325,7 @@ func (t *EntityQueryTool) Execute(ctx context.Context, args map[string]any) (any
 	// Parse limit
 	limit := 20
 	if l, ok := args["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
+		limit = min(int(l), 100)
 	}
 
 	// Parse relation type filter
@@ -661,10 +658,7 @@ func (t *GetCommunitySiblingsTool) Execute(ctx context.Context, args map[string]
 
 	limit := 20
 	if l, ok := args["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
+		limit = min(int(l), 100)
 	}
 
 	// Get the entity's community

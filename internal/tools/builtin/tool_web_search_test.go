@@ -461,10 +461,7 @@ func TestWebSearchTool_LimitValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			limit := DefaultResultLimit
 			if tt.limit > 0 {
-				limit = int(tt.limit)
-				if limit > MaxResultLimit {
-					limit = MaxResultLimit
-				}
+				limit = min(int(tt.limit), MaxResultLimit)
 			}
 			if limit != tt.wantLimit {
 				t.Errorf("limit = %d, want %d", limit, tt.wantLimit)

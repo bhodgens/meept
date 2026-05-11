@@ -11,6 +11,7 @@ package taint
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -76,12 +77,7 @@ func (v *TaintedValue) IsTainted() bool {
 
 // HasLabel returns true if the value has the specified taint label.
 func (v *TaintedValue) HasLabel(label TaintLabel) bool {
-	for _, t := range v.Taints {
-		if t == label {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(v.Taints, label)
 }
 
 // Merge combines the taint labels from another value into this one.
@@ -338,18 +334,16 @@ func (t *Tracker) CheckSink(value *TaintedValue, sink *TaintSink) *TaintViolatio
 	defer t.mu.RUnlock()
 
 	for _, label := range value.Taints {
-		for _, blocked := range sink.BlockedLabels {
-			if label == blocked {
-				truncated := value.Value
-				if len(truncated) > 100 {
-					truncated = truncated[:100] + "..."
-				}
-				return &TaintViolation{
-					Label:    label,
-					SinkName: sink.Name,
-					Source:   value.Source,
-					Value:    truncated,
-				}
+		if slices.Contains(sink.BlockedLabels, label) {
+			truncated := value.Value
+			if len(truncated) > 100 {
+				truncated = truncated[:100] + "..."
+			}
+			return &TaintViolation{
+				Label:    label,
+				SinkName: sink.Name,
+				Source:   value.Source,
+				Value:    truncated,
 			}
 		}
 	}

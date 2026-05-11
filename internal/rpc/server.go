@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -38,10 +39,10 @@ type Server struct {
 	running  atomic.Bool
 
 	// Connection tracking
-	connMu  sync.Mutex
-	conns   map[net.Conn]struct{}
-	connWg  sync.WaitGroup
-	closeCh    chan struct{}
+	connMu   sync.Mutex
+	conns    map[net.Conn]struct{}
+	connWg   sync.WaitGroup
+	closeCh  chan struct{}
 	stopOnce sync.Once
 }
 
@@ -203,7 +204,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 		if err != nil {
 			if s.running.Load() {
 				// Don't log timeout as error - it's expected idle behavior
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				var netErr net.Error
+				if errors.As(err, &netErr) {
 					s.logger.Debug("rpc: client idle timeout, closing connection")
 				} else {
 					s.logger.Debug("rpc: read error", "error", err)
@@ -379,11 +381,11 @@ func (s *Server) registerBuiltinHandlers() {
 		}
 
 		msg := &models.BusMessage{
-			ID:        fmt.Sprintf("rpc-%d", atomicCounter()),
-			Type:      models.MessageTypeRequest,
-			Topic:     "task.amend.request",
-			Source:    "rpc.client",
-			Payload:   payload,
+			ID:      fmt.Sprintf("rpc-%d", atomicCounter()),
+			Type:    models.MessageTypeRequest,
+			Topic:   "task.amend.request",
+			Source:  "rpc.client",
+			Payload: payload,
 		}
 		s.bus.Publish("task.amend.request", msg)
 

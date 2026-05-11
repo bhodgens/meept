@@ -17,7 +17,7 @@ func TestProgressEvents_NoRateLimiting(t *testing.T) {
 	received := make(chan map[string]any, 20)
 
 	// Simulate receiving 10 progress events rapidly
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		payload := map[string]any{
 			"task_id":        "task-1",
 			"current_step":   "step " + string(rune('A'+i)),

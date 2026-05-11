@@ -3,6 +3,8 @@ package agent
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -25,13 +27,13 @@ const (
 // This enables multi-turn budget allocation and graceful wrap-up when depleted.
 type TurnBudgetTracker struct {
 	mu              sync.Mutex
-	totalBudget     int   // Total tokens allocated for the session
-	usedBudget      int   // Tokens used so far
-	tokensPerTurn   int   // Expected tokens per turn (for estimation)
-	maxTurns        int   // Maximum turns before wrap-up
-	currentTurn     int   // Current turn number
-	warningZone     bool  // Set when budget is nearly depleted
-	wrapUpRequested bool  // Set when wrap-up is requested
+	totalBudget     int  // Total tokens allocated for the session
+	usedBudget      int  // Tokens used so far
+	tokensPerTurn   int  // Expected tokens per turn (for estimation)
+	maxTurns        int  // Maximum turns before wrap-up
+	currentTurn     int  // Current turn number
+	warningZone     bool // Set when budget is nearly depleted
+	wrapUpRequested bool // Set when wrap-up is requested
 }
 
 // NewTurnBudgetTracker creates a new budget tracker.
@@ -111,7 +113,6 @@ func (t *TurnBudgetTracker) GetTurnInfo() (current, max, used, total int) {
 	return t.currentTurn, t.maxTurns, t.usedBudget, t.totalBudget
 }
 
-
 // MessageClassification classifies the semantic type of a message for importance-based retention.
 type MessageClassification int
 
@@ -142,6 +143,7 @@ const (
 	ImportanceHigh
 	ImportanceCritical
 )
+
 // Conversation manages chat message history with LRU eviction and truncation.
 type Conversation struct {
 	mu           sync.RWMutex
@@ -246,7 +248,6 @@ func (c *Conversation) hashContent(content string) string {
 	}
 	return content
 }
-
 
 // classifyMessageClassification determines the semantic type of a message based on role and content.
 func classifyMessageClassification(msg llm.ChatMessage, isFirstUserMsg bool) MessageClassification {
@@ -501,10 +502,7 @@ func (c *Conversation) Truncate() int {
 
 	// Calculate how many messages to remove
 	// Keep the system prompt separate, so we only count regular messages
-	keep := c.maxMessages
-	if keep < 1 {
-		keep = 1
-	}
+	keep := max(c.maxMessages, 1)
 
 	removed := len(c.messages) - keep
 	if removed <= 0 {
@@ -570,21 +568,21 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 	keepMask := make([]bool, len(c.messages))
 	totalTokens := 0
 
-	for i := len(c.messages) - 1; i >= 0; i-- {
+	for i, v := range slices.Backward(c.messages) {
 		// Always keep anchor messages
-		if c.isAnchorMessageUnsafe(c.messages[i].Content) {
+		if c.isAnchorMessageUnsafe(v.Content) {
 			keepMask[i] = true
 			continue
 		}
 
-		msgTokens := len(c.messages[i].Content) / charsPerToken
+		msgTokens := len(v.Content) / charsPerToken
 		// Count tool calls
-		for _, tc := range c.messages[i].ToolCalls {
+		for _, tc := range v.ToolCalls {
 			msgTokens += len(tc.Function.Name) / charsPerToken
 			msgTokens += len(tc.Function.Arguments) / charsPerToken
 			msgTokens += 20
 		}
-		if c.messages[i].ToolCallID != "" {
+		if v.ToolCallID != "" {
 			msgTokens += 15
 		}
 
@@ -686,7 +684,7 @@ func (c *Conversation) TruncateByImportance(tokenBudget int) int {
 	}
 
 	// Sort by importance (lowest first), then by token count (highest first)
-	for i := 0; i < len(indices)-1; i++ {
+	for i := range len(indices) - 1 {
 		for j := i + 1; j < len(indices); j++ {
 			shouldSwap := false
 			if indices[i].importance > indices[j].importance {
@@ -790,7 +788,7 @@ func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 	}
 
 	// Find the original user message (first user message after any system messages)
-	var originalUserIdx int = -1
+	var originalUserIdx = -1
 	for i, msg := range c.messages {
 		if msg.Role == llm.RoleUser {
 			originalUserIdx = i
@@ -839,15 +837,15 @@ func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 	totalTokens := 0
 	keepFromIdx := len(c.messages)
 
-	for i := len(c.messages) - 1; i >= 0; i-- {
+	for i, v := range slices.Backward(c.messages) {
 		// Skip original user and anchors in this pass
 		if i == originalUserIdx || anchorIndices[i] {
 			continue
 		}
 
-		msgTokens := len(c.messages[i].Content) / charsPerToken
+		msgTokens := len(v.Content) / charsPerToken
 		// Also count tool calls if present
-		for _, tc := range c.messages[i].ToolCalls {
+		for _, tc := range v.ToolCalls {
 			msgTokens += len(tc.Function.Arguments) / charsPerToken
 		}
 
@@ -907,9 +905,7 @@ func (c *Conversation) Clone() *Conversation {
 	// Clone anchorMessages map (AGENT-4 fix)
 	if c.anchorMessages != nil {
 		clone.anchorMessages = make(map[string]bool, len(c.anchorMessages))
-		for k, v := range c.anchorMessages {
-			clone.anchorMessages[k] = v
-		}
+		maps.Copy(clone.anchorMessages, c.anchorMessages)
 	}
 
 	return clone
@@ -1054,7 +1050,7 @@ func (c *Conversation) InjectContextBounded(context string, maxTokens int) {
 	// Estimate token count and truncate if necessary
 	contextContent := context
 	estimatedTokens := llm.EstimateTokenCountHeuristic(context)
-	
+
 	if estimatedTokens > maxTokens {
 		// Truncate proportionally
 		ratio := float64(maxTokens) / float64(estimatedTokens)
@@ -1072,6 +1068,7 @@ func (c *Conversation) InjectContextBounded(context string, maxTokens int) {
 
 	c.messages = append([]llm.ChatMessage{contextMsg}, newMessages...)
 }
+
 // This is used for memory injection before LLM calls.
 func (c *Conversation) InjectContext(context string) {
 	c.mu.Lock()
@@ -1190,7 +1187,7 @@ func (c *Conversation) CompressByImportance(targetRatio float64) CompressionRepo
 
 	// Sort by importance (lowest first), then by token count (highest first)
 	// This means low-importance, high-token messages are candidates for removal first.
-	for i := 0; i < len(indices)-1; i++ {
+	for i := range len(indices) - 1 {
 		for j := i + 1; j < len(indices); j++ {
 			shouldSwap := false
 			if indices[i].importance > indices[j].importance {

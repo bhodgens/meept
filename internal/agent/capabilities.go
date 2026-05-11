@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -131,10 +132,8 @@ func (cm *CapabilitiesMap) removeFromIndices(caps *AgentCapabilities) {
 
 // appendUnique appends a string to a slice if not already present.
 func appendUnique(slice []string, s string) []string {
-	for _, existing := range slice {
-		if existing == s {
-			return slice
-		}
+	if slices.Contains(slice, s) {
+		return slice
 	}
 	return append(slice, s)
 }

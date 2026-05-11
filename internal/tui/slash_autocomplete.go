@@ -11,13 +11,13 @@ import (
 // SlashAutocomplete is a type-ahead autocomplete popup for slash commands.
 // It appears when the user types "/" at the start of the input.
 type SlashAutocomplete struct {
-	visible    bool
-	commands   []string // All available commands
-	filtered   []string // Commands matching current filter
-	selected   int      // Currently selected index
-	filter     string   // Current filter text (what user typed after /)
-	maxHeight  int      // Maximum visible items before scrolling
-	styles     *Styles
+	visible   bool
+	commands  []string // All available commands
+	filtered  []string // Commands matching current filter
+	selected  int      // Currently selected index
+	filter    string   // Current filter text (what user typed after /)
+	maxHeight int      // Maximum visible items before scrolling
+	styles    *Styles
 }
 
 // NewSlashAutocomplete creates a new autocomplete component.
@@ -136,7 +136,7 @@ func (s *SlashAutocomplete) HandleKey(key string) (HandleKeyResult, tea.Cmd) {
 		return HandleKeyPassThrough, nil
 	case "esc":
 		s.Hide()
-		return HandleKeyNavigated, nil  // Consume the key
+		return HandleKeyNavigated, nil // Consume the key
 	}
 
 	// Any other key - pass through to input (autocomplete will be hidden by caller)
@@ -195,10 +195,7 @@ func (s *SlashAutocomplete) View() string {
 		// Highlight the matched portion
 		var label string
 		if strings.HasPrefix(cmd, s.filter) && s.filter != "" {
-			matchedLen := len(s.filter)
-			if matchedLen > len(cmd) {
-				matchedLen = len(cmd)
-			}
+			matchedLen := min(len(s.filter), len(cmd))
 			label = s.styles.HelpKey.Render(cmd[:matchedLen]) + cmd[matchedLen:]
 		} else {
 			label = cmd

@@ -57,12 +57,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "1":
 			// All idle
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				m.viz.SetRobotState(i, viz.RobotIdle)
 			}
 		case "2":
 			// All working with different progress
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				m.viz.SetRobotState(i, viz.RobotWorking)
 				m.viz.SetRobotProgress(i, float64(i+1)*0.25)
 			}
@@ -81,12 +81,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viz.SetRobotState(3, viz.RobotIdle)
 		case "5":
 			// Moving states
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				m.viz.SetRobotState(i, viz.RobotMovingToCenter)
 			}
 		case "6":
 			// Dispatching
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				m.viz.SetRobotState(i, viz.RobotDispatchingSubtask)
 			}
 		}
@@ -96,10 +96,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		// Resize viz to fit window (leave room for chrome)
-		vizWidth := msg.Width - 4
-		if vizWidth > 80 {
-			vizWidth = 80
-		}
+		vizWidth := min(msg.Width-4, 80)
 		if vizWidth < 20 {
 			vizWidth = 20
 		}
@@ -118,7 +115,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.demoPhase {
 		case 0:
 			// All idle
-			for i := 0; i < 4; i++ {
+			for i := range 4 {
 				m.viz.SetRobotState(i, viz.RobotIdle)
 			}
 		case 1:
@@ -146,7 +143,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Increment progress on working robots
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			if m.viz != nil {
 				// This is handled internally by the robot
 			}

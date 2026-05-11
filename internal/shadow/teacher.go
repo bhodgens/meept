@@ -15,9 +15,9 @@ import (
 type CircuitState int
 
 const (
-	CircuitClosed CircuitState = iota // Normal operation
-	CircuitOpen                       // Failing, reject requests
-	CircuitHalfOpen                   // Testing if service recovered
+	CircuitClosed   CircuitState = iota // Normal operation
+	CircuitOpen                         // Failing, reject requests
+	CircuitHalfOpen                     // Testing if service recovered
 )
 
 // CircuitBreaker implements the circuit breaker pattern.
@@ -138,8 +138,8 @@ type TeacherClient struct {
 	circuitBreaker *CircuitBreaker
 
 	// Retry configuration
-	maxRetries      int
-	baseRetryDelay  time.Duration
+	maxRetries     int
+	baseRetryDelay time.Duration
 
 	// Daily usage tracking
 	mu            sync.RWMutex
@@ -310,7 +310,7 @@ func containsIgnoreCase(s, substr string) bool {
 // toLowerASCII converts ASCII letters to lowercase.
 func toLowerASCII(s string) string {
 	b := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if c >= 'A' && c <= 'Z' {
 			c += 'a' - 'A'

@@ -172,11 +172,7 @@ func (m *ChatModel) selectInputLineAt(y int) {
 	for i := range y {
 		lineStart += len(lines[i]) + 1
 	}
-	lineEnd := lineStart + len(lines[y])
-
-	if lineEnd > len(content) {
-		lineEnd = len(content)
-	}
+	lineEnd := min(lineStart+len(lines[y]), len(content))
 
 	m.inputSelectionStart = lineStart
 	m.inputSelectionEnd = lineEnd
@@ -229,4 +225,3 @@ func findInputWordBoundaries(content string, offset int) (start, end int) {
 
 	return byteStart, byteEnd
 }
-

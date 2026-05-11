@@ -112,7 +112,7 @@ func (m *AmendmentManager) Process(ctx context.Context, requestID string) (*Amen
 		m.mu.Unlock()
 		return nil, fmt.Errorf("request not found: %s", requestID)
 	}
-	handler, _ := m.handlers[req.Type]
+	handler := m.handlers[req.Type]
 	m.mu.Unlock()
 
 	if handler == nil {

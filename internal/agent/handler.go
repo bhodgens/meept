@@ -26,8 +26,8 @@ type ChatHandler struct {
 	dispatcher   *Dispatcher // Optional: if set, routes through multi-agent dispatch
 	bus          *bus.MessageBus
 	logger       *slog.Logger
-	metricsStore *metrics.Store   // Optional: metrics store for duration estimates
-	stepStore    *task.StepStore  // Optional: step store for fetching step summaries
+	metricsStore *metrics.Store  // Optional: metrics store for duration estimates
+	stepStore    *task.StepStore // Optional: step store for fetching step summaries
 
 	// Worker tracking
 	workers   map[string]*Worker
@@ -601,7 +601,7 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 // formatTaskCompletedMessage builds a human-readable task completion message.
 func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSummary, executionTime, result string, completed, total, tokenUsage int) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## task completed: %s\n\n", strings.ToLower(name)))
+	fmt.Fprintf(&sb, "## task completed: %s\n\n", strings.ToLower(name))
 
 	if len(steps) > 0 {
 		sb.WriteString("### steps:\n")
@@ -610,30 +610,30 @@ func (h *ChatHandler) formatTaskCompletedMessage(name string, steps []TaskStepSu
 			if step.State != "completed" && step.State != "approved" {
 				icon = "x"
 			}
-			sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, icon, strings.ToLower(step.Description)))
+			fmt.Fprintf(&sb, "%d. [%s] %s\n", i+1, icon, strings.ToLower(step.Description))
 			if step.Result != "" {
 				resultPreview := truncateString(step.Result, 80)
-				sb.WriteString(fmt.Sprintf("   %s\n", resultPreview))
+				fmt.Fprintf(&sb, "   %s\n", resultPreview)
 			}
 		}
 		sb.WriteString("\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("completed %d/%d steps successfully.\n\n", completed, total))
+		fmt.Fprintf(&sb, "completed %d/%d steps successfully.\n\n", completed, total)
 	}
 
 	if result != "" {
-		sb.WriteString(fmt.Sprintf("**summary:** %s\n\n", result))
+		fmt.Fprintf(&sb, "**summary:** %s\n\n", result)
 	}
 
 	if executionTime != "" {
-		sb.WriteString(fmt.Sprintf("completed in %s\n", executionTime))
+		fmt.Fprintf(&sb, "completed in %s\n", executionTime)
 	}
 
 	if tokenUsage > 0 {
 		if executionTime != "" {
 			sb.WriteString(" | ")
 		}
-		sb.WriteString(fmt.Sprintf("**token usage:** %s\n", formatTokenCount(tokenUsage)))
+		fmt.Fprintf(&sb, "**token usage:** %s\n", formatTokenCount(tokenUsage))
 	}
 
 	return sb.String()
@@ -689,16 +689,16 @@ func (h *ChatHandler) handleTaskFailed(msg *models.BusMessage) {
 // formatTaskFailedMessage builds a human-readable task failure message.
 func (h *ChatHandler) formatTaskFailedMessage(name, errMsg, failedStep string, failed, completed, total int) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("## task failed: %s\n\n", strings.ToLower(name)))
+	fmt.Fprintf(&sb, "## task failed: %s\n\n", strings.ToLower(name))
 
-	sb.WriteString(fmt.Sprintf("**progress:** %d/%d steps completed, %d failed\n\n", completed, total, failed))
+	fmt.Fprintf(&sb, "**progress:** %d/%d steps completed, %d failed\n\n", completed, total, failed)
 
 	if failedStep != "" {
-		sb.WriteString(fmt.Sprintf("**failed at step:** %s\n\n", failedStep))
+		fmt.Fprintf(&sb, "**failed at step:** %s\n\n", failedStep)
 	}
 
 	if errMsg != "" {
-		sb.WriteString(fmt.Sprintf("**error:** %s\n", truncateString(errMsg, 200)))
+		fmt.Fprintf(&sb, "**error:** %s\n", truncateString(errMsg, 200))
 	}
 
 	return sb.String()
@@ -721,8 +721,8 @@ func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 ) string {
 	var sb strings.Builder
 	sb.WriteString("## starting task\n\n")
-	sb.WriteString(fmt.Sprintf("**task:** %s\n", strings.ToLower(result.Task.Name)))
-	sb.WriteString(fmt.Sprintf("**id:** `%s`\n", result.Task.ID))
+	fmt.Fprintf(&sb, "**task:** %s\n", strings.ToLower(result.Task.Name))
+	fmt.Fprintf(&sb, "**id:** `%s`\n", result.Task.ID)
 
 	// Plan line: plan reference | subtask count | optional duration
 	planLine := fmt.Sprintf("**plan:** `%s` | %d subtasks", planRef, len(steps))
@@ -748,7 +748,7 @@ func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 			agents = append(agents, agent)
 		}
 		sort.Strings(agents)
-		sb.WriteString(fmt.Sprintf("**agents:** %s\n", strings.Join(agents, ", ")))
+		fmt.Fprintf(&sb, "**agents:** %s\n", strings.Join(agents, ", "))
 	}
 
 	sb.WriteString("**subtasks:**\n")
@@ -763,11 +763,11 @@ func (h *ChatHandler) FormatEnhancedAsyncTaskAck(
 			agentLabel = "agent"
 		}
 		desc := truncateString(step.Description, 50)
-		sb.WriteString(fmt.Sprintf("- %s (%s)\n", strings.ToLower(desc), agentLabel))
+		fmt.Fprintf(&sb, "- %s (%s)\n", strings.ToLower(desc), agentLabel)
 	}
 
 	if len(steps) > displayLimit {
-		sb.WriteString(fmt.Sprintf("- ... and %d more\n", len(steps)-displayLimit))
+		fmt.Fprintf(&sb, "- ... and %d more\n", len(steps)-displayLimit)
 	}
 
 	sb.WriteString("\n")

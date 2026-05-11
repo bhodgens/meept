@@ -1,10 +1,10 @@
 package security
 
 import (
-	"io"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/user"
@@ -30,13 +30,13 @@ type compiledPattern struct {
 
 // Engine is the SQLite-backed security decision engine.
 type Engine struct {
-	mu                  sync.RWMutex
-	db                  *sql.DB
-	config              *config.SecurityConfig
-	homeDir             string
-	compiledCommands    []compiledPattern
-	compiledFinancial   []*regexp.Regexp
-	logger              *slog.Logger
+	mu                sync.RWMutex
+	db                *sql.DB
+	config            *config.SecurityConfig
+	homeDir           string
+	compiledCommands  []compiledPattern
+	compiledFinancial []*regexp.Regexp
+	logger            *slog.Logger
 }
 
 // NewEngine creates a new security engine with the given database path.
@@ -846,14 +846,15 @@ func (e *Engine) GetContextForLLM(decision Decision, action string, details map[
 	lines = append(lines, "# Security Context (current action)")
 	lines = append(lines, fmt.Sprintf("- Action: %s", action))
 
-	if action == "shell_execute" {
+	switch action {
+	case "shell_execute":
 		if cmd := details["command"]; cmd != "" {
 			if len(cmd) > 100 {
 				cmd = cmd[:100] + "..."
 			}
 			lines = append(lines, fmt.Sprintf("- Command: %s", cmd))
 		}
-	} else if action == "file_read" || action == "file_write" || action == "file_delete" {
+	case "file_read", "file_write", "file_delete":
 		if path := details["path"]; path != "" {
 			lines = append(lines, fmt.Sprintf("- Path: %s", path))
 		}

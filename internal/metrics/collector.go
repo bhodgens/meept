@@ -14,11 +14,11 @@ import (
 
 // Collector collects metrics from various sources.
 type Collector struct {
-	store          *Store
-	bus            *bus.MessageBus
-	stopChan       chan struct{}
-	wg             sync.WaitGroup
-	getQueueDepth  func() int
+	store           *Store
+	bus             *bus.MessageBus
+	stopChan        chan struct{}
+	wg              sync.WaitGroup
+	getQueueDepth   func() int
 	getActiveAgents func() int
 }
 
@@ -26,8 +26,8 @@ type Collector struct {
 type CollectorConfig struct {
 	CollectionInterval time.Duration
 	Enabled            bool
-	GetQueueDepth      func() int  // Returns total pending + claimed jobs
-	GetActiveAgents    func() int  // Returns active agent count
+	GetQueueDepth      func() int // Returns total pending + claimed jobs
+	GetActiveAgents    func() int // Returns active agent count
 }
 
 // DefaultCollectorConfig returns default collector configuration.
@@ -45,10 +45,10 @@ func NewCollector(store *Store, messageBus *bus.MessageBus, cfg *CollectorConfig
 	}
 
 	c := &Collector{
-		store:          store,
-		bus:            messageBus,
-		stopChan:       make(chan struct{}),
-		getQueueDepth:  cfg.GetQueueDepth,
+		store:           store,
+		bus:             messageBus,
+		stopChan:        make(chan struct{}),
+		getQueueDepth:   cfg.GetQueueDepth,
 		getActiveAgents: cfg.GetActiveAgents,
 	}
 
@@ -62,9 +62,7 @@ func NewCollector(store *Store, messageBus *bus.MessageBus, cfg *CollectorConfig
 
 // startCollection starts the background collection goroutine.
 func (c *Collector) startCollection(interval time.Duration) {
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -76,7 +74,7 @@ func (c *Collector) startCollection(interval time.Duration) {
 				return
 			}
 		}
-	}()
+	})
 }
 
 // subscribeToBus subscribes to relevant bus messages for metrics.
@@ -308,9 +306,7 @@ func NewPeriodicCollector(ctx context.Context, fn CollectFunc, interval time.Dur
 		stopChan: make(chan struct{}),
 	}
 
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
+	c.wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -324,7 +320,7 @@ func NewPeriodicCollector(ctx context.Context, fn CollectFunc, interval time.Dur
 				return
 			}
 		}
-	}()
+	})
 
 	return c
 }

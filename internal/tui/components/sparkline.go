@@ -11,8 +11,8 @@ import (
 // Characters used: ▁▂▃▄▅▆▇█ (8 levels from lowest to highest)
 type Sparkline struct {
 	data     []int
-	maxValue int  // Max value for scaling (0 = auto-scale)
-	width    int  // Width in characters
+	maxValue int // Max value for scaling (0 = auto-scale)
+	width    int // Width in characters
 	label    string
 	style    lipgloss.Style
 }
@@ -117,10 +117,7 @@ func (s *Sparkline) View() string {
 	// Render each data point
 	for _, v := range data {
 		// Scale to 0-7 range (8 levels)
-		level := (v * 7) / maxVal
-		if level > 7 {
-			level = 7
-		}
+		level := min((v*7)/maxVal, 7)
 		if level < 0 {
 			level = 0
 		}

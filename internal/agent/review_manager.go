@@ -18,9 +18,9 @@ import (
 type CompletionStatus string
 
 const (
-	CompletionValid    CompletionStatus = "valid"
-	CompletionInvalid  CompletionStatus = "invalid"
-	CompletionPartial  CompletionStatus = "partial"
+	CompletionValid   CompletionStatus = "valid"
+	CompletionInvalid CompletionStatus = "invalid"
+	CompletionPartial CompletionStatus = "partial"
 )
 
 // ValidationResult holds the result of ValidateCompletion().
@@ -28,18 +28,18 @@ type ValidationResult struct {
 	Status   CompletionStatus `json:"status"`
 	Feedback string           `json:"feedback"`
 	Missing  []string         `json:"missing,omitempty"`  // Items not completed
-	Verified []string         `json:"verified,omitempty"`  // Items verified complete
+	Verified []string         `json:"verified,omitempty"` // Items verified complete
 }
 
 // ReviewManager orchestrates the review process for task steps.
 type ReviewManager struct {
-	registry          *AgentRegistry
-	stepStore         *task.StepStore
-	taskStore         *task.Store
-	policy            *ReviewPolicy
-	validationPolicy  *ValidationPolicy
-	bus               *bus.MessageBus
-	logger            *slog.Logger
+	registry         *AgentRegistry
+	stepStore        *task.StepStore
+	taskStore        *task.Store
+	policy           *ReviewPolicy
+	validationPolicy *ValidationPolicy
+	bus              *bus.MessageBus
+	logger           *slog.Logger
 }
 
 // ReviewManagerConfig holds configuration for creating a ReviewManager.
@@ -472,12 +472,12 @@ func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *Revie
 	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "review-manager", map[string]any{
-		"step_id":       stepID,
-		"task_id":       taskID,
-		"status":        string(result.Status),
-		"feedback":      result.Feedback,
-		"confidence":    result.Confidence,
-		"reviewer":      result.ReviewerID,
+		"step_id":        stepID,
+		"task_id":        taskID,
+		"status":         string(result.Status),
+		"feedback":       result.Feedback,
+		"confidence":     result.Confidence,
+		"reviewer":       result.ReviewerID,
 		"revision_count": revisionCount,
 	})
 	if err != nil {

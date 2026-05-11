@@ -11,7 +11,7 @@ import (
 // count non-system messages whose token count (heuristic) is tokensPerMsg each.
 func makeCompressorMessages(count, tokensPerMsg int) []ChatMessage {
 	msgs := []ChatMessage{{Role: RoleSystem, Content: "system prompt"}}
-	for i := 0; i < count; i++ {
+	for range count {
 		msgs = append(msgs, ChatMessage{
 			Role:    RoleUser,
 			Content: strings.Repeat("x", tokensPerMsg*3),
@@ -40,15 +40,15 @@ func TestCompress_Disabled(t *testing.T) {
 
 func TestCompress_AllStages(t *testing.T) {
 	tests := []struct {
-		name                  string
-		utilization           float64
-		wantStage             CompressionStage
-		wantCompressed        bool
-		wantMinMessages       int // minimum number of messages after compression
-		statsWarningDelta     uint64
-		statsSummarizeDelta   uint64
-		statsAggressiveDelta  uint64
-		statsHardLimitDelta   uint64
+		name                 string
+		utilization          float64
+		wantStage            CompressionStage
+		wantCompressed       bool
+		wantMinMessages      int // minimum number of messages after compression
+		statsWarningDelta    uint64
+		statsSummarizeDelta  uint64
+		statsAggressiveDelta uint64
+		statsHardLimitDelta  uint64
 	}{
 		{
 			name:              "below warning",
@@ -59,12 +59,12 @@ func TestCompress_AllStages(t *testing.T) {
 			statsWarningDelta: 0,
 		},
 		{
-			name:               "warning stage",
-			utilization:        0.55,
-			wantStage:          CompressionStageWarning,
-			wantCompressed:     false,
-			wantMinMessages:    11, // unchanged
-			statsWarningDelta:  1,
+			name:              "warning stage",
+			utilization:       0.55,
+			wantStage:         CompressionStageWarning,
+			wantCompressed:    false,
+			wantMinMessages:   11, // unchanged
+			statsWarningDelta: 1,
 		},
 		{
 			name:                "summarize stage",
@@ -95,10 +95,10 @@ func TestCompress_AllStages(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := CompressionConfig{
-				Enabled:              true,
-				ModelContextLimit:    10000,
-				Stage1WarningRatio:   DefaultWarningRatio,
-				Stage2SummarizeRatio: DefaultSummarizeRatio,
+				Enabled:               true,
+				ModelContextLimit:     10000,
+				Stage1WarningRatio:    DefaultWarningRatio,
+				Stage2SummarizeRatio:  DefaultSummarizeRatio,
 				Stage3AggressiveRatio: DefaultAggressiveRatio,
 				Stage4HardLimitRatio:  DefaultHardLimitRatio,
 			}

@@ -3,6 +3,7 @@
 package shadow
 
 import (
+	"slices"
 	"time"
 )
 
@@ -110,26 +111,26 @@ type ExamplesConfig struct {
 
 // ExportConfig configures training data export.
 type ExportConfig struct {
-	OutputDir               string   `toml:"output_dir"`
-	Formats                 []string `toml:"formats"`
-	MinRecords              int      `toml:"min_records"`
-	IncludeLowQuality       bool     `toml:"include_low_quality"`
-	Deduplicate             bool     `toml:"deduplicate"`
+	OutputDir                string   `toml:"output_dir"`
+	Formats                  []string `toml:"formats"`
+	MinRecords               int      `toml:"min_records"`
+	IncludeLowQuality        bool     `toml:"include_low_quality"`
+	Deduplicate              bool     `toml:"deduplicate"`
 	DedupSimilarityThreshold float64  `toml:"dedup_similarity_threshold"`
 }
 
 // LoRAConfig configures LoRA training parameters.
 type LoRAConfig struct {
-	Rank                  int      `toml:"rank"`
-	Alpha                 int      `toml:"alpha"`
-	Dropout               float64  `toml:"dropout"`
-	TargetModules         []string `toml:"target_modules"`
-	LearningRate          float64  `toml:"learning_rate"`
-	Epochs                int      `toml:"epochs"`
-	BatchSize             int      `toml:"batch_size"`
-	GradientAccumulation  int      `toml:"gradient_accumulation"`
-	WarmupRatio           float64  `toml:"warmup_ratio"`
-	MaxGradNorm           float64  `toml:"max_grad_norm"`
+	Rank                 int      `toml:"rank"`
+	Alpha                int      `toml:"alpha"`
+	Dropout              float64  `toml:"dropout"`
+	TargetModules        []string `toml:"target_modules"`
+	LearningRate         float64  `toml:"learning_rate"`
+	Epochs               int      `toml:"epochs"`
+	BatchSize            int      `toml:"batch_size"`
+	GradientAccumulation int      `toml:"gradient_accumulation"`
+	WarmupRatio          float64  `toml:"warmup_ratio"`
+	MaxGradNorm          float64  `toml:"max_grad_norm"`
 }
 
 // DPOConfig configures DPO training parameters.
@@ -281,10 +282,5 @@ func meetsComplexity(actual, threshold Complexity) bool {
 
 // contains checks if a slice contains a string.
 func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }

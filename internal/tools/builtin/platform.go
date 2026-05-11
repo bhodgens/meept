@@ -4,6 +4,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
@@ -283,11 +284,12 @@ func joinStrings(strs []string) string {
 	if len(strs) == 0 {
 		return ""
 	}
-	result := strs[0]
+	var result strings.Builder
+	result.WriteString(strs[0])
 	for i := 1; i < len(strs); i++ {
-		result += ", " + strs[i]
+		result.WriteString(", " + strs[i])
 	}
-	return result
+	return result.String()
 }
 
 func generateDelegateID() string {
@@ -303,15 +305,15 @@ type SessionHistoryTool struct {
 
 // SessionTaskInfo represents summary information about a task.
 type SessionTaskInfo struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description,omitempty"`
-	State          string    `json:"state"`
-	AssignedAgent  string    `json:"assigned_agent,omitempty"`
-	CompletedJobs  int       `json:"completed_jobs"`
-	TotalJobs      int       `json:"total_jobs"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description,omitempty"`
+	State         string    `json:"state"`
+	AssignedAgent string    `json:"assigned_agent,omitempty"`
+	CompletedJobs int       `json:"completed_jobs"`
+	TotalJobs     int       `json:"total_jobs"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // SessionMessageInfo represents a message in the session history.
@@ -323,10 +325,10 @@ type SessionMessageInfo struct {
 
 // SessionHistoryResult is the result of querying session history.
 type SessionHistoryResult struct {
-	Tasks      []SessionTaskInfo    `json:"tasks"`
-	Messages   []SessionMessageInfo `json:"messages,omitempty"`
-	TaskCount  int                  `json:"task_count"`
-	Summary    string               `json:"summary"`
+	Tasks     []SessionTaskInfo    `json:"tasks"`
+	Messages  []SessionMessageInfo `json:"messages,omitempty"`
+	TaskCount int                  `json:"task_count"`
+	Summary   string               `json:"summary"`
 }
 
 // NewSessionHistoryTool creates a new session history tool.
@@ -371,10 +373,7 @@ func (t *SessionHistoryTool) Execute(ctx context.Context, args map[string]any) (
 	// Parse parameters
 	limit := 10
 	if l, ok := args["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-		if limit > 50 {
-			limit = 50
-		}
+		limit = min(int(l), 50)
 	}
 
 	sessionID, _ := args["session_id"].(string)

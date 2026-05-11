@@ -214,14 +214,8 @@ func (b *Budget) GetStatus() Status {
 	effDaily := b.effectiveLimit(b.dailyLimit)
 	hourlyUsed := b.hourlyUsed()
 
-	hourlyRemaining := effHourly - hourlyUsed
-	if hourlyRemaining < 0 {
-		hourlyRemaining = 0
-	}
-	dailyRemaining := effDaily - b.dailyUsed
-	if dailyRemaining < 0 {
-		dailyRemaining = 0
-	}
+	hourlyRemaining := max(effHourly-hourlyUsed, 0)
+	dailyRemaining := max(effDaily-b.dailyUsed, 0)
 
 	return Status{
 		HourlyUsed:      hourlyUsed,

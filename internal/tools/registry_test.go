@@ -255,7 +255,7 @@ func TestRegistry_Concurrent(t *testing.T) {
 	r := NewRegistry(nil)
 
 	done := make(chan bool)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(n int) {
 			name := string(rune('a' + n))
 			r.Register(&mockTool{name: "tool_" + name})
@@ -267,7 +267,7 @@ func TestRegistry_Concurrent(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 

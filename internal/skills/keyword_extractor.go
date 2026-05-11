@@ -161,7 +161,7 @@ func (ke *KeywordExtractor) extractFromText(text string) []string {
 	}
 
 	// Also extract bigrams (two-word phrases) for common patterns
-	for i := 0; i < len(words)-1; i++ {
+	for i := range len(words) - 1 {
 		w1, w2 := words[i], words[i+1]
 		if len(w1) >= 2 && len(w2) >= 2 && !ke.stopWords[w1] && !ke.stopWords[w2] {
 			bigram := w1 + " " + w2

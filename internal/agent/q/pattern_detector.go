@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -119,18 +120,18 @@ func (d *PatternDetector) detectModelMisconfiguration(byAgent map[string][]*Sess
 			// Check if variance exceeds threshold
 			if variance > d.config.DurationVarianceThreshold {
 				reports = append(reports, PatternReport{
-					ID:                 fmt.Sprintf("model_misconfig_%s_%s", agentID, intent),
-					PatternType:        "model_misconfiguration",
-					Confidence:         min(1.0, variance/d.config.DurationVarianceThreshold),
-					RecommendedAction:  "reassign_model",
+					ID:                   fmt.Sprintf("model_misconfig_%s_%s", agentID, intent),
+					PatternType:          "model_misconfiguration",
+					Confidence:           min(1.0, variance/d.config.DurationVarianceThreshold),
+					RecommendedAction:    "reassign_model",
 					MisconfigurationType: "model_misconfiguration",
-					AffectedAgent:      agentID,
-					AffectedIntent:     intent,
-					SessionCount:       len(durations),
-					MetricBaseline:     avg.Seconds(),
-					MetricObserved:     variance,
-					Evidence:           d.buildDurationEvidence(sessions, intent),
-					CreatedAt:          time.Now(),
+					AffectedAgent:        agentID,
+					AffectedIntent:       intent,
+					SessionCount:         len(durations),
+					MetricBaseline:       avg.Seconds(),
+					MetricObserved:       variance,
+					Evidence:             d.buildDurationEvidence(sessions, intent),
+					CreatedAt:            time.Now(),
 				})
 			}
 		}
@@ -160,17 +161,17 @@ func (d *PatternDetector) detectHighErrorRate(byAgent map[string][]*SessionAnaly
 
 		if errorRate > d.config.HighErrorRateThreshold {
 			reports = append(reports, PatternReport{
-				ID:                 fmt.Sprintf("high_error_%s", agentID),
-				PatternType:        "high_error_rate",
-				Confidence:         min(1.0, errorRate/d.config.HighErrorRateThreshold),
-				RecommendedAction:  "update_spec",
+				ID:                   fmt.Sprintf("high_error_%s", agentID),
+				PatternType:          "high_error_rate",
+				Confidence:           min(1.0, errorRate/d.config.HighErrorRateThreshold),
+				RecommendedAction:    "update_spec",
 				MisconfigurationType: "high_error_rate",
-				AffectedAgent:      agentID,
-				SessionCount:       len(sessions),
-				MetricBaseline:     d.config.HighErrorRateThreshold,
-				MetricObserved:     errorRate,
-				Evidence:           d.buildErrorEvidence(sessions),
-				CreatedAt:          time.Now(),
+				AffectedAgent:        agentID,
+				SessionCount:         len(sessions),
+				MetricBaseline:       d.config.HighErrorRateThreshold,
+				MetricObserved:       errorRate,
+				Evidence:             d.buildErrorEvidence(sessions),
+				CreatedAt:            time.Now(),
 			})
 		}
 	}
@@ -203,15 +204,15 @@ func (d *PatternDetector) detectWrongAgentAssignment(byIntent map[string][]*Sess
 
 		if strugglingAgents >= 2 {
 			reports = append(reports, PatternReport{
-				ID:                 fmt.Sprintf("wrong_agent_%s", intent),
-				PatternType:        "wrong_agent_assignment",
-				Confidence:         min(1.0, float64(strugglingAgents)*0.4),
-				RecommendedAction:  "create_agent",
+				ID:                   fmt.Sprintf("wrong_agent_%s", intent),
+				PatternType:          "wrong_agent_assignment",
+				Confidence:           min(1.0, float64(strugglingAgents)*0.4),
+				RecommendedAction:    "create_agent",
 				MisconfigurationType: "capability_gap",
-				AffectedIntent:     intent,
-				SessionCount:       len(sessions),
-				Evidence:           d.buildIntentEvidence(sessions, intent),
-				CreatedAt:          time.Now(),
+				AffectedIntent:       intent,
+				SessionCount:         len(sessions),
+				Evidence:             d.buildIntentEvidence(sessions, intent),
+				CreatedAt:            time.Now(),
 			})
 		}
 	}
@@ -225,7 +226,7 @@ func (d *PatternDetector) detectHighToolFailureRate(analyses []*SessionAnalysis)
 
 	// Aggregate tool call stats by tool name
 	toolStats := make(map[string]struct {
-		total   int
+		total    int
 		failures int
 	})
 
@@ -249,16 +250,16 @@ func (d *PatternDetector) detectHighToolFailureRate(analyses []*SessionAnalysis)
 
 		if failureRate > 0.2 {
 			reports = append(reports, PatternReport{
-				ID:                 fmt.Sprintf("high_tool_failure_%s", toolName),
-				PatternType:        "high_tool_failure_rate",
-				Confidence:         min(1.0, failureRate/0.2),
-				RecommendedAction:  "add_tool",
+				ID:                   fmt.Sprintf("high_tool_failure_%s", toolName),
+				PatternType:          "high_tool_failure_rate",
+				Confidence:           min(1.0, failureRate/0.2),
+				RecommendedAction:    "add_tool",
 				MisconfigurationType: "tool_deficiency",
-				AffectedIntent:     toolName,
-				SessionCount:       stats.total,
-				MetricBaseline:     0.2,
-				MetricObserved:     failureRate,
-				CreatedAt:          time.Now(),
+				AffectedIntent:       toolName,
+				SessionCount:         stats.total,
+				MetricBaseline:       0.2,
+				MetricObserved:       failureRate,
+				CreatedAt:            time.Now(),
 			})
 		}
 	}
@@ -287,17 +288,17 @@ func (d *PatternDetector) detectHighRejectionRate(byAgent map[string][]*SessionA
 
 		if rejectionRate > d.config.HighRejectionRateThreshold {
 			reports = append(reports, PatternReport{
-				ID:                 fmt.Sprintf("high_rejection_%s", agentID),
-				PatternType:        "high_rejection_rate",
-				Confidence:         min(1.0, rejectionRate/d.config.HighRejectionRateThreshold),
-				RecommendedAction:  "update_spec",
+				ID:                   fmt.Sprintf("high_rejection_%s", agentID),
+				PatternType:          "high_rejection_rate",
+				Confidence:           min(1.0, rejectionRate/d.config.HighRejectionRateThreshold),
+				RecommendedAction:    "update_spec",
 				MisconfigurationType: "prompt_deficiency",
-				AffectedAgent:      agentID,
-				SessionCount:       len(sessions),
-				MetricBaseline:     d.config.HighRejectionRateThreshold,
-				MetricObserved:     rejectionRate,
-				Evidence:           d.buildRejectionEvidence(sessions),
-				CreatedAt:          time.Now(),
+				AffectedAgent:        agentID,
+				SessionCount:         len(sessions),
+				MetricBaseline:       d.config.HighRejectionRateThreshold,
+				MetricObserved:       rejectionRate,
+				Evidence:             d.buildRejectionEvidence(sessions),
+				CreatedAt:            time.Now(),
 			})
 		}
 	}
@@ -333,16 +334,16 @@ func (d *PatternDetector) detectRepeatedFailure(analyses []*SessionAnalysis) []P
 
 		if failureCount >= 3 {
 			reports = append(reports, PatternReport{
-				ID:                 fmt.Sprintf("repeated_failure_%s", key),
-				PatternType:        "repeated_failure",
-				Confidence:         min(1.0, float64(failureCount)/float64(len(sessions)) + 0.3),
-				RecommendedAction:  "create_agent",
+				ID:                   fmt.Sprintf("repeated_failure_%s", key),
+				PatternType:          "repeated_failure",
+				Confidence:           min(1.0, float64(failureCount)/float64(len(sessions))+0.3),
+				RecommendedAction:    "create_agent",
 				MisconfigurationType: "capability_gap",
-				AffectedAgent:      sessions[0].AgentID,
-				AffectedIntent:     sessions[0].Intents[0],
-				SessionCount:       len(sessions),
-				Evidence:           d.buildFailureEvidence(sessions),
-				CreatedAt:          time.Now(),
+				AffectedAgent:        sessions[0].AgentID,
+				AffectedIntent:       sessions[0].Intents[0],
+				SessionCount:         len(sessions),
+				Evidence:             d.buildFailureEvidence(sessions),
+				CreatedAt:            time.Now(),
 			})
 		}
 	}
@@ -478,12 +479,7 @@ func (d *PatternDetector) buildFailureEvidence(sessions []*SessionAnalysis) []Pa
 }
 
 func containsAnomaly(flags []string, target string) bool {
-	for _, f := range flags {
-		if f == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(flags, target)
 }
 
 func min(a, b float64) float64 {
@@ -520,15 +516,15 @@ func (d *PatternDetector) detectSkillOpportunity(analyses []*SessionAnalysis) []
 	for toolPattern, count := range intentCommands {
 		if count >= 5 {
 			reports = append(reports, PatternReport{
-				ID:                 fmt.Sprintf("skill_opportunity_%s", toolPattern),
-				PatternType:        "skill_opportunity",
-				Confidence:         min(1.0, float64(count)/10.0),
-				RecommendedAction:  "add_skill",
+				ID:                   fmt.Sprintf("skill_opportunity_%s", toolPattern),
+				PatternType:          "skill_opportunity",
+				Confidence:           min(1.0, float64(count)/10.0),
+				RecommendedAction:    "add_skill",
 				MisconfigurationType: "automation_opportunity",
-				AffectedIntent:     toolPattern,
-				SessionCount:       count,
-				MetricBaseline:     5,
-				MetricObserved:     float64(count),
+				AffectedIntent:       toolPattern,
+				SessionCount:         count,
+				MetricBaseline:       5,
+				MetricObserved:       float64(count),
 				Evidence: []PatternEvidence{
 					{
 						Metric:      "repetition_count",
@@ -536,7 +532,7 @@ func (d *PatternDetector) detectSkillOpportunity(analyses []*SessionAnalysis) []
 						Description: fmt.Sprintf("Same tool pattern executed %d times", count),
 					},
 				},
-				CreatedAt:          time.Now(),
+				CreatedAt: time.Now(),
 			})
 		}
 	}

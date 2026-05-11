@@ -3,6 +3,7 @@ package taint
 
 import (
 	"log/slog"
+	"slices"
 )
 
 // TaintLogger is an interface for logging taint violations.
@@ -68,8 +69,8 @@ func NewExtendedTracker(logger *slog.Logger) *ExtendedTracker {
 // PushContext creates a new nested context scope.
 // All subsequent stores will be scoped to this context until PopContext is called.
 func (t *ExtendedTracker) PushContext(name string) {
-	t.Tracker.mu.Lock()
-	defer t.Tracker.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	var parent *Context
 	if len(t.contexts) > 0 {
@@ -89,8 +90,8 @@ func (t *ExtendedTracker) PushContext(name string) {
 // PopContext removes the current context scope.
 // Returns true if a context was removed, false if there were no contexts to pop.
 func (t *ExtendedTracker) PopContext() bool {
-	t.Tracker.mu.Lock()
-	defer t.Tracker.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	if len(t.contexts) == 0 {
 		return false
@@ -105,8 +106,8 @@ func (t *ExtendedTracker) PopContext() bool {
 
 // CurrentContext returns the current context, or nil if no contexts are active.
 func (t *ExtendedTracker) CurrentContext() *Context {
-	t.Tracker.mu.RLock()
-	defer t.Tracker.mu.RUnlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	if len(t.contexts) == 0 {
 		return nil
@@ -116,8 +117,8 @@ func (t *ExtendedTracker) CurrentContext() *Context {
 
 // StoreWithContext stores a tainted value in the current context scope.
 func (t *ExtendedTracker) StoreWithContext(name string, value *TaintedValue) {
-	t.Tracker.mu.Lock()
-	defer t.Tracker.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	ctx := t.CurrentContext()
 	if ctx != nil {
@@ -140,12 +141,12 @@ func (t *ExtendedTracker) StoreWithContext(name string, value *TaintedValue) {
 // RetrieveFromContext retrieves a tainted value from the current context,
 // falling back to parent contexts and then global storage.
 func (t *ExtendedTracker) RetrieveFromContext(name string) *TaintedValue {
-	t.Tracker.mu.RLock()
-	defer t.Tracker.mu.RUnlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	// Search contexts from innermost to outermost
-	for i := len(t.contexts) - 1; i >= 0; i-- {
-		ctx := t.contexts[i]
+	for _, v := range slices.Backward(t.contexts) {
+		ctx := v
 		if value, ok := ctx.Variables[name]; ok {
 			return value
 		}
@@ -157,8 +158,8 @@ func (t *ExtendedTracker) RetrieveFromContext(name string) *TaintedValue {
 
 // Clear removes all stored variables and contexts.
 func (t *ExtendedTracker) Clear() {
-	t.Tracker.mu.Lock()
-	defer t.Tracker.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	t.variables = make(map[string]*TaintedValue)
 	t.contexts = make([]*Context, 0, t.maxContexts)
@@ -167,8 +168,8 @@ func (t *ExtendedTracker) Clear() {
 
 // ClearContexts removes all contexts but preserves global variables.
 func (t *ExtendedTracker) ClearContexts() {
-	t.Tracker.mu.Lock()
-	defer t.Tracker.mu.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	t.contexts = make([]*Context, 0, t.maxContexts)
 	t.Tracker.logger.Debug("taint contexts cleared")
@@ -177,7 +178,7 @@ func (t *ExtendedTracker) ClearContexts() {
 // CheckSinkWithLogging checks a value against a sink and logs any violations.
 // Returns true if safe, false if a violation was found and logged.
 func (t *ExtendedTracker) CheckSinkWithLogging(value *TaintedValue, sink *TaintSink) bool {
-	violation := t.Tracker.CheckSink(value, sink)
+	violation := t.CheckSink(value, sink)
 	if violation != nil {
 		t.logger.LogViolation(violation)
 		return false

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -185,7 +186,7 @@ func (m *Middleware) queueShadow(ctx context.Context, convID string, messages []
 }
 
 func (m *Middleware) startWorkers(count int) {
-	for i := 0; i < count; i++ {
+	for range count {
 		m.wg.Add(1)
 		go m.worker()
 	}
@@ -235,9 +236,9 @@ func (m *Middleware) classifyDomain(messages []llm.ChatMessage) Domain {
 	// Simple keyword-based classification
 	// In production, could use a classifier model
 
-	var text string
+	var text strings.Builder
 	for _, msg := range messages {
-		text += " " + msg.Content
+		text.WriteString(" " + msg.Content)
 	}
 
 	codeKeywords := []string{"code", "function", "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
@@ -245,16 +246,16 @@ func (m *Middleware) classifyDomain(messages []llm.ChatMessage) Domain {
 	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "stack trace", "exception", "traceback"}
 	analysisKeywords := []string{"analyze", "explain", "why", "how does", "what is", "understand", "review"}
 
-	if containsAny(text, codeKeywords) {
+	if containsAny(text.String(), codeKeywords) {
 		return DomainCode
 	}
-	if containsAny(text, debuggingKeywords) {
+	if containsAny(text.String(), debuggingKeywords) {
 		return DomainDebugging
 	}
-	if containsAny(text, planningKeywords) {
+	if containsAny(text.String(), planningKeywords) {
 		return DomainPlanning
 	}
-	if containsAny(text, analysisKeywords) {
+	if containsAny(text.String(), analysisKeywords) {
 		return DomainAnalysis
 	}
 
@@ -268,18 +269,18 @@ func (m *Middleware) classifyTaskType(messages []llm.ChatMessage, response *llm.
 	}
 
 	// Check for multi-step patterns
-	var text string
+	var text strings.Builder
 	for _, msg := range messages {
-		text += " " + msg.Content
+		text.WriteString(" " + msg.Content)
 	}
 
 	multiStepKeywords := []string{"step by step", "first", "second", "then", "finally", "multiple steps"}
 	reasoningKeywords := []string{"think", "reason", "consider", "analyze", "evaluate", "compare"}
 
-	if containsAny(text, multiStepKeywords) {
+	if containsAny(text.String(), multiStepKeywords) {
 		return TaskTypeMultiStep
 	}
-	if containsAny(text, reasoningKeywords) {
+	if containsAny(text.String(), reasoningKeywords) {
 		return TaskTypeReasoning
 	}
 

@@ -176,8 +176,8 @@ func (sd *SkillDesigner) extractTriggerKeywords(rec Recommendation) []string {
 
 	// Also use intent from recommendation if available
 	if rec.Title != "" {
-		parts := strings.Fields(rec.Title)
-		for _, part := range parts {
+		parts := strings.FieldsSeq(rec.Title)
+		for part := range parts {
 			clean := strings.Trim(part, ".,;:!?.")
 			if len(clean) > 3 && !seen[strings.ToLower(clean)] {
 				keywords = append(keywords, strings.ToLower(clean))

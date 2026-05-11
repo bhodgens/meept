@@ -1,10 +1,11 @@
 package lsp
 
 import (
-	"io"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -14,11 +15,11 @@ import (
 
 // Manager manages multiple LSP server connections.
 type Manager struct {
-	mu       sync.RWMutex
-	servers  map[string]*ServerInstance
-	config   config.LSPConfig
-	rootURI  string
-	logger   *slog.Logger
+	mu      sync.RWMutex
+	servers map[string]*ServerInstance
+	config  config.LSPConfig
+	rootURI string
+	logger  *slog.Logger
 }
 
 // ServerInstance holds a running LSP server.
@@ -66,11 +67,9 @@ func NewManager(cfg config.LSPConfig, opts ...ManagerOption) *Manager {
 func (m *Manager) GetServerForLanguage(ctx context.Context, languageID string) (*ServerInstance, error) {
 	m.mu.RLock()
 	for _, srv := range m.servers {
-		for _, lang := range srv.Languages {
-			if lang == languageID {
-				m.mu.RUnlock()
-				return srv, nil
-			}
+		if slices.Contains(srv.Languages, languageID) {
+			m.mu.RUnlock()
+			return srv, nil
 		}
 	}
 	m.mu.RUnlock()
@@ -91,13 +90,10 @@ func (m *Manager) StartServerForLanguage(ctx context.Context, languageID string)
 	found := false
 
 	for name, cfg := range m.config.Servers {
-		for _, lang := range cfg.Languages {
-			if lang == languageID {
-				serverName = name
-				serverCfg = cfg
-				found = true
-				break
-			}
+		if slices.Contains(cfg.Languages, languageID) {
+			serverName = name
+			serverCfg = cfg
+			found = true
 		}
 		if found {
 			break
@@ -252,21 +248,17 @@ func (m *Manager) SupportsLanguage(languageID string) bool {
 	// Check running servers
 	m.mu.RLock()
 	for _, srv := range m.servers {
-		for _, lang := range srv.Languages {
-			if lang == languageID {
-				m.mu.RUnlock()
-				return true
-			}
+		if slices.Contains(srv.Languages, languageID) {
+			m.mu.RUnlock()
+			return true
 		}
 	}
 	m.mu.RUnlock()
 
 	// Check configured servers
 	for _, cfg := range m.config.Servers {
-		for _, lang := range cfg.Languages {
-			if lang == languageID {
-				return true
-			}
+		if slices.Contains(cfg.Languages, languageID) {
+			return true
 		}
 	}
 

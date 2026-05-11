@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
@@ -124,17 +125,17 @@ func (v *ReviewerValidator) LogValidationResult(ctx context.Context, rec Recomme
 	}
 
 	metadata := map[string]any{
-		"recommendation_id": rec.Title,
+		"recommendation_id":   rec.Title,
 		"recommendation_type": rec.Type,
-		"validation_status": string(result.Status),
-		"confidence": result.Confidence,
-		"feedback": result.Feedback,
-		"issues": result.Issues,
-		"validated_at": result.ValidatedAt.Format(time.RFC3339),
+		"validation_status":   string(result.Status),
+		"confidence":          result.Confidence,
+		"feedback":            result.Feedback,
+		"issues":              result.Issues,
+		"validated_at":        result.ValidatedAt.Format(time.RFC3339),
 	}
 
 	content, _ := json.Marshal(map[string]any{
-		"recommendation": rec,
+		"recommendation":    rec,
 		"validation_result": result,
 	})
 
@@ -147,9 +148,10 @@ func joinStrings(strs []string, sep string) string {
 	if len(strs) == 0 {
 		return ""
 	}
-	result := strs[0]
+	var result strings.Builder
+	result.WriteString(strs[0])
 	for _, s := range strs[1:] {
-		result += sep + s
+		result.WriteString(sep + s)
 	}
-	return result
+	return result.String()
 }

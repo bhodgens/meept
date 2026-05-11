@@ -33,11 +33,11 @@ func NewResearchEngine(client *memvid.Client, logger *slog.Logger, config Resear
 
 // ResearchTypes defines the types of research analysis.
 const (
-	ResearchTypeBehavioral    = "behavioral"
+	ResearchTypeBehavioral     = "behavioral"
 	ResearchTypeImplementation = "implementation"
-	ResearchTypeTooling       = "tooling"
-	ResearchTypeCapability    = "capability"
-	ResearchTypeModelFit      = "model_fit"
+	ResearchTypeTooling        = "tooling"
+	ResearchTypeCapability     = "capability"
+	ResearchTypeModelFit       = "model_fit"
 )
 
 // ConductResearch performs deep-dive analysis on a pattern report.
@@ -322,10 +322,10 @@ func (e *ResearchEngine) recommendNewAgent(pattern PatternReport, rootCause stri
 // recommendSpecUpdate generates a recommendation for updating agent specification.
 func (e *ResearchEngine) recommendSpecUpdate(pattern PatternReport, rootCause string) Recommendation {
 	return Recommendation{
-		Type:        "update_spec",
-		Title:       fmt.Sprintf("Update %s agent specification", pattern.AffectedAgent),
-		Description: fmt.Sprintf("Agent spec needs improvement: %s", rootCause),
-		Priority:    e.determinePriority(pattern.Confidence, pattern.SessionCount),
+		Type:           "update_spec",
+		Title:          fmt.Sprintf("Update %s agent specification", pattern.AffectedAgent),
+		Description:    fmt.Sprintf("Agent spec needs improvement: %s", rootCause),
+		Priority:       e.determinePriority(pattern.Confidence, pattern.SessionCount),
 		ExpectedImpact: fmt.Sprintf("Expected to reduce rejection rate from %.0f%% to 10%%", pattern.MetricObserved*100),
 		Implementation: ImplementationDetails{
 			FilesToModify: []FileModification{
@@ -378,10 +378,10 @@ func (e *ResearchEngine) recommendNewTool(pattern PatternReport, rootCause strin
 func (e *ResearchEngine) recommendNewSkill(pattern PatternReport, rootCause string) Recommendation {
 	skillID := fmt.Sprintf("skill_%s", pattern.AffectedIntent)
 	return Recommendation{
-		Type:        "new_skill",
-		Title:       fmt.Sprintf("Create Claude Code skill: %s", pattern.AffectedIntent),
-		Description: fmt.Sprintf("Deterministic task pattern detected: %s", rootCause),
-		Priority:    e.determinePriority(pattern.Confidence, pattern.SessionCount),
+		Type:           "new_skill",
+		Title:          fmt.Sprintf("Create Claude Code skill: %s", pattern.AffectedIntent),
+		Description:    fmt.Sprintf("Deterministic task pattern detected: %s", rootCause),
+		Priority:       e.determinePriority(pattern.Confidence, pattern.SessionCount),
 		ExpectedImpact: fmt.Sprintf("Expected to automate %d repetitive sessions/week", pattern.SessionCount/4),
 		Implementation: ImplementationDetails{
 			SkillSpec: &SkillDesign{
@@ -408,7 +408,7 @@ func (e *ResearchEngine) determinePriority(confidence float64, sessionCount int)
 func (e *ResearchEngine) generateAgentSpecContent(pattern PatternReport) string {
 	var buf strings.Builder
 
-	buf.WriteString(fmt.Sprintf(`---
+	fmt.Fprintf(&buf, `---
 id: %s_specialist
 name: %s Specialist Agent
 role: executor
@@ -456,7 +456,7 @@ Escalate when:
 - Complete tasks in minimal iterations
 - Document all tool calls and their results
 - Verify results before reporting success
-`, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent))
+`, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent, pattern.AffectedIntent)
 
 	return buf.String()
 }
@@ -473,7 +473,6 @@ func (e *ResearchEngine) averageDurationFromAnalyses(analyses []*SessionAnalysis
 	}
 	return total / time.Duration(len(analyses))
 }
-
 
 func minFloat(a, b float64) float64 {
 	if a < b {

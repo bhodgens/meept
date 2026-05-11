@@ -78,8 +78,8 @@ func (v *WebValidator) validateAPIResponse(url, value string) error {
 // parseStatusValue parses an HTTP status code from evidence.
 func parseStatusValue(value string) int {
 	// Expected format: "status=200,size=1234"
-	parts := strings.Split(value, ",")
-	for _, part := range parts {
+	parts := strings.SplitSeq(value, ",")
+	for part := range parts {
 		kv := strings.Split(part, "=")
 		if len(kv) == 2 && kv[0] == "status" {
 			// Parse status code

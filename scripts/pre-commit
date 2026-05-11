@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#
+# pre-commit hook: run golangci-lint on staged Go files
+# Install: make hooks  (or: cp scripts/pre-commit .git/hooks/pre-commit)
+#
+set -euo pipefail
+
+# Only run if there are staged .go files
+staged=$(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+if [ -z "$staged" ]; then
+    exit 0
+fi
+
+# Run golangci-lint on just the staged packages
+# Derive package paths from staged file list
+pkgs=()
+for f in $staged; do
+    dir=$(dirname "$f")
+    # Only add unique dirs that exist (file might be deleted)
+    if [ -d "$dir" ] && [[ ! " ${pkgs[*]} " =~ " ${dir} " ]]; then
+        pkgs+=("./$dir/...")
+    fi
+done
+
+if [ ${#pkgs[@]} -eq 0 ]; then
+    exit 0
+fi
+
+echo "running golangci-lint on staged packages..."
+if ! golangci-lint run "${pkgs[@]}" 2>&1; then
+    echo ""
+    echo "lint failed — fix issues or commit with --no-verify to bypass"
+    exit 1
+fi

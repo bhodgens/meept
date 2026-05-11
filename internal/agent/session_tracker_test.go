@@ -30,7 +30,7 @@ func TestRecordIntent(t *testing.T) {
 func TestRecordIntentHistoryCap(t *testing.T) {
 	tracker := NewSessionTracker(30 * time.Minute)
 
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		intent := &Intent{Type: "chat", Confidence: 0.5, AgentType: "chat"}
 		tracker.RecordIntent("session1", intent, "chat")
 	}
@@ -154,28 +154,26 @@ func TestConcurrentAccess(t *testing.T) {
 	tracker := NewSessionTracker(30 * time.Minute)
 	var wg sync.WaitGroup
 
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				intent := &Intent{Type: "code", Confidence: float64(n) * 0.01, AgentType: "coder"}
 				tracker.RecordIntent("session1", intent, "coder")
 			}
 		}(i)
 	}
 
-	for i := 0; i < 25; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 25 {
+		wg.Go(func() {
+			for range 100 {
 				tracker.GetDominantIntent("session1")
 				tracker.GetLastIntent("session1")
 				tracker.GetLastAgent("session1")
 				tracker.GetIntentCounts("session1")
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

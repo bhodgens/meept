@@ -115,7 +115,7 @@ func (p *OpenAIProvider) GenerateEmbeddings(ctx context.Context, texts []string)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/embeddings", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/embeddings", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -209,7 +209,7 @@ func NewOllamaProvider(cfg OllamaProviderConfig) *OllamaProvider {
 
 // ollamaEmbeddingRequest is the request body for Ollama embeddings API.
 type ollamaEmbeddingRequest struct {
-	Model string `json:"model"`
+	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
 }
 
@@ -231,7 +231,7 @@ func (p *OllamaProvider) GenerateEmbedding(ctx context.Context, text string) ([]
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/api/embeddings", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/embeddings", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

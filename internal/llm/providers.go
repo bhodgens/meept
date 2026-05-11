@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/caimlas/meept/internal/pathutil"
@@ -13,9 +14,9 @@ import (
 
 // ProviderConfig represents a provider configuration from models.json5.
 type ProviderConfig struct {
-	API     string                 `json:"api"`
-	Options ProviderOptionsConfig  `json:"options"`
-	Models  map[string]ModelDef    `json:"models"`
+	API     string                `json:"api"`
+	Options ProviderOptionsConfig `json:"options"`
+	Models  map[string]ModelDef   `json:"models"`
 }
 
 // ProviderOptionsConfig holds provider-specific options.
@@ -38,11 +39,11 @@ type ModelDef struct {
 
 // ProvidersConfig represents the full models.json5 configuration.
 type ProvidersConfig struct {
-	Model             string                    `json:"model"`
-	SmallModel        string                    `json:"small_model"`
-	DisabledProviders []string                  `json:"disabled_providers"`
+	Model             string                     `json:"model"`
+	SmallModel        string                     `json:"small_model"`
+	DisabledProviders []string                   `json:"disabled_providers"`
 	ModelAliases      map[string]ModelAliasEntry `json:"model_aliases"`
-	Providers         map[string]ProviderConfig `json:"providers"`
+	Providers         map[string]ProviderConfig  `json:"providers"`
 }
 
 // ModelAliasEntry represents a model alias configuration.
@@ -173,10 +174,8 @@ func ResolveModelRef(ref string, cfg *ProvidersConfig) *ModelConfig {
 	modelID := parts[1]
 
 	// Check if provider is disabled
-	for _, disabled := range cfg.DisabledProviders {
-		if disabled == providerID {
-			return nil
-		}
+	if slices.Contains(cfg.DisabledProviders, providerID) {
+		return nil
 	}
 
 	provider, ok := cfg.Providers[providerID]

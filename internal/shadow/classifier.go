@@ -33,11 +33,11 @@ func (c *Classifier) Classify(messages []llm.ChatMessage, response *llm.Response
 
 // ClassifyDomain determines the domain of the conversation.
 func (c *Classifier) ClassifyDomain(messages []llm.ChatMessage) Domain {
-	var text string
+	var text strings.Builder
 	for _, msg := range messages {
-		text += " " + msg.Content
+		text.WriteString(" " + msg.Content)
 	}
-	lower := strings.ToLower(text)
+	lower := strings.ToLower(text.String())
 
 	// Keywords for each domain, ordered by specificity
 	domainKeywords := map[Domain][]string{
@@ -83,11 +83,11 @@ func (c *Classifier) ClassifyTaskType(messages []llm.ChatMessage, response *llm.
 	}
 
 	// Analyze message content
-	var text string
+	var text strings.Builder
 	for _, msg := range messages {
-		text += " " + msg.Content
+		text.WriteString(" " + msg.Content)
 	}
-	lower := strings.ToLower(text)
+	lower := strings.ToLower(text.String())
 
 	// Multi-step patterns
 	multiStepKeywords := []string{

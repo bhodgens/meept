@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -172,10 +173,10 @@ func (s *SQLiteStore) getByColumn(column, value string) *Session {
 
 func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 	var (
-		id, name, convID            string
-		createdAt, lastActivity     string
-		attachedJSON, workersJSON   string
-		description                 sql.NullString
+		id, name, convID          string
+		createdAt, lastActivity   string
+		attachedJSON, workersJSON string
+		description               sql.NullString
 	)
 
 	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description)
@@ -318,10 +319,8 @@ func (s *SQLiteStore) Attach(sessionID, clientID string) error {
 	}
 
 	// Check if already attached
-	for _, c := range session.AttachedClients {
-		if c == clientID {
-			return nil
-		}
+	if slices.Contains(session.AttachedClients, clientID) {
+		return nil
 	}
 
 	session.AttachedClients = append(session.AttachedClients, clientID)
@@ -373,10 +372,8 @@ func (s *SQLiteStore) AddWorker(sessionID, workerID string) error {
 	}
 
 	// Check if already present
-	for _, w := range session.WorkerIDs {
-		if w == workerID {
-			return nil
-		}
+	if slices.Contains(session.WorkerIDs, workerID) {
+		return nil
 	}
 
 	session.WorkerIDs = append(session.WorkerIDs, workerID)

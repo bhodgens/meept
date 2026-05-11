@@ -2,11 +2,11 @@
 package vector
 
 import (
-	"io"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -27,10 +27,10 @@ type SearchResult struct {
 
 // Store stores and retrieves embeddings for memories.
 type Store struct {
-	db            *sql.DB
-	provider      Provider
+	db             *sql.DB
+	provider       Provider
 	embeddingCache sync.Map // map[string][]float32
-	mu            sync.RWMutex
+	mu             sync.RWMutex
 }
 
 // StoreConfig holds configuration for the vector store.
@@ -338,7 +338,7 @@ func deserializeVector(data []byte) ([]float32, error) {
 	}
 
 	vector := make([]float32, len(data)/4)
-	for i := 0; i < len(vector); i++ {
+	for i := range vector {
 		bits := uint32(data[i*4])<<24 | uint32(data[i*4+1])<<16 | uint32(data[i*4+2])<<8 | uint32(data[i*4+3])
 		vector[i] = math.Float32frombits(bits)
 	}
@@ -355,7 +355,7 @@ func cosineSimilarity(a, b []float32) float32 {
 	var normA float32
 	var normB float32
 
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		dotProduct += a[i] * b[i]
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]

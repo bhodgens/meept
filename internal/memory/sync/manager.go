@@ -36,8 +36,8 @@ type SyncManager struct {
 	retryMu    sync.Mutex
 
 	// Statistics
-	stats      SyncStatus
-	statsMu    sync.RWMutex
+	stats   SyncStatus
+	statsMu sync.RWMutex
 
 	// Background ticker for periodic distillation
 	periodicStop chan struct{}
@@ -644,10 +644,7 @@ func (s *SyncManager) processRetryQueue(ctx context.Context) {
 		if err != nil {
 			item.Error = err.Error()
 			// Exponential backoff
-			backoff := time.Duration(1<<item.Attempts) * 30 * time.Second
-			if backoff > 10*time.Minute {
-				backoff = 10 * time.Minute
-			}
+			backoff := min(time.Duration(1<<item.Attempts)*30*time.Second, 10*time.Minute)
 			item.NextAttempt = now.Add(backoff)
 			s.queueRetry(item)
 		}
@@ -698,5 +695,3 @@ func (s *SyncManager) publishEvent(topic string, data any) {
 
 	s.bus.Publish(topic, msg)
 }
-
-

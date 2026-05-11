@@ -101,10 +101,9 @@ func (m *MemoryModel) SetSize(width, height int) {
 	m.searchInput.SetWidth(width - 10)
 
 	// Update list dimensions
-	listHeight := height - 16 // Account for search, detail panel, etc.
-	if listHeight < 5 {
-		listHeight = 5
-	}
+	listHeight := max(
+		// Account for search, detail panel, etc.
+		height-16, 5)
 	m.list.SetSize(width/2-4, listHeight)
 }
 
@@ -269,7 +268,7 @@ func (m *MemoryModel) View() string {
 
 func (m *MemoryModel) renderLoading() string {
 	style := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(2, 0).
 		Foreground(lipgloss.Color("#6B7280"))
@@ -293,7 +292,7 @@ func (m *MemoryModel) renderError() string {
 
 func (m *MemoryModel) renderEmpty() string {
 	style := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(2, 0).
 		Foreground(lipgloss.Color("#6B7280")).
@@ -398,9 +397,9 @@ func wrapText(text string, width int) string {
 	}
 
 	var lines []string
-	paragraphs := strings.Split(text, "\n")
+	paragraphs := strings.SplitSeq(text, "\n")
 
-	for _, para := range paragraphs {
+	for para := range paragraphs {
 		if len(para) <= width {
 			lines = append(lines, para)
 			continue

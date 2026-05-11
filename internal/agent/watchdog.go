@@ -14,10 +14,10 @@ import (
 type WorkerStage string
 
 const (
-	StageThinking  WorkerStage = "thinking"
-	StageExecuting WorkerStage = "executing"
+	StageThinking   WorkerStage = "thinking"
+	StageExecuting  WorkerStage = "executing"
 	StageValidating WorkerStage = "validating"
-	StageReviewing WorkerStage = "reviewing"
+	StageReviewing  WorkerStage = "reviewing"
 )
 
 // WorkerState tracks the state of a single monitored worker/agent.
@@ -37,10 +37,10 @@ type WorkerState struct {
 type WatchdogAlertType string
 
 const (
-	AlertTimeout    WatchdogAlertType = "timeout"
-	AlertMaxIter    WatchdogAlertType = "max_iterations"
-	AlertStuck      WatchdogAlertType = "stuck"
-	AlertHeartbeat  WatchdogAlertType = "heartbeat_missed"
+	AlertTimeout   WatchdogAlertType = "timeout"
+	AlertMaxIter   WatchdogAlertType = "max_iterations"
+	AlertStuck     WatchdogAlertType = "stuck"
+	AlertHeartbeat WatchdogAlertType = "heartbeat_missed"
 )
 
 // WatchdogAlert represents a watchdog alert for a stuck or timed-out worker.
@@ -91,10 +91,10 @@ func NewWatchdog(cfg config.WatchdogConfig, logger *slog.Logger) *Watchdog {
 	}
 
 	return &Watchdog{
-		workers: make(map[string]*WorkerState),
-		config:  cfg,
-		logger:  logger.With("component", "watchdog"),
-		alertCh: make(chan WatchdogAlert, 64),
+		workers:  make(map[string]*WorkerState),
+		config:   cfg,
+		logger:   logger.With("component", "watchdog"),
+		alertCh:  make(chan WatchdogAlert, 64),
 		reportCh: make(chan ReportCapture, 16),
 	}
 }
@@ -114,9 +114,7 @@ func (w *Watchdog) Start(ctx context.Context) {
 		heartbeatInterval = 30 * time.Second
 	}
 
-	w.wg.Add(1)
-	go func() {
-		defer w.wg.Done()
+	w.wg.Go(func() {
 		w.logger.Info("Watchdog monitor started",
 			"timeout_min", w.config.TimeoutMinutes,
 			"heartbeat_interval", heartbeatInterval,
@@ -136,7 +134,7 @@ func (w *Watchdog) Start(ctx context.Context) {
 				w.checkWorkers()
 			}
 		}
-	}()
+	})
 }
 
 // Stop gracefully stops the watchdog monitor.

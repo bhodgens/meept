@@ -378,7 +378,7 @@ func TestProviderManager_SuccessUpdatesHealth(t *testing.T) {
 	ctx := context.Background()
 
 	// Make several requests
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := pm.Chat(ctx, []ChatMessage{
 			{Role: RoleUser, Content: "Hello"},
 		})

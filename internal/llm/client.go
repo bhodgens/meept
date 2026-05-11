@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	defaultTimeout        = 120 * time.Second
-	maxRetries            = 3
-	retryBackoffBase      = 2.0 // seconds - exponential: 2, 4, 8
+	defaultTimeout   = 120 * time.Second
+	maxRetries       = 3
+	retryBackoffBase = 2.0 // seconds - exponential: 2, 4, 8
 )
 
 // HTTP status codes that warrant a retry
@@ -61,14 +61,14 @@ func (e *ClientError) Unwrap() error {
 
 // Client is an HTTP client for OpenAI-compatible chat completions endpoints.
 type Client struct {
-	config        *ModelConfig
-	budget        *Budget
-	httpClient    *http.Client
-	logger        *slog.Logger
-	metricsStore  *metrics.Store
-	timeoutCalc   *metrics.Calculator
-	tokenCache    ResponseCache
-	keyBuilder    *CacheKeyBuilder
+	config       *ModelConfig
+	budget       *Budget
+	httpClient   *http.Client
+	logger       *slog.Logger
+	metricsStore *metrics.Store
+	timeoutCalc  *metrics.Calculator
+	tokenCache   ResponseCache
+	keyBuilder   *CacheKeyBuilder
 }
 
 // ClientOption is a functional option for configuring a Client.
@@ -493,7 +493,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	c.logger.Debug("Making LLM request", "url", url, "model", c.config.ModelID)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, &ClientError{Message: "failed to create request", Cause: err}
 	}
@@ -655,8 +655,8 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 	}
 
 	return &Response{
-		Content:      content,
-		ToolCalls:    toolCalls,
+		Content:   content,
+		ToolCalls: toolCalls,
 		Usage: TokenUsage{
 			PromptTokens:     chatResp.Usage.PromptTokens,
 			CompletionTokens: chatResp.Usage.CompletionTokens,

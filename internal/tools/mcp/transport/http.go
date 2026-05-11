@@ -72,7 +72,7 @@ func (t *HTTPTransport) Send(ctx context.Context, message []byte) ([]byte, error
 	}
 
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST", t.url, bytes.NewReader(message))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(message))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -146,8 +146,8 @@ func (t *HTTPTransport) parseSSEResponse(r io.Reader) ([]byte, error) {
 		}
 
 		// Handle data line
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
+		if after, ok := strings.CutPrefix(line, "data: "); ok {
+			data := after
 
 			// Try to parse as JSON to verify it's a response
 			var parsed map[string]any

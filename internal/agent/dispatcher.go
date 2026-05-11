@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"math"
 	"regexp"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -610,7 +610,7 @@ func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context, input stri
 		specs := d.registry.ListSpecs()
 		sb.WriteString("### Available Agents\n\n")
 		for _, spec := range specs {
-			sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", spec.Name, spec.ID, truncateString(spec.Purpose, 100)))
+			fmt.Fprintf(&sb, "- **%s** (%s): %s\n", spec.Name, spec.ID, truncateString(spec.Purpose, 100))
 		}
 		sb.WriteString("\n")
 	}
@@ -618,7 +618,7 @@ func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context, input stri
 	// List baseline tools available to all agents
 	sb.WriteString("### Baseline Tools (available to all agents)\n\n")
 	for _, tool := range BaselineTools {
-		sb.WriteString(fmt.Sprintf("- %s\n", tool))
+		fmt.Fprintf(&sb, "- %s\n", tool)
 	}
 	sb.WriteString("\n")
 
@@ -628,7 +628,7 @@ func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context, input stri
 		if len(skills) > 0 {
 			sb.WriteString("### Available Skills\n\n")
 			for _, skill := range skills {
-				sb.WriteString(fmt.Sprintf("- **/%s**: %s\n", skill.Name, truncateString(skill.Description, 80)))
+				fmt.Fprintf(&sb, "- **/%s**: %s\n", skill.Name, truncateString(skill.Description, 80))
 			}
 			sb.WriteString("\n")
 		}
@@ -1035,10 +1035,10 @@ func (d *Dispatcher) GetFallbackDetails(limit int) []FallbackEntry {
 // DispatcherStats returns statistics about the dispatcher.
 type DispatcherStats struct {
 	mu              sync.RWMutex
-	TotalDispatched int            `json:"total_dispatched"`
-	ByMethod        map[string]int `json:"by_method"`
-	ByAgent         map[string]int `json:"by_agent"`
-	ByIntent        map[string]int `json:"by_intent"`
+	TotalDispatched int             `json:"total_dispatched"`
+	ByMethod        map[string]int  `json:"by_method"`
+	ByAgent         map[string]int  `json:"by_agent"`
+	ByIntent        map[string]int  `json:"by_intent"`
 	FallbackCount   int             `json:"fallback_count"`
 	FallbackDetails []FallbackEntry `json:"fallback_details,omitempty"`
 }

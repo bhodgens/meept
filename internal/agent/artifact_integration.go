@@ -36,7 +36,7 @@ func NewArtifactManager(logger *slog.Logger) *ArtifactManager {
 	}
 
 	return &ArtifactManager{
-		claudeManager: artifactcontext.NewArtifactManager(5 * time.Minute),
+		claudeManager:  artifactcontext.NewArtifactManager(5 * time.Minute),
 		contextBuilder: nil, // Will be created on first scan
 		artifactCache:  make(map[string]*artifactcontext.Artifacts),
 		cacheExpiry:    5 * time.Minute,
@@ -191,9 +191,9 @@ func (am *ArtifactManager) BuildCommandSuggestions(taskDesc, workingDir string) 
 	sb.WriteString("The following commands from CLAUDE.md may be relevant to this task:\n\n")
 
 	for _, cmd := range commands {
-		sb.WriteString(fmt.Sprintf("- **%s**: `%s`\n", cmd.Description, cmd.Command))
+		fmt.Fprintf(&sb, "- **%s**: `%s`\n", cmd.Description, cmd.Command)
 		if cmd.Category != "" {
-			sb.WriteString(fmt.Sprintf("  Category: %s\n", cmd.Category))
+			fmt.Fprintf(&sb, "  Category: %s\n", cmd.Category)
 		}
 	}
 
@@ -209,8 +209,8 @@ func (am *ArtifactManager) BuildSkillReferences(taskDesc, workingDir string) str
 
 	var sb strings.Builder
 	sb.WriteString("# Relevant Skill\n\n")
-	sb.WriteString(fmt.Sprintf("**%s** (v%s)\n\n", skill.Name, skill.Version))
-	sb.WriteString(fmt.Sprintf("%s\n\n", skill.Description))
+	fmt.Fprintf(&sb, "**%s** (v%s)\n\n", skill.Name, skill.Version)
+	fmt.Fprintf(&sb, "%s\n\n", skill.Description)
 
 	if len(skill.Triggers) > 0 {
 		sb.WriteString("Triggers: " + strings.Join(skill.Triggers, ", ") + "\n")
@@ -232,8 +232,8 @@ func (am *ArtifactManager) BuildAgentReferences(taskDesc, workingDir string) str
 
 	var sb strings.Builder
 	sb.WriteString("# Relevant Agent\n\n")
-	sb.WriteString(fmt.Sprintf("**%s** (%s)\n\n", agent.Name, agent.Role))
-	sb.WriteString(fmt.Sprintf("%s\n\n", agent.Purpose))
+	fmt.Fprintf(&sb, "**%s** (%s)\n\n", agent.Name, agent.Role)
+	fmt.Fprintf(&sb, "%s\n\n", agent.Purpose)
 
 	return sb.String()
 }
@@ -271,12 +271,12 @@ func (am *ArtifactManager) BuildFullArtifactContext(taskDesc, workingDir string)
 }
 
 // GetCacheStats returns cache statistics for debugging.
-func (am *ArtifactManager) GetCacheStats() map[string]interface{} {
+func (am *ArtifactManager) GetCacheStats() map[string]any {
 	claudeStats := am.claudeManager.GetCacheStats()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"directories_cached": len(am.artifactCache),
 		"claude_stats":       claudeStats,
-		"cache_expiry":        am.cacheExpiry.String(),
+		"cache_expiry":       am.cacheExpiry.String(),
 	}
 }

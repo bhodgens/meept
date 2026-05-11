@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -201,10 +202,7 @@ func (e *ImpactEstimator) averageDurationFromEvidence(pattern PatternReport) flo
 // estimateWeeklySessions estimates weekly sessions for this pattern.
 func (e *ImpactEstimator) estimateWeeklySessions(pattern PatternReport) int {
 	// Assume pattern.SessionCount is monthly, convert to weekly
-	weekly := pattern.SessionCount / 4
-	if weekly < 1 {
-		weekly = 1
-	}
+	weekly := max(pattern.SessionCount/4, 1)
 	return weekly
 }
 
@@ -226,11 +224,11 @@ func (e *ImpactEstimator) AggregateImpact(estimates []*ImpactEstimate) *Aggregat
 	}
 
 	return &AggregateImpact{
-		TotalWeeklyTimeSaved:   totalTimeSaved,
-		TotalMonthlyTimeSaved:  totalTimeSaved * 4,
-		RecommendationCount:    len(estimates),
-		AverageConfidence:      highestConfidence / float64(len(estimates)),
-		EstimatedMonthlyCost:   e.estimateCostSavings(totalTimeSaved),
+		TotalWeeklyTimeSaved:  totalTimeSaved,
+		TotalMonthlyTimeSaved: totalTimeSaved * 4,
+		RecommendationCount:   len(estimates),
+		AverageConfidence:     highestConfidence / float64(len(estimates)),
+		EstimatedMonthlyCost:  e.estimateCostSavings(totalTimeSaved),
 	}
 }
 
@@ -252,38 +250,38 @@ func (e *ImpactEstimator) estimateCostSavings(minutesSaved float64) float64 {
 
 // AggregateImpact represents aggregated impact across all recommendations.
 type AggregateImpact struct {
-	TotalWeeklyTimeSaved   float64
-	TotalMonthlyTimeSaved  float64
-	RecommendationCount    int
-	AverageConfidence      float64
-	EstimatedMonthlyCost   float64
+	TotalWeeklyTimeSaved  float64
+	TotalMonthlyTimeSaved float64
+	RecommendationCount   int
+	AverageConfidence     float64
+	EstimatedMonthlyCost  float64
 }
 
 // FormatReport formats the impact analysis as a human-readable report.
 func (e *ImpactEstimator) FormatReport(estimates []*ImpactEstimate, aggregate *AggregateImpact) string {
-	var buf string
+	var buf strings.Builder
 
-	buf += "## Impact Analysis Report\n\n"
-	buf += "### Summary\n"
+	buf.WriteString("## Impact Analysis Report\n\n")
+	buf.WriteString("### Summary\n")
 	if aggregate != nil {
-		buf += fmt.Sprintf("- **Total Recommendations**: %d\n", aggregate.RecommendationCount)
-		buf += fmt.Sprintf("- **Estimated Monthly Time Saved**: %.0f hours (%.0f minutes)\n", aggregate.TotalMonthlyTimeSaved/60, aggregate.TotalMonthlyTimeSaved)
-		buf += fmt.Sprintf("- **Average Confidence**: %.0f%%\n", aggregate.AverageConfidence*100)
+		buf.WriteString(fmt.Sprintf("- **Total Recommendations**: %d\n", aggregate.RecommendationCount))
+		buf.WriteString(fmt.Sprintf("- **Estimated Monthly Time Saved**: %.0f hours (%.0f minutes)\n", aggregate.TotalMonthlyTimeSaved/60, aggregate.TotalMonthlyTimeSaved))
+		buf.WriteString(fmt.Sprintf("- **Average Confidence**: %.0f%%\n", aggregate.AverageConfidence*100))
 		if aggregate.EstimatedMonthlyCost > 0 {
-			buf += fmt.Sprintf("- **Estimated Monthly Cost Savings**: $%.2f\n", aggregate.EstimatedMonthlyCost)
+			buf.WriteString(fmt.Sprintf("- **Estimated Monthly Cost Savings**: $%.2f\n", aggregate.EstimatedMonthlyCost))
 		}
 	}
-	buf += "\n### Detailed Impacts\n\n"
+	buf.WriteString("\n### Detailed Impacts\n\n")
 
 	for i, est := range estimates {
-		buf += fmt.Sprintf("#### Recommendation %d: %s\n", i+1, est.RecommendationID)
-		buf += fmt.Sprintf("- **Metric Type**: %s\n", est.MetricType)
-		buf += fmt.Sprintf("- **Baseline**: %.1f\n", est.BaselineValue)
-		buf += fmt.Sprintf("- **Expected**: %.1f\n", est.ExpectedValue)
-		buf += fmt.Sprintf("- **Improvement**: %.0f%%\n", est.ImprovementPercent)
-		buf += fmt.Sprintf("- **Weekly Impact**: %s\n", est.WeeklyImpact)
-		buf += fmt.Sprintf("- **Confidence**: %.0f%%\n\n", est.Confidence*100)
+		buf.WriteString(fmt.Sprintf("#### Recommendation %d: %s\n", i+1, est.RecommendationID))
+		buf.WriteString(fmt.Sprintf("- **Metric Type**: %s\n", est.MetricType))
+		buf.WriteString(fmt.Sprintf("- **Baseline**: %.1f\n", est.BaselineValue))
+		buf.WriteString(fmt.Sprintf("- **Expected**: %.1f\n", est.ExpectedValue))
+		buf.WriteString(fmt.Sprintf("- **Improvement**: %.0f%%\n", est.ImprovementPercent))
+		buf.WriteString(fmt.Sprintf("- **Weekly Impact**: %s\n", est.WeeklyImpact))
+		buf.WriteString(fmt.Sprintf("- **Confidence**: %.0f%%\n\n", est.Confidence*100))
 	}
 
-	return buf
+	return buf.String()
 }

@@ -78,7 +78,7 @@ func (c *SnowflakeEmbedClient) Embed(ctx context.Context, text string) ([]float6
 		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedding request: %w", err)
 	}

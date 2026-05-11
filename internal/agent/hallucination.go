@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"strings"
 	"sync"
@@ -12,9 +13,9 @@ import (
 type HallucinationSensitivity string
 
 const (
-	SensitivityLow      HallucinationSensitivity = "low"
-	SensitivityMedium   HallucinationSensitivity = "medium"
-	SensitivityHigh     HallucinationSensitivity = "high"
+	SensitivityLow    HallucinationSensitivity = "low"
+	SensitivityMedium HallucinationSensitivity = "medium"
+	SensitivityHigh   HallucinationSensitivity = "high"
 )
 
 // HallucinationConfig configures the hallucination detector.
@@ -38,10 +39,10 @@ func DefaultHallucinationConfig() HallucinationConfig {
 
 // HallucinationIndicator represents a single detected hallucination indicator.
 type HallucinationIndicator struct {
-	Type        string  `json:"type"`         // "confident_claim", "fabricated_ref", "contradiction", "impossible_response"
+	Type        string  `json:"type"` // "confident_claim", "fabricated_ref", "contradiction", "impossible_response"
 	Description string  `json:"description"`
-	Confidence  float64 `json:"confidence"`   // 0.0-1.0 confidence this is actually a hallucination
-	Content     string  `json:"content"`      // The specific text that triggered detection
+	Confidence  float64 `json:"confidence"` // 0.0-1.0 confidence this is actually a hallucination
+	Content     string  `json:"content"`    // The specific text that triggered detection
 }
 
 // HallucinationResult holds the results of hallucination analysis.
@@ -53,9 +54,9 @@ type HallucinationResult struct {
 
 // HallucinationDetector detects hallucination patterns in LLM output.
 type HallucinationDetector struct {
-	mu       sync.RWMutex
-	config   HallucinationConfig
-	logger   *slog.Logger
+	mu     sync.RWMutex
+	config HallucinationConfig
+	logger *slog.Logger
 
 	// Known symbols for fact-checking (file paths, function names, etc.)
 	knownSymbols map[string]bool
@@ -159,12 +160,8 @@ func (hd *HallucinationDetector) RegisterKnownSymbols(symbols map[string]bool, f
 	hd.mu.Lock()
 	defer hd.mu.Unlock()
 
-	for k, v := range symbols {
-		hd.knownSymbols[k] = v
-	}
-	for k, v := range files {
-		hd.knownFiles[k] = v
-	}
+	maps.Copy(hd.knownSymbols, symbols)
+	maps.Copy(hd.knownFiles, files)
 }
 
 // detectConfidentClaims detects claims stated with unwarranted certainty.
@@ -173,9 +170,9 @@ func (hd *HallucinationDetector) detectConfidentClaims(output string) []Hallucin
 
 	// Patterns that indicate confident but potentially fabricated claims
 	confidentPatterns := []struct {
-		pattern   string
-		severity  float64
-		desc      string
+		pattern  string
+		severity float64
+		desc     string
 	}{
 		{`(?i)\bI (?:have |have already )?(?:created|modified|deleted|fixed|updated|implemented)\b.*\b(?:file|function|method|class|module)\b`, 0.6, "claims file/code creation without evidence"},
 		{`(?i)\bthe (?:file|function|method|class) (?:now|has been|is now) (?:updated|modified|fixed|changed)\b`, 0.5, "asserts change without showing diff"},
@@ -301,7 +298,7 @@ func (hd *HallucinationDetector) detectImpossibleResponses(output string) []Hall
 	// Check for repeated phrases (sign of generation loop)
 	// Look for triple repetition of the same word (e.g., "the the the")
 	words := strings.Fields(strings.ToLower(output))
-	for i := 0; i < len(words)-2; i++ {
+	for i := range len(words) - 2 {
 		w1 := strings.Trim(words[i], ".,;:!?'\"()[]{}")
 		w2 := strings.Trim(words[i+1], ".,;:!?'\"()[]{}")
 		w3 := strings.Trim(words[i+2], ".,;:!?'\"()[]{}")

@@ -42,7 +42,7 @@ func main() {
 			// Configure logging based on debug flag
 			if debugFile == "" {
 				// No debug: discard all logs
-				slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+				slog.SetDefault(slog.New(slog.DiscardHandler))
 			} else {
 				var output io.Writer
 				if debugFile == "-" {

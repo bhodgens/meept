@@ -13,10 +13,10 @@ type CompressionStage int
 
 const (
 	CompressionStageNone       CompressionStage = iota // No compression needed
-	CompressionStageWarning                             // Context is filling up; log a warning only
-	CompressionStageSummarize                           // LLM-summarize old history, keep system + summary + last 4
-	CompressionStageAggressive                          // Drop low-importance messages (keep system + critical + last 4)
-	CompressionStageHardLimit                           // Drop old context entirely (keep system + last 2)
+	CompressionStageWarning                            // Context is filling up; log a warning only
+	CompressionStageSummarize                          // LLM-summarize old history, keep system + summary + last 4
+	CompressionStageAggressive                         // Drop low-importance messages (keep system + critical + last 4)
+	CompressionStageHardLimit                          // Drop old context entirely (keep system + last 2)
 )
 
 // String returns a human-readable label for the compression stage.
@@ -39,12 +39,12 @@ func (s CompressionStage) String() string {
 
 // CompressionConfig configures the multi-stage context compressor.
 type CompressionConfig struct {
-	Enabled                bool    // Master switch
-	ModelContextLimit      int     // Total context tokens for the model
-	Stage1WarningRatio     float64 // Utilization threshold for warning (default 0.50)
-	Stage2SummarizeRatio   float64 // Utilization threshold for summarization (default 0.60)
-	Stage3AggressiveRatio  float64 // Utilization threshold for aggressive compression (default 0.70)
-	Stage4HardLimitRatio   float64 // Utilization threshold for hard limit (default 0.80)
+	Enabled               bool    // Master switch
+	ModelContextLimit     int     // Total context tokens for the model
+	Stage1WarningRatio    float64 // Utilization threshold for warning (default 0.50)
+	Stage2SummarizeRatio  float64 // Utilization threshold for summarization (default 0.60)
+	Stage3AggressiveRatio float64 // Utilization threshold for aggressive compression (default 0.70)
+	Stage4HardLimitRatio  float64 // Utilization threshold for hard limit (default 0.80)
 }
 
 // Defaults.
@@ -57,11 +57,11 @@ const (
 
 // QualityMetrics tracks compression quality for a single compression pass.
 type QualityMetrics struct {
-	TokenRatio       float64           // tokensAfter / tokensBefore (1.0 when no compression)
-	CriticalRetained int               // Count of critical messages kept
-	CriticalDropped  int               // Count of critical messages dropped (should always be 0)
-	SummaryLevel     int               // Highest summary level in the output messages
-	CompressionStage CompressionStage  // Stage that produced this result
+	TokenRatio       float64          // tokensAfter / tokensBefore (1.0 when no compression)
+	CriticalRetained int              // Count of critical messages kept
+	CriticalDropped  int              // Count of critical messages dropped (should always be 0)
+	SummaryLevel     int              // Highest summary level in the output messages
+	CompressionStage CompressionStage // Stage that produced this result
 }
 
 // CompressionResult holds the outcome of a compression pass.
@@ -77,25 +77,25 @@ type CompressionResult struct {
 
 // CompressionStats tracks cumulative compression events with atomic-safe counters.
 type CompressionStats struct {
-	WarningEvents      atomic.Uint64
-	SummarizeEvents    atomic.Uint64
-	AggressiveEvents   atomic.Uint64
-	HardLimitEvents    atomic.Uint64
-	TotalTokensSaved   atomic.Uint64
-	TotalCompressions  atomic.Uint64
-	QualityScoreSum    atomic.Uint64 // Scaled by 1000 to use uint64 for float accumulation
-	QualityScoreCount  atomic.Uint64
+	WarningEvents     atomic.Uint64
+	SummarizeEvents   atomic.Uint64
+	AggressiveEvents  atomic.Uint64
+	HardLimitEvents   atomic.Uint64
+	TotalTokensSaved  atomic.Uint64
+	TotalCompressions atomic.Uint64
+	QualityScoreSum   atomic.Uint64 // Scaled by 1000 to use uint64 for float accumulation
+	QualityScoreCount atomic.Uint64
 }
 
 // Snapshot returns a point-in-time copy of the stats fields as plain values.
 type CompressionStatsSnapshot struct {
-	WarningEvents    uint64
-	SummarizeEvents  uint64
-	AggressiveEvents uint64
-	HardLimitEvents  uint64
-	TotalTokensSaved uint64
+	WarningEvents     uint64
+	SummarizeEvents   uint64
+	AggressiveEvents  uint64
+	HardLimitEvents   uint64
+	TotalTokensSaved  uint64
 	TotalCompressions uint64
-	AvgQualityScore  float64 // Running average of quality scores (0.0-1.0)
+	AvgQualityScore   float64 // Running average of quality scores (0.0-1.0)
 }
 
 // Snapshot reads all atomic counters and returns a plain-value snapshot.
@@ -106,13 +106,13 @@ func (s *CompressionStats) Snapshot() CompressionStatsSnapshot {
 		avg = float64(s.QualityScoreSum.Load()) / float64(count) / 1000.0
 	}
 	return CompressionStatsSnapshot{
-		WarningEvents:    s.WarningEvents.Load(),
-		SummarizeEvents:  s.SummarizeEvents.Load(),
-		AggressiveEvents: s.AggressiveEvents.Load(),
-		HardLimitEvents:  s.HardLimitEvents.Load(),
-		TotalTokensSaved: s.TotalTokensSaved.Load(),
+		WarningEvents:     s.WarningEvents.Load(),
+		SummarizeEvents:   s.SummarizeEvents.Load(),
+		AggressiveEvents:  s.AggressiveEvents.Load(),
+		HardLimitEvents:   s.HardLimitEvents.Load(),
+		TotalTokensSaved:  s.TotalTokensSaved.Load(),
 		TotalCompressions: s.TotalCompressions.Load(),
-		AvgQualityScore:  avg,
+		AvgQualityScore:   avg,
 	}
 }
 
@@ -332,10 +332,9 @@ func (c *ContextCompressor) buildQualityMetrics(before, after []ChatMessage, tok
 	criticalBefore := countCritical(before)
 	criticalAfter := countCritical(after)
 
-	dropped := criticalBefore - criticalAfter
-	if dropped < 0 {
-		dropped = 0 // Compression can only drop messages, not add critical ones
-	}
+	dropped := max(criticalBefore-criticalAfter,
+		// Compression can only drop messages, not add critical ones
+		0)
 
 	qm := QualityMetrics{
 		TokenRatio:       ratio,
@@ -400,7 +399,7 @@ func (c *ContextCompressor) summarizeWithLLM(ctx context.Context, messages []Cha
 	sb.WriteString("Summarize the following conversation history into a concise summary preserving:\n")
 	sb.WriteString("- Key decisions made\n- Important file paths mentioned\n- Unresolved questions\n- Current task status\n\n")
 	for _, msg := range toSummarize {
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+		fmt.Fprintf(&sb, "[%s]: %s\n", msg.Role, msg.Content)
 	}
 
 	summaryPrompt := ChatMessage{Role: RoleUser, Content: sb.String()}
@@ -460,10 +459,7 @@ func keepTail(messages []ChatMessage, n int) []ChatMessage {
 	// Determine which non-system messages to keep: the tail of n plus any
 	// critical messages that fall outside the tail window.
 	keepSet := make(map[int]bool)
-	tailStart := len(nonSystemMsgs) - n
-	if tailStart < 0 {
-		tailStart = 0
-	}
+	tailStart := max(len(nonSystemMsgs)-n, 0)
 	for i := tailStart; i < len(nonSystemMsgs); i++ {
 		keepSet[i] = true
 	}

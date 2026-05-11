@@ -24,9 +24,9 @@ type BuildContext struct {
 	WorkingDir      string
 
 	// Available context
-	HasCLAUDEMD     bool
-	HasClaudeDir    bool
-	HasSkills       bool
+	HasCLAUDEMD  bool
+	HasClaudeDir bool
+	HasSkills    bool
 
 	// Relevant sections
 	RelevantSections []string
@@ -35,13 +35,13 @@ type BuildContext struct {
 	Commands         []BuildCommand
 	Architecture     *ArchitectureSection
 	Components       []ComponentMapping
-	Agents          []AgentDefinition
-	Skills          []*Skill
-	BuildInfo       string
+	Agents           []AgentDefinition
+	Skills           []*Skill
+	BuildInfo        string
 	ArchitectureInfo string
-	AgentInfo       string
-	SkillInfo       string
-	ProjectOverview string
+	AgentInfo        string
+	SkillInfo        string
+	ProjectOverview  string
 }
 
 // BuildForTask builds context for a specific task
@@ -84,10 +84,10 @@ func (cb *ContextBuilder) classifyTask(task string) string {
 	case strings.Contains(taskLower, "test") || strings.Contains(taskLower, "spec"):
 		return "test"
 	case strings.Contains(taskLower, "code") || strings.Contains(taskLower, "implement") ||
-	     strings.Contains(taskLower, "write") || strings.Contains(taskLower, "function"):
+		strings.Contains(taskLower, "write") || strings.Contains(taskLower, "function"):
 		return "code"
 	case strings.Contains(taskLower, "architecture") || strings.Contains(taskLower, "design") ||
-	     strings.Contains(taskLower, "structure"):
+		strings.Contains(taskLower, "structure"):
 		return "architecture"
 	case strings.Contains(taskLower, "agent") || strings.Contains(taskLower, "delegate"):
 		return "agent"
@@ -111,9 +111,9 @@ func (cb *ContextBuilder) buildBuildContext(ctx *BuildContext) {
 		if len(ctx.Commands) > 0 {
 			for _, cmd := range ctx.Commands {
 				if cmd.Description != "" {
-					buildInfo.WriteString(fmt.Sprintf("- %s: `%s`\n", cmd.Description, cmd.Command))
+					fmt.Fprintf(&buildInfo, "- %s: `%s`\n", cmd.Description, cmd.Command)
 				} else {
-					buildInfo.WriteString(fmt.Sprintf("- `%s`\n", cmd.Command))
+					fmt.Fprintf(&buildInfo, "- `%s`\n", cmd.Command)
 				}
 			}
 		} else {
@@ -139,9 +139,9 @@ func (cb *ContextBuilder) buildTestContext(ctx *BuildContext) {
 		if len(ctx.Commands) > 0 {
 			for _, cmd := range ctx.Commands {
 				if cmd.Description != "" {
-					testInfo.WriteString(fmt.Sprintf("- %s: `%s`\n", cmd.Description, cmd.Command))
+					fmt.Fprintf(&testInfo, "- %s: `%s`\n", cmd.Description, cmd.Command)
 				} else {
-					testInfo.WriteString(fmt.Sprintf("- `%s`\n", cmd.Command))
+					fmt.Fprintf(&testInfo, "- `%s`\n", cmd.Command)
 				}
 			}
 		} else {
@@ -167,7 +167,7 @@ func (cb *ContextBuilder) buildCodeContext(ctx *BuildContext) {
 			if len(doc.Architecture.RequestFlow) > 0 {
 				archInfo.WriteString("### Request Flow\n\n")
 				for i, step := range doc.Architecture.RequestFlow {
-					archInfo.WriteString(fmt.Sprintf("%d. %s\n", i+1, step))
+					fmt.Fprintf(&archInfo, "%d. %s\n", i+1, step)
 				}
 				archInfo.WriteString("\n")
 			}
@@ -175,7 +175,7 @@ func (cb *ContextBuilder) buildCodeContext(ctx *BuildContext) {
 			if len(doc.Components) > 0 {
 				archInfo.WriteString("### Key Components\n\n")
 				for _, comp := range doc.Components {
-					archInfo.WriteString(fmt.Sprintf("- **%s**: %s\n", comp.Layer, strings.Join(comp.Packages, ", ")))
+					fmt.Fprintf(&archInfo, "- **%s**: %s\n", comp.Layer, strings.Join(comp.Packages, ", "))
 				}
 				archInfo.WriteString("\n")
 			}
@@ -190,13 +190,13 @@ func (cb *ContextBuilder) buildCodeContext(ctx *BuildContext) {
 			convInfo.WriteString("## Code Conventions\n\n")
 
 			if doc.Conventions.Language != "" {
-				convInfo.WriteString(fmt.Sprintf("Language: %s\n\n", doc.Conventions.Language))
+				fmt.Fprintf(&convInfo, "Language: %s\n\n", doc.Conventions.Language)
 			}
 
 			if len(doc.Conventions.Patterns) > 0 {
 				convInfo.WriteString("Patterns:\n")
 				for _, pattern := range doc.Conventions.Patterns {
-					convInfo.WriteString(fmt.Sprintf("- %s\n", pattern))
+					fmt.Fprintf(&convInfo, "- %s\n", pattern)
 				}
 				convInfo.WriteString("\n")
 			}
@@ -225,7 +225,7 @@ func (cb *ContextBuilder) buildArchitectureContext(ctx *BuildContext) {
 		if doc.Architecture != nil && len(doc.Architecture.RequestFlow) > 0 {
 			archInfo.WriteString("### Request Flow\n\n")
 			for i, step := range doc.Architecture.RequestFlow {
-				archInfo.WriteString(fmt.Sprintf("%d. %s\n", i+1, step))
+				fmt.Fprintf(&archInfo, "%d. %s\n", i+1, step)
 			}
 			archInfo.WriteString("\n")
 		}
@@ -234,7 +234,7 @@ func (cb *ContextBuilder) buildArchitectureContext(ctx *BuildContext) {
 		if len(doc.Components) > 0 {
 			archInfo.WriteString("### Component Mapping\n\n")
 			for _, comp := range doc.Components {
-				archInfo.WriteString(fmt.Sprintf("**%s**\n- Packages: %s\n\n", comp.Layer, strings.Join(comp.Packages, ", ")))
+				fmt.Fprintf(&archInfo, "**%s**\n- Packages: %s\n\n", comp.Layer, strings.Join(comp.Packages, ", "))
 			}
 		}
 
@@ -242,7 +242,7 @@ func (cb *ContextBuilder) buildArchitectureContext(ctx *BuildContext) {
 		if doc.Architecture != nil && len(doc.Architecture.DataFlow) > 0 {
 			archInfo.WriteString("### Data Flow\n\n")
 			for _, step := range doc.Architecture.DataFlow {
-				archInfo.WriteString(fmt.Sprintf("- %s\n", step.Action))
+				fmt.Fprintf(&archInfo, "- %s\n", step.Action)
 			}
 			archInfo.WriteString("\n")
 		}
@@ -251,7 +251,7 @@ func (cb *ContextBuilder) buildArchitectureContext(ctx *BuildContext) {
 		if len(doc.SecurityLayers) > 0 {
 			archInfo.WriteString("### Security Layers\n\n")
 			for _, layer := range doc.SecurityLayers {
-				archInfo.WriteString(fmt.Sprintf("- **%s**: %s\n", layer.Name, layer.Description))
+				fmt.Fprintf(&archInfo, "- **%s**: %s\n", layer.Name, layer.Description)
 			}
 			archInfo.WriteString("\n")
 		}
@@ -274,12 +274,12 @@ func (cb *ContextBuilder) buildAgentContext(ctx *BuildContext) {
 			agentInfo.WriteString("## Available Agents\n\n")
 
 			for _, agent := range doc.Agents {
-				agentInfo.WriteString(fmt.Sprintf("- **%s** (%s)\n", agent.ID, agent.Role))
+				fmt.Fprintf(&agentInfo, "- **%s** (%s)\n", agent.ID, agent.Role)
 				if agent.Purpose != "" {
-					agentInfo.WriteString(fmt.Sprintf("  Purpose: %s\n", agent.Purpose))
+					fmt.Fprintf(&agentInfo, "  Purpose: %s\n", agent.Purpose)
 				}
 				if len(agent.Capabilities) > 0 {
-					agentInfo.WriteString(fmt.Sprintf("  Capabilities: %s\n", strings.Join(agent.Capabilities, ", ")))
+					fmt.Fprintf(&agentInfo, "  Capabilities: %s\n", strings.Join(agent.Capabilities, ", "))
 				}
 				agentInfo.WriteString("\n")
 			}
@@ -306,13 +306,13 @@ func (cb *ContextBuilder) buildGeneralContext(ctx *BuildContext) {
 		overview.WriteString("## Project Overview\n\n")
 
 		// Working directory
-		overview.WriteString(fmt.Sprintf("Working Directory: `%s`\n\n", cb.artifacts.WorkingDir))
+		fmt.Fprintf(&overview, "Working Directory: `%s`\n\n", cb.artifacts.WorkingDir)
 
 		// Architecture summary
 		if doc.Architecture != nil && len(doc.Architecture.RequestFlow) > 0 {
 			overview.WriteString("### Architecture\n\n")
 			for _, step := range doc.Architecture.RequestFlow {
-				overview.WriteString(fmt.Sprintf("- %s\n", step))
+				fmt.Fprintf(&overview, "- %s\n", step)
 			}
 			overview.WriteString("\n")
 		}
@@ -321,12 +321,12 @@ func (cb *ContextBuilder) buildGeneralContext(ctx *BuildContext) {
 		if doc.Conventions != nil {
 			overview.WriteString("### Conventions\n\n")
 			if doc.Conventions.Language != "" {
-				overview.WriteString(fmt.Sprintf("Language: %s\n", doc.Conventions.Language))
+				fmt.Fprintf(&overview, "Language: %s\n", doc.Conventions.Language)
 			}
 			if len(doc.Conventions.Patterns) > 0 {
 				overview.WriteString("\nPatterns:\n")
 				for _, pattern := range doc.Conventions.Patterns {
-					overview.WriteString(fmt.Sprintf("- %s\n", pattern))
+					fmt.Fprintf(&overview, "- %s\n", pattern)
 				}
 			}
 			overview.WriteString("\n")
@@ -365,12 +365,12 @@ func (cb *ContextBuilder) buildSkillInfo(ctx *BuildContext, categories []string)
 			}
 		}
 
-		skillInfo.WriteString(fmt.Sprintf("- **%s** (%s)\n", skill.Name, skill.Category))
+		fmt.Fprintf(&skillInfo, "- **%s** (%s)\n", skill.Name, skill.Category)
 		if skill.Description != "" {
-			skillInfo.WriteString(fmt.Sprintf("  %s\n", skill.Description))
+			fmt.Fprintf(&skillInfo, "  %s\n", skill.Description)
 		}
 		if skill.Version != "" {
-			skillInfo.WriteString(fmt.Sprintf("  Version: %s\n", skill.Version))
+			fmt.Fprintf(&skillInfo, "  Version: %s\n", skill.Version)
 		}
 		skillInfo.WriteString("\n")
 

@@ -39,11 +39,11 @@ func RegisterRPCHandlers(server *rpc.Server, scheduler *Scheduler) {
 
 // AddJobParams represents the parameters for adding a job.
 type AddJobParams struct {
-	ID       string  `json:"id,omitempty"`
-	Name     string  `json:"name"`
-	Type     JobType `json:"type"`
-	Schedule string  `json:"schedule"`
-	Enabled  bool    `json:"enabled"`
+	ID       string   `json:"id,omitempty"`
+	Name     string   `json:"name"`
+	Type     JobType  `json:"type"`
+	Schedule string   `json:"schedule"`
+	Enabled  bool     `json:"enabled"`
 	Tags     []string `json:"tags,omitempty"`
 
 	// Type-specific configs (only one should be set)
@@ -361,13 +361,13 @@ func (h *RPCHandler) Status(ctx context.Context, params json.RawMessage) (any, e
 	}
 
 	return map[string]any{
-		"running":        h.scheduler.Running(),
-		"timezone":       h.scheduler.Location().String(),
-		"total_jobs":     len(jobs),
-		"enabled_jobs":   enabledCount,
-		"disabled_jobs":  disabledCount,
-		"running_jobs":   runningCount,
-		"storage_path":   h.scheduler.Store().FilePath(),
+		"running":       h.scheduler.Running(),
+		"timezone":      h.scheduler.Location().String(),
+		"total_jobs":    len(jobs),
+		"enabled_jobs":  enabledCount,
+		"disabled_jobs": disabledCount,
+		"running_jobs":  runningCount,
+		"storage_path":  h.scheduler.Store().FilePath(),
 	}, nil
 }
 
@@ -404,7 +404,7 @@ func getScheduleExamples(schedule string, loc *time.Location, count int) []strin
 	examples := make([]string, 0, count)
 	t := time.Now().In(loc)
 
-	for i := 0; i < count; i++ {
+	for range count {
 		t = sched.Next(t)
 		examples = append(examples, t.Format(time.RFC3339))
 	}

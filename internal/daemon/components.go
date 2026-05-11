@@ -25,8 +25,8 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/queue"
-	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/scheduler"
+	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
@@ -42,67 +42,67 @@ import (
 
 // Components holds all the daemon components.
 type Components struct {
-	Config          *config.Config
-	ModelsConfig    *config.ModelsConfig
-	LLMClient       *llm.Client
-	LLMResolver     *llm.Resolver
-	ToolRegistry    *tools.Registry
-	SecurityChecker *security.PermissionChecker
+	Config               *config.Config
+	ModelsConfig         *config.ModelsConfig
+	LLMClient            *llm.Client
+	LLMResolver          *llm.Resolver
+	ToolRegistry         *tools.Registry
+	SecurityChecker      *security.PermissionChecker
 	SecurityOrchestrator *intsecurity.Orchestrator
-	AgentLoop       *agent.AgentLoop
-	ChatHandler     *agent.ChatHandler
-	StatusHandler   *StatusHandler
-	SessionStore    session.Store
-	SessionHandler  *session.Handler
+	AgentLoop            *agent.AgentLoop
+	ChatHandler          *agent.ChatHandler
+	StatusHandler        *StatusHandler
+	SessionStore         session.Store
+	SessionHandler       *session.Handler
 
 	// Multi-agent orchestration components
-	Queue           queue.Queue
-	QueueHandler    *queue.Handler
-	TaskRegistry    *task.Registry
-	TaskHandler     *task.Handler
-	AmendmentMgr    *task.AmendmentManager
-	WorkerPool      *worker.Pool
-	WorkerHandler   *worker.Handler
-	JobProcessor    worker.JobProcessor
-	Orchestrator    *agent.Orchestrator
-	ReviewManager   *agent.ReviewManager
+	Queue         queue.Queue
+	QueueHandler  *queue.Handler
+	TaskRegistry  *task.Registry
+	TaskHandler   *task.Handler
+	AmendmentMgr  *task.AmendmentManager
+	WorkerPool    *worker.Pool
+	WorkerHandler *worker.Handler
+	JobProcessor  worker.JobProcessor
+	Orchestrator  *agent.Orchestrator
+	ReviewManager *agent.ReviewManager
 
 	// Agent validation watchdog
-	Watchdog             *agent.Watchdog
+	Watchdog              *agent.Watchdog
 	HallucinationDetector *agent.HallucinationDetector
-	EscalationManager    *agent.EscalationManager
-	ArtifactManager      *agent.ArtifactManager
+	EscalationManager     *agent.EscalationManager
+	ArtifactManager       *agent.ArtifactManager
 
 	// Memory
-	MemoryManager   *memory.Manager
-	MemoryHandler   *memory.Handler
+	MemoryManager *memory.Manager
+	MemoryHandler *memory.Handler
 
 	// Memvid and multi-agent
-	MemvidClient    *memvid.Client
-	AgentRegistry   *agent.AgentRegistry
-	Dispatcher      *agent.Dispatcher
+	MemvidClient  *memvid.Client
+	AgentRegistry *agent.AgentRegistry
+	Dispatcher    *agent.Dispatcher
 
 	// Shadow training
-	ShadowManager   *shadow.Manager
+	ShadowManager *shadow.Manager
 
 	// Learning pipeline
 	LearningPipeline *selfimprove.LearningPipeline
 
 	// Self-improvement controller (full 5-phase cycle)
-	SelfImproveCtrl    *selfimprove.Controller
-	SelfImproveSched   *selfimprove.Scheduler
+	SelfImproveCtrl  *selfimprove.Controller
+	SelfImproveSched *selfimprove.Scheduler
 
 	// LLM provider manager (for multi-provider failover)
-	LLMProvider     llm.Chatter
+	LLMProvider llm.Chatter
 
 	// Token cache for LLM responses
-	TokenCache    *llm.TokenCacheCoordinator
+	TokenCache *llm.TokenCacheCoordinator
 
 	// MCP integration
-	MCPManager      *mcp.Manager
+	MCPManager *mcp.Manager
 
 	// Scheduler with job dependencies
-	Scheduler       *scheduler.Scheduler
+	Scheduler *scheduler.Scheduler
 
 	// Skills
 	SkillRegistry   *skills.Registry
@@ -111,33 +111,32 @@ type Components struct {
 	SkillLoader     *skills.LazySkillLoader
 	CapabilityIndex *skills.CapabilityIndex
 
-
 	// Agent capabilities
 	CapabilitiesMap *agent.CapabilitiesMap
 
 	// Distributed memory sync
-	SyncManager     *memsync.SyncManager
-	SyncHandler     *memsync.Handler
+	SyncManager *memsync.SyncManager
+	SyncHandler *memsync.Handler
 
 	// Result cache for tool outputs
-	ResultCache     *agent.ResultCache
+	ResultCache *agent.ResultCache
 
 	// Web API server
-	WebServer       *web.Server
+	WebServer *web.Server
 
 	// Telegram bot
 	TelegramBot     *telegram.Bot
 	TelegramHandler *telegram.AgentHandler
 
 	// Code intelligence
-	ASTParser       *ast.ParserManager
-	LSPManager      *lsp.Manager
+	ASTParser  *ast.ParserManager
+	LSPManager *lsp.Manager
 
 	// Calendar integration
-	CalendarClient    *calendar.Client
-	CalendarReminder  *calendar.ReminderWatcher
+	CalendarClient   *calendar.Client
+	CalendarReminder *calendar.ReminderWatcher
 
-	Logger          *slog.Logger
+	Logger *slog.Logger
 }
 
 // NewComponents creates all daemon components from configuration.
@@ -175,10 +174,10 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Create security checker
 	secCfg := security.Config{
-		AllowedPaths:              cfg.Security.AllowedPaths,
-		BlockedPaths:              cfg.Security.BlockedPaths,
-		BlockFinancial:            cfg.Security.BlockFinancial,
-		RequireConfirmationHigh:   cfg.Security.RequireConfirmationHigh,
+		AllowedPaths:                cfg.Security.AllowedPaths,
+		BlockedPaths:                cfg.Security.BlockedPaths,
+		BlockFinancial:              cfg.Security.BlockFinancial,
+		RequireConfirmationHigh:     cfg.Security.RequireConfirmationHigh,
 		RequireConfirmationCritical: cfg.Security.RequireConfirmationCritical,
 	}
 	c.SecurityChecker = security.NewPermissionChecker(secCfg)
@@ -267,7 +266,6 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if cfg.Skills.Enabled {
 		c.initializeSkills(cfg, logger)
 	}
-
 
 	// Create shadow training manager early (before agent loop) so it can be injected
 	if cfg.Shadow.Enabled {
@@ -673,7 +671,6 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Create agent registry if multi-agent is enabled
 	if cfg.MultiAgent.Enabled {
-		
 
 		var taskStore *task.Store
 		if c.TaskRegistry != nil {
@@ -681,15 +678,15 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 
 		c.AgentRegistry = agent.NewAgentRegistry(agent.RegistryConfig{
-			MemvidClient:         c.MemvidClient,
-			TaskStore:            taskStore,
-			LLMClient:            c.LLMClient,
-			Resolver:             c.LLMResolver,
-			MessageBus:           msgBus,
-			SecurityChecker:      c.SecurityChecker,
-			ToolRegistry:         c.ToolRegistry,
-			ShadowManager:        c.ShadowManager,
-			Logger:               logger,
+			MemvidClient:          c.MemvidClient,
+			TaskStore:             taskStore,
+			LLMClient:             c.LLMClient,
+			Resolver:              c.LLMResolver,
+			MessageBus:            msgBus,
+			SecurityChecker:       c.SecurityChecker,
+			ToolRegistry:          c.ToolRegistry,
+			ShadowManager:         c.ShadowManager,
+			Logger:                logger,
 			BundledAgentsPath:     "config/agents",
 			Watchdog:              c.Watchdog,
 			HallucinationDetector: c.HallucinationDetector,
@@ -1468,7 +1465,6 @@ func splitModelRef(ref string) []string {
 	return []string{ref}
 }
 
-
 // createSecurityOrchestrator creates a security orchestrator from configuration.
 func createSecurityOrchestrator(cfg *config.Config, logger *slog.Logger) *intsecurity.Orchestrator {
 	orchCfg := intsecurity.OrchestratorConfig{
@@ -1840,9 +1836,9 @@ func (a *learningPipelineAdapter) Distill(ctx context.Context, trajectory agent.
 
 	siJudgment := &selfimprove.JudgmentResult{
 		Quality:          judgment.Quality,
-		Correctness:      judgment.Quality,     // Approximate from Quality
-		Efficiency:       judgment.Quality,     // Approximate from Quality
-		Generalizability: 0.7,                  // Default: assume moderate generalizability
+		Correctness:      judgment.Quality, // Approximate from Quality
+		Efficiency:       judgment.Quality, // Approximate from Quality
+		Generalizability: 0.7,              // Default: assume moderate generalizability
 		ShouldStore:      judgment.ShouldLearn,
 		Reason:           judgment.Reason,
 	}
@@ -2372,7 +2368,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			if len(stepPayload.MemoryRefs) > 0 {
 				sb.WriteString("**Available Memories:**\n")
 				for i, ref := range stepPayload.MemoryRefs {
-					sb.WriteString(fmt.Sprintf("%d. Memory: `%s`\n", i+1, ref))
+					fmt.Fprintf(&sb, "%d. Memory: `%s`\n", i+1, ref)
 				}
 				sb.WriteString("\n")
 			}
@@ -2383,14 +2379,14 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 			}
 			contextSection = sb.String()
 		}
-		
+
 		// Prepend context to the step description
 		if contextSection != "" {
 			prompt = contextSection + "\n## Your Task\n\n" + stepPayload.Description
 		} else {
 			prompt = stepPayload.Description
 		}
-		
+
 		conversationID = fmt.Sprintf("step-%s-%s", stepPayload.TaskID, stepPayload.StepID)
 		p.logger.Info("Processing step job",
 			"job_id", job.ID,

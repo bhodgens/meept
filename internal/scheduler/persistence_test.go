@@ -359,7 +359,7 @@ func TestStoreList(t *testing.T) {
 	}
 
 	// Add jobs
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		store.Add(JobConfig{
 			ID:       string(rune('a' + i)),
 			Name:     "Job",
@@ -386,7 +386,7 @@ func TestStoreClear(t *testing.T) {
 	}
 
 	// Add jobs
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		store.Add(JobConfig{
 			ID:       string(rune('a' + i)),
 			Name:     "Job",
@@ -570,7 +570,7 @@ func TestStoreConcurrency(t *testing.T) {
 
 	// Run concurrent operations
 	done := make(chan bool)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(n int) {
 			jobID := string(rune('a' + n))
 			store.Add(JobConfig{
@@ -589,7 +589,7 @@ func TestStoreConcurrency(t *testing.T) {
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 

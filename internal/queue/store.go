@@ -341,10 +341,7 @@ func (s *Store) Retry(jobID string) error {
 
 	// Calculate exponential backoff: 2s * 2^retryCount, capped at 8s
 	backoffMultiplier := 1 << retryCount // 2^retryCount: 1, 2, 4, 8, ...
-	backoff := retryBackoffBase * time.Duration(backoffMultiplier)
-	if backoff > 8*time.Second {
-		backoff = 8 * time.Second
-	}
+	backoff := min(retryBackoffBase*time.Duration(backoffMultiplier), 8*time.Second)
 
 	nextRetryAt := now.Add(backoff)
 
@@ -563,17 +560,17 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		FROM dead_letter WHERE id = ?`, jobID)
 
 	var (
-		id, jobType, payload, capsJSON    string
-		priority, maxRetries, retryCount  int
-		taskID, agentID                   sql.NullString
-		errMsg                            sql.NullString
-		createdAt                         string
+		id, jobType, payload, capsJSON   string
+		priority, maxRetries, retryCount int
+		taskID, agentID                  sql.NullString
+		errMsg                           sql.NullString
+		createdAt                        string
 	)
 
 	err = row.Scan(&id, &taskID, &agentID, &jobType, &priority, &payload, &capsJSON,
 		&maxRetries, &retryCount, &errMsg, &createdAt)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("dead letter job not found: %s", jobID)
 		}
 		return nil, fmt.Errorf("failed to read dead letter: %w", err)
@@ -593,7 +590,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 		payload,
 		capsJSON,
 		maxRetries,
-		0, // Reset retry_count
+		0,              // Reset retry_count
 		(*string)(nil), // claimed_by
 		(*string)(nil), // result
 		(*string)(nil), // Reset error
@@ -646,7 +643,7 @@ func (s *Store) ListDeadLetter(limit int) ([]*Job, error) {
 	var jobs []*Job
 	for rows.Next() {
 		var (
-			id, jobType, payload, capsJSON  string
+			id, jobType, payload, capsJSON   string
 			priority, maxRetries, retryCount int
 			taskID, agentID                  sql.NullString
 			errMsg                           sql.NullString
@@ -713,13 +710,13 @@ func (s *Store) Close() error {
 
 func (s *Store) scanJob(row *sql.Row) (*Job, error) {
 	var (
-		id, jobType, state, payload       string
-		priority, maxRetries, retryCount  int
-		taskID, agentID, claimedBy        sql.NullString
-		result, errMsg                    sql.NullString
-		capsJSON                          string
-		createdAt, updatedAt              string
-		dueAt, nextRetryAt                sql.NullString
+		id, jobType, state, payload      string
+		priority, maxRetries, retryCount int
+		taskID, agentID, claimedBy       sql.NullString
+		result, errMsg                   sql.NullString
+		capsJSON                         string
+		createdAt, updatedAt             string
+		dueAt, nextRetryAt               sql.NullString
 	)
 
 	err := row.Scan(&id, &taskID, &agentID, &jobType, &priority, &state, &payload, &capsJSON,
@@ -733,13 +730,13 @@ func (s *Store) scanJob(row *sql.Row) (*Job, error) {
 
 func (s *Store) scanJobRows(rows *sql.Rows) (*Job, error) {
 	var (
-		id, jobType, state, payload       string
-		priority, maxRetries, retryCount  int
-		taskID, agentID, claimedBy        sql.NullString
-		result, errMsg                    sql.NullString
-		capsJSON                          string
-		createdAt, updatedAt              string
-		dueAt, nextRetryAt                sql.NullString
+		id, jobType, state, payload      string
+		priority, maxRetries, retryCount int
+		taskID, agentID, claimedBy       sql.NullString
+		result, errMsg                   sql.NullString
+		capsJSON                         string
+		createdAt, updatedAt             string
+		dueAt, nextRetryAt               sql.NullString
 	)
 
 	err := rows.Scan(&id, &taskID, &agentID, &jobType, &priority, &state, &payload, &capsJSON,
@@ -803,14 +800,14 @@ func (s *Store) buildJob(id string, taskID, agentID sql.NullString, jobType, sta
 	return job, nil
 }
 
-func nullableString(s string) interface{} {
+func nullableString(s string) any {
 	if s == "" {
 		return nil
 	}
 	return s
 }
 
-func nullableRawJSON(j json.RawMessage) interface{} {
+func nullableRawJSON(j json.RawMessage) any {
 	if len(j) == 0 {
 		return nil
 	}

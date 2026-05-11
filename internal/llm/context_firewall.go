@@ -115,10 +115,10 @@ func parseBulletItems(section string) []string {
 func formatStructuredSummary(level int, ext SummaryExtract, narrative string) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("[Conversation summary level %d]:", level))
+	fmt.Fprintf(&b, "[Conversation summary level %d]:", level)
 
 	if ext.TaskState != "" {
-		b.WriteString(fmt.Sprintf(" status: %s.", ext.TaskState))
+		fmt.Fprintf(&b, " status: %s.", ext.TaskState)
 	}
 
 	if len(ext.Decisions) > 0 {
@@ -349,10 +349,10 @@ func NewContextFirewall(
 			contextLimit = model.ContextLimit
 		}
 		compressorCfg := CompressionConfig{
-			Enabled:              true,
-			ModelContextLimit:    contextLimit,
-			Stage1WarningRatio:   DefaultWarningRatio,
-			Stage2SummarizeRatio: DefaultSummarizeRatio,
+			Enabled:               true,
+			ModelContextLimit:     contextLimit,
+			Stage1WarningRatio:    DefaultWarningRatio,
+			Stage2SummarizeRatio:  DefaultSummarizeRatio,
 			Stage3AggressiveRatio: DefaultAggressiveRatio,
 			Stage4HardLimitRatio:  DefaultHardLimitRatio,
 		}
@@ -369,7 +369,6 @@ func NewContextFirewall(
 		compressor:   compressor,
 	}
 }
-
 
 // Chat sends a request through context filtering.
 func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
@@ -729,7 +728,7 @@ func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []Cha
 	// Build content-aware summarization request
 	var conversationText strings.Builder
 	for _, msg := range toSummarize {
-		conversationText.WriteString(fmt.Sprintf("%s: %s\n", msg.Role, msg.Content))
+		fmt.Fprintf(&conversationText, "%s: %s\n", msg.Role, msg.Content)
 	}
 	summaryPrompt := fmt.Sprintf(structuredSummaryPromptTemplate, conversationText.String())
 

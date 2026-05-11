@@ -10,7 +10,7 @@ func TestL1Cache_LRU_Eviction(t *testing.T) {
 	cache := NewL1Cache(L1CacheConfig{MaxEntries: 3})
 
 	// Insert 3 entries
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		key := CacheKey{ModelID: "model", PromptHash: fmt.Sprintf("hash%d", i)}
 		entry := &CacheEntry{
 			Response:       &Response{Content: fmt.Sprintf("response%d", i)},

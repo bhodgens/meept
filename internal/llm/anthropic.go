@@ -36,14 +36,14 @@ var anthropicRetryableStatusCodes = map[int]bool{
 // AnthropicClient implements the Chatter interface for Anthropic's Messages API.
 // It provides native support for Anthropic-specific features including extended thinking.
 type AnthropicClient struct {
-	config        *ModelConfig
-	budget        *Budget
-	httpClient    *http.Client
-	logger        *slog.Logger
-	metricsStore  *metrics.Store
-	timeoutCalc   *metrics.Calculator
-	tokenCache    ResponseCache
-	keyBuilder    *CacheKeyBuilder
+	config       *ModelConfig
+	budget       *Budget
+	httpClient   *http.Client
+	logger       *slog.Logger
+	metricsStore *metrics.Store
+	timeoutCalc  *metrics.Calculator
+	tokenCache   ResponseCache
+	keyBuilder   *CacheKeyBuilder
 }
 
 // AnthropicClientOption is a functional option for configuring an AnthropicClient.
@@ -362,22 +362,22 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 // Anthropic API request structures
 
 type anthropicRequest struct {
-	Model         string                   `json:"model"`
-	MaxTokens     int                      `json:"max_tokens"`
-	System        string                   `json:"system,omitempty"`
-	Messages      []anthropicMessage       `json:"messages"`
-	Tools         []anthropicTool          `json:"tools,omitempty"`
-	Temperature   *float64                 `json:"temperature,omitempty"`
-	TopP          *float64                 `json:"top_p,omitempty"`
-	StopSequences []string                 `json:"stop_sequences,omitempty"`
-	Stream        bool                     `json:"stream,omitempty"`
+	Model         string             `json:"model"`
+	MaxTokens     int                `json:"max_tokens"`
+	System        string             `json:"system,omitempty"`
+	Messages      []anthropicMessage `json:"messages"`
+	Tools         []anthropicTool    `json:"tools,omitempty"`
+	Temperature   *float64           `json:"temperature,omitempty"`
+	TopP          *float64           `json:"top_p,omitempty"`
+	StopSequences []string           `json:"stop_sequences,omitempty"`
+	Stream        bool               `json:"stream,omitempty"`
 	// Extended thinking configuration
 	Thinking *anthropicThinkingConfig `json:"thinking,omitempty"`
 }
 
 type anthropicThinkingConfig struct {
-	Type      string  `json:"type"`
-	BudgetTokens *int `json:"budget_tokens,omitempty"`
+	Type         string `json:"type"`
+	BudgetTokens *int   `json:"budget_tokens,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -386,16 +386,16 @@ type anthropicMessage struct {
 }
 
 type anthropicContent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 	// For tool results
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
 	Content   string `json:"content,omitempty"`
 	// For tool use
-	ID       string          `json:"id,omitempty"`
-	Name     string          `json:"name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 type anthropicTool struct {
@@ -421,8 +421,8 @@ type anthropicContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 	// Tool use fields
-	ID   string          `json:"id,omitempty"`
-	Name string          `json:"name,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 	// Thinking fields
 	Thinking string `json:"thinking,omitempty"`
@@ -454,19 +454,19 @@ type anthropicStreamEvent struct {
 }
 
 type anthropicDelta struct {
-	Type         string `json:"type,omitempty"`
-	Text         string `json:"text,omitempty"`
-	Thinking     string `json:"thinking,omitempty"`
-	PartialJSON  string `json:"partial_json,omitempty"`
-	StopReason   string `json:"stop_reason,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Text        string `json:"text,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
 }
 
 type anthropicMessageMeta struct {
-	ID      string                `json:"id,omitempty"`
-	Type    string                `json:"type,omitempty"`
-	Role    string                `json:"role,omitempty"`
+	ID      string                  `json:"id,omitempty"`
+	Type    string                  `json:"type,omitempty"`
+	Role    string                  `json:"role,omitempty"`
 	Content []anthropicContentBlock `json:"content,omitempty"`
-	Usage   *anthropicUsage       `json:"usage,omitempty"`
+	Usage   *anthropicUsage         `json:"usage,omitempty"`
 }
 
 // contentBlockAccum accumulates content during streaming response parsing.
@@ -610,7 +610,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	c.logger.Debug("Making Anthropic request", "url", url, "model", c.config.ModelID)
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, &ClientError{Message: "failed to create request", Cause: err}
 	}
@@ -719,7 +719,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 
 	c.logger.Debug("Making Anthropic streaming request", "url", url, "model", c.config.ModelID)
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, &ClientError{Message: "failed to create request", Cause: err}
 	}
@@ -918,7 +918,7 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 	}
 
 	return &Response{
-		Content: finalContent,
+		Content:   finalContent,
 		ToolCalls: toolCalls,
 		Usage: TokenUsage{
 			PromptTokens:     usage.InputTokens,
@@ -943,7 +943,7 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) (*Response, 
 		case "thinking":
 			thinking.WriteString(block.Thinking)
 		case "tool_use":
-			var input json.RawMessage = block.Input
+			var input = block.Input
 			if input == nil {
 				input = json.RawMessage("{}")
 			}
@@ -965,7 +965,7 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) (*Response, 
 	}
 
 	return &Response{
-		Content: finalContent,
+		Content:   finalContent,
 		ToolCalls: toolCalls,
 		Usage: TokenUsage{
 			PromptTokens:     apiResp.Usage.InputTokens,
@@ -1076,10 +1076,10 @@ func (s *sseScanner) Scan() bool {
 }
 
 func (s *sseScanner) processLine(line string) {
-	if strings.HasPrefix(line, "event: ") {
-		s.event.Type = strings.TrimPrefix(line, "event: ")
-	} else if strings.HasPrefix(line, "data: ") {
-		data := strings.TrimPrefix(line, "data: ")
+	if after, ok := strings.CutPrefix(line, "event: "); ok {
+		s.event.Type = after
+	} else if after, ok := strings.CutPrefix(line, "data: "); ok {
+		data := after
 		if s.event.Data != "" {
 			s.event.Data += "\n" + data
 		} else {

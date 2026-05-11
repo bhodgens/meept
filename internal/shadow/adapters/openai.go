@@ -13,10 +13,10 @@ import (
 
 // OpenAIAdapter manages fine-tuning via OpenAI API.
 type OpenAIAdapter struct {
-	apiKey     string
-	baseURL    string
-	client     *http.Client
-	orgID      string
+	apiKey  string
+	baseURL string
+	client  *http.Client
+	orgID   string
 }
 
 // NewOpenAIAdapter creates a new OpenAI adapter manager.
@@ -33,16 +33,16 @@ func NewOpenAIAdapter(apiKey, orgID string) *OpenAIAdapter {
 
 // FineTuneJob represents an OpenAI fine-tuning job.
 type FineTuneJob struct {
-	ID              string    `json:"id"`
-	Object          string    `json:"object"`
-	Model           string    `json:"model"`
-	CreatedAt       int64     `json:"created_at"`
-	FinishedAt      *int64    `json:"finished_at,omitempty"`
-	FineTunedModel  string    `json:"fine_tuned_model,omitempty"`
-	Status          string    `json:"status"`
-	TrainingFile    string    `json:"training_file"`
-	ValidationFile  string    `json:"validation_file,omitempty"`
-	Error           *JobError `json:"error,omitempty"`
+	ID             string    `json:"id"`
+	Object         string    `json:"object"`
+	Model          string    `json:"model"`
+	CreatedAt      int64     `json:"created_at"`
+	FinishedAt     *int64    `json:"finished_at,omitempty"`
+	FineTunedModel string    `json:"fine_tuned_model,omitempty"`
+	Status         string    `json:"status"`
+	TrainingFile   string    `json:"training_file"`
+	ValidationFile string    `json:"validation_file,omitempty"`
+	Error          *JobError `json:"error,omitempty"`
 }
 
 // JobError represents an error in a fine-tuning job.
@@ -81,12 +81,12 @@ func (a *OpenAIAdapter) UploadTrainingFile(ctx context.Context, filePath string)
 	body.WriteString("Content-Disposition: form-data; name=\"purpose\"\r\n\r\n")
 	body.WriteString("fine-tune\r\n")
 	body.WriteString("--boundary\r\n")
-	body.WriteString(fmt.Sprintf("Content-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n", filePath))
+	fmt.Fprintf(body, "Content-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n", filePath)
 	body.WriteString("Content-Type: application/json\r\n\r\n")
 	body.Write(content)
 	body.WriteString("\r\n--boundary--\r\n")
 
-	req, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/files", body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/files", body)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (a *OpenAIAdapter) CreateFineTuneJob(ctx context.Context, trainingFileID, m
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/fine_tuning/jobs", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/fine_tuning/jobs", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func (a *OpenAIAdapter) CreateFineTuneJob(ctx context.Context, trainingFileID, m
 
 // GetFineTuneJob retrieves the status of a fine-tuning job.
 func (a *OpenAIAdapter) GetFineTuneJob(ctx context.Context, jobID string) (*FineTuneJob, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", a.baseURL+"/fine_tuning/jobs/"+jobID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/fine_tuning/jobs/"+jobID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (a *OpenAIAdapter) GetFineTuneJob(ctx context.Context, jobID string) (*Fine
 // ListFineTuneJobs lists all fine-tuning jobs.
 func (a *OpenAIAdapter) ListFineTuneJobs(ctx context.Context, limit int) ([]*FineTuneJob, error) {
 	url := fmt.Sprintf("%s/fine_tuning/jobs?limit=%d", a.baseURL, limit)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (a *OpenAIAdapter) ListFineTuneJobs(ctx context.Context, limit int) ([]*Fin
 
 // CancelFineTuneJob cancels a running fine-tuning job.
 func (a *OpenAIAdapter) CancelFineTuneJob(ctx context.Context, jobID string) error {
-	req, err := http.NewRequestWithContext(ctx, "POST", a.baseURL+"/fine_tuning/jobs/"+jobID+"/cancel", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/fine_tuning/jobs/"+jobID+"/cancel", nil)
 	if err != nil {
 		return err
 	}

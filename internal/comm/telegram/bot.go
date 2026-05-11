@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -71,11 +72,11 @@ type SessionResetter interface {
 
 // BotConfig holds configuration for the Telegram bot.
 type BotConfig struct {
-	Token          string   // Bot API token
-	AllowedUsers   []int64  // User IDs allowed to interact (empty = all)
-	AllowedChats   []int64  // Chat IDs allowed (empty = all)
-	PollTimeout    int      // Long polling timeout in seconds
-	MaxConnections int      // Max simultaneous connections
+	Token          string  // Bot API token
+	AllowedUsers   []int64 // User IDs allowed to interact (empty = all)
+	AllowedChats   []int64 // Chat IDs allowed (empty = all)
+	PollTimeout    int     // Long polling timeout in seconds
+	MaxConnections int     // Max simultaneous connections
 }
 
 // Bot is the Telegram bot client.
@@ -311,7 +312,6 @@ const helpMessage = `*Meept Bot Commands*
 
 Just send me a message to chat\\!`
 
-
 // SendMessage sends a message to a chat.
 func (b *Bot) SendMessage(ctx context.Context, chatID int64, text string) error {
 	// Split long messages
@@ -374,13 +374,7 @@ func (b *Bot) SendTyping(ctx context.Context, chatID int64) error {
 func (b *Bot) isAllowed(msg *Message) bool {
 	// Check user allowlist
 	if len(b.config.AllowedUsers) > 0 && msg.From != nil {
-		found := false
-		for _, id := range b.config.AllowedUsers {
-			if id == msg.From.ID {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(b.config.AllowedUsers, msg.From.ID)
 		if !found {
 			return false
 		}
@@ -388,13 +382,7 @@ func (b *Bot) isAllowed(msg *Message) bool {
 
 	// Check chat allowlist
 	if len(b.config.AllowedChats) > 0 {
-		found := false
-		for _, id := range b.config.AllowedChats {
-			if id == msg.Chat.ID {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(b.config.AllowedChats, msg.Chat.ID)
 		if !found {
 			return false
 		}
@@ -411,10 +399,7 @@ func splitMessage(text string, maxLen int) []string {
 
 	var messages []string
 	for len(text) > 0 {
-		end := maxLen
-		if end > len(text) {
-			end = len(text)
-		}
+		end := min(maxLen, len(text))
 
 		// Try to split at newline or space
 		if end < len(text) {

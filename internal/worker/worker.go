@@ -400,10 +400,3 @@ type WorkerStats struct {
 func generateWorkerID() string {
 	return fmt.Sprintf("worker-%d", time.Now().UnixNano())
 }
-
-func min(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}

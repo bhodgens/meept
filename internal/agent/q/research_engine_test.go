@@ -84,7 +84,7 @@ func TestResearchEngineComputeConfidence(t *testing.T) {
 			pattern := PatternReport{Confidence: tt.baseConf}
 
 			evidence := make([]EvidenceLink, 0, tt.evidenceCount)
-			for i := 0; i < tt.evidenceCount; i++ {
+			for i := range tt.evidenceCount {
 				typ := "transcript"
 				if i < len(tt.evidenceTypes) {
 					typ = tt.evidenceTypes[i]
@@ -389,11 +389,11 @@ func TestResearchEngineConductResearch(t *testing.T) {
 	eng := NewResearchEngine(nil, researchLogger, ResearchEngineConfig{AnalysisTimeoutMinutes: 30})
 
 	pattern := PatternReport{
-		ID:                 "test_pattern_1",
-		PatternType:        "wrong_agent_assignment",
-		Confidence:         0.85,
-		AffectedIntent:     "debugging",
-		RecommendedAction:  "create_agent",
+		ID:                   "test_pattern_1",
+		PatternType:          "wrong_agent_assignment",
+		Confidence:           0.85,
+		AffectedIntent:       "debugging",
+		RecommendedAction:    "create_agent",
 		MisconfigurationType: "capability_gap",
 		SessionCount:         10,
 	}

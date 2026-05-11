@@ -10,10 +10,10 @@ import (
 // countingStubChatter tracks how many times Chat is called and records the
 // prompt it received. It returns a fixed-size response.
 type countingStubChatter struct {
-	calls     atomic.Int32
+	calls      atomic.Int32
 	lastPrompt string
-	respSize  int // tokens in the response (using heuristic 3 chars/token)
-	err       error
+	respSize   int // tokens in the response (using heuristic 3 chars/token)
+	err        error
 }
 
 func (c *countingStubChatter) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
@@ -51,10 +51,7 @@ func (t *tieredStubChatter) Chat(ctx context.Context, messages []ChatMessage, op
 	if t.err != nil {
 		return nil, t.err
 	}
-	tokens := t.respSize - t.shrinkBy*callNum
-	if tokens < 1 {
-		tokens = 1
-	}
+	tokens := max(t.respSize-t.shrinkBy*callNum, 1)
 	content := strings.Repeat("s", tokens*3)
 	return &Response{Content: content}, nil
 }
@@ -72,14 +69,14 @@ func TestHierarchicalSummarization_Disabled(t *testing.T) {
 	// before -- single pass, no recursion, SummaryLevel=1 on the summary.
 	model := &ModelConfig{ContextLimit: 1000}
 	cfg := ContextFirewallConfig{
-		Enabled:                    true,
-		SummarizeHistory:           true,
-		DropContextOnHardLimit:     false,
-		HardLimit:                  0.30,
-		WrapUpThreshold:            0.10,
-		HierarchicalSummarization:  false,
-		MaxSummaryLevel:            3,
-		SummaryLevelThreshold:      100,
+		Enabled:                   true,
+		SummarizeHistory:          true,
+		DropContextOnHardLimit:    false,
+		HardLimit:                 0.30,
+		WrapUpThreshold:           0.10,
+		HierarchicalSummarization: false,
+		MaxSummaryLevel:           3,
+		SummaryLevelThreshold:     100,
 	}
 
 	inner := &stubChatter{resp: &Response{Content: "ok"}}
@@ -114,14 +111,14 @@ func TestHierarchicalSummarization_RecursesWhenSummaryExceedsThreshold(t *testin
 	// the 300-token summary should trigger a second summarization pass.
 	model := &ModelConfig{ContextLimit: 1000}
 	cfg := ContextFirewallConfig{
-		Enabled:                    true,
-		SummarizeHistory:           true,
-		DropContextOnHardLimit:     false,
-		HardLimit:                  0.30,
-		WrapUpThreshold:            0.10,
-		HierarchicalSummarization:  true,
-		MaxSummaryLevel:            3,
-		SummaryLevelThreshold:      100,
+		Enabled:                   true,
+		SummarizeHistory:          true,
+		DropContextOnHardLimit:    false,
+		HardLimit:                 0.30,
+		WrapUpThreshold:           0.10,
+		HierarchicalSummarization: true,
+		MaxSummaryLevel:           3,
+		SummaryLevelThreshold:     100,
 	}
 
 	inner := &stubChatter{resp: &Response{Content: "ok"}}
@@ -158,14 +155,14 @@ func TestHierarchicalSummarization_MaxLevelRespected(t *testing.T) {
 	// still exceeds the threshold.
 	model := &ModelConfig{ContextLimit: 1000}
 	cfg := ContextFirewallConfig{
-		Enabled:                    true,
-		SummarizeHistory:           true,
-		DropContextOnHardLimit:     false,
-		HardLimit:                  0.30,
-		WrapUpThreshold:            0.10,
-		HierarchicalSummarization:  true,
-		MaxSummaryLevel:            2,
-		SummaryLevelThreshold:      100,
+		Enabled:                   true,
+		SummarizeHistory:          true,
+		DropContextOnHardLimit:    false,
+		HardLimit:                 0.30,
+		WrapUpThreshold:           0.10,
+		HierarchicalSummarization: true,
+		MaxSummaryLevel:           2,
+		SummaryLevelThreshold:     100,
 	}
 
 	inner := &stubChatter{resp: &Response{Content: "ok"}}
@@ -200,14 +197,14 @@ func TestHierarchicalSummarization_LevelMetadata(t *testing.T) {
 	// Verify that the summary messages carry the correct SummaryLevel.
 	model := &ModelConfig{ContextLimit: 1000}
 	cfg := ContextFirewallConfig{
-		Enabled:                    true,
-		SummarizeHistory:           true,
-		DropContextOnHardLimit:     false,
-		HardLimit:                  0.30,
-		WrapUpThreshold:            0.10,
-		HierarchicalSummarization:  true,
-		MaxSummaryLevel:            3,
-		SummaryLevelThreshold:      100,
+		Enabled:                   true,
+		SummarizeHistory:          true,
+		DropContextOnHardLimit:    false,
+		HardLimit:                 0.30,
+		WrapUpThreshold:           0.10,
+		HierarchicalSummarization: true,
+		MaxSummaryLevel:           3,
+		SummaryLevelThreshold:     100,
 	}
 
 	inner := &stubChatter{resp: &Response{Content: "ok"}}
@@ -263,14 +260,14 @@ func TestHierarchicalSummarization_SummaryBelowThresholdNoRecursion(t *testing.T
 	// When the initial summary is below the threshold, no recursion occurs.
 	model := &ModelConfig{ContextLimit: 1000}
 	cfg := ContextFirewallConfig{
-		Enabled:                    true,
-		SummarizeHistory:           true,
-		DropContextOnHardLimit:     false,
-		HardLimit:                  0.30,
-		WrapUpThreshold:            0.10,
-		HierarchicalSummarization:  true,
-		MaxSummaryLevel:            3,
-		SummaryLevelThreshold:      500,
+		Enabled:                   true,
+		SummarizeHistory:          true,
+		DropContextOnHardLimit:    false,
+		HardLimit:                 0.30,
+		WrapUpThreshold:           0.10,
+		HierarchicalSummarization: true,
+		MaxSummaryLevel:           3,
+		SummaryLevelThreshold:     500,
 	}
 
 	inner := &stubChatter{resp: &Response{Content: "ok"}}

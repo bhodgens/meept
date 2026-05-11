@@ -412,7 +412,7 @@ func (c *CollaborativePlanner) formatPlanForAnalysis(plan *TaskPlan) string {
 		if step.ToolHint != "" {
 			hint = fmt.Sprintf(" (tool: %s)", step.ToolHint)
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s%s%s\n", i+1, step.Description, hint, deps))
+		fmt.Fprintf(&sb, "%d. %s%s%s\n", i+1, step.Description, hint, deps)
 	}
 	return sb.String()
 }
@@ -425,7 +425,7 @@ func (c *CollaborativePlanner) formatSummary(plan *TaskPlan, analysis string) st
 	if len(desc) > 100 {
 		desc = desc[:100]
 	}
-	sb.WriteString(fmt.Sprintf("## Task Plan: %s\n\n", desc))
+	fmt.Fprintf(&sb, "## Task Plan: %s\n\n", desc)
 	sb.WriteString("### Steps\n")
 
 	for i, step := range plan.Steps {
@@ -433,7 +433,7 @@ func (c *CollaborativePlanner) formatSummary(plan *TaskPlan, analysis string) st
 		if len(step.DependsOn) > 0 {
 			deps = fmt.Sprintf(" *(after: %s)*", strings.Join(step.DependsOn, ", "))
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s%s\n", i+1, step.Description, deps))
+		fmt.Fprintf(&sb, "%d. %s%s\n", i+1, step.Description, deps)
 	}
 
 	sb.WriteString("\n### Review\n")

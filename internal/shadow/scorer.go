@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -102,9 +103,9 @@ func (s *Scorer) scoreHeuristic(record *ShadowRecord) *ScoreResult {
 
 	// Get the user query (last user message)
 	var userQuery string
-	for i := len(record.Messages) - 1; i >= 0; i-- {
-		if record.Messages[i].Role == "user" {
-			userQuery = record.Messages[i].Content
+	for _, v := range slices.Backward(record.Messages) {
+		if v.Role == "user" {
+			userQuery = v.Content
 			break
 		}
 	}
@@ -304,7 +305,7 @@ func extractCodeBlocks(text string) []codeBlock {
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
+		if after, ok := strings.CutPrefix(trimmed, "```"); ok {
 			if inBlock {
 				// End of block
 				blocks = append(blocks, codeBlock{
@@ -316,7 +317,7 @@ func extractCodeBlocks(text string) []codeBlock {
 			} else {
 				// Start of block
 				inBlock = true
-				language = strings.TrimPrefix(trimmed, "```")
+				language = after
 			}
 		} else if inBlock {
 			currentBlock = append(currentBlock, line)
@@ -650,9 +651,9 @@ func (s *Scorer) scoreHybrid(ctx context.Context, record *ShadowRecord) (*ScoreR
 func (s *Scorer) buildEvalPrompt(record *ShadowRecord) string {
 	// Get user query
 	var userQuery string
-	for i := len(record.Messages) - 1; i >= 0; i-- {
-		if record.Messages[i].Role == "user" {
-			userQuery = record.Messages[i].Content
+	for _, v := range slices.Backward(record.Messages) {
+		if v.Role == "user" {
+			userQuery = v.Content
 			break
 		}
 	}

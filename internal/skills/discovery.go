@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -319,13 +320,7 @@ func isSkillFile(name string) bool {
 
 	// Exclude common non-skill markdown files
 	excluded := []string{"readme.md", "changelog.md", "license.md", "contributing.md"}
-	for _, ex := range excluded {
-		if lower == ex {
-			return false
-		}
-	}
-
-	return true
+	return !slices.Contains(excluded, lower)
 }
 
 // normalizeName normalizes a skill name for case-insensitive comparison.

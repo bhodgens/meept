@@ -236,8 +236,8 @@ func (a RouteAction) String() string {
 
 // CategorizedRecommendation represents a recommendation from an agent.
 type CategorizedRecommendation struct {
-	Category    string  `json:"category"`    // "security", "performance", "maintainability", "follow-up"
-	Priority    string  `json:"priority"`    // "critical", "high", "medium", "low"
+	Category    string  `json:"category"` // "security", "performance", "maintainability", "follow-up"
+	Priority    string  `json:"priority"` // "critical", "high", "medium", "low"
 	Description string  `json:"description"`
 	AgentID     string  `json:"agent_id"`
 	Confidence  float64 `json:"confidence"`
@@ -357,7 +357,7 @@ func (a *TaskReportAggregator) DeduplicateRecommendations() []CategorizedRecomme
 	// Sort recommendations by priority
 	sorted := make([]CategorizedRecommendation, len(a.recommendations))
 	copy(sorted, a.recommendations)
-	for i := 0; i < len(sorted)-1; i++ {
+	for i := range len(sorted) - 1 {
 		for j := i + 1; j < len(sorted); j++ {
 			pi, ok1 := priorityOrder[sorted[i].Priority]
 			pj, ok2 := priorityOrder[sorted[j].Priority]

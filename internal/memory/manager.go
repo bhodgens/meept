@@ -39,10 +39,10 @@ type VectorSearcher interface {
 // It provides a single entry-point for the rest of meept to interact with
 // the memory system. Supports memvid as primary backend with SQLite fallback.
 type Manager struct {
-	config       config.MemoryConfig
-	memvidCfg    config.MemvidConfig
+	config         config.MemoryConfig
+	memvidCfg      config.MemvidConfig
 	distributedCfg config.DistributedMemoryConfig
-	dataDir      string
+	dataDir        string
 
 	// Memvid client (primary backend when configured)
 	memvid    *memvid.Client
@@ -65,8 +65,8 @@ type Manager struct {
 	logger       *slog.Logger
 
 	// Security components for memory store validation
-	sanitizer    *security.InputSanitizer
-	securityCfg  config.MemorySecurityConfig
+	sanitizer   *security.InputSanitizer
+	securityCfg config.MemorySecurityConfig
 
 	// LLM client for intelligent summarization (optional; nil falls back to date-based grouping)
 	llm llm.Chatter
@@ -1132,7 +1132,7 @@ func (m *Manager) StoreVersioned(ctx context.Context, mem Memory, opts StoreOpti
 		}
 
 		// Get current version number
-			currentVersion := m.getCurrentVersion(ctx, mem.ID)
+		currentVersion := m.getCurrentVersion(ctx, mem.ID)
 
 		// Create new version
 		newMem := mem
@@ -1252,7 +1252,7 @@ func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, e
 		var mem Memory
 		var metaJSON string
 		var lastAccessedStr sql.NullString
-		
+
 		err := rows.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &mem.CreatedAt, &lastAccessedStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan memory: %w", err)
@@ -1260,7 +1260,7 @@ func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, e
 
 		mem.Metadata = ParseMetadata(metaJSON)
 		mem.Type = MemoryTypeEpisodic
-		
+
 		if lastAccessedStr.Valid {
 			if t, err := time.Parse(time.RFC3339Nano, lastAccessedStr.String); err == nil {
 				mem.LastAccessedAt = &t
@@ -1297,7 +1297,7 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	var lastAccessedStr sql.NullString
 	err = row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &mem.CreatedAt, &lastAccessedStr)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
@@ -1438,22 +1438,18 @@ func (m *Manager) StartPrefetchService(ctx context.Context) {
 	m.prefetchQueue = make(chan prefetchRequest, 10)
 	m.prefetchShutdown = make(chan struct{})
 
-	m.prefetchWg.Add(1)
-	go func() {
-		defer m.prefetchWg.Done()
+	m.prefetchWg.Go(func() {
 		for {
 			select {
 			case req := <-m.prefetchQueue:
-				m.prefetchWg.Add(1)
-				go func() {
-					defer m.prefetchWg.Done()
+				m.prefetchWg.Go(func() {
 					m.doPrefetch(ctx, req)
-				}()
+				})
 			case <-m.prefetchShutdown:
 				return
 			}
 		}
-	}()
+	})
 
 	m.logger.Info("Prefetch service started")
 }

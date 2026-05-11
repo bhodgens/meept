@@ -1,6 +1,8 @@
 // Package worker provides a worker pool for processing jobs.
 package worker
 
+import "slices"
+
 import "time"
 
 // State represents the current state of a worker.
@@ -61,10 +63,5 @@ func IsValidTransition(from, to State) bool {
 	if !ok {
 		return false
 	}
-	for _, s := range allowed {
-		if s == to {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, to)
 }

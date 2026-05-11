@@ -62,15 +62,15 @@ type Orchestrator struct {
 	auditDB       *sql.DB // SQLite database for audit logging (nil when disabled)
 
 	// Metrics tracking (atomic for thread safety)
-	inputsProcessed       atomic.Int64
-	inputsSanitized       atomic.Int64
-	inputsBlocked         atomic.Int64
-	outputsScanned        atomic.Int64
-	outputsWithCreds      atomic.Int64
-	outputsRedacted       atomic.Int64
-	commandsScanned       atomic.Int64
-	commandsBlocked       atomic.Int64
-	commandsWarned        atomic.Int64
+	inputsProcessed  atomic.Int64
+	inputsSanitized  atomic.Int64
+	inputsBlocked    atomic.Int64
+	outputsScanned   atomic.Int64
+	outputsWithCreds atomic.Int64
+	outputsRedacted  atomic.Int64
+	commandsScanned  atomic.Int64
+	commandsBlocked  atomic.Int64
+	commandsWarned   atomic.Int64
 
 	// Mutex for complex operations
 	mu sync.RWMutex
@@ -167,7 +167,7 @@ func (o *Orchestrator) SanitizeInput(text string) (string, bool, []Warning) {
 			"was_modified", result.WasModified,
 		)
 		o.logAuditEvent("input_sanitized", "warning", map[string]any{
-			"threats":    result.ThreatsDetected,
+			"threats":     result.ThreatsDetected,
 			"text_length": len(text),
 		}, "sanitizer")
 	}
@@ -207,9 +207,9 @@ func (o *Orchestrator) ScanOutput(text string) (string, bool, []Warning) {
 		)
 
 		o.logAuditEvent("output_credentials", "warning", map[string]any{
-			"warnings":      result.Warnings,
-			"text_length":   len(text),
-			"was_redacted":  o.config.RedactOutput,
+			"warnings":     result.Warnings,
+			"text_length":  len(text),
+			"was_redacted": o.config.RedactOutput,
 		}, "output_monitor")
 
 		if o.config.RedactOutput {
@@ -350,12 +350,12 @@ func (o *Orchestrator) Close() {
 
 // AuditEvent represents a single row in the orchestrator audit log.
 type AuditEvent struct {
-	ID         int64           `json:"id"`
-	Timestamp  time.Time       `json:"timestamp"`
-	EventType  string          `json:"event_type"`  // e.g. "input_sanitized", "input_blocked", "output_scan", "command_blocked", "command_warning"
-	Severity   string          `json:"severity"`    // e.g. "info", "warning", "critical"
-	Details    json.RawMessage `json:"details"`     // event-specific details as JSON
-	Source     string          `json:"source"`      // e.g. "sanitizer", "output_monitor", "tirith"
+	ID        int64           `json:"id"`
+	Timestamp time.Time       `json:"timestamp"`
+	EventType string          `json:"event_type"` // e.g. "input_sanitized", "input_blocked", "output_scan", "command_blocked", "command_warning"
+	Severity  string          `json:"severity"`   // e.g. "info", "warning", "critical"
+	Details   json.RawMessage `json:"details"`    // event-specific details as JSON
+	Source    string          `json:"source"`     // e.g. "sanitizer", "output_monitor", "tirith"
 }
 
 // initAuditDB opens (or creates) the SQLite audit database and ensures the
@@ -404,7 +404,7 @@ func (o *Orchestrator) logAuditEvent(eventType, severity string, details any, so
 
 	detailsJSON, err := json.Marshal(details)
 	if err != nil {
-		detailsJSON = []byte(fmt.Sprintf(`{"marshal_error": %q}`, err))
+		detailsJSON = fmt.Appendf(nil, `{"marshal_error": %q}`, err)
 	}
 
 	_, err = o.auditDB.Exec(
@@ -427,17 +427,17 @@ func (o *Orchestrator) logAuditEvent(eventType, severity string, details any, so
 func isCriticalThreat(threatType string) bool {
 	// These threat types indicate active prompt injection attempts
 	criticalTypes := map[string]bool{
-		"instruction_override":      true,
-		"role_switch_attempt":       true,
-		"instruction_injection":     true,
-		"role_marker_system":        true,
-		"role_marker_assistant":     true,
-		"markdown_role_injection":   true,
-		"special_token_chatml":      true,
-		"special_token_llama":       true,
-		"special_token_llama_sys":   true,
-		"special_token_phi":         true,
-		"special_token_eos":         true,
+		"instruction_override":    true,
+		"role_switch_attempt":     true,
+		"instruction_injection":   true,
+		"role_marker_system":      true,
+		"role_marker_assistant":   true,
+		"markdown_role_injection": true,
+		"special_token_chatml":    true,
+		"special_token_llama":     true,
+		"special_token_llama_sys": true,
+		"special_token_phi":       true,
+		"special_token_eos":       true,
 	}
 	return criticalTypes[threatType]
 }

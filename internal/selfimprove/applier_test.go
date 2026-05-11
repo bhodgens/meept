@@ -1,7 +1,6 @@
 package selfimprove
 
 import (
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,7 +9,7 @@ import (
 )
 
 func slogDiscardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 // TestRollback_RestoresNestedPath verifies that Rollback writes the backup

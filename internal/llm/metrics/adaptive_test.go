@@ -27,7 +27,7 @@ func TestCalculatorTokenRateBased(t *testing.T) {
 
 	// Populate some test data
 	now := time.Now()
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		record := RequestRecord{
 			Timestamp:        now.Add(-time.Duration(i) * time.Minute),
 			ProviderID:       "openai",
@@ -88,7 +88,7 @@ func TestCalculatorLatencyBased(t *testing.T) {
 
 	// Populate test data
 	now := time.Now()
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		record := RequestRecord{
 			Timestamp:        now.Add(-time.Duration(i) * time.Minute),
 			ProviderID:       "anthropic",

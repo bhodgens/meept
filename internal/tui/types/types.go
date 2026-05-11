@@ -58,15 +58,15 @@ func (r *MemoryQueryResponse) GetItems() []MemoryItem {
 
 // MemoryItem represents a single memory item.
 type MemoryItem struct {
-	ID             string                 `json:"id"`
-	Content        string                 `json:"content"`
-	MemoryType     string                 `json:"memory_type"`
-	Type           string                 `json:"type"`
-	Category       string                 `json:"category"`
-	RelevanceScore float64                `json:"relevance_score"`
-	CreatedAt      string                 `json:"created_at"`
-	UpdatedAt      string                 `json:"updated_at"`
-	Metadata       map[string]interface{} `json:"metadata"`
+	ID             string         `json:"id"`
+	Content        string         `json:"content"`
+	MemoryType     string         `json:"memory_type"`
+	Type           string         `json:"type"`
+	Category       string         `json:"category"`
+	RelevanceScore float64        `json:"relevance_score"`
+	CreatedAt      string         `json:"created_at"`
+	UpdatedAt      string         `json:"updated_at"`
+	Metadata       map[string]any `json:"metadata"`
 }
 
 // GetType returns the memory type from whichever field is populated.
@@ -232,9 +232,9 @@ type TaskListResponse struct {
 type QueueJob struct {
 	ID           string   `json:"id"`
 	TaskID       string   `json:"task_id,omitempty"`
-	Type         string   `json:"type"` // one_off, project_task
+	Type         string   `json:"type"`     // one_off, project_task
 	Priority     int      `json:"priority"` // 1=low, 2=normal, 3=high, 4=urgent
-	State        string   `json:"state"` // pending, claimed, processing, completed, failed, dead
+	State        string   `json:"state"`    // pending, claimed, processing, completed, failed, dead
 	RequiredCaps []string `json:"required_caps,omitempty"`
 	MaxRetries   int      `json:"max_retries"`
 	RetryCount   int      `json:"retry_count"`
@@ -372,8 +372,8 @@ type TaskExtended struct {
 
 	// Stats for enhanced task detail view
 	ModelsUsed []string `json:"models_used,omitempty"`
-	ErrorCount int `json:"error_count,omitempty"`
-	ChildTasks []Task `json:"child_tasks,omitempty"` // Active child tasks with progress
+	ErrorCount int      `json:"error_count,omitempty"`
+	ChildTasks []Task   `json:"child_tasks,omitempty"` // Active child tasks with progress
 }
 
 // TaskExtendedListResponse represents the extended task list response.
@@ -388,15 +388,15 @@ type TaskStepsResponse struct {
 
 // CacheStatsResponse represents the token cache statistics RPC response.
 type CacheStatsResponse struct {
-	L1Entries   int     `json:"l1_entries"`
-	L1Hits      int     `json:"l1_hits"`
-	L1Misses    int     `json:"l1_misses"`
-	Evictions   int     `json:"evictions"`
-	L2Entries   int     `json:"l2_entries"`
-	L2Hits      int     `json:"l2_hits"`
-	L2Misses    int     `json:"l2_misses"`
-	TotalHits   int     `json:"total_hits"`
-	HitRate     float64 `json:"hit_rate"`
+	L1Entries int     `json:"l1_entries"`
+	L1Hits    int     `json:"l1_hits"`
+	L1Misses  int     `json:"l1_misses"`
+	Evictions int     `json:"evictions"`
+	L2Entries int     `json:"l2_entries"`
+	L2Hits    int     `json:"l2_hits"`
+	L2Misses  int     `json:"l2_misses"`
+	TotalHits int     `json:"total_hits"`
+	HitRate   float64 `json:"hit_rate"`
 }
 
 // CacheInspectEntry represents a single cache entry returned by cache.inspect.

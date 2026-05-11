@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 
 	"github.com/caimlas/meept/internal/agents"
@@ -70,9 +71,9 @@ type RegistryConfig struct {
 	Logger          *slog.Logger
 
 	// Agent validation components (shared across all agent loops)
-	Watchdog             *Watchdog
+	Watchdog              *Watchdog
 	HallucinationDetector *HallucinationDetector
-	ArtifactManager      *ArtifactManager
+	ArtifactManager       *ArtifactManager
 
 	// BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	BundledAgentsPath string
@@ -615,9 +616,7 @@ func copyStringMap(m map[string]string) map[string]string {
 		return nil
 	}
 	c := make(map[string]string, len(m))
-	for k, v := range m {
-		c[k] = v
-	}
+	maps.Copy(c, m)
 	return c
 }
 
@@ -627,12 +626,8 @@ func mergeStringMaps(base, overlay map[string]string) map[string]string {
 	}
 
 	result := make(map[string]string)
-	for k, v := range base {
-		result[k] = v
-	}
-	for k, v := range overlay {
-		result[k] = v
-	}
+	maps.Copy(result, base)
+	maps.Copy(result, overlay)
 	return result
 }
 

@@ -107,10 +107,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, 
 	// Parse limit
 	limit := DefaultResultLimit
 	if limitFloat, ok := args["limit"].(float64); ok && limitFloat > 0 {
-		limit = int(limitFloat)
-		if limit > MaxResultLimit {
-			limit = MaxResultLimit
-		}
+		limit = min(int(limitFloat), MaxResultLimit)
 	}
 
 	// Rate limiting: ensure minimum interval between requests
@@ -133,7 +130,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, 
 	searchURL := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

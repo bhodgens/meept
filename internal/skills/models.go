@@ -5,6 +5,8 @@
 // hierarchy where higher-priority tiers shadow lower ones.
 package skills
 
+import "slices"
+
 // Priority levels for skill discovery (lower is higher priority).
 const (
 	PriorityProject = 0 // .meept/skills/ (project-local)
@@ -57,22 +59,12 @@ type Skill struct {
 
 // HasCapability checks if the skill requires a specific capability.
 func (s *Skill) HasCapability(cap string) bool {
-	for _, c := range s.Requires {
-		if c == cap {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.Requires, cap)
 }
 
 // HasTag checks if the skill has a specific tag.
 func (s *Skill) HasTag(tag string) bool {
-	for _, t := range s.Tags {
-		if t == tag {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.Tags, tag)
 }
 
 // MatchesTags returns true if the skill has all specified tags.

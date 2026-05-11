@@ -38,7 +38,7 @@ func (q *FTS5Query) Terms(terms ...string) *FTS5Query {
 
 // TermsFromString splits a string into terms and adds them.
 func (q *FTS5Query) TermsFromString(input string) *FTS5Query {
-	for _, t := range strings.Fields(input) {
+	for t := range strings.FieldsSeq(input) {
 		q.Term(t)
 	}
 	return q
@@ -211,7 +211,7 @@ func CreateFTS5Table(tableName string, contentTable string, columns ...string) s
 	sb.WriteString(strings.Join(columns, ", "))
 
 	if contentTable != "" {
-		sb.WriteString(fmt.Sprintf(", content='%s', content_rowid='rowid'", contentTable))
+		fmt.Fprintf(&sb, ", content='%s', content_rowid='rowid'", contentTable)
 	}
 
 	sb.WriteString(")")

@@ -75,7 +75,7 @@ func createTestConfig() *ProvidersConfig {
 func TestResolver_NewResolver_LoadsAliases(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	
+
 	resolver := NewResolver(cfg, logger)
 
 	// Verify aliases were loaded
@@ -114,7 +114,7 @@ func TestResolver_NewResolver_LoadsAliases(t *testing.T) {
 func TestResolver_ResolveForAlias(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	
+
 	resolver := NewResolver(cfg, logger)
 
 	// Should return the first model initially
@@ -198,7 +198,7 @@ func TestResolver_HasHealthyModels(t *testing.T) {
 func TestResolver_ResolveForAlias_NotFound(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	
+
 	resolver := NewResolver(cfg, logger)
 
 	_, err := resolver.ResolveForAlias("nonexistent")
@@ -210,7 +210,7 @@ func TestResolver_ResolveForAlias_NotFound(t *testing.T) {
 func TestResolver_RecordAliasFailure_Success(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	
+
 	resolver := NewResolver(cfg, logger)
 
 	// Record a failure
@@ -236,7 +236,7 @@ func TestResolver_RecordAliasFailure_Success(t *testing.T) {
 func TestResolver_RecordAliasSuccess_ResetsFailures(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	
+
 	resolver := NewResolver(cfg, logger)
 
 	// Record some failures
@@ -265,7 +265,7 @@ func TestResolver_RecordAliasSuccess_ResetsFailures(t *testing.T) {
 func TestResolver_Rotation(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	
+
 	resolver := NewResolver(cfg, logger)
 
 	// Get initial model
@@ -275,7 +275,7 @@ func TestResolver_Rotation(t *testing.T) {
 	}
 
 	// Simulate failures to trigger cooldown
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		resolver.RecordAliasFailure("coder", nil)
 	}
 
@@ -289,7 +289,7 @@ func TestResolver_Rotation(t *testing.T) {
 func TestResolver_HasAlias(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	
+
 	resolver := NewResolver(cfg, logger)
 
 	if !resolver.HasAlias("coder") {
@@ -306,21 +306,21 @@ func TestResolver_HasAlias(t *testing.T) {
 func TestResolver_ExponentialBackoff(t *testing.T) {
 	cfg := createTestConfig()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	
+
 	resolver := NewResolver(cfg, logger)
 
 	// Record first failure
 	resolver.RecordAliasFailure("coder", nil)
 	health1 := resolver.health["coder"]
-	cooldown1 := health1.CooldownUntil.Sub(time.Now())
+	cooldown1 := time.Until(health1.CooldownUntil)
 
 	// Record second failure
 	resolver.RecordAliasFailure("coder", nil)
 	health2 := resolver.health["coder"]
-	cooldown2 := health2.CooldownUntil.Sub(time.Now())
+	cooldown2 := time.Until(health2.CooldownUntil)
 
 	// Cooldown should roughly double (30s -> 60s)
-	if cooldown2 < cooldown1 + cooldown1 {
+	if cooldown2 < cooldown1+cooldown1 {
 		t.Errorf("Expected exponential backoff: cooldown1=%v, cooldown2=%v", cooldown1, cooldown2)
 	}
 }

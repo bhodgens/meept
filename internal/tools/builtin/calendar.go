@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/calendar"
@@ -236,20 +237,21 @@ func (t *CalendarTodayTool) Execute(ctx context.Context, args map[string]any) (a
 
 // formatCalendarEvents formats a slice of events into a readable string.
 func formatCalendarEvents(events []calendar.Event) string {
-	result := fmt.Sprintf("%d event(s):\n", len(events))
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("%d event(s):\n", len(events)))
 	for i, e := range events {
 		start, err := e.Start.Time()
 		if err != nil {
-			result += fmt.Sprintf("%d. %s\n", i+1, e.Summary)
+			result.WriteString(fmt.Sprintf("%d. %s\n", i+1, e.Summary))
 			continue
 		}
 		line := fmt.Sprintf("%d. %s - %s", i+1, start.Format("15:04"), e.Summary)
 		if e.Location != "" {
 			line += fmt.Sprintf(" (%s)", e.Location)
 		}
-		result += line + "\n"
+		result.WriteString(line + "\n")
 	}
-	return result
+	return result.String()
 }
 
 // calendarGetString extracts an optional string argument.

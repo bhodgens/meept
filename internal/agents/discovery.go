@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -211,13 +212,7 @@ func isAgentFile(name string) bool {
 
 	// Exclude common non-agent markdown files
 	excluded := []string{"readme.md", "changelog.md", "license.md", "contributing.md", "rules.md"}
-	for _, ex := range excluded {
-		if lower == ex {
-			return false
-		}
-	}
-
-	return true
+	return !slices.Contains(excluded, lower)
 }
 
 // normalizeID normalizes an agent ID for case-insensitive comparison.

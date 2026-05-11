@@ -27,8 +27,8 @@ type AmendmentRequest struct {
 	ID          string          `json:"id"`
 	TaskID      string          `json:"task_id"`
 	Type        AmendmentType   `json:"type"`
-	StepID      string          `json:"step_id,omitempty"` // For step-specific amendments
-	Content     string          `json:"content"`           // The amendment content
+	StepID      string          `json:"step_id,omitempty"`  // For step-specific amendments
+	Content     string          `json:"content"`            // The amendment content
 	Metadata    json.RawMessage `json:"metadata,omitempty"` // Type-specific metadata
 	Status      AmendmentStatus `json:"status"`
 	CreatedAt   time.Time       `json:"created_at"`

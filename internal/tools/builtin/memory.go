@@ -3,13 +3,13 @@ package builtin
 
 import (
 	"context"
-	
+	"slices"
+
 	"fmt"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/tools"
-	
 )
 
 // MemoryStoreTool stores information in long-term memory.
@@ -150,10 +150,7 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 
 	limit := 10
 	if l, ok := args["limit"].(float64); ok && l > 0 {
-		limit = int(l)
-		if limit > 50 {
-			limit = 50
-		}
+		limit = min(int(l), 50)
 	}
 
 	minRelevance := 0.3
@@ -248,10 +245,7 @@ func (t *MemoryGetContextTool) Execute(ctx context.Context, args map[string]any)
 
 	maxItems := 10
 	if m, ok := args["max_items"].(float64); ok && m > 0 {
-		maxItems = int(m)
-		if maxItems > 30 {
-			maxItems = 30
-		}
+		maxItems = min(int(m), 30)
 	}
 
 	results, err := t.manager.GetRelevantContext(ctx, query, maxItems)
@@ -444,21 +438,21 @@ func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[stri
 	}
 
 	return map[string]any{
-		"memory_id":      memoryID,
-		"version_count":  len(versions),
-		"versions":       versions,
+		"memory_id":       memoryID,
+		"version_count":   len(versions),
+		"versions":        versions,
 		"current_version": getCurrentVersionFromList(versions),
 	}, nil
 }
 
 // getCurrentVersionFromList finds the current version from a list of versions.
 func getCurrentVersionFromList(versions []map[string]any) int {
-	for i := len(versions) - 1; i >= 0; i-- {
-		if isCurrent, ok := versions[i]["is_current"].(int); ok && isCurrent == 1 {
-			if v, ok := versions[i]["version"].(int); ok {
+	for _, v := range slices.Backward(versions) {
+		if isCurrent, ok := v["is_current"].(int); ok && isCurrent == 1 {
+			if v, ok := v["version"].(int); ok {
 				return v
 			}
-			if v, ok := versions[i]["version"].(float64); ok {
+			if v, ok := v["version"].(float64); ok {
 				return int(v)
 			}
 		}

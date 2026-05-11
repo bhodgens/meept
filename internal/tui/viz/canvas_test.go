@@ -145,7 +145,7 @@ func TestDrawDottedLine(t *testing.T) {
 	// Check that some pixels are set and some are not (dotted)
 	hasSet := false
 	hasUnset := false
-	for x := 0; x <= 19; x++ {
+	for x := range 20 {
 		if c.GetPixel(x, 0) {
 			hasSet = true
 		} else {

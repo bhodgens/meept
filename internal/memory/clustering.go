@@ -26,7 +26,7 @@ func cosineSimilarity(a, b []float32) float32 {
 	var normA float32
 	var normB float32
 
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		dotProduct += a[i] * b[i]
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
@@ -92,7 +92,7 @@ func ClusterBySimilarity(ctx context.Context, memories []Memory, threshold float
 	}
 
 	// Compare all pairs.
-	for i := 0; i < len(memories); i++ {
+	for i := range memories {
 		for j := i + 1; j < len(memories); j++ {
 			sim := cosineSimilarity(embeddings[i], embeddings[j])
 			if float64(sim) >= threshold {

@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -31,9 +33,9 @@ type Exporter struct {
 
 // dedupState holds state for semantic deduplication during export.
 type dedupState struct {
-	seenHashes     map[string]bool
-	seenTokenSets  []map[string]int
-	threshold      float64
+	seenHashes    map[string]bool
+	seenTokenSets []map[string]int
+	threshold     float64
 }
 
 // ExporterOption is a functional option for Exporter.
@@ -163,22 +165,22 @@ func (e *Exporter) exportJSONL(ctx context.Context, writer *bufio.Writer, opts E
 		// Deduplication using semantic similarity
 		if e.config.Deduplicate {
 			// Build text for dedup from user messages
-			var dedupText string
+			var dedupText strings.Builder
 			for _, msg := range record.Messages {
 				if msg.Role == "user" {
-					dedupText += msg.Content + " "
+					dedupText.WriteString(msg.Content + " ")
 				}
 			}
-			if dedup.isDuplicate(dedupText) {
+			if dedup.isDuplicate(dedupText.String()) {
 				continue
 			}
 		}
 
 		// Build JSONL entry
 		entry := map[string]any{
-			"id":           record.ID,
-			"messages":     record.Messages,
-			"response":     getBestResponse(record),
+			"id":       record.ID,
+			"messages": record.Messages,
+			"response": getBestResponse(record),
 			"metadata": map[string]any{
 				"domain":        record.Domain,
 				"task_type":     record.TaskType,
@@ -275,13 +277,13 @@ func (e *Exporter) exportOpenAI(ctx context.Context, writer *bufio.Writer, opts 
 	for _, record := range records {
 		// Deduplication using semantic similarity
 		if e.config.Deduplicate {
-			var dedupText string
+			var dedupText strings.Builder
 			for _, msg := range record.Messages {
 				if msg.Role == "user" {
-					dedupText += msg.Content + " "
+					dedupText.WriteString(msg.Content + " ")
 				}
 			}
-			if dedup.isDuplicate(dedupText) {
+			if dedup.isDuplicate(dedupText.String()) {
 				continue
 			}
 		}
@@ -343,22 +345,22 @@ func (e *Exporter) exportAlpaca(ctx context.Context, writer *bufio.Writer, opts 
 	for _, record := range records {
 		// Deduplication using semantic similarity
 		if e.config.Deduplicate {
-			var dedupText string
+			var dedupText strings.Builder
 			for _, msg := range record.Messages {
 				if msg.Role == "user" {
-					dedupText += msg.Content + " "
+					dedupText.WriteString(msg.Content + " ")
 				}
 			}
-			if dedup.isDuplicate(dedupText) {
+			if dedup.isDuplicate(dedupText.String()) {
 				continue
 			}
 		}
 
 		// Get last user message as instruction
 		var instruction string
-		for i := len(record.Messages) - 1; i >= 0; i-- {
-			if record.Messages[i].Role == "user" {
-				instruction = record.Messages[i].Content
+		for _, v := range slices.Backward(record.Messages) {
+			if v.Role == "user" {
+				instruction = v.Content
 				break
 			}
 		}
@@ -500,7 +502,7 @@ func tokenizeForDedup(text string) []string {
 	var tokens []string
 	var current []byte
 
-	for i := 0; i < len(text); i++ {
+	for i := range len(text) {
 		c := text[i]
 		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
 			current = append(current, c)
@@ -521,7 +523,7 @@ func tokenizeForDedup(text string) []string {
 // toLowerString converts a string to lowercase without using strings package.
 func toLowerString(s string) string {
 	b := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if c >= 'A' && c <= 'Z' {
 			c += 'a' - 'A'
@@ -587,9 +589,10 @@ func joinStrings(parts []string, sep string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	result := parts[0]
+	var result strings.Builder
+	result.WriteString(parts[0])
 	for i := 1; i < len(parts); i++ {
-		result += sep + parts[i]
+		result.WriteString(sep + parts[i])
 	}
-	return result
+	return result.String()
 }

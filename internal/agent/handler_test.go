@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -208,7 +207,7 @@ func TestGenerateWorkerID(t *testing.T) {
 
 // slogDiscardLogger creates a logger that discards all output.
 func slogDiscardLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func TestChatHandler_PublishPlanRequest(t *testing.T) {

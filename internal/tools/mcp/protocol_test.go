@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -160,7 +161,8 @@ func TestExtractResult(t *testing.T) {
 		if err == nil {
 			t.Error("expected error")
 		}
-		rpcErr, ok := err.(*RPCError)
+		rpcErr := &RPCError{}
+		ok := errors.As(err, &rpcErr)
 		if !ok {
 			t.Errorf("expected *RPCError, got %T", err)
 		}

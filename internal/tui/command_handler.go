@@ -289,7 +289,7 @@ func (h *CommandHandler) executeRetry() *CommandResult {
 	// Return special result that triggers re-send
 	// The app will handle re-sending the message
 	return &CommandResult{
-		Output:  "retrying last message...",
+		Output:    "retrying last message...",
 		RetryLast: true,
 	}
 }
@@ -345,10 +345,10 @@ func (h *CommandHandler) executeUsage() *CommandResult {
 	var sb s.Builder
 	sb.WriteString("usage statistics:\n\n")
 	sb.WriteString("daemon totals:\n")
-	sb.WriteString(fmt.Sprintf("  tokens used:     %d\n", status.TokensUsed))
-	sb.WriteString(fmt.Sprintf("  tokens remaining: %d\n", status.TokensRemaining))
-	sb.WriteString(fmt.Sprintf("  budget used:     $%.4f\n", status.BudgetUsed))
-	sb.WriteString(fmt.Sprintf("  budget remaining: $%.4f\n", status.BudgetRemaining))
+	fmt.Fprintf(&sb, "  tokens used:     %d\n", status.TokensUsed)
+	fmt.Fprintf(&sb, "  tokens remaining: %d\n", status.TokensRemaining)
+	fmt.Fprintf(&sb, "  budget used:     $%.4f\n", status.BudgetUsed)
+	fmt.Fprintf(&sb, "  budget remaining: $%.4f\n", status.BudgetRemaining)
 
 	sb.WriteString("\n")
 
@@ -406,24 +406,24 @@ func (h *CommandHandler) executeStatus() *CommandResult {
 	hours := uptime / 3600
 	mins := (uptime % 3600) / 60
 	secs := uptime % 60
-	sb.WriteString(fmt.Sprintf("  uptime:        %dh %dm %ds\n", hours, mins, secs))
-	sb.WriteString(fmt.Sprintf("  model:         %s\n", coalesce(status.Model, status.DefaultModel, "(not set)")))
-	sb.WriteString(fmt.Sprintf("  tokens used:   %d\n", status.TokensUsed))
-	sb.WriteString(fmt.Sprintf("  budget used:   $%.4f\n", status.BudgetUsed))
+	fmt.Fprintf(&sb, "  uptime:        %dh %dm %ds\n", hours, mins, secs)
+	fmt.Fprintf(&sb, "  model:         %s\n", coalesce(status.Model, status.DefaultModel, "(not set)"))
+	fmt.Fprintf(&sb, "  tokens used:   %d\n", status.TokensUsed)
+	fmt.Fprintf(&sb, "  budget used:   $%.4f\n", status.BudgetUsed)
 
 	// Agent workers
 	sb.WriteString("\nagent workers:\n")
 	if workers == nil || len(workers.Workers) == 0 {
 		sb.WriteString("  no active workers\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("  %d active:\n", len(workers.Workers)))
+		fmt.Fprintf(&sb, "  %d active:\n", len(workers.Workers))
 		for _, w := range workers.Workers {
 			id := truncate(w.ID, 8)
 			tool := ""
 			if w.CurrentTool != "" {
 				tool = fmt.Sprintf(" [%s]", truncate(w.CurrentTool, 20))
 			}
-			sb.WriteString(fmt.Sprintf("    %s: %s%s\n", id, w.State, tool))
+			fmt.Fprintf(&sb, "    %s: %s%s\n", id, w.State, tool)
 		}
 	}
 
@@ -433,14 +433,14 @@ func (h *CommandHandler) executeStatus() *CommandResult {
 	if len(runningTasks) == 0 {
 		sb.WriteString("  no running tasks\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("  %d running:\n", len(runningTasks)))
+		fmt.Fprintf(&sb, "  %d running:\n", len(runningTasks))
 		for _, t := range runningTasks {
 			name := coalesce(t.Name, truncate(t.ID, 12), "unnamed")
 			progress := ""
 			if t.TotalJobs > 0 {
 				progress = fmt.Sprintf(" [%d/%d]", t.CompletedJobs, t.TotalJobs)
 			}
-			sb.WriteString(fmt.Sprintf("    %s: %s%s\n", t.State, name, progress))
+			fmt.Fprintf(&sb, "    %s: %s%s\n", t.State, name, progress)
 		}
 	}
 
@@ -562,7 +562,7 @@ func (h *CommandHandler) executeTasks(args []string) *CommandResult {
 		if t.TotalJobs > 0 {
 			progress = fmt.Sprintf(" [%d/%d]", t.CompletedJobs, t.TotalJobs)
 		}
-		sb.WriteString(fmt.Sprintf("  %s: %s%s\n", t.State, name, progress))
+		fmt.Fprintf(&sb, "  %s: %s%s\n", t.State, name, progress)
 		count++
 	}
 
@@ -630,7 +630,7 @@ func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 	if len(args) < 2 {
 		return &CommandResult{
 			Output:  "usage: /amend <task-id> <type> [content]\n\nsubmit an amendment to modify a task.\n\namendment types:\n  inject_context  - add context to the task\n  skip_step       - skip a step (requires step_id in content)\n  add_step        - add a new step (requires description in content)\n  reprioritize    - reorder steps (requires step_ids in content)\n  change_agent    - reassign step to different agent\n\nexamples:\n  /amend task-123 inject_context \"skip testing, go straight to deployment\"\n  /amend task-123 skip_step step-456\n  /amend task-123 add_step \"write unit tests\"",
-			IsError:   true,
+			IsError: true,
 		}
 	}
 

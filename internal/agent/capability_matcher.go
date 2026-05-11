@@ -362,7 +362,7 @@ func (m *CapabilityMatcher) MatchAll(input string) []*MatchResult {
 	}
 
 	// Sort by confidence descending (simple bubble sort for small lists)
-	for i := 0; i < len(results)-1; i++ {
+	for i := range len(results) - 1 {
 		for j := i + 1; j < len(results); j++ {
 			if results[j].Confidence > results[i].Confidence {
 				results[i], results[j] = results[j], results[i]

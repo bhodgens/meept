@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -219,7 +220,7 @@ func NewFrameReader(conn net.Conn) *FrameReader {
 
 func (r *FrameReader) ReadRequest() (*Request, error) {
 	// Read length line
-	var lengthStr string
+	var lengthStr strings.Builder
 	buf := make([]byte, 1)
 	for {
 		_, err := r.conn.Read(buf)
@@ -229,11 +230,11 @@ func (r *FrameReader) ReadRequest() (*Request, error) {
 		if buf[0] == '\n' {
 			break
 		}
-		lengthStr += string(buf)
+		lengthStr.WriteString(string(buf))
 	}
 
 	var length int
-	fmt.Sscanf(lengthStr, "%d", &length)
+	fmt.Sscanf(lengthStr.String(), "%d", &length)
 
 	// Read payload
 	payload := make([]byte, length)

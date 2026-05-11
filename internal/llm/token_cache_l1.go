@@ -236,11 +236,11 @@ func (c *L1Cache) Inspect(promptHash string) []l1InspectEntry {
 func containsPromptHash(key, promptHash string) bool {
 	// Keys are format: modelID:promptHash[:fileHashSuffix]
 	// We need to find promptHash after the first colon
-	idx := strings.Index(key, ":")
-	if idx < 0 {
+	_, after, ok := strings.Cut(key, ":")
+	if !ok {
 		return false
 	}
-	rest := key[idx+1:]
+	rest := after
 	// The prompt hash is 64 hex chars (SHA256)
 	if len(promptHash) > 16 {
 		// Match truncated form if provided
@@ -363,11 +363,4 @@ func (c *L1Cache) cleanupExpired() {
 		c.recordEntryCountMetric()
 		c.logger.Debug("L1 cache cleanup", "expired", expired)
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

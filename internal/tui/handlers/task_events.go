@@ -8,15 +8,15 @@ import (
 
 // TaskEventPayload represents common task event data.
 type TaskEventPayload struct {
-	TaskID        string  `json:"task_id"`
-	Name          string  `json:"name"`
-	CompletedJobs int     `json:"completed_jobs"`
-	TotalJobs     int     `json:"total_jobs"`
-	FailedJobs    int     `json:"failed_jobs"`
-	CurrentStep   string  `json:"current_step"`
-	Result        string  `json:"result"`
-	Error         string  `json:"error"`
-	ExecutionTime string  `json:"execution_time"`
+	TaskID        string        `json:"task_id"`
+	Name          string        `json:"name"`
+	CompletedJobs int           `json:"completed_jobs"`
+	TotalJobs     int           `json:"total_jobs"`
+	FailedJobs    int           `json:"failed_jobs"`
+	CurrentStep   string        `json:"current_step"`
+	Result        string        `json:"result"`
+	Error         string        `json:"error"`
+	ExecutionTime string        `json:"execution_time"`
 	Steps         []StepSummary `json:"steps"`
 }
 
@@ -51,12 +51,12 @@ func (h *TaskEventHandler) HandleTaskCompleted(payload map[string]any) *TaskNoti
 	executionTime := getString(payload, "execution_time", "")
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("task completed: %s", strings.ToLower(name)))
+	fmt.Fprintf(&sb, "task completed: %s", strings.ToLower(name))
 	if result != "" {
-		sb.WriteString(fmt.Sprintf("\n%s", result))
+		fmt.Fprintf(&sb, "\n%s", result)
 	}
 	if executionTime != "" {
-		sb.WriteString(fmt.Sprintf(" (%s)", executionTime))
+		fmt.Fprintf(&sb, " (%s)", executionTime)
 	}
 
 	return &TaskNotification{
@@ -75,16 +75,16 @@ func (h *TaskEventHandler) HandleTaskFailed(payload map[string]any) *TaskNotific
 	total := getInt(payload, "total_jobs", 0)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("task failed: %s", strings.ToLower(name)))
+	fmt.Fprintf(&sb, "task failed: %s", strings.ToLower(name))
 	if total > 0 {
-		sb.WriteString(fmt.Sprintf("\nprogress: %d/%d completed, %d failed", completed, total, failed))
+		fmt.Fprintf(&sb, "\nprogress: %d/%d completed, %d failed", completed, total, failed)
 	}
 	if errMsg != "" {
 		errPreview := errMsg
 		if len(errPreview) > 100 {
 			errPreview = errPreview[:97] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("\nerror: %s", errPreview))
+		fmt.Fprintf(&sb, "\nerror: %s", errPreview)
 	}
 
 	return &TaskNotification{
@@ -109,7 +109,7 @@ func (h *TaskEventHandler) HandleTaskProgress(payload map[string]any) *TaskNotif
 
 	var sb strings.Builder
 	if total > 0 {
-		sb.WriteString(fmt.Sprintf("task progress [%d/%d]: ", completed, total))
+		fmt.Fprintf(&sb, "task progress [%d/%d]: ", completed, total)
 	} else {
 		sb.WriteString("task progress: ")
 	}
@@ -133,9 +133,9 @@ func (h *TaskEventHandler) HandleStepCompleted(payload map[string]any) *TaskNoti
 	result := getString(payload, "result", "")
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("step completed: %s", strings.ToLower(desc)))
+	fmt.Fprintf(&sb, "step completed: %s", strings.ToLower(desc))
 	if result != "" && len(result) < 60 {
-		sb.WriteString(fmt.Sprintf("\n  %s", result))
+		fmt.Fprintf(&sb, "\n  %s", result)
 	}
 
 	return &TaskNotification{

@@ -14,7 +14,7 @@ func TestCompressByImportance_RemovesLowImportanceFirst(t *testing.T) {
 	conv.AddUserMessage("What is the weather?")
 
 	// Add reasoning steps (ImportanceLow) - make them large to be removal candidates
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		conv.AddAssistantMessage("let me think about this carefully. Hmm, considering the data and analyzing the situation thoroughly. This suggests that we need to explore more options.")
 	}
 
@@ -49,7 +49,7 @@ func TestCompressByImportance_PreservesAnchorMessages(t *testing.T) {
 
 	// Add regular messages
 	conv.AddUserMessage("Do something")
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		conv.AddAssistantMessage("let me think about step " + strings.Repeat("x", 100))
 	}
 	conv.AddAssistantMessage("Done with the task.")
@@ -83,7 +83,7 @@ func TestCompressByImportance_PreservesUserInput(t *testing.T) {
 	conv.AddUserMessage(userContent)
 
 	// Add many low-importance reasoning messages
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		conv.AddAssistantMessage("let me think about this. Hmm, considering the options. " + strings.Repeat("data ", 20))
 	}
 
@@ -112,7 +112,7 @@ func TestCompressByImportance_ReportAccuracy(t *testing.T) {
 
 	// Add messages with known token counts
 	// 3 chars per token heuristic
-	conv.AddUserMessage("1234567890")          // 10 chars = 3 tokens
+	conv.AddUserMessage("1234567890")           // 10 chars = 3 tokens
 	conv.AddAssistantMessage("123456789012345") // 15 chars = 5 tokens
 	conv.AddAssistantMessage("123456789012345") // 15 chars = 5 tokens
 	conv.AddAssistantMessage("123456789012345") // 15 chars = 5 tokens
@@ -192,7 +192,7 @@ func TestCompressByImportance_HighImportancePreservedOverLow(t *testing.T) {
 	conv.AddAssistantMessage(conclusionContent)
 
 	// Add many reasoning messages (ImportanceLow) - larger
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		conv.AddAssistantMessage("let me think about this step carefully. Hmm, " + strings.Repeat("analysis ", 30))
 	}
 

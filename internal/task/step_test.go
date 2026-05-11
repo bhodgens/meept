@@ -56,7 +56,7 @@ func TestStepStore_ListByTaskID(t *testing.T) {
 	store := newTestStepStore(t)
 
 	// Create steps for two tasks
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		step := NewTaskStep("task-A", "step A", i)
 		if err := store.Create(step); err != nil {
 			t.Fatalf("Create failed: %v", err)
@@ -360,7 +360,7 @@ func TestStepStore_CountByState(t *testing.T) {
 func TestStepStore_DeleteByTaskID(t *testing.T) {
 	store := newTestStepStore(t)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		s := NewTaskStep("task-1", "step", i)
 		if err := store.Create(s); err != nil {
 			t.Fatalf("Create failed: %v", err)

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/caimlas/meept/internal/memory/memvid"
@@ -85,9 +86,7 @@ func (b *MemvidConsolidationBackend) StoreExpiredSummary(ctx context.Context, me
 	}
 
 	metadata := make(map[string]any)
-	for k, v := range mem.Metadata {
-		metadata[k] = v
-	}
+	maps.Copy(metadata, mem.Metadata)
 	metadata["type"] = "expired_summary"
 	metadata["original_id"] = mem.ID
 	metadata["category"] = category

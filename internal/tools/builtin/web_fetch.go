@@ -36,10 +36,10 @@ var (
 	}
 
 	// Regex patterns for HTML stripping
-	scriptRE         = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
-	styleRE          = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
-	blockTagRE       = regexp.MustCompile(`(?i)<(br|p|div|h[1-6]|li|tr)[^>]*>`)
-	tagRE            = regexp.MustCompile(`<[^>]+>`)
+	scriptRE          = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	styleRE           = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	blockTagRE        = regexp.MustCompile(`(?i)<(br|p|div|h[1-6]|li|tr)[^>]*>`)
+	tagRE             = regexp.MustCompile(`<[^>]+>`)
 	multiWhitespaceRE = regexp.MustCompile(`\n{3,}`)
 )
 
@@ -123,7 +123,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 	}
 
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

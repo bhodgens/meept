@@ -77,7 +77,7 @@ func TestRobotUpdate(t *testing.T) {
 	initialProgress := r.moveProgress
 
 	// Update several times
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		r.Update()
 	}
 

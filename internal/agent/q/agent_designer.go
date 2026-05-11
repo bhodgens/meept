@@ -3,6 +3,7 @@ package q
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -103,18 +104,18 @@ func (d *AgentDesigner) determineRoleAndPurpose(pattern PatternReport, requireme
 	}
 
 	var purpose strings.Builder
-	purpose.WriteString(fmt.Sprintf("You are a %s specialist %s agent. ", intent, role))
+	fmt.Fprintf(&purpose, "You are a %s specialist %s agent. ", intent, role)
 	purpose.WriteString("Your responsibilities:\n")
 
 	reqCount := minInt(len(requirements), 3)
-	for i := 0; i < reqCount; i++ {
-		purpose.WriteString(fmt.Sprintf("%d. %s\n", i+1, requirements[i]))
+	for i := range reqCount {
+		fmt.Fprintf(&purpose, "%d. %s\n", i+1, requirements[i])
 	}
 	if reqCount == 0 {
-		purpose.WriteString(fmt.Sprintf("1. Execute %s tasks with high quality\n", intent))
+		fmt.Fprintf(&purpose, "1. Execute %s tasks with high quality\n", intent)
 	}
 
-	purpose.WriteString(fmt.Sprintf("\nYou do NOT handle: tasks outside %s domain, general chat, unrelated requests", intent))
+	fmt.Fprintf(&purpose, "\nYou do NOT handle: tasks outside %s domain, general chat, unrelated requests", intent)
 
 	return role, purpose.String()
 }
@@ -428,12 +429,7 @@ func (d *AgentDesigner) recommendModel(pattern PatternReport, analyses []*Sessio
 // Helper functions
 
 func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, item)
 }
 
 func maxInt(a, b int) int {
@@ -453,40 +449,40 @@ func (d *AgentDesigner) GenerateFullAgentFile(design *AgentDesign) string {
 
 	// YAML frontmatter
 	buf.WriteString("---\n")
-	buf.WriteString(fmt.Sprintf("id: %s\n", design.ID))
-	buf.WriteString(fmt.Sprintf("name: %s\n", design.Name))
-	buf.WriteString(fmt.Sprintf("role: %s\n", design.Role))
-	buf.WriteString(fmt.Sprintf("purpose: |\n%s\n", indent(design.Purpose, "  ")))
+	fmt.Fprintf(&buf, "id: %s\n", design.ID)
+	fmt.Fprintf(&buf, "name: %s\n", design.Name)
+	fmt.Fprintf(&buf, "role: %s\n", design.Role)
+	fmt.Fprintf(&buf, "purpose: |\n%s\n", indent(design.Purpose, "  "))
 
 	if design.Model != "" {
-		buf.WriteString(fmt.Sprintf("model: %s\n", design.Model))
+		fmt.Fprintf(&buf, "model: %s\n", design.Model)
 	}
 
 	if len(design.AdditionalTools) > 0 {
 		buf.WriteString("additional_tools:\n")
 		for _, tool := range design.AdditionalTools {
-			buf.WriteString(fmt.Sprintf("  - %s\n", tool))
+			fmt.Fprintf(&buf, "  - %s\n", tool)
 		}
 	}
 
 	if len(design.Capabilities) > 0 {
 		buf.WriteString("capabilities:\n")
 		for _, cap := range design.Capabilities {
-			buf.WriteString(fmt.Sprintf("  - %s\n", cap))
+			fmt.Fprintf(&buf, "  - %s\n", cap)
 		}
 	}
 
-	buf.WriteString(fmt.Sprintf("max_iterations: %d\n", design.Constraints.MaxIterations))
-	buf.WriteString(fmt.Sprintf("timeout_seconds: %d\n", design.Constraints.TimeoutSeconds))
-	buf.WriteString(fmt.Sprintf("max_tokens_per_turn: %d\n", design.Constraints.MaxTokensPerTurn))
+	fmt.Fprintf(&buf, "max_iterations: %d\n", design.Constraints.MaxIterations)
+	fmt.Fprintf(&buf, "timeout_seconds: %d\n", design.Constraints.TimeoutSeconds)
+	fmt.Fprintf(&buf, "max_tokens_per_turn: %d\n", design.Constraints.MaxTokensPerTurn)
 	if design.Constraints.Temperature != nil {
-		buf.WriteString(fmt.Sprintf("temperature: %.1f\n", *design.Constraints.Temperature))
+		fmt.Fprintf(&buf, "temperature: %.1f\n", *design.Constraints.Temperature)
 	}
 
 	buf.WriteString("---\n\n")
 
 	// Baseline instructions header
-	buf.WriteString(fmt.Sprintf("# %s Baseline Instructions\n\n", design.Name))
+	fmt.Fprintf(&buf, "# %s Baseline Instructions\n\n", design.Name)
 
 	// System prompt sections
 	for _, section := range design.SystemPromptSections {

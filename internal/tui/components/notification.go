@@ -211,7 +211,7 @@ func renderNotification(n Notification, screenWidth int) string {
 
 	// Build content lines
 	var content strings.Builder
-	content.WriteString(fmt.Sprintf("[%s] %s", icon, titleStyle.Render(n.Title)))
+	fmt.Fprintf(&content, "[%s] %s", icon, titleStyle.Render(n.Title))
 	content.WriteString("\n")
 
 	// Truncate message to fit

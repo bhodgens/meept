@@ -42,10 +42,10 @@ type Manager struct {
 
 // ManagerConfig holds configuration for creating a Manager.
 type ManagerConfig struct {
-	Config        *Config
-	PrimaryLLM    *llm.Client
-	FallbackLLM   *llm.Client
-	Logger        *slog.Logger
+	Config      *Config
+	PrimaryLLM  *llm.Client
+	FallbackLLM *llm.Client
+	Logger      *slog.Logger
 }
 
 // NewManager creates a new shadow training manager.
@@ -299,9 +299,9 @@ func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string,
 
 // classifyDomain classifies message domain.
 func (m *Manager) classifyDomain(messages []llm.ChatMessage) Domain {
-	var text string
+	var text strings.Builder
 	for _, msg := range messages {
-		text += " " + msg.Content
+		text.WriteString(" " + msg.Content)
 	}
 
 	codeKeywords := []string{"code", "function", "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
@@ -309,7 +309,7 @@ func (m *Manager) classifyDomain(messages []llm.ChatMessage) Domain {
 	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "stack trace", "exception"}
 	analysisKeywords := []string{"analyze", "explain", "how does", "what is", "understand", "review"}
 
-	lower := strings.ToLower(text)
+	lower := strings.ToLower(text.String())
 	if containsAnyWord(lower, codeKeywords) {
 		return DomainCode
 	}
@@ -331,12 +331,12 @@ func (m *Manager) classifyTaskType(messages []llm.ChatMessage, response *llm.Res
 		return TaskTypeToolUse
 	}
 
-	var text string
+	var text strings.Builder
 	for _, msg := range messages {
-		text += " " + msg.Content
+		text.WriteString(" " + msg.Content)
 	}
 
-	lower := strings.ToLower(text)
+	lower := strings.ToLower(text.String())
 	if containsAnyWord(lower, []string{"step by step", "first", "second", "then", "finally"}) {
 		return TaskTypeMultiStep
 	}
@@ -565,16 +565,16 @@ func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID str
 	}
 
 	// Build a content representation of the tool calls
-	var toolContent string
+	var toolContent strings.Builder
 	for i, tc := range response.ToolCalls {
 		if i > 0 {
-			toolContent += "\n"
+			toolContent.WriteString("\n")
 		}
-		toolContent += "Tool: " + tc.Function.Name + "\nArgs: " + tc.Function.Arguments
+		toolContent.WriteString("Tool: " + tc.Function.Name + "\nArgs: " + tc.Function.Arguments)
 	}
 
 	// Create the shadow record
-	record := NewShadowRecord(conversationID, shadowMessages, modelID, toolContent)
+	record := NewShadowRecord(conversationID, shadowMessages, modelID, toolContent.String())
 	record.StudentTokensIn = response.Usage.PromptTokens
 	record.StudentTokensOut = response.Usage.CompletionTokens
 	record.Domain = domain

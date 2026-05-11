@@ -22,8 +22,8 @@ type Selector struct {
 
 // TFIDFEmbedding represents a sparse TF-IDF embedding.
 type TFIDFEmbedding struct {
-	Terms   map[string]float64 `json:"terms"`
-	Norm    float64            `json:"norm"`
+	Terms map[string]float64 `json:"terms"`
+	Norm  float64            `json:"norm"`
 }
 
 // SelectorOption is a functional option for Selector.
@@ -328,7 +328,7 @@ func (s *Selector) FormatForInjection(examples []*FewShotExample) []Message {
 
 	// Add a system message introducing the examples
 	messages = append(messages, Message{
-		Role: "system",
+		Role:    "system",
 		Content: "Here are some relevant example interactions that demonstrate the expected response style and quality:\n",
 	})
 
@@ -382,7 +382,7 @@ func getBigrams(text string) []string {
 	}
 
 	bigrams := make([]string, len(words)-1)
-	for i := 0; i < len(words)-1; i++ {
+	for i := range len(words) - 1 {
 		bigrams[i] = words[i] + " " + words[i+1]
 	}
 

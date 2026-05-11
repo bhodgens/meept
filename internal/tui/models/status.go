@@ -118,7 +118,7 @@ func (m *StatusModel) View() string {
 
 func (m *StatusModel) renderLoading() string {
 	style := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Align(lipgloss.Center).
 		Padding(4, 0)
 
@@ -143,10 +143,7 @@ func (m *StatusModel) renderError() string {
 
 func (m *StatusModel) renderDashboard() string {
 	// Calculate panel widths
-	panelWidth := (m.width - 8) / 3
-	if panelWidth < 20 {
-		panelWidth = 20
-	}
+	panelWidth := max((m.width-8)/3, 20)
 
 	// Create three panels
 	leftPanel := m.renderStatusPanel(panelWidth)
@@ -309,10 +306,9 @@ func (m *StatusModel) renderProgressBar(width int, percent float64) string {
 		percent = 1
 	}
 
-	barWidth := width - 2 // Account for brackets
-	if barWidth < 10 {
-		barWidth = 10
-	}
+	barWidth := max(
+		// Account for brackets
+		width-2, 10)
 
 	filled := int(float64(barWidth) * percent)
 	empty := barWidth - filled

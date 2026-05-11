@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/caimlas/meept/pkg/models"
@@ -16,8 +17,8 @@ var ErrStepNotFound = errors.New("step not found")
 
 // CategorizedRecommendation represents a recommendation from an agent.
 type CategorizedRecommendation struct {
-	Category    string  `json:"category"`    // "security", "performance", "maintainability", "follow-up"
-	Priority    string  `json:"priority"`    // "critical", "high", "medium", "low"
+	Category    string  `json:"category"` // "security", "performance", "maintainability", "follow-up"
+	Priority    string  `json:"priority"` // "critical", "high", "medium", "low"
 	Description string  `json:"description"`
 	AgentID     string  `json:"agent_id"`
 	Confidence  float64 `json:"confidence"`
@@ -88,9 +89,9 @@ type TaskStep struct {
 	// AccumulatedContext contains evidence/outputs from prior steps.
 	AccumulatedContext string `json:"accumulated_context,omitempty"`
 	// ValidationRetryCount tracks how many times this step has been re-queued for validation retry.
-	ValidationRetryCount int `json:"validation_retry_count,omitempty"`
+	ValidationRetryCount int       `json:"validation_retry_count,omitempty"`
 	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // NewTaskStep creates a new task step.
@@ -133,10 +134,8 @@ func (s *TaskStep) AddTokenUsage(tokens int) {
 
 // AddMemoryRef adds a memory reference to the step.
 func (s *TaskStep) AddMemoryRef(ref string) {
-	for _, r := range s.MemoryRefs {
-		if r == ref {
-			return // Already exists
-		}
+	if slices.Contains(s.MemoryRefs, ref) {
+		return // Already exists
 	}
 	s.MemoryRefs = append(s.MemoryRefs, ref)
 	s.UpdatedAt = time.Now().UTC()

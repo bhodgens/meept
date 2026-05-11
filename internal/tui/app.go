@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"os"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -50,9 +50,9 @@ type App struct {
 	sidebarWidth int // cached for status bar width calculation
 	layoutMode   LayoutMode
 	styles       *Styles
-	rpc         *RPCClient
-	eventRPC    *RPCClient // Separate connection for event polling
-	currentView ViewType
+	rpc          *RPCClient
+	eventRPC     *RPCClient // Separate connection for event polling
+	currentView  ViewType
 
 	// Sub-models for each view
 	chat   *models.ChatModel
@@ -73,12 +73,12 @@ type App struct {
 	clientConfig *ClientConfig
 
 	// Modal state
-	activeModal     ModalType
-	commandPalette  *Modal
-	sessionPicker   *SessionPickerModal
-	sessionRename   *SessionRenameModal
-	confirmModal    *ConfirmModal
-	fuzzyFinder     *FuzzyFinderModal
+	activeModal    ModalType
+	commandPalette *Modal
+	sessionPicker  *SessionPickerModal
+	sessionRename  *SessionRenameModal
+	confirmModal   *ConfirmModal
+	fuzzyFinder    *FuzzyFinderModal
 
 	// Current session
 	currentSession *types.Session
@@ -166,14 +166,14 @@ func NewApp(socketPath string) *App {
 	}
 
 	app := &App{
-		styles:         styles,
-		rpc:            rpc,
-		eventRPC:       eventRPC,
-		currentView:    ViewChat,
-		chat:           models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior, inputConfig, models.ChatConfig{
-		AutoCopyOnRelease: clientConfig.Chat.AutoCopyOnRelease,
-		ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
-	}),
+		styles:      styles,
+		rpc:         rpc,
+		eventRPC:    eventRPC,
+		currentView: ViewChat,
+		chat: models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior, inputConfig, models.ChatConfig{
+			AutoCopyOnRelease: clientConfig.Chat.AutoCopyOnRelease,
+			ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
+		}),
 		tasks:          models.NewTasksModel(rpc),
 		queue:          models.NewQueueModel(rpc),
 		memory:         models.NewMemoryModel(rpc),
@@ -292,10 +292,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case LayoutStandard:
 				a.sidebarWidth = 25
 			case LayoutWide:
-				a.sidebarWidth = msg.Width * 30 / 100
-				if a.sidebarWidth > 35 {
-					a.sidebarWidth = 35
-				}
+				a.sidebarWidth = min(msg.Width*30/100, 35)
 				if a.sidebarWidth < 25 {
 					a.sidebarWidth = 25
 				}
@@ -460,7 +457,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				input := a.chat.GetInputValue()
 				// Debug logging - write to file for inspection
 				DebugLog(fmt.Sprintf("SLASH /: input=%q (len=%d), appFocus=%v, currentView=%v", input, len(input), a.appFocus, a.currentView))
-				
+
 				if input == "" || strings.HasPrefix(input, "/") {
 					a.slashAutocomplete.Show("")
 					DebugLog(fmt.Sprintf("SLASH Show(): visible=%v, filtered=%d commands", a.slashAutocomplete.IsVisible(), len(a.slashAutocomplete.filtered)))
@@ -671,8 +668,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if errMsg != "" {
 						// Display error in chat as a task result message
 						resultMsg := models.ChatTaskResultMsg{
-							State:        "failed",
-							TaskID:       taskID,
+							State:         "failed",
+							TaskID:        taskID,
 							ResultSummary: fmt.Sprintf("step %s failed: %s", stepDesc, errMsg),
 						}
 						if cmd := a.chat.Update(resultMsg); cmd != nil {
@@ -874,9 +871,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if a.slashAutocomplete != nil && a.currentView == ViewChat && a.appFocus == FocusChat && a.slashAutocomplete.IsVisible() {
 		// Check for key press or check if we just showed the popup
 		currentInput := a.chat.GetInputValue()
-		if strings.HasPrefix(currentInput, "/") {
+		if after, ok := strings.CutPrefix(currentInput, "/"); ok {
 			// Normal case: input has "/" prefix
-			filter := strings.TrimPrefix(currentInput, "/")
+			filter := after
 			filter = strings.TrimSpace(filter)
 			a.slashAutocomplete.SetFilter(filter)
 			if len(a.slashAutocomplete.filtered) == 0 {
@@ -1254,7 +1251,6 @@ func (a *App) getWindowTitle() string {
 	return title
 }
 
-
 func (a *App) renderTabs() string {
 	tabs := []struct {
 		name string
@@ -1350,7 +1346,7 @@ func (a *App) getQuickActions() []string {
 			if a.chat.HasSelection() {
 				actions = append(actions, a.styles.HelpKey.Render("c")+" "+a.styles.HelpValue.Render("copy selection"))
 			}
-			
+
 			chatMode := a.chat.GetMode()
 			switch chatMode {
 			case "insert":
@@ -1408,13 +1404,6 @@ func (a *App) renderError() string {
 // that should trigger auto-focus to the text input.
 func isPrintableKey(msg tea.KeyPressMsg) bool {
 	return len(msg.Text) > 0
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // CopySuccessMsg indicates clipboard copy succeeded.

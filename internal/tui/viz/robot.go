@@ -30,9 +30,9 @@ const (
 type Robot struct {
 	ID           string
 	AgentID      string
-	Position     Point   // Current position in Braille coordinates
-	HomePosition Point   // Rest position (corner)
-	TargetPos    Point   // Animation target
+	Position     Point // Current position in Braille coordinates
+	HomePosition Point // Rest position (corner)
+	TargetPos    Point // Animation target
 	State        RobotState
 	Progress     float64 // 0.0-1.0 for work progress fill
 
@@ -193,8 +193,8 @@ func (r *Robot) Draw(c *Canvas) {
 // drawBody draws the basic robot shape.
 func (r *Robot) drawBody(c *Canvas, x, y, height int, color ansi.Color) {
 	// Simple filled rectangle for small robot (2x4 dots = 1 char)
-	for py := 0; py < height; py++ {
-		for px := 0; px < RobotWidth; px++ {
+	for py := range height {
+		for px := range RobotWidth {
 			c.SetPixel(x+px, y+py, true)
 			c.SetColorAtPixel(x+px, y+py, color)
 		}
@@ -205,8 +205,8 @@ func (r *Robot) drawBody(c *Canvas, x, y, height int, color ansi.Color) {
 func (r *Robot) drawWithFill(c *Canvas, x, y, height int, color ansi.Color) {
 	fillHeight := int(float64(height) * r.Progress)
 
-	for py := 0; py < height; py++ {
-		for px := 0; px < RobotWidth; px++ {
+	for py := range height {
+		for px := range RobotWidth {
 			c.SetPixel(x+px, y+py, true)
 
 			// Fill from bottom: if py >= (height - fillHeight), use working color

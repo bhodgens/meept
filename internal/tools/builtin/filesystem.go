@@ -108,20 +108,16 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 		lines := strings.Split(text, "\n")
 		start := 0
 		if offset > 0 {
-			start = int(offset) - 1 // Convert to 0-based
-			if start < 0 {
-				start = 0
-			}
+			start = max(
+				// Convert to 0-based
+				int(offset)-1, 0)
 			if start >= len(lines) {
 				return "", nil // Empty result if offset beyond file
 			}
 		}
 		end := len(lines)
 		if limit > 0 {
-			end = start + int(limit)
-			if end > len(lines) {
-				end = len(lines)
-			}
+			end = min(start+int(limit), len(lines))
 		}
 		text = strings.Join(lines[start:end], "\n")
 	}
@@ -426,10 +422,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	recursive, _ := args["recursive"].(bool)
 	maxEntries := 200
 	if max, ok := args["max_entries"].(float64); ok && max > 0 {
-		maxEntries = int(max)
-		if maxEntries > MaxListEntries {
-			maxEntries = MaxListEntries
-		}
+		maxEntries = min(int(max), MaxListEntries)
 	}
 
 	if rawPath == "" {
