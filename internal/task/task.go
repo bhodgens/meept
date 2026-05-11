@@ -41,7 +41,7 @@ type Task struct {
 	MemvidZone   string          `json:"memvid_zone,omitempty"`
 	Metadata     json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
-	StartedAt    time.Time       `json:"started_at,omitempty,omitzero"`
+	StartedAt    time.Time       `json:"started_at,omitempty,omitzero"` //nolint:modernize // omitzero already applied
 	UpdatedAt    time.Time       `json:"updated_at"`
 
 	// Linked sessions

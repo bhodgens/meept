@@ -238,7 +238,63 @@ Instead of deleting messages, insert `compaction` entries:
 4. Original messages remain in the tree but are skipped during context assembly.
 5. Context assembly walks the tree and replaces runs of messages with their compaction entries.
 
-### 3.8 Enhanced Message Model
+### 3.8 Tool Call Serialization Sidecar (Optional Enhancement)
+
+Instead of handling tool call JSON encoding/decoding in the main agent loop, delegate to a dedicated sidecar capability:
+
+```
+┌─────────────────┐
+│   AgentLoop     │
+│ (main conversation) │
+└────────┬────────┘
+         │ serialize/deserialize tool calls
+         ▼
+┌─────────────────┐
+│ Tooling Agent   │ ◄── sidecar capability
+│ (or model)      │
+│ - JSON encode   │
+│ - JSON decode   │
+│ - Schema evol.  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ session.Message │
+│ .tool_calls     │
+│ (JSON string)   │
+└─────────────────┘
+```
+
+**Benefits:**
+- Keeps main agent loop focused on conversation flow
+- Centralizes tool call serialization logic
+- Easier to evolve schema (one place to update)
+- Can add validation, logging, metrics in one place
+
+**Implementation options:**
+1. **Dedicated agent ID** (`tooling`): Register a minimal agent that only handles serialization
+2. **Model capability**: Use a fast/cheap model for serialization tasks
+3. **Service layer**: Extract to `internal/tools/serialization.go` (simplest, no agent overhead)
+
+**Recommendation:** Start with option 3 (service layer). Promote to agent/sidecar only if the logic grows complex or multiple callers emerge.
+
+**Configuration** (`tooling` section in `meept.json5`):
+```json5
+tooling: {
+  enabled: false,              // Enable sidecar (default: false)
+  mode: "service",             // "service" (in-process) or "agent" (sidecar)
+  agent_id: "tooling",         // Agent ID when mode is "agent"
+  model: "",                   // Model override (empty = default)
+  cache_enabled: true,         // Cache serialized tool calls
+  cache_max_size: 500,         // Max cache entries
+  cache_ttl_minutes: 60,       // Cache TTL
+  include_schema: true,        // Include JSON schema in metadata
+  validate_on_serialize: false,// Validate against schema
+  log_unknown_tools: true,     // Log warnings for unknown tools
+}
+```
+
+### 3.9 Enhanced Message Model
 
 Extend `session.Message` to carry the full `llm.ChatMessage` data:
 
@@ -433,21 +489,34 @@ type Message struct {
 
 **Estimated effort:** Low-Medium. Straightforward SQL copy operation wrapped in a transaction.
 
-### Phase 6: Compaction Integration
+### Phase 6a: Compaction Entry Emission
 
-**Goal:** Replace in-memory message deletion with tree-based compaction entries.
+**Goal:** Modify compaction logic to emit tree-based compaction entries instead of deleting messages.
 
 **Files to modify:**
 - `internal/agent/conversation.go` -- Modify `CompressByImportance` and `TruncateByTokens` to emit compaction entries instead of deleting messages. Add `GetCompactionEntries() []CompactionEntry`.
-- `internal/session/tree.go` -- Update context assembly to skip messages that have been compacted and use the compaction entry instead.
-- `internal/session/store_sqlite.go` -- Add `InsertCompaction(sessionID, parentID, summary string, compressedRange [2]int64)` method.
+- `internal/session/store_sqlite.go` -- Add `InsertCompaction(sessionID, parentID, summary string, compressedIDs []int64)` method.
 
 **Key design decisions:**
 - **When to compact:** Trigger compaction when `GetWindowedMessages` would drop more than 30% of messages.
 - **Compaction granularity:** Compact in chunks rather than all-at-once, to allow fine-grained context reconstruction.
 - **Backward compatibility:** Existing truncated conversations (without compaction entries) continue to work normally.
 
-**Estimated effort:** High. Requires careful integration with the existing context assembly pipeline.
+**Estimated effort:** Medium. Additive changes only — no context assembly changes yet.
+
+### Phase 6b: Compaction Integration with Context Assembly
+
+**Goal:** Update context assembly to skip compacted messages and use compaction entries instead.
+
+**Files to modify:**
+- `internal/session/tree.go` -- Update `AssembleBranch` to skip messages that have been compacted and substitute compaction entries.
+- `internal/agent/conversation.go` -- Integrate tree-based compaction with `GetWindowedMessages()`.
+
+**Key design decisions:**
+- **Context assembly order:** Walk tree, detect compaction entry ranges, substitute summary for compressed messages.
+- **Testing:** Extensive tests for various tree shapes and compaction patterns.
+
+**Estimated effort:** High. Requires careful integration with the existing context assembly pipeline. Splitting from 6a allows validating compaction entry emission before integrating with context assembly.
 
 ### Phase 7: CLI and TUI Integration
 
@@ -582,29 +651,36 @@ type TreeNode struct {
 
 ### Questions for Review
 
-1. **Backward compatibility with existing sessions.db:** The migration adds nullable columns with defaults, so existing data should work. But should we backfill `parent_id` for existing messages? (Proposed: yes, set `parent_id` to the previous message's ID based on insertion order and autoincrement ID.)
+1. **Backward compatibility with existing sessions.db:** The migration adds nullable columns with defaults, so existing data should work. But should we backfill `parent_id` for existing messages? (Proposed: **yes, backfill during migration** — set `parent_id` to the previous message's ID based on insertion order. This is a one-time cost that simplifies all downstream tree-walking logic and removes ambiguity for existing messages.)
 
-2. **Compaction vs. deletion for existing behavior:** Should compaction be opt-in (requires `session.compaction: true`) or should it replace the current truncation behavior entirely? (Proposed: opt-in initially, with a migration path to make it default.)
+2. **Compaction vs. deletion for existing behavior:** Should compaction be opt-in (requires `session.compaction: true`) or should it replace the current truncation behavior entirely? (Proposed: **opt-in initially**, with a migration path to make it default after proven in production.)
 
-3. **Branch visibility in TUI:** How should branches be presented to the user? A tree view is complex for a terminal UI. Options: (a) linear list with branch indicators, (b) simple selector dialog showing branch summaries, (c) full tree visualization using bubbletea. (Proposed: start with option (b), add tree viz later.)
+3. **Branch visibility in TUI:** How should branches be presented to the user? A tree view is complex for a terminal UI. Options: (a) linear list with branch indicators, (b) simple selector dialog showing branch summaries, (c) full tree visualization using bubbletea. (Proposed: **indented tree-like list with status metadata** — shows branch name/message count/summary status with visual hierarchy. Example:
+   ```
+   main (current) ────────────────┐
+     └─ branch-1 (3 msgs) ────────┤
+     └─ branch-2 (7 msgs, summed) ┘
+   ```)
 
-4. **Branch summarization cost:** Each branch navigation could trigger an LLM call for summarization. Should this be async? Should there be a rate limit? (Proposed: async with a queue, show "summarizing..." indicator in TUI, cache summary on completion.)
+4. **Branch summarization cost:** Each branch navigation could trigger an LLM call for summarization. Should this be async? Should there be a rate limit? (Proposed: **hybrid approach** — synchronous for branches under 10 messages, async beyond that. Most branches will be short, and users prefer waiting 2 seconds over a blocking spinner. Async path uses a queue with persistence for daemon restart mid-summarization.)
 
-5. **ConversationStore LRU interaction with branches:** If a user forks a session, the fork is a new ConversationStore entry. Should branches within a session count toward the LRU limit separately or together? (Proposed: each session counts as one entry regardless of branches; only the active branch is loaded into memory.)
+5. **ConversationStore LRU interaction with branches:** If a user forks a session, the fork is a new ConversationStore entry. Should branches within a session count toward the LRU limit separately or together? (Proposed: **per-session counting** — each session counts as one entry regardless of branches; only the active branch is loaded into memory.)
 
-6. **Multi-agent branching:** When multiple agents share a session (via worker IDs), branching could cause confusion. Should branching be restricted to single-agent sessions? (Proposed: allow branching in multi-agent sessions but warn if agents are actively working.)
+6. **Multi-agent branching:** When multiple agents share a session (via worker IDs), branching could cause confusion. Should branching be restricted to single-agent sessions? (Proposed: **warn but allow** — multi-agent sessions are rare; branching is a power feature. Log a warning if branching while other workers are attached.)
 
-7. **Tool call persistence:** Currently `session.Message` does not store tool calls. The proposed enhancement adds `tool_calls` as a JSON string. Is this sufficient, or should tool calls be normalized into a separate table? (Proposed: JSON string is sufficient for now; normalize later if query patterns demand it.)
+7. **Tool call persistence:** Currently `session.Message` does not store tool calls. The proposed enhancement adds `tool_calls` as a JSON string. Is this sufficient, or should tool calls be normalized into a separate table? (Proposed: **JSON string first, with sidecar agent option** — start with JSON encoding for simplicity. As an optional enhancement, a dedicated "tooling" agent/sidecar can handle tool call serialization/deserialization as a capability, keeping the main agent loop focused. Normalize to a separate table only if query patterns emerge, e.g., "find all tool calls of type X".)
 
 ### Risk Assessment
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Schema migration breaks existing databases | Low | High | Additive columns with defaults; test migration on real databases |
+| Schema migration breaks existing databases | Low | High | Additive columns with defaults; backfill `parent_id` in migration; test on real databases |
+| Backfill migration is slow on large datasets | Medium | Low | Run backfill in batches; show progress indicator; make it resumable |
 | Performance regression from SQLite queries on every message | Medium | Medium | Cache tree paths in ConversationStore; only query SQLite on miss or startup |
-| LLM summarization failures leave branches without summaries | Medium | Low | Fallback to simple extraction (already implemented in Summarizer) |
-| Tree complexity causes bugs in context assembly | Medium | High | Extensive tests for tree shapes; keep flat path as the primary context source |
+| LLM summarization failures leave branches without summaries | Medium | Low | Fallback to simple extraction (already implemented in Summarizer); sync for short branches |
+| Tree complexity causes bugs in context assembly | Medium | High | Extensive tests for tree shapes; split compaction into two phases; keep flat path as primary context source |
 | ConversationStore memory usage increases with tree metadata | Low | Low | Tree metadata is small; only the active branch path is in memory |
+| Tool call JSON encoding becomes a bottleneck | Low | Low | Profile early; extract to sidecar agent if needed; add normalization migration if query patterns emerge |
 
 ### What This Plan Does NOT Cover
 
@@ -626,6 +702,7 @@ type TreeNode struct {
 | `internal/session/branch.go` | Branch navigation, forking, summarization orchestration |
 | `internal/session/tree_test.go` | Tests for tree walking, branch operations |
 | `internal/session/branch_test.go` | Tests for branch navigation, forking |
+| `internal/tools/serialization.go` _(optional)_ | Tool call JSON serialization/deserialization service |
 
 ### Modified Files
 
@@ -638,11 +715,11 @@ type TreeNode struct {
 | `internal/agent/conversation.go` | `RestoreFromMessages`, branch point support, compaction entries |
 | `internal/agent/loop.go` | Accept session store, restore on access, persist after turns |
 | `internal/agent/conversation_test.go` | Tests for restore, branch points |
-| `internal/config/schema.go` | `SessionConfig` struct |
+| `internal/config/schema.go` | `SessionConfig` struct, `ToolingConfig` struct |
 | `internal/services/session_service.go` | Fork, branch navigation service methods |
 | `internal/comm/http/api_handlers.go` | New HTTP endpoints |
 | `internal/tui/rpc.go` | New RPC client methods |
-| `config/meept.json5` | Session config section |
+| `config/meept.json5` | Session config section, Tooling config section |
 
 ---
 
@@ -653,7 +730,10 @@ type TreeNode struct {
 3. **Phase 4** (branch summarization) -- Needed before Phase 3 for abandoned branch handling
 4. **Phase 3** (branch navigation) -- Depends on Phase 1 and 4
 5. **Phase 5** (session forking) -- Depends on Phase 3
-6. **Phase 6** (compaction) -- Independent, can be done in parallel with 3-5
-7. **Phase 7** (CLI/TUI) -- Depends on all backend phases
+6. **Phase 6a** (compaction entry emission) -- Independent, can be done in parallel with 3-5
+7. **Phase 6b** (compaction integration with context assembly) -- Depends on 6a
+8. **Phase 7** (CLI/TUI) -- Depends on all backend phases
 
-Phases 1-2 are the **minimum viable improvement** that solve the core problem (data loss on restart). Phases 3-5 add branching. Phase 6 adds sophisticated compaction. Phase 7 makes it user-facing.
+Phases 1-2 are the **minimum viable improvement** that solve the core problem (data loss on restart). Phases 3-5 add branching. Phases 6a-6b add sophisticated compaction (split into two phases for reduced risk). Phase 7 makes it user-facing.
+
+**Critical integration test checkpoint:** After Phase 2, add end-to-end tests for session resumption across daemon restarts. This is the foundation for all other features.

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -20,6 +21,43 @@ import (
 
 // anaphoraForRegex matches "do the same for X" patterns for anaphora resolution.
 var anaphoraForRegex = regexp.MustCompile(`do the same for (.+)`)
+
+// SteeringHeuristicTable defines which intent types should interrupt (steer)
+// vs wait for a natural stopping point (follow-up) when an agent loop is
+// already running for the conversation.
+var SteeringHeuristicTable = map[IntentType]bool{
+	// HIGH URGENCY - Steer (interrupt immediately)
+	IntentCode:     true, // User is redirecting coding approach
+	IntentDebug:    true, // User spotted a bug mid-execution
+	IntentSecurity: true, // Security concern needs immediate attention
+	IntentToolUse:  true, // Explicit tool redirection
+
+	// MEDIUM/LOW URGENCY - Follow-up (wait for natural stop)
+	IntentChat:     false, // General chat can wait
+	IntentRecall:   false, // Memory recall is not urgent
+	IntentResearch: false, // Research extensions follow naturally
+	IntentReport:   false, // Reporting status/information
+	IntentPlatform: false, // Platform events are informational
+	IntentStatus:   false, // Status inquiries
+	IntentUnknown:  false,
+}
+
+// shouldSteer determines if a message should interrupt the current flow.
+// Returns true for steering, false for follow-up.
+func shouldSteer(intentType IntentType, explicitSteerMode bool) bool {
+	// Explicit user override (ctrl+s) always wins
+	if explicitSteerMode {
+		return true
+	}
+
+	// Intent-based heuristic
+	if shouldSteer, exists := SteeringHeuristicTable[intentType]; exists {
+		return shouldSteer
+	}
+
+	// Default: follow-up (safer, less disruptive)
+	return false
+}
 
 // Intent represents the classified intent of a user message.
 type Intent struct {
@@ -59,6 +97,8 @@ type DispatchResult struct {
 	MemoryContext []memory.MemoryResult `json:"memory_context,omitempty"`
 	// Steps are step summaries for the ACK message.
 	Steps []TaskStepSummary `json:"steps,omitempty"`
+	// ExplicitSteerMode indicates the user pressed ctrl+s to force steering.
+	ExplicitSteerMode bool `json:"explicit_steer_mode,omitempty"`
 }
 
 // Dispatcher handles intake classification and routing of requests.
@@ -540,6 +580,9 @@ func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memC
 }
 
 // RouteToAgent routes a dispatch result to the appropriate agent.
+// If an active agent loop exists for this conversation, it injects
+// the message into the queue (steer or follow-up) based on the
+// SteeringHeuristicTable. Otherwise, it runs the agent synchronously.
 func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, conversationID string) (string, error) {
 	if d.registry == nil {
 		return "", fmt.Errorf("no agent registry configured")
@@ -550,6 +593,58 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		return d.handlePlatformIntrospection(ctx, result.Intent.Summary)
 	}
 
+	// Check if there's an active agent loop for this conversation
+	queue, generation := d.registry.GetActiveQueue(conversationID)
+	if queue != nil {
+		// Check if queue is still active
+		if queue.IsClosed() {
+			d.logger.Info("Queue is closed, running new agent",
+				"conversation", conversationID,
+			)
+			// Fall through to normal execution
+		} else {
+			d.logger.Info("Steering active agent",
+				"conversation", conversationID,
+				"agent", result.AgentID,
+				"generation", generation,
+			)
+
+			// Determine steering vs follow-up based on heuristic
+			isSteer := shouldSteer(IntentType(result.Intent.Type), result.ExplicitSteerMode)
+
+			if isSteer {
+				if err := queue.Steer(ctx, result.Intent.Summary, "dispatcher"); err != nil {
+					if errors.Is(err, ErrQueueClosed) || errors.Is(err, ErrQueueFull) {
+						d.logger.Warn("Queue injection failed, starting new agent",
+							"conversation", conversationID,
+							"error", err,
+						)
+						// Fall through to new agent
+					} else {
+						return "", err
+					}
+				} else {
+					return "message queued (steer)", nil
+				}
+			} else {
+				if err := queue.FollowUp(ctx, result.Intent.Summary, "dispatcher"); err != nil {
+					if errors.Is(err, ErrQueueClosed) || errors.Is(err, ErrQueueFull) {
+						d.logger.Warn("Queue injection failed, starting new agent",
+							"conversation", conversationID,
+							"error", err,
+						)
+						// Fall through to new agent
+					} else {
+						return "", err
+					}
+				} else {
+					return "message queued (follow-up)", nil
+				}
+			}
+		}
+	}
+
+	// No active loop, or queue closed/full -- run normally
 	// Build context message with memory refs
 	contextMsg := d.buildContextMessage(result)
 
@@ -1284,4 +1379,31 @@ func (d *Dispatcher) GetTask(ctx context.Context, taskID string) (*task.Task, er
 		return nil, fmt.Errorf("task store not configured")
 	}
 	return d.taskStore.GetByID(taskID)
+}
+
+// SteerActiveAgent sends a steering message to an active agent for the given conversation.
+// This interrupts the current flow. Returns ErrQueueNotFound if no active queue exists.
+func (d *Dispatcher) SteerActiveAgent(ctx context.Context, conversationID, content, source string) error {
+	if d.registry == nil {
+		return ErrQueueNotFound
+	}
+	queue, _ := d.registry.GetActiveQueue(conversationID)
+	if queue == nil || queue.IsClosed() {
+		return ErrQueueNotFound
+	}
+	return queue.Steer(ctx, content, source)
+}
+
+// FollowUpActiveAgent sends a follow-up message to an active agent for the given conversation.
+// This waits for the agent to reach a natural stopping point. Returns ErrQueueNotFound
+// if no active queue exists.
+func (d *Dispatcher) FollowUpActiveAgent(ctx context.Context, conversationID, content, source string) error {
+	if d.registry == nil {
+		return ErrQueueNotFound
+	}
+	queue, _ := d.registry.GetActiveQueue(conversationID)
+	if queue == nil || queue.IsClosed() {
+		return ErrQueueNotFound
+	}
+	return queue.FollowUp(ctx, content, source)
 }

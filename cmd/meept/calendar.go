@@ -110,7 +110,7 @@ func runCalendarAuth(cmd *cobra.Command, args []string) error {
 			errCh <- err
 		}
 	}()
-	defer server.Shutdown(context.Background())
+	defer func() { _ = server.Shutdown(context.Background()) }()
 
 	// Wait for code or error
 	var code string

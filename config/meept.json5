@@ -232,6 +232,15 @@
       "max_iterations": 50,
       "stuck_iteration_count": 5,
     },
+    // Steering and follow-up message queues
+    "queues": {
+      "steering_drain": "one",        // Always "one" for steering
+      "followup_drain": "one",        // "one" or "all"
+      "max_steering": 5,              // Max queued steering (low - they're urgent)
+      "max_followup": 20,             // Max queued follow-ups
+      "persist_followup": true,       // Enable hybrid persistence
+      "flush_delay_ms": 5000,         // Write-behind flush delay (milliseconds)
+    },
   },
 
   // Security configuration
@@ -515,6 +524,21 @@
       "auto_start_servers": true,
       "connection_timeout_seconds": 10,
     },
+  },
+
+  // Tool call serialization sidecar (optional)
+  // Dedicated agent/service for tool call JSON encoding/decoding
+  "tooling": {
+    "enabled": false,                    // Enable sidecar agent for serialization
+    "mode": "service",                   // "service" (in-process) or "agent" (sidecar)
+    "agent_id": "tooling",               // Agent ID if mode is "agent"
+    "model": "",                         // Model override (empty = default)
+    "cache_enabled": true,               // Cache serialized tool calls
+    "cache_max_size": 500,               // Max cache entries
+    "cache_ttl_minutes": 60,             // Cache TTL
+    "include_schema": true,              // Include JSON schema in tool call metadata
+    "validate_on_serialize": false,      // Validate tool calls against schema
+    "log_unknown_tools": true,           // Log warnings for unknown tool types
   },
 
   // Calendar integration

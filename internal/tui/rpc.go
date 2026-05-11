@@ -810,3 +810,45 @@ func (c *RPCClient) CacheInspect(promptHash string) (*types.CacheInspectResponse
 
 	return &resp, nil
 }
+
+// ============================================================================
+// Steering and Follow-Up Queue Methods
+// ============================================================================
+
+// Steer sends a steering message to an active conversation.
+func (c *RPCClient) Steer(message, conversationID string) error {
+	req := map[string]string{
+		"message":         message,
+		"conversation_id": conversationID,
+		"source":          "tui",
+	}
+	_, err := c.Call("chat.steer", req)
+	return err
+}
+
+// FollowUp sends a follow-up message to an active conversation.
+func (c *RPCClient) FollowUp(message, conversationID string) error {
+	req := map[string]string{
+		"message":         message,
+		"conversation_id": conversationID,
+		"source":          "tui",
+	}
+	_, err := c.Call("chat.followup", req)
+	return err
+}
+
+// GetQueueStatus returns the current queue state for a conversation.
+func (c *RPCClient) GetQueueStatus(conversationID string) (*types.QueueStatusResponse, error) {
+	req := map[string]string{"conversation_id": conversationID}
+	result, err := c.Call("chat.queue_status", req)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.QueueStatusResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse queue status response: %w", err)
+	}
+
+	return &resp, nil
+}

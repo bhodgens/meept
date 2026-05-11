@@ -1221,7 +1221,7 @@ func (s *SQLiteAdaptersStore) SetActiveAdapter(ctx context.Context, id string) e
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Deactivate all adapters for this base model
 	_, err = tx.ExecContext(ctx,

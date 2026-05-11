@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -99,6 +100,11 @@ func (q *PersistentQueue) SetTaskCancelledCallback(fn IsTaskCancelledFunc) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.isTaskCancelled = fn
+}
+
+// DB returns the underlying database connection for recovery operations.
+func (q *PersistentQueue) DB() *sql.DB {
+	return q.store.DB()
 }
 
 // Enqueue adds a job to the queue.

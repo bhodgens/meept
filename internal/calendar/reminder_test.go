@@ -208,7 +208,7 @@ func TestClient_GetToday(t *testing.T) {
 			t.Errorf("missing or wrong Authorization header: %s", r.Header.Get("Authorization"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(eventsJSON))
+		_, _ = w.Write([]byte(eventsJSON))
 	}))
 	defer server.Close()
 
@@ -253,7 +253,7 @@ func TestClient_CreateEvent(t *testing.T) {
 			t.Errorf("expected JSON content type, got %s", r.Header.Get("Content-Type"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(createdJSON))
+		_, _ = w.Write([]byte(createdJSON))
 	}))
 	defer server.Close()
 
@@ -293,7 +293,7 @@ func TestClient_QuickAdd(t *testing.T) {
 			t.Errorf("missing text parameter: %s", r.URL.Query().Get("text"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(quickAddJSON))
+		_, _ = w.Write([]byte(quickAddJSON))
 	}))
 	defer server.Close()
 
@@ -340,7 +340,7 @@ func TestClient_DeleteEvent(t *testing.T) {
 func TestClient_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "invalid credentials"}`))
+		_, _ = w.Write([]byte(`{"error": "invalid credentials"}`))
 	}))
 	defer server.Close()
 

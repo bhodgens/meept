@@ -317,7 +317,7 @@ func TestArtifactManager(t *testing.T) {
 	}
 
 	// Invalidate cache and rescan
-	manager.Invalidate(tmpDir)
+	_ = manager.Invalidate(tmpDir)
 	artifacts, err = manager.ScanDirectory(tmpDir)
 	if err != nil {
 		t.Fatalf("ScanDirectory() error = %v", err)

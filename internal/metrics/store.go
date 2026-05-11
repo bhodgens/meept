@@ -211,7 +211,7 @@ func (s *Store) flush() {
 	if err != nil {
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare("INSERT INTO metrics_live (timestamp, metric_name, value, tags) VALUES (?, ?, ?, ?)")
 	if err != nil {
@@ -225,7 +225,7 @@ func (s *Store) flush() {
 			data, _ := json.Marshal(m.tags)
 			tagsJSON = string(data)
 		}
-		stmt.Exec(m.timestamp, m.name, m.value, tagsJSON)
+		_, _ = stmt.Exec(m.timestamp, m.name, m.value, tagsJSON)
 	}
 
 	if err := tx.Commit(); err == nil {
@@ -432,7 +432,7 @@ func (s *Store) GetHistoricalMetrics(from, to time.Time, resolution string) ([]M
 		}
 
 		if tagsStr != "" {
-			json.Unmarshal([]byte(tagsStr), &point.Tags)
+			_ = json.Unmarshal([]byte(tagsStr), &point.Tags)
 		}
 
 		points = append(points, point)
@@ -516,7 +516,7 @@ func (s *Store) GetEvents(limit int, severity string) ([]Event, error) {
 		}
 
 		if ctxJSON != "" {
-			json.Unmarshal([]byte(ctxJSON), &event.Context)
+			_ = json.Unmarshal([]byte(ctxJSON), &event.Context)
 		}
 
 		events = append(events, event)

@@ -215,7 +215,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		// Clear read deadline during processing
-		conn.SetReadDeadline(time.Time{})
+		_ = conn.SetReadDeadline(time.Time{})
 
 		// Process request with connection-scoped context
 		resp := s.dispatch(ctx, req)
@@ -246,7 +246,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		// Clear write deadline
-		conn.SetWriteDeadline(time.Time{})
+		_ = conn.SetWriteDeadline(time.Time{})
 	}
 }
 

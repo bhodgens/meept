@@ -7,7 +7,9 @@ linters:
   enable:
     # Bugs & correctness
     - bodyclose          # HTTP response body closed
-    - contextcheck       # Non-inherited context
+    # contextcheck disabled: near-100% false-positive rate for this codebase.
+    # Daemon shutdown paths, bus handler goroutines, RPC cache/stats operations,
+    # and scheduler operations all legitimately use context.Background().
     - copyloopvar        # Loop variable copies (Go 1.22+)
     - durationcheck      # Duration multiplication
     - errcheck           # Unchecked errors
@@ -57,61 +59,61 @@ linters:
       - "testdata/.*"
       - "vendor/.*"
 
-linters-settings:
-  staticcheck:
-    checks:
-      - "all"
-      - "SA4023"  # Impossible comparison: interface cannot be concrete type
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        - "SA4023"  # Impossible comparison: interface cannot be concrete type
 
-  revive:
-    rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-      - name: exported
-      - name: increment-decrement
-      - name: indent-error-flow
-      - name: package-comments
-      - name: range
-      - name: receiver-naming
-      - name: time-naming
-      - name: unexported-return
-      - name: var-declaration
-      - name: var-naming
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: var-declaration
+        - name: var-naming
 
-  gosec:
-    excludes:
-      - G104  # Audit errors not checked (errcheck handles this)
+    gosec:
+      excludes:
+        - G104  # Audit errors not checked (errcheck handles this)
 
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-      - performance
-    disabled-checks:
-      - hugeParam      # Often noisy for structs
-      - rangeValCopy   # Often intentional
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam      # Often noisy for structs
+        - rangeValCopy   # Often intentional
 
-  goconst:
-    min-len: 3
-    min-occurrences: 4
-    ignore-tests: true
+    goconst:
+      min-len: 3
+      min-occurrences: 4
+      ignore-tests: true
 
-  errorlint:
-    errorf: true
-    asserts: true
-    comparison: true
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
 
-  sloglint:
-    key-naming-case: snake_case
-    args-on-sep-lines: false
+    sloglint:
+      key-naming-case: snake
+      args-on-sep-lines: false
 
-  unparam:
-    check-exported: false
+    unparam:
+      check-exported: false
 
 issues:
   max-issues-per-linter: 50

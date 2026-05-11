@@ -190,6 +190,10 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
 	// Chat endpoints
 	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
+	mux.HandleFunc("POST /api/v1/chat/steer", s.handleChatSteer)
+	mux.HandleFunc("POST /api/v1/chat/followup", s.handleChatFollowUp)
+	mux.HandleFunc("GET /api/v1/chat/queue/{id}", s.handleChatQueueStatus)
+	mux.HandleFunc("POST /api/v1/chat/with-agent", s.handleChatWithAgent)
 
 	// Memory endpoints
 	mux.HandleFunc("POST /api/v1/memory/query", s.handleMemoryQuery)
@@ -205,6 +209,10 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/queue/jobs/{id}/fail", s.handleQueueFail)
 	mux.HandleFunc("POST /api/v1/queue/jobs/{id}/retry", s.handleQueueRetry)
 	mux.HandleFunc("GET /api/v1/queue/stats", s.handleQueueStats)
+	// Queue steering/follow-up convenience aliases
+	mux.HandleFunc("POST /api/v1/queue/steer", s.handleQueueSteerRoute)
+	mux.HandleFunc("POST /api/v1/queue/followup", s.handleQueueFollowUpRoute)
+	mux.HandleFunc("GET /api/v1/queue/status/{id}", s.handleQueueStatusRoute)
 
 	// Task endpoints
 	mux.HandleFunc("POST /api/v1/tasks", s.handleTaskCreate)
@@ -348,7 +356,7 @@ func (s *Server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json5")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(content))
+	_, _ = w.Write([]byte(content))
 }
 
 // handleSaveClientConfig handles POST /api/v1/config/client.
@@ -389,7 +397,7 @@ func (s *Server) handleGetModelsConfig(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json5")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(content))
+	_, _ = w.Write([]byte(content))
 }
 
 // handleSaveModelsConfig handles POST /api/v1/config/models.
@@ -645,7 +653,7 @@ func (s *Server) handleGetMenubarConfig(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json5")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(content))
+	_, _ = w.Write([]byte(content))
 }
 
 // handleSaveMenubarConfig handles POST /api/v1/config/menubar.

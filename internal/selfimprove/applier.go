@@ -49,7 +49,9 @@ func NewChangeApplier(cfg SafetyConfig, projectRoot string, msgBus *bus.MessageB
 
 	homeDir, _ := os.UserHomeDir()
 	backupDir := filepath.Join(homeDir, ".meept", "selfimprove", "backups")
-	os.MkdirAll(backupDir, 0755)
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		logger.Warn("failed to create backup directory", "error", err)
+	}
 
 	return &ChangeApplier{
 		config:           cfg,

@@ -77,6 +77,12 @@ type Styles struct {
 
 	// Text selection
 	TextSelection lipgloss.Style
+
+	// Queue indicators
+	SteerBadge         lipgloss.Style
+	FollowUpBadge      lipgloss.Style
+	QueueIndicator     lipgloss.Style
+	AgentActiveBadge   lipgloss.Style
 }
 
 // DefaultStyles returns the default style set.
@@ -247,6 +253,28 @@ func DefaultStyles() *Styles {
 	s.TextSelection = lipgloss.NewStyle().
 		Foreground(ColorBackground).
 		Background(ColorPrimary)
+
+	// Queue indicators
+	s.SteerBadge = lipgloss.NewStyle().
+		Background(lipgloss.Color("#EF4444")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(0, 1).
+		Bold(true)
+
+	s.FollowUpBadge = lipgloss.NewStyle().
+		Background(lipgloss.Color("#10B981")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(0, 1)
+
+	s.QueueIndicator = lipgloss.NewStyle().
+		Foreground(ColorMuted).
+		Italic(true)
+
+	s.AgentActiveBadge = lipgloss.NewStyle().
+		Background(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(0, 1).
+		Bold(true)
 
 	return s
 }

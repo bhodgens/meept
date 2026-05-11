@@ -100,12 +100,12 @@ func (sd *SkillDesigner) GenerateFullSkillFile(skill *SkillDesign) string {
 	fmt.Fprintf(&buf, "# %s\n\n", skill.Name)
 
 	buf.WriteString("## Overview\n")
-	buf.WriteString(fmt.Sprintf("%s\n\n", skill.Description))
+	fmt.Fprintf(&buf, "%s\n\n", skill.Description)
 
 	buf.WriteString("## When to Use\n")
 	buf.WriteString("Use this skill when:\n")
 	for _, keyword := range skill.TriggerKeywords {
-		buf.WriteString(fmt.Sprintf("- Handling %s-related tasks\n", keyword))
+		fmt.Fprintf(&buf, "- Handling %s-related tasks\n", keyword)
 	}
 	buf.WriteString("\n")
 
@@ -113,7 +113,7 @@ func (sd *SkillDesigner) GenerateFullSkillFile(skill *SkillDesign) string {
 		buf.WriteString("## Shell Commands\n")
 		buf.WriteString("This skill provides the following shell commands:\n\n")
 		for _, cmd := range skill.ShellCommands {
-			buf.WriteString(fmt.Sprintf("```bash\n%s\n```\n\n", cmd))
+			fmt.Fprintf(&buf, "```bash\n%s\n```\n\n", cmd)
 		}
 	}
 
@@ -121,7 +121,7 @@ func (sd *SkillDesigner) GenerateFullSkillFile(skill *SkillDesign) string {
 		buf.WriteString("## Required Tools\n")
 		buf.WriteString("This skill requires access to:\n\n")
 		for _, tool := range skill.Tools {
-			buf.WriteString(fmt.Sprintf("- `%s`\n", tool))
+			fmt.Fprintf(&buf, "- `%s`\n", tool)
 		}
 		buf.WriteString("\n")
 	}
@@ -135,7 +135,7 @@ func (sd *SkillDesigner) GenerateFullSkillFile(skill *SkillDesign) string {
 	if skill.SystemPrompt != "" {
 		buf.WriteString("## System Prompt\n")
 		buf.WriteString("When this skill is invoked as an agent skill, use the following system prompt:\n\n")
-		buf.WriteString(fmt.Sprintf("```\n%s\n```\n\n", skill.SystemPrompt))
+		fmt.Fprintf(&buf, "```\n%s\n```\n\n", skill.SystemPrompt)
 	}
 
 	return buf.String()
@@ -213,8 +213,8 @@ func (sd *SkillDesigner) extractShellCommands(rec Recommendation) []string {
 func (sd *SkillDesigner) generateSystemPrompt(rec Recommendation) string {
 	var buf strings.Builder
 
-	buf.WriteString(fmt.Sprintf("You are a %s skill.\n", rec.Title))
-	buf.WriteString(fmt.Sprintf("Your purpose: %s\n\n", rec.Description))
+	fmt.Fprintf(&buf, "You are a %s skill.\n", rec.Title)
+	fmt.Fprintf(&buf, "Your purpose: %s\n\n", rec.Description)
 
 	buf.WriteString("When invoked:\n")
 	buf.WriteString("1. Verify the task matches your specialty\n")
@@ -255,10 +255,10 @@ func (sd *SkillDesigner) generateExamples(skill *SkillDesign) string {
 	}
 
 	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("Example 1: Using %s skill\n", skill.Name))
+	fmt.Fprintf(&buf, "Example 1: Using %s skill\n", skill.Name)
 	buf.WriteString("```\n")
-	buf.WriteString(fmt.Sprintf("User: Handle %s\n", skill.TriggerKeywords[0]))
-	buf.WriteString(fmt.Sprintf("Assistant: [invokes %s skill]\n", skill.ID))
+	fmt.Fprintf(&buf, "User: Handle %s\n", skill.TriggerKeywords[0])
+	fmt.Fprintf(&buf, "Assistant: [invokes %s skill]\n", skill.ID)
 	buf.WriteString("Result: Task completed successfully.\n")
 	buf.WriteString("```\n\n")
 

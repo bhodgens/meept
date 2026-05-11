@@ -213,7 +213,7 @@ func convertNode(n *sitter.Node, source []byte, depthLimit int) Node {
 		}
 
 		children := make([]Node, 0, n.ChildCount())
-		for i := uint32(0); i < n.ChildCount(); i++ {
+		for i := range n.ChildCount() {
 			child := n.Child(int(i))
 			if child != nil {
 				children = append(children, convertNode(child, source, newLimit))
@@ -245,7 +245,7 @@ func collectErrors(n *sitter.Node, source []byte) []string {
 			errors = append(errors, fmt.Sprintf("line %d, col %d%s", startLine, startCol, text))
 		}
 
-		for i := uint32(0); i < node.ChildCount(); i++ {
+		for i := range node.ChildCount() {
 			walk(node.Child(int(i)))
 		}
 	}
@@ -382,7 +382,7 @@ func collectBodyRanges(root *sitter.Node, source []byte, lang Language) []bodyRa
 			}
 		}
 
-		for i := uint32(0); i < node.ChildCount(); i++ {
+		for i := range node.ChildCount() {
 			child := node.Child(int(i))
 			if child != nil {
 				walk(child)
@@ -420,7 +420,7 @@ func isBodyHolder(node *sitter.Node, lang Language) bool {
 
 // findChildByType finds the first direct child with the given type.
 func findChildByType(node *sitter.Node, childType string) *sitter.Node {
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil && child.Type() == childType {
 			return child

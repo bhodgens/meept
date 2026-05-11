@@ -443,6 +443,9 @@ type AgentLoop struct {
 	// Prefetch callback for memory context (Hermes pattern)
 	// Called at turn completion to prefetch context for next turn
 	prefetchCallback func(query string, maxItems int)
+
+	// Steering/follow-up queue for deferred message injection
+	queue *MessageQueue
 }
 
 // LearningPipeline is the interface for the learning pipeline.
@@ -663,6 +666,14 @@ func WithPrefetchCallback(callback func(query string, maxItems int)) LoopOption 
 	}
 }
 
+// WithMessageQueue sets the steering/follow-up message queue.
+// When nil (default), queue processing is skipped with no behavior change.
+func WithMessageQueue(q *MessageQueue) LoopOption {
+	return func(l *AgentLoop) {
+		l.queue = q
+	}
+}
+
 // WithArtifactManager sets the Claude artifact manager for project context injection.
 func WithArtifactManager(am *ArtifactManager) LoopOption {
 	return func(l *AgentLoop) {
@@ -813,10 +824,41 @@ func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig)
 }
 
 // RunOnce processes a single user turn through the full reasoning loop.
-func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (string, error) {
+func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (response string, err error) {
 	if l.llm == nil {
 		return "", ErrNoLLMClient
 	}
+
+	// Publish lifecycle started event
+	if l.bus != nil {
+		startPayload := map[string]any{
+			"conversation_id": conversationID,
+			"agent_id":        l.agentID,
+		}
+		startMsg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", startPayload)
+		if err == nil {
+			l.bus.Publish("agent.lifecycle.started", startMsg)
+		}
+	}
+
+	// Publish lifecycle ended event
+	defer func() {
+		reason := "completed"
+		if err != nil && err.Error() == "maximum iterations reached" {
+			reason = "max_iterations"
+		} else if err != nil {
+			reason = "error"
+		}
+		endPayload := map[string]any{
+			"conversation_id": conversationID,
+			"agent_id":        l.agentID,
+			"reason":          reason,
+		}
+		endMsg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", endPayload)
+		if err == nil {
+			l.bus.Publish("agent.lifecycle.ended", endMsg)
+		}
+	}()
 
 	// Sanitize user input through security orchestrator
 	sanitizedMessage := userMessage
@@ -907,7 +949,7 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	}
 
 	// Run reasoning cycle
-	response, err := l.reasoningCycle(loopCtx, conv, conversationID)
+	response, err = l.reasoningCycle(loopCtx, conv, conversationID)
 	if err != nil {
 		l.logger.Error("Reasoning cycle failed",
 			"conversation", conversationID,
@@ -1316,6 +1358,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		default:
 		}
 
+		// Check steering queue before LLM call
+		if l.queue != nil {
+			if steerMsgs := l.queue.DrainSteering(); len(steerMsgs) > 0 {
+				for _, sm := range steerMsgs {
+					conv.AddUserMessage(sm.Content)
+					l.logger.Info("Steering message injected",
+						"conversation", conversationID,
+						"source", sm.Source,
+						"iteration", iteration,
+					)
+				}
+				l.publishSteeringInjected(conversationID, steerMsgs)
+			}
+		}
+
 		// Check conversation token budget
 		if totalTokens >= convBudget {
 			l.logger.Warn("Conversation token budget exhausted",
@@ -1598,7 +1655,27 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			continue
 		}
 
-		// Case 2: LLM returned text response (no tool calls) - done
+		// Case 2: LLM returned text response (no tool calls) - check for follow-ups
+		// Check follow-up queue before returning
+		if l.queue != nil {
+			if followMsgs := l.queue.DrainFollowUp(); len(followMsgs) > 0 {
+				// CRITICAL: Add assistant response BEFORE follow-up
+				// so the LLM sees "its answer -> follow-up question" as context
+				conv.AddAssistantMessage(response.Content)
+
+				for _, fm := range followMsgs {
+					conv.AddUserMessage(fm.Content)
+					l.logger.Info("Follow-up message injected",
+						"conversation", conversationID,
+						"source", fm.Source,
+						"iteration", iteration,
+					)
+				}
+				l.publishFollowUpInjected(conversationID, followMsgs)
+				continue // Loop back for another LLM turn
+			}
+		}
+
 		l.logger.Info("Agent loop complete",
 			"iterations", iteration,
 			"conversation", conversationID,
@@ -2536,6 +2613,54 @@ func (l *AgentLoop) publishTokenUsage(conversationID string, totalTokens int) {
 	if delivered == 0 {
 		l.logger.Debug("Token usage event published (no subscribers)")
 	}
+}
+
+// publishSteeringInjected publishes an event when steering queue messages
+// are injected into a conversation by the agent loop.
+func (l *AgentLoop) publishSteeringInjected(conversationID string, msgs []QueuedMessage) {
+	if l.bus == nil {
+		return
+	}
+	var messageIDs []string
+	for _, m := range msgs {
+		messageIDs = append(messageIDs, m.ID)
+	}
+	payload := map[string]any{
+		"conversation_id": conversationID,
+		"queue_type":      string(QueueTypeSteer),
+		"count":           len(msgs),
+		"message_ids":     messageIDs,
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
+	if err != nil {
+		l.logger.Warn("Failed to create steering injected bus message", "error", err)
+		return
+	}
+	l.bus.Publish("agent.queue.steer.injected", msg)
+}
+
+// publishFollowUpInjected publishes an event when follow-up queue messages
+// are injected into a conversation by the agent loop.
+func (l *AgentLoop) publishFollowUpInjected(conversationID string, msgs []QueuedMessage) {
+	if l.bus == nil {
+		return
+	}
+	var messageIDs []string
+	for _, m := range msgs {
+		messageIDs = append(messageIDs, m.ID)
+	}
+	payload := map[string]any{
+		"conversation_id": conversationID,
+		"queue_type":      string(QueueTypeFollowUp),
+		"count":           len(msgs),
+		"message_ids":     messageIDs,
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
+	if err != nil {
+		l.logger.Warn("Failed to create follow-up injected bus message", "error", err)
+		return
+	}
+	l.bus.Publish("agent.queue.followup.injected", msg)
 }
 
 // GetConversation returns a conversation by ID.

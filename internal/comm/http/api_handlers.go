@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/caimlas/meept/internal/services"
 )
@@ -129,7 +130,7 @@ func (s *Server) handleMemoryExport(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 // ===== Queue Endpoints =====
@@ -1192,4 +1193,179 @@ func (s *Server) handleSelfImproveReject(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
+
+// ===== Chat Steering Endpoints =====
+
+// handleChatSteer handles POST /api/v1/chat/steer.
+func (s *Server) handleChatSteer(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat service not available")
+		return
+	}
+
+	var req services.SteerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Chat.Steer(r.Context(), req); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+}
+
+// handleChatFollowUp handles POST /api/v1/chat/followup.
+func (s *Server) handleChatFollowUp(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat service not available")
+		return
+	}
+
+	var req services.FollowUpRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Chat.FollowUp(r.Context(), req); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+}
+
+// handleChatQueueStatus handles GET /api/v1/chat/queue/{id}.
+func (s *Server) handleChatQueueStatus(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat service not available")
+		return
+	}
+
+	// Only allow GET
+	if r.Method != http.MethodGet {
+		s.writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	conversationID := strings.TrimPrefix(r.URL.Path, "/api/v1/chat/queue/")
+	if conversationID == "" {
+		s.writeError(w, http.StatusBadRequest, "conversation_id is required")
+		return
+	}
+
+	status, err := s.services.Chat.GetQueueStatus(r.Context(), services.QueueStatusRequest{
+		ConversationID: conversationID,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, status)
+}
+
+// ===== Queue Routing Endpoints =====
+
+// handleQueueSteerRoute handles POST /api/v1/queue/steer.
+// This is a convenience alias that routes steering messages through the standard queue API.
+func (s *Server) handleQueueSteerRoute(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat service not available")
+		return
+	}
+
+	var req services.SteerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Chat.Steer(r.Context(), req); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+}
+
+// handleQueueFollowUpRoute handles POST /api/v1/queue/followup.
+// This is a convenience alias that routes follow-up messages through the standard queue API.
+func (s *Server) handleQueueFollowUpRoute(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat service not available")
+		return
+	}
+
+	var req services.FollowUpRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Chat.FollowUp(r.Context(), req); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+}
+
+// handleQueueStatusRoute handles GET /api/v1/queue/status/{id}.
+// This is a convenience alias that returns the queue status for a conversation.
+func (s *Server) handleQueueStatusRoute(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat service not available")
+		return
+	}
+
+	conversationID := strings.TrimPrefix(r.URL.Path, "/api/v1/queue/status/")
+	if conversationID == "" {
+		s.writeError(w, http.StatusBadRequest, "conversation_id is required")
+		return
+	}
+
+	status, err := s.services.Chat.GetQueueStatus(r.Context(), services.QueueStatusRequest{
+		ConversationID: conversationID,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, status)
+}
+
+// handleChatWithAgent handles POST /api/v1/chat/with-agent.
+// Routes a steering message to a specific agent (e.g., coder, debugger, planner).
+func (s *Server) handleChatWithAgent(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat service not available")
+		return
+	}
+
+	var req struct {
+		Message        string `json:"message"`
+		ConversationID string `json:"conversation_id"`
+		Source         string `json:"source,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Chat.Steer(r.Context(), services.SteerRequest{
+		Message:        req.Message,
+		ConversationID: req.ConversationID,
+		Source:         req.Source,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
 }

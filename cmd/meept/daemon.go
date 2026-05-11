@@ -211,7 +211,7 @@ func stopDaemon() error {
 		case <-ctx.Done():
 			// Force kill
 			fmt.Println("Daemon not responding, sending SIGKILL...")
-			proc.Signal(syscall.SIGKILL)
+			_ = proc.Signal(syscall.SIGKILL)
 			os.Remove(pidFile)
 			return nil
 		default:

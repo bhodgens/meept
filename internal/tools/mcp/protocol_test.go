@@ -55,7 +55,7 @@ func TestNewNotification(t *testing.T) {
 	}
 
 	var parsed map[string]any
-	json.Unmarshal(data, &parsed)
+	_ = json.Unmarshal(data, &parsed)
 
 	if _, exists := parsed["id"]; exists {
 		t.Error("notification should not have id field")

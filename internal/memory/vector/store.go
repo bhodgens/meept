@@ -118,7 +118,7 @@ func (s *Store) Store(ctx context.Context, memoryID, content string, metadata ma
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Store embedding
 	_, err = tx.ExecContext(ctx, `
@@ -250,7 +250,7 @@ func (s *Store) getMemoryMetadata(memoryID string) (map[string]any, string, erro
 			content = value
 		} else {
 			var v any
-			json.Unmarshal([]byte(value), &v)
+			_ = json.Unmarshal([]byte(value), &v)
 			metadata[key] = v
 		}
 	}

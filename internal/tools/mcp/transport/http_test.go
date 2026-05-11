@@ -43,7 +43,7 @@ func TestHTTPTransport_Send(t *testing.T) {
 
 		// Parse request
 		var req map[string]any
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		// Send response
 		w.Header().Set("Content-Type", "application/json")
@@ -58,7 +58,7 @@ func TestHTTPTransport_Send(t *testing.T) {
 	transport := NewHTTPTransport(server.URL, nil, DefaultConfig())
 
 	ctx := context.Background()
-	transport.Start(ctx)
+	_ = transport.Start(ctx)
 	defer transport.Close()
 
 	request := map[string]any{
@@ -107,7 +107,7 @@ func TestHTTPTransport_SendWithHeaders(t *testing.T) {
 	}, DefaultConfig())
 
 	ctx := context.Background()
-	transport.Start(ctx)
+	_ = transport.Start(ctx)
 	defer transport.Close()
 
 	_, err := transport.Send(ctx, []byte(`{"jsonrpc":"2.0","id":1,"method":"test"}`))
@@ -145,7 +145,7 @@ func TestHTTPTransport_SessionID(t *testing.T) {
 	transport := NewHTTPTransport(server.URL, nil, DefaultConfig())
 
 	ctx := context.Background()
-	transport.Start(ctx)
+	_ = transport.Start(ctx)
 	defer transport.Close()
 
 	// First request
@@ -178,7 +178,7 @@ func TestHTTPTransport_SSEResponse(t *testing.T) {
 	transport := NewHTTPTransport(server.URL, nil, DefaultConfig())
 
 	ctx := context.Background()
-	transport.Start(ctx)
+	_ = transport.Start(ctx)
 	defer transport.Close()
 
 	response, err := transport.Send(ctx, []byte(`{"jsonrpc":"2.0","id":1,"method":"test"}`))
@@ -209,7 +209,7 @@ func TestHTTPTransport_HTTPError(t *testing.T) {
 	transport := NewHTTPTransport(server.URL, nil, DefaultConfig())
 
 	ctx := context.Background()
-	transport.Start(ctx)
+	_ = transport.Start(ctx)
 	defer transport.Close()
 
 	_, err := transport.Send(ctx, []byte(`{"jsonrpc":"2.0","id":1,"method":"test"}`))

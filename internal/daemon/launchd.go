@@ -283,7 +283,7 @@ func (c *LaunchAgentController) Load() error {
 	}
 
 	// Unload first if already loaded (ignore errors)
-	exec.Command("launchctl", "unload", c.plistPath).Run()
+	_ = exec.Command("launchctl", "unload", c.plistPath).Run()
 
 	// Load the agent
 	cmd := exec.Command("launchctl", "load", "-w", c.plistPath)

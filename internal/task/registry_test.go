@@ -102,9 +102,9 @@ func TestRegistry_List(t *testing.T) {
 	reg := newTestRegistry(t)
 	ctx := context.Background()
 
-	reg.Create(ctx, "task-1", "desc")
-	reg.Create(ctx, "task-2", "desc")
-	reg.Create(ctx, "task-3", "desc")
+	_ = reg.Create(ctx, "task-1", "desc")
+	_ = reg.Create(ctx, "task-2", "desc")
+	_ = reg.Create(ctx, "task-3", "desc")
 
 	tasks, err := reg.List(ctx, nil, 10)
 	if err != nil {
@@ -124,7 +124,7 @@ func TestRegistry_ListWithStateFilter(t *testing.T) {
 
 	_ = task1
 	task2.SetState(StateExecuting)
-	reg.Update(ctx, task2)
+	_ = reg.Update(ctx, task2)
 
 	pendingState := StatePending
 	tasks, err := reg.List(ctx, &pendingState, 10)
@@ -176,8 +176,8 @@ func TestRegistry_UnlinkSession(t *testing.T) {
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
-	reg.LinkSession(ctx, task.ID, "session-1")
-	reg.LinkSession(ctx, task.ID, "session-2")
+	_ = reg.LinkSession(ctx, task.ID, "session-1")
+	_ = reg.LinkSession(ctx, task.ID, "session-2")
 
 	if err := reg.UnlinkSession(ctx, task.ID, "session-1"); err != nil {
 		t.Fatalf("UnlinkSession failed: %v", err)
@@ -195,9 +195,9 @@ func TestRegistry_JobTracking(t *testing.T) {
 
 	task, _ := reg.Create(ctx, "test", "desc")
 
-	reg.IncrementJobCount(ctx, task.ID)
-	reg.IncrementJobCount(ctx, task.ID)
-	reg.IncrementJobCount(ctx, task.ID)
+	_ = reg.IncrementJobCount(ctx, task.ID)
+	_ = reg.IncrementJobCount(ctx, task.ID)
+	_ = reg.IncrementJobCount(ctx, task.ID)
 
 	reg.CompleteJob(ctx, task.ID)
 	reg.CompleteJob(ctx, task.ID)

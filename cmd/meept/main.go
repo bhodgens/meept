@@ -148,17 +148,17 @@ func newHelpCmd(root *cobra.Command) *cobra.Command {
 		Long:  "Display help information about meept and its subcommands.",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
-				root.Help()
+				_ = root.Help()
 				return
 			}
 			// Find the subcommand
 			target, _, err := root.Find(args)
 			if err != nil || target == nil {
 				fmt.Printf("Unknown command: %s\n", args[0])
-				root.Help()
+				_ = root.Help()
 				return
 			}
-			target.Help()
+			_ = target.Help()
 		},
 	}
 }

@@ -481,7 +481,7 @@ func runModelsCredAdd(cmd *cobra.Command, args []string) error {
 	// Prompt for API key
 	fmt.Printf("Enter API key for %s (%s): ", provider.Name, provider.APIKeyEnvVar)
 	var apiKey string
-	fmt.Scanln(&apiKey)
+	_, _ = fmt.Scanln(&apiKey)
 
 	if err := cs.Set(providerID, apiKey); err != nil {
 		return fmt.Errorf("failed to save credential: %w", err)

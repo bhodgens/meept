@@ -339,9 +339,9 @@ func TestHandleReprioritize(t *testing.T) {
 	step2 := NewTaskStep(task.ID, "step 2", 1)
 	step3 := NewTaskStep(task.ID, "step 3", 2)
 
-	handlers.stepStore.Create(step1)
-	handlers.stepStore.Create(step2)
-	handlers.stepStore.Create(step3)
+	_ = handlers.stepStore.Create(step1)
+	_ = handlers.stepStore.Create(step2)
+	_ = handlers.stepStore.Create(step3)
 
 	metadata, _ := json.Marshal(map[string][]string{
 		"step_ids": []string{step3.ID, step1.ID, step2.ID},
@@ -409,7 +409,7 @@ func TestHandleChangeAgent(t *testing.T) {
 
 	step := NewTaskStep(task.ID, "step 1", 0)
 	step.AgentID = "coder"
-	handlers.stepStore.Create(step)
+	_ = handlers.stepStore.Create(step)
 
 	metadata, _ := json.Marshal(map[string]string{
 		"step_id":  step.ID,

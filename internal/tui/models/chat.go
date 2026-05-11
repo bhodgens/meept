@@ -155,6 +155,11 @@ type ChatModel struct {
 	// Slash autocomplete popup (rendered above input)
 	slashAutocompletePopup string
 
+	// Steering and follow-up queue state
+	agentActive   bool                     // true while agent is processing
+	queueStatus   *types.QueueStatusResponse // latest queue state (nil if agent idle)
+	steerMode     bool                     // when true, next message is a steer (ctrl+s toggle)
+
 	// Styles
 	userStyle       lipgloss.Style
 	assistantStyle  lipgloss.Style
@@ -174,6 +179,9 @@ type RPCClient interface {
 	GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error)
 	UpdateSessionDescription(sessionID, description string) error
 	GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error)
+	Steer(message, conversationID string) error
+	FollowUp(message, conversationID string) error
+	GetQueueStatus(conversationID string) (*types.QueueStatusResponse, error)
 }
 
 // ChatConfig holds chat viewport behavior settings.
@@ -399,6 +407,35 @@ type ProgressUpdateMsg struct {
 // IsChatVisible returns true if this progress update should display in chat.
 func (m ProgressUpdateMsg) IsChatVisible() bool {
 	return m.ChatVisible
+}
+
+// SteeringResultMsg is returned after a steering RPC call completes.
+type SteeringResultMsg struct {
+	Success bool
+	Err     error
+}
+
+// FollowUpResultMsg is returned after a follow-up RPC call completes.
+type FollowUpResultMsg struct {
+	Success bool
+	Err     error
+}
+
+// AgentLifecycleMsg signals agent start/stop events.
+type AgentLifecycleMsg struct {
+	Active         bool
+	ConversationID string
+}
+
+// SteeringInjectedMsg signals that a steering message was injected into the queue.
+type SteeringInjectedMsg struct{}
+
+// FollowUpInjectedMsg signals that a follow-up message was injected into the queue.
+type FollowUpInjectedMsg struct{}
+
+// FollowUpRestoredMsg signals that pending follow-ups were restored.
+type FollowUpRestoredMsg struct {
+	Count int
 }
 
 // ProgressState holds current progress for display in chat.
@@ -1036,6 +1073,44 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		m.progressState.LastUpdate = time.Now()
 		m.updateProgressMessage()
 		return nil
+
+	case AgentLifecycleMsg:
+		if msg.Active && msg.ConversationID == m.conversationID {
+			m.agentActive = true
+		} else if !msg.Active && (msg.ConversationID == "" || msg.ConversationID == m.conversationID) {
+			m.agentActive = false
+			m.steerMode = false
+			m.queueStatus = nil
+		}
+		return nil
+
+	case SteeringResultMsg:
+		if msg.Success {
+			m.addMessage("system", "[steering] message queued")
+		} else {
+			m.addMessage("system", fmt.Sprintf("[steering] error: %v", msg.Err))
+		}
+		return nil
+
+	case SteeringInjectedMsg:
+		m.addMessage("system", "[steering] steering message injected into agent queue")
+		return nil
+
+	case FollowUpResultMsg:
+		if msg.Success {
+			m.addMessage("system", "[follow-up] message queued for processing")
+		} else {
+			m.addMessage("system", fmt.Sprintf("[follow-up] error: %v", msg.Err))
+		}
+		return nil
+
+	case FollowUpInjectedMsg:
+		m.AddSystemMessage("[follow-up] follow-up message injected into agent queue")
+		return nil
+
+	case FollowUpRestoredMsg:
+		m.AddSystemMessage(fmt.Sprintf("[follow-up] restored %d pending follow-up message(s)", msg.Count))
+		return nil
 	}
 
 	// Update textarea if focused
@@ -1186,6 +1261,8 @@ func (m *ChatModel) trackDirtyMessage(role, content string) {
 }
 
 // doSendMessage handles the common logic for sending a message.
+// When agent is active, messages are queued as follow-ups or steering messages
+// instead of starting a new conversation.
 func (m *ChatModel) doSendMessage() tea.Cmd {
 	text := strings.TrimSpace(m.textarea.Value())
 	if text == "" && len(m.attachments) == 0 {
@@ -1205,15 +1282,31 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 		actualText = strings.Join(attachmentRefs, "\n") + "\n\n" + actualText
 	}
 
-	// Add to history buffer (with tokens for display)
-	m.addToHistory(text)
-
 	m.textarea.Reset()
 	m.attachments = nil // Clear attachments after sending
 
 	// Clear compressed pastes after sending
 	m.compressedPastes = make(map[int]string)
 	m.pasteCounter = 0
+
+	// Route based on agent state
+	if m.agentActive {
+		// Agent is running - queue the message
+		m.addToHistory(text)
+
+		if m.steerMode {
+			m.steerMode = false // Reset after sending
+			m.addMessage("user", "[steering] "+actualText)
+			m.trackDirtyMessage("user", "[steering] "+actualText)
+			return m.SteerQueue(text)
+		}
+		// Follow-up mode
+		m.AddSystemMessage("Message queued (follow-up)")
+		return m.FollowUpQueue(text)
+	}
+
+	// Agent is idle - normal chat
+	m.addToHistory(text)
 
 	// Add user message (with expanded content)
 	m.addMessage("user", actualText)
@@ -2379,4 +2472,72 @@ func (m *ChatModel) GetMessages() []ChatMessage {
 	result := make([]ChatMessage, len(m.messages))
 	copy(result, m.messages)
 	return result
+}
+
+// ============================================================================
+// Steering and Follow-Up Queue Methods
+// ============================================================================
+
+// SetAgentActive updates the agent active state.
+func (m *ChatModel) SetAgentActive(active bool, conversationID string) {
+	if conversationID == "" || conversationID == m.conversationID {
+		m.agentActive = active
+		if !active {
+			m.steerMode = false
+			m.queueStatus = nil
+			m.AddSystemMessage("[agent] idle")
+		} else {
+			m.AddSystemMessage("[agent] active")
+		}
+	}
+}
+
+// UpdateQueueStatus updates the queue status from an event or RPC call.
+func (m *ChatModel) UpdateQueueStatus(status *types.QueueStatusResponse) {
+	m.queueStatus = status
+}
+
+// IsAgentActive returns whether the agent is currently processing.
+func (m *ChatModel) IsAgentActive() bool {
+	return m.agentActive
+}
+
+// IsSteerMode returns the current steer mode state.
+func (m *ChatModel) IsSteerMode() bool {
+	return m.steerMode
+}
+
+// ToggleSteerMode flips steer mode and returns the new state.
+func (m *ChatModel) ToggleSteerMode() bool {
+	m.steerMode = !m.steerMode
+	return m.steerMode
+}
+
+// SetSteerMode sets steer mode to the given state.
+func (m *ChatModel) SetSteerMode(active bool) {
+	m.steerMode = active
+}
+
+// SteerQueue sends the given text as a steering message to the daemon.
+// It also adds a local user message so the steering action is visible in chat.
+func (m *ChatModel) SteerQueue(text string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.rpc.Steer(text, m.conversationID)
+		if err != nil {
+			return SteeringResultMsg{Err: err}
+		}
+		return SteeringResultMsg{Success: true}
+	}
+}
+
+// FollowUpQueue sends the given text as a follow-up message to the daemon.
+// It does not add a local user message (follow-ups are not shown in chat).
+func (m *ChatModel) FollowUpQueue(text string) tea.Cmd {
+	return func() tea.Msg {
+		err := m.rpc.FollowUp(text, m.conversationID)
+		if err != nil {
+			return FollowUpResultMsg{Err: err}
+		}
+		return FollowUpResultMsg{Success: true}
+	}
 }

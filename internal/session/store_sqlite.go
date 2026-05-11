@@ -409,7 +409,7 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO session_messages (session_id, role, content, timestamp)

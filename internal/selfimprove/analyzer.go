@@ -168,7 +168,7 @@ func (a *RootCauseAnalyzer) parseAnalysisResponse(issueID, response string) *Roo
 		} else if after, ok := strings.CutPrefix(line, "CONFIDENCE:"); ok {
 			confStr := strings.TrimSpace(after)
 			var conf float64
-			fmt.Sscanf(confStr, "%f", &conf)
+			_, _ = fmt.Sscanf(confStr, "%f", &conf)
 			if conf >= 0 && conf <= 1 {
 				analysis.Confidence = conf
 			}

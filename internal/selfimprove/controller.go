@@ -77,7 +77,9 @@ func NewController(cfg Config, msgBus *bus.MessageBus, llmClient *llm.Client, pr
 	}
 
 	// Validate config
-	cfg.Validate()
+	if err := cfg.Validate(); err != nil {
+		logger.Warn("invalid controller config", "error", err)
+	}
 
 	c := &Controller{
 		config:        cfg,
@@ -156,7 +158,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 		now := time.Now()
 		c.currentCycle.CompletedAt = &now
 		c.cycles = append(c.cycles, c.currentCycle)
-		c.saveState()
+		_ = c.saveState()
 	}()
 
 	// Phase 1: Detection
@@ -407,7 +409,7 @@ func (c *Controller) Detect(ctx context.Context) ([]Issue, error) {
 		return nil, err
 	}
 	c.issues = issues
-	c.saveState()
+	_ = c.saveState()
 	return issues, nil
 }
 
@@ -485,7 +487,7 @@ func (c *Controller) RejectFix(fixID, reason string) error {
 
 // Stop stops the controller.
 func (c *Controller) Stop() error {
-	c.validator.Cleanup()
+	_ = c.validator.Cleanup()
 	c.analyzer.Close()
 	c.generator.Close()
 	return nil
@@ -559,7 +561,7 @@ func (c *Controller) saveState() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	os.MkdirAll(c.config.DataPath, 0755)
+	_ = os.MkdirAll(c.config.DataPath, 0755)
 
 	state := persistedState{
 		Issues:              c.issues,

@@ -275,12 +275,12 @@ func TestHandler_StatsViaBus(t *testing.T) {
 	// Pre-enqueue a job
 	ctx := context.Background()
 	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
-	q.Enqueue(ctx, job)
+	_ = q.Enqueue(ctx, job)
 
 	handler := NewHandler(q, msgBus, nil)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	handler.Start(ctx)
+	_ = handler.Start(ctx)
 	defer handler.Stop(ctx)
 
 	respSub := msgBus.Subscribe("test-stats", "queue.result")
@@ -300,7 +300,7 @@ func TestHandler_StatsViaBus(t *testing.T) {
 	select {
 	case resp := <-respSub.Channel:
 		var result map[string]any
-		json.Unmarshal(resp.Payload, &result)
+		_ = json.Unmarshal(resp.Payload, &result)
 		if _, hasErr := result["error"]; hasErr {
 			t.Errorf("got error: %s", string(resp.Payload))
 		}
@@ -332,8 +332,8 @@ func TestPersistentQueue_ClaimWithCancelledTaskCallback(t *testing.T) {
 	job2, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "normal task"})
 	job2.WithTaskID("task-active")
 
-	q.Enqueue(ctx, job1)
-	q.Enqueue(ctx, job2)
+	_ = q.Enqueue(ctx, job1)
+	_ = q.Enqueue(ctx, job2)
 
 	// Set up callback that marks task-cancelled as cancelled
 	q.SetTaskCancelledCallback(func(taskID string) (bool, string) {
@@ -372,8 +372,7 @@ func TestPersistentQueue_ClaimAllTasksCancelled(t *testing.T) {
 
 	job, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "cancelled"})
 	job.WithTaskID("task-cancelled")
-	q.Enqueue(ctx, job)
-
+	_ = q.Enqueue(ctx, job)
 	// Set up callback that marks all tasks as cancelled
 	q.SetTaskCancelledCallback(func(taskID string) (bool, string) {
 		return true, "test cancellation"
@@ -396,8 +395,7 @@ func TestPersistentQueue_ClaimNoTaskID(t *testing.T) {
 
 	// Job without task_id (one-off job)
 	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "one-off"})
-	q.Enqueue(ctx, job)
-
+	_ = q.Enqueue(ctx, job)
 	// Set up callback (should not affect jobs without task_id)
 	q.SetTaskCancelledCallback(func(taskID string) (bool, string) {
 		return true, "test cancellation"

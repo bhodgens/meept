@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 func createTestModelsConfig() *config.ModelsConfig {
@@ -73,9 +74,20 @@ func TestDaemonStartup(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	// Wait for status to be "running" with retry (race-free check)
+	// This ensures we read the status after Run() has set it
+	var status models.DaemonStatus
+	for i := 0; i < 10; i++ {
+		status = d.Status()
+		if status == models.StatusRunning {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	// Verify daemon is running
-	if d.Status() != "running" {
-		t.Errorf("Expected status 'running', got %q", d.Status())
+	if status != models.StatusRunning {
+		t.Errorf("Expected status 'running', got %q", status)
 	}
 
 	// Clean shutdown

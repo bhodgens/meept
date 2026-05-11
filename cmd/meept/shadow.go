@@ -497,7 +497,7 @@ func newShadowAdaptersRegisterCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Adapter name (defaults to directory name)")
 	cmd.Flags().StringVarP(&modelBase, "base", "b", "", "Base model this adapts (required)")
 	cmd.Flags().StringVarP(&adapterType, "type", "t", "lora", "Adapter type (lora, soft_prompt)")
-	cmd.MarkFlagRequired("base")
+	_ = cmd.MarkFlagRequired("base")
 
 	return cmd
 }

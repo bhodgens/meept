@@ -38,6 +38,7 @@ type Config struct {
 	QAgent            QAgentConfig            `json:"q_agent"            toml:"q_agent"`
 	CodeIntel         CodeIntelConfig         `json:"code_intel"         toml:"code_intel"`
 	Calendar          CalendarConfig          `json:"calendar"           toml:"calendar"`
+	Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -69,6 +70,32 @@ type CodeIntelConfig struct {
 	// LSP holds LSP client settings
 	LSP LSPConfig `json:"lsp" toml:"lsp"`
 }
+
+// ToolingConfig holds tool call serialization sidecar settings.
+// Used for delegating tool call JSON encoding/decoding to a dedicated agent or service.
+type ToolingConfig struct {
+	// Enabled turns on the tooling sidecar (default: false)
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// Mode is "service" (in-process) or "agent" (sidecar agent)
+	Mode string `json:"mode" toml:"mode"`
+	// AgentID is the agent ID to use when mode is "agent"
+	AgentID string `json:"agent_id" toml:"agent_id"`
+	// Model is the model override for the tooling agent (empty = default)
+	Model string `json:"model" toml:"model"`
+	// CacheEnabled enables caching of serialized tool calls
+	CacheEnabled bool `json:"cache_enabled" toml:"cache_enabled"`
+	// CacheMaxSize is the maximum number of cached serializations
+	CacheMaxSize int `json:"cache_max_size" toml:"cache_max_size"`
+	// CacheTTLMinutes is how long cached results remain valid
+	CacheTTLMinutes int `json:"cache_ttl_minutes" toml:"cache_ttl_minutes"`
+	// IncludeSchema includes JSON schema in tool call metadata
+	IncludeSchema bool `json:"include_schema" toml:"include_schema"`
+	// ValidateOnSerialize validates tool calls against schema before serialization
+	ValidateOnSerialize bool `json:"validate_on_serialize" toml:"validate_on_serialize"`
+	// LogUnknownTools logs warnings for unrecognized tool types
+	LogUnknownTools bool `json:"log_unknown_tools" toml:"log_unknown_tools"`
+}
+
 
 // ASTConfig holds AST parsing settings.
 type ASTConfig struct {
@@ -461,6 +488,8 @@ type AgentConfig struct {
 	Validation ValidationConfig `json:"validation" toml:"validation"`
 	// Watchdog holds agent monitoring settings
 	Watchdog WatchdogConfig `json:"watchdog" toml:"watchdog"`
+	// Queues holds steering and follow-up message queue settings
+	Queues AgentQueuesConfig `json:"queues" toml:"queues"`
 }
 
 // WatchdogConfig holds agent monitoring and timeout settings.
@@ -475,6 +504,27 @@ type WatchdogConfig struct {
 	MaxIterations int `json:"max_iterations" toml:"max_iterations"`
 	// StuckIterationCount is iterations without progress before flagged as stuck (default: 5)
 	StuckIterationCount int `json:"stuck_iteration_count" toml:"stuck_iteration_count"`
+}
+
+// AgentQueuesConfig holds steering and follow-up message queue settings.
+type AgentQueuesConfig struct {
+	// SteeringDrain controls how the steering queue drains.
+	// Always "one" -- only one steering message is valid at a time.
+	SteeringDrain string `json:"steering_drain" toml:"steering_drain"`
+	// FollowUpDrain controls how the follow-up queue drains.
+	// "one" returns a single message, "all" returns all pending.
+	FollowUpDrain string `json:"followup_drain" toml:"followup_drain"`
+	// MaxSteering is the maximum number of steering messages allowed.
+	// Low value -- they're urgent and should interrupt immediately.
+	MaxSteering int `json:"max_steering" toml:"max_steering"`
+	// MaxFollowUp is the maximum number of follow-up messages allowed.
+	MaxFollowUp int `json:"max_followup" toml:"max_followup"`
+	// PersistFollowUp enables hybrid persistence (write-behind to SQLite).
+	PersistFollowUp bool `json:"persist_followup" toml:"persist_followup"`
+	// FlushDelayMs is the write-behind flush delay in milliseconds.
+	// When PersistFollowUp is true, messages are batched in memory and
+	// flushed to disk after this delay or on daemon shutdown.
+	FlushDelayMs int `json:"flush_delay_ms" toml:"flush_delay_ms"`
 }
 
 // ErrorsConfig holds error handling settings.
@@ -1033,6 +1083,14 @@ func DefaultConfig() *Config {
 				MaxIterations:        50,
 				StuckIterationCount:  5,
 			},
+			Queues: AgentQueuesConfig{
+				SteeringDrain:   "one",
+				FollowUpDrain:   "one",
+				MaxSteering:     5,
+				MaxFollowUp:     20,
+				PersistFollowUp: true,
+				FlushDelayMs:    5000,
+			},
 		},
 		Security: SecurityConfig{
 			SanitizeInputs:              true,
@@ -1279,6 +1337,18 @@ func DefaultConfig() *Config {
 				AutoStartServers:         true,
 				ConnectionTimeoutSeconds: 10,
 			},
+		},
+		Tooling: ToolingConfig{
+			Enabled:             false,
+			Mode:                "service",
+			AgentID:             "tooling",
+			Model:               "",
+			CacheEnabled:        true,
+			CacheMaxSize:        500,
+			CacheTTLMinutes:     60,
+			IncludeSchema:       true,
+			ValidateOnSerialize: false,
+			LogUnknownTools:     true,
 		},
 		Calendar: CalendarConfig{
 			Enabled:                false,

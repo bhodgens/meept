@@ -17,6 +17,12 @@ import (
 	"github.com/caimlas/meept/pkg/security"
 )
 
+// QueueEntry wraps a MessageQueue with generation tracking.
+type QueueEntry struct {
+	Queue      *MessageQueue
+	Generation uint64
+}
+
 // AgentRegistry manages agent specifications and instantiated agent loops.
 type AgentRegistry struct {
 	mu sync.RWMutex
@@ -56,6 +62,11 @@ type AgentRegistry struct {
 	watchdog              *Watchdog
 	hallucinationDetector *HallucinationDetector
 	artifactManager       *ArtifactManager
+
+	// Queue tracking for conversation-scoped queue management
+	activeQueues map[string]*QueueEntry
+	activeQueuesMu sync.RWMutex
+	nextGen      uint64
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -92,6 +103,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 	r := &AgentRegistry{
 		specs:                 make(map[string]*AgentSpec),
 		loops:                 make(map[string]*AgentLoop),
+		activeQueues:          make(map[string]*QueueEntry),
 		memvid:                cfg.MemvidClient,
 		taskStore:             cfg.TaskStore,
 		llm:                   cfg.LLMClient,
@@ -668,4 +680,71 @@ func (r *AgentRegistry) SetGlobalRules(rules string) {
 	// Invalidate all loops so they get recreated with new rules
 	r.loops = make(map[string]*AgentLoop)
 	r.logger.Info("Global rules updated, agent loops invalidated")
+}
+
+// RegisterActiveQueue associates a queue with a running conversation.
+// Returns the generation number for this registration.
+func (r *AgentRegistry) RegisterActiveQueue(conversationID string, q *MessageQueue) uint64 {
+	r.activeQueuesMu.Lock()
+	defer r.activeQueuesMu.Unlock()
+
+	r.nextGen++
+	entry := &QueueEntry{
+		Queue:      q,
+		Generation: r.nextGen,
+	}
+
+	r.activeQueues[conversationID] = entry
+	return r.nextGen
+}
+
+// UnregisterActiveQueue removes the queue when the loop exits.
+// Also closes the queue to reject any in-flight injection attempts.
+func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
+	r.activeQueuesMu.Lock()
+	defer r.activeQueuesMu.Unlock()
+
+	entry, exists := r.activeQueues[conversationID]
+	if !exists {
+		return
+	}
+
+	entry.Queue.Close()
+	delete(r.activeQueues, conversationID)
+}
+
+// GetActiveQueue returns the queue for a running conversation, or nil if not found.
+// Also returns the generation number for version checking.
+func (r *AgentRegistry) GetActiveQueue(conversationID string) (*MessageQueue, uint64) {
+	r.activeQueuesMu.RLock()
+	defer r.activeQueuesMu.RUnlock()
+
+	entry, exists := r.activeQueues[conversationID]
+	if !exists {
+		return nil, 0
+	}
+
+	return entry.Queue, entry.Generation
+}
+
+// GetQueueWithVersion performs a version-check after lookup.
+// Returns ErrQueueClosed or ErrGenerationMismatch if the queue is stale.
+func (r *AgentRegistry) GetQueueWithVersion(conversationID string, expectedGen uint64) (*MessageQueue, error) {
+	r.activeQueuesMu.RLock()
+	defer r.activeQueuesMu.RUnlock()
+
+	entry, exists := r.activeQueues[conversationID]
+	if !exists {
+		return nil, ErrQueueNotFound
+	}
+
+	if entry.Generation != expectedGen {
+		return nil, ErrGenerationMismatch
+	}
+
+	if entry.Queue.IsClosed() {
+		return nil, ErrQueueClosed
+	}
+
+	return entry.Queue, nil
 }

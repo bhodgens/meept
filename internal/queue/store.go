@@ -89,6 +89,20 @@ func (s *Store) migrate() error {
 		created_at    TEXT NOT NULL,
 		died_at       TEXT NOT NULL
 	);
+
+	-- queued_followups table for persisted follow-up messages (Phase 4).
+	CREATE TABLE IF NOT EXISTS queued_followups (
+		conversation_id TEXT NOT NULL,
+		message_id      TEXT PRIMARY KEY,
+		content         TEXT NOT NULL,
+		queue_type      TEXT NOT NULL,
+		source          TEXT NOT NULL,
+		created_at      TEXT DEFAULT (datetime('now')),
+		updated_at      TEXT DEFAULT (datetime('now'))
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_queued_followups_conversation
+		ON queued_followups(conversation_id);
 	`
 
 	_, err := s.db.Exec(schema)
@@ -105,7 +119,7 @@ func (s *Store) migrate() error {
 
 	for _, m := range migrations {
 		// Ignore errors - column may already exist
-		s.db.Exec(m)
+		_, _ = s.db.Exec(m)
 	}
 
 	return nil
@@ -177,7 +191,7 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -501,7 +515,7 @@ func (s *Store) GetStats() (*QueueStats, error) {
 
 	// Dead letter count
 	row := s.db.QueryRow(`SELECT COUNT(*) FROM dead_letter`)
-	row.Scan(&stats.DeadCount)
+	_ = row.Scan(&stats.DeadCount)
 
 	return stats, nil
 }
@@ -519,7 +533,7 @@ func (s *Store) moveToDead(jobID string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -550,7 +564,7 @@ func (s *Store) RecoverFromDeadLetter(jobID string) (*Job, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -677,7 +691,7 @@ func (s *Store) ListDeadLetter(limit int) ([]*Job, error) {
 			job.Error = errMsg.String
 		}
 
-		json.Unmarshal([]byte(capsJSON), &job.RequiredCaps)
+		_ = json.Unmarshal([]byte(capsJSON), &job.RequiredCaps)
 
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 			job.CreatedAt = t
@@ -706,6 +720,11 @@ func (s *Store) DeadLetterStats() (int, error) {
 // Close closes the database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// DB returns the underlying database connection for recovery operations.
+func (s *Store) DB() *sql.DB {
+	return s.db
 }
 
 func (s *Store) scanJob(row *sql.Row) (*Job, error) {
@@ -778,7 +797,7 @@ func (s *Store) buildJob(id string, taskID, agentID sql.NullString, jobType, sta
 		job.Error = errMsg.String
 	}
 
-	json.Unmarshal([]byte(capsJSON), &job.RequiredCaps)
+	_ = json.Unmarshal([]byte(capsJSON), &job.RequiredCaps)
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		job.CreatedAt = t
@@ -821,7 +840,7 @@ func (s *Store) ClaimNextByID(jobID string, workerID string) (*Job, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 

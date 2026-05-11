@@ -38,7 +38,7 @@ type modelEntry struct {
 // NewDevHandler creates a new dev handler.
 func NewDevHandler() *DevHandler {
 	h := &DevHandler{}
-	h.loadModels()
+	_ = h.loadModels()
 	return h
 }
 

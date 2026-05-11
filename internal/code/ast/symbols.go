@@ -133,7 +133,7 @@ func (e *SymbolExtractor) extractGoSymbols(node *sitter.Node, source []byte, fil
 
 	case "type_declaration":
 		// Handle type spec children
-		for i := uint32(0); i < node.ChildCount(); i++ {
+		for i := range node.ChildCount() {
 			child := node.Child(int(i))
 			if child != nil && child.Type() == "type_spec" {
 				name := e.getChildByFieldName(child, "name", source)
@@ -164,7 +164,7 @@ func (e *SymbolExtractor) extractGoSymbols(node *sitter.Node, source []byte, fil
 		if nodeType == "const_declaration" {
 			kind = SymbolKindConstant
 		}
-		for i := uint32(0); i < node.ChildCount(); i++ {
+		for i := range node.ChildCount() {
 			child := node.Child(int(i))
 			if child != nil && (child.Type() == "const_spec" || child.Type() == "var_spec") {
 				name := e.getChildByFieldName(child, "name", source)
@@ -181,7 +181,7 @@ func (e *SymbolExtractor) extractGoSymbols(node *sitter.Node, source []byte, fil
 	}
 
 	// Recurse into children
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			childSymbols := e.extractGoSymbols(child, source, filter, depth+1)
@@ -220,7 +220,7 @@ func (e *SymbolExtractor) extractPythonSymbols(node *sitter.Node, source []byte,
 				DocComment: e.getPythonDocstring(node, source),
 			}
 			// Extract methods as children
-			for i := uint32(0); i < node.ChildCount(); i++ {
+			for i := range node.ChildCount() {
 				child := node.Child(int(i))
 				if child != nil && child.Type() == "block" {
 					childSymbols := e.extractPythonSymbols(child, source, filter, depth+1)
@@ -233,7 +233,7 @@ func (e *SymbolExtractor) extractPythonSymbols(node *sitter.Node, source []byte,
 	}
 
 	// Recurse into children
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			childSymbols := e.extractPythonSymbols(child, source, filter, depth+1)
@@ -291,7 +291,7 @@ func (e *SymbolExtractor) extractJSSymbols(node *sitter.Node, source []byte, fil
 	}
 
 	// Recurse
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			childSymbols := e.extractJSSymbols(child, source, filter, depth+1)
@@ -353,7 +353,7 @@ func (e *SymbolExtractor) extractRustSymbols(node *sitter.Node, source []byte, f
 	}
 
 	// Recurse
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			childSymbols := e.extractRustSymbols(child, source, filter, depth+1)
@@ -401,7 +401,7 @@ func (e *SymbolExtractor) extractJavaSymbols(node *sitter.Node, source []byte, f
 	}
 
 	// Recurse
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			childSymbols := e.extractJavaSymbols(child, source, filter, depth+1)
@@ -462,7 +462,7 @@ func (e *SymbolExtractor) extractCSymbols(node *sitter.Node, source []byte, filt
 	}
 
 	// Recurse
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			childSymbols := e.extractCSymbols(child, source, filter, depth+1)
@@ -510,7 +510,7 @@ func (e *SymbolExtractor) extractRubySymbols(node *sitter.Node, source []byte, f
 	}
 
 	// Recurse
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			childSymbols := e.extractRubySymbols(child, source, filter, depth+1)
@@ -532,7 +532,7 @@ func (e *SymbolExtractor) extractGenericSymbols(node *sitter.Node, source []byte
 		name := e.getChildByFieldName(node, "name", source)
 		if name == "" {
 			// Try identifier child
-			for i := uint32(0); i < node.ChildCount(); i++ {
+			for i := range node.ChildCount() {
 				child := node.Child(int(i))
 				if child != nil && child.Type() == "identifier" {
 					name = child.Content(source)
@@ -563,7 +563,7 @@ func (e *SymbolExtractor) extractGenericSymbols(node *sitter.Node, source []byte
 	}
 
 	// Recurse
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			childSymbols := e.extractGenericSymbols(child, source, filter, depth+1)
@@ -594,7 +594,7 @@ func (e *SymbolExtractor) getIdentifierFromDeclarator(node *sitter.Node, source 
 	if node.Type() == "identifier" {
 		return node.Content(source)
 	}
-	for i := uint32(0); i < node.ChildCount(); i++ {
+	for i := range node.ChildCount() {
 		child := node.Child(int(i))
 		if child != nil {
 			if child.Type() == "identifier" {

@@ -72,9 +72,9 @@ func TestAmendmentManager_GetPendingForTask(t *testing.T) {
 	req2 := NewAmendmentRequest("task-1", AmendmentSkipStep, "test2")
 	req3 := NewAmendmentRequest("task-2", AmendmentAddStep, "test3")
 
-	mgr.Submit(context.Background(), req1)
-	mgr.Submit(context.Background(), req2)
-	mgr.Submit(context.Background(), req3)
+	_ = mgr.Submit(context.Background(), req1)
+	_ = mgr.Submit(context.Background(), req2)
+	_ = mgr.Submit(context.Background(), req3)
 
 	pending := mgr.GetPendingForTask("task-1")
 	if len(pending) != 2 {
@@ -91,8 +91,8 @@ func TestAmendmentManager_CancelPendingForTask(t *testing.T) {
 	req1 := NewAmendmentRequest("task-1", AmendmentInjectContext, "test1")
 	req2 := NewAmendmentRequest("task-1", AmendmentSkipStep, "test2")
 
-	mgr.Submit(context.Background(), req1)
-	mgr.Submit(context.Background(), req2)
+	_ = mgr.Submit(context.Background(), req1)
+	_ = mgr.Submit(context.Background(), req2)
 
 	mgr.CancelPendingForTask("task-1")
 

@@ -9,9 +9,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
@@ -37,7 +39,7 @@ type Daemon struct {
 	metricsCollector *metrics.Collector
 	logger       *slog.Logger
 
-	status    models.DaemonStatus
+	status    atomic.Value // stores models.DaemonStatus
 	startTime time.Time
 	pidFile   string
 }
@@ -129,7 +131,9 @@ func New(cfg *Config) (*Daemon, error) {
 		devHandler.RegisterDevMethods(rpcServer)
 
 		// Register RPC server as a component
-		reg.Register(rpcServer)
+		if err := reg.Register(rpcServer); err != nil {
+			return nil, fmt.Errorf("failed to register RPC server: %w", err)
+		}
 
 		logger.Info("RPC transport enabled", "socket", cfg.SocketPath)
 	} else {
@@ -164,6 +168,13 @@ func New(cfg *Config) (*Daemon, error) {
 		cacheHandler.RegisterCacheMethods(rpcServer)
 		if components.TokenCache != nil {
 			logger.Info("Token cache RPC handlers registered")
+		}
+
+		// Register queue (steer/follow-up) handlers (native Go, calling AgentRegistry directly)
+		queueHandler := rpc.NewQueueHandler(components.AgentRegistry)
+		queueHandler.RegisterQueueMethods(rpcServer)
+		if components.AgentRegistry != nil {
+			logger.Info("Queue RPC handlers registered")
 		}
 	}
 
@@ -229,8 +240,8 @@ func New(cfg *Config) (*Daemon, error) {
 		if components.MemoryManager != nil {
 			svcRegistry.Memory = services.NewMemoryService(components.MemoryManager)
 		}
-		// Chat service uses the message bus
-		svcRegistry.Chat = services.NewChatService(msgBus, logger)
+		// Chat service uses the message bus and agent registry for queue access
+		svcRegistry.Chat = services.NewChatService(msgBus, components.AgentRegistry, logger)
 
 		// Task service
 		if components.TaskRegistry != nil {
@@ -298,26 +309,27 @@ func New(cfg *Config) (*Daemon, error) {
 		return nil, fmt.Errorf("at least one transport (rpc or http) must be enabled")
 	}
 
-	return &Daemon{
-		config:         cfg,
-		fullConfig:     fullCfg,
-		bus:            msgBus,
-		registry:       reg,
-		rpc:            rpcServer,
-		httpServer:     httpSrv,
-		components:     components,
-		metricsStore:   metricsStore,
+	d := &Daemon{
+		config:           cfg,
+		fullConfig:       fullCfg,
+		bus:              msgBus,
+		registry:         reg,
+		rpc:              rpcServer,
+		httpServer:       httpSrv,
+		components:       components,
+		metricsStore:     metricsStore,
 		metricsCollector: coll,
-		logger:         logger,
-		status:         models.StatusStopped,
-		pidFile:        cfg.PIDFile,
-	}, nil
+		logger:           logger,
+		pidFile:          cfg.PIDFile,
+	}
+	d.status.Store(models.StatusStopped)
+	return d, nil
 }
 
 // Run starts the daemon and blocks until shutdown.
 func (d *Daemon) Run(ctx context.Context) error {
 	d.logger.Info("daemon: starting", "pid", os.Getpid())
-	d.status = models.StatusStarting
+	d.status.Store(models.StatusStarting)
 	d.startTime = time.Now()
 
 	// Check for existing daemon
@@ -349,6 +361,19 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Metrics collector is started automatically by NewCollector
 
+	// Recover pending follow-ups from queue persistence.
+	// This scans queued_followups for conversations that had messages pending
+	// when the daemon last shut down, loads them, and publishes restore events
+	// so that any connected TUI clients are notified.
+	if d.components != nil && d.components.Queue != nil {
+		if pq, ok := d.components.Queue.(*queue.PersistentQueue); ok {
+			db := pq.DB()
+			if db != nil {
+				agent.RecoverPendingFollowUps(db, d.bus, d.logger)
+			}
+		}
+	}
+
 	// Start HTTP server for menubar app
 	if d.httpServer != nil {
 		go func() {
@@ -359,7 +384,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.logger.Info("HTTP server starting", "addr", ":8081")
 	}
 
-	d.status = models.StatusRunning
+	d.status.Store(models.StatusRunning)
 	d.logger.Info("daemon: running",
 		"socket", d.config.SocketPath,
 		"pid", os.Getpid(),
@@ -399,7 +424,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 func (d *Daemon) shutdown() error {
 	d.logger.Info("daemon: shutting down")
-	d.status = models.StatusStopping
+	d.status.Store(models.StatusStopping)
 
 	// Publish shutdown event
 	msg, _ := models.NewBusMessage(models.MessageTypeEvent, "daemon", map[string]any{
@@ -441,7 +466,7 @@ func (d *Daemon) shutdown() error {
 	// Close message bus
 	d.bus.Close()
 
-	d.status = models.StatusStopped
+	d.status.Store(models.StatusStopped)
 	d.logger.Info("daemon: stopped")
 	return nil
 }
@@ -458,6 +483,7 @@ func (d *Daemon) checkExisting() error {
 	pid, err := strconv.Atoi(string(data))
 	if err != nil {
 		// Invalid PID file, remove it
+		//nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 		os.Remove(d.pidFile)
 		return nil
 	}
@@ -465,12 +491,14 @@ func (d *Daemon) checkExisting() error {
 	// Check if process is running
 	proc, err := os.FindProcess(pid)
 	if err != nil {
+		//nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 		os.Remove(d.pidFile)
 		return nil
 	}
 
 	// Send signal 0 to check if process exists
 	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		//nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 		os.Remove(d.pidFile)
 		return nil
 	}
@@ -550,14 +578,17 @@ func hasDot(s string) bool {
 
 // Status returns the current daemon status.
 func (d *Daemon) Status() models.DaemonStatus {
-	return d.status
+	if v := d.status.Load(); v != nil {
+		return v.(models.DaemonStatus)
+	}
+	return models.StatusStopped
 }
 
 // Info returns daemon information.
 func (d *Daemon) Info() *models.DaemonInfo {
 	return &models.DaemonInfo{
 		PID:       os.Getpid(),
-		Status:    d.status,
+		Status:    d.Status(),
 		StartTime: d.startTime,
 		Version:   "0.2.0-go",
 		Socket:    d.config.SocketPath,

@@ -125,7 +125,7 @@ func TestAgentHandler_SessionPersistence(t *testing.T) {
 
 	handler := NewAgentHandler(store, loop, dir, nil)
 	_ = handler.getOrCreateSession(42)
-	handler.saveSessions()
+	_ = handler.saveSessions()
 
 	// Create a new handler loading from the same dir
 	handler2 := NewAgentHandler(store, loop, dir, nil)

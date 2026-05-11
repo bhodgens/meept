@@ -118,7 +118,7 @@ func (e *Engine) seedDefaults() error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Seed tool rules
 	for _, r := range rules.ToolRules {

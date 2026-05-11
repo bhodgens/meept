@@ -368,8 +368,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Check for Ctrl+S to open session picker directly
+		// Check for Ctrl+S: toggle steer mode when agent active, otherwise open session picker
 		if msg.String() == "ctrl+s" {
+			if a.chat != nil && a.chat.IsAgentActive() {
+				// Agent is running - toggle steer mode
+				newState := a.chat.ToggleSteerMode()
+				status := "off"
+				if newState {
+					status = "on"
+				}
+				a.chat.AddSystemMessage(fmt.Sprintf("Steer mode: %s", status))
+				return a, nil
+			}
 			a.activeModal = ModalSessionPicker
 			a.sessionPicker.Show()
 			return a, a.sessionPicker.RefreshSessions()
@@ -721,6 +731,63 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if a.currentView != ViewTasks {
 					a.tabFlash[ViewTasks] = true
 					a.tabFlashTime = time.Now()
+				}
+
+			// Agent lifecycle events
+			case "agent.lifecycle.started":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if convID, ok := payloadMap["conversation_id"].(string); ok {
+						if cmd := a.chat.Update(models.AgentLifecycleMsg{Active: true, ConversationID: convID}); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					}
+				}
+			case "agent.lifecycle.ended":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if convID, ok := payloadMap["conversation_id"].(string); ok {
+						if cmd := a.chat.Update(models.AgentLifecycleMsg{Active: false, ConversationID: convID}); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					}
+				}
+
+			// Steering queue events
+			case "agent.queue.steer.injected":
+				if cmd := a.chat.Update(models.SteeringInjectedMsg{}); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+
+			// Follow-up queue events
+			case "agent.queue.followup.injected":
+				if cmd := a.chat.Update(models.FollowUpInjectedMsg{}); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case "agent.queue.followup.restore":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					if count, ok := payloadMap["count"].(float64); ok {
+						if cmd := a.chat.Update(models.FollowUpRestoredMsg{Count: int(count)}); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					}
+				}
+
+			// Queue status update events
+			case "agent.queue.status":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					status := &types.QueueStatusResponse{}
+					if sd, ok := payloadMap["steering_depth"].(float64); ok {
+						status.SteeringDepth = int(sd)
+					}
+					if fd, ok := payloadMap["followup_depth"].(float64); ok {
+						status.FollowUpDepth = int(fd)
+					}
+					if ia, ok := payloadMap["is_active"].(bool); ok {
+						status.IsActive = ia
+					}
+					if gen, ok := payloadMap["generation"].(float64); ok {
+						status.Generation = uint64(gen)
+					}
+					a.chat.UpdateQueueStatus(status)
 				}
 			}
 		}

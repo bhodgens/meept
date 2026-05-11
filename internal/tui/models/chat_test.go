@@ -18,6 +18,14 @@ type MockChatRPCClient struct {
 	ChatError    error
 	ChatCalls    []string // Records messages sent
 
+	// Steering/follow-up tracking
+	SteerCalls     []string
+	SteerError     error
+	FollowUpCalls  []string
+	FollowUpError  error
+	QueueStatus    *types.QueueStatusResponse
+	QueueStatusErr error
+
 	// Message persistence tracking
 	SavedMessages      map[string][]types.SessionMessage
 	GetMessagesResp    *types.SessionMessagesResponse
@@ -82,6 +90,29 @@ func (m *MockChatRPCClient) GenerateSessionDescription(sessionID, firstMessage, 
 		Description: desc,
 		Status:      "generated",
 	}, nil
+}
+
+func (m *MockChatRPCClient) Steer(message, conversationID string) error {
+	m.SteerCalls = append(m.SteerCalls, message)
+	if m.SteerError != nil {
+		return m.SteerError
+	}
+	return nil
+}
+
+func (m *MockChatRPCClient) FollowUp(message, conversationID string) error {
+	m.FollowUpCalls = append(m.FollowUpCalls, message)
+	if m.FollowUpError != nil {
+		return m.FollowUpError
+	}
+	return nil
+}
+
+func (m *MockChatRPCClient) GetQueueStatus(conversationID string) (*types.QueueStatusResponse, error) {
+	if m.QueueStatusErr != nil {
+		return nil, m.QueueStatusErr
+	}
+	return m.QueueStatus, nil
 }
 
 func newTestChatModel() *ChatModel {
