@@ -445,32 +445,6 @@ func formatPrompt(messages []Message) string {
 	return joinStrings(parts, "\n\n")
 }
 
-func hashRecord(record *ShadowRecord) string {
-	// Simple hash based on user message content
-	var userContent string
-	for _, msg := range record.Messages {
-		if msg.Role == "user" {
-			userContent += msg.Content
-		}
-	}
-
-	// Use first 100 chars as a fingerprint
-	if len(userContent) > 100 {
-		userContent = userContent[:100]
-	}
-
-	return userContent
-}
-
-func hashPair(pair *PreferencePair) string {
-	// Hash based on chosen response start
-	content := pair.ChosenResponse
-	if len(content) > 100 {
-		content = content[:100]
-	}
-	return content
-}
-
 // newDedupState creates a new deduplication state with the given similarity threshold.
 func newDedupState(threshold float64) *dedupState {
 	return &dedupState{

@@ -186,16 +186,3 @@ func (v *StepValidator) validateClaim(ctx context.Context, claim string, evidenc
 	return ValidationResult{Valid: true}
 }
 
-// validateClaimSimple checks if a simple file operation claim is supported.
-func validateClaimSimple(claim string, evidence []models.Evidence) bool {
-	// Simple heuristic: if claim mentions "created" or "wrote" and we have file evidence, pass
-	if strings.Contains(strings.ToLower(claim), "created") ||
-		strings.Contains(strings.ToLower(claim), "wrote") {
-		for _, ev := range evidence {
-			if ev.Type == models.EvidenceFileExists {
-				return true
-			}
-		}
-	}
-	return len(evidence) > 0
-}

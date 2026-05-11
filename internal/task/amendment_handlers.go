@@ -257,13 +257,3 @@ func (h *AmendmentHandlers) handleChangeAgent(ctx context.Context, req *Amendmen
 }
 
 
-// truncateString truncates a string to maxLength, adding "..." if truncated.
-func truncateString(s string, maxLength int) string {
-	if len(s) <= maxLength {
-		return s
-	}
-	if maxLength <= 3 {
-		return s[:maxLength]
-	}
-	return s[:maxLength-3] + "..."
-}

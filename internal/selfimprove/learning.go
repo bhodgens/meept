@@ -151,7 +151,6 @@ type LearningPipeline struct {
 
 	// In-memory caches
 	patterns    map[string]*LearnedPattern
-	trajectories []Trajectory
 	lastConsolidation time.Time
 
 	initialized bool

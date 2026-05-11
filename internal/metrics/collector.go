@@ -14,7 +14,6 @@ import (
 
 // Collector collects metrics from various sources.
 type Collector struct {
-	mu             sync.RWMutex
 	store          *Store
 	bus            *bus.MessageBus
 	stopChan       chan struct{}
@@ -295,7 +294,6 @@ type CollectFunc func()
 
 // PeriodicCollector runs a collection function periodically.
 type PeriodicCollector struct {
-	mu       sync.RWMutex
 	fn       CollectFunc
 	interval time.Duration
 	stopChan chan struct{}

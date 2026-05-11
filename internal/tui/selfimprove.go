@@ -38,7 +38,6 @@ var (
 	siRiskLow    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a"))
 	siRiskMed    = lipgloss.NewStyle().Foreground(lipgloss.Color("#e0af68"))
 	siRiskHigh   = lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))
-	siDiffStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))
 	siHelpStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#565f89"))
 	siErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e"))
 	siOkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a"))

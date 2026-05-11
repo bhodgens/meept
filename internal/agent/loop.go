@@ -2663,44 +2663,6 @@ type AgentResponse struct {
 	ReplyTo        string `json:"reply_to,omitempty"`
 }
 
-// getAliasName extracts the alias name from a model reference.
-// Returns empty string if not an alias.
-func (l *AgentLoop) getAliasName(modelRef string) string {
-	if modelRef == "" {
-		return ""
-	}
-	if l.resolver == nil {
-		return ""
-	}
-	// Check if it's a known alias
-	if l.resolver.HasAlias(modelRef) {
-		return modelRef
-	}
-	return ""
-}
-
-// resolveAliasModel resolves an alias to a specific model config.
-// Returns nil if no alias or resolution fails.
-func (l *AgentLoop) resolveAliasModel(aliasName string) *llm.ModelConfig {
-	if aliasName == "" || l.resolver == nil {
-		return nil
-	}
-	modelConfig, err := l.resolver.ResolveForAlias(aliasName)
-	if err != nil {
-		l.logger.Warn("Alias resolution failed", "alias", aliasName, "error", err)
-		return nil
-	}
-	return modelConfig
-}
-
-// recordAliasFailure records a failure for the current model alias.
-func (l *AgentLoop) recordAliasFailure(modelRef string, err error) {
-	aliasName := l.getAliasName(modelRef)
-	if aliasName != "" && l.resolver != nil {
-		l.resolver.RecordAliasFailure(aliasName, err)
-	}
-}
-
 // resolveInferenceParams builds chat options that merge model defaults with agent overrides.
 // Agent spec values take precedence when set, otherwise model defaults apply.
 func (l *AgentLoop) resolveInferenceParams() []llm.ChatOption {
@@ -2731,14 +2693,6 @@ func (l *AgentLoop) resolveInferenceParams() []llm.ChatOption {
 	}
 
 	return opts
-}
-
-// recordAliasSuccess records a success for the current model alias.
-func (l *AgentLoop) recordAliasSuccess(modelRef string) {
-	aliasName := l.getAliasName(modelRef)
-	if aliasName != "" && l.resolver != nil {
-		l.resolver.RecordAliasSuccess(aliasName)
-	}
 }
 
 // currentModelInfo returns the current model ID and provider ID for logging.

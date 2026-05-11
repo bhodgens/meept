@@ -16,11 +16,6 @@ import (
 	"github.com/caimlas/meept/internal/tui/viz"
 )
 
-// getSlashCommands returns the list of built-in slash commands.
-func getSlashCommands() []string {
-	return []string{"help", "new", "clear", "retry", "undo", "usage", "stop", "status", "vim", "session", "task"}
-}
-
 // LayoutMode determines how the TUI arranges panels based on terminal size.
 type LayoutMode int
 
@@ -1075,68 +1070,6 @@ func (a *App) initCurrentView() tea.Cmd {
 		return a.memory.Init()
 	}
 	return nil
-}
-
-// generateAutocompletePopup generates the autocomplete popup string.
-func (a *App) generateAutocompletePopup() string {
-	if !a.slashAutocomplete.IsVisible() {
-		DebugLog("POPUP: autocomplete not visible")
-		return ""
-	}
-	
-	// Get filtered commands from autocomplete (this is the source of truth)
-	commands := a.slashAutocomplete.GetFilteredCommands()
-	if len(commands) == 0 {
-		DebugLog("POPUP: no filtered commands")
-		return ""
-	}
-	
-	// Get current input to determine filter for highlighting
-	inputValue := a.chat.GetInputValue()
-	filter := ""
-	if strings.HasPrefix(inputValue, "/") {
-		filter = strings.TrimPrefix(inputValue, "/")
-		filter = strings.TrimSpace(filter)
-	}
-	
-	DebugLog(fmt.Sprintf("POPUP: generating with %d commands, filter=%q, input=%q", len(commands), filter, inputValue))
-	
-	// Build popup
-	var b strings.Builder
-	boxStyle := a.styles.ModalBox.Width(30)
-	
-	// Header
-	b.WriteString(a.styles.ModalTitle.Render("commands"))
-	b.WriteString("\n")
-	
-	// Items
-	selectedIdx := a.slashAutocomplete.GetSelectedIndex()
-	for i, cmd := range commands {
-		style := a.styles.ModalItem
-		if i == selectedIdx {
-			style = a.styles.ModalItemSelected
-		}
-		
-		marker := "  "
-		if i == selectedIdx {
-			marker = "▸ "
-		}
-		
-		// Highlight matched portion
-		var label string
-		if filter != "" && strings.HasPrefix(cmd, filter) {
-			label = a.styles.HelpKey.Render(cmd[:len(filter)]) + cmd[len(filter):]
-		} else {
-			label = cmd
-		}
-		
-		b.WriteString(style.Render(marker + label))
-		b.WriteString("\n")
-	}
-	
-	result := boxStyle.Render(b.String())
-	DebugLog(fmt.Sprintf("POPUP: generated %d bytes", len(result)))
-	return result
 }
 
 // View renders the application.

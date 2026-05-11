@@ -10,78 +10,28 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// MessagePosition tracks where a message appears in rendered content.
-type MessagePosition struct {
-	MsgIdx       int
-	LineStart    int // Line number in rendered content
-	LineCount    int // Number of lines this message spans
-	ContentStart int // Character offset in viewport content
+// isClickInViewportArea checks whether the mouse event coordinates fall within the
+// viewport content area. It accounts for the screen Y offset (header/chrome above
+// the chat area), the viewport border, and the viewport dimensions.
+func (m *ChatModel) isClickInViewportArea(mouse tea.Mouse) bool {
+	// Viewport content starts after screenYOffset + viewport top border (1 line)
+	viewportTop := m.screenYOffset + 1
+	viewportBottom := viewportTop + m.viewport.Height()
+
+	// X range: 1 (left border) to 1 + viewport width
+	viewportLeft := 1
+	viewportRight := viewportLeft + m.viewport.Width()
+
+	return mouse.Y >= viewportTop && mouse.Y < viewportBottom &&
+		mouse.X >= viewportLeft && mouse.X < viewportRight
 }
 
-// buildPositionIndex builds a position index for the rendered content.
-func (m *ChatModel) buildPositionIndex() []MessagePosition {
-	var positions []MessagePosition
-	currentLine := 0
-	currentOffset := 0
-
-	content := m.viewport.View()
-	lines := strings.Split(content, "\n")
-
-	for i, msg := range m.messages {
-		msgContent := m.getMessageContent(msg)
-		msgLines := strings.Count(msgContent, "\n") + 1
-
-		// Account for timestamp header line (non-system/pending messages)
-		if msg.Role != "system" && msg.Role != "pending" {
-			msgLines++ // timestamp header
-		}
-
-		// Account for state indicator line
-		if msg.State == MessageCollapsed || msg.State == MessageExpanded {
-			msgLines++
-		}
-
-		// Account for separator line
-		if i < len(m.messages)-1 {
-			msgLines++
-		}
-
-		positions = append(positions, MessagePosition{
-			MsgIdx:       i,
-			LineStart:    currentLine,
-			LineCount:    msgLines,
-			ContentStart: currentOffset,
-		})
-
-		// Update counters
-		for j := 0; j < msgLines && currentLine+j < len(lines); j++ {
-			currentOffset += len(lines[currentLine+j]) + 1 // +1 for newline
-		}
-		currentLine += msgLines
-	}
-
-	return positions
-}
-
-// messageAtY finds the message at a given viewport Y coordinate.
-// Returns message index, line within message, and character offset.
-func (m *ChatModel) messageAtY(y int) (msgIdx int, lineInMsg int, charOffset int) {
-	positions := m.buildPositionIndex()
-
-	// Y is already relative to visible content (no YOffset adjustment needed)
-
-	for _, pos := range positions {
-		if y >= pos.LineStart && y < pos.LineStart+pos.LineCount {
-			return pos.MsgIdx, y - pos.LineStart, pos.ContentStart
-		}
-	}
-
-	// Default to last message if not found
-	if len(positions) > 0 {
-		last := positions[len(positions)-1]
-		return last.MsgIdx, 0, last.ContentStart
-	}
-	return -1, 0, 0
+// viewportAdjustedCoords converts screen mouse coordinates to viewport-relative
+// coordinates, accounting for screen Y offset and borders.
+func (m *ChatModel) viewportAdjustedCoords(mouse tea.Mouse) (y, x int) {
+	y = mouse.Y - m.screenYOffset - 1 // screenYOffset + border top
+	x = mouse.X - 1                   // left border
+	return y, x
 }
 
 // calculateCursorOffset converts viewport Y,X to character offset in rendered content.

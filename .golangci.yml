@@ -1,0 +1,127 @@
+# golangci-lint configuration for meept
+# https://golangci-lint.run/usage/configuration/
+
+version: "2"
+
+linters:
+  enable:
+    # Bugs & correctness
+    - bodyclose          # HTTP response body closed
+    - contextcheck       # Non-inherited context
+    - copyloopvar        # Loop variable copies (Go 1.22+)
+    - durationcheck      # Duration multiplication
+    - errcheck           # Unchecked errors
+    - errname            # Sentinel error naming (Err/FooError)
+    - errorlint          # Error wrapping best practices
+    - govet              # go vet passes
+    - ineffassign        # Unused assignments
+    - nilerr             # Returns nil despite checking err != nil
+    - nilnesserr         # Returns wrong nil after err check
+    - nilnil             # Returns nil error + nil value
+    - rowserrcheck       # sql.Rows.Err checked
+    - sqlclosecheck      # sql.Rows/Stmt closed
+    - staticcheck        # Staticcheck rules (includes SA4023)
+    - unused             # Unused code
+    - wastedassign       # Wasted assignments
+
+    # Security
+    - gosec              # Security issues
+
+    # Performance
+    - prealloc           # Slice preallocation hints
+    - unconvert          # Unnecessary type conversions
+
+    # Style & readability
+    - goconst            # Repeated strings → constants
+    - gocritic           # Bug/performance/style diagnostics
+    - misspell           # Typos
+    - revive             # golint replacement
+    - sloglint           # Consistent slog usage
+    - tagalign           # Struct tag alignment
+    - unparam            # Unused function params
+    - usestdlibvars      # Use stdlib constants
+
+    # Modernization
+    - intrange           # Use integer range in for loops
+    - modernize          # Modern Go idioms
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+      - common-false-positives
+    paths:
+      - "archive/.*"
+      - "third_party/.*"
+      - "testdata/.*"
+      - "vendor/.*"
+
+linters-settings:
+  staticcheck:
+    checks:
+      - "all"
+      - "SA4023"  # Impossible comparison: interface cannot be concrete type
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: increment-decrement
+      - name: indent-error-flow
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: var-declaration
+      - name: var-naming
+
+  gosec:
+    excludes:
+      - G104  # Audit errors not checked (errcheck handles this)
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - hugeParam      # Often noisy for structs
+      - rangeValCopy   # Often intentional
+
+  goconst:
+    min-len: 3
+    min-occurrences: 4
+    ignore-tests: true
+
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+
+  sloglint:
+    key-naming-case: snake_case
+    args-on-sep-lines: false
+
+  unparam:
+    check-exported: false
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5
+  fix: false
+
+formatters:
+  exclusions:
+    paths:
+      - "archive/.*"
+      - "third_party/.*"
+      - "testdata/.*"
+      - "vendor/.*"

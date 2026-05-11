@@ -234,31 +234,6 @@ func (s *Selector) computeRecencyScore(age time.Duration) float64 {
 	return math.Exp(-decayRate * float64(age))
 }
 
-func (s *Selector) selectWithinBudget(scored []*ScoredExample, maxCount int) []*FewShotExample {
-	var selected []*FewShotExample
-	totalTokens := 0
-	maxTokens := s.config.MaxContextTokens
-
-	for _, se := range scored {
-		if len(selected) >= maxCount {
-			break
-		}
-
-		// Estimate tokens (rough: ~4 chars per token)
-		exampleTokens := (len(se.Example.UserMessage) + len(se.Example.AssistantResponse)) / 4
-
-		if totalTokens+exampleTokens > maxTokens {
-			// Skip examples that would exceed budget
-			continue
-		}
-
-		selected = append(selected, se.Example)
-		totalTokens += exampleTokens
-	}
-
-	return selected
-}
-
 // selectWithMMR uses Maximal Marginal Relevance to select diverse examples.
 // MMR balances relevance to the query with diversity from already-selected examples.
 // lambda controls the trade-off: 1.0 = pure relevance, 0.0 = pure diversity

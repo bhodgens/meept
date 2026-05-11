@@ -4,7 +4,6 @@ package handlers
 import (
 	"fmt"
 	"strings"
-	"sync"
 )
 
 // TaskEventPayload represents common task event data.
@@ -38,9 +37,7 @@ type TaskNotification struct {
 }
 
 // TaskEventHandler processes task events and produces notifications.
-type TaskEventHandler struct {
-	mu sync.Mutex
-}
+type TaskEventHandler struct{}
 
 // NewTaskEventHandler creates a new task event handler.
 func NewTaskEventHandler() *TaskEventHandler {

@@ -39,23 +39,6 @@ func NewConfigService() (*ConfigService, error) {
 	}, nil
 }
 
-// expandPath expands ~ to the home directory.
-func (s *ConfigService) expandPath(path string) string {
-	if !strings.HasPrefix(path, "~") {
-		return path
-	}
-
-	homeDir := s.meeptDir[:len(s.meeptDir)-len("/.meept")]
-
-	if path == "~" {
-		return homeDir
-	}
-	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(homeDir, path[2:])
-	}
-	return path
-}
-
 // getClientConfigPath returns the path to client.json5.
 func (s *ConfigService) getClientConfigPath() string {
 	return filepath.Join(s.meeptDir, "client.json5")

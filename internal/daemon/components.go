@@ -760,6 +760,12 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 		// Create chat handler with dispatcher for multi-agent routing
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, msgBus, logger)
+
+		// Wire step store for fetching step summaries in ACK and completion messages
+		if c.TaskRegistry != nil {
+			c.ChatHandler.SetStepStore(c.TaskRegistry.StepStore())
+		}
+
 		logger.Info("ChatHandler initialized with dispatcher")
 
 		// Subscribe to dispatcher.stats requests
@@ -838,6 +844,11 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	} else {
 		// Create chat handler without dispatcher (single-agent mode)
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, msgBus, logger)
+
+		// Wire step store for fetching step summaries in ACK and completion messages
+		if c.TaskRegistry != nil {
+			c.ChatHandler.SetStepStore(c.TaskRegistry.StepStore())
+		}
 	}
 
 	// Create job processor that uses the agent loop (with optional multi-agent registry)
@@ -2163,20 +2174,6 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 		logger.Warn("Skills executor not created - no LLM resolver available")
 	}
 
-}
-
-// It scans the install directory, loads the index with claw: prefix enforcement,
-// applies the blocklist, and guarantees risk_level=high for all entries.
-// with the claw: prefix to prevent shadowing local skills.
-func expandHomePath(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return path
-		}
-		return filepath.Join(homeDir, path[2:])
-	}
-	return path
 }
 
 // StatusHandler handles status.request messages on the bus.

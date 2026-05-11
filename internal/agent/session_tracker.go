@@ -21,7 +21,6 @@ type SessionTracker struct {
 	stopCh                  chan struct{}        // Used to signal background goroutine to stop
 	stopOnce                sync.Once            // Ensures Stop is only called once
 	logger                  *slog.Logger
-	lastErr                 error                // AGENT-20: tracks the last persist error
 }
 
 // SessionState holds state for a single conversation session.

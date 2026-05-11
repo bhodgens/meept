@@ -9,28 +9,6 @@ import (
 
 var designerLogger = slog.Default()
 
-func makeAnalysis(sID, agentID string, intents []string, duration time.Duration,
-	iterations, revisions, tokens int, outcome string, difficulty float64,
-) *SessionAnalysis {
-	return &SessionAnalysis{
-		SessionID:       sID,
-		AgentID:         agentID,
-		Intents:         intents,
-		Duration:        duration,
-		IterationCount:  iterations,
-		RevisionCycles:  revisions,
-		TokenUsage:      tokens,
-		Outcome:         outcome,
-		DifficultyScore: difficulty,
-		ToolCalls: []ToolCallRecord{
-			{ToolName: "file_read", Success: true},
-			{ToolName: "shell_execute", Success: true},
-		},
-		StartTime: time.Now().Add(-duration),
-		EndTime:   time.Now(),
-	}
-}
-
 func makeAnalysisOnly(sID, agentID string, intents []string, duration time.Duration,
 	iterations, revisions, tokens int, outcome string, difficulty float64,
 ) *SessionAnalysis {

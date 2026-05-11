@@ -167,18 +167,22 @@ func (r *Robot) Draw(c *Canvas) {
 		// Progressive fill from bottom to top
 		r.drawWithFill(c, x, y, RobotHeight, color)
 	case RobotFailed:
-		// Draw body with blinking effect
+		// Draw body with blinking X overlay
 		if r.blinkOn {
 			r.drawBody(c, x, y, RobotHeight, ColorError)
+			r.drawX(c, x, y, RobotHeight, ColorMuted)
 		} else {
 			r.drawBody(c, x, y, RobotHeight, ColorMuted)
+			r.drawX(c, x, y, RobotHeight, ColorError)
 		}
 	case RobotProblems:
-		// Draw body with blinking effect
+		// Draw body with blinking exclamation overlay
 		if r.blinkOn {
 			r.drawBody(c, x, y, RobotHeight, ColorError)
+			r.drawExclamation(c, x, y, RobotHeight, ColorMuted)
 		} else {
 			r.drawBody(c, x, y, RobotHeight, color)
+			r.drawExclamation(c, x, y, RobotHeight, ColorError)
 		}
 	default:
 		// Normal body

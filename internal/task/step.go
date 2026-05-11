@@ -757,15 +757,6 @@ func buildStep(id, taskID, description, state string,
 	return step
 }
 
-// encodeStepDependsOn encodes step dependencies as JSON.
-func encodeStepDependsOn(deps []string) string {
-	if len(deps) == 0 {
-		return ""
-	}
-	data, _ := json.Marshal(deps)
-	return string(data)
-}
-
 // encodeRecommendations encodes recommendations as JSON.
 func encodeRecommendations(recs []CategorizedRecommendation) string {
 	if len(recs) == 0 {

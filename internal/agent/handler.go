@@ -350,7 +350,12 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 				"intent", result.Intent.Type,
 			)
 			// Build human-readable acknowledgment
-			reply = h.FormatEnhancedAsyncTaskAck(result, result.Steps, h.estimateDuration(result.Task.ID, len(result.Steps)), h.getPlanReference(result.Task.ID))
+			// Use dispatcher-provided steps, falling back to step store
+			steps := result.Steps
+			if len(steps) == 0 {
+				steps = h.fetchStepSummaries(result.Task.ID)
+			}
+			reply = h.FormatEnhancedAsyncTaskAck(result, steps, h.estimateDuration(result.Task.ID, len(steps)), h.getPlanReference(result.Task.ID))
 
 			// Publish plan request to orchestrator
 			h.publishPlanRequest(result, conversationID)
@@ -570,7 +575,12 @@ func (h *ChatHandler) handleTaskCompleted(msg *models.BusMessage) {
 	)
 
 	// Build human-readable completion message
-	reply := h.formatTaskCompletedMessage(payload.Name, payload.Steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs, payload.TokenUsage)
+	// Use event-provided steps, falling back to step store
+	steps := payload.Steps
+	if len(steps) == 0 {
+		steps = h.fetchStepSummaries(payload.TaskID)
+	}
+	reply := h.formatTaskCompletedMessage(payload.Name, steps, payload.ExecutionTime, payload.Result, payload.CompletedJobs, payload.TotalJobs, payload.TokenUsage)
 
 	response := ChatResponse{
 		Reply: reply,

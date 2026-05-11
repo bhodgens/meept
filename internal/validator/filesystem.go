@@ -6,17 +6,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
 
 // FilesystemValidator validates file-related evidence.
-type FilesystemValidator struct {
-	basePath string
-}
+type FilesystemValidator struct{}
 
 // NewFilesystemValidator creates a new FilesystemValidator.
 func NewFilesystemValidator() *FilesystemValidator {
@@ -105,12 +101,3 @@ func (v *FilesystemValidator) ValidateEvidence(ctx context.Context, ev models.Ev
 	return result
 }
 
-// parseSizeValue parses a size value from evidence.
-func parseSizeValue(value string) (int64, error) {
-	// Expected format: "size=1234"
-	parts := strings.Split(value, "=")
-	if len(parts) != 2 || parts[0] != "size" {
-		return 0, fmt.Errorf("invalid size format: %s", value)
-	}
-	return strconv.ParseInt(parts[1], 10, 64)
-}

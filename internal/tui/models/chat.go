@@ -56,9 +56,8 @@ type ChatMessage struct {
 	Progress  *ProgressState // Progress state for pending messages
 
 	// Rendering cache
-	rendered    string // Cached rendered output
-	renderedAt  int    // Width when rendered
-	hasMarkdown bool   // Detected markdown
+	rendered   string // Cached rendered output
+	renderedAt int    // Width when rendered
 }
 
 // ChatModel is the model for the chat view.
@@ -72,7 +71,6 @@ type ChatModel struct {
 	width          int
 	height         int
 	loading        bool
-	err            error
 
 	// Focus management
 	focused        FocusedElement
@@ -120,8 +118,6 @@ type ChatModel struct {
 	// Paste compression
 	compressedPastes map[int]string // pasteID -> original paste content
 	pasteCounter     int
-	lastInputValue   string // For detecting pastes
-	lastInputLines   int    // Line count at last check
 
 	// File attachments - paths dragged/pasted into the input
 	attachments []string
@@ -714,30 +710,13 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 		case tea.MouseClickMsg:
 			mouse := msg.Mouse()
-			// Convert screen coordinates to viewport-relative
-			// Header=2 lines (header + newline), border top=1 line
-			adjustedY := mouse.Y - 2
-			adjustedX := mouse.X - 1
-
-			// Check if click is within viewport bounds
-			if adjustedY >= 0 && adjustedY < m.viewport.Height() &&
-				adjustedX >= 0 && adjustedX < m.viewport.Width() {
-				return m.handleMousePress(msg)
+			if !m.isClickInViewportArea(mouse) {
+				return nil
 			}
-			return nil
+			return m.handleMousePress(msg)
 
 		case tea.MouseMotionMsg:
 			if m.mouseDown {
-				mouse := msg.Mouse()
-				adjustedY := mouse.Y - 2
-				adjustedX := mouse.X - 1
-				// Allow dragging outside viewport to extend selection
-				if adjustedY < 0 {
-					adjustedY = 0
-				}
-				if adjustedX < 0 {
-					adjustedX = 0
-				}
 				return m.handleMouseDrag(msg)
 			}
 			return nil
@@ -1994,21 +1973,7 @@ func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
 	m.mouseDownX = mouse.X
 
 	// Convert screen coordinates to viewport-relative
-	// Header is 1 line, viewport border top is 1 line, so viewport content starts at screen Y=2
-	adjustedY := mouse.Y - 2
-	adjustedX := mouse.X - 1 // left border offset
-
-	// Clamp to valid range - ignore clicks outside viewport
-	if adjustedY < 0 || adjustedX < 0 {
-		// Click was outside viewport area (maybe on header, sidebar, or status bar)
-		return nil
-	}
-	
-	// Also check if click is within viewport dimensions
-	if adjustedY >= m.viewport.Height() || adjustedX >= m.viewport.Width() {
-		// Click was outside viewport bounds
-		return nil
-	}
+	adjustedY, adjustedX := m.viewportAdjustedCoords(mouse)
 
 	// Check for double/triple click
 	now := time.Now()
@@ -2039,12 +2004,12 @@ func (m *ChatModel) handleMousePress(msg tea.MouseMsg) tea.Cmd {
 
 // handleMouseDrag handles mouse drag for extending text selection.
 func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
-	m.mouseDragY = msg.Mouse().Y
-	m.mouseDragX = msg.Mouse().X
+	mouse := msg.Mouse()
+	m.mouseDragY = mouse.Y
+	m.mouseDragX = mouse.X
 
-	// Convert screen coordinates to viewport-relative (header=1, viewport border=1)
-	adjustedY := msg.Mouse().Y - 2
-	adjustedX := msg.Mouse().X - 1
+	// Convert screen coordinates to viewport-relative
+	adjustedY, adjustedX := m.viewportAdjustedCoords(mouse)
 
 	// Clamp to valid range (allow dragging outside viewport to extend selection)
 	if adjustedY < 0 {
@@ -2124,24 +2089,6 @@ func (m *ChatModel) getTextareaBounds() (startY, endY int) {
 
 	return startY, endY
 }
-// isClickInViewportArea checks if mouse coordinates are within the viewport area on screen.
-// The viewport is positioned after the header (2 lines) and includes a border.
-// This confines selection to the viewport and prevents interference with other UI elements.
-func (m *ChatModel) isClickInViewportArea(mouse tea.Mouse) bool {
-	// Viewport screen position:
-	// - Y: starts at line 2 (after header) + 1 (top border) = line 3
-	// - Ends at viewport height + border offset
-	// For simplicity, check if Y is in the upper portion of screen where viewport renders
-	// and X is within the viewport width (minus sidebar if present)
-
-	headerOffset := 2 // header + newline
-	viewportStart := headerOffset + 1 // +1 for top border
-	viewportEnd := viewportStart + m.viewport.Height()
-
-	return mouse.Y >= viewportStart && mouse.Y <= viewportEnd &&
-		mouse.X >= 0 && mouse.X <= m.width
-}
-
 // parseAsyncAck checks if a reply is an async task acknowledgment JSON.
 // Returns (isAsync, taskID, message).
 func parseAsyncAck(reply string) (bool, string, string) {

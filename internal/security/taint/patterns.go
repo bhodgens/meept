@@ -441,9 +441,7 @@ func EstimateEntropy(value string) float64 {
 
 // log2 is base-2 logarithm.
 func log2(x float64) float64 {
-	const ln2 = 0.6931471805599453
 	// Simple implementation avoiding math import for minimal dependencies
-	// Using natural log approximation
 	if x <= 0 {
 		return 0
 	}
