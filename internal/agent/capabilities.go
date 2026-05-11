@@ -32,8 +32,8 @@ type AgentCapabilities struct {
 }
 
 // HasCapability checks if the agent has a specific capability.
-func (ac *AgentCapabilities) HasCapability(cap string) bool {
-	capLower := strings.ToLower(cap)
+func (ac *AgentCapabilities) HasCapability(capability string) bool {
+	capLower := strings.ToLower(capability)
 	return ac.SkillCapabilities[capLower]
 }
 
@@ -91,8 +91,8 @@ func (cm *CapabilitiesMap) Add(caps *AgentCapabilities) {
 	cm.agents[caps.AgentID] = caps
 
 	// Index by capability
-	for cap := range caps.SkillCapabilities {
-		capLower := strings.ToLower(cap)
+	for capability := range caps.SkillCapabilities {
+		capLower := strings.ToLower(capability)
 		cm.byCapability[capLower] = appendUnique(cm.byCapability[capLower], caps.AgentID)
 	}
 
@@ -112,8 +112,8 @@ func (cm *CapabilitiesMap) Add(caps *AgentCapabilities) {
 // removeFromIndices removes an agent from all secondary indices.
 func (cm *CapabilitiesMap) removeFromIndices(caps *AgentCapabilities) {
 	// Remove from capability index
-	for cap := range caps.SkillCapabilities {
-		capLower := strings.ToLower(cap)
+	for capability := range caps.SkillCapabilities {
+		capLower := strings.ToLower(capability)
 		cm.byCapability[capLower] = removeString(cm.byCapability[capLower], caps.AgentID)
 	}
 
@@ -188,11 +188,11 @@ func (cm *CapabilitiesMap) AgentIDs() []string {
 }
 
 // FindByCapability returns agent IDs that have a specific capability.
-func (cm *CapabilitiesMap) FindByCapability(cap string) []string {
+func (cm *CapabilitiesMap) FindByCapability(capability string) []string {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	capLower := strings.ToLower(cap)
+	capLower := strings.ToLower(capability)
 	result := make([]string, len(cm.byCapability[capLower]))
 	copy(result, cm.byCapability[capLower])
 	return result
@@ -245,8 +245,8 @@ func (cm *CapabilitiesMap) AllCapabilities() []string {
 	defer cm.mu.RUnlock()
 
 	caps := make([]string, 0, len(cm.byCapability))
-	for cap := range cm.byCapability {
-		caps = append(caps, cap)
+	for capability := range cm.byCapability {
+		caps = append(caps, capability)
 	}
 	sort.Strings(caps)
 	return caps

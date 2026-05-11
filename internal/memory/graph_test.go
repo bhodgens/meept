@@ -309,8 +309,8 @@ func TestKnowledgeGraph_RankResults(t *testing.T) {
 		{SourceID: "mem-001-aaaa", TargetID: "mem-002-bbbb", EdgeType: EdgeTypeReference, Weight: 1.0},
 		{SourceID: "mem-003-cccc", TargetID: "mem-002-bbbb", EdgeType: EdgeTypeReference, Weight: 1.0},
 	}
-	g.AddEdges(ctx, edges)
-	g.ComputePageRank(ctx)
+	_ = g.AddEdges(ctx, edges)
+	_ = g.ComputePageRank(ctx)
 
 	// Create results where mem-001 has higher relevance but mem-002 has higher PageRank
 	results := []MemoryResult{
@@ -438,7 +438,7 @@ func TestKnowledgeGraph_DeleteMemoryEdges(t *testing.T) {
 		{SourceID: "mem-001-aaaa", TargetID: "mem-002-bbbb", EdgeType: EdgeTypeReference, Weight: 0.9},
 		{SourceID: "mem-002-bbbb", TargetID: "mem-003-cccc", EdgeType: EdgeTypeSimilar, Weight: 0.7},
 	}
-	g.AddEdges(ctx, edges)
+	_ = g.AddEdges(ctx, edges)
 
 	// Delete mem-002's edges
 	if err := g.DeleteMemoryEdges(ctx, "mem-002-bbbb"); err != nil {
@@ -520,14 +520,14 @@ func TestKnowledgeGraph_CacheInvalidation(t *testing.T) {
 	edges := []MemoryEdge{
 		{SourceID: "mem-001-aaaa", TargetID: "mem-002-bbbb", EdgeType: EdgeTypeReference, Weight: 1.0},
 	}
-	g.AddEdges(ctx, edges)
-	g.ComputePageRank(ctx)
+	_ = g.AddEdges(ctx, edges)
+	_ = g.ComputePageRank(ctx)
 
 	// Get initial PageRank
 	pr1, _ := g.GetPageRank(ctx, "mem-002-bbbb")
 
 	// Add new edge (should invalidate cache)
-	g.AddEdge(ctx, MemoryEdge{
+	_ = g.AddEdge(ctx, MemoryEdge{
 		SourceID: "mem-003-cccc",
 		TargetID: "mem-002-bbbb",
 		EdgeType: EdgeTypeReference,
@@ -535,7 +535,7 @@ func TestKnowledgeGraph_CacheInvalidation(t *testing.T) {
 	})
 
 	// Recompute and verify the scores changed
-	g.ComputePageRank(ctx)
+	_ = g.ComputePageRank(ctx)
 	pr2, _ := g.GetPageRank(ctx, "mem-002-bbbb")
 
 	// After adding a new node, scores get redistributed.
@@ -574,10 +574,10 @@ func TestKnowledgeGraph_GetCommunitySiblings(t *testing.T) {
 		{SourceID: "mem-002-bbbb", TargetID: "mem-003-cccc", EdgeType: EdgeTypeSimilar, Weight: 0.9},
 		{SourceID: "mem-003-cccc", TargetID: "mem-001-aaaa", EdgeType: EdgeTypeSimilar, Weight: 0.9},
 	}
-	g.AddEdges(ctx, edges)
+	_ = g.AddEdges(ctx, edges)
 
 	// First compute PageRank to populate the pagerank table
-	g.ComputePageRank(ctx)
+	_ = g.ComputePageRank(ctx)
 
 	// Then detect communities (this updates the community_id column)
 	communities, err := g.DetectCommunities(ctx)
@@ -627,7 +627,7 @@ func TestKnowledgeGraph_ExpandResults(t *testing.T) {
 		{SourceID: "mem-001-aaaa", TargetID: "mem-002-bbbb", EdgeType: EdgeTypeReference, Weight: 0.9},
 		{SourceID: "mem-001-aaaa", TargetID: "mem-003-cccc", EdgeType: EdgeTypeSimilar, Weight: 0.7},
 	}
-	g.AddEdges(ctx, edges)
+	_ = g.AddEdges(ctx, edges)
 
 	results := []MemoryResult{
 		{Memory: Memory{ID: "mem-001-aaaa"}, RelevanceScore: 0.9},

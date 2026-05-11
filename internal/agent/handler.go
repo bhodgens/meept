@@ -508,8 +508,8 @@ func (h *ChatHandler) GetWorkers() []*Worker {
 	workers := make([]*Worker, 0, len(h.workers))
 	for _, w := range h.workers {
 		// Create a copy
-		copy := *w
-		workers = append(workers, &copy)
+		msgCopy := *w
+		workers = append(workers, &msgCopy)
 	}
 	return workers
 }
@@ -802,7 +802,7 @@ func (h *ChatHandler) fetchStepSummaries(taskID string) []TaskStepSummary {
 }
 
 // estimateDuration returns estimated duration based on step count and historical data.
-func (h *ChatHandler) estimateDuration(taskID string, stepCount int) int {
+func (h *ChatHandler) estimateDuration(_ string, stepCount int) int {
 	if stepCount <= 0 {
 		return 0
 	}

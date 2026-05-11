@@ -210,19 +210,20 @@ func splitWords(s string) []string {
 	var current strings.Builder
 
 	for _, ch := range s {
-		if unicode.IsSpace(ch) || ch == '_' || ch == '-' || ch == '/' || ch == '.' {
+		switch {
+		case unicode.IsSpace(ch) || ch == '_' || ch == '-' || ch == '/' || ch == '.':
 			if current.Len() > 0 {
 				words = append(words, current.String())
 				current.Reset()
 			}
-		} else if unicode.IsUpper(ch) {
+		case unicode.IsUpper(ch):
 			// CamelCase boundary
 			if current.Len() > 0 {
 				words = append(words, current.String())
 				current.Reset()
 			}
 			current.WriteRune(unicode.ToLower(ch))
-		} else {
+		default:
 			current.WriteRune(ch)
 		}
 	}
@@ -253,22 +254,23 @@ func HighlightMatch(text string, indices []int, highlight func(string) string) s
 	for i, ch := range text {
 		isMatch := matched[i]
 
-		if isMatch && !inMatch {
+		switch {
+		case isMatch && !inMatch:
 			// Start of match
 			if b.Len() > 0 || matchBuf.Len() == 0 {
 				// Flush any previous content
 			}
 			inMatch = true
 			matchBuf.WriteRune(ch)
-		} else if isMatch && inMatch {
+		case isMatch && inMatch:
 			matchBuf.WriteRune(ch)
-		} else if !isMatch && inMatch {
+		case !isMatch && inMatch:
 			// End of match - flush match buffer
 			b.WriteString(highlight(matchBuf.String()))
 			matchBuf.Reset()
 			inMatch = false
 			b.WriteRune(ch)
-		} else {
+		default:
 			b.WriteRune(ch)
 		}
 	}

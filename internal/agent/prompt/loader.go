@@ -145,7 +145,7 @@ func (l *Loader) ListComponents() []string {
 	var components []string
 
 	for _, searchPath := range l.searchPaths {
-		filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+		if err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -168,7 +168,9 @@ func (l *Loader) ListComponents() []string {
 				components = append(components, ref)
 			}
 			return nil
-		})
+		}); err != nil {
+			continue
+		}
 	}
 
 	return components

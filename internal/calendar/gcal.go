@@ -28,8 +28,8 @@ type Event struct {
 	End         EventTime  `json:"end"`
 	Status      string     `json:"status,omitempty"`
 	HTMLLink    string     `json:"htmlLink,omitempty"`
-	Created     time.Time  `json:"created,omitempty,omitzero"`
-	Updated     time.Time  `json:"updated,omitempty,omitzero"`
+	Created     time.Time  `json:"created,omitempty,omitzero"` //nolint:modernize
+	Updated     time.Time  `json:"updated,omitempty,omitzero"` //nolint:modernize
 	Attendees   []Attendee `json:"attendees,omitempty"`
 	Reminders   *Reminders `json:"reminders,omitempty"`
 }

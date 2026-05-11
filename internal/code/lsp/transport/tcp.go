@@ -44,8 +44,8 @@ func NewTCPTransport(host string, port int, timeout time.Duration) (*TCPTranspor
 func (t *TCPTransport) Read(ctx context.Context) ([]byte, error) {
 	// Set read deadline if context has deadline
 	if deadline, ok := ctx.Deadline(); ok {
-		t.conn.SetReadDeadline(deadline)
-		defer t.conn.SetReadDeadline(time.Time{})
+		_ = t.conn.SetReadDeadline(deadline)
+		defer func() { _ = t.conn.SetReadDeadline(time.Time{}) }()
 	}
 
 	// Read headers until blank line
@@ -88,8 +88,8 @@ func (t *TCPTransport) Read(ctx context.Context) ([]byte, error) {
 func (t *TCPTransport) Write(ctx context.Context, data []byte) error {
 	// Set write deadline if context has deadline
 	if deadline, ok := ctx.Deadline(); ok {
-		t.conn.SetWriteDeadline(deadline)
-		defer t.conn.SetWriteDeadline(time.Time{})
+		_ = t.conn.SetWriteDeadline(deadline)
+		defer func() { _ = t.conn.SetWriteDeadline(time.Time{}) }()
 	}
 
 	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))

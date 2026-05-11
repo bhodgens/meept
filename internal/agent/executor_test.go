@@ -374,7 +374,7 @@ func TestExecuteAll(t *testing.T) {
 
 func TestExecuteAllContextCancellation(t *testing.T) {
 	registry := NewPlaceholderToolRegistry()
-	registry.Register(NewMockTool("slow_tool", "Slow", func(ctx context.Context, args map[string]any) (any, error) {
+	registry.Register(NewMockTool("slow_tool", "Slow", func(ctx context.Context, _ map[string]any) (any, error) {
 		select {
 		case <-time.After(5 * time.Second):
 			return "done", nil

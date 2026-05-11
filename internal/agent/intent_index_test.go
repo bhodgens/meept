@@ -75,7 +75,7 @@ func TestMatch(t *testing.T) {
 func TestMatchBelowThreshold(t *testing.T) {
 	client := &mockEmbeddingClient{
 		dimension: 2,
-		embedFunc: func(ctx context.Context, text string) ([]float64, error) {
+		embedFunc: func(_ context.Context, text string) ([]float64, error) {
 			return []float64{-0.9, -0.9}, nil
 		},
 		embedBatchFunc: func(ctx context.Context, texts []string) ([][]float64, error) {

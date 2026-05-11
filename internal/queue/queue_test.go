@@ -56,7 +56,7 @@ func TestPersistentQueue_ClaimAndComplete(t *testing.T) {
 	ctx := context.Background()
 
 	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
-	q.Enqueue(ctx, job)
+	_ = q.Enqueue(ctx, job)
 
 	claimed, err := q.Claim(ctx, "worker-1", nil)
 	if err != nil {
@@ -97,8 +97,8 @@ func TestPersistentQueue_FailAndRetry(t *testing.T) {
 	ctx := context.Background()
 
 	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
-	q.Enqueue(ctx, job)
-	q.Claim(ctx, "worker-1", nil)
+	_ = q.Enqueue(ctx, job)
+	_, _ = q.Claim(ctx, "worker-1", nil)
 
 	if err := q.Fail(ctx, job.ID, errForTestError("something broke")); err != nil {
 		t.Fatalf("Fail failed: %v", err)
@@ -127,13 +127,13 @@ func TestPersistentQueue_ListByState(t *testing.T) {
 	j2, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "2"})
 	j3, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "3"})
 
-	q.Enqueue(ctx, j1)
-	q.Enqueue(ctx, j2)
-	q.Enqueue(ctx, j3)
+	_ = q.Enqueue(ctx, j1)
+	_ = q.Enqueue(ctx, j2)
+	_ = q.Enqueue(ctx, j3)
 
 	// Complete one
-	q.Claim(ctx, "w1", nil)
-	q.Complete(ctx, j1.ID, nil)
+	_, _ = q.Claim(ctx, "w1", nil)
+	_ = q.Complete(ctx, j1.ID, nil)
 
 	pending, err := q.ListByState(ctx, StatePending, 10)
 	if err != nil {
@@ -150,8 +150,8 @@ func TestPersistentQueue_Stats(t *testing.T) {
 
 	j1, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "1"})
 	j2, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "2"})
-	q.Enqueue(ctx, j1)
-	q.Enqueue(ctx, j2)
+	_ = q.Enqueue(ctx, j1)
+	_ = q.Enqueue(ctx, j2)
 
 	stats, err := q.Stats(ctx)
 	if err != nil {
@@ -189,9 +189,9 @@ func TestPersistentQueue_ListByTaskID(t *testing.T) {
 	j2.WithTaskID("task-123")
 	j3, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "3"})
 
-	q.Enqueue(ctx, j1)
-	q.Enqueue(ctx, j2)
-	q.Enqueue(ctx, j3)
+	_ = q.Enqueue(ctx, j1)
+	_ = q.Enqueue(ctx, j2)
+	_ = q.Enqueue(ctx, j3)
 
 	jobs, err := q.ListByTaskID(ctx, "task-123")
 	if err != nil {

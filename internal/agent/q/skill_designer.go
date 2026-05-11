@@ -83,21 +83,21 @@ func (sd *SkillDesigner) GenerateFullSkillFile(skill *SkillDesign) string {
 
 	// YAML frontmatter
 	buf.WriteString("---\n")
-	buf.WriteString(fmt.Sprintf("name: %s\n", skill.ID))
-	buf.WriteString(fmt.Sprintf("description: >\n  %s\n", skill.Description))
+	fmt.Fprintf(&buf, "name: %s\n", skill.ID)
+	fmt.Fprintf(&buf, "description: >\n  %s\n", skill.Description)
 	buf.WriteString("author: Q Agent (Quartermaster)\n")
 	buf.WriteString("version: \"1.0\"\n")
-	buf.WriteString(fmt.Sprintf("date: %s\n", time.Now().Format("2006-01-02")))
+	fmt.Fprintf(&buf, "date: %s\n", time.Now().Format("2006-01-02"))
 	if len(skill.Tools) > 0 {
 		buf.WriteString("allowed-tools:\n")
 		for _, tool := range skill.Tools {
-			buf.WriteString(fmt.Sprintf("  - %s\n", tool))
+			fmt.Fprintf(&buf, "  - %s\n", tool)
 		}
 	}
 	buf.WriteString("---\n\n")
 
 	// Main content
-	buf.WriteString(fmt.Sprintf("# %s\n\n", skill.Name))
+	fmt.Fprintf(&buf, "# %s\n\n", skill.Name)
 
 	buf.WriteString("## Overview\n")
 	buf.WriteString(fmt.Sprintf("%s\n\n", skill.Description))

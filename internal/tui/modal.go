@@ -348,7 +348,8 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 	b.WriteString(s.styles.Muted.Render(strings.Repeat("─", s.width-4)))
 	b.WriteString("\n")
 
-	if s.inputMode {
+	switch {
+	case s.inputMode:
 		// New session input mode
 		b.WriteString(s.styles.Paragraph.Render("enter session name:"))
 		b.WriteString("\n")
@@ -372,13 +373,13 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 		}
 		hint += ", esc to cancel"
 		b.WriteString(s.styles.Muted.Render(hint))
-	} else if len(s.sessions) == 0 {
+	case len(s.sessions) == 0:
 		// No sessions
 		b.WriteString(s.styles.Muted.Render("no sessions found"))
 		b.WriteString("\n\n")
 		b.WriteString(s.styles.HelpKey.Render("[n]"))
 		b.WriteString(s.styles.HelpValue.Render(" create new session"))
-	} else {
+	default:
 		// Session list
 		for i, sess := range s.sessions {
 			style := s.styles.ModalItem

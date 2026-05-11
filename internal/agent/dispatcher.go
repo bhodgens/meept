@@ -448,7 +448,7 @@ func (m *MultiIntent) DetectCompound() bool {
 }
 
 // routeCompound handles compound (multi-intent) request routing.
-func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, input string, sessionID string) (*DispatchResult, error) {
+func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, _ string, sessionID string) (*DispatchResult, error) {
 	// Cap intents at 5 for safety
 	if len(multi.Intents) > 5 {
 		multi.Intents = multi.Intents[:5]
@@ -951,7 +951,7 @@ func (d *Dispatcher) recordIntentType(intentType string) {
 }
 
 // recordCompoundDispatch records a compound dispatch with all relevant stats.
-func (d *Dispatcher) recordCompoundDispatch(intentCount int) {
+func (d *Dispatcher) recordCompoundDispatch(_ int) {
 	d.recordClassificationMethod("compound")
 	d.recordAgent("orchestrator")
 	d.recordIntentType(string(IntentCompound))
@@ -1078,7 +1078,7 @@ func (d *Dispatcher) getSkill(name string) *skills.Skill {
 }
 
 // executeSkill executes a skill and returns a dispatch result.
-func (d *Dispatcher) executeSkill(ctx context.Context, skill *skills.Skill, input string, sessionID string) (*DispatchResult, error) {
+func (d *Dispatcher) executeSkill(ctx context.Context, skill *skills.Skill, input string, _ string) (*DispatchResult, error) {
 	if d.skillExecutor == nil {
 		return nil, fmt.Errorf("skill executor not configured")
 	}

@@ -269,7 +269,7 @@ func (g *KnowledgeGraph) AddEdges(ctx context.Context, edges []MemoryEdge) error
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		stmt, err := tx.PrepareContext(ctx,
 			`INSERT OR REPLACE INTO memory_edges
@@ -538,7 +538,7 @@ func (g *KnowledgeGraph) persistPageRank(ctx context.Context, nodes []string, sc
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		stmt, err := tx.PrepareContext(ctx,
 			`INSERT OR REPLACE INTO memory_pagerank
@@ -739,7 +739,7 @@ func (g *KnowledgeGraph) persistCommunities(ctx context.Context, communities map
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		stmt, err := tx.PrepareContext(ctx,
 			`UPDATE memory_pagerank SET community_id = ? WHERE memory_id = ?`)
@@ -1141,7 +1141,7 @@ func (g *KnowledgeGraph) ImportEdges(ctx context.Context, edges []MemoryEdge) er
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		// Use INSERT OR IGNORE to handle duplicate edges gracefully
 		stmt, err := tx.PrepareContext(ctx,

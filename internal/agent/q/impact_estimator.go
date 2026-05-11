@@ -236,7 +236,7 @@ func (e *ImpactEstimator) AggregateImpact(estimates []*ImpactEstimate) *Aggregat
 func (e *ImpactEstimator) extractTimeSaved(impact string) float64 {
 	// Parse "Save ~X minutes/week" format
 	var minutes float64
-	fmt.Sscanf(impact, "Save ~%f minutes", &minutes)
+	_, _ = fmt.Sscanf(impact, "Save ~%f minutes", &minutes)
 	if minutes == 0 {
 		minutes = 5.0 // Default if parsing fails
 	}

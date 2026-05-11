@@ -107,7 +107,7 @@ func (t *TurnBudgetTracker) IsWrapUpRequested() bool {
 }
 
 // GetTurnInfo returns current turn, max turns, and budget status.
-func (t *TurnBudgetTracker) GetTurnInfo() (current, max, used, total int) {
+func (t *TurnBudgetTracker) GetTurnInfo() (current, maxTurns, used, total int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.currentTurn, t.maxTurns, t.usedBudget, t.totalBudget
@@ -167,9 +167,9 @@ type Conversation struct {
 type ConversationOption func(*Conversation)
 
 // WithMaxMessages sets the maximum number of messages before truncation.
-func WithMaxMessages(max int) ConversationOption {
+func WithMaxMessages(maxMessages int) ConversationOption {
 	return func(c *Conversation) {
-		c.maxMessages = max
+		c.maxMessages = maxMessages
 	}
 }
 
@@ -250,7 +250,7 @@ func (c *Conversation) hashContent(content string) string {
 }
 
 // classifyMessageClassification determines the semantic type of a message based on role and content.
-func classifyMessageClassification(msg llm.ChatMessage, isFirstUserMsg bool) MessageClassification {
+func classifyMessageClassification(msg llm.ChatMessage, _ bool) MessageClassification {
 	switch msg.Role {
 	case llm.RoleUser:
 		return MessageUserInput
@@ -940,7 +940,7 @@ func (c *Conversation) RemoveLast() *llm.ChatMessage {
 // to enable API prefix caching. The snapshot remains stable for the session,
 // allowing the LLM API to cache the prefix and reduce token costs.
 // Returns an error if memory context is empty (nothing to freeze).
-func (c *Conversation) FreezeMemorySnapshot(ctx context.Context) error {
+func (c *Conversation) FreezeMemorySnapshot(_ context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

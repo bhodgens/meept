@@ -255,7 +255,7 @@ func (em *EscalationManager) notifyHumanIntervention(ctx context.Context, failur
 }
 
 // publishEscalationEvent publishes an escalation event to the message bus.
-func (em *EscalationManager) publishEscalationEvent(ctx context.Context, failure FailureContext, level int, action string) {
+func (em *EscalationManager) publishEscalationEvent(_ context.Context, failure FailureContext, level int, action string) {
 	if em.bus == nil {
 		return
 	}
