@@ -220,8 +220,9 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 
 	var targetIdx = -1
 
-	// Switch by index
-	if req.Index != nil {
+	// Switch by index or name
+	switch {
+	case req.Index != nil:
 		if *req.Index < 0 || *req.Index >= len(h.modelsList) {
 			return map[string]any{
 				"success": false,
@@ -229,7 +230,7 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 			}, nil
 		}
 		targetIdx = *req.Index
-	} else if req.Name != "" {
+	case req.Name != "":
 		// Switch by name (provider/model or just model)
 		for i, m := range h.modelsList {
 			if m.FullName == req.Name || m.Model == req.Name {
@@ -243,7 +244,7 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 				"message": fmt.Sprintf("model not found: %s", req.Name),
 			}, nil
 		}
-	} else {
+	default:
 		return map[string]any{
 			"success": false,
 			"message": "must specify either 'index' or 'name'",

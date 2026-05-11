@@ -288,7 +288,7 @@ func (c *TokenCacheCoordinator) SetMetricsStore(store *metrics.Store) {
 	}
 }
 
-// recordMetric records a cache metric if metrics store is available.
+//nolint:unparam // value is intentionally parameterized for future metric variations
 func (c *TokenCacheCoordinator) recordMetric(name string, value float64, key CacheKey) {
 	if c.metricsStore == nil {
 		return

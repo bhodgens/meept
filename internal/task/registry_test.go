@@ -13,7 +13,7 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
-func newTestRegistry(t *testing.T) (*Registry, *bus.MessageBus) {
+func newTestRegistry(t *testing.T) *Registry {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "tasks.db")
@@ -24,11 +24,11 @@ func newTestRegistry(t *testing.T) (*Registry, *bus.MessageBus) {
 		t.Fatalf("failed to create registry: %v", err)
 	}
 	t.Cleanup(func() { reg.Close() })
-	return reg, msgBus
+	return reg
 }
 
 func TestRegistry_CreateAndGet(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task, err := reg.Create(ctx, "test-task", "description")
@@ -56,7 +56,7 @@ func TestRegistry_CreateAndGet(t *testing.T) {
 }
 
 func TestRegistry_Update(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
@@ -77,7 +77,7 @@ func TestRegistry_Update(t *testing.T) {
 }
 
 func TestRegistry_Delete(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
@@ -99,7 +99,7 @@ func TestRegistry_Delete(t *testing.T) {
 }
 
 func TestRegistry_List(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	reg.Create(ctx, "task-1", "desc")
@@ -116,7 +116,7 @@ func TestRegistry_List(t *testing.T) {
 }
 
 func TestRegistry_ListWithStateFilter(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task1, _ := reg.Create(ctx, "pending-task", "desc")
@@ -137,7 +137,7 @@ func TestRegistry_ListWithStateFilter(t *testing.T) {
 }
 
 func TestRegistry_UpdateState(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
@@ -153,7 +153,7 @@ func TestRegistry_UpdateState(t *testing.T) {
 }
 
 func TestRegistry_LinkSession(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
@@ -172,7 +172,7 @@ func TestRegistry_LinkSession(t *testing.T) {
 }
 
 func TestRegistry_UnlinkSession(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
@@ -190,7 +190,7 @@ func TestRegistry_UnlinkSession(t *testing.T) {
 }
 
 func TestRegistry_JobTracking(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
@@ -212,7 +212,7 @@ func TestRegistry_JobTracking(t *testing.T) {
 }
 
 func TestRegistry_AutoComplete(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
@@ -226,7 +226,7 @@ func TestRegistry_AutoComplete(t *testing.T) {
 }
 
 func TestRegistry_ClosedOperations(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	reg.Close()
@@ -248,7 +248,7 @@ func TestRegistry_ClosedOperations(t *testing.T) {
 }
 
 func TestRegistry_ListSummaries(t *testing.T) {
-	reg, _ := newTestRegistry(t)
+	reg := newTestRegistry(t)
 	ctx := context.Background()
 
 	reg.Create(ctx, "task-1", "desc1")

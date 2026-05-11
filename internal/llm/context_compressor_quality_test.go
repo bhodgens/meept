@@ -33,7 +33,7 @@ func TestQualityMetrics_TokenRatio(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			msgs := makeCompressorMessages(10, 100)
+			msgs := makeCompressorMessages(10)
 			result := c.Compress(context.Background(), msgs, tc.utilization)
 
 			if !tc.compressed {
@@ -72,7 +72,7 @@ func TestQualityMetrics_CriticalRetained_NoCriticals(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(10, 100)
+	msgs := makeCompressorMessages(10)
 	result := c.Compress(context.Background(), msgs, 0.65)
 
 	if result.Metrics.CriticalRetained != 0 {
@@ -97,7 +97,7 @@ func TestQualityMetrics_CriticalRetained_AllInTail(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(10, 100)
+	msgs := makeCompressorMessages(10)
 	// Mark the last 2 messages as critical (they are in the tail of 4)
 	msgs[len(msgs)-1].Critical = true
 	msgs[len(msgs)-2].Critical = true
@@ -125,7 +125,7 @@ func TestQualityMetrics_CriticalRetained_OutsideTail(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(10, 100)
+	msgs := makeCompressorMessages(10)
 	// Mark the 2nd and 3rd messages as critical (far outside the tail of 4)
 	msgs[1].Critical = true
 	msgs[2].Critical = true
@@ -154,7 +154,7 @@ func TestQualityMetrics_CompressionStage(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(10, 100)
+	msgs := makeCompressorMessages(10)
 
 	tests := []struct {
 		utilization float64
@@ -219,7 +219,7 @@ func TestQualityMetrics_QualityScoreAverages(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(10, 100)
+	msgs := makeCompressorMessages(10)
 
 	// Stage 2 (summarize): triggers compression, quality score = tokenRatio
 	c.Compress(context.Background(), msgs, 0.65)
@@ -370,7 +370,7 @@ func TestFirewallStats_QualityFields(t *testing.T) {
 	}
 
 	// Trigger summarize-level compression
-	msgs := makeCompressorMessages(6, 100)
+	msgs := makeCompressorMessages(6)
 	msgs = append(msgs, ChatMessage{Role: RoleUser, Content: strings.Repeat("y", 150)})
 	_, err := fw.Compress(context.Background(), msgs)
 	if err != nil {

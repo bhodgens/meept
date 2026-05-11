@@ -190,7 +190,7 @@ func (r *Robot) Draw(c *Canvas) {
 	}
 }
 
-// drawBody draws the basic robot shape.
+//nolint:unparam // height is intentionally parameterized for potential resize support
 func (r *Robot) drawBody(c *Canvas, x, y, height int, color ansi.Color) {
 	// Simple filled rectangle for small robot (2x4 dots = 1 char)
 	for py := range height {

@@ -1629,9 +1629,7 @@ func (m *ChatModel) View() string {
 
 	// Calculate viewport height to fill available space
 	inputLines := max(m.textarea.LineCount(), 3)
-	if inputLines > 8 {
-		inputLines = 8
-	}
+	inputLines = min(inputLines, 8)
 	// Layout: viewport(2 borders + content) + copy_hint(0-1) + input(2 borders + content) + completions(0-1) + statusbar(1)
 	// Account for copy hint line when selection is active
 	copyHintLines := 0
@@ -1645,9 +1643,6 @@ func (m *ChatModel) View() string {
 	}
 	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - 1(statusbar)
 	viewportContentHeight := max(m.height-copyHintLines-inputLines-completionsLines-5, 1)
-	if viewportContentHeight < 1 {
-		viewportContentHeight = 1
-	}
 
 	// Update viewport dimensions BEFORE rendering
 	m.viewport.SetWidth(m.width - 2)
@@ -2062,9 +2057,7 @@ func (m *ChatModel) getTextareaBounds() (startY, endY int) {
 
 	// Textarea content lines (what we render, not the full textarea.Model height)
 	inputLines := max(m.textarea.LineCount(), 3)
-	if inputLines > 8 {
-		inputLines = 8
-	}
+	inputLines = min(inputLines, 8)
 
 	// Calculate start Y relative to chat area
 	chatRelativeStartY := viewportBorderLines + viewportContentLines + copyHintLines + attachmentsLines

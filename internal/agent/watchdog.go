@@ -266,7 +266,7 @@ func (w *Watchdog) CaptureReport(workerID string, partialResult string) *ReportC
 
 // captureReportUnsafe captures a report without acquiring the lock.
 // Must only be called when w.mu is already held (e.g., from checkWorkers).
-func (w *Watchdog) captureReportUnsafe(state *WorkerState, partialResult string) *ReportCapture {
+func (w *Watchdog) captureReportUnsafe(state *WorkerState, partialResult string) {
 	report := ReportCapture{
 		WorkerID:      state.WorkerID,
 		TaskID:        state.TaskID,
@@ -287,7 +287,6 @@ func (w *Watchdog) captureReportUnsafe(state *WorkerState, partialResult string)
 		)
 	}
 
-	return &report
 }
 
 // checkWorkers is the main monitoring loop body that checks all registered workers.

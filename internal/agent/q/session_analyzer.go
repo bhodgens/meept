@@ -150,10 +150,7 @@ func (a *SessionAnalyzer) fetchTranscript(ctx context.Context, sessionID string)
 
 	messages := make([]Message, 0, len(transcriptMemories))
 	for _, mem := range transcriptMemories {
-		msg, err := a.parseMessage(mem)
-		if err != nil {
-			continue
-		}
+		msg := a.parseMessage(mem)
 		messages = append(messages, msg)
 	}
 
@@ -161,7 +158,7 @@ func (a *SessionAnalyzer) fetchTranscript(ctx context.Context, sessionID string)
 }
 
 // parseMessage parses a message from memvid memory.
-func (a *SessionAnalyzer) parseMessage(mem memvid.MemoryResult) (Message, error) {
+func (a *SessionAnalyzer) parseMessage(mem memvid.MemoryResult) Message {
 	msg := Message{
 		Content: mem.Memory.Content,
 	}
@@ -193,7 +190,7 @@ func (a *SessionAnalyzer) parseMessage(mem memvid.MemoryResult) (Message, error)
 		}
 	}
 
-	return msg, nil
+	return msg
 }
 
 // computeAnalysis computes analysis metrics from session data and messages.

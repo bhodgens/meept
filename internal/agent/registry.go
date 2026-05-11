@@ -186,10 +186,7 @@ func (r *AgentRegistry) Get(id string) (*AgentLoop, error) {
 	}
 
 	// Create new loop
-	loop, err := r.createLoop(spec)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create agent loop: %w", err)
-	}
+	loop := r.createLoop(spec)
 
 	r.loops[id] = loop
 	r.logger.Info("Created agent loop", "id", id, "name", spec.Name)
@@ -202,7 +199,7 @@ func (r *AgentRegistry) GetDispatcher() (*AgentLoop, error) {
 }
 
 // createLoop creates a new agent loop from a spec.
-func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
+func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	config := AgentConfig{
 		MaxIterations:         spec.Constraints.MaxIterations,
 		Timeout:               spec.Constraints.Timeout,
@@ -275,7 +272,7 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) (*AgentLoop, error) {
 		opts = append(opts, WithArtifactManager(r.artifactManager))
 	}
 
-	return NewAgentLoop(opts...), nil
+	return NewAgentLoop(opts...)
 }
 
 // filterTools returns a filtered tool registry based on agent spec.

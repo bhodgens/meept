@@ -307,11 +307,12 @@ func matchEntryScore(entry *SkillIndexEntry, queryLower string) int {
 	descLower := strings.ToLower(entry.Description)
 
 	// Exact name match
-	if nameLower == queryLower {
+	switch {
+	case nameLower == queryLower:
 		score += 100
-	} else if strings.HasPrefix(nameLower, queryLower) {
+	case strings.HasPrefix(nameLower, queryLower):
 		score += 50
-	} else if strings.Contains(nameLower, queryLower) {
+	case strings.Contains(nameLower, queryLower):
 		score += 30
 	}
 

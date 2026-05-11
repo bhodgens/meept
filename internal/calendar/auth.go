@@ -46,7 +46,7 @@ type Token struct {
 	AccessToken  string    `json:"access_token"`
 	TokenType    string    `json:"token_type"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
-	Expiry       time.Time `json:"expiry,omitempty"`
+	Expiry       time.Time `json:"expiry,omitempty,omitzero"`
 }
 
 // Valid returns true if the token is valid and not expired.

@@ -9,7 +9,8 @@ import (
 
 // makeCompressorMessages builds a message slice with a system message and
 // count non-system messages whose token count (heuristic) is tokensPerMsg each.
-func makeCompressorMessages(count, tokensPerMsg int) []ChatMessage {
+func makeCompressorMessages(count int) []ChatMessage {
+	const tokensPerMsg = 100
 	msgs := []ChatMessage{{Role: RoleSystem, Content: "system prompt"}}
 	for range count {
 		msgs = append(msgs, ChatMessage{
@@ -24,7 +25,7 @@ func TestCompress_Disabled(t *testing.T) {
 	cfg := CompressionConfig{Enabled: false}
 	c := NewContextCompressor(cfg, nil, nil, nil)
 
-	msgs := makeCompressorMessages(10, 100)
+	msgs := makeCompressorMessages(10)
 	result := c.Compress(context.Background(), msgs, 0.9)
 
 	if result.Compressed {
@@ -104,7 +105,7 @@ func TestCompress_AllStages(t *testing.T) {
 			}
 			c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-			msgs := makeCompressorMessages(10, 100) // 1 system + 10 user messages
+			msgs := makeCompressorMessages(10) // 1 system + 10 user messages
 			before := len(msgs)
 
 			result := c.Compress(context.Background(), msgs, tc.utilization)
@@ -177,7 +178,7 @@ func TestCompress_ExactThresholds(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
-			msgs := makeCompressorMessages(10, 100)
+			msgs := makeCompressorMessages(10)
 			result := c.Compress(context.Background(), msgs, tc.utilization)
 			if result.Stage != tc.wantStage {
 				t.Errorf("at utilization %.2f: got stage %s, want %s",
@@ -245,7 +246,7 @@ func TestCompress_TokensSavedAccumulates(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(10, 100)
+	msgs := makeCompressorMessages(10)
 
 	// First compression at summarize level.
 	c.Compress(context.Background(), msgs, 0.65)
@@ -362,7 +363,7 @@ func TestSummarizeOldHistory_WithLLM(t *testing.T) {
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, mock)
 
 	// 1 system + 8 user messages
-	msgs := makeCompressorMessages(8, 100)
+	msgs := makeCompressorMessages(8)
 	result := c.Compress(context.Background(), msgs, 0.65)
 
 	if result.Stage != CompressionStageSummarize {
@@ -415,7 +416,7 @@ func TestSummarizeOldHistory_FallbackOnLLMError(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, mock)
 
-	msgs := makeCompressorMessages(8, 100)
+	msgs := makeCompressorMessages(8)
 	result := c.Compress(context.Background(), msgs, 0.65)
 
 	if result.Stage != CompressionStageSummarize {
@@ -443,7 +444,7 @@ func TestSummarizeOldHistory_NilSummarizer(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(8, 100)
+	msgs := makeCompressorMessages(8)
 	result := c.Compress(context.Background(), msgs, 0.65)
 
 	if result.Stage != CompressionStageSummarize {
@@ -468,7 +469,7 @@ func TestAggressiveCompress_PreservesCritical(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(10, 100)
+	msgs := makeCompressorMessages(10)
 	// Mark messages outside the tail of 4 as critical
 	msgs[1].Critical = true
 	msgs[2].Critical = true
@@ -509,7 +510,7 @@ func TestCompressionStages_Differentiate(t *testing.T) {
 	}
 	c := NewContextCompressor(cfg, nil, &HeuristicTokenizer{}, nil)
 
-	msgs := makeCompressorMessages(10, 100) // 1 system + 10 user = 11
+	msgs := makeCompressorMessages(10) // 1 system + 10 user = 11
 
 	// Stage 2: summarize -> keepTail(4) = 1 system + 4 user = 5
 	r2 := c.Compress(context.Background(), msgs, 0.65)

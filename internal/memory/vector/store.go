@@ -111,10 +111,7 @@ func (s *Store) Store(ctx context.Context, memoryID, content string, metadata ma
 	}
 
 	// Serialize vector to blob
-	vectorBlob, err := serializeVector(embedding)
-	if err != nil {
-		return fmt.Errorf("failed to serialize vector: %w", err)
-	}
+	vectorBlob := serializeVector(embedding)
 
 	// Begin transaction to ensure atomicity
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -317,7 +314,7 @@ func (s *Store) Close() error {
 // Compile-time assertion that Store implements io.Closer.
 var _ io.Closer = (*Store)(nil)
 
-func serializeVector(vector []float32) ([]byte, error) {
+func serializeVector(vector []float32) []byte {
 	// Each float32 is 4 bytes
 	data := make([]byte, len(vector)*4)
 	for i, v := range vector {
@@ -328,7 +325,7 @@ func serializeVector(vector []float32) ([]byte, error) {
 		data[i*4+2] = byte(bits >> 8)
 		data[i*4+3] = byte(bits)
 	}
-	return data, nil
+	return data
 }
 
 // deserializeVector converts a byte array to a vector.

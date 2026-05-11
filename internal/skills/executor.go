@@ -139,12 +139,13 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 
 	// Create or use existing client
 	var chatter llm.Chatter
-	if e.client == nil {
+	switch {
+	case e.client == nil:
 		chatter = createChatter(modelConfig, e.logger)
-	} else if e.client.Config().ModelID != modelConfig.ModelID {
+	case e.client.Config().ModelID != modelConfig.ModelID:
 		// AnthropicClient doesn't support SwitchModel, so create a new one
 		chatter = createChatter(modelConfig, e.logger)
-	} else {
+	default:
 		chatter = e.client
 	}
 
@@ -253,12 +254,13 @@ func (e *Executor) ExecuteWithMessages(
 
 	// Create or use existing client
 	var chatter llm.Chatter
-	if e.client == nil {
+	switch {
+	case e.client == nil:
 		chatter = createChatter(modelConfig, e.logger)
-	} else if e.client.Config().ModelID != modelConfig.ModelID {
+	case e.client.Config().ModelID != modelConfig.ModelID:
 		// AnthropicClient doesn't support SwitchModel, so create a new one
 		chatter = createChatter(modelConfig, e.logger)
-	} else {
+	default:
 		chatter = e.client
 	}
 

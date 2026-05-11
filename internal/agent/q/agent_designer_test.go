@@ -9,12 +9,12 @@ import (
 
 var designerLogger = slog.Default()
 
-func makeAnalysisOnly(sID, agentID string, intents []string, duration time.Duration,
+func makeAnalysisOnly(sID string, intents []string, duration time.Duration,
 	iterations, revisions, tokens int, outcome string, difficulty float64,
 ) *SessionAnalysis {
 	return &SessionAnalysis{
 		SessionID:       sID,
-		AgentID:         agentID,
+		AgentID:         "coder",
 		Intents:         intents,
 		Duration:        duration,
 		IterationCount:  iterations,
@@ -42,8 +42,8 @@ func TestAgentDesignerDesignAgent(t *testing.T) {
 	}
 
 	analyses := []*SessionAnalysis{
-		makeAnalysisOnly("s1", "coder", []string{"debugging"}, 20*time.Minute, 15, 5, 5000, "failed", 0.8),
-		makeAnalysisOnly("s2", "coder", []string{"debugging"}, 25*time.Minute, 18, 6, 6000, "failed", 0.85),
+		makeAnalysisOnly("s1", []string{"debugging"}, 20*time.Minute, 15, 5, 5000, "failed", 0.8),
+		makeAnalysisOnly("s2", []string{"debugging"}, 25*time.Minute, 18, 6, 6000, "failed", 0.85),
 	}
 
 	designer := NewAgentDesigner(designerLogger, AgentDesignerConfig{})
@@ -79,7 +79,7 @@ func TestAgentDesignerDesignAgentHighRejection(t *testing.T) {
 
 	research := &ResearchReport{}
 	analyses := []*SessionAnalysis{
-		makeAnalysisOnly("s1", "coder", []string{"code_review"}, 10*time.Minute, 5, 3, 2000, "completed", 0.5),
+		makeAnalysisOnly("s1", []string{"code_review"}, 10*time.Minute, 5, 3, 2000, "completed", 0.5),
 	}
 
 	designer := NewAgentDesigner(designerLogger, AgentDesignerConfig{})
@@ -97,7 +97,7 @@ func TestAgentDesignerDesignAgentEmptyPattern(t *testing.T) {
 
 	research := &ResearchReport{}
 	analyses := []*SessionAnalysis{
-		makeAnalysisOnly("s1", "coder", []string{"general"}, 10*time.Minute, 5, 1, 2000, "completed", 0.3),
+		makeAnalysisOnly("s1", []string{"general"}, 10*time.Minute, 5, 1, 2000, "completed", 0.3),
 	}
 
 	designer := NewAgentDesigner(designerLogger, AgentDesignerConfig{})
@@ -257,8 +257,8 @@ func TestAgentDesignerDetermineCapabilitiesWithResearch(t *testing.T) {
 
 func TestAgentDesignerDeriveConstraints(t *testing.T) {
 	analyses := []*SessionAnalysis{
-		makeAnalysisOnly("s1", "coder", []string{"debug"}, 10*time.Minute, 5, 1, 5000, "completed", 0.3),
-		makeAnalysisOnly("s2", "coder", []string{"debug"}, 20*time.Minute, 10, 2, 8000, "completed", 0.5),
+		makeAnalysisOnly("s1", []string{"debug"}, 10*time.Minute, 5, 1, 5000, "completed", 0.3),
+		makeAnalysisOnly("s2", []string{"debug"}, 20*time.Minute, 10, 2, 8000, "completed", 0.5),
 	}
 
 	designer := NewAgentDesigner(designerLogger, AgentDesignerConfig{})

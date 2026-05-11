@@ -703,7 +703,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 		return nil, &ClientError{Message: "failed to parse response", Cause: err}
 	}
 
-	return c.parseResponse(&apiResp)
+	return c.parseResponse(&apiResp), nil
 }
 
 // doStreamingRequest performs a streaming HTTP request to Anthropic's API.
@@ -931,7 +931,7 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 }
 
 // parseResponse converts an Anthropic API response to our internal Response format.
-func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) (*Response, error) {
+func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) *Response {
 	var content strings.Builder
 	var toolCalls []ToolCall
 	var thinking strings.Builder
@@ -974,7 +974,7 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) (*Response, 
 		},
 		Model:        apiResp.Model,
 		FinishReason: apiResp.StopReason,
-	}, nil
+	}
 }
 
 // Close closes the client and releases resources.
@@ -1035,8 +1035,8 @@ func (s *sseScanner) Scan() bool {
 		for i := 0; i < len(s.buffer); i++ {
 			c := s.buffer[i]
 
-			switch {
-			case c == '\r':
+			switch c {
+			case '\r':
 				// Skip \r, look for \n
 				if i+1 < len(s.buffer) && s.buffer[i+1] == '\n' {
 					i++
@@ -1052,7 +1052,7 @@ func (s *sseScanner) Scan() bool {
 				}
 				s.buffer = s.buffer[i+1:]
 				break bufferLoop
-			case c == '\n':
+			case '\n':
 				// End of line
 				if currentLine.Len() > 0 {
 					s.processLine(currentLine.String())

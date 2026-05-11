@@ -81,7 +81,7 @@ func resolveConnection() *clientConnection {
 		cfg = DefaultClientConfig()
 	}
 
-	conn, _ := cfg.Connection.unwrap()
+	conn := cfg.Connection.unwrap()
 	return conn
 }
 
@@ -123,7 +123,7 @@ type RetryConfig struct {
 }
 
 // unwrap returns a resolved clientConnection with defaults applied.
-func (c *ConnectionConfig) unwrap() (*clientConnection, error) {
+func (c *ConnectionConfig) unwrap() *clientConnection {
 	conn := &clientConnection{
 		transport:  "rpc",
 		address:    "~/.meept/meept.sock",
@@ -157,5 +157,5 @@ func (c *ConnectionConfig) unwrap() (*clientConnection, error) {
 		conn.transport = "rpc"
 	}
 
-	return conn, nil
+	return conn
 }

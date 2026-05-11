@@ -93,11 +93,9 @@ func TestCapabilityMatcher_Match_Keywords(t *testing.T) {
 				if result.Confidence <= tt.wantConfGT {
 					t.Errorf("Match(%q).Confidence = %f, want > %f", tt.input, result.Confidence, tt.wantConfGT)
 				}
-			} else {
+			} else if result != nil && result.Confidence >= 0.5 {
 				// Either nil or very low confidence
-				if result != nil && result.Confidence >= 0.5 {
-					t.Errorf("Match(%q) = {%s, %f}, want nil or low confidence", tt.input, result.AgentID, result.Confidence)
-				}
+				t.Errorf("Match(%q) = {%s, %f}, want nil or low confidence", tt.input, result.AgentID, result.Confidence)
 			}
 		})
 	}

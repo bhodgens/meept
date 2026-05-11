@@ -95,7 +95,7 @@ func (m *Middleware) Chat(ctx context.Context, messages []llm.ChatMessage, opts 
 
 	case ModeAsync, ModeSelective:
 		// Asynchronous shadowing - queue for background processing
-		m.queueShadow(ctx, convID, messages, response, domain, taskType)
+		m.queueShadow(convID, messages, response, domain, taskType)
 	}
 
 	return response, nil
@@ -167,7 +167,7 @@ func (m *Middleware) shadowSync(ctx context.Context, convID string, messages []l
 	}
 }
 
-func (m *Middleware) queueShadow(ctx context.Context, convID string, messages []llm.ChatMessage, response *llm.Response, domain Domain, taskType TaskType) {
+func (m *Middleware) queueShadow(convID string, messages []llm.ChatMessage, response *llm.Response, domain Domain, taskType TaskType) {
 	req := &shadowRequest{
 		ctx:            context.Background(), // Use background context for async processing
 		conversationID: convID,

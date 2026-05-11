@@ -49,7 +49,7 @@ func TestContextFirewallMultiStageCompression(t *testing.T) {
 
 	t.Run("compress_returns_warning_at_stage1", func(t *testing.T) {
 		// 550 tokens out of 1000 = 0.55 utilization, which is in the warning zone [0.50, 0.60).
-		msgs := makeCompressorMessages(5, 100) // 1 system (~2 tokens) + 5 user x 100 tokens = ~502 tokens
+		msgs := makeCompressorMessages(5) // 1 system (~2 tokens) + 5 user x 100 tokens = ~502 tokens
 		// Add extra to get closer to 550
 		msgs = append(msgs, ChatMessage{Role: RoleUser, Content: strings.Repeat("y", 150)})
 
@@ -71,7 +71,7 @@ func TestContextFirewallMultiStageCompression(t *testing.T) {
 
 	t.Run("compress_returns_summarize_at_stage2", func(t *testing.T) {
 		// 650 tokens out of 1000 = 0.65 utilization, in the summarize zone [0.60, 0.70).
-		msgs := makeCompressorMessages(6, 100) // ~602 tokens
+		msgs := makeCompressorMessages(6) // ~602 tokens
 		msgs = append(msgs, ChatMessage{Role: RoleUser, Content: strings.Repeat("y", 150)})
 
 		result, err := firewall.Compress(context.Background(), msgs)
@@ -105,7 +105,7 @@ func TestContextFirewallMultiStageCompression(t *testing.T) {
 
 	t.Run("compress_returns_aggressive_at_stage3", func(t *testing.T) {
 		// 750 tokens out of 1000 = 0.75 utilization, in aggressive zone [0.70, 0.80).
-		msgs := makeCompressorMessages(7, 100) // ~702 tokens
+		msgs := makeCompressorMessages(7) // ~702 tokens
 		msgs = append(msgs, ChatMessage{Role: RoleUser, Content: strings.Repeat("y", 150)})
 
 		result, err := firewall.Compress(context.Background(), msgs)
@@ -131,7 +131,7 @@ func TestContextFirewallMultiStageCompression(t *testing.T) {
 
 	t.Run("compress_returns_hardlimit_at_stage4", func(t *testing.T) {
 		// 850 tokens out of 1000 = 0.85 utilization, at hard limit stage.
-		msgs := makeCompressorMessages(8, 100) // ~802 tokens
+		msgs := makeCompressorMessages(8) // ~802 tokens
 		msgs = append(msgs, ChatMessage{Role: RoleUser, Content: strings.Repeat("y", 150)})
 
 		result, err := firewall.Compress(context.Background(), msgs)
@@ -170,7 +170,7 @@ func TestContextFirewallMultiStageCompression(t *testing.T) {
 		fw := NewContextFirewall(inner, model, cfg, nil, nil, &HeuristicTokenizer{})
 
 		// Run compress at summarize level multiple times.
-		msgs := makeCompressorMessages(6, 100)
+		msgs := makeCompressorMessages(6)
 		msgs = append(msgs, ChatMessage{Role: RoleUser, Content: strings.Repeat("y", 150)})
 
 		fw.Compress(context.Background(), msgs)
@@ -204,7 +204,7 @@ func TestContextFirewallCompressionDisabled(t *testing.T) {
 	})
 
 	t.Run("compress_returns_none", func(t *testing.T) {
-		msgs := makeCompressorMessages(10, 100)
+		msgs := makeCompressorMessages(10)
 		result, err := firewall.Compress(context.Background(), msgs)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)

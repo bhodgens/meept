@@ -132,11 +132,9 @@ func TestHTTPTransport_SessionID(t *testing.T) {
 		// First call: send session ID
 		if callCount == 1 {
 			w.Header().Set("Mcp-Session-Id", "test-session-123")
-		} else {
+		} else if r.Header.Get("Mcp-Session-Id") != "test-session-123" {
 			// Second call: verify session ID was sent
-			if r.Header.Get("Mcp-Session-Id") != "test-session-123" {
-				t.Error("Session ID not sent in subsequent request")
-			}
+			t.Error("Session ID not sent in subsequent request")
 		}
 
 		w.Header().Set("Content-Type", "application/json")

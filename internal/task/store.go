@@ -378,6 +378,9 @@ func (s *Store) GetLinkedSessions(taskID string) ([]string, error) {
 		}
 		sessions = append(sessions, sessionID)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to get linked sessions: %w", err)
+	}
 
 	return sessions, nil
 }

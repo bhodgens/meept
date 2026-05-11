@@ -361,7 +361,7 @@ func tokenize(text string) []string {
 	// Lowercase and split on non-alphanumeric
 	lower := strings.ToLower(text)
 	words := strings.FieldsFunc(lower, func(c rune) bool {
-		return !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9')
+		return (c < 'a' || c > 'z') && (c < '0' || c > '9')
 	})
 
 	// Filter short words and stopwords

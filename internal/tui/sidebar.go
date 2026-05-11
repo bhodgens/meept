@@ -825,10 +825,7 @@ func (s *SidebarModel) View() string {
 	}
 
 	// Height is the total visual height including border (2 lines for top+bottom)
-	innerHeight := s.height - 2
-	if innerHeight < 1 {
-		innerHeight = 1
-	}
+	innerHeight := max(s.height-2, 1)
 
 	contentWidth := s.width - 4 // Account for border (2) + padding (2)
 
@@ -855,10 +852,7 @@ func (s *SidebarModel) View() string {
 
 	// Calculate available height for scrollable panel content
 	// innerHeight - headerLines - vizHeight - 1 (blank before viz)
-	availableForPanels := innerHeight - headerLines - vizHeight - 5 // -1 header, -1 blank before viz, -4 bottom padding
-	if availableForPanels < 3 {
-		availableForPanels = 3
-	}
+	availableForPanels := max(innerHeight-headerLines-vizHeight-5, 3) // -1 header, -1 blank before viz, -4 bottom padding
 
 	// Render all panel content
 	var panelContent strings.Builder
@@ -1227,10 +1221,7 @@ func (s *SidebarModel) renderTasksPanel() string {
 				}
 
 				title := task.Title
-				maxLen := s.width - 16
-				if maxLen < 8 {
-					maxLen = 8
-				}
+				maxLen := max(s.width-16, 8)
 				if len(title) > maxLen {
 					title = title[:maxLen-3] + "..."
 				}
@@ -1242,10 +1233,7 @@ func (s *SidebarModel) renderTasksPanel() string {
 				b.WriteString("\n")
 
 				// Line 2: progress bar completed/total
-				barWidth := s.width - 14
-				if barWidth < 4 {
-					barWidth = 4
-				}
+				barWidth := max(s.width-14, 4)
 				if barWidth > 12 {
 					barWidth = 12
 				}

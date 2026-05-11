@@ -377,10 +377,7 @@ func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts
 		return nil, err
 	}
 
-	processed, err := f.processMessages(ctx, messages)
-	if err != nil {
-		return nil, fmt.Errorf("context firewall: %w", err)
-	}
+	processed := f.processMessages(ctx, messages)
 
 	resp, err := f.inner.Chat(ctx, processed, opts...)
 	if err == nil && f.logger != nil {
@@ -397,10 +394,7 @@ func (f *ContextFirewall) ChatWithProgress(ctx context.Context, messages []ChatM
 		return nil, err
 	}
 
-	processed, err := f.processMessages(ctx, messages)
-	if err != nil {
-		return nil, fmt.Errorf("context firewall: %w", err)
-	}
+	processed := f.processMessages(ctx, messages)
 
 	resp, err := f.inner.ChatWithProgress(ctx, processed, progress, opts...)
 	if err == nil && f.logger != nil {
@@ -449,9 +443,9 @@ func (f *ContextFirewall) ContextUtilization(messages []ChatMessage) float64 {
 // It implements threshold-based handling:
 // - At wrapUpThreshold (50%): logs warning for potential wrap-up
 // - At hardLimit (80%): drops old context if DropContextOnHardLimit is enabled
-func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMessage) ([]ChatMessage, error) {
+func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMessage) []ChatMessage {
 	if !f.config.Enabled || f.model == nil || f.model.ContextLimit == 0 {
-		return messages, nil
+		return messages
 	}
 
 	result := append([]ChatMessage{}, messages...)
@@ -554,7 +548,7 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 		}
 	}
 
-	return result, nil
+	return result
 }
 
 // dropOldContext removes old messages, keeping only system prompt and last 2 messages.

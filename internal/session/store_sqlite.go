@@ -534,7 +534,7 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
-// getByColumnUnsafe is like getByColumn but assumes the lock is already held.
+//nolint:unparam // column is intentionally generic for reuse across different query types
 func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	query := fmt.Sprintf(`
 		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description

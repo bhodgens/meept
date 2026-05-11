@@ -192,16 +192,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 	}
 
 	// 4. Classify primary intent
-	intent, err := d.classifyIntent(ctx, resolvedInput, memCtx)
-	if err != nil {
-		d.logger.Error("Intent classification failed", "error", err)
-		// Default to chat agent
-		intent = &Intent{
-			Type:       "chat",
-			Confidence: 0.5,
-			AgentType:  "chat",
-		}
-	}
+	intent := d.classifyIntent(ctx, resolvedInput, memCtx)
 
 	// 5. Extract memory refs for context continuity
 	intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
@@ -239,7 +230,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 // 2. Try LLM classifier (if available)
 // 3. If LLM fails OR confidence < threshold → try Keyword classifier
 // 4. If Keyword fails → return Chat fallback
-func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error) {
+func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *MemoryContext) *Intent {
 	d.recordTotalDispatch()
 
 	// Step 1: Try capability matcher first (fast, no LLM)
@@ -261,7 +252,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordClassificationMethod("capability_matcher")
 			d.recordAgent(result.AgentID)
 			d.recordIntentType(result.IntentType)
-			return d.applyContextWeighting(intent, memCtx, input), nil
+			return d.applyContextWeighting(intent, memCtx, input)
 		}
 		if result != nil {
 			d.logger.Debug("Capability matcher result below threshold",
@@ -284,7 +275,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				d.recordClassificationMethod("llm")
 				d.recordAgent(intent.AgentType)
 				d.recordIntentType(intent.Type)
-				return d.applyContextWeighting(intent, memCtx, input), nil
+				return d.applyContextWeighting(intent, memCtx, input)
 			}
 			d.logger.Debug("LLM classifier result below threshold",
 				"intent", intent.Type,
@@ -307,7 +298,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordClassificationMethod("keyword")
 			d.recordAgent(intent.AgentType)
 			d.recordIntentType(intent.Type)
-			return d.applyContextWeighting(intent, memCtx, input), nil
+			return d.applyContextWeighting(intent, memCtx, input)
 		}
 		d.logger.Warn("Keyword classifier failed", "error", err)
 	}
@@ -329,7 +320,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordClassificationMethod("semantic")
 			d.recordAgent(intent.AgentType)
 			d.recordIntentType(intent.Type)
-			return d.applyContextWeighting(intent, memCtx, input), nil
+			return d.applyContextWeighting(intent, memCtx, input)
 		}
 	}
 
@@ -343,7 +334,7 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		Confidence: 0.3,
 		AgentType:  "chat",
 		Summary:    "Could not determine intent, clarifying with user",
-	}, nil
+	}
 }
 
 // buildMemoryContext builds memory context with session history.

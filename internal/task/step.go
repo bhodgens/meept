@@ -632,6 +632,9 @@ func (s *StepStore) CountByState(taskID string) (map[StepState]int, error) {
 		}
 		counts[StepState(state)] = count
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to count steps by state: %w", err)
+	}
 
 	return counts, nil
 }
@@ -865,6 +868,9 @@ func (s *StepStore) GetTransitions(stepID string) ([]*StateTransition, error) {
 
 		transitions = append(transitions, &t)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to get transitions: %w", err)
+	}
 
 	return transitions, nil
 }
@@ -903,6 +909,9 @@ func (s *StepStore) GetTransitionsByTask(taskID string) ([]*StateTransition, err
 		}
 
 		transitions = append(transitions, &t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to get task transitions: %w", err)
 	}
 
 	return transitions, nil

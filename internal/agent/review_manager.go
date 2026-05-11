@@ -179,11 +179,11 @@ func (rm *ReviewManager) buildReviewPrompt(step *task.TaskStep) string {
 	var sb strings.Builder
 
 	sb.WriteString("REVIEW TASK STEP\n\n")
-	sb.WriteString(fmt.Sprintf("Step ID: %s\n", step.ID))
-	sb.WriteString(fmt.Sprintf("Description: %s\n", step.Description))
-	sb.WriteString(fmt.Sprintf("Tool Hint: %s\n", step.ToolHint))
-	sb.WriteString(fmt.Sprintf("Agent: %s\n", step.AgentID))
-	sb.WriteString(fmt.Sprintf("Result:\n%s\n\n", step.Result))
+	fmt.Fprintf(&sb, "Step ID: %s\n", step.ID)
+	fmt.Fprintf(&sb, "Description: %s\n", step.Description)
+	fmt.Fprintf(&sb, "Tool Hint: %s\n", step.ToolHint)
+	fmt.Fprintf(&sb, "Agent: %s\n", step.AgentID)
+	fmt.Fprintf(&sb, "Result:\n%s\n\n", step.Result)
 
 	sb.WriteString("Your task is to review this work for:\n")
 	sb.WriteString("- Correctness: Does the work accomplish what was described?\n")

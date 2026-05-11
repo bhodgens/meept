@@ -42,7 +42,7 @@ func TestNewManager_EnabledWithoutTeacher(t *testing.T) {
 	})
 	if err != nil {
 		// Skip if FTS5 is not available
-		if containsString(err.Error(), "fts5") {
+		if containsFTS5(err.Error()) {
 			t.Skip("SQLite FTS5 module not available")
 		}
 		t.Fatalf("NewManager failed: %v", err)
@@ -55,8 +55,9 @@ func TestNewManager_EnabledWithoutTeacher(t *testing.T) {
 	}
 }
 
-// containsString is a helper for error message checking
-func containsString(s, substr string) bool {
+// containsFTS5 is a helper for error message checking
+func containsFTS5(s string) bool {
+	const substr = "fts5"
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStringHelper(s, substr))
 }
 
@@ -84,7 +85,7 @@ func TestNewManager_EnabledWithTeacher(t *testing.T) {
 	})
 	if err != nil {
 		// Skip if FTS5 is not available
-		if containsString(err.Error(), "fts5") {
+		if containsFTS5(err.Error()) {
 			t.Skip("SQLite FTS5 module not available")
 		}
 		t.Fatalf("NewManager failed: %v", err)
@@ -250,7 +251,7 @@ func TestManager_ProcessRecord(t *testing.T) {
 	})
 	if err != nil {
 		// Skip if FTS5 is not available
-		if containsString(err.Error(), "fts5") {
+		if containsFTS5(err.Error()) {
 			t.Skip("SQLite FTS5 module not available")
 		}
 		t.Fatalf("NewManager failed: %v", err)
@@ -291,7 +292,7 @@ func TestManager_Config(t *testing.T) {
 	})
 	if err != nil {
 		// Skip if FTS5 is not available
-		if containsString(err.Error(), "fts5") {
+		if containsFTS5(err.Error()) {
 			t.Skip("SQLite FTS5 module not available")
 		}
 		t.Fatalf("NewManager failed: %v", err)
@@ -317,7 +318,7 @@ func TestManager_Close(t *testing.T) {
 	})
 	if err != nil {
 		// Skip if FTS5 is not available
-		if containsString(err.Error(), "fts5") {
+		if containsFTS5(err.Error()) {
 			t.Skip("SQLite FTS5 module not available")
 		}
 		t.Fatalf("NewManager failed: %v", err)

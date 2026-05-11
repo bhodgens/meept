@@ -12,7 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/queue"
 )
 
-func setupTestHandlers(t *testing.T) (*AmendmentHandlers, *AmendmentManager, *Registry, func()) {
+func setupTestHandlers(t *testing.T) (*AmendmentHandlers, *Registry, func()) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	msgBus := bus.New(nil, logger)
 
@@ -34,7 +34,7 @@ func setupTestHandlers(t *testing.T) (*AmendmentHandlers, *AmendmentManager, *Re
 		registry.Close()
 	}
 
-	return handlers, amendmentMgr, registry, cleanup
+	return handlers, registry, cleanup
 }
 
 func setupTestRegistry(t *testing.T, tmpDir string, msgBus *bus.MessageBus, logger *slog.Logger) *Registry {
@@ -48,7 +48,7 @@ func setupTestRegistry(t *testing.T, tmpDir string, msgBus *bus.MessageBus, logg
 }
 
 func TestHandleInjectContext(t *testing.T) {
-	handlers, _, registry, cleanup := setupTestHandlers(t)
+	handlers, registry, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -89,7 +89,7 @@ func TestHandleInjectContext(t *testing.T) {
 }
 
 func TestHandleInjectContext_WithExistingContext(t *testing.T) {
-	handlers, _, registry, cleanup := setupTestHandlers(t)
+	handlers, registry, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -134,7 +134,7 @@ func TestHandleInjectContext_WithExistingContext(t *testing.T) {
 }
 
 func TestHandleSkipStep(t *testing.T) {
-	handlers, _, _, cleanup := setupTestHandlers(t)
+	handlers, _, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -184,7 +184,7 @@ func TestHandleSkipStep(t *testing.T) {
 }
 
 func TestHandleSkipStep_MissingStepID(t *testing.T) {
-	handlers, _, _, cleanup := setupTestHandlers(t)
+	handlers, _, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -206,7 +206,7 @@ func TestHandleSkipStep_MissingStepID(t *testing.T) {
 }
 
 func TestHandleAddStep(t *testing.T) {
-	handlers, _, registry, cleanup := setupTestHandlers(t)
+	handlers, registry, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -250,7 +250,7 @@ func TestHandleAddStep(t *testing.T) {
 }
 
 func TestHandleAddStep_WithAgentID(t *testing.T) {
-	handlers, _, registry, cleanup := setupTestHandlers(t)
+	handlers, registry, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -296,7 +296,7 @@ func TestHandleAddStep_WithAgentID(t *testing.T) {
 }
 
 func TestHandleAddStep_MissingDescription(t *testing.T) {
-	handlers, _, _, cleanup := setupTestHandlers(t)
+	handlers, _, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -325,7 +325,7 @@ func TestHandleAddStep_MissingDescription(t *testing.T) {
 }
 
 func TestHandleReprioritize(t *testing.T) {
-	handlers, _, _, cleanup := setupTestHandlers(t)
+	handlers, _, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -375,7 +375,7 @@ func TestHandleReprioritize(t *testing.T) {
 }
 
 func TestHandleReprioritize_EmptyStepIDs(t *testing.T) {
-	handlers, _, _, cleanup := setupTestHandlers(t)
+	handlers, _, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -397,7 +397,7 @@ func TestHandleReprioritize_EmptyStepIDs(t *testing.T) {
 }
 
 func TestHandleChangeAgent(t *testing.T) {
-	handlers, _, _, cleanup := setupTestHandlers(t)
+	handlers, _, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -445,7 +445,7 @@ func TestHandleChangeAgent(t *testing.T) {
 }
 
 func TestHandleChangeAgent_MissingFields(t *testing.T) {
-	handlers, _, _, cleanup := setupTestHandlers(t)
+	handlers, _, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -483,7 +483,7 @@ func TestHandleChangeAgent_MissingFields(t *testing.T) {
 }
 
 func TestHandleAmendmentErrors(t *testing.T) {
-	handlers, _, _, cleanup := setupTestHandlers(t)
+	handlers, _, cleanup := setupTestHandlers(t)
 	defer cleanup()
 	ctx := context.Background()
 

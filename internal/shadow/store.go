@@ -2,7 +2,18 @@ package shadow
 
 import (
 	"context"
+	"errors"
 	"time"
+)
+
+// Sentinel errors for store operations.
+var (
+	ErrRecordNotFound      = errors.New("shadow record not found")
+	ErrPreferencePairNotFound = errors.New("preference pair not found")
+	ErrExampleNotFound     = errors.New("few-shot example not found")
+	ErrAdapterNotFound     = errors.New("adapter not found")
+	ErrActiveAdapterNotFound = errors.New("no active adapter found")
+	ErrStoreNotInitialized = errors.New("store not initialized")
 )
 
 // TrainingStore provides access to shadow training data (training.db).

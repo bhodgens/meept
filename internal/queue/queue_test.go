@@ -12,7 +12,7 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
-func newTestQueue(t *testing.T) (*PersistentQueue, *bus.MessageBus) {
+func newTestQueue(t *testing.T) *PersistentQueue {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "queue.db")
@@ -23,11 +23,11 @@ func newTestQueue(t *testing.T) (*PersistentQueue, *bus.MessageBus) {
 		t.Fatalf("failed to create queue: %v", err)
 	}
 	t.Cleanup(func() { q.Close() })
-	return q, msgBus
+	return q
 }
 
 func TestPersistentQueue_EnqueueAndGet(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	job, err := NewJob(JobTypeOneOff, map[string]string{"prompt": "hello"})
@@ -52,7 +52,7 @@ func TestPersistentQueue_EnqueueAndGet(t *testing.T) {
 }
 
 func TestPersistentQueue_ClaimAndComplete(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
@@ -80,7 +80,7 @@ func TestPersistentQueue_ClaimAndComplete(t *testing.T) {
 }
 
 func TestPersistentQueue_ClaimEmpty(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	claimed, err := q.Claim(ctx, "worker-1", nil)
@@ -93,7 +93,7 @@ func TestPersistentQueue_ClaimEmpty(t *testing.T) {
 }
 
 func TestPersistentQueue_FailAndRetry(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	job, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "test"})
@@ -120,7 +120,7 @@ func TestPersistentQueue_FailAndRetry(t *testing.T) {
 }
 
 func TestPersistentQueue_ListByState(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	j1, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "1"})
@@ -145,7 +145,7 @@ func TestPersistentQueue_ListByState(t *testing.T) {
 }
 
 func TestPersistentQueue_Stats(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	j1, _ := NewJob(JobTypeOneOff, map[string]string{"prompt": "1"})
@@ -163,7 +163,7 @@ func TestPersistentQueue_Stats(t *testing.T) {
 }
 
 func TestPersistentQueue_ClosedOperations(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	q.Close()
@@ -180,7 +180,7 @@ func TestPersistentQueue_ClosedOperations(t *testing.T) {
 }
 
 func TestPersistentQueue_ListByTaskID(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	j1, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "1"})
@@ -323,7 +323,7 @@ func (e errForTestError) Error() string { return string(e) }
 
 // TestPersistentQueue_ClaimWithCancelledTaskCallback tests that jobs from cancelled tasks are skipped.
 func TestPersistentQueue_ClaimWithCancelledTaskCallback(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	// Create two jobs: one for a "cancelled" task, one for a normal task
@@ -367,7 +367,7 @@ func TestPersistentQueue_ClaimWithCancelledTaskCallback(t *testing.T) {
 
 // TestPersistentQueue_ClaimAllTasksCancelled tests that claiming returns nil when all tasks are cancelled.
 func TestPersistentQueue_ClaimAllTasksCancelled(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	job, _ := NewJob(JobTypeProjectTask, map[string]string{"prompt": "cancelled"})
@@ -391,7 +391,7 @@ func TestPersistentQueue_ClaimAllTasksCancelled(t *testing.T) {
 
 // TestPersistentQueue_ClaimNoTaskID tests that jobs without task_id are claimable.
 func TestPersistentQueue_ClaimNoTaskID(t *testing.T) {
-	q, _ := newTestQueue(t)
+	q := newTestQueue(t)
 	ctx := context.Background()
 
 	// Job without task_id (one-off job)

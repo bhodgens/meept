@@ -37,15 +37,13 @@ func ParseCLAUDEMD(path string) (*CLAUDEDocument, error) {
 	}
 
 	// Parse the document
-	if err := parseDocument(doc); err != nil {
-		return nil, fmt.Errorf("failed to parse document: %w", err)
-	}
+	parseDocument(doc)
 
 	return doc, nil
 }
 
 // parseDocument parses the document structure
-func parseDocument(doc *CLAUDEDocument) error {
+func parseDocument(doc *CLAUDEDocument) {
 	// Extract sections
 	doc.BuildCommands = extractBuildCommands(doc.RawContent)
 	doc.Architecture = extractArchitectureSection(doc.RawContent)
@@ -55,8 +53,6 @@ func parseDocument(doc *CLAUDEDocument) error {
 	doc.Configuration = extractConfiguration(doc.RawContent)
 	doc.Conventions = extractConventions(doc.RawContent)
 	doc.ProjectStructure = extractProjectStructure(doc.RawContent)
-
-	return nil
 }
 
 // extractBuildCommands extracts build commands from the document

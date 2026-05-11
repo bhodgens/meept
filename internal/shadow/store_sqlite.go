@@ -78,9 +78,7 @@ func (s *SQLiteTrainingStore) migrate() error {
 	}
 
 	if currentVersion < 2 {
-		if err := s.migrateToV2(); err != nil {
-			return fmt.Errorf("migration to v2 failed: %w", err)
-		}
+		s.migrateToV2()
 	}
 
 	// Update version
@@ -147,7 +145,7 @@ func (s *SQLiteTrainingStore) migrateToV1() error {
 	return err
 }
 
-func (s *SQLiteTrainingStore) migrateToV2() error {
+func (s *SQLiteTrainingStore) migrateToV2() {
 	// Add any V2 schema changes here
 	// Example: Add metadata column to shadow_records if it doesn't exist
 	_, err := s.db.Exec(`
@@ -173,8 +171,6 @@ func (s *SQLiteTrainingStore) migrateToV2() error {
 	`); ierr != nil {
 		slog.Warn("shadow training store migration: create index failed", "error", ierr)
 	}
-
-	return nil
 }
 
 // SaveRecord saves a shadow record.
@@ -508,7 +504,7 @@ func (s *SQLiteTrainingStore) scanRecord(row *sql.Row) (*ShadowRecord, error) {
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, ErrRecordNotFound
 		}
 		return nil, err
 	}
@@ -567,7 +563,7 @@ func (s *SQLiteTrainingStore) scanPair(row *sql.Row) (*PreferencePair, error) {
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, ErrPreferencePairNotFound
 		}
 		return nil, err
 	}
@@ -686,9 +682,7 @@ func (s *SQLiteExamplesStore) migrate() error {
 	}
 
 	if currentVersion < 2 {
-		if err := s.migrateToV2(); err != nil {
-			return fmt.Errorf("migration to v2 failed: %w", err)
-		}
+		s.migrateToV2()
 	}
 
 	// Update version
@@ -1007,7 +1001,7 @@ func (s *SQLiteExamplesStore) scanExample(row *sql.Row) (*FewShotExample, error)
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, ErrExampleNotFound
 		}
 		return nil, err
 	}
@@ -1347,7 +1341,7 @@ func (s *SQLiteAdaptersStore) scanAdapter(row *sql.Row) (*Adapter, error) {
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, ErrAdapterNotFound
 		}
 		return nil, err
 	}

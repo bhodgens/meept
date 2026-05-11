@@ -138,12 +138,13 @@ func (ke *KeywordExtractor) extractFromText(text string) []string {
 	// Remove punctuation except hyphens within words
 	var normalized strings.Builder
 	for i, r := range textLower {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r):
 			normalized.WriteRune(r)
-		} else if r == '-' && i > 0 && i < len(textLower)-1 {
+		case r == '-' && i > 0 && i < len(textLower)-1:
 			// Keep hyphens that are between letters
 			normalized.WriteRune(r)
-		} else {
+		default:
 			normalized.WriteRune(' ')
 		}
 	}

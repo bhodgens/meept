@@ -88,16 +88,8 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 	// Access-based expiration (run before consolidation)
 	cfg := c.manager.Config().Expiration
 	if cfg.Enabled && cfg.AccessExpirationDays > 0 {
-		accessReport, err := c.runAccessBasedExpiration(ctx)
-		if err != nil {
-			if report.Error != "" {
-				report.Error += "; "
-			}
-			report.Error += err.Error()
-			c.logger.Error("Access-based expiration failed", "error", err)
-		} else {
-			report.Expired = accessReport.Expired
-		}
+		accessReport := c.runAccessBasedExpiration(ctx)
+		report.Expired = accessReport.Expired
 	}
 
 	// Episodic consolidation
@@ -144,12 +136,12 @@ func (c *Consolidator) Run(ctx context.Context, olderThanHours int) (*Consolidat
 // discarding them.  The report's Expired field now only reflects cleanly
 // removed memories; non-zero storeErrors/deleteErrors are logged at
 // warn level above.
-func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*ConsolidationReport, error) {
+func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) *ConsolidationReport {
 	cfg := c.manager.Config().Expiration
 	expiredMemories, err := c.backend.GetExpiredMemories(ctx, cfg.AccessExpirationDays)
 	if err != nil {
 		c.logger.Debug("skipping access-based expiration", "reason", err.Error())
-		return &ConsolidationReport{}, nil
+		return &ConsolidationReport{}
 	}
 
 	var expiredCount int
@@ -188,7 +180,7 @@ func (c *Consolidator) runAccessBasedExpiration(ctx context.Context) (*Consolida
 		)
 	}
 
-	return &ConsolidationReport{Expired: expiredCount}, nil
+	return &ConsolidationReport{Expired: expiredCount}
 }
 
 // episodicReport holds internal episodic consolidation results.

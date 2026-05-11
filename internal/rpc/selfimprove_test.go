@@ -11,7 +11,7 @@ import (
 	"github.com/caimlas/meept/internal/selfimprove"
 )
 
-func newTestSelfImproveHandler(t *testing.T) (*SelfImproveHandler, *bus.MessageBus) {
+func newTestSelfImproveHandler(t *testing.T) *SelfImproveHandler {
 	t.Helper()
 	logger := slog.Default()
 	msgBus := bus.New(nil, logger)
@@ -19,7 +19,7 @@ func newTestSelfImproveHandler(t *testing.T) (*SelfImproveHandler, *bus.MessageB
 	cfg.DataPath = t.TempDir()
 	ctrl := selfimprove.NewController(cfg, msgBus, nil, t.TempDir(), logger)
 	_ = ctrl.Initialize(context.Background())
-	return NewSelfImproveHandler(ctrl), msgBus
+	return NewSelfImproveHandler(ctrl)
 }
 
 func newNilSelfImproveHandler() *SelfImproveHandler {
@@ -50,7 +50,7 @@ func TestSelfImproveHandler_NilController(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Status(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	result, err := h.handleStatus(context.Background(), json.RawMessage(`{}`))
 	if err != nil {
@@ -63,7 +63,7 @@ func TestSelfImproveHandler_Status(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Detect(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	result, err := h.handleDetect(context.Background(), json.RawMessage(`{}`))
 	if err != nil {
@@ -77,7 +77,7 @@ func TestSelfImproveHandler_Detect(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Apply_MissingFixID(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	_, err := h.handleApply(context.Background(), json.RawMessage(`{}`))
 	if err == nil {
@@ -86,7 +86,7 @@ func TestSelfImproveHandler_Apply_MissingFixID(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Apply_UnknownFixID(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	_, err := h.handleApply(context.Background(), json.RawMessage(`{"fix_id":"nonexistent"}`))
 	if err == nil {
@@ -95,7 +95,7 @@ func TestSelfImproveHandler_Apply_UnknownFixID(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Reject_MissingFixID(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	_, err := h.handleReject(context.Background(), json.RawMessage(`{}`))
 	if err == nil {
@@ -104,7 +104,7 @@ func TestSelfImproveHandler_Reject_MissingFixID(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Reject_UnknownFixID(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	_, err := h.handleReject(context.Background(), json.RawMessage(`{"fix_id":"nonexistent","reason":"test"}`))
 	if err == nil {
@@ -113,7 +113,7 @@ func TestSelfImproveHandler_Reject_UnknownFixID(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Cycle(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	result, err := h.handleCycle(context.Background(), json.RawMessage(`{"interactive":false}`))
 	if err != nil {
@@ -126,7 +126,7 @@ func TestSelfImproveHandler_Cycle(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Generate(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	result, err := h.handleGenerate(context.Background(), json.RawMessage(`{}`))
 	if err != nil {
@@ -139,7 +139,7 @@ func TestSelfImproveHandler_Generate(t *testing.T) {
 }
 
 func TestSelfImproveHandler_Validate(t *testing.T) {
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 
 	result, err := h.handleValidate(context.Background(), json.RawMessage(`{}`))
 	if err != nil {
@@ -153,7 +153,7 @@ func TestSelfImproveHandler_Validate(t *testing.T) {
 
 func TestSelfImproveHandler_ServerRegistration(t *testing.T) {
 	// Verify all methods are registered and accessible on the server.
-	h, _ := newTestSelfImproveHandler(t)
+	h := newTestSelfImproveHandler(t)
 	server := New(&Config{}, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	h.RegisterSelfImproveMethods(server)
 

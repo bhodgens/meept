@@ -154,6 +154,7 @@ func getString(payload map[string]any, key, defaultVal string) string {
 	return defaultVal
 }
 
+//nolint:unparam // defaultVal is intentionally parameterized for reuse
 func getInt(payload map[string]any, key string, defaultVal int) int {
 	if v, ok := payload[key].(float64); ok {
 		return int(v)

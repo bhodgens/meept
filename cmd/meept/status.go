@@ -71,13 +71,15 @@ func runStatus(jsonOutput bool) error {
 	}
 
 	if jsonOutput {
-		return printStatusJSON(status, pid)
+		printStatusJSON(status, pid)
+		return nil
 	}
 
-	return printStatusText(status, pid)
+	printStatusText(status, pid)
+	return nil
 }
 
-func printStatusText(status *types.DaemonStatusResponse, pid int) error {
+func printStatusText(status *types.DaemonStatusResponse, pid int) {
 	// Status header
 	statusColor := "\033[32m" // Green
 	if status.Status != "running" {
@@ -133,11 +135,9 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) error {
 	fmt.Printf("----------\n")
 	fmt.Printf("  Methods:    %d registered\n", len(status.RegisteredMethods))
 	fmt.Printf("  Bus Subs:   %d\n", status.BusSubscribers)
-
-	return nil
 }
 
-func printStatusJSON(status *types.DaemonStatusResponse, pid int) error {
+func printStatusJSON(status *types.DaemonStatusResponse, pid int) {
 	// Simple JSON output without encoding/json import cycle
 	fmt.Printf(`{
   "status": "%s",
@@ -163,5 +163,4 @@ func printStatusJSON(status *types.DaemonStatusResponse, pid int) error {
 		len(status.RegisteredMethods),
 		status.BusSubscribers,
 	)
-	return nil
 }

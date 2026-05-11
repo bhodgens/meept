@@ -576,6 +576,7 @@ func (e *SymbolExtractor) extractGenericSymbols(node *sitter.Node, source []byte
 
 // Helper methods
 
+//nolint:unparam // fieldName is intentionally generic for reuse across different AST node types
 func (e *SymbolExtractor) getChildByFieldName(node *sitter.Node, fieldName string, source []byte) string {
 	child := node.ChildByFieldName(fieldName)
 	if child != nil {

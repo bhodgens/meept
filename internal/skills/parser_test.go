@@ -42,10 +42,8 @@ Provide constructive feedback with specific suggestions.
 
 	if len(skill.Requires) != 2 {
 		t.Errorf("Requires length = %d, want 2", len(skill.Requires))
-	} else {
-		if skill.Requires[0] != "code" || skill.Requires[1] != "reasoning" {
-			t.Errorf("Requires = %v, want [code, reasoning]", skill.Requires)
-		}
+	} else if skill.Requires[0] != "code" || skill.Requires[1] != "reasoning" {
+		t.Errorf("Requires = %v, want [code, reasoning]", skill.Requires)
 	}
 
 	if len(skill.Tags) != 2 {

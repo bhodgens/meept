@@ -44,10 +44,10 @@ type testEnv struct {
 	mux    *http.ServeMux
 }
 
-func newTestEnv(opts ...web.ServerOption) *testEnv {
+func newTestEnv() *testEnv {
 	cfg := web.DefaultServerConfig()
 	handler := &stubHandler{}
-	s := web.NewServer(cfg, handler, web.NoAuth{}, nil, opts...)
+	s := web.NewServer(cfg, handler, web.NoAuth{}, nil)
 	mux := http.NewServeMux()
 	s.SetupRoutesForTest(mux)
 	return &testEnv{server: s, mux: mux}

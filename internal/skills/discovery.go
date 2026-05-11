@@ -260,11 +260,9 @@ func (d *Discovery) scanTier(tier DiscoveryTier) error {
 			if _, err := os.Stat(skillFile); err == nil {
 				d.loadSkillFile(skillFile, tier.Priority)
 			}
-		} else {
+		} else if isSkillFile(entry.Name()) {
 			// Support flat .md files (not SKILL.md, which would be at root)
-			if isSkillFile(entry.Name()) {
-				d.loadSkillFile(entryPath, tier.Priority)
-			}
+			d.loadSkillFile(entryPath, tier.Priority)
 		}
 	}
 

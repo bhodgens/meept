@@ -511,7 +511,7 @@ func (m *Manager) ActivateAdapter(ctx context.Context, id string) error {
 // GetActiveAdapter returns the active adapter for a base model.
 func (m *Manager) GetActiveAdapter(ctx context.Context, modelBase string) (*Adapter, error) {
 	if m.adaptersStore == nil {
-		return nil, nil
+		return nil, ErrStoreNotInitialized
 	}
 	return m.adaptersStore.GetActiveAdapter(ctx, modelBase)
 }
