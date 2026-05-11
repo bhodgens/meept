@@ -236,7 +236,7 @@
     "queues": {
       "steering_drain": "one",        // Always "one" for steering
       "followup_drain": "one",        // "one" or "all"
-      "max_steering": 5,              // Max queued steering (low - they're urgent)
+      "max_steering": 1,              // Max queued steering (always 1 - latest wins)
       "max_followup": 20,             // Max queued follow-ups
       "persist_followup": true,       // Enable hybrid persistence
       "flush_delay_ms": 5000,         // Write-behind flush delay (milliseconds)

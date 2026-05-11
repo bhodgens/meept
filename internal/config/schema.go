@@ -1086,7 +1086,7 @@ func DefaultConfig() *Config {
 			Queues: AgentQueuesConfig{
 				SteeringDrain:   "one",
 				FollowUpDrain:   "one",
-				MaxSteering:     5,
+				MaxSteering:     1,
 				MaxFollowUp:     20,
 				PersistFollowUp: true,
 				FlushDelayMs:    5000,

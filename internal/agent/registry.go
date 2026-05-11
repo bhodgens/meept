@@ -9,6 +9,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agents"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/shadow"
@@ -67,6 +68,9 @@ type AgentRegistry struct {
 	activeQueues map[string]*QueueEntry
 	activeQueuesMu sync.RWMutex
 	nextGen      uint64
+
+	// Queues config from config file (overrides code defaults)
+	queueConfig config.AgentQueuesConfig
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -92,6 +96,10 @@ type RegistryConfig struct {
 	// GlobalRules is the global rules content to inject into all agents.
 	// If empty, the registry will auto-discover rules using RulesDiscovery.
 	GlobalRules string
+
+	// Queues holds steering and follow-up message queue settings from config.
+	// When non-zero, these values override the code defaults.
+	Queues config.AgentQueuesConfig
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -116,6 +124,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		watchdog:              cfg.Watchdog,
 		hallucinationDetector: cfg.HallucinationDetector,
 		artifactManager:       cfg.ArtifactManager,
+		queueConfig:           cfg.Queues,
 	}
 
 	// Load global rules
@@ -287,8 +296,25 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	}
 
 	// Create a message queue for steering/follow-up support
+	queueCfg := DefaultQueueConfig()
+	if r.queueConfig.MaxSteering > 0 {
+		queueCfg.MaxSteering = r.queueConfig.MaxSteering
+	}
+	if r.queueConfig.MaxFollowUp > 0 {
+		queueCfg.MaxFollowUp = r.queueConfig.MaxFollowUp
+	}
+	if r.queueConfig.SteeringDrain != "" {
+		queueCfg.SteeringDrain = ParseDrainMode(r.queueConfig.SteeringDrain)
+	}
+	if r.queueConfig.FollowUpDrain != "" {
+		queueCfg.FollowUpDrain = ParseDrainMode(r.queueConfig.FollowUpDrain)
+	}
+	queueCfg.PersistFollowUp = r.queueConfig.PersistFollowUp
+	if r.queueConfig.FlushDelayMs > 0 {
+		queueCfg.FlushDelayMs = r.queueConfig.FlushDelayMs
+	}
 	queueOpts := []MessageQueueOption{
-		WithQueueConfig(DefaultQueueConfig()),
+		WithQueueConfig(queueCfg),
 	}
 	if r.bus != nil {
 		queueOpts = append(queueOpts, WithQueueBus(r.bus))

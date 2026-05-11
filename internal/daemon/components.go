@@ -692,6 +692,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			Watchdog:              c.Watchdog,
 			HallucinationDetector: c.HallucinationDetector,
 			ArtifactManager:       c.ArtifactManager,
+			Queues:                cfg.Agent.Queues,
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
