@@ -842,11 +842,10 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 
 	// Publish lifecycle started event
 	if l.bus != nil {
-		startPayload := map[string]any{
-			"conversation_id": conversationID,
-			"agent_id":        l.agentID,
-		}
-		startMsg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", startPayload)
+		startMsg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", AgentLifecyclePayload{
+			ConversationID: conversationID,
+			AgentID:        l.agentID,
+		})
 		if err == nil {
 			l.bus.Publish(bus.EventAgentStarted, startMsg)
 		}
@@ -872,13 +871,12 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		} else if err != nil {
 			reason = "error"
 		}
-		endPayload := map[string]any{
-			"conversation_id": conversationID,
-			"agent_id":        l.agentID,
-			"reason":          reason,
-		}
-		endMsg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", endPayload)
-		if err == nil {
+		endMsg, deferErr := models.NewBusMessage(models.MessageTypeEvent, "agent", AgentLifecyclePayload{
+			ConversationID: conversationID,
+			AgentID:        l.agentID,
+			Reason:         reason,
+		})
+		if deferErr == nil {
 			l.bus.Publish(bus.EventAgentEnded, endMsg)
 		}
 	}()
@@ -1617,6 +1615,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Publish agent result event
 			l.publishResult(conversationID, iteration, results)
 
+			// Publish iteration completed event
+			l.publishIteration(conversationID, iteration)
+
 			// Continue loop for LLM to process tool results
 			continue
 		}
@@ -1662,6 +1663,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					"\n\nPlease verify your claims against available evidence and provide a corrected response. " +
 					"If you referenced files or symbols, confirm they exist before asserting changes.]"
 				conv.AddUserMessage(correctionPrompt)
+
+				// Publish iteration completed event
+				l.publishIteration(conversationID, iteration)
 				continue
 			}
 		}
@@ -1706,6 +1710,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Publish progress: complete
 		l.publishProgress(conversationID, iteration, "complete", "", totalTokens)
+
+		// Publish iteration completed event
+		l.publishIteration(conversationID, iteration)
 
 		// Capture interaction for shadow training
 		if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
@@ -2684,6 +2691,24 @@ func (l *AgentLoop) publishFollowUpInjected(conversationID string, msgs []Queued
 		return
 	}
 	l.bus.Publish(bus.EventQueueFollowUpInjected, msg)
+}
+
+// publishIteration publishes an event after each reasoning cycle iteration completes.
+func (l *AgentLoop) publishIteration(conversationID string, iteration int) {
+	if l.bus == nil {
+		return
+	}
+	payload := map[string]any{
+		"conversation_id": conversationID,
+		"agent_id":        l.agentID,
+		"iteration":       iteration,
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
+	if err != nil {
+		l.logger.Warn("Failed to create iteration bus message", "error", err)
+		return
+	}
+	l.bus.Publish(bus.EventAgentIteration, msg)
 }
 
 // GetConversation returns a conversation by ID.
