@@ -24,6 +24,7 @@ type QueuePersister struct {
 	flushTimer     *time.Timer
 	flushDelay     time.Duration
 	conversationID string
+	maxPending     int
 }
 
 // QueuePersisterConfig holds configuration for QueuePersister.
@@ -70,6 +71,7 @@ func NewQueuePersister(db *sql.DB, conversationID string, logger *slog.Logger) (
 		flushDelay:     defaultFlushDelay,
 		conversationID: conversationID,
 		pending:        make([]QueuedMessage, 0),
+		maxPending:     DefaultQueuePersisterConfig().MaxPending,
 	}
 
 	// Start the flush timer.
@@ -103,11 +105,21 @@ func (p *QueuePersister) initSchema() error {
 
 // EnqueueAsync buffers a message for later flushing.
 // It starts or resets the flush timer (debounced write-behind).
+// If the pending buffer reaches MaxPending, an immediate flush is triggered first.
 func (p *QueuePersister) EnqueueAsync(msg QueuedMessage) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+
+	if len(p.pending) >= p.maxPending {
+		p.logger.Warn("queue persister: max pending reached, flushing",
+			"pending", len(p.pending),
+			"max_pending", p.maxPending,
+		)
+		// flushLockedHeld drains pending without acquiring the lock (caller holds it).
+		p.flushLockedHeld()
+	}
 
 	p.pending = append(p.pending, msg)
+	p.mu.Unlock()
 
 	// Reset the flush timer (debounce).
 	if !p.flushTimer.Stop() {
@@ -154,11 +166,30 @@ func (p *QueuePersister) Flush() {
 		p.mu.Unlock()
 		return
 	}
-
 	pending := p.pending
 	p.pending = make([]QueuedMessage, 0)
 	p.mu.Unlock()
 
+	p.flushPending(pending)
+}
+
+// flushLockedHeld drains the pending buffer. Caller must hold p.mu.
+func (p *QueuePersister) flushLockedHeld() {
+	if len(p.pending) == 0 {
+		return
+	}
+	pending := p.pending
+	p.pending = make([]QueuedMessage, 0)
+	p.mu.Unlock()
+
+	p.flushPending(pending)
+
+	// Reacquire lock for the caller (EnqueueAsync expects it held).
+	p.mu.Lock()
+}
+
+// flushPending writes messages to SQLite, re-enqueuing failures.
+func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 	for _, msg := range pending {
 		if err := p.PersistSync(msg); err != nil {
 			// Re-enqueue on failure so it gets retried on next flush.
