@@ -235,7 +235,7 @@ func (q *MessageQueue) Steer(ctx context.Context, content, source string) error 
 	q.mu.Unlock()
 
 	q.notifyNonBlocking()
-	q.publishEvent("agent.queue.steer.added", QueueEventPayload{
+	q.publishEvent(bus.EventQueueSteerAdded, QueueEventPayload{
 		ContentPreview: previewContent(content),
 		QueueType:      string(QueueTypeSteer),
 		MessageID:      msg.ID,
@@ -285,7 +285,7 @@ func (q *MessageQueue) FollowUp(ctx context.Context, content, source string) err
 	q.mu.Unlock()
 
 	q.notifyNonBlocking()
-	q.publishEvent("agent.queue.followup.added", QueueEventPayload{
+	q.publishEvent(bus.EventQueueFollowUpAdded, QueueEventPayload{
 		ContentPreview: previewContent(content),
 		QueueType:      string(QueueTypeFollowUp),
 		MessageID:      msg.ID,

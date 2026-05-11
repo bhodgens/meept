@@ -15,7 +15,7 @@ import (
 // This is called once on daemon startup so that any TUI clients listening
 // for agent.queue.followup.restored events are notified that history is
 // available.
-func RecoverPendingFollowUps(db *sql.DB, bus *bus.MessageBus, logger *slog.Logger) {
+func RecoverPendingFollowUps(db *sql.DB, msgBus *bus.MessageBus, logger *slog.Logger) {
 	query := `
 		SELECT DISTINCT conversation_id
 		FROM queued_followups
@@ -73,7 +73,7 @@ func RecoverPendingFollowUps(db *sql.DB, bus *bus.MessageBus, logger *slog.Logge
 			logger.Warn("queue recovery: failed to marshal event", "error", marshalErr)
 			continue
 		}
-		_ = bus.Publish("agent.queue.followup.restored", ev)
+		_ = msgBus.Publish(bus.EventQueueFollowUpRestored, ev)
 	}
 }
 

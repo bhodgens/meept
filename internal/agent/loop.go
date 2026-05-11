@@ -848,7 +848,7 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		}
 		startMsg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", startPayload)
 		if err == nil {
-			l.bus.Publish("agent.lifecycle.started", startMsg)
+			l.bus.Publish(bus.EventAgentStarted, startMsg)
 		}
 	}
 
@@ -879,7 +879,7 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		}
 		endMsg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", endPayload)
 		if err == nil {
-			l.bus.Publish("agent.lifecycle.ended", endMsg)
+			l.bus.Publish(bus.EventAgentEnded, endMsg)
 		}
 	}()
 
@@ -2659,7 +2659,7 @@ func (l *AgentLoop) publishSteeringInjected(conversationID string, msgs []Queued
 		l.logger.Warn("Failed to create steering injected bus message", "error", err)
 		return
 	}
-	l.bus.Publish("agent.queue.steer.injected", msg)
+	l.bus.Publish(bus.EventQueueSteerInjected, msg)
 }
 
 // publishFollowUpInjected publishes an event when follow-up queue messages
@@ -2683,7 +2683,7 @@ func (l *AgentLoop) publishFollowUpInjected(conversationID string, msgs []Queued
 		l.logger.Warn("Failed to create follow-up injected bus message", "error", err)
 		return
 	}
-	l.bus.Publish("agent.queue.followup.injected", msg)
+	l.bus.Publish(bus.EventQueueFollowUpInjected, msg)
 }
 
 // GetConversation returns a conversation by ID.

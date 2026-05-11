@@ -10,6 +10,23 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// Agent lifecycle event topics.
+const (
+	EventAgentStarted   = "agent.lifecycle.started"
+	EventAgentEnded     = "agent.lifecycle.ended"
+	EventAgentIteration = "agent.iteration.completed"
+)
+
+// Queue event topics.
+const (
+	EventQueueSteerAdded       = "agent.queue.steer.added"
+	EventQueueFollowUpAdded    = "agent.queue.followup.added"
+	EventQueueSteerInjected    = "agent.queue.steer.injected"
+	EventQueueFollowUpInjected = "agent.queue.followup.injected"
+	EventQueueFollowUpRestored = "agent.queue.followup.restored"
+	EventQueuePersisted        = "agent.queue.persisted"
+)
+
 // Subscriber represents a channel that receives messages.
 type Subscriber struct {
 	ID      string

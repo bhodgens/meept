@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -734,7 +735,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			// Agent lifecycle events
-			case "agent.lifecycle.started":
+			case bus.EventAgentStarted:
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					if convID, ok := payloadMap["conversation_id"].(string); ok {
 						if cmd := a.chat.Update(models.AgentLifecycleMsg{Active: true, ConversationID: convID}); cmd != nil {
@@ -742,7 +743,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
-			case "agent.lifecycle.ended":
+			case bus.EventAgentEnded:
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					if convID, ok := payloadMap["conversation_id"].(string); ok {
 						if cmd := a.chat.Update(models.AgentLifecycleMsg{Active: false, ConversationID: convID}); cmd != nil {
@@ -752,13 +753,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			// Steering queue events
-			case "agent.queue.steer.injected":
+			case bus.EventQueueSteerInjected:
 				if cmd := a.chat.Update(models.SteeringInjectedMsg{}); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 
 			// Follow-up queue events
-			case "agent.queue.followup.injected":
+			case bus.EventQueueFollowUpInjected:
 				if cmd := a.chat.Update(models.FollowUpInjectedMsg{}); cmd != nil {
 					cmds = append(cmds, cmd)
 				}

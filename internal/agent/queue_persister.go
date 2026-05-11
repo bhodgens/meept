@@ -242,5 +242,5 @@ func (p *QueuePersister) publishPersistedEvent(msg QueuedMessage) {
 		return
 	}
 
-	_ = p.bus.Publish("agent.queue.persisted", ev)
+	_ = p.bus.Publish(bus.EventQueuePersisted, ev)
 }
