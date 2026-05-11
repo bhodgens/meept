@@ -5,6 +5,19 @@ package services
 import (
 	"context"
 	"log/slog"
+
+	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/memory"
+	"github.com/caimlas/meept/internal/queue"
+	"github.com/caimlas/meept/internal/scheduler"
+	"github.com/caimlas/meept/internal/selfimprove"
+	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/internal/skills"
+	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/worker"
+	"github.com/caimlas/meept/pkg/security"
 )
 
 // ServiceRegistry holds all service instances.
@@ -24,18 +37,72 @@ type ServiceRegistry struct {
 	Bus         *BusService
 }
 
-// Config holds service configuration.
+// Config holds dependencies for service instantiation.
+// All fields are optional; services whose dependencies are nil will not be created.
 type Config struct {
-	// Dependencies will be added as needed per service
+	Bus            *bus.MessageBus
+	AgentRegistry  *agent.AgentRegistry
+	Queue          queue.Queue
+	MemoryManager  *memory.Manager
+	TaskRegistry   *task.Registry
+	SessionStore   session.Store
+	WorkerPool     *worker.Pool
+	SkillRegistry  *skills.Registry
+	SkillExecutor  *skills.Executor
+	SelfImprove    *selfimprove.Controller
+	TokenCache     *llm.TokenCacheCoordinator
+	SecurityChecker *security.PermissionChecker
+	Scheduler      *scheduler.Scheduler
 }
 
 // NewRegistry creates all services with their dependencies.
+// Services whose required dependencies are nil in cfg are left as nil
+// in the returned registry, allowing HTTP handlers to return 503 gracefully.
 func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	_ = logger // TODO: use logger when services are implemented
-	return &ServiceRegistry{}, nil
+
+	reg := &ServiceRegistry{
+		// ChatService is always created if Bus is available;
+		// it gracefully handles nil AgentRegistry (Steer/FollowUp return ErrUnavailable).
+		Chat:     NewChatService(cfg.Bus, cfg.AgentRegistry, logger),
+		Pipeline: NewPipelineService(),
+		Bus:      NewBusService(cfg.Bus),
+	}
+
+	if cfg.Queue != nil {
+		reg.Queue = NewQueueService(cfg.Queue)
+	}
+	if cfg.MemoryManager != nil {
+		reg.Memory = NewMemoryService(cfg.MemoryManager)
+	}
+	if cfg.TaskRegistry != nil {
+		reg.Task = NewTaskService(cfg.TaskRegistry)
+	}
+	if cfg.SessionStore != nil {
+		reg.Session = NewSessionService(cfg.SessionStore)
+	}
+	if cfg.WorkerPool != nil {
+		reg.Worker = NewWorkerService(cfg.WorkerPool)
+	}
+	if cfg.SkillRegistry != nil {
+		reg.Skills = NewSkillsService(cfg.SkillRegistry, cfg.SkillExecutor)
+	}
+	if cfg.SelfImprove != nil {
+		reg.SelfImprove = NewSelfImproveService(cfg.SelfImprove)
+	}
+	if cfg.TokenCache != nil {
+		reg.Cache = NewCacheService(cfg.TokenCache)
+	}
+	if cfg.SecurityChecker != nil {
+		reg.Security = NewSecurityService(cfg.SecurityChecker)
+	}
+	if cfg.Scheduler != nil {
+		reg.Scheduler = NewSchedulerService(cfg.Scheduler)
+	}
+
+	return reg, nil
 }
 
 // Start starts all startable services.
