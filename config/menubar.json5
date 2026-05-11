@@ -1,24 +1,24 @@
 // Menubar app configuration
 {
   // Connection to meept daemon (menubar always uses HTTP)
-  daemon: {
-    http_url: "http://localhost:8081",
+  "daemon": {
+    "http_url": "http://localhost:8081",
   },
 
   // UI preferences
-  ui: {
+  "ui": {
     // Show panel in menu bar
-    show_in_menu_bar: true,
+    "show_in_menu_bar": true,
     // Start at login
-    start_at_login: false,
+    "start_at_login": false,
     // Menu bar icon style: "icon", "text", "both"
-    icon_style: "icon",
+    "icon_style": "icon",
   },
 
   // Notifications
-  notifications: {
-    enabled: true,
+  "notifications": {
+    "enabled": true,
     // Notify on: "all", "errors_only", "none"
-    level: "errors_only",
+    "level": "errors_only",
   },
 }

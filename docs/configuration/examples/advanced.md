@@ -176,7 +176,7 @@ cleanup_completed = true
 enabled = true
 search_paths = ["~/.meept/skills", "~/projects/*/.meept/skills"]
 auto_reload = true
-cache_size = 100
+max_cached_skills = 100
 
 [clawskills]
 enabled = true

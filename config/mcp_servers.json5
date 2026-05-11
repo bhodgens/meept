@@ -1,23 +1,23 @@
 // MCP server definitions. Disabled by default; enable by setting enabled: true.
 // Each server maps to a name used in the tool registry.
 {
-  servers: [
+  "servers": [
     // Example: local server via stdio subprocess
     {
-      name: "github",
-      type: "stdio",
-      command: ["npx", "-y", "@modelcontextprotocol/server-github"],
-      env: {
-        GITHUB_TOKEN: "${GITHUB_TOKEN}",
+      "name": "github",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}",
       },
     },
     // Example: remote server with API key auth
     {
-      name: "example",
-      type: "http",
-      url: "https://mcp.example.com/mcp",
-      headers: {
-        Authorization: "Bearer ${MCP_TOKEN}",
+      "name": "example",
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_TOKEN}",
       },
     },
   ],

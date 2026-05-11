@@ -279,8 +279,8 @@ func TestDefaultConfigTransport(t *testing.T) {
 	if !cfg.Transport.RPC.Enabled {
 		t.Error("RPC transport should be enabled by default")
 	}
-	if !cfg.Transport.HTTP.Enabled {
-		t.Error("HTTP transport should be enabled by default")
+	if cfg.Transport.HTTP.Enabled {
+		t.Error("HTTP transport should be disabled by default")
 	}
 	if cfg.Transport.HTTP.Addr != ":8081" {
 		t.Errorf("expected HTTP addr :8081, got %s", cfg.Transport.HTTP.Addr)

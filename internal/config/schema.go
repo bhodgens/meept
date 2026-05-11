@@ -651,7 +651,7 @@ type SkillsConfig struct {
 	Enabled     bool     `toml:"enabled" json:"enabled"`
 	SearchPaths []string `toml:"search_paths" json:"search_paths"` // Additional skill directories beyond defaults
 	AutoReload  bool     `toml:"auto_reload" json:"auto_reload"`  // Watch for skill file changes
-	CacheSize   int      `toml:"cache_size" json:"cache_size"`   // Max skills to cache in lazy loader (default: 50)
+	CacheSize   int      `toml:"max_cached_skills" json:"max_cached_skills"`   // Max skills to cache in lazy loader (default: 50)
 }
 
 
@@ -1102,6 +1102,7 @@ func DefaultConfig() *Config {
 			Enabled:     false,
 			SearchPaths: []string{},
 			AutoReload:  false,
+			CacheSize:   50,
 		},
 		SelfImprove: SelfImproveConfig{
 			Enabled:               false,

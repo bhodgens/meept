@@ -2,267 +2,192 @@
 // Copy to ~/.meept/meept.json5 and customize
 {
   // Daemon settings
-  daemon: {
-    socket_path: "~/.meept/meept.sock",
-    pid_file: "~/.meept/meept.pid",
-    log_level: "INFO",
-    data_dir: "~/.meept",
+  "daemon": {
+    "socket_path": "~/.meept/meept.sock",
+    "pid_file": "~/.meept/meept.pid",
+    "log_level": "INFO",
+    "data_dir": "~/.meept",
   },
 
   // Transport configuration - enable/disable RPC and HTTP independently
-  transport: {
-    rpc: {
-      enabled: true,
-      socket_path: "~/.meept/meept.sock",
+  "transport": {
+    "rpc": {
+      "enabled": true,
+      "socket_path": "~/.meept/meept.sock",
     },
-    http: {
-      enabled: false,
-      addr: ":8081",
+    "http": {
+      "enabled": false,
+      "addr": ":8081",
     },
   },
 
   // LLM configuration (models moved to models.json5)
-  llm: {
-    budget: {
-      hourly_token_limit: 100000,
-      daily_token_limit: 1000000,
-      rate_limit_rpm: 30,
-      aggressiveness: 0.5,
+  "llm": {
+    "budget": {
+      "hourly_token_limit": 100000,
+      "daily_token_limit": 1000000,
+      "rate_limit_rpm": 30,
+      "aggressiveness": 0.5,  // 0.0 = very conservative, 1.0 = use full budget
     },
-    context_firewall: {
-      enabled: true,
-      proactive_compression: false,
-      hierarchical_summarization: false,  // enable recursive re-summarization
-      max_summary_level: 3,               // max recursion depth
-      summary_level_threshold: 500,       // token threshold to trigger re-summarization
+    // Model broker - circuit breaker and fallback
+    "broker": {
+      "max_error_rate": 0.10,      // Error rate threshold before fallback
+      "max_p95_latency_ms": 30000, // P95 latency threshold before fallback
+      "fallback_enabled": true,    // Enable automatic model fallback
+    },
+    // Adaptive timeout - adjusts timeouts based on historical performance
+    "adaptive_timeout": {
+      "enabled": true,
+      "stddev_multiplier": 3.0,
+      "stddev_token_rate_timeout": true,
+      "min_timeout_seconds": 10,
+      "max_timeout_seconds": 300,
+      "warmup_requests": 20,
+      "window_hours": 24,
+    },
+    // Context firewall - manages context window budget
+    "context_firewall": {
+      "enabled": true,
+      "summarize_history": true,
+      "small_model_context_threshold": 32768,
+      "iteration_budget_ratio": 0.30,
+      "conversation_budget_ratio": 0.50,
+      "chunk_large_inputs": true,
+      "chunk_threshold_ratio": 0.25,
+      "wrap_up_threshold": 0.50,        // Soft limit - inject wrap-up suggestions
+      "hard_limit": 0.80,               // Hard limit - drop context and reattempt
+      "drop_context_on_hard_limit": true,
+      "proactive_compression": false,   // Enable multi-stage ContextCompressor
+      "model_context_limit": 0,         // Override model's ContextLimit (0 = use model default)
+      "hierarchical_summarization": false,
+      "max_summary_level": 3,           // Max recursion depth for re-summarization
+      "summary_level_threshold": 500,   // Token threshold to trigger re-summarization
+    },
+    // HTTP-level metrics collection
+    "metrics": {
+      "enabled": true,
+      "db_path": "~/.meept/metrics.db",
+      "retention_days": 7,
+      "stats_refresh_minutes": 5,
+    },
+    // LLM response cache (L1 in-memory, L2 SQLite)
+    "cache": {
+      "enabled": false,
+      "l1_max_entries": 0,
+      "l2_enabled": false,
+      "l2_db_path": "",
+      "default_ttl_min": 0,
     },
   },
 
   // Memory configuration
-  memory: {
-    data_dir: "~/.meept/memory",
-    consolidation_interval_hours: 6,
-    episodic: {
-      enabled: true,
-      max_context_items: 20,
+  "memory": {
+    "backend": "memvid",  // "memvid" (default) or "sqlite"
+    "data_dir": "~/.meept/memory",
+    "consolidation_interval_hours": 6,
+    "episodic": {
+      "enabled": true,
+      "max_context_items": 20,
     },
-    task: {
-      enabled: true,
-      domains: ["general", "code", "commands"],
+    "task": {
+      "enabled": true,
+      "domains": ["general", "code", "commands"],
     },
-    personality: {
-      enabled: true,
-      update_interval_conversations: 10,
+    "personality": {
+      "enabled": true,
+      "update_interval_conversations": 10,
     },
-    security: {
-      enabled: true,
-      fail_closed: true,
-      log_blocked: true,
+    // Vector embeddings for semantic memory search
+    "embeddings": {
+      "enabled": false,
+      "provider": "",      // "openai" or "ollama"
+      "api_key": "",
+      "base_url": "",
+      "model": "",
+      "dimension": 0,
     },
-    caching: {
-      enabled: true,
-      refresh_on_session_end: true,
+    "security": {
+      "enabled": true,
+      "fail_closed": true,
+      "log_blocked": true,
     },
-    limits: {
-      episodic: {
-        enabled: true,
-        character_limit: 2200,
+    "caching": {
+      "enabled": true,
+      "refresh_on_session_end": true,
+    },
+    "limits": {
+      "episodic": {
+        "enabled": true,
+        "character_limit": 2200,
       },
-      task_code: {
-        enabled: true,
-        character_limit: 3000,
+      "task_code": {
+        "enabled": true,
+        "character_limit": 3000,
       },
-      task_general: {
-        enabled: true,
-        character_limit: 2200,
+      "task_general": {
+        "enabled": true,
+        "character_limit": 2200,
       },
-      task_commands: {
-        enabled: true,
-        character_limit: 1500,
+      "task_commands": {
+        "enabled": true,
+        "character_limit": 1500,
       },
-      personality: {
-        enabled: true,
-        character_limit: 1375,
+      "personality": {
+        "enabled": true,
+        "character_limit": 1375,
       },
     },
-    expiration: {
-      enabled: true,
-      access_expiration_days: 90,
-      summarize_before_delete: true,
-      summary_category: "archived",
+    "expiration": {
+      "enabled": true,
+      "access_expiration_days": 90,
+      "summarize_before_delete": true,
+      "summary_category": "archived",
     },
-    versioning: {
-      enabled: true,
-      max_versions: 10,
+    "versioning": {
+      "enabled": true,
+      "max_versions": 10,
     },
+    // Per-project character limit overrides (keyed by project path)
+    "project_overrides": {},
   },
 
-  // Multi-agent configuration
-  agents: {
-    enabled: false,
-    config_dirs: ["~/.meept/agents", "config/agents"],
-    prompts_dir: "config/prompts",
-    default_model: "",
-    dispatcher_id: "dispatcher",
+  // Memvid service connection
+  "memvid": {
+    "enabled": false,
+    "endpoint": "http://localhost:8765",
+    "data_dir": "~/.meept/memvid",
+    "timeout_seconds": 30,
   },
 
-  // Security configuration
-  security: {
-    sanitize_inputs: true,
-    sanitize_strictness: "standard",
-    llm_filter_external: false,
-    monitor_output: true,
-    redact_output: true,
-    scan_shell_commands: true,
-    tirith_binary: "tirith",
-    require_confirmation_high: true,
-    require_confirmation_critical: true,
-    block_financial: true,
-    allowed_paths: ["~/*"],
-    blocked_paths: ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"],
-    enable_audit_log: false,
-    audit_db_path: "~/.meept/audit.db",
+  // Multi-agent orchestration
+  "multiagent": {
+    "enabled": true,
+    "dispatcher_model": "",        // Empty = use default model
+    "default_model": "",           // Empty = use default model
+    "classifier_model": "",        // Empty = use small_model
+    "max_memory_refs": 20,
+    "context_search_limit": 10,
   },
 
-  // Scheduler configuration
-  scheduler: {
-    enabled: true,
-    timezone: "UTC",
-  },
-
-  // Telegram bot configuration
-  telegram: {
-    enabled: false,
-    token: "",
-    creator_id: 0,
-    allowed_users: [],
-    allowed_chats: [],
-    poll_timeout: 30,
-  },
-
-  // Web server configuration
-  web: {
-    enabled: false,
-    host: "127.0.0.1",
-    port: 8420,
-    secret_key: "",
-  },
-
-  // MCP server configuration
-  mcp: {
-    enabled: false,
-    config_file: "~/.meept/mcp_servers.json5",
-  },
-
-  // Plugins configuration
-  plugins: {
-    enabled: true,
-    directory: "~/.meept/plugins",
-  },
-
-  // Workspace configuration
-  workspace: {
-    enabled: true,
-    base_dir: "~/.meept/workspaces",
-    auto_commit: true,
-    commit_on_plan: true,
-    commit_on_step: true,
-    cleanup_completed: false,
-  },
-
-  // Skills configuration
-  skills: {
-    enabled: false,
-    search_paths: [],
-    auto_reload: false,
-  },
-
-  // ClawSkills (third-party skills)
-  clawskills: {
-    enabled: false,
-    registry_url: "https://clawhub.ai",
-    install_dir: "~/.meept/clawskills",
-    auto_update: false,
-    max_installed: 50,
-    default_risk_level: "high",
-    max_iterations: 10,
-    blocked_slugs: [],
-  },
-
-  // Self-improvement configuration
-  selfimprove: {
-    enabled: false,
-    data_dir: "~/.meept/selfimprove",
-    max_iterations_per_cycle: 5,
-    max_fixes_per_cycle: 10,
-    auto_run_interval_hours: 0,
-    ai_infra: {
-      enabled: false,
-      base_url: "http://localhost:8100",
-      api_key_env: "MEEPT_AI_INFRA_KEY",
-      analysis_model: "claude-opus-4-5-20251101",
-      generation_model: "claude-sonnet-4-5-20241022",
-      review_model: "claude-opus-4-5-20251101",
-      timeout_seconds: 120.0,
-      max_retries: 3,
-    },
-    sandbox: {
-      worktree_dir: "~/.meept/selfimprove/worktrees",
-      cleanup_on_success: true,
-      cleanup_on_failure: false,
-      max_worktrees: 5,
-      test_timeout_seconds: 300.0,
-    },
-    safety: {
-      require_human_approval: true,
-      max_files_per_fix: 10,
-      max_lines_changed_per_fix: 500,
-      blocked_paths: [],
-      allowed_risk_levels: ["low", "medium", "high"],
-      block_critical_risk: true,
-      require_tests_pass: true,
-      min_confidence_threshold: 0.7,
-    },
-    detection: {
-      scan_pytest: true,
-      scan_runtime_logs: true,
-      scan_type_check: true,
-      scan_lint: true,
-      log_file: "~/.meept/meept.log",
-      log_lookback_hours: 24,
-      pytest_args: ["-v", "--tb=short"],
-      mypy_args: ["--ignore-missing-imports"],
-      ruff_args: [],
-    },
-  },
-
-  // Q Agent (meta-agent) configuration
-  q_agent: {
-    enabled: true,
-    session_idle_trigger_hours: 12,
-    analysis_timeout_minutes: 30,
-    min_sessions_for_pattern: 5,
-    min_confidence_score: 0.7,
-    high_error_rate_threshold: 0.2,
-    high_rejection_rate_threshold: 0.3,
-    duration_variance_threshold: 3.0,
-    notify_chat: true,
-    notify_cli: true,
-    notify_menu_bar: false,
-    analysis_dir: "~/.meept/q_analysis",
-    outcomes_log: "~/.meept/q_outcomes.jsonl",
+  // Agent definitions (TOML-based agent configs)
+  "agents": {
+    "enabled": false,
+    "config_dirs": ["~/.meept/agents", "config/agents"],
+    "prompts_dir": "config/prompts",
+    "default_model": "",
+    "dispatcher_id": "dispatcher",
   },
 
   // Agent loop configuration
-  agent: {
-    progress_enabled: true,
-    progress_interval_seconds: 30,
-    cache: {
-      enabled: true,
-      max_entries: 1000,
-      default_ttl_seconds: 300,
-      cleanup_freq_seconds: 60,
-      enabled_tools: [
+  "agent": {
+    "progress_enabled": true,
+    "progress_interval_seconds": 30,
+    "cache": {
+      "enabled": false,
+      "max_entries": 1000,
+      "default_ttl_seconds": 300,
+      "cleanup_freq_seconds": 60,
+      "enabled_tools": [
         "file_read",
         "list_directory",
         "memory_search",
@@ -272,43 +197,335 @@
         "platform_tools",
       ],
     },
-    errors: {
-      detailed_errors: true,
-      include_examples: true,
-      max_suggestion_length: 500,
+    "errors": {
+      "detailed_errors": true,
+      "include_examples": true,
+      "max_suggestion_length": 500,
+    },
+    "review": {
+      "enabled": true,
+      "require_review": ["code", "refactor", "debug", "git"],
+      "skip_review": ["chat", "report", "recall", "search"],
+      "reviewer_mapping": {
+        "coder": "code-reviewer",
+        "debugger": "debug-reviewer",
+        "planner": "planner-reviewer",
+        "analyst": "analyst-reviewer",
+        "committer": "code-reviewer",
+      },
+      "max_revision_cycles": 3,
+      "auto_approve_patterns": ["*.md", "LICENSE"],
+    },
+    // Task completion validation
+    "validation": {
+      "enabled": true,
+      "require_validation": ["code", "refactor", "debug", "git", "fix", "commit"],
+      "skip_validation": ["chat", "report", "recall", "search", "analyze", "platform"],
+      "skip_validation_agents": ["chat", "analyst"],
+      "max_validation_loops": 3,
+    },
+    // Agent monitoring and stuck detection
+    "watchdog": {
+      "enabled": true,
+      "timeout_minutes": 10,
+      "heartbeat_interval_sec": 30,
+      "max_iterations": 50,
+      "stuck_iteration_count": 5,
     },
   },
 
-  // Review configuration
-  review: {
-    enabled: true,
-    require_review: ["code", "refactor", "debug", "git", "fix"],
-    skip_review: ["chat", "report", "recall", "search", "analyze"],
-    reviewer_mapping: {
-      coder: "code-reviewer",
-      debugger: "debug-reviewer",
-      planner: "planner-reviewer",
-      analyst: "analyst-reviewer",
-      committer: "code-reviewer",
+  // Security configuration
+  "security": {
+    "sanitize_inputs": true,
+    "sanitize_strictness": "standard",  // "permissive", "standard", "strict"
+    "llm_filter_external": false,
+    "monitor_output": true,
+    "redact_output": true,
+    "scan_shell_commands": true,
+    "tirith_binary": "tirith",
+    "require_confirmation_high": true,
+    "require_confirmation_critical": true,
+    "block_financial": true,
+    "allowed_paths": ["~/*"],
+    "blocked_paths": ["~/.ssh/*", "~/.gnupg/*", "~/.meept/meept.toml"],
+    "enable_audit_log": false,
+    "audit_db_path": "~/.meept/audit.db",
+    "strict_override_matching": false,  // Use lenient three-strategy cascade for permission overrides
+  },
+
+  // Scheduler configuration
+  "scheduler": {
+    "enabled": true,
+    "timezone": "UTC",
+  },
+
+  // Job queue
+  "queue": {
+    "db_path": "~/.meept/queue.db",
+    "max_retries": 3,
+  },
+
+  // Worker pool
+  "workers": {
+    "pool_size": 4,
+    "idle_timeout_seconds": 300,
+    "default_caps": ["code", "reasoning"],
+  },
+
+  // Task isolation / sandbox
+  "isolation": {
+    "base_dir": "~/.meept/sandboxes",
+    "auto_git_init": true,
+    "auto_test": true,
+  },
+
+  // Telegram bot configuration
+  "telegram": {
+    "enabled": false,
+    "token": "",
+    "creator_id": 0,
+    "allowed_users": [],
+    "allowed_chats": [],
+    "poll_timeout": 30,
+  },
+
+  // Web server configuration
+  "web": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 8420,
+    "secret_key": "",
+  },
+
+  // MCP server configuration
+  "mcp": {
+    "enabled": false,
+    "config_file": "~/.meept/mcp_servers.json",
+  },
+
+  // Plugins configuration
+  "plugins": {
+    "enabled": true,
+    "directory": "~/.meept/plugins",
+  },
+
+  // Workspace configuration
+  "workspace": {
+    "enabled": true,
+    "base_dir": "~/.meept/workspaces",
+    "auto_commit": true,
+    "commit_on_plan": true,
+    "commit_on_step": true,
+    "cleanup_completed": false,
+  },
+
+  // Skills configuration
+  "skills": {
+    "enabled": false,
+    "search_paths": [],
+    "auto_reload": false,
+    "max_cached_skills": 50,
+  },
+
+  // Self-improvement configuration
+  "selfimprove": {
+    "enabled": false,
+    "data_dir": "~/.meept/selfimprove",
+    "max_iterations_per_cycle": 5,
+    "max_fixes_per_cycle": 10,
+    "auto_run_interval_hours": 0,
+    "ai_infra": {
+      "enabled": false,
+      "base_url": "http://localhost:8100",
+      "api_key_env": "MEEPT_AI_INFRA_KEY",
+      "analysis_model": "claude-opus-4-5-20251101",
+      "generation_model": "claude-sonnet-4-5-20241022",
+      "review_model": "claude-opus-4-5-20251101",
+      "timeout_seconds": 120.0,
+      "max_retries": 3,
     },
-    max_revision_cycles: 3,
-    auto_approve_patterns: ["*.md", "LICENSE", "*.txt"],
+    "sandbox": {
+      "worktree_dir": "~/.meept/selfimprove/worktrees",
+      "cleanup_on_success": true,
+      "cleanup_on_failure": false,
+      "max_worktrees": 5,
+      "test_timeout_seconds": 300.0,
+    },
+    "safety": {
+      "require_human_approval": true,
+      "max_files_per_fix": 10,
+      "max_lines_changed_per_fix": 500,
+      "blocked_paths": [],
+      "allowed_risk_levels": ["low", "medium", "high"],
+      "block_critical_risk": true,
+      "require_tests_pass": true,
+      "min_confidence_threshold": 0.7,
+    },
+    "detection": {
+      "scan_pytest": true,
+      "scan_runtime_logs": true,
+      "scan_type_check": true,
+      "scan_lint": true,
+      "log_file": "~/.meept/meept.log",
+      "log_lookback_hours": 24,
+      "pytest_args": ["-v", "--tb=short"],
+      "mypy_args": ["--ignore-missing-imports"],
+      "ruff_args": [],
+    },
   },
 
-  // Menubar configuration
-  menubar: {
-    enabled: true,
+  // Hierarchical orchestrator settings
+  "orchestrator": {
+    "max_plan_steps": 10,
+    "max_research_steps": 3,
+    "planner_timeout": 120,
+    "token_budget_alert": 5000,
   },
 
-  // Calendar configuration
-  calendar: {
-    enabled: false,
-    client_id: "${GOOGLE_CLIENT_ID}",
-    client_secret: "${GOOGLE_CLIENT_SECRET}",
-    calendar_id: "primary",
-    redirect_uri: "http://localhost:8888/callback",
-    reminder_enabled: false,
-    reminder_check_interval: "5m",
-    reminder_advance_minutes: 10,
+  // Shadow training system (response shadowing for model improvement)
+  "shadow": {
+    "enabled": false,
+    "data_dir": "~/.meept/shadow",
+    "shadowing": {
+      "mode": "async",            // "async" or "sync"
+      "min_complexity": "moderate",
+      "domains": [],
+      "task_types": [],
+      "sample_rate": 0.5,
+      "queue_size": 1000,
+      "worker_count": 2,
+    },
+    "teacher": {
+      "model": "",                // Empty = use default
+      "fallback_model": "",
+      "temperature": 0.0,
+      "max_tokens": 4096,
+      "timeout_seconds": 120,
+      "max_daily_queries": 500,
+      "max_daily_cost": 10.0,
+      "requests_per_minute": 30,
+    },
+    "quality": {
+      "method": "hybrid",         // "heuristic", "llm", "hybrid"
+      "high_quality_threshold": 0.85,
+      "trainable_threshold": 0.6,
+      "preference_margin": 0.1,
+      "heuristic_weights": {
+        "relevance": 0.30,
+        "completeness": 0.25,
+        "correctness": 0.35,
+        "style": 0.10,
+      },
+      "eval_prompt_template": "",
+    },
+    "examples": {
+      "enabled": true,
+      "max_per_category": 100,
+      "min_quality": 0.8,
+      "default_count": 3,
+      "max_count": 5,
+      "similarity_weight": 0.7,
+      "recency_weight": 0.2,
+      "quality_weight": 0.1,
+      "max_context_tokens": 2000,
+    },
+    "export": {
+      "output_dir": "~/.meept/shadow/exports",
+      "formats": ["jsonl", "dpo"],
+      "min_records": 100,
+      "include_low_quality": false,
+      "deduplicate": true,
+      "dedup_similarity_threshold": 0.95,
+    },
+    "adapters": {
+      "enabled": false,
+      "ollama_endpoint": "http://localhost:11434",
+      "auto_train": false,
+      "train_threshold": 500,
+      "train_schedule": "",
+      "adapter_dir": "~/.meept/shadow/adapters",
+      "lora": {
+        "rank": 16,
+        "alpha": 32,
+        "dropout": 0.05,
+        "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj"],
+        "learning_rate": 0.0002,
+        "epochs": 3,
+        "batch_size": 4,
+        "gradient_accumulation": 4,
+        "warmup_ratio": 0.03,
+        "max_grad_norm": 1.0,
+      },
+      "dpo": {
+        "beta": 0.1,
+        "loss_type": "sigmoid",
+      },
+    },
+  },
+
+  // Distributed memory synchronization (2-tier local/memvid)
+  "distributed_memory": {
+    "enabled": false,
+    "mode": "local",  // "local" (no sync) or "distributed" (sync with memvid)
+    "sync": {
+      "hydrate_on_claim": true,
+      "hydration_limit": 20,
+      "distill_on_complete": true,
+      "periodic_distill_interval_minutes": 30,
+      "retry_on_failure": true,
+      "max_retries": 3,
+    },
+    "distillation": {
+      "pagerank_threshold": 0.3,
+      "hub_connectivity_threshold": 5,
+      "promote_task_completions": true,
+      "cross_agent_references_min": 2,
+      "min_memory_age_minutes": 5,
+    },
+  },
+
+  // Q Agent (meta-agent for agent optimization)
+  "q_agent": {
+    "enabled": true,
+    "session_idle_trigger_hours": 12,
+    "analysis_timeout_minutes": 30,
+    "min_sessions_for_pattern": 5,
+    "min_confidence_score": 0.7,
+    "high_error_rate_threshold": 0.2,
+    "high_rejection_rate_threshold": 0.3,
+    "duration_variance_threshold": 3.0,
+    "notify_chat": true,
+    "notify_cli": true,
+    "notify_menu_bar": false,
+    "analysis_dir": "~/.meept/q_analysis",
+    "outcomes_log": "~/.meept/q_outcomes.jsonl",
+  },
+
+  // Code intelligence (AST parsing + LSP client)
+  "code_intel": {
+    "enabled": true,
+    "ast": {
+      "cache_enabled": true,
+      "cache_max_size": 100,
+      "cache_ttl_minutes": 5,
+    },
+    "lsp": {
+      "enabled": false,
+      "servers": {},  // Map of language ID to server config
+      "auto_start_servers": true,
+      "connection_timeout_seconds": 10,
+    },
+  },
+
+  // Calendar integration
+  "calendar": {
+    "enabled": false,
+    "client_id": "${GOOGLE_CLIENT_ID}",
+    "client_secret": "${GOOGLE_CLIENT_SECRET}",
+    "calendar_id": "primary",
+    "redirect_uri": "http://localhost:8888/callback",
+    "reminder_enabled": false,
+    "reminder_check_interval": "5m",
+    "reminder_advance_minutes": 10,
   },
 }
