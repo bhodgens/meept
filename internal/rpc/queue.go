@@ -23,9 +23,9 @@ func NewQueueHandler(reg *agent.AgentRegistry) *QueueHandler {
 
 // RegisterQueueMethods registers queue RPC methods on the server.
 func (h *QueueHandler) RegisterQueueMethods(server *Server) {
-	server.RegisterHandler("queue.steer", h.handleSteer)
-	server.RegisterHandler("queue.followup", h.handleFollowUp)
-	server.RegisterHandler("queue.status", h.handleStatus)
+	server.RegisterHandler("chat.steer", h.handleSteer)
+	server.RegisterHandler("chat.followup", h.handleFollowUp)
+	server.RegisterHandler("chat.queue_status", h.handleStatus)
 }
 
 func (h *QueueHandler) reg() (*agent.AgentRegistry, error) {
@@ -35,7 +35,7 @@ func (h *QueueHandler) reg() (*agent.AgentRegistry, error) {
 	return h.registry, nil
 }
 
-// handleSteer handles queue.steer RPC calls.
+// handleSteer handles chat.steer RPC calls.
 func (h *QueueHandler) handleSteer(ctx context.Context, params json.RawMessage) (any, error) {
 	reg, err := h.reg()
 	if err != nil {
@@ -72,7 +72,7 @@ func (h *QueueHandler) handleSteer(ctx context.Context, params json.RawMessage) 
 	}, nil
 }
 
-// handleFollowUp handles queue.followup RPC calls.
+// handleFollowUp handles chat.followup RPC calls.
 func (h *QueueHandler) handleFollowUp(ctx context.Context, params json.RawMessage) (any, error) {
 	reg, err := h.reg()
 	if err != nil {
@@ -109,7 +109,7 @@ func (h *QueueHandler) handleFollowUp(ctx context.Context, params json.RawMessag
 	}, nil
 }
 
-// handleStatus handles queue.status RPC calls.
+// handleStatus handles chat.queue_status RPC calls.
 func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage) (any, error) {
 	reg, err := h.reg()
 	if err != nil {
