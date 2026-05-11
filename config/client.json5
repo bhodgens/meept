@@ -1,65 +1,95 @@
 // Meept TUI Client Configuration
 // Copy to ~/.meept/client.json5 to customize
 {
+  // Connection to the meept daemon
+  "connection": {
+    // Transport: "rpc" (unix socket), "http" (REST), or "auto" (default: "auto" -> rpc)
+    "transport": "auto",
+    // Daemon address: socket path for RPC, "host:port" for HTTP
+    "address": "~/.meept/meept.sock",
+    // Connection timeout (default: "5s")
+    "timeout": "5s",
+    // Retry settings for connection failures
+    "retry": {
+      "attempts": 3,      // Max retry attempts
+      "delay": "500ms",   // Delay between retries
+    },
+  },
+
   // Keyboard shortcuts configuration
   "keybindings": {
     // Key to enter command mode (opens command palette)
     "command_mode": "ctrl+x",
-
     // Key to quit the application
     "quit": "ctrl+c",
-
+    // Escape behavior for clearing input: "once", "twice", or "off"
+    "escape_behavior": "once",
     // Keys within command palette
     "command_palette": {
-      // View switching
-      "view_chat": "1",
-      "view_status": "2",
-      "view_tasks": "3",
-      "view_memory": "4",
-
-      // UI controls
-      "sidebar": "y",      // Toggle sidebar (changed from 's')
-      "sessions": "s",     // Open session picker (new)
-      "copy_mode": "c"     // Enable text selection mode
-    }
+      "view_chat": "c",
+      "view_tasks": "t",
+      "view_queue": "q",
+      "view_memory": "m",
+      "sidebar": "y",        // Toggle sidebar
+      "sessions": "s",       // Open session picker
+      "new_session": "n",    // Create new session
+      "rename_session": "r", // Rename current session
+    },
   },
 
   // Session behavior configuration
   "session": {
     // Automatically resume the most recent session on startup
     "auto_resume": true,
-
     // Default name for new sessions (if not specified)
-    "default_name": "default"
+    "default_name": "default",
+  },
+
+  // Vim mode settings
+  "vim": {
+    // Enable vim keybindings mode (default: false)
+    "enabled": false,
+    // Escape sequence from insert mode (default: "jk")
+    "escape_insert": "jk",
+    // Leader key (default: " ")
+    "leader": " ",
+    // Custom normal mode bindings
+    "normal": {},
+    // Custom insert mode bindings
+    "insert": {},
+    // Custom visual mode bindings
+    "visual": {},
   },
 
   // Rendering options
   "rendering": {
     // Enable markdown rendering in chat messages
     "markdown": true,
-
     // Enable syntax highlighting in code blocks
     "syntax_highlighting": true,
-
     // Syntax highlighting theme (e.g., "monokai", "dracula")
     "theme": "monokai",
-
     // Enable word wrap for long lines
     "word_wrap": true,
-
     // Show header bar with session info
     "show_header": true,
-
     // Enable animated dispatch visualization in sidebar
-    "sidebar_animation": true
+    "sidebar_animation": true,
+    // Sidebar panel configuration
+    "sidebar": {
+      "show_metrics": true,       // Show metrics sparklines panel
+      "show_activity_feed": true, // Show activity feed panel
+      "default_panel": 0,         // Default expanded panel (0=status)
+      "metrics_history": 30,      // Data points for sparklines
+      "activity_feed_size": 50,   // Max events in activity feed
+    },
   },
 
-  // Chat viewport behavior configuration
+  // Chat viewport behavior
   "chat": {
-    // Auto-copy selected text to clipboard on mouse release (default: false)
+    // Auto-copy selected text to clipboard on mouse release
     "auto_copy_on_release": false,
-
-    // Lines to scroll per mouse wheel event (default: 3)
-    "scroll_speed": 5
-  }
+    // Lines to scroll per mouse wheel event
+    "scroll_speed": 3,
+  },
 }
