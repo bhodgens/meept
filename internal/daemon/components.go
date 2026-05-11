@@ -608,9 +608,10 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 		// Load MCP servers config
 		mcpCfg, err := config.LoadMCPConfig(cfg.MCP.ConfigFile)
-		if err != nil {
+		switch {
+		case err != nil:
 			logger.Warn("Failed to load MCP config", "error", err, "path", cfg.MCP.ConfigFile)
-		} else if len(mcpCfg.Servers) > 0 {
+		case len(mcpCfg.Servers) > 0:
 			logger.Info("Starting MCP servers", "count", len(mcpCfg.Servers))
 			for _, serverCfg := range mcpCfg.Servers {
 				if err := c.MCPManager.StartServer(context.Background(), serverCfg); err != nil {
@@ -624,7 +625,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 			// Register MCP tools with the tool registry
 			registerMCPTools(c.ToolRegistry, c.MCPManager, logger)
-		} else {
+		default:
 			logger.Info("MCP enabled but no servers configured")
 		}
 	}

@@ -152,7 +152,9 @@ func (am *ArtifactManager) HasArtifacts(workingDir string) bool {
 // InvalidateCache invalidates the cache for a specific directory.
 func (am *ArtifactManager) InvalidateCache(dir string) {
 	delete(am.artifactCache, dir)
-	am.claudeManager.Invalidate(dir)
+	if err := am.claudeManager.Invalidate(dir); err != nil {
+		am.logger.Warn("failed to invalidate artifact cache", "dir", dir, "error", err)
+	}
 }
 
 // InvalidateAll clears all cached artifacts.

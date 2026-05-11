@@ -238,11 +238,11 @@ func (t *CalendarTodayTool) Execute(ctx context.Context, args map[string]any) (a
 // formatCalendarEvents formats a slice of events into a readable string.
 func formatCalendarEvents(events []calendar.Event) string {
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("%d event(s):\n", len(events)))
+	fmt.Fprintf(&result, "%d event(s):\n", len(events))
 	for i, e := range events {
 		start, err := e.Start.Time()
 		if err != nil {
-			result.WriteString(fmt.Sprintf("%d. %s\n", i+1, e.Summary))
+			fmt.Fprintf(&result, "%d. %s\n", i+1, e.Summary)
 			continue
 		}
 		line := fmt.Sprintf("%d. %s - %s", i+1, start.Format("15:04"), e.Summary)

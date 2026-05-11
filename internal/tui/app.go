@@ -1180,23 +1180,24 @@ func (a *App) renderHeader() string {
 
 	// Build header content
 	var content string
-	if sessionName != "" && desc != "" {
+	switch {
+	case sessionName != "" && desc != "":
 		// Both name and description
 		maxDescWidth := width - len(sessionName) - 5
 		if maxDescWidth > 10 && len(desc) > maxDescWidth {
 			desc = desc[:maxDescWidth-3] + "..."
 		}
 		content = sessionName + " │ " + desc
-	} else if sessionName != "" {
+	case sessionName != "":
 		// Just session name
 		content = sessionName
-	} else if desc != "" {
+	case desc != "":
 		// Just description (for "default" session)
 		if len(desc) > width-2 {
 			desc = desc[:width-5] + "..."
 		}
 		content = desc
-	} else {
+	default:
 		// Nothing to show
 		content = "meept"
 	}

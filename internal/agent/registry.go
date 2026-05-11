@@ -115,7 +115,9 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 
 	// Register default specs
 	for _, spec := range DefaultSpecs() {
-		r.RegisterSpec(spec)
+		if err := r.RegisterSpec(spec); err != nil {
+			r.logger.Warn("failed to register default agent spec", "id", spec.ID, "error", err)
+		}
 	}
 
 	// Discover and merge AGENT.md definitions

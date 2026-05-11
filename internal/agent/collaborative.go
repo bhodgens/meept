@@ -255,7 +255,9 @@ func (c *CollaborativePlanner) PlanAndReview(ctx context.Context, message, conve
 	c.pending[conversationID] = review
 	c.mu.Unlock()
 
-	c.workspace.AppendLog(ctx, taskID, "Plan created and pending approval")
+	if err := c.workspace.AppendLog(ctx, taskID, "Plan created and pending approval"); err != nil {
+		c.logger.Warn("failed to append workspace log", "task_id", taskID, "error", err)
+	}
 	return review, nil
 }
 
@@ -273,8 +275,12 @@ func (c *CollaborativePlanner) Approve(ctx context.Context, conversationID strin
 	review.Plan.Approved = true
 	review.Plan.Status = TaskStatusPending
 
-	c.workspace.AppendLog(ctx, review.TaskID, "Plan approved by user")
-	c.workspace.Commit(ctx, review.TaskID, "Plan approved", nil)
+	if err := c.workspace.AppendLog(ctx, review.TaskID, "Plan approved by user"); err != nil {
+		c.logger.Warn("failed to append workspace log", "task_id", review.TaskID, "error", err)
+	}
+	if err := c.workspace.Commit(ctx, review.TaskID, "Plan approved", nil); err != nil {
+		c.logger.Warn("failed to commit workspace", "task_id", review.TaskID, "error", err)
+	}
 
 	// Remove from pending
 	delete(c.pending, conversationID)
@@ -299,8 +305,12 @@ func (c *CollaborativePlanner) Reject(ctx context.Context, conversationID, reaso
 	if reason != "" {
 		logMsg = fmt.Sprintf("Plan rejected: %s", reason)
 	}
-	c.workspace.AppendLog(ctx, review.TaskID, logMsg)
-	c.workspace.Commit(ctx, review.TaskID, "Plan rejected", nil)
+	if err := c.workspace.AppendLog(ctx, review.TaskID, logMsg); err != nil {
+		c.logger.Warn("failed to append workspace log", "task_id", review.TaskID, "error", err)
+	}
+	if err := c.workspace.Commit(ctx, review.TaskID, "Plan rejected", nil); err != nil {
+		c.logger.Warn("failed to commit workspace", "task_id", review.TaskID, "error", err)
+	}
 
 	delete(c.pending, conversationID)
 	return nil
@@ -347,12 +357,16 @@ func (c *CollaborativePlanner) Revise(ctx context.Context, conversationID, feedb
 			ToolHint:    s.ToolHint,
 		})
 	}
-	c.workspace.WritePlan(ctx, taskID, planInfo)
+	if _, err := c.workspace.WritePlan(ctx, taskID, planInfo); err != nil {
+		c.logger.Warn("failed to write plan", "task_id", taskID, "error", err)
+	}
 
 	// Re-analyse
 	analysis := c.analysePlan(ctx, plan)
 	plan.Analysis = analysis
-	c.workspace.WriteReview(ctx, taskID, analysis)
+	if _, err := c.workspace.WriteReview(ctx, taskID, analysis); err != nil {
+		c.logger.Warn("failed to write review", "task_id", taskID, "error", err)
+	}
 
 	summary := c.formatSummary(plan, analysis)
 
@@ -369,8 +383,12 @@ func (c *CollaborativePlanner) Revise(ctx context.Context, conversationID, feedb
 	if len(truncatedFeedback) > 80 {
 		truncatedFeedback = truncatedFeedback[:80]
 	}
-	c.workspace.AppendLog(ctx, taskID, fmt.Sprintf("Plan revised based on feedback: %s", truncatedFeedback))
-	c.workspace.Commit(ctx, taskID, "Plan revised", nil)
+	if err := c.workspace.AppendLog(ctx, taskID, fmt.Sprintf("Plan revised based on feedback: %s", truncatedFeedback)); err != nil {
+		c.logger.Warn("failed to append workspace log", "task_id", taskID, "error", err)
+	}
+	if err := c.workspace.Commit(ctx, taskID, "Plan revised", nil); err != nil {
+		c.logger.Warn("failed to commit workspace", "task_id", taskID, "error", err)
+	}
 
 	return review, nil
 }

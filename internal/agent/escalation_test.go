@@ -71,7 +71,7 @@ func TestEscalationManager_EscalationLevel(t *testing.T) {
 	}
 
 	// Second escalation
-	em.Escalate(context.Background(), failure)
+	_ = em.Escalate(context.Background(), failure)
 	level = em.GetEscalationLevel("task-1")
 	if level != 2 {
 		t.Errorf("expected level 2 after second escalation, got %d", level)
@@ -95,7 +95,7 @@ func TestEscalationManager_ClearEscalation(t *testing.T) {
 		Timestamp: time.Now(),
 	}
 
-	em.Escalate(context.Background(), failure)
+	_ = em.Escalate(context.Background(), failure)
 	if level := em.GetEscalationLevel("task-1"); level != 1 {
 		t.Errorf("expected level 1, got %d", level)
 	}
@@ -123,7 +123,7 @@ func TestEscalationManager_EscalateForValidation(t *testing.T) {
 		Timestamp: time.Now(),
 	}
 
-	em.EscalateForValidation(context.Background(), failure, 3)
+	_ = em.EscalateForValidation(context.Background(), failure, 3)
 
 	level := em.GetEscalationLevel("task-1")
 	if level != 1 {
@@ -162,8 +162,8 @@ func TestEscalationManager_MaxLevelsReached(t *testing.T) {
 	}
 
 	// Escalate twice to reach max
-	em.Escalate(context.Background(), failure)
-	em.Escalate(context.Background(), failure)
+	_ = em.Escalate(context.Background(), failure)
+	_ = em.Escalate(context.Background(), failure)
 
 	level := em.GetEscalationLevel("task-1")
 	if level != 2 {
@@ -172,7 +172,7 @@ func TestEscalationManager_MaxLevelsReached(t *testing.T) {
 
 	// Third escalation should trigger human intervention path
 	// (no planner available, so it goes to notifyHumanIntervention)
-	em.Escalate(context.Background(), failure)
+	_ = em.Escalate(context.Background(), failure)
 	// Level should be 3 (max reached)
 	level = em.GetEscalationLevel("task-1")
 	if level != 3 {

@@ -278,9 +278,9 @@ func (e *ImpactEstimator) FormatReport(estimates []*ImpactEstimate, aggregate *A
 		fmt.Fprintf(&buf, "- **Metric Type**: %s\n", est.MetricType)
 		fmt.Fprintf(&buf, "- **Baseline**: %.1f\n", est.BaselineValue)
 		fmt.Fprintf(&buf, "- **Expected**: %.1f\n", est.ExpectedValue)
-		buf.WriteString(fmt.Sprintf("- **Improvement**: %.0f%%\n", est.ImprovementPercent))
-		buf.WriteString(fmt.Sprintf("- **Weekly Impact**: %s\n", est.WeeklyImpact))
-		buf.WriteString(fmt.Sprintf("- **Confidence**: %.0f%%\n\n", est.Confidence*100))
+		fmt.Fprintf(&buf, "- **Improvement**: %.0f%%\n", est.ImprovementPercent)
+		fmt.Fprintf(&buf, "- **Weekly Impact**: %s\n", est.WeeklyImpact)
+		fmt.Fprintf(&buf, "- **Confidence**: %.0f%%\n\n", est.Confidence*100)
 	}
 
 	return buf.String()

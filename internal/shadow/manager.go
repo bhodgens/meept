@@ -179,11 +179,12 @@ func (m *Manager) ProcessRecord(ctx context.Context, record *ShadowRecord) error
 			m.logger.Warn("Comparison scoring failed", "error", err)
 		} else {
 			margin := teacherScore - studentScore
-			if margin > m.config.Quality.PreferenceMargin {
+			switch {
+			case margin > m.config.Quality.PreferenceMargin:
 				record.Preference = PreferenceTeacher
-			} else if margin < -m.config.Quality.PreferenceMargin {
+			case margin < -m.config.Quality.PreferenceMargin:
 				record.Preference = PreferenceStudent
-			} else {
+			default:
 				record.Preference = PreferenceTie
 			}
 

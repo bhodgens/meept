@@ -140,7 +140,7 @@ func TestGet(t *testing.T) {
 
 	// Register and get
 	original := newMockComponent("test")
-	r.Register(original)
+	_ = r.Register(original)
 
 	c, ok = r.Get("test")
 	if !ok {
@@ -158,9 +158,9 @@ func TestStartAll(t *testing.T) {
 	c2 := newMockComponent("c2")
 	c3 := newMockComponent("c3")
 
-	r.Register(c1)
-	r.Register(c2)
-	r.Register(c3)
+	_ = r.Register(c1)
+	_ = r.Register(c2)
+	_ = r.Register(c3)
 
 	ctx := context.Background()
 	err := r.StartAll(ctx)
@@ -192,9 +192,9 @@ func TestStartAll_StopsOnError(t *testing.T) {
 	c2 := newMockComponent("c2").withStartErr(errors.New("start failed"))
 	c3 := newMockComponent("c3")
 
-	r.Register(c1)
-	r.Register(c2)
-	r.Register(c3)
+	_ = r.Register(c1)
+	_ = r.Register(c2)
+	_ = r.Register(c3)
 
 	ctx := context.Background()
 	err := r.StartAll(ctx)
@@ -218,12 +218,12 @@ func TestStopAll(t *testing.T) {
 	c2 := newMockComponent("c2")
 	c3 := newMockComponent("c3")
 
-	r.Register(c1)
-	r.Register(c2)
-	r.Register(c3)
+	_ = r.Register(c1)
+	_ = r.Register(c2)
+	_ = r.Register(c3)
 
 	ctx := context.Background()
-	r.StartAll(ctx)
+	_ = r.StartAll(ctx)
 
 	// Stop all
 	err := r.StopAll(ctx)
@@ -271,13 +271,13 @@ func TestStopAll_ReverseOrder(t *testing.T) {
 	c2 := createTracking("c2")
 	c3 := createTracking("c3")
 
-	r.Register(c1)
-	r.Register(c2)
-	r.Register(c3)
+	_ = r.Register(c1)
+	_ = r.Register(c2)
+	_ = r.Register(c3)
 
 	ctx := context.Background()
-	r.StartAll(ctx)
-	r.StopAll(ctx)
+	_ = r.StartAll(ctx)
+	_ = r.StopAll(ctx)
 
 	// Should be stopped in reverse order: c3, c2, c1
 	if len(stopOrder) != 3 {
@@ -294,11 +294,11 @@ func TestStopAll_SkipsNotRunning(t *testing.T) {
 	c1 := newMockComponent("c1")
 	c2 := newMockComponent("c2")
 
-	r.Register(c1)
-	r.Register(c2)
+	_ = r.Register(c1)
+	_ = r.Register(c2)
 
 	// Only start c1
-	c1.Start(context.Background())
+	_ = c1.Start(context.Background())
 
 	ctx := context.Background()
 	err := r.StopAll(ctx)
@@ -322,12 +322,12 @@ func TestStopAll_ContinuesOnError(t *testing.T) {
 	c2 := newMockComponent("c2").withStopErr(errors.New("stop failed"))
 	c3 := newMockComponent("c3")
 
-	r.Register(c1)
-	r.Register(c2)
-	r.Register(c3)
+	_ = r.Register(c1)
+	_ = r.Register(c2)
+	_ = r.Register(c3)
 
 	ctx := context.Background()
-	r.StartAll(ctx)
+	_ = r.StartAll(ctx)
 
 	err := r.StopAll(ctx)
 	// Should return the last error
@@ -351,11 +351,11 @@ func TestList(t *testing.T) {
 	c1 := newMockComponent("c1")
 	c2 := newMockComponent("c2")
 
-	r.Register(c1)
-	r.Register(c2)
+	_ = r.Register(c1)
+	_ = r.Register(c2)
 
 	// Start only c1
-	c1.Start(context.Background())
+	_ = c1.Start(context.Background())
 
 	list := r.List()
 	if len(list) != 2 {
@@ -391,13 +391,13 @@ func TestCount(t *testing.T) {
 		t.Errorf("empty registry Count() = %d, want 0", r.Count())
 	}
 
-	r.Register(newMockComponent("c1"))
+	_ = r.Register(newMockComponent("c1"))
 	if r.Count() != 1 {
 		t.Errorf("Count() = %d, want 1", r.Count())
 	}
 
-	r.Register(newMockComponent("c2"))
-	r.Register(newMockComponent("c3"))
+	_ = r.Register(newMockComponent("c2"))
+	_ = r.Register(newMockComponent("c3"))
 	if r.Count() != 3 {
 		t.Errorf("Count() = %d, want 3", r.Count())
 	}
@@ -408,7 +408,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 	// Pre-register some components
 	for i := range 10 {
-		r.Register(newMockComponent(fmt.Sprintf("pre-%d", i)))
+		_ = r.Register(newMockComponent(fmt.Sprintf("pre-%d", i)))
 	}
 
 	var wg sync.WaitGroup
@@ -435,7 +435,7 @@ func TestConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := range opsPerGoroutine / 10 {
 				name := fmt.Sprintf("concurrent-%d-%d", id, j)
-				r.Register(newMockComponent(name))
+				_ = r.Register(newMockComponent(name))
 			}
 		}(i)
 	}
@@ -466,7 +466,7 @@ func TestStartAll_WithContext(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	r.Register(c)
+	_ = r.Register(c)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()

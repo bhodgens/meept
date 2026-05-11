@@ -59,11 +59,12 @@ func (m *Manager) StartServer(ctx context.Context, cfg ServerConfig) error {
 	transportType := cfg.Type
 	if transportType == "" {
 		// Infer type from config
-		if len(cfg.Command) > 0 {
+		switch {
+		case len(cfg.Command) > 0:
 			transportType = "stdio"
-		} else if cfg.URL != "" {
+		case cfg.URL != "":
 			transportType = "http"
-		} else {
+		default:
 			return fmt.Errorf("server %q: must specify command (stdio) or url (http)", cfg.Name)
 		}
 	}

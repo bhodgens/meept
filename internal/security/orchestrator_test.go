@@ -658,6 +658,9 @@ func TestOrchestratorAuditLog_QueryEvents(t *testing.T) {
 		e.Details = json.RawMessage(detailsStr)
 		events = append(events, e)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() after scanning audit events: %v", err)
+	}
 
 	if len(events) < 2 {
 		t.Errorf("expected at least 2 audit events, got %d", len(events))

@@ -33,7 +33,7 @@ func TestOrchestrator_SubscriptionSetup(t *testing.T) {
 	if err := orchestrator.Start(ctx); err != nil {
 		t.Fatalf("Failed to start orchestrator: %v", err)
 	}
-	defer orchestrator.Stop(context.Background())
+	defer func() { _ = orchestrator.Stop(context.Background()) }()
 
 	// Give the subscription goroutines time to start
 	time.Sleep(10 * time.Millisecond)
@@ -228,7 +228,7 @@ func TestOrchestrator_PlanRequestHandling(t *testing.T) {
 	if err := orchestrator.Start(ctx); err != nil {
 		t.Fatalf("Failed to start orchestrator: %v", err)
 	}
-	defer orchestrator.Stop(context.Background())
+	defer func() { _ = orchestrator.Stop(context.Background()) }()
 
 	// Give subscriptions time to register
 	time.Sleep(20 * time.Millisecond)

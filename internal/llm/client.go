@@ -506,7 +506,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	// Time the HTTP request
 	start := time.Now()
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req) //nolint:bodyclose // resp.Body closed below when resp != nil
 	latencyMs := time.Since(start).Milliseconds()
 
 	if resp != nil {

@@ -157,7 +157,8 @@ func (v *DispatchViz) Update(msg tea.Msg) tea.Cmd {
 func (v *DispatchViz) SyncWithData(agents []AgentActivityData, workers []WorkerData) {
 	// Map agent states to robots
 	for i, r := range v.robots {
-		if i < len(agents) {
+		switch {
+		case i < len(agents):
 			agent := agents[i]
 			r.AgentID = agent.AgentID
 
@@ -175,7 +176,7 @@ func (v *DispatchViz) SyncWithData(agents []AgentActivityData, workers []WorkerD
 				}
 			}
 			r.Progress = agent.Progress
-		} else if i < len(workers) {
+		case i < len(workers):
 			worker := workers[i-len(agents)]
 			r.AgentID = worker.ID
 
@@ -187,10 +188,12 @@ func (v *DispatchViz) SyncWithData(agents []AgentActivityData, workers []WorkerD
 					r.MoveTo(v.center)
 				}
 			}
-		} else if r.State != RobotIdle {
-			// No data for this robot, set to idle
-			r.SetState(RobotIdle)
-			r.MoveToHome()
+		default:
+			if r.State != RobotIdle {
+				// No data for this robot, set to idle
+				r.SetState(RobotIdle)
+				r.MoveToHome()
+			}
 		}
 	}
 }

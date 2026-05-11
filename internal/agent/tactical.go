@@ -418,7 +418,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			if step.ValidationRetryCount < maxRetries {
 				// Re-queue step for validation retry
 				step.ValidationRetryCount++
-				ts.stepStore.Update(step) // Persist retry count
+				if err := ts.stepStore.Update(step); err != nil {
+					ts.logger.Warn("failed to persist step retry count", "step_id", step.ID, "error", err)
+				}
 
 				retryPayload := StepJobPayload{
 					StepID:               step.ID,
@@ -470,7 +472,9 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 				"retry_count", step.ValidationRetryCount,
 				"max_retries", maxRetries,
 			)
-			ts.stepStore.Update(step) // Persist
+			if err := ts.stepStore.Update(step); err != nil {
+				ts.logger.Warn("failed to persist step", "step_id", step.ID, "error", err)
+			}
 			return validationErr      // Don't proceed to completion
 		}
 		step.Validated = true

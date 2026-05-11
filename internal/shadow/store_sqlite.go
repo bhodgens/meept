@@ -461,6 +461,9 @@ func (s *SQLiteTrainingStore) GetStats(ctx context.Context) (*ShadowStats, error
 		}
 		stats.RecordsByDomain[domain] = count
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err() scanning records by domain: %w", err)
+	}
 
 	// Records by task type
 	rows, err = s.db.QueryContext(ctx, "SELECT task_type, COUNT(*) FROM shadow_records GROUP BY task_type")
@@ -475,6 +478,9 @@ func (s *SQLiteTrainingStore) GetStats(ctx context.Context) (*ShadowStats, error
 			return nil, err
 		}
 		stats.RecordsByTaskType[taskType] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows.Err() scanning records by task type: %w", err)
 	}
 
 	// Daily usage
@@ -743,7 +749,7 @@ func (s *SQLiteExamplesStore) migrateToV1() error {
 	return err
 }
 
-func (s *SQLiteExamplesStore) migrateToV2() error {
+func (s *SQLiteExamplesStore) migrateToV2() {
 	// Add tags column for categorization. Ignore duplicate-column errors;
 	// log other errors at WARN.
 	_, err := s.db.Exec(`
@@ -760,8 +766,6 @@ func (s *SQLiteExamplesStore) migrateToV2() error {
 	if err != nil && !strings.Contains(err.Error(), "duplicate column") {
 		slog.Warn("shadow examples store migration: add last_used_at failed", "error", err)
 	}
-
-	return nil
 }
 
 // SaveExample saves a few-shot example.
