@@ -17,11 +17,19 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/registry"
 	"github.com/caimlas/meept/internal/rpc"
+	"github.com/caimlas/meept/internal/scheduler"
+	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/internal/skills"
+	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -231,63 +239,23 @@ func New(cfg *Config) (*Daemon, error) {
 	}
 
 	// Create service registry with dependencies
-	svcRegistry := &services.ServiceRegistry{}
-	if components != nil {
-		// Wire up services with their dependencies
-		if components.Queue != nil {
-			svcRegistry.Queue = services.NewQueueService(components.Queue)
-		}
-		if components.MemoryManager != nil {
-			svcRegistry.Memory = services.NewMemoryService(components.MemoryManager)
-		}
-		// Chat service uses the message bus and agent registry for queue access
-		svcRegistry.Chat = services.NewChatService(msgBus, components.AgentRegistry, logger)
-
-		// Task service
-		if components.TaskRegistry != nil {
-			svcRegistry.Task = services.NewTaskService(components.TaskRegistry)
-		}
-
-		// Session service
-		if components.SessionStore != nil {
-			svcRegistry.Session = services.NewSessionService(components.SessionStore)
-		}
-
-		// Worker service
-		if components.WorkerPool != nil {
-			svcRegistry.Worker = services.NewWorkerService(components.WorkerPool)
-		}
-
-		// Pipeline service (placeholder)
-		svcRegistry.Pipeline = services.NewPipelineService()
-
-		// Skills service
-		if components.SkillRegistry != nil {
-			svcRegistry.Skills = services.NewSkillsService(components.SkillRegistry, components.SkillExecutor)
-		}
-
-		// Self-improve service
-		if components.SelfImproveCtrl != nil {
-			svcRegistry.SelfImprove = services.NewSelfImproveService(components.SelfImproveCtrl)
-		}
-
-		// Cache service
-		if components.TokenCache != nil {
-			svcRegistry.Cache = services.NewCacheService(components.TokenCache)
-		}
-
-		// Security service
-		if components.SecurityChecker != nil {
-			svcRegistry.Security = services.NewSecurityService(components.SecurityChecker)
-		}
-
-		// Scheduler service
-		if components.Scheduler != nil {
-			svcRegistry.Scheduler = services.NewSchedulerService(components.Scheduler)
-		}
-
-		// Bus service
-		svcRegistry.Bus = services.NewBusService(msgBus)
+	svcRegistry, err := services.NewRegistry(services.Config{
+		Bus:             msgBus,
+		AgentRegistry:   nilSafeAgentRegistry(components),
+		Queue:           nilSafeQueue(components),
+		MemoryManager:   nilSafeMemoryManager(components),
+		TaskRegistry:    nilSafeTaskRegistry(components),
+		SessionStore:    nilSafeSessionStore(components),
+		WorkerPool:      nilSafeWorkerPool(components),
+		SkillRegistry:   nilSafeSkillRegistry(components),
+		SkillExecutor:   nilSafeSkillExecutor(components),
+		SelfImprove:     nilSafeSelfImprove(components),
+		TokenCache:      nilSafeTokenCache(components),
+		SecurityChecker: nilSafeSecurityChecker(components),
+		Scheduler:       nilSafeScheduler(components),
+	}, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create service registry: %w", err)
 	}
 
 	// Create HTTP server (if enabled)
@@ -630,4 +598,92 @@ func (w *metricsStoreWrapper) GetHistoricalMetrics(ctx context.Context, from, to
 
 func (w *metricsStoreWrapper) SubscribeMetrics() (<-chan *metrics.LiveMetricsSnapshot, func()) {
 	return w.store.SubscribeMetrics()
+}
+
+// nil-safe accessors extract fields from *Components, returning nil when
+// components itself is nil.  This prevents typed-nil interface values from
+// reaching service constructors (see CLAUDE.md typed-nil guard pattern).
+
+func nilSafeAgentRegistry(c *Components) *agent.AgentRegistry {
+	if c == nil {
+		return nil
+	}
+	return c.AgentRegistry
+}
+
+func nilSafeQueue(c *Components) queue.Queue {
+	if c == nil {
+		return nil
+	}
+	return c.Queue
+}
+
+func nilSafeMemoryManager(c *Components) *memory.Manager {
+	if c == nil {
+		return nil
+	}
+	return c.MemoryManager
+}
+
+func nilSafeTaskRegistry(c *Components) *task.Registry {
+	if c == nil {
+		return nil
+	}
+	return c.TaskRegistry
+}
+
+func nilSafeSessionStore(c *Components) session.Store {
+	if c == nil {
+		return nil
+	}
+	return c.SessionStore
+}
+
+func nilSafeWorkerPool(c *Components) *worker.Pool {
+	if c == nil {
+		return nil
+	}
+	return c.WorkerPool
+}
+
+func nilSafeSkillRegistry(c *Components) *skills.Registry {
+	if c == nil {
+		return nil
+	}
+	return c.SkillRegistry
+}
+
+func nilSafeSkillExecutor(c *Components) *skills.Executor {
+	if c == nil {
+		return nil
+	}
+	return c.SkillExecutor
+}
+
+func nilSafeSelfImprove(c *Components) *selfimprove.Controller {
+	if c == nil {
+		return nil
+	}
+	return c.SelfImproveCtrl
+}
+
+func nilSafeTokenCache(c *Components) *llm.TokenCacheCoordinator {
+	if c == nil {
+		return nil
+	}
+	return c.TokenCache
+}
+
+func nilSafeSecurityChecker(c *Components) *security.PermissionChecker {
+	if c == nil {
+		return nil
+	}
+	return c.SecurityChecker
+}
+
+func nilSafeScheduler(c *Components) *scheduler.Scheduler {
+	if c == nil {
+		return nil
+	}
+	return c.Scheduler
 }
