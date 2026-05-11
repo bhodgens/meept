@@ -446,6 +446,9 @@ type AgentLoop struct {
 
 	// Steering/follow-up queue for deferred message injection
 	queue *MessageQueue
+
+	// Agent registry for queue registration during RunOnce
+	agentRegistry *AgentRegistry
 }
 
 // LearningPipeline is the interface for the learning pipeline.
@@ -674,6 +677,14 @@ func WithMessageQueue(q *MessageQueue) LoopOption {
 	}
 }
 
+// WithAgentRegistry sets the agent registry for queue registration.
+// The loop will register/unregister its queue with the registry during RunOnce.
+func WithAgentRegistry(r *AgentRegistry) LoopOption {
+	return func(l *AgentLoop) {
+		l.agentRegistry = r
+	}
+}
+
 // WithArtifactManager sets the Claude artifact manager for project context injection.
 func WithArtifactManager(am *ArtifactManager) LoopOption {
 	return func(l *AgentLoop) {
@@ -839,6 +850,18 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		if err == nil {
 			l.bus.Publish("agent.lifecycle.started", startMsg)
 		}
+	}
+
+	// Register queue for external access if both queue and registry are available
+	if l.agentRegistry != nil && l.queue != nil {
+		gen := l.agentRegistry.RegisterActiveQueue(conversationID, l.queue)
+		defer func() {
+			l.agentRegistry.UnregisterActiveQueue(conversationID)
+		}()
+		l.logger.Debug("registered queue for conversation",
+			"conversation_id", conversationID,
+			"generation", gen,
+		)
 	}
 
 	// Publish lifecycle ended event

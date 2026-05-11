@@ -286,6 +286,22 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		opts = append(opts, WithArtifactManager(r.artifactManager))
 	}
 
+	// Create a message queue for steering/follow-up support
+	queueOpts := []MessageQueueOption{
+		WithQueueConfig(DefaultQueueConfig()),
+	}
+	if r.bus != nil {
+		queueOpts = append(queueOpts, WithQueueBus(r.bus))
+	}
+	if spec.ID != "" {
+		queueOpts = append(queueOpts, WithQueueAgentID(spec.ID))
+	}
+	queueOpts = append(queueOpts, WithQueueLogger(r.logger.With("agent", spec.ID, "component", "queue")))
+	opts = append(opts, WithMessageQueue(NewMessageQueue(queueOpts...)))
+
+	// Wire the registry so the loop can register/unregister its queue
+	opts = append(opts, WithAgentRegistry(r))
+
 	return NewAgentLoop(opts...)
 }
 
