@@ -628,10 +628,7 @@ func (f *ContextFirewall) chunkMessage(content string, maxTokens int) []string {
 	// As a last resort, split at character boundaries
 	var chunks []string
 	for i := 0; i < len(content); i += maxChars {
-		end := i + maxChars
-		if end > len(content) {
-			end = len(content)
-		}
+		end := min(i+maxChars, len(content))
 		chunks = append(chunks, content[i:end])
 	}
 	return chunks
@@ -710,13 +707,14 @@ func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []Cha
 	var toSummarize []ChatMessage
 
 	for i, msg := range messages {
-		if msg.Role == RoleSystem && level == 1 {
+		switch {
+		case msg.Role == RoleSystem && level == 1:
 			// Only preserve original system messages at level 1.
 			// At higher levels, system-tagged summaries are fair game for re-summarization.
 			result = append(result, msg)
-		} else if i >= len(messages)-keepCount {
+		case i >= len(messages)-keepCount:
 			result = append(result, msg)
-		} else {
+		default:
 			toSummarize = append(toSummarize, msg)
 		}
 	}

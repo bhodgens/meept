@@ -164,8 +164,7 @@ func (c *Canvas) DrawDottedLine(from, to Point, dashLen, gapLen int) {
 	dy := to.Y - from.Y
 
 	// Calculate line length
-	var length int
-	length = max(abs(dx), abs(dy))
+	length := max(abs(dx), abs(dy))
 	if length == 0 {
 		return
 	}
@@ -297,8 +296,8 @@ func cosApprox(x float64) float64 {
 func (c *Canvas) Render() string {
 	var b strings.Builder
 
-	for charY := 0; charY < c.charHeight; charY++ {
-		for charX := 0; charX < c.charWidth; charX++ {
+	for charY := range c.charHeight {
+		for charX := range c.charWidth {
 			// Build the Braille character for this cell
 			var char = brailleBase
 

@@ -717,10 +717,7 @@ func (c *Conversation) TruncateByImportance(tokenBudget int) int {
 	}
 
 	// Always keep the last few messages
-	minKeep := 4
-	if len(c.messages) < minKeep {
-		minKeep = len(c.messages)
-	}
+	minKeep := min(4, len(c.messages))
 	for i := len(c.messages) - minKeep; i < len(c.messages); i++ {
 		if i >= 0 {
 			keepMask[i] = true

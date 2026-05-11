@@ -252,7 +252,7 @@ func (p *OllamaProvider) GenerateEmbedding(ctx context.Context, text string) ([]
 
 	if resp.StatusCode != http.StatusOK {
 		p.logger.Warn("Ollama API error", "status", resp.StatusCode, "body", string(body))
-		return nil, fmt.Errorf("Ollama API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("ollama API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var respData ollamaEmbeddingResponse
@@ -261,7 +261,7 @@ func (p *OllamaProvider) GenerateEmbedding(ctx context.Context, text string) ([]
 	}
 
 	if respData.Error != "" {
-		return nil, fmt.Errorf("Ollama API error: %s", respData.Error)
+		return nil, fmt.Errorf("ollama API error: %s", respData.Error)
 	}
 
 	return respData.Embedding, nil

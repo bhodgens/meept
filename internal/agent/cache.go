@@ -119,7 +119,7 @@ func (c *ResultCache) generateCacheKey(toolName string, args map[string]any) str
 // Returns the first 16 hex characters of the SHA256 hash.
 // JSON keys are sorted before hashing to ensure consistency.
 func (c *ResultCache) hashArgs(args map[string]any) string {
-	if args == nil || len(args) == 0 {
+	if len(args) == 0 {
 		return "empty"
 	}
 

@@ -133,7 +133,7 @@ func (s *SkillsService) Execute(ctx context.Context, req ExecuteRequest) (*Execu
 		return &ExecuteResult{
 			Success: false,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	return &ExecuteResult{

@@ -116,10 +116,8 @@ func TestStoreSaveLoad(t *testing.T) {
 
 	if j, ok := jobMap["job-2"]; !ok {
 		t.Error("job-2 not found")
-	} else {
-		if j.ShellConfig == nil || j.ShellConfig.Command != "echo" {
-			t.Error("shell config not preserved")
-		}
+	} else if j.ShellConfig == nil || j.ShellConfig.Command != "echo" {
+		t.Error("shell config not preserved")
 	}
 }
 

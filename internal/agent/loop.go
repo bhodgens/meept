@@ -1668,9 +1668,7 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 					select {
 					case <-time.After(currentBackoff):
 						currentBackoff = time.Duration(float64(currentBackoff) * 2)
-						if currentBackoff > maxBackoff {
-							currentBackoff = maxBackoff
-						}
+						currentBackoff = min(currentBackoff, maxBackoff)
 						continue
 					case <-ctx.Done():
 						return nil, ctx.Err()
@@ -1745,9 +1743,7 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 			case <-time.After(waitTime):
 				// Increase backoff for next attempt
 				currentBackoff = time.Duration(float64(currentBackoff) * 2)
-				if currentBackoff > maxBackoff {
-					currentBackoff = maxBackoff
-				}
+				currentBackoff = min(currentBackoff, maxBackoff)
 				continue
 			case <-ctx.Done():
 				return nil, ctx.Err()

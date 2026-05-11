@@ -264,9 +264,9 @@ func (e *ImpactEstimator) FormatReport(estimates []*ImpactEstimate, aggregate *A
 	buf.WriteString("## Impact Analysis Report\n\n")
 	buf.WriteString("### Summary\n")
 	if aggregate != nil {
-		buf.WriteString(fmt.Sprintf("- **Total Recommendations**: %d\n", aggregate.RecommendationCount))
-		buf.WriteString(fmt.Sprintf("- **Estimated Monthly Time Saved**: %.0f hours (%.0f minutes)\n", aggregate.TotalMonthlyTimeSaved/60, aggregate.TotalMonthlyTimeSaved))
-		buf.WriteString(fmt.Sprintf("- **Average Confidence**: %.0f%%\n", aggregate.AverageConfidence*100))
+		fmt.Fprintf(&buf, "- **Total Recommendations**: %d\n", aggregate.RecommendationCount)
+		fmt.Fprintf(&buf, "- **Estimated Monthly Time Saved**: %.0f hours (%.0f minutes)\n", aggregate.TotalMonthlyTimeSaved/60, aggregate.TotalMonthlyTimeSaved)
+		fmt.Fprintf(&buf, "- **Average Confidence**: %.0f%%\n", aggregate.AverageConfidence*100)
 		if aggregate.EstimatedMonthlyCost > 0 {
 			buf.WriteString(fmt.Sprintf("- **Estimated Monthly Cost Savings**: $%.2f\n", aggregate.EstimatedMonthlyCost))
 		}

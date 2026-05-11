@@ -90,7 +90,7 @@ func (a *AuditLog) QueryHistory(filters QueryFilters) ([]AuditEntry, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	query.WriteString(fmt.Sprintf(" LIMIT %d", limit))
+	fmt.Fprintf(&query, " LIMIT %d", limit)
 
 	rows, err := a.db.Query(query.String(), args...)
 	if err != nil {

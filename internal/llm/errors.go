@@ -33,7 +33,7 @@ func (e *ContextSizeExceededError) SuggestionsString() string {
 	var s strings.Builder
 	s.WriteString("\nSuggestions:\n")
 	for i, sug := range e.Suggestions {
-		s.WriteString(fmt.Sprintf("  %d. %s\n", i+1, sug))
+		fmt.Fprintf(&s, "  %d. %s\n", i+1, sug)
 	}
 	return s.String()
 }

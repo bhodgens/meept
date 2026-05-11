@@ -210,11 +210,12 @@ func (g *PatchGenerator) parseGenerationResponse(issueID, response string) (*Pro
 	fix.Diff = strings.Join(diffLines, "\n")
 
 	// Determine fix type based on content
-	if strings.Contains(fix.Description, "refactor") {
+	switch {
+	case strings.Contains(fix.Description, "refactor"):
 		fix.Type = FixTypeRefactor
-	} else if strings.Contains(fix.Description, "config") {
+	case strings.Contains(fix.Description, "config"):
 		fix.Type = FixTypeConfigChange
-	} else {
+	default:
 		fix.Type = FixTypeCodeChange
 	}
 

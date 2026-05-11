@@ -32,7 +32,7 @@ type AmendmentRequest struct {
 	Metadata    json.RawMessage `json:"metadata,omitempty"` // Type-specific metadata
 	Status      AmendmentStatus `json:"status"`
 	CreatedAt   time.Time       `json:"created_at"`
-	ProcessedAt time.Time       `json:"processed_at,omitempty"`
+	ProcessedAt time.Time       `json:"processed_at,omitempty,omitzero"`
 	Result      string          `json:"result,omitempty"` // Result message after processing
 }
 

@@ -188,10 +188,7 @@ func (s *SidebarModel) SetSize(width, height int) {
 		s.viz.SetSize(width - 6)
 	}
 	// Update sparkline widths
-	sparklineWidth := width - 14 // Account for label + padding
-	if sparklineWidth < 5 {
-		sparklineWidth = 5
-	}
+	sparklineWidth := max(width-14, 5) // Account for label + padding
 	if s.queueSparkline != nil {
 		s.queueSparkline.SetWidth(sparklineWidth)
 	}

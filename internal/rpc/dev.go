@@ -353,7 +353,7 @@ func (h *DevHandler) handleReload(ctx context.Context, params json.RawMessage) (
 		return map[string]any{
 			"success": false,
 			"error":   err.Error(),
-		}, nil
+		}, err
 	}
 
 	return map[string]any{

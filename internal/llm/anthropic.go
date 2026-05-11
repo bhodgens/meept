@@ -1031,10 +1031,12 @@ func (s *sseScanner) Scan() bool {
 		}
 
 		// Process buffer
+	bufferLoop:
 		for i := 0; i < len(s.buffer); i++ {
 			c := s.buffer[i]
 
-			if c == '\r' {
+			switch {
+			case c == '\r':
 				// Skip \r, look for \n
 				if i+1 < len(s.buffer) && s.buffer[i+1] == '\n' {
 					i++
@@ -1049,8 +1051,8 @@ func (s *sseScanner) Scan() bool {
 					return true
 				}
 				s.buffer = s.buffer[i+1:]
-				break
-			} else if c == '\n' {
+				break bufferLoop
+			case c == '\n':
 				// End of line
 				if currentLine.Len() > 0 {
 					s.processLine(currentLine.String())
@@ -1061,8 +1063,8 @@ func (s *sseScanner) Scan() bool {
 					return true
 				}
 				s.buffer = s.buffer[i+1:]
-				break
-			} else {
+				break bufferLoop
+			default:
 				currentLine.WriteByte(c)
 			}
 

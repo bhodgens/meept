@@ -117,10 +117,7 @@ func (s *Sparkline) View() string {
 	// Render each data point
 	for _, v := range data {
 		// Scale to 0-7 range (8 levels)
-		level := min((v*7)/maxVal, 7)
-		if level < 0 {
-			level = 0
-		}
+		level := max(min((v*7)/maxVal, 7), 0)
 		sb.WriteRune(SparklineChars[level])
 	}
 

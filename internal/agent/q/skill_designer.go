@@ -103,7 +103,7 @@ func (sd *SkillDesigner) GenerateFullSkillFile(skill *SkillDesign) string {
 	buf.WriteString(fmt.Sprintf("%s\n\n", skill.Description))
 
 	buf.WriteString("## When to Use\n")
-	buf.WriteString(fmt.Sprintf("Use this skill when:\n"))
+	buf.WriteString("Use this skill when:\n")
 	for _, keyword := range skill.TriggerKeywords {
 		buf.WriteString(fmt.Sprintf("- Handling %s-related tasks\n", keyword))
 	}
@@ -167,7 +167,7 @@ func (sd *SkillDesigner) extractTriggerKeywords(rec Recommendation) []string {
 	words := strings.Fields(rec.Description)
 	seen := make(map[string]bool)
 	for _, word := range words {
-		word = strings.Trim(strings.ToLower(word), ".,;:!?.")
+		word = strings.Trim(strings.ToLower(word), ".,;:!?")
 		if len(word) > 3 && !seen[word] && !isStopWord(word) {
 			keywords = append(keywords, word)
 			seen[word] = true
@@ -178,7 +178,7 @@ func (sd *SkillDesigner) extractTriggerKeywords(rec Recommendation) []string {
 	if rec.Title != "" {
 		parts := strings.FieldsSeq(rec.Title)
 		for part := range parts {
-			clean := strings.Trim(part, ".,;:!?.")
+			clean := strings.Trim(part, ".,;:!?")
 			if len(clean) > 3 && !seen[strings.ToLower(clean)] {
 				keywords = append(keywords, strings.ToLower(clean))
 			}

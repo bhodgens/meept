@@ -245,7 +245,7 @@ func (p *Pool) Scale(ctx context.Context, targetCount int) error {
 
 	if targetCount > currentCount {
 		// Add workers
-		for i := 0; i < targetCount-currentCount; i++ {
+		for range targetCount - currentCount {
 			worker, err := p.AddWorker(p.defaultCaps)
 			if err != nil {
 				return fmt.Errorf("failed to add worker: %w", err)

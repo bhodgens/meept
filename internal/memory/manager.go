@@ -1298,7 +1298,7 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	err = row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &mem.CreatedAt, &lastAccessedStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}
@@ -1386,6 +1386,10 @@ func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, e
 			CreatedAt: createdAt,
 			UpdatedAt: lastAccessed,
 		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating expired memories: %w", err)
 	}
 
 	return memories, nil

@@ -141,11 +141,9 @@ func (d *Discovery) scanTierMetadataOnly(tier DiscoveryTier, entries map[string]
 			if _, err := os.Stat(skillFile); err == nil {
 				d.loadSkillMetadata(skillFile, tier.Priority, entries)
 			}
-		} else {
+		} else if isSkillFile(dirEntry.Name()) {
 			// Support flat .md files (not SKILL.md, which would be at root)
-			if isSkillFile(dirEntry.Name()) {
-				d.loadSkillMetadata(entryPath, tier.Priority, entries)
-			}
+			d.loadSkillMetadata(entryPath, tier.Priority, entries)
 		}
 	}
 

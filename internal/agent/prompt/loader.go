@@ -147,7 +147,7 @@ func (l *Loader) ListComponents() []string {
 	for _, searchPath := range l.searchPaths {
 		filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return nil
+				return err
 			}
 			if info.IsDir() {
 				return nil
@@ -159,7 +159,7 @@ func (l *Loader) ListComponents() []string {
 			// Convert path to reference
 			relPath, err := filepath.Rel(searchPath, path)
 			if err != nil {
-				return nil
+				return err
 			}
 
 			ref := l.pathToRef(relPath)

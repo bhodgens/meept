@@ -67,7 +67,7 @@ func (t *ScheduleDeleteTool) Execute(ctx context.Context, args map[string]any) (
 			Success: false,
 			JobID:   jobID,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	return ScheduleDeleteResult{
@@ -134,7 +134,7 @@ func (t *SchedulePauseTool) Execute(ctx context.Context, args map[string]any) (a
 			Success: false,
 			JobID:   jobID,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	return SchedulePauseResult{
@@ -201,7 +201,7 @@ func (t *ScheduleResumeTool) Execute(ctx context.Context, args map[string]any) (
 			Success: false,
 			JobID:   jobID,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	return ScheduleResumeResult{
@@ -268,7 +268,7 @@ func (t *ScheduleRunNowTool) Execute(ctx context.Context, args map[string]any) (
 			Success: false,
 			JobID:   jobID,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	return ScheduleRunNowResult{

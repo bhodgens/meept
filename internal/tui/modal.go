@@ -112,11 +112,6 @@ func (m *Modal) renderContent() string {
 			style = m.styles.Muted
 		}
 
-		keyStyle := m.styles.HelpKey
-		if i == m.selected {
-			keyStyle = keyStyle.Background(lipgloss.Color("#374151"))
-		}
-
 		line := fmt.Sprintf("[%s]  %s", item.Key, item.Label)
 		if item.Description != "" {
 			descStyle := m.styles.Muted
@@ -1085,10 +1080,7 @@ func (f *FuzzyFinderModal) View(screenW, screenH int) string {
 
 	// Results pane
 	items := f.getFilteredItems()
-	resultsHeight := f.height - 12
-	if resultsHeight < 5 {
-		resultsHeight = 5
-	}
+	resultsHeight := max(f.height-12, 5)
 	resultsStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#374151")).

@@ -234,13 +234,13 @@ type InitializeParams struct {
 
 // ClientCapabilities represents the client's capabilities.
 type ClientCapabilities struct {
-	TextDocument TextDocumentClientCapabilities `json:"textDocument,omitempty"`
-	Workspace    WorkspaceClientCapabilities    `json:"workspace,omitempty"`
+	TextDocument TextDocumentClientCapabilities `json:"textDocument,omitempty,omitzero"`
+	Workspace    WorkspaceClientCapabilities    `json:"workspace,omitempty,omitzero"`
 }
 
 // TextDocumentClientCapabilities represents text document capabilities.
 type TextDocumentClientCapabilities struct {
-	Synchronization TextDocumentSyncClientCapabilities `json:"synchronization,omitempty"`
+	Synchronization TextDocumentSyncClientCapabilities `json:"synchronization,omitempty,omitzero"`
 }
 
 // TextDocumentSyncClientCapabilities represents sync capabilities.

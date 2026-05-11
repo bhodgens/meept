@@ -107,6 +107,7 @@ func extractReportFallback(response string) *AgentReport {
 	rest := response[braceIdx:]
 	depth := 0
 	endIdx := -1
+braceLoop:
 	for i, ch := range rest {
 		switch ch {
 		case '{':
@@ -115,11 +116,8 @@ func extractReportFallback(response string) *AgentReport {
 			depth--
 			if depth == 0 {
 				endIdx = i + 1
-				break
+				break braceLoop
 			}
-		}
-		if endIdx > 0 {
-			break
 		}
 	}
 

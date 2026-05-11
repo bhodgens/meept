@@ -126,7 +126,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 		return CronCreateResult{
 			Success: false,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	// Validate the cron expression
@@ -196,7 +196,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 		return CronCreateResult{
 			Success: false,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	scheduledID, err := t.sched.ScheduleConfig(cfg)
@@ -204,7 +204,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 		return CronCreateResult{
 			Success: false,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	return CronCreateResult{

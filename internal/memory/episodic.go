@@ -407,7 +407,7 @@ func (e *EpisodicMemory) GetByID(ctx context.Context, id string) (*MemoryResult,
 	err = row.Scan(&memID, &content, &category, &metaJSON, &createdAtStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get memory by ID: %w", err)
 	}

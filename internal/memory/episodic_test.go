@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -297,18 +298,18 @@ func TestEpisodicMemoryTimestamps(t *testing.T) {
 	}
 	defer mem.Close()
 
-	// Empty store should return nil timestamps
+	// Empty store should return ErrNotFound
 	oldest, err := mem.GetOldestTimestamp(ctx)
-	if err != nil {
-		t.Fatalf("GetOldestTimestamp failed: %v", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetOldestTimestamp expected ErrNotFound, got: %v", err)
 	}
 	if oldest != nil {
 		t.Error("Expected nil oldest timestamp for empty store")
 	}
 
 	newest, err := mem.GetNewestTimestamp(ctx)
-	if err != nil {
-		t.Fatalf("GetNewestTimestamp failed: %v", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetNewestTimestamp expected ErrNotFound, got: %v", err)
 	}
 	if newest != nil {
 		t.Error("Expected nil newest timestamp for empty store")

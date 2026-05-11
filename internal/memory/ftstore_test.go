@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -232,8 +233,8 @@ func TestSQLiteFTSStore_GetOldestTimestamp_Empty(t *testing.T) {
 	defer store.Close()
 
 	ts, err := store.GetOldestTimestamp(context.Background(), "test_items")
-	if err != nil {
-		t.Fatalf("GetOldestTimestamp: %v", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetOldestTimestamp expected ErrNotFound, got: %v", err)
 	}
 	if ts != nil {
 		t.Error("expected nil for empty store")
@@ -246,8 +247,8 @@ func TestSQLiteFTSStore_GetNewestTimestamp_Empty(t *testing.T) {
 	defer store.Close()
 
 	ts, err := store.GetNewestTimestamp(context.Background(), "test_items")
-	if err != nil {
-		t.Fatalf("GetNewestTimestamp: %v", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetNewestTimestamp expected ErrNotFound, got: %v", err)
 	}
 	if ts != nil {
 		t.Error("expected nil for empty store")

@@ -304,13 +304,13 @@ func TestPoolExec(t *testing.T) {
 	ctx := context.Background()
 
 	// Create table using Exec
-	result, err := pool.Exec(ctx, "CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
+	_, err = pool.Exec(ctx, "CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
 	if err != nil {
 		t.Fatalf("Exec failed: %v", err)
 	}
 
 	// Insert using Exec with args
-	result, err = pool.Exec(ctx, "INSERT INTO test (name) VALUES (?)", "hello")
+	result, err := pool.Exec(ctx, "INSERT INTO test (name) VALUES (?)", "hello")
 	if err != nil {
 		t.Fatalf("Insert failed: %v", err)
 	}

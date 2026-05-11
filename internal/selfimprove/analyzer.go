@@ -131,10 +131,7 @@ func (a *RootCauseAnalyzer) extractRelevantCode(content string, issue Issue) str
 
 	// Extract context around the line
 	start := max(lineNum-10, 0)
-	end := lineNum + 10
-	if end > len(lines) {
-		end = len(lines)
-	}
+	end := min(lineNum+10, len(lines))
 
 	relevantLines := lines[start:end]
 	return strings.Join(relevantLines, "\n")

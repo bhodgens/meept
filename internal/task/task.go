@@ -3,6 +3,7 @@ package task
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -40,7 +41,7 @@ type Task struct {
 	MemvidZone   string          `json:"memvid_zone,omitempty"`
 	Metadata     json.RawMessage `json:"metadata,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
-	StartedAt    time.Time       `json:"started_at,omitempty"`
+	StartedAt    time.Time       `json:"started_at,omitempty,omitzero"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 
 	// Linked sessions
@@ -135,10 +136,8 @@ func (t *Task) IsComplete() bool {
 
 // LinkSession links a session to this task.
 func (t *Task) LinkSession(sessionID string) {
-	for _, s := range t.LinkedSessions {
-		if s == sessionID {
-			return // Already linked
-		}
+	if slices.Contains(t.LinkedSessions, sessionID) {
+		return // Already linked
 	}
 	t.LinkedSessions = append(t.LinkedSessions, sessionID)
 	t.UpdatedAt = time.Now().UTC()
@@ -243,10 +242,8 @@ func (t *Task) WithAssignedAgent(agentID string) *Task {
 
 // AddMemoryRef adds a memory reference to the task.
 func (t *Task) AddMemoryRef(ref string) {
-	for _, r := range t.MemoryRefs {
-		if r == ref {
-			return // Already exists
-		}
+	if slices.Contains(t.MemoryRefs, ref) {
+		return // Already exists
 	}
 	t.MemoryRefs = append(t.MemoryRefs, ref)
 	t.UpdatedAt = time.Now().UTC()
@@ -254,10 +251,8 @@ func (t *Task) AddMemoryRef(ref string) {
 
 // AddCreatedMemory records a memory created during execution.
 func (t *Task) AddCreatedMemory(memoryID string) {
-	for _, m := range t.CreatedMemories {
-		if m == memoryID {
-			return // Already exists
-		}
+	if slices.Contains(t.CreatedMemories, memoryID) {
+		return // Already exists
 	}
 	t.CreatedMemories = append(t.CreatedMemories, memoryID)
 	t.UpdatedAt = time.Now().UTC()

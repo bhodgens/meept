@@ -11,13 +11,14 @@ import (
 
 // handleServiceError writes appropriate HTTP response based on service error type.
 func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
-	if errors.Is(err, services.ErrNotFound) {
+	switch {
+	case errors.Is(err, services.ErrNotFound):
 		s.writeError(w, http.StatusNotFound, err.Error())
-	} else if errors.Is(err, services.ErrInvalidInput) {
+	case errors.Is(err, services.ErrInvalidInput):
 		s.writeError(w, http.StatusBadRequest, err.Error())
-	} else if errors.Is(err, services.ErrUnauthorized) {
+	case errors.Is(err, services.ErrUnauthorized):
 		s.writeError(w, http.StatusUnauthorized, err.Error())
-	} else {
+	default:
 		s.logger.Debug("service error", "error", err)
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 	}

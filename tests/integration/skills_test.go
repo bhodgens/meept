@@ -290,8 +290,7 @@ func TestDispatcherSkillInvocation(t *testing.T) {
 	}
 
 	// Test non-skill invocation falls through to normal routing
-	var result any
-	result, err = dispatcher.ClassifyAndRoute(ctx, "hello world", "test-session")
+	result, err := dispatcher.ClassifyAndRoute(ctx, "hello world", "test-session")
 	if err != nil {
 		t.Errorf("Non-skill invocation should not error: %v", err)
 	}
@@ -556,10 +555,8 @@ Analyze the provided data and extract key insights.
 	deploy := registry.Get("deploy")
 	if deploy == nil {
 		t.Error("deploy skill not found")
-	} else {
-		if deploy.RiskLevel != "high" {
-			t.Errorf("deploy: expected risk 'high', got '%s'", deploy.RiskLevel)
-		}
+	} else if deploy.RiskLevel != "high" {
+		t.Errorf("deploy: expected risk 'high', got '%s'", deploy.RiskLevel)
 	}
 
 	// Test FindByTag
@@ -621,21 +618,16 @@ func TestSkillIndexCapabilityMatching(t *testing.T) {
 	matches := capIndex.Match("review code quality", 3)
 	if len(matches) == 0 {
 		t.Error("Expected matches for 'review code quality'")
-	} else {
-		// code-review should be top match
-		if matches[0].Entry.Name != "code-review" {
-			t.Errorf("Expected code-review as top match, got %s", matches[0].Entry.Name)
-		}
+	} else if matches[0].Entry.Name != "code-review" {
+		t.Errorf("Expected code-review as top match, got %s", matches[0].Entry.Name)
 	}
 
 	// Test deploy-related query
 	deployMatches := capIndex.Match("deploy to staging", 3)
 	if len(deployMatches) == 0 {
 		t.Error("Expected matches for 'deploy to staging'")
-	} else {
-		if deployMatches[0].Entry.Name != "deploy" {
-			t.Errorf("Expected deploy as top match, got %s", deployMatches[0].Entry.Name)
-		}
+	} else if deployMatches[0].Entry.Name != "deploy" {
+		t.Errorf("Expected deploy as top match, got %s", deployMatches[0].Entry.Name)
 	}
 
 	// Test threshold filtering

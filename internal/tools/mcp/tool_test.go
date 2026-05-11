@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"testing"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -127,7 +128,7 @@ func TestMCPToolExecuteNilManager(t *testing.T) {
 		}
 	}()
 
-	_, err := tool.Execute(nil, nil)
+	_, err := tool.Execute(context.TODO(), nil)
 	// If we get here without panic, err should be non-nil
 	if err == nil {
 		t.Error("expected error when executing with nil manager")

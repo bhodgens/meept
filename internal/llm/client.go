@@ -509,6 +509,10 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 	resp, err := c.httpClient.Do(req)
 	latencyMs := time.Since(start).Milliseconds()
 
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+
 	// Record error metrics only here; successful requests are recorded after parsing
 	// with actual token counts (see below after parseResponse)
 	if c.metricsStore != nil && (err != nil || (resp != nil && resp.StatusCode != http.StatusOK)) {
@@ -539,12 +543,8 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 	}
 
 	if err != nil {
-		if resp != nil {
-			resp.Body.Close()
-		}
 		return nil, &ClientError{Message: "request failed", Cause: err}
 	}
-	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

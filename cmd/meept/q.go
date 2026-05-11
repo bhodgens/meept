@@ -118,7 +118,7 @@ Examples:
 			}
 
 			if !cfg.QAgent.Enabled && !force {
-				return fmt.Errorf("Q Agent is disabled; enable in meept.toml or use --force")
+				return fmt.Errorf("q agent is disabled; enable in meept.toml or use --force")
 			}
 
 			// Check memvid availability

@@ -1,10 +1,11 @@
 package lsp
 
 import (
-	"io"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/caimlas/meept/internal/code/lsp/transport"
 )
+
+// ErrNotFound is returned when the LSP server returns no result for a query.
+var ErrNotFound = errors.New("not found")
 
 // Client is a JSON-RPC client for communicating with an LSP server.
 type Client struct {
@@ -333,7 +337,7 @@ func (c *Client) Hover(ctx context.Context, uri string, line, char int) (*Hover,
 	}
 
 	if len(result) == 0 || string(result) == "null" {
-		return nil, nil
+		return nil, ErrNotFound
 	}
 
 	var hover Hover

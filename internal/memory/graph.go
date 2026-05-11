@@ -436,6 +436,9 @@ func (g *KnowledgeGraph) ComputePageRank(ctx context.Context) error {
 		nodeIndex[id] = len(nodes)
 		nodes = append(nodes, id)
 	}
+	if err := nodeRows.Err(); err != nil {
+		return err
+	}
 
 	n := len(nodes)
 	if n == 0 {
@@ -465,6 +468,9 @@ func (g *KnowledgeGraph) ComputePageRank(ctx context.Context) error {
 		outLinks[srcIdx] = append(outLinks[srcIdx], tgtIdx)
 		inLinks[tgtIdx] = append(inLinks[tgtIdx], srcIdx)
 	}
+	if err := edgeRows.Err(); err != nil {
+		return err
+	}
 
 	// Initialize PageRank scores
 	scores := make([]float64, n)
@@ -474,7 +480,8 @@ func (g *KnowledgeGraph) ComputePageRank(ctx context.Context) error {
 
 	// Iterate PageRank
 	d := g.dampingFactor
-	for iter := 0; iter < g.maxIterations; iter++ {
+	for iter := range g.maxIterations {
+		_ = iter
 		newScores := make([]float64, n)
 
 		// Base score for all nodes
@@ -626,6 +633,9 @@ func (g *KnowledgeGraph) DetectCommunities(ctx context.Context) (map[string]stri
 		nodeIndex[id] = len(nodes)
 		nodes = append(nodes, id)
 	}
+	if err := nodeRows.Err(); err != nil {
+		return nil, err
+	}
 
 	if len(nodes) == 0 {
 		return make(map[string]string), nil
@@ -658,6 +668,9 @@ func (g *KnowledgeGraph) DetectCommunities(ctx context.Context) (map[string]stri
 		}
 		neighbors[srcIdx][tgtIdx] = weight
 		neighbors[tgtIdx][srcIdx] = weight
+	}
+	if err := edgeRows.Err(); err != nil {
+		return nil, err
 	}
 
 	// Initialize: each node is its own community
@@ -907,7 +920,7 @@ func (g *KnowledgeGraph) CreateTemporalEdges(ctx context.Context, sessionID stri
 	}
 
 	var edges []MemoryEdge
-	for i := 0; i < len(memoryIDs)-1; i++ {
+	for i := range len(memoryIDs) - 1 {
 		edges = append(edges, MemoryEdge{
 			SourceID: memoryIDs[i],
 			TargetID: memoryIDs[i+1],

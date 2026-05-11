@@ -96,10 +96,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		// Resize viz to fit window (leave room for chrome)
-		vizWidth := min(msg.Width-4, 80)
-		if vizWidth < 20 {
-			vizWidth = 20
-		}
+		vizWidth := max(min(msg.Width-4, 80), 20)
 		m.viz.SetSize(vizWidth)
 		return m, nil
 

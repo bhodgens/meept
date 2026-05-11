@@ -270,7 +270,7 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 			AgentID: agentID,
 			Success: false,
 			Error:   err.Error(),
-		}, nil
+		}, err
 	}
 
 	return DelegateResult{

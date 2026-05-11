@@ -355,7 +355,7 @@ func TestArtifactManager(t *testing.T) {
 
 	// Test InvalidateAll
 	manager.InvalidateAll()
-	artifacts, err = manager.ScanDirectory(tmpDir)
+	_, err = manager.ScanDirectory(tmpDir)
 	if err != nil {
 		t.Fatalf("ScanDirectory() after InvalidateAll() error = %v", err)
 	}

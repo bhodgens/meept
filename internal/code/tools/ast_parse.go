@@ -67,12 +67,13 @@ func (t *ASTParseTool) Execute(ctx context.Context, args map[string]any) (any, e
 	var result *ast.ParseResult
 	var err error
 
-	if filePath != "" {
+	switch {
+	case filePath != "":
 		result, err = t.parser.ParseFile(ctx, filePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse file: %w", err)
 		}
-	} else if source != "" && language != "" {
+	case source != "" && language != "":
 		lang := ast.LanguageFromString(language)
 		if lang == ast.LangUnknown {
 			return nil, fmt.Errorf("unsupported language: %s", language)
@@ -81,7 +82,7 @@ func (t *ASTParseTool) Execute(ctx context.Context, args map[string]any) (any, e
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse source: %w", err)
 		}
-	} else {
+	default:
 		return nil, fmt.Errorf("either file_path or source+language must be provided")
 	}
 

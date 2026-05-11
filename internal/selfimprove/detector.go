@@ -187,7 +187,7 @@ func (d *IssueDetector) ScanCode(ctx context.Context) ([]Issue, error) {
 	// Walk Go files
 	err := filepath.Walk(d.projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 
 		select {
@@ -208,7 +208,7 @@ func (d *IssueDetector) ScanCode(ctx context.Context) ([]Issue, error) {
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return err
 		}
 
 		lines := strings.Split(string(content), "\n")

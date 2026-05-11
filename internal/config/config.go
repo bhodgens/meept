@@ -51,7 +51,7 @@ func Load(path string) (*Config, error) {
 func LoadDefault() (*Config, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return DefaultConfig(), nil
+		return DefaultConfig(), err
 	}
 
 	// Try JSON5 first

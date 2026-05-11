@@ -292,10 +292,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case LayoutStandard:
 				a.sidebarWidth = 25
 			case LayoutWide:
-				a.sidebarWidth = min(msg.Width*30/100, 35)
-				if a.sidebarWidth < 25 {
-					a.sidebarWidth = 25
-				}
+				a.sidebarWidth = max(min(msg.Width*30/100, 35), 25)
 			}
 		}
 		a.sidebar.SetSize(a.sidebarWidth, msg.Height-chromeHeight)

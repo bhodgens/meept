@@ -32,7 +32,7 @@ func LoadMCPConfig(path string) (*MCPServersConfig, error) {
 func LoadMCPConfigDefault() (*MCPServersConfig, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return &MCPServersConfig{Servers: []mcp.ServerConfig{}}, nil
+		return &MCPServersConfig{Servers: []mcp.ServerConfig{}}, err
 	}
 	return LoadMCPConfig(filepath.Join(homeDir, ".meept", "mcp_servers.json5"))
 }

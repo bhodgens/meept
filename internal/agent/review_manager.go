@@ -178,7 +178,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep) (*
 func (rm *ReviewManager) buildReviewPrompt(step *task.TaskStep) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("REVIEW TASK STEP\n\n"))
+	sb.WriteString("REVIEW TASK STEP\n\n")
 	sb.WriteString(fmt.Sprintf("Step ID: %s\n", step.ID))
 	sb.WriteString(fmt.Sprintf("Description: %s\n", step.Description))
 	sb.WriteString(fmt.Sprintf("Tool Hint: %s\n", step.ToolHint))
@@ -294,6 +294,7 @@ func (rm *ReviewManager) extractReviewJSON(output string) string {
 	start := strings.Index(output, "{")
 	if start >= 0 {
 		depth := 0
+	braceSearch:
 		for i := start; i < len(output); i++ {
 			switch output[i] {
 			case '{':
@@ -305,7 +306,7 @@ func (rm *ReviewManager) extractReviewJSON(output string) string {
 					if json.Valid([]byte(candidate)) && strings.Contains(candidate, `"status"`) {
 						return candidate
 					}
-					break
+					break braceSearch
 				}
 			}
 		}
@@ -607,9 +608,7 @@ func (rm *ReviewManager) checkClaimsAgainstDescription(step *task.TaskStep) ([]s
 
 	// Check if claims are present
 	if len(step.Claims) > 0 {
-		for _, claim := range step.Claims {
-			verified = append(verified, claim)
-		}
+		verified = append(verified, step.Claims...)
 	} else {
 		// No explicit claims - check if the result mentions completing the description
 		resultLower := strings.ToLower(step.Result)
