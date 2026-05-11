@@ -413,11 +413,12 @@ func extractAgents(content string) []AgentDefinition {
 			headers := parseTableRow(trimmed)
 			for i, header := range headers {
 				lowerHeader := strings.ToLower(header)
-				if strings.Contains(lowerHeader, "id") {
+				switch {
+				case strings.Contains(lowerHeader, "id"):
 					idIndex = i
-				} else if strings.Contains(lowerHeader, "role") {
+				case strings.Contains(lowerHeader, "role"):
 					roleIndex = i
-				} else if strings.Contains(lowerHeader, "purpose") {
+				case strings.Contains(lowerHeader, "purpose"):
 					purposeIndex = i
 				}
 			}

@@ -87,7 +87,7 @@ func (s *QueueService) Claim(ctx context.Context, req ClaimRequest) (*queue.Job,
 	job, err := s.q.Claim(ctx, req.WorkerID, req.Capabilities)
 	if err != nil {
 		if errors.Is(err, queue.ErrNoJobAvailable) {
-			return nil, nil
+			return nil, wrapError("queue", "Claim", ErrNotFound)
 		}
 		return nil, wrapError("queue", "Claim", err)
 	}

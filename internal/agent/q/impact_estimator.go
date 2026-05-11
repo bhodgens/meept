@@ -268,16 +268,16 @@ func (e *ImpactEstimator) FormatReport(estimates []*ImpactEstimate, aggregate *A
 		fmt.Fprintf(&buf, "- **Estimated Monthly Time Saved**: %.0f hours (%.0f minutes)\n", aggregate.TotalMonthlyTimeSaved/60, aggregate.TotalMonthlyTimeSaved)
 		fmt.Fprintf(&buf, "- **Average Confidence**: %.0f%%\n", aggregate.AverageConfidence*100)
 		if aggregate.EstimatedMonthlyCost > 0 {
-			buf.WriteString(fmt.Sprintf("- **Estimated Monthly Cost Savings**: $%.2f\n", aggregate.EstimatedMonthlyCost))
+			fmt.Fprintf(&buf, "- **Estimated Monthly Cost Savings**: $%.2f\n", aggregate.EstimatedMonthlyCost)
 		}
 	}
 	buf.WriteString("\n### Detailed Impacts\n\n")
 
 	for i, est := range estimates {
-		buf.WriteString(fmt.Sprintf("#### Recommendation %d: %s\n", i+1, est.RecommendationID))
-		buf.WriteString(fmt.Sprintf("- **Metric Type**: %s\n", est.MetricType))
-		buf.WriteString(fmt.Sprintf("- **Baseline**: %.1f\n", est.BaselineValue))
-		buf.WriteString(fmt.Sprintf("- **Expected**: %.1f\n", est.ExpectedValue))
+		fmt.Fprintf(&buf, "#### Recommendation %d: %s\n", i+1, est.RecommendationID)
+		fmt.Fprintf(&buf, "- **Metric Type**: %s\n", est.MetricType)
+		fmt.Fprintf(&buf, "- **Baseline**: %.1f\n", est.BaselineValue)
+		fmt.Fprintf(&buf, "- **Expected**: %.1f\n", est.ExpectedValue)
 		buf.WriteString(fmt.Sprintf("- **Improvement**: %.0f%%\n", est.ImprovementPercent))
 		buf.WriteString(fmt.Sprintf("- **Weekly Impact**: %s\n", est.WeeklyImpact))
 		buf.WriteString(fmt.Sprintf("- **Confidence**: %.0f%%\n\n", est.Confidence*100))

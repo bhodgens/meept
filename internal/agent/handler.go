@@ -339,10 +339,11 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	if h.dispatcher != nil {
 		// Multi-agent mode: classify and route through dispatcher
 		result, dispatchErr := h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
-		if dispatchErr != nil {
+		switch {
+		case dispatchErr != nil:
 			h.logger.Error("Dispatch failed", "error", dispatchErr)
 			err = dispatchErr
-		} else if h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil {
+		case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
 			// Async dispatch: send ack immediately, let orchestrator handle it
 			h.logger.Info("Async dispatch: sending ack and publishing plan request",
 				"task_id", result.Task.ID,
@@ -359,7 +360,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 			// Publish plan request to orchestrator
 			h.publishPlanRequest(result, conversationID)
-		} else {
+		default:
 			h.logger.Debug("Dispatched to agent",
 				"agent", result.AgentID,
 				"intent", result.Intent.Type,

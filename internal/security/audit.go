@@ -195,6 +195,9 @@ func (a *AuditLog) GetStats() (SecurityStats, error) {
 		}
 		stats.TopDeniedActions[action] = count
 	}
+	if err := rows.Err(); err != nil {
+		return stats, fmt.Errorf("iterating top denied actions: %w", err)
+	}
 
 	return stats, nil
 }
@@ -267,6 +270,9 @@ func (a *AuditLog) CountEntriesByDecision() (map[string]int64, error) {
 			continue
 		}
 		counts[decision] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating decision counts: %w", err)
 	}
 
 	return counts, nil

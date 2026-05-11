@@ -3,6 +3,7 @@ package shadow
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,6 +19,9 @@ var (
 	_ TrainingStore = (*SQLiteTrainingStore)(nil)
 	_ ExamplesStore = (*SQLiteExamplesStore)(nil)
 	_ AdaptersStore = (*SQLiteAdaptersStore)(nil)
+
+	// ErrNotFound is returned when a shadow store record is not found.
+	ErrNotFound = errors.New("record not found")
 )
 
 // Schema version constants
@@ -1385,7 +1389,7 @@ func (s *SQLiteAdaptersStore) scanTrainingRun(row *sql.Row) (*TrainingRun, error
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, ErrNotFound
 		}
 		return nil, err
 	}

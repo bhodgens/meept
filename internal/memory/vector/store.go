@@ -254,6 +254,9 @@ func (s *Store) getMemoryMetadata(memoryID string) (map[string]any, string, erro
 			metadata[key] = v
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("iterating metadata rows: %w", err)
+	}
 
 	return metadata, content, nil
 }

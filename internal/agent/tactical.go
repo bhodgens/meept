@@ -765,9 +765,10 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 	if ts.isRetryableError(jobErr) {
 		// Get the job from queue
 		job, err := ts.queue.Get(ctx, jobID)
-		if err != nil {
+		switch {
+		case err != nil:
 			ts.logger.Error("Failed to get job for retry", "job_id", jobID, "error", err)
-		} else if job != nil && job.CanRetry() {
+		case job != nil && job.CanRetry():
 			// Determine retry reason
 			reason := "transient_error"
 			if ts.isRateLimitError(jobErr) {
@@ -799,7 +800,7 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 				})
 				return nil // Job has been requeued, don't mark as failed
 			}
-		} else {
+		default:
 			ts.logger.Warn("Job cannot be retried",
 				"job_id", jobID,
 				"step_id", step.ID,

@@ -305,7 +305,7 @@ func (t *TaskMemory) GetByID(ctx context.Context, id string) (*MemoryResult, err
 	err = row.Scan(&memID, &content, &domain, &metaJSON, &createdAtStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get memory by ID: %w", err)
 	}

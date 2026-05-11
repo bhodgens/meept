@@ -215,6 +215,9 @@ func (e *Engine) compilePatterns() error {
 			Immutable:   immutable == 1,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating command patterns: %w", err)
+	}
 
 	// Compile financial patterns
 	e.compiledFinancial = nil
@@ -707,6 +710,9 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 				OverrideID:      &id,
 			}
 		}
+	}
+	if err := rows.Err(); err != nil {
+		e.logger.Error("Error iterating permission overrides", "error", err)
 	}
 
 	return nil

@@ -1126,14 +1126,16 @@ func (l *AgentLoop) classifyDomain(messages []llm.ChatMessage) string {
 	planningKeywords := []string{"plan", "step", "strategy", "approach", "design"}
 	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "error"}
 
-	if containsAnyKeyword(text.String(), codeKeywords) {
+	switch {
+	case containsAnyKeyword(text.String(), codeKeywords):
 		return "code"
-	} else if containsAnyKeyword(text.String(), debuggingKeywords) {
+	case containsAnyKeyword(text.String(), debuggingKeywords):
 		return "debugging"
-	} else if containsAnyKeyword(text.String(), planningKeywords) {
+	case containsAnyKeyword(text.String(), planningKeywords):
 		return "planning"
+	default:
+		return "general"
 	}
-	return "general"
 }
 
 // DiscoveredSkill holds a skill that was found relevant to the input.
@@ -2204,13 +2206,14 @@ func (l *AgentLoop) classifyForShadow(messages []llm.ChatMessage) (shadow.Domain
 	analysisKeywords := []string{"analyze", "explain", "why", "how does", "what is", "understand", "review"}
 
 	domain := shadow.DomainGeneral
-	if containsAnyKeyword(text.String(), codeKeywords) {
+	switch {
+	case containsAnyKeyword(text.String(), codeKeywords):
 		domain = shadow.DomainCode
-	} else if containsAnyKeyword(text.String(), debuggingKeywords) {
+	case containsAnyKeyword(text.String(), debuggingKeywords):
 		domain = shadow.DomainDebugging
-	} else if containsAnyKeyword(text.String(), planningKeywords) {
+	case containsAnyKeyword(text.String(), planningKeywords):
 		domain = shadow.DomainPlanning
-	} else if containsAnyKeyword(text.String(), analysisKeywords) {
+	case containsAnyKeyword(text.String(), analysisKeywords):
 		domain = shadow.DomainAnalysis
 	}
 
@@ -2218,9 +2221,10 @@ func (l *AgentLoop) classifyForShadow(messages []llm.ChatMessage) (shadow.Domain
 	multiStepKeywords := []string{"step by step", "first", "second", "then", "finally", "multiple steps"}
 	reasoningKeywords := []string{"think", "reason", "consider", "analyze", "evaluate", "compare"}
 
-	if containsAnyKeyword(text.String(), multiStepKeywords) {
+	switch {
+	case containsAnyKeyword(text.String(), multiStepKeywords):
 		taskType = shadow.TaskTypeMultiStep
-	} else if containsAnyKeyword(text.String(), reasoningKeywords) {
+	case containsAnyKeyword(text.String(), reasoningKeywords):
 		taskType = shadow.TaskTypeReasoning
 	}
 

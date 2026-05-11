@@ -1233,10 +1233,7 @@ func (s *SidebarModel) renderTasksPanel() string {
 				b.WriteString("\n")
 
 				// Line 2: progress bar completed/total
-				barWidth := max(s.width-14, 4)
-				if barWidth > 12 {
-					barWidth = 12
-				}
+				barWidth := min(max(s.width-14, 4), 12)
 
 				if task.TotalJobs > 0 {
 					filled := (task.CompletedJobs * barWidth) / task.TotalJobs
@@ -1258,10 +1255,7 @@ func (s *SidebarModel) renderTasksPanel() string {
 
 				// Line 3 (optional): current step when executing
 				if (task.Status == "executing" || task.Status == "planning") && task.CurrentStep != "" {
-					stepMaxLen := s.width - 10
-					if stepMaxLen < 8 {
-						stepMaxLen = 8
-					}
+					stepMaxLen := max(s.width-10, 8)
 					stepDesc := task.CurrentStep
 					if len(stepDesc) > stepMaxLen {
 						stepDesc = stepDesc[:stepMaxLen-3] + "..."
@@ -1415,10 +1409,7 @@ func (s *SidebarModel) renderActivityFeedPanel() string {
 
 				// Truncate summary
 				summary := item.Summary
-				maxSummaryLen := s.width - 18 // Account for timestamp and spacing
-				if maxSummaryLen < 5 {
-					maxSummaryLen = 5
-				}
+				maxSummaryLen := max(s.width-18, 5) // Account for timestamp and spacing
 				if len(summary) > maxSummaryLen {
 					summary = summary[:maxSummaryLen-3] + "..."
 				}
