@@ -119,70 +119,90 @@ type ServerOption func(*Server)
 // WithMemorySearcher sets the memory searcher for the server.
 func WithMemorySearcher(ms MemorySearcher) ServerOption {
 	return func(s *Server) {
-		s.memorySearcher = ms
+		if ms != nil {
+			s.memorySearcher = ms
+		}
 	}
 }
 
 // WithSkillsLister sets the skills lister for the server.
 func WithSkillsLister(sl SkillsLister) ServerOption {
 	return func(s *Server) {
-		s.skillsLister = sl
+		if sl != nil {
+			s.skillsLister = sl
+		}
 	}
 }
 
 // WithJobsLister sets the jobs lister for the server.
 func WithJobsLister(jl JobsLister) ServerOption {
 	return func(s *Server) {
-		s.jobsLister = jl
+		if jl != nil {
+			s.jobsLister = jl
+		}
 	}
 }
 
 // WithChatStreamer sets the streaming chat handler.
 func WithChatStreamer(cs ChatStreamer) ServerOption {
 	return func(s *Server) {
-		s.chatStreamer = cs
+		if cs != nil {
+			s.chatStreamer = cs
+		}
 	}
 }
 
 // WithSessionManager sets the session manager.
 func WithSessionManager(sm SessionManager) ServerOption {
 	return func(s *Server) {
-		s.sessionManager = sm
+		if sm != nil {
+			s.sessionManager = sm
+		}
 	}
 }
 
 // WithAgentLister sets the agent lister.
 func WithAgentLister(al AgentLister) ServerOption {
 	return func(s *Server) {
-		s.agentLister = al
+		if al != nil {
+			s.agentLister = al
+		}
 	}
 }
 
 // WithToolLister sets the tool lister.
 func WithToolLister(tl ToolLister) ServerOption {
 	return func(s *Server) {
-		s.toolLister = tl
+		if tl != nil {
+			s.toolLister = tl
+		}
 	}
 }
 
 // WithMemoryStore sets the memory store.
 func WithMemoryStore(ms MemoryStore) ServerOption {
 	return func(s *Server) {
-		s.memoryStore = ms
+		if ms != nil {
+			s.memoryStore = ms
+		}
 	}
 }
 
 // WithSkillExecutor sets the skill executor.
 func WithSkillExecutor(se SkillExecutor) ServerOption {
 	return func(s *Server) {
-		s.skillExecutor = se
+		if se != nil {
+			s.skillExecutor = se
+		}
 	}
 }
 
 // WithJobScheduler sets the job scheduler.
 func WithJobScheduler(js JobScheduler) ServerOption {
 	return func(s *Server) {
-		s.jobScheduler = js
+		if js != nil {
+			s.jobScheduler = js
+		}
 	}
 }
 

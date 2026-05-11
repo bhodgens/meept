@@ -77,7 +77,9 @@ func WithExecutorLogger(logger *slog.Logger) ExecutorOption {
 // Accepts any Chatter (e.g., *llm.Client or *llm.AnthropicClient).
 func WithClient(client llm.Chatter) ExecutorOption {
 	return func(e *Executor) {
-		e.client = client
+		if client != nil {
+			e.client = client
+		}
 	}
 }
 

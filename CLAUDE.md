@@ -294,6 +294,26 @@ Jobs can be targeted to specific agents via `agent_id`:
 
 - Always implement complete wired features, do not leave stub code or partial implementations
 - Always check your work
+- **Typed-nil interface guard**: When passing a concrete pointer to a function that accepts an interface, always nil-check the concrete pointer first. A nil `*ConcreteType` assigned to an interface variable produces a non-nil interface that passes `!= nil` but panics on method calls. Guard at the call site AND inside `With*` option functions:
+  ```go
+  // WRONG: typed-nil panic
+  var cache *TokenCacheCoordinator  // nil
+  WithTokenCache(cache)             // non-nil interface wrapping nil pointer
+
+  // RIGHT: guard at call site
+  if tokenCache != nil {
+      opts = append(opts, WithTokenCache(tokenCache))
+  }
+
+  // RIGHT: defense in depth inside option function
+  func WithTokenCache(cache ResponseCache) ClientOption {
+      return func(c *Client) {
+          if cache != nil {
+              c.tokenCache = cache
+          }
+      }
+  }
+  ```
 
 ## Project Structure
 

@@ -227,11 +227,15 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			}
 		}
 
-		c.LLMClient = llm.NewClient(llmCfg,
+		// Build client options
+		clientOpts := []llm.ClientOption{
 			llm.WithLogger(logger),
 			llm.WithBudget(budgetTracker),
-			llm.WithTokenCache(tokenCache),
-		)
+		}
+		if tokenCache != nil {
+			clientOpts = append(clientOpts, llm.WithTokenCache(tokenCache))
+		}
+		c.LLMClient = llm.NewClient(llmCfg, clientOpts...)
 		c.TokenCache = tokenCache
 		logger.Info("LLM client initialized successfully",
 			"provider", llmCfg.ProviderID,
@@ -2143,7 +2147,9 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 	if c.LLMResolver != nil {
 		executorOpts := []skills.ExecutorOption{
 			skills.WithExecutorLogger(logger.With("component", "skills-executor")),
-			skills.WithClient(c.LLMClient),
+		}
+		if c.LLMClient != nil {
+			executorOpts = append(executorOpts, skills.WithClient(c.LLMClient))
 		}
 
 		// Add lazy loader to executor

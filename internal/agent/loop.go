@@ -509,10 +509,12 @@ func WithLLMClient(client *llm.Client) LoopOption {
 // WithLLMChatter sets the LLM chatter interface (supports Client or ProviderManager).
 func WithLLMChatter(chatter llm.Chatter) LoopOption {
 	return func(l *AgentLoop) {
-		l.llm = chatter
-		// Try to extract concrete client for config access
-		if client, ok := chatter.(*llm.Client); ok {
-			l.llmClient = client
+		if chatter != nil {
+			l.llm = chatter
+			// Try to extract concrete client for config access
+			if client, ok := chatter.(*llm.Client); ok {
+				l.llmClient = client
+			}
 		}
 	}
 }
@@ -544,14 +546,18 @@ func WithAgentSpec(spec *AgentSpec) LoopOption {
 // WithLearningPipeline sets the learning pipeline for pattern extraction.
 func WithLearningPipeline(lp LearningPipeline) LoopOption {
 	return func(l *AgentLoop) {
-		l.learningPipeline = lp
+		if lp != nil {
+			l.learningPipeline = lp
+		}
 	}
 }
 
 // WithToolRegistry sets the tool registry.
 func WithToolRegistry(registry ToolRegistry) LoopOption {
 	return func(l *AgentLoop) {
-		l.registry = registry
+		if registry != nil {
+			l.registry = registry
+		}
 	}
 }
 
