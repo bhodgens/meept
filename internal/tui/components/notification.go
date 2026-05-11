@@ -138,8 +138,7 @@ func (nm *NotificationManager) HasActive() bool {
 
 // Update handles notification messages.
 func (nm *NotificationManager) Update(msg tea.Msg) tea.Cmd {
-	switch msg := msg.(type) {
-	case NotificationExpiredMsg:
+	if msg, ok := msg.(NotificationExpiredMsg); ok {
 		nm.Dismiss(msg.ID)
 	}
 	return nil

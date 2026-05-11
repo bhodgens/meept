@@ -420,7 +420,7 @@ func (c *Controller) GetStatus() *ControllerStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	pendingApprovals := make([]string, 0)
+	pendingApprovals := make([]string, 0, len(c.applier.PendingApprovals()))
 	for id := range c.applier.PendingApprovals() {
 		pendingApprovals = append(pendingApprovals, id)
 	}

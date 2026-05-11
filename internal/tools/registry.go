@@ -344,7 +344,7 @@ func (r *Registry) ExecuteWithRetry(ctx context.Context, name string, args map[s
 		if attempt < policy.MaxRetries {
 			delay := policy.RetryDelay
 			if policy.Exponential {
-				delay = delay * time.Duration(1<<uint(attempt))
+				delay *= time.Duration(1 << uint(attempt))
 			}
 
 			select {

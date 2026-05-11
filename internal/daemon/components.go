@@ -878,10 +878,11 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Create scheduler with job dependencies for extended job types
 	if cfg.Scheduler.Enabled {
-		schedOpts := []scheduler.Option{
+		schedOpts := make([]scheduler.Option, 0, 3)
+		schedOpts = append(schedOpts,
 			scheduler.WithDataDir(cfg.Daemon.DataDir),
 			scheduler.WithLogger(logger.With("component", "scheduler")),
-		}
+		)
 
 		// Build job dependencies for optimization, security, and learning jobs
 		jobDeps := &scheduler.JobDependencies{

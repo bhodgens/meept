@@ -2,7 +2,6 @@ package integration
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -29,7 +28,7 @@ func TestController_Detect_Integration(t *testing.T) {
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
 	cfg.Validate()
 
-	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
 	issues, err := ctrl.Detect(context.Background())
 	if err != nil {
@@ -50,7 +49,7 @@ func TestController_StatusRoundTrip(t *testing.T) {
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
 	cfg.Validate()
 
-	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
 	if err := ctrl.Initialize(context.Background()); err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -78,8 +77,8 @@ func TestScheduler_StopVerifiesIdempotent(t *testing.T) {
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
 	cfg.Validate()
 
-	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	sched := selfimprove.NewScheduler(ctrl, 1*time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
+	sched := selfimprove.NewScheduler(ctrl, 1*time.Hour, slog.New(slog.DiscardHandler))
 
 	// Stop before start should be safe.
 	sched.Stop()
@@ -95,10 +94,10 @@ func TestScheduler_StartStop(t *testing.T) {
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
 	cfg.Validate()
 
-	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
 	// Use a very short interval so we can observe at least one tick in tests.
-	sched := selfimprove.NewScheduler(ctrl, 50*time.Millisecond, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sched := selfimprove.NewScheduler(ctrl, 50*time.Millisecond, slog.New(slog.DiscardHandler))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -130,7 +129,7 @@ func TestController_ProgressCallback(t *testing.T) {
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
 	cfg.Validate()
 
-	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
 	var phases []string
 	var mu sync.Mutex
@@ -178,14 +177,14 @@ func TestController_ProgressCallback(t *testing.T) {
 func TestController_BusIntegration(t *testing.T) {
 	projectDir := t.TempDir()
 
-	msgBus := bus.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	msgBus := bus.New(nil, slog.New(slog.DiscardHandler))
 	defer msgBus.Close()
 
 	cfg := selfimprove.DefaultConfig()
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
 	cfg.Validate()
 
-	ctrl := selfimprove.NewController(cfg, msgBus, nil, projectDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := selfimprove.NewController(cfg, msgBus, nil, projectDir, slog.New(slog.DiscardHandler))
 
 	// Subscribe to the status topic.
 	sub := msgBus.Subscribe("test-si", "selfimprove.status")
@@ -233,7 +232,7 @@ func TestApplier_ApproveReject_Integration(t *testing.T) {
 	cfg.Safety.AutoApplyLowRisk = false
 	cfg.Validate()
 
-	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
 	// Manually create a pending fix via the applier.
 	fix := &selfimprove.ProposedFix{

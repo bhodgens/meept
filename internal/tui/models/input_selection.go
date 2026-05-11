@@ -169,7 +169,7 @@ func (m *ChatModel) selectInputLineAt(y int) {
 
 	// Calculate character offsets for this line
 	lineStart := 0
-	for i := 0; i < y; i++ {
+	for i := range y {
 		lineStart += len(lines[i]) + 1
 	}
 	lineEnd := lineStart + len(lines[y])

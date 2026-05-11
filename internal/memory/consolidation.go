@@ -289,7 +289,7 @@ func (c *Consolidator) summarizeByDate(memories []MemoryResult) []Summary {
 		groups[dayKey] = append(groups[dayKey], mem)
 	}
 
-	var summaries []Summary
+	summaries := make([]Summary, 0, len(groups))
 
 	// Sort keys for deterministic output
 	days := make([]string, 0, len(groups))

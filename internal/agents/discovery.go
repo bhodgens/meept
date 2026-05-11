@@ -154,11 +154,9 @@ func (d *Discovery) scanTier(tier DiscoveryTier) error {
 			if _, err := os.Stat(agentFile); err == nil {
 				d.loadAgentFile(agentFile, tier.Priority)
 			}
-		} else {
+		} else if isAgentFile(entry.Name()) {
 			// Support flat .md files that could be agent definitions
-			if isAgentFile(entry.Name()) {
-				d.loadAgentFile(entryPath, tier.Priority)
-			}
+			d.loadAgentFile(entryPath, tier.Priority)
 		}
 	}
 

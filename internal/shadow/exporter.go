@@ -438,7 +438,7 @@ func getResponseModel(record *ShadowRecord) string {
 }
 
 func formatPrompt(messages []Message) string {
-	var parts []string
+	parts := make([]string, 0, len(messages))
 	for _, msg := range messages {
 		parts = append(parts, fmt.Sprintf("%s: %s", msg.Role, msg.Content))
 	}

@@ -310,11 +310,6 @@ func parseTime(timeStr string) (hour, minute int, err error) {
 				}
 			}
 			minStr = minNum
-			// Handle am/pm for the hour
-			if strings.Contains(minPart, "pm") && hourStr != "12" {
-				h, _ := parseInt(hourStr)
-				hour = h + 12
-			}
 		} else {
 			minStr = minPart
 		}
@@ -338,7 +333,7 @@ func parseTime(timeStr string) (hour, minute int, err error) {
 
 	// Handle am/pm for hour-only formats
 	if strings.Contains(timeStr, "pm") && !strings.Contains(timeStr, ":") && h != 12 {
-		h = h + 12
+		h += 12
 	}
 	if strings.Contains(timeStr, "am") && h == 12 {
 		h = 0

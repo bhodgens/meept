@@ -220,8 +220,6 @@ func (e *ResearchEngine) analyzePromptDeficiency(pattern PatternReport, analyses
 
 // analyzeHighErrorRate analyzes high error rate issues.
 func (e *ResearchEngine) analyzeHighErrorRate(pattern PatternReport, analyses []*SessionAnalysis) (string, []EvidenceLink) {
-	evidence := make([]EvidenceLink, 0)
-
 	// Analyze error patterns
 	errorTypes := make(map[string]int)
 	for _, a := range analyses {
@@ -230,6 +228,7 @@ func (e *ResearchEngine) analyzeHighErrorRate(pattern PatternReport, analyses []
 		}
 	}
 
+	evidence := make([]EvidenceLink, 0, len(errorTypes))
 	for errorType, count := range errorTypes {
 		evidence = append(evidence, EvidenceLink{
 			Type:        "error_log",
@@ -244,7 +243,7 @@ func (e *ResearchEngine) analyzeHighErrorRate(pattern PatternReport, analyses []
 
 // analyzeGeneric performs generic analysis when specific type is unclear.
 func (e *ResearchEngine) analyzeGeneric(pattern PatternReport, analyses []*SessionAnalysis) (string, []EvidenceLink) {
-	evidence := make([]EvidenceLink, 0)
+	evidence := make([]EvidenceLink, 0, minInt(len(analyses), 5))
 
 	// Collect general evidence
 	for _, a := range analyses[:minInt(len(analyses), 5)] {

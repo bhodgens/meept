@@ -266,7 +266,7 @@ func (a *OpenAIAdapter) WaitForJob(ctx context.Context, jobID string, pollInterv
 
 // DeleteFile deletes an uploaded file.
 func (a *OpenAIAdapter) DeleteFile(ctx context.Context, fileID string) error {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", a.baseURL+"/files/"+fileID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.baseURL+"/files/"+fileID, nil)
 	if err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func (a *OpenAIAdapter) DeleteFile(ctx context.Context, fileID string) error {
 
 // DeleteModel deletes a fine-tuned model.
 func (a *OpenAIAdapter) DeleteModel(ctx context.Context, modelID string) error {
-	req, err := http.NewRequestWithContext(ctx, "DELETE", a.baseURL+"/models/"+modelID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.baseURL+"/models/"+modelID, nil)
 	if err != nil {
 		return err
 	}

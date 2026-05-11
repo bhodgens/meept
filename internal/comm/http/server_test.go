@@ -60,7 +60,7 @@ func TestNewServer(t *testing.T) {
 func TestHandleHealth(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
 	server.handleHealth(w, req)
@@ -88,7 +88,7 @@ func TestHandleDaemonStatus_Running(t *testing.T) {
 	}
 	server := NewServer(ServerConfig{}, nil, daemon, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/daemon/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/daemon/status", nil)
 	w := httptest.NewRecorder()
 
 	server.handleDaemonStatus(w, req)
@@ -120,7 +120,7 @@ func TestHandleDaemonStatus_NotRunning(t *testing.T) {
 	}
 	server := NewServer(ServerConfig{}, nil, daemon, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/daemon/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/daemon/status", nil)
 	w := httptest.NewRecorder()
 
 	server.handleDaemonStatus(w, req)
@@ -146,7 +146,7 @@ func TestHandleDaemonStatus_NotRunning(t *testing.T) {
 func TestHandleDaemonStatus_NoDaemonController(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/daemon/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/daemon/status", nil)
 	w := httptest.NewRecorder()
 
 	server.handleDaemonStatus(w, req)
@@ -160,7 +160,7 @@ func TestHandleDaemonStatus_NoDaemonController(t *testing.T) {
 func TestHandleGetClientConfig_NoConfigService(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/config/client", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/client", nil)
 	w := httptest.NewRecorder()
 
 	server.handleGetClientConfig(w, req)
@@ -178,7 +178,7 @@ func TestHandleSaveClientConfig_InvalidBody(t *testing.T) {
 	// So test the error path
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("POST", "/api/v1/config/client", strings.NewReader("not json"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/client", strings.NewReader("not json"))
 	w := httptest.NewRecorder()
 
 	server.handleSaveClientConfig(w, req)
@@ -194,7 +194,7 @@ func TestHandleSaveClientConfig_InvalidBody(t *testing.T) {
 func TestHandleGetModelsConfig_NoConfigService(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/config/models", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/models", nil)
 	w := httptest.NewRecorder()
 
 	server.handleGetModelsConfig(w, req)
@@ -216,7 +216,7 @@ func TestHandleLiveMetrics_Success(t *testing.T) {
 	}
 	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/metrics/live", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/live", nil)
 	w := httptest.NewRecorder()
 
 	server.handleLiveMetrics(w, req)
@@ -239,7 +239,7 @@ func TestHandleLiveMetrics_Success(t *testing.T) {
 func TestHandleLiveMetrics_NoService(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/metrics/live", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/live", nil)
 	w := httptest.NewRecorder()
 
 	server.handleLiveMetrics(w, req)
@@ -255,7 +255,7 @@ func TestHandleHistoricalMetrics_MissingParams(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil, nil)
 
 	// Missing from and to
-	req := httptest.NewRequest("GET", "/api/v1/metrics/historical", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/historical", nil)
 	w := httptest.NewRecorder()
 
 	server.handleHistoricalMetrics(w, req)
@@ -270,7 +270,7 @@ func TestHandleHistoricalMetrics_InvalidFromParam(t *testing.T) {
 	metricsSvc := &mockMetricsService{}
 	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/metrics/historical?from=invalid&to=2024-01-01T00:00:00Z", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/historical?from=invalid&to=2024-01-01T00:00:00Z", nil)
 	w := httptest.NewRecorder()
 
 	server.handleHistoricalMetrics(w, req)
@@ -290,7 +290,7 @@ func TestHandleHistoricalMetrics_InvalidToParam(t *testing.T) {
 	metricsSvc := &mockMetricsService{}
 	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/metrics/historical?from=2024-01-01T00:00:00Z&to=invalid", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/historical?from=2024-01-01T00:00:00Z&to=invalid", nil)
 	w := httptest.NewRecorder()
 
 	server.handleHistoricalMetrics(w, req)
@@ -317,7 +317,7 @@ func TestHandleHistoricalMetrics_Success(t *testing.T) {
 
 	from := time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
 	to := time.Now().Format(time.RFC3339)
-	req := httptest.NewRequest("GET", "/api/v1/metrics/historical?from="+from+"&to="+to, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/historical?from="+from+"&to="+to, nil)
 	w := httptest.NewRecorder()
 
 	server.handleHistoricalMetrics(w, req)
@@ -344,7 +344,7 @@ func TestMiddleware_CORS(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -362,7 +362,7 @@ func TestMiddleware_CORSPreflight(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("OPTIONS", "/test", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/test", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -380,7 +380,7 @@ func TestMiddleware_NoCORS(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -457,7 +457,7 @@ func TestDefaultServerConfig(t *testing.T) {
 func TestHandleListAgents_NoConfigService(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/config/agents", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/agents", nil)
 	w := httptest.NewRecorder()
 
 	server.handleListAgents(w, req)
@@ -471,7 +471,7 @@ func TestHandleListAgents_NoConfigService(t *testing.T) {
 func TestHandleGetAgent_NoConfigService(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/config/agents/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/agents/test", nil)
 	req.SetPathValue("id", "test")
 	w := httptest.NewRecorder()
 
@@ -486,7 +486,7 @@ func TestHandleGetAgent_NoConfigService(t *testing.T) {
 func TestHandleGetAgent_MissingID(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/config/agents/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/config/agents/", nil)
 	// Don't set path value to simulate missing ID
 	w := httptest.NewRecorder()
 
@@ -502,7 +502,7 @@ func TestHandleGetAgent_MissingID(t *testing.T) {
 func TestHandleSaveAgent_InvalidBody(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("POST", "/api/v1/config/agents/test", strings.NewReader("not json"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/agents/test", strings.NewReader("not json"))
 	req.SetPathValue("id", "test")
 	w := httptest.NewRecorder()
 
@@ -518,7 +518,7 @@ func TestHandleSaveAgent_InvalidBody(t *testing.T) {
 func TestHandleDeleteAgent_NoConfigService(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("DELETE", "/api/v1/config/agents/test", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/config/agents/test", nil)
 	req.SetPathValue("id", "test")
 	w := httptest.NewRecorder()
 
@@ -534,7 +534,7 @@ func TestHandleDaemonRestart_Success(t *testing.T) {
 	daemon := &mockDaemonController{running: true}
 	server := NewServer(ServerConfig{}, nil, daemon, nil, nil, nil)
 
-	req := httptest.NewRequest("POST", "/api/v1/daemon/restart", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/daemon/restart", nil)
 	w := httptest.NewRecorder()
 
 	server.handleDaemonRestart(w, req)
@@ -557,7 +557,7 @@ func TestHandleDaemonRestart_Success(t *testing.T) {
 func TestHandleDaemonRestart_NoDaemonController(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 
-	req := httptest.NewRequest("POST", "/api/v1/daemon/restart", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/daemon/restart", nil)
 	w := httptest.NewRecorder()
 
 	server.handleDaemonRestart(w, req)
@@ -572,7 +572,7 @@ func TestHandleMetricsStream(t *testing.T) {
 	metricsSvc := &mockMetricsService{}
 	server := NewServer(ServerConfig{}, nil, nil, metricsSvc, nil, nil)
 
-	req := httptest.NewRequest("GET", "/api/v1/metrics/stream", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/stream", nil)
 	w := httptest.NewRecorder()
 
 	server.handleMetricsStream(w, req)

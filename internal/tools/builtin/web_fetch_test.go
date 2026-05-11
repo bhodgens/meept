@@ -55,8 +55,8 @@ func TestWebFetchTool_Execute(t *testing.T) {
 
 		fetchResult := unwrapFetchResult(t, result)
 
-		if fetchResult.StatusCode != 200 {
-			t.Errorf("expected status 200, got %d", fetchResult.StatusCode)
+		if fetchResult.StatusCode != http.StatusOK {
+			t.Errorf("expected status %d, got %d", http.StatusOK, fetchResult.StatusCode)
 		}
 		if fetchResult.Content != "Hello, World!" {
 			t.Errorf("expected 'Hello, World!', got %q", fetchResult.Content)

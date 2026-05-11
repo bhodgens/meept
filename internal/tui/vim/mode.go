@@ -171,16 +171,14 @@ func (s *State) handleNormalMode(key string, msg tea.KeyPressMsg) (Action, bool)
 	switch s.Pending {
 	case "g":
 		s.Pending = ""
-		switch key {
-		case "g":
+		if key == "g" {
 			return Action{Type: ActionMoveToTop, Count: count}, true
 		}
 		return Action{Type: ActionNone}, false
 
 	case "d":
 		s.Pending = ""
-		switch key {
-		case "d":
+		if key == "d" {
 			return Action{Type: ActionDelete, Count: count}, true
 		}
 		return Action{Type: ActionNone}, false

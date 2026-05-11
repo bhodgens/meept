@@ -159,7 +159,7 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 	}
 
 	if targetJob == nil {
-		return nil, nil
+		return nil, ErrNoJobAvailable
 	}
 
 	// Claim the selected job atomically

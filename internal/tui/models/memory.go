@@ -238,13 +238,14 @@ func (m *MemoryModel) View() string {
 	b.WriteString(searchStyle.Render(m.searchInput.View()))
 	b.WriteString("\n\n")
 
-	if m.loading {
+	switch {
+	case m.loading:
 		b.WriteString(m.renderLoading())
-	} else if m.err != nil {
+	case m.err != nil:
 		b.WriteString(m.renderError())
-	} else if len(m.results) == 0 {
+	case len(m.results) == 0:
 		b.WriteString(m.renderEmpty())
-	} else {
+	default:
 		// Two-column layout: list on left, detail on right
 		listWidth := m.width / 2
 		detailWidth := m.width - listWidth - 4

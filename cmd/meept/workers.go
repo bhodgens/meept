@@ -20,10 +20,7 @@ Examples:
   meept workers              # Show worker pool status
   meept workers list         # List all workers with details
   meept workers scale 8      # Scale to 8 workers`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// Default to showing status when no subcommand given
-			return runWorkersStatus(cmd, args)
-		},
+		RunE: runWorkersStatus,
 	}
 
 	cmd.AddCommand(newWorkersListCmd())

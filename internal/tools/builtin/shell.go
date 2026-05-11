@@ -242,14 +242,13 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	}
 
 	// Build evidence: exit code and output hash
-	evidence := []models.Evidence{
-		models.NewEvidence(
-			models.EvidenceProcessExit,
-			command,
-			fmt.Sprintf("%d", returnCode),
-			t.Name(),
-		),
-	}
+	evidence := make([]models.Evidence, 0, 2)
+	evidence = append(evidence, models.NewEvidence(
+		models.EvidenceProcessExit,
+		command,
+		fmt.Sprintf("%d", returnCode),
+		t.Name(),
+	))
 
 	// Hash output for compactness (full output is still returned in result)
 	outputForHash := stdoutStr + stderrStr

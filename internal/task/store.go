@@ -1,15 +1,19 @@
 package task
 
 import (
-	"io"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+// ErrTaskNotFound is returned when a task cannot be found by ID.
+var ErrTaskNotFound = errors.New("task not found")
 
 // Store provides SQLite persistence for tasks.
 type Store struct {
@@ -174,9 +178,6 @@ func (s *Store) GetByID(id string) (*Task, error) {
 	task, err := s.scanTask(row)
 	if err != nil {
 		return nil, err
-	}
-	if task == nil {
-		return nil, nil
 	}
 
 	// Load linked sessions
@@ -445,7 +446,7 @@ func (s *Store) scanTask(row *sql.Row) (*Task, error) {
 		&inheritedFrom, &createdMemories, &assignedAgent, &tokenUsage)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, ErrTaskNotFound
 		}
 		return nil, err
 	}

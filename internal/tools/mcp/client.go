@@ -223,8 +223,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 	// Convert content blocks to text
 	var text string
 	for _, block := range result.Content {
-		switch block.Type {
-		case "text":
+		if block.Type == "text" {
 			if text != "" {
 				text += "\n"
 			}

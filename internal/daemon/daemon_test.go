@@ -91,7 +91,7 @@ func TestDaemonStartup(t *testing.T) {
 }
 
 func BenchmarkDaemonStartup(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		tmpDir := b.TempDir()
 		cfg := &Config{
 			SocketPath:      filepath.Join(tmpDir, "meept.sock"),
@@ -114,7 +114,7 @@ func BenchmarkDaemonStartup(b *testing.B) {
 			// Run daemon briefly
 			go d.Run(ctx)
 			// Wait for socket
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				if _, err := os.Stat(cfg.SocketPath); err == nil {
 					close(ready)
 					return
@@ -179,7 +179,7 @@ func BenchmarkRPCThroughput(b *testing.B) {
 	frame := fmt.Sprintf("%d\n%s", len(reqData), reqData)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		// Send request
 		conn.SetWriteDeadline(time.Now().Add(time.Second))
 		if _, err := conn.Write([]byte(frame)); err != nil {
@@ -229,7 +229,7 @@ func BenchmarkConcurrentRPC(b *testing.B) {
 	// Create connection pool
 	const poolSize = 10
 	conns := make([]net.Conn, poolSize)
-	for i := 0; i < poolSize; i++ {
+	for i := range poolSize {
 		conn, err := net.Dial("unix", cfg.SocketPath)
 		if err != nil {
 			b.Fatalf("Failed to connect: %v", err)
@@ -247,7 +247,7 @@ func BenchmarkConcurrentRPC(b *testing.B) {
 	var wg sync.WaitGroup
 	var ops atomic.Int64
 
-	for i := 0; i < poolSize; i++ {
+	for i := range poolSize {
 		wg.Add(1)
 		go func(conn net.Conn) {
 			defer wg.Done()

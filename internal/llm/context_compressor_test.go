@@ -131,10 +131,8 @@ func TestCompress_AllStages(t *testing.T) {
 					t.Errorf("DroppedCount: got %d, want %d",
 						result.DroppedCount, before-len(result.Messages))
 				}
-			} else {
-				if result.DroppedCount != 0 {
-					t.Errorf("DroppedCount should be 0 when not compressed, got %d", result.DroppedCount)
-				}
+			} else if result.DroppedCount != 0 {
+				t.Errorf("DroppedCount should be 0 when not compressed, got %d", result.DroppedCount)
 			}
 
 			// Verify stats counters.

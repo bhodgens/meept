@@ -304,7 +304,7 @@ func (m *Manager) reloadPhase1(newConfigs map[string]ServerConfig) []ServerConfi
 	}
 
 	// Determine what servers to start/refresh
-	var serversToStart []string
+	serversToStart := make([]string, 0, len(newConfigs))
 	for name := range newConfigs {
 		serversToStart = append(serversToStart, name)
 	}

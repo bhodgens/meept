@@ -3,12 +3,20 @@ package queue
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+// ErrNoJobAvailable is returned when no claimable job is found.
+var ErrNoJobAvailable = errors.New("no job available")
+
+// ErrJobAlreadyClaimed is returned when a job cannot be claimed because it is
+// not found or already claimed by another worker.
+var ErrJobAlreadyClaimed = errors.New("job not found or already claimed")
 
 // Store provides SQLite persistence for jobs.
 type Store struct {
@@ -228,7 +236,7 @@ func (s *Store) ClaimNextForAgent(workerID string, caps []string, agentID string
 	}
 
 	if claimableJob == nil {
-		return nil, nil // No jobs available
+		return nil, ErrNoJobAvailable
 	}
 
 	// Claim the job (reuse now from above since it's already in the same transaction)
@@ -472,6 +480,9 @@ func (s *Store) GetStats() (*QueueStats, error) {
 		}
 		stats.ByState[JobState(state)] = count
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating state stats: %w", err)
+	}
 
 	// Count by priority for pending jobs
 	rows, err = s.db.Query(`SELECT priority, COUNT(*) FROM jobs WHERE state = 'pending' GROUP BY priority`)
@@ -486,6 +497,9 @@ func (s *Store) GetStats() (*QueueStats, error) {
 			continue
 		}
 		stats.ByPriority[Priority(priority)] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating priority stats: %w", err)
 	}
 
 	// Dead letter count
@@ -675,6 +689,10 @@ func (s *Store) ListDeadLetter(limit int) ([]*Job, error) {
 		jobs = append(jobs, job)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating dead letter jobs: %w", err)
+	}
+
 	return jobs, nil
 }
 
@@ -821,7 +839,7 @@ func (s *Store) ClaimNextByID(jobID string, workerID string) (*Job, error) {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return nil, nil // Job not found or already claimed
+		return nil, ErrJobAlreadyClaimed
 	}
 
 	if err := tx.Commit(); err != nil {

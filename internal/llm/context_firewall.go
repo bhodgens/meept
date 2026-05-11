@@ -786,7 +786,8 @@ func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []Cha
 
 			// Build a synthetic message list from the summary + kept messages
 			// so the recursive call can summarize the summary itself.
-			subMessages := []ChatMessage{summaryMsg}
+			subMessages := make([]ChatMessage, 0, 1+len(result))
+			subMessages = append(subMessages, summaryMsg)
 			subMessages = append(subMessages, result...)
 
 			return f.summarizeWithLevel(ctx, subMessages, level+1)
@@ -800,7 +801,7 @@ func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []Cha
 }
 
 // ValidateContextSize checks if the context size exceeds the model limit.
-// Returns a ContextSizeExceeded error if the limit is exceeded.
+// Returns a ContextSizeExceededError error if the limit is exceeded.
 func (f *ContextFirewall) ValidateContextSize(messages []ChatMessage) error {
 	if f.model == nil || f.model.ContextLimit == 0 {
 		return nil // No limit configured
@@ -810,7 +811,7 @@ func (f *ContextFirewall) ValidateContextSize(messages []ChatMessage) error {
 	modelLimit := f.model.ContextLimit
 
 	if estimated > modelLimit {
-		return &ContextSizeExceeded{
+		return &ContextSizeExceededError{
 			Estimated:  estimated,
 			ModelLimit: modelLimit,
 			Suggestions: []string{

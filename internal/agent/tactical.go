@@ -561,7 +561,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	}
 
 	// Check for newly unblocked steps (only if step was approved/completed)
-	step, _ = ts.stepStore.GetByID(step.ID) // Refresh step state
+	step, err = ts.stepStore.GetByID(step.ID) // Refresh step state
+	if err != nil {
+		ts.logger.Error("Failed to refresh step state", "step_id", step.ID, "error", err)
+		return nil
+	}
 	if step.State == task.StepCompleted || step.State == task.StepApproved {
 		promoted, err := ts.stepStore.PromoteReadySteps(step.TaskID)
 		if err != nil {

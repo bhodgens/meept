@@ -260,7 +260,7 @@ func (s *Store) aggregateHourly() {
 	}
 
 	// Clean up old raw data (keep last 24 hours)
-	_, err = s.db.Exec("DELETE FROM metrics_live WHERE timestamp < datetime('now', '-24 hours')")
+	_, _ = s.db.Exec("DELETE FROM metrics_live WHERE timestamp < datetime('now', '-24 hours')")
 }
 
 // Record records a metric value.
@@ -407,7 +407,6 @@ func (s *Store) GetHistoricalMetrics(from, to time.Time, resolution string) ([]M
 		ORDER BY hour ASC
 		`
 	default:
-		resolution = "hour"
 		query = `
 		SELECT hour, metric_name, avg_value, ''
 		FROM metrics_hourly

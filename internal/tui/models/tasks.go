@@ -456,10 +456,8 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 				if idx >= 0 && idx < len(filtered) {
 					m.selectedTask = &filtered[idx]
 				}
-			} else {
-				if idx >= 0 && idx < len(m.jobs) {
-					m.selectedJob = &m.jobs[idx]
-				}
+			} else if idx >= 0 && idx < len(m.jobs) {
+				m.selectedJob = &m.jobs[idx]
 			}
 			return cmd
 		}
@@ -533,7 +531,8 @@ func (m *TasksModel) filterTasks() []types.TaskExtended {
 		case FilterMine:
 			// Filter by session (for TUI) or agent (for agent-mode clients).
 			// Priority: session > agent > fallback to all assigned tasks.
-			if m.currentSessionID != "" {
+			switch {
+			case m.currentSessionID != "":
 				// Check if current session is linked to this task
 				for _, linkedSess := range t.LinkedSessions {
 					if linkedSess == m.currentSessionID {
@@ -541,11 +540,11 @@ func (m *TasksModel) filterTasks() []types.TaskExtended {
 						break
 					}
 				}
-			} else if m.currentAgentID != "" {
+			case m.currentAgentID != "":
 				if t.AssignedAgent == m.currentAgentID {
 					include = true
 				}
-			} else if t.AssignedAgent != "" {
+			case t.AssignedAgent != "":
 				// Fallback: show all assigned tasks
 				include = true
 			}
@@ -734,11 +733,12 @@ func (m *TasksModel) View() string {
 	b.WriteString("\n")
 
 	// Detail panel (preview, not full modal)
-	if m.viewMode == ViewModeTasks && m.selectedTask != nil {
+	switch {
+	case m.viewMode == ViewModeTasks && m.selectedTask != nil:
 		b.WriteString(m.renderTaskPreview())
-	} else if m.viewMode == ViewModeJobs && m.selectedJob != nil {
+	case m.viewMode == ViewModeJobs && m.selectedJob != nil:
 		b.WriteString(m.renderJobDetail())
-	} else {
+	default:
 		b.WriteString(m.renderEmptyDetail())
 	}
 
@@ -779,13 +779,14 @@ func (m *TasksModel) renderHeader() string {
 	var title string
 	var tabs string
 
-	if m.viewMode == ViewModeTasks {
+	switch {
+	case m.viewMode == ViewModeTasks:
 		title = titleStyle.Render("Tasks")
 		tabs = activeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + modeStyle.Render("Lineage")
-	} else if m.viewMode == ViewModeLineage {
+	case m.viewMode == ViewModeLineage:
 		title = titleStyle.Render("Task Lineage")
 		tabs = modeStyle.Render("Tasks") + " " + modeStyle.Render("Jobs") + " " + activeStyle.Render("Lineage")
-	} else {
+	default:
 		title = titleStyle.Render("Scheduled Jobs")
 		tabs = modeStyle.Render("Tasks") + " " + activeStyle.Render("Jobs") + " " + modeStyle.Render("Lineage")
 	}

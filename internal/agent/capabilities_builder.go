@@ -123,13 +123,13 @@ func (b *CapabilitiesBuilder) buildAgentCapabilities(spec *AgentSpec) *AgentCapa
 // deriveIntentTypesFromSpec derives intent types from agent specification.
 // Uses agent ID, role, and purpose - no hardcoded mappings.
 func (b *CapabilitiesBuilder) deriveIntentTypesFromSpec(spec *AgentSpec) []string {
-	var intents []string
+	purposeIntents := b.extractIntentsFromPurpose(spec.Purpose)
+	intents := make([]string, 0, 1+len(purposeIntents))
 
 	// Agent ID is always an intent type
 	intents = append(intents, spec.ID)
 
 	// Extract potential intent hints from purpose
-	purposeIntents := b.extractIntentsFromPurpose(spec.Purpose)
 	intents = append(intents, purposeIntents...)
 
 	return intents

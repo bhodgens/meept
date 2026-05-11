@@ -34,6 +34,7 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	_ = logger // TODO: use logger when services are implemented
 	return &ServiceRegistry{}, nil
 }
 

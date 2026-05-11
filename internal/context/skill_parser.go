@@ -334,7 +334,7 @@ func inferAgentRole(description, body string) string {
 
 // parseAgentsFromBody parses multiple agents from the body
 func parseAgentsFromBody(body, path string) []*AgentDefinition {
-	var agents []*AgentDefinition
+	agents := make([]*AgentDefinition, 0, 1)
 
 	// This is a simplified implementation
 	// In a full implementation, this would parse complex agent definitions

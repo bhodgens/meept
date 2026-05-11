@@ -93,8 +93,7 @@ func (m *StatusModel) Update(msg tea.Msg) tea.Cmd {
 		return nil
 
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "r":
+		if msg.String() == "r" {
 			// Manual refresh
 			m.loading = true
 			return m.fetchStatus

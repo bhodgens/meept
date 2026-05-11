@@ -12,7 +12,7 @@ import (
 func TestClientChat(t *testing.T) {
 	// Create a mock server
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			t.Errorf("Expected POST, got %s", r.Method)
 		}
 
@@ -253,8 +253,8 @@ func TestClientChatAPIError(t *testing.T) {
 		t.Fatalf("Expected APIError, got %T", err)
 	}
 
-	if apiErr.StatusCode != 400 {
-		t.Errorf("StatusCode = %d, want 400", apiErr.StatusCode)
+	if apiErr.StatusCode != http.StatusBadRequest {
+		t.Errorf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusBadRequest)
 	}
 }
 

@@ -144,8 +144,7 @@ func (v *DispatchViz) tickCmd() tea.Cmd {
 
 // Update handles messages and returns the next tick command.
 func (v *DispatchViz) Update(msg tea.Msg) tea.Cmd {
-	switch msg.(type) {
-	case VizTickMsg:
+	if _, ok := msg.(VizTickMsg); ok {
 		v.frame++
 
 		// Update all entities
@@ -193,12 +192,10 @@ func (v *DispatchViz) SyncWithData(agents []AgentActivityData, workers []WorkerD
 					r.MoveTo(v.center)
 				}
 			}
-		} else {
+		} else if r.State != RobotIdle {
 			// No data for this robot, set to idle
-			if r.State != RobotIdle {
-				r.SetState(RobotIdle)
-				r.MoveToHome()
-			}
+			r.SetState(RobotIdle)
+			r.MoveToHome()
 		}
 	}
 }

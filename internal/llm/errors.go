@@ -15,18 +15,18 @@ type NonRetryableError interface {
 	NonRetryable() bool
 }
 
-// ContextSizeExceeded is returned when the context size exceeds the model limit.
-type ContextSizeExceeded struct {
+// ContextSizeExceededError is returned when the context size exceeds the model limit.
+type ContextSizeExceededError struct {
 	Estimated   int      // Estimated token count
 	ModelLimit  int      // Model's context window limit
 	Suggestions []string // Suggestions for resolving the issue
 }
 
-func (e *ContextSizeExceeded) Error() string {
+func (e *ContextSizeExceededError) Error() string {
 	return fmt.Sprintf("context size (%d tokens) exceeds model limit (%d tokens)", e.Estimated, e.ModelLimit)
 }
 
-func (e *ContextSizeExceeded) SuggestionsString() string {
+func (e *ContextSizeExceededError) SuggestionsString() string {
 	if len(e.Suggestions) == 0 {
 		return ""
 	}
@@ -37,13 +37,13 @@ func (e *ContextSizeExceeded) SuggestionsString() string {
 	return s
 }
 
-// NonRetryable marks ContextSizeExceeded as non-retryable
-func (e *ContextSizeExceeded) NonRetryable() bool {
+// NonRetryable marks ContextSizeExceededError as non-retryable
+func (e *ContextSizeExceededError) NonRetryable() bool {
 	return true
 }
 
-// Ensure ContextSizeExceeded implements NonRetryableError
-var _ NonRetryableError = (*ContextSizeExceeded)(nil)
+// Ensure ContextSizeExceededError implements NonRetryableError
+var _ NonRetryableError = (*ContextSizeExceededError)(nil)
 
 // RateLimitError is returned when a rate limit (HTTP 429) is encountered.
 type RateLimitError struct {

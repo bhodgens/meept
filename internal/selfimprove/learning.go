@@ -828,7 +828,7 @@ func (lp *LearningPipeline) GetPatterns() []*LearnedPattern {
 	lp.mu.RLock()
 	defer lp.mu.RUnlock()
 
-	var result []*LearnedPattern
+	result := make([]*LearnedPattern, 0, len(lp.patterns))
 	for _, p := range lp.patterns {
 		result = append(result, p)
 	}

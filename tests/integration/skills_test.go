@@ -282,7 +282,7 @@ func TestDispatcherSkillInvocation(t *testing.T) {
 
 	// Test ClassifyAndRoute with skill invocation - should attempt skill execution
 	ctx := context.Background()
-	result, err := dispatcher.ClassifyAndRoute(ctx, "/test-dispatch some input", "test-session")
+	_, err := dispatcher.ClassifyAndRoute(ctx, "/test-dispatch some input", "test-session")
 
 	// Without an executor, this will fail
 	if err == nil {
@@ -290,6 +290,7 @@ func TestDispatcherSkillInvocation(t *testing.T) {
 	}
 
 	// Test non-skill invocation falls through to normal routing
+	var result interface{}
 	result, err = dispatcher.ClassifyAndRoute(ctx, "hello world", "test-session")
 	if err != nil {
 		t.Errorf("Non-skill invocation should not error: %v", err)
@@ -705,13 +706,14 @@ func TestDispatcherSkillRoutingWithAllowedTools(t *testing.T) {
 	ctx := context.Background()
 
 	// Test explicit skill invocation with restricted tools
-	result, err := dispatcher.ClassifyAndRoute(ctx, "/restricted-skill some input", "test-session")
+	_, err := dispatcher.ClassifyAndRoute(ctx, "/restricted-skill some input", "test-session")
 	if err == nil {
 		// Without executor, this should error
 		t.Error("Expected error when executor is nil")
 	}
 
 	// Verify non-skill input doesn't trigger skill path
+	var result *agent.DispatchResult
 	result, err = dispatcher.ClassifyAndRoute(ctx, "general question", "test-session")
 	if err != nil {
 		t.Errorf("General input should not error: %v", err)

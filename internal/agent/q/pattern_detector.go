@@ -33,7 +33,7 @@ func NewPatternDetector(logger *slog.Logger, config PatternDetectorConfig) *Patt
 
 // DetectPatterns analyzes session analyses to find patterns.
 func (d *PatternDetector) DetectPatterns(analyses []*SessionAnalysis) []PatternReport {
-	reports := make([]PatternReport, 0)
+	reports := make([]PatternReport, 0, len(analyses))
 
 	// Group analyses by agent
 	byAgent := d.groupByAgent(analyses)

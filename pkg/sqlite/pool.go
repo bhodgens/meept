@@ -287,9 +287,13 @@ type pooledRows struct {
 }
 
 func (r *pooledRows) Close() error {
-	err := r.rows.Close()
+	closeErr := r.rows.Close()
+	if iterErr := r.rows.Err(); iterErr != nil {
+		r.pool.Put(r.db)
+		return iterErr
+	}
 	r.pool.Put(r.db)
-	return err
+	return closeErr
 }
 
 func (r *pooledRows) Columns() ([]string, error) {

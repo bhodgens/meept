@@ -461,6 +461,10 @@ func (s *SQLiteStore) GetMessages(sessionID string, offset, limit int) ([]Messag
 		messages = append(messages, msg)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating session messages: %w", err)
+	}
+
 	return messages, nil
 }
 

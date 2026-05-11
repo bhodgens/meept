@@ -3,12 +3,16 @@ package task
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// ErrStepNotFound is returned when a step cannot be found by ID.
+var ErrStepNotFound = errors.New("step not found")
 
 // CategorizedRecommendation represents a recommendation from an agent.
 type CategorizedRecommendation struct {
@@ -171,7 +175,8 @@ func CreateRevision(original *TaskStep, feedback string) *TaskStep {
 	if original.DependsOn == nil {
 		revision.DependsOn = []string{original.ID}
 	} else {
-		revision.DependsOn = append(original.DependsOn, original.ID)
+		revision.DependsOn = append(revision.DependsOn, original.DependsOn...)
+		revision.DependsOn = append(revision.DependsOn, original.ID)
 	}
 	return revision
 }
@@ -660,7 +665,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		&tokenUsage, &memoryRefs, &accumulatedContext, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil
+			return nil, ErrStepNotFound
 		}
 		return nil, err
 	}

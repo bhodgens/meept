@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -216,7 +217,7 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 
 	// Try to claim a job
 	job, err := w.queue.Claim(ctx, w.ID, w.Capabilities)
-	if err != nil {
+	if err != nil && !errors.Is(err, queue.ErrNoJobAvailable) {
 		w.mu.Lock()
 		w.setStateWithError(StateError, "", err)
 		w.mu.Unlock()

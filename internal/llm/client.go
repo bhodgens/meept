@@ -539,6 +539,9 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 	}
 
 	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
 		return nil, &ClientError{Message: "request failed", Cause: err}
 	}
 	defer resp.Body.Close()

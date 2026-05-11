@@ -458,7 +458,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	}
 
 	var entries []DirEntry
-	truncated := false
+	var truncated bool
 
 	if recursive {
 		entries, truncated = t.listRecursive(resolved, maxEntries)

@@ -392,7 +392,10 @@ func (h *CommandHandler) executeStatus() *CommandResult {
 
 	// Get running tasks
 	tasksResp, err := h.rpc.ListTasksExtended()
-	tasks := tasksResp.Tasks
+	var tasks []types.TaskExtended
+	if err == nil {
+		tasks = tasksResp.Tasks
+	}
 
 	// Build status output
 	sb.WriteString("platform status:\n\n")

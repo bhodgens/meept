@@ -135,11 +135,9 @@ func (c *Canvas) DrawRect(x, y, w, h int, filled bool) {
 		for px := x; px < x+w; px++ {
 			if filled {
 				c.SetPixel(px, py, true)
-			} else {
+			} else if px == x || px == x+w-1 || py == y || py == y+h-1 {
 				// Only draw border
-				if px == x || px == x+w-1 || py == y || py == y+h-1 {
-					c.SetPixel(px, py, true)
-				}
+				c.SetPixel(px, py, true)
 			}
 		}
 	}
@@ -166,7 +164,7 @@ func (c *Canvas) DrawDottedLine(from, to Point, dashLen, gapLen int) {
 	dy := to.Y - from.Y
 
 	// Calculate line length
-	length := 0
+	var length int
 	if abs(dx) > abs(dy) {
 		length = abs(dx)
 	} else {

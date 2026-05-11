@@ -216,7 +216,7 @@ func (d *AgentDesigner) deriveConstraints(analyses []*SessionAnalysis) AgentCons
 
 // generatePromptSections generates system prompt sections.
 func (d *AgentDesigner) generatePromptSections(pattern PatternReport, research *ResearchReport, requirements []string) []string {
-	sections := make([]string, 0)
+	sections := make([]string, 0, 5)
 
 	// Section 1: Scope and Boundaries
 	sections = append(sections, d.generateScopeSection(pattern))

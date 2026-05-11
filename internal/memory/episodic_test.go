@@ -436,7 +436,7 @@ func TestEpisodicMemoryGetOldMemories(t *testing.T) {
 	// Get memories older than a very recent time (should get the first one)
 	time.Sleep(50 * time.Millisecond)
 	cutoff = time.Now().Add(-20 * time.Millisecond)
-	results, err = mem.GetOldMemories(ctx, cutoff, 10)
+	_, err = mem.GetOldMemories(ctx, cutoff, 10)
 	if err != nil {
 		t.Fatalf("GetOldMemories failed: %v", err)
 	}

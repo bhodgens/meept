@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -83,8 +84,8 @@ func TestPersistentQueue_ClaimEmpty(t *testing.T) {
 	ctx := context.Background()
 
 	claimed, err := q.Claim(ctx, "worker-1", nil)
-	if err != nil {
-		t.Fatalf("Claim on empty queue failed: %v", err)
+	if !errors.Is(err, ErrNoJobAvailable) {
+		t.Fatalf("expected ErrNoJobAvailable, got: %v", err)
 	}
 	if claimed != nil {
 		t.Error("expected nil from empty queue")
@@ -99,7 +100,7 @@ func TestPersistentQueue_FailAndRetry(t *testing.T) {
 	q.Enqueue(ctx, job)
 	q.Claim(ctx, "worker-1", nil)
 
-	if err := q.Fail(ctx, job.ID, errForTest("something broke")); err != nil {
+	if err := q.Fail(ctx, job.ID, errForTestError("something broke")); err != nil {
 		t.Fatalf("Fail failed: %v", err)
 	}
 
@@ -316,9 +317,9 @@ func TestHandler_StatsViaBus(t *testing.T) {
 	}
 }
 
-type errForTest string
+type errForTestError string
 
-func (e errForTest) Error() string { return string(e) }
+func (e errForTestError) Error() string { return string(e) }
 
 // TestPersistentQueue_ClaimWithCancelledTaskCallback tests that jobs from cancelled tasks are skipped.
 func TestPersistentQueue_ClaimWithCancelledTaskCallback(t *testing.T) {
@@ -378,10 +379,10 @@ func TestPersistentQueue_ClaimAllTasksCancelled(t *testing.T) {
 		return true, "test cancellation"
 	})
 
-	// Claim should return nil when all tasks are cancelled
+	// Claim should return ErrNoJobAvailable when all tasks are cancelled
 	claimed, err := q.Claim(ctx, "worker-1", nil)
-	if err != nil {
-		t.Fatalf("Claim failed: %v", err)
+	if !errors.Is(err, ErrNoJobAvailable) {
+		t.Fatalf("expected ErrNoJobAvailable, got: %v", err)
 	}
 	if claimed != nil {
 		t.Errorf("expected nil when all tasks cancelled, got job %q", claimed.ID)

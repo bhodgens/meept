@@ -501,13 +501,14 @@ func (m *ChatModel) ClearLoading() {
 // SetFocus sets focus to a specific element.
 func (m *ChatModel) SetFocus(elem FocusedElement) {
 	m.focused = elem
-	if elem == FocusInput {
+	switch elem {
+	case FocusInput:
 		m.textarea.Focus()
 		m.viewportActive = false
-	} else if elem == FocusViewport {
+	case FocusViewport:
 		m.textarea.Blur()
 		m.viewportActive = true
-	} else {
+	default:
 		m.textarea.Blur()
 		m.viewportActive = false
 	}
@@ -1412,7 +1413,7 @@ func formatTokens(n int) string {
 
 // loadServerMessages converts server messages and populates local state.
 func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.SessionMessage) {
-	var chatMsgs []ChatMessage
+	chatMsgs := make([]ChatMessage, 0, len(serverMsgs))
 	var history []string
 
 	for _, sm := range serverMsgs {
@@ -1698,7 +1699,7 @@ func (m *ChatModel) View() string {
 	// Show attached files in orange [filename.ext] format
 	if len(m.attachments) > 0 {
 		attachStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316")) // orange
-		var attachLabels []string
+		attachLabels := make([]string, 0, len(m.attachments))
 		for _, path := range m.attachments {
 			name := filepath.Base(path)
 			attachLabels = append(attachLabels, attachStyle.Render("["+name+"]"))
@@ -1721,7 +1722,7 @@ func (m *ChatModel) View() string {
 				Foreground(lipgloss.Color("#6B7280")).
 				Italic(true).
 				Render(fmt.Sprintf(" [history %d/%d]", m.historyIdx+1, len(history)))
-			inputView = inputView + historyIndicator
+			inputView += historyIndicator
 		}
 		inputContent.WriteString(inputView)
 	}

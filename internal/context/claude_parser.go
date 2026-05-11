@@ -370,7 +370,7 @@ func parseTableRow(row string) []string {
 	// Split by pipe
 	parts := strings.Split(row, "|")
 
-	var cells []string
+	cells := make([]string, 0, len(parts))
 	for _, part := range parts {
 		cells = append(cells, strings.TrimSpace(part))
 	}

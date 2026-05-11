@@ -243,7 +243,7 @@ func (b *PromptBuilder) Build() string {
 
 // formatToolDescription formats a single tool for the system prompt.
 func formatToolDescription(tool ToolDescription) string {
-	var params []string
+	params := make([]string, 0, len(tool.Parameters))
 	for _, p := range tool.Parameters {
 		paramStr := p.Name + ": " + p.Type
 		if !p.Required {

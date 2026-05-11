@@ -88,7 +88,7 @@ ADAPTER %s
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", a.endpoint+"/api/create", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.endpoint+"/api/create", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func (a *OllamaAdapter) DeleteModel(ctx context.Context, name string) error {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "DELETE", a.endpoint+"/api/delete", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.endpoint+"/api/delete", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

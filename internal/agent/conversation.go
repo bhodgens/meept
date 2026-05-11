@@ -552,7 +552,6 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 	if availableBudget <= 0 {
 		// System prompt alone exceeds budget, keep at least last message
 		// but preserve anchors
-		removed := 0
 		newMessages := make([]llm.ChatMessage, 0, 2)
 		for _, msg := range c.messages {
 			if c.isAnchorMessageUnsafe(msg.Content) {
@@ -562,7 +561,7 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 		if len(newMessages) == 0 && len(c.messages) > 1 {
 			newMessages = append(newMessages, c.messages[len(c.messages)-1])
 		}
-		removed = len(c.messages) - len(newMessages)
+		removed := len(c.messages) - len(newMessages)
 		c.messages = newMessages
 		return removed
 	}
@@ -824,9 +823,8 @@ func (c *Conversation) GetWindowedMessages(tokenBudget int) []llm.ChatMessage {
 	}
 
 	// If we have an original user message, always include it
-	originalUserTokens := 0
 	if originalUserIdx >= 0 {
-		originalUserTokens = len(c.messages[originalUserIdx].Content) / charsPerToken
+		originalUserTokens := len(c.messages[originalUserIdx].Content) / charsPerToken
 		availableBudget -= originalUserTokens
 	}
 

@@ -1209,7 +1209,7 @@ func (a *App) renderHeader() string {
 
 	// Pad content to fill width
 	if len(content) < width {
-		content = content + strings.Repeat(" ", width-len(content))
+		content += strings.Repeat(" ", width-len(content))
 	} else if len(content) > width {
 		content = content[:width]
 	}
@@ -1266,7 +1266,7 @@ func (a *App) renderTabs() string {
 		{"Memory", ViewMemory},
 	}
 
-	var renderedTabs []string
+	renderedTabs := make([]string, 0, len(tabs))
 	for i, t := range tabs {
 		style := a.styles.Tab
 		if t.view == a.currentView {

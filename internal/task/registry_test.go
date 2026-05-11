@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,8 +87,11 @@ func TestRegistry_Delete(t *testing.T) {
 	}
 
 	got, err := reg.Get(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("Get after delete failed: %v", err)
+	if err == nil {
+		t.Fatal("expected error after delete")
+	}
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("expected ErrTaskNotFound, got: %v", err)
 	}
 	if got != nil {
 		t.Error("expected nil after delete")
