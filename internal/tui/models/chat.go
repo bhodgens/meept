@@ -169,6 +169,9 @@ type ChatModel struct {
 	focusedBorder   lipgloss.Style
 	unfocusedBorder lipgloss.Style
 	headerStyle     lipgloss.Style
+	steerBadgeStyle lipgloss.Style
+	followUpBadgeStyle lipgloss.Style
+	agentActiveBadgeStyle lipgloss.Style
 }
 
 // RPCClient interface for the chat model.
@@ -291,6 +294,20 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 			Foreground(lipgloss.Color("#000000")).
 			Bold(true).
 			Padding(0, 1),
+		steerBadgeStyle: lipgloss.NewStyle().
+			Background(lipgloss.Color("#EF4444")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Bold(true),
+		followUpBadgeStyle: lipgloss.NewStyle().
+			Background(lipgloss.Color("#10B981")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1),
+		agentActiveBadgeStyle: lipgloss.NewStyle().
+			Background(lipgloss.Color("#6B7280")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Bold(true),
 	}
 }
 
@@ -1734,8 +1751,13 @@ func (m *ChatModel) View() string {
 	if strings.HasPrefix(m.textarea.Value(), "/") {
 		completionsLines = 1
 	}
-	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - 1(statusbar)
-	viewportContentHeight := max(m.height-copyHintLines-inputLines-completionsLines-5, 1)
+	// Account for queue indicator bar (shown when agent active, steer mode, or queue has items)
+	queueIndicatorLines := 0
+	if m.agentActive || m.steerMode || m.hasQueueItems() {
+		queueIndicatorLines = 1
+	}
+	// viewportContentHeight = height - 2(viewport borders) - copyHintLines - inputLines - 2(input borders) - completionsLines - queueIndicatorLines - 1(statusbar)
+	viewportContentHeight := max(m.height-copyHintLines-inputLines-completionsLines-queueIndicatorLines-5, 1)
 
 	// Update viewport dimensions BEFORE rendering
 	m.viewport.SetWidth(m.width - 2)
@@ -1765,6 +1787,12 @@ func (m *ChatModel) View() string {
 			Background(lipgloss.Color("#F97316")).
 			Padding(0, 1)
 		b.WriteString(copyHintStyle.Render(" press 'c' to copy "))
+		b.WriteString("\n")
+	}
+
+	// Queue status indicator bar (agent active, steer mode, queue depth)
+	if m.agentActive || m.steerMode || m.hasQueueItems() {
+		b.WriteString(m.renderQueueIndicator())
 		b.WriteString("\n")
 	}
 
@@ -2540,4 +2568,41 @@ func (m *ChatModel) FollowUpQueue(text string) tea.Cmd {
 		}
 		return FollowUpResultMsg{Success: true}
 	}
+}
+
+// hasQueueItems returns true if any queue has pending items.
+func (m *ChatModel) hasQueueItems() bool {
+	if m.queueStatus == nil {
+		return false
+	}
+	return m.queueStatus.SteeringDepth > 0 || m.queueStatus.FollowUpDepth > 0
+}
+
+// renderQueueIndicator renders a single-line indicator bar showing agent
+// activity, steer mode, and queue depth as styled badges joined horizontally.
+func (m *ChatModel) renderQueueIndicator() string {
+	var badges []string
+
+	if m.agentActive {
+		badges = append(badges, m.agentActiveBadgeStyle.Render("agent active"))
+	}
+
+	if m.steerMode {
+		badges = append(badges, m.steerBadgeStyle.Render("steer mode"))
+	}
+
+	if m.queueStatus != nil {
+		if m.queueStatus.SteeringDepth > 0 {
+			badges = append(badges, m.steerBadgeStyle.Render(fmt.Sprintf("steer: %d", m.queueStatus.SteeringDepth)))
+		}
+		if m.queueStatus.FollowUpDepth > 0 {
+			badges = append(badges, m.followUpBadgeStyle.Render(fmt.Sprintf("follow-up: %d", m.queueStatus.FollowUpDepth)))
+		}
+	}
+
+	if len(badges) == 0 {
+		return ""
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, badges...)
 }
