@@ -439,7 +439,7 @@ func (h *Handler) handleMessage(ctx context.Context, topic string, msg *models.B
 	h.sendResponse(msg.ID, "worker.result", response, err)
 }
 
-func (h *Handler) handleAdd(ctx context.Context, msg *models.BusMessage) (any, error) {
+func (h *Handler) handleAdd(_ context.Context, msg *models.BusMessage) (any, error) {
 	var params struct {
 		Capabilities []string `json:"capabilities,omitempty"`
 	}

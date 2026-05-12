@@ -100,7 +100,7 @@ func (v *StepValidator) validateEvidence(ctx context.Context, ev models.Evidence
 }
 
 // validateClaim checks if a claim is supported by evidence.
-func (v *StepValidator) validateClaim(ctx context.Context, claim string, evidence []models.Evidence) ValidationResult {
+func (v *StepValidator) validateClaim(_ context.Context, claim string, evidence []models.Evidence) ValidationResult {
 	// Basic check: ensure evidence exists for the claim
 	if len(evidence) == 0 {
 		return ValidationResult{
