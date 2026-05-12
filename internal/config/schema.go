@@ -508,6 +508,10 @@ type WatchdogConfig struct {
 
 // AgentQueuesConfig holds steering and follow-up message queue settings.
 type AgentQueuesConfig struct {
+	// Enabled controls whether the steering/follow-up queue feature is active.
+	// When false, agent loops are created without message queues and all
+	// messages go through the standard synchronous path.
+	Enabled bool `json:"enabled" toml:"enabled"`
 	// SteeringDrain controls how the steering queue drains.
 	// Always "one" -- only one steering message is valid at a time.
 	SteeringDrain string `json:"steering_drain" toml:"steering_drain"`
@@ -1084,6 +1088,7 @@ func DefaultConfig() *Config {
 				StuckIterationCount:  5,
 			},
 			Queues: AgentQueuesConfig{
+				Enabled:         true,
 				SteeringDrain:   "one",
 				FollowUpDrain:   "one",
 				MaxSteering:     1,

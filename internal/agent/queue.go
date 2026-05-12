@@ -33,7 +33,7 @@ const (
 	DefaultMaxFollowUp       = 20
 	DefaultPersistFollowUp   = true
 	DefaultSteeringDrain     = DrainOne
-	DefaultFollowUpDrain     = DrainAll
+	DefaultFollowUpDrain     = DrainOne
 )
 
 // QueuedMessage represents a single message enqueued for the agent loop.
@@ -65,7 +65,7 @@ type QueueConfig struct {
 func DefaultQueueConfig() QueueConfig {
 	return QueueConfig{
 		SteeringDrain:     DrainOne,
-		FollowUpDrain:     DrainAll,
+		FollowUpDrain:     DrainOne,
 		MaxSteering:       DefaultMaxSteering,
 		MaxFollowUp:       DefaultMaxFollowUp,
 		PersistFollowUp:   DefaultPersistFollowUp,
@@ -440,7 +440,7 @@ func previewContent(s string) string {
 // noopLogger is a no-op implementation of Logger for when no logger is configured.
 type noopLogger struct{}
 
-func (noopLogger) Debug(msg string, args ...any) {}
-func (noopLogger) Warn(msg string, args ...any)  {}
-func (noopLogger) Error(msg string, args ...any) {}
-func (noopLogger) Info(msg string, args ...any)  {}
+func (noopLogger) Debug(_ string, _ ...any) {}
+func (noopLogger) Warn(_ string, _ ...any)  {}
+func (noopLogger) Error(_ string, _ ...any) {}
+func (noopLogger) Info(_ string, _ ...any)  {}

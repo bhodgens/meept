@@ -295,35 +295,37 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 		opts = append(opts, WithArtifactManager(r.artifactManager))
 	}
 
-	// Create a message queue for steering/follow-up support
-	queueCfg := DefaultQueueConfig()
-	if r.queueConfig.MaxSteering > 0 {
-		queueCfg.MaxSteering = r.queueConfig.MaxSteering
+	// Create a message queue for steering/follow-up support (unless disabled).
+	if r.queueConfig.Enabled {
+		queueCfg := DefaultQueueConfig()
+		if r.queueConfig.MaxSteering > 0 {
+			queueCfg.MaxSteering = r.queueConfig.MaxSteering
+		}
+		if r.queueConfig.MaxFollowUp > 0 {
+			queueCfg.MaxFollowUp = r.queueConfig.MaxFollowUp
+		}
+		if r.queueConfig.SteeringDrain != "" {
+			queueCfg.SteeringDrain = ParseDrainMode(r.queueConfig.SteeringDrain)
+		}
+		if r.queueConfig.FollowUpDrain != "" {
+			queueCfg.FollowUpDrain = ParseDrainMode(r.queueConfig.FollowUpDrain)
+		}
+		queueCfg.PersistFollowUp = r.queueConfig.PersistFollowUp
+		if r.queueConfig.FlushDelayMs > 0 {
+			queueCfg.FlushDelayMs = r.queueConfig.FlushDelayMs
+		}
+		queueOpts := []MessageQueueOption{
+			WithQueueConfig(queueCfg),
+		}
+		if r.bus != nil {
+			queueOpts = append(queueOpts, WithQueueBus(r.bus))
+		}
+		if spec.ID != "" {
+			queueOpts = append(queueOpts, WithQueueAgentID(spec.ID))
+		}
+		queueOpts = append(queueOpts, WithQueueLogger(r.logger.With("agent", spec.ID, "component", "queue")))
+		opts = append(opts, WithMessageQueue(NewMessageQueue(queueOpts...)))
 	}
-	if r.queueConfig.MaxFollowUp > 0 {
-		queueCfg.MaxFollowUp = r.queueConfig.MaxFollowUp
-	}
-	if r.queueConfig.SteeringDrain != "" {
-		queueCfg.SteeringDrain = ParseDrainMode(r.queueConfig.SteeringDrain)
-	}
-	if r.queueConfig.FollowUpDrain != "" {
-		queueCfg.FollowUpDrain = ParseDrainMode(r.queueConfig.FollowUpDrain)
-	}
-	queueCfg.PersistFollowUp = r.queueConfig.PersistFollowUp
-	if r.queueConfig.FlushDelayMs > 0 {
-		queueCfg.FlushDelayMs = r.queueConfig.FlushDelayMs
-	}
-	queueOpts := []MessageQueueOption{
-		WithQueueConfig(queueCfg),
-	}
-	if r.bus != nil {
-		queueOpts = append(queueOpts, WithQueueBus(r.bus))
-	}
-	if spec.ID != "" {
-		queueOpts = append(queueOpts, WithQueueAgentID(spec.ID))
-	}
-	queueOpts = append(queueOpts, WithQueueLogger(r.logger.With("agent", spec.ID, "component", "queue")))
-	opts = append(opts, WithMessageQueue(NewMessageQueue(queueOpts...)))
 
 	// Wire the registry so the loop can register/unregister its queue
 	opts = append(opts, WithAgentRegistry(r))

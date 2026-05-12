@@ -43,7 +43,7 @@ func NewMockChatRPCClient() *MockChatRPCClient {
 	}
 }
 
-func (m *MockChatRPCClient) Chat(message, conversationID string) (string, error) {
+func (m *MockChatRPCClient) Chat(message, _ string) (string, error) {
 	m.ChatCalls = append(m.ChatCalls, message)
 	if m.ChatError != nil {
 		return "", m.ChatError
@@ -63,7 +63,7 @@ func (m *MockChatRPCClient) SaveSessionMessages(sessionID string, msgs []types.S
 	return nil
 }
 
-func (m *MockChatRPCClient) GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error) {
+func (m *MockChatRPCClient) GetSessionMessages(_ string, _, _ int) (*types.SessionMessagesResponse, error) {
 	if m.GetMessagesErr != nil {
 		return nil, m.GetMessagesErr
 	}
@@ -78,7 +78,7 @@ func (m *MockChatRPCClient) UpdateSessionDescription(sessionID, description stri
 	return nil
 }
 
-func (m *MockChatRPCClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
+func (m *MockChatRPCClient) GenerateSessionDescription(sessionID, firstMessage, _ string) (*types.GenerateDescriptionResult, error) {
 	// Simulate LLM-generated description
 	desc := "mock: " + firstMessage
 	if len(desc) > 30 {
@@ -92,7 +92,7 @@ func (m *MockChatRPCClient) GenerateSessionDescription(sessionID, firstMessage, 
 	}, nil
 }
 
-func (m *MockChatRPCClient) Steer(message, conversationID string) error {
+func (m *MockChatRPCClient) Steer(message, _ string) error {
 	m.SteerCalls = append(m.SteerCalls, message)
 	if m.SteerError != nil {
 		return m.SteerError
@@ -100,7 +100,7 @@ func (m *MockChatRPCClient) Steer(message, conversationID string) error {
 	return nil
 }
 
-func (m *MockChatRPCClient) FollowUp(message, conversationID string) error {
+func (m *MockChatRPCClient) FollowUp(message, _ string) error {
 	m.FollowUpCalls = append(m.FollowUpCalls, message)
 	if m.FollowUpError != nil {
 		return m.FollowUpError
@@ -108,7 +108,7 @@ func (m *MockChatRPCClient) FollowUp(message, conversationID string) error {
 	return nil
 }
 
-func (m *MockChatRPCClient) GetQueueStatus(conversationID string) (*types.QueueStatusResponse, error) {
+func (m *MockChatRPCClient) GetQueueStatus(_ string) (*types.QueueStatusResponse, error) {
 	if m.QueueStatusErr != nil {
 		return nil, m.QueueStatusErr
 	}
@@ -638,7 +638,7 @@ func TestChatModel_Reset(t *testing.T) {
 	}
 }
 
-func TestChatModel_ViewportNavigation(t *testing.T) {
+func TestChatModel_ViewportNavigation(_ *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)
 	model.SetFocus(FocusViewport)
@@ -1036,5 +1036,442 @@ func TestProgressUpdateMsg_ChatVisible(t *testing.T) {
 	msg.ChatVisible = false
 	if msg.IsChatVisible() {
 		t.Error("expected ChatVisible to be false")
+	}
+}
+
+// --- Steering / Follow-Up Queue tests ---
+
+func TestChatModel_AgentLifecycle_StartSetsActive(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	msg := AgentLifecycleMsg{Active: true, ConversationID: model.conversationID}
+	model.Update(msg)
+
+	if !model.agentActive {
+		t.Error("expected agentActive to be true after AgentLifecycleMsg{Active: true}")
+	}
+}
+
+func TestChatModel_AgentLifecycle_EndClearsState(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	// Start agent
+	model.Update(AgentLifecycleMsg{Active: true, ConversationID: model.conversationID})
+	if !model.agentActive {
+		t.Fatal("expected agentActive to be true after start")
+	}
+
+	// Set queue status
+	model.queueStatus = &types.QueueStatusResponse{
+		SteeringDepth: 2,
+		FollowUpDepth: 3,
+	}
+
+	// End agent
+	model.Update(AgentLifecycleMsg{Active: false, ConversationID: model.conversationID})
+
+	if model.agentActive {
+		t.Error("expected agentActive to be false after AgentLifecycleMsg{Active: false}")
+	}
+	if model.steerMode {
+		t.Error("expected steerMode to be false after agent end")
+	}
+	if model.queueStatus != nil {
+		t.Error("expected queueStatus to be nil after agent end")
+	}
+}
+
+func TestChatModel_AgentLifecycle_EndClearsSteerMode(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	// Start agent and enable steer mode
+	model.Update(AgentLifecycleMsg{Active: true, ConversationID: model.conversationID})
+	model.steerMode = true
+
+	if !model.steerMode {
+		t.Fatal("expected steerMode to be true before agent end")
+	}
+
+	// End agent should clear steer mode
+	model.Update(AgentLifecycleMsg{Active: false, ConversationID: model.conversationID})
+
+	if model.steerMode {
+		t.Error("expected steerMode to be false after agent end")
+	}
+}
+
+func TestChatModel_ToggleSteerMode(t *testing.T) {
+	model := newTestChatModel()
+
+	if model.steerMode {
+		t.Error("expected steerMode to be false initially")
+	}
+
+	// Toggle on
+	result := model.ToggleSteerMode()
+	if !result {
+		t.Error("expected ToggleSteerMode to return true")
+	}
+	if !model.steerMode {
+		t.Error("expected steerMode to be true after toggle")
+	}
+
+	// Toggle off
+	result = model.ToggleSteerMode()
+	if result {
+		t.Error("expected ToggleSteerMode to return false")
+	}
+	if model.steerMode {
+		t.Error("expected steerMode to be false after second toggle")
+	}
+}
+
+func TestChatModel_SetSteerMode(t *testing.T) {
+	model := newTestChatModel()
+
+	model.SetSteerMode(true)
+	if !model.steerMode {
+		t.Error("expected steerMode to be true after SetSteerMode(true)")
+	}
+
+	model.SetSteerMode(false)
+	if model.steerMode {
+		t.Error("expected steerMode to be false after SetSteerMode(false)")
+	}
+}
+
+func TestChatModel_SendMessage_AgentActive_FollowUp(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	// Simulate agent active
+	model.agentActive = true
+	model.steerMode = false
+
+	model.textarea.SetValue("follow-up question")
+	cmd := model.doSendMessage()
+	if cmd == nil {
+		t.Fatal("expected command to be returned for follow-up")
+	}
+
+	// Execute the command to trigger the RPC call
+	msg := cmd()
+	result, ok := msg.(FollowUpResultMsg)
+	if !ok {
+		t.Fatalf("expected FollowUpResultMsg, got %T", msg)
+	}
+	if result.Err != nil {
+		t.Fatalf("expected no error, got %v", result.Err)
+	}
+
+	// Check system message about follow-up queuing
+	found := false
+	for _, m := range model.messages {
+		if m.Role == "system" && strings.Contains(m.Content, "follow-up") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected system message about follow-up queuing")
+	}
+}
+
+func TestChatModel_SendMessage_AgentActive_SteerMode(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	// Simulate agent active with steer mode
+	model.agentActive = true
+	model.steerMode = true
+
+	model.textarea.SetValue("steer direction")
+	cmd := model.doSendMessage()
+	if cmd == nil {
+		t.Fatal("expected command to be returned for steer")
+	}
+
+	// steerMode should be reset after sending
+	if model.steerMode {
+		t.Error("expected steerMode to be reset to false after sending steer")
+	}
+
+	// Execute the command
+	msg := cmd()
+	result, ok := msg.(SteeringResultMsg)
+	if !ok {
+		t.Fatalf("expected SteeringResultMsg, got %T", msg)
+	}
+	if result.Err != nil {
+		t.Fatalf("expected no error, got %v", result.Err)
+	}
+
+	// Check user message includes steering prefix
+	found := false
+	for _, m := range model.messages {
+		if m.Role == "user" && strings.Contains(m.Content, "[steering]") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected user message with [steering] prefix")
+	}
+}
+
+func TestChatModel_SendMessage_AgentInactive_Normal(t *testing.T) {
+	mock := NewMockChatRPCClient()
+	userStyle := lipgloss.NewStyle()
+	model := NewChatModel(mock, userStyle, userStyle, userStyle, "once")
+	model.SetSize(80, 24)
+
+	// Agent is idle
+	model.agentActive = false
+
+	model.textarea.SetValue("normal message")
+	cmd := model.doSendMessage()
+	if cmd == nil {
+		t.Fatal("expected command to be returned for normal send")
+	}
+
+	// Check user message was added (no steering prefix)
+	found := false
+	for _, m := range model.messages {
+		if m.Role == "user" && m.Content == "normal message" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected user message without steering prefix")
+	}
+
+	// Should be in loading state
+	if !model.loading {
+		t.Error("expected loading to be true for normal send")
+	}
+}
+
+func TestChatModel_RenderQueueIndicator_AgentActive(t *testing.T) {
+	model := newTestChatModel()
+	model.agentActive = true
+
+	indicator := model.renderQueueIndicator()
+	if indicator == "" {
+		t.Error("expected non-empty indicator when agent is active")
+	}
+	if !strings.Contains(indicator, "agent active") {
+		t.Error("expected indicator to contain 'agent active'")
+	}
+}
+
+func TestChatModel_RenderQueueIndicator_SteerMode(t *testing.T) {
+	model := newTestChatModel()
+	model.steerMode = true
+
+	indicator := model.renderQueueIndicator()
+	if indicator == "" {
+		t.Error("expected non-empty indicator when steer mode is on")
+	}
+	if !strings.Contains(indicator, "steer mode") {
+		t.Error("expected indicator to contain 'steer mode'")
+	}
+}
+
+func TestChatModel_RenderQueueIndicator_QueueDepth(t *testing.T) {
+	model := newTestChatModel()
+	model.queueStatus = &types.QueueStatusResponse{
+		SteeringDepth: 2,
+		FollowUpDepth: 5,
+	}
+
+	indicator := model.renderQueueIndicator()
+	if indicator == "" {
+		t.Error("expected non-empty indicator when queue has items")
+	}
+	if !strings.Contains(indicator, "steer: 2") {
+		t.Error("expected indicator to contain 'steer: 2'")
+	}
+	if !strings.Contains(indicator, "follow-up: 5") {
+		t.Error("expected indicator to contain 'follow-up: 5'")
+	}
+}
+
+func TestChatModel_RenderQueueIndicator_Empty(t *testing.T) {
+	model := newTestChatModel()
+
+	indicator := model.renderQueueIndicator()
+	if indicator != "" {
+		t.Errorf("expected empty indicator when nothing to show, got %q", indicator)
+	}
+}
+
+func TestChatModel_SteeringInjectedMsg(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	model.Update(SteeringInjectedMsg{})
+
+	found := false
+	for _, m := range model.messages {
+		if m.Role == "system" && strings.Contains(m.Content, "steering message injected") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected system message about steering injection")
+	}
+}
+
+func TestChatModel_FollowUpInjectedMsg(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	model.Update(FollowUpInjectedMsg{})
+
+	found := false
+	for _, m := range model.messages {
+		if m.Role == "system" && strings.Contains(m.Content, "follow-up message injected") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected system message about follow-up injection")
+	}
+}
+
+func TestChatModel_FollowUpRestoredMsg(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	model.Update(FollowUpRestoredMsg{Count: 3})
+
+	found := false
+	for _, m := range model.messages {
+		if m.Role == "system" && strings.Contains(m.Content, "restored 3 pending follow-up") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected system message about restored follow-ups")
+	}
+}
+
+func TestChatModel_HasQueueItems(t *testing.T) {
+	model := newTestChatModel()
+
+	// nil queue status
+	if model.hasQueueItems() {
+		t.Error("expected hasQueueItems to be false when queueStatus is nil")
+	}
+
+	// Empty queue
+	model.queueStatus = &types.QueueStatusResponse{}
+	if model.hasQueueItems() {
+		t.Error("expected hasQueueItems to be false when queue depths are zero")
+	}
+
+	// Only steering items
+	model.queueStatus = &types.QueueStatusResponse{SteeringDepth: 1}
+	if !model.hasQueueItems() {
+		t.Error("expected hasQueueItems to be true when steering depth > 0")
+	}
+
+	// Only follow-up items
+	model.queueStatus = &types.QueueStatusResponse{FollowUpDepth: 1}
+	if !model.hasQueueItems() {
+		t.Error("expected hasQueueItems to be true when follow-up depth > 0")
+	}
+
+	// Both
+	model.queueStatus = &types.QueueStatusResponse{SteeringDepth: 2, FollowUpDepth: 3}
+	if !model.hasQueueItems() {
+		t.Error("expected hasQueueItems to be true when both depths > 0")
+	}
+}
+
+func TestChatModel_IsAgentActive(t *testing.T) {
+	model := newTestChatModel()
+
+	if model.IsAgentActive() {
+		t.Error("expected IsAgentActive to be false initially")
+	}
+
+	model.agentActive = true
+	if !model.IsAgentActive() {
+		t.Error("expected IsAgentActive to be true after setting agentActive")
+	}
+}
+
+func TestChatModel_SetAgentActive(t *testing.T) {
+	model := newTestChatModel()
+	model.SetSize(80, 24)
+
+	// Set active for matching conversation ID
+	model.SetAgentActive(true, model.conversationID)
+	if !model.agentActive {
+		t.Error("expected agentActive to be true after SetAgentActive(true, ...)")
+	}
+
+	// Set inactive
+	model.SetAgentActive(false, model.conversationID)
+	if model.agentActive {
+		t.Error("expected agentActive to be false after SetAgentActive(false, ...)")
+	}
+	if model.steerMode {
+		t.Error("expected steerMode to be cleared on agent end")
+	}
+	if model.queueStatus != nil {
+		t.Error("expected queueStatus to be cleared on agent end")
+	}
+
+	// Set active with empty conversation ID (should apply to current)
+	model.SetAgentActive(true, "")
+	if !model.agentActive {
+		t.Error("expected agentActive to be true with empty conversation ID")
+	}
+
+	// Set active with non-matching conversation ID (should be ignored)
+	model.agentActive = false
+	model.SetAgentActive(true, "other-conv-id")
+	if model.agentActive {
+		t.Error("expected agentActive to remain false for non-matching conversation ID")
+	}
+}
+
+func TestChatModel_UpdateQueueStatus(t *testing.T) {
+	model := newTestChatModel()
+
+	status := &types.QueueStatusResponse{
+		SteeringDepth: 1,
+		FollowUpDepth: 2,
+		IsActive:      true,
+		Generation:    42,
+	}
+	model.UpdateQueueStatus(status)
+
+	if model.queueStatus == nil {
+		t.Fatal("expected queueStatus to be set")
+	}
+	if model.queueStatus.SteeringDepth != 1 {
+		t.Errorf("expected SteeringDepth 1, got %d", model.queueStatus.SteeringDepth)
+	}
+	if model.queueStatus.FollowUpDepth != 2 {
+		t.Errorf("expected FollowUpDepth 2, got %d", model.queueStatus.FollowUpDepth)
+	}
+	if model.queueStatus.Generation != 42 {
+		t.Errorf("expected Generation 42, got %d", model.queueStatus.Generation)
+	}
+
+	// Can update to nil
+	model.UpdateQueueStatus(nil)
+	if model.queueStatus != nil {
+		t.Error("expected queueStatus to be nil after clearing")
 	}
 }

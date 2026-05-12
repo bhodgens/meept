@@ -234,6 +234,7 @@
     },
     // Steering and follow-up message queues
     "queues": {
+      "enabled": true,               // Set false to disable queues (rollback toggle)
       "steering_drain": "one",        // Always "one" for steering
       "followup_drain": "one",        // "one" or "all"
       "max_steering": 1,              // Max queued steering (always 1 - latest wins)

@@ -334,7 +334,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Show hint message
 			a.statusMessage = "press ctrl+c again to exit"
 			a.statusMessageTime = time.Now()
-			return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
 		}
@@ -352,7 +352,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.lastCtrlD = now
 			a.statusMessage = "press ctrl+d again to exit"
 			a.statusMessageTime = time.Now()
-			return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
 		}
@@ -510,7 +510,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.statusMessage = fmt.Sprintf("Resumed session: %s", msg.Session.Name)
 			}
 			a.statusMessageTime = time.Now()
-			clearCmd := tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
 			if sessionCmd != nil {
@@ -540,7 +540,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sessionCmd := a.chat.SetSession(msg.Session)
 			a.statusMessage = fmt.Sprintf("Switched to: %s", msg.Session.Name)
 			a.statusMessageTime = time.Now()
-			clearCmd := tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 				return StatusMessageClearMsg{}
 			})
 			if sessionCmd != nil {
@@ -763,7 +763,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd := a.chat.Update(models.FollowUpInjectedMsg{}); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-			case "agent.queue.followup.restore":
+			case bus.EventQueueFollowUpRestored:
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					if count, ok := payloadMap["count"].(float64); ok {
 						if cmd := a.chat.Update(models.FollowUpRestoredMsg{Count: int(count)}); cmd != nil {
@@ -773,7 +773,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			// Queue status update events
-			case "agent.queue.status":
+			case bus.EventQueueStatus:
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					status := &types.QueueStatusResponse{}
 					if sd, ok := payloadMap["steering_depth"].(float64); ok {
@@ -866,11 +866,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, a.chat.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			}
 
-			// Handle vim toggle
-			if msg.Result.ToggleVimMode {
-				// Vim mode was already toggled by the command handler
-				// Just clear status message after delay
-			}
+			// Handle vim toggle - mode was already toggled by the command handler.
+			_ = msg.Result.ToggleVimMode
 
 			// Clear status message after delay
 			return a, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
@@ -1059,7 +1056,7 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				sessionCmd := a.chat.SetSession(sess)
 				a.statusMessage = fmt.Sprintf("Switched to: %s", sess.Name)
 				a.statusMessageTime = time.Now()
-				clearCmd := tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
 					return StatusMessageClearMsg{}
 				})
 				return a, tea.Batch(sessionCmd, clearCmd)

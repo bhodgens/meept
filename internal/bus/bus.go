@@ -25,6 +25,7 @@ const (
 	EventQueueFollowUpInjected = "agent.queue.followup.injected"
 	EventQueueFollowUpRestored = "agent.queue.followup.restored"
 	EventQueuePersisted        = "agent.queue.persisted"
+	EventQueueStatus           = "agent.queue.status"
 )
 
 // Subscriber represents a channel that receives messages.

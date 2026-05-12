@@ -26,6 +26,7 @@ func (h *QueueHandler) RegisterQueueMethods(server *Server) {
 	server.RegisterHandler("chat.steer", h.handleSteer)
 	server.RegisterHandler("chat.followup", h.handleFollowUp)
 	server.RegisterHandler("chat.queue_status", h.handleStatus)
+	server.RegisterHandler("chat.queue.restore", h.handleRestore)
 }
 
 func (h *QueueHandler) reg() (*agent.AgentRegistry, error) {
@@ -142,5 +143,40 @@ func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage)
 		"followup_depth": status.FollowUpDepth,
 		"is_active":      status.IsActive,
 		"generation":     status.Generation,
+	}, nil
+}
+
+// handleRestore handles chat.queue.restore RPC calls.
+// It returns the current status of the queue for a conversation, which is
+// used by the TUI to check whether pending follow-ups were restored on
+// daemon startup.
+func (h *QueueHandler) handleRestore(ctx context.Context, params json.RawMessage) (any, error) {
+	reg, err := h.reg()
+	if err != nil {
+		return nil, err
+	}
+
+	var req struct {
+		ConversationID string `json:"conversation_id"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if req.ConversationID == "" {
+		return nil, fmt.Errorf("conversation_id is required")
+	}
+
+	q, _ := reg.GetActiveQueue(req.ConversationID)
+	if q == nil {
+		return map[string]any{
+			"restored": 0,
+			"active":   false,
+		}, nil
+	}
+
+	status := q.Status()
+	return map[string]any{
+		"restored": status.FollowUpDepth,
+		"active":   status.IsActive,
 	}, nil
 }

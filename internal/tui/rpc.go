@@ -852,3 +852,10 @@ func (c *RPCClient) GetQueueStatus(conversationID string) (*types.QueueStatusRes
 
 	return &resp, nil
 }
+
+// RestorePendingFollowUps checks for persisted follow-ups for a conversation.
+func (c *RPCClient) RestorePendingFollowUps(conversationID string) error {
+	req := map[string]string{"conversation_id": conversationID}
+	_, err := c.Call("chat.queue.restore", req)
+	return err
+}

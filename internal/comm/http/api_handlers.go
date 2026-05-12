@@ -1218,6 +1218,31 @@ func (s *Server) handleChatSteer(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
 }
 
+// handleChatSteerExplicit handles POST /api/v1/chat/steer-explicit.
+// This is the ctrl+s equivalent -- forces steering regardless of intent classification.
+func (s *Server) handleChatSteerExplicit(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Chat == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "chat service not available")
+		return
+	}
+
+	var req services.SteerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Chat.Steer(r.Context(), req); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{
+		"status": "queued",
+		"mode":   "explicit",
+	})
+}
+
 // handleChatFollowUp handles POST /api/v1/chat/followup.
 func (s *Server) handleChatFollowUp(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Chat == nil {

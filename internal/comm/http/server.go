@@ -191,6 +191,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Chat endpoints
 	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
 	mux.HandleFunc("POST /api/v1/chat/steer", s.handleChatSteer)
+	mux.HandleFunc("POST /api/v1/chat/steer-explicit", s.handleChatSteerExplicit)
 	mux.HandleFunc("POST /api/v1/chat/followup", s.handleChatFollowUp)
 	mux.HandleFunc("GET /api/v1/chat/queue/{id}", s.handleChatQueueStatus)
 	mux.HandleFunc("POST /api/v1/chat/with-agent", s.handleChatWithAgent)
@@ -337,12 +338,12 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 }
 
 // handleHealth handles health check requests.
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // handleGetClientConfig handles GET /api/v1/config/client.
-func (s *Server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetClientConfig(w http.ResponseWriter, _ *http.Request) {
 	if s.configService == nil {
 		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
 		return

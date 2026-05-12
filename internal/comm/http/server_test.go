@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/services"
 )
 
 // mockDaemonController implements DaemonController for testing.
@@ -590,5 +591,178 @@ func TestHandleMetricsStream(t *testing.T) {
 	// Currently returns not implemented message
 	if body["status"] != "websocket_not_implemented" {
 		t.Errorf("status = %s, want websocket_not_implemented", body["status"])
+	}
+}
+
+// ===== Steering / Follow-Up Queue Tests =====
+
+func TestHandleChatSteer_Success(t *testing.T) {
+	t.Parallel()
+	chatSvc := services.NewChatService(nil, nil, nil)
+	svcReg := &services.ServiceRegistry{Chat: chatSvc}
+	server := NewServer(ServerConfig{}, nil, nil, nil, svcReg, nil)
+
+	body := `{"message":"focus on tests","conversation_id":"conv-123"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/steer", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleChatSteer(w, req)
+
+	resp := w.Result()
+	// Steer returns ErrUnavailable (nil agentRegistry) -> handleServiceError -> 500.
+	// The handler correctly decoded the valid JSON and reached the service call.
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleChatSteer_InvalidBody(t *testing.T) {
+	t.Parallel()
+	chatSvc := services.NewChatService(nil, nil, nil)
+	svcReg := &services.ServiceRegistry{Chat: chatSvc}
+	server := NewServer(ServerConfig{}, nil, nil, nil, svcReg, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/steer", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+
+	server.handleChatSteer(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["error"] != "invalid request body" {
+		t.Errorf("error = %s, want 'invalid request body'", body["error"])
+	}
+}
+
+func TestHandleChatSteer_NoService(t *testing.T) {
+	t.Parallel()
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
+
+	reqBody := `{"message":"focus on tests","conversation_id":"conv-123"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/steer", strings.NewReader(reqBody))
+	w := httptest.NewRecorder()
+
+	server.handleChatSteer(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	var respBody map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if respBody["error"] != "chat service not available" {
+		t.Errorf("error = %s, want 'chat service not available'", respBody["error"])
+	}
+}
+
+func TestHandleChatFollowUp_Success(t *testing.T) {
+	t.Parallel()
+	chatSvc := services.NewChatService(nil, nil, nil)
+	svcReg := &services.ServiceRegistry{Chat: chatSvc}
+	server := NewServer(ServerConfig{}, nil, nil, nil, svcReg, nil)
+
+	body := `{"message":"also run linter","conversation_id":"conv-456"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/followup", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleChatFollowUp(w, req)
+
+	resp := w.Result()
+	// FollowUp returns ErrUnavailable (nil agentRegistry) -> handleServiceError -> 500.
+	// The handler correctly decoded the valid JSON and reached the service call.
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleChatFollowUp_InvalidBody(t *testing.T) {
+	t.Parallel()
+	chatSvc := services.NewChatService(nil, nil, nil)
+	svcReg := &services.ServiceRegistry{Chat: chatSvc}
+	server := NewServer(ServerConfig{}, nil, nil, nil, svcReg, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat/followup", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+
+	server.handleChatFollowUp(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["error"] != "invalid request body" {
+		t.Errorf("error = %s, want 'invalid request body'", body["error"])
+	}
+}
+
+func TestHandleChatQueueStatus_Active(t *testing.T) {
+	t.Parallel()
+	// ChatService.GetQueueStatus gracefully handles nil agentRegistry,
+	// returning a zero-valued response instead of an error.
+	chatSvc := services.NewChatService(nil, nil, nil)
+	svcReg := &services.ServiceRegistry{Chat: chatSvc}
+	server := NewServer(ServerConfig{}, nil, nil, nil, svcReg, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/queue/conv-789", nil)
+	w := httptest.NewRecorder()
+
+	server.handleChatQueueStatus(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if body["steering_depth"].(float64) != 0 {
+		t.Errorf("steering_depth = %v, want 0", body["steering_depth"])
+	}
+	if body["followup_depth"].(float64) != 0 {
+		t.Errorf("followup_depth = %v, want 0", body["followup_depth"])
+	}
+	if body["is_active"] != false {
+		t.Errorf("is_active = %v, want false", body["is_active"])
+	}
+}
+
+func TestHandleChatQueueStatus_NoService(t *testing.T) {
+	t.Parallel()
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/queue/conv-789", nil)
+	w := httptest.NewRecorder()
+
+	server.handleChatQueueStatus(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["error"] != "chat service not available" {
+		t.Errorf("error = %s, want 'chat service not available'", body["error"])
 	}
 }
