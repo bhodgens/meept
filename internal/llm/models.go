@@ -324,11 +324,15 @@ func (rtc *RawToolCall) ToToolCall() ToolCall {
 // concatenation, the summarizer produces this structured representation so
 // downstream consumers can query decisions, file paths, open questions, etc.
 type SummaryExtract struct {
-	Decisions          []string `json:"decisions"`    // Key decisions made
-	FilePaths          []string `json:"file_paths"`   // Files referenced/modified
+	Decisions           []string `json:"decisions"`    // Key decisions made
+	FilePaths           []string `json:"file_paths"`   // Files referenced/modified
 	UnresolvedQuestions []string `json:"unresolved"`   // Open questions remaining
-	TaskState          string   `json:"task_state"`    // Current task status
-	KeyFindings        []string `json:"findings"`      // Important discoveries
+	TaskState           string   `json:"task_state"`   // Current task status
+	KeyFindings         []string `json:"findings"`     // Important discoveries
+	FileReads           []string `json:"file_reads"`   // Files read (compaction)
+	FileWrites          []string `json:"file_writes"`  // Files written (compaction)
+	FileEdits           []string `json:"file_edits"`   // Files edited (compaction)
+	ErrorsEncountered   []string `json:"errors"`       // Errors encountered (compaction)
 }
 
 // Ptr returns a pointer to the given value.

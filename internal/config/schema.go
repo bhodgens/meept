@@ -39,6 +39,7 @@ type Config struct {
 	CodeIntel         CodeIntelConfig         `json:"code_intel"         toml:"code_intel"`
 	Calendar          CalendarConfig          `json:"calendar"           toml:"calendar"`
 	Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
+	Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -96,6 +97,19 @@ type ToolingConfig struct {
 	LogUnknownTools bool `json:"log_unknown_tools" toml:"log_unknown_tools"`
 }
 
+// CompactionConfig configures LLM-based context compaction.
+type CompactionConfig struct {
+	Enabled           bool    `json:"enabled"            toml:"enabled"`
+	Model             string  `json:"model"              toml:"model"`
+	ReserveTokens     int     `json:"reserve_tokens"     toml:"reserve_tokens"`
+	KeepRecentTokens  int     `json:"keep_recent_tokens" toml:"keep_recent_tokens"`
+	MaxResponseTokens int     `json:"max_response_tokens" toml:"max_response_tokens"`
+	SummaryFormat     string  `json:"summary_format"     toml:"summary_format"`
+	TriggerRatio      float64 `json:"trigger_ratio"      toml:"trigger_ratio"`
+	IterativeUpdates  bool    `json:"iterative_updates"  toml:"iterative_updates"`
+	TrackFileOps      bool    `json:"track_file_ops"     toml:"track_file_ops"`
+	TimeoutSeconds    int     `json:"timeout_seconds"    toml:"timeout_seconds"`
+}
 
 // ASTConfig holds AST parsing settings.
 type ASTConfig struct {
@@ -1362,6 +1376,17 @@ func DefaultConfig() *Config {
 			ReminderEnabled:        false,
 			ReminderCheckInterval:  "5m",
 			ReminderAdvanceMinutes: 10,
+		},
+		Compaction: CompactionConfig{
+			Enabled:           false,
+			ReserveTokens:     16384,
+			KeepRecentTokens:  20000,
+			MaxResponseTokens: 13107,
+			SummaryFormat:     "structured",
+			TriggerRatio:      0.60,
+			IterativeUpdates:  true,
+			TrackFileOps:      true,
+			TimeoutSeconds:    30,
 		},
 	}
 }

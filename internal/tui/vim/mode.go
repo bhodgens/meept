@@ -141,7 +141,7 @@ func (s *State) HandleKey(msg tea.KeyPressMsg) (Action, bool) {
 	return Action{Type: ActionNone}, false
 }
 
-func (s *State) handleNormalMode(key string, msg tea.KeyPressMsg) (Action, bool) {
+func (s *State) handleNormalMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 	// Check for leader key sequences
 	if s.Pending == s.LeaderKey {
 		action := s.handleLeaderSequence(key)
@@ -312,7 +312,7 @@ func (s *State) handleLeaderSequence(key string) Action {
 	return Action{Type: ActionNone}
 }
 
-func (s *State) handleInsertMode(key string, msg tea.KeyPressMsg) (Action, bool) {
+func (s *State) handleInsertMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 	// Check escape sequence (e.g., "jk")
 	if len(s.EscapeSequence) == 2 {
 		now := time.Now()
@@ -339,7 +339,7 @@ func (s *State) handleInsertMode(key string, msg tea.KeyPressMsg) (Action, bool)
 	return Action{Type: ActionNone}, false
 }
 
-func (s *State) handleVisualMode(key string, msg tea.KeyPressMsg) (Action, bool) {
+func (s *State) handleVisualMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 	switch key {
 	case "esc":
 		s.Mode = ModeNormal

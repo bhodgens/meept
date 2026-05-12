@@ -102,9 +102,9 @@ func TestRegistry_List(t *testing.T) {
 	reg := newTestRegistry(t)
 	ctx := context.Background()
 
-	_ = reg.Create(ctx, "task-1", "desc")
-	_ = reg.Create(ctx, "task-2", "desc")
-	_ = reg.Create(ctx, "task-3", "desc")
+	_, _ = reg.Create(ctx, "task-1", "desc")
+	_, _ = reg.Create(ctx, "task-2", "desc")
+	_, _ = reg.Create(ctx, "task-3", "desc")
 
 	tasks, err := reg.List(ctx, nil, 10)
 	if err != nil {

@@ -2131,7 +2131,7 @@ func (m *ChatModel) handleMouseDrag(msg tea.MouseMsg) tea.Cmd {
 }
 
 // handleMouseRelease handles mouse button release. Optionally copies selected text to clipboard.
-func (m *ChatModel) handleMouseRelease(msg tea.MouseMsg) tea.Cmd {
+func (m *ChatModel) handleMouseRelease(_ tea.MouseMsg) tea.Cmd {
 	m.mouseDown = false
 
 	// Copy selected text to clipboard only if autoCopyOnRelease is enabled
