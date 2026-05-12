@@ -49,7 +49,7 @@ func (e *ImpactEstimator) EstimateImpact(pattern PatternReport, research *Resear
 }
 
 // estimateNewAgentImpact estimates impact of creating a new specialist agent.
-func (e *ImpactEstimator) estimateNewAgentImpact(pattern PatternReport, research *ResearchReport, rec Recommendation) *ImpactEstimate {
+func (e *ImpactEstimator) estimateNewAgentImpact(pattern PatternReport, _ *ResearchReport, rec Recommendation) *ImpactEstimate {
 	// Baseline: current time spent on these tasks
 	avgDuration := e.averageDurationFromEvidence(pattern)
 	weeklySessions := e.estimateWeeklySessions(pattern)
@@ -77,7 +77,7 @@ func (e *ImpactEstimator) estimateNewAgentImpact(pattern PatternReport, research
 }
 
 // estimateSpecUpdateImpact estimates impact of updating agent specification.
-func (e *ImpactEstimator) estimateSpecUpdateImpact(pattern PatternReport, research *ResearchReport, rec Recommendation) *ImpactEstimate {
+func (e *ImpactEstimator) estimateSpecUpdateImpact(pattern PatternReport, _ *ResearchReport, rec Recommendation) *ImpactEstimate {
 	// Baseline: current rejection/revision rate
 	currentRejectionRate := pattern.MetricObserved
 	targetRejectionRate := 0.1 // Target 10% rejection rate
@@ -108,7 +108,7 @@ func (e *ImpactEstimator) estimateSpecUpdateImpact(pattern PatternReport, resear
 }
 
 // estimateModelReassignmentImpact estimates impact of reassigning model.
-func (e *ImpactEstimator) estimateModelReassignmentImpact(pattern PatternReport, research *ResearchReport, rec Recommendation) *ImpactEstimate {
+func (e *ImpactEstimator) estimateModelReassignmentImpact(pattern PatternReport, _ *ResearchReport, rec Recommendation) *ImpactEstimate {
 	// Baseline: current duration variance
 	durationVariance := pattern.MetricObserved
 	targetVariance := 1.5 // Target 1.5x variance (down from current)
@@ -139,7 +139,7 @@ func (e *ImpactEstimator) estimateModelReassignmentImpact(pattern PatternReport,
 }
 
 // estimateToolAdditionImpact estimates impact of adding/fixing a tool.
-func (e *ImpactEstimator) estimateToolAdditionImpact(pattern PatternReport, research *ResearchReport, rec Recommendation) *ImpactEstimate {
+func (e *ImpactEstimator) estimateToolAdditionImpact(pattern PatternReport, _ *ResearchReport, rec Recommendation) *ImpactEstimate {
 	// Baseline: current tool failure rate
 	currentFailureRate := pattern.MetricObserved
 	targetFailureRate := 0.05 // Target 5% failure rate

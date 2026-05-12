@@ -141,9 +141,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Increment progress on working robots
 		for range 4 {
-			if m.viz != nil {
-				// This is handled internally by the robot
-			}
+			// Progress is handled internally by the robot visualization
+			_ = m.viz
 		}
 
 		return m, demoTickCmd()

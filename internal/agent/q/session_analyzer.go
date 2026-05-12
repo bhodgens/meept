@@ -238,7 +238,7 @@ func (a *SessionAnalyzer) extractToolCalls(messages []Message) []ToolCallRecord 
 }
 
 // computeDifficultyScore computes a difficulty score (0.0-1.0) based on session metrics.
-func (a *SessionAnalyzer) computeDifficultyScore(data *SessionData, messages []Message) float64 {
+func (a *SessionAnalyzer) computeDifficultyScore(data *SessionData, _ []Message) float64 {
 	score := 0.0
 
 	// Factor 1: Duration (longer sessions tend to be more difficult)

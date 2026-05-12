@@ -1503,7 +1503,7 @@ func (m *Manager) QueuePrefetch(query string, maxItems int) {
 
 	select {
 	case m.prefetchQueue <- prefetchRequest{query: query, maxItems: maxItems}:
-		m.logger.Debug("Prefetch queued", "query", query, "maxItems", maxItems)
+		m.logger.Debug("Prefetch queued", "query", query, "max_items", maxItems)
 	default:
 		m.logger.Warn("Prefetch queue full, dropping request", "query", query)
 	}

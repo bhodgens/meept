@@ -571,7 +571,7 @@ type TaskExtendedResponse struct {
 	Steps           []*TaskStep `json:"steps,omitempty"`
 }
 
-func (h *Handler) handleListExtended(ctx context.Context, msg *models.BusMessage) (any, error) {
+func (h *Handler) handleListExtended(ctx context.Context, _ *models.BusMessage) (any, error) {
 	// Get all tasks (no filter, reasonable limit)
 	tasks, err := h.registry.List(ctx, nil, 100)
 	if err != nil {
@@ -731,7 +731,7 @@ func (h *Handler) handleUnlink(ctx context.Context, msg *models.BusMessage) (any
 	return map[string]string{"status": "unlinked"}, nil
 }
 
-func (h *Handler) handleSteps(ctx context.Context, msg *models.BusMessage) (any, error) {
+func (h *Handler) handleSteps(_ context.Context, msg *models.BusMessage) (any, error) {
 	var params struct {
 		TaskID string `json:"task_id"`
 	}

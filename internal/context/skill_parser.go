@@ -210,7 +210,7 @@ func extractTriggersFromDescription(description string) []string {
 }
 
 // inferSkillCategory infers a category from the skill slug/path
-func inferSkillCategory(slug, path string) string {
+func inferSkillCategory(slug, _ string) string {
 	lower := strings.ToLower(slug)
 
 	switch {
@@ -307,7 +307,7 @@ func parseAgentFrontmatter(frontmatter, body string) (*AgentDefinition, error) {
 }
 
 // inferAgentRole infers the agent role from description and body
-func inferAgentRole(description, body string) string {
+func inferAgentRole(description, _ string) string {
 	descLower := strings.ToLower(description)
 
 	switch {
@@ -333,7 +333,7 @@ func inferAgentRole(description, body string) string {
 }
 
 // parseAgentsFromBody parses multiple agents from the body
-func parseAgentsFromBody(body, path string) []*AgentDefinition {
+func parseAgentsFromBody(_, path string) []*AgentDefinition {
 	agents := make([]*AgentDefinition, 0, 1)
 
 	// This is a simplified implementation

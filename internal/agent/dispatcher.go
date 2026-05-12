@@ -441,7 +441,7 @@ func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
 }
 
 // createTask creates a new task for the request.
-func (d *Dispatcher) createTask(ctx context.Context, input string, intent *Intent, sessionID string) *task.Task {
+func (d *Dispatcher) createTask(_ context.Context, input string, intent *Intent, sessionID string) *task.Task {
 	// Create task summary
 	summary := intent.Summary
 	if summary == "" {
@@ -729,7 +729,7 @@ func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context, input stri
 }
 
 // handleStatsQuery returns dispatcher statistics as JSON.
-func (d *Dispatcher) handleStatsQuery(ctx context.Context) (string, error) {
+func (d *Dispatcher) handleStatsQuery(_ context.Context) (string, error) {
 	stats := d.GetStats()
 
 	result := map[string]any{

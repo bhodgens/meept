@@ -504,7 +504,7 @@ func (h *Handler) handleList(_ context.Context, _ *models.BusMessage) (any, erro
 	}, nil
 }
 
-func (h *Handler) handleStats(ctx context.Context, msg *models.BusMessage) (any, error) {
+func (h *Handler) handleStats(_ context.Context, _ *models.BusMessage) (any, error) {
 	stats := h.pool.GetStats()
 
 	workerStats := make([]map[string]any, 0, len(stats.WorkerStats))

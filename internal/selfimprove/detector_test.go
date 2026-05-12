@@ -30,7 +30,7 @@ func newTestDetector(t *testing.T) *IssueDetector {
 	return NewIssueDetector(cfg, dir, slog.Default())
 }
 
-func newTestDetectorWithRoot(t *testing.T, root string) *IssueDetector {
+func newTestDetectorWithRoot(_ *testing.T, root string) *IssueDetector {
 	cfg := DetectionConfig{
 		LogPatterns: []string{},
 		ErrorPatterns: []string{

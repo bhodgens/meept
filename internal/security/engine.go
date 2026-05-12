@@ -420,7 +420,7 @@ func isPathUnderDir(path, dir string) bool {
 }
 
 // checkPath checks a filesystem path against path rules.
-func (e *Engine) checkPath(pathStr, action string) *Decision {
+func (e *Engine) checkPath(pathStr, _ string) *Decision {
 	resolved := pathutil.ExpandPath(pathStr)
 	if absPath, err := filepath.Abs(resolved); err == nil {
 		resolved = absPath

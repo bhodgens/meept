@@ -1035,7 +1035,7 @@ func (ts *TacticalScheduler) runValidationGateIfDue(ctx context.Context, taskID 
 
 // runValidationGate checks all completed steps for a task are validated.
 // Returns error if any completed step lacks validation.
-func (ts *TacticalScheduler) runValidationGate(ctx context.Context, taskID string) error {
+func (ts *TacticalScheduler) runValidationGate(_ context.Context, taskID string) error {
 	steps, err := ts.stepStore.ListByTaskID(taskID)
 	if err != nil {
 		return fmt.Errorf("failed to list steps for validation gate: %w", err)
@@ -1125,7 +1125,7 @@ func (ts *TacticalScheduler) buildResultSummary(steps []map[string]any) string {
 }
 
 // propagateContextToNextSteps copies completed step's result and MemoryRefs to next ready steps.
-func (ts *TacticalScheduler) propagateContextToNextSteps(ctx context.Context, completedStep *task.TaskStep) error {
+func (ts *TacticalScheduler) propagateContextToNextSteps(_ context.Context, completedStep *task.TaskStep) error {
 	// Get next ready steps
 	readySteps, err := ts.stepStore.GetReadySteps(completedStep.TaskID)
 	if err != nil {

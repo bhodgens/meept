@@ -225,7 +225,7 @@ func (o *Orchestrator) handleAmendmentApplied(ctx context.Context, msg *models.B
 }
 
 // handleAmendmentRejected handles events when an amendment is rejected.
-func (o *Orchestrator) handleAmendmentRejected(ctx context.Context, msg *models.BusMessage) {
+func (o *Orchestrator) handleAmendmentRejected(_ context.Context, msg *models.BusMessage) {
 	var req struct {
 		ID      string `json:"id"`
 		TaskID  string `json:"task_id"`

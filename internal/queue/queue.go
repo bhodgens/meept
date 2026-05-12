@@ -633,7 +633,7 @@ func (h *Handler) handleList(ctx context.Context, msg *models.BusMessage) (any, 
 	return map[string]any{"jobs": jobs}, nil
 }
 
-func (h *Handler) handleStats(ctx context.Context, msg *models.BusMessage) (any, error) {
+func (h *Handler) handleStats(ctx context.Context, _ *models.BusMessage) (any, error) {
 	stats, err := h.queue.Stats(ctx)
 	if err != nil {
 		return nil, err
@@ -694,7 +694,7 @@ func (h *Handler) handleDeadLetter(ctx context.Context, msg *models.BusMessage) 
 	return map[string]any{"jobs": jobs}, nil
 }
 
-func (h *Handler) handleDeadStats(ctx context.Context, msg *models.BusMessage) (any, error) {
+func (h *Handler) handleDeadStats(ctx context.Context, _ *models.BusMessage) (any, error) {
 	count, err := h.queue.DeadLetterStats(ctx)
 	if err != nil {
 		return nil, err

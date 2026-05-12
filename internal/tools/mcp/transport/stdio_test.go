@@ -127,6 +127,7 @@ func TestStdioTransport_SendContextCancel(t *testing.T) {
 	// Should either timeout or be canceled
 	if !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "canceled") {
 		// This is fine - cat might have responded quickly
+		_ = err
 	}
 }
 

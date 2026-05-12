@@ -1015,6 +1015,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 	case FlushResultMsg:
 		if msg.Err != nil {
 			// Log flush error but don't show to user - messages are still in memory
+			_ = msg.Err
 		}
 		return nil
 

@@ -310,7 +310,7 @@ func TestQueue_ConcurrentEnqueueDrain(t *testing.T) {
 	// Concurrent steering.
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
-		go func(n int) {
+		go func(_ int) {
 			defer wg.Done()
 			if err := q.Steer(context.Background(), "steer", "goroutine"); err == nil {
 				steerOK.Add(1)
@@ -321,7 +321,7 @@ func TestQueue_ConcurrentEnqueueDrain(t *testing.T) {
 	// Concurrent follow-up.
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
-		go func(n int) {
+		go func(_ int) {
 			defer wg.Done()
 			if err := q.FollowUp(context.Background(), "follow", "goroutine"); err == nil {
 				followUpOK.Add(1)

@@ -122,7 +122,6 @@ type ContextCompressor struct {
 	config     CompressionConfig
 	stats      CompressionStats
 	summarizer Chatter // Optional: when set, enables LLM-based summarization at stage 2
-	compactor  *ContextCompactor // Optional: when set, preferred over summarizer
 	logger     *slog.Logger
 	tokenizer  Tokenizer
 }
@@ -362,14 +361,6 @@ func (c *ContextCompressor) buildQualityMetrics(before, after []ChatMessage, tok
 // messages. When a compactor is available, it uses it for smart summarization.
 // Falls back to LLM summarizer, then to tail-keep truncation.
 func (c *ContextCompressor) summarizeOldHistory(ctx context.Context, messages []ChatMessage) []ChatMessage {
-	// Prefer compactor when available.
-	if c.compactor != nil {
-		result := c.compactor.Compact(ctx, messages)
-		if result.Compacted {
-			return result.Messages
-		}
-		c.logger.Warn("compactor returned without compacting, falling back")
-	}
 	if c.summarizer != nil {
 		summarized, err := c.summarizeWithLLM(ctx, messages)
 		if err != nil {
@@ -379,14 +370,6 @@ func (c *ContextCompressor) summarizeOldHistory(ctx context.Context, messages []
 		}
 	}
 	return keepTail(messages, 4)
-}
-
-// SetCompactor sets the ContextCompactor for smart summarization.
-// The compactor takes priority over the summarizer when both are set.
-func (c *ContextCompressor) SetCompactor(compactor *ContextCompactor) {
-	if compactor != nil {
-		c.compactor = compactor
-	}
 }
 
 // summarizeWithLLM performs real LLM-based summarization. It separates system

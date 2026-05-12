@@ -85,7 +85,7 @@ func (a *ChangeApplier) Apply(ctx context.Context, fix *ProposedFix, validation 
 }
 
 // applyFix performs the actual fix application.
-func (a *ChangeApplier) applyFix(ctx context.Context, fix *ProposedFix) (*AppliedFix, error) {
+func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix) (*AppliedFix, error) {
 	// Create backup
 	backupPath, err := a.createBackup(fix)
 	if err != nil {

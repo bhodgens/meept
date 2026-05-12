@@ -222,7 +222,7 @@ func (e *Executor) resolveModel(skill *Skill) (*llm.ModelConfig, error) {
 }
 
 // buildPrompt constructs the user prompt for the skill.
-func (e *Executor) buildPrompt(skill *Skill, input string) string {
+func (e *Executor) buildPrompt(_ *Skill, input string) string {
 	// If the skill body already contains specific instructions,
 	// we just pass the user input directly
 	return strings.TrimSpace(input)

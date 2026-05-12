@@ -125,6 +125,7 @@ func TestMCPToolExecuteNilManager(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			// Expected - nil manager causes panic
+			_ = r
 		}
 	}()
 

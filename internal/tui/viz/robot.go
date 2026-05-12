@@ -202,7 +202,7 @@ func (r *Robot) drawBody(c *Canvas, x, y, height int, color ansi.Color) {
 }
 
 // drawWithFill draws the robot with a progress fill from bottom to top.
-func (r *Robot) drawWithFill(c *Canvas, x, y, height int, color ansi.Color) {
+func (r *Robot) drawWithFill(c *Canvas, x, y, height int, _ ansi.Color) {
 	fillHeight := int(float64(height) * r.Progress)
 
 	for py := range height {

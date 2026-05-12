@@ -1091,6 +1091,7 @@ func (a *App) deleteSession(sessionID string) tea.Cmd {
 		err := a.rpc.DeleteSession(sessionID)
 		if err != nil {
 			// Just refresh the list to show current state
+			_ = err
 		}
 		// Refresh session list
 		resp, _ := a.rpc.ListSessions()

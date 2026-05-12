@@ -112,7 +112,7 @@ func (m *Middleware) Close() {
 	m.wg.Wait()
 }
 
-func (m *Middleware) shouldShadow(ctx context.Context, messages []llm.ChatMessage) bool {
+func (m *Middleware) shouldShadow(_ context.Context, messages []llm.ChatMessage) bool {
 	if !m.config.IsEnabled() {
 		return false
 	}

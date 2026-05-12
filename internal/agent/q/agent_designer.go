@@ -340,7 +340,7 @@ func (d *AgentDesigner) generateQualityStandardsSection(research *ResearchReport
 }
 
 // generateWorkflowSection generates the workflow disclosure section.
-func (d *AgentDesigner) generateWorkflowSection(requirements []string) string {
+func (d *AgentDesigner) generateWorkflowSection(_ []string) string {
 	var workflow strings.Builder
 	workflow.WriteString("## Workflow Steps\n\n")
 	workflow.WriteString("Follow this systematic approach:\n\n")
@@ -401,7 +401,7 @@ func (d *AgentDesigner) generateAgentName(pattern PatternReport) string {
 }
 
 // recommendModel recommends an appropriate model based on task patterns.
-func (d *AgentDesigner) recommendModel(pattern PatternReport, analyses []*SessionAnalysis) string {
+func (d *AgentDesigner) recommendModel(_ PatternReport, analyses []*SessionAnalysis) string {
 	// Check if task requires reasoning
 	requiresReasoning := false
 	requiresCode := false

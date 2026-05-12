@@ -31,9 +31,7 @@ func TestNew_NilConfig(t *testing.T) {
 		t.Fatal("New(nil) returned nil client")
 	}
 	// Default transport should be RPC; verify type by checking interface
-	if !client.IsConnected() {
-		// Not connected yet, which is expected
-	}
+	_ = client.IsConnected() // Not connected yet, which is expected
 	client.Close()
 }
 

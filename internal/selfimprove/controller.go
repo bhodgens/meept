@@ -500,7 +500,7 @@ func (c *Controller) recordFailure(issueID string) {
 	c.consecutiveFailures++
 }
 
-func (c *Controller) recordSuccess(issueID string) {
+func (c *Controller) recordSuccess(_ string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.consecutiveFailures = 0

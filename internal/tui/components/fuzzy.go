@@ -259,6 +259,7 @@ func HighlightMatch(text string, indices []int, highlight func(string) string) s
 			// Start of match
 			if b.Len() > 0 || matchBuf.Len() == 0 {
 				// Flush any previous content
+				_ = b.Len()
 			}
 			inMatch = true
 			matchBuf.WriteRune(ch)

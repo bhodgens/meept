@@ -76,7 +76,7 @@ func (h *SkillsHandler) Stop(ctx context.Context) error {
 }
 
 // handleList handles skills.list requests.
-func (h *SkillsHandler) handleList(ctx context.Context, msg *models.BusMessage) {
+func (h *SkillsHandler) handleList(_ context.Context, msg *models.BusMessage) {
 	var result any
 	var err error
 
@@ -106,7 +106,7 @@ func (h *SkillsHandler) handleList(ctx context.Context, msg *models.BusMessage) 
 }
 
 // handleGet handles skills.get requests.
-func (h *SkillsHandler) handleGet(ctx context.Context, msg *models.BusMessage) {
+func (h *SkillsHandler) handleGet(_ context.Context, msg *models.BusMessage) {
 	var params struct {
 		Name string `json:"name"`
 	}

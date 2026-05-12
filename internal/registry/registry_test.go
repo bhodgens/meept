@@ -418,7 +418,7 @@ func TestConcurrentAccess(t *testing.T) {
 	// Concurrent reads
 	for i := range goroutines {
 		wg.Add(1)
-		go func(id int) {
+		go func(_ int) {
 			defer wg.Done()
 			for j := range opsPerGoroutine {
 				r.Get(fmt.Sprintf("pre-%d", j%10))

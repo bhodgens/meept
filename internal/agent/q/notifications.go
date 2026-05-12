@@ -107,7 +107,7 @@ func (s *NotificationService) sendCLI(notification *Notification) {
 }
 
 // sendChat sends notification via chat system.
-func (s *NotificationService) sendChat(ctx context.Context, notification *Notification) {
+func (s *NotificationService) sendChat(_ context.Context, notification *Notification) {
 	s.logger.Debug("chat notification",
 		"title", notification.Title,
 		"message", notification.Message,

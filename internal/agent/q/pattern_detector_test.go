@@ -9,7 +9,7 @@ import (
 var testLogger = slog.Default()
 
 func makeSession(sessionID string, agentID string, intents []string, duration time.Duration,
-	iterations, revisions, errors, switches int, outcome string, difficulty float64, anomalyFlags []string,
+	iterations, revisions, errors, _ int, outcome string, difficulty float64, anomalyFlags []string,
 ) *SessionAnalysis {
 	sa := &SessionAnalysis{
 		SessionID:       sessionID,

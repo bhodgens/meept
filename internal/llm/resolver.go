@@ -291,8 +291,8 @@ func (r *Resolver) rotateToNext(aliasName string, alias *AliasEntry) {
 
 	r.logger.Info("Rotated to next model in alias",
 		"alias", aliasName,
-		"newModel", alias.Models[health.CurrentIndex].ModelID,
-		"newIndex", health.CurrentIndex,
+		"new_model", alias.Models[health.CurrentIndex].ModelID,
+		"new_index", health.CurrentIndex,
 	)
 }
 
@@ -355,8 +355,8 @@ func (r *Resolver) RotateToNextModel(aliasName string) (*ModelConfig, error) {
 
 	r.logger.Info("Manually rotated to next model in alias",
 		"alias", aliasName,
-		"newModel", newModel.ModelID,
-		"newIndex", health.CurrentIndex,
+		"new_model", newModel.ModelID,
+		"new_index", health.CurrentIndex,
 	)
 
 	return newModel, nil

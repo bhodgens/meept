@@ -282,7 +282,7 @@ func (q *QAgent) compileResults(
 	analyses []*SessionAnalysis,
 	patterns []PatternReport,
 	researchReports []*ResearchReport,
-	designs []*AgentDesign,
+	_ []*AgentDesign,
 	impactEstimates []*ImpactEstimate,
 	recommendations []Recommendation,
 ) *AnalysisResult {
