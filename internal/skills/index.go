@@ -93,8 +93,8 @@ func (idx *SkillIndex) Index(entry *SkillIndexEntry) {
 	}
 
 	// Add to capability index
-	for _, cap := range entry.Requires {
-		capKey := strings.ToLower(cap)
+	for _, capName := range entry.Requires {
+		capKey := strings.ToLower(capName)
 		idx.byCap[capKey] = append(idx.byCap[capKey], entry)
 	}
 }
@@ -108,8 +108,8 @@ func (idx *SkillIndex) removeFromSecondaryIndices(entry *SkillIndexEntry) {
 	}
 
 	// Remove from capability index
-	for _, cap := range entry.Requires {
-		capKey := strings.ToLower(cap)
+	for _, capName := range entry.Requires {
+		capKey := strings.ToLower(capName)
 		idx.byCap[capKey] = removeEntry(idx.byCap[capKey], entry)
 	}
 }
@@ -264,8 +264,8 @@ func (idx *SkillIndex) AllCapabilities() []string {
 	defer idx.mu.RUnlock()
 
 	caps := make([]string, 0, len(idx.byCap))
-	for cap := range idx.byCap {
-		caps = append(caps, cap)
+	for capName := range idx.byCap {
+		caps = append(caps, capName)
 	}
 	sort.Strings(caps)
 	return caps

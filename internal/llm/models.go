@@ -135,8 +135,8 @@ func (m *ModelConfig) HasCapability(cap string) bool {
 
 // HasCapabilities checks if the model has all specified capabilities.
 func (m *ModelConfig) HasCapabilities(caps []string) bool {
-	for _, cap := range caps {
-		if !m.Capabilities[cap] {
+	for _, capName := range caps {
+		if !m.Capabilities[capName] {
 			return false
 		}
 	}

@@ -121,8 +121,8 @@ func (d *Dispatcher) workerCanHandle(worker *WorkerInfo, requiredCaps []string) 
 	}
 
 	capSet := make(map[string]bool)
-	for _, cap := range worker.Capabilities {
-		capSet[cap] = true
+	for _, capName := range worker.Capabilities {
+		capSet[capName] = true
 	}
 
 	for _, required := range requiredCaps {

@@ -314,13 +314,13 @@ func countCritical(messages []ChatMessage) int {
 
 // maxSummaryLevel returns the highest SummaryLevel among the messages.
 func maxSummaryLevel(messages []ChatMessage) int {
-	max := 0
+	maxVal := 0
 	for _, msg := range messages {
-		if msg.SummaryLevel > max {
-			max = msg.SummaryLevel
+		if msg.SummaryLevel > maxVal {
+			maxVal = msg.SummaryLevel
 		}
 	}
-	return max
+	return maxVal
 }
 
 // buildQualityMetrics constructs a QualityMetrics for the compression pass.

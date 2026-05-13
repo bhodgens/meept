@@ -190,8 +190,8 @@ func ResolveModelRef(ref string, cfg *ProvidersConfig) *ModelConfig {
 
 	// Build capabilities map
 	caps := make(map[string]bool)
-	for _, cap := range modelDef.Capabilities {
-		caps[cap] = true
+	for _, capName := range modelDef.Capabilities {
+		caps[capName] = true
 	}
 
 	return &ModelConfig{
@@ -224,8 +224,8 @@ func GetAllModels(cfg *ProvidersConfig) []*ModelConfig {
 
 		for modelID, modelDef := range provider.Models {
 			caps := make(map[string]bool)
-			for _, cap := range modelDef.Capabilities {
-				caps[cap] = true
+			for _, capName := range modelDef.Capabilities {
+				caps[capName] = true
 			}
 
 			models = append(models, &ModelConfig{

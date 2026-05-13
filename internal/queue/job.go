@@ -138,8 +138,8 @@ func (j *Job) CanBeClaimedBy(workerCaps []string) bool {
 	}
 
 	capSet := make(map[string]bool)
-	for _, cap := range workerCaps {
-		capSet[cap] = true
+	for _, capName := range workerCaps {
+		capSet[capName] = true
 	}
 
 	for _, required := range j.RequiredCaps {

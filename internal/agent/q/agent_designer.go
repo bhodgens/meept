@@ -467,8 +467,8 @@ func (d *AgentDesigner) GenerateFullAgentFile(design *AgentDesign) string {
 
 	if len(design.Capabilities) > 0 {
 		buf.WriteString("capabilities:\n")
-		for _, cap := range design.Capabilities {
-			fmt.Fprintf(&buf, "  - %s\n", cap)
+		for _, capName := range design.Capabilities {
+			fmt.Fprintf(&buf, "  - %s\n", capName)
 		}
 	}
 

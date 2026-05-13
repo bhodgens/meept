@@ -1447,8 +1447,8 @@ func createLLMConfig(cfg *config.ModelsConfig, logger *slog.Logger) *llm.ModelCo
 		for id, model := range provider.Models {
 			if id == targetModel || model.Name == targetModel {
 				caps := make(map[string]bool)
-				for _, cap := range model.Capabilities {
-					caps[cap] = true
+				for _, capName := range model.Capabilities {
+					caps[capName] = true
 				}
 
 				apiKey := provider.Options.APIKey
@@ -1785,8 +1785,8 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.
 		// Get the first model from this provider (or the default model)
 		for modelID, model := range provider.Models {
 			caps := make(map[string]bool)
-			for _, cap := range model.Capabilities {
-				caps[cap] = true
+			for _, capName := range model.Capabilities {
+				caps[capName] = true
 			}
 
 			configs = append(configs, &llm.ModelConfig{

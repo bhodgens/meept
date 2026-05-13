@@ -89,8 +89,8 @@ func (b *CapabilitiesBuilder) buildAgentCapabilities(spec *AgentSpec) *AgentCapa
 			}
 
 			// Add skill capabilities (requires)
-			for _, cap := range entry.Requires {
-				caps.SkillCapabilities[strings.ToLower(cap)] = true
+			for _, capName := range entry.Requires {
+				caps.SkillCapabilities[strings.ToLower(capName)] = true
 			}
 
 			// Add skill tags

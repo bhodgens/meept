@@ -218,8 +218,8 @@ func (w *Watchdog) GetWorkerState(workerID string) (*WorkerState, bool) {
 		return nil, false
 	}
 	// Return a copy
-	copy := *state
-	return &copy, true
+	stateCopy := *state
+	return &stateCopy, true
 }
 
 // ActiveWorkerCount returns the number of currently monitored workers.

@@ -248,8 +248,8 @@ func (t *SanitizableTracker) DeclassifyWithReason(value *TaintedValue, label Tai
 		return nil
 	}
 
-	copy := DeepCopy(value)
-	copy.Declassify(label)
+	deepCopy := DeepCopy(value)
+	deepCopy.Declassify(label)
 
 	t.Tracker.logger.Info("taint declassified",
 		"label", label.String(),
@@ -257,5 +257,5 @@ func (t *SanitizableTracker) DeclassifyWithReason(value *TaintedValue, label Tai
 		"reason", reason,
 	)
 
-	return copy
+	return deepCopy
 }
