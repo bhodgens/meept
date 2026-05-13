@@ -144,3 +144,29 @@ func (s *SessionService) Detach(ctx context.Context, req DetachSessionRequest) (
 	}
 	return sess, nil
 }
+
+// ForkSessionRequest contains fork parameters.
+type ForkSessionRequest struct {
+	SessionID     string `json:"session_id"`
+	FromMessageID int64  `json:"from_message_id"`
+	Name          string `json:"name,omitempty"`
+}
+
+// ForkSession creates a new session by copying messages from the source session
+// up to the specified message ID.
+func (s *SessionService) ForkSession(ctx context.Context, req ForkSessionRequest) (*session.Session, error) {
+	if req.SessionID == "" {
+		return nil, wrapError("session", "ForkSession", ErrInvalidInput)
+	}
+	if req.FromMessageID == 0 {
+		return nil, wrapError("session", "ForkSession", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "ForkSession", ErrUnavailable)
+	}
+	newSession, err := s.store.ForkSession(req.SessionID, req.FromMessageID, req.Name)
+	if err != nil {
+		return nil, wrapError("session", "ForkSession", err)
+	}
+	return newSession, nil
+}

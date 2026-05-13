@@ -132,6 +132,109 @@ All lowercase. No punctuation at end of description.`
 	return &result, nil
 }
 
+// SummarizeBranchRequest contains the data needed to summarize a conversation branch.
+type SummarizeBranchRequest struct {
+	Messages []llm.ChatMessage
+	BranchID string
+}
+
+// SummarizeBranchResult contains the output of branch summarization.
+type SummarizeBranchResult struct {
+	Summary  string
+	BranchID string
+	MsgCount int
+}
+
+// SummarizeBranch generates a summary of a conversation branch.
+// Returns nil if fewer than 3 messages (below threshold).
+// Falls back to simple extraction if LLM client is nil or call fails.
+func (s *Summarizer) SummarizeBranch(ctx context.Context, req SummarizeBranchRequest) (*SummarizeBranchResult, error) {
+	if len(req.Messages) < 3 {
+		return nil, nil
+	}
+
+	if s.llmClient == nil {
+		s.logger.Warn("No LLM client for branch summarization, using fallback",
+			"branch_id", req.BranchID,
+			"msg_count", len(req.Messages),
+		)
+		return &SummarizeBranchResult{
+			Summary:  fallbackBranchSummary(req),
+			BranchID: req.BranchID,
+			MsgCount: len(req.Messages),
+		}, nil
+	}
+
+	systemPrompt := `You are a conversation summarizer. Summarize the following conversation branch in 2-3 concise sentences.
+Focus on: what was discussed, what was decided or concluded, and any important outcomes.
+Do not include pleasantries or filler. Be factual and direct.`
+
+	// Build conversation content from messages
+	var parts []string
+	for _, msg := range req.Messages {
+		parts = append(parts, fmt.Sprintf("[%s]: %s", string(msg.Role), msg.Content))
+	}
+	userPrompt := fmt.Sprintf("Summarize this conversation branch (branch: %s):\n\n%s",
+		req.BranchID,
+		strings.Join(parts, "\n"),
+	)
+
+	// Truncate if too long
+	if len(userPrompt) > 8000 {
+		userPrompt = userPrompt[:8000] + "\n... (truncated)"
+	}
+
+	messages := []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: systemPrompt},
+		{Role: llm.RoleUser, Content: userPrompt},
+	}
+
+	sumCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	resp, err := s.llmClient.Chat(sumCtx, messages,
+		llm.WithMaxTokens(300),
+		llm.WithTemperature(0.3),
+	)
+	if err != nil {
+		s.logger.Warn("LLM branch summarization failed, using fallback",
+			"error", err,
+			"branch_id", req.BranchID,
+		)
+		return &SummarizeBranchResult{
+			Summary:  fallbackBranchSummary(req),
+			BranchID: req.BranchID,
+			MsgCount: len(req.Messages),
+		}, nil
+	}
+
+	summary := strings.TrimSpace(resp.Content)
+	if summary == "" {
+		summary = fallbackBranchSummary(req)
+	}
+
+	return &SummarizeBranchResult{
+		Summary:  summary,
+		BranchID: req.BranchID,
+		MsgCount: len(req.Messages),
+	}, nil
+}
+
+// fallbackBranchSummary generates a simple summary without LLM.
+func fallbackBranchSummary(req SummarizeBranchRequest) string {
+	var firstUserMsg string
+	for _, msg := range req.Messages {
+		if string(msg.Role) == "user" {
+			firstUserMsg = msg.Content
+			break
+		}
+	}
+	if len(firstUserMsg) > 100 {
+		firstUserMsg = firstUserMsg[:100] + "..."
+	}
+	return fmt.Sprintf("branch %s: %d messages covering %s", req.BranchID, len(req.Messages), firstUserMsg)
+}
+
 // extractSimpleResult extracts the first few words as a fallback.
 func extractSimpleResult(text string) *SummarizeResult {
 	words := strings.Fields(text)

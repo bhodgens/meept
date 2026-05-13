@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -71,6 +72,9 @@ type AgentRegistry struct {
 
 	// Queues config from config file (overrides code defaults)
 	queueConfig config.AgentQueuesConfig
+
+	// db is the SQLite connection for queue persistence (may be nil).
+	db *sql.DB
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -100,6 +104,10 @@ type RegistryConfig struct {
 	// Queues holds steering and follow-up message queue settings from config.
 	// When non-zero, these values override the code defaults.
 	Queues config.AgentQueuesConfig
+
+	// DB is an optional SQLite connection used for queue persistence.
+	// When set, follow-up messages are persisted to the queued_followups table.
+	DB *sql.DB
 }
 
 // NewAgentRegistry creates a new agent registry.
@@ -125,6 +133,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		hallucinationDetector: cfg.HallucinationDetector,
 		artifactManager:       cfg.ArtifactManager,
 		queueConfig:           cfg.Queues,
+		db:                    cfg.DB,
 	}
 
 	// Load global rules
@@ -791,4 +800,11 @@ func (r *AgentRegistry) GetQueueWithVersion(conversationID string, expectedGen u
 	}
 
 	return entry.Queue, nil
+}
+
+// DB returns the SQLite connection used for queue persistence, or nil.
+func (r *AgentRegistry) DB() *sql.DB {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.db
 }

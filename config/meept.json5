@@ -530,7 +530,7 @@
   // Tool call serialization sidecar (optional)
   // Dedicated agent/service for tool call JSON encoding/decoding
   "tooling": {
-    "enabled": false,                    // Enable sidecar agent for serialization
+    "enabled": true,                     // Enable sidecar agent for serialization
     "mode": "service",                   // "service" (in-process) or "agent" (sidecar)
     "agent_id": "tooling",               // Agent ID if mode is "agent"
     "model": "",                         // Model override (empty = default)
@@ -540,6 +540,34 @@
     "include_schema": true,              // Include JSON schema in tool call metadata
     "validate_on_serialize": false,      // Validate tool calls against schema
     "log_unknown_tools": true,           // Log warnings for unknown tool types
+  },
+
+  // LLM-based context compaction (preserves knowledge instead of discarding messages)
+  "compaction": {
+    "enabled": false,                  // Master switch (disabled by default)
+    "model": "",                      // Compaction model (empty = working model)
+    "reserve_tokens": 16384,           // Tokens reserved for response after compaction
+    "keep_recent_tokens": 20000,       // Recent tokens to keep verbatim
+    "max_response_tokens": 13107,      // Max tokens for compaction summary
+    "summary_format": "structured",    // "structured" or "narrative"
+    "trigger_ratio": 0.60,             // Utilization ratio to trigger (0.0-1.0)
+    "iterative_updates": true,         // Merge old summary with new messages
+    "track_file_ops": true,            // Cumulative file operation tracking
+    "timeout_seconds": 30,             // Timeout for compaction LLM call
+  },
+
+  // Session persistence and branching
+  "session": {
+    "persistence": true,                // Restore sessions from SQLite on startup
+    "branching": true,                  // Enable conversation branching
+    "max_branches": 20,                 // Maximum branches per session (0 = unlimited)
+    "branch_summary_threshold": 5,      // Min messages before auto-summarizing abandoned branch
+    "restore_message_limit": 0,         // Max messages to restore on resumption (0 = all)
+    "compaction": true,                 // Use tree-based compaction instead of deleting messages
+    "compaction_threshold": 50,         // Minimum messages before compaction is considered
+    "compaction_target_ratio": 0.6,     // Target compression ratio (0.0-1.0)
+    "auto_fork": "ask",                 // Auto-fork behavior: "never" | "ask" | "always"
+    "legacy_truncation": false,         // Revert to old message deletion behavior
   },
 
   // Calendar integration

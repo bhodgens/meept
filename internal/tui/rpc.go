@@ -859,3 +859,95 @@ func (c *RPCClient) RestorePendingFollowUps(conversationID string) error {
 	_, err := c.Call("chat.queue.restore", req)
 	return err
 }
+
+// ============================================================================
+// Branch Methods
+// ============================================================================
+
+// NavigateBranch navigates to a prior message in a session, creating a new branch.
+func (c *RPCClient) NavigateBranch(sessionID string, targetMessageID int64) error {
+	params := map[string]any{
+		"session_id":        sessionID,
+		"target_message_id": targetMessageID,
+	}
+	_, err := c.Call("session.branch.navigate", params)
+	return err
+}
+
+// BranchInfo represents a conversation branch.
+type BranchInfo struct {
+	ID           string `json:"id"`
+	LeafID       int64  `json:"leaf_id"`
+	MessageCount int    `json:"message_count"`
+	Summary      string `json:"summary,omitempty"`
+}
+
+// ListBranches lists all branches in a session.
+func (c *RPCClient) ListBranches(sessionID string) ([]BranchInfo, error) {
+	params := map[string]string{"session_id": sessionID}
+	result, err := c.Call("session.branches.list", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Branches []BranchInfo `json:"branches"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse branches response: %w", err)
+	}
+
+	return resp.Branches, nil
+}
+
+// ForkSession forks a session from a specific message, returning the new session ID.
+func (c *RPCClient) ForkSession(sessionID string, fromMessageID int64, name string) (string, error) {
+	params := map[string]any{
+		"session_id":      sessionID,
+		"from_message_id": fromMessageID,
+		"name":            name,
+	}
+	result, err := c.Call("session.fork", params)
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		NewSessionID string `json:"new_session_id"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse fork response: %w", err)
+	}
+
+	return resp.NewSessionID, nil
+}
+
+// TreeNodeInfo represents a node in the conversation tree.
+type TreeNodeInfo struct {
+	ID        int64  `json:"id"`
+	ParentID  int64  `json:"parent_id"`
+	Role      string `json:"role"`
+	EntryType string `json:"entry_type"`
+	BranchID  string `json:"branch_id"`
+	Content   string `json:"content,omitempty"`
+	Timestamp string `json:"timestamp"`
+	IsLeaf    bool   `json:"is_leaf"`
+}
+
+// GetTree returns the conversation tree for a session.
+func (c *RPCClient) GetTree(sessionID string) ([]TreeNodeInfo, error) {
+	params := map[string]string{"session_id": sessionID}
+	result, err := c.Call("session.tree.get", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Nodes []TreeNodeInfo `json:"nodes"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse tree response: %w", err)
+	}
+
+	return resp.Nodes, nil
+}

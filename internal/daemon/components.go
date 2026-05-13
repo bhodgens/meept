@@ -3,6 +3,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -554,14 +555,40 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Create session handler with summarizer if LLM is available
 	sessionOpts := []session.HandlerOption{}
+	var summarizer *session.Summarizer
 	if c.LLMClient != nil {
-		summarizer := session.NewSummarizer(c.LLMClient, logger.With("component", "summarizer"))
+		summarizer = session.NewSummarizer(c.LLMClient, logger.With("component", "summarizer"))
 		sessionOpts = append(sessionOpts, session.WithSummarizer(summarizer))
 		logger.Info("Session summarizer enabled with LLM client")
 	} else {
 		logger.Warn("Session summarizer disabled - no LLM client available")
 	}
+
+	// Create branch manager if branching is enabled
+	if cfg.Session.Branching {
+		bm := session.NewBranchManager(c.SessionStore, summarizer, cfg.Session, logger.With("component", "branch-manager"))
+		sessionOpts = append(sessionOpts, session.WithBranchManager(bm))
+		logger.Info("Branch manager enabled",
+			"summary_threshold", cfg.Session.BranchSummaryThreshold,
+		)
+	}
+
 	c.SessionHandler = session.NewHandler(c.SessionStore, msgBus, logger.With("component", "session"), sessionOpts...)
+
+	// Wire session store to agent loop for persistence
+	if c.AgentLoop != nil && c.SessionStore != nil && cfg.Session.Persistence {
+		c.AgentLoop.SetSessionStore(c.SessionStore, cfg.Session)
+		logger.Info("Session persistence wired to agent loop",
+			"restore_message_limit", cfg.Session.RestoreMessageLimit,
+		)
+	}
+
+	// Wire branch manager to agent loop for in-memory cache coordination
+	if c.AgentLoop != nil && cfg.Session.Persistence && cfg.Session.Branching {
+		bm := session.NewBranchManager(c.SessionStore, summarizer, cfg.Session, logger.With("component", "branch-manager"))
+		c.AgentLoop.SetBranchManager(bm)
+		logger.Info("Branch navigation wired to agent loop")
+	}
 
 	// Create job queue
 	queueDB := cfg.Queue.DBPath
@@ -693,6 +720,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			HallucinationDetector: c.HallucinationDetector,
 			ArtifactManager:       c.ArtifactManager,
 			Queues:                cfg.Agent.Queues,
+			DB:                    getQueueDB(c),
 		})
 		logger.Info("Agent registry initialized", "specs", len(c.AgentRegistry.ListSpecs()))
 
@@ -1361,6 +1389,18 @@ func getProviderNames(cfg *config.ModelsConfig) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// getQueueDB extracts the *sql.DB from the job queue for queue persistence.
+// Returns nil if the queue is not a PersistentQueue or has no DB.
+func getQueueDB(c *Components) *sql.DB {
+	if c.Queue == nil {
+		return nil
+	}
+	if pq, ok := c.Queue.(*queue.PersistentQueue); ok {
+		return pq.DB()
+	}
+	return nil
 }
 
 // createLLMConfig creates an LLM model config from the models configuration.

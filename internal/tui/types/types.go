@@ -166,6 +166,7 @@ type Session struct {
 	LastActivity    string   `json:"last_activity"`
 	AttachedClients []string `json:"attached_clients"`
 	WorkerIDs       []string `json:"worker_ids,omitempty"`
+	LeafMessageID   *int64   `json:"leaf_message_id,omitempty"`
 }
 
 // GenerateDescriptionResult is the result of LLM-based session description generation.

@@ -224,6 +224,7 @@ type ContextFirewall struct {
 	logger       *slog.Logger
 	tokenizer    Tokenizer
 	compressor   *ContextCompressor
+	compactor    *ContextCompactor
 
 	// Counters (atomic-safe for concurrent callers)
 	summarizationFailures atomic.Uint64
@@ -367,6 +368,17 @@ func NewContextFirewall(
 		logger:       logger,
 		tokenizer:    tokenizer,
 		compressor:   compressor,
+	}
+}
+
+// SetCompactor sets the ContextCompactor for smart summarization.
+func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor) {
+	if compactor == nil {
+		return
+	}
+	f.compactor = compactor
+	if f.compressor != nil {
+		f.compressor.SetCompactor(compactor)
 	}
 }
 
@@ -690,6 +702,14 @@ func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []Ch
 // FINDINGS, SUMMARY). The raw response is parsed into a SummaryExtract and
 // then formatted as a compact, information-dense summary message.
 func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []ChatMessage, level int) ([]ChatMessage, error) {
+	if f.compactor != nil && level == 1 {
+		cr := f.compactor.Compact(ctx, messages)
+		if cr.Compacted {
+			return cr.Messages, nil
+		}
+		f.logger.Warn("compactor returned without compacting, falling back to legacy")
+	}
+
 	// Keep: system prompt + last 4 messages
 	keepCount := 4 + 1 // +1 for system
 

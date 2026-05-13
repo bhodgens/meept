@@ -26,6 +26,7 @@ type Session struct {
 	LastActivity    time.Time `json:"last_activity"`
 	AttachedClients []string  `json:"attached_clients"`
 	WorkerIDs       []string  `json:"worker_ids,omitempty"`
+	LeafMessageID   *int64    `json:"leaf_message_id,omitempty"`
 }
 
 // MemoryStore manages sessions with thread-safe operations (in-memory, non-persistent).
@@ -328,16 +329,313 @@ func (s *MemoryStore) Close() error {
 	return nil
 }
 
+// GetLeafMessageID returns the current leaf message ID for a session.
+func (s *MemoryStore) GetLeafMessageID(sessionID string) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return 0, fmt.Errorf("session not found: %s", sessionID)
+	}
+	if session.LeafMessageID == nil {
+		return 0, nil
+	}
+	return *session.LeafMessageID, nil
+}
+
+// SetLeafMessageID updates the leaf message ID for a session.
+func (s *MemoryStore) SetLeafMessageID(sessionID string, messageID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.LeafMessageID = &messageID
+	return nil
+}
+
+// GetMessagePath returns messages from root to the given leaf.
+// For MemoryStore, this walks the flat message slice by ID.
+func (s *MemoryStore) GetMessagePath(sessionID string, leafID int64) ([]Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	msgs := s.messages[sessionID]
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+
+	// Find the leaf message index
+	leafIdx := -1
+	for i, msg := range msgs {
+		if msg.ID == leafID {
+			leafIdx = i
+			break
+		}
+	}
+	if leafIdx < 0 {
+		return nil, fmt.Errorf("message %d not found in session %s", leafID, sessionID)
+	}
+
+	// Walk from the leaf back to root via ParentID chain
+	var path []Message
+	current := msgs[leafIdx]
+	for {
+		path = append(path, current)
+		if current.ParentID == nil {
+			break
+		}
+		// Find parent message
+		found := false
+		for _, msg := range msgs {
+			if msg.ID == *current.ParentID {
+				current = msg
+				found = true
+				break
+			}
+		}
+		if !found {
+			break
+		}
+	}
+
+	// Reverse to get root-to-leaf order
+	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+		path[i], path[j] = path[j], path[i]
+	}
+	return path, nil
+}
+
+// GetMessageBranches returns branch information for a session.
+// MemoryStore returns a single "main" branch if messages exist.
+func (s *MemoryStore) GetMessageBranches(sessionID string) ([]Branch, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	msgs := s.messages[sessionID]
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+
+	// Collect unique branch IDs
+	branchMap := make(map[string]int) // branchID -> count
+	var lastID int64
+	for _, msg := range msgs {
+		bid := msg.BranchID
+		if bid == "" {
+			bid = "main"
+		}
+		branchMap[bid]++
+		lastID = msg.ID
+	}
+
+	branches := make([]Branch, 0, len(branchMap))
+	for bid, count := range branchMap {
+		branches = append(branches, Branch{
+			ID:           bid,
+			LeafID:       lastID,
+			MessageCount: count,
+		})
+	}
+	return branches, nil
+}
+
+// GetTree returns tree nodes for a session.
+// MemoryStore returns all messages as flat tree nodes.
+func (s *MemoryStore) GetTree(sessionID string) ([]TreeNode, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	msgs := s.messages[sessionID]
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	leafID := int64(0)
+	if session.LeafMessageID != nil {
+		leafID = *session.LeafMessageID
+	}
+
+	nodes := make([]TreeNode, 0, len(msgs))
+	for _, msg := range msgs {
+		parentID := int64(0)
+		if msg.ParentID != nil {
+			parentID = *msg.ParentID
+		}
+		nodes = append(nodes, TreeNode{
+			ID:        msg.ID,
+			ParentID:  parentID,
+			Role:      msg.Role,
+			EntryType: msg.EntryType,
+			BranchID:  msg.BranchID,
+			Content:   msg.Content,
+			Timestamp: msg.Timestamp.Format(time.RFC3339),
+			IsLeaf:    msg.ID == leafID,
+		})
+	}
+	return nodes, nil
+}
+
+// NavigateToBranch is not fully implemented for MemoryStore.
+func (s *MemoryStore) NavigateToBranch(sessionID string, targetMessageID int64) (int64, error) {
+	return 0, fmt.Errorf("not implemented: NavigateToBranch in MemoryStore")
+}
+
+// ForkSession creates a new session by copying messages up to fromMessageID from the
+// source session. For MemoryStore, this copies messages and remaps parent IDs.
+func (s *MemoryStore) ForkSession(sourceSessionID string, fromMessageID int64, newName string) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Validate source session exists
+	source, exists := s.sessions[sourceSessionID]
+	if !exists {
+		return nil, fmt.Errorf("source session not found: %s", sourceSessionID)
+	}
+
+	sourceMsgs := s.messages[sourceSessionID]
+	if len(sourceMsgs) == 0 {
+		return nil, fmt.Errorf("no messages in source session")
+	}
+
+	// Find the path from root to fromMessageID by walking parent chain
+	// First, find the target message
+	targetIdx := -1
+	for i, msg := range sourceMsgs {
+		if msg.ID == fromMessageID {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return nil, fmt.Errorf("message %d not found in session %s", fromMessageID, sourceSessionID)
+	}
+
+	// Collect the path by walking parent chain from target to root
+	pathSet := make(map[int64]bool)
+	current := sourceMsgs[targetIdx]
+	for {
+		pathSet[current.ID] = true
+		if current.ParentID == nil {
+			break
+		}
+		found := false
+		for _, msg := range sourceMsgs {
+			if msg.ID == *current.ParentID {
+				current = msg
+				found = true
+				break
+			}
+		}
+		if !found {
+			break
+		}
+	}
+
+	// Create new session
+	now := time.Now().UTC()
+	newID := fmt.Sprintf("session-%d", now.UnixNano())
+	newConvID := fmt.Sprintf("conv-%d", now.UnixNano())
+	if newName == "" {
+		newName = "fork of " + source.Name
+	}
+
+	newSession := &Session{
+		ID:              newID,
+		Name:            newName,
+		ConversationID:  newConvID,
+		CreatedAt:       now,
+		LastActivity:    now,
+		AttachedClients: []string{},
+		WorkerIDs:       []string{},
+	}
+
+	s.sessions[newID] = newSession
+
+	// Copy messages in path, ordered by ID
+	oldToNew := make(map[int64]int64)
+	nextID := int64(1)
+	var newLeafID int64
+
+	for _, msg := range sourceMsgs {
+		if !pathSet[msg.ID] {
+			continue
+		}
+		newMsg := Message{
+			SessionID:  newID,
+			Role:       msg.Role,
+			Content:    msg.Content,
+			Timestamp:  msg.Timestamp,
+			EntryType:  msg.EntryType,
+			BranchID:   msg.BranchID,
+			Model:      msg.Model,
+			Name:       msg.Name,
+			ToolCallID: msg.ToolCallID,
+		}
+		newMsg.ID = nextID
+		if msg.ParentID != nil {
+			if newPID, ok := oldToNew[*msg.ParentID]; ok {
+				newMsg.ParentID = &newPID
+			}
+			// If old parent wasn't in path, this becomes root
+		}
+		oldToNew[msg.ID] = newMsg.ID
+		newLeafID = newMsg.ID
+		s.messages[newID] = append(s.messages[newID], newMsg)
+		nextID++
+	}
+
+	newSession.LeafMessageID = &newLeafID
+
+	s.logger.Info("Session forked (memory)",
+		"source_id", sourceSessionID,
+		"new_id", newID,
+		"from_message", fromMessageID,
+		"copied_messages", len(s.messages[newID]),
+	)
+
+	return newSession, nil
+}
+
+// InsertCompaction is not fully implemented for MemoryStore.
+func (s *MemoryStore) InsertCompaction(sessionID string, parentID int64, summary string, compressedIDs []int64) (int64, error) {
+	return 0, fmt.Errorf("not implemented: InsertCompaction in MemoryStore")
+}
+
+// SaveToolCalls is not supported for MemoryStore (tool calls are only persisted in SQLite).
+func (s *MemoryStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error {
+	return nil
+}
+
+// GetToolCalls returns empty for MemoryStore (tool calls are only persisted in SQLite).
+func (s *MemoryStore) GetToolCalls(messageID int64) ([]ToolCall, error) {
+	return nil, nil
+}
+
+// GetToolCallsForMessages returns empty for MemoryStore (tool calls are only persisted in SQLite).
+func (s *MemoryStore) GetToolCallsForMessages(messageIDs []int64) (map[int64][]ToolCall, error) {
+	return make(map[int64][]ToolCall), nil
+}
+
 // Ensure MemoryStore implements Store interface.
 var _ Store = (*MemoryStore)(nil)
 
 // Handler handles session-related RPC requests via the message bus.
 type Handler struct {
-	handler    *bus.SubscriptionHandler
-	store      Store
-	bus        *bus.MessageBus
-	logger     *slog.Logger
-	summarizer *Summarizer
+	handler       *bus.SubscriptionHandler
+	store         Store
+	bus           *bus.MessageBus
+	logger        *slog.Logger
+	summarizer    *Summarizer
+	branchManager *BranchManager
 }
 
 // HandlerOption configures the session handler.
@@ -347,6 +645,13 @@ type HandlerOption func(*Handler)
 func WithSummarizer(s *Summarizer) HandlerOption {
 	return func(h *Handler) {
 		h.summarizer = s
+	}
+}
+
+// WithBranchManager sets the branch manager for branch navigation operations.
+func WithBranchManager(bm *BranchManager) HandlerOption {
+	return func(h *Handler) {
+		h.branchManager = bm
 	}
 }
 
@@ -380,6 +685,10 @@ func NewHandler(store Store, msgBus *bus.MessageBus, logger *slog.Logger, opts .
 		"session.generate_description": h.handleSessionGenerateDescription,
 		"session.stop":                 h.handleSessionStop,
 		"session.get_child_tasks":      h.handleSessionGetChildTasks,
+		"session.branch.navigate":      h.handleBranchNavigate,
+		"session.branches.list":        h.handleBranchesList,
+		"session.fork":                 h.handleSessionFork,
+		"session.tree.get":             h.handleSessionTreeGet,
 	}
 
 	for topic, callback := range topics {
@@ -454,6 +763,22 @@ func (h *Handler) handleSessionGetChildTasks(ctx context.Context, topic string, 
 	h.handleMessage(topic, msg.(*models.BusMessage))
 }
 
+func (h *Handler) handleBranchNavigate(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleBranchesList(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionFork(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
+func (h *Handler) handleSessionTreeGet(ctx context.Context, topic string, msg any) {
+	h.handleMessage(topic, msg.(*models.BusMessage))
+}
+
 // handleMessage routes messages to the appropriate handler.
 func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 	var response any
@@ -486,6 +811,14 @@ func (h *Handler) handleMessage(topic string, msg *models.BusMessage) {
 		response, err = h.handleStop(msg)
 	case "session.get_child_tasks":
 		response, err = h.handleGetChildTasks(msg)
+	case "session.branch.navigate":
+		response, err = h.handleBranchNavigateMsg(msg)
+	case "session.branches.list":
+		response, err = h.handleBranchesListMsg(msg)
+	case "session.fork":
+		response, err = h.handleForkMsg(msg)
+	case "session.tree.get":
+		response, err = h.handleTreeGetMsg(msg)
 	default:
 		err = fmt.Errorf("unknown topic: %s", topic)
 	}
@@ -827,6 +1160,70 @@ func (h *Handler) handleGetChildTasks(msg *models.BusMessage) (any, error) {
 		"session_id": params.SessionID,
 		"tasks":      session.WorkerIDs,
 	}, nil
+}
+
+// handleBranchNavigateMsg handles a branch navigate request.
+func (h *Handler) handleBranchNavigateMsg(msg *models.BusMessage) (any, error) {
+	if h.branchManager == nil {
+		return nil, fmt.Errorf("branch manager not configured")
+	}
+	return handleBranchNavigate(h.branchManager, msg.Payload)
+}
+
+// handleBranchesListMsg handles a branches list request.
+func (h *Handler) handleBranchesListMsg(msg *models.BusMessage) (any, error) {
+	if h.branchManager == nil {
+		return nil, fmt.Errorf("branch manager not configured")
+	}
+	return handleBranchesList(h.branchManager, msg.Payload)
+}
+
+// handleForkMsg handles a session fork request.
+func (h *Handler) handleForkMsg(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID    string `json:"session_id"`
+		FromMessageID int64  `json:"from_message_id"`
+		Name         string `json:"name"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if params.FromMessageID == 0 {
+		return nil, fmt.Errorf("from_message_id is required")
+	}
+
+	newSession, err := h.store.ForkSession(params.SessionID, params.FromMessageID, params.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"session":      newSession,
+		"new_session_id": newSession.ID,
+	}, nil
+}
+
+// handleTreeGetMsg handles a tree get request.
+func (h *Handler) handleTreeGetMsg(msg *models.BusMessage) (any, error) {
+	var params struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &params); err != nil {
+		return nil, err
+	}
+	if params.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+
+	nodes, err := h.store.GetTree(params.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{"nodes": nodes}, nil
 }
 
 // sendResponse publishes a response to the bus.

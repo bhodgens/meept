@@ -393,6 +393,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(a.fuzzyFinder.FetchSessions(), a.fuzzyFinder.FetchTasks())
 		}
 
+		// Check for Ctrl+B to show branch info
+		if msg.String() == "ctrl+b" {
+			return a, a.fetchBranchInfo()
+		}
+
 		// Global escape handler
 		if msg.String() == "esc" {
 			// If sidebar is focused, unfocus and return to chat
@@ -899,6 +904,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case BranchInfoMsg:
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("branch error: %v", msg.Err)
+		} else if len(msg.Branches) == 0 {
+			a.statusMessage = "no branches"
+		} else {
+			names := make([]string, len(msg.Branches))
+			for i, b := range msg.Branches {
+				names[i] = b.ID
+			}
+			a.statusMessage = fmt.Sprintf("branches: %s", strings.Join(names, ", "))
+		}
+		a.statusMessageTime = time.Now()
+		return a, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+
 	case components.NotificationExpiredMsg:
 		if a.notifications != nil {
 			a.notifications.Update(msg)
@@ -1376,6 +1398,12 @@ func (a *App) renderStatusBar() string {
 		parts = append(parts, a.styles.StatusRunning.Render(a.statusMessage))
 	} else {
 		parts = append(parts, statusStyle.Render(connectionStatus))
+
+		// Show branch indicator if session has a leaf message set
+		if a.currentSession != nil && a.currentSession.LeafMessageID != nil {
+			parts = append(parts, a.styles.Muted.Render("branch: "+a.currentSession.Name))
+		}
+
 		// Add context-sensitive quick actions
 		quickActions := a.getQuickActions()
 		parts = append(parts, quickActions...)
@@ -1396,10 +1424,11 @@ func (a *App) renderStatusBar() string {
 func (a *App) getQuickActions() []string {
 	var actions []string
 
-	// Always show menu, sessions, find, and quit
+	// Always show menu, sessions, find, branches, and quit
 	actions = append(actions, a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"))
 	actions = append(actions, a.styles.HelpKey.Render("^S")+" "+a.styles.HelpValue.Render("sessions"))
 	actions = append(actions, a.styles.HelpKey.Render("^P")+" "+a.styles.HelpValue.Render("find"))
+	actions = append(actions, a.styles.HelpKey.Render("^B")+" "+a.styles.HelpValue.Render("branches"))
 	actions = append(actions, a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"))
 
 	switch a.currentView {
@@ -1492,6 +1521,29 @@ func doCopy(text string) tea.Cmd {
 
 // StatusMessageClearMsg clears the status message.
 type StatusMessageClearMsg struct{}
+
+// BranchInfoMsg carries branch information fetched for the current session.
+type BranchInfoMsg struct {
+	Branches []BranchInfo
+	Err      error
+}
+
+// fetchBranchInfo fetches branch info for the current session and logs it.
+func (a *App) fetchBranchInfo() tea.Cmd {
+	if a.currentSession == nil {
+		a.statusMessage = "no active session"
+		a.statusMessageTime = time.Now()
+		return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+	}
+
+	sessionID := a.currentSession.ID
+	return func() tea.Msg {
+		branches, err := a.rpc.ListBranches(sessionID)
+		return BranchInfoMsg{Branches: branches, Err: err}
+	}
+}
 
 // stopCurrentWork stops the current session's work and prompts for child tasks.
 func (a *App) stopCurrentWork() tea.Cmd {

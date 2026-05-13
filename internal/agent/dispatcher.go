@@ -31,6 +31,8 @@ var SteeringHeuristicTable = map[IntentType]bool{
 	IntentDebug:    true, // User spotted a bug mid-execution
 	IntentSecurity: true, // Security concern needs immediate attention
 	IntentToolUse:  true, // Explicit tool redirection
+	IntentGit:      true, // Git operations are action-oriented
+	IntentPlan:     true, // Plan changes redirect execution
 
 	// MEDIUM/LOW URGENCY - Follow-up (wait for natural stop)
 	IntentChat:     false, // General chat can wait
@@ -39,6 +41,12 @@ var SteeringHeuristicTable = map[IntentType]bool{
 	IntentReport:   false, // Reporting status/information
 	IntentPlatform: false, // Platform events are informational
 	IntentStatus:   false, // Status inquiries
+	IntentReview:   false, // Review requests build on completion
+	IntentSchedule: false, // Scheduling is not urgent
+	IntentAnalyze:  false, // Analysis extends naturally
+	IntentSearch:   false, // Search queries are not urgent
+	IntentSkill:    false, // Skill operations can wait
+	IntentCompound: false, // Compound intents default to follow-up
 	IntentUnknown:  false,
 }
 

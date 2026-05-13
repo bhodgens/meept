@@ -40,6 +40,7 @@ type Config struct {
 	Calendar          CalendarConfig          `json:"calendar"           toml:"calendar"`
 	Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
 	Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
+	Session           SessionConfig           `json:"session"            toml:"session"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -109,6 +110,30 @@ type CompactionConfig struct {
 	IterativeUpdates  bool    `json:"iterative_updates"  toml:"iterative_updates"`
 	TrackFileOps      bool    `json:"track_file_ops"     toml:"track_file_ops"`
 	TimeoutSeconds    int     `json:"timeout_seconds"    toml:"timeout_seconds"`
+}
+
+// SessionConfig configures session persistence, branching, and compaction.
+type SessionConfig struct {
+	// Persistence enables restoring sessions from SQLite on startup (default: true)
+	Persistence bool `json:"persistence" toml:"persistence"`
+	// Branching enables conversation branching (default: true)
+	Branching bool `json:"branching" toml:"branching"`
+	// MaxBranches is the maximum number of branches per session (0 = unlimited, default: 20)
+	MaxBranches int `json:"max_branches" toml:"max_branches"`
+	// BranchSummaryThreshold is the minimum messages in an abandoned branch before auto-summarization (default: 5)
+	BranchSummaryThreshold int `json:"branch_summary_threshold" toml:"branch_summary_threshold"`
+	// RestoreMessageLimit is the maximum messages to restore on resumption (0 = all, default: 0)
+	RestoreMessageLimit int `json:"restore_message_limit" toml:"restore_message_limit"`
+	// Compaction enables tree-based compaction entries instead of deleting messages (default: true)
+	Compaction bool `json:"compaction" toml:"compaction"`
+	// CompactionThreshold is the minimum messages before compaction is considered (default: 50)
+	CompactionThreshold int `json:"compaction_threshold" toml:"compaction_threshold"`
+	// CompactionTargetRatio is the target compression ratio (0.0-1.0, default: 0.6)
+	CompactionTargetRatio float64 `json:"compaction_target_ratio" toml:"compaction_target_ratio"`
+	// AutoFork controls auto-fork behavior: "never", "ask", or "always" (default: "ask")
+	AutoFork string `json:"auto_fork" toml:"auto_fork"`
+	// LegacyTruncation reverts to old message deletion behavior instead of compaction (default: false)
+	LegacyTruncation bool `json:"legacy_truncation" toml:"legacy_truncation"`
 }
 
 // ASTConfig holds AST parsing settings.
@@ -1358,7 +1383,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Tooling: ToolingConfig{
-			Enabled:             false,
+			Enabled:             true,
 			Mode:                "service",
 			AgentID:             "tooling",
 			Model:               "",
@@ -1387,6 +1412,18 @@ func DefaultConfig() *Config {
 			IterativeUpdates:  true,
 			TrackFileOps:      true,
 			TimeoutSeconds:    30,
+		},
+		Session: SessionConfig{
+			Persistence:            true,
+			Branching:              true,
+			MaxBranches:            20,
+			BranchSummaryThreshold: 5,
+			RestoreMessageLimit:    0,
+			Compaction:             true,
+			CompactionThreshold:    50,
+			CompactionTargetRatio:  0.6,
+			AutoFork:               "ask",
+			LegacyTruncation:       false,
 		},
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
@@ -341,6 +342,7 @@ type AgentConfig struct {
 	// SummaryLevelThreshold is the token count at which a summary is
 	// re-summarized at the next level (default 500).
 	SummaryLevelThreshold int
+	Compaction config.CompactionConfig
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -449,6 +451,13 @@ type AgentLoop struct {
 
 	// Agent registry for queue registration during RunOnce
 	agentRegistry *AgentRegistry
+
+	// Session persistence (SQLite-backed)
+	sessionStore  session.Store
+	sessionConfig config.SessionConfig
+
+	// Branch navigation (coordinated with in-memory ConversationStore)
+	branchManager *session.BranchManager
 }
 
 // LearningPipeline is the interface for the learning pipeline.
@@ -713,6 +722,44 @@ func WithGlobalRules(rules string) LoopOption {
 	}
 }
 
+// WithSessionStore sets the session store and config for session persistence.
+func WithSessionStore(store session.Store, cfg config.SessionConfig) LoopOption {
+	return func(l *AgentLoop) {
+		if store != nil {
+			l.sessionStore = store
+			l.sessionConfig = cfg
+		}
+	}
+}
+
+// SetSessionStore sets the session store and config for session persistence.
+func (l *AgentLoop) SetSessionStore(store session.Store, cfg config.SessionConfig) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if store != nil {
+		l.sessionStore = store
+		l.sessionConfig = cfg
+	}
+}
+
+// WithBranchManager sets the branch manager for branch navigation coordination.
+func WithBranchManager(bm *session.BranchManager) LoopOption {
+	return func(l *AgentLoop) {
+		if bm != nil {
+			l.branchManager = bm
+		}
+	}
+}
+
+// SetBranchManager sets the branch manager for branch navigation.
+func (l *AgentLoop) SetBranchManager(bm *session.BranchManager) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if bm != nil {
+		l.branchManager = bm
+	}
+}
+
 // NewAgentLoop creates a new agent loop.
 func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 	loop := &AgentLoop{
@@ -807,6 +854,29 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 			loop.logger,
 			tokenizer,
 		)
+		if loop.config.Compaction.Enabled {
+			compactorCfg := llm.CompactorConfig{
+				ReserveTokens:     loop.config.Compaction.ReserveTokens,
+				KeepRecentTokens:  loop.config.Compaction.KeepRecentTokens,
+				MaxResponseTokens: loop.config.Compaction.MaxResponseTokens,
+				SummaryFormat:     loop.config.Compaction.SummaryFormat,
+				TrackFileOps:      loop.config.Compaction.TrackFileOps,
+				TimeoutSeconds:    loop.config.Compaction.TimeoutSeconds,
+			}
+			var compactorModel llm.Chatter
+			if loop.llm != nil {
+				compactorModel = loop.llm
+			}
+			if compactorModel != nil {
+				compactor := llm.NewContextCompactor(compactorCfg, compactorModel, tokenizer, loop.logger)
+				firewall.SetCompactor(compactor)
+				loop.logger.Info("context compaction enabled",
+					"summary_format", loop.config.Compaction.SummaryFormat,
+					"trigger_ratio", loop.config.Compaction.TriggerRatio,
+				)
+			}
+		}
+
 		loop.llm = firewall
 		loop.logger.Debug("ContextFirewall enabled for agent loop")
 	}
@@ -834,6 +904,254 @@ func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig)
 	l.config.SummaryLevelThreshold = fw.SummaryLevelThreshold
 }
 
+// getOrCreateConversation retrieves or creates a conversation for the given ID.
+// If session persistence is enabled and the conversation is not in the ConversationStore,
+// it attempts to restore from SQLite. Otherwise, it creates a new empty conversation.
+func (l *AgentLoop) getOrCreateConversation(conversationID string) *Conversation {
+	l.mu.RLock()
+	store := l.sessionStore
+	cfg := l.sessionConfig
+	l.mu.RUnlock()
+
+	if store != nil && cfg.Persistence {
+		conv, err := l.conversations.GetOrRestore(conversationID, func() ([]llm.ChatMessage, error) {
+			chatMsgs, _, err := session.RestoreConversationFromStore(store, conversationID, cfg.RestoreMessageLimit)
+			return chatMsgs, err
+		})
+		if err != nil {
+			l.logger.Debug("Failed to restore conversation, using empty",
+				"conversation", conversationID,
+				"error", err,
+			)
+		} else {
+			l.logger.Debug("Conversation restored or retrieved",
+				"conversation", conversationID,
+				"messages", conv.Len(),
+			)
+		}
+		return conv
+	}
+
+	return l.conversations.Get(conversationID)
+}
+
+// persistConversation persists the current conversation state to the session store.
+// This is called after each turn completes. It is a no-op when session persistence is disabled.
+func (l *AgentLoop) persistConversation(conversationID string) {
+	l.mu.RLock()
+	store := l.sessionStore
+	cfg := l.sessionConfig
+	l.mu.RUnlock()
+
+	if store == nil || !cfg.Persistence {
+		return
+	}
+
+	conv := l.conversations.GetIfExists(conversationID)
+	if conv == nil {
+		return
+	}
+
+	messages := conv.GetMessages()
+	if len(messages) == 0 {
+		return
+	}
+
+	// Find or create session for this conversation
+	sess := store.GetByConversationID(conversationID)
+	if sess == nil {
+		var err error
+		sess, err = store.Create("restored")
+		if err != nil {
+			l.logger.Error("Failed to create session for persistence",
+				"conversation", conversationID,
+				"error", err,
+			)
+			return
+		}
+	}
+
+	// Convert ChatMessages to session Messages
+	sessionMsgs := session.ConvertChatMessagesToSessionMessages(sess.ID, messages)
+	if len(sessionMsgs) > 0 {
+		if err := store.SaveMessages(sess.ID, sessionMsgs); err != nil {
+			l.logger.Error("Failed to persist messages",
+				"session", sess.ID,
+				"error", err,
+			)
+			return
+		}
+
+		// Update leaf pointer to the last message
+		if len(sessionMsgs) > 0 {
+			lastMsg := sessionMsgs[len(sessionMsgs)-1]
+			_ = store.SetLeafMessageID(sess.ID, lastMsg.ID)
+		}
+
+		// Persist tool calls for messages that have them
+		for i, msg := range sessionMsgs {
+			// Find the corresponding ChatMessage to check for tool calls
+			chatIdx := 0
+			for _, cm := range messages {
+				if cm.Role == llm.RoleSystem {
+					continue
+				}
+				if chatIdx == i {
+					if len(cm.ToolCalls) > 0 {
+						tcs := make([]session.ToolCall, len(cm.ToolCalls))
+						for j, tc := range cm.ToolCalls {
+							tcs[j] = session.ToolCall{
+								MessageID:  msg.ID,
+								ToolName:   tc.Function.Name,
+								ToolCallID: tc.ID,
+								Arguments:  tc.Function.Arguments,
+								Seq:        j,
+							}
+						}
+						if err := store.SaveToolCalls(msg.ID, tcs); err != nil {
+							l.logger.Error("Failed to persist tool calls",
+								"message_id", msg.ID,
+								"error", err,
+							)
+						}
+					}
+					break
+				}
+				chatIdx++
+			}
+		}
+	}
+
+	l.logger.Debug("Persisted conversation",
+		"conversation", conversationID,
+		"session", sess.ID,
+		"messages", len(sessionMsgs),
+	)
+}
+
+// maybeCompact checks if compaction should be triggered and performs it if needed.
+// When compaction is enabled and the conversation exceeds the configured threshold,
+// it identifies low-importance messages, performs in-memory compression, and persists
+// a compaction entry to the session store. This is the tree-based compaction flow;
+// the original messages remain in SQLite but are replaced by the compaction summary
+// during context assembly.
+func (l *AgentLoop) maybeCompact(conversationID string) {
+	l.mu.RLock()
+	store := l.sessionStore
+	cfg := l.sessionConfig
+	l.mu.RUnlock()
+
+	if store == nil || !cfg.Compaction || cfg.LegacyTruncation {
+		return
+	}
+
+	conv := l.conversations.GetIfExists(conversationID)
+	if conv == nil {
+		return
+	}
+
+	// Skip if conversation hasn't grown past the threshold
+	threshold := cfg.CompactionThreshold
+	if threshold <= 0 {
+		threshold = 50
+	}
+	if conv.Len() < threshold {
+		return
+	}
+
+	// Get candidates for compression
+	targetRatio := cfg.CompactionTargetRatio
+	if targetRatio <= 0 || targetRatio >= 1 {
+		targetRatio = 0.6
+	}
+
+	candidates, report := conv.GetCompactionCandidates(targetRatio)
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Find the session
+	sess := store.GetByConversationID(conversationID)
+	if sess == nil {
+		return
+	}
+
+	// Get the leaf message ID to use as the parent for the compaction entry
+	var parentID int64
+	leafID, err := store.GetLeafMessageID(sess.ID)
+	if err == nil && leafID > 0 {
+		parentID = leafID
+	}
+
+	// Perform the actual in-memory removal
+	tokensSaved := conv.RemoveCompactedMessages(candidates)
+
+	if tokensSaved > 0 {
+		// Insert compaction entry into SQLite
+		summary := fmt.Sprintf("Compacted %d messages (%d tokens removed)",
+			report.MessagesBefore-report.MessagesAfter, tokensSaved)
+		_, compactErr := store.InsertCompaction(
+			sess.ID,
+			parentID,
+			summary,
+			nil, // Individual message IDs are not tracked in this pass
+		)
+		if compactErr != nil {
+			l.logger.Warn("Failed to persist compaction entry",
+				"conversation_id", conversationID,
+				"error", compactErr,
+			)
+		}
+
+		l.logger.Info("Compaction performed",
+			"conversation_id", conversationID,
+			"messages_before", report.MessagesBefore,
+			"messages_after", report.MessagesAfter,
+			"tokens_removed", tokensSaved,
+			"session_id", sess.ID,
+		)
+	}
+}
+
+// NavigateBranch handles a branch navigation request.
+// It coordinates between the session store and in-memory ConversationStore:
+//  1. Calls BranchManager.NavigateToBranch for SQLite-side operations
+//  2. Invalidates the in-memory conversation cache
+//  3. The next getOrCreateConversation will restore from SQLite with the new branch
+func (l *AgentLoop) NavigateBranch(conversationID string, targetMessageID int64) error {
+	if l.sessionStore == nil || l.branchManager == nil {
+		return fmt.Errorf("session persistence and branching not enabled")
+	}
+
+	// Find the session for this conversation
+	sess := l.sessionStore.GetByConversationID(conversationID)
+	if sess == nil {
+		return fmt.Errorf("session not found for conversation: %s", conversationID)
+	}
+
+	// Perform branch navigation in SQLite (summarizes, inserts entries, updates leaf)
+	ctx := context.Background()
+	result, err := l.branchManager.NavigateToBranch(ctx, sess.ID, targetMessageID)
+	if err != nil {
+		return fmt.Errorf("branch navigation failed: %w", err)
+	}
+
+	// Invalidate the in-memory conversation
+	// The next getOrCreateConversation will restore from SQLite
+	l.conversations.Delete(conversationID)
+
+	l.logger.Info("Branch navigation completed",
+		"conversation_id", conversationID,
+		"old_leaf", result.OldLeafID,
+		"new_leaf", result.NewLeafID,
+		"new_branch", result.NewBranchID,
+		"abandoned_msgs", result.AbandonedMsgs,
+		"summary_len", len(result.Summary),
+	)
+
+	return nil
+}
+
 // RunOnce processes a single user turn through the full reasoning loop.
 func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (response string, err error) {
 	if l.llm == nil {
@@ -853,6 +1171,28 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 
 	// Register queue for external access if both queue and registry are available
 	if l.agentRegistry != nil && l.queue != nil {
+		// Wire persister for follow-up persistence when DB is available
+		if db := l.agentRegistry.DB(); db != nil && l.queue.config.PersistFollowUp {
+			persister, pErr := NewQueuePersister(db, conversationID, l.logger.With("component", "queue-persister"))
+			if pErr != nil {
+				l.logger.Warn("failed to create queue persister, persistence disabled",
+					"conversation_id", conversationID,
+					"error", pErr,
+				)
+			} else {
+				if l.bus != nil {
+					persister.WithBus(l.bus)
+				}
+				l.queue.SetPersister(persister)
+				defer func() {
+					// Flush and stop persister before unregistering the queue
+					persister.Flush()
+					persister.Stop()
+					l.queue.ClearPersister()
+				}()
+			}
+		}
+
 		gen := l.agentRegistry.RegisterActiveQueue(conversationID, l.queue)
 		defer func() {
 			l.agentRegistry.UnregisterActiveQueue(conversationID)
@@ -901,8 +1241,8 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		sanitizedMessage = cleanText
 	}
 
-	// Get or create conversation
-	conv := l.conversations.Get(conversationID)
+	// Get or create conversation (restore from SQLite if persistence enabled)
+	conv := l.getOrCreateConversation(conversationID)
 
 	// Add validation anchor instructions as an anchor message (persists through truncation)
 	// Only add once per conversation
@@ -1009,6 +1349,12 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		l.prefetchCallback(sanitizedMessage, 5) // Prefetch 5 context items
 	}
 
+	// Persist conversation to session store after turn completes
+	l.persistConversation(conversationID)
+
+	// Check if compaction is needed
+	l.maybeCompact(conversationID)
+
 	return finalResponse, nil
 }
 
@@ -1065,7 +1411,7 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 	}
 
 	// Get or create conversation
-	conv := l.conversations.Get(conversationID)
+	conv := l.getOrCreateConversation(conversationID)
 
 	// Set skill body as system prompt
 	conv.SetSystemPrompt(skill.Body)
@@ -1091,6 +1437,13 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 
 	// Add response to conversation
 	conv.AddAssistantMessage(response)
+
+	// Persist conversation to session store after skill execution
+	l.persistConversation(conversationID)
+
+	// Check if compaction is needed
+	l.maybeCompact(conversationID)
+
 	return response, nil
 }
 
@@ -1885,7 +2238,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	}
 
 	// Get or create conversation
-	conv := l.conversations.Get(conversationID)
+	conv := l.getOrCreateConversation(conversationID)
 
 	// Build context parts from memory (conditional based on recall mode)
 	var contextParts []string
@@ -1984,6 +2337,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	if l.memvid != nil {
 		go l.recordTaskExecution(context.Background(), t, response)
 	}
+
+	// Persist conversation to session store after task execution
+	l.persistConversation(conversationID)
+
+	// Check if compaction is needed
+	l.maybeCompact(conversationID)
 
 	return response, nil
 }

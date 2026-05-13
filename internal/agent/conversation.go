@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -465,6 +466,20 @@ func (c *Conversation) Clear() {
 	c.messageTypes = make([]MessageClassification, 0, 32)
 }
 
+// RestoreFromMessages replaces the conversation's message history with the provided messages.
+// Preserves system prompt and other config. Re-classifies all messages for importance tracking.
+func (c *Conversation) RestoreFromMessages(messages []llm.ChatMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.messages = make([]llm.ChatMessage, len(messages))
+	copy(c.messages, messages)
+	c.messageTypes = make([]MessageClassification, len(messages))
+	for i, msg := range messages {
+		isFirstUserMsg := i == 0 && msg.Role == llm.RoleUser
+		c.messageTypes[i] = classifyMessageClassification(msg, isFirstUserMsg)
+	}
+}
+
 // SetSystemPrompt sets or updates the system prompt.
 func (c *Conversation) SetSystemPrompt(prompt string) {
 	c.mu.Lock()
@@ -487,6 +502,33 @@ func (c *Conversation) Len() int {
 	defer c.mu.RUnlock()
 
 	return len(c.messages)
+}
+
+// SetBranchPoint truncates the conversation to the message at the given index.
+// All messages after the index are removed. Used when branching back to a prior message.
+func (c *Conversation) SetBranchPoint(index int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if index < 0 || index >= len(c.messages) {
+		return
+	}
+	c.messages = c.messages[:index+1]
+	if len(c.messageTypes) > index+1 {
+		c.messageTypes = c.messageTypes[:index+1]
+	}
+}
+
+// FindMessageByContent finds the index of a message matching the given content prefix.
+// Returns -1 if not found.
+func (c *Conversation) FindMessageByContent(contentPrefix string) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for i, msg := range c.messages {
+		if len(msg.Content) >= len(contentPrefix) && msg.Content[:len(contentPrefix)] == contentPrefix {
+			return i
+		}
+	}
+	return -1
 }
 
 // Truncate removes old messages when the conversation exceeds the maximum.
@@ -1103,6 +1145,17 @@ type CompressionReport struct {
 	MessagesAfter  int
 }
 
+// CompactionEntry represents a compaction summary that replaces a range of messages.
+// When compaction mode is enabled, the agent loop emits these entries to the session
+// store instead of silently deleting messages.
+type CompactionEntry struct {
+	Summary       string // Summary text for the compacted range
+	CompressedIDs []int64 // IDs of the compressed session messages (populated from SQLite)
+	TokenSaved    int     // Approximate tokens saved by this compaction
+	MsgsBefore    int     // Total messages before compaction
+	MsgsAfter     int     // Total messages after compaction
+}
+
 // CompressByImportance removes messages based on semantic importance to reach a target
 // token ratio. The targetRatio parameter (0.0-1.0) specifies what fraction of the current
 // token count to retain. For example, 0.5 means compress to 50% of current tokens.
@@ -1240,24 +1293,253 @@ func (c *Conversation) CompressByImportance(targetRatio float64) CompressionRepo
 	return report
 }
 
+// GetCompactionCandidates returns the indices of messages that would be compressed
+// at the given target ratio, without actually removing them. The caller uses this
+// to decide whether to trigger compaction and to know which messages are affected.
+// Returns indices sorted by importance (lowest importance first among the candidates)
+// and a CompressionReport describing what the compaction would achieve.
+func (c *Conversation) GetCompactionCandidates(targetRatio float64) (candidates []int, report CompressionReport) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	const charsPerToken = 3
+
+	report = CompressionReport{
+		MessagesBefore: len(c.messages),
+	}
+
+	if len(c.messages) == 0 {
+		return nil, report
+	}
+
+	// Calculate current token usage
+	currentTokens := 0
+	msgTokens := make([]int, len(c.messages))
+	for i, msg := range c.messages {
+		tokens := len(msg.Content) / charsPerToken
+		for _, tc := range msg.ToolCalls {
+			tokens += len(tc.Function.Name) / charsPerToken
+			tokens += len(tc.Function.Arguments) / charsPerToken
+			tokens += 20
+		}
+		if msg.ToolCallID != "" {
+			tokens += 15
+		}
+		msgTokens[i] = tokens
+		currentTokens += tokens
+	}
+
+	report.TokensBefore = currentTokens
+
+	if currentTokens == 0 {
+		report.TokensAfter = 0
+		return nil, report
+	}
+
+	targetTokens := int(float64(currentTokens) * targetRatio)
+
+	if currentTokens <= targetTokens {
+		report.TokensAfter = currentTokens
+		report.MessagesAfter = len(c.messages)
+		return nil, report
+	}
+
+	// Build index list with importance info
+	type msgIndex struct {
+		idx        int
+		importance MessageImportance
+		tokens     int
+	}
+
+	indices := make([]msgIndex, len(c.messages))
+	for i := range c.messages {
+		msgType := MessageUnknown
+		if i < len(c.messageTypes) {
+			msgType = c.messageTypes[i]
+		}
+		importance := getMessageImportance(msgType)
+		if c.isAnchorMessageUnsafe(c.messages[i].Content) {
+			importance = ImportanceCritical
+		}
+		indices[i] = msgIndex{
+			idx:        i,
+			importance: importance,
+			tokens:     msgTokens[i],
+		}
+	}
+
+	// Sort by importance (lowest first), then by token count (highest first)
+	for i := range len(indices) - 1 {
+		for j := i + 1; j < len(indices); j++ {
+			shouldSwap := false
+			if indices[i].importance > indices[j].importance {
+				shouldSwap = true
+			} else if indices[i].importance == indices[j].importance && indices[i].tokens < indices[j].tokens {
+				shouldSwap = true
+			}
+			if shouldSwap {
+				indices[i], indices[j] = indices[j], indices[i]
+			}
+		}
+	}
+
+	// Identify candidates for removal, never removing ImportanceCritical
+	tokensRemoved := 0
+	var removedIndices []int
+	for _, mi := range indices {
+		if currentTokens-tokensRemoved <= targetTokens {
+			break
+		}
+		if mi.importance == ImportanceCritical {
+			continue
+		}
+		removedIndices = append(removedIndices, mi.idx)
+		tokensRemoved += mi.tokens
+	}
+
+	report.TokensAfter = currentTokens - tokensRemoved
+	report.TokensRemoved = tokensRemoved
+	report.MessagesAfter = len(c.messages) - len(removedIndices)
+
+	return removedIndices, report
+}
+
+// RemoveCompactedMessages removes the messages at the given indices from the
+// in-memory conversation. The indices must be valid positions in the current
+// message slice. After removal, the messageTypes slice is kept in sync.
+// Returns the approximate tokens saved by the removal.
+func (c *Conversation) RemoveCompactedMessages(indices []int) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(indices) == 0 || len(c.messages) == 0 {
+		return 0
+	}
+
+	// Build a set of indices to remove for O(1) lookup
+	removeSet := make(map[int]bool, len(indices))
+	for _, idx := range indices {
+		if idx >= 0 && idx < len(c.messages) {
+			removeSet[idx] = true
+		}
+	}
+
+	if len(removeSet) == 0 {
+		return 0
+	}
+
+	const charsPerToken = 3
+	tokensSaved := 0
+
+	newMessages := make([]llm.ChatMessage, 0, len(c.messages)-len(removeSet))
+	newTypes := make([]MessageClassification, 0, len(c.messageTypes)-len(removeSet))
+
+	for i, msg := range c.messages {
+		if removeSet[i] {
+			// Calculate tokens saved
+			tokens := len(msg.Content) / charsPerToken
+			for _, tc := range msg.ToolCalls {
+				tokens += len(tc.Function.Name) / charsPerToken
+				tokens += len(tc.Function.Arguments) / charsPerToken
+				tokens += 20
+			}
+			if msg.ToolCallID != "" {
+				tokens += 15
+			}
+			tokensSaved += tokens
+			continue
+		}
+		newMessages = append(newMessages, msg)
+		if i < len(c.messageTypes) {
+			newTypes = append(newTypes, c.messageTypes[i])
+		}
+	}
+
+	c.messages = newMessages
+	c.messageTypes = newTypes
+
+	return tokensSaved
+}
+
 // ConversationStore manages multiple conversations with LRU eviction.
 type ConversationStore struct {
 	mu            sync.RWMutex
 	conversations map[string]*Conversation
 	order         []string // LRU order, most recent at end
 	maxSize       int
+	persistFn     PersistenceFunc
+}
+
+// PersistenceFunc is called to persist messages after they're added.
+type PersistenceFunc func(conversationID string, messages []llm.ChatMessage) error
+
+// ConversationStoreOption is a functional option for ConversationStore.
+type ConversationStoreOption func(*ConversationStore)
+
+// WithPersistence sets the persistence callback.
+func WithPersistence(fn PersistenceFunc) ConversationStoreOption {
+	return func(s *ConversationStore) {
+		if fn != nil {
+			s.persistFn = fn
+		}
+	}
 }
 
 // NewConversationStore creates a new conversation store.
-func NewConversationStore(maxSize int) *ConversationStore {
+func NewConversationStore(maxSize int, opts ...ConversationStoreOption) *ConversationStore {
 	if maxSize <= 0 {
 		maxSize = 100
 	}
-	return &ConversationStore{
+	s := &ConversationStore{
 		conversations: make(map[string]*Conversation),
 		order:         make([]string, 0, maxSize),
 		maxSize:       maxSize,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// SetPersistence sets the persistence callback after creation.
+func (s *ConversationStore) SetPersistence(fn PersistenceFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if fn != nil {
+		s.persistFn = fn
+	}
+}
+
+// GetOrRestore retrieves or restores a conversation from persistence.
+// If the conversation is already in the store, it is returned directly.
+// Otherwise, restoreFn is called to load messages from the backing store.
+// On restore failure, an empty conversation is created and the error is returned.
+func (s *ConversationStore) GetOrRestore(id string, restoreFn func() ([]llm.ChatMessage, error)) (*Conversation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if conv, ok := s.conversations[id]; ok {
+		s.moveToEnd(id)
+		return conv, nil
+	}
+
+	messages, err := restoreFn()
+	if err != nil {
+		conv := NewConversation()
+		s.conversations[id] = conv
+		s.order = append(s.order, id)
+		s.evictOldest()
+		return conv, fmt.Errorf("failed to restore conversation: %w", err)
+	}
+
+	conv := NewConversation()
+	if len(messages) > 0 {
+		conv.RestoreFromMessages(messages)
+	}
+	s.conversations[id] = conv
+	s.order = append(s.order, id)
+	s.evictOldest()
+	return conv, nil
 }
 
 // Get retrieves a conversation by ID, creating a new one if it doesn't exist.
@@ -1279,13 +1561,19 @@ func (s *ConversationStore) Get(id string) *Conversation {
 	s.order = append(s.order, id)
 
 	// Evict oldest if over capacity
+	s.evictOldest()
+
+	return conv
+}
+
+// evictOldest removes the oldest conversation when over capacity.
+// Must be called with lock held.
+func (s *ConversationStore) evictOldest() {
 	if len(s.order) > s.maxSize {
 		oldest := s.order[0]
 		delete(s.conversations, oldest)
 		s.order = s.order[1:]
 	}
-
-	return conv
 }
 
 // GetIfExists retrieves a conversation by ID, returning nil if not found.
