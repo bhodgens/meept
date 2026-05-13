@@ -28,7 +28,7 @@ type modelEntry struct {
 	Model        string   `json:"model"`
 	FullName     string   `json:"full_name"`
 	BaseURL      string   `json:"base_url"`
-	APIKey       string   `json:"-"` // Don't expose
+	APIKey       string   `json:"-"` //nolint:gosec // field name, not a secret // Don't expose
 	ContextLimit int      `json:"context_limit"`
 	MaxOutput    int      `json:"max_output"`
 	Temperature  float64  `json:"temperature"`

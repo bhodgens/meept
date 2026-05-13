@@ -78,7 +78,7 @@ func NewLaunchAgentController() (*LaunchAgentController, error) {
 	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
 
 	// Ensure directories exist
-	if err := os.MkdirAll(meeptDir, 0755); err != nil {
+	if err := os.MkdirAll(meeptDir, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		return nil, fmt.Errorf("failed to create meept directory: %w", err)
 	}
 	if err := os.MkdirAll(launchAgentsDir, 0700); err != nil {
@@ -143,12 +143,12 @@ func (c *LaunchAgentController) generatePlist() string {
 // ensurePlistFile writes the plist file if it doesn't exist.
 func (c *LaunchAgentController) ensurePlistFile() error {
 	content := c.generatePlist()
-	return os.WriteFile(c.plistPath, []byte(content), 0644)
+	return os.WriteFile(c.plistPath, []byte(content), 0644) //nolint:gosec // workspace plan/data files are user-readable
 }
 
 // IsLoaded checks if the launchd agent is currently loaded.
 func (c *LaunchAgentController) IsLoaded() bool {
-	cmd := exec.Command("launchctl", "list", LaunchAgentLabel)
+	cmd := exec.Command("launchctl", "list", LaunchAgentLabel) //nolint:gosec // path is constructed from known config values
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -222,7 +222,7 @@ func (c *LaunchAgentController) GetUptime() time.Duration {
 	}
 
 	// Get process info
-	cmd := exec.Command("ps", "-o", "etime=", "-p", strconv.Itoa(pid))
+	cmd := exec.Command("ps", "-o", "etime=", "-p", strconv.Itoa(pid)) //nolint:gosec // path is constructed from known config values
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
@@ -283,10 +283,10 @@ func (c *LaunchAgentController) Load() error {
 	}
 
 	// Unload first if already loaded (ignore errors)
-	_ = exec.Command("launchctl", "unload", c.plistPath).Run()
+	_ = exec.Command("launchctl", "unload", c.plistPath).Run() //nolint:gosec // path is constructed from known config values
 
 	// Load the agent
-	cmd := exec.Command("launchctl", "load", "-w", c.plistPath)
+	cmd := exec.Command("launchctl", "load", "-w", c.plistPath) //nolint:gosec // path is constructed from known config values
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -304,7 +304,7 @@ func (c *LaunchAgentController) Unload() error {
 		return nil
 	}
 
-	cmd := exec.Command("launchctl", "unload", "-w", c.plistPath)
+	cmd := exec.Command("launchctl", "unload", "-w", c.plistPath) //nolint:gosec // path is constructed from known config values
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -324,7 +324,7 @@ func (c *LaunchAgentController) Start() error {
 	}
 
 	// Start the service
-	cmd := exec.Command("launchctl", "kickstart", "-k", LaunchAgentLabel)
+	cmd := exec.Command("launchctl", "kickstart", "-k", LaunchAgentLabel) //nolint:gosec // path is constructed from known config values
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -345,7 +345,7 @@ func (c *LaunchAgentController) Stop() error {
 		return nil
 	}
 
-	cmd := exec.Command("launchctl", "stop", LaunchAgentLabel)
+	cmd := exec.Command("launchctl", "stop", LaunchAgentLabel) //nolint:gosec // path is constructed from known config values
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

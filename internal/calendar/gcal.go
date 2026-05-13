@@ -89,7 +89,7 @@ type Client struct {
 
 // ClientConfig holds configuration for the calendar client.
 type ClientConfig struct {
-	AccessToken string // OAuth2 access token
+	AccessToken string //nolint:gosec // field name, not a secret // OAuth2 access token
 	CalendarID  string // Calendar ID (default: "primary")
 }
 
