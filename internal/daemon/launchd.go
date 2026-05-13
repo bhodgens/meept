@@ -387,6 +387,7 @@ func (c *LaunchAgentController) Uninstall() error {
 // DaemonController interface implementation for HTTP server
 
 // DaemonControl provides daemon control functionality.
+//nolint:revive // stutter with package name is intentional for API clarity
 type DaemonControl struct {
 	controller *LaunchAgentController
 }

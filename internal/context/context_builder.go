@@ -6,6 +6,7 @@ import (
 )
 
 // ContextBuilder builds context from artifacts for agent prompts
+//nolint:revive // stutter with package name is intentional for API clarity
 type ContextBuilder struct {
 	artifacts *Artifacts
 }

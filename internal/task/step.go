@@ -60,6 +60,7 @@ func (s StepState) IsSuccessfullyTerminal() bool {
 }
 
 // TaskStep represents a single step within a task's execution plan.
+//nolint:revive // stutter with package name is intentional for API clarity
 type TaskStep struct {
 	ID            string    `json:"id"`
 	TaskID        string    `json:"task_id"`

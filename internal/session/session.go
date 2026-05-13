@@ -17,6 +17,7 @@ import (
 
 // Session represents an active conversation session that can be shared
 // by multiple clients.
+//nolint:revive // stutter with package name is intentional for API clarity
 type Session struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`

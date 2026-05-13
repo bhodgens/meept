@@ -35,6 +35,7 @@ import (
 )
 
 // Daemon manages the meept daemon lifecycle.
+//nolint:revive // stutter with package name is intentional for API clarity
 type Daemon struct {
 	config       *Config
 	fullConfig   *config.Config // Full configuration loaded from file

@@ -15,6 +15,7 @@ import (
 )
 
 // Scheduler wraps robfig/cron with job management and persistence.
+//nolint:revive // stutter with package name is intentional for API clarity
 type Scheduler struct {
 	cron    *cron.Cron
 	store   *Store

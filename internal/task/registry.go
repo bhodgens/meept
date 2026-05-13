@@ -548,6 +548,7 @@ func (h *Handler) handleList(ctx context.Context, msg *models.BusMessage) (any, 
 }
 
 // TaskExtendedResponse represents a task with all extended fields for TUI display.
+//nolint:revive // stutter with package name is intentional for API clarity
 type TaskExtendedResponse struct {
 	ID              string      `json:"id"`
 	Name            string      `json:"name"`

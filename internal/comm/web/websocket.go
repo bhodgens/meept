@@ -16,6 +16,7 @@ type WSMessage struct {
 }
 
 // WebSocketHub manages WebSocket client connections and broadcasts messages.
+//nolint:revive // stutter with package name is intentional for API clarity
 type WebSocketHub struct {
 	mu      sync.RWMutex
 	clients map[*websocket.Conn]struct{}

@@ -20,6 +20,7 @@ type JobProcessor interface {
 }
 
 // Worker represents a single worker that processes jobs.
+//nolint:revive // stutter with package name is intentional for API clarity
 type Worker struct {
 	ID           string
 	Capabilities []string
@@ -386,6 +387,7 @@ func (w *Worker) getCurrentJobID() string {
 }
 
 // WorkerStats holds worker statistics.
+//nolint:revive // stutter with package name is intentional for API clarity
 type WorkerStats struct {
 	ID           string
 	State        State

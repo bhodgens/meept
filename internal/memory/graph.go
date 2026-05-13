@@ -35,6 +35,7 @@ const (
 )
 
 // MemoryEdge represents a directed edge between two memories.
+//nolint:revive // stutter with package name is intentional for API clarity
 type MemoryEdge struct {
 	ID         string         `json:"id"`
 	SourceID   string         `json:"source_id"`
@@ -47,6 +48,7 @@ type MemoryEdge struct {
 }
 
 // MemoryNode represents a memory with its graph properties.
+//nolint:revive // stutter with package name is intentional for API clarity
 type MemoryNode struct {
 	Memory      Memory  `json:"memory"`
 	PageRank    float64 `json:"page_rank"`    // Importance score [0, 1]

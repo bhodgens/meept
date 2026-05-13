@@ -21,6 +21,7 @@ import (
 )
 
 // ServiceRegistry holds all service instances.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ServiceRegistry struct {
 	Chat        *ChatService
 	Memory      *MemoryService

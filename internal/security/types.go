@@ -62,6 +62,7 @@ type AuditEntry struct {
 }
 
 // SecurityStats holds aggregate security statistics.
+//nolint:revive // stutter with package name is intentional for API clarity
 type SecurityStats struct {
 	TotalDecisions    int64             `json:"total_decisions"`
 	TotalAllows       int64             `json:"total_allows"`

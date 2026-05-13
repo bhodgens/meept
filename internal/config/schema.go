@@ -11,6 +11,7 @@ import (
 //gendoc:section config
 //gendoc:desc Root configuration structure containing all subsystem configurations.
 //gendoc:example [config] daemon.socket_path = "~/.meept/meept.sock"
+//nolint:revive // stutter with package name is intentional for API clarity
 type Config struct {
 	Daemon            DaemonConfig            `json:"daemon"             toml:"daemon"`
 	Transport         TransportConfig         `json:"transport"          toml:"transport"`

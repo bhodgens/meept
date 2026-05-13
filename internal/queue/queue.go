@@ -18,6 +18,7 @@ import (
 type IsTaskCancelledFunc func(taskID string) (bool, string)
 
 // Queue defines the interface for job queue operations.
+//nolint:revive // stutter with package name is intentional for API clarity
 type Queue interface {
 	// Enqueue adds a job to the queue.
 	Enqueue(ctx context.Context, job *Job) error
