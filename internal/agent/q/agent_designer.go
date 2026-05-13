@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/caimlas/meept/internal/config"
 )
 
 // AgentDesigner generates new agent specifications based on research findings.
@@ -98,9 +100,9 @@ func (d *AgentDesigner) determineRoleAndPurpose(pattern PatternReport, requireme
 		intent = "specialized"
 	}
 
-	role := "executor"
+	role := config.AgentRoleExecutor
 	if pattern.PatternType == "high_rejection_rate" {
-		role = "reviewer"
+		role = config.AgentRoleReviewer
 	}
 
 	var purpose strings.Builder

@@ -31,6 +31,26 @@ type AgentDefinition struct {
 	Constraints AgentConstraintsConfig `json:"constraints" toml:"constraints"`
 }
 
+// Agent ID constants used throughout the codebase as identifiers.
+const (
+	AgentIDDispatcher = "dispatcher"
+	AgentIDCoder      = "coder"
+	AgentIDDebugger   = "debugger"
+	AgentIDPlanner    = "planner"
+	AgentIDAnalyst    = "analyst"
+	AgentIDCommitter  = "committer"
+	AgentIDScheduler  = "scheduler"
+	AgentIDChat       = "chat"
+)
+
+// Agent role constants used for role validation and assignment.
+const (
+	AgentRoleDispatcher     = "dispatcher"
+	AgentRoleExecutor       = "executor"
+	AgentRoleConversational = "conversational"
+	AgentRoleReviewer       = "reviewer"
+)
+
 // AgentConstraintsConfig holds agent operational constraints.
 type AgentConstraintsConfig struct {
 	MaxIterations    int `json:"max_iterations"      toml:"max_iterations"`
@@ -187,10 +207,10 @@ func ValidateAgentDefinition(agent *AgentDefinition) error {
 	}
 
 	validRoles := map[string]bool{
-		"dispatcher":     true,
-		"executor":       true,
-		"conversational": true,
-		"reviewer":       true,
+		AgentRoleDispatcher:     true,
+		AgentRoleExecutor:       true,
+		AgentRoleConversational: true,
+		AgentRoleReviewer:       true,
 	}
 	if agent.Role != "" && !validRoles[agent.Role] {
 		return fmt.Errorf("invalid role %q for agent %s", agent.Role, agent.ID)

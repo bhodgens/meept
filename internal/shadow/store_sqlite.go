@@ -252,15 +252,17 @@ func (s *SQLiteTrainingStore) ListRecords(ctx context.Context, opts ListRecordsO
 		FROM shadow_records
 	`
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		query += " WHERE " + strings.Join(conditions, " AND ") //nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY created_at DESC"
 
 	if opts.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
+		query += " LIMIT ?"
+		args = append(args, opts.Limit)
 	}
 	if opts.Offset > 0 {
-		query += fmt.Sprintf(" OFFSET %d", opts.Offset)
+		query += " OFFSET ?"
+		args = append(args, opts.Offset)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -368,15 +370,17 @@ func (s *SQLiteTrainingStore) ListPreferencePairs(ctx context.Context, opts List
 		FROM preference_pairs
 	`
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		query += " WHERE " + strings.Join(conditions, " AND ") //nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY margin DESC"
 
 	if opts.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
+		query += " LIMIT ?"
+		args = append(args, opts.Limit)
 	}
 	if opts.Offset > 0 {
-		query += fmt.Sprintf(" OFFSET %d", opts.Offset)
+		query += " OFFSET ?"
+		args = append(args, opts.Offset)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -818,7 +822,7 @@ func (s *SQLiteExamplesStore) ListExamples(ctx context.Context, domain Domain, t
 		FROM fewshot_examples
 	`
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		query += " WHERE " + strings.Join(conditions, " AND ") //nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY quality_score DESC, created_at DESC"
 
@@ -890,6 +894,7 @@ func (s *SQLiteExamplesStore) SearchSimilar(ctx context.Context, query string, d
 		args = append(args, string(taskType))
 	}
 
+	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	sqlQuery := `
 		SELECT id, source_record_id, domain, task_type,
 			user_message, assistant_response, quality_score,
@@ -936,6 +941,7 @@ func (s *SQLiteExamplesStore) fallbackSearch(ctx context.Context, query string, 
 		args = append(args, string(taskType))
 	}
 
+	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	sqlQuery := `
 		SELECT id, source_record_id, domain, task_type,
 			user_message, assistant_response, quality_score,

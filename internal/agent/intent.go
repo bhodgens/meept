@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/caimlas/meept/internal/config"
+
 // IntentType represents a classified user intent.
 type IntentType string
 
@@ -69,29 +71,29 @@ func (t IntentType) Category() IntentCategory {
 func (t IntentType) DefaultAgent() string {
 	switch t {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus:
-		return "chat"
+		return config.AgentIDChat
 	case IntentCode, IntentReview:
-		return "coder"
+		return config.AgentIDCoder
 	case IntentDebug:
-		return "debugger"
+		return config.AgentIDDebugger
 	case IntentPlan:
-		return "planner"
+		return config.AgentIDPlanner
 	case IntentAnalyze, IntentSearch, IntentResearch:
-		return "analyst"
+		return config.AgentIDAnalyst
 	case IntentGit:
-		return "committer"
+		return config.AgentIDCommitter
 	case IntentSchedule:
-		return "scheduler"
+		return config.AgentIDScheduler
 	case IntentSecurity:
-		return "chat"
+		return config.AgentIDChat
 	case IntentToolUse:
-		return "coder"
+		return config.AgentIDCoder
 	case IntentSkill:
 		return "skill"
 	case IntentCompound:
 		return "orchestrator"
 	default:
-		return "chat"
+		return config.AgentIDChat
 	}
 }
 

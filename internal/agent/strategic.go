@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -208,7 +209,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 
 // generatePlan uses the planner agent to decompose the request.
 func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) ([]*task.TaskStep, error) {
-	plannerLoop, err := sp.registry.Get("planner")
+	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
 		return nil, fmt.Errorf("planner agent not available: %w", err)
 	}

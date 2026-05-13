@@ -3,6 +3,8 @@ package agent
 import (
 	"slices"
 	"time"
+
+	"github.com/caimlas/meept/internal/config"
 )
 
 // ptr returns a pointer to the given value.
@@ -104,7 +106,7 @@ var BaselineTools = []string{
 // DispatcherSpec returns the spec for the dispatcher agent.
 func DispatcherSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:   "dispatcher",
+		ID:   config.AgentIDDispatcher,
 		Name: "Dispatcher Agent",
 		Role: RoleDispatcher,
 		Purpose: `You are the intake agent for meept, a multi-agent orchestration platform.
@@ -199,7 +201,7 @@ func CoderAgentSpec() *AgentSpec {
 // DebuggerAgentSpec returns the spec for the debugging specialist agent.
 func DebuggerAgentSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "debugger",
+		ID:      config.AgentIDDebugger,
 		Name:    "Debugger Agent",
 		Role:    RoleExecutor,
 		Purpose: "You are a debugging specialist. You diagnose issues, trace problems, and help fix bugs in code.",
@@ -216,7 +218,7 @@ func DebuggerAgentSpec() *AgentSpec {
 // PlannerAgentSpec returns the spec for the planning specialist agent.
 func PlannerAgentSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "planner",
+		ID:      config.AgentIDPlanner,
 		Name:    "Planner Agent",
 		Role:    RoleExecutor,
 		Purpose: "You are a planning specialist. You decompose complex tasks into smaller subtasks and create execution plans.",
@@ -236,7 +238,7 @@ func PlannerAgentSpec() *AgentSpec {
 // AnalystAgentSpec returns the spec for the analysis specialist agent.
 func AnalystAgentSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "analyst",
+		ID:      config.AgentIDAnalyst,
 		Name:    "Analyst Agent",
 		Role:    RoleExecutor,
 		Purpose: "You are an analysis specialist. You research topics, summarize information, and provide insights.",
@@ -252,7 +254,7 @@ func AnalystAgentSpec() *AgentSpec {
 // CommitterAgentSpec returns the spec for the git operations agent.
 func CommitterAgentSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "committer",
+		ID:      config.AgentIDCommitter,
 		Name:    "Committer Agent",
 		Role:    RoleExecutor,
 		Purpose: "You are a git operations specialist. You handle commits, branches, and repository management.",
@@ -272,7 +274,7 @@ func CommitterAgentSpec() *AgentSpec {
 // SchedulerAgentSpec returns the spec for the scheduling agent.
 func SchedulerAgentSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:      "scheduler",
+		ID:      config.AgentIDScheduler,
 		Name:    "Scheduler Agent",
 		Role:    RoleExecutor,
 		Purpose: "You are a scheduling specialist. You create, manage, and cancel scheduled tasks and reminders.",

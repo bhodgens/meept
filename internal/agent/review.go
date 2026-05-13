@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -55,11 +56,11 @@ func DefaultReviewPolicy() *ReviewPolicy {
 		RequireReview: []string{"code", "refactor", "debug", "git", "fix"},
 		SkipReview:    []string{"chat", "report", "recall", "search", "analyze"},
 		ReviewerMapping: map[string]string{
-			"coder":     "code-reviewer",
-			"debugger":  "debug-reviewer",
-			"planner":   "planner-reviewer",
-			"analyst":   "analyst-reviewer",
-			"committer": "code-reviewer",
+			config.AgentIDCoder:     "code-reviewer",
+			config.AgentIDDebugger:  "debug-reviewer",
+			config.AgentIDPlanner:   "planner-reviewer",
+			config.AgentIDAnalyst:   "analyst-reviewer",
+			config.AgentIDCommitter: "code-reviewer",
 		},
 		MaxRevisionCycles: 3,
 		AutoApprovePatterns: []string{
@@ -179,7 +180,7 @@ func DefaultValidationPolicy() *ValidationPolicy {
 		RequireValidation:    []string{"code", "refactor", "debug", "git", "fix", "commit"},
 		SkipValidation:       []string{"chat", "report", "recall", "search", "analyze", "platform"},
 		MaxValidationLoops:   3,
-		SkipValidationAgents: []string{"chat", "analyst"},
+		SkipValidationAgents: []string{config.AgentIDChat, config.AgentIDAnalyst},
 	}
 }
 

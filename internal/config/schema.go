@@ -940,7 +940,7 @@ func DefaultConfig() *Config {
 		Daemon: DaemonConfig{
 			SocketPath: "~/.meept/meept.sock",
 			PIDFile:    "~/.meept/meept.pid",
-			LogLevel:   "INFO",
+			LogLevel:   LogLevelInfo,
 			DataDir:    "~/.meept",
 		},
 		Transport: TransportConfig{
@@ -1074,7 +1074,7 @@ func DefaultConfig() *Config {
 			ConfigDirs:   []string{"~/.meept/agents", "config/agents"},
 			PromptsDir:   "config/prompts",
 			DefaultModel: "", // Empty = use llm.default_model
-			DispatcherID: "dispatcher",
+			DispatcherID: AgentIDDispatcher,
 		},
 		Agent: AgentConfig{
 			ProgressEnabled:         true, // Enabled by default for TUI progress bars
@@ -1104,11 +1104,11 @@ func DefaultConfig() *Config {
 				RequireReview: []string{"code", "refactor", "debug", "git"},
 				SkipReview:    []string{"chat", "report", "recall", "search"},
 				ReviewerMapping: map[string]string{
-					"coder":     "code-reviewer",
-					"debugger":  "debug-reviewer",
-					"planner":   "planner-reviewer",
-					"analyst":   "analyst-reviewer",
-					"committer": "code-reviewer",
+					AgentIDCoder:     "code-reviewer",
+					AgentIDDebugger:  "debug-reviewer",
+					AgentIDPlanner:   "planner-reviewer",
+					AgentIDAnalyst:   "analyst-reviewer",
+					AgentIDCommitter: "code-reviewer",
 				},
 				MaxRevisionCycles:   3,
 				AutoApprovePatterns: []string{"*.md", "LICENSE"},
@@ -1117,7 +1117,7 @@ func DefaultConfig() *Config {
 				Enabled:              true,
 				RequireValidation:    []string{"code", "refactor", "debug", "git", "fix", "commit"},
 				SkipValidation:       []string{"chat", "report", "recall", "search", "analyze", "platform"},
-				SkipValidationAgents: []string{"chat", "analyst"},
+				SkipValidationAgents: []string{AgentIDChat, AgentIDAnalyst},
 				MaxValidationLoops:   3,
 			},
 			Watchdog: WatchdogConfig{
@@ -1429,16 +1429,24 @@ func DefaultConfig() *Config {
 	}
 }
 
+// Log level constants used for configuration.
+const (
+	LogLevelInfo  = "INFO"
+	LogLevelDebug = "DEBUG"
+	LogLevelWarn  = "WARN"
+	LogLevelError = "ERROR"
+)
+
 // ParseLogLevel converts a string log level to slog.Level.
 func ParseLogLevel(level string) slog.Level {
 	switch level {
-	case "DEBUG":
+	case LogLevelDebug:
 		return slog.LevelDebug
-	case "INFO":
+	case LogLevelInfo:
 		return slog.LevelInfo
-	case "WARN", "WARNING":
+	case LogLevelWarn, "WARNING":
 		return slog.LevelWarn
-	case "ERROR":
+	case LogLevelError:
 		return slog.LevelError
 	default:
 		return slog.LevelInfo

@@ -1,5 +1,7 @@
 package prompts
 
+import "github.com/caimlas/meept/internal/config"
+
 // ChatAgentPrompt is the system prompt for the general chat agent.
 const ChatAgentPrompt = `# Chat Agent
 
@@ -197,21 +199,21 @@ For system-level job scheduling, use shell_execute with cron/systemd, or use tas
 // GetSpecialistPrompt returns the prompt for a specialist agent.
 func GetSpecialistPrompt(agentID string) string {
 	switch agentID {
-	case "chat":
+	case config.AgentIDChat:
 		return ChatAgentPrompt
-	case "coder":
+	case config.AgentIDCoder:
 		return CoderAgentPrompt
-	case "debugger":
+	case config.AgentIDDebugger:
 		return DebuggerAgentPrompt
-	case "planner":
+	case config.AgentIDPlanner:
 		return PlannerAgentPrompt
-	case "analyst":
+	case config.AgentIDAnalyst:
 		return AnalystAgentPrompt
-	case "committer":
+	case config.AgentIDCommitter:
 		return CommitterAgentPrompt
-	case "scheduler":
+	case config.AgentIDScheduler:
 		return SchedulerAgentPrompt
-	case "dispatcher":
+	case config.AgentIDDispatcher:
 		return DispatcherPrompt
 	default:
 		return ChatAgentPrompt // Default to chat

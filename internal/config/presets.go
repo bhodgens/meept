@@ -8,6 +8,15 @@ import (
 	"path/filepath"
 )
 
+// Preset name constants used throughout the codebase.
+const (
+	PresetDevelopment = "development"
+	PresetDebugging   = "debugging"
+	PresetPlanning    = "planning"
+	PresetCreative    = "creative"
+	PresetResearch    = "research"
+)
+
 // PresetConfig represents the presets configuration.
 type PresetConfig struct {
 	Presets map[string]*ModelPreset `json:"presets"`
@@ -56,7 +65,7 @@ func LoadPresetsConfig(path string) (*PresetConfig, error) {
 
 	// Set default preset if not specified
 	if cfg.Default == "" {
-		cfg.Default = "development"
+		cfg.Default = PresetDevelopment
 	}
 
 	return &cfg, nil
@@ -85,9 +94,9 @@ func LoadPresetsConfigDefault() (*PresetConfig, error) {
 // DefaultPresetsConfig returns the default preset configuration.
 func DefaultPresetsConfig() *PresetConfig {
 	return &PresetConfig{
-		Default: "development",
+		Default: PresetDevelopment,
 		Presets: map[string]*ModelPreset{
-			"development": {
+			PresetDevelopment: {
 				Label:       "Development",
 				Description: "Balanced for coding tasks",
 				Params: ModelParams{
@@ -97,7 +106,7 @@ func DefaultPresetsConfig() *PresetConfig {
 					PresencePenalty:  0.0,
 				},
 			},
-			"debugging": {
+			PresetDebugging: {
 				Label:       "Debugging",
 				Description: "Methodical troubleshooting",
 				Params: ModelParams{
@@ -107,7 +116,7 @@ func DefaultPresetsConfig() *PresetConfig {
 					PresencePenalty:  0.0,
 				},
 			},
-			"planning": {
+			PresetPlanning: {
 				Label:       "Planning",
 				Description: "Structured thinking",
 				Params: ModelParams{
@@ -117,7 +126,7 @@ func DefaultPresetsConfig() *PresetConfig {
 					PresencePenalty:  0.0,
 				},
 			},
-			"creative": {
+			PresetCreative: {
 				Label:       "Creative Writing",
 				Description: "High creativity mode",
 				Params: ModelParams{
@@ -127,7 +136,7 @@ func DefaultPresetsConfig() *PresetConfig {
 					PresencePenalty:  0.5,
 				},
 			},
-			"research": {
+			PresetResearch: {
 				Label:       "Research",
 				Description: "Analytical and thorough",
 				Params: ModelParams{

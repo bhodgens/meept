@@ -3,6 +3,8 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/caimlas/meept/internal/config"
 )
 
 // handleAgentsList handles GET /api/v1/agents.
@@ -64,13 +66,13 @@ func (s *Server) handleAgentsDelegate(w http.ResponseWriter, r *http.Request) {
 // defaultAgentList returns the built-in agent definitions.
 func defaultAgentList() []AgentEntry {
 	return []AgentEntry{
-		{ID: "dispatcher", Name: "dispatcher", Role: "Dispatcher", Description: "Intake, classify, route to specialists", Enabled: true},
-		{ID: "chat", Name: "chat", Role: "Executor", Description: "General conversation", Enabled: true},
-		{ID: "coder", Name: "coder", Role: "Executor", Description: "File ops, shell, coding tasks", Enabled: true},
-		{ID: "debugger", Name: "debugger", Role: "Executor", Description: "Troubleshooting, bug fixing", Enabled: true},
-		{ID: "planner", Name: "planner", Role: "Executor", Description: "Task decomposition, planning", Enabled: true},
-		{ID: "analyst", Name: "analyst", Role: "Executor", Description: "Research, data analysis", Enabled: true},
-		{ID: "committer", Name: "committer", Role: "Executor", Description: "Git operations", Enabled: true},
-		{ID: "scheduler", Name: "scheduler", Role: "Executor", Description: "Job scheduling", Enabled: true},
+		{ID: config.AgentIDDispatcher, Name: config.AgentIDDispatcher, Role: "Dispatcher", Description: "Intake, classify, route to specialists", Enabled: true},
+		{ID: config.AgentIDChat, Name: config.AgentIDChat, Role: "Executor", Description: "General conversation", Enabled: true},
+		{ID: config.AgentIDCoder, Name: config.AgentIDCoder, Role: "Executor", Description: "File ops, shell, coding tasks", Enabled: true},
+		{ID: config.AgentIDDebugger, Name: config.AgentIDDebugger, Role: "Executor", Description: "Troubleshooting, bug fixing", Enabled: true},
+		{ID: config.AgentIDPlanner, Name: config.AgentIDPlanner, Role: "Executor", Description: "Task decomposition, planning", Enabled: true},
+		{ID: config.AgentIDAnalyst, Name: config.AgentIDAnalyst, Role: "Executor", Description: "Research, data analysis", Enabled: true},
+		{ID: config.AgentIDCommitter, Name: config.AgentIDCommitter, Role: "Executor", Description: "Git operations", Enabled: true},
+		{ID: config.AgentIDScheduler, Name: config.AgentIDScheduler, Role: "Executor", Description: "Job scheduling", Enabled: true},
 	}
 }
