@@ -17,6 +17,7 @@ import (
 // A tool provides metadata (name, description, parameters) that is sent to the
 // LLM so it can decide when to invoke the tool, and an Execute method that
 // performs the actual action.
+//nolint:revive // stutter with package name is intentional for API clarity
 type Tool interface {
 	// Name returns the unique identifier for this tool.
 	// Tool names should be snake_case (e.g., "file_read", "shell_execute").
@@ -37,6 +38,7 @@ type Tool interface {
 }
 
 // ToolResult is the standardized result envelope returned by tool execution.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ToolResult struct {
 	Success  bool              `json:"success"`
 	Result   any               `json:"result,omitempty"`
@@ -61,6 +63,7 @@ func NewErrorResult(err string) *ToolResult {
 }
 
 // ToolExecutor wraps a Tool and provides permission checking and auditing.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ToolExecutor interface {
 	// Execute runs a tool by name with the given arguments.
 	// Returns the result or an error if the tool is not found or execution fails.

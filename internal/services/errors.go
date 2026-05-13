@@ -14,6 +14,7 @@ var (
 )
 
 // ServiceError wraps errors with service context.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ServiceError struct {
 	Service string
 	Op      string

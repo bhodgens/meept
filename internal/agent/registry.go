@@ -26,6 +26,7 @@ type QueueEntry struct {
 }
 
 // AgentRegistry manages agent specifications and instantiated agent loops.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentRegistry struct {
 	mu sync.RWMutex
 

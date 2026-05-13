@@ -167,6 +167,7 @@ func (r *Registry) GetDefinitions() []llm.ToolDefinition {
 }
 
 // ToolRetryPolicy defines retry semantics for a specific tool.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ToolRetryPolicy struct {
 	MaxRetries     int           // Maximum number of retry attempts
 	RetryDelay     time.Duration // Base delay between retries

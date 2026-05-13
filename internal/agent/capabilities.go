@@ -8,6 +8,7 @@ import (
 )
 
 // AgentCapabilities holds the aggregated capability view for an agent.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentCapabilities struct {
 	// AgentID is the unique identifier for this agent.
 	AgentID string `json:"agent_id"`

@@ -292,6 +292,7 @@ func (r *Registry) MatchAll(query string) []*SkillMatch {
 }
 
 // SkillMatch holds a skill with its match score.
+//nolint:revive // stutter with package name is intentional for API clarity
 type SkillMatch struct {
 	Skill *Skill
 	Score int

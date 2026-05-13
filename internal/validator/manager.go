@@ -10,6 +10,7 @@ import (
 )
 
 // ValidatorManager orchestrates validators for different tool types.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ValidatorManager struct {
 	validators map[string]Validator // tool_hint -> validator
 	logger     *slog.Logger

@@ -521,6 +521,7 @@ func (s *Store) GetStats() (*QueueStats, error) {
 }
 
 // QueueStats holds queue statistics.
+//nolint:revive // stutter with package name is intentional for API clarity
 type QueueStats struct {
 	ByState    map[JobState]int
 	ByPriority map[Priority]int

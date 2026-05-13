@@ -112,6 +112,7 @@ type QueueInjectedPayload struct {
 }
 
 // AgentLifecyclePayload is attached to bus events for agent lifecycle tracking.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentLifecyclePayload struct {
 	ConversationID string `json:"conversation_id"`
 	AgentID        string `json:"agent_id"`

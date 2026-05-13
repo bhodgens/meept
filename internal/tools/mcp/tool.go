@@ -9,6 +9,7 @@ import (
 
 // MCPTool wraps an MCP tool to expose it as a local tool.
 // It implements the tools.Tool interface.
+//nolint:revive // stutter with package name is intentional for API clarity
 type MCPTool struct {
 	def     llm.ToolDefinition
 	manager *Manager

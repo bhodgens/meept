@@ -7,6 +7,7 @@ import (
 )
 
 // AgentReport represents the structured report from an agent's response.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentReport struct {
 	// Status indicates the completion state: completed, partial, failed, needs_input
 	Status string `json:"status"`

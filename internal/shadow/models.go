@@ -45,6 +45,7 @@ type Message struct {
 }
 
 // ShadowRecord captures a student response and optional teacher response.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ShadowRecord struct {
 	ID               string     `json:"id"`
 	CreatedAt        time.Time  `json:"created_at"`
@@ -258,6 +259,7 @@ func (r *TrainingRun) Complete(finalLoss, evalScore float64) {
 }
 
 // ShadowStats holds statistics about shadow training data.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ShadowStats struct {
 	TotalRecords      int            `json:"total_records"`
 	HighQualityCount  int            `json:"high_quality_count"`

@@ -304,6 +304,7 @@ const (
 )
 
 // AgentMemoryConfig holds memory recall configuration for an agent.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentMemoryConfig struct {
 	RecallMode MemoryRecallMode `json:"recall_mode"`
 	// SnapshotCachingEnabled controls whether memory snapshots are frozen for
@@ -313,6 +314,7 @@ type AgentMemoryConfig struct {
 }
 
 // AgentConfig holds configuration for the agent loop.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentConfig struct {
 	MaxIterations           int
 	Timeout                 time.Duration
@@ -374,6 +376,7 @@ func (l *AgentLoop) shouldFetchOnQuery() bool {
 }
 
 // AgentLoop orchestrates LLM reasoning interleaved with tool execution.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentLoop struct {
 	mu sync.RWMutex
 
@@ -3324,6 +3327,7 @@ func (l *AgentLoop) Run(ctx context.Context, messages <-chan *AgentMessage, resp
 }
 
 // AgentMessage represents an incoming message to the agent.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentMessage struct {
 	ID             string `json:"id"`
 	ConversationID string `json:"conversation_id"`
@@ -3332,6 +3336,7 @@ type AgentMessage struct {
 }
 
 // AgentResponse represents the agent's response.
+//nolint:revive // stutter with package name is intentional for API clarity
 type AgentResponse struct {
 	ConversationID string `json:"conversation_id"`
 	Content        string `json:"content"`

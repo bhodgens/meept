@@ -8,6 +8,7 @@ import (
 )
 
 // ShadowMode defines how shadowing is performed.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ShadowMode string
 
 const (
@@ -56,6 +57,7 @@ type Config struct {
 }
 
 // ShadowingConfig controls when and how responses are shadowed.
+//nolint:revive // stutter with package name is intentional for API clarity
 type ShadowingConfig struct {
 	Mode          ShadowMode `toml:"mode"`
 	MinComplexity Complexity `toml:"min_complexity"`
