@@ -1107,9 +1107,14 @@ func (l *AgentLoop) persistConversation(conversationID string) {
 // maybeCompact checks if compaction should be triggered and performs it if needed.
 // When compaction is enabled and the conversation exceeds the configured threshold,
 // it identifies low-importance messages, performs in-memory compression, and persists
-// a compaction entry to the session store. This is the tree-based compaction flow;
-// the original messages remain in SQLite but are replaced by the compaction summary
-// during context assembly.
+// a compaction entry to the session store.
+//
+// Tree restructuring: the compaction entry is inserted as a child of the message
+// just before the first compacted range. Messages after the compacted range are
+// re-parented to chain from the compaction entry. The leaf pointer is updated so
+// that GetMessagePath walks through the compaction entry, skipping the original
+// messages. This ensures RestoreConversationFromStore returns the compaction
+// summary in place of the detailed messages.
 func (l *AgentLoop) maybeCompact(conversationID string) {
 	l.mu.RLock()
 	store := l.sessionStore
@@ -1151,31 +1156,95 @@ func (l *AgentLoop) maybeCompact(conversationID string) {
 		return
 	}
 
-	// Get the leaf message ID to use as the parent for the compaction entry
-	var parentID int64
+	// Get the current leaf message ID
 	leafID, err := store.GetLeafMessageID(sess.ID)
-	if err == nil && leafID > 0 {
-		parentID = leafID
+	if err != nil || leafID <= 0 {
+		return
+	}
+
+	// Get the current path to map in-memory indices to SQLite message IDs.
+	// The path is ordered root-to-leaf; non-system in-memory messages map 1:1
+	// to path entries (system prompt messages are excluded during persistence).
+	path, err := store.GetMessagePath(sess.ID, leafID)
+	if err != nil || len(path) == 0 {
+		return
+	}
+
+	// Build a candidate set for fast lookup and collect the SQLite message IDs.
+	// We also need to sort candidates to find contiguous compacted ranges.
+	allMessages := conv.GetMessages()
+	candidateSet := make(map[int]bool, len(candidates))
+	for _, idx := range candidates {
+		candidateSet[idx] = true
+	}
+
+	// Map candidate indices to SQLite IDs.
+	// In-memory messages include system prompts (no SQLite row), so we walk
+	// both lists in parallel: each non-system in-memory message corresponds to
+	// one path entry.
+	var compressedIDs []int64
+	pathIdx := 0
+	for memIdx, msg := range allMessages {
+		if msg.Role == llm.RoleSystem {
+			continue // system prompt is not persisted
+		}
+		if candidateSet[memIdx] && pathIdx < len(path) {
+			compressedIDs = append(compressedIDs, path[pathIdx].ID)
+		}
+		pathIdx++
+	}
+
+	// Determine the compaction entry's parent: the message in the path just
+	// before the first compacted message. If the first path message is
+	// compacted, parent is 0 (root).
+	var compactionParent int64
+	if len(compressedIDs) > 0 {
+		firstCompressedID := compressedIDs[0]
+		for i, pm := range path {
+			if pm.ID == firstCompressedID {
+				if i > 0 {
+					compactionParent = path[i-1].ID
+				}
+				break
+			}
+		}
 	}
 
 	// Perform the actual in-memory removal
 	tokensSaved := conv.RemoveCompactedMessages(candidates)
 
 	if tokensSaved > 0 {
-		// Insert compaction entry into SQLite
+		// Insert compaction entry into SQLite.
+		// The entry's parent is set to the message just before the first
+		// compacted range, so that GetMessagePath from the compaction entry
+		// skips over the compacted messages.
 		summary := fmt.Sprintf("Compacted %d messages (%d tokens removed)",
 			report.MessagesBefore-report.MessagesAfter, tokensSaved)
-		_, compactErr := store.InsertCompaction(
+		compactionID, compactErr := store.InsertCompaction(
 			sess.ID,
-			parentID,
+			compactionParent,
 			summary,
-			nil, // Individual message IDs are not tracked in this pass
+			compressedIDs,
 		)
 		if compactErr != nil {
 			l.logger.Warn("Failed to persist compaction entry",
 				"conversation_id", conversationID,
 				"error", compactErr,
 			)
+			return
+		}
+
+		// Re-parent messages after the compacted range to chain from the
+		// compaction entry. This ensures the tree is consistent: GetMessagePath
+		// from the current leaf walks through the compaction entry.
+		if len(compressedIDs) > 0 {
+			lastCompressedID := compressedIDs[len(compressedIDs)-1]
+			if err := store.ReparentAfterCompaction(sess.ID, lastCompressedID, compactionID); err != nil {
+				l.logger.Warn("Failed to re-parent messages after compaction",
+					"conversation_id", conversationID,
+					"error", err,
+				)
+			}
 		}
 
 		l.logger.Info("Compaction performed",
@@ -1184,6 +1253,8 @@ func (l *AgentLoop) maybeCompact(conversationID string) {
 			"messages_after", report.MessagesAfter,
 			"tokens_removed", tokensSaved,
 			"session_id", sess.ID,
+			"compaction_id", compactionID,
+			"compressed_count", len(compressedIDs),
 		)
 	}
 }

@@ -133,6 +133,12 @@ type Store interface {
 	// compressed message IDs with a summary. Returns the new compaction entry ID.
 	InsertCompaction(sessionID string, parentID int64, summary string, compressedIDs []int64) (int64, error)
 
+	// ReparentAfterCompaction re-parents all messages whose current parent is
+	// afterID (or that are children of messages in the compacted range) to point
+	// to compactionID instead. This ensures the tree path walks through the
+	// compaction entry, skipping the compacted messages.
+	ReparentAfterCompaction(sessionID string, afterID int64, compactionID int64) error
+
 	// SaveToolCalls persists tool calls associated with a message.
 	SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 

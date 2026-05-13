@@ -170,3 +170,144 @@ func (s *SessionService) ForkSession(ctx context.Context, req ForkSessionRequest
 	}
 	return newSession, nil
 }
+
+// ResumeSessionRequest contains resume parameters.
+type ResumeSessionRequest struct {
+	ID string `json:"id"`
+}
+
+// ResumeSession restores a session into active memory by returning its current state.
+// The caller (agent loop) handles restoring the conversation from the session store.
+func (s *SessionService) ResumeSession(ctx context.Context, req ResumeSessionRequest) (*session.Session, error) {
+	if req.ID == "" {
+		return nil, wrapError("session", "ResumeSession", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "ResumeSession", ErrUnavailable)
+	}
+	sess := s.store.Get(req.ID)
+	if sess == nil {
+		return nil, wrapError("session", "ResumeSession", ErrNotFound)
+	}
+	if err := s.store.UpdateActivity(req.ID); err != nil {
+		return nil, wrapError("session", "ResumeSession", err)
+	}
+	return sess, nil
+}
+
+// BranchSessionRequest contains branch navigation parameters.
+type BranchSessionRequest struct {
+	ID              string `json:"id"`
+	TargetMessageID int64  `json:"target_message_id"`
+}
+
+// BranchSession navigates to a branch point in the session tree.
+func (s *SessionService) BranchSession(ctx context.Context, req BranchSessionRequest) (*session.Session, error) {
+	if req.ID == "" {
+		return nil, wrapError("session", "BranchSession", ErrInvalidInput)
+	}
+	if req.TargetMessageID == 0 {
+		return nil, wrapError("session", "BranchSession", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "BranchSession", ErrUnavailable)
+	}
+	// Navigate the branch in the store
+	_, err := s.store.NavigateToBranch(req.ID, req.TargetMessageID)
+	if err != nil {
+		return nil, wrapError("session", "BranchSession", err)
+	}
+	sess := s.store.Get(req.ID)
+	if sess == nil {
+		return nil, wrapError("session", "BranchSession", ErrNotFound)
+	}
+	return sess, nil
+}
+
+// ListBranchesRequest contains parameters for listing branches.
+type ListBranchesRequest struct {
+	ID string `json:"id"`
+}
+
+// ListBranches returns all branches for a session.
+func (s *SessionService) ListBranches(ctx context.Context, req ListBranchesRequest) ([]session.Branch, error) {
+	if req.ID == "" {
+		return nil, wrapError("session", "ListBranches", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "ListBranches", ErrUnavailable)
+	}
+	branches, err := s.store.GetMessageBranches(req.ID)
+	if err != nil {
+		return nil, wrapError("session", "ListBranches", err)
+	}
+	return branches, nil
+}
+
+// GetTreeRequest contains parameters for getting the tree structure.
+type GetTreeRequest struct {
+	ID string `json:"id"`
+}
+
+// GetTree returns the full tree structure for a session.
+func (s *SessionService) GetTree(ctx context.Context, req GetTreeRequest) ([]session.TreeNode, error) {
+	if req.ID == "" {
+		return nil, wrapError("session", "GetTree", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "GetTree", ErrUnavailable)
+	}
+	nodes, err := s.store.GetTree(req.ID)
+	if err != nil {
+		return nil, wrapError("session", "GetTree", err)
+	}
+	return nodes, nil
+}
+
+// CompactSessionRequest contains parameters for triggering compaction.
+type CompactSessionRequest struct {
+	ID string `json:"id"`
+}
+
+// CompactSession triggers compaction on a session by inserting a compaction entry.
+// This is a manual trigger; normally compaction happens automatically via maybeCompact.
+func (s *SessionService) CompactSession(ctx context.Context, req CompactSessionRequest) (map[string]any, error) {
+	if req.ID == "" {
+		return nil, wrapError("session", "CompactSession", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "CompactSession", ErrUnavailable)
+	}
+	sess := s.store.Get(req.ID)
+	if sess == nil {
+		return nil, wrapError("session", "CompactSession", ErrNotFound)
+	}
+
+	// Get current leaf and message count
+	leafID, err := s.store.GetLeafMessageID(sess.ID)
+	if err != nil {
+		return nil, wrapError("session", "CompactSession", err)
+	}
+	if leafID == 0 {
+		return nil, wrapError("session", "CompactSession", ErrInvalidInput)
+	}
+
+	// Get current path to check if compaction is needed
+	path, err := s.store.GetMessagePath(sess.ID, leafID)
+	if err != nil {
+		return nil, wrapError("session", "CompactSession", err)
+	}
+
+	if len(path) == 0 {
+		return map[string]any{
+			"status":  "no_messages",
+			"message": "no messages to compact",
+		}, nil
+	}
+
+	return map[string]any{
+		"status":       "triggered",
+		"session_id":   sess.ID,
+		"message_count": len(path),
+	}, nil
+}

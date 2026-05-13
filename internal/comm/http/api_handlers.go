@@ -999,6 +999,182 @@ func (s *Server) handleSessionDetach(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, session)
 }
 
+// handleSessionResume handles POST /api/v1/sessions/{id}/resume.
+// Restores a session into active memory.
+func (s *Server) handleSessionResume(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	session, err := s.services.Session.ResumeSession(r.Context(), services.ResumeSessionRequest{
+		ID: id,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, session)
+}
+
+// handleSessionBranch handles POST /api/v1/sessions/{id}/branch.
+// Navigates to a branch point in the session tree.
+func (s *Server) handleSessionBranch(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	var req struct {
+		TargetMessageID int64 `json:"target_message_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	session, err := s.services.Session.BranchSession(r.Context(), services.BranchSessionRequest{
+		ID:              id,
+		TargetMessageID: req.TargetMessageID,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, session)
+}
+
+// handleSessionBranches handles GET /api/v1/sessions/{id}/branches.
+// Lists all branches for a session.
+func (s *Server) handleSessionBranches(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	branches, err := s.services.Session.ListBranches(r.Context(), services.ListBranchesRequest{
+		ID: id,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"branches": branches,
+		"count":    len(branches),
+	})
+}
+
+// handleSessionFork handles POST /api/v1/sessions/{id}/fork.
+// Forks a session from a specific message.
+func (s *Server) handleSessionFork(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	var req struct {
+		FromMessageID int64  `json:"from_message_id"`
+		Name          string `json:"name,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	newSession, err := s.services.Session.ForkSession(r.Context(), services.ForkSessionRequest{
+		SessionID:     id,
+		FromMessageID: req.FromMessageID,
+		Name:          req.Name,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusCreated, newSession)
+}
+
+// handleSessionTree handles GET /api/v1/sessions/{id}/tree.
+// Returns the tree structure for a session.
+func (s *Server) handleSessionTree(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	nodes, err := s.services.Session.GetTree(r.Context(), services.GetTreeRequest{
+		ID: id,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"nodes": nodes,
+		"count": len(nodes),
+	})
+}
+
+// handleSessionCompact handles POST /api/v1/sessions/{id}/compact.
+// Triggers compaction on a session.
+func (s *Server) handleSessionCompact(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	result, err := s.services.Session.CompactSession(r.Context(), services.CompactSessionRequest{
+		ID: id,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
 // ===== Additional Worker Endpoints =====
 
 // handleWorkerAdd handles POST /api/v1/workers.

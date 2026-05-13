@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -10,19 +11,47 @@ import (
 // AssembleBranch converts session Messages into llm.ChatMessages for the agent loop.
 // It walks the message list (already ordered by GetMessagePath) and builds ChatMessages.
 // Compaction entries are included as system messages with a "[Compacted Context]" prefix,
-// providing summarized context for messages that have been removed.
+// providing summarized context for messages that have been removed. Messages whose IDs
+// appear in a compaction entry's compressed_ids list are skipped.
 // Summary entries (from abandoned sibling branches) are included as system messages with
 // a "[Branch Summary]" prefix.
 // toolCallsMap maps message_id -> []ToolCall for the messages being assembled.
 func AssembleBranch(messages []Message, toolCallsMap map[int64][]ToolCall) []llm.ChatMessage {
+	// First pass: collect all compressed IDs from compaction entries so we can
+	// skip those messages when assembling.
+	compressedIDs := make(map[int64]bool)
+	for _, msg := range messages {
+		if msg.EntryType == "compaction" {
+			var content CompactionContent
+			if err := json.Unmarshal([]byte(msg.Content), &content); err == nil {
+				for _, id := range content.CompressedIDs {
+					compressedIDs[id] = true
+				}
+			}
+		}
+	}
+
 	var result []llm.ChatMessage
 	for _, msg := range messages {
+		// Skip messages that have been replaced by a compaction entry.
+		if compressedIDs[msg.ID] {
+			continue
+		}
+
 		switch msg.EntryType {
 		case "compaction":
-			// Compaction entries already have the "[Compacted Context]" prefix from the compactor.
+			// Compaction entries may store JSON content (from InsertCompaction)
+			// or plain text. Try JSON first; fall back to raw content.
+			content := msg.Content
+			var cc CompactionContent
+			if err := json.Unmarshal([]byte(msg.Content), &cc); err == nil && cc.Summary != "" {
+				content = "[Compacted Context] " + cc.Summary
+			} else if !isCompactedPrefix(content) {
+				content = "[Compacted Context] " + content
+			}
 			result = append(result, llm.ChatMessage{
 				Role:    llm.RoleSystem,
-				Content: msg.Content,
+				Content: content,
 			})
 		case "summary":
 			// Include summary entries from sibling branches
@@ -50,6 +79,11 @@ func AssembleBranch(messages []Message, toolCallsMap map[int64][]ToolCall) []llm
 		}
 	}
 	return result
+}
+
+// isCompactedPrefix returns true if the content already has a compaction prefix.
+func isCompactedPrefix(content string) bool {
+	return len(content) >= 19 && content[:19] == "[Compacted Context]"
 }
 
 // convertToolCalls converts session.ToolCall records to llm.ToolCall format.

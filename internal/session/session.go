@@ -612,6 +612,11 @@ func (s *MemoryStore) InsertCompaction(sessionID string, parentID int64, summary
 	return 0, fmt.Errorf("not implemented: InsertCompaction in MemoryStore")
 }
 
+// ReparentAfterCompaction is not fully implemented for MemoryStore.
+func (s *MemoryStore) ReparentAfterCompaction(sessionID string, afterID int64, compactionID int64) error {
+	return fmt.Errorf("not implemented: ReparentAfterCompaction in MemoryStore")
+}
+
 // SaveToolCalls is not supported for MemoryStore (tool calls are only persisted in SQLite).
 func (s *MemoryStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error {
 	return nil

@@ -231,6 +231,12 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/attach", s.handleSessionAttach)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/detach", s.handleSessionDetach)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/resume", s.handleSessionResume)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/branch", s.handleSessionBranch)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/branches", s.handleSessionBranches)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/fork", s.handleSessionFork)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/tree", s.handleSessionTree)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", s.handleSessionCompact)
 
 	// Worker endpoints
 	mux.HandleFunc("GET /api/v1/workers/stats", s.handleWorkerStats)

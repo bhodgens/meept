@@ -1203,6 +1203,34 @@ type CompactionContent struct {
 	CompressedIDs []int64 `json:"compressed_ids"`
 }
 
+// ReparentAfterCompaction re-parents all messages whose parent_id is afterID
+// (the last compressed message) to point to compactionID instead. This makes
+// GetMessagePath walk through the compaction entry, skipping the compacted
+// messages in the tree.
+func (s *SQLiteStore) ReparentAfterCompaction(sessionID string, afterID int64, compactionID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(`
+		UPDATE session_messages
+		SET parent_id = ?
+		WHERE session_id = ? AND parent_id = ?`,
+		compactionID, sessionID, afterID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to re-parent messages after compaction: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	s.logger.Debug("Reparented messages after compaction",
+		"session_id", sessionID,
+		"old_parent", afterID,
+		"new_parent", compactionID,
+		"rows_affected", rows,
+	)
+	return nil
+}
+
 // --- Tool call operations ---
 
 // SaveToolCalls persists tool calls associated with a message.
