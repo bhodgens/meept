@@ -102,7 +102,7 @@ User Input (CLI/Telegram/Web/MenuBar)
 | **Server Core** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` |
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace) |
 | **Security** | `internal/security` (engine, sanitizer, tirith, tls) |
-| **LLM** | `internal/llm` (client, resolver, budget, providers, token cache) |
+| **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context compactor, context firewall) |
 | **Skills** | `internal/skills` (discovery, registry, parser, models) |
 | **Memory** | `internal/memory` (manager, episodic, task, consolidation, ftstore) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp) |
@@ -231,8 +231,9 @@ The HTTP API uses a **service layer pattern** to share business logic between RP
 - `LLMClassifierConfig.Timeout time.Duration` — per-classification HTTP timeout;
   defaults to 5 s when unset.
 - `ContextFirewall.Stats()` returns `FirewallStats` with counters for
-  `SummarizationFailures`, `DroppedMessages`, and `DropEvents` so operators
-  can monitor context-pressure indicators.
+  `SummarizationFailures`, `DroppedMessages`, `DropEvents`, `CompactionEvents`,
+  `CompactionTokensSaved`, and `CompactionFallbacks` so operators can monitor
+  context-pressure indicators and compaction effectiveness.
 
 ## Skills Discovery
 

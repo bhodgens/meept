@@ -420,23 +420,25 @@ func (s *MemoryStore) GetMessageBranches(sessionID string) ([]Branch, error) {
 		return nil, nil
 	}
 
-	// Collect unique branch IDs
-	branchMap := make(map[string]int) // branchID -> count
-	var lastID int64
+	// Collect unique branch IDs with per-branch max ID
+	branchMap := make(map[string]int)   // branchID -> count
+	branchMaxID := make(map[string]int64) // branchID -> max message ID
 	for _, msg := range msgs {
 		bid := msg.BranchID
 		if bid == "" {
 			bid = "main"
 		}
 		branchMap[bid]++
-		lastID = msg.ID
+		if msg.ID > branchMaxID[bid] {
+			branchMaxID[bid] = msg.ID
+		}
 	}
 
 	branches := make([]Branch, 0, len(branchMap))
 	for bid, count := range branchMap {
 		branches = append(branches, Branch{
 			ID:           bid,
-			LeafID:       lastID,
+			LeafID:       branchMaxID[bid],
 			MessageCount: count,
 		})
 	}

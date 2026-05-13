@@ -863,16 +863,54 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 				TrackFileOps:      loop.config.Compaction.TrackFileOps,
 				TimeoutSeconds:    loop.config.Compaction.TimeoutSeconds,
 			}
+
+			// Resolve compaction model with fallback chain:
+			// 1. compaction.model from config (resolved via resolver/broker)
+			// 2. small_model from models.json5 (resolved via resolver/broker)
+			// 3. loop.llm (working model, same as pre-compaction behavior)
 			var compactorModel llm.Chatter
-			if loop.llm != nil {
-				compactorModel = loop.llm
+			compactionModelRef := loop.config.Compaction.Model
+
+			// If no explicit compaction model configured, try small_model
+			if compactionModelRef == "" && loop.resolver != nil {
+				if sm := loop.resolver.SmallModel(); sm != nil {
+					compactionModelRef = fmt.Sprintf("%s/%s", sm.ProviderID, sm.ModelID)
+				}
 			}
+
+			// Try to get a dedicated Chatter for the resolved model ref
+			if compactionModelRef != "" {
+				if broker, ok := loop.llm.(*llm.ModelBroker); ok {
+					if ch := broker.ChatterForModel(compactionModelRef); ch != nil {
+						compactorModel = ch
+						loop.logger.Info("resolved compaction model via broker",
+							"model_ref", compactionModelRef,
+						)
+					}
+				}
+			}
+
+			// Final fallback: use the working model (loop.llm)
+			if compactorModel == nil && loop.llm != nil {
+				compactorModel = loop.llm
+				if compactionModelRef != "" {
+					loop.logger.Warn("compaction model not resolved via broker, falling back to working model",
+						"requested_model", compactionModelRef,
+					)
+				}
+			}
+
 			if compactorModel != nil {
 				compactor := llm.NewContextCompactor(compactorCfg, compactorModel, tokenizer, loop.logger)
-				firewall.SetCompactor(compactor)
+				triggerRatio := loop.config.Compaction.TriggerRatio
+				if triggerRatio <= 0 {
+					triggerRatio = 0.60 // default
+				}
+				firewall.SetCompactor(compactor, triggerRatio)
 				loop.logger.Info("context compaction enabled",
 					"summary_format", loop.config.Compaction.SummaryFormat,
 					"trigger_ratio", loop.config.Compaction.TriggerRatio,
+					"model_ref", compactionModelRef,
 				)
 			}
 		}
@@ -971,53 +1009,89 @@ func (l *AgentLoop) persistConversation(conversationID string) {
 		}
 	}
 
-	// Convert ChatMessages to session Messages
+	// Determine how many messages are already persisted by checking the leaf.
+	// This prevents re-inserting all messages on every turn.
+	existingCount := 0
+	leafID, _ := store.GetLeafMessageID(sess.ID)
+	if leafID > 0 {
+		path, err := store.GetMessagePath(sess.ID, leafID)
+		if err == nil {
+			existingCount = len(path)
+		}
+	}
+
+	// Count non-system messages in the conversation (matches ConvertChatMessagesToSessionMessages filtering)
+	nonSystemCount := 0
+	for _, cm := range messages {
+		if cm.Role != llm.RoleSystem {
+			nonSystemCount++
+		}
+	}
+
+	if nonSystemCount <= existingCount {
+		// All messages already persisted; nothing new to save.
+		return
+	}
+
+	// Only persist the new messages (those beyond existingCount)
 	sessionMsgs := session.ConvertChatMessagesToSessionMessages(sess.ID, messages)
-	if len(sessionMsgs) > 0 {
-		if err := store.SaveMessages(sess.ID, sessionMsgs); err != nil {
-			l.logger.Error("Failed to persist messages",
-				"session", sess.ID,
-				"error", err,
-			)
-			return
-		}
+	if len(sessionMsgs) == 0 {
+		return
+	}
 
-		// Update leaf pointer to the last message
-		if len(sessionMsgs) > 0 {
-			lastMsg := sessionMsgs[len(sessionMsgs)-1]
-			_ = store.SetLeafMessageID(sess.ID, lastMsg.ID)
-		}
+	// Slice to only new messages
+	newMsgs := sessionMsgs[existingCount:]
+	if len(newMsgs) == 0 {
+		return
+	}
 
-		// Persist tool calls for messages that have them
-		for i, msg := range sessionMsgs {
-			// Find the corresponding ChatMessage to check for tool calls
-			chatIdx := 0
-			for _, cm := range messages {
-				if cm.Role == llm.RoleSystem {
-					continue
+	// Chain ParentID: the first new message's parent is the current leaf
+	parentID := leafID
+	for i := range newMsgs {
+		if parentID > 0 {
+			newMsgs[i].ParentID = &parentID
+		}
+	}
+
+	if err := store.SaveMessages(sess.ID, newMsgs); err != nil {
+		l.logger.Error("Failed to persist messages",
+			"session", sess.ID,
+			"error", err,
+		)
+		return
+	}
+
+	// The last inserted message becomes the new leaf
+	lastMsg := newMsgs[len(newMsgs)-1]
+	_ = store.SetLeafMessageID(sess.ID, lastMsg.ID)
+
+	// Persist tool calls for the new messages
+	// Map session messages back to their corresponding ChatMessages for tool call extraction.
+	// newMsgs[i] corresponds to messages (non-system) at index (existingCount + i).
+	nonSystemMsgs := make([]llm.ChatMessage, 0, nonSystemCount)
+	for _, cm := range messages {
+		if cm.Role != llm.RoleSystem {
+			nonSystemMsgs = append(nonSystemMsgs, cm)
+		}
+	}
+	for i, msg := range newMsgs {
+		chatIdx := existingCount + i
+		if chatIdx < len(nonSystemMsgs) && len(nonSystemMsgs[chatIdx].ToolCalls) > 0 {
+			tcs := make([]session.ToolCall, len(nonSystemMsgs[chatIdx].ToolCalls))
+			for j, tc := range nonSystemMsgs[chatIdx].ToolCalls {
+				tcs[j] = session.ToolCall{
+					MessageID:  msg.ID,
+					ToolName:   tc.Function.Name,
+					ToolCallID: tc.ID,
+					Arguments:  tc.Function.Arguments,
+					Seq:        j,
 				}
-				if chatIdx == i {
-					if len(cm.ToolCalls) > 0 {
-						tcs := make([]session.ToolCall, len(cm.ToolCalls))
-						for j, tc := range cm.ToolCalls {
-							tcs[j] = session.ToolCall{
-								MessageID:  msg.ID,
-								ToolName:   tc.Function.Name,
-								ToolCallID: tc.ID,
-								Arguments:  tc.Function.Arguments,
-								Seq:        j,
-							}
-						}
-						if err := store.SaveToolCalls(msg.ID, tcs); err != nil {
-							l.logger.Error("Failed to persist tool calls",
-								"message_id", msg.ID,
-								"error", err,
-							)
-						}
-					}
-					break
-				}
-				chatIdx++
+			}
+			if err := store.SaveToolCalls(msg.ID, tcs); err != nil {
+				l.logger.Error("Failed to persist tool calls",
+					"message_id", msg.ID,
+					"error", err,
+				)
 			}
 		}
 	}
@@ -1025,7 +1099,8 @@ func (l *AgentLoop) persistConversation(conversationID string) {
 	l.logger.Debug("Persisted conversation",
 		"conversation", conversationID,
 		"session", sess.ID,
-		"messages", len(sessionMsgs),
+		"new_messages", len(newMsgs),
+		"total_non_system", nonSystemCount,
 	)
 }
 

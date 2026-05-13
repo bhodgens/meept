@@ -874,13 +874,8 @@ func (c *RPCClient) NavigateBranch(sessionID string, targetMessageID int64) erro
 	return err
 }
 
-// BranchInfo represents a conversation branch.
-type BranchInfo struct {
-	ID           string `json:"id"`
-	LeafID       int64  `json:"leaf_id"`
-	MessageCount int    `json:"message_count"`
-	Summary      string `json:"summary,omitempty"`
-}
+// BranchInfo is an alias for the shared type.
+type BranchInfo = types.BranchInfo
 
 // ListBranches lists all branches in a session.
 func (c *RPCClient) ListBranches(sessionID string) ([]BranchInfo, error) {
@@ -922,17 +917,8 @@ func (c *RPCClient) ForkSession(sessionID string, fromMessageID int64, name stri
 	return resp.NewSessionID, nil
 }
 
-// TreeNodeInfo represents a node in the conversation tree.
-type TreeNodeInfo struct {
-	ID        int64  `json:"id"`
-	ParentID  int64  `json:"parent_id"`
-	Role      string `json:"role"`
-	EntryType string `json:"entry_type"`
-	BranchID  string `json:"branch_id"`
-	Content   string `json:"content,omitempty"`
-	Timestamp string `json:"timestamp"`
-	IsLeaf    bool   `json:"is_leaf"`
-}
+// TreeNodeInfo is an alias for the shared type.
+type TreeNodeInfo = types.TreeNodeInfo
 
 // GetTree returns the conversation tree for a session.
 func (c *RPCClient) GetTree(sessionID string) ([]TreeNodeInfo, error) {

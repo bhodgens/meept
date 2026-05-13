@@ -342,5 +342,19 @@ func (b *ModelBroker) Config() *ModelConfig {
 	return &ModelConfig{}
 }
 
+// ChatterForModel returns a Chatter for a specific model reference.
+// Returns nil if the model is not found in the broker.
+// The returned Chatter can be used directly for chat operations.
+func (b *ModelBroker) ChatterForModel(modelRef string) Chatter {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	entry, ok := b.entries[modelRef]
+	if !ok || entry == nil {
+		return nil
+	}
+	return entry.chatter
+}
+
 // Ensure ModelBroker implements Chatter
 var _ Chatter = (*ModelBroker)(nil)

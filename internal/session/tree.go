@@ -19,10 +19,10 @@ func AssembleBranch(messages []Message, toolCallsMap map[int64][]ToolCall) []llm
 	for _, msg := range messages {
 		switch msg.EntryType {
 		case "compaction":
-			// Include compaction entries as system messages with summary
+			// Compaction entries already have the "[Compacted Context]" prefix from the compactor.
 			result = append(result, llm.ChatMessage{
 				Role:    llm.RoleSystem,
-				Content: "[Compacted Context] " + msg.Content,
+				Content: msg.Content,
 			})
 		case "summary":
 			// Include summary entries from sibling branches

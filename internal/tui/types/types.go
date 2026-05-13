@@ -426,3 +426,23 @@ type QueueStatusResponse struct {
 	IsActive      bool  `json:"is_active"`
 	Generation    uint64 `json:"generation"`
 }
+
+// BranchInfo represents a conversation branch (shared between TUI and CLI).
+type BranchInfo struct {
+	ID           string `json:"id"`
+	LeafID       int64  `json:"leaf_id"`
+	MessageCount int    `json:"message_count"`
+	Summary      string `json:"summary,omitempty"`
+}
+
+// TreeNodeInfo represents a node in the conversation tree (shared between TUI and CLI).
+type TreeNodeInfo struct {
+	ID        int64  `json:"id"`
+	ParentID  int64  `json:"parent_id"`
+	Role      string `json:"role"`
+	EntryType string `json:"entry_type"`
+	BranchID  string `json:"branch_id"`
+	Content   string `json:"content,omitempty"`
+	Timestamp string `json:"timestamp"`
+	IsLeaf    bool   `json:"is_leaf"`
+}

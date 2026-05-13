@@ -565,9 +565,15 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 
 	// Create branch manager if branching is enabled
+	var branchMgr *session.BranchManager
 	if cfg.Session.Branching {
-		bm := session.NewBranchManager(c.SessionStore, summarizer, cfg.Session, logger.With("component", "branch-manager"))
-		sessionOpts = append(sessionOpts, session.WithBranchManager(bm))
+		// Guard against typed-nil interface: only pass summarizer if non-nil.
+		var branchSummarizer session.BranchSummarizer
+		if summarizer != nil {
+			branchSummarizer = summarizer
+		}
+		branchMgr = session.NewBranchManager(c.SessionStore, branchSummarizer, cfg.Session, logger.With("component", "branch-manager"))
+		sessionOpts = append(sessionOpts, session.WithBranchManager(branchMgr))
 		logger.Info("Branch manager enabled",
 			"summary_threshold", cfg.Session.BranchSummaryThreshold,
 		)
@@ -584,9 +590,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 
 	// Wire branch manager to agent loop for in-memory cache coordination
-	if c.AgentLoop != nil && cfg.Session.Persistence && cfg.Session.Branching {
-		bm := session.NewBranchManager(c.SessionStore, summarizer, cfg.Session, logger.With("component", "branch-manager"))
-		c.AgentLoop.SetBranchManager(bm)
+	// Reuse the same BranchManager instance created above.
+	if c.AgentLoop != nil && cfg.Session.Persistence && cfg.Session.Branching && branchMgr != nil {
+		c.AgentLoop.SetBranchManager(branchMgr)
 		logger.Info("Branch navigation wired to agent loop")
 	}
 

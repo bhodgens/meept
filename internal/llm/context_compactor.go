@@ -104,17 +104,25 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 	conversationText := c.serializeMessages(cut.ToCompact)
 	if conversationText == "" { result.Messages = messages; return result }
 
-	prompt := c.buildSummaryPrompt(conversationText, c.lastSummary)
 	timeout := time.Duration(c.config.TimeoutSeconds) * time.Second
 	if timeout <= 0 { timeout = 30 * time.Second }
-	sumCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
-	resp, err := c.summarizer.Chat(sumCtx, []ChatMessage{{Role: RoleUser, Content: prompt}})
-	if err != nil { c.logger.Warn("compaction summarization failed", "error", err); result.Messages = messages; return result }
-	if resp.Content == "" { result.Messages = messages; return result }
+	var summary string
+	if cut.SplitTurn && cut.SplitTurnIndex >= 0 && cut.SplitTurnIndex < len(cut.ToCompact) {
+		var err error
+		summary, err = c.compactSplitTurn(ctx, cut, timeout)
+		if err != nil {
+			c.logger.Warn("split-turn compaction failed, falling back to single summary", "error", err)
+			summary = ""
+		}
+	}
+	if summary == "" {
+		var err error
+		summary, err = c.summarizeMessages(ctx, cut.ToCompact, timeout)
+		if err != nil { c.logger.Warn("compaction summarization failed", "error", err); result.Messages = messages; return result }
+		if summary == "" { result.Messages = messages; return result }
+	}
 
-	summary := resp.Content
 	extract := c.parseSummaryResponse(summary)
 	c.updateFileOps(extract)
 	result.FileOps = c.fileOps
@@ -131,6 +139,99 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 	result.TokensAfter = c.countTokens(final)
 	c.logger.Info("context compacted", "tokens_before", tokensBefore, "tokens_after", result.TokensAfter, "split_turn", result.SplitTurn, "files_tracked", c.fileOps.FileCount())
 	return result
+}
+
+// compactSplitTurn handles the case where the cut point lands mid-turn.
+// It produces two summaries (history + turn prefix) and merges them.
+// Both LLM calls share the overall timeout budget derived from ctx.
+func (c *ContextCompactor) compactSplitTurn(ctx context.Context, cut CutResult, timeout time.Duration) (string, error) {
+	historyMessages := cut.ToCompact[:cut.SplitTurnIndex]
+	turnPrefixMessages := cut.ToCompact[cut.SplitTurnIndex:]
+
+	// If history is empty, just summarize the turn prefix as a regular summary.
+	if len(historyMessages) == 0 {
+		return c.summarizeMessages(ctx, turnPrefixMessages, timeout)
+	}
+
+	// If turn prefix is empty, just summarize the history.
+	if len(turnPrefixMessages) == 0 {
+		return c.summarizeMessages(ctx, historyMessages, timeout)
+	}
+
+	// Use a shared deadline for both LLM calls so the total does not exceed timeout.
+	deadline := time.Now().Add(timeout)
+	sharedCtx, sharedCancel := context.WithDeadline(ctx, deadline)
+	defer sharedCancel()
+
+	// Generate history summary (full structured summary of all messages before the split).
+	halfTimeout := timeout / 2
+	if halfTimeout < 5*time.Second {
+		halfTimeout = 5 * time.Second
+	}
+	historySummary, err := c.summarizeMessages(sharedCtx, historyMessages, halfTimeout)
+	if err != nil {
+		return "", fmt.Errorf("history summarization failed: %w", err)
+	}
+
+	// Generate turn prefix summary (brief summary of the partial turn).
+	turnPrefixText := c.serializeMessages(turnPrefixMessages)
+	turnPrefixSummary := ""
+	if turnPrefixText != "" {
+		prompt := c.buildTurnPrefixPrompt(turnPrefixText)
+		remaining := time.Until(deadline)
+		if remaining < 5*time.Second {
+			remaining = 5 * time.Second
+		}
+		sumCtx, cancel := context.WithDeadline(sharedCtx, deadline)
+		defer cancel()
+		resp, err := c.summarizer.Chat(sumCtx, []ChatMessage{{Role: RoleUser, Content: prompt}})
+		if err != nil {
+			c.logger.Warn("turn prefix summarization failed, using raw text", "error", err)
+			turnPrefixSummary = turnPrefixText
+		} else if resp.Content != "" {
+			turnPrefixSummary = resp.Content
+		}
+	}
+
+	// Merge both summaries.
+	if turnPrefixSummary == "" {
+		return historySummary, nil
+	}
+	return historySummary + "\n\n## In-Progress Turn (compacted mid-turn)\n" + turnPrefixSummary, nil
+}
+
+// summarizeMessages is a helper that builds a prompt for the given messages
+// and calls the LLM summarizer.
+func (c *ContextCompactor) summarizeMessages(ctx context.Context, messages []ChatMessage, timeout time.Duration) (string, error) {
+	conversationText := c.serializeMessages(messages)
+	if conversationText == "" {
+		return "", nil
+	}
+	prompt := c.buildSummaryPrompt(conversationText, c.lastSummary)
+	sumCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	resp, err := c.summarizer.Chat(sumCtx, []ChatMessage{{Role: RoleUser, Content: prompt}})
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
+}
+
+const turnPrefixPrompt = `Summarize concisely what the assistant was doing in this partial turn.
+Focus on:
+- What tool was being called and why
+- What the tool returned (if available)
+- What the assistant was about to do next
+
+Keep the summary brief (2-4 sentences).
+
+<partial_turn>
+%s
+</partial_turn>`
+
+// buildTurnPrefixPrompt builds the prompt for summarizing a partial turn.
+func (c *ContextCompactor) buildTurnPrefixPrompt(turnText string) string {
+	return fmt.Sprintf(turnPrefixPrompt, turnText)
 }
 
 func (c *ContextCompactor) LastSummary() string       { return c.lastSummary }
@@ -152,7 +253,7 @@ func (c *ContextCompactor) findCutPoint(messages []ChatMessage) CutResult {
 		if tokenCount+msgTokens > keepBudget && i < len(nonSystem)-1 { cutIdx = i + 1; break }
 		tokenCount += msgTokens
 	}
-	if cutIdx == 0 { return CutResult{SystemMsgs: systemMsgs, ToKeep: nonSystem} }
+	if cutIdx == 0 || cutIdx >= len(nonSystem) { return CutResult{SystemMsgs: systemMsgs, ToKeep: nonSystem} }
 
 	adjustedIdx := c.adjustCutPoint(nonSystem, cutIdx)
 	split, splitIdx := c.findSplitTurnBoundary(nonSystem[:adjustedIdx])
@@ -358,7 +459,7 @@ func (c *ContextCompactor) updateFileOps(summary SummaryExtract) {
 
 func (c *ContextCompactor) buildCompactionMessage(summary string, fileOps *FileOperationSet) ChatMessage {
 	var sb strings.Builder
-	sb.WriteString("[context compaction summary]\n")
+	sb.WriteString("[Compacted Context] ")
 	sb.WriteString(summary)
 	if fileOps != nil && fileOps.FileCount() > 0 {
 		sb.WriteString("\n\n## Cumulative File Operations\n")

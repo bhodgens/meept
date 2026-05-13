@@ -1383,7 +1383,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Tooling: ToolingConfig{
-			Enabled:             true,
+			Enabled:             false,
 			Mode:                "service",
 			AgentID:             "tooling",
 			Model:               "",

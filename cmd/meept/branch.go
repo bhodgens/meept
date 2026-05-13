@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/spf13/cobra"
 )
 
@@ -184,12 +185,7 @@ func runBranchList(sessionID string) error {
 	return nil
 }
 
-type branchInfo struct {
-	ID           string `json:"id"`
-	LeafID       int64  `json:"leaf_id"`
-	MessageCount int    `json:"message_count"`
-	Summary      string `json:"summary,omitempty"`
-}
+type branchInfo = types.BranchInfo
 
 func runBranchNavigate(sessionID string, targetMessageID int64) error {
 	client, err := connectDaemon()
@@ -385,16 +381,7 @@ func runBranchTree(sessionID string) error {
 	return nil
 }
 
-type treeNodeInfo struct {
-	ID        int64  `json:"id"`
-	ParentID  int64  `json:"parent_id"`
-	Role      string `json:"role"`
-	EntryType string `json:"entry_type"`
-	BranchID  string `json:"branch_id"`
-	Content   string `json:"content,omitempty"`
-	Timestamp string `json:"timestamp"`
-	IsLeaf    bool   `json:"is_leaf"`
-}
+type treeNodeInfo = types.TreeNodeInfo
 
 func truncateContent(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")

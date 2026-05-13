@@ -9,4 +9,5 @@ Understand how Meept works under the hood.
 - [Request Flow](request-flow.md) — How a message travels through the system
 - [Tools](tools.md) — Tool registry, execution, and MCP integration
 - [Memory](memory.md) — Episodic, task, personality, knowledge graph, and vector memory
+- [Context Management](context-management.md) — Compaction, compression, and the context firewall pipeline
 - [Skills](skills.md) — Skill discovery, loading, and ClawSkills marketplace

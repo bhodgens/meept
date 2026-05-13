@@ -225,11 +225,19 @@ type ContextFirewall struct {
 	tokenizer    Tokenizer
 	compressor   *ContextCompressor
 	compactor    *ContextCompactor
+	// compactionTriggerRatio is the utilization threshold at which the
+	// compactor is invoked as the primary context reduction strategy.
+	// Default 0.60 (60%). When zero, compaction only runs through the
+	// compressor pipeline (if ProactiveCompression is enabled).
+	compactionTriggerRatio float64
 
 	// Counters (atomic-safe for concurrent callers)
-	summarizationFailures atomic.Uint64
-	droppedMessages       atomic.Uint64
-	dropEvents            atomic.Uint64
+	summarizationFailures  atomic.Uint64
+	droppedMessages        atomic.Uint64
+	dropEvents             atomic.Uint64
+	compactionEvents       atomic.Uint64
+	compactionTokensSaved  atomic.Uint64
+	compactionFallbacks    atomic.Uint64
 }
 
 // FirewallStats is a snapshot of firewall counters including compression stats.
@@ -237,6 +245,10 @@ type FirewallStats struct {
 	SummarizationFailures uint64
 	DroppedMessages       uint64
 	DropEvents            uint64
+	// Compaction stats (populated when compactor is set)
+	CompactionEvents      uint64
+	CompactionTokensSaved uint64
+	CompactionFallbacks   uint64
 	// Compression stats (populated when ProactiveCompression is enabled)
 	CompressionWarningEvents    uint64
 	CompressionSummarizeEvents  uint64
@@ -250,11 +262,15 @@ type FirewallStats struct {
 
 // Stats returns a snapshot of firewall counters. When proactive compression
 // is enabled, compression counters are populated from the internal compressor.
+// When a compactor is set, compaction counters are populated.
 func (f *ContextFirewall) Stats() FirewallStats {
 	stats := FirewallStats{
 		SummarizationFailures: f.summarizationFailures.Load(),
 		DroppedMessages:       f.droppedMessages.Load(),
 		DropEvents:            f.dropEvents.Load(),
+		CompactionEvents:      f.compactionEvents.Load(),
+		CompactionTokensSaved: f.compactionTokensSaved.Load(),
+		CompactionFallbacks:   f.compactionFallbacks.Load(),
 	}
 
 	if f.compressor != nil {
@@ -371,13 +387,22 @@ func NewContextFirewall(
 	}
 }
 
-// SetCompactor sets the ContextCompactor for smart summarization.
-func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor) {
+// SetCompactor sets the ContextCompactor for smart summarization and
+// configures the trigger ratio for direct compaction in processMessages.
+// When triggerRatio > 0, the compactor is invoked at that utilization level
+// as the primary context reduction strategy. When triggerRatio is 0, the
+// compactor is only used through the compressor pipeline.
+func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor, triggerRatio float64) {
 	if compactor == nil {
 		return
 	}
 	f.compactor = compactor
-	if f.compressor != nil {
+	f.compactionTriggerRatio = triggerRatio
+	// When triggerRatio > 0, processMessages (Layer 1) handles compaction
+	// directly. Wiring the compactor into the compressor would cause double
+	// compaction. When triggerRatio == 0, the compactor is only invoked
+	// through the compressor pipeline (Layer 2).
+	if triggerRatio == 0 && f.compressor != nil {
 		f.compressor.SetCompactor(compactor)
 	}
 }
@@ -466,7 +491,35 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	currentTokens := f.countTokens(result)
 	utilization := float64(currentTokens) / float64(f.model.ContextLimit)
 
-	// Proactive compression: run the multi-stage compressor before the
+	// Layer 1: LLM-based compaction (primary strategy). When a compactor
+	// is configured with a trigger ratio, invoke it when utilization exceeds
+	// that threshold. This runs before the compressor so the smarter
+	// summarization gets first shot at reducing context pressure.
+	if f.compactor != nil && f.compactionTriggerRatio > 0 && utilization >= f.compactionTriggerRatio {
+		cr := f.compactor.Compact(ctx, result)
+		if cr.Compacted {
+			f.logger.Info("context compaction applied",
+				"tokens_before", cr.TokensBefore,
+				"tokens_after", cr.TokensAfter,
+				"utilization_before", utilization,
+			)
+			f.compactionEvents.Add(1)
+			saved := cr.TokensBefore - cr.TokensAfter
+			if saved > 0 {
+				f.compactionTokensSaved.Add(uint64(saved))
+			}
+			result = cr.Messages
+			currentTokens = cr.TokensAfter
+			utilization = float64(currentTokens) / float64(f.model.ContextLimit)
+		} else {
+			f.logger.Debug("compaction returned without compacting",
+				"utilization", utilization,
+			)
+			f.compactionFallbacks.Add(1)
+		}
+	}
+
+	// Layer 2: Proactive compression: run the multi-stage compressor before the
 	// legacy pipeline so that the more granular thresholds can reduce
 	// context pressure early.
 	if f.compressor != nil {

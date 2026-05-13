@@ -1145,17 +1145,6 @@ type CompressionReport struct {
 	MessagesAfter  int
 }
 
-// CompactionEntry represents a compaction summary that replaces a range of messages.
-// When compaction mode is enabled, the agent loop emits these entries to the session
-// store instead of silently deleting messages.
-type CompactionEntry struct {
-	Summary       string // Summary text for the compacted range
-	CompressedIDs []int64 // IDs of the compressed session messages (populated from SQLite)
-	TokenSaved    int     // Approximate tokens saved by this compaction
-	MsgsBefore    int     // Total messages before compaction
-	MsgsAfter     int     // Total messages after compaction
-}
-
 // CompressByImportance removes messages based on semantic importance to reach a target
 // token ratio. The targetRatio parameter (0.0-1.0) specifies what fraction of the current
 // token count to retain. For example, 0.5 means compress to 50% of current tokens.

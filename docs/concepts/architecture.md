@@ -38,6 +38,8 @@ flowchart TB
         Budget["Budget Tracker<br/>internal/llm"]
         TokenCache["Token Cache<br/>internal/llm (L1+L2)"]
         Providers["Provider Adapters<br/>OpenAI-compatible"]
+        Compactor["Context Compactor<br/>internal/llm"]
+        Firewall["Context Firewall<br/>internal/llm"]
     end
 
     subgraph Tools["Tool System"]
@@ -83,6 +85,8 @@ flowchart TB
     LLMClient --> Resolver
     LLMClient --> Budget
     Resolver --> Providers
+    AgentLoop --> Firewall
+    Firewall --> Compactor
 
     MemMgr --> Episodic
     MemMgr --> TaskMem
@@ -133,6 +137,8 @@ flowchart TB
 | Component | Package | Description |
 |-----------|---------|-------------|
 | LLM Client | `internal/llm` | Multi-provider LLM integration |
+| Context Compactor | `internal/llm` | LLM-based context compaction (knowledge-preserving summarization) |
+| Context Firewall | `internal/llm` | Three-layer context management (compaction, compression, hard limit) |
 | Token Cache | `internal/llm` | L1+L2 response caching with file-aware invalidation |
 | Tool Registry | `internal/tools` | Tool registration and dispatch |
 | Security | `internal/security` | Sanitization, taint tracking, permissions |

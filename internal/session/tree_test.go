@@ -43,7 +43,7 @@ func TestAssembleBranch_SimpleConversation(t *testing.T) {
 func TestAssembleBranch_WithCompaction(t *testing.T) {
 	messages := []Message{
 		{ID: 1, Role: "user", Content: "Hello", EntryType: "message"},
-		{ID: 2, Role: "assistant", Content: "Summary of earlier messages", EntryType: "compaction"},
+		{ID: 2, Role: "assistant", Content: "[Compacted Context] Summary of earlier messages", EntryType: "compaction"},
 		{ID: 3, Role: "user", Content: "Follow up", EntryType: "message"},
 		{ID: 4, Role: "assistant", Content: "Response", EntryType: "message"},
 	}
@@ -57,9 +57,9 @@ func TestAssembleBranch_WithCompaction(t *testing.T) {
 	if result[1].Role != llm.RoleSystem {
 		t.Errorf("compaction entry should have system role, got %s", result[1].Role)
 	}
-	expectedPrefix := "[Compacted Context] Summary of earlier messages"
-	if result[1].Content != expectedPrefix {
-		t.Errorf("compaction content mismatch: got %q, want %q", result[1].Content, expectedPrefix)
+	// Compaction content is passed through as-is (prefix is already in the persisted content)
+	if result[1].Content != "[Compacted Context] Summary of earlier messages" {
+		t.Errorf("compaction content mismatch: got %q", result[1].Content)
 	}
 
 	// Other messages should be unchanged
@@ -401,7 +401,7 @@ func TestAssembleBranch_Mixed(t *testing.T) {
 	messages := []Message{
 		{ID: 1, Role: "user", Content: "First question", EntryType: "message"},
 		{ID: 2, Role: "assistant", Content: "First answer", EntryType: "message"},
-		{ID: 3, Role: "assistant", Content: "Compacted: early discussion about Go basics", EntryType: "compaction"},
+		{ID: 3, Role: "assistant", Content: "[Compacted Context] Compacted: early discussion about Go basics", EntryType: "compaction"},
 		{ID: 4, Role: "user", Content: "Second question", EntryType: "branch_point"},
 		{ID: 5, Role: "system", Content: "Abandoned branch explored error handling", EntryType: "summary"},
 		{ID: 6, Role: "user", Content: "Third question", EntryType: "message"},
@@ -441,10 +441,10 @@ func TestAssembleBranch_Mixed(t *testing.T) {
 func TestAssembleBranch_CompactionPreservesOrder(t *testing.T) {
 	// Multiple compaction entries should maintain their relative order
 	messages := []Message{
-		{ID: 1, Role: "assistant", Content: "Early compaction", EntryType: "compaction"},
+		{ID: 1, Role: "assistant", Content: "[Compacted Context] Early compaction", EntryType: "compaction"},
 		{ID: 2, Role: "user", Content: "question 1", EntryType: "message"},
 		{ID: 3, Role: "assistant", Content: "answer 1", EntryType: "message"},
-		{ID: 4, Role: "assistant", Content: "Later compaction", EntryType: "compaction"},
+		{ID: 4, Role: "assistant", Content: "[Compacted Context] Later compaction", EntryType: "compaction"},
 		{ID: 5, Role: "user", Content: "question 2", EntryType: "message"},
 	}
 
@@ -453,7 +453,7 @@ func TestAssembleBranch_CompactionPreservesOrder(t *testing.T) {
 		t.Fatalf("expected 5 messages, got %d", len(result))
 	}
 
-	// First compaction
+	// First compaction (content passed through as-is)
 	if result[0].Role != llm.RoleSystem || result[0].Content != "[Compacted Context] Early compaction" {
 		t.Errorf("first compaction mismatch: role=%s content=%s", result[0].Role, result[0].Content)
 	}

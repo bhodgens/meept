@@ -545,7 +545,7 @@
   // LLM-based context compaction (preserves knowledge instead of discarding messages)
   "compaction": {
     "enabled": false,                  // Master switch (disabled by default)
-    "model": "",                      // Compaction model (empty = working model)
+    "model": "",                      // Compaction model ref (empty = small_model, then working model)
     "reserve_tokens": 16384,           // Tokens reserved for response after compaction
     "keep_recent_tokens": 20000,       // Recent tokens to keep verbatim
     "max_response_tokens": 13107,      // Max tokens for compaction summary

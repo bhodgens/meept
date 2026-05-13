@@ -75,6 +75,7 @@ nav:
       - Request Flow: concepts/request-flow.md
       - Tools: concepts/tools.md
       - Memory: concepts/memory.md
+      - Context Management: concepts/context-management.md
       - Skills: concepts/skills.md
       - Token Caching: concepts/token-caching.md
   - Configuration:
