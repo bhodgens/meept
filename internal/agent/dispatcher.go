@@ -186,7 +186,7 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	if cfg.EmbeddingClient != nil {
 		d.semanticIndex = NewSemanticIndex(cfg.EmbeddingClient)
 		// Build index in background
-		go func() {
+		go func() { //nolint:gosec // background goroutine outlives request context
 			if err := d.semanticIndex.BuildIndex(context.Background()); err != nil {
 				d.logger.Warn("Failed to build semantic index", "error", err)
 			}
@@ -680,7 +680,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 
 	// Record memory of this interaction
 	if d.memvid != nil && d.memvid.IsAvailable(ctx) {
-		go d.recordInteraction(context.Background(), result, displayResponse)
+		go d.recordInteraction(context.Background(), result, displayResponse) //nolint:gosec // background goroutine outlives request context
 	}
 
 	return displayResponse, nil

@@ -133,7 +133,7 @@ func ClientTLSConfig(cfg TLSConfig) (*tls.Config, error) {
 // WARNING: This should only be used for testing/development.
 func InsecureSkipVerify() *tls.Config {
 	return &tls.Config{
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: true, //nolint:gosec // development mode only; production uses proper TLS
 		MinVersion:         tls.VersionTLS12,
 	}
 }

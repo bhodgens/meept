@@ -183,7 +183,7 @@ type Provider struct {
 // ProviderOptions holds provider-specific options.
 type ProviderOptions struct {
 	BaseURL string `json:"baseURL"`
-	APIKey  string `json:"apiKey"`
+	APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
 	Timeout int    `json:"timeout"`
 }
 

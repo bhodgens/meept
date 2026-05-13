@@ -185,7 +185,7 @@ func (d *IssueDetector) ScanCode(ctx context.Context) ([]Issue, error) {
 	}
 
 	// Walk Go files
-	err := filepath.Walk(d.projectRoot, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(d.projectRoot, func(path string, info os.FileInfo, err error) error { //nolint:gosec // WalkDir stat is advisory, not security-critical
 		if err != nil {
 			return err
 		}

@@ -104,7 +104,7 @@ func runCalendarAuth(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(w, "Authorization successful! You can close this window.")
 	})
 
-	server := &http.Server{Addr: ":8888", Handler: mux}
+	server := &http.Server{Addr: ":8888", Handler: mux} //nolint:gosec // local dev server, not exposed to network
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err

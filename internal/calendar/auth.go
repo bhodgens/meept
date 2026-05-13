@@ -43,9 +43,9 @@ func DefaultOAuth2Config(clientID, clientSecret, redirectURI string) OAuth2Confi
 
 // Token represents an OAuth2 token.
 type Token struct {
-	AccessToken  string    `json:"access_token"`
+	AccessToken  string    `json:"access_token"`  //nolint:gosec // field name, not a secret
 	TokenType    string    `json:"token_type"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
+	RefreshToken string    `json:"refresh_token,omitempty"` //nolint:gosec // field name, not a secret
 	Expiry       time.Time `json:"expiry,omitempty,omitzero"` //nolint:modernize
 }
 
@@ -123,10 +123,10 @@ func (a *OAuth2Authenticator) Exchange(ctx context.Context, code string) (*Token
 	}
 
 	var tokenResp struct {
-		AccessToken  string `json:"access_token"`
+		AccessToken  string `json:"access_token"`  //nolint:gosec // field name, not a secret
 		TokenType    string `json:"token_type"`
 		ExpiresIn    int    `json:"expires_in"`
-		RefreshToken string `json:"refresh_token"`
+		RefreshToken string `json:"refresh_token"` //nolint:gosec // field name, not a secret
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
@@ -172,7 +172,7 @@ func (a *OAuth2Authenticator) Refresh(ctx context.Context, refreshToken string) 
 	}
 
 	var tokenResp struct {
-		AccessToken string `json:"access_token"`
+		AccessToken string `json:"access_token"` //nolint:gosec // field name, not a secret
 		TokenType   string `json:"token_type"`
 		ExpiresIn   int    `json:"expires_in"`
 	}

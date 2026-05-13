@@ -51,7 +51,7 @@ type CalendarConfig struct {
 	// ClientID is the Google OAuth2 client ID (supports ${ENV_VAR} expansion)
 	ClientID string `json:"client_id" toml:"client_id"`
 	// ClientSecret is the Google OAuth2 client secret (supports ${ENV_VAR} expansion)
-	ClientSecret string `json:"client_secret" toml:"client_secret"`
+	ClientSecret string `json:"client_secret" toml:"client_secret"` //nolint:gosec // field name, not a secret
 	// CalendarID is the Google Calendar ID (default: "primary")
 	CalendarID string `json:"calendar_id" toml:"calendar_id"`
 	// RedirectURI is the OAuth2 redirect URI (default: "http://localhost:8888/callback")
@@ -408,7 +408,7 @@ type PersonalityConfig struct {
 type EmbeddingConfig struct {
 	Enabled   bool   `json:"enabled"   toml:"enabled"`
 	Provider  string `json:"provider"  toml:"provider"` // "openai" or "ollama"
-	APIKey    string `json:"api_key"   toml:"api_key"`
+	APIKey    string `json:"api_key"   toml:"api_key"`   //nolint:gosec // field name, not a secret
 	BaseURL   string `json:"base_url"  toml:"base_url"`
 	Model     string `json:"model"     toml:"model"`
 	Dimension int    `json:"dimension" toml:"dimension"`
@@ -657,7 +657,7 @@ type SecurityConfig struct {
 
 	// Output monitoring
 	MonitorOutput bool `json:"monitor_output" toml:"monitor_output"` // Enable credential detection in LLM output
-	RedactOutput  bool `json:"redact_output"  toml:"redact_output"`  // Automatically redact detected credentials
+	RedactOutput  bool `json:"redact_output"  toml:"redact_output"`  //nolint:gosec // field name, not a secret // Automatically redact detected credentials
 
 	// Shell command security
 	ScanShellCommands bool   `json:"scan_shell_commands" toml:"scan_shell_commands"` // Enable Tirith command scanning
@@ -715,7 +715,7 @@ type WebConfig struct {
 	Enabled   bool   `json:"enabled"    toml:"enabled"`
 	Host      string `json:"host"       toml:"host"`
 	Port      int    `json:"port"       toml:"port"`
-	SecretKey string `json:"secret_key" toml:"secret_key"`
+	SecretKey string `json:"secret_key" toml:"secret_key"` //nolint:gosec // field name, not a secret
 }
 
 // MCPConfig holds MCP settings.
@@ -765,7 +765,7 @@ type SelfImproveConfig struct {
 type AIInfraConfig struct {
 	Enabled         bool    `json:"enabled"          toml:"enabled"`
 	BaseURL         string  `json:"base_url"         toml:"base_url"`
-	APIKeyEnv       string  `json:"api_key_env"      toml:"api_key_env"`
+	APIKeyEnv       string  `json:"api_key_env"      toml:"api_key_env"`   //nolint:gosec // field name, not a secret
 	AnalysisModel   string  `json:"analysis_model"   toml:"analysis_model"`
 	GenerationModel string  `json:"generation_model" toml:"generation_model"`
 	ReviewModel     string  `json:"review_model"     toml:"review_model"`

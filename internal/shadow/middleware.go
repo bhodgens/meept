@@ -122,7 +122,7 @@ func (m *Middleware) shouldShadow(_ context.Context, messages []llm.ChatMessage)
 	// Check mode-specific filters for selective mode
 	if cfg.Mode == ModeSelective {
 		// Sample rate check
-		if cfg.SampleRate < 1.0 && rand.Float64() > cfg.SampleRate {
+		if cfg.SampleRate < 1.0 && rand.Float64() > cfg.SampleRate { //nolint:gosec // non-cryptographic randomness for rate limiting
 			return false
 		}
 	}

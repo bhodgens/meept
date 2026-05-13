@@ -109,7 +109,7 @@ func (d *AgentDesigner) determineRoleAndPurpose(pattern PatternReport, requireme
 
 	reqCount := minInt(len(requirements), 3)
 	for i := range reqCount {
-		fmt.Fprintf(&purpose, "%d. %s\n", i+1, requirements[i])
+		fmt.Fprintf(&purpose, "%d. %s\n", i+1, requirements[i]) //nolint:gosec // index bounded by minInt(len(requirements), 3) above
 	}
 	if reqCount == 0 {
 		fmt.Fprintf(&purpose, "1. Execute %s tasks with high quality\n", intent)

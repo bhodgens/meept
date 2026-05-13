@@ -226,7 +226,7 @@ func exprToString(expr ast.Expr) string {
 
 // generateDocs creates markdown files for each struct
 func generateDocs(structs []StructInfo, outputDir string) error {
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if err := os.MkdirAll(outputDir, 0755); err != nil { //nolint:gosec // generated docs directory is public
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 

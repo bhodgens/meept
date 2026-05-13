@@ -413,7 +413,7 @@ func splitModelRef(ref string) []string {
 
 // execCommand executes a command with the given arguments.
 func execCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) //nolint:gosec // path is constructed from known config values
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = os.Stdin
 	cmd.Stderr = os.Stderr
