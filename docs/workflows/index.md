@@ -27,6 +27,7 @@ Feature specifications describing how each Meept subsystem works, with configura
 | [Deterministic Execution](deterministic-execution.md) | Evidence-based validation, concurrency control, retry logic |
 | [Taint Tracking](taint-tracking.md) | Lattice-based information flow security |
 | [Shadow Training](shadow-training.md) | Parallel teacher execution and training data export |
+| [Q Agent](q-agent.md) | Meta-agent for session analysis and optimization design |
 
 ## Self-Improvement
 

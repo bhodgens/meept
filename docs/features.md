@@ -189,6 +189,16 @@ A transparent wrapper around the LLM client that manages context pressure before
 - **Windowed Messages**: Preserves system prompt + original user message + recent context
 - **Budget Ratios**: Configurable iteration (30%) and conversation (50%) budget allocation
 
+**Three-Layer Context Management:**
+
+| Layer | Component | Trigger | Behavior |
+|-------|-----------|---------|----------|
+| **Layer 1** | Context Compactor | `compaction_trigger_ratio` (e.g., 0.6) | LLM-based structured summarization replacing old messages with compaction entries |
+| **Layer 2** | Context Compressor | Stage thresholds (70%, 85%, 95%) | Multi-stage compression: keeps system + summary + recent messages |
+| **Layer 3** | Hard Limit | Token budget exhaustion | Keeps system + last 2 messages only |
+
+**Structured Compaction:** The Context Compactor generates `[Compacted Context]` entries that replace ranges of old messages. Compaction entries store JSON with summary, compressed message IDs, tokens saved, and file operation tracking. The context assembler skips compressed messages and substitutes compaction summaries. Split-turn compaction handles cases where an assistant response spans a tool-call round trip by merging both halves into a single summary.
+
 **Structured Summarization Output:**
 ```
 [Conversation summary level 1]: status: debugging auth issue.
@@ -201,6 +211,68 @@ open questions: should refresh tokens be rotated?;
 [agent]
 proactive_compression = true
 model_context_limit = 32768  # override model default
+
+[agent.compaction]
+enabled = true
+trigger_ratio = 0.6          # compact when 60% of context used
+summary_model = ""           # model for compaction summaries (empty = default)
+```
+
+---
+
+### Session Persistence & Branching
+
+Meept bridges its in-memory ConversationStore with SQLite-backed persistent storage, enabling session resumption across daemon restarts and tree-structured conversation branching.
+
+#### Session Resumption
+
+On daemon startup or when accessing a conversation not in the in-memory cache:
+1. Query SQLite for the session's message path from root to the `leaf_message_id` pointer
+2. Reconstruct the `[]llm.ChatMessage` slice including tool calls, compaction entries, and branch summaries
+3. Populate the in-memory `Conversation` object for the agent loop
+4. Apply message limits if configured
+
+Incremental persistence tracks already-saved message count to avoid re-inserting all messages each turn. Only new messages are appended with proper `parent_id` chaining.
+
+#### Tree-Structured Branching
+
+Messages use a `parent_id` column enabling tree-structured conversations:
+
+```
+root ─── msg1 ─── msg2 ─── msg3 (leaf)
+                     └── msg4 ─── msg5 (branch B)
+```
+
+**Branch Navigation:** Moving the leaf pointer to a prior message creates a fork. The abandoned branch can be summarized via LLM for context in sibling branches.
+
+**Branch Summarization:** When navigating away from a branch with 5+ messages, the system generates a `[Branch Summary]` that is included in context for sibling branches.
+
+**Session Forking:** Copy a conversation subtree to a new session for parallel exploration. The fork operation is transactional and preserves the full message tree.
+
+**Context Assembly:** The `AssembleBranch` function walks the message path from root to leaf, skipping compacted messages (tracked via `compressed_ids` in compaction entries) and including compaction summaries and branch summaries as system messages.
+
+**CLI Commands:**
+```bash
+./bin/meept branch list <session-id>       # List branches in a session
+./bin/meept branch navigate <message-id>   # Move to a branch point
+./bin/meept branch tree <session-id>       # Show tree structure
+./bin/meept branch summary <session-id>    # Show branch summaries
+```
+
+**TUI:** `Ctrl+B` opens branch navigator; current branch shown in status bar.
+
+**Configuration:**
+```json5
+{
+  session: {
+    persistence: true,              // Enable session resumption
+    branching: true,                // Enable conversation branching
+    max_branches: 20,               // Max branches per session (0 = unlimited)
+    branch_summary_threshold: 5,    // Min messages before branch summarization
+    restore_message_limit: 0,       // Max messages to restore (0 = all)
+    compaction: true,               // Enable compaction entries
+  }
+}
 ```
 
 ---
@@ -231,6 +303,39 @@ Meept uses a specialist-agent architecture where different agents handle differe
 - `platform_status`: Get platform health status
 - `platform_tools`: List registered tools
 - `delegate_task`: Route a task to a specific agent
+
+#### Steering and Follow-Up Queues
+
+Real-time message injection into active agent conversations without restarting them.
+
+**Steering** (urgent redirection): When the user sends a new message while an agent is executing, the dispatcher classifies the intent using a steering heuristic table. High-urgency intents (code, debug, git, plan, security, tool-use) immediately inject into the active agent's conversation via the message queue, causing the agent to pivot mid-execution.
+
+**Follow-up** (queued context): Low-urgency intents (chat, memory, report, review, search, skill) are queued and injected after the current turn completes, providing context without interrupting flow.
+
+**Key features:**
+- Generation counters prevent stale queue operations from previous conversations
+- SQLite persistence for follow-up messages survives daemon restarts
+- Write-behind buffering with configurable flush delay
+- Single-message drain for steering (processes one message at a time)
+- Agent lifecycle events for queue registration/unregistration
+
+**TUI:** `Ctrl+S` toggles steer mode; queue status shown in status bar.
+
+**Configuration:**
+```json5
+{
+  agent: {
+    queues: {
+      steering_drain: "one",    // "one" (single) or "all" (batch)
+      followup_drain: "all",
+      max_steering: 1,
+      max_followup: 20,
+      persist_followup: true,
+      flush_delay_ms: 500,
+    }
+  }
+}
+```
 
 #### Compound Task Acknowledgment
 
@@ -511,6 +616,18 @@ results, err := hybrid.Search(ctx, "query", 20)
 - Updates every N conversations
 - Influences response style and behavior
 
+#### Context Propagation to Subtasks
+
+Child steps inherit parent task context and accumulate knowledge from prior completed steps.
+
+**Flow:** Parent task `MemoryRefs` → first step → subsequent steps. Each step's evidence/output is appended to an `AccumulatedContext` that becomes available to the next step.
+
+- `TaskStep.MemoryRefs` — memory IDs inherited from parent task or accumulated from prior steps (deduplicated)
+- `TaskStep.AccumulatedContext` — evidence/outputs from prior steps, appended with `---` separators
+- `StrategicPlanner` copies parent task `MemoryRefs` to the first step during planning
+- `TacticalScheduler.propagateContextToNextSteps()` copies completed step's result and memory refs to all ready next steps
+- Agent prompts include a context section listing available memories and accumulated findings from prior steps
+
 ---
 
 ### Security
@@ -629,6 +746,18 @@ When rate limits hit:
 1. Rotate to next model in alias (immediate retry)
 2. Exponential backoff if alias exhausted (2s → 4s → 8s → 16s → 32s)
 3. Max 5 attempts before returning error
+
+#### Token Usage Trickle-Up
+
+Real-time token usage tracking that aggregates from child steps to parent tasks and displays in chat and sidebar.
+
+**Flow:** AgentLoop → `llm.tokens.used` bus event → TacticalScheduler aggregates → Task.Metadata → periodic progress events → TUI display.
+
+- Each `Task` and `TaskStep` tracks `TokenUsage` via `AddTokenUsage()` method
+- AgentLoop publishes token counts after each LLM call via bus events
+- TacticalScheduler aggregates step tokens into parent task on job completion
+- Token counts displayed in sidebar (e.g., "1.5K tok") and chat progress messages
+- Task completion messages include total token usage summary
 
 **Configuration:**
 ```toml
@@ -1004,9 +1133,12 @@ scan_type_check = true
 |---------|-------------|
 | **Evidence-Based Execution** | All agent claims validated against tool-produced evidence |
 | **Context Firewall** | Multi-stage proactive compression with LLM summarization, hierarchical re-summarization |
+| **Context Compaction** | Three-layer system: LLM-based compaction, multi-stage compression, hard limit with `[Compacted Context]` entries replacing old messages |
+| **Session Persistence & Branching** | SQLite-backed session resumption across restarts, tree-structured branching with LLM summarization, session forking |
 | **Deterministic Execution** | Concurrency control, validation gates, checkpoints, retry hierarchy |
 | **MCP Protocol Support** | First-class Model Context Protocol integration for external tools |
 | **Agent Coworker Awareness** | Agents discover and delegate to each other via platform tools |
+| **Steering & Follow-Up Queues** | Real-time message injection: urgent steering interrupts active agents, follow-up queues context for after current turn |
 | **Compound Task ACK** | Enhanced async acknowledgment with subtask summary, duration estimates, multi-agent detection |
 | **Markdown Agent Definitions** | User-customizable AGENT.md files with YAML frontmatter, 4-tier discovery |
 | **Global Rules & Reporting** | Platform-wide rules with structured JSON reports |
@@ -1016,12 +1148,15 @@ scan_type_check = true
 | **Self-Improvement System** | Automated detection, fixing, and validation of code issues |
 | **Advanced Knowledge Graph** | PageRank scoring, community detection, hybrid search |
 | **Multi-Tier Memory** | Episodic, task, knowledge graph, distributed, and semantic memory |
+| **Context Propagation** | Child steps inherit parent MemoryRefs and accumulate findings from prior steps |
+| **Token Usage Trickle-Up** | Real-time token tracking aggregated from steps to tasks, displayed in chat and sidebar |
+| **Progress Event Reliability** | All progress updates visible in chat with no rate limiting; immediate error escalation |
 | **Taint Tracking** | Lattice-based information flow tracking for security |
 | **Native Anthropic Driver** | Extended thinking mode with progress reporting |
 | **Web Search (No API Key)** | DuckDuckGo integration without API requirements |
 | **Code Intelligence (AST+LSP)** | Tree-sitter parsing, AST-based code compression, and LSP client tools |
 | **Semantic Memory Clustering** | Union-find cosine similarity grouping for memory consolidation |
-| **Responsive TUI** | Adaptive layout with fuzzy finder, message threading, task detail modal |
+| **Responsive TUI** | Adaptive layout with fuzzy finder, message threading, task detail modal, branch navigator |
 | **Validation Retry Loop** | Automatic step re-queue on validation failure with configurable max retries |
 | **Model Failover** | Alias rotation with exponential backoff |
 | **Hallucination Detection** | Pattern-based detection with configurable sensitivity |
@@ -1055,6 +1190,7 @@ The interactive TUI provides a rich terminal interface built with Bubbletea v2.
 - **Task detail modal**: Enter on a task shows full step breakdown, progress bars, memory context
 - **Slash commands**: `/tasks`, `/cancel`, `/amend` for task management
 - **Multi-panel view**: Chat, tasks, and sidebar panels
+- **Progress event reliability**: All progress updates visible in chat (not silently dropped). `chat_visible` flag replaces deprecated `silent` flag. No rate limiting on progress events — all are delivered. Error escalation path ensures step failures appear in chat immediately via `task.error` topic.
 
 ---
 
@@ -1144,6 +1280,12 @@ enable_checkpoints = true
 ./bin/meept status                 # Show daemon status
 ./bin/meept agents                 # List agents
 ./bin/meept tools                  # List tools
+
+# Branch
+./bin/meept branch list <session>  # List branches in a session
+./bin/meept branch navigate <id>   # Navigate to a branch point
+./bin/meept branch tree <session>  # Show tree structure
+./bin/meept branch summary <session> # Show branch summaries
 
 # Jobs
 ./bin/meept jobs list              # List jobs
