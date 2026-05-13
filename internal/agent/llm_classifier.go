@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 )
@@ -32,18 +33,18 @@ var intentThresholds = map[string]float64{
 }
 
 var agentMapping = map[string]string{
-	"git":      "committer",
-	"schedule": "scheduler",
-	"code":     "coder",
-	"debug":    "debugger",
-	"review":   "coder",
-	"plan":     "planner",
-	"platform": "chat",
-	"report":   "chat",
-	"recall":   "chat",
-	"analyze":  "analyst",
-	"search":   "analyst",
-	"chat":     "chat",
+	"git":      config.AgentIDCommitter,
+	"schedule": config.AgentIDScheduler,
+	"code":     config.AgentIDCoder,
+	"debug":    config.AgentIDDebugger,
+	"review":   config.AgentIDCoder,
+	"plan":     config.AgentIDPlanner,
+	"platform": config.AgentIDChat,
+	"report":   config.AgentIDChat,
+	"recall":   config.AgentIDChat,
+	"analyze":  config.AgentIDAnalyst,
+	"search":   config.AgentIDAnalyst,
+	"chat":     config.AgentIDChat,
 }
 
 type LLMClassifier struct {

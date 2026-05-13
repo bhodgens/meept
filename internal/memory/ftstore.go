@@ -211,7 +211,7 @@ func (s *SQLiteFTSStore) DeleteByIDs(ctx context.Context, tableName string, ids 
 		args[i] = id
 	}
 
-	query := fmt.Sprintf("DELETE FROM %s WHERE id IN (%s)", tableName, joinStrings(placeholders, ","))
+	query := fmt.Sprintf("DELETE FROM %s WHERE id IN (%s)", tableName, joinStrings(placeholders, ",")) //nolint:gosec // table name from FTSConfig, not user input
 	result, err := s.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete items: %w", err)
@@ -232,7 +232,7 @@ func (s *SQLiteFTSStore) Count(ctx context.Context, tableName string) (int, erro
 
 	var count int
 	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+tableName).Scan(&count)
+		return db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+tableName).Scan(&count) //nolint:gosec // table name from FTSConfig, not user input
 	})
 	return count, err
 }
@@ -248,7 +248,7 @@ func (s *SQLiteFTSStore) GetOldestTimestamp(ctx context.Context, tableName strin
 
 	var ts sql.NullString
 	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT MIN(created_at) FROM "+tableName).Scan(&ts)
+		return db.QueryRowContext(ctx, "SELECT MIN(created_at) FROM "+tableName).Scan(&ts) //nolint:gosec // table name from FTSConfig, not user input
 	})
 	if err != nil {
 		return nil, err
@@ -276,7 +276,7 @@ func (s *SQLiteFTSStore) GetNewestTimestamp(ctx context.Context, tableName strin
 
 	var ts sql.NullString
 	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT MAX(created_at) FROM "+tableName).Scan(&ts)
+		return db.QueryRowContext(ctx, "SELECT MAX(created_at) FROM "+tableName).Scan(&ts) //nolint:gosec // table name from FTSConfig, not user input
 	})
 	if err != nil {
 		return nil, err
@@ -360,6 +360,7 @@ func (s *SQLiteFTSStore) FindDuplicateGroups(ctx context.Context, tableName stri
 	}
 	defer s.pool.Put(db)
 
+	//nolint:gosec // table name from FTSConfig, not user input
 	rows, err := db.QueryContext(ctx, `
 		SELECT GROUP_CONCAT(id, ','), content, COUNT(*) as cnt
 		FROM `+tableName+`

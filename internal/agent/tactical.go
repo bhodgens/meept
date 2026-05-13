@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/task"
@@ -89,7 +90,7 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 	agentSemaphore := make(map[string]chan struct{})
 
 	// Pre-initialize semaphores for known agents
-	knownAgents := []string{"coder", "debugger", "planner", "analyst", "committer", "scheduler", "chat"}
+	knownAgents := []string{config.AgentIDCoder, config.AgentIDDebugger, config.AgentIDPlanner, config.AgentIDAnalyst, config.AgentIDCommitter, config.AgentIDScheduler, config.AgentIDChat}
 	for _, agentID := range knownAgents {
 		agentSemaphore[agentID] = make(chan struct{}, maxConcurrentPerAgent)
 	}
@@ -928,19 +929,19 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 	switch step.ToolHint {
 	case "code", "refactor":
-		return "coder"
+		return config.AgentIDCoder
 	case "debug", "fix":
-		return "debugger"
+		return config.AgentIDDebugger
 	case "analyze", "research":
-		return "analyst"
+		return config.AgentIDAnalyst
 	case "git", "commit":
-		return "committer"
+		return config.AgentIDCommitter
 	case "schedule":
-		return "scheduler"
+		return config.AgentIDScheduler
 	case "plan":
-		return "planner"
+		return config.AgentIDPlanner
 	default:
-		return "chat"
+		return config.AgentIDChat
 	}
 }
 

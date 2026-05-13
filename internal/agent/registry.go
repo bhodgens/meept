@@ -227,7 +227,7 @@ func (r *AgentRegistry) Get(id string) (*AgentLoop, error) {
 
 // GetDispatcher returns the dispatcher agent loop.
 func (r *AgentRegistry) GetDispatcher() (*AgentLoop, error) {
-	return r.Get("dispatcher")
+	return r.Get(config.AgentIDDispatcher)
 }
 
 // createLoop creates a new agent loop from a spec.

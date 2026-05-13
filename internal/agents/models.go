@@ -9,6 +9,8 @@ import "slices"
 
 import "time"
 
+import "github.com/caimlas/meept/internal/config"
+
 // Priority levels for agent discovery (lower is higher priority).
 const (
 	PriorityProject = 0 // .meept/agents/ (project-local)
@@ -114,7 +116,7 @@ func (d *AgentDefinition) GetSkillForTrigger(keyword string) string {
 // DefaultMetadata returns sensible default values for agent metadata.
 func DefaultMetadata() AgentMetadata {
 	return AgentMetadata{
-		Role:             "executor",
+		Role:             config.AgentRoleExecutor,
 		MaxIterations:    25,
 		TimeoutSeconds:   300,
 		MaxTokensPerTurn: 4096,

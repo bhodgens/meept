@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
@@ -621,7 +622,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 			isSteer := shouldSteer(IntentType(result.Intent.Type), result.ExplicitSteerMode)
 
 			if isSteer {
-				if err := queue.Steer(ctx, result.Intent.Summary, "dispatcher"); err != nil {
+				if err := queue.Steer(ctx, result.Intent.Summary, config.AgentIDDispatcher); err != nil {
 					if errors.Is(err, ErrQueueClosed) || errors.Is(err, ErrQueueFull) {
 						d.logger.Warn("Queue injection failed, starting new agent",
 							"conversation", conversationID,
@@ -635,7 +636,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 					return "message queued (steer)", nil
 				}
 			} else {
-				if err := queue.FollowUp(ctx, result.Intent.Summary, "dispatcher"); err != nil {
+				if err := queue.FollowUp(ctx, result.Intent.Summary, config.AgentIDDispatcher); err != nil {
 					if errors.Is(err, ErrQueueClosed) || errors.Is(err, ErrQueueFull) {
 						d.logger.Warn("Queue injection failed, starting new agent",
 							"conversation", conversationID,
@@ -837,23 +838,23 @@ var keywordPatterns = []keywordPattern{
 	{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, string(IntentRecall), "chat", 0.85, false},
 
 	// Code-related
-	{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), "debugger", 0.8, false},
-	{[]string{"write code", "implement", "create function", "add feature", "refactor"}, string(IntentCode), "coder", 0.8, false},
-	{[]string{"code review", "review pr", "check code"}, string(IntentReview), "coder", 0.75, false},
+	{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), config.AgentIDDebugger, 0.8, false},
+	{[]string{"write code", "implement", "create function", "add feature", "refactor"}, string(IntentCode), config.AgentIDCoder, 0.8, false},
+	{[]string{"code review", "review pr", "check code"}, string(IntentReview), config.AgentIDCoder, 0.75, false},
 
 	// Git operations
-	{[]string{"commit", "push", "pull", "merge", "branch", "git"}, string(IntentGit), "committer", 0.8, false},
+	{[]string{"commit", "push", "pull", "merge", "branch", "git"}, string(IntentGit), config.AgentIDCommitter, 0.8, false},
 
 	// Scheduling
-	{[]string{"remind", "schedule", "alarm", "timer", "at ", "tomorrow", "next week"}, string(IntentSchedule), "scheduler", 0.8, false},
+	{[]string{"remind", "schedule", "alarm", "timer", "at ", "tomorrow", "next week"}, string(IntentSchedule), config.AgentIDScheduler, 0.8, false},
 
 	// Planning
-	{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, string(IntentPlan), "planner", 0.8, true},
+	{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, string(IntentPlan), config.AgentIDPlanner, 0.8, true},
 
 	// Analysis/Research ("summarize" alone stays here for document summarization;
 	// "summarize what" and "summary of work" are captured by report intent above)
-	{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, string(IntentAnalyze), "analyst", 0.7, false},
-	{[]string{"search", "find", "look up", "google"}, string(IntentSearch), "analyst", 0.7, false},
+	{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, string(IntentAnalyze), config.AgentIDAnalyst, 0.7, false},
+	{[]string{"search", "find", "look up", "google"}, string(IntentSearch), config.AgentIDAnalyst, 0.7, false},
 
 	// General chat (lower priority)
 	{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), "chat", 0.6, false},
