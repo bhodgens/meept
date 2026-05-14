@@ -148,27 +148,27 @@ func (t IntentType) Keywords() []string {
 	case IntentChat:
 		return []string{"hello", "hi", "thanks", "help"}
 	case IntentReport:
-		return []string{"report", "what did you", "summary", "progress"}
+		return []string{string(IntentReport), "what did you", "summary", "progress"}
 	case IntentRecall:
-		return []string{"remember", "recall", "last time"}
+		return []string{"remember", string(IntentRecall), "last time"}
 	case IntentPlatform:
-		return []string{"capabilities", "what can you", "platform"}
+		return []string{"capabilities", "what can you", string(IntentPlatform)}
 	case IntentStatus:
 		return []string{"status", "how are things", "check status"}
 	case IntentCode:
-		return []string{"implement", "create", "add feature", "refactor"}
+		return []string{"implement", "create", "add feature", KeywordRefactor}
 	case IntentDebug:
-		return []string{"fix bug", "error", "broken", "not working"}
+		return []string{KeywordFix + " bug", string(MessageTypeError), "broken", "not working"}
 	case IntentReview:
 		return []string{"review pr", "check code", "code review"}
 	case IntentGit:
-		return []string{"commit", "push", "pull", "merge", "branch"}
+		return []string{KeywordCommit, "push", "pull", "merge", "branch"}
 	case IntentSchedule:
-		return []string{"remind", "schedule", "alarm", "at "}
+		return []string{"remind", string(IntentSchedule), "alarm", "at "}
 	case IntentPlan:
-		return []string{"plan", "design", "architect", "how should i"}
+		return []string{string(IntentPlan), KeywordDesign, "architect", "how should i"}
 	case IntentAnalyze, IntentSearch:
-		return []string{"research", "analyze", "explain", "search"}
+		return []string{"research", string(IntentAnalyze), KeywordExplain, "search"}
 	case IntentResearch:
 		return []string{"research", "investigate", "deep dive", "study"}
 	case IntentSecurity:
@@ -183,3 +183,13 @@ func (t IntentType) Keywords() []string {
 		return nil
 	}
 }
+
+// Action keyword constants used in routing tables, review policies, and capability builders.
+// These represent keyword-level triggers, distinct from IntentType values.
+const (
+	KeywordRefactor = "refactor"
+	KeywordCommit   = "commit"
+	KeywordFix      = "fix"
+	KeywordDesign   = "design"
+	KeywordExplain  = "explain"
+)

@@ -129,12 +129,12 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("ctrl+c", "quit"),
 		),
 		Enter: key.NewBinding(
-			key.WithKeys("enter"),
-			key.WithHelp("enter", "submit"),
+			key.WithKeys(KeyEnter),
+			key.WithHelp(KeyEnter, "submit"),
 		),
 		Escape: key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "cancel"),
+			key.WithKeys(KeyEsc),
+			key.WithHelp(KeyEsc, "cancel"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("ctrl+?"),
@@ -441,7 +441,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Global escape handler
-		if msg.String() == "esc" {
+		if msg.String() == KeyEsc {
 			// If sidebar is focused, unfocus and return to chat
 			if a.appFocus == FocusSidebar {
 				a.appFocus = FocusChat
@@ -478,7 +478,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Slash command detection - intercept Enter when input starts with "/"
-		if a.currentView == ViewChat && a.appFocus == FocusChat && msg.String() == "enter" {
+		if a.currentView == ViewChat && a.appFocus == FocusChat && msg.String() == KeyEnter {
 			input := a.chat.GetInputValue()
 			if strings.HasPrefix(strings.TrimSpace(input), "/") {
 				// Parse the slash command
@@ -523,7 +523,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Handle Enter for slash command execution
-			if msg.String() == "enter" {
+			if msg.String() == KeyEnter {
 				input := a.chat.GetInputValue()
 				if strings.HasPrefix(strings.TrimSpace(input), "/") {
 					cmd := ParseSlash(input)
@@ -759,13 +759,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						cmds = append(cmds, cmd)
 					}
 				}
-			case "task.completed", "task.failed":
+			case "task.completed", EventTaskFailed:
 				// Inject task result message into chat
 				if payloadMap, ok := e.Payload.(map[string]any); ok {
 					resultMsg := models.ChatTaskResultMsg{
 						State: "completed",
 					}
-					if e.Topic == "task.failed" {
+					if e.Topic == EventTaskFailed {
 						resultMsg.State = "failed"
 					}
 					if v, ok := payloadMap["task_id"].(string); ok {
@@ -792,7 +792,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						level := components.NotifySuccess
 						title := "task completed"
 						msg := resultMsg.TaskName
-						if e.Topic == "task.failed" {
+						if e.Topic == EventTaskFailed {
 							level = components.NotifyError
 							title = "task failed"
 						}
@@ -1582,12 +1582,12 @@ func (a *App) getQuickActions() []string {
 			switch chatMode {
 			case "insert":
 				actions = append(actions,
-					a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("normal"),
-					a.styles.HelpKey.Render("enter")+" "+a.styles.HelpValue.Render("send"),
+					a.styles.HelpKey.Render(KeyEsc)+" "+a.styles.HelpValue.Render("normal"),
+					a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("send"),
 				)
 			case "visual":
 				actions = append(actions,
-					a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("normal"),
+					a.styles.HelpKey.Render(KeyEsc)+" "+a.styles.HelpValue.Render("normal"),
 					a.styles.HelpKey.Render("y")+" "+a.styles.HelpValue.Render("copy"),
 				)
 			default: // normal mode
@@ -1598,13 +1598,13 @@ func (a *App) getQuickActions() []string {
 				)
 			}
 		} else {
-			actions = append(actions, a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("input"))
+			actions = append(actions, a.styles.HelpKey.Render(KeyEsc)+" "+a.styles.HelpValue.Render("input"))
 		}
 
 	case ViewTasks:
 		actions = append(actions,
 			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
-			a.styles.HelpKey.Render("enter")+" "+a.styles.HelpValue.Render("details"),
+			a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("details"),
 			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
 			a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("toggle view"),
 		)

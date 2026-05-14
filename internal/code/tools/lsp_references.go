@@ -36,28 +36,28 @@ func (t *LSPReferencesTool) Parameters() llm.FunctionParameters {
 		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			SchemaPropFilePath: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Path to the source file containing the symbol.",
 			},
 			SchemaPropLine: {
-				Type:        "integer",
+				Type:        SchemaTypeInteger,
 				Description: "Line number (0-indexed) of the symbol.",
 			},
 			SchemaPropCharacter: {
-				Type:        "integer",
+				Type:        SchemaTypeInteger,
 				Description: "Column/character offset (0-indexed) within the line.",
 			},
 			"include_declaration": {
-				Type:        "boolean",
+				Type:        SchemaTypeBoolean,
 				Description: "Include the declaration in the results (default: true).",
 			},
 		},
-		Required: []string{"file_path", "line", "character"},
+		Required: []string{SchemaPropFilePath, "line", "character"},
 	}
 }
 
 func (t *LSPReferencesTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	filePath, _ := args["file_path"].(string)
+	filePath, _ := args[SchemaPropFilePath].(string)
 	if filePath == "" {
 		return nil, fmt.Errorf("file_path is required")
 	}

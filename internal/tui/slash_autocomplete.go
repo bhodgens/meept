@@ -120,12 +120,12 @@ func (s *SlashAutocomplete) HandleKey(key string) (HandleKeyResult, tea.Cmd) {
 			s.selected--
 		}
 		return HandleKeyNavigated, nil
-	case "down", "ctrl+j", "tab":
+	case KeyDown, "ctrl+j", KeyTab:
 		if s.selected < len(s.filtered)-1 {
 			s.selected++
 		}
 		return HandleKeyNavigated, nil
-	case "enter":
+	case KeyEnter:
 		// Insert selected command and return it for execution
 		if len(s.filtered) > 0 {
 			cmd := s.GetSelectedCommandWithSlash()
@@ -134,7 +134,7 @@ func (s *SlashAutocomplete) HandleKey(key string) (HandleKeyResult, tea.Cmd) {
 			}
 		}
 		return HandleKeyPassThrough, nil
-	case "esc":
+	case KeyEsc:
 		s.Hide()
 		return HandleKeyNavigated, nil // Consume the key
 	}

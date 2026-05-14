@@ -401,17 +401,17 @@ func isBodyHolder(node *sitter.Node, lang Language) bool {
 	t := node.Type()
 	switch lang {
 	case LangGo:
-		return t == "function_declaration" || t == "method_declaration" || t == "func_literal"
+		return t == NodeFunctionDeclaration || t == NodeMethodDeclaration || t == "func_literal"
 	case LangPython:
-		return t == "function_definition" || t == "class_definition"
+		return t == NodeFunctionDefinition || t == "class_definition"
 	case LangTypeScript, LangJavaScript:
-		return t == "function_declaration" || t == "class_declaration" || t == "method_definition" || t == "arrow_function" || t == "function_expression"
+		return t == NodeFunctionDeclaration || t == NodeClassDeclaration || t == "method_definition" || t == "arrow_function" || t == "function_expression"
 	case LangRust:
 		return t == "function_item" || t == "impl_item"
 	case LangJava:
-		return t == "method_declaration" || t == "class_declaration" || t == "constructor_declaration"
+		return t == NodeMethodDeclaration || t == NodeClassDeclaration || t == "constructor_declaration"
 	case LangC, LangCpp:
-		return t == "function_definition" || t == "class_specifier" || t == "struct_specifier"
+		return t == NodeFunctionDefinition || t == "class_specifier" || t == "struct_specifier"
 	case LangRuby:
 		return t == "method" || t == "class" || t == "module"
 	default:

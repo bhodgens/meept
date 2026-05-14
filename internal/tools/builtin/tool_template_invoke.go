@@ -52,7 +52,7 @@ func (t *TemplateInvokeTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropName: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The name of the template to invoke.",
 			},
 			"args": {
@@ -60,15 +60,15 @@ func (t *TemplateInvokeTool) Parameters() llm.FunctionParameters {
 				Description: "Positional arguments for template substitution ($1, $2, $@, etc.).",
 			},
 			"inject": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "If true, inject the template as context rather than returning as text. Session-scoped templates persist until cleared.",
 			},
 			schemaPropConversationID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Required when inject=true with a session-scoped template. The conversation ID to activate the template for.",
 			},
 		},
-		Required: []string{"name"},
+		Required: []string{schemaPropName},
 	}
 }
 
@@ -92,7 +92,7 @@ func (t *TemplateInvokeTool) Execute(ctx context.Context, args map[string]any) (
 		}, nil
 	}
 
-	name, _ := args["name"].(string)
+	name, _ := args[schemaPropName].(string)
 	if name == "" {
 		return TemplateInvokeResult{
 			Success: false,

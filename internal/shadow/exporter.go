@@ -168,7 +168,7 @@ func (e *Exporter) exportJSONL(ctx context.Context, writer *bufio.Writer, opts E
 			// Build text for dedup from user messages
 			var dedupText strings.Builder
 			for _, msg := range record.Messages {
-				if msg.Role == "user" {
+				if msg.Role == RoleUser {
 					dedupText.WriteString(msg.Content + " ")
 				}
 			}
@@ -280,7 +280,7 @@ func (e *Exporter) exportOpenAI(ctx context.Context, writer *bufio.Writer, opts 
 		if e.config.Deduplicate {
 			var dedupText strings.Builder
 			for _, msg := range record.Messages {
-				if msg.Role == "user" {
+				if msg.Role == RoleUser {
 					dedupText.WriteString(msg.Content + " ")
 				}
 			}
@@ -348,7 +348,7 @@ func (e *Exporter) exportAlpaca(ctx context.Context, writer *bufio.Writer, opts 
 		if e.config.Deduplicate {
 			var dedupText strings.Builder
 			for _, msg := range record.Messages {
-				if msg.Role == "user" {
+				if msg.Role == RoleUser {
 					dedupText.WriteString(msg.Content + " ")
 				}
 			}
@@ -360,7 +360,7 @@ func (e *Exporter) exportAlpaca(ctx context.Context, writer *bufio.Writer, opts 
 		// Get last user message as instruction
 		var instruction string
 		for _, v := range slices.Backward(record.Messages) {
-			if v.Role == "user" {
+			if v.Role == RoleUser {
 				instruction = v.Content
 				break
 			}

@@ -41,6 +41,7 @@ const (
 	KeyChatVisible    = "chat_visible"
 	KeyCompletedJobs  = "completed_jobs"
 	KeyTotalJobs      = "total_jobs"
+	KeyCode           = "code"
 )
 
 // Source identifiers for event attribution.
@@ -177,7 +178,7 @@ func (c *ResultCache) hashArgs(args map[string]any) string {
 	jsonBytes, err := json.Marshal(sortedArgs)
 	if err != nil {
 		c.logger.Warn("Failed to marshal args for hashing", "error", err)
-		return "error"
+		return string(MessageTypeError)
 	}
 
 	// Generate SHA256 hash

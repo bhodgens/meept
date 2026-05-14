@@ -40,6 +40,24 @@ const (
 	ResearchTypeModelFit       = "model_fit"
 )
 
+// Pattern type constants used in pattern detection and research.
+const (
+	PatternModelMisconfiguration = "model_misconfiguration"
+	PatternHighErrorRate         = "high_error_rate"
+)
+
+// Recommended action constants for pattern remediation.
+const (
+	ActionReassignModel = "reassign_model"
+	ActionUpdateSpec    = "update_spec"
+	ActionAddTool       = "add_tool"
+)
+
+// Evidence type constants.
+const (
+	EvidenceTypeTranscript = "transcript"
+)
+
 // ConductResearch performs deep-dive analysis on a pattern report.
 func (e *ResearchEngine) ConductResearch(ctx context.Context, pattern PatternReport, analyses []*SessionAnalysis) *ResearchReport {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(e.config.AnalysisTimeoutMinutes)*time.Minute)
@@ -66,9 +84,9 @@ func (e *ResearchEngine) ConductResearch(ctx context.Context, pattern PatternRep
 // determineResearchType determines the type of research based on pattern.
 func (e *ResearchEngine) determineResearchType(pattern PatternReport) string {
 	switch pattern.PatternType {
-	case "model_misconfiguration":
+	case PatternModelMisconfiguration:
 		return ResearchTypeModelFit
-	case "high_error_rate", "high_rejection_rate":
+	case PatternHighErrorRate, "high_rejection_rate":
 		return ResearchTypeBehavioral
 	case "high_tool_failure_rate":
 		return ResearchTypeTooling
@@ -90,13 +108,13 @@ func (e *ResearchEngine) applyCausalAttribution(_ context.Context, pattern Patte
 	switch pattern.MisconfigurationType {
 	case "capability_gap":
 		return e.analyzeCapabilityGap(pattern, analyses)
-	case "model_misconfiguration":
+	case PatternModelMisconfiguration:
 		return e.analyzeModelMisconfiguration(pattern, analyses)
 	case "tool_deficiency":
 		return e.analyzeToolDeficiency(pattern, analyses)
 	case "prompt_deficiency":
 		return e.analyzePromptDeficiency(pattern, analyses)
-	case "high_error_rate":
+	case PatternHighErrorRate:
 		return e.analyzeHighErrorRate(pattern, analyses)
 	default:
 		return e.analyzeGeneric(pattern, analyses)
@@ -118,7 +136,7 @@ func (e *ResearchEngine) analyzeCapabilityGap(pattern PatternReport, analyses []
 	if len(agentStruggles) >= 2 {
 		for agentID, count := range agentStruggles {
 			evidence = append(evidence, EvidenceLink{
-				Type:        "transcript",
+				Type:        EvidenceTypeTranscript,
 				Reference:   agentID,
 				Description: fmt.Sprintf("Agent %s struggled with %d sessions of this type", agentID, count),
 			})
@@ -150,7 +168,7 @@ func (e *ResearchEngine) analyzeModelMisconfiguration(pattern PatternReport, ana
 	if len(longSessions) > 0 && len(shortSessions) > 0 {
 		for _, s := range longSessions {
 			evidence = append(evidence, EvidenceLink{
-				Type:        "transcript",
+				Type:        EvidenceTypeTranscript,
 				Reference:   s.SessionID,
 				Description: fmt.Sprintf("Long session (%v) - may indicate model struggling", s.Duration),
 			})
@@ -203,7 +221,7 @@ func (e *ResearchEngine) analyzePromptDeficiency(pattern PatternReport, analyses
 	for _, a := range analyses {
 		if a.RevisionCycles > 2 {
 			evidence = append(evidence, EvidenceLink{
-				Type:        "transcript",
+				Type:        EvidenceTypeTranscript,
 				Reference:   a.SessionID,
 				Description: fmt.Sprintf("Session had %d revision cycles - possible prompt confusion", a.RevisionCycles),
 			})
@@ -248,7 +266,7 @@ func (e *ResearchEngine) analyzeGeneric(_ PatternReport, analyses []*SessionAnal
 	// Collect general evidence
 	for _, a := range analyses[:minInt(len(analyses), 5)] {
 		evidence = append(evidence, EvidenceLink{
-			Type:        "transcript",
+			Type:        EvidenceTypeTranscript,
 			Reference:   a.SessionID,
 			Description: fmt.Sprintf("Session difficulty: %.2f, duration: %v", a.DifficultyScore, a.Duration),
 		})
@@ -287,11 +305,11 @@ func (e *ResearchEngine) generateRecommendations(pattern PatternReport, rootCaus
 	switch pattern.RecommendedAction {
 	case "create_agent":
 		recommendations = append(recommendations, e.recommendNewAgent(pattern, rootCause))
-	case "update_spec":
+	case ActionUpdateSpec:
 		recommendations = append(recommendations, e.recommendSpecUpdate(pattern, rootCause))
-	case "reassign_model":
+	case ActionReassignModel:
 		recommendations = append(recommendations, e.recommendModelReassignment(pattern, rootCause))
-	case "add_tool":
+	case ActionAddTool:
 		recommendations = append(recommendations, e.recommendNewTool(pattern, rootCause))
 	case "add_skill":
 		recommendations = append(recommendations, e.recommendNewSkill(pattern, rootCause))

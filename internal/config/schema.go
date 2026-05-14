@@ -1006,7 +1006,7 @@ func DefaultConfig() *Config {
 			},
 			Task: TaskMemoryConfig{
 				Enabled: true,
-				Domains: []string{"general", "code", "commands"},
+				Domains: []string{"general", DomainCode, "commands"},
 			},
 			Personality: PersonalityConfig{
 				Enabled:                     true,
@@ -1101,7 +1101,7 @@ func DefaultConfig() *Config {
 			},
 			Review: ReviewConfig{
 				Enabled:       true,
-				RequireReview: []string{"code", "refactor", "debug", "git"},
+				RequireReview: []string{HintCode, HintRefactor, HintDebug, HintGit},
 				SkipReview:    []string{"chat", "report", "recall", "search"},
 				ReviewerMapping: map[string]string{
 					AgentIDCoder:     "code-reviewer",
@@ -1115,7 +1115,7 @@ func DefaultConfig() *Config {
 			},
 			Validation: ValidationConfig{
 				Enabled:              true,
-				RequireValidation:    []string{"code", "refactor", "debug", "git", "fix", "commit"},
+				RequireValidation:    []string{HintCode, HintRefactor, HintDebug, HintGit, HintFix, HintCommit},
 				SkipValidation:       []string{"chat", "report", "recall", "search", "analyze", "platform"},
 				SkipValidationAgents: []string{AgentIDChat, AgentIDAnalyst},
 				MaxValidationLoops:   3,
@@ -1164,7 +1164,7 @@ func DefaultConfig() *Config {
 		Workers: WorkersConfig{
 			PoolSize:           4,
 			IdleTimeoutSeconds: 300,
-			DefaultCaps:        []string{"code", "reasoning"},
+			DefaultCaps:        []string{CapCode, CapReasoning},
 		},
 		Isolation: IsolationConfig{
 			BaseDir:     "~/.meept/sandboxes",
@@ -1429,6 +1429,23 @@ func DefaultConfig() *Config {
 		},
 	}
 }
+
+// Tool hint constants used in review and validation policy defaults.
+const (
+	HintCode     = "code"
+	HintRefactor = "refactor"
+	HintDebug    = "debug"
+	HintGit      = "git"
+	HintFix      = "fix"
+	HintCommit   = "commit"
+)
+
+// Capability and domain constants used in default configurations.
+const (
+	CapCode     = "code"
+	CapReasoning = "reasoning"
+	DomainCode   = "code"
+)
 
 // Log level constants used for configuration.
 const (

@@ -32,12 +32,12 @@ func (t *ScheduleListTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropJobType: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional filter by job type: agent, shell, reminder, optimization, security, learning.",
-				Enum:        []string{"agent", "shell", "reminder", "optimization", "security", "learning", ""},
+				Enum:        []string{"agent", schemaJobTypeShell, "reminder", "optimization", "security", "learning", ""},
 			},
 			"enabled_only": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "If true, only return enabled jobs.",
 			},
 		},
@@ -141,11 +141,11 @@ func (t *ScheduleGetTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropJobID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The job ID to retrieve.",
 			},
 		},
-		Required: []string{"job_id"},
+		Required: []string{schemaPropJobID},
 	}
 }
 
@@ -154,7 +154,7 @@ func (t *ScheduleGetTool) Execute(ctx context.Context, args map[string]any) (any
 		return nil, fmt.Errorf("scheduler not available")
 	}
 
-	jobID, _ := args["job_id"].(string)
+	jobID, _ := args[schemaPropJobID].(string)
 	if jobID == "" {
 		return nil, fmt.Errorf("job_id is required")
 	}

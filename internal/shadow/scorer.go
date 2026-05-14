@@ -104,7 +104,7 @@ func (s *Scorer) scoreHeuristic(record *ShadowRecord) *ScoreResult {
 	// Get the user query (last user message)
 	var userQuery string
 	for _, v := range slices.Backward(record.Messages) {
-		if v.Role == "user" {
+		if v.Role == RoleUser {
 			userQuery = v.Content
 			break
 		}
@@ -270,7 +270,7 @@ func (s *Scorer) scoreCorrectness(response string, domain Domain) float64 {
 		debugPatterns := []string{
 			"root cause",
 			"solution",
-			"fix",
+			KwFix,
 			"error occurs",
 			"stack trace shows",
 		}
@@ -435,7 +435,7 @@ func validateJSCode(code string) float64 {
 	score := 0.0
 
 	// Check for common JS patterns
-	patterns := []string{"function", "const ", "let ", "var ", "=>", "async "}
+	patterns := []string{KwFunction, "const ", "let ", "var ", "=>", "async "}
 	for _, p := range patterns {
 		if strings.Contains(code, p) {
 			score += 0.05
@@ -652,7 +652,7 @@ func (s *Scorer) buildEvalPrompt(record *ShadowRecord) string {
 	// Get user query
 	var userQuery string
 	for _, v := range slices.Backward(record.Messages) {
-		if v.Role == "user" {
+		if v.Role == RoleUser {
 			userQuery = v.Content
 			break
 		}
@@ -750,7 +750,7 @@ func extractKeyTerms(text string) []string {
 		"may": true, "might": true, "must": true, "can": true, "to": true,
 		"of": true, "in": true, "for": true, "on": true, "with": true,
 		"at": true, "by": true, "from": true, "or": true, "and": true,
-		"but": true, "if": true, "then": true, "that": true, "this": true,
+		"but": true, "if": true, KwThen: true, "that": true, "this": true,
 		"it": true, "i": true, "you": true, "we": true, "they": true,
 		"he": true, "she": true, "what": true, "how": true, "why": true,
 		"when": true, "where": true, "which": true, "who": true, "me": true,

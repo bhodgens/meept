@@ -40,7 +40,7 @@ func NewQueueModel(rpc QueueRPCClient) *QueueModel {
 		{Title: "ID", Width: 20},
 		{Title: "Type", Width: 12},
 		{Title: "Priority", Width: 10},
-		{Title: "State", Width: 12},
+		{Title: ColState, Width: 12},
 		{Title: "Task", Width: 20},
 	}
 
@@ -68,7 +68,7 @@ func NewQueueModel(rpc QueueRPCClient) *QueueModel {
 	return &QueueModel{
 		rpc:         rpc,
 		table:       t,
-		filterState: "pending", // Default to pending jobs
+		filterState: StatePending, // Default to pending jobs
 	}
 }
 
@@ -90,7 +90,7 @@ func (m *QueueModel) SetSize(width, height int) {
 		{Title: "ID", Width: 20},
 		{Title: "Type", Width: 12},
 		{Title: "Priority", Width: 10},
-		{Title: "State", Width: 12},
+		{Title: ColState, Width: 12},
 		{Title: "Task", Width: taskWidth},
 	})
 }
@@ -157,7 +157,7 @@ func (m *QueueModel) Update(msg tea.Msg) tea.Cmd {
 			m.showingHelp = true
 			return nil
 
-		case "enter":
+		case KeyEnter:
 			// Select job for detail view
 			if len(m.jobs) > 0 {
 				idx := m.table.Cursor()
@@ -167,7 +167,7 @@ func (m *QueueModel) Update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 
-		case "esc":
+		case KeyEsc:
 			m.selectedJob = nil
 			return nil
 
@@ -188,19 +188,19 @@ func (m *QueueModel) Update(msg tea.Msg) tea.Cmd {
 
 		case "p":
 			// Filter to pending
-			m.filterState = "pending"
+			m.filterState = StatePending
 			m.loading = true
 			return m.fetchQueueData
 
 		case "f":
 			// Filter to failed
-			m.filterState = "failed"
+			m.filterState = StateFailed
 			m.loading = true
 			return m.fetchQueueData
 
 		case "c":
 			// Filter to completed
-			m.filterState = "completed"
+			m.filterState = StateCompleted
 			m.loading = true
 			return m.fetchQueueData
 
@@ -236,7 +236,7 @@ func (m *QueueModel) updateTable() {
 
 	priorityNames := map[int]string{
 		1: "low",
-		2: "normal",
+		2: StateNormal,
 		3: "high",
 		4: "urgent",
 	}
@@ -299,7 +299,7 @@ func (m *QueueModel) View() string {
 
 	// Filter indicator
 	filterStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280"))
+		Foreground(lipgloss.Color(ColorGray))
 	filterLabel := "All Jobs"
 	if m.filterState != "" {
 		filterLabel = fmt.Sprintf("Filter: %s", m.filterState)
@@ -322,7 +322,7 @@ func (m *QueueModel) View() string {
 
 	// Help hint
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		MarginTop(1)
 
 	b.WriteString(hintStyle.Render("r: refresh | p/f/c/a: filter | R: retry | ?: help"))
@@ -338,15 +338,15 @@ func (m *QueueModel) renderStatsPanel() string {
 		Width(m.width - 4)
 
 	if m.stats == nil {
-		return panelStyle.Render(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Loading statistics..."))
+		return panelStyle.Render(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Loading statistics..."))
 	}
 
 	// Build stats line
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280"))
+		Foreground(lipgloss.Color(ColorGray))
 
 	pendingStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B")).
+		Foreground(lipgloss.Color(ColorAmber)).
 		Bold(true)
 
 	processingStyle := lipgloss.NewStyle().
@@ -354,19 +354,19 @@ func (m *QueueModel) renderStatsPanel() string {
 		Bold(true)
 
 	completedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#10B981")).
+		Foreground(lipgloss.Color(ColorGreen)).
 		Bold(true)
 
 	failedStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#EF4444")).
+		Foreground(lipgloss.Color(ColorRed)).
 		Bold(true)
 
 	var parts []string
 
-	pending := m.stats.ByState["pending"]
-	processing := m.stats.ByState["processing"]
-	completed := m.stats.ByState["completed"]
-	failed := m.stats.ByState["failed"]
+	pending := m.stats.ByState[StatePending]
+	processing := m.stats.ByState[StateProcessing]
+	completed := m.stats.ByState[StateCompleted]
+	failed := m.stats.ByState[StateFailed]
 
 	parts = append(parts, labelStyle.Render("Pending: ")+pendingStyle.Render(fmt.Sprintf("%d", pending)), labelStyle.Render("Processing: ")+processingStyle.Render(fmt.Sprintf("%d", processing)), labelStyle.Render("Completed: ")+completedStyle.Render(fmt.Sprintf("%d", completed)), labelStyle.Render("Failed: ")+failedStyle.Render(fmt.Sprintf("%d", failed)))
 
@@ -392,16 +392,16 @@ func (m *QueueModel) renderLoading() string {
 func (m *QueueModel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#EF4444")).
+		BorderForeground(lipgloss.Color(ColorRed)).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("Error") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("Error") +
 			"\n\n" +
 			fmt.Sprintf("%v", m.err) +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press 'r' to refresh"),
 	)
 }
 
@@ -419,23 +419,23 @@ func (m *QueueModel) renderJobDetail() string {
 		Foreground(lipgloss.Color("#06B6D4"))
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Width(14)
 
 	valueStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#E5E7EB"))
 
 	// State color
-	stateColor := "#6B7280"
+	stateColor := ColorGray
 	switch job.State {
-	case "pending":
-		stateColor = "#F59E0B"
+	case StatePending:
+		stateColor = ColorAmber
 	case "processing", "claimed":
 		stateColor = "#06B6D4"
-	case "completed":
-		stateColor = "#10B981"
-	case "failed":
-		stateColor = "#EF4444"
+	case StateCompleted:
+		stateColor = ColorGreen
+	case StateFailed:
+		stateColor = ColorRed
 	case "dead":
 		stateColor = "#DC2626"
 	}
@@ -445,7 +445,7 @@ func (m *QueueModel) renderJobDetail() string {
 
 	priorityNames := map[int]string{
 		1: "low",
-		2: "normal",
+		2: StateNormal,
 		3: "high",
 		4: "urgent",
 	}
@@ -480,7 +480,7 @@ func (m *QueueModel) renderHelp() string {
 		MarginBottom(1)
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B")).
+		Foreground(lipgloss.Color(ColorAmber)).
 		Bold(true).
 		Width(12)
 
@@ -501,7 +501,7 @@ func (m *QueueModel) renderHelp() string {
 	content += keyStyle.Render("c") + descStyle.Render("Show completed jobs") + "\n"
 	content += keyStyle.Render("a") + descStyle.Render("Show all jobs") + "\n"
 	content += "\n"
-	content += lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Press any key to close")
+	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press any key to close")
 
 	return panelStyle.Render(content)
 }

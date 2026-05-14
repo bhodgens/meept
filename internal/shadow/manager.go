@@ -307,10 +307,10 @@ func (m *Manager) classifyDomain(messages []llm.ChatMessage) Domain {
 		text.WriteString(" " + msg.Content)
 	}
 
-	codeKeywords := []string{"code", "function", "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
+	codeKeywords := []string{"code", KwFunction, "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
 	planningKeywords := []string{"plan", "step", "strategy", "approach", "design", "architecture"}
-	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "stack trace", "exception"}
-	analysisKeywords := []string{"analyze", "explain", "how does", "what is", "understand", "review"}
+	debuggingKeywords := []string{"debug", KwFix, "issue", "problem", "crash", "stack trace", "exception"}
+	analysisKeywords := []string{KwAnalyze, "explain", "how does", "what is", "understand", "review"}
 
 	lower := strings.ToLower(text.String())
 	if containsAnyWord(lower, codeKeywords) {
@@ -340,10 +340,10 @@ func (m *Manager) classifyTaskType(messages []llm.ChatMessage, response *llm.Res
 	}
 
 	lower := strings.ToLower(text.String())
-	if containsAnyWord(lower, []string{"step by step", "first", "second", "then", "finally"}) {
+	if containsAnyWord(lower, []string{"step by step", KwFirst, "second", KwThen, "finally"}) {
 		return TaskTypeMultiStep
 	}
-	if containsAnyWord(lower, []string{"think", "reason", "consider", "evaluate", "compare"}) {
+	if containsAnyWord(lower, []string{"think", "reason", "consider", KwEvaluate, "compare"}) {
 		return TaskTypeReasoning
 	}
 	return TaskTypeChat

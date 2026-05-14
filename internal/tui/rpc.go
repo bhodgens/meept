@@ -155,7 +155,7 @@ func (c *RPCClient) isConnectionError(err error) bool {
 func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error) {
 	// Fast path: check connection status without lock
 	if !c.connected.Load() {
-		return nil, fmt.Errorf("not connected to daemon")
+		return nil, errors.New(ErrNotConnected)
 	}
 
 	// Build request outside of any lock
@@ -186,7 +186,7 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 
 	// Re-check connection status after acquiring lock
 	if !c.connected.Load() {
-		return nil, fmt.Errorf("not connected to daemon")
+		return nil, errors.New(ErrNotConnected)
 	}
 
 	// Get connection references under connMu (brief hold)
@@ -198,7 +198,7 @@ func (c *RPCClient) callOnce(method string, params any) (json.RawMessage, error)
 
 	if conn == nil {
 		c.connected.Store(false)
-		return nil, fmt.Errorf("not connected to daemon")
+		return nil, errors.New(ErrNotConnected)
 	}
 
 	// Set deadline
@@ -265,8 +265,8 @@ func (c *RPCClient) SetTimeout(d time.Duration) {
 // Chat sends a chat message and returns the response.
 func (c *RPCClient) Chat(message, conversationID string) (string, error) {
 	params := map[string]string{
-		"message":         message,
-		"conversation_id": conversationID,
+		ParamMessage:         message,
+		ParamConversationID: conversationID,
 	}
 
 	result, err := c.Call("chat", params)
@@ -318,7 +318,7 @@ func (c *RPCClient) ListJobs() (*types.JobListResponse, error) {
 func (c *RPCClient) QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error) {
 	params := map[string]any{
 		"query": query,
-		"limit": limit,
+		ParamLimit: limit,
 	}
 
 	result, err := c.Call("memory.query", params)
@@ -337,7 +337,7 @@ func (c *RPCClient) QueryMemory(query string, limit int) (*types.MemoryQueryResp
 // GetRecentMemories retrieves the most recent memories.
 func (c *RPCClient) GetRecentMemories(limit int) (*types.MemoryQueryResponse, error) {
 	params := map[string]any{
-		"limit": limit,
+		ParamLimit: limit,
 	}
 
 	result, err := c.Call("memory.recent", params)
@@ -370,7 +370,7 @@ func (c *RPCClient) ListWorkers() (*types.WorkerListResponse, error) {
 
 // CreateSession creates a new session.
 func (c *RPCClient) CreateSession(name string) (*types.Session, error) {
-	params := map[string]string{"name": name}
+	params := map[string]string{ParamName: name}
 	result, err := c.Call("session.create", params)
 	if err != nil {
 		return nil, err
@@ -407,8 +407,8 @@ func (c *RPCClient) ListSessions() (*types.SessionListResponse, error) {
 // AttachSession attaches a client to a session.
 func (c *RPCClient) AttachSession(sessionID, clientID string) error {
 	params := map[string]string{
-		"session_id": sessionID,
-		"client_id":  clientID,
+		ParamSessionID: sessionID,
+		ParamClientID:  clientID,
 	}
 	_, err := c.Call("session.attach", params)
 	return err
@@ -417,8 +417,8 @@ func (c *RPCClient) AttachSession(sessionID, clientID string) error {
 // DetachSession detaches a client from a session.
 func (c *RPCClient) DetachSession(sessionID, clientID string) error {
 	params := map[string]string{
-		"session_id": sessionID,
-		"client_id":  clientID,
+		ParamSessionID: sessionID,
+		ParamClientID:  clientID,
 	}
 	_, err := c.Call("session.detach", params)
 	return err
@@ -449,8 +449,8 @@ func (c *RPCClient) DeleteSession(sessionID string) error {
 // SaveSessionMessages saves messages for a session.
 func (c *RPCClient) SaveSessionMessages(sessionID string, messages []types.SessionMessage) error {
 	params := map[string]any{
-		"session_id": sessionID,
-		"messages":   messages,
+		ParamSessionID: sessionID,
+		"messages":     messages,
 	}
 	_, err := c.Call("session.messages.save", params)
 	return err
@@ -459,9 +459,9 @@ func (c *RPCClient) SaveSessionMessages(sessionID string, messages []types.Sessi
 // GetSessionMessages retrieves messages for a session with pagination.
 func (c *RPCClient) GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error) {
 	params := map[string]any{
-		"session_id": sessionID,
-		"offset":     offset,
-		"limit":      limit,
+		ParamSessionID: sessionID,
+		"offset":       offset,
+		ParamLimit:     limit,
 	}
 	result, err := c.Call("session.messages.get", params)
 	if err != nil {
@@ -479,8 +479,8 @@ func (c *RPCClient) GetSessionMessages(sessionID string, offset, limit int) (*ty
 // UpdateSessionDescription updates a session's description.
 func (c *RPCClient) UpdateSessionDescription(sessionID, description string) error {
 	params := map[string]string{
-		"session_id":  sessionID,
-		"description": description,
+		ParamSessionID:  sessionID,
+		ParamDescription: description,
 	}
 	_, err := c.Call("session.update_description", params)
 	return err
@@ -489,9 +489,9 @@ func (c *RPCClient) UpdateSessionDescription(sessionID, description string) erro
 // GenerateSessionDescription uses LLM to generate a session description.
 func (c *RPCClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
 	params := map[string]string{
-		"session_id":    sessionID,
-		"first_message": firstMessage,
-		"project_name":  projectName,
+		ParamSessionID:    sessionID,
+		"first_message":   firstMessage,
+		"project_name":    projectName,
 	}
 	result, err := c.Call("session.generate_description", params)
 	if err != nil {
@@ -511,7 +511,7 @@ func (c *RPCClient) GenerateSessionDescription(sessionID, firstMessage, projectN
 
 // StopSession stops all work for a session.
 func (c *RPCClient) StopSession(sessionID string) (*types.StopSessionResponse, error) {
-	params := map[string]string{"session_id": sessionID}
+	params := map[string]string{ParamSessionID: sessionID}
 	result, err := c.Call("session.stop", params)
 	if err != nil {
 		return nil, err
@@ -527,7 +527,7 @@ func (c *RPCClient) StopSession(sessionID string) (*types.StopSessionResponse, e
 
 // GetSessionChildTasks gets tasks associated with a session.
 func (c *RPCClient) GetSessionChildTasks(sessionID string) ([]string, error) {
-	params := map[string]string{"session_id": sessionID}
+	params := map[string]string{ParamSessionID: sessionID}
 	result, err := c.Call("session.get_child_tasks", params)
 	if err != nil {
 		return nil, err
@@ -550,8 +550,8 @@ func (c *RPCClient) GetSessionChildTasks(sessionID string) ([]string, error) {
 // CreateTask creates a new task.
 func (c *RPCClient) CreateTask(name, description string) (*types.Task, error) {
 	params := map[string]string{
-		"name":        name,
-		"description": description,
+		ParamName:        name,
+		ParamDescription: description,
 	}
 	result, err := c.Call("task.create", params)
 	if err != nil {
@@ -585,8 +585,8 @@ func (c *RPCClient) GetTask(taskID string) (*types.Task, error) {
 // ListTasks gets all tasks.
 func (c *RPCClient) ListTasks(state string, limit int) (*types.TaskListResponse, error) {
 	params := map[string]any{
-		"state": state,
-		"limit": limit,
+		ParamState: state,
+		ParamLimit: limit,
 	}
 	result, err := c.Call("task.list", params)
 	if err != nil {
@@ -628,7 +628,7 @@ func (c *RPCClient) ListTasksExtended() (*types.TaskExtendedListResponse, error)
 
 // ListTaskSteps returns the steps for a task.
 func (c *RPCClient) ListTaskSteps(taskID string) (*types.TaskStepsResponse, error) {
-	params := map[string]string{"task_id": taskID}
+	params := map[string]string{ParamTaskID: taskID}
 	result, err := c.Call("task.steps", params)
 	if err != nil {
 		return nil, err
@@ -660,8 +660,8 @@ func (c *RPCClient) CancelTask(taskID string) error {
 // LinkTaskSession links a session to a task.
 func (c *RPCClient) LinkTaskSession(taskID, sessionID string) error {
 	params := map[string]string{
-		"task_id":    taskID,
-		"session_id": sessionID,
+		ParamTaskID:    taskID,
+		ParamSessionID: sessionID,
 	}
 	_, err := c.Call("task.link", params)
 	return err
@@ -670,8 +670,8 @@ func (c *RPCClient) LinkTaskSession(taskID, sessionID string) error {
 // UnlinkTaskSession removes a session-task link.
 func (c *RPCClient) UnlinkTaskSession(taskID, sessionID string) error {
 	params := map[string]string{
-		"task_id":    taskID,
-		"session_id": sessionID,
+		ParamTaskID:    taskID,
+		ParamSessionID: sessionID,
 	}
 	_, err := c.Call("task.unlink", params)
 	return err
@@ -699,8 +699,8 @@ func (c *RPCClient) GetQueueStats() (*types.QueueStatsResponse, error) {
 // ListQueueJobs gets jobs in a given state.
 func (c *RPCClient) ListQueueJobs(state string, limit int) (*types.QueueJobListResponse, error) {
 	params := map[string]any{
-		"state": state,
-		"limit": limit,
+		ParamState: state,
+		ParamLimit: limit,
 	}
 	result, err := c.Call("queue.list", params)
 	if err != nil {
@@ -818,9 +818,9 @@ func (c *RPCClient) CacheInspect(promptHash string) (*types.CacheInspectResponse
 // Steer sends a steering message to an active conversation.
 func (c *RPCClient) Steer(message, conversationID string) error {
 	req := map[string]string{
-		"message":         message,
-		"conversation_id": conversationID,
-		"source":          "tui",
+		ParamMessage:         message,
+		ParamConversationID: conversationID,
+		"source":             "tui",
 	}
 	_, err := c.Call("chat.steer", req)
 	return err
@@ -829,9 +829,9 @@ func (c *RPCClient) Steer(message, conversationID string) error {
 // FollowUp sends a follow-up message to an active conversation.
 func (c *RPCClient) FollowUp(message, conversationID string) error {
 	req := map[string]string{
-		"message":         message,
-		"conversation_id": conversationID,
-		"source":          "tui",
+		ParamMessage:         message,
+		ParamConversationID: conversationID,
+		"source":             "tui",
 	}
 	_, err := c.Call("chat.followup", req)
 	return err
@@ -839,7 +839,7 @@ func (c *RPCClient) FollowUp(message, conversationID string) error {
 
 // GetQueueStatus returns the current queue state for a conversation.
 func (c *RPCClient) GetQueueStatus(conversationID string) (*types.QueueStatusResponse, error) {
-	req := map[string]string{"conversation_id": conversationID}
+	req := map[string]string{ParamConversationID: conversationID}
 	result, err := c.Call("chat.queue_status", req)
 	if err != nil {
 		return nil, err
@@ -855,7 +855,7 @@ func (c *RPCClient) GetQueueStatus(conversationID string) (*types.QueueStatusRes
 
 // RestorePendingFollowUps checks for persisted follow-ups for a conversation.
 func (c *RPCClient) RestorePendingFollowUps(conversationID string) error {
-	req := map[string]string{"conversation_id": conversationID}
+	req := map[string]string{ParamConversationID: conversationID}
 	_, err := c.Call("chat.queue.restore", req)
 	return err
 }
@@ -867,7 +867,7 @@ func (c *RPCClient) RestorePendingFollowUps(conversationID string) error {
 // NavigateBranch navigates to a prior message in a session, creating a new branch.
 func (c *RPCClient) NavigateBranch(sessionID string, targetMessageID int64) error {
 	params := map[string]any{
-		"session_id":        sessionID,
+		ParamSessionID:        sessionID,
 		"target_message_id": targetMessageID,
 	}
 	_, err := c.Call("session.branch.navigate", params)
@@ -879,7 +879,7 @@ type BranchInfo = types.BranchInfo
 
 // ListBranches lists all branches in a session.
 func (c *RPCClient) ListBranches(sessionID string) ([]BranchInfo, error) {
-	params := map[string]string{"session_id": sessionID}
+	params := map[string]string{ParamSessionID: sessionID}
 	result, err := c.Call("session.branches.list", params)
 	if err != nil {
 		return nil, err
@@ -898,9 +898,9 @@ func (c *RPCClient) ListBranches(sessionID string) ([]BranchInfo, error) {
 // ForkSession forks a session from a specific message, returning the new session ID.
 func (c *RPCClient) ForkSession(sessionID string, fromMessageID int64, name string) (string, error) {
 	params := map[string]any{
-		"session_id":      sessionID,
+		ParamSessionID:      sessionID,
 		"from_message_id": fromMessageID,
-		"name":            name,
+		ParamName:            name,
 	}
 	result, err := c.Call("session.fork", params)
 	if err != nil {
@@ -922,7 +922,7 @@ type TreeNodeInfo = types.TreeNodeInfo
 
 // GetTree returns the conversation tree for a session.
 func (c *RPCClient) GetTree(sessionID string) ([]TreeNodeInfo, error) {
-	params := map[string]string{"session_id": sessionID}
+	params := map[string]string{ParamSessionID: sessionID}
 	result, err := c.Call("session.tree.get", params)
 	if err != nil {
 		return nil, err
@@ -973,8 +973,8 @@ func (c *RPCClient) ListTemplates() ([]TemplateInfo, error) {
 // configured, it also returns the LLM response content.
 func (c *RPCClient) InvokeTemplate(name string, args []string) (string, error) {
 	params := map[string]any{
-		"name": name,
-		"args": args,
+		ParamName: name,
+		"args":    args,
 	}
 
 	result, err := c.Call("templates.invoke", params)

@@ -128,12 +128,12 @@ func (m *StatusModel) renderLoading() string {
 func (m *StatusModel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#EF4444")).
+		BorderForeground(lipgloss.Color(ColorRed)).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("error") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error") +
 			"\n\n" +
 			fmt.Sprintf("%v", m.err) +
 			"\n\n" +
@@ -188,9 +188,9 @@ func (m *StatusModel) renderStatusPanel(width int) string {
 		Foreground(lipgloss.Color("#E5E7EB"))
 
 	// Status color
-	statusColor := "#10B981" // Green
-	if m.status.Status != "running" {
-		statusColor = "#EF4444" // Red
+	statusColor := ColorGreen // Green
+	if m.status.Status != StateRunning {
+		statusColor = ColorRed // Red
 	}
 	statusStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(statusColor)).
@@ -206,7 +206,7 @@ func (m *StatusModel) renderStatusPanel(width int) string {
 		model = m.status.DefaultModel
 	}
 	if model == "" {
-		model = "n/a"
+		model = StatusNA
 	}
 	content += labelStyle.Render("llm model:") + valueStyle.Render(model) + "\n"
 
@@ -286,7 +286,7 @@ func (m *StatusModel) renderInfoPanel(width int) string {
 		Foreground(lipgloss.Color("#6B7280"))
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B")).
+		Foreground(lipgloss.Color(ColorAmber)).
 		Bold(true)
 
 	content += keyStyle.Render("c") + helpStyle.Render(" - Chat view") + "\n"
@@ -314,12 +314,12 @@ func (m *StatusModel) renderProgressBar(width int, percent float64) string {
 	empty := barWidth - filled
 
 	// Color based on percentage
-	fillColor := "#10B981" // Green
+	fillColor := ColorGreen // Green
 	if percent > 0.75 {
-		fillColor = "#F59E0B" // Amber
+		fillColor = ColorAmber // Amber
 	}
 	if percent > 0.9 {
-		fillColor = "#EF4444" // Red
+		fillColor = ColorRed // Red
 	}
 
 	fillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(fillColor))

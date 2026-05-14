@@ -85,11 +85,11 @@ func (t *WebSearchTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropQuery: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The search query string.",
 			},
 			schemaPropLimit: {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of results to return (default 10, max 30).",
 			},
 		},

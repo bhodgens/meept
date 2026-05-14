@@ -127,7 +127,7 @@ func (t *ShellExecuteTool) SetKnownSafeCommands(cmds []string) {
 	t.knownSafeCommands = safe
 }
 
-func (t *ShellExecuteTool) Name() string { return "shell" }
+func (t *ShellExecuteTool) Name() string { return schemaJobTypeShell }
 
 func (t *ShellExecuteTool) Description() string {
 	return "Execute a shell command and return its stdout and stderr. Use for running system commands, scripts, and CLI tools. Commands run in a sandboxed subprocess with a timeout."
@@ -138,15 +138,15 @@ func (t *ShellExecuteTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropCommand: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The shell command to execute.",
 			},
 			"timeout": {
-				Type:        "number",
+				Type:        schemaTypeNumber,
 				Description: "Timeout in seconds (default 30).",
 			},
 			"working_dir": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Working directory for the command (optional).",
 			},
 		},

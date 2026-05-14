@@ -33,11 +33,11 @@ func (t *EntityCreateTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropEntityID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Unique identifier for the entity (will be used as memory_id in the graph).",
 			},
 			"entity_type": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Type of entity (e.g., 'person', 'concept', 'task', 'decision', 'project'). Stored as metadata.",
 			},
 			"properties": {
@@ -125,20 +125,20 @@ func (t *EntityLinkTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"source_id": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "ID of the source entity (the entity the relationship originates from).",
 			},
 			"target_id": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "ID of the target entity (the entity the relationship points to).",
 			},
 			"relation_type": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Type of relationship: 'reference' (one references another), 'similar' (semantic similarity), 'temporal' (same time/session), 'co_accessed' (accessed together), 'causal' (one led to another).",
-				Enum:        []string{"reference", "similar", "temporal", "co_accessed", "causal"},
+				Enum:        []string{schemaPropReference, "similar", "temporal", "co_accessed", "causal"},
 			},
 			"weight": {
-				Type:        "number",
+				Type:        schemaTypeNumber,
 				Description: "Strength of the relationship from 0.0 to 1.0 (default 0.5). Higher values indicate stronger connections.",
 			},
 			"metadata": {
@@ -177,13 +177,13 @@ func (t *EntityLinkTool) Execute(ctx context.Context, args map[string]any) (any,
 
 	relationTypeStr, _ := args["relation_type"].(string)
 	if relationTypeStr == "" {
-		relationTypeStr = "reference"
+		relationTypeStr = schemaPropReference
 	}
 
 	// Map string to EdgeType
 	var edgeType memory.EdgeType
 	switch relationTypeStr {
-	case "reference":
+	case schemaPropReference:
 		edgeType = memory.EdgeTypeReference
 	case "similar":
 		edgeType = memory.EdgeTypeSimilar
@@ -271,20 +271,20 @@ func (t *EntityQueryTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropEntityID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "ID of the entity to query for related entities.",
 			},
 			"relation_type": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional: filter by specific relation type ('reference', 'similar', 'temporal', 'co_accessed', 'causal'). If not specified, returns all relations.",
-				Enum:        []string{"reference", "similar", "temporal", "co_accessed", "causal", ""},
+				Enum:        []string{schemaPropReference, "similar", "temporal", "co_accessed", "causal", ""},
 			},
 			schemaPropLimit: {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of related entities to return (default 20, max 100).",
 			},
 			"include_pagerank": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "Whether to include PageRank scores (default true).",
 			},
 		},
@@ -543,7 +543,7 @@ func (t *DetectCommunitiesTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"return_mapping": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "If true, returns the full entity_id -> community_id mapping (can be large). Default false.",
 			},
 		},
@@ -624,11 +624,11 @@ func (t *GetCommunitySiblingsTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropEntityID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "ID of the entity to find community siblings for.",
 			},
 			schemaPropLimit: {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of siblings to return (default 20, max 100).",
 			},
 		},

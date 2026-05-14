@@ -69,8 +69,8 @@ func (c *HTTPClient) SetTimeout(d time.Duration) {
 // Chat sends a chat message via HTTP and returns the response.
 func (c *HTTPClient) Chat(message, conversationID string) (string, error) {
 	params := map[string]string{
-		"message":         message,
-		"conversation_id": conversationID,
+		ParamMessage:         message,
+		ParamConversationID: conversationID,
 	}
 	body, err := json.Marshal(params)
 	if err != nil {
@@ -173,7 +173,7 @@ func (c *HTTPClient) ListJobs() (*types.JobListResponse, error) {
 
 // QueryMemory queries the memory store.
 func (c *HTTPClient) QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error) {
-	result, err := c.callAPI("memory.query", map[string]any{"query": query, "limit": limit})
+	result, err := c.callAPI("memory.query", map[string]any{"query": query, ParamLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (c *HTTPClient) QueryMemory(query string, limit int) (*types.MemoryQueryRes
 
 // GetRecentMemories retrieves recent memories.
 func (c *HTTPClient) GetRecentMemories(limit int) (*types.MemoryQueryResponse, error) {
-	result, err := c.callAPI("memory.recent", map[string]any{"limit": limit})
+	result, err := c.callAPI("memory.recent", map[string]any{ParamLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +212,7 @@ func (c *HTTPClient) ListWorkers() (*types.WorkerListResponse, error) {
 
 // Session methods
 func (c *HTTPClient) CreateSession(name string) (*types.Session, error) {
-	result, err := c.callAPI("session.create", map[string]string{"name": name})
+	result, err := c.callAPI("session.create", map[string]string{ParamName: name})
 	if err != nil {
 		return nil, err
 	}
@@ -238,13 +238,13 @@ func (c *HTTPClient) ListSessions() (*types.SessionListResponse, error) {
 
 // AttachSession attaches a client to a session.
 func (c *HTTPClient) AttachSession(sessionID, clientID string) error {
-	_, err := c.callAPI("session.attach", map[string]string{"session_id": sessionID, "client_id": clientID})
+	_, err := c.callAPI("session.attach", map[string]string{ParamSessionID: sessionID, ParamClientID: clientID})
 	return err
 }
 
 // DetachSession detaches a client.
 func (c *HTTPClient) DetachSession(sessionID, clientID string) error {
-	_, err := c.callAPI("session.detach", map[string]string{"session_id": sessionID, "client_id": clientID})
+	_, err := c.callAPI("session.detach", map[string]string{ParamSessionID: sessionID, ParamClientID: clientID})
 	return err
 }
 
@@ -269,13 +269,13 @@ func (c *HTTPClient) DeleteSession(sessionID string) error {
 
 // SaveSessionMessages saves messages.
 func (c *HTTPClient) SaveSessionMessages(sessionID string, messages []types.SessionMessage) error {
-	_, err := c.callAPI("session.messages.save", map[string]any{"session_id": sessionID, "messages": messages})
+	_, err := c.callAPI("session.messages.save", map[string]any{ParamSessionID: sessionID, "messages": messages})
 	return err
 }
 
 // GetSessionMessages retrieves messages.
 func (c *HTTPClient) GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error) {
-	result, err := c.callAPI("session.messages.get", map[string]any{"session_id": sessionID, "offset": offset, "limit": limit})
+	result, err := c.callAPI("session.messages.get", map[string]any{ParamSessionID: sessionID, "offset": offset, ParamLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -288,14 +288,14 @@ func (c *HTTPClient) GetSessionMessages(sessionID string, offset, limit int) (*t
 
 // UpdateSessionDescription updates description.
 func (c *HTTPClient) UpdateSessionDescription(sessionID, description string) error {
-	_, err := c.callAPI("session.update_description", map[string]string{"session_id": sessionID, "description": description})
+	_, err := c.callAPI("session.update_description", map[string]string{ParamSessionID: sessionID, ParamDescription: description})
 	return err
 }
 
 // GenerateSessionDescription generates a description.
 func (c *HTTPClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
 	result, err := c.callAPI("session.generate_description", map[string]string{
-		"session_id":    sessionID,
+		ParamSessionID:    sessionID,
 		"first_message": firstMessage,
 		"project_name":  projectName,
 	})
@@ -311,7 +311,7 @@ func (c *HTTPClient) GenerateSessionDescription(sessionID, firstMessage, project
 
 // StopSession stops a session.
 func (c *HTTPClient) StopSession(sessionID string) (*types.StopSessionResponse, error) {
-	result, err := c.callAPI("session.stop", map[string]string{"session_id": sessionID})
+	result, err := c.callAPI("session.stop", map[string]string{ParamSessionID: sessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (c *HTTPClient) StopSession(sessionID string) (*types.StopSessionResponse, 
 
 // GetSessionChildTasks gets child tasks.
 func (c *HTTPClient) GetSessionChildTasks(sessionID string) ([]string, error) {
-	result, err := c.callAPI("session.get_child_tasks", map[string]string{"session_id": sessionID})
+	result, err := c.callAPI("session.get_child_tasks", map[string]string{ParamSessionID: sessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func (c *HTTPClient) GetSessionChildTasks(sessionID string) ([]string, error) {
 
 // Task methods
 func (c *HTTPClient) CreateTask(name, description string) (*types.Task, error) {
-	result, err := c.callAPI("task.create", map[string]string{"name": name, "description": description})
+	result, err := c.callAPI("task.create", map[string]string{ParamName: name, ParamDescription: description})
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +365,7 @@ func (c *HTTPClient) GetTask(taskID string) (*types.Task, error) {
 
 // ListTasks lists tasks.
 func (c *HTTPClient) ListTasks(state string, limit int) (*types.TaskListResponse, error) {
-	result, err := c.callAPI("task.list", map[string]any{"state": state, "limit": limit})
+	result, err := c.callAPI("task.list", map[string]any{ParamState: state, ParamLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -391,7 +391,7 @@ func (c *HTTPClient) ListTasksExtended() (*types.TaskExtendedListResponse, error
 
 // ListTaskSteps returns steps.
 func (c *HTTPClient) ListTaskSteps(taskID string) (*types.TaskStepsResponse, error) {
-	result, err := c.callAPI("task.steps", map[string]string{"task_id": taskID})
+	result, err := c.callAPI("task.steps", map[string]string{ParamTaskID: taskID})
 	if err != nil {
 		return nil, err
 	}
@@ -416,13 +416,13 @@ func (c *HTTPClient) CancelTask(taskID string) error {
 
 // LinkTaskSession links session to task.
 func (c *HTTPClient) LinkTaskSession(taskID, sessionID string) error {
-	_, err := c.callAPI("task.link", map[string]string{"task_id": taskID, "session_id": sessionID})
+	_, err := c.callAPI("task.link", map[string]string{ParamTaskID: taskID, ParamSessionID: sessionID})
 	return err
 }
 
 // UnlinkTaskSession removes link.
 func (c *HTTPClient) UnlinkTaskSession(taskID, sessionID string) error {
-	_, err := c.callAPI("task.unlink", map[string]string{"task_id": taskID, "session_id": sessionID})
+	_, err := c.callAPI("task.unlink", map[string]string{ParamTaskID: taskID, ParamSessionID: sessionID})
 	return err
 }
 
@@ -441,7 +441,7 @@ func (c *HTTPClient) GetQueueStats() (*types.QueueStatsResponse, error) {
 
 // ListQueueJobs lists queue jobs.
 func (c *HTTPClient) ListQueueJobs(state string, limit int) (*types.QueueJobListResponse, error) {
-	result, err := c.callAPI("queue.list", map[string]any{"state": state, "limit": limit})
+	result, err := c.callAPI("queue.list", map[string]any{ParamState: state, ParamLimit: limit})
 	if err != nil {
 		return nil, err
 	}

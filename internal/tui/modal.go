@@ -150,16 +150,16 @@ func (m *Modal) HandleKey(key string) string {
 		if m.selected > 0 {
 			m.selected--
 		}
-	case "down", "j":
+	case KeyDown, "j":
 		if m.selected < len(m.items)-1 {
 			m.selected++
 		}
-	case "enter":
+	case KeyEnter:
 		if m.selected >= 0 && m.selected < len(m.items) && !m.items[m.selected].Disabled {
 			m.Hide()
 			return m.items[m.selected].Key
 		}
-	case "esc", "q":
+	case KeyEsc, "q":
 		m.Hide()
 		return ""
 	}
@@ -174,7 +174,7 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 
 	m.SetItems([]ModalItem{
 		{Key: keys.ViewChat, Label: "chat", Description: "switch to chat view"},
-		{Key: keys.ViewTasks, Label: "tasks", Description: "switch to tasks view"},
+		{Key: keys.ViewTasks, Label: CmdTasks, Description: "switch to tasks view"},
 		{Key: keys.ViewQueue, Label: "queue", Description: "switch to queue view"},
 		{Key: keys.ViewMemory, Label: "memory", Description: "switch to memory view"},
 		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
@@ -480,11 +480,11 @@ func (s *SessionPickerModal) HandleKey(key string) tea.Cmd {
 		if s.selected > 0 {
 			s.selected--
 		}
-	case "down", "j":
+	case KeyDown, "j":
 		if s.selected < len(s.sessions)-1 {
 			s.selected++
 		}
-	case "enter":
+	case KeyEnter:
 		if s.selected >= 0 && s.selected < len(s.sessions) {
 			sess := s.sessions[s.selected]
 			s.Hide()
@@ -516,7 +516,7 @@ func (s *SessionPickerModal) HandleKey(key string) tea.Cmd {
 				return SessionDeleteMsg{SessionID: sess.ID}
 			}
 		}
-	case "esc", "q":
+	case KeyEsc, "q":
 		s.Hide()
 	default:
 		// Check for numeric shortcuts
@@ -537,7 +537,7 @@ func (s *SessionPickerModal) HandleKey(key string) tea.Cmd {
 
 func (s *SessionPickerModal) handleInputKey(key string) tea.Cmd {
 	switch key {
-	case "enter":
+	case KeyEnter:
 		name := s.inputBuffer
 		if name == "" {
 			name = s.clientConfig.Session.DefaultName
@@ -548,7 +548,7 @@ func (s *SessionPickerModal) handleInputKey(key string) tea.Cmd {
 		return func() tea.Msg {
 			return SessionCreateMsg{Name: name}
 		}
-	case "esc":
+	case KeyEsc:
 		s.inputMode = false
 		s.inputBuffer = ""
 	case "backspace", "ctrl+h":
@@ -558,7 +558,7 @@ func (s *SessionPickerModal) handleInputKey(key string) tea.Cmd {
 	case "ctrl+u":
 		// Clear the entire input
 		s.inputBuffer = ""
-	case "left", "right", "up", "down", "tab":
+	case KeyLeft, KeyRight, "up", KeyDown, KeyTab:
 		// Ignore navigation keys in input mode
 		return nil
 	default:
@@ -691,13 +691,13 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 			// Clear the entire input
 			m.inputBuffer = ""
 			return nil
-		case "tab":
+		case KeyTab:
 			m.selected = 1
 			return nil
 		case "shift+tab":
 			m.selected = 2
 			return nil
-		case "enter":
+		case KeyEnter:
 			// Submit the current input
 			name := m.inputBuffer
 			sessionID := m.sessionID
@@ -705,10 +705,10 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 			return func() tea.Msg {
 				return SessionRenameMsg{SessionID: sessionID, NewName: name}
 			}
-		case "esc":
+		case KeyEsc:
 			m.Hide()
 			return nil
-		case "left", "right", "up", "down":
+		case KeyLeft, KeyRight, "up", KeyDown:
 			// Ignore arrow keys in input mode - don't change selection
 			return nil
 		default:
@@ -722,23 +722,23 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 
 	// Button navigation (when not in input field)
 	switch key {
-	case "tab":
+	case KeyTab:
 		m.selected = (m.selected + 1) % 3
 	case "shift+tab":
 		m.selected = (m.selected + 2) % 3
-	case "left":
+	case KeyLeft:
 		if m.selected > 1 {
 			m.selected--
 		} else if m.selected == 1 {
 			m.selected = 0 // Go back to input
 		}
-	case "right":
+	case KeyRight:
 		if m.selected < 2 {
 			m.selected++
 		}
 	case "up":
 		m.selected = 0 // Go back to input
-	case "enter":
+	case KeyEnter:
 		switch m.selected {
 		case 1:
 			// Ok button - submit
@@ -752,7 +752,7 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 			// Cancel button
 			m.Hide()
 		}
-	case "esc":
+	case KeyEsc:
 		m.Hide()
 	default:
 		// If user starts typing while on a button, go back to input and type
@@ -859,23 +859,23 @@ func (m *ConfirmModal) View(screenW, screenH int) string {
 // HandleKey processes key input for the confirm modal.
 func (m *ConfirmModal) HandleKey(key string) tea.Cmd {
 	switch key {
-	case "left", "h":
+	case KeyLeft, "h":
 		m.selected = 0 // yes
-	case "right", "l":
+	case KeyRight, "l":
 		m.selected = 1 // no
-	case "tab":
+	case KeyTab:
 		m.selected = (m.selected + 1) % 2
 	case "y":
 		m.Hide()
 		if m.onConfirm != nil {
 			return m.onConfirm()
 		}
-	case "n", "esc", "q":
+	case "n", KeyEsc, "q":
 		m.Hide()
 		if m.onCancel != nil {
 			return m.onCancel()
 		}
-	case "enter":
+	case KeyEnter:
 		m.Hide()
 		if m.selected == 0 && m.onConfirm != nil {
 			return m.onConfirm()
@@ -1147,18 +1147,18 @@ func (f *FuzzyFinderModal) HandleKey(key string) string {
 		if f.selectedIndex > 0 {
 			f.selectedIndex--
 		}
-	case "down", "j":
+	case KeyDown, "j":
 		items := f.getFilteredItems()
 		if f.selectedIndex < len(items)-1 {
 			f.selectedIndex++
 		}
-	case "enter":
+	case KeyEnter:
 		items := f.getFilteredItems()
 		if f.selectedIndex >= 0 && f.selectedIndex < len(items) {
 			f.Hide()
 			return "select"
 		}
-	case "esc", "q":
+	case KeyEsc, "q":
 		f.Hide()
 	}
 
@@ -1378,7 +1378,7 @@ func (b *BranchPickerModal) View(screenW, screenH int) string {
 // Returns a tea.Cmd if an action should be performed.
 func (b *BranchPickerModal) HandleKey(keyStr string) tea.Cmd {
 	if len(b.branches) == 0 {
-		if keyStr == "esc" || keyStr == "q" {
+		if keyStr == KeyEsc || keyStr == "q" {
 			b.Hide()
 		}
 		return nil
@@ -1394,14 +1394,14 @@ func (b *BranchPickerModal) HandleKey(keyStr string) tea.Cmd {
 				b.scrollOffset = b.selected
 			}
 		}
-	case "down", "j":
+	case KeyDown, "j":
 		if b.selected < len(b.branches)-1 {
 			b.selected++
 			if b.selected >= b.scrollOffset+maxVisible {
 				b.scrollOffset = b.selected - maxVisible + 1
 			}
 		}
-	case "enter":
+	case KeyEnter:
 		if b.selected >= 0 && b.selected < len(b.branches) {
 			br := b.branches[b.selected]
 			b.Hide()
@@ -1409,7 +1409,7 @@ func (b *BranchPickerModal) HandleKey(keyStr string) tea.Cmd {
 				return BranchNavigateMsg{Branch: br}
 			}
 		}
-	case "esc", "q":
+	case KeyEsc, "q":
 		b.Hide()
 	}
 

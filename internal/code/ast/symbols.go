@@ -105,7 +105,7 @@ func (e *SymbolExtractor) extractGoSymbols(node *sitter.Node, source []byte, fil
 	nodeType := node.Type()
 
 	switch nodeType {
-	case "function_declaration":
+	case NodeFunctionDeclaration:
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindFunction, filter) {
 			sym := Symbol{
@@ -118,7 +118,7 @@ func (e *SymbolExtractor) extractGoSymbols(node *sitter.Node, source []byte, fil
 			symbols = append(symbols, sym)
 		}
 
-	case "method_declaration":
+	case NodeMethodDeclaration:
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindMethod, filter) {
 			sym := Symbol{
@@ -197,7 +197,7 @@ func (e *SymbolExtractor) extractPythonSymbols(node *sitter.Node, source []byte,
 	var symbols []Symbol
 
 	switch node.Type() {
-	case "function_definition":
+	case NodeFunctionDefinition:
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindFunction, filter) {
 			sym := Symbol{
@@ -249,7 +249,7 @@ func (e *SymbolExtractor) extractJSSymbols(node *sitter.Node, source []byte, fil
 	var symbols []Symbol
 
 	switch node.Type() {
-	case "function_declaration":
+	case NodeFunctionDeclaration:
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindFunction, filter) {
 			symbols = append(symbols, Symbol{
@@ -259,7 +259,7 @@ func (e *SymbolExtractor) extractJSSymbols(node *sitter.Node, source []byte, fil
 			})
 		}
 
-	case "class_declaration":
+	case NodeClassDeclaration:
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindClass, filter) {
 			symbols = append(symbols, Symbol{
@@ -369,7 +369,7 @@ func (e *SymbolExtractor) extractJavaSymbols(node *sitter.Node, source []byte, f
 	var symbols []Symbol
 
 	switch node.Type() {
-	case "method_declaration":
+	case NodeMethodDeclaration:
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindMethod, filter) {
 			symbols = append(symbols, Symbol{
@@ -379,7 +379,7 @@ func (e *SymbolExtractor) extractJavaSymbols(node *sitter.Node, source []byte, f
 			})
 		}
 
-	case "class_declaration":
+	case NodeClassDeclaration:
 		name := e.getChildByFieldName(node, "name", source)
 		if name != "" && e.shouldInclude(name, SymbolKindClass, filter) {
 			symbols = append(symbols, Symbol{
@@ -417,7 +417,7 @@ func (e *SymbolExtractor) extractCSymbols(node *sitter.Node, source []byte, filt
 	var symbols []Symbol
 
 	switch node.Type() {
-	case "function_definition":
+	case NodeFunctionDefinition:
 		declarator := e.getChildNodeByFieldName(node, "declarator")
 		if declarator != nil {
 			name := e.getIdentifierFromDeclarator(declarator, source)

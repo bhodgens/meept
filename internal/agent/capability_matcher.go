@@ -95,8 +95,8 @@ func (m *CapabilityMatcher) matchPlatformPatterns(inputLower string) *MatchResul
 			return &MatchResult{
 				AgentID:         config.AgentIDChat,
 				Confidence:      0.9,
-				MatchType:       "platform",
-				IntentType:      "platform",
+				MatchType:       string(IntentPlatform),
+				IntentType:      string(IntentPlatform),
 				MatchedKeywords: []string{pattern},
 			}
 		}

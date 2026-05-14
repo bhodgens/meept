@@ -166,7 +166,7 @@ func (d *AgentDesigner) determineCapabilities(pattern PatternReport, research *R
 
 	// Add capabilities based on pattern type
 	switch pattern.PatternType {
-	case "model_misconfiguration":
+	case PatternModelMisconfiguration:
 		// May need specific model capabilities
 		capabilities = append(capabilities, "domain_knowledge")
 	case "wrong_agent_assignment", "repeated_failure":

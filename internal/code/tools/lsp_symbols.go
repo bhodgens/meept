@@ -37,15 +37,15 @@ func (t *LSPSymbolsTool) Parameters() llm.FunctionParameters {
 		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"query": {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Search query for workspace symbols. Required if file_path is not provided.",
 			},
 			SchemaPropFilePath: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Path to file for document symbols. If provided, returns all symbols in this file.",
 			},
 			SchemaPropLanguage: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Language ID for workspace search (e.g., 'go', 'python', 'typescript'). Required for workspace search.",
 			},
 		},
@@ -55,7 +55,7 @@ func (t *LSPSymbolsTool) Parameters() llm.FunctionParameters {
 
 func (t *LSPSymbolsTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	query, _ := args["query"].(string)
-	filePath, _ := args["file_path"].(string)
+	filePath, _ := args[SchemaPropFilePath].(string)
 	language, _ := args["language"].(string)
 
 	// Document symbols mode

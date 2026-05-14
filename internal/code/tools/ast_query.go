@@ -43,32 +43,32 @@ func (t *ASTQueryTool) Parameters() llm.FunctionParameters {
 		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			SchemaPropFilePath: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Path to the source file to query.",
 			},
 			"query": {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Tree-sitter S-expression query pattern. Use @name to capture nodes.",
 			},
 			"query_name": {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Use a predefined query: functions, classes, imports, strings, comments.",
 			},
 			SchemaPropLanguage: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Override language detection (go, python, typescript, etc.).",
 			},
 			"max_matches": {
-				Type:        "integer",
+				Type:        SchemaTypeInteger,
 				Description: "Maximum number of matches to return (default: 100).",
 			},
 		},
-		Required: []string{"file_path"},
+		Required: []string{SchemaPropFilePath},
 	}
 }
 
 func (t *ASTQueryTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	filePath, _ := args["file_path"].(string)
+	filePath, _ := args[SchemaPropFilePath].(string)
 	if filePath == "" {
 		return nil, fmt.Errorf("file_path is required")
 	}

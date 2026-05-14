@@ -29,7 +29,7 @@ var builtinCommands = map[string]struct{}{
 	"cancel":    {},
 	"amend":     {},
 	"interrupt": {},
-	"tasks":     {},
+	CmdTasks:     {},
 }
 
 // ParseSlash parses a slash command from input text.

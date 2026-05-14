@@ -29,13 +29,14 @@ const (
 	ContentTypeFunction = "function"
 
 	// Capability strings used in model definitions.
-	CapCode      = "code"
-	CapReasoning = "reasoning"
-	CapToolUse   = "tool_use"
-	CapThinking  = "thinking"
-	CapImages    = "images"
-	CapStreaming = "streaming"
+	CapCode       = "code"
+	CapReasoning  = "reasoning"
+	CapToolUse    = "tool_use"
+	CapThinking   = "thinking"
+	CapImages     = "images"
+	CapStreaming  = "streaming"
 	CapCompletion = "completion"
+	CapTools      = "tools"
 
 	// Budget exceeded error message.
 	ErrBudgetExceeded = "Token budget exceeded - request blocked"

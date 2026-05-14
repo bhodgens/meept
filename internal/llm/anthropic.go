@@ -846,12 +846,12 @@ func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(P
 						progress(ProgressStageStreaming, "Receiving text...")
 					}
 				}
-			case "thinking":
+			case ContentTypeThinking:
 				if streamEvent.Delta.Thinking != "" {
 					currentBlock.Thinking.WriteString(streamEvent.Delta.Thinking)
 					// Don't spam progress for each thinking delta
 				}
-			case "tool_use":
+			case ContentTypeToolUse:
 				if streamEvent.Delta.PartialJSON != "" {
 					currentBlock.InputJSON.WriteString(streamEvent.Delta.PartialJSON)
 				}
@@ -891,9 +891,9 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 		switch block.Type {
 		case "text":
 			content.WriteString(block.Text.String())
-		case "thinking":
+		case ContentTypeThinking:
 			thinking.WriteString(block.Thinking.String())
-		case "tool_use":
+		case ContentTypeToolUse:
 			// Parse the accumulated input JSON
 			var input json.RawMessage
 			if block.InputJSON.Len() > 0 {
@@ -943,9 +943,9 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) *Response {
 		switch block.Type {
 		case "text":
 			content.WriteString(block.Text)
-		case "thinking":
+		case ContentTypeThinking:
 			thinking.WriteString(block.Thinking)
-		case "tool_use":
+		case ContentTypeToolUse:
 			var input = block.Input
 			if input == nil {
 				input = json.RawMessage("{}")

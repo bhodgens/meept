@@ -241,10 +241,10 @@ func (m *Middleware) classifyDomain(messages []llm.ChatMessage) Domain {
 		text.WriteString(" " + msg.Content)
 	}
 
-	codeKeywords := []string{"code", "function", "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
-	planningKeywords := []string{"plan", "step", "first", "then", "next", "strategy", "approach", "design", "architecture"}
-	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "stack trace", "exception", "traceback"}
-	analysisKeywords := []string{"analyze", "explain", "why", "how does", "what is", "understand", "review"}
+	codeKeywords := []string{"code", KwFunction, "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
+	planningKeywords := []string{"plan", "step", KwFirst, KwThen, "next", "strategy", "approach", "design", "architecture"}
+	debuggingKeywords := []string{"debug", KwFix, "issue", "problem", "crash", "stack trace", "exception", "traceback"}
+	analysisKeywords := []string{KwAnalyze, "explain", "why", "how does", "what is", "understand", "review"}
 
 	if containsAny(text.String(), codeKeywords) {
 		return DomainCode
@@ -274,8 +274,8 @@ func (m *Middleware) classifyTaskType(messages []llm.ChatMessage, response *llm.
 		text.WriteString(" " + msg.Content)
 	}
 
-	multiStepKeywords := []string{"step by step", "first", "second", "then", "finally", "multiple steps"}
-	reasoningKeywords := []string{"think", "reason", "consider", "analyze", "evaluate", "compare"}
+	multiStepKeywords := []string{"step by step", KwFirst, "second", KwThen, "finally", "multiple steps"}
+	reasoningKeywords := []string{"think", "reason", "consider", KwAnalyze, KwEvaluate, "compare"}
 
 	if containsAny(text.String(), multiStepKeywords) {
 		return TaskTypeMultiStep

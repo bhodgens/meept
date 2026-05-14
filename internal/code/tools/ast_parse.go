@@ -35,19 +35,19 @@ func (t *ASTParseTool) Parameters() llm.FunctionParameters {
 		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			SchemaPropFilePath: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Path to the source file to parse. Either file_path or source+language is required.",
 			},
 			"source": {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Inline source code to parse (use with 'language' parameter).",
 			},
 			SchemaPropLanguage: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Language of inline source: go, python, typescript, javascript, rust, c, cpp, java, ruby, yaml, toml, bash.",
 			},
 			"max_depth": {
-				Type:        "integer",
+				Type:        SchemaTypeInteger,
 				Description: "Maximum depth of AST nodes to return (default: 5, 0 for unlimited).",
 			},
 		},
@@ -56,7 +56,7 @@ func (t *ASTParseTool) Parameters() llm.FunctionParameters {
 }
 
 func (t *ASTParseTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	filePath, _ := args["file_path"].(string)
+	filePath, _ := args[SchemaPropFilePath].(string)
 	source, _ := args["source"].(string)
 	language, _ := args["language"].(string)
 	maxDepth := 5

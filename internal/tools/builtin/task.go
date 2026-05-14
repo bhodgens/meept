@@ -31,19 +31,19 @@ func (t *TaskCreateTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropName: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Short descriptive name for the task.",
 			},
 			schemaPropDescription: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Detailed description of what the task involves.",
 			},
 			"project_dir": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional project directory path for context.",
 			},
 			"context_query": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional query for auto-searching relevant memory context.",
 			},
 			"memory_refs": {
@@ -51,7 +51,7 @@ func (t *TaskCreateTool) Parameters() llm.FunctionParameters {
 				Description: "Optional array of memory IDs to attach as context.",
 			},
 		},
-		Required: []string{"name"},
+		Required: []string{schemaPropName},
 	}
 }
 
@@ -60,7 +60,7 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 		return nil, fmt.Errorf("task store not configured")
 	}
 
-	name, _ := args["name"].(string)
+	name, _ := args[schemaPropName].(string)
 	if name == "" {
 		return nil, fmt.Errorf("name is required")
 	}
@@ -124,7 +124,7 @@ func (t *TaskGetTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"id": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The task ID to retrieve.",
 			},
 		},
@@ -190,16 +190,16 @@ func (t *TaskListTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropState: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional state filter: pending, planning, executing, testing, completed, failed, cancelled.",
 				Enum:        []string{"pending", "planning", "executing", "testing", "completed", "failed", "cancelled", ""},
 			},
 			schemaPropLimit: {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of tasks to return (default 20, max 100).",
 			},
 			"active_only": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "If true, only return active (non-terminal) tasks.",
 			},
 		},
@@ -274,32 +274,32 @@ func (t *TaskUpdateTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"id": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The task ID to update.",
 			},
 			schemaPropName: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "New name for the task.",
 			},
 			schemaPropDescription: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "New description for the task.",
 			},
 			schemaPropState: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "New state: pending, planning, executing, testing, completed, failed, cancelled.",
 				Enum:        []string{"pending", "planning", "executing", "testing", "completed", "failed", "cancelled"},
 			},
 			"add_memory_ref": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Add a memory ID reference to the task.",
 			},
 			"context_query": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Set the context query for auto-search.",
 			},
 			"assigned_agent": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Assign the task to a specific agent.",
 			},
 		},
@@ -326,7 +326,7 @@ func (t *TaskUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	// Apply updates
-	if name, ok := args["name"].(string); ok && name != "" {
+	if name, ok := args[schemaPropName].(string); ok && name != "" {
 		taskObj.Name = name
 	}
 

@@ -151,14 +151,14 @@ var CommonQueries = map[string]map[Language]string{
 
 	// Find all comments
 	"comments": {
-		LangGo:         "(comment) @comment",
-		LangPython:     "(comment) @comment",
+		LangGo:         QueryComment,
+		LangPython:     QueryComment,
 		LangTypeScript: "[(comment) @comment (hash_bang_line) @comment]",
 		LangJavaScript: "[(comment) @comment (hash_bang_line) @comment]",
 		LangRust:       "[(line_comment) @comment (block_comment) @comment]",
 		LangJava:       "[(line_comment) @comment (block_comment) @comment]",
-		LangC:          "(comment) @comment",
-		LangCpp:        "(comment) @comment",
+		LangC:          QueryComment,
+		LangCpp:        QueryComment,
 	},
 }
 

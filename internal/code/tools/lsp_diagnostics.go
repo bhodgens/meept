@@ -44,24 +44,24 @@ func (t *LSPDiagnosticsTool) Parameters() llm.FunctionParameters {
 		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			SchemaPropFilePath: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Path to the source file to analyze.",
 			},
 			"severity": {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Minimum severity to include: 'error', 'warning', 'information', 'hint'. Default: 'warning'.",
 			},
 			"wait_ms": {
-				Type:        "integer",
+				Type:        SchemaTypeInteger,
 				Description: "Milliseconds to wait for diagnostics after opening file (default: 1000).",
 			},
 		},
-		Required: []string{"file_path"},
+		Required: []string{SchemaPropFilePath},
 	}
 }
 
 func (t *LSPDiagnosticsTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	filePath, _ := args["file_path"].(string)
+	filePath, _ := args[SchemaPropFilePath].(string)
 	if filePath == "" {
 		return nil, fmt.Errorf("file_path is required")
 	}

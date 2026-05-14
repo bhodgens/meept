@@ -68,7 +68,7 @@ func NewTasksModel(rpc TasksRPCClient) *TasksModel {
 	// SetSize() will adjust column widths; setJobsColumns() switches to 4 job columns.
 	columns := []table.Column{
 		{Title: "Name", Width: 20},
-		{Title: "State", Width: 8},
+		{Title: ColState, Width: 8},
 		{Title: "Agent", Width: 12},
 		{Title: "Steps", Width: 7},
 		{Title: "Progress", Width: 12},
@@ -244,7 +244,7 @@ func (m *TasksModel) setTasksColumns() {
 
 	m.table.SetColumns([]table.Column{
 		{Title: "Name", Width: nameW},
-		{Title: "State", Width: stateW},
+		{Title: ColState, Width: stateW},
 		{Title: "Agent", Width: agentW},
 		{Title: "Steps", Width: stepsW},
 		{Title: "Progress", Width: progressW},
@@ -318,7 +318,7 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyPressMsg:
 		// Handle detail modal first
 		if m.showingDetail {
-			if msg.String() == "esc" || msg.String() == "q" {
+			if msg.String() == KeyEsc || msg.String() == "q" {
 				m.showingDetail = false
 				return nil
 			}
@@ -383,7 +383,7 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 
-		case "enter":
+		case KeyEnter:
 			// Open detail modal
 			if m.viewMode == ViewModeTasks {
 				if len(m.tasks) > 0 {
@@ -404,7 +404,7 @@ func (m *TasksModel) Update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 
-		case "esc":
+		case KeyEsc:
 			m.selectedJob = nil
 			m.selectedTask = nil
 			m.showingDetail = false
@@ -479,12 +479,12 @@ func (m *TasksModel) updateTable() {
 			schedule = job.Trigger
 		}
 		if schedule == "" {
-			schedule = "n/a"
+			schedule = StatusNA
 		}
 
 		nextRun := job.NextRunTime
 		if nextRun == "" {
-			nextRun = "n/a"
+			nextRun = StatusNA
 		}
 
 		name := job.Name
@@ -514,15 +514,15 @@ func (m *TasksModel) filterTasks() []types.TaskExtended {
 		case FilterAll:
 			include = true
 		case FilterActive:
-			if t.State == "executing" || t.State == "planning" || t.State == "pending" {
+			if t.State == StateExecuting || t.State == "planning" || t.State == StatePending {
 				include = true
 			}
 		case FilterCompleted:
-			if t.State == "completed" {
+			if t.State == StateCompleted {
 				include = true
 			}
 		case FilterFailed:
-			if t.State == "failed" || t.State == "cancelled" {
+			if t.State == StateFailed || t.State == "cancelled" {
 				include = true
 			}
 		case FilterMine:
@@ -575,7 +575,7 @@ func (m *TasksModel) updateTasksTable() {
 		if len(task.Steps) > 0 {
 			completedSteps := 0
 			for _, s := range task.Steps {
-				if s.State == "completed" {
+				if s.State == StateCompleted {
 					completedSteps++
 				}
 			}
@@ -643,7 +643,7 @@ func (m *TasksModel) getStateIcon(state string) string {
 		return "● exec"
 	case "testing":
 		return "◑ test"
-	case "completed":
+	case StateCompleted:
 		return "✓ done"
 	case "failed":
 		return "✗ fail"
@@ -675,7 +675,7 @@ func (m *TasksModel) formatTimeAgo(timestamp string) string {
 	// Simplified time formatting
 	// In production, parse the timestamp and calculate relative time
 	if timestamp == "" {
-		return "n/a"
+		return StatusNA
 	}
 	// Just return last few chars for now
 	if len(timestamp) > 5 {
@@ -738,7 +738,7 @@ func (m *TasksModel) View() string {
 
 	// Help hint
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		MarginTop(1)
 
 	if m.viewMode == ViewModeTasks {
@@ -756,7 +756,7 @@ func (m *TasksModel) renderHeader() string {
 		Foreground(lipgloss.Color("#7C3AED"))
 
 	modeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Background(lipgloss.Color("#1F2937")).
 		Padding(0, 1)
 
@@ -767,7 +767,7 @@ func (m *TasksModel) renderHeader() string {
 		Padding(0, 1)
 
 	filterStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B")).
+		Foreground(lipgloss.Color(ColorAmber)).
 		Padding(0, 1)
 
 	var title string
@@ -828,14 +828,14 @@ func (m *TasksModel) renderTaskPreview() string {
 		Width(m.width - 4)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Width(12)
 
 	valueStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#E5E7EB"))
 
 	memStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B"))
+		Foreground(lipgloss.Color(ColorAmber))
 
 	// Quick preview
 	var content strings.Builder
@@ -875,7 +875,7 @@ func (m *TasksModel) renderTaskPreview() string {
 
 	if task.ErrorCount > 0 {
 		content.WriteString(labelStyle.Render("Errors:"))
-		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Render(fmt.Sprintf("%d", task.ErrorCount)))
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Render(fmt.Sprintf("%d", task.ErrorCount)))
 		content.WriteString("\n")
 	}
 
@@ -908,16 +908,16 @@ func (m *TasksModel) renderLoading() string {
 func (m *TasksModel) renderError() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#EF4444")).
+		BorderForeground(lipgloss.Color(ColorRed)).
 		Padding(1, 2).
 		Width(m.width - 4)
 
 	return style.Render(
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true).Render("Error") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("Error") +
 			"\n\n" +
 			fmt.Sprintf("%v", m.err) +
 			"\n\n" +
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Press 'r' to refresh"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press 'r' to refresh"),
 	)
 }
 
@@ -935,15 +935,15 @@ func (m *TasksModel) renderJobDetail() string {
 		Foreground(lipgloss.Color("#7C3AED"))
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Width(14)
 
 	valueStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#E5E7EB"))
 
-	statusColor := "#10B981" // Green
+	statusColor := ColorGreen // Green
 	if job.Paused {
-		statusColor = "#F59E0B" // Amber
+		statusColor = ColorAmber // Amber
 	}
 	statusStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(statusColor)).
@@ -969,19 +969,19 @@ func (m *TasksModel) renderJobDetail() string {
 		schedule = job.Trigger
 	}
 	if schedule == "" {
-		schedule = "n/a"
+		schedule = StatusNA
 	}
 	content += labelStyle.Render("Schedule:") + valueStyle.Render(schedule) + "\n"
 
 	nextRun := job.NextRunTime
 	if nextRun == "" {
-		nextRun = "n/a"
+		nextRun = StatusNA
 	}
 	content += labelStyle.Render("Next Run:") + valueStyle.Render(nextRun) + "\n"
 
 	lastResult := job.LastResult
 	if lastResult == "" {
-		lastResult = "n/a"
+		lastResult = StatusNA
 	}
 	content += labelStyle.Render("Last Result:") + valueStyle.Render(lastResult) + "\n"
 
@@ -1000,7 +1000,7 @@ func (m *TasksModel) renderEmptyDetail() string {
 		Width(m.width - 4)
 
 	content := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Italic(true).
 		Render("Select a job to view details")
 
@@ -1028,12 +1028,12 @@ func (m *TasksModel) renderTaskDetailModal() string {
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B")).
+		Foreground(lipgloss.Color(ColorAmber)).
 		Bold(true).
 		MarginTop(1)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Width(14)
 
 	valueStyle := lipgloss.NewStyle().
@@ -1087,9 +1087,9 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	content.WriteString(valueStyle.Render(fmt.Sprintf("%s (%.0f%%)", progress, percent)))
 	content.WriteString("\n")
 
-	completedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981"))
-	failedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
-	pendingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	completedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGreen))
+	failedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed))
+	pendingStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
 
 	pending := max(task.TotalJobs-task.CompletedJobs-task.FailedJobs, 0)
 
@@ -1132,7 +1132,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 			revisionBadge := ""
 			if step.RevisionCount > 0 {
 				revisionBadge = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#F59E0B")).
+					Foreground(lipgloss.Color(ColorAmber)).
 					Render(fmt.Sprintf(" (rev %d)", step.RevisionCount))
 			}
 
@@ -1220,7 +1220,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 	// Footer
 	content.WriteString("\n")
 	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Italic(true)
 	content.WriteString(footerStyle.Render("[Esc/q] close"))
 
@@ -1229,44 +1229,44 @@ func (m *TasksModel) renderTaskDetailModal() string {
 
 func (m *TasksModel) getStateColor(state string) string {
 	switch state {
-	case "pending":
-		return "#6B7280" // Gray
+	case StatePending:
+		return ColorGray // Gray
 	case "planning":
-		return "#F59E0B" // Amber
+		return ColorAmber // Amber
 	case "executing":
 		return "#3B82F6" // Blue
 	case "testing":
 		return "#8B5CF6" // Purple
-	case "completed":
-		return "#10B981" // Green
-	case "failed":
-		return "#EF4444" // Red
+	case StateCompleted:
+		return ColorGreen // Green
+	case StateFailed:
+		return ColorRed // Red
 	case "cancelled":
-		return "#6B7280" // Gray
+		return ColorGray // Gray
 	default:
-		return "#6B7280"
+		return ColorGray
 	}
 }
 
 func (m *TasksModel) getStepStateIcon(state string) string {
 	switch state {
-	case "pending":
+	case StatePending:
 		return "○"
-	case "ready":
+	case StateReady:
 		return "◌"
 	case "scheduled":
 		return "◐"
-	case "running":
+	case StateRunning:
 		return "●"
-	case "reviewing":
+	case StateReviewing:
 		return "🔍"
-	case "approved":
+	case StateApproved:
 		return "✔"
-	case "rejected":
+	case StateRejected:
 		return "✎"
-	case "completed":
+	case StateCompleted:
 		return "✓"
-	case "failed":
+	case StateFailed:
 		return "✗"
 	case "skipped":
 		return "⊘"
@@ -1277,23 +1277,23 @@ func (m *TasksModel) getStepStateIcon(state string) string {
 
 func (m *TasksModel) getStepStateLabel(state string) string {
 	switch state {
-	case "pending":
+	case StatePending:
 		return "pend"
-	case "ready":
-		return "ready"
+	case StateReady:
+		return StateReady
 	case "scheduled":
 		return "sched"
-	case "running":
+	case StateRunning:
 		return "exec"
-	case "reviewing":
+	case StateReviewing:
 		return "rev"
-	case "approved":
+	case StateApproved:
 		return "ok"
-	case "rejected":
+	case StateRejected:
 		return "fix"
-	case "completed":
+	case StateCompleted:
 		return "done"
-	case "failed":
+	case StateFailed:
 		return "fail"
 	case "skipped":
 		return "skip"
@@ -1305,37 +1305,37 @@ func (m *TasksModel) getStepStateLabel(state string) string {
 func (m *TasksModel) getStepStateColor(state string) string {
 	switch state {
 	case "pending":
-		return "#6B7280"
-	case "ready":
-		return "#F59E0B"
+		return ColorGray
+	case StateReady:
+		return ColorAmber
 	case "scheduled":
-		return "#F59E0B"
+		return ColorAmber
 	case "running":
 		return "#3B82F6"
-	case "reviewing":
+	case StateReviewing:
 		return "#8B5CF6"
-	case "approved":
-		return "#10B981"
-	case "rejected":
-		return "#F59E0B"
-	case "completed":
-		return "#10B981"
+	case StateApproved:
+		return ColorGreen
+	case StateRejected:
+		return ColorAmber
+	case StateCompleted:
+		return ColorGreen
 	case "failed":
-		return "#EF4444"
+		return ColorRed
 	case "skipped":
-		return "#6B7280"
+		return ColorGray
 	default:
-		return "#6B7280"
+		return ColorGray
 	}
 }
 
 func (m *TasksModel) getStepPercent(state string) float64 {
 	switch state {
-	case "completed", "approved":
+	case StateCompleted, StateApproved:
 		return 100
-	case "running", "reviewing":
+	case "running", StateReviewing:
 		return 50
-	case "failed", "rejected":
+	case "failed", StateRejected:
 		return 100
 	default:
 		return 0
@@ -1360,7 +1360,7 @@ func (m *TasksModel) renderLineageView() string {
 		Foreground(lipgloss.Color("#7C3AED"))
 
 	modeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		Background(lipgloss.Color("#1F2937")).
 		Padding(0, 1)
 
@@ -1400,7 +1400,7 @@ func (m *TasksModel) renderLineageView() string {
 
 	if len(rootTasks) == 0 {
 		b.WriteString(panelStyle.Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Italic(true).Render("No tasks with lineage information"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("No tasks with lineage information"),
 		))
 	} else {
 		var treeContent strings.Builder
@@ -1415,7 +1415,7 @@ func (m *TasksModel) renderLineageView() string {
 
 	// Footer hints
 	hintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280")).
+		Foreground(lipgloss.Color(ColorGray)).
 		MarginTop(1)
 	b.WriteString(hintStyle.Render("tab: tasks view | t: toggle | r: refresh | enter: details | ?: help"))
 
@@ -1429,8 +1429,8 @@ func (m *TasksModel) renderTaskNode(b *strings.Builder, task types.TaskExtended,
 	stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor))
 
 	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
-	memStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	memStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray))
 
 	// Task name
 	name := task.Name
@@ -1527,12 +1527,12 @@ func (m *TasksModel) renderHelp() string {
 		MarginBottom(1)
 
 	sectionStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B")).
+		Foreground(lipgloss.Color(ColorAmber)).
 		Bold(true).
 		MarginTop(1)
 
 	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F59E0B")).
+		Foreground(lipgloss.Color(ColorAmber)).
 		Bold(true).
 		Width(12)
 
@@ -1568,7 +1568,7 @@ func (m *TasksModel) renderHelp() string {
 	content += keyStyle.Render("✗") + descStyle.Render("Failed") + "\n"
 
 	content += "\n"
-	content += lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Press any key to close")
+	content += lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press any key to close")
 
 	return panelStyle.Render(content)
 }

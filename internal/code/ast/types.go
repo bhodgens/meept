@@ -1,7 +1,22 @@
 // Package ast provides AST parsing capabilities using tree-sitter.
 package ast
 
-import "encoding/json"
+import (
+	"encoding/json"
+)
+
+// Tree-sitter node type constants.
+const (
+	NodeFunctionDeclaration = "function_declaration"
+	NodeFunctionDefinition  = "function_definition"
+	NodeClassDeclaration    = "class_declaration"
+	NodeMethodDeclaration   = "method_declaration"
+)
+
+// Tree-sitter query constants.
+const (
+	QueryComment = "(comment) @comment"
+)
 
 // Language represents a supported programming language.
 type Language string

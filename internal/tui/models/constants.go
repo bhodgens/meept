@@ -10,3 +10,44 @@ const (
 	KeyLeft  = "left"
 	KeyRight = "right"
 )
+
+// UI state constants shared across TUI models.
+const (
+	StateCompleted  = "completed"
+	StateFailed     = "failed"
+	StatePending    = "pending"
+	StateProcessing = "processing"
+	StateExecuting  = "executing"
+	StateRunning    = "running"
+	StateNormal     = "normal"
+	RoleUser        = "user"
+	RoleAssistant   = "assistant"
+	RoleSystem      = "system"
+	RolePending     = "pending"
+)
+
+// Color constants for TUI rendering.
+const (
+	ColorAmber = "#F59E0B"
+	ColorGreen = "#10B981"
+	ColorRed   = "#EF4444"
+	ColorGray  = "#6B7280"
+)
+
+// Status text constants.
+const (
+	StatusNA = "n/a"
+)
+
+// Table column title constants.
+const (
+	ColState = "State"
+)
+
+// Task step state constants.
+const (
+	StateReady     = "ready"
+	StateReviewing = "reviewing"
+	StateApproved  = "approved"
+	StateRejected  = "rejected"
+)

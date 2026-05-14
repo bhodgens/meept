@@ -53,7 +53,7 @@ type ReviewPolicy struct {
 // DefaultReviewPolicy returns sensible defaults for review policy.
 func DefaultReviewPolicy() *ReviewPolicy {
 	return &ReviewPolicy{
-		RequireReview: []string{string(IntentCode), "refactor", string(IntentDebug), string(IntentGit), "fix"},
+		RequireReview: []string{string(IntentCode), KeywordRefactor, string(IntentDebug), string(IntentGit), KeywordFix},
 		SkipReview:    []string{string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentSearch), string(IntentAnalyze)},
 		ReviewerMapping: map[string]string{
 			config.AgentIDCoder:     SourceCodeReviewer,
@@ -106,15 +106,15 @@ func (p *ReviewPolicy) SelectReviewer(step *task.TaskStep) string {
 
 	// Map tool hint to reviewer
 	switch step.ToolHint {
-	case string(IntentCode), "refactor":
+	case string(IntentCode), KeywordRefactor:
 		return SourceCodeReviewer
-	case string(IntentDebug), "fix":
+	case string(IntentDebug), KeywordFix:
 		return "debug-reviewer"
 	case string(IntentPlan):
 		return "planner-reviewer"
 	case string(IntentAnalyze), string(IntentResearch):
 		return "analyst-reviewer"
-	case string(IntentGit), "commit":
+	case string(IntentGit), KeywordCommit:
 		return SourceCodeReviewer
 	default:
 		return "test-reviewer" // Default reviewer
@@ -177,7 +177,7 @@ type ValidationPolicy struct {
 func DefaultValidationPolicy() *ValidationPolicy {
 	return &ValidationPolicy{
 		Enabled:              true,
-		RequireValidation:    []string{string(IntentCode), "refactor", string(IntentDebug), string(IntentGit), "fix", "commit"},
+		RequireValidation:    []string{string(IntentCode), KeywordRefactor, string(IntentDebug), string(IntentGit), KeywordFix, KeywordCommit},
 		SkipValidation:       []string{string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentSearch), string(IntentAnalyze), string(IntentPlatform)},
 		MaxValidationLoops:   3,
 		SkipValidationAgents: []string{config.AgentIDChat, config.AgentIDAnalyst},

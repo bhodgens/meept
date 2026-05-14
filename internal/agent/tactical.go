@@ -928,13 +928,13 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 // selectAgent maps a step's ToolHint to the appropriate agent ID.
 func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 	switch step.ToolHint {
-	case string(IntentCode), "refactor":
+	case string(IntentCode), KeywordRefactor:
 		return config.AgentIDCoder
-	case string(IntentDebug), "fix":
+	case string(IntentDebug), KeywordFix:
 		return config.AgentIDDebugger
 	case string(IntentAnalyze), string(IntentResearch):
 		return config.AgentIDAnalyst
-	case string(IntentGit), "commit":
+	case string(IntentGit), KeywordCommit:
 		return config.AgentIDCommitter
 	case string(IntentSchedule):
 		return config.AgentIDScheduler

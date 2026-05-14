@@ -208,7 +208,7 @@ func (h *ChatHandler) handleAgentProgress(msg *models.BusMessage) {
 			continue
 		}
 		// Don't override terminal states.
-		if w.State == "completed" || w.State == "error" {
+		if w.State == ReportStatusCompleted || w.State == string(MessageTypeError) {
 			continue
 		}
 		changed := false
@@ -376,7 +376,7 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// Update worker state
 	worker.LastActivity = time.Now()
 	if err != nil {
-		worker.State = "error"
+		worker.State = string(MessageTypeError)
 		h.logger.Error("Agent loop failed",
 			"worker", workerID,
 			"error", err,

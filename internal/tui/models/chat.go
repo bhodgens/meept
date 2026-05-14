@@ -355,7 +355,7 @@ func (m *ChatModel) SetScreenYOffset(offset int) {
 // Init initializes the chat model.
 func (m *ChatModel) Init() tea.Cmd {
 	if len(m.messages) == 0 {
-		m.addMessage("system", "Welcome to Meept! Type a message to begin.")
+		m.addMessage(RoleSystem, "Welcome to Meept! Type a message to begin.")
 	}
 	return textarea.Blink
 }
@@ -546,7 +546,7 @@ func (m *ChatModel) ClearLoading() {
 	if m.pendingMsgIdx >= 0 && m.pendingMsgIdx < len(m.messages) {
 		// Replace pending message with a cancelled indicator
 		m.messages[m.pendingMsgIdx] = ChatMessage{
-			Role:      "system",
+			Role:      RoleSystem,
 			Content:   "[work stopped]",
 			Timestamp: time.Now(),
 			State:     MessageNormal,
@@ -810,7 +810,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 
-		case "enter":
+		case KeyEnter:
 			// Enter always sends message (when focused on input and not loading)
 			if m.focused != FocusInput || m.loading {
 				return nil
@@ -879,7 +879,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			m.updateViewport()
 			return nil
 
-		case "esc":
+		case KeyEsc:
 			// Escape is handled by App.HandleEscape, but handle here for direct calls
 			return m.HandleEscape()
 
@@ -944,7 +944,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		m.pendingMsgIdx = -1
 
 		if msg.Err != nil {
-			m.addMessage("system", fmt.Sprintf("Error: %v", msg.Err))
+			m.addMessage(RoleSystem, fmt.Sprintf("Error: %v", msg.Err))
 		} else {
 			// Check if the reply is an async task ack
 			if isAsyncAck, taskID, taskMessage := parseAsyncAck(msg.Reply); isAsyncAck {
@@ -957,7 +957,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 					types.TruncateString(taskMessage, 45),
 					types.TruncateString(taskID, 40),
 				)
-				m.addMessage("system", content)
+				m.addMessage(RoleSystem, content)
 			} else if result := parseTaskResult(msg.Reply); result != nil {
 				// Render as a task result message
 				var content string
@@ -984,13 +984,13 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 					}
 					content += "└─────────────────────────────────────────────┘"
 				}
-				m.addMessage("system", content)
+				m.addMessage(RoleSystem, content)
 			} else {
-				m.addMessage("assistant", msg.Reply)
+				m.addMessage(RoleAssistant, msg.Reply)
 			}
 
 			// Track dirty message for persistence
-			m.trackDirtyMessage("assistant", msg.Reply)
+			m.trackDirtyMessage(RoleAssistant, msg.Reply)
 
 			// Auto-description: after first exchange (1 user + 1 assistant)
 			descCmd := m.maybeGenerateDescription()
@@ -1047,14 +1047,14 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			types.TruncateString(msg.TaskName, 40),
 			types.TruncateString(msg.TaskID, 40),
 		)
-		m.addMessage("system", content)
+		m.addMessage(RoleSystem, content)
 		return nil
 
 	case ChatTaskResultMsg:
 		// Render a styled task result message in chat
-		stateLabel := "completed"
-		if msg.State == "failed" {
-			stateLabel = "failed"
+		stateLabel := StateCompleted
+		if msg.State == StateFailed {
+			stateLabel = StateFailed
 		}
 		content := fmt.Sprintf("┌ task %s ────────────────────────────────┐\n"+
 			"│ Task: \"%s\"\n"+
@@ -1067,7 +1067,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			content += fmt.Sprintf("│ %s\n", types.TruncateString(msg.ResultSummary, 50))
 		}
 		content += "└─────────────────────────────────────────────┘"
-		m.addMessage("system", content)
+		m.addMessage(RoleSystem, content)
 		return nil
 
 	case ProgressUpdateMsg:
@@ -1108,21 +1108,21 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	case SteeringResultMsg:
 		if msg.Success {
-			m.addMessage("system", "[steering] message queued")
+			m.addMessage(RoleSystem, "[steering] message queued")
 		} else {
-			m.addMessage("system", fmt.Sprintf("[steering] error: %v", msg.Err))
+			m.addMessage(RoleSystem, fmt.Sprintf("[steering] error: %v", msg.Err))
 		}
 		return nil
 
 	case SteeringInjectedMsg:
-		m.addMessage("system", "[steering] steering message injected into agent queue")
+		m.addMessage(RoleSystem, "[steering] steering message injected into agent queue")
 		return nil
 
 	case FollowUpResultMsg:
 		if msg.Success {
-			m.addMessage("system", "[follow-up] message queued for processing")
+			m.addMessage(RoleSystem, "[follow-up] message queued for processing")
 		} else {
-			m.addMessage("system", fmt.Sprintf("[follow-up] error: %v", msg.Err))
+			m.addMessage(RoleSystem, fmt.Sprintf("[follow-up] error: %v", msg.Err))
 		}
 		return nil
 
@@ -1211,13 +1211,13 @@ type CopyToClipboardMsg struct {
 func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 	var prefix string
 	switch msg.Role {
-	case "user":
+	case RoleUser:
 		prefix = "You: "
-	case "assistant":
+	case RoleAssistant:
 		prefix = "Meept: "
-	case "pending":
+	case StatePending:
 		prefix = ""
-	case "system":
+	case RoleSystem:
 		prefix = ""
 	}
 
@@ -1234,7 +1234,7 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 	}
 
 	// Try markdown rendering for assistant messages
-	if m.renderMarkdown && m.mdRenderer != nil && msg.Role == "assistant" {
+	if m.renderMarkdown && m.mdRenderer != nil && msg.Role == RoleAssistant {
 		// Check if markdown is detected
 		if render.DetectMarkdown(content) {
 			rendered, err := m.mdRenderer.Render(content)
@@ -1267,7 +1267,7 @@ func (m *ChatModel) addMessage(role, content string) {
 
 // AddSystemMessage adds a system message to the chat transcript.
 func (m *ChatModel) AddSystemMessage(content string) {
-	m.addMessage("system", content)
+	m.addMessage(RoleSystem, content)
 }
 
 // trackDirtyMessage adds a message to the dirty buffer for later persistence.
@@ -1318,8 +1318,8 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 
 		if m.steerMode {
 			m.steerMode = false // Reset after sending
-			m.addMessage("user", "[steering] "+actualText)
-			m.trackDirtyMessage("user", "[steering] "+actualText)
+			m.addMessage(RoleUser, "[steering] "+actualText)
+			m.trackDirtyMessage(RoleUser, "[steering] "+actualText)
 			return m.SteerQueue(text)
 		}
 		// Follow-up mode
@@ -1331,10 +1331,10 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 	m.addToHistory(text)
 
 	// Add user message (with expanded content)
-	m.addMessage("user", actualText)
+	m.addMessage(RoleUser, actualText)
 
 	// Track dirty message for persistence
-	m.trackDirtyMessage("user", actualText)
+	m.trackDirtyMessage(RoleUser, actualText)
 
 	// Initialize progress state
 	m.progressState = &ProgressState{
@@ -1345,7 +1345,7 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 	// Add pending "Sending..." message immediately
 	m.pendingMsgIdx = len(m.messages)
 	m.messages = append(m.messages, ChatMessage{
-		Role:      "pending",
+		Role:      StatePending,
 		Content:   m.renderProgressContent(),
 		Timestamp: time.Now(),
 		State:     MessageNormal,
@@ -1407,12 +1407,12 @@ func (m *ChatModel) maybeGenerateDescription() tea.Cmd {
 	var firstUserContent string
 	for _, msg := range m.messages {
 		switch msg.Role {
-		case "user":
+		case RoleUser:
 			userCount++
 			if firstUserContent == "" {
 				firstUserContent = msg.Content
 			}
-		case "assistant":
+		case RoleAssistant:
 			assistantCount++
 		}
 	}
@@ -1540,7 +1540,7 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 			State:     MessageNormal,
 		})
 		// Populate history from user messages
-		if sm.Role == "user" {
+		if sm.Role == RoleUser {
 			history = append(history, sm.Content)
 		}
 	}
@@ -1579,13 +1579,13 @@ func (m *ChatModel) updateViewport() {
 		var style lipgloss.Style
 
 		switch msg.Role {
-		case "user":
+		case RoleUser:
 			style = m.userStyle
-		case "assistant":
+		case RoleAssistant:
 			style = m.assistantStyle
-		case "pending":
+		case StatePending:
 			style = m.pendingStyle
-		case "system":
+		case RoleSystem:
 			style = m.systemStyle
 		}
 
@@ -1600,12 +1600,12 @@ func (m *ChatModel) updateViewport() {
 		// messages belong to the same turn.
 		isNewTurn := false
 		switch msg.Role {
-		case "user":
+		case RoleUser:
 			isNewTurn = true
-		case "system":
+		case RoleSystem:
 			// System message starts a new turn only if the previous message
 			// was not also a system message
-			if i == 0 || m.messages[i-1].Role != "system" {
+			if i == 0 || m.messages[i-1].Role != RoleSystem {
 				isNewTurn = true
 			}
 		}
@@ -1631,7 +1631,7 @@ func (m *ChatModel) updateViewport() {
 
 		// Add timestamp for non-system messages
 		var timestampStr string
-		if msg.Role != "system" && msg.Role != "pending" {
+		if msg.Role != RoleSystem && msg.Role != StatePending {
 			timestampStr = msg.Timestamp.Format("15:04")
 		}
 
@@ -1972,11 +1972,11 @@ func (m *ChatModel) GetMode() string {
 		if m.focused == FocusInput {
 			return "insert"
 		}
-		return "normal"
+		return StateNormal
 	}
 	switch m.vimState.Mode {
 	case vim.ModeNormal:
-		return "normal"
+		return StateNormal
 	case vim.ModeInsert:
 		return "insert"
 	case vim.ModeVisual:
@@ -1984,7 +1984,7 @@ func (m *ChatModel) GetMode() string {
 	case vim.ModeCommand:
 		return "command"
 	default:
-		return "normal"
+		return StateNormal
 	}
 }
 
@@ -2430,7 +2430,7 @@ func (m *ChatModel) RetryLast() bool {
 	// Find the last user message
 	lastUserIdx := -1
 	for i, v := range slices.Backward(m.messages) {
-		if v.Role == "user" {
+		if v.Role == RoleUser {
 			lastUserIdx = i
 			break
 		}
@@ -2458,7 +2458,7 @@ func (m *ChatModel) RetryLast() bool {
 // GetLastUserMessage returns the content of the last user message, or empty string if none.
 func (m *ChatModel) GetLastUserMessage() string {
 	for _, v := range slices.Backward(m.messages) {
-		if v.Role == "user" {
+		if v.Role == RoleUser {
 			return v.Content
 		}
 	}
@@ -2475,7 +2475,7 @@ func (m *ChatModel) UndoLast() bool {
 	// Find the last user message
 	lastUserIdx := -1
 	for i, v := range slices.Backward(m.messages) {
-		if v.Role == "user" {
+		if v.Role == RoleUser {
 			lastUserIdx = i
 			break
 		}

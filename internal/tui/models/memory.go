@@ -144,7 +144,7 @@ func (m *MemoryModel) Update(msg tea.Msg) tea.Cmd {
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "enter":
+		case KeyEnter:
 			if m.focusedSearch {
 				query := strings.TrimSpace(m.searchInput.Value())
 				if query != "" {
@@ -176,7 +176,7 @@ func (m *MemoryModel) Update(msg tea.Msg) tea.Cmd {
 			m.searchInput.Focus()
 			return nil
 
-		case "esc":
+		case KeyEsc:
 			if m.selectedItem != nil {
 				m.selectedItem = nil
 			} else if !m.focusedSearch {
@@ -350,7 +350,7 @@ func (m *MemoryModel) renderDetail(width int) string {
 	case "episodic":
 		typeColor = "#06B6D4" // Cyan
 	case "task":
-		typeColor = "#F59E0B" // Amber
+		typeColor = ColorAmber // Amber
 	case "personality":
 		typeColor = "#A855F7" // Purple
 	}

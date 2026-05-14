@@ -523,7 +523,7 @@ func (rm *ReviewManager) ValidateCompletion(ctx context.Context, step *task.Task
 	}
 
 	// Check 2: Evidence was provided (if applicable)
-	if step.ToolHint == string(IntentCode) || step.ToolHint == "refactor" || step.ToolHint == "fix" {
+	if step.ToolHint == string(IntentCode) || step.ToolHint == KeywordRefactor || step.ToolHint == KeywordFix {
 		if len(step.Evidence) == 0 && len(step.Claims) == 0 {
 			return &ValidationResult{
 				Status:   CompletionPartial,
@@ -627,7 +627,7 @@ func (rm *ReviewManager) checkClaimsAgainstDescription(step *task.TaskStep) (ver
 	if strings.Contains(descLower, "fix") || strings.Contains(descLower, "debug") {
 		// Check result for error indicators
 		resultLower := strings.ToLower(step.Result)
-		errorIndicators := []string{"error", "failed", "could not", "unable to", "not found"}
+		errorIndicators := []string{string(MessageTypeError), "failed", "could not", "unable to", "not found"}
 		hasErrors := false
 		for _, indicator := range errorIndicators {
 			if strings.Contains(resultLower, indicator) && !strings.Contains(resultLower, "fixed") && !strings.Contains(resultLower, "resolved") {

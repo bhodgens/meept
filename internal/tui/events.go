@@ -350,7 +350,7 @@ func (mc *MetricsCollector) Collect() tea.Cmd {
 		if workers, err := mc.rpc.ListPoolWorkers(); err == nil {
 			for _, w := range workers.Workers {
 				switch w.State {
-				case "processing", "claiming":
+				case StateProcessing, "claiming":
 					snapshot.WorkersBusy++
 				case "idle":
 					snapshot.WorkersIdle++

@@ -36,7 +36,7 @@ func (t *ASTSymbolsTool) Parameters() llm.FunctionParameters {
 		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			SchemaPropFilePath: {
-				Type:        "string",
+				Type:        SchemaTypeString,
 				Description: "Path to the source file to analyze.",
 			},
 			"kinds": {
@@ -44,20 +44,20 @@ func (t *ASTSymbolsTool) Parameters() llm.FunctionParameters {
 				Description: "Filter by symbol kinds: function, method, class, interface, struct, enum, constant, variable, module. Empty means all.",
 			},
 			"include_private": {
-				Type:        "boolean",
+				Type:        SchemaTypeBoolean,
 				Description: "Include private/unexported symbols (default: true).",
 			},
 			"max_depth": {
-				Type:        "integer",
+				Type:        SchemaTypeInteger,
 				Description: "Maximum nesting depth for child symbols (default: 0 = unlimited).",
 			},
 		},
-		Required: []string{"file_path"},
+		Required: []string{SchemaPropFilePath},
 	}
 }
 
 func (t *ASTSymbolsTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	filePath, _ := args["file_path"].(string)
+	filePath, _ := args[SchemaPropFilePath].(string)
 	if filePath == "" {
 		return nil, fmt.Errorf("file_path is required")
 	}

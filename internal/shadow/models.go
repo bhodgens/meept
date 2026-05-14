@@ -38,6 +38,22 @@ const (
 	TaskTypeMultiStep TaskType = "multi_step"
 )
 
+// Message role constants.
+const (
+	RoleUser      = "user"
+	RoleAssistant = "assistant"
+)
+
+// Classification keyword constants used across classifier, manager, and middleware.
+const (
+	KwFix       = "fix"
+	KwFunction  = "function"
+	KwAnalyze   = "analyze"
+	KwEvaluate  = "evaluate"
+	KwFirst     = "first"
+	KwThen      = "then"
+)
+
 // Message represents a chat message for storage.
 type Message struct {
 	Role    string `json:"role"`
@@ -173,7 +189,7 @@ func NewFewShotExample(record *ShadowRecord) *FewShotExample {
 	// Get the last user message
 	var userMsg string
 	for _, v := range slices.Backward(record.Messages) {
-		if v.Role == "user" {
+		if v.Role == RoleUser {
 			userMsg = v.Content
 			break
 		}

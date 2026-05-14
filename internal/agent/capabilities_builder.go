@@ -145,7 +145,7 @@ func (b *CapabilitiesBuilder) extractIntentsFromPurpose(purpose string) []string
 		string(IntentAnalyze):  true,
 		string(IntentResearch): true,
 		string(IntentSchedule): true,
-		"commit":               true,
+		KeywordCommit:          true,
 		string(ActionReview):   true,
 		"test":                 true,
 		"deploy":               true,
@@ -159,9 +159,9 @@ func (b *CapabilitiesBuilder) extractIntentsFromPurpose(purpose string) []string
 		"delete":               true,
 		"diagnose":             true,
 		"troubleshoot":         true,
-		"fix":                  true,
+		KeywordFix:             true,
 		"summarize":            true,
-		"explain":              true,
+		KeywordExplain:         true,
 	}
 
 	purposeLower := strings.ToLower(purpose)

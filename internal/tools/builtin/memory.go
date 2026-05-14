@@ -33,16 +33,16 @@ func (t *MemoryStoreTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropContent: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The content to store in memory. Should be clear and self-contained.",
 			},
 			schemaPropType: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Memory type: 'episodic' for conversations/interactions, 'task' for technical knowledge.",
-				Enum:        []string{"episodic", "task"},
+				Enum:        []string{schemaMemoryEpisodic, "task"},
 			},
 			schemaPropCategory: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional category to organize the memory (e.g., 'conversation', 'code', 'decision').",
 			},
 		},
@@ -62,12 +62,12 @@ func (t *MemoryStoreTool) Execute(ctx context.Context, args map[string]any) (any
 
 	memTypeStr, _ := args["type"].(string)
 	if memTypeStr == "" {
-		memTypeStr = "episodic"
+		memTypeStr = schemaMemoryEpisodic
 	}
 
 	var memType memory.MemoryType
 	switch memTypeStr {
-	case "episodic":
+	case schemaMemoryEpisodic:
 		memType = memory.MemoryTypeEpisodic
 	case "task":
 		memType = memory.MemoryTypeTask
@@ -117,20 +117,20 @@ func (t *MemorySearchTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropQuery: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Search query to find relevant memories.",
 			},
 			schemaPropType: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional: filter to 'episodic' or 'task' memories only.",
-				Enum:        []string{"episodic", "task", ""},
+				Enum:        []string{schemaMemoryEpisodic, "task", ""},
 			},
 			schemaPropLimit: {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of results to return (default 10, max 50).",
 			},
 			"min_relevance": {
-				Type:        "number",
+				Type:        schemaTypeNumber,
 				Description: "Minimum relevance score 0.0-1.0 (default 0.3).",
 			},
 		},
@@ -167,7 +167,7 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 	// Apply type filter if specified
 	if memTypeStr, ok := args["type"].(string); ok && memTypeStr != "" {
 		switch memTypeStr {
-		case "episodic":
+		case schemaMemoryEpisodic:
 			memQuery.Type = memory.MemoryTypeEpisodic
 		case "task":
 			memQuery.Type = memory.MemoryTypeTask
@@ -221,11 +221,11 @@ func (t *MemoryGetContextTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropQuery: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The query or topic to get relevant context for.",
 			},
 			"max_items": {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of context items to return (default 10, max 30).",
 			},
 		},
@@ -307,11 +307,11 @@ func (t *MemoryGetVersionTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropMemoryID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The ID of the memory to retrieve.",
 			},
 			"version": {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Optional: specific version number to retrieve. If not specified, returns the current version.",
 			},
 		},
@@ -384,7 +384,7 @@ func (t *MemoryGetVersionHistoryTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropMemoryID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The ID of the memory to retrieve version history for.",
 			},
 		},

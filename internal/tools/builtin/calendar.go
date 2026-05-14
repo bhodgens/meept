@@ -32,15 +32,15 @@ func (t *CalendarListTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropStart: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Start date/time in RFC3339 format (e.g., 2024-01-15T09:00:00Z)",
 			},
 			schemaPropEnd: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "End date/time in RFC3339 format",
 			},
 			"max_results": {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of events to return (default: 10)",
 			},
 		},
@@ -95,23 +95,23 @@ func (t *CalendarCreateTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"summary": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Event title/summary",
 			},
 			schemaPropStart: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Start date/time in RFC3339 format",
 			},
 			schemaPropEnd: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "End date/time in RFC3339 format",
 			},
 			schemaPropDescription: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Event description (optional)",
 			},
 			"location": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Event location (optional)",
 			},
 		},
@@ -176,7 +176,7 @@ func (t *CalendarQuickAddTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"text": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Natural language event description",
 			},
 		},

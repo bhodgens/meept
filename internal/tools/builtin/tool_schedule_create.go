@@ -32,28 +32,28 @@ func (t *ScheduleCreateTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropName: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Human-readable name for the job.",
 			},
 			"schedule": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Cron expression for when to run the job (e.g., '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes). Supports 6-field cron with seconds.",
 			},
 			schemaPropJobType: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Type of job: agent (runs an agent prompt), shell (executes a shell command), reminder (sends a reminder message).",
-				Enum:        []string{"agent", "shell", "reminder"},
+				Enum:        []string{"agent", schemaJobTypeShell, "reminder"},
 			},
 			"prompt": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For agent jobs: the prompt/message to send to the agent.",
 			},
 			schemaPropCommand: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For shell jobs: the shell command to execute.",
 			},
 			schemaPropMessage: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For reminder jobs: the reminder message to send.",
 			},
 			"channels": {
@@ -61,11 +61,11 @@ func (t *ScheduleCreateTool) Parameters() llm.FunctionParameters {
 				Description: "For reminder jobs: list of channels to send to (e.g., ['notification', 'telegram']).",
 			},
 			"working_dir": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For shell jobs: working directory for the command.",
 			},
 			"enabled": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "Whether the job is enabled immediately (default true).",
 			},
 		},
@@ -89,7 +89,7 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 		}, nil
 	}
 
-	name, _ := args["name"].(string)
+	name, _ := args[schemaPropName].(string)
 	schedule, _ := args["schedule"].(string)
 	jobType, _ := args["job_type"].(string)
 

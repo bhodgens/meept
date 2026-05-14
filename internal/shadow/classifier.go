@@ -42,11 +42,11 @@ func (c *Classifier) ClassifyDomain(messages []llm.ChatMessage) Domain {
 	// Keywords for each domain, ordered by specificity
 	domainKeywords := map[Domain][]string{
 		DomainDebugging: {
-			"debug", "fix", "issue", "problem", "crash", "stack trace",
+			"debug", KwFix, "issue", "problem", "crash", "stack trace",
 			"exception", "traceback", "error", "bug", "failing", "broken",
 		},
 		DomainCode: {
-			"code", "function", "class", "variable", "compile", "syntax",
+			"code", KwFunction, "class", "variable", "compile", "syntax",
 			"import", "package", "implement", "refactor", "method", "struct",
 			"type", "interface", "module", "library", "api",
 		},
@@ -55,8 +55,8 @@ func (c *Classifier) ClassifyDomain(messages []llm.ChatMessage) Domain {
 			"roadmap", "milestone", "timeline", "schedule", "prioritize",
 		},
 		DomainAnalysis: {
-			"analyze", "explain", "how does", "what is", "understand",
-			"review", "investigate", "examine", "study", "evaluate",
+			KwAnalyze, "explain", "how does", "what is", "understand",
+			"review", "investigate", "examine", "study", KwEvaluate,
 		},
 	}
 
@@ -91,7 +91,7 @@ func (c *Classifier) ClassifyTaskType(messages []llm.ChatMessage, response *llm.
 
 	// Multi-step patterns
 	multiStepKeywords := []string{
-		"step by step", "first", "second", "third", "then", "finally",
+		"step by step", KwFirst, "second", "third", KwThen, "finally",
 		"multiple steps", "next", "after that", "following",
 	}
 	for _, kw := range multiStepKeywords {
@@ -102,7 +102,7 @@ func (c *Classifier) ClassifyTaskType(messages []llm.ChatMessage, response *llm.
 
 	// Reasoning patterns
 	reasoningKeywords := []string{
-		"think", "reason", "consider", "analyze", "evaluate", "compare",
+		"think", "reason", "consider", KwAnalyze, KwEvaluate, "compare",
 		"decide", "choose between", "trade-off", "pros and cons",
 	}
 	for _, kw := range reasoningKeywords {

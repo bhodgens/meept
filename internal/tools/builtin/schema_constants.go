@@ -48,4 +48,13 @@ const (
 	// Scheduler error messages.
 	errSchedulerNotAvailable = "scheduler not available"
 	errJobIDRequired         = "job_id is required"
+
+	// Knowledge graph relationship type.
+	schemaPropReference = "reference"
+
+	// Memory type constants.
+	schemaMemoryEpisodic = "episodic"
+
+	// Job type constants for scheduler tools.
+	schemaJobTypeShell = "shell"
 )

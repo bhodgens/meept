@@ -108,6 +108,9 @@ const (
 	ActionMoveStartOfLine
 )
 
+// TargetNormal is the Action target string for switching to normal mode.
+const TargetNormal = "normal"
+
 // ModeChangeMsg signals a mode change.
 type ModeChangeMsg struct {
 	From Mode
@@ -321,7 +324,7 @@ func (s *State) handleInsertMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 			if combined == s.EscapeSequence {
 				s.Mode = ModeNormal
 				s.LastKey = ""
-				return Action{Type: ActionModeChange, Target: "normal", Payload: "escape_seq"}, true
+				return Action{Type: ActionModeChange, Target: TargetNormal, Payload: "escape_seq"}, true
 			}
 		}
 		s.LastKey = key
@@ -332,7 +335,7 @@ func (s *State) handleInsertMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 	if key == KeyEsc {
 		s.Mode = ModeNormal
 		s.LastKey = ""
-		return Action{Type: ActionModeChange, Target: "normal"}, true
+		return Action{Type: ActionModeChange, Target: TargetNormal}, true
 	}
 
 	// Pass through to normal input handling
@@ -343,7 +346,7 @@ func (s *State) handleVisualMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 	switch key {
 	case KeyEsc:
 		s.Mode = ModeNormal
-		return Action{Type: ActionModeChange, Target: "normal"}, true
+		return Action{Type: ActionModeChange, Target: TargetNormal}, true
 
 	case "j", KeyDown:
 		return Action{Type: ActionMoveDown, Count: 1}, true
@@ -368,7 +371,7 @@ func (s *State) handleCommandMode(key string, msg tea.KeyPressMsg) (Action, bool
 	case KeyEsc:
 		s.Mode = ModeNormal
 		s.Pending = ""
-		return Action{Type: ActionModeChange, Target: "normal"}, true
+		return Action{Type: ActionModeChange, Target: TargetNormal}, true
 
 	case KeyEnter:
 		cmd := s.Pending

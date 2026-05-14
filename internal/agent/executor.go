@@ -491,11 +491,11 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 	if e.security == nil {
 		// Fail-closed: security not configured, block all tool execution except safe introspection
 		allowedSafeTools := map[string]bool{
-			"platform_status":    true,
-			"platform_agents":    true,
-			"platform_tools":     true,
-			"memory_search":      true,
-			"memory_get_context": true,
+			ToolPlatformStatus:   true,
+			ToolPlatformAgents:   true,
+			ToolPlatformTools:    true,
+			ToolMemorySearch:     true,
+			ToolMemoryGetContext: true,
 		}
 		if !allowedSafeTools[toolName] {
 			e.logger.Error("Tool execution blocked: security not configured (fail-closed)",

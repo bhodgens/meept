@@ -40,7 +40,7 @@ func (e *ToolExecutionError) Error() string {
 // ToJSON converts the error to a JSON-serializable map
 func (e *ToolExecutionError) ToJSON() map[string]any {
 	result := map[string]any{
-		"code":          string(e.Code),
+		KeyCode:        string(e.Code),
 		"error_code":    string(e.Code),
 		"error_message": e.Message,
 		"tool":          e.ToolName,

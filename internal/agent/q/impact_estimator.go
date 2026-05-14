@@ -37,11 +37,11 @@ func (e *ImpactEstimator) EstimateImpact(pattern PatternReport, research *Resear
 	switch recommendation.Type {
 	case "new_agent":
 		return e.estimateNewAgentImpact(pattern, research, recommendation)
-	case "update_spec":
+	case ActionUpdateSpec:
 		return e.estimateSpecUpdateImpact(pattern, research, recommendation)
-	case "reassign_model":
+	case ActionReassignModel:
 		return e.estimateModelReassignmentImpact(pattern, research, recommendation)
-	case "add_tool":
+	case ActionAddTool:
 		return e.estimateToolAdditionImpact(pattern, research, recommendation)
 	default:
 		return e.estimateGenericImpact(pattern, recommendation)

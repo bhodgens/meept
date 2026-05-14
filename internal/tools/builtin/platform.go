@@ -188,15 +188,15 @@ func (t *DelegateTaskTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"agent_id": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The ID of the agent to delegate to (e.g., 'coder', 'planner', 'analyst').",
 			},
 			schemaPropMessage: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The message/task to send to the agent.",
 			},
 			"context": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional additional context to provide to the agent.",
 			},
 		},
@@ -353,15 +353,15 @@ func (t *SessionHistoryTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropLimit: {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of recent tasks to return (default: 10, max: 50).",
 			},
 			"session_id": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Optional session ID to filter history for a specific session.",
 			},
 			"include_messages": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "Whether to include recent conversation messages (default: false).",
 			},
 		},

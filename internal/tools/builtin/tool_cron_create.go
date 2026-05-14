@@ -34,45 +34,45 @@ func (t *CronCreateTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropName: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Human-readable name for the job.",
 			},
 			"interval": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Pre-defined interval: minutely, hourly, daily, weekly, monthly, or 'custom' to use cron_expr.",
 				Enum:        []string{"minutely", "hourly", "daily", "weekly", "monthly", "custom"},
 			},
 			"cron_expr": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Custom cron expression (required if interval='custom'). Format: sec min hour dom month dow (e.g., '0 9 * * *' for daily at 9am).",
 			},
 			"at_time": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For daily/weekly/monthly: time to run (e.g., '9:00am', '14:30'). Uses 24-hour format if no am/pm specified.",
 			},
 			"day_of_week": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For weekly: day of week (monday, tuesday, etc.). Default: monday.",
 			},
 			"day_of_month": {
-				Type:        "number",
+				Type:        schemaTypeNumber,
 				Description: "For monthly: day of month (1-31). Default: 1.",
 			},
 			schemaPropJobType: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Type of job: agent, shell, or reminder.",
-				Enum:        []string{"agent", "shell", "reminder"},
+				Enum:        []string{"agent", schemaJobTypeShell, "reminder"},
 			},
 			"prompt": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For agent jobs: the prompt/message to send to the agent.",
 			},
 			schemaPropCommand: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For shell jobs: the shell command to execute.",
 			},
 			schemaPropMessage: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "For reminder jobs: the reminder message to send.",
 			},
 		},
@@ -97,7 +97,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 		}, nil
 	}
 
-	name, _ := args["name"].(string)
+	name, _ := args[schemaPropName].(string)
 	interval, _ := args["interval"].(string)
 	jobType, _ := args["job_type"].(string)
 

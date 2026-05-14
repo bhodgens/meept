@@ -86,11 +86,11 @@ func (t *WebFetchTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"url": {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The URL to fetch.",
 			},
 			"max_length": {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum characters to return (default 50000).",
 			},
 		},

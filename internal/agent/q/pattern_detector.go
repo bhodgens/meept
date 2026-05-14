@@ -121,10 +121,10 @@ func (d *PatternDetector) detectModelMisconfiguration(byAgent map[string][]*Sess
 			if variance > d.config.DurationVarianceThreshold {
 				reports = append(reports, PatternReport{
 					ID:                   fmt.Sprintf("model_misconfig_%s_%s", agentID, intent),
-					PatternType:          "model_misconfiguration",
+					PatternType:          PatternModelMisconfiguration,
 					Confidence:           min(1.0, variance/d.config.DurationVarianceThreshold),
-					RecommendedAction:    "reassign_model",
-					MisconfigurationType: "model_misconfiguration",
+					RecommendedAction:    ActionReassignModel,
+					MisconfigurationType: PatternModelMisconfiguration,
 					AffectedAgent:        agentID,
 					AffectedIntent:       intent,
 					SessionCount:         len(durations),
@@ -162,10 +162,10 @@ func (d *PatternDetector) detectHighErrorRate(byAgent map[string][]*SessionAnaly
 		if errorRate > d.config.HighErrorRateThreshold {
 			reports = append(reports, PatternReport{
 				ID:                   fmt.Sprintf("high_error_%s", agentID),
-				PatternType:          "high_error_rate",
+				PatternType:          PatternHighErrorRate,
 				Confidence:           min(1.0, errorRate/d.config.HighErrorRateThreshold),
-				RecommendedAction:    "update_spec",
-				MisconfigurationType: "high_error_rate",
+				RecommendedAction:    ActionUpdateSpec,
+				MisconfigurationType: PatternHighErrorRate,
 				AffectedAgent:        agentID,
 				SessionCount:         len(sessions),
 				MetricBaseline:       d.config.HighErrorRateThreshold,
@@ -253,7 +253,7 @@ func (d *PatternDetector) detectHighToolFailureRate(analyses []*SessionAnalysis)
 				ID:                   fmt.Sprintf("high_tool_failure_%s", toolName),
 				PatternType:          "high_tool_failure_rate",
 				Confidence:           min(1.0, failureRate/0.2),
-				RecommendedAction:    "add_tool",
+				RecommendedAction:    ActionAddTool,
 				MisconfigurationType: "tool_deficiency",
 				AffectedIntent:       toolName,
 				SessionCount:         stats.total,

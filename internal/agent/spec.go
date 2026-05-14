@@ -207,7 +207,7 @@ func DebuggerAgentSpec() *AgentSpec {
 		Purpose: "You are a debugging specialist. You diagnose issues, trace problems, and help fix bugs in code.",
 		Model:   "",
 		AdditionalTools: []string{
-			"file_read",
+			ToolFileRead,
 			"file_write",
 			"shell_execute",
 		},
@@ -311,8 +311,8 @@ For serious issues, reject with clear explanation of what needs to be fixed.
 Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedback": "...", "issues": [...], "confidence": 0.0-1.0}`,
 		Model: "",
 		AdditionalTools: []string{
-			"file_read",
-			"memory_search",
+			ToolFileRead,
+			ToolMemorySearch,
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    3,
@@ -342,7 +342,7 @@ Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedba
 		Model: "",
 		AdditionalTools: []string{
 			"shell_execute",
-			"file_read",
+			ToolFileRead,
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    5,
@@ -369,8 +369,8 @@ Debugging work should be practical and focused. Approve if the approach is sound
 Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedback": "...", "issues": [...], "confidence": 0.0-1.0}`,
 		Model: "",
 		AdditionalTools: []string{
-			"file_read",
-			"memory_search",
+			ToolFileRead,
+			ToolMemorySearch,
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    3,
@@ -399,7 +399,7 @@ Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedba
 		AdditionalTools: []string{
 			"web_search",
 			"web_fetch",
-			"memory_search",
+			ToolMemorySearch,
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    3,
@@ -426,7 +426,7 @@ Plans should be actionable and clear. Minor gaps are acceptable if the overall d
 Always respond with JSON: {"status": "approved"|"rejected"|"needs_info", "feedback": "...", "issues": [...], "confidence": 0.0-1.0}`,
 		Model: "",
 		AdditionalTools: []string{
-			"memory_search",
+			ToolMemorySearch,
 		},
 		Constraints: AgentConstraints{
 			MaxIterations:    3,

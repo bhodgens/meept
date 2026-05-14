@@ -48,24 +48,24 @@ func (t *ReadFileTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropPath: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Absolute or ~-prefixed path to the file.",
 			},
 			"offset": {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Line number to start reading from (1-based, optional).",
 			},
 			schemaPropLimit: {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of lines to read (optional).",
 			},
 		},
-		Required: []string{"path"},
+		Required: []string{schemaPropPath},
 	}
 }
 
 func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	rawPath, _ := args["path"].(string)
+	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
 		return nil, fmt.Errorf("no path specified")
 	}
@@ -154,7 +154,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 // ExecuteStreaming implements tools.StreamingTool with progress updates during file reads.
 func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
-	rawPath, _ := args["path"].(string)
+	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
 		return nil, fmt.Errorf("no path specified")
 	}
@@ -264,24 +264,24 @@ func (t *WriteFileTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropPath: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Absolute or ~-prefixed path to the file.",
 			},
 			schemaPropContent: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The text content to write.",
 			},
 			"append": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "If true, append instead of overwrite (default false).",
 			},
 		},
-		Required: []string{"path", "content"},
+		Required: []string{schemaPropPath, schemaPropContent},
 	}
 }
 
 func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	rawPath, _ := args["path"].(string)
+	rawPath, _ := args[schemaPropPath].(string)
 	content, _ := args["content"].(string)
 	appendMode, _ := args["append"].(bool)
 
@@ -376,7 +376,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 
 // ExecuteStreaming implements tools.StreamingTool with progress updates during file writes.
 func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
-	rawPath, _ := args["path"].(string)
+	rawPath, _ := args[schemaPropPath].(string)
 	content, _ := args["content"].(string)
 	appendMode, _ := args["append"].(bool)
 
@@ -494,16 +494,16 @@ func (t *DeleteFileTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropPath: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Absolute or ~-prefixed path to the file to delete.",
 			},
 		},
-		Required: []string{"path"},
+		Required: []string{schemaPropPath},
 	}
 }
 
 func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	rawPath, _ := args["path"].(string)
+	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
 		return nil, fmt.Errorf("no path specified")
 	}
@@ -579,19 +579,19 @@ func (t *ListDirectoryTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropPath: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Absolute or ~-prefixed path to the directory.",
 			},
 			"recursive": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "If true, list recursively (default false).",
 			},
 			"max_entries": {
-				Type:        "integer",
+				Type:        schemaTypeInteger,
 				Description: "Maximum number of entries to return (default 200).",
 			},
 		},
-		Required: []string{"path"},
+		Required: []string{schemaPropPath},
 	}
 }
 
@@ -611,7 +611,7 @@ type ListResult struct {
 }
 
 func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (any, error) {
-	rawPath, _ := args["path"].(string)
+	rawPath, _ := args[schemaPropPath].(string)
 	recursive, _ := args["recursive"].(bool)
 	maxEntries := 200
 	if maxVal, ok := args["max_entries"].(float64); ok && maxVal > 0 {

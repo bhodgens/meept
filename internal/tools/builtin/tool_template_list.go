@@ -31,11 +31,11 @@ func (t *TemplateListTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"active": {
-				Type:        "boolean",
+				Type:        schemaTypeBoolean,
 				Description: "If true, list only currently active session-scoped templates for the conversation. Requires conversation_id.",
 			},
 			schemaPropConversationID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "Required when active=true. The conversation ID to list active templates for.",
 			},
 		},

@@ -1404,11 +1404,11 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 
 	// Publish lifecycle ended event
 	defer func() {
-		reason := "completed"
+		reason := ReportStatusCompleted
 		if err != nil && err.Error() == "maximum iterations reached" {
 			reason = "max_iterations"
 		} else if err != nil {
-			reason = "error"
+			reason = string(MessageTypeError)
 		}
 		endMsg, deferErr := models.NewBusMessage(models.MessageTypeEvent, "agent", AgentLifecyclePayload{
 			ConversationID: conversationID,
@@ -1752,13 +1752,13 @@ func (l *AgentLoop) classifyDomain(messages []llm.ChatMessage) string {
 	}
 
 	// Simple keyword-based classification
-	codeKeywords := []string{"code", "function", "class", "variable", "bug", "compile", "syntax"}
-	planningKeywords := []string{"plan", "step", "strategy", "approach", "design"}
-	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "error"}
+	codeKeywords := []string{string(IntentCode), "function", "class", "variable", "bug", "compile", "syntax"}
+	planningKeywords := []string{string(IntentPlan), "step", "strategy", "approach", KeywordDesign}
+	debuggingKeywords := []string{string(IntentDebug), KeywordFix, "issue", "problem", "crash", string(MessageTypeError)}
 
 	switch {
 	case containsAnyKeyword(text.String(), codeKeywords):
-		return "code"
+		return string(IntentCode)
 	case containsAnyKeyword(text.String(), debuggingKeywords):
 		return "debugging"
 	case containsAnyKeyword(text.String(), planningKeywords):
@@ -3102,10 +3102,10 @@ func (l *AgentLoop) classifyForShadow(messages []llm.ChatMessage) (shadow.Domain
 	}
 
 	// Simple keyword-based classification
-	codeKeywords := []string{"code", "function", "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
-	planningKeywords := []string{"plan", "step", "first", "then", "next", "strategy", "approach", "design", "architecture"}
-	debuggingKeywords := []string{"debug", "fix", "issue", "problem", "crash", "stack trace", "exception", "traceback"}
-	analysisKeywords := []string{"analyze", "explain", "why", "how does", "what is", "understand", "review"}
+	codeKeywords := []string{string(IntentCode), "function", "class", "variable", "bug", "error", "compile", "syntax", "import", "package"}
+	planningKeywords := []string{string(IntentPlan), "step", "first", "then", "next", "strategy", "approach", KeywordDesign, "architecture"}
+	debuggingKeywords := []string{string(IntentDebug), KeywordFix, "issue", "problem", "crash", "stack trace", "exception", "traceback"}
+	analysisKeywords := []string{string(IntentAnalyze), KeywordExplain, "why", "how does", "what is", "understand", string(ActionReview)}
 
 	domain := shadow.DomainGeneral
 	switch {
@@ -3121,7 +3121,7 @@ func (l *AgentLoop) classifyForShadow(messages []llm.ChatMessage) (shadow.Domain
 
 	taskType := shadow.TaskTypeChat
 	multiStepKeywords := []string{"step by step", "first", "second", "then", "finally", "multiple steps"}
-	reasoningKeywords := []string{"think", "reason", "consider", "analyze", "evaluate", "compare"}
+	reasoningKeywords := []string{"think", "reason", "consider", string(IntentAnalyze), "evaluate", "compare"}
 
 	switch {
 	case containsAnyKeyword(text.String(), multiStepKeywords):

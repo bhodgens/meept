@@ -196,9 +196,9 @@ If no intents detected, return empty array [].`, input)
 		}
 		agentType := agentMapping[intent]
 		if agentType == "" {
-			agentType = "chat"
+			agentType = string(IntentChat)
 		}
-		requiresPlanning := intent == "plan"
+		requiresPlanning := intent == string(IntentPlan)
 		intents = append(intents, &Intent{
 			Type:             intent,
 			Confidence:       clampConfidence(r.Confidence),
@@ -218,7 +218,7 @@ func (c *LLMClassifier) buildClassificationPrompt(input string) string {
 	sb.WriteString(input)
 	sb.WriteString("\n\n")
 	sb.WriteString("Available intents:\n")
-	intents := []string{"git", "schedule", "code", "debug", "review", "plan", "platform", "report", "recall", "analyze", "search", "chat"}
+	intents := []string{string(IntentGit), string(IntentSchedule), string(IntentCode), string(IntentDebug), string(IntentReview), string(IntentPlan), string(IntentPlatform), string(IntentReport), string(IntentRecall), string(IntentAnalyze), string(IntentSearch), string(IntentChat)}
 	for _, intent := range intents {
 		sb.WriteString("- ")
 		sb.WriteString(intent)
@@ -232,18 +232,18 @@ func (c *LLMClassifier) buildClassificationPrompt(input string) string {
 
 func (c *LLMClassifier) getIntentDescription(intent string) string {
 	descriptions := map[string]string{
-		"git":      "Git operations (commit, push, pull, merge, branch)",
-		"schedule": "Scheduling, reminders, timers, future tasks",
-		"code":     "Code writing, implementation, refactoring",
-		"debug":    "Bug fixing, debugging, error handling",
-		"review":   "Code review, PR review",
-		"plan":     "Planning, architecture, design",
-		"platform": "Questions about agent capabilities, tools",
-		"report":   "Status reports, summaries of work done",
-		"recall":   "Memory recall, remembering past conversations",
-		"analyze":  "Research, analysis, explanations",
-		"search":   "Web search, finding information",
-		"chat":     "General conversation, greetings, help",
+		string(IntentGit):      "Git operations (commit, push, pull, merge, branch)",
+		string(IntentSchedule): "Scheduling, reminders, timers, future tasks",
+		string(IntentCode):     "Code writing, implementation, refactoring",
+		string(IntentDebug):    "Bug fixing, debugging, error handling",
+		string(IntentReview):   "Code review, PR review",
+		string(IntentPlan):     "Planning, architecture, design",
+		string(IntentPlatform): "Questions about agent capabilities, tools",
+		string(IntentReport):   "Status reports, summaries of work done",
+		string(IntentRecall):   "Memory recall, remembering past conversations",
+		string(IntentAnalyze):  "Research, analysis, explanations",
+		string(IntentSearch):   "Web search, finding information",
+		string(IntentChat):     "General conversation, greetings, help",
 	}
 	if desc, ok := descriptions[intent]; ok {
 		return desc
@@ -279,10 +279,10 @@ func (c *LLMClassifier) parseResponse(content, originalInput string) (*Intent, e
 
 	agentType := agentMapping[resp.Intent]
 	if agentType == "" {
-		agentType = "chat"
+		agentType = string(IntentChat)
 	}
 
-	requiresPlanning := resp.Intent == "plan"
+	requiresPlanning := resp.Intent == string(IntentPlan)
 
 	return &Intent{
 		Type:             resp.Intent,
@@ -313,18 +313,18 @@ func extractJSONFromLLM(s string) string {
 
 func isValidIntent(intent string) bool {
 	validIntents := map[string]bool{
-		"git":      true,
-		"schedule": true,
-		"code":     true,
-		"debug":    true,
-		"review":   true,
-		"plan":     true,
-		"platform": true,
-		"report":   true,
-		"recall":   true,
-		"analyze":  true,
-		"search":   true,
-		"chat":     true,
+		string(IntentGit):      true,
+		string(IntentSchedule): true,
+		string(IntentCode):     true,
+		string(IntentDebug):    true,
+		string(IntentReview):   true,
+		string(IntentPlan):     true,
+		string(IntentPlatform): true,
+		string(IntentReport):   true,
+		string(IntentRecall):   true,
+		string(IntentAnalyze):  true,
+		string(IntentSearch):   true,
+		string(IntentChat):     true,
 	}
 	return validIntents[intent]
 }

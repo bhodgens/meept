@@ -336,11 +336,11 @@ func (s *Selector) FormatForInjection(examples []*FewShotExample) []Message {
 	for i, example := range examples {
 		messages = append(messages,
 			Message{
-				Role:    "user",
+				Role:    RoleUser,
 				Content: formatExampleHeader(i+1, example.UserMessage),
 			},
 			Message{
-				Role:    "assistant",
+				Role:    RoleAssistant,
 				Content: example.AssistantResponse,
 			},
 		)

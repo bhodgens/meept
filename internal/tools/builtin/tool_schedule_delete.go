@@ -30,11 +30,11 @@ func (t *ScheduleDeleteTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropJobID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The job ID to delete.",
 			},
 		},
-		Required: []string{"job_id"},
+		Required: []string{schemaPropJobID},
 	}
 }
 
@@ -53,7 +53,7 @@ func (t *ScheduleDeleteTool) Execute(ctx context.Context, args map[string]any) (
 		}, nil
 	}
 
-	jobID, _ := args["job_id"].(string)
+	jobID, _ := args[schemaPropJobID].(string)
 	if jobID == "" {
 		return ScheduleDeleteResult{
 			Success: false,
@@ -97,11 +97,11 @@ func (t *SchedulePauseTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropJobID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The job ID to pause.",
 			},
 		},
-		Required: []string{"job_id"},
+		Required: []string{schemaPropJobID},
 	}
 }
 
@@ -120,7 +120,7 @@ func (t *SchedulePauseTool) Execute(ctx context.Context, args map[string]any) (a
 		}, nil
 	}
 
-	jobID, _ := args["job_id"].(string)
+	jobID, _ := args[schemaPropJobID].(string)
 	if jobID == "" {
 		return SchedulePauseResult{
 			Success: false,
@@ -164,11 +164,11 @@ func (t *ScheduleResumeTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropJobID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The job ID to resume.",
 			},
 		},
-		Required: []string{"job_id"},
+		Required: []string{schemaPropJobID},
 	}
 }
 
@@ -187,7 +187,7 @@ func (t *ScheduleResumeTool) Execute(ctx context.Context, args map[string]any) (
 		}, nil
 	}
 
-	jobID, _ := args["job_id"].(string)
+	jobID, _ := args[schemaPropJobID].(string)
 	if jobID == "" {
 		return ScheduleResumeResult{
 			Success: false,
@@ -231,11 +231,11 @@ func (t *ScheduleRunNowTool) Parameters() llm.FunctionParameters {
 		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			schemaPropJobID: {
-				Type:        "string",
+				Type:        schemaTypeString,
 				Description: "The job ID to run immediately.",
 			},
 		},
-		Required: []string{"job_id"},
+		Required: []string{schemaPropJobID},
 	}
 }
 
@@ -254,7 +254,7 @@ func (t *ScheduleRunNowTool) Execute(ctx context.Context, args map[string]any) (
 		}, nil
 	}
 
-	jobID, _ := args["job_id"].(string)
+	jobID, _ := args[schemaPropJobID].(string)
 	if jobID == "" {
 		return ScheduleRunNowResult{
 			Success: false,

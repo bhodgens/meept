@@ -852,26 +852,26 @@ var keywordPatterns = []keywordPattern{
 	{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, string(IntentReport), config.AgentIDChat, 0.9, false},
 
 	// Recall/Memory requests (high priority - handle inline)
-	{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, string(IntentRecall), config.AgentIDChat, 0.85, false},
+	{[]string{"remember when", string(IntentRecall), "what do you remember", "do you remember", "last time we"}, string(IntentRecall), config.AgentIDChat, 0.85, false},
 
 	// Code-related
-	{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), config.AgentIDDebugger, 0.8, false},
-	{[]string{"write code", "implement", "create function", "add feature", "refactor"}, string(IntentCode), config.AgentIDCoder, 0.8, false},
+	{[]string{KeywordFix + " bug", string(IntentDebug), "error", "exception", "crash", "not working"}, string(IntentDebug), config.AgentIDDebugger, 0.8, false},
+	{[]string{"write code", "implement", "create function", "add feature", KeywordRefactor}, string(IntentCode), config.AgentIDCoder, 0.8, false},
 	{[]string{"code review", "review pr", "check code"}, string(IntentReview), config.AgentIDCoder, 0.75, false},
 
 	// Git operations
-	{[]string{"commit", "push", "pull", "merge", "branch", "git"}, string(IntentGit), config.AgentIDCommitter, 0.8, false},
+	{[]string{KeywordCommit, "push", "pull", "merge", "branch", string(IntentGit)}, string(IntentGit), config.AgentIDCommitter, 0.8, false},
 
 	// Scheduling
-	{[]string{"remind", "schedule", "alarm", "timer", "at ", "tomorrow", "next week"}, string(IntentSchedule), config.AgentIDScheduler, 0.8, false},
+	{[]string{"remind", string(IntentSchedule), "alarm", "timer", "at ", "tomorrow", "next week"}, string(IntentSchedule), config.AgentIDScheduler, 0.8, false},
 
 	// Planning
-	{[]string{"plan", "design", "architect", "how should i", "break down", "decompose"}, string(IntentPlan), config.AgentIDPlanner, 0.8, true},
+	{[]string{string(IntentPlan), KeywordDesign, "architect", "how should i", "break down", "decompose"}, string(IntentPlan), config.AgentIDPlanner, 0.8, true},
 
 	// Analysis/Research ("summarize" alone stays here for document summarization;
 	// "summarize what" and "summary of work" are captured by report intent above)
-	{[]string{"research", "analyze", "summarize", "explain", "what is", "how does"}, string(IntentAnalyze), config.AgentIDAnalyst, 0.7, false},
-	{[]string{"search", "find", "look up", "google"}, string(IntentSearch), config.AgentIDAnalyst, 0.7, false},
+	{[]string{"research", string(IntentAnalyze), "summarize", KeywordExplain, "what is", "how does"}, string(IntentAnalyze), config.AgentIDAnalyst, 0.7, false},
+	{[]string{string(IntentSearch), "find", "look up", "google"}, string(IntentSearch), config.AgentIDAnalyst, 0.7, false},
 
 	// General chat (lower priority)
 	{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), config.AgentIDChat, 0.6, false},

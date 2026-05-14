@@ -331,7 +331,7 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 			if workersResp, err := s.rpc.ListWorkers(); err == nil {
 				for _, w := range workersResp.Workers {
 					// Create agent activity entry for active workers
-					if w.State == "processing" || w.State == "executing_tool" {
+					if w.State == StateProcessing || w.State == "executing_tool" {
 						activity := SidebarAgentActivity{
 							AgentID:   w.ID,
 							AgentName: w.ID, // Use ID as name fallback
@@ -380,7 +380,7 @@ func (s *SidebarModel) refreshData() tea.Cmd {
 				}
 				status.PendingTasks = 0
 				for _, t := range taskResp.Tasks {
-					if t.State == "pending" || t.State == "planning" || t.State == "executing" {
+					if t.State == "pending" || t.State == StatePlanning || t.State == StateExecuting {
 						status.PendingTasks++
 					}
 				}
@@ -510,7 +510,7 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, s.refreshData())
 			case "task.step_completed":
 				s.handleStepCompletedEvent(e)
-			case "task.planned", "task.completed", "task.failed":
+			case "task.planned", "task.completed", EventTaskFailed:
 				cmds = append(cmds, s.refreshData())
 			}
 		}
@@ -524,7 +524,7 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		switch msg.String() {
-		case "tab":
+		case KeyTab:
 			// Cycle focus back to chat
 			s.focused = false
 			return func() tea.Msg { return SidebarFocusChatMsg{} }
@@ -537,7 +537,7 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				}
 			}
 			return nil
-		case "down", "j":
+		case KeyDown, "j":
 			// Move selection down, skipping PanelWorkers (now just a counter)
 			if s.selectedPanel < PanelActivityFeed {
 				s.selectedPanel++
@@ -546,11 +546,11 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				}
 			}
 			return nil
-		case "right", "enter", "l":
+		case KeyRight, KeyEnter, "l":
 			// Toggle selected panel expansion
 			s.expandedPanels[s.selectedPanel] = !s.expandedPanels[s.selectedPanel]
 			return nil
-		case "left", "h":
+		case KeyLeft, "h":
 			// Collapse current panel (go back to no expansion by selecting status)
 			// Actually just cycle focus back
 			s.focused = false
@@ -1129,7 +1129,7 @@ func (s *SidebarModel) renderWorkersPanel() string {
 		switch w.State {
 		case "idle":
 			idle++
-		case "claiming", "processing":
+		case "claiming", StateProcessing:
 			busy++
 		case "error":
 			errored++
@@ -1196,10 +1196,10 @@ func (s *SidebarModel) renderTasksPanel() string {
 				case "pending":
 					statusIcon = "○"
 					statusStyle = s.styles.Muted
-				case "planning":
+				case StatePlanning:
 					statusIcon = "◐"
 					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
-				case "executing":
+				case StateExecuting:
 					statusIcon = "●"
 					statusStyle = s.styles.StatusRunning
 				case "testing":
@@ -1255,7 +1255,7 @@ func (s *SidebarModel) renderTasksPanel() string {
 				b.WriteString("\n")
 
 				// Line 3 (optional): current step when executing
-				if (task.Status == "executing" || task.Status == "planning") && task.CurrentStep != "" {
+				if (task.Status == StateExecuting || task.Status == StatePlanning) && task.CurrentStep != "" {
 					stepMaxLen := max(s.width-10, 8)
 					stepDesc := task.CurrentStep
 					if len(stepDesc) > stepMaxLen {

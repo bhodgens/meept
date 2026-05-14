@@ -297,7 +297,7 @@ func (t *SessionTracker) determineOutcome(state *SessionState) string {
 	if state.Metrics.Revisions > 5 {
 		return "partial"
 	}
-	return "completed"
+	return ReportStatusCompleted
 }
 
 // generateSessionSummary generates a text summary of the session.

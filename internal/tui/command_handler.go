@@ -122,7 +122,7 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeStop()
 	case "status":
 		return h.executeStatus()
-	case "tasks":
+	case CmdTasks:
 		return h.executeTasks(cmd.Args)
 	case "cancel":
 		return h.executeCancel(cmd.Args)
@@ -344,7 +344,7 @@ func (h *CommandHandler) executeUndo() *CommandResult {
 func (h *CommandHandler) executeUsage() *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
-			Output:  "not connected to daemon",
+			Output:  ErrNotConnected,
 			IsError: true,
 		}
 	}
@@ -384,7 +384,7 @@ func (h *CommandHandler) executeStop() *CommandResult {
 func (h *CommandHandler) executeStatus() *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
-			Output:  "not connected to daemon",
+			Output:  ErrNotConnected,
 			IsError: true,
 		}
 	}
@@ -468,7 +468,7 @@ func filterRunningTasks(tasks []types.TaskExtended) []types.TaskExtended {
 	var running []types.TaskExtended
 	for _, t := range tasks {
 		switch t.State {
-		case "planning", "executing", "processing", "pending":
+		case StatePlanning, StateExecuting, StateProcessing, "pending":
 			running = append(running, t)
 		}
 	}
@@ -538,7 +538,7 @@ func (h *CommandHandler) executeVim() *CommandResult {
 func (h *CommandHandler) executeTasks(args []string) *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
-			Output:  "not connected to daemon",
+			Output:  ErrNotConnected,
 			IsError: true,
 		}
 	}
@@ -593,7 +593,7 @@ func (h *CommandHandler) executeTasks(args []string) *CommandResult {
 func (h *CommandHandler) executeCancel(args []string) *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
-			Output:  "not connected to daemon",
+			Output:  ErrNotConnected,
 			IsError: true,
 		}
 	}
@@ -609,7 +609,7 @@ func (h *CommandHandler) executeCancel(args []string) *CommandResult {
 
 	// If no task ID provided, show recent active tasks
 	if taskID == "" {
-		return h.executeTasks([]string{"executing", "planning"})
+		return h.executeTasks([]string{StateExecuting, StatePlanning})
 	}
 
 	reason := ""
@@ -638,7 +638,7 @@ func (h *CommandHandler) executeCancel(args []string) *CommandResult {
 func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
-			Output:  "not connected to daemon",
+			Output:  ErrNotConnected,
 			IsError: true,
 		}
 	}
@@ -674,7 +674,7 @@ func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 
 	// Build amendment request and send via RPC bus publish
 	amendmentReq := map[string]any{
-		"task_id": taskID,
+		ParamTaskID: taskID,
 		"type":    amendmentType,
 		"content": content,
 	}
@@ -716,7 +716,7 @@ func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 func (h *CommandHandler) executeInterrupt(args []string) *CommandResult {
 	if h.rpc == nil || !h.rpc.IsConnected() {
 		return &CommandResult{
-			Output:  "not connected to daemon",
+			Output:  ErrNotConnected,
 			IsError: true,
 		}
 	}

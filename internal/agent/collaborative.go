@@ -14,11 +14,11 @@ import (
 
 // Programming task detection keywords.
 var programmingKeywords = []string{
-	"write", "code", "script", "program", "implement", "build", "deploy",
+	"write", string(IntentCode), "script", "program", "implement", "build", "deploy",
 	"automate", "cron", "service", "daemon", "api", "endpoint", "database",
 	"server", "docker", "container", "pipeline", "ci/cd", "terraform",
 	"ansible", "kubernetes", "config", "infrastructure", "migration",
-	"refactor", "debug", "fix bug", "patch", "update code", "git",
+	KeywordRefactor, string(IntentDebug), KeywordFix + " bug", "patch", "update code", string(IntentGit),
 	"compile", "test", "unit test", "integration",
 }
 

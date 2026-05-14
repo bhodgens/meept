@@ -108,7 +108,7 @@ func (p *SelfImprovePanel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			cmd := p.rejectCurrent()
 			return p, cmd
-		case "j", "down":
+		case "j", KeyDown:
 			if p.selectedIdx < len(p.pendingFixes)-1 {
 				p.selectedIdx++
 			}

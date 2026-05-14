@@ -60,3 +60,17 @@ const (
 const (
 	EventTaskFailed = "task.failed"
 )
+
+// Command name constants.
+const (
+	CmdTasks = "tasks"
+)
+
+// Task state constants.
+const (
+	StatePlanning  = "planning"
+	StateReady     = "ready"
+	StateReviewing = "reviewing"
+	StateApproved  = "approved"
+	StateRejected  = "rejected"
+)
