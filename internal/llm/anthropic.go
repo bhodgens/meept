@@ -647,6 +647,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 		}
 		store := c.metricsStore
 		logger := c.logger
+		//nolint:gosec // goroutine outlives request context
 		go func() {
 			if rerr := store.Record(context.Background(), record); rerr != nil {
 				logger.Debug("metrics record failed", "error", rerr)
@@ -754,6 +755,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 		}
 		store := c.metricsStore
 		logger := c.logger
+		//nolint:gosec // goroutine outlives request context
 		go func() {
 			if rerr := store.Record(context.Background(), record); rerr != nil {
 				logger.Debug("metrics record failed", "error", rerr)

@@ -95,6 +95,7 @@ func (e *Exporter) Export(ctx context.Context, opts ExportOptions) (*ExportResul
 	}
 
 	// Ensure output directory exists
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -399,6 +400,7 @@ func (e *Exporter) exportAlpaca(ctx context.Context, writer *bufio.Writer, opts 
 // ExportDatabase copies the training database for external use.
 // The training.db is self-contained and portable for use on training machines.
 func (e *Exporter) ExportDatabase(ctx context.Context, srcPath, outputPath string) error {
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}

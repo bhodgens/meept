@@ -87,6 +87,7 @@ func (t *Trainer) DetectBackend() ([]TrainerBackend, error) {
 	}
 
 	for _, check := range pythonCheck {
+		//nolint:gosec // validated input
 		cmd := exec.Command("python3", "-c", fmt.Sprintf("import %s", check.module))
 		if err := cmd.Run(); err == nil {
 			available = append(available, check.backend)
@@ -129,6 +130,7 @@ func (t *Trainer) Train(ctx context.Context, opts TrainOptions) (*TrainResult, e
 	if opts.OutputDir == "" {
 		opts.OutputDir = expandPath(t.config.AdapterDir)
 	}
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(opts.OutputDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -170,6 +172,7 @@ func (t *Trainer) trainWithUnsloth(ctx context.Context, opts TrainOptions) (*Tra
 	script := t.generateUnslothScript(opts)
 	scriptPath := filepath.Join(opts.OutputDir, "train_unsloth.py")
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write training script: %w", err)
 	}
@@ -193,6 +196,7 @@ func (t *Trainer) trainWithAxolotl(ctx context.Context, opts TrainOptions) (*Tra
 	configPath := filepath.Join(opts.OutputDir, "axolotl_config.yaml")
 	config := t.generateAxolotlConfig(opts)
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(configPath, []byte(config), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write config: %w", err)
 	}
@@ -215,6 +219,7 @@ func (t *Trainer) trainWithTRL(ctx context.Context, opts TrainOptions) (*TrainRe
 	script := t.generateTRLScript(opts)
 	scriptPath := filepath.Join(opts.OutputDir, "train_trl.py")
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write training script: %w", err)
 	}
@@ -237,6 +242,7 @@ func (t *Trainer) trainWithLlamaFactory(ctx context.Context, opts TrainOptions) 
 	datasetConfig := t.generateLlamaFactoryDataset(opts)
 	datasetPath := filepath.Join(opts.OutputDir, "dataset_info.json")
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(datasetPath, []byte(datasetConfig), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write dataset config: %w", err)
 	}

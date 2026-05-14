@@ -91,6 +91,7 @@ func (s *Selector) SelectExamples(ctx context.Context, query string, domain Doma
 	selected := s.selectWithMMR(scored, query, count)
 
 	// Update usage counts asynchronously
+	//nolint:gosec // goroutine outlives request context
 	go s.updateUsageCounts(context.Background(), selected)
 
 	return selected, nil

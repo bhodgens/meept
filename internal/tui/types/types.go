@@ -122,6 +122,7 @@ func formatTimeUnit(value int, unit string) string {
 	}
 	return lipgloss.NewStyle().Render(
 		lipgloss.JoinHorizontal(lipgloss.Left,
+			//nolint:gosec // value bounded by upstream
 			lipgloss.NewStyle().Bold(true).Render(string(rune('0'+value/10))+string(rune('0'+value%10))),
 			unit+" ",
 		),

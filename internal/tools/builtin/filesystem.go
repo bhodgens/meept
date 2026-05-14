@@ -213,6 +213,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 
 	// Create parent directories
 	dir := filepath.Dir(resolved)
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -224,6 +225,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 		flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	}
 
+	//nolint:gosec // user config directory/file permissions
 	f, err := os.OpenFile(resolved, flag, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)

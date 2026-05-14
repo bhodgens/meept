@@ -189,11 +189,13 @@ func TestScanOutput_WithCredentials(t *testing.T) {
 			output:            "Your API key is: sk-1234567890abcdefghijklmnopqrstuvwxyz",
 			expectCredentials: true,
 		},
+		//nolint:gosec // test fixture, not a real secret
 		{
 			name:              "AWS access key",
 			output:            "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
 			expectCredentials: true,
 		},
+		//nolint:gosec // test fixture, not a real secret
 		{
 			name:              "GitHub token",
 			output:            "Use this token: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -209,6 +211,7 @@ func TestScanOutput_WithCredentials(t *testing.T) {
 			output:            "Token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
 			expectCredentials: true,
 		},
+		//nolint:gosec // test fixture, not a real secret
 		{
 			name:              "private key header",
 			output:            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpQIBAAKCAQEA...",

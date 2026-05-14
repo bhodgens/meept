@@ -192,7 +192,7 @@ func (s *SessionStore) ContextString(conversationID string) string {
 	var b strings.Builder
 	b.WriteString("<template-context>\n")
 	for _, t := range templates {
-		b.WriteString(fmt.Sprintf("<!-- template: %s (activated %s) -->\n", t.Name, t.ActivatedAt.Format(time.RFC3339)))
+		fmt.Fprintf(&b, "<!-- template: %s (activated %s) -->\n", t.Name, t.ActivatedAt.Format(time.RFC3339))
 		b.WriteString(t.SubstitutedBody)
 		b.WriteString("\n")
 	}

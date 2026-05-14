@@ -81,6 +81,7 @@ max_tokens_per_turn = 4096
 max_memory_refs = 20
 `
 
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}

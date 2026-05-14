@@ -570,6 +570,7 @@ func TestStoreConcurrency(t *testing.T) {
 	done := make(chan bool)
 	for i := range 10 {
 		go func(n int) {
+			//nolint:gosec // value bounded by upstream
 			jobID := string(rune('a' + n))
 			store.Add(JobConfig{
 				ID:       jobID,

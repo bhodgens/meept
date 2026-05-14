@@ -435,6 +435,7 @@ ORDER BY latency_ms
 	}
 
 	// Get token rate (avg tokens per second)
+	//nolint:gosec // field name, not a secret
 	const qTokens = `
 SELECT SUM(completion_tokens), SUM(latency_ms) FROM provider_requests
 WHERE provider_id = ? AND model_id = ? AND ts > ? AND success = 1
@@ -533,10 +534,12 @@ func (s *Store) StartBackground(ctx context.Context) {
 	s.mu.Unlock()
 
 	// Start the record worker
+	//nolint:gosec // goroutine outlives request context
 	go s.recordWorker()
 
 	// Start the refresh/prune ticker
 	s.refreshTicker = time.NewTicker(s.config.RefreshInterval)
+	//nolint:gosec // goroutine outlives request context
 	go func() {
 		for {
 			select {

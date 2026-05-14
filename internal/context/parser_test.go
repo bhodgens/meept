@@ -60,6 +60,7 @@ func TestParseCLAUDEMD(t *testing.T) {
 		"Main config: ~/.app/config.toml",
 	}, "\n")
 
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(claudeMDPath, []byte(claudeMDContent), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -298,6 +299,7 @@ func TestParseSkillFile(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	skillDir := filepath.Join(tmpDir, "test-skill")
+	//nolint:gosec // test directory/file
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -316,6 +318,7 @@ func TestParseSkillFile(t *testing.T) {
 		"It provides useful capabilities.",
 	}, "\n")
 
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(skillPath, []byte(skillContent), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -51,6 +51,7 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 	}
 
 	// Build command
+	//nolint:gosec // validated input
 	cmd := exec.CommandContext(ctx, t.command, t.args...)
 
 	// Set up environment

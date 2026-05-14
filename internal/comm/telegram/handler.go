@@ -161,6 +161,7 @@ func (h *AgentHandler) saveSessions() error {
 		return nil
 	}
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(h.sessionsDir, 0o755); err != nil {
 		return fmt.Errorf("create sessions dir: %w", err)
 	}
@@ -173,6 +174,7 @@ func (h *AgentHandler) saveSessions() error {
 	}
 
 	path := filepath.Join(h.sessionsDir, "telegram_sessions.json")
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write sessions file: %w", err)
 	}
@@ -188,6 +190,7 @@ func (h *AgentHandler) saveSessionsLocked() error {
 		return nil
 	}
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(h.sessionsDir, 0o755); err != nil {
 		return fmt.Errorf("create sessions dir: %w", err)
 	}
@@ -198,6 +201,7 @@ func (h *AgentHandler) saveSessionsLocked() error {
 	}
 
 	path := filepath.Join(h.sessionsDir, "telegram_sessions.json")
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write sessions file: %w", err)
 	}

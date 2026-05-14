@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" //nolint:revive // blank import for side effects
 )
 
 // ErrTaskNotFound is returned when a task cannot be found by ID.

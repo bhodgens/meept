@@ -680,6 +680,7 @@ func TestSQLiteStore_ForkSession_Basic(t *testing.T) {
 	for i, content := range msgContents {
 		var parentID *int64
 		if i > 0 {
+			//nolint:gosec // index bounded by upstream check
 			parentID = &msgIDs[i-1]
 		}
 		msg := Message{

@@ -72,6 +72,7 @@ func (p *PersonalityMemory) Load(ctx context.Context) error {
 	defer p.mu.Unlock()
 
 	// Ensure directory exists
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(p.dataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
@@ -175,9 +176,11 @@ func (p *PersonalityMemory) Save() error {
 }
 
 func (p *PersonalityMemory) saveUnlocked() error {
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(p.dataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(p.filePath, []byte(p.description), 0644); err != nil {
 		return fmt.Errorf("failed to write personality file: %w", err)
 	}

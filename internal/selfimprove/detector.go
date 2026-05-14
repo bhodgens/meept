@@ -206,6 +206,7 @@ func (d *IssueDetector) ScanCode(ctx context.Context) ([]Issue, error) {
 			return nil
 		}
 
+		//nolint:gosec // path validated by trusted source
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err

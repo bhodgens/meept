@@ -267,6 +267,7 @@ func (j *ShellJob) Execute(ctx context.Context) error {
 	defer cancel()
 
 	// Build command
+	//nolint:gosec // validated input
 	cmd := exec.CommandContext(execCtx, j.command, j.args...)
 
 	if j.workDir != "" {

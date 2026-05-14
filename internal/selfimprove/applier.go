@@ -49,6 +49,7 @@ func NewChangeApplier(cfg SafetyConfig, projectRoot string, msgBus *bus.MessageB
 
 	homeDir, _ := os.UserHomeDir()
 	backupDir := filepath.Join(homeDir, ".meept", "selfimprove", "backups")
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
 		logger.Warn("failed to create backup directory", "error", err)
 	}
@@ -113,6 +114,7 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix) (*AppliedF
 	}
 
 	// Write the file
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -198,6 +200,7 @@ func (a *ChangeApplier) Rollback(applied *AppliedFix) error {
 		originalPath = filepath.Join(a.projectRoot, filepath.Base(legacy))
 	}
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(originalPath, backupContent, 0644); err != nil {
 		return fmt.Errorf("failed to restore file: %w", err)
 	}
@@ -207,7 +210,7 @@ func (a *ChangeApplier) Rollback(applied *AppliedFix) error {
 }
 
 // PendingApprovals returns the map of pending approvals.
-func (a *ChangeApplier) PendingApprovals() map[string]*pendingFix {
+func (a *ChangeApplier) PendingApprovals() map[string]*pendingFix { //nolint:revive // diagnostic method
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	// Return a copy
@@ -227,6 +230,7 @@ func (a *ChangeApplier) createBackup(fix *ProposedFix) (string, error) {
 	backupPath := filepath.Join(a.backupDir, fmt.Sprintf("%s_%s.backup",
 		fix.ID, filepath.Base(fix.FilePath)))
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(backupPath, content, 0644); err != nil {
 		return "", err
 	}
@@ -288,6 +292,7 @@ func (a *ChangeApplier) createCommit(fix *ProposedFix) (string, error) {
 
 	// Stage the file. The `--` separator prevents git from interpreting
 	// a path beginning with `-` as an option flag.
+	//nolint:gosec // validated input
 	cmd := exec.Command("git", "add", "--", fix.FilePath)
 	cmd.Dir = a.projectRoot
 	if err := cmd.Run(); err != nil {

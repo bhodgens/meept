@@ -70,6 +70,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 
 	// Initialize data directory
 	dataDir := expandPath(cfg.Config.DataDir)
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
@@ -278,6 +279,7 @@ func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string,
 
 	case ModeAsync, ModeSelective:
 		// Process in background
+		//nolint:gosec // goroutine outlives request context
 		go func() {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
@@ -590,6 +592,7 @@ func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID str
 		}
 
 	case ModeAsync, ModeSelective:
+		//nolint:gosec // goroutine outlives request context
 		go func() {
 			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

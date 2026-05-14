@@ -14,6 +14,7 @@ func TestReadFileTool(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "test.txt")
 	content := "line 1\nline 2\nline 3\nline 4\nline 5"
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}

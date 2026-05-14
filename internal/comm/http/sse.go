@@ -3,7 +3,6 @@ package http
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -71,14 +70,4 @@ func (s *SSEWriter) Write(p []byte) (int, error) {
 // CloseWithFinalEvent sends a final done event.
 func (s *SSEWriter) CloseWithFinalEvent() error {
 	return s.SendEvent("done", map[string]string{"status": "complete"})
-}
-
-// isClientDisconnected checks if the client has disconnected by attempting
-// a small write. Returns true if the connection is closed.
-func isClientDisconnected(w io.Writer) bool {
-	// net/http sets WriteDeadline on client disconnect; a 0-byte write
-	// is enough to detect it. We use a simple heuristic:
-	// if Write returns an error, client is likely gone.
-	_, err := w.Write([]byte(""))
-	return err != nil
 }

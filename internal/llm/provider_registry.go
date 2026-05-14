@@ -35,6 +35,7 @@ type ProviderDef struct {
 
 // CanonicalProviders is the master list of supported providers.
 var CanonicalProviders = []ProviderDef{
+	//nolint:gosec // field name, not a secret
 	{
 		ID:           "anthropic",
 		Name:         "Anthropic",
@@ -45,6 +46,7 @@ var CanonicalProviders = []ProviderDef{
 		DocURL:       "https://docs.anthropic.com",
 		Supports:     []string{"streaming", "tools", "images", "thinking"},
 	},
+	//nolint:gosec // field name, not a secret
 	{
 		ID:           "openrouter",
 		Name:         "OpenRouter",
@@ -55,6 +57,7 @@ var CanonicalProviders = []ProviderDef{
 		DocURL:       "https://openrouter.ai/docs",
 		Supports:     []string{"streaming", "tools", "images"},
 	},
+	//nolint:gosec // field name, not a secret
 	{
 		ID:           "openai",
 		Name:         "OpenAI",
@@ -74,6 +77,7 @@ var CanonicalProviders = []ProviderDef{
 		DocURL:       "https://ollama.ai/docs",
 		Supports:     []string{"streaming", "local"},
 	},
+	//nolint:gosec // field name, not a secret
 	{
 		ID:           "zai",
 		Name:         "Z.ai",
@@ -84,6 +88,7 @@ var CanonicalProviders = []ProviderDef{
 		DocURL:       "https://docs.z.ai",
 		Supports:     []string{"streaming", "tools"},
 	},
+	//nolint:gosec // field name, not a secret
 	{
 		ID:           "google",
 		Name:         "Google AI",
@@ -94,6 +99,7 @@ var CanonicalProviders = []ProviderDef{
 		DocURL:       "https://ai.google.dev",
 		Supports:     []string{"streaming", "tools", "images"},
 	},
+	//nolint:gosec // field name, not a secret
 	{
 		ID:           "deepseek",
 		Name:         "DeepSeek",
@@ -104,6 +110,7 @@ var CanonicalProviders = []ProviderDef{
 		DocURL:       "https://platform.deepseek.com/docs",
 		Supports:     []string{"streaming", "code", "reasoning"},
 	},
+	//nolint:gosec // field name, not a secret
 	{
 		ID:           "xai",
 		Name:         "xAI",
@@ -114,6 +121,7 @@ var CanonicalProviders = []ProviderDef{
 		DocURL:       "https://docs.x.ai",
 		Supports:     []string{"streaming", "reasoning"},
 	},
+	//nolint:gosec // field name, not a secret
 	{
 		ID:           "groq",
 		Name:         "Groq",

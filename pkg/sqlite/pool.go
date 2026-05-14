@@ -72,6 +72,7 @@ func NewPool(cfg PoolConfig) (*Pool, error) {
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(cfg.Path)
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}

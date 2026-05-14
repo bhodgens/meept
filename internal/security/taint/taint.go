@@ -17,7 +17,7 @@ import (
 )
 
 // TaintLabel represents a classification label applied to data flowing through the system.
-type TaintLabel string
+type TaintLabel string //nolint:revive // stutter is intentional
 
 const (
 	// TaintNone indicates data is clean and trusted.
@@ -129,7 +129,7 @@ func deduplicateLabels(labels []TaintLabel) []TaintLabel {
 }
 
 // TaintSink represents a destination that restricts which taint labels may flow into it.
-type TaintSink struct {
+type TaintSink struct { //nolint:revive // stutter is intentional
 	// Name is the human-readable name of the sink (e.g., "shell_exec").
 	Name string
 	// BlockedLabels are labels that are NOT allowed to reach this sink.
@@ -174,7 +174,7 @@ func AgentMessageSink() *TaintSink {
 
 // TaintViolation describes a taint policy violation: a labelled value
 // tried to reach a sink that blocks that label.
-type TaintViolation struct {
+type TaintViolation struct { //nolint:revive // stutter is intentional
 	// Label is the offending label.
 	Label TaintLabel
 	// SinkName is the sink that rejected the value.

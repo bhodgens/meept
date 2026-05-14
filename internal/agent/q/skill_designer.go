@@ -61,6 +61,7 @@ func (sd *SkillDesigner) enrichSkill(skill *SkillDesign, rec Recommendation) (*S
 func (sd *SkillDesigner) WriteSkillFile(skill *SkillDesign, outputPath string) error {
 	// Ensure directory exists
 	dir := filepath.Dir(outputPath)
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create skill directory: %w", err)
 	}
@@ -69,6 +70,7 @@ func (sd *SkillDesigner) WriteSkillFile(skill *SkillDesign, outputPath string) e
 	content := sd.GenerateFullSkillFile(skill)
 
 	// Write file
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write skill file: %w", err)
 	}

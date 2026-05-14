@@ -15,12 +15,14 @@ func TestDiscovery_SingleTier(t *testing.T) {
 
 	// Create templates directory.
 	templatesDir := filepath.Join(tmpDir, "templates")
+	//nolint:gosec // test directory/file
 	if err := os.MkdirAll(templatesDir, 0755); err != nil {
 		t.Fatalf("Failed to create templates dir: %v", err)
 	}
 
 	// Create a template in a subdirectory with TEMPLATE.md.
 	subDir := filepath.Join(templatesDir, "code-review")
+	//nolint:gosec // test directory/file
 	if err := os.MkdirAll(subDir, 0755); err != nil {
 		t.Fatalf("Failed to create template subdir: %v", err)
 	}
@@ -33,6 +35,7 @@ scope: turn
 
 Review the provided code.
 `
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(subDir, "TEMPLATE.md"), []byte(templateContent), 0644); err != nil {
 		t.Fatalf("Failed to write template file: %v", err)
 	}
@@ -45,6 +48,7 @@ description: A flat template file
 
 Flat template instructions.
 `
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(templatesDir, "flat-template.md"), []byte(flatTemplate), 0644); err != nil {
 		t.Fatalf("Failed to write flat template: %v", err)
 	}
@@ -92,6 +96,7 @@ func TestDiscovery_Shadowing(t *testing.T) {
 	userDir := filepath.Join(tmpDir, "user-templates")
 
 	for _, dir := range []string{projectDir, userDir} {
+		//nolint:gosec // test directory/file
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatalf("Failed to create dir: %v", err)
 		}
@@ -113,9 +118,11 @@ description: User version
 User instructions.
 `
 
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(projectDir, "shared-template.md"), []byte(projectTemplate), 0644); err != nil {
 		t.Fatalf("Failed to write project template: %v", err)
 	}
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(userDir, "shared-template.md"), []byte(userTemplate), 0644); err != nil {
 		t.Fatalf("Failed to write user template: %v", err)
 	}
@@ -183,6 +190,7 @@ description: Template with mixed case name
 
 Instructions.
 `
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(tmpDir, "mixed.md"), []byte(templateContent), 0644); err != nil {
 		t.Fatalf("Failed to write template: %v", err)
 	}
@@ -229,6 +237,7 @@ description: This should be excluded
 
 Not a real template.
 `
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte(readme), 0644); err != nil {
 		t.Fatalf("Failed to write README: %v", err)
 	}
@@ -241,6 +250,7 @@ description: A real template
 
 Real instructions.
 `
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(tmpDir, "real-template.md"), []byte(tmpl), 0644); err != nil {
 		t.Fatalf("Failed to write template: %v", err)
 	}
@@ -285,6 +295,7 @@ description: Test template
 
 Body.
 `
+		//nolint:gosec // test directory/file
 		if err := os.WriteFile(filepath.Join(tmpDir, name+".md"), []byte(content), 0644); err != nil {
 			t.Fatalf("Failed to write template: %v", err)
 		}
@@ -326,6 +337,7 @@ description: Test
 ---
 Body.
 `
+		//nolint:gosec // test directory/file
 		if err := os.WriteFile(filepath.Join(tmpDir, "template"+string(rune('a'+i))+".md"), []byte(content), 0644); err != nil {
 			t.Fatalf("Failed to write template: %v", err)
 		}
@@ -380,6 +392,7 @@ func TestDiscovery_SubdirTemplate(t *testing.T) {
 
 	// Create a subdirectory with TEMPLATE.md.
 	subDir := filepath.Join(tmpDir, "explain")
+	//nolint:gosec // test directory/file
 	if err := os.MkdirAll(subDir, 0755); err != nil {
 		t.Fatalf("Failed to create subdir: %v", err)
 	}
@@ -392,15 +405,18 @@ scope: turn
 
 Explain this code step by step.
 `
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(subDir, "TEMPLATE.md"), []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write TEMPLATE.md: %v", err)
 	}
 
 	// Also create a non-TEMPLATE.md file in another subdir (should be skipped).
 	otherDir := filepath.Join(tmpDir, "other")
+	//nolint:gosec // test directory/file
 	if err := os.MkdirAll(otherDir, 0755); err != nil {
 		t.Fatalf("Failed to create other dir: %v", err)
 	}
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(filepath.Join(otherDir, "notes.md"), []byte("just notes"), 0644); err != nil {
 		t.Fatalf("Failed to write notes: %v", err)
 	}

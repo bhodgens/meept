@@ -326,6 +326,7 @@ func TestHandler_ListViaBus(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "tasks.db")
 
+	//nolint:gosec // test directory/file
 	_ = os.MkdirAll(tmpDir, 0o755)
 
 	msgBus := bus.New(nil, nil)

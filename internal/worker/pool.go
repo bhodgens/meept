@@ -474,7 +474,7 @@ func (h *Handler) handleRemove(_ context.Context, msg *models.BusMessage) (any, 
 	return map[string]string{"status": "removed"}, nil
 }
 
-func (h *Handler) handleList(_ context.Context, _ *models.BusMessage) (any, error) {
+func (h *Handler) handleList(_ context.Context, _ *models.BusMessage) (any, error) { //nolint:unparam // interface contract
 	workers := h.pool.GetWorkers()
 
 	workerList := make([]map[string]any, 0, len(workers))
@@ -504,7 +504,7 @@ func (h *Handler) handleList(_ context.Context, _ *models.BusMessage) (any, erro
 	}, nil
 }
 
-func (h *Handler) handleStats(_ context.Context, _ *models.BusMessage) (any, error) {
+func (h *Handler) handleStats(_ context.Context, _ *models.BusMessage) (any, error) { //nolint:unparam // interface contract
 	stats := h.pool.GetStats()
 
 	workerStats := make([]map[string]any, 0, len(stats.WorkerStats))

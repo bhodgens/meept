@@ -93,7 +93,7 @@ type DistillationResult struct {
 }
 
 // SyncStatus represents the current state of the sync system.
-type SyncStatus struct {
+type SyncStatus struct { //nolint:revive // stutter is intentional
 	// Enabled indicates if distributed sync is enabled
 	Enabled bool `json:"enabled"`
 	// Mode is the current mode ("local" or "distributed")

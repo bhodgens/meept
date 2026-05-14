@@ -305,7 +305,7 @@ func (s *Scheduler) RunNow(jobID string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
-		s.executeJob(job, ctx)
+		s.executeJob(ctx, job)
 	}()
 
 	s.logger.Info("scheduler: job triggered manually", "job_id", jobID)
@@ -456,12 +456,12 @@ func (s *Scheduler) wrapJob(job Job) func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
-		s.executeJob(job, ctx)
+		s.executeJob(ctx, job)
 	}
 }
 
 // executeJob runs the job and tracks execution state.
-func (s *Scheduler) executeJob(job Job, ctx context.Context) {
+func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 	jobID := job.ID()
 
 	// Mark as running

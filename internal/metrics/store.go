@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" //nolint:revive // blank import for side effects
 )
 
 const (
@@ -81,6 +81,7 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 
 	// Ensure directory exists
 	dir := filepath.Dir(dbPath)
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create metrics directory: %w", err)
 	}

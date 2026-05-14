@@ -11,11 +11,13 @@ func createTestSkillFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 
 	skillDir := filepath.Join(dir, name)
+	//nolint:gosec // test directory/file
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatalf("Failed to create skill directory: %v", err)
 	}
 
 	skillFile := filepath.Join(skillDir, "SKILL.md")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(skillFile, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write skill file: %v", err)
 	}

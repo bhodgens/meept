@@ -38,6 +38,7 @@ type SQLiteTrainingStore struct {
 
 // NewSQLiteTrainingStore creates a new training store.
 func NewSQLiteTrainingStore(dbPath string) (*SQLiteTrainingStore, error) {
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -415,6 +416,7 @@ func (s *SQLiteTrainingStore) MarkExported(ctx context.Context, ids []string) er
 		args[i+1] = id
 	}
 
+	//nolint:gosec // parameterized query
 	query := fmt.Sprintf(
 		"UPDATE preference_pairs SET exported_at = ? WHERE id IN (%s)",
 		strings.Join(placeholders, ", "),
@@ -652,6 +654,7 @@ type SQLiteExamplesStore struct {
 
 // NewSQLiteExamplesStore creates a new examples store.
 func NewSQLiteExamplesStore(dbPath string) (*SQLiteExamplesStore, error) {
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -1057,6 +1060,7 @@ type SQLiteAdaptersStore struct {
 
 // NewSQLiteAdaptersStore creates a new adapters store.
 func NewSQLiteAdaptersStore(dbPath string) (*SQLiteAdaptersStore, error) {
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}

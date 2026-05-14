@@ -7,7 +7,7 @@ import (
 )
 
 // TaintLogger is an interface for logging taint violations.
-type TaintLogger interface {
+type TaintLogger interface { //nolint:revive // stutter is intentional
 	LogViolation(violation *TaintViolation)
 }
 

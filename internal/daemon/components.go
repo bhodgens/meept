@@ -1485,6 +1485,7 @@ func createLLMConfig(cfg *config.ModelsConfig, logger *slog.Logger) *llm.ModelCo
 				}
 
 				apiKey := provider.Options.APIKey
+				//nolint:gosec // field name, not a secret
 				hasKey := apiKey != "" && apiKey != "${GALA_API_KEY}" // Check for unexpanded env var
 
 				logger.Info("Resolved model configuration",
@@ -2275,7 +2276,7 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 }
 
 // initializeTemplates sets up the templates system with discovery and registry.
-func (c *Components) initializeTemplates(cfg *config.Config, logger *slog.Logger) {
+func (c *Components) initializeTemplates(_ *config.Config, logger *slog.Logger) {
 	// Templates share the skills enabled flag since they use the same
 	// discovery mechanism. Templates can still be useful even without skills.
 	discoveryOpts := []templates.DiscoveryOption{

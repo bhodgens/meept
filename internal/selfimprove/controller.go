@@ -561,6 +561,7 @@ func (c *Controller) saveState() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	//nolint:gosec // user config directory/file permissions
 	_ = os.MkdirAll(c.config.DataPath, 0755)
 
 	state := persistedState{
@@ -581,6 +582,7 @@ func (c *Controller) saveState() error {
 	}
 
 	statePath := filepath.Join(c.config.DataPath, "state.json")
+	//nolint:gosec // user config directory/file permissions
 	return os.WriteFile(statePath, data, 0644)
 }
 

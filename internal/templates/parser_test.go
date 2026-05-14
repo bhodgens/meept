@@ -217,6 +217,7 @@ scope: turn
 This template was loaded from a file.
 `
 	templatePath := filepath.Join(tmpDir, "test-template.md")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(templatePath, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write template file: %v", err)
 	}
@@ -263,6 +264,7 @@ scope: session
 This body should not be parsed.
 `
 	templatePath := filepath.Join(tmpDir, "meta-template.md")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(templatePath, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write template file: %v", err)
 	}

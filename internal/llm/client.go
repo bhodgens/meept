@@ -526,6 +526,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		if resp != nil {
 			httpStatus = resp.StatusCode
 		}
+		//nolint:gosec // goroutine outlives request context
 		go func() {
 			record := metrics.RequestRecord{
 				Timestamp:  time.Now(),
@@ -606,6 +607,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	// Update metrics with actual token counts if available
 	if c.metricsStore != nil && parsedResp != nil {
+		//nolint:gosec // goroutine outlives request context
 		go func() {
 			record := metrics.RequestRecord{
 				Timestamp:        time.Now(),

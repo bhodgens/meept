@@ -114,6 +114,7 @@ func findDaemonBinary() (string, error) {
 	}
 
 	for _, path := range locations {
+		//nolint:gosec // path validated by config directory check
 		if _, err := os.Stat(path); err == nil {
 			// Convert to absolute path
 			if !filepath.IsAbs(path) {

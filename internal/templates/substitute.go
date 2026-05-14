@@ -37,10 +37,7 @@ func Substitute(body string, args []string) string {
 			if length < 0 {
 				length = 0
 			}
-			end := idx + length
-			if end > len(args) {
-				end = len(args)
-			}
+			end := min(idx+length, len(args))
 			return strings.Join(args[idx:end], " ")
 		}
 		return strings.Join(args[idx:], " ")

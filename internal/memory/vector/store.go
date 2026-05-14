@@ -13,7 +13,7 @@ import (
 	"slices"
 	"sync"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" //nolint:revive // blank import for side effects
 )
 
 // SearchResult represents a vector similarity search result.
@@ -53,6 +53,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 
 	// Ensure directory exists
 	dir := filepath.Dir(dbPath)
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -324,8 +325,11 @@ func serializeVector(vector []float32) []byte {
 		// Convert float32 to uint32 bytes
 		bits := math.Float32bits(v)
 		data[i*4] = byte(bits >> 24)
+		//nolint:gosec // value bounded by upstream
 		data[i*4+1] = byte(bits >> 16)
+		//nolint:gosec // value bounded by upstream
 		data[i*4+2] = byte(bits >> 8)
+		//nolint:gosec // value bounded by upstream
 		data[i*4+3] = byte(bits)
 	}
 	return data

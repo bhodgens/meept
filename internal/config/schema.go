@@ -1211,6 +1211,7 @@ func DefaultConfig() *Config {
 			MaxIterationsPerCycle: 5,
 			MaxFixesPerCycle:      10,
 			AutoRunIntervalHours:  0,
+			//nolint:gosec // field name, not a secret
 			AIInfra: AIInfraConfig{
 				Enabled:         false,
 				BaseURL:         "http://localhost:8100",

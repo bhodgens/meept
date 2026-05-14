@@ -20,6 +20,7 @@ func TestController_Detect_Integration(t *testing.T) {
 
 	// Create a small Go file with a TODO that the detector should find.
 	src := filepath.Join(projectDir, "main.go")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(src, []byte("package main\n\nfunc main() {\n\t// TODO: fix this\n}\n"), 0644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
@@ -222,6 +223,7 @@ func TestApplier_ApproveReject_Integration(t *testing.T) {
 	// Create the file we'll modify.
 	targetFile := filepath.Join(projectDir, "hello.go")
 	original := []byte("package main\n\nfunc hello() string {\n\treturn \"hello\"\n}\n")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(targetFile, original, 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

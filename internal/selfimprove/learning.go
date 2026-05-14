@@ -180,6 +180,7 @@ func (lp *LearningPipeline) Initialize(ctx context.Context) error {
 		return nil
 	}
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(lp.dataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
@@ -900,6 +901,7 @@ func (lp *LearningPipeline) savePatterns() error {
 		return err
 	}
 
+	//nolint:gosec // user config directory/file permissions
 	return os.WriteFile(path, data, 0644)
 }
 

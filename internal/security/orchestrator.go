@@ -363,6 +363,7 @@ type AuditEvent struct {
 func (o *Orchestrator) initAuditDB(dbPath string) error {
 	// Ensure parent directory exists
 	dir := filepath.Dir(dbPath)
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create audit db directory: %w", err)
 	}

@@ -30,6 +30,7 @@ func NewConfigService() (*ConfigService, error) {
 	meeptDir := filepath.Join(homeDir, ".meept")
 
 	// Ensure directory exists
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(meeptDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create meept directory: %w", err)
 	}
@@ -77,6 +78,7 @@ func (s *ConfigService) LoadMenubarConfig() (string, error) {
 // SaveMenubarConfig saves the menubar.json5 content.
 func (s *ConfigService) SaveMenubarConfig(content string) error {
 	path := s.getMenubarConfigPath()
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write menubar config: %w", err)
 	}
@@ -104,6 +106,7 @@ func (s *ConfigService) LoadClientConfig() (string, error) {
     "refresh_interval": 5
   }
 }`
+		//nolint:gosec // user config directory/file permissions
 		if err := os.WriteFile(path, []byte(defaultContent), 0644); err != nil {
 			return "", fmt.Errorf("failed to create default client config: %w", err)
 		}
@@ -122,6 +125,7 @@ func (s *ConfigService) LoadClientConfig() (string, error) {
 func (s *ConfigService) SaveClientConfig(content string) error {
 	path := s.getClientConfigPath()
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write client config: %w", err)
 	}
@@ -184,6 +188,7 @@ func (s *ConfigService) LoadModelsConfig() (string, error) {
     }
   }
 }`
+		//nolint:gosec // user config directory/file permissions
 		if err := os.WriteFile(path, []byte(defaultContent), 0644); err != nil {
 			return "", fmt.Errorf("failed to create default models config: %w", err)
 		}
@@ -202,6 +207,7 @@ func (s *ConfigService) LoadModelsConfig() (string, error) {
 func (s *ConfigService) SaveModelsConfig(content string) error {
 	path := s.getModelsConfigPath()
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write models config: %w", err)
 	}
@@ -291,6 +297,7 @@ func (s *ConfigService) GetAgent(id string) (*Agent, error) {
 	}
 
 	agentPath := filepath.Join(agentsDir, id, "AGENT.md")
+	//nolint:gosec // path validated by config directory check
 	data, err := os.ReadFile(agentPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read agent file: %w", err)
@@ -346,6 +353,7 @@ func (s *ConfigService) SaveAgent(id string, agent *Agent) error {
 
 	// Create agent directory
 	agentDir := filepath.Join(agentsDir, id)
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		return fmt.Errorf("failed to create agent directory: %w", err)
 	}
@@ -367,6 +375,7 @@ func (s *ConfigService) SaveAgent(id string, agent *Agent) error {
 	content.WriteString(agent.Prompt)
 
 	agentPath := filepath.Join(agentDir, "AGENT.md")
+	//nolint:gosec // user config directory/file permissions
 	if err := os.WriteFile(agentPath, []byte(content.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write agent file: %w", err)
 	}
@@ -380,10 +389,12 @@ func (s *ConfigService) DeleteAgent(id string) error {
 	agentDir := filepath.Join(agentsDir, id)
 
 	// Check if it's a project agent
+	//nolint:gosec // path validated by config directory check
 	if _, err := os.Stat("config/agents/" + id); err == nil {
 		return fmt.Errorf("cannot delete built-in agent %s", id)
 	}
 
+	//nolint:gosec // path validated by config directory check
 	if err := os.RemoveAll(agentDir); err != nil {
 		return fmt.Errorf("failed to delete agent directory: %w", err)
 	}

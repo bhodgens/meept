@@ -217,18 +217,21 @@ func TestOutputMonitorScan(t *testing.T) {
 			wantCredentials: true,
 			wantLabel:       "openai_key",
 		},
+		//nolint:gosec // test fixture, not a real secret
 		{
 			name:            "GitHub token",
 			input:           "Your token is ghp_abcdefghijklmnopqrstuvwxyz1234567890",
 			wantCredentials: true,
 			wantLabel:       "github_token",
 		},
+		//nolint:gosec // test fixture, not a real secret
 		{
 			name:            "AWS access key",
 			input:           "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
 			wantCredentials: true,
 			wantLabel:       "aws_access_key",
 		},
+		//nolint:gosec // test fixture, not a real secret
 		{
 			name:            "Private key header",
 			input:           "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3...",
@@ -241,6 +244,7 @@ func TestOutputMonitorScan(t *testing.T) {
 			wantCredentials: true,
 			wantLabel:       "jwt_token",
 		},
+		//nolint:gosec // test fixture, not a real secret
 		{
 			name:            "Database URL",
 			input:           "DATABASE_URL=postgres://user:password@localhost:5432/db",

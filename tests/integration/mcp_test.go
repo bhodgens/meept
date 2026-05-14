@@ -80,6 +80,7 @@ if echo "$line" | grep -q '"method":"initialize"'; then
 fi
 `
 	scriptPath := filepath.Join(tempDir, "mock-mcp.sh")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		t.Fatalf("Failed to write mock server script: %v", err)
 	}
@@ -169,6 +170,7 @@ while read line; do
 done
 `
 	scriptPath := filepath.Join(tempDir, "exec-mcp.sh")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		t.Fatalf("Failed to write mock server script: %v", err)
 	}
@@ -233,6 +235,7 @@ while read line; do
 done
 `
 	scriptPath := filepath.Join(tempDir, "shutdown-mcp.sh")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		t.Fatalf("Failed to write mock server script: %v", err)
 	}

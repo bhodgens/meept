@@ -1,7 +1,8 @@
 # Plan: Tool Streaming Progress & Terminate Hints
 
-**Status**: tentative-needsreview
+**Status**: complete (all 3 phases implemented)
 **Date**: 2026-05-11
+**Completed**: 2026-05-13
 **Author**: claude-code
 **Estimated effort**: 3 phases, ~1.5 weeks
 

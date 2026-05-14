@@ -1,7 +1,8 @@
 # Typed Agent Events & Hook System
 
-> **Status:** tentative -- needs review
+> **Status:** complete (all 6 phases implemented)
 > **Date:** 2026-05-11
+> **Completed:** 2026-05-13
 > **For Claude:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task.
 
 **Goal:** Add a typed event system with type-safe hooks to the agent loop that coexists with the existing message bus. Typed events serve agent-internal lifecycle concerns (turn boundaries, tool execution, context transforms); the bus continues to serve system-wide pub/sub (daemon, scheduler, RPC, TUI).

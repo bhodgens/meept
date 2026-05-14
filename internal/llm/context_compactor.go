@@ -265,6 +265,7 @@ func (c *ContextCompactor) adjustCutPoint(messages []ChatMessage, cutIdx int) in
 	start := cutIdx
 	for start > 0 && messages[start-1].Role == RoleTool {
 		start--
+		//nolint:gosec // index bounded by upstream check
 		if start > 0 && messages[start-1].Role == RoleAssistant && len(messages[start-1].ToolCalls) > 0 { start-- }
 	}
 	if start < cutIdx { cutIdx = start }

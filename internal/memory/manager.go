@@ -149,6 +149,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	}
 	m.dataDir = dataDir
 
+	//nolint:gosec // user config directory/file permissions
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}

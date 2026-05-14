@@ -266,9 +266,11 @@ func TestComputeFileHashes_ExistingFiles(t *testing.T) {
 	file1 := filepath.Join(tmpDir, "file1.txt")
 	file2 := filepath.Join(tmpDir, "file2.txt")
 
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(file1, []byte("content1"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(file2, []byte("content2"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
@@ -324,6 +326,7 @@ func TestComputeFileHashes_MixedExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	existingFile := filepath.Join(tmpDir, "exists.txt")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(existingFile, []byte("content"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
@@ -444,6 +447,7 @@ func TestBuild_FullKeyConstruction(t *testing.T) {
 
 	// Create a test file
 	testFile := filepath.Join(tmpDir, "test.go")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(testFile, []byte("package main"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
@@ -480,6 +484,7 @@ func TestBuild_FileAwareDisabled(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	testFile := filepath.Join(tmpDir, "test.go")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(testFile, []byte("package main"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
@@ -498,6 +503,7 @@ func TestBuild_ExtractsFromMessages(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	testFile := filepath.Join(tmpDir, "message_file.go")
+	//nolint:gosec // test directory/file
 	if err := os.WriteFile(testFile, []byte("package test"), 0644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}

@@ -22,7 +22,7 @@ const SharedZone = "shared"
 // and shared memvid storage. It handles:
 // - Hydration: Fetching relevant memories from shared storage when a job is claimed
 // - Distillation: Promoting high-value local memories to shared storage on job completion
-type SyncManager struct {
+type SyncManager struct { //nolint:revive // stutter is intentional
 	config    config.DistributedMemoryConfig
 	localMgr  *memory.Manager
 	memvid    *memvid.Client
@@ -45,7 +45,7 @@ type SyncManager struct {
 }
 
 // SyncManagerConfig holds configuration for creating a SyncManager.
-type SyncManagerConfig struct {
+type SyncManagerConfig struct { //nolint:revive // stutter is intentional
 	Config       config.DistributedMemoryConfig
 	LocalManager *memory.Manager
 	MemvidClient *memvid.Client

@@ -234,6 +234,7 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	// With pool size N and N concurrent searches, synchronous updates could
 	// cause deadlock since Search holds one connection and updateLastAccessed
 	// requests another.
+	//nolint:gosec // goroutine outlives request context
 	go func() {
 		// Use a fresh context to avoid cancellation issues
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -266,6 +267,7 @@ func (e *EpisodicMemory) updateLastAccessed(ctx context.Context, results []Memor
 		args[i+1] = id
 	}
 
+	//nolint:gosec // parameterized query
 	query := fmt.Sprintf("UPDATE episodic_memories SET last_accessed_at = ? WHERE id IN (%s)", strings.Join(placeholders, ","))
 	
 	pool := e.store.GetPool()

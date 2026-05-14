@@ -257,6 +257,7 @@ func TestRegistry_Concurrent(t *testing.T) {
 	done := make(chan bool)
 	for i := range 10 {
 		go func(n int) {
+			//nolint:gosec // value bounded by upstream
 			name := string(rune('a' + n))
 			r.Register(&mockTool{name: "tool_" + name})
 			r.Get("tool_" + name)

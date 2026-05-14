@@ -697,10 +697,12 @@ Training backends (auto-detected if not specified):
 					scriptPath = filepath.Join(outputDir, "axolotl_config.yaml")
 				}
 
+				//nolint:gosec // user config directory/file permissions
 				if err := os.MkdirAll(outputDir, 0755); err != nil {
 					return fmt.Errorf("failed to create output directory: %w", err)
 				}
 
+				//nolint:gosec // user config directory/file permissions
 				if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
 					return fmt.Errorf("failed to write script: %w", err)
 				}

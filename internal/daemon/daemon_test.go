@@ -336,7 +336,7 @@ func TestRPCLoadTest(t *testing.T) {
 
 	for i := range concurrency {
 		wg.Add(1)
-		go func(workerID int) {
+		go func(_ int) {
 			defer wg.Done()
 
 			conn, err := net.Dial("unix", cfg.SocketPath)
