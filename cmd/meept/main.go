@@ -117,6 +117,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newQueueCmd())
 	rootCmd.AddCommand(newWorkersCmd())
 	rootCmd.AddCommand(newSkillsCmd())
+	rootCmd.AddCommand(newTemplatesCmd())
 	rootCmd.AddCommand(newSelfImproveCmd())
 	rootCmd.AddCommand(newShadowCmd())
 	rootCmd.AddCommand(newDevCmd())

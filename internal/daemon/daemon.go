@@ -29,6 +29,7 @@ import (
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/templates"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
@@ -164,6 +165,14 @@ func New(cfg *Config) (*Daemon, error) {
 		)
 	}
 
+	// Register template handlers
+	if rpcServer != nil && components.TemplateRegistry != nil {
+		rpc.RegisterTemplateHandlers(rpcServer, components.TemplateRegistry, components.SkillExecutor)
+		logger.Info("Template RPC handlers registered",
+			"template_count", components.TemplateRegistry.Count(),
+		)
+	}
+
 	// Register self-improve handlers (native Go, calling Controller directly)
 	if rpcServer != nil {
 		siHandler := rpc.NewSelfImproveHandler(components.SelfImproveCtrl)
@@ -250,6 +259,7 @@ func New(cfg *Config) (*Daemon, error) {
 		WorkerPool:      nilSafeWorkerPool(components),
 		SkillRegistry:   nilSafeSkillRegistry(components),
 		SkillExecutor:   nilSafeSkillExecutor(components),
+		TemplateRegistry: nilSafeTemplateRegistry(components),
 		SelfImprove:     nilSafeSelfImprove(components),
 		TokenCache:      nilSafeTokenCache(components),
 		SecurityChecker: nilSafeSecurityChecker(components),
@@ -687,4 +697,11 @@ func nilSafeScheduler(c *Components) *scheduler.Scheduler {
 		return nil
 	}
 	return c.Scheduler
+}
+
+func nilSafeTemplateRegistry(c *Components) *templates.Registry {
+	if c == nil {
+		return nil
+	}
+	return c.TemplateRegistry
 }

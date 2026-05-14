@@ -266,6 +266,33 @@ type ConnectErrorMsg struct {
 	Err error
 }
 
+// TemplateNamesLoadedMsg carries template names fetched from the daemon for
+// autocomplete integration.
+type TemplateNamesLoadedMsg struct {
+	Names []string
+}
+
+// fetchTemplateNames fetches available template names from the daemon and
+// returns them as a TemplateNamesLoadedMsg for the autocomplete system.
+func (a *App) fetchTemplateNames() tea.Msg {
+	if a.rpc == nil || !a.rpc.IsConnected() {
+		return TemplateNamesLoadedMsg{}
+	}
+
+	templates, err := a.rpc.ListTemplates()
+	if err != nil {
+		// Non-fatal: template names are optional for autocomplete
+		return TemplateNamesLoadedMsg{}
+	}
+
+	names := make([]string, len(templates))
+	for i, t := range templates {
+		names[i] = t.Name
+	}
+
+	return TemplateNamesLoadedMsg{Names: names}
+}
+
 // Update handles messages and updates the model.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -497,8 +524,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ConnectSuccessMsg:
 		a.err = nil
-		// Initialize the current view, sidebar, and load session
-		return a, tea.Batch(a.initCurrentView(), a.sidebar.Init(), a.loadSession)
+		// Initialize the current view, sidebar, load session, and fetch templates
+		return a, tea.Batch(a.initCurrentView(), a.sidebar.Init(), a.loadSession, a.fetchTemplateNames)
 
 	case SessionLoadedMsg:
 		if msg.Err != nil {
@@ -947,6 +974,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				return a, a.commandHandler.Execute(cmd)
 			}
+		}
+		return a, nil
+
+	case TemplateNamesLoadedMsg:
+		// Merge template names into the autocomplete command list
+		if a.slashAutocomplete != nil && len(msg.Names) > 0 {
+			a.slashAutocomplete.MergeCommands(msg.Names)
 		}
 		return a, nil
 	}

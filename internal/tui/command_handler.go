@@ -82,9 +82,25 @@ func (h *CommandHandler) executeSync(cmd *SlashCommand) *CommandResult {
 		return h.executeBuiltin(cmd)
 	}
 
-	// Not a built-in, treat as skill invocation (not yet implemented in full TUI)
+	// Try template invocation via RPC
+	if h.rpc != nil && h.rpc.IsConnected() {
+		result, err := h.rpc.InvokeTemplate(cmd.Name, cmd.Args)
+		if err == nil {
+			return &CommandResult{Output: result}
+		}
+		// If the error indicates template not found, fall through to the
+		// unknown command error. Log other errors but don't block the user.
+		if !isTemplateNotFoundError(err) {
+			return &CommandResult{
+				Output:  fmt.Sprintf("template invocation failed: %v", err),
+				IsError: true,
+			}
+		}
+	}
+
+	// Not a built-in, skill, or template
 	return &CommandResult{
-		Output:  fmt.Sprintf("skill invocation not yet implemented: %s", cmd.Name),
+		Output:  fmt.Sprintf("unknown command: /%s", cmd.Name),
 		IsError: true,
 	}
 }
@@ -729,4 +745,15 @@ func (h *CommandHandler) executeInterrupt(args []string) *CommandResult {
 	return &CommandResult{
 		Output: fmt.Sprintf("task %s interrupted (reason: %s)", taskID, reason),
 	}
+}
+
+// isTemplateNotFoundError checks whether an RPC error indicates that the
+// template was not found (as opposed to a network or execution error).
+func isTemplateNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return s.Contains(msg, "template not found") ||
+		s.Contains(msg, "template substitution failed")
 }

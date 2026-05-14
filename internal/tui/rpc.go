@@ -937,3 +937,65 @@ func (c *RPCClient) GetTree(sessionID string) ([]TreeNodeInfo, error) {
 
 	return resp.Nodes, nil
 }
+
+// ============================================================================
+// Template Methods
+// ============================================================================
+
+// TemplateInfo holds basic info about a template returned by ListTemplates.
+type TemplateInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Scope       string `json:"scope"`
+}
+
+// ListTemplates fetches all available template names from the daemon.
+// Returns template names suitable for autocomplete and invocation.
+func (c *RPCClient) ListTemplates() ([]TemplateInfo, error) {
+	result, err := c.Call("templates.list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Templates []TemplateInfo `json:"templates"`
+		Count     int            `json:"count"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse templates list response: %w", err)
+	}
+
+	return resp.Templates, nil
+}
+
+// InvokeTemplate substitutes arguments into a template and executes it via the
+// daemon. Returns the substituted prompt text. If the daemon has an executor
+// configured, it also returns the LLM response content.
+func (c *RPCClient) InvokeTemplate(name string, args []string) (string, error) {
+	params := map[string]any{
+		"name": name,
+		"args": args,
+	}
+
+	result, err := c.Call("templates.invoke", params)
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		Prompt  string `json:"prompt"`
+		Content string `json:"content"`
+		Success bool   `json:"success"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse template invoke response: %w", err)
+	}
+
+	// If the daemon executed the template and returned LLM content, use that.
+	if resp.Content != "" {
+		return resp.Content, nil
+	}
+
+	// Otherwise return the substituted prompt text.
+	return resp.Prompt, nil
+}

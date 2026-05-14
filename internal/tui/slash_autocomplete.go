@@ -225,6 +225,35 @@ func (s *SlashAutocomplete) UpdateCommands(commands []string) {
 	s.updateFiltered()
 }
 
+// MergeCommands adds extra commands (template names, skill names) to the
+// existing built-in command list. Duplicates are removed. The merged list
+// is sorted for consistent autocomplete ordering.
+func (s *SlashAutocomplete) MergeCommands(extra []string) {
+	seen := make(map[string]struct{}, len(s.commands)+len(extra))
+
+	// Start with current commands
+	merged := make([]string, 0, len(s.commands)+len(extra))
+	for _, cmd := range s.commands {
+		if _, ok := seen[cmd]; !ok {
+			seen[cmd] = struct{}{}
+			merged = append(merged, cmd)
+		}
+	}
+
+	// Add extras
+	for _, cmd := range extra {
+		if _, ok := seen[cmd]; !ok {
+			seen[cmd] = struct{}{}
+			merged = append(merged, cmd)
+		}
+	}
+
+	// Sort for consistent ordering
+	sortStrings(merged)
+	s.commands = merged
+	s.updateFiltered()
+}
+
 // GetFilteredCommands returns the currently filtered commands.
 func (s *SlashAutocomplete) GetFilteredCommands() []string {
 	return s.filtered

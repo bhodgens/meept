@@ -15,6 +15,7 @@ import (
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/skills"
+	"github.com/caimlas/meept/internal/templates"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/pkg/security"
@@ -36,6 +37,7 @@ type ServiceRegistry struct {
 	Security    *SecurityService
 	Scheduler   *SchedulerService
 	Bus         *BusService
+	Templates   *TemplatesService
 }
 
 // Config holds dependencies for service instantiation.
@@ -48,8 +50,9 @@ type Config struct {
 	TaskRegistry   *task.Registry
 	SessionStore   session.Store
 	WorkerPool     *worker.Pool
-	SkillRegistry  *skills.Registry
-	SkillExecutor  *skills.Executor
+	SkillRegistry   *skills.Registry
+	SkillExecutor   *skills.Executor
+	TemplateRegistry *templates.Registry
 	SelfImprove    *selfimprove.Controller
 	TokenCache     *llm.TokenCacheCoordinator
 	SecurityChecker *security.PermissionChecker
@@ -89,6 +92,9 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	}
 	if cfg.SkillRegistry != nil {
 		reg.Skills = NewSkillsService(cfg.SkillRegistry, cfg.SkillExecutor)
+	}
+	if cfg.TemplateRegistry != nil {
+		reg.Templates = NewTemplatesService(cfg.TemplateRegistry, cfg.SkillExecutor)
 	}
 	if cfg.SelfImprove != nil {
 		reg.SelfImprove = NewSelfImproveService(cfg.SelfImprove)

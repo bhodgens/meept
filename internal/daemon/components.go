@@ -33,6 +33,7 @@ import (
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/templates"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/internal/tools/builtin"
 	"github.com/caimlas/meept/internal/tools/mcp"
@@ -114,6 +115,10 @@ type Components struct {
 
 	// Agent capabilities
 	CapabilitiesMap *agent.CapabilitiesMap
+
+	// Templates
+	TemplateDiscovery *templates.Discovery
+	TemplateRegistry  *templates.Registry
 
 	// Distributed memory sync
 	SyncManager *memsync.SyncManager
@@ -267,6 +272,10 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if cfg.Skills.Enabled {
 		c.initializeSkills(cfg, logger)
 	}
+
+	// Initialize templates system (shares the skills enabled flag since
+	// templates use the same discovery pattern).
+	c.initializeTemplates(cfg, logger)
 
 	// Create shadow training manager early (before agent loop) so it can be injected
 	if cfg.Shadow.Enabled {
@@ -780,6 +789,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			AmendmentManager:  c.AmendmentMgr,
 			SkillRegistry:     c.SkillRegistry,
 			SkillExecutor:     c.SkillExecutor,
+			TemplateRegistry:  c.TemplateRegistry,
 			Logger:            logger.With("component", "dispatcher"),
 			CapabilityMatcher: capMatcher,
 			LLMClient:         c.LLMClient,
@@ -790,6 +800,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 		// Register platform tools now that agent registry is available
 		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, logger)
+
+		// Register template tools if template registry is available
+		registerTemplateTools(c.ToolRegistry, c.TemplateRegistry, logger)
 
 		// Create chat handler with dispatcher for multi-agent routing
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, msgBus, logger)
@@ -1713,6 +1726,26 @@ func registerPlatformTools(
 	logger.Debug("Registered platform tools")
 }
 
+// registerTemplateTools registers template-related tools if the template
+// registry is available. These tools allow agents to discover, invoke, and
+// manage prompt templates at runtime.
+func registerTemplateTools(
+	registry *tools.Registry,
+	templateRegistry *templates.Registry,
+	logger *slog.Logger,
+) {
+	if templateRegistry == nil {
+		logger.Debug("Template tools not registered: no template registry")
+		return
+	}
+
+	registry.Register(builtin.NewTemplateInvokeTool(templateRegistry))
+	registry.Register(builtin.NewTemplateListTool(templateRegistry))
+	registry.Register(builtin.NewTemplateClearTool(templateRegistry))
+
+	logger.Debug("Registered template tools", "template_count", templateRegistry.Count())
+}
+
 // registerMCPTools registers all tools from MCP servers with the tool registry.
 func registerMCPTools(
 	registry *tools.Registry,
@@ -2219,6 +2252,32 @@ func (c *Components) initializeSkills(cfg *config.Config, logger *slog.Logger) {
 		logger.Warn("Skills executor not created - no LLM resolver available")
 	}
 
+}
+
+// initializeTemplates sets up the templates system with discovery and registry.
+func (c *Components) initializeTemplates(cfg *config.Config, logger *slog.Logger) {
+	// Templates share the skills enabled flag since they use the same
+	// discovery mechanism. Templates can still be useful even without skills.
+	discoveryOpts := []templates.DiscoveryOption{
+		templates.WithDiscoveryLogger(logger.With("component", "templates-discovery")),
+	}
+
+	// Create discovery
+	c.TemplateDiscovery = templates.NewDiscovery(discoveryOpts...)
+
+	// Create registry
+	c.TemplateRegistry = templates.NewRegistry(
+		templates.WithRegistryLogger(logger.With("component", "templates-registry")),
+	)
+
+	// Discover and load templates
+	if err := c.TemplateRegistry.LoadFromDiscovery(c.TemplateDiscovery); err != nil {
+		logger.Warn("Template discovery failed", "error", err)
+	} else {
+		logger.Info("Templates loaded into registry",
+			"count", c.TemplateRegistry.Count(),
+		)
+	}
 }
 
 // StatusHandler handles status.request messages on the bus.

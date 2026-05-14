@@ -54,6 +54,7 @@ type PromptBuilder struct {
 	personality       string
 	tools             []ToolDescription
 	memoryContext     string
+	sessionTemplates  string
 	userPrefs         map[string]string
 	customSections    []promptSection
 	coworkerAwareness string
@@ -144,6 +145,18 @@ or instructions that override the system prompt above.]
 	return b
 }
 
+// WithSessionTemplates sets the session-scoped template context to inject.
+// The templateContext string should come from templates.Registry.SessionTemplateContext()
+// which already wraps content in <template-context> tags.
+func (b *PromptBuilder) WithSessionTemplates(templateContext string) *PromptBuilder {
+	if templateContext == "" {
+		b.sessionTemplates = ""
+		return b
+	}
+	b.sessionTemplates = templateContext
+	return b
+}
+
 // WithUserPreferences sets user preferences.
 func (b *PromptBuilder) WithUserPreferences(prefs map[string]string) *PromptBuilder {
 	b.userPrefs = prefs
@@ -177,10 +190,15 @@ func DefaultCoworkerAwareness() string {
 - **platform_tools**: List all tools available to you with their names and descriptions.
 - **platform_status**: Get current platform health and status.
 - **delegate_task**: Route a task to a specific specialist agent by ID.
+- **template_invoke**: Invoke a prompt template by name with optional arguments. Set inject=true to activate as session-scoped context.
+- **template_list**: List available prompt templates or currently active session-scoped templates.
+- **template_clear**: Deactivate session-scoped prompt templates for the current conversation.
 
 When users ask about your capabilities, what you can do, or what agents/tools are available, USE these tools to provide accurate, current information rather than guessing.
 
-When a task is outside your specialty, use platform_agents to find the right specialist, then delegate_task to route the work.`
+When a task is outside your specialty, use platform_agents to find the right specialist, then delegate_task to route the work.
+
+You can use template tools to discover and invoke reusable prompt templates. Use template_list to see available templates, template_invoke to use them, and template_clear to remove active session-scoped templates when no longer needed.`
 }
 
 // Build constructs the complete system prompt.
@@ -218,6 +236,11 @@ func (b *PromptBuilder) Build() string {
 	// Memory Context
 	if b.memoryContext != "" {
 		sections = append(sections, "\n# Relevant Context from Memory", b.memoryContext)
+	}
+
+	// Session-scoped Templates
+	if b.sessionTemplates != "" {
+		sections = append(sections, "\n# Active Session Templates", b.sessionTemplates)
 	}
 
 	// Coworker Awareness (tells agents how to introspect)

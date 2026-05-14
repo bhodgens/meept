@@ -18,6 +18,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/templates"
 )
 
 // anaphoraForRegex matches "do the same for X" patterns for anaphora resolution.
@@ -120,6 +121,7 @@ type Dispatcher struct {
 	amendmentMgr      *task.AmendmentManager
 	skillRegistry     *skills.Registry
 	skillExecutor     *skills.Executor
+	templateRegistry  *templates.Registry
 	logger            *slog.Logger
 	llmClassifier     *LLMClassifier
 	keywordClassifier *KeywordClassifier
@@ -144,6 +146,7 @@ type DispatcherConfig struct {
 	AmendmentManager  *task.AmendmentManager
 	SkillRegistry     *skills.Registry
 	SkillExecutor     *skills.Executor
+	TemplateRegistry  *templates.Registry
 	Logger            *slog.Logger
 	LLMClient         *llm.Client
 	ClassifierModel   string
@@ -167,6 +170,7 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		amendmentMgr:      cfg.AmendmentManager,
 		skillRegistry:     cfg.SkillRegistry,
 		skillExecutor:     cfg.SkillExecutor,
+		templateRegistry:  cfg.TemplateRegistry,
 		logger:            cfg.Logger,
 		capabilityMatcher: cfg.CapabilityMatcher,
 	}
@@ -225,7 +229,20 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, session
 			)
 			return d.executeSkill(ctx, skill, skillInput, sessionID)
 		}
-		// Not a valid skill, fall through to normal routing
+		// Check template registry if no skill matched
+		if d.templateRegistry != nil {
+			if tmpl := d.templateRegistry.Get(skillName); tmpl != nil {
+				d.logger.Info("Template invocation detected",
+					"template", skillName,
+					"session", sessionID,
+				)
+				substituted := d.substituteTemplate(tmpl, skillInput)
+				// Treat substituted text as normal user input
+				input = substituted
+				// Fall through to normal intent classification
+			}
+		}
+		// Not a valid skill or template, fall through to normal routing
 	}
 
 	// 1. Build memory context with session history
@@ -1179,6 +1196,17 @@ func (d *Dispatcher) getSkill(name string) *skills.Skill {
 		return nil
 	}
 	return d.skillRegistry.Get(name)
+}
+
+// substituteTemplate substitutes a template body with arguments parsed from
+// the raw skill input string. The input is split on whitespace to produce
+// positional arguments for the template substitution engine.
+func (d *Dispatcher) substituteTemplate(tmpl *templates.Template, input string) string {
+	var args []string
+	if input != "" {
+		args = strings.Fields(input)
+	}
+	return templates.Substitute(tmpl.Body, args)
 }
 
 // executeSkill executes a skill and returns a dispatch result.
