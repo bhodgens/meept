@@ -32,7 +32,7 @@ Examples:
 
 func newWorkersStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   cmdStatus,
 		Short: "Show worker pool status",
 		RunE:  runWorkersStatus,
 	}
@@ -63,7 +63,7 @@ func runWorkersStatus(cmd *cobra.Command, args []string) error {
 
 func newWorkersListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List all workers with details",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := connectDaemon()

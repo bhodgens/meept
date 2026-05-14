@@ -68,7 +68,7 @@ func (h *QueueHandler) handleSteer(ctx context.Context, params json.RawMessage) 
 	}
 
 	return map[string]any{
-		"status": "queued",
+		RPCKeyStatus: "queued",
 		"queue":  "steer",
 	}, nil
 }
@@ -105,7 +105,7 @@ func (h *QueueHandler) handleFollowUp(ctx context.Context, params json.RawMessag
 	}
 
 	return map[string]any{
-		"status": "queued",
+		RPCKeyStatus: "queued",
 		"queue":  "followup",
 	}, nil
 }

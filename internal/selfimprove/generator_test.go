@@ -100,7 +100,7 @@ func TestGenerate_ProtectedFile(t *testing.T) {
 func TestReadAffectedFiles(t *testing.T) {
 	dir := t.TempDir()
 	testFile := filepath.Join(dir, "main.go")
-	os.WriteFile(testFile, []byte("package main\n\nfunc main() {}"), 0644)
+	_ = os.WriteFile(testFile, []byte("package main\n\nfunc main() {}"), 0o644) //nolint:gosec // test uses temp dir
 
 	g := newTestGenerator(t)
 	g.projectRoot = dir
@@ -122,9 +122,9 @@ func TestReadAffectedFiles(t *testing.T) {
 func TestReadAffectedFiles_RelativePath(t *testing.T) {
 	dir := t.TempDir()
 	subDir := filepath.Join(dir, "sub")
-	os.MkdirAll(subDir, 0755)
+	_ = os.MkdirAll(subDir, 0o755) //nolint:gosec // test uses temp dir
 	testFile := filepath.Join(subDir, "code.go")
-	os.WriteFile(testFile, []byte("package sub"), 0644)
+	_ = os.WriteFile(testFile, []byte("package sub"), 0o644) //nolint:gosec // test uses temp dir
 
 	g := newTestGenerator(t)
 	g.projectRoot = dir

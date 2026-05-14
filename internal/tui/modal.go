@@ -552,7 +552,7 @@ func (s *SessionPickerModal) handleInputKey(key string) tea.Cmd {
 		s.inputMode = false
 		s.inputBuffer = ""
 	case "backspace", "ctrl+h":
-		if len(s.inputBuffer) > 0 {
+		if s.inputBuffer != "" {
 			s.inputBuffer = s.inputBuffer[:len(s.inputBuffer)-1]
 		}
 	case "ctrl+u":
@@ -683,7 +683,7 @@ func (m *SessionRenameModal) HandleKey(key string) tea.Cmd {
 	if m.selected == 0 {
 		switch key {
 		case "backspace", "ctrl+h":
-			if len(m.inputBuffer) > 0 {
+			if m.inputBuffer != "" {
 				m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
 			}
 			return nil
@@ -1136,7 +1136,7 @@ func (f *FuzzyFinderModal) HandleKey(key string) string {
 
 	switch key {
 	case "backspace":
-		if len(f.inputBuffer) > 0 {
+		if f.inputBuffer != "" {
 			f.inputBuffer = f.inputBuffer[:len(f.inputBuffer)-1]
 			f.selectedIndex = 0
 		}

@@ -162,7 +162,7 @@ func (h *DevHandler) handleListModels(ctx context.Context, params json.RawMessag
 		models[i] = map[string]any{
 			"index":         m.Index,
 			"provider":      m.Provider,
-			"model":         m.Model,
+			RPCKeyModel:         m.Model,
 			"full_name":     m.FullName,
 			"base_url":      m.BaseURL,
 			"context_limit": m.ContextLimit,
@@ -175,7 +175,7 @@ func (h *DevHandler) handleListModels(ctx context.Context, params json.RawMessag
 	return map[string]any{
 		"models":        models,
 		"current_model": currentModel,
-		"count":         len(models),
+		RPCKeyCount:         len(models),
 	}, nil
 }
 
@@ -196,7 +196,7 @@ func (h *DevHandler) handleCurrentModel(ctx context.Context, params json.RawMess
 	return map[string]any{
 		"index":         m.Index,
 		"provider":      m.Provider,
-		"model":         m.Model,
+		RPCKeyModel:         m.Model,
 		"full_name":     m.FullName,
 		"base_url":      m.BaseURL,
 		"context_limit": m.ContextLimit,
@@ -225,8 +225,8 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 	case req.Index != nil:
 		if *req.Index < 0 || *req.Index >= len(h.modelsList) {
 			return map[string]any{
-				"success": false,
-				"message": fmt.Sprintf("invalid index %d, valid range is 0-%d", *req.Index, len(h.modelsList)-1),
+				RPCKeySuccess: false,
+				RPCKeyMessage: fmt.Sprintf("invalid index %d, valid range is 0-%d", *req.Index, len(h.modelsList)-1),
 			}, nil
 		}
 		targetIdx = *req.Index
@@ -240,14 +240,14 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 		}
 		if targetIdx == -1 {
 			return map[string]any{
-				"success": false,
-				"message": fmt.Sprintf("model not found: %s", req.Name),
+				RPCKeySuccess: false,
+				RPCKeyMessage: fmt.Sprintf("model not found: %s", req.Name),
 			}, nil
 		}
 	default:
 		return map[string]any{
-			"success": false,
-			"message": "must specify either 'index' or 'name'",
+			RPCKeySuccess: false,
+			RPCKeyMessage: "must specify either 'index' or 'name'",
 		}, nil
 	}
 
@@ -256,10 +256,10 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 
 	m := h.modelsList[targetIdx]
 	return map[string]any{
-		"success":  true,
-		"model":    m.Model,
+		RPCKeySuccess:  true,
+		RPCKeyModel:    m.Model,
 		"provider": m.Provider,
-		"message":  fmt.Sprintf("switched to %s", m.FullName),
+		RPCKeyMessage:  fmt.Sprintf("switched to %s", m.FullName),
 	}, nil
 }
 
@@ -303,7 +303,7 @@ func (h *DevHandler) handleTestLLM(ctx context.Context, params json.RawMessage) 
 
 	return map[string]any{
 		"response": resp.Content,
-		"model":    currentModel,
+		RPCKeyModel:    currentModel,
 		"tokens": map[string]int{
 			"prompt":     resp.Usage.PromptTokens,
 			"completion": resp.Usage.CompletionTokens,
@@ -328,7 +328,7 @@ func (h *DevHandler) handleConfig(ctx context.Context, params json.RawMessage) (
 		models := make(map[string]any)
 		for mName, m := range p.Models {
 			models[mName] = map[string]any{
-				"name":          m.Name,
+				RPCKeyName:          m.Name,
 				"capabilities":  m.Capabilities,
 				"context_limit": m.ContextLimit,
 				"max_output":    m.MaxOutput,
@@ -352,13 +352,13 @@ func (h *DevHandler) handleConfig(ctx context.Context, params json.RawMessage) (
 func (h *DevHandler) handleReload(ctx context.Context, params json.RawMessage) (any, error) {
 	if err := h.loadModels(); err != nil {
 		return map[string]any{
-			"success": false,
+			RPCKeySuccess: false,
 			"error":   err.Error(),
 		}, err
 	}
 
 	return map[string]any{
-		"success":      true,
+		RPCKeySuccess:      true,
 		"models_count": len(h.modelsList),
 	}, nil
 }

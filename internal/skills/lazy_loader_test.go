@@ -12,13 +12,13 @@ func createTestSkillFile(t *testing.T, dir, name, content string) string {
 
 	skillDir := filepath.Join(dir, name)
 	//nolint:gosec // test directory/file
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("Failed to create skill directory: %v", err)
 	}
 
 	skillFile := filepath.Join(skillDir, "SKILL.md")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(skillFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(skillFile, []byte(content), 0o644); err != nil {
 		t.Fatalf("Failed to write skill file: %v", err)
 	}
 
@@ -268,7 +268,7 @@ Body.
 	// Load all skills
 	for i := range 3 {
 		name := "skill-" + string(rune('a'+i))
-		loader.Load(ctx, name)
+		_, _ = loader.Load(ctx, name)
 	}
 
 	if loader.CachedCount() != 3 {
@@ -310,7 +310,7 @@ Body.
 	}
 
 	// Load
-	loader.Load(ctx, "get-test")
+	_, _ = loader.Load(ctx, "get-test")
 
 	// Get after load should return skill
 	if loader.Get("get-test") == nil {

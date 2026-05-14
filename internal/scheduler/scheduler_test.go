@@ -139,7 +139,7 @@ func TestScheduleJob(t *testing.T) {
 	if err := s.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer s.Stop(ctx)
+	defer func() { _ = s.Stop(ctx) }()
 
 	// Create a reminder job
 	jobCfg := JobConfig{
@@ -200,7 +200,7 @@ func TestUnscheduleJob(t *testing.T) {
 	if err := s.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer s.Stop(ctx)
+	defer func() { _ = s.Stop(ctx) }()
 
 	// Schedule a job
 	jobCfg := JobConfig{
@@ -255,7 +255,7 @@ func TestPauseResumeJob(t *testing.T) {
 	if err := s.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer s.Stop(ctx)
+	defer func() { _ = s.Stop(ctx) }()
 
 	// Schedule a job
 	jobCfg := JobConfig{
@@ -436,7 +436,7 @@ func TestJobExecution(t *testing.T) {
 
 	// Cleanup
 	msgBus.Unsubscribe(sub)
-	s.Stop(ctx)
+	_ = s.Stop(ctx)
 }
 
 func TestShellJob(t *testing.T) {
@@ -786,7 +786,7 @@ func TestJobPersistence(t *testing.T) {
 	if err := s2.Start(ctx); err != nil {
 		t.Fatalf("Start (2) failed: %v", err)
 	}
-	defer s2.Stop(ctx)
+	defer func() { _ = s2.Stop(ctx) }()
 
 	// Check job was loaded
 	if s2.JobCount() != 1 {

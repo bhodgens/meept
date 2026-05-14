@@ -48,7 +48,7 @@ func main() {
 				if debugFile == "-" {
 					output = os.Stderr
 				} else {
-					f, err := os.OpenFile(debugFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) //nolint:gosec // workspace plan/data files are user-readable
+					f, err := os.OpenFile(debugFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644) //nolint:gosec // workspace plan/data files are user-readable
 					if err != nil {
 						return fmt.Errorf("failed to open debug file: %w", err)
 					}

@@ -30,7 +30,7 @@ func newTemplatesListCmd() *cobra.Command {
 	var outputJSON bool
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List available templates",
 		Long:  "List all templates discovered from the template directories.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -120,7 +120,7 @@ func newTemplatesShowCmd() *cobra.Command {
 			}
 			defer c.Close()
 
-			params := map[string]string{"name": templateName}
+			params := map[string]string{paramName: templateName}
 			rawResult, err := c.Call("templates.get", params)
 			if err != nil {
 				return fmt.Errorf("failed to get template: %w", err)

@@ -96,7 +96,7 @@ func (h *AmendmentHandlers) handleSkipStep(ctx context.Context, req *AmendmentRe
 	}
 
 	// Promote newly unblocked steps
-	h.stepStore.PromoteReadySteps(req.TaskID)
+	_, _ = h.stepStore.PromoteReadySteps(req.TaskID)
 
 	return &AmendmentReply{
 		RequestID: req.ID,
@@ -150,7 +150,7 @@ func (h *AmendmentHandlers) handleAddStep(ctx context.Context, req *AmendmentReq
 	task, err := h.registry.Get(ctx, req.TaskID)
 	if err == nil && task != nil {
 		task.TotalJobs++
-		h.registry.Update(ctx, task)
+		_ = h.registry.Update(ctx, task)
 	}
 
 	jsonMetadata, _ := json.Marshal(map[string]string{"step_id": step.ID})

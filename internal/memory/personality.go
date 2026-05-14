@@ -73,7 +73,7 @@ func (p *PersonalityMemory) Load(ctx context.Context) error {
 
 	// Ensure directory exists
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(p.dataDir, 0755); err != nil {
+	if err := os.MkdirAll(p.dataDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 
@@ -125,7 +125,7 @@ func (p *PersonalityMemory) Update(ctx context.Context, interactionSummary strin
 
 // UpdateKey updates or adds a specific key-value pair in the personality.
 // This is useful for tracking specific preferences.
-func (p *PersonalityMemory) UpdateKey(ctx context.Context, section string, key string, value string) error {
+func (p *PersonalityMemory) UpdateKey(ctx context.Context, section, key, value string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -177,11 +177,11 @@ func (p *PersonalityMemory) Save() error {
 
 func (p *PersonalityMemory) saveUnlocked() error {
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(p.dataDir, 0755); err != nil {
+	if err := os.MkdirAll(p.dataDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(p.filePath, []byte(p.description), 0644); err != nil {
+	if err := os.WriteFile(p.filePath, []byte(p.description), 0o644); err != nil {
 		return fmt.Errorf("failed to write personality file: %w", err)
 	}
 	p.logger.Debug("Saved personality profile", "path", p.filePath)

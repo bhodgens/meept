@@ -216,7 +216,7 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 }
 
 // ClassifyAndRoute is the main entry point for the dispatcher.
-func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input string, sessionID string) (*DispatchResult, error) {
+func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string) (*DispatchResult, error) {
 	d.logger.Debug("Dispatching request", "session", sessionID, "input_len", len(input))
 
 	// Check for explicit skill invocation (/skill-name)
@@ -391,20 +391,20 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 	}
 
 	// Step 4: Fallback to Chat for clarification
-	d.recordFallback(input, "all_classifiers_failed", 0.0, "chat")
+	d.recordFallback(input, "all_classifiers_failed", 0.0, config.AgentIDChat)
 	d.recordClassificationMethod("fallback")
-	d.recordAgent("chat")
-	d.recordIntentType("chat")
+	d.recordAgent(config.AgentIDChat)
+	d.recordIntentType(string(IntentChat))
 	return &Intent{
-		Type:       "chat",
+		Type:       string(IntentChat),
 		Confidence: 0.3,
-		AgentType:  "chat",
+		AgentType:  config.AgentIDChat,
 		Summary:    "Could not determine intent, clarifying with user",
 	}
 }
 
 // buildMemoryContext builds memory context with session history.
-func (d *Dispatcher) buildMemoryContext(ctx context.Context, input string, sessionID string) *MemoryContext {
+func (d *Dispatcher) buildMemoryContext(ctx context.Context, input, sessionID string) *MemoryContext {
 	if d.memoryMgr == nil {
 		return &MemoryContext{
 			Results:      []memory.MemoryResult{},
@@ -514,7 +514,7 @@ func (m *MultiIntent) DetectCompound() bool {
 }
 
 // routeCompound handles compound (multi-intent) request routing.
-func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, _ string, sessionID string) (*DispatchResult, error) {
+func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, _, sessionID string) (*DispatchResult, error) {
 	// Cap intents at 5 for safety
 	if len(multi.Intents) > 5 {
 		multi.Intents = multi.Intents[:5]
@@ -615,7 +615,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	}
 
 	// Handle platform introspection directly without LLM
-	if result.Intent != nil && result.Intent.Type == "platform" {
+	if result.Intent != nil && result.Intent.Type == string(IntentPlatform) {
 		return d.handlePlatformIntrospection(ctx, result.Intent.Summary)
 	}
 
@@ -678,7 +678,7 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 	agent, err := d.registry.Get(result.AgentID)
 	if err != nil {
 		d.logger.Warn("Agent not found, falling back to chat", "agent", result.AgentID, "error", err)
-		agent, err = d.registry.Get("chat")
+		agent, err = d.registry.Get(config.AgentIDChat)
 		if err != nil {
 			return "", fmt.Errorf("fallback agent not found: %w", err)
 		}
@@ -736,10 +736,10 @@ func (d *Dispatcher) handlePlatformIntrospection(ctx context.Context, input stri
 
 	// List available skills
 	if d.skillRegistry != nil {
-		skills := d.skillRegistry.List()
-		if len(skills) > 0 {
+		skillList := d.skillRegistry.List()
+		if len(skillList) > 0 {
 			sb.WriteString("### Available Skills\n\n")
-			for _, skill := range skills {
+			for _, skill := range skillList {
 				fmt.Fprintf(&sb, "- **/%s**: %s\n", skill.Name, truncateString(skill.Description, 80))
 			}
 			sb.WriteString("\n")
@@ -814,7 +814,7 @@ func (d *Dispatcher) recordInteraction(ctx context.Context, result *DispatchResu
 
 	metadata := map[string]any{
 		"intent_type": result.Intent.Type,
-		"agent_id":    result.AgentID,
+		KeyAgentID:    result.AgentID,
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -846,13 +846,13 @@ var keywordPatterns = []keywordPattern{
 	{[]string{"what are your capabilities", "what can you do", "what tools", "what agents", "what kind of systems", "help me understand", "system access", "platform status",
 		"internal capabilities", "your capabilities", "tell me about your", "built into", "agent harness", "memory system", "tool system",
 		"what models", "what agents are", "available tools", "your tools", "your features", "how are you built", "your architecture",
-		"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities"}, string(IntentPlatform), "chat", 0.9, false},
+		"what are you aware of", "what do you have access to", "platform capabilities", "system capabilities"}, string(IntentPlatform), config.AgentIDChat, 0.9, false},
 
 	// Report/Summary requests (high priority - handle inline, not async)
-	{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, string(IntentReport), "chat", 0.9, false},
+	{[]string{"give me a report", "report on", "what did you do", "what have you done", "what did you accomplish", "summarize what", "summary of work", "work summary", "status report", "progress report", "what happened"}, string(IntentReport), config.AgentIDChat, 0.9, false},
 
 	// Recall/Memory requests (high priority - handle inline)
-	{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, string(IntentRecall), "chat", 0.85, false},
+	{[]string{"remember when", "recall", "what do you remember", "do you remember", "last time we"}, string(IntentRecall), config.AgentIDChat, 0.85, false},
 
 	// Code-related
 	{[]string{"fix bug", "debug", "error", "exception", "crash", "not working"}, string(IntentDebug), config.AgentIDDebugger, 0.8, false},
@@ -874,7 +874,7 @@ var keywordPatterns = []keywordPattern{
 	{[]string{"search", "find", "look up", "google"}, string(IntentSearch), config.AgentIDAnalyst, 0.7, false},
 
 	// General chat (lower priority)
-	{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), "chat", 0.6, false},
+	{[]string{"hello", "hi", "hey", "thanks", "thank you", "help"}, string(IntentChat), config.AgentIDChat, 0.6, false},
 }
 
 // KeywordClassifier is a simple keyword-based intent classifier.
@@ -1079,7 +1079,7 @@ func (d *Dispatcher) recordCompoundDispatch(_ int) {
 }
 
 // recordFallback records a fallback to chat agent with details.
-func (d *Dispatcher) recordFallback(input string, method string, confidence float64, routedTo string) {
+func (d *Dispatcher) recordFallback(input, method string, confidence float64, routedTo string) {
 	if d.stats == nil {
 		return
 	}
@@ -1175,14 +1175,14 @@ func (i *Intent) MarshalJSON() ([]byte, error) {
 }
 
 // parseSkillInvocation extracts skill name and input from a /skill-name invocation.
-func (d *Dispatcher) parseSkillInvocation(input string) (string, string) {
+func (d *Dispatcher) parseSkillInvocation(input string) (skillName, skillInput string) {
 	// Remove leading slash
 	input = strings.TrimPrefix(input, "/")
 
 	// Split on first whitespace
 	parts := strings.SplitN(input, " ", 2)
-	skillName := parts[0]
-	skillInput := ""
+	skillName = parts[0]
+	skillInput = ""
 	if len(parts) > 1 {
 		skillInput = strings.TrimSpace(parts[1])
 	}
@@ -1210,7 +1210,7 @@ func (d *Dispatcher) substituteTemplate(tmpl *templates.Template, input string) 
 }
 
 // executeSkill executes a skill and returns a dispatch result.
-func (d *Dispatcher) executeSkill(ctx context.Context, skill *skills.Skill, input string, _ string) (*DispatchResult, error) {
+func (d *Dispatcher) executeSkill(ctx context.Context, skill *skills.Skill, input, _ string) (*DispatchResult, error) {
 	if d.skillExecutor == nil {
 		return nil, fmt.Errorf("skill executor not configured")
 	}
@@ -1227,7 +1227,7 @@ func (d *Dispatcher) executeSkill(ctx context.Context, skill *skills.Skill, inpu
 
 	// Build dispatch result with skill response
 	intent := &Intent{
-		Type:       "skill",
+		Type:       string(IntentSkill),
 		Confidence: 1.0,
 		AgentType:  "skill:" + skill.Name,
 		Summary:    fmt.Sprintf("Executed skill: %s", skill.Name),
@@ -1285,7 +1285,7 @@ func (d *Dispatcher) ValidateRouting(taskID, originalIntent, routedAgent string)
 	isValid := routedAgent == expectedAgent
 
 	// Special case: chat agent can handle inline intents
-	if routedAgent == "chat" && it.Category() == CategoryInline {
+	if routedAgent == config.AgentIDChat && it.Category() == CategoryInline {
 		isValid = true
 	}
 
@@ -1334,7 +1334,7 @@ func (d *Dispatcher) GetActiveTasks(ctx context.Context) ([]*task.Task, error) {
 
 // GetInterruptStatus returns the interrupt status for a task.
 // Returns (isInterrupted, reason, message) or an error if the task is not found.
-func (d *Dispatcher) GetInterruptStatus(ctx context.Context, taskID string) (bool, string, string, error) {
+func (d *Dispatcher) GetInterruptStatus(ctx context.Context, taskID string) (ok bool, reason, message string, err error) {
 	if d.taskStore == nil {
 		return false, "", "", fmt.Errorf("task store not configured")
 	}

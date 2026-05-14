@@ -150,7 +150,7 @@ type SummarizeBranchResult struct {
 // Falls back to simple extraction if LLM client is nil or call fails.
 func (s *Summarizer) SummarizeBranch(ctx context.Context, req SummarizeBranchRequest) (*SummarizeBranchResult, error) {
 	if len(req.Messages) < 3 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // below-threshold branch is not an error; caller checks for nil result
 	}
 
 	if s.llmClient == nil {

@@ -185,7 +185,7 @@ func (j *AgentJob) Execute(ctx context.Context) error {
 	payload := map[string]any{
 		"prompt":     j.prompt,
 		"source":     "scheduler",
-		"job_id":     j.id,
+		SchedulerKeyJobID:     j.id,
 		"job_name":   j.name,
 	}
 
@@ -369,7 +369,7 @@ func NewReminderJob(cfg JobConfig, msgBus *bus.MessageBus) (*ReminderJob, error)
 func (j *ReminderJob) Execute(ctx context.Context) error {
 	payload := map[string]any{
 		"message":   j.message,
-		"job_id":    j.id,
+		SchedulerKeyJobID:    j.id,
 		"job_name":  j.name,
 		"priority":  j.priority,
 		"channels":  j.channels,
@@ -566,7 +566,7 @@ func (j *SecurityJob) Execute(ctx context.Context) error {
 	// Publish scan results
 	if j.deps.Bus != nil {
 		payload := map[string]any{
-			"job_id":      j.id,
+			SchedulerKeyJobID:      j.id,
 			"issues":      issues,
 			"issue_count": len(issues),
 			"scan_types":  j.scanTypes,

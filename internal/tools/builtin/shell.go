@@ -135,9 +135,9 @@ func (t *ShellExecuteTool) Description() string {
 
 func (t *ShellExecuteTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"command": {
+			schemaPropCommand: {
 				Type:        "string",
 				Description: "The shell command to execute.",
 			},

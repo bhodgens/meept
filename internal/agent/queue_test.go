@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -97,7 +98,7 @@ func TestQueue_SteerAfterClose(t *testing.T) {
 	q.Close()
 
 	err := q.Steer(context.Background(), "after close", "user")
-	if err != ErrQueueClosed {
+	if !errors.Is(err, ErrQueueClosed) {
 		t.Errorf("Steer after close = %v, want ErrQueueClosed", err)
 	}
 }
@@ -110,7 +111,7 @@ func TestQueue_FollowUp(t *testing.T) {
 	}
 	q := NewMessageQueue(WithQueueConfig(cfg))
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		content := "follow-up message " + string(rune('0'+i))
 		if err := q.FollowUp(context.Background(), content, "user"); err != nil {
 			t.Fatalf("FollowUp %d failed: %v", i, err)
@@ -172,7 +173,7 @@ func TestQueue_FollowUpDrainOne(t *testing.T) {
 	}
 	q := NewMessageQueue(WithQueueConfig(cfg))
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		content := "msg" + string(rune('0'+i))
 		if err := q.FollowUp(context.Background(), content, "user"); err != nil {
 			t.Fatalf("FollowUp %d failed: %v", i, err)
@@ -217,7 +218,7 @@ func TestQueue_FollowUpFull(t *testing.T) {
 	}
 
 	err := q.FollowUp(context.Background(), "third", "user")
-	if err != ErrQueueFull {
+	if !errors.Is(err, ErrQueueFull) {
 		t.Errorf("expected ErrQueueFull, got %v", err)
 	}
 }
@@ -227,7 +228,7 @@ func TestQueue_FollowUpAfterClose(t *testing.T) {
 	q.Close()
 
 	err := q.FollowUp(context.Background(), "after close", "user")
-	if err != ErrQueueClosed {
+	if !errors.Is(err, ErrQueueClosed) {
 		t.Errorf("FollowUp after close = %v, want ErrQueueClosed", err)
 	}
 }
@@ -238,7 +239,7 @@ func TestQueue_GenerationCounter(t *testing.T) {
 		t.Errorf("initial generation = %d, want 0", q.GetGeneration())
 	}
 
-	q.Steer(context.Background(), "steer", "user")
+	_ = q.Steer(context.Background(), "steer", "user")
 	if q.GetGeneration() != 1 {
 		t.Errorf("after Steer, generation = %d, want 1", q.GetGeneration())
 	}
@@ -251,7 +252,7 @@ func TestQueue_GenerationCounter(t *testing.T) {
 	cfg := DefaultQueueConfig()
 	cfg.MaxFollowUp = 5
 	q2 := NewMessageQueue(WithQueueConfig(cfg))
-	q2.FollowUp(context.Background(), "follow", "user")
+	_ = q2.FollowUp(context.Background(), "follow", "user")
 	if q2.GetGeneration() != 1 {
 		t.Errorf("after FollowUp, generation = %d, want 1", q2.GetGeneration())
 	}
@@ -274,8 +275,8 @@ func TestQueue_Status(t *testing.T) {
 		t.Error("new queue should be active")
 	}
 
-	q.Steer(context.Background(), "steer", "user")
-	q.FollowUp(context.Background(), "follow", "user")
+	_ = q.Steer(context.Background(), "steer", "user")
+	_ = q.FollowUp(context.Background(), "follow", "user")
 
 	status = q.Status()
 	if status.SteeringDepth != 1 {
@@ -308,7 +309,7 @@ func TestQueue_ConcurrentEnqueueDrain(t *testing.T) {
 	var steerOK, followUpOK atomic.Int32
 
 	// Concurrent steering.
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		wg.Add(1)
 		go func(_ int) {
 			defer wg.Done()
@@ -319,7 +320,7 @@ func TestQueue_ConcurrentEnqueueDrain(t *testing.T) {
 	}
 
 	// Concurrent follow-up.
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(1)
 		go func(_ int) {
 			defer wg.Done()
@@ -365,21 +366,17 @@ func TestQueue_ConcurrentEnqueueDrain(t *testing.T) {
 
 func TestQueue_ConcurrentCloseDrain(t *testing.T) {
 	q := NewMessageQueue()
-	q.Steer(context.Background(), "steer", "user")
+	_ = q.Steer(context.Background(), "steer", "user")
 
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			q.Status()
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		q.Close()
-	}()
+	})
 	wg.Wait()
 
 	q.DrainSteering()
@@ -412,8 +409,8 @@ func TestQueue_SteeringDepthNeverExceeds1(t *testing.T) {
 	cfg.MaxSteering = 1
 	q := NewMessageQueue(WithQueueConfig(cfg))
 
-	for i := 0; i < 10; i++ {
-		q.Steer(context.Background(), "content", "user")
+	for i := range 10 {
+		_ = q.Steer(context.Background(), "content", "user")
 		if q.Status().SteeringDepth > 1 {
 			t.Errorf("after %d steers, depth = %d, max is 1", i+1, q.Status().SteeringDepth)
 		}
@@ -430,7 +427,7 @@ func TestQueue_HasMethods(t *testing.T) {
 		t.Error("empty queue should not have follow-up")
 	}
 
-	q.Steer(context.Background(), "steer", "user")
+	_ = q.Steer(context.Background(), "steer", "user")
 	if !q.HasSteering() {
 		t.Error("queue should have steering after Steer()")
 	}
@@ -438,7 +435,7 @@ func TestQueue_HasMethods(t *testing.T) {
 	cfg := DefaultQueueConfig()
 	cfg.MaxFollowUp = 5
 	q2 := NewMessageQueue(WithQueueConfig(cfg))
-	q2.FollowUp(context.Background(), "follow", "user")
+	_ = q2.FollowUp(context.Background(), "follow", "user")
 	if !q2.HasFollowUp() {
 		t.Error("queue should have follow-up after FollowUp()")
 	}

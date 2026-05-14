@@ -624,7 +624,7 @@ func (e *SymbolExtractor) shouldInclude(name string, kind SymbolKind, filter Sym
 	if !filter.IncludePrivate {
 		// Go convention: lowercase first letter is unexported
 		// Python convention: leading underscore is private
-		if len(name) > 0 {
+		if name != "" {
 			first := rune(name[0])
 			if first >= 'a' && first <= 'z' {
 				return false

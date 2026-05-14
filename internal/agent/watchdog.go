@@ -232,7 +232,7 @@ func (w *Watchdog) ActiveWorkerCount() int {
 // CaptureReport captures the partial state of a worker (used on abort).
 // This method is safe to call while holding the write lock (does not re-acquire it).
 // When called from checkWorkers (which holds w.mu), use captureReportUnsafe instead.
-func (w *Watchdog) CaptureReport(workerID string, partialResult string) *ReportCapture {
+func (w *Watchdog) CaptureReport(workerID, partialResult string) *ReportCapture {
 	w.mu.Lock()
 	state, ok := w.workers[workerID]
 	if !ok {

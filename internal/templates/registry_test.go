@@ -252,8 +252,8 @@ func TestRegistry_ClearSessionTemplates(t *testing.T) {
 	reg.Register(&Template{Name: "a", Scope: ScopeSession, Body: "a"})
 	reg.Register(&Template{Name: "b", Scope: ScopeSession, Body: "b"})
 
-	reg.ActivateSessionTemplate("conv-1", "a", nil)
-	reg.ActivateSessionTemplate("conv-1", "b", nil)
+	_ = reg.ActivateSessionTemplate("conv-1", "a", nil)
+	_ = reg.ActivateSessionTemplate("conv-1", "b", nil)
 
 	names := reg.ClearSessionTemplates("conv-1")
 	if len(names) != 2 {
@@ -274,7 +274,7 @@ func TestRegistry_SessionTemplateContext(t *testing.T) {
 		Body:  "You are a Go developer.",
 	})
 
-	reg.ActivateSessionTemplate("conv-1", "role-dev", nil)
+	_ = reg.ActivateSessionTemplate("conv-1", "role-dev", nil)
 
 	ctx := reg.SessionTemplateContext("conv-1")
 	if ctx == "" {

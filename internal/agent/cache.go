@@ -11,15 +11,53 @@ import (
 	"time"
 )
 
+// Tool name constants used across agent cache, executor, spec, and loop.
+const (
+	ToolFileRead         = "file_read"
+	ToolFileWrite        = "file_write"
+	ToolFileDelete       = "file_delete"
+	ToolShellExecute     = "shell_execute"
+	ToolListDirectory    = "list_directory"
+	ToolMemorySearch     = "memory_search"
+	ToolMemoryGetContext = "memory_get_context"
+	ToolMemoryStore      = "memory_store"
+	ToolMemoryDelete     = "memory_delete"
+	ToolPlatformStatus   = "platform_status"
+	ToolPlatformAgents   = "platform_agents"
+	ToolPlatformTools    = "platform_tools"
+	ToolWebSearch        = "web_search"
+	ToolWebFetch         = "web_fetch"
+	ToolCodeRead         = "code_read"
+)
+
+// Map key constants used in structured log/event payloads throughout the agent package.
+const (
+	KeyTaskID         = "task_id"
+	KeyStepID         = "step_id"
+	KeyAgentID        = "agent_id"
+	KeySessionID      = "session_id"
+	KeyConversationID = "conversation_id"
+	KeyTokenUsage     = "token_usage"
+	KeyChatVisible    = "chat_visible"
+	KeyCompletedJobs  = "completed_jobs"
+	KeyTotalJobs      = "total_jobs"
+)
+
+// Source identifiers for event attribution.
+const (
+	SourceChatHandler = "chat-handler"
+	SourceCodeReviewer = "code-reviewer"
+)
+
 // Default cached tools - read-only, idempotent operations safe for caching
 var defaultCachedTools = []string{
-	"file_read",
-	"list_directory",
-	"memory_search",
-	"memory_get_context",
-	"platform_status",
-	"platform_agents",
-	"platform_tools",
+	ToolFileRead,
+	ToolListDirectory,
+	ToolMemorySearch,
+	ToolMemoryGetContext,
+	ToolPlatformStatus,
+	ToolPlatformAgents,
+	ToolPlatformTools,
 }
 
 // CacheConfig holds configuration for the result cache.

@@ -102,7 +102,7 @@ func (f *FrameWriter) WriteResponse(resp *models.JSONRPCResponse) error {
 }
 
 // MakeResponse creates a success response.
-func MakeResponse(id any, result any) *models.JSONRPCResponse {
+func MakeResponse(id, result any) *models.JSONRPCResponse {
 	data, _ := json.Marshal(result)
 	return &models.JSONRPCResponse{
 		JSONRPC: "2.0",

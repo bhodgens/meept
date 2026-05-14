@@ -30,10 +30,9 @@ type SkillIndexEntry struct {
 }
 
 // HasCapability checks if the entry requires a specific capability.
-func (e *SkillIndexEntry) HasCapability(cap string) bool {
-	capLower := strings.ToLower(cap)
+func (e *SkillIndexEntry) HasCapability(capability string) bool {
 	for _, c := range e.Requires {
-		if strings.ToLower(c) == capLower {
+		if strings.EqualFold(c, capability) {
 			return true
 		}
 	}
@@ -42,9 +41,8 @@ func (e *SkillIndexEntry) HasCapability(cap string) bool {
 
 // HasTag checks if the entry has a specific tag.
 func (e *SkillIndexEntry) HasTag(tag string) bool {
-	tagLower := strings.ToLower(tag)
 	for _, t := range e.Tags {
-		if strings.ToLower(t) == tagLower {
+		if strings.EqualFold(t, tag) {
 			return true
 		}
 	}
@@ -184,11 +182,11 @@ func (idx *SkillIndex) FindByTag(tag string) []*SkillIndexEntry {
 }
 
 // FindByCapability returns entries that require a specific capability.
-func (idx *SkillIndex) FindByCapability(cap string) []*SkillIndexEntry {
+func (idx *SkillIndex) FindByCapability(capability string) []*SkillIndexEntry {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	capKey := strings.ToLower(cap)
+	capKey := strings.ToLower(capability)
 	entries := idx.byCap[capKey]
 	result := make([]*SkillIndexEntry, len(entries))
 	copy(result, entries)
@@ -282,12 +280,11 @@ func (idx *SkillIndex) Match(query string) *SkillIndexEntry {
 		return nil
 	}
 
-	queryLower := strings.ToLower(query)
 	var bestMatch *SkillIndexEntry
 	bestScore := 0
 
 	for _, entry := range idx.entries {
-		score := matchEntryScore(entry, queryLower)
+		score := matchEntryScore(entry, query)
 		if score > bestScore {
 			bestScore = score
 			bestMatch = entry
@@ -303,7 +300,8 @@ func (idx *SkillIndex) Match(query string) *SkillIndexEntry {
 }
 
 // matchEntryScore calculates a fuzzy match score for an entry.
-func matchEntryScore(entry *SkillIndexEntry, queryLower string) int {
+func matchEntryScore(entry *SkillIndexEntry, query string) int {
+	queryLower := strings.ToLower(query)
 	score := 0
 	nameLower := strings.ToLower(entry.Name)
 	descLower := strings.ToLower(entry.Description)
@@ -336,7 +334,7 @@ func matchEntryScore(entry *SkillIndexEntry, queryLower string) int {
 
 	// Tag match
 	for _, tag := range entry.Tags {
-		if strings.ToLower(tag) == queryLower {
+		if strings.EqualFold(tag, query) {
 			score += 20
 		} else if strings.Contains(strings.ToLower(tag), queryLower) {
 			score += 5
@@ -369,11 +367,10 @@ func (idx *SkillIndex) MatchAll(query string) []*SkillIndexMatch {
 		return nil
 	}
 
-	queryLower := strings.ToLower(query)
 	var matches []*SkillIndexMatch
 
 	for _, entry := range idx.entries {
-		score := matchEntryScore(entry, queryLower)
+		score := matchEntryScore(entry, query)
 		if score > 0 {
 			matches = append(matches, &SkillIndexMatch{
 				Entry: entry,

@@ -302,7 +302,7 @@ func (s *Store) Complete(jobID string, result any) error {
 }
 
 // Fail marks a job as failed with an error message.
-func (s *Store) Fail(jobID string, errMsg string) error {
+func (s *Store) Fail(jobID, errMsg string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Get current retry count
@@ -836,7 +836,7 @@ func nullableRawJSON(j json.RawMessage) any {
 
 // ClaimNextByID attempts to claim a specific job by ID.
 // Returns the job if successfully claimed, nil if already claimed or not found.
-func (s *Store) ClaimNextByID(jobID string, workerID string) (*Job, error) {
+func (s *Store) ClaimNextByID(jobID, workerID string) (*Job, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)

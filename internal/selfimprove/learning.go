@@ -181,7 +181,7 @@ func (lp *LearningPipeline) Initialize(ctx context.Context) error {
 	}
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(lp.dataDir, 0755); err != nil {
+	if err := os.MkdirAll(lp.dataDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 
@@ -196,7 +196,7 @@ func (lp *LearningPipeline) Initialize(ctx context.Context) error {
 }
 
 // Retrieve returns the top-k most relevant patterns for a query.
-func (lp *LearningPipeline) Retrieve(ctx context.Context, query string, domain string, k int) ([]*LearnedPattern, error) {
+func (lp *LearningPipeline) Retrieve(ctx context.Context, query, domain string, k int) ([]*LearnedPattern, error) {
 	lp.mu.RLock()
 	defer lp.mu.RUnlock()
 
@@ -345,7 +345,7 @@ func (lp *LearningPipeline) buildJudgmentPrompt(trajectory Trajectory) string {
 	return sb.String()
 }
 
-func (lp *LearningPipeline) parseJudgmentResponse(content string, trajectoryID string) (*JudgmentResult, error) {
+func (lp *LearningPipeline) parseJudgmentResponse(content, trajectoryID string) (*JudgmentResult, error) {
 	// Strip markdown code fences if present
 	content = strings.TrimSpace(content)
 	if strings.HasPrefix(content, "```") {
@@ -480,7 +480,7 @@ func (lp *LearningPipeline) buildDistillPrompt(trajectory Trajectory, judgment *
 	return sb.String()
 }
 
-func (lp *LearningPipeline) parseDistillResponse(content string, domain string, judgment *JudgmentResult) ([]*LearnedPattern, error) {
+func (lp *LearningPipeline) parseDistillResponse(content, domain string, judgment *JudgmentResult) ([]*LearnedPattern, error) {
 	// Strip markdown code fences
 	content = strings.TrimSpace(content)
 	if strings.HasPrefix(content, "```") {
@@ -580,15 +580,16 @@ func (lp *LearningPipeline) StorePattern(ctx context.Context, pattern *LearnedPa
 
 	// Check for duplicates
 	for _, existing := range lp.patterns {
-		if existing.ContentHash == pattern.ContentHash {
-			// Update existing pattern instead
-			existing.UseCount++
-			existing.SuccessCount++
-			existing.UpdatedAt = time.Now()
-			// Boost confidence
-			existing.Confidence = minFloat(1.0, existing.Confidence*1.1)
-			return lp.savePatterns()
+		if existing.ContentHash != pattern.ContentHash {
+			continue
 		}
+		// Update existing pattern instead
+		existing.UseCount++
+		existing.SuccessCount++
+		existing.UpdatedAt = time.Now()
+		// Boost confidence
+		existing.Confidence = minFloat(1.0, existing.Confidence*1.1)
+		return lp.savePatterns()
 	}
 
 	// Activate if confidence is high enough
@@ -902,7 +903,7 @@ func (lp *LearningPipeline) savePatterns() error {
 	}
 
 	//nolint:gosec // user config directory/file permissions
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o644)
 }
 
 func (lp *LearningPipeline) loadPatterns() error {

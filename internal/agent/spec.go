@@ -90,16 +90,16 @@ type AgentSpec struct {
 
 // BaselineTools are the tools available to all agents.
 var BaselineTools = []string{
-	"memory_store",
-	"memory_search",
-	"memory_get_context",
+	ToolMemoryStore,
+	ToolMemorySearch,
+	ToolMemoryGetContext,
 	"task_create",
 	"task_get",
 	"task_list",
 	"task_update",
-	"platform_status",
-	"platform_agents",
-	"platform_tools",
+	ToolPlatformStatus,
+	ToolPlatformAgents,
+	ToolPlatformTools,
 	"delegate_task",
 }
 
@@ -164,14 +164,14 @@ func ChatAgentSpec() *AgentSpec {
 	constraints := DefaultConstraints()
 	constraints.Temperature = ptr(0.8) // Higher for natural conversation
 	return &AgentSpec{
-		ID:      "chat",
+		ID:      config.AgentIDChat,
 		Name:    "Chat Agent",
 		Role:    RoleExecutor,
 		Purpose: "You are a helpful conversational assistant with full tool access.",
 		Model:   "",
 		AdditionalTools: []string{
-			"web_fetch",
-			"web_search",
+			ToolWebFetch,
+			ToolWebSearch,
 		},
 		Constraints: constraints,
 	}
@@ -188,11 +188,11 @@ func CoderAgentSpec() *AgentSpec {
 		Purpose: "You are a coding specialist. You can read, write, and modify files, execute shell commands, and work with MCP servers.",
 		Model:   "",
 		AdditionalTools: []string{
-			"file_read",
-			"file_write",
-			"file_delete",
-			"list_directory",
-			"shell_execute",
+			ToolFileRead,
+			ToolFileWrite,
+			ToolFileDelete,
+			ToolListDirectory,
+			ToolShellExecute,
 		},
 		Constraints: constraints,
 	}
@@ -296,7 +296,7 @@ func SchedulerAgentSpec() *AgentSpec {
 // CodeReviewerSpec returns the spec for the code reviewer agent.
 func CodeReviewerSpec() *AgentSpec {
 	return &AgentSpec{
-		ID:   "code-reviewer",
+		ID:   SourceCodeReviewer,
 		Name: "Code Reviewer Agent",
 		Role: RoleReviewer,
 		Purpose: `You are a code review specialist. Your role is to review code changes for:

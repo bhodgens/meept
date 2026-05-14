@@ -55,8 +55,8 @@ func (s *Sparkline) AddPoint(value int) {
 
 // SetMaxValue sets the maximum value for scaling.
 // If 0, auto-scale based on current data max.
-func (s *Sparkline) SetMaxValue(max int) {
-	s.maxValue = max
+func (s *Sparkline) SetMaxValue(maxVal int) {
+	s.maxValue = maxVal
 }
 
 // SetLabel sets the sparkline label.

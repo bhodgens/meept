@@ -218,7 +218,7 @@ This template was loaded from a file.
 `
 	templatePath := filepath.Join(tmpDir, "test-template.md")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(templatePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(templatePath, []byte(content), 0o644); err != nil {
 		t.Fatalf("Failed to write template file: %v", err)
 	}
 
@@ -265,7 +265,7 @@ This body should not be parsed.
 `
 	templatePath := filepath.Join(tmpDir, "meta-template.md")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(templatePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(templatePath, []byte(content), 0o644); err != nil {
 		t.Fatalf("Failed to write template file: %v", err)
 	}
 
@@ -364,7 +364,7 @@ body`,
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
+	return len(s) >= len(substr) && (s == substr || s != "" && containsStr(s, substr))
 }
 
 func containsStr(s, substr string) bool {

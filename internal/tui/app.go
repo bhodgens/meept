@@ -357,7 +357,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// If chat is loading, stop current work
 			if a.chat != nil && a.chat.IsLoading() {
-				return a, a.stopCurrentWork()
+				cmd := a.stopCurrentWork()
+				return a, cmd
 			}
 
 			// Show hint message
@@ -454,7 +455,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.currentView != ViewChat {
 				a.currentView = ViewChat
 				a.chat.SetFocus(models.FocusInput)
-				return a, a.initCurrentView()
+				cmd := a.initCurrentView()
+				return a, cmd
 			}
 			// Delegate to chat's escape handling
 			return a, a.chat.HandleEscape()
@@ -598,11 +600,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SessionCreateMsg:
 		// Create a new session
-		return a, a.createSession(msg.Name)
+		cmd := a.createSession(msg.Name)
+		return a, cmd
 
 	case SessionDeleteMsg:
 		// Delete a session
-		return a, a.deleteSession(msg.SessionID)
+		cmd := a.deleteSession(msg.SessionID)
+		return a, cmd
 
 	case OpenRenameModalMsg:
 		// Open rename modal for a session
@@ -612,7 +616,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SessionRenameMsg:
 		// Rename a session (update description)
-		return a, a.renameSession(msg.SessionID, msg.NewName)
+		cmd := a.renameSession(msg.SessionID, msg.NewName)
+		return a, cmd
 
 	case SidebarDataMsg:
 		// Delegate to sidebar
@@ -981,11 +986,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		// Fallback: show branch info as status message
-		if msg.Err != nil {
+		switch {
+		case msg.Err != nil:
 			a.statusMessage = fmt.Sprintf("branch error: %v", msg.Err)
-		} else if len(msg.Branches) == 0 {
+		case len(msg.Branches) == 0:
 			a.statusMessage = "no branches"
-		} else {
+		default:
 			names := make([]string, len(msg.Branches))
 			for i, b := range msg.Branches {
 				names[i] = b.ID
@@ -1120,16 +1126,20 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch action {
 		case keys.ViewChat:
 			a.currentView = ViewChat
-			return a, a.initCurrentView()
+			cmd := a.initCurrentView()
+			return a, cmd
 		case keys.ViewTasks:
 			a.currentView = ViewTasks
-			return a, a.initCurrentView()
+			cmd := a.initCurrentView()
+			return a, cmd
 		case keys.ViewQueue:
 			a.currentView = ViewQueue
-			return a, a.initCurrentView()
+			cmd := a.initCurrentView()
+			return a, cmd
 		case keys.ViewMemory:
 			a.currentView = ViewMemory
-			return a, a.initCurrentView()
+			cmd := a.initCurrentView()
+			return a, cmd
 		case keys.Sidebar:
 			a.sidebar.Toggle()
 			return a, func() tea.Msg {
@@ -1141,7 +1151,8 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, a.sessionPicker.RefreshSessions()
 		case keys.NewSession:
 			// Create a new session directly with default name
-			return a, a.createSession(a.clientConfig.Session.DefaultName)
+			cmd := a.createSession(a.clientConfig.Session.DefaultName)
+			return a, cmd
 		case keys.RenameSession:
 			// Rename current session
 			if a.currentSession != nil {
@@ -1202,7 +1213,8 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// Switch to tasks view and select the task
 				a.currentView = ViewTasks
 				a.tasks.SetFilter(models.FilterAll)
-				return a, a.initCurrentView()
+				cmd := a.initCurrentView()
+				return a, cmd
 			}
 		}
 		return a, nil
@@ -1549,11 +1561,13 @@ func (a *App) getQuickActions() []string {
 	var actions []string
 
 	// Always show menu, sessions, find, branches, and quit
-	actions = append(actions, a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"))
-	actions = append(actions, a.styles.HelpKey.Render("^S")+" "+a.styles.HelpValue.Render("sessions"))
-	actions = append(actions, a.styles.HelpKey.Render("^P")+" "+a.styles.HelpValue.Render("find"))
-	actions = append(actions, a.styles.HelpKey.Render("^B")+" "+a.styles.HelpValue.Render("branches"))
-	actions = append(actions, a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"))
+	actions = append(actions,
+		a.styles.HelpKey.Render("^X")+" "+a.styles.HelpValue.Render("menu"),
+		a.styles.HelpKey.Render("^S")+" "+a.styles.HelpValue.Render("sessions"),
+		a.styles.HelpKey.Render("^P")+" "+a.styles.HelpValue.Render("find"),
+		a.styles.HelpKey.Render("^B")+" "+a.styles.HelpValue.Render("branches"),
+		a.styles.HelpKey.Render("^C")+" "+a.styles.HelpValue.Render("quit"),
+	)
 
 	switch a.currentView {
 	case ViewChat:
@@ -1567,35 +1581,47 @@ func (a *App) getQuickActions() []string {
 			chatMode := a.chat.GetMode()
 			switch chatMode {
 			case "insert":
-				actions = append(actions, a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("normal"))
-				actions = append(actions, a.styles.HelpKey.Render("enter")+" "+a.styles.HelpValue.Render("send"))
+				actions = append(actions,
+					a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("normal"),
+					a.styles.HelpKey.Render("enter")+" "+a.styles.HelpValue.Render("send"),
+				)
 			case "visual":
-				actions = append(actions, a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("normal"))
-				actions = append(actions, a.styles.HelpKey.Render("y")+" "+a.styles.HelpValue.Render("copy"))
+				actions = append(actions,
+					a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("normal"),
+					a.styles.HelpKey.Render("y")+" "+a.styles.HelpValue.Render("copy"),
+				)
 			default: // normal mode
-				actions = append(actions, a.styles.HelpKey.Render("i")+" "+a.styles.HelpValue.Render("insert"))
-				actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("scroll"))
-				actions = append(actions, a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"))
+				actions = append(actions,
+					a.styles.HelpKey.Render("i")+" "+a.styles.HelpValue.Render("insert"),
+					a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("scroll"),
+					a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"),
+				)
 			}
 		} else {
 			actions = append(actions, a.styles.HelpKey.Render("esc")+" "+a.styles.HelpValue.Render("input"))
 		}
 
 	case ViewTasks:
-		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))
-		actions = append(actions, a.styles.HelpKey.Render("enter")+" "+a.styles.HelpValue.Render("details"))
-		actions = append(actions, a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"))
-		actions = append(actions, a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("toggle view"))
+		actions = append(actions,
+			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
+			a.styles.HelpKey.Render("enter")+" "+a.styles.HelpValue.Render("details"),
+			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
+			a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("toggle view"),
+		)
 
 	case ViewQueue:
-		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))
-		actions = append(actions, a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"))
-		actions = append(actions, a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("toggle view"))
+		actions = append(actions,
+			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
+			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
+			a.styles.HelpKey.Render("tab")+" "+a.styles.HelpValue.Render("toggle view"),
+		)
 
 	case ViewMemory:
-		actions = append(actions, a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"))
-		actions = append(actions, a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"))
-		actions = append(actions, a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"))
+		actions = append(actions,
+			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
+			a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"),
+			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
+		)
 	}
 
 	// Add sidebar toggle hint if sidebar is hidden
@@ -1620,7 +1646,7 @@ func (a *App) renderError() string {
 // isPrintableKey returns true if the key message represents a printable character
 // that should trigger auto-focus to the text input.
 func isPrintableKey(msg tea.KeyPressMsg) bool {
-	return len(msg.Text) > 0
+	return msg.Text != ""
 }
 
 // CopySuccessMsg indicates clipboard copy succeeded.
@@ -1655,23 +1681,6 @@ type BranchInfoMsg struct {
 // BranchNavigateResultMsg carries the result of a successful branch navigation.
 type BranchNavigateResultMsg struct {
 	BranchID string
-}
-
-// fetchBranchInfo fetches branch info for the current session and logs it.
-func (a *App) fetchBranchInfo() tea.Cmd {
-	if a.currentSession == nil {
-		a.statusMessage = "no active session"
-		a.statusMessageTime = time.Now()
-		return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-			return StatusMessageClearMsg{}
-		})
-	}
-
-	sessionID := a.currentSession.ID
-	return func() tea.Msg {
-		branches, err := a.rpc.ListBranches(sessionID)
-		return BranchInfoMsg{Branches: branches, Err: err}
-	}
 }
 
 // stopCurrentWork stops the current session's work and prompts for child tasks.

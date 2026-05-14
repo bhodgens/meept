@@ -32,9 +32,9 @@ Supports: Go, Python, TypeScript, JavaScript, Rust, C, C++, Java, Ruby, YAML, TO
 
 func (t *ASTParseTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"file_path": {
+			SchemaPropFilePath: {
 				Type:        "string",
 				Description: "Path to the source file to parse. Either file_path or source+language is required.",
 			},
@@ -42,7 +42,7 @@ func (t *ASTParseTool) Parameters() llm.FunctionParameters {
 				Type:        "string",
 				Description: "Inline source code to parse (use with 'language' parameter).",
 			},
-			"language": {
+			SchemaPropLanguage: {
 				Type:        "string",
 				Description: "Language of inline source: go, python, typescript, javascript, rust, c, cpp, java, ruby, yaml, toml, bash.",
 			},

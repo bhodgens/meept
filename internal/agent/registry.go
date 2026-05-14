@@ -233,7 +233,7 @@ func (r *AgentRegistry) GetDispatcher() (*AgentLoop, error) {
 
 // createLoop creates a new agent loop from a spec.
 func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
-	config := AgentConfig{
+	agentCfg := AgentConfig{
 		MaxIterations:         spec.Constraints.MaxIterations,
 		Timeout:               spec.Constraints.Timeout,
 		Purpose:               spec.Purpose,
@@ -242,7 +242,7 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	}
 
 	opts := []LoopOption{
-		WithAgentConfig(config),
+		WithAgentConfig(agentCfg),
 		WithAgentID(spec.ID),
 		WithLoopLogger(r.logger.With("agent", spec.ID)),
 	}
@@ -769,7 +769,7 @@ func (r *AgentRegistry) UnregisterActiveQueue(conversationID string) {
 
 // GetActiveQueue returns the queue for a running conversation, or nil if not found.
 // Also returns the generation number for version checking.
-func (r *AgentRegistry) GetActiveQueue(conversationID string) (*MessageQueue, uint64) {
+func (r *AgentRegistry) GetActiveQueue(conversationID string) (queue *MessageQueue, generation uint64) {
 	r.activeQueuesMu.RLock()
 	defer r.activeQueuesMu.RUnlock()
 

@@ -230,7 +230,7 @@ func (p *ProxyHandler) makeFireAndForget(topic string) Handler {
 		}
 		delivered := p.bus.Publish(topic, msg)
 		return map[string]any{
-			"status":    "published",
+			RPCKeyStatus:    "published",
 			"topic":     topic,
 			"delivered": delivered,
 		}, nil
@@ -449,6 +449,6 @@ func (p *ProxyHandler) handleBusUnsubscribe(ctx context.Context, params json.Raw
 	p.subscriptions.Delete(req.SubscriptionID)
 
 	return map[string]any{
-		"status": "unsubscribed",
+		RPCKeyStatus: "unsubscribed",
 	}, nil
 }

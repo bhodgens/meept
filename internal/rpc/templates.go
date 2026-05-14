@@ -22,17 +22,17 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 		templatesData := make([]map[string]any, len(list))
 		for i, t := range list {
 			templatesData[i] = map[string]any{
-				"name":        t.Name,
-				"description": t.Description,
+				RPCKeyName:        t.Name,
+				RPCKeyDescription: t.Description,
 				"scope":       string(t.Scope),
-				"path":        t.Path,
-				"priority":    t.Priority,
+				RPCKeyPath:        t.Path,
+				RPCKeyPriority:    t.Priority,
 			}
 		}
 
 		return map[string]any{
 			"templates": templatesData,
-			"count":     len(templatesData),
+			RPCKeyCount:     len(templatesData),
 		}, nil
 	})
 
@@ -55,12 +55,12 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 		}
 
 		return map[string]any{
-			"name":        tmpl.Name,
-			"description": tmpl.Description,
+			RPCKeyName:        tmpl.Name,
+			RPCKeyDescription: tmpl.Description,
 			"scope":       string(tmpl.Scope),
 			"body":        tmpl.Body,
-			"path":        tmpl.Path,
-			"priority":    tmpl.Priority,
+			RPCKeyPath:        tmpl.Path,
+			RPCKeyPriority:    tmpl.Priority,
 		}, nil
 	})
 
@@ -87,7 +87,7 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 		if executor == nil {
 			return map[string]any{
 				"prompt":  prompt,
-				"success": true,
+				RPCKeySuccess: true,
 			}, nil
 		}
 
@@ -100,12 +100,12 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 
 		return map[string]any{
 			"prompt":            prompt,
-			"content":           result.Content,
-			"model":             result.Model,
+			RPCKeyContent:           result.Content,
+			RPCKeyModel:             result.Model,
 			"prompt_tokens":     result.PromptTokens,
 			"completion_tokens": result.CompletionTokens,
 			"total_tokens":      result.TotalTokens,
-			"success":           true,
+			RPCKeySuccess:           true,
 		}, nil
 	})
 
@@ -138,7 +138,7 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 
 		return map[string]any{
 			"cleared": cleared,
-			"count":   len(cleared),
+			RPCKeyCount:   len(cleared),
 		}, nil
 	})
 }

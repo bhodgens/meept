@@ -1024,17 +1024,17 @@ func (c *Conversation) GetMemoryContext() string {
 }
 
 // SetMemoryContext sets the live memory context (for internal use).
-func (c *Conversation) SetMemoryContext(context string) {
+func (c *Conversation) SetMemoryContext(ctxStr string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.memoryContext = context
+	c.memoryContext = ctxStr
 }
 
 // FetchAndFreezeMemory fetches memory context and freezes it for prefix caching.
 // The fetchFn should fetch the relevant memory context and return it as a string.
 // Returns an error if the fetch fails.
 func (c *Conversation) FetchAndFreezeMemory(ctx context.Context, fetchFn func(ctx context.Context) (string, error)) error {
-	context, err := fetchFn(ctx)
+	ctxStr, err := fetchFn(ctx)
 	if err != nil {
 		return err
 	}
@@ -1042,8 +1042,8 @@ func (c *Conversation) FetchAndFreezeMemory(ctx context.Context, fetchFn func(ct
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.memoryContext = context
-	c.memorySnapshot = context
+	c.memoryContext = ctxStr
+	c.memorySnapshot = ctxStr
 	return nil
 }
 
@@ -1073,7 +1073,7 @@ func (c *Conversation) ClearMemoryContext() {
 // InjectContextBounded inserts context with a token budget limit.
 // This is used for memory injection to prevent memory from dominating the context.
 // If the context exceeds the budget, it is truncated proportionally.
-func (c *Conversation) InjectContextBounded(context string, maxTokens int) {
+func (c *Conversation) InjectContextBounded(ctxStr string, maxTokens int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -1087,15 +1087,15 @@ func (c *Conversation) InjectContextBounded(context string, maxTokens int) {
 	}
 
 	// Estimate token count and truncate if necessary
-	contextContent := context
-	estimatedTokens := llm.EstimateTokenCountHeuristic(context)
+	contextContent := ctxStr
+	estimatedTokens := llm.EstimateTokenCountHeuristic(ctxStr)
 
 	if estimatedTokens > maxTokens {
 		// Truncate proportionally
 		ratio := float64(maxTokens) / float64(estimatedTokens)
-		truncateLen := int(float64(len(context)) * ratio)
+		truncateLen := int(float64(len(ctxStr)) * ratio)
 		if truncateLen > 0 {
-			contextContent = context[:truncateLen] + "\n\n...[memory truncated due to token budget]..."
+			contextContent = ctxStr[:truncateLen] + "\n\n...[memory truncated due to token budget]..."
 		}
 	}
 
@@ -1109,7 +1109,7 @@ func (c *Conversation) InjectContextBounded(context string, maxTokens int) {
 }
 
 // This is used for memory injection before LLM calls.
-func (c *Conversation) InjectContext(context string) {
+func (c *Conversation) InjectContext(ctxStr string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -1125,7 +1125,7 @@ func (c *Conversation) InjectContext(context string) {
 	// Insert new context at the beginning
 	contextMsg := llm.ChatMessage{
 		Role:    llm.RoleSystem,
-		Content: "# Relevant Context from Memory\n" + context,
+		Content: "# Relevant Context from Memory\n" + ctxStr,
 	}
 
 	c.messages = append([]llm.ChatMessage{contextMsg}, newMessages...)

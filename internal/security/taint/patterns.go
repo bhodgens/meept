@@ -129,7 +129,7 @@ func DetectSuspiciousPatterns(command string) (string, bool) {
 
 // detectContextualInjection checks for ; and | only in suspicious contexts.
 // This reduces false positives from legitimate uses like "echo 'a;b'" or "ls | grep".
-func detectContextualInjection(lowerCmd string) (bool, string) {
+func detectContextualInjection(lowerCmd string) (ok bool, result string) {
 	// Dangerous commands that, when combined with ; or |, indicate injection
 	dangerousCommands := []string{
 		"rm ", "rm\t", "rm;",
@@ -339,8 +339,8 @@ func ScoreSuspiciousness(command string) int {
 // Callers MUST still run the sanitized result through DetectSuspiciousPatterns
 // and ScoreSuspiciousness, and MUST treat the returned command as
 // best-effort that may require human review before execution.
-func SanitizeShellCommand(command string) (string, []string) {
-	modifications := []string{}
+func SanitizeShellCommand(command string) (result string, modifications []string) {
+	modifications = []string{}
 	sanitized := command
 
 	// Remove or flag dangerous patterns
@@ -420,7 +420,7 @@ func HasURL(input string) bool {
 // EstimateEntropy calculates a rough estimate of the Shannon entropy of the input.
 // High entropy values may indicate encoded or encrypted content.
 func EstimateEntropy(value string) float64 {
-	if len(value) == 0 {
+	if value == "" {
 		return 0
 	}
 

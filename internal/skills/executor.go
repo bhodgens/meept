@@ -326,7 +326,7 @@ func (e *Executor) GetModelForSkill(skill *Skill) (*llm.ModelConfig, error) {
 
 // ExecuteByName executes a skill by name using the lazy loader.
 // This is useful when you only have the skill name and want on-demand loading.
-func (e *Executor) ExecuteByName(ctx context.Context, name string, input string) (*SkillExecutionResult, error) {
+func (e *Executor) ExecuteByName(ctx context.Context, name, input string) (*SkillExecutionResult, error) {
 	if e.lazyLoader == nil {
 		return nil, fmt.Errorf("lazy loader not configured")
 	}

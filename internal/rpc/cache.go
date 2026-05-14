@@ -63,7 +63,7 @@ func (h *CacheHandler) handleClear(ctx context.Context, params json.RawMessage) 
 	h.logger.Info("cache cleared")
 
 	return map[string]any{
-		"status": "cleared",
+		RPCKeyStatus: "cleared",
 	}, nil
 }
 
@@ -88,7 +88,7 @@ func (h *CacheHandler) handleInvalidate(ctx context.Context, params json.RawMess
 	h.logger.Info("cache entries invalidated", "file", req.FilePath)
 
 	return map[string]any{
-		"status":   "invalidated",
+		RPCKeyStatus:   "invalidated",
 		"file":     req.FilePath,
 	}, nil
 }
@@ -114,7 +114,7 @@ func (h *CacheHandler) handleInspect(ctx context.Context, params json.RawMessage
 	if len(results) == 0 {
 		return map[string]any{
 			"found":  false,
-			"count":  0,
+			RPCKeyCount:  0,
 			"entries": []any{},
 		}, nil
 	}
@@ -139,7 +139,7 @@ func (h *CacheHandler) handleInspect(ctx context.Context, params json.RawMessage
 
 	return map[string]any{
 		"found":   true,
-		"count":   len(entries),
+		RPCKeyCount:   len(entries),
 		"entries": entries,
 	}, nil
 }

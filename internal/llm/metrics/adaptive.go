@@ -110,6 +110,7 @@ func (c *Calculator) calculateTokenRateBased(ctx context.Context, providerID, mo
 		return staticDefault
 	}
 
+	// Explanatory formula (not dead code):
 	// timeout = estimatedTokens * (mean_ms_per_token + N * stddev_ms_per_token)
 	msPerToken := mean + c.config.StddevMultiplier*stddev
 	timeoutMs := float64(estimatedTokens) * msPerToken
@@ -152,6 +153,7 @@ func (c *Calculator) calculateLatencyBased(ctx context.Context, providerID, mode
 		return staticDefault
 	}
 
+	// Explanatory formula (not dead code):
 	// timeout = mean + N * stddev
 	timeoutMs := mean + c.config.StddevMultiplier*stddev
 	timeout := time.Duration(timeoutMs) * time.Millisecond

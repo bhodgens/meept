@@ -78,7 +78,7 @@ func (q *QueryExecutor) RunQuery(ctx context.Context, source []byte, lang Langua
 }
 
 // RunQueryOnFile executes a tree-sitter query on a file.
-func (q *QueryExecutor) RunQueryOnFile(ctx context.Context, filePath string, queryPattern string) (*QueryResult, error) {
+func (q *QueryExecutor) RunQueryOnFile(ctx context.Context, filePath, queryPattern string) (*QueryResult, error) {
 	lang := DetectLanguage(filePath)
 	if lang == LangUnknown {
 		return nil, fmt.Errorf("could not detect language for: %s", filePath)

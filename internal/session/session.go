@@ -614,7 +614,7 @@ func (s *MemoryStore) InsertCompaction(sessionID string, parentID int64, summary
 }
 
 // ReparentAfterCompaction is not fully implemented for MemoryStore.
-func (s *MemoryStore) ReparentAfterCompaction(sessionID string, afterID int64, compactionID int64) error {
+func (s *MemoryStore) ReparentAfterCompaction(sessionID string, afterID, compactionID int64) error {
 	return fmt.Errorf("not implemented: ReparentAfterCompaction in MemoryStore")
 }
 
@@ -881,7 +881,7 @@ func (h *Handler) handleCreate(msg *models.BusMessage) (any, error) {
 }
 
 // handleList lists all sessions.
-func (h *Handler) handleList(msg *models.BusMessage) (any, error) {
+func (h *Handler) handleList(_ *models.BusMessage) (any, error) {
 	sessions, err := h.store.List()
 	if err != nil {
 		return nil, err
@@ -906,7 +906,7 @@ func (h *Handler) handleGet(msg *models.BusMessage) (any, error) {
 }
 
 // handleGetMostRecent gets the most recently active session.
-func (h *Handler) handleGetMostRecent(msg *models.BusMessage) (any, error) {
+func (h *Handler) handleGetMostRecent(_ *models.BusMessage) (any, error) {
 	session := h.store.GetMostRecent()
 	if session == nil {
 		return nil, fmt.Errorf("no sessions found")

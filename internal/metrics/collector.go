@@ -325,7 +325,7 @@ func (c *Collector) RecordMemoryOperation(opType string, duration time.Duration)
 }
 
 // RecordModelResolution records a model resolution event.
-func (c *Collector) RecordModelResolution(modelID string, provider string) {
+func (c *Collector) RecordModelResolution(modelID, provider string) {
 	c.store.Record("model.resolutions", 1, map[string]string{
 		"model_id": modelID,
 		"provider": provider,
@@ -333,7 +333,7 @@ func (c *Collector) RecordModelResolution(modelID string, provider string) {
 }
 
 // RecordReviewResult records a review result metric.
-func (c *Collector) RecordReviewResult(status string, reviewerID string, confidence float64) {
+func (c *Collector) RecordReviewResult(status, reviewerID string, confidence float64) {
 	c.store.Record("review.completed", 1, map[string]string{
 		"status":   status,
 		"reviewer": reviewerID,

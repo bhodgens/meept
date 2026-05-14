@@ -262,8 +262,8 @@ func TestStepStore_AreAllCompleted(t *testing.T) {
 	}
 
 	// Complete both
-	store.SetState(s0.ID, StepCompleted)
-	store.SetState(s1.ID, StepCompleted)
+	_ = store.SetState(s0.ID, StepCompleted)
+	_ = store.SetState(s1.ID, StepCompleted)
 
 	done, err = store.AreAllCompleted("task-1")
 	if err != nil {
@@ -285,8 +285,8 @@ func TestStepStore_AreAllCompleted_WithFailure(t *testing.T) {
 		}
 	}
 
-	store.SetState(s0.ID, StepCompleted)
-	store.SetState(s1.ID, StepFailed)
+	_ = store.SetState(s0.ID, StepCompleted)
+	_ = store.SetState(s1.ID, StepFailed)
 
 	// Failed steps mean "not all completed"
 	done, err := store.AreAllCompleted("task-1")
@@ -314,7 +314,7 @@ func TestStepStore_HasFailures(t *testing.T) {
 		t.Error("expected no failures")
 	}
 
-	store.SetState(s0.ID, StepFailed)
+	_ = store.SetState(s0.ID, StepFailed)
 
 	has, err = store.HasFailures("task-1")
 	if err != nil {
@@ -338,8 +338,8 @@ func TestStepStore_CountByState(t *testing.T) {
 		}
 	}
 
-	store.SetState(s0.ID, StepCompleted)
-	store.SetState(s1.ID, StepRunning)
+	_ = store.SetState(s0.ID, StepCompleted)
+	_ = store.SetState(s1.ID, StepRunning)
 	// s2 stays pending
 
 	counts, err := store.CountByState("task-1")

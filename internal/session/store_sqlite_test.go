@@ -11,11 +11,11 @@ import (
 )
 
 // testHelper creates a temporary SQLiteStore for testing.
-func testHelper(t *testing.T) (*SQLiteStore, string) {
+func testHelper(t *testing.T) (result *SQLiteStore, dbPath string) {
 	t.Helper()
 
 	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test_sessions.db")
+	dbPath = filepath.Join(tmpDir, "test_sessions.db")
 
 	store, err := NewSQLiteStore(dbPath, slog.Default())
 	if err != nil {
@@ -55,6 +55,9 @@ func TestSQLiteStore_MigrationFromExistingSchema(t *testing.T) {
 		}
 		columns[name] = true
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
 
 	for _, col := range []string{"parent_id", "entry_type", "branch_id", "model", "name", "tool_call_id"} {
 		if !columns[col] {
@@ -80,6 +83,9 @@ func TestSQLiteStore_MigrationFromExistingSchema(t *testing.T) {
 			t.Fatalf("failed to scan sessions table info: %v", err)
 		}
 		sessionColumns[name] = true
+	}
+	if err := rows2.Err(); err != nil {
+		t.Fatalf("rows2 error: %v", err)
 	}
 
 	if !sessionColumns["leaf_message_id"] {
@@ -454,10 +460,10 @@ func TestSQLiteStore_ToolCallsForMessages(t *testing.T) {
 	msg2ID := retrieved[1].ID
 
 	// Save tool calls for both messages
-	store.SaveToolCalls(msg1ID, []ToolCall{
+	_ = store.SaveToolCalls(msg1ID, []ToolCall{
 		{MessageID: msg1ID, ToolName: "file_read", ToolCallID: "call_a", Arguments: "{}", Result: "a", Seq: 0},
 	})
-	store.SaveToolCalls(msg2ID, []ToolCall{
+	_ = store.SaveToolCalls(msg2ID, []ToolCall{
 		{MessageID: msg2ID, ToolName: "shell_exec", ToolCallID: "call_b1", Arguments: "{}", Result: "b1", Seq: 0},
 		{MessageID: msg2ID, ToolName: "file_write", ToolCallID: "call_b2", Arguments: "{}", Result: "b2", Seq: 1},
 	})
@@ -521,7 +527,7 @@ func TestSQLiteStore_LeafMessageID(t *testing.T) {
 		EntryType: "message",
 		BranchID:  "main",
 	}
-	store.SaveMessages(session.ID, []Message{msg})
+	_ = store.SaveMessages(session.ID, []Message{msg})
 	msgs, _ := store.GetMessages(session.ID, 0, 1)
 	msgID := msgs[0].ID
 
@@ -573,7 +579,7 @@ func TestSQLiteStore_GetMessageBranches(t *testing.T) {
 		{SessionID: session.ID, Role: "assistant", Content: "main response", Timestamp: time.Now().UTC().Add(time.Second), EntryType: "message", BranchID: "main"},
 		{SessionID: session.ID, Role: "assistant", Content: "alt response", Timestamp: time.Now().UTC().Add(2 * time.Second), EntryType: "message", BranchID: "branch-1"},
 	}
-	store.SaveMessages(session.ID, msgs)
+	_ = store.SaveMessages(session.ID, msgs)
 
 	branches, err := store.GetMessageBranches(session.ID)
 	if err != nil {
@@ -621,12 +627,12 @@ func TestSQLiteStore_GetTree(t *testing.T) {
 		{SessionID: session.ID, Role: "user", Content: "root", Timestamp: time.Now().UTC(), EntryType: "message", BranchID: "main"},
 		{SessionID: session.ID, Role: "assistant", Content: "response", Timestamp: time.Now().UTC().Add(time.Second), EntryType: "message", BranchID: "main"},
 	}
-	store.SaveMessages(session.ID, msgs)
+	_ = store.SaveMessages(session.ID, msgs)
 
 	// Set leaf to the second message
 	retrieved, _ := store.GetMessages(session.ID, 0, 2)
 	leafID := retrieved[1].ID
-	store.SetLeafMessageID(session.ID, leafID)
+	_ = store.SetLeafMessageID(session.ID, leafID)
 
 	nodes, err := store.GetTree(session.ID)
 	if err != nil {
@@ -699,7 +705,7 @@ func TestSQLiteStore_ForkSession_Basic(t *testing.T) {
 		msgIDs[i] = msgs[0].ID
 	}
 
-	// Set leaf to last message
+_ = 	// Set leaf to last message
 	store.SetLeafMessageID(session.ID, msgIDs[4])
 
 	// Fork from message 3 (index 2)
@@ -771,7 +777,7 @@ func TestSQLiteStore_ForkSession_WithToolCalls(t *testing.T) {
 		SessionID: session.ID, Role: "user", Content: "hello",
 		Timestamp: now, EntryType: "message", BranchID: "main",
 	}
-	store.SaveMessages(session.ID, []Message{msg1})
+	_ = store.SaveMessages(session.ID, []Message{msg1})
 	msgs1, _ := store.GetMessages(session.ID, 0, 1)
 	msg1ID := msgs1[0].ID
 
@@ -779,7 +785,7 @@ func TestSQLiteStore_ForkSession_WithToolCalls(t *testing.T) {
 		SessionID: session.ID, ParentID: &msg1ID, Role: "assistant", Content: "response",
 		Timestamp: now.Add(time.Second), EntryType: "message", BranchID: "main",
 	}
-	store.SaveMessages(session.ID, []Message{msg2})
+	_ = store.SaveMessages(session.ID, []Message{msg2})
 	msgs2, _ := store.GetMessages(session.ID, 1, 1)
 	msg2ID := msgs2[0].ID
 
@@ -796,7 +802,7 @@ func TestSQLiteStore_ForkSession_WithToolCalls(t *testing.T) {
 		SessionID: session.ID, ParentID: &msg2ID, Role: "user", Content: "follow-up",
 		Timestamp: now.Add(2 * time.Second), EntryType: "message", BranchID: "main",
 	}
-	store.SaveMessages(session.ID, []Message{msg3})
+	_ = store.SaveMessages(session.ID, []Message{msg3})
 	msgs3, _ := store.GetMessages(session.ID, 2, 1)
 	msg3ID := msgs3[0].ID
 
@@ -890,7 +896,7 @@ func TestSQLiteStore_ForkSession_MessageNotFound(t *testing.T) {
 
 	session, _ := store.Create("test-fork-msgnotfound")
 
-	// Add one message
+_ = 	// Add one message
 	store.SaveMessages(session.ID, []Message{
 		{SessionID: session.ID, Role: "user", Content: "hello", Timestamp: time.Now().UTC()},
 	})
@@ -933,7 +939,7 @@ func TestSQLiteStore_ExistingMethodsStillWork(t *testing.T) {
 		t.Errorf("expected empty list (no assistant msgs), got %d", len(list))
 	}
 
-	// Save assistant message
+_ = 	// Save assistant message
 	store.SaveMessages(session.ID, []Message{
 		{SessionID: session.ID, Role: "assistant", Content: "response", Timestamp: time.Now().UTC(), EntryType: "message", BranchID: "main"},
 	})
@@ -1030,7 +1036,7 @@ func TestSQLiteStore_ExistingMethodsStillWork(t *testing.T) {
 	store2, _ := testHelper(t)
 	defer store2.Close()
 	s2, _ := store2.Create("count-test")
-	store2.SaveMessages(s2.ID, []Message{
+	_ = store2.SaveMessages(s2.ID, []Message{
 		{SessionID: s2.ID, Role: "user", Content: "a", Timestamp: time.Now().UTC()},
 		{SessionID: s2.ID, Role: "assistant", Content: "b", Timestamp: time.Now().UTC()},
 		{SessionID: s2.ID, Role: "user", Content: "c", Timestamp: time.Now().UTC()},
@@ -1066,14 +1072,14 @@ func TestSQLiteStore_ToolCallsWithEmptyResult(t *testing.T) {
 	defer store.Close()
 
 	session, _ := store.Create("tool-result-test")
-	store.SaveMessages(session.ID, []Message{
+	_ = store.SaveMessages(session.ID, []Message{
 		{SessionID: session.ID, Role: "assistant", Content: "", Timestamp: time.Now().UTC()},
 	})
 	msgs, _ := store.GetMessages(session.ID, 0, 1)
 	msgID := msgs[0].ID
 
 	// Save a tool call with empty result
-	store.SaveToolCalls(msgID, []ToolCall{
+	_ = store.SaveToolCalls(msgID, []ToolCall{
 		{MessageID: msgID, ToolName: "shell_execute", ToolCallID: "call_1", Arguments: "{}", Result: "", Seq: 0},
 	})
 
@@ -1094,7 +1100,7 @@ func TestSQLiteStore_MigrationIdempotent(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "idempotent.db")
 
 	// Open and close multiple times - should not error
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		store, err := NewSQLiteStore(dbPath, slog.Default())
 		if err != nil {
 			t.Fatalf("iteration %d: failed to create store: %v", i, err)
@@ -1158,7 +1164,7 @@ func TestBackfillParentID(t *testing.T) {
 			t.Fatalf("failed to insert session %s: %v", sid, err)
 		}
 
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			_, err := db.Exec(
 				`INSERT INTO session_messages (session_id, role, content, timestamp) VALUES (?, 'user', ?, ?)`,
 				sid, fmt.Sprintf("msg-%d", i), ts,
@@ -1191,9 +1197,9 @@ func TestBackfillParentID(t *testing.T) {
 	defer store.Close()
 
 	// Verify backfill for sess-a.
-	verifyBackfill(t, store, "sess-a", 5)
+	verifyBackfill(t, store, "sess-a")
 	// Verify backfill for sess-b.
-	verifyBackfill(t, store, "sess-b", 5)
+	verifyBackfill(t, store, "sess-b")
 
 	// Verify idempotency: re-open the store and confirm nothing changes.
 	store.Close()
@@ -1203,19 +1209,19 @@ func TestBackfillParentID(t *testing.T) {
 	}
 	defer store2.Close()
 
-	verifyBackfill(t, store2, "sess-a", 5)
-	verifyBackfill(t, store2, "sess-b", 5)
+	verifyBackfill(t, store2, "sess-a")
+	verifyBackfill(t, store2, "sess-b")
 }
 
-func verifyBackfill(t *testing.T, store *SQLiteStore, sessionID string, expectedCount int) {
+func verifyBackfill(t *testing.T, store *SQLiteStore, sessionID string) {
 	t.Helper()
 
 	msgs, err := store.GetMessages(sessionID, 0, 100)
 	if err != nil {
 		t.Fatalf("failed to get messages for %s: %v", sessionID, err)
 	}
-	if len(msgs) != expectedCount {
-		t.Fatalf("expected %d messages for %s, got %d", expectedCount, sessionID, len(msgs))
+	if len(msgs) != 5 {
+		t.Fatalf("expected %d messages for %s, got %d", 5, sessionID, len(msgs))
 	}
 
 	// First message must have nil parent_id.

@@ -10,7 +10,7 @@ func TestNewRPCClient(t *testing.T) {
 	if client == nil {
 		t.Fatal("NewRPCClient returned nil")
 	}
-	defer client.Close()
+	client.Close()
 }
 
 func TestNewRPCClient_ZeroTimeout(t *testing.T) {
@@ -19,7 +19,7 @@ func TestNewRPCClient_ZeroTimeout(t *testing.T) {
 	if client == nil {
 		t.Fatal("NewRPCClient with zero timeout returned nil")
 	}
-	defer client.Close()
+	client.Close()
 }
 
 func TestRPCAdapter_NotConnected(t *testing.T) {

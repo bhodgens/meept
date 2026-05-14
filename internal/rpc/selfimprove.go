@@ -55,7 +55,7 @@ func (h *SelfImproveHandler) handleDetect(ctx context.Context, params json.RawMe
 	}
 	return map[string]any{
 		"issues": issues,
-		"count":  len(issues),
+		RPCKeyCount:  len(issues),
 	}, nil
 }
 
@@ -73,7 +73,7 @@ func (h *SelfImproveHandler) handleAnalyze(ctx context.Context, params json.RawM
 		return nil, fmt.Errorf("detection failed: %w", err)
 	}
 	if len(issues) == 0 {
-		return map[string]any{"analyses": []any{}, "count": 0}, nil
+		return map[string]any{"analyses": []any{}, RPCKeyCount: 0}, nil
 	}
 	status := ctrl.GetStatus()
 	return map[string]any{
@@ -91,7 +91,7 @@ func (h *SelfImproveHandler) handleGenerate(ctx context.Context, params json.Raw
 	}
 	status := ctrl.GetStatus()
 	return map[string]any{
-		"status":       status,
+		RPCKeyStatus:       status,
 		"fixes_count":  status.FixesCount,
 		"pending":      status.PendingApprovals,
 	}, nil
@@ -105,7 +105,7 @@ func (h *SelfImproveHandler) handleValidate(ctx context.Context, params json.Raw
 	}
 	status := ctrl.GetStatus()
 	return map[string]any{
-		"status":             status,
+		RPCKeyStatus:             status,
 		"validations_count":  status.ValidationsCount,
 	}, nil
 }
@@ -151,7 +151,7 @@ func (h *SelfImproveHandler) handleReject(ctx context.Context, params json.RawMe
 	if err := ctrl.RejectFix(req.FixID, req.Reason); err != nil {
 		return nil, err
 	}
-	return map[string]any{"status": "rejected", "fix_id": req.FixID}, nil
+	return map[string]any{RPCKeyStatus: "rejected", "fix_id": req.FixID}, nil
 }
 
 // handleStatus returns the current self-improve controller status.

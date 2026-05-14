@@ -129,8 +129,8 @@ type ModelConfig struct {
 }
 
 // HasCapability checks if the model has a specific capability.
-func (m *ModelConfig) HasCapability(cap string) bool {
-	return m.Capabilities[cap]
+func (m *ModelConfig) HasCapability(capability string) bool {
+	return m.Capabilities[capability]
 }
 
 // HasCapabilities checks if the model has all specified capabilities.

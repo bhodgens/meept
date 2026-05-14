@@ -23,10 +23,10 @@ type AgentDesignerConfig struct {
 }
 
 // NewAgentDesigner creates a new AgentDesigner.
-func NewAgentDesigner(logger *slog.Logger, config AgentDesignerConfig) *AgentDesigner {
+func NewAgentDesigner(logger *slog.Logger, designerCfg AgentDesignerConfig) *AgentDesigner {
 	return &AgentDesigner{
 		logger: logger,
-		config: config,
+		config: designerCfg,
 	}
 }
 
@@ -94,7 +94,7 @@ func (d *AgentDesigner) extractRequirements(research *ResearchReport, analyses [
 }
 
 // determineRoleAndPurpose determines the agent's role and purpose statement.
-func (d *AgentDesigner) determineRoleAndPurpose(pattern PatternReport, requirements []string) (string, string) {
+func (d *AgentDesigner) determineRoleAndPurpose(pattern PatternReport, requirements []string) (agentRole, purposeStmt string) {
 	intent := pattern.AffectedIntent
 	if intent == "" {
 		intent = "specialized"
@@ -222,19 +222,17 @@ func (d *AgentDesigner) generatePromptSections(pattern PatternReport, research *
 	sections := make([]string, 0, 5)
 
 	// Section 1: Scope and Boundaries
-	sections = append(sections, d.generateScopeSection(pattern))
-
 	// Section 2: Required Output Format
-	sections = append(sections, d.generateOutputFormatSection())
-
 	// Section 3: Escalation Triggers
-	sections = append(sections, d.generateEscalationSection())
-
 	// Section 4: Quality Standards
-	sections = append(sections, d.generateQualityStandardsSection(research))
-
 	// Section 5: Workflow Steps
-	sections = append(sections, d.generateWorkflowSection(requirements))
+	sections = append(sections,
+		d.generateScopeSection(pattern),
+		d.generateOutputFormatSection(),
+		d.generateEscalationSection(),
+		d.generateQualityStandardsSection(research),
+		d.generateWorkflowSection(requirements),
+	)
 
 	return sections
 }
@@ -394,7 +392,7 @@ func (d *AgentDesigner) generateAgentName(pattern PatternReport) string {
 
 	// Capitalize first letter (strings.Title is deprecated, use unicode.ToUpper for first char)
 	name := strings.ToLower(intent)
-	if len(name) > 0 {
+	if name != "" {
 		runes := []rune(name)
 		runes[0] = unicode.ToUpper(runes[0])
 		name = string(runes)

@@ -85,8 +85,8 @@ var methodToTopics = map[string][2]string{
 }
 
 // NewBusProxyAdapter creates a new bus proxy adapter.
-func NewBusProxyAdapter(bus *bus.MessageBus) *BusProxyAdapter {
-	return &BusProxyAdapter{bus: bus}
+func NewBusProxyAdapter(msgBus *bus.MessageBus) *BusProxyAdapter {
+	return &BusProxyAdapter{bus: msgBus}
 }
 
 // Call sends a method call to the bus and waits for a response.

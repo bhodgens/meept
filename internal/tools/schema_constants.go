@@ -1,0 +1,52 @@
+package tools
+
+// JSON Schema type constants used in tool parameter definitions.
+const (
+	SchemaTypeObject  = "object"
+	SchemaTypeString  = "string"
+	SchemaTypeInteger = "integer"
+	SchemaTypeBoolean = "boolean"
+	SchemaTypeNumber  = "number"
+)
+
+// Common JSON Schema property name constants used as map keys in tool definitions.
+const (
+	SchemaPropFilePath       = "file_path"
+	SchemaPropLanguage       = "language"
+	SchemaPropLimit          = "limit"
+	SchemaPropQuery          = "query"
+	SchemaPropLine           = "line"
+	SchemaPropCharacter      = "character"
+	SchemaPropStartLine      = "start_line"
+	SchemaPropStartChar      = "start_char"
+	SchemaPropEndLine        = "end_line"
+	SchemaPropEndChar        = "end_char"
+	SchemaPropFound          = "found"
+	SchemaPropMessage        = "message"
+	SchemaPropCount          = "count"
+	SchemaPropContent        = "content"
+	SchemaPropCommand        = "command"
+	SchemaPropName           = "name"
+	SchemaPropDescription    = "description"
+	SchemaPropPath           = "path"
+	SchemaPropPriority       = "priority"
+	SchemaPropTags           = "tags"
+	SchemaPropRequires       = "requires"
+	SchemaPropRiskLevel      = "risk_level"
+	SchemaPropType           = "type"
+	SchemaPropJobID          = "job_id"
+	SchemaPropJobType        = "job_type"
+	SchemaPropConversationID = "conversation_id"
+	SchemaPropModel          = "model"
+	SchemaPropState          = "state"
+	SchemaPropTaskID         = "task_id"
+	SchemaPropSuccess        = "success"
+	SchemaPropStatus         = "status"
+	SchemaPropStart          = "start"
+	SchemaPropEnd            = "end"
+	SchemaPropEntityID       = "entity_id"
+	SchemaPropMemoryID       = "memory_id"
+	SchemaPropCategory       = "category"
+	SchemaPropOutcome        = "outcome"
+	SchemaPropCapabilities   = "capabilities"
+)

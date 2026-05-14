@@ -58,7 +58,7 @@ func TestNewManager_EnabledWithoutTeacher(t *testing.T) {
 // containsFTS5 is a helper for error message checking
 func containsFTS5(s string) bool {
 	const substr = "fts5"
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStringHelper(s, substr))
+	return len(s) >= len(substr) && (s == substr || s != "" && containsStringHelper(s, substr))
 }
 
 func containsStringHelper(s, substr string) bool {

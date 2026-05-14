@@ -50,7 +50,7 @@ func NewChangeApplier(cfg SafetyConfig, projectRoot string, msgBus *bus.MessageB
 	homeDir, _ := os.UserHomeDir()
 	backupDir := filepath.Join(homeDir, ".meept", "selfimprove", "backups")
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		logger.Warn("failed to create backup directory", "error", err)
 	}
 
@@ -115,7 +115,7 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix) (*AppliedF
 
 	// Write the file
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -201,7 +201,7 @@ func (a *ChangeApplier) Rollback(applied *AppliedFix) error {
 	}
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(originalPath, backupContent, 0644); err != nil {
+	if err := os.WriteFile(originalPath, backupContent, 0o644); err != nil {
 		return fmt.Errorf("failed to restore file: %w", err)
 	}
 
@@ -231,7 +231,7 @@ func (a *ChangeApplier) createBackup(fix *ProposedFix) (string, error) {
 		fix.ID, filepath.Base(fix.FilePath)))
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(backupPath, content, 0644); err != nil {
+	if err := os.WriteFile(backupPath, content, 0o644); err != nil {
 		return "", err
 	}
 

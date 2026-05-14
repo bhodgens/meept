@@ -106,9 +106,9 @@ func TestPlaceholderToolRegistry(t *testing.T) {
 	}
 
 	// List tools
-	tools := registry.List()
-	if len(tools) != 1 {
-		t.Errorf("expected 1 tool, got %d", len(tools))
+	toolList := registry.List()
+	if len(toolList) != 1 {
+		t.Errorf("expected 1 tool, got %d", len(toolList))
 	}
 }
 

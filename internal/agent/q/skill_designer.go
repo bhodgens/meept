@@ -62,7 +62,7 @@ func (sd *SkillDesigner) WriteSkillFile(skill *SkillDesign, outputPath string) e
 	// Ensure directory exists
 	dir := filepath.Dir(outputPath)
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create skill directory: %w", err)
 	}
 
@@ -71,7 +71,7 @@ func (sd *SkillDesigner) WriteSkillFile(skill *SkillDesign, outputPath string) e
 
 	// Write file
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(outputPath, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("failed to write skill file: %w", err)
 	}
 

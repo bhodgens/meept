@@ -104,7 +104,7 @@ func NewModelBroker(cfg BrokerConfig) *ModelBroker {
 // Detects Anthropic vs OpenAI-compat and injects metrics/timeout options.
 func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 	// Detect Anthropic
-	if cfg.ProviderID == "anthropic" || strings.Contains(strings.ToLower(cfg.BaseURL), "anthropic") {
+	if cfg.ProviderID == ProviderIDAnthropic || strings.Contains(strings.ToLower(cfg.BaseURL), ProviderIDAnthropic) {
 		opts := []AnthropicClientOption{
 			WithAnthropicLogger(b.logger),
 		}

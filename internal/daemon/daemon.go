@@ -87,13 +87,13 @@ func DefaultConfig() *Config {
 }
 
 // New creates a new Daemon instance.
-func New(cfg *Config) (*Daemon, error) {
+func New(cfg *Config) (daemon *Daemon, err error) {
 	if cfg == nil {
 		cfg = DefaultConfig()
 	}
 
 	// Ensure state directory exists
-	if err := os.MkdirAll(cfg.StateDir, 0700); err != nil {
+	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create state directory: %w", err)
 	}
 
@@ -462,31 +462,28 @@ func (d *Daemon) checkExisting() error {
 	pid, err := strconv.Atoi(string(data))
 	if err != nil {
 		// Invalid PID file, remove it
-		//nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 		os.Remove(d.pidFile)
-		return nil
+		return nil //nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 	}
 
 	// Check if process is running
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		//nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 		os.Remove(d.pidFile)
-		return nil
+		return nil //nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 	}
 
 	// Send signal 0 to check if process exists
 	if err := proc.Signal(syscall.Signal(0)); err != nil {
-		//nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 		os.Remove(d.pidFile)
-		return nil
+		return nil //nolint:nilerr // intentional: stale PID cleanup returns nil to allow startup
 	}
 
 	return fmt.Errorf("daemon already running (PID %d)", pid)
 }
 
 func (d *Daemon) writePIDFile() error {
-	return os.WriteFile(d.pidFile, []byte(strconv.Itoa(os.Getpid())), 0600)
+	return os.WriteFile(d.pidFile, []byte(strconv.Itoa(os.Getpid())), 0o600)
 }
 
 func (d *Daemon) removePIDFile() {
@@ -607,7 +604,7 @@ func (w *metricsStoreWrapper) GetHistoricalMetrics(ctx context.Context, from, to
 	return w.store.GetHistoricalMetrics(from, to, resolution)
 }
 
-func (w *metricsStoreWrapper) SubscribeMetrics() (<-chan *metrics.LiveMetricsSnapshot, func()) {
+func (w *metricsStoreWrapper) SubscribeMetrics() (_ <-chan *metrics.LiveMetricsSnapshot, _ func()) {
 	return w.store.SubscribeMetrics()
 }
 

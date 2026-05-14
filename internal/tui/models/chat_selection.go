@@ -203,7 +203,7 @@ func (m *ChatModel) hasSelection() bool {
 }
 
 // applySelectionHighlight applies visual highlighting to the selected text region.
-func (m *ChatModel) applySelectionHighlight(content string, selStyle string) string {
+func (m *ChatModel) applySelectionHighlight(content, selStyle string) string {
 	start, end := m.selectionStart, m.selectionEnd
 	if start > end {
 		start, end = end, start

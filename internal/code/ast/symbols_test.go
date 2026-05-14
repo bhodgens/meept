@@ -294,7 +294,7 @@ func privateFunc() {}
 	}
 
 	for _, sym := range symbols {
-		if len(sym.Name) > 0 {
+		if sym.Name != "" {
 			first := sym.Name[0]
 			if first >= 'a' && first <= 'z' {
 				t.Errorf("expected no private symbols, got %q", sym.Name)

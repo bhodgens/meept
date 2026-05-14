@@ -49,7 +49,7 @@ func TestAnthropicClient_AdaptiveTimeout(t *testing.T) {
 		b, _ := json.Marshal(resp)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(b)
+		_, _ = w.Write(b)
 	}))
 	defer server.Close()
 
@@ -141,7 +141,7 @@ func TestAnthropicClient_RecordsMetrics(t *testing.T) {
 		b, _ := json.Marshal(resp)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(b)
+		_, _ = w.Write(b)
 	}))
 	defer server.Close()
 

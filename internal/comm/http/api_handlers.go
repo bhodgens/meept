@@ -69,7 +69,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	subID := fmt.Sprintf("sse-chat-%d", time.Now().UnixNano())
 	sub, unsub := s.services.Bus.Subscribe(subID, "tool.execution.progress")
 	if sub == nil {
-		sse.SendError("bus subscription failed")
+		_ = sse.SendError("bus subscription failed")
 		return
 	}
 	defer unsub()

@@ -31,9 +31,9 @@ func (t *CronCreateTool) Description() string {
 
 func (t *CronCreateTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"name": {
+			schemaPropName: {
 				Type:        "string",
 				Description: "Human-readable name for the job.",
 			},
@@ -58,7 +58,7 @@ func (t *CronCreateTool) Parameters() llm.FunctionParameters {
 				Type:        "number",
 				Description: "For monthly: day of month (1-31). Default: 1.",
 			},
-			"job_type": {
+			schemaPropJobType: {
 				Type:        "string",
 				Description: "Type of job: agent, shell, or reminder.",
 				Enum:        []string{"agent", "shell", "reminder"},
@@ -67,11 +67,11 @@ func (t *CronCreateTool) Parameters() llm.FunctionParameters {
 				Type:        "string",
 				Description: "For agent jobs: the prompt/message to send to the agent.",
 			},
-			"command": {
+			schemaPropCommand: {
 				Type:        "string",
 				Description: "For shell jobs: the shell command to execute.",
 			},
-			"message": {
+			schemaPropMessage: {
 				Type:        "string",
 				Description: "For reminder jobs: the reminder message to send.",
 			},
@@ -93,7 +93,7 @@ func (t *CronCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	if t.sched == nil {
 		return CronCreateResult{
 			Success: false,
-			Error:   "scheduler not available",
+			Error:   errSchedulerNotAvailable,
 		}, nil
 	}
 

@@ -10,7 +10,7 @@ import (
 )
 
 // VizTickMsg signals a visualization frame update.
-type VizTickMsg struct{}
+type VizTickMsg struct{} //nolint:revive // stutter with package name is intentional for API clarity
 
 // --- Typed event types for agent events (mirrors internal/agent/events.go) ---
 

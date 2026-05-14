@@ -98,8 +98,8 @@ func (d *AgentDefinition) HasTool(tool string) bool {
 }
 
 // HasCapability checks if the agent has a specific capability.
-func (d *AgentDefinition) HasCapability(cap string) bool {
-	return slices.Contains(d.Capabilities, cap)
+func (d *AgentDefinition) HasCapability(capability string) bool {
+	return slices.Contains(d.Capabilities, capability)
 }
 
 // HasSkill checks if the agent has access to a specific skill.

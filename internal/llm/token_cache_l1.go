@@ -188,8 +188,8 @@ func (c *L1Cache) Count() int {
 	return len(c.entries)
 }
 
-// l1InspectEntry is a lightweight result for inspection without the composite cache key.
-type l1InspectEntry struct {
+// L1InspectEntry is a lightweight result for inspection without the composite cache key.
+type L1InspectEntry struct {
 	ModelID    string
 	Response   *Response
 	CreatedAt  time.Time
@@ -200,11 +200,11 @@ type l1InspectEntry struct {
 
 // Inspect searches for entries matching the given prompt hash.
 // It scans all entries and returns those whose composite key contains the prompt hash.
-func (c *L1Cache) Inspect(promptHash string) []l1InspectEntry {
+func (c *L1Cache) Inspect(promptHash string) []L1InspectEntry {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	var results []l1InspectEntry
+	var results []L1InspectEntry
 	for _, entry := range c.entries {
 		// The composite key format is: modelID:promptHash[:fileHashSuffix]
 		// Check if this entry's key contains the prompt hash
@@ -220,7 +220,7 @@ func (c *L1Cache) Inspect(promptHash string) []l1InspectEntry {
 		if idx := strings.Index(entry.Key, ":"); idx >= 0 {
 			modelID = entry.Key[:idx]
 		}
-		results = append(results, l1InspectEntry{
+		results = append(results, L1InspectEntry{
 			ModelID:    modelID,
 			Response:   entry.Entry.Response,
 			CreatedAt:  entry.Entry.CreatedAt,

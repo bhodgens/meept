@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // sqlite3 driver registration
 )
 
 // Ensure implementations satisfy interfaces
@@ -39,7 +39,7 @@ type SQLiteTrainingStore struct {
 // NewSQLiteTrainingStore creates a new training store.
 func NewSQLiteTrainingStore(dbPath string) (*SQLiteTrainingStore, error) {
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -526,7 +526,7 @@ func (s *SQLiteTrainingStore) scanRecord(row *sql.Row) (*ShadowRecord, error) {
 	}
 
 	record.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	record.SetMessagesFromJSON(messagesJSON)
+	_ = record.SetMessagesFromJSON(messagesJSON)
 	record.TeacherModel = teacherModel.String
 	record.TeacherContent = teacherContent.String
 	record.Preference = Preference(preference)
@@ -555,7 +555,7 @@ func (s *SQLiteTrainingStore) scanRecordRow(rows *sql.Rows) (*ShadowRecord, erro
 	}
 
 	record.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	record.SetMessagesFromJSON(messagesJSON)
+	_ = record.SetMessagesFromJSON(messagesJSON)
 	record.TeacherModel = teacherModel.String
 	record.TeacherContent = teacherContent.String
 	record.Preference = Preference(preference)
@@ -584,7 +584,7 @@ func (s *SQLiteTrainingStore) scanPair(row *sql.Row) (*PreferencePair, error) {
 		return nil, err
 	}
 
-	pair.SetPromptFromJSON(promptJSON)
+	_ = pair.SetPromptFromJSON(promptJSON)
 	if exportedAt.Valid {
 		t, _ := time.Parse(time.RFC3339, exportedAt.String)
 		pair.ExportedAt = &t
@@ -608,7 +608,7 @@ func (s *SQLiteTrainingStore) scanPairRow(rows *sql.Rows) (*PreferencePair, erro
 		return nil, err
 	}
 
-	pair.SetPromptFromJSON(promptJSON)
+	_ = pair.SetPromptFromJSON(promptJSON)
 	if exportedAt.Valid {
 		t, _ := time.Parse(time.RFC3339, exportedAt.String)
 		pair.ExportedAt = &t
@@ -632,7 +632,7 @@ func (s *SQLiteTrainingStore) RecordTeacherUsage(ctx context.Context, queries in
 }
 
 // GetTeacherUsageToday returns today's teacher usage.
-func (s *SQLiteTrainingStore) GetTeacherUsageToday(ctx context.Context) (int, float64, error) {
+func (s *SQLiteTrainingStore) GetTeacherUsageToday(ctx context.Context) (n int, f float64, err error) {
 	today := time.Now().UTC().Format("2006-01-02")
 	var queries int
 	var cost float64
@@ -640,7 +640,7 @@ func (s *SQLiteTrainingStore) GetTeacherUsageToday(ctx context.Context) (int, fl
 		"SELECT COALESCE(teacher_queries, 0), COALESCE(teacher_cost, 0) FROM daily_usage WHERE date = ?",
 		today,
 	)
-	err := row.Scan(&queries, &cost)
+	err = row.Scan(&queries, &cost)
 	if err == sql.ErrNoRows {
 		return 0, 0, nil
 	}
@@ -655,7 +655,7 @@ type SQLiteExamplesStore struct {
 // NewSQLiteExamplesStore creates a new examples store.
 func NewSQLiteExamplesStore(dbPath string) (*SQLiteExamplesStore, error) {
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -1061,7 +1061,7 @@ type SQLiteAdaptersStore struct {
 // NewSQLiteAdaptersStore creates a new adapters store.
 func NewSQLiteAdaptersStore(dbPath string) (*SQLiteAdaptersStore, error) {
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 

@@ -40,9 +40,9 @@ Common query names available: functions, classes, imports, strings, comments`
 
 func (t *ASTQueryTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"file_path": {
+			SchemaPropFilePath: {
 				Type:        "string",
 				Description: "Path to the source file to query.",
 			},
@@ -54,7 +54,7 @@ func (t *ASTQueryTool) Parameters() llm.FunctionParameters {
 				Type:        "string",
 				Description: "Use a predefined query: functions, classes, imports, strings, comments.",
 			},
-			"language": {
+			SchemaPropLanguage: {
 				Type:        "string",
 				Description: "Override language detection (go, python, typescript, etc.).",
 			},

@@ -88,7 +88,7 @@ func (fm *FuzzyMatcher) Match(query string) []FuzzyMatch {
 
 // score calculates a fuzzy match score for an item against a query.
 // Returns 0 if no match, otherwise a positive score and matched indices.
-func (fm *FuzzyMatcher) score(item fuzzyItem, query string) (float64, []int) {
+func (fm *FuzzyMatcher) score(item fuzzyItem, query string) (f float64, n []int) {
 	// Strategy 1: Exact substring match (highest priority)
 	if idx := strings.Index(item.lower, query); idx >= 0 {
 		indices := make([]int, len(query))

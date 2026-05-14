@@ -78,10 +78,10 @@ func NewLaunchAgentController() (*LaunchAgentController, error) {
 	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
 
 	// Ensure directories exist
-	if err := os.MkdirAll(meeptDir, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
+	if err := os.MkdirAll(meeptDir, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		return nil, fmt.Errorf("failed to create meept directory: %w", err)
 	}
-	if err := os.MkdirAll(launchAgentsDir, 0700); err != nil {
+	if err := os.MkdirAll(launchAgentsDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create LaunchAgents directory: %w", err)
 	}
 
@@ -89,7 +89,7 @@ func NewLaunchAgentController() (*LaunchAgentController, error) {
 	daemonPath, err := findDaemonBinary()
 	if err != nil {
 		// Use a default path if not found
-		daemonPath = filepath.Join("/usr/local", "bin", "meept-daemon")
+		daemonPath = "/usr/local/bin/meept-daemon"
 	}
 
 	return &LaunchAgentController{
@@ -144,7 +144,7 @@ func (c *LaunchAgentController) generatePlist() string {
 // ensurePlistFile writes the plist file if it doesn't exist.
 func (c *LaunchAgentController) ensurePlistFile() error {
 	content := c.generatePlist()
-	return os.WriteFile(c.plistPath, []byte(content), 0644) //nolint:gosec // workspace plan/data files are user-readable
+	return os.WriteFile(c.plistPath, []byte(content), 0o644) //nolint:gosec // workspace plan/data files are user-readable
 }
 
 // IsLoaded checks if the launchd agent is currently loaded.

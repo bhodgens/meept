@@ -471,7 +471,7 @@ func TestMemorySearch_NoQuery(t *testing.T) {
 
 func TestMemorySearch_NotConfigured(t *testing.T) {
 	s := newTestServer()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/memory/search?q=test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memory/search?q=test", http.NoBody)
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
@@ -488,7 +488,7 @@ func TestMemorySearch_WithSearcher(t *testing.T) {
 		},
 	}
 	s := newTestServer(WithMemorySearcher(ms))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/memory/search?q=test&limit=5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/memory/search?q=test&limit=5", http.NoBody)
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
@@ -585,7 +585,7 @@ func TestSkillsList_TagFilter(t *testing.T) {
 		},
 	}
 	s := newTestServer(WithSkillsLister(sl))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/skills?tags=code", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/skills?tags=code", http.NoBody)
 	w := httptest.NewRecorder()
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
@@ -770,7 +770,7 @@ func TestAuth_Unauthorized(t *testing.T) {
 	s.setupRoutes(mux)
 	wrapped := s.middleware(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", http.NoBody)
 	w := httptest.NewRecorder()
 	wrapped.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
@@ -787,7 +787,7 @@ func TestAuth_Authorized(t *testing.T) {
 	s.setupRoutes(mux)
 	wrapped := s.middleware(mux)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/status", http.NoBody)
 	req.Header.Set("Authorization", "Bearer valid-token")
 	w := httptest.NewRecorder()
 	wrapped.ServeHTTP(w, req)

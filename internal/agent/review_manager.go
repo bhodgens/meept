@@ -252,7 +252,7 @@ func (rm *ReviewManager) parseReviewResult(output string) *ReviewResult {
 	}
 
 	// Extract feedback from non-JSON parts if needed
-	if result.Feedback == "No explicit feedback provided" && len(output) > 0 {
+	if result.Feedback == "No explicit feedback provided" && output != "" {
 		feedback := output
 		if jsonStr != "" {
 			feedback = strings.ReplaceAll(output, jsonStr, "")
@@ -317,7 +317,7 @@ func (rm *ReviewManager) extractReviewJSON(output string) string {
 
 // analyzeReviewText performs text analysis to determine review status.
 // It uses phrase matching to avoid false positives from negations.
-func (rm *ReviewManager) analyzeReviewText(output string) (ReviewStatus, float64) {
+func (rm *ReviewManager) analyzeReviewText(output string) (result ReviewStatus, f float64) {
 	lower := strings.ToLower(output)
 
 	// Check for explicit rejection phrases (high confidence)
@@ -473,8 +473,8 @@ func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *Revie
 	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "review-manager", map[string]any{
-		"step_id":        stepID,
-		"task_id":        taskID,
+		KeyStepID:        stepID,
+		KeyTaskID:        taskID,
 		"status":         string(result.Status),
 		"feedback":       result.Feedback,
 		"confidence":     result.Confidence,
@@ -523,7 +523,7 @@ func (rm *ReviewManager) ValidateCompletion(ctx context.Context, step *task.Task
 	}
 
 	// Check 2: Evidence was provided (if applicable)
-	if step.ToolHint == "code" || step.ToolHint == "refactor" || step.ToolHint == "fix" {
+	if step.ToolHint == string(IntentCode) || step.ToolHint == "refactor" || step.ToolHint == "fix" {
 		if len(step.Evidence) == 0 && len(step.Claims) == 0 {
 			return &ValidationResult{
 				Status:   CompletionPartial,
@@ -600,9 +600,9 @@ func (rm *ReviewManager) ValidateCompletion(ctx context.Context, step *task.Task
 
 // checkClaimsAgainstDescription compares step claims against the step description
 // to verify the stated work was completed.
-func (rm *ReviewManager) checkClaimsAgainstDescription(step *task.TaskStep) ([]string, []string) {
-	var verified []string
-	var missing []string
+func (rm *ReviewManager) checkClaimsAgainstDescription(step *task.TaskStep) (verified, missing []string) {
+	verified = nil
+	missing = nil
 
 	descLower := strings.ToLower(step.Description)
 

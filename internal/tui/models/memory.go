@@ -382,7 +382,7 @@ func (m *MemoryModel) renderDetail(width int) string {
 	// Word-wrap content
 	contentText := item.Content
 	maxWidth := width - 8
-	if maxWidth > 0 && len(contentText) > 0 {
+	if maxWidth > 0 && contentText != "" {
 		contentText = wrapText(contentText, maxWidth)
 	}
 	content += valueStyle.Render(contentText)

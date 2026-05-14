@@ -60,18 +60,6 @@ func (m *mockTransformContextHook) TransformContext(_ context.Context, msgs []ll
 	}
 }
 
-// mockPrepareNextTurnHook is a test hook for PrepareNextTurn.
-type mockPrepareNextTurnHook struct {
-	modified bool
-	reason   string
-	called   bool
-}
-
-func (m *mockPrepareNextTurnHook) PrepareNextTurn(_ context.Context, _ TurnState) TurnModification {
-	m.called = true
-	return TurnModification{Modified: m.modified, Reason: m.reason}
-}
-
 func TestHookRegistry_Empty(t *testing.T) {
 	reg := NewHookRegistry(nil)
 

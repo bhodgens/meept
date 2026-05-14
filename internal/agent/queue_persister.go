@@ -191,22 +191,23 @@ func (p *QueuePersister) flushLockedHeld() {
 // flushPending writes messages to SQLite, re-enqueuing failures.
 func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 	for _, msg := range pending {
-		if err := p.PersistSync(msg); err != nil {
-			// Re-enqueue on failure so it gets retried on next flush.
-			p.mu.Lock()
-			p.pending = append(p.pending, msg)
-			p.mu.Unlock()
-
-			// Restart the timer for a retry.
-			if !p.flushTimer.Stop() {
-				select {
-				case <-p.flushTimer.C:
-				default:
-				}
-			}
-			p.flushTimer.Reset(p.flushDelay)
-			break
+		if err := p.PersistSync(msg); err == nil {
+			continue
 		}
+		// Re-enqueue on failure so it gets retried on next flush.
+		p.mu.Lock()
+		p.pending = append(p.pending, msg)
+		p.mu.Unlock()
+
+		// Restart the timer for a retry.
+		if !p.flushTimer.Stop() {
+			select {
+			case <-p.flushTimer.C:
+			default:
+			}
+		}
+		p.flushTimer.Reset(p.flushDelay)
+		break
 	}
 }
 

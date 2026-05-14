@@ -70,7 +70,7 @@ func DefaultKeymap() *Keymap {
 }
 
 // VimConfig holds vim configuration options.
-type VimConfig struct {
+type VimConfig struct { //nolint:revive // stutter with package name is intentional for API clarity
 	Enabled        bool              `json:"enabled"`
 	EscapeInsert   string            `json:"escape_insert"`   // e.g., "jk" or "jj"
 	Leader         string            `json:"leader"`          // Default: " "

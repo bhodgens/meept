@@ -30,7 +30,7 @@ func setupTestScheduler(t *testing.T) (*Scheduler, *RPCHandler) {
 	}
 
 	t.Cleanup(func() {
-		s.Stop(ctx)
+		_ = s.Stop(ctx)
 	})
 
 	handler := NewRPCHandler(s)
@@ -156,7 +156,7 @@ func TestRPCRemoveJob(t *testing.T) {
 			Message: "Test",
 		},
 	}
-	scheduler.ScheduleConfig(jobCfg)
+	_, _ = scheduler.ScheduleConfig(jobCfg)
 
 	// Remove it
 	params := RemoveJobParams{JobID: "remove-test"}
@@ -204,7 +204,7 @@ func TestRPCListJobs(t *testing.T) {
 
 	// Add jobs
 	for i := range 3 {
-		scheduler.ScheduleConfig(JobConfig{
+		_, _ = scheduler.ScheduleConfig(JobConfig{
 			ID:       string(rune('a' + i)),
 			Name:     "Job",
 			Type:     JobTypeReminder,
@@ -233,7 +233,7 @@ func TestRPCListJobsWithFilters(t *testing.T) {
 	ctx := context.Background()
 
 	// Add mixed jobs
-	scheduler.ScheduleConfig(JobConfig{
+	_, _ = scheduler.ScheduleConfig(JobConfig{
 		ID:       "reminder-1",
 		Name:     "Reminder 1",
 		Type:     JobTypeReminder,
@@ -244,7 +244,7 @@ func TestRPCListJobsWithFilters(t *testing.T) {
 			Message: "Test",
 		},
 	})
-	scheduler.ScheduleConfig(JobConfig{
+	_, _ = scheduler.ScheduleConfig(JobConfig{
 		ID:       "shell-1",
 		Name:     "Shell 1",
 		Type:     JobTypeShell,
@@ -275,7 +275,7 @@ func TestRPCRunJob(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a job
-	scheduler.ScheduleConfig(JobConfig{
+	_, _ = scheduler.ScheduleConfig(JobConfig{
 		ID:       "run-test",
 		Name:     "Run Test",
 		Type:     JobTypeShell,
@@ -316,7 +316,7 @@ func TestRPCGetJob(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a job
-	scheduler.ScheduleConfig(JobConfig{
+	_, _ = scheduler.ScheduleConfig(JobConfig{
 		ID:       "get-test",
 		Name:     "Get Test",
 		Type:     JobTypeReminder,
@@ -359,7 +359,7 @@ func TestRPCPauseResumeJob(t *testing.T) {
 	ctx := context.Background()
 
 	// Add a job
-	scheduler.ScheduleConfig(JobConfig{
+	_, _ = scheduler.ScheduleConfig(JobConfig{
 		ID:       "pause-test",
 		Name:     "Pause Test",
 		Type:     JobTypeReminder,
@@ -449,7 +449,7 @@ func TestRPCStatus(t *testing.T) {
 	ctx := context.Background()
 
 	// Add some jobs
-	scheduler.ScheduleConfig(JobConfig{
+	_, _ = scheduler.ScheduleConfig(JobConfig{
 		ID:       "status-1",
 		Name:     "Status 1",
 		Type:     JobTypeReminder,
@@ -459,7 +459,7 @@ func TestRPCStatus(t *testing.T) {
 			Message: "Test",
 		},
 	})
-	scheduler.ScheduleConfig(JobConfig{
+	_, _ = scheduler.ScheduleConfig(JobConfig{
 		ID:       "status-2",
 		Name:     "Status 2",
 		Type:     JobTypeReminder,
@@ -471,7 +471,7 @@ func TestRPCStatus(t *testing.T) {
 	})
 
 	// Pause one
-	scheduler.PauseJob("status-2")
+	_ = scheduler.PauseJob("status-2")
 
 	result, err := handler.Status(ctx, nil)
 	if err != nil {

@@ -565,7 +565,7 @@ func hasAnyTag(skillTags, requestedTags []string) bool {
 }
 
 // parseLimit parses a limit string and clamps it to the given max.
-func parseLimit(s string, max int) (int, error) {
+func parseLimit(s string, maxVal int) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil {
 		return 0, err
@@ -573,8 +573,8 @@ func parseLimit(s string, max int) (int, error) {
 	if n < 1 {
 		n = 1
 	}
-	if n > max {
-		n = max
+	if n > maxVal {
+		n = maxVal
 	}
 	return n, nil
 }

@@ -111,17 +111,17 @@ type toolCallSignature struct {
 }
 
 // newCycleDetector creates a new cycle detector.
-func newCycleDetector(config DetectionConfig, logger *slog.Logger) *cycleDetector {
+func newCycleDetector(detCfg DetectionConfig, logger *slog.Logger) *cycleDetector {
 	return &cycleDetector{
-		history: make([]toolCallSignature, 0, config.HistorySize),
-		config:  config,
+		history: make([]toolCallSignature, 0, detCfg.HistorySize),
+		config:  detCfg,
 		logger:  logger,
 	}
 }
 
 // recordCall records a tool call and checks for cycles.
 // Returns true if a cycle was detected.
-func (cd *cycleDetector) recordCall(tool string, argsJSON string) bool {
+func (cd *cycleDetector) recordCall(tool, argsJSON string) bool {
 	cd.mu.Lock()
 	defer cd.mu.Unlock()
 
@@ -192,10 +192,10 @@ type responseSignature struct {
 }
 
 // newConvergenceDetector creates a new convergence detector.
-func newConvergenceDetector(config DetectionConfig, logger *slog.Logger) *convergenceDetector {
+func newConvergenceDetector(detCfg DetectionConfig, logger *slog.Logger) *convergenceDetector {
 	return &convergenceDetector{
-		history: make([]responseSignature, 0, config.HistorySize),
-		config:  config,
+		history: make([]responseSignature, 0, detCfg.HistorySize),
+		config:  detCfg,
 		logger:  logger,
 	}
 }
@@ -364,18 +364,6 @@ func DefaultAgentConfig() AgentConfig {
 	}
 }
 
-// shouldAutoInject returns true if memory context should be auto-injected before LLM calls.
-func (l *AgentLoop) shouldAutoInject() bool {
-	mode := l.config.Memory.RecallMode
-	return mode == RecallModeAuto || mode == RecallModeHybrid
-}
-
-// shouldFetchOnQuery returns true if memory should be fetched when agent calls memory tools.
-func (l *AgentLoop) shouldFetchOnQuery() bool {
-	mode := l.config.Memory.RecallMode
-	return mode == RecallModeOnQuery || mode == RecallModeHybrid
-}
-
 // AgentLoop orchestrates LLM reasoning interleaved with tool execution.
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentLoop struct {
@@ -466,6 +454,18 @@ type AgentLoop struct {
 
 	// Branch navigation (coordinated with in-memory ConversationStore)
 	branchManager *session.BranchManager
+}
+
+// shouldAutoInject returns true if memory context should be auto-injected before LLM calls.
+func (l *AgentLoop) shouldAutoInject() bool {
+	mode := l.config.Memory.RecallMode
+	return mode == RecallModeAuto || mode == RecallModeHybrid
+}
+
+// shouldFetchOnQuery returns true if memory should be fetched when agent calls memory tools.
+func (l *AgentLoop) shouldFetchOnQuery() bool {
+	mode := l.config.Memory.RecallMode
+	return mode == RecallModeOnQuery || mode == RecallModeHybrid
 }
 
 // LearningPipeline is the interface for the learning pipeline.
@@ -606,9 +606,9 @@ func WithLoopLogger(logger *slog.Logger) LoopOption {
 }
 
 // WithAgentConfig sets the agent configuration.
-func WithAgentConfig(config AgentConfig) LoopOption {
+func WithAgentConfig(agentCfg AgentConfig) LoopOption {
 	return func(l *AgentLoop) {
-		l.config = config
+		l.config = agentCfg
 	}
 }
 
@@ -1577,7 +1577,7 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 // injected as the system prompt, and if the skill declares allowed-tools,
 // the tool registry is filtered to only include those tools for the duration
 // of execution.
-func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input string, conversationID string) (string, error) {
+func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input, conversationID string) (string, error) {
 	if skill == nil {
 		return "", ErrNoSkill
 	}
@@ -1662,7 +1662,7 @@ func (l *AgentLoop) RunWithSkill(ctx context.Context, skill *skills.Skill, input
 }
 
 // triggerLearning runs the JUDGE/DISTILL learning pipeline asynchronously.
-func (l *AgentLoop) triggerLearning(ctx context.Context, conv *Conversation, conversationID string, response string) {
+func (l *AgentLoop) triggerLearning(ctx context.Context, conv *Conversation, conversationID, response string) {
 	// Build trajectory from conversation
 	trajectory := l.buildTrajectory(conv, conversationID, response)
 	if len(trajectory.Steps) == 0 {
@@ -1708,7 +1708,7 @@ func (l *AgentLoop) triggerLearning(ctx context.Context, conv *Conversation, con
 }
 
 // buildTrajectory constructs a trajectory from the conversation history.
-func (l *AgentLoop) buildTrajectory(conv *Conversation, conversationID string, response string) Trajectory {
+func (l *AgentLoop) buildTrajectory(conv *Conversation, conversationID, _ string) Trajectory {
 	messages := conv.GetMessages()
 
 	trajectory := Trajectory{
@@ -2983,8 +2983,8 @@ func (l *AgentLoop) recordTaskExecution(ctx context.Context, t *task.Task, respo
 	)
 
 	metadata := map[string]any{
-		"task_id":   t.ID,
-		"agent_id":  l.agentID,
+		KeyTaskID:   t.ID,
+		KeyAgentID:  l.agentID,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -3148,8 +3148,8 @@ func containsAnyKeyword(text string, keywords []string) bool {
 // When recall mode is "disabled", these tools are gated and return an error.
 var memoryToolNames = map[string]bool{
 	"memory_store":               true,
-	"memory_search":              true,
-	"memory_get_context":         true,
+	ToolMemorySearch:              true,
+	ToolMemoryGetContext:         true,
 	"memory_get_version":         true,
 	"memory_get_version_history": true,
 }
@@ -3358,7 +3358,7 @@ func (l *AgentLoop) publishAction(conversationID string, iteration int, toolCall
 	}
 
 	payload := map[string]any{
-		"conversation_id": conversationID,
+		KeyConversationID: conversationID,
 		"iteration":       iteration,
 		"tool_calls":      calls,
 	}
@@ -3390,7 +3390,7 @@ func (l *AgentLoop) publishResult(conversationID string, iteration int, results 
 	}
 
 	payload := map[string]any{
-		"conversation_id": conversationID,
+		KeyConversationID: conversationID,
 		"iteration":       iteration,
 		"results":         resultsData,
 	}
@@ -3407,53 +3407,13 @@ func (l *AgentLoop) publishResult(conversationID string, iteration int, results 
 // Deprecated: Use EventEmitter with AgentEvent* types instead.
 // The emitter bridge publishes to the same legacy bus topics.
 // This method exists only for backward-compatible tests.
-func (l *AgentLoop) publishProgress(conversationID string, iteration int, stage string, detail string, tokenCount int) {
-	// Skip if progress disabled or no bus
-	if !l.progressEnabled || l.bus == nil {
-		l.logger.Debug("Progress skipped", "enabled", l.progressEnabled, "bus_nil", l.bus == nil)
-		return
-	}
-
-	l.logger.Info("Publishing progress event",
-		"conversation", conversationID,
-		"iteration", iteration,
-		"stage", stage,
-		"detail", detail,
-		"tokens", tokenCount,
-	)
-
-	payload := map[string]any{
-		"conversation_id": conversationID,
-		"iteration":       iteration,
-		"stage":           stage,
-		"detail":          detail,
-		"token_count":     tokenCount,
-		"timestamp":       time.Now().UTC().Format(time.RFC3339),
-	}
-
-	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
-	if err != nil {
-		l.logger.Warn("Failed to create progress bus message", "error", err)
-		return
-	}
-
-	// Publish - don't care if nobody is listening
-	delivered := l.bus.Publish("agent.progress", msg)
-	if delivered == 0 {
-		l.logger.Debug("Progress event published (no subscribers)", "stage", stage)
-	}
-}
-
-// Deprecated: Use EventEmitter with AgentEvent* types instead.
-// The emitter bridge publishes to the same legacy bus topics.
-// This method exists only for backward-compatible tests.
 func (l *AgentLoop) publishTokenUsage(conversationID string, totalTokens int) {
 	if l.bus == nil {
 		return
 	}
 
 	payload := map[string]any{
-		"conversation_id": conversationID,
+		KeyConversationID: conversationID,
 		"total_tokens":    totalTokens,
 	}
 
@@ -3480,7 +3440,7 @@ func (l *AgentLoop) publishSteeringInjected(conversationID string, msgs []Queued
 		messageIDs = append(messageIDs, m.ID)
 	}
 	payload := map[string]any{
-		"conversation_id": conversationID,
+		KeyConversationID: conversationID,
 		"queue_type":      string(QueueTypeSteer),
 		"count":           len(msgs),
 		"message_ids":     messageIDs,
@@ -3504,7 +3464,7 @@ func (l *AgentLoop) publishFollowUpInjected(conversationID string, msgs []Queued
 		messageIDs = append(messageIDs, m.ID)
 	}
 	payload := map[string]any{
-		"conversation_id": conversationID,
+		KeyConversationID: conversationID,
 		"queue_type":      string(QueueTypeFollowUp),
 		"count":           len(msgs),
 		"message_ids":     messageIDs,
@@ -3523,8 +3483,8 @@ func (l *AgentLoop) publishIteration(conversationID string, iteration int) {
 		return
 	}
 	payload := map[string]any{
-		"conversation_id": conversationID,
-		"agent_id":        l.agentID,
+		KeyConversationID: conversationID,
+		KeyAgentID:        l.agentID,
 		"iteration":       iteration,
 	}
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "agent", payload)
@@ -3546,10 +3506,10 @@ func (l *AgentLoop) ClearConversation(id string) {
 }
 
 // SetConfig updates the agent configuration.
-func (l *AgentLoop) SetConfig(config AgentConfig) {
+func (l *AgentLoop) SetConfig(agentCfg AgentConfig) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.config = config
+	l.config = agentCfg
 }
 
 // GetConfig returns the current configuration.
@@ -3722,7 +3682,7 @@ func (l *AgentLoop) emitSafeWithFields(ctx context.Context, event AgentEvent) {
 }
 
 // emitTurnEnd emits a typed turn end event with standard fields.
-func (l *AgentLoop) emitTurnEnd(ctx context.Context, conversationID string, iteration int, hadToolCalls bool, toolCallCount int, responseTokens int, turnStartTime time.Time) {
+func (l *AgentLoop) emitTurnEnd(ctx context.Context, conversationID string, iteration int, hadToolCalls bool, toolCallCount, responseTokens int, _ time.Time) {
 	stoppedBy := ""
 	if iteration >= l.config.MaxIterations {
 		stoppedBy = "max_iterations"

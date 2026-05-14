@@ -29,9 +29,9 @@ func (t *ScheduleCreateTool) Description() string {
 
 func (t *ScheduleCreateTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"name": {
+			schemaPropName: {
 				Type:        "string",
 				Description: "Human-readable name for the job.",
 			},
@@ -39,7 +39,7 @@ func (t *ScheduleCreateTool) Parameters() llm.FunctionParameters {
 				Type:        "string",
 				Description: "Cron expression for when to run the job (e.g., '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes). Supports 6-field cron with seconds.",
 			},
-			"job_type": {
+			schemaPropJobType: {
 				Type:        "string",
 				Description: "Type of job: agent (runs an agent prompt), shell (executes a shell command), reminder (sends a reminder message).",
 				Enum:        []string{"agent", "shell", "reminder"},
@@ -48,11 +48,11 @@ func (t *ScheduleCreateTool) Parameters() llm.FunctionParameters {
 				Type:        "string",
 				Description: "For agent jobs: the prompt/message to send to the agent.",
 			},
-			"command": {
+			schemaPropCommand: {
 				Type:        "string",
 				Description: "For shell jobs: the shell command to execute.",
 			},
-			"message": {
+			schemaPropMessage: {
 				Type:        "string",
 				Description: "For reminder jobs: the reminder message to send.",
 			},
@@ -85,7 +85,7 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 	if t.sched == nil {
 		return ScheduleCreateResult{
 			Success: false,
-			Error:   "scheduler not available",
+			Error:   errSchedulerNotAvailable,
 		}, nil
 	}
 

@@ -115,7 +115,7 @@ func (p *OpenAIProvider) GenerateEmbeddings(ctx context.Context, texts []string)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/embeddings", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/embeddings", http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -231,7 +231,7 @@ func (p *OllamaProvider) GenerateEmbedding(ctx context.Context, text string) ([]
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/embeddings", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/api/embeddings", http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -326,7 +326,7 @@ type stringReader struct {
 }
 
 func (r *stringReader) Read(p []byte) (int, error) {
-	if len(r.s) == 0 {
+	if r.s == "" {
 		return 0, io.EOF
 	}
 	n := copy(p, r.s)

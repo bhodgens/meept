@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -144,7 +145,7 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 // compactSplitTurn handles the case where the cut point lands mid-turn.
 // It produces two summaries (history + turn prefix) and merges them.
 // Both LLM calls share the overall timeout budget derived from ctx.
-func (c *ContextCompactor) compactSplitTurn(ctx context.Context, cut CutResult, timeout time.Duration) (string, error) {
+func (c *ContextCompactor) compactSplitTurn(ctx context.Context, cut CutResult, timeout time.Duration) (result string, err error) {
 	historyMessages := cut.ToCompact[:cut.SplitTurnIndex]
 	turnPrefixMessages := cut.ToCompact[cut.SplitTurnIndex:]
 
@@ -164,10 +165,7 @@ func (c *ContextCompactor) compactSplitTurn(ctx context.Context, cut CutResult, 
 	defer sharedCancel()
 
 	// Generate history summary (full structured summary of all messages before the split).
-	halfTimeout := timeout / 2
-	if halfTimeout < 5*time.Second {
-		halfTimeout = 5 * time.Second
-	}
+	halfTimeout := max(timeout/2, 5*time.Second)
 	historySummary, err := c.summarizeMessages(sharedCtx, historyMessages, halfTimeout)
 	if err != nil {
 		return "", fmt.Errorf("history summarization failed: %w", err)
@@ -178,10 +176,6 @@ func (c *ContextCompactor) compactSplitTurn(ctx context.Context, cut CutResult, 
 	turnPrefixSummary := ""
 	if turnPrefixText != "" {
 		prompt := c.buildTurnPrefixPrompt(turnPrefixText)
-		remaining := time.Until(deadline)
-		if remaining < 5*time.Second {
-			remaining = 5 * time.Second
-		}
 		sumCtx, cancel := context.WithDeadline(sharedCtx, deadline)
 		defer cancel()
 		resp, err := c.summarizer.Chat(sumCtx, []ChatMessage{{Role: RoleUser, Content: prompt}})
@@ -202,7 +196,7 @@ func (c *ContextCompactor) compactSplitTurn(ctx context.Context, cut CutResult, 
 
 // summarizeMessages is a helper that builds a prompt for the given messages
 // and calls the LLM summarizer.
-func (c *ContextCompactor) summarizeMessages(ctx context.Context, messages []ChatMessage, timeout time.Duration) (string, error) {
+func (c *ContextCompactor) summarizeMessages(ctx context.Context, messages []ChatMessage, timeout time.Duration) (result string, err error) {
 	conversationText := c.serializeMessages(messages)
 	if conversationText == "" {
 		return "", nil
@@ -248,7 +242,7 @@ func (c *ContextCompactor) findCutPoint(messages []ChatMessage) CutResult {
 
 	tokenCount := 0
 	cutIdx := len(nonSystem)
-	for i := len(nonSystem) - 1; i >= 0; i-- {
+	for i := range slices.Backward(nonSystem) {
 		msgTokens := c.tokenizer.CountTokens(nonSystem[i].Content)
 		if tokenCount+msgTokens > keepBudget && i < len(nonSystem)-1 { cutIdx = i + 1; break }
 		tokenCount += msgTokens
@@ -290,9 +284,9 @@ func (c *ContextCompactor) isSplitTurn(messages []ChatMessage, cutIdx int) bool 
 	return false
 }
 
-func (c *ContextCompactor) findSplitTurnBoundary(toCompact []ChatMessage) (bool, int) {
+func (c *ContextCompactor) findSplitTurnBoundary(toCompact []ChatMessage) (_ bool, _ int) {
 	if len(toCompact) == 0 { return false, -1 }
-	for i := len(toCompact) - 1; i >= 0; i-- {
+	for i := range slices.Backward(toCompact) {
 		msg := toCompact[i]
 		if msg.Role == RoleAssistant && len(msg.ToolCalls) > 0 {
 			hasResults := false

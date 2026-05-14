@@ -157,7 +157,7 @@ func writeModelsConfig(cfg *llm.ProvidersConfig) error {
 	}
 
 	configDir := filepath.Join(homeDir, ".meept")
-	if err := os.MkdirAll(configDir, 0700); err != nil {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return err
 	}
 
@@ -168,7 +168,7 @@ func writeModelsConfig(cfg *llm.ProvidersConfig) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0600)
+	return os.WriteFile(configPath, data, 0o600)
 }
 
 // newModelsListCmd creates the models list command
@@ -176,7 +176,7 @@ func newModelsListCmd() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List all configured models",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runModelsList(jsonOutput)
@@ -455,7 +455,7 @@ func newModelsCredRemoveCmd() *cobra.Command {
 
 func newModelsCredListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List stored credentials",
 		RunE:  runModelsCredList,
 	}

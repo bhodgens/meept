@@ -43,7 +43,7 @@ type StoreConfig struct {
 func NewStore(cfg StoreConfig) (*Store, error) {
 	// Expand home directory
 	dbPath := cfg.DBPath
-	if len(dbPath) > 0 && dbPath[0] == '~' {
+	if dbPath != "" && dbPath[0] == '~' {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get home directory: %w", err)
@@ -54,7 +54,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(dbPath)
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -231,7 +231,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]SearchRe
 }
 
 // getMemoryMetadata retrieves metadata and content for a memory.
-func (s *Store) getMemoryMetadata(memoryID string) (map[string]any, string, error) {
+func (s *Store) getMemoryMetadata(memoryID string) (metadata map[string]any, content string, err error) {
 	rows, err := s.db.Query(`
 		SELECT key, value FROM metadata WHERE memory_id = ?
 	`, memoryID)
@@ -240,8 +240,8 @@ func (s *Store) getMemoryMetadata(memoryID string) (map[string]any, string, erro
 	}
 	defer rows.Close()
 
-	metadata := make(map[string]any)
-	var content string
+	metadata = make(map[string]any)
+	content = ""
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {

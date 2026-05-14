@@ -180,7 +180,7 @@ func (s *mockServer) handleConn(conn net.Conn) {
 		}
 
 		respData, _ := json.Marshal(resp)
-		writer.WriteFrame(respData)
+		_ = writer.WriteFrame(respData)
 	}
 }
 
@@ -234,7 +234,7 @@ func (r *FrameReader) ReadRequest() (*Request, error) {
 	}
 
 	var length int
-	fmt.Sscanf(lengthStr.String(), "%d", &length)
+	_, _ = fmt.Sscanf(lengthStr.String(), "%d", &length)
 
 	// Read payload
 	payload := make([]byte, length)

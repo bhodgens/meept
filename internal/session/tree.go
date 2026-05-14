@@ -175,7 +175,7 @@ func LoadToolCallsForMessages(store Store, messages []Message) (map[int64][]Tool
 		ids = append(ids, m.ID)
 	}
 	if len(ids) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // empty message set has no tool calls; callers handle nil map
 	}
 	return store.GetToolCallsForMessages(ids)
 }

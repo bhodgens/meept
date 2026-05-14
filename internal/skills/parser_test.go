@@ -244,7 +244,7 @@ This skill was loaded from a file.
 `
 	skillPath := filepath.Join(tmpDir, "test-skill.md")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(skillPath, []byte(skillContent), 0644); err != nil {
+	if err := os.WriteFile(skillPath, []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write skill file: %v", err)
 	}
 

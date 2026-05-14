@@ -65,7 +65,7 @@ func (w *WorkspaceManager) Create(ctx context.Context, taskID, description strin
 	defer w.mu.Unlock()
 
 	workspace := filepath.Join(w.baseDir, taskID)
-	if err := os.MkdirAll(workspace, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
+	if err := os.MkdirAll(workspace, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		return "", fmt.Errorf("failed to create workspace directory: %w", err)
 	}
 
@@ -80,7 +80,7 @@ func (w *WorkspaceManager) Create(ctx context.Context, taskID, description strin
 	readme := filepath.Join(workspace, "README.md")
 	content := fmt.Sprintf("# Task: %s\n\n%s\n\nCreated: %s\n",
 		taskID, description, time.Now().UTC().Format(time.RFC3339))
-	if err := os.WriteFile(readme, []byte(content), 0644); err != nil { //nolint:gosec // workspace plan/data files are user-readable
+	if err := os.WriteFile(readme, []byte(content), 0o644); err != nil { //nolint:gosec // workspace plan/data files are user-readable
 		return "", fmt.Errorf("failed to write README: %w", err)
 	}
 
@@ -164,7 +164,7 @@ func (w *WorkspaceManager) WritePlan(ctx context.Context, taskID string, plan Ta
 	sb.WriteString("\n")
 
 	planPath := filepath.Join(workspace, "PLAN.md")
-	if err := os.WriteFile(planPath, []byte(sb.String()), 0644); err != nil { //nolint:gosec // workspace plan/data files are user-readable
+	if err := os.WriteFile(planPath, []byte(sb.String()), 0o644); err != nil { //nolint:gosec // workspace plan/data files are user-readable
 		return "", fmt.Errorf("failed to write PLAN.md: %w", err)
 	}
 
@@ -190,7 +190,7 @@ func (w *WorkspaceManager) WriteReview(ctx context.Context, taskID, analysis str
 		analysis, time.Now().UTC().Format(time.RFC3339))
 
 	reviewPath := filepath.Join(workspace, "REVIEW.md")
-	if err := os.WriteFile(reviewPath, []byte(content), 0644); err != nil { //nolint:gosec // workspace plan/data files are user-readable
+	if err := os.WriteFile(reviewPath, []byte(content), 0o644); err != nil { //nolint:gosec // workspace plan/data files are user-readable
 		return "", fmt.Errorf("failed to write REVIEW.md: %w", err)
 	}
 
@@ -213,7 +213,7 @@ func (w *WorkspaceManager) AppendLog(ctx context.Context, taskID, entry string) 
 	}
 
 	logPath := filepath.Join(workspace, "LOG.md")
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // workspace plan/data files are user-readable
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // workspace plan/data files are user-readable
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ func (w *WorkspaceManager) Cleanup(taskID string) error {
 }
 
 // gitCmd runs a git command in the workspace and returns (success, output).
-func (w *WorkspaceManager) gitCmd(ctx context.Context, workspace string, args ...string) (bool, string) {
+func (w *WorkspaceManager) gitCmd(ctx context.Context, workspace string, args ...string) (ok bool, result string) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = workspace
 
@@ -309,7 +309,7 @@ func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label s
 
 	// Create checkpoints directory
 	checkpointDir := filepath.Join(workspace, "checkpoints", label)
-	if err := os.MkdirAll(checkpointDir, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
+	if err := os.MkdirAll(checkpointDir, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		w.logger.Warn("Failed to create checkpoint directory",
 			"task_id", taskID,
 			"label", label,
@@ -331,7 +331,7 @@ func (w *WorkspaceManager) CreateCheckpoint(ctx context.Context, taskID, label s
 	}
 	metadataPath := filepath.Join(checkpointDir, "checkpoint.json")
 	data, _ := json.MarshalIndent(metadata, "", "  ")
-	if err := os.WriteFile(metadataPath, data, 0644); err != nil { //nolint:gosec // workspace plan/data files are user-readable
+	if err := os.WriteFile(metadataPath, data, 0o644); err != nil { //nolint:gosec // workspace plan/data files are user-readable
 		w.logger.Warn("Failed to write checkpoint metadata", "error", err)
 	}
 

@@ -289,7 +289,7 @@ func sinApprox(x float64) float64 {
 }
 
 func cosApprox(x float64) float64 {
-	return sinApprox(x + 1.5708) // cos(x) = sin(x + π/2)
+	return sinApprox(x + 1.5708) //nolint:gocritic // cos(x) = sin(x + pi/2), mathematical identity
 }
 
 // Render converts the canvas to a string of Braille characters with ANSI colors.

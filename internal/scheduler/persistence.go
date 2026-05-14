@@ -41,7 +41,7 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	// Expand ~ in path
-	if len(dataDir) > 0 && dataDir[0] == '~' {
+	if dataDir != "" && dataDir[0] == '~' {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return nil, fmt.Errorf("failed to expand home directory: %w", err)
@@ -50,7 +50,7 @@ func NewStore(dataDir string) (*Store, error) {
 	}
 
 	// Ensure directory exists
-	if err := os.MkdirAll(dataDir, 0700); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
@@ -128,7 +128,7 @@ func (s *Store) saveUnlocked(jobs []JobConfig) error {
 
 	// Write to temp file first (atomic write)
 	tempFile := s.filePath + ".tmp"
-	if err := os.WriteFile(tempFile, data, 0600); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 

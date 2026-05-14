@@ -313,7 +313,7 @@ func TestArtifactManager(t *testing.T) {
 		"This is a simple architecture.",
 	}, "\n")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(claudeMDPath, []byte(claudeMDContent), 0644); err != nil {
+	if err := os.WriteFile(claudeMDPath, []byte(claudeMDContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -395,7 +395,7 @@ func TestArtifactScanner(t *testing.T) {
 		"```",
 	}, "\n")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(claudeMDPath, []byte(claudeMDContent), 0644); err != nil {
+	if err := os.WriteFile(claudeMDPath, []byte(claudeMDContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

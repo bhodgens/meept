@@ -54,7 +54,7 @@ func (b *MemvidConsolidationBackend) GetExpiredMemories(_ context.Context, _ int
 	return nil, fmt.Errorf("access-based expiration not supported by memvid backend")
 }
 
-func (b *MemvidConsolidationBackend) StoreSummary(ctx context.Context, content string, category string, metadata map[string]any) (string, error) {
+func (b *MemvidConsolidationBackend) StoreSummary(ctx context.Context, content, category string, metadata map[string]any) (string, error) {
 	if metadata == nil {
 		metadata = make(map[string]any)
 	}

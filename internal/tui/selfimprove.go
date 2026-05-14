@@ -103,9 +103,11 @@ func (p *SelfImprovePanel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "a":
-			return p, p.approveCurrent()
+			cmd := p.approveCurrent()
+			return p, cmd
 		case "r":
-			return p, p.rejectCurrent()
+			cmd := p.rejectCurrent()
+			return p, cmd
 		case "j", "down":
 			if p.selectedIdx < len(p.pendingFixes)-1 {
 				p.selectedIdx++
@@ -117,11 +119,13 @@ func (p *SelfImprovePanel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "R":
 			// Refresh
 			p.loading = true
-			return p, p.fetchPending()
+			cmd := p.fetchPending()
+			return p, cmd
 		}
 	case actionResultMsg:
 		p.lastAction = msg.desc
-		return p, p.fetchPending()
+		cmd := p.fetchPending()
+		return p, cmd
 	}
 	return p, nil
 }

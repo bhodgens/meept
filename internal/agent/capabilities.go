@@ -46,9 +46,8 @@ func (ac *AgentCapabilities) HasTag(tag string) bool {
 
 // HasIntentType checks if the agent handles a specific intent type.
 func (ac *AgentCapabilities) HasIntentType(intentType string) bool {
-	intentLower := strings.ToLower(intentType)
 	for _, it := range ac.IntentTypes {
-		if strings.ToLower(it) == intentLower {
+		if strings.EqualFold(it, intentType) {
 			return true
 		}
 	}

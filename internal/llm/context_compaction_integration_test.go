@@ -49,7 +49,8 @@ Investigated the issue and found root cause
 // makeIntegrationMessages builds a message list with enough tokens to exceed
 // a given utilization threshold for a model with the given context limit.
 func makeIntegrationMessages(pairs int) []ChatMessage {
-	msgs := []ChatMessage{{Role: RoleSystem, Content: "system prompt"}}
+	msgs := make([]ChatMessage, 0, 1+2*pairs)
+	msgs = append(msgs, ChatMessage{Role: RoleSystem, Content: "system prompt"})
 	for i := range pairs {
 		msgs = append(msgs,
 			ChatMessage{Role: RoleUser, Content: fmt.Sprintf("user message %d %s", i, makeLongString(90))},
@@ -508,7 +509,7 @@ func TestIntegration_CompactionStatsInSnapshot(t *testing.T) {
 	}
 
 	msgs := makeIntegrationMessages(10)
-	f.Chat(context.Background(), msgs)
+	_, _ = f.Chat(context.Background(), msgs)
 
 	stats = f.Stats()
 	if stats.CompactionEvents == 0 {
@@ -567,7 +568,7 @@ none`},
 
 	// First chat: compaction with initial summary
 	msgs1 := makeIntegrationMessages(10)
-	f.Chat(context.Background(), msgs1)
+	_, _ = f.Chat(context.Background(), msgs1)
 
 	if !mock1.called {
 		t.Fatal("first compaction should have been called")
@@ -604,7 +605,7 @@ none`},
 
 	// Second chat: should use iterative update prompt
 	msgs2 := makeIntegrationMessages(10)
-	f.Chat(context.Background(), msgs2)
+	_, _ = f.Chat(context.Background(), msgs2)
 
 	if !mock2.called {
 		t.Fatal("second compaction should have been called")
@@ -839,24 +840,29 @@ none`
 	f.SetCompactor(compactor, 0.60)
 
 	// Build messages with tool call chains
-	msgs := []ChatMessage{
-		{Role: RoleSystem, Content: "system prompt"},
-		{Role: RoleUser, Content: "Read the auth files and fix them" + makeLongString(50)},
-	}
+	msgs := make([]ChatMessage, 0, 22)
+	msgs = append(msgs,
+		ChatMessage{Role: RoleSystem, Content: "system prompt"},
+		ChatMessage{Role: RoleUser, Content: "Read the auth files and fix them" + makeLongString(50)},
+	)
 
 	// First tool call chain
 	toolCalls1 := []ToolCall{
 		{ID: "call_1", Type: "function", Function: ToolCallFunction{Name: "read_file", Arguments: `{"path": "internal/auth/handler.go"}`}},
 	}
-	msgs = append(msgs, ChatMessage{Role: RoleAssistant, Content: "Reading handler.go" + makeLongString(40), ToolCalls: toolCalls1})
-	msgs = append(msgs, ChatMessage{Role: RoleTool, Content: "package auth\nfunc HandleAuth() { ... }" + makeLongString(50), ToolCallID: "call_1"})
+	msgs = append(msgs,
+		ChatMessage{Role: RoleAssistant, Content: "Reading handler.go" + makeLongString(40), ToolCalls: toolCalls1},
+		ChatMessage{Role: RoleTool, Content: "package auth\nfunc HandleAuth() { ... }" + makeLongString(50), ToolCallID: "call_1"},
+	)
 
 	// Second tool call chain
 	toolCalls2 := []ToolCall{
 		{ID: "call_2", Type: "function", Function: ToolCallFunction{Name: "read_file", Arguments: `{"path": "internal/auth/middleware.go"}`}},
 	}
-	msgs = append(msgs, ChatMessage{Role: RoleAssistant, Content: "Reading middleware.go" + makeLongString(40), ToolCalls: toolCalls2})
-	msgs = append(msgs, ChatMessage{Role: RoleTool, Content: "package auth\nfunc Middleware() { ... }" + makeLongString(50), ToolCallID: "call_2"})
+	msgs = append(msgs,
+		ChatMessage{Role: RoleAssistant, Content: "Reading middleware.go" + makeLongString(40), ToolCalls: toolCalls2},
+		ChatMessage{Role: RoleTool, Content: "package auth\nfunc Middleware() { ... }" + makeLongString(50), ToolCallID: "call_2"},
+	)
 
 	// More messages to push utilization over 60%
 	for i := range 8 {

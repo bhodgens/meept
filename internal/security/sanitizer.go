@@ -83,12 +83,12 @@ func initPatterns() {
 			// Instruction override attempts
 			{
 				Pattern:  regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above|earlier|preceding)\s+(instructions?|prompts?|rules?|guidelines?|directions?)`),
-				Label:    "instruction_override",
+				Label:    LabelInstructionOverride,
 				MinLevel: StrictnessPermissive,
 			},
 			{
 				Pattern:  regexp.MustCompile(`(?i)(disregard|forget|override|bypass|skip)\s+(all\s+)?(previous|prior|above|earlier|preceding)?\s*(instructions?|prompts?|rules?|guidelines?|directions?|constraints?)`),
-				Label:    "instruction_override",
+				Label:    LabelInstructionOverride,
 				MinLevel: StrictnessPermissive,
 			},
 			{
@@ -103,7 +103,7 @@ func initPatterns() {
 			},
 			{
 				Pattern:  regexp.MustCompile(`(?i)(do\s+not|don'?t)\s+(follow|obey|listen\s+to)\s+(your|the|any)\s+(rules?|instructions?|guidelines?|system\s+prompt)`),
-				Label:    "instruction_override",
+				Label:    LabelInstructionOverride,
 				MinLevel: StrictnessPermissive,
 			},
 			// Role markers in user text
@@ -166,17 +166,17 @@ func initPatterns() {
 			},
 			{
 				Pattern:  regexp.MustCompile(`(?i)<\|system\|>`),
-				Label:    "special_token_phi",
+				Label:    LabelSpecialTokenPhi,
 				MinLevel: StrictnessPermissive,
 			},
 			{
 				Pattern:  regexp.MustCompile(`(?i)<\|user\|>`),
-				Label:    "special_token_phi",
+				Label:    LabelSpecialTokenPhi,
 				MinLevel: StrictnessStandard,
 			},
 			{
 				Pattern:  regexp.MustCompile(`(?i)<\|assistant\|>`),
-				Label:    "special_token_phi",
+				Label:    LabelSpecialTokenPhi,
 				MinLevel: StrictnessPermissive,
 			},
 			{
@@ -231,14 +231,14 @@ func initPatterns() {
 			{Pattern: regexp.MustCompile(`AKIA[A-Z0-9]{16}`), Label: "aws_access_key"},
 			{Pattern: regexp.MustCompile(`(?i)aws[_-]?secret[_-]?access[_-]?key\s*[=:]\s*['"]?([a-zA-Z0-9/+]{40})['"]?`), Label: "aws_secret_key"},
 			// Private keys
-			{Pattern: regexp.MustCompile(`-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`), Label: "private_key"},
-			{Pattern: regexp.MustCompile(`-----BEGIN PGP PRIVATE KEY BLOCK-----`), Label: "pgp_private_key"},
+			{Pattern: regexp.MustCompile(`-{5}BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-{5}`), Label: "private_key"},
+			{Pattern: regexp.MustCompile(`-{5}BEGIN PGP PRIVATE KEY BLOCK-{5}`), Label: "pgp_private_key"},
 			// Database connection strings
-			{Pattern: regexp.MustCompile(`(?i)(mongodb|postgres|mysql|redis)://[^\s]+:[^\s]+@[^\s]+`), Label: "database_url"},
+			{Pattern: regexp.MustCompile(`(?i)(mongodb|postgres|mysql|redis)://\S+:\S+@\S+`), Label: "database_url"},
 			// JWT tokens
 			{Pattern: regexp.MustCompile(`eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*`), Label: "jwt_token"},
 			// Slack
-			{Pattern: regexp.MustCompile(`xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*`), Label: "slack_token"},
+			{Pattern: regexp.MustCompile(`xox[baprs]-\d{10,13}-\d{10,13}[a-zA-Z0-9-]*`), Label: "slack_token"},
 			// Stripe
 			{Pattern: regexp.MustCompile(`(?i)sk_live_[a-zA-Z0-9]{24,}`), Label: "stripe_key"},
 			{Pattern: regexp.MustCompile(`(?i)rk_live_[a-zA-Z0-9]{24,}`), Label: "stripe_restricted_key"},

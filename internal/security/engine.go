@@ -16,7 +16,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/pathutil"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // sqlite3 driver registration
 )
 
 // compiledPattern holds a pre-compiled regex pattern with metadata.
@@ -56,7 +56,7 @@ func NewEngine(dbPath string, cfg *config.SecurityConfig, logger *slog.Logger) (
 
 	// Ensure directory exists
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
@@ -262,7 +262,7 @@ func (e *Engine) Check(action, toolName string, details map[string]string, conve
 	effectiveRisk := baseRisk
 	ruleSource := "base_rule"
 
-	if action == "shell_execute" {
+	if action == ActionShellExecute {
 		cmd := details["command"]
 		cmdRisk, cmdSource, cmdImmutable := e.evaluateCommand(cmd)
 		if cmdSource != "shell_execute" {
@@ -276,7 +276,7 @@ func (e *Engine) Check(action, toolName string, details map[string]string, conve
 				Allowed:    false,
 				Reason:     "Command matches immutable rule: " + cmdSource,
 				RiskLevel:  cmdRisk,
-				RuleSource: "immutable",
+				RuleSource: RuleSourceImmutable,
 			}
 			e.logDecision(decision, action, toolName, details, conversationID)
 			return decision
@@ -284,7 +284,7 @@ func (e *Engine) Check(action, toolName string, details map[string]string, conve
 	}
 
 	// Path-based checks
-	if action == "file_read" || action == "file_write" || action == "file_delete" {
+	if action == ActionFileRead || action == ActionFileWrite || action == ActionFileDelete {
 		if path := details["path"]; path != "" {
 			if decision := e.checkPath(path, action); decision != nil {
 				e.logDecision(*decision, action, toolName, details, conversationID)
@@ -338,7 +338,7 @@ func (e *Engine) checkFinancial(details map[string]string) *Decision {
 					Allowed:    false,
 					Reason:     "Financial operations are blocked by policy",
 					RiskLevel:  RiskCritical,
-					RuleSource: "immutable",
+					RuleSource: RuleSourceImmutable,
 				}
 			}
 		}
@@ -436,9 +436,9 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 		e.logger.Error("Failed to query path rules", "error", err)
 		return &Decision{
 			Allowed:    false,
-			Reason:     "path rule query failed",
+			Reason:     ReasonPathRuleQueryFailed,
 			RiskLevel:  RiskHigh,
-			RuleSource: "fail_closed",
+			RuleSource: RuleSourceFailClosed,
 		}
 	}
 	defer blockRows.Close()
@@ -487,9 +487,9 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 		e.logger.Error("Failed to iterate block path rules", "error", err)
 		return &Decision{
 			Allowed:    false,
-			Reason:     "path rule query failed",
+			Reason:     ReasonPathRuleQueryFailed,
 			RiskLevel:  RiskHigh,
-			RuleSource: "fail_closed",
+			RuleSource: RuleSourceFailClosed,
 		}
 	}
 	if blocked != nil {
@@ -507,9 +507,9 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 		e.logger.Error("Failed to query allow path rules", "error", err)
 		return &Decision{
 			Allowed:    false,
-			Reason:     "path rule query failed",
+			Reason:     ReasonPathRuleQueryFailed,
 			RiskLevel:  RiskHigh,
-			RuleSource: "fail_closed",
+			RuleSource: RuleSourceFailClosed,
 		}
 	}
 	defer allowRows.Close()
@@ -528,9 +528,9 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 				e.logger.Error("Failed to iterate allow path rules", "error", err)
 				return &Decision{
 					Allowed:    false,
-					Reason:     "path rule query failed",
+					Reason:     ReasonPathRuleQueryFailed,
 					RiskLevel:  RiskHigh,
-					RuleSource: "fail_closed",
+					RuleSource: RuleSourceFailClosed,
 				}
 			}
 			return nil // Allowed
@@ -541,9 +541,9 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 				e.logger.Error("Failed to iterate allow path rules", "error", err)
 				return &Decision{
 					Allowed:    false,
-					Reason:     "path rule query failed",
+					Reason:     ReasonPathRuleQueryFailed,
 					RiskLevel:  RiskHigh,
-					RuleSource: "fail_closed",
+					RuleSource: RuleSourceFailClosed,
 				}
 			}
 			return nil // Allowed
@@ -554,9 +554,9 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 		e.logger.Error("Failed to iterate allow path rules", "error", err)
 		return &Decision{
 			Allowed:    false,
-			Reason:     "path rule query failed",
+			Reason:     ReasonPathRuleQueryFailed,
 			RiskLevel:  RiskHigh,
-			RuleSource: "fail_closed",
+			RuleSource: RuleSourceFailClosed,
 		}
 	}
 
@@ -683,7 +683,7 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			continue
 		}
 
-		if decisionStr == "allow" {
+		if decisionStr == DecisionAllow {
 			reasonStr := "Creator pre-approved"
 			if reason != "" {
 				reasonStr = "Creator override: " + reason
@@ -696,19 +696,18 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 				OverrideApplied: true,
 				OverrideID:      &id,
 			}
-		} else {
-			reasonStr := "Creator denied"
-			if reason != "" {
-				reasonStr = "Creator override (deny): " + reason
-			}
-			return &Decision{
-				Allowed:         false,
-				Reason:          reasonStr,
-				RiskLevel:       RiskHigh,
-				RuleSource:      "override",
-				OverrideApplied: true,
-				OverrideID:      &id,
-			}
+		}
+		reasonStr := "Creator denied"
+		if reason != "" {
+			reasonStr = "Creator override (deny): " + reason
+		}
+		return &Decision{
+			Allowed:         false,
+			Reason:          reasonStr,
+			RiskLevel:       RiskHigh,
+			RuleSource:      "override",
+			OverrideApplied: true,
+			OverrideID:      &id,
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -849,8 +848,7 @@ func (e *Engine) GetDecision(action string) Decision {
 // GetContextForLLM generates a minimal context string for the LLM.
 func (e *Engine) GetContextForLLM(decision Decision, action string, details map[string]string) string {
 	var lines []string
-	lines = append(lines, "# Security Context (current action)")
-	lines = append(lines, fmt.Sprintf("- Action: %s", action))
+	lines = append(lines, "# Security Context (current action)", fmt.Sprintf("- Action: %s", action))
 
 	switch action {
 	case "shell_execute":

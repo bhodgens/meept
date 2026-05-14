@@ -34,17 +34,17 @@ Requires an LSP server for the language to be configured and running.`
 
 func (t *LSPSymbolsTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"query": {
 				Type:        "string",
 				Description: "Search query for workspace symbols. Required if file_path is not provided.",
 			},
-			"file_path": {
+			SchemaPropFilePath: {
 				Type:        "string",
 				Description: "Path to file for document symbols. If provided, returns all symbols in this file.",
 			},
-			"language": {
+			SchemaPropLanguage: {
 				Type:        "string",
 				Description: "Language ID for workspace search (e.g., 'go', 'python', 'typescript'). Required for workspace search.",
 			},
@@ -108,9 +108,9 @@ func (t *LSPSymbolsTool) documentSymbols(ctx context.Context, filePath string) (
 
 	return map[string]any{
 		"mode":      "document",
-		"file_path": filePath,
+		SchemaPropFilePath: filePath,
 		"symbols":   result,
-		"count":     len(result),
+		SchemaPropCount:     len(result),
 	}, nil
 }
 
@@ -134,11 +134,11 @@ func (t *LSPSymbolsTool) workspaceSymbols(ctx context.Context, query, language s
 		result[i] = map[string]any{
 			"name":       sym.Name,
 			"kind":       symbolKindToString(sym.Kind),
-			"file_path":  lsp.URIToPath(sym.Location.URI),
-			"start_line": sym.Location.Range.Start.Line,
-			"start_char": sym.Location.Range.Start.Character,
-			"end_line":   sym.Location.Range.End.Line,
-			"end_char":   sym.Location.Range.End.Character,
+			SchemaPropFilePath:  lsp.URIToPath(sym.Location.URI),
+			SchemaPropStartLine: sym.Location.Range.Start.Line,
+			SchemaPropStartChar: sym.Location.Range.Start.Character,
+			SchemaPropEndLine:   sym.Location.Range.End.Line,
+			SchemaPropEndChar:   sym.Location.Range.End.Character,
 		}
 		if sym.ContainerName != "" {
 			result[i]["container"] = sym.ContainerName
@@ -148,9 +148,9 @@ func (t *LSPSymbolsTool) workspaceSymbols(ctx context.Context, query, language s
 	return map[string]any{
 		"mode":     "workspace",
 		"query":    query,
-		"language": language,
+		SchemaPropLanguage: language,
 		"symbols":  result,
-		"count":    len(result),
+		SchemaPropCount:    len(result),
 	}, nil
 }
 
@@ -160,10 +160,10 @@ func convertDocumentSymbols(symbols []lsp.DocumentSymbol) []map[string]any {
 		item := map[string]any{
 			"name":       sym.Name,
 			"kind":       symbolKindToString(sym.Kind),
-			"start_line": sym.Range.Start.Line,
-			"start_char": sym.Range.Start.Character,
-			"end_line":   sym.Range.End.Line,
-			"end_char":   sym.Range.End.Character,
+			SchemaPropStartLine: sym.Range.Start.Line,
+			SchemaPropStartChar: sym.Range.Start.Character,
+			SchemaPropEndLine:   sym.Range.End.Line,
+			SchemaPropEndChar:   sym.Range.End.Character,
 		}
 		if sym.Detail != "" {
 			item["detail"] = sym.Detail

@@ -146,7 +146,7 @@ func (pc *PermissionChecker) CheckPath(path string) bool {
 }
 
 // CheckPathWithReason returns (allowed, reason).
-func (pc *PermissionChecker) checkPathWithReason(pathStr string) (bool, string) {
+func (pc *PermissionChecker) checkPathWithReason(pathStr string) (ok bool, result string) {
 	resolved := pc.expandPath(pathStr)
 	if absPath, err := filepath.Abs(resolved); err == nil {
 		resolved = absPath

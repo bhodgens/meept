@@ -36,7 +36,7 @@ var (
 // SEC-2 FIX: Now caches per binary path instead of using a single package-level sync.Once.
 func CheckTirithAvailable(ctx context.Context, binary string) bool {
 	if binary == "" {
-		binary = "tirith"
+		binary = BinaryTirith
 	}
 
 	// Check cache first with read lock
@@ -69,9 +69,9 @@ func CheckTirithAvailable(ctx context.Context, binary string) bool {
 
 // ScanCommand runs tirith check on a shell command and parses the output.
 // Returns nil if tirith is not installed (graceful degradation).
-func ScanCommand(ctx context.Context, command string, binary string) *TirithResult {
+func ScanCommand(ctx context.Context, command, binary string) *TirithResult {
 	if binary == "" {
-		binary = "tirith"
+		binary = BinaryTirith
 	}
 
 	if !CheckTirithAvailable(ctx, binary) {
@@ -150,7 +150,7 @@ type TirithScanner struct {
 // NewTirithScanner creates a new TirithScanner.
 func NewTirithScanner(binary string) *TirithScanner {
 	if binary == "" {
-		binary = "tirith"
+		binary = BinaryTirith
 	}
 	return &TirithScanner{binary: binary}
 }

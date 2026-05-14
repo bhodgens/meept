@@ -211,13 +211,13 @@ func slogDiscardLogger() *slog.Logger {
 }
 
 func TestChatHandler_PublishPlanRequest(t *testing.T) {
-	bus := bus.New(nil, slogDiscardLogger())
+	msgBus := bus.New(nil, slogDiscardLogger())
 
 	// Subscribe to orchestrator.plan
-	sub := bus.Subscribe("test", "orchestrator.plan")
-	defer bus.Unsubscribe(sub)
+	sub := msgBus.Subscribe("test", "orchestrator.plan")
+	defer msgBus.Unsubscribe(sub)
 
-	handler := NewChatHandler(nil, nil, bus, slogDiscardLogger())
+	handler := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
 
 	result := &DispatchResult{
 		Task: &task.Task{
@@ -260,12 +260,12 @@ func TestChatHandler_PublishPlanRequest(t *testing.T) {
 }
 
 func TestChatHandler_PublishPlanRequest_Compound(t *testing.T) {
-	bus := bus.New(nil, slogDiscardLogger())
+	msgBus := bus.New(nil, slogDiscardLogger())
 
-	sub := bus.Subscribe("test", "orchestrator.plan")
-	defer bus.Unsubscribe(sub)
+	sub := msgBus.Subscribe("test", "orchestrator.plan")
+	defer msgBus.Unsubscribe(sub)
 
-	handler := NewChatHandler(nil, nil, bus, slogDiscardLogger())
+	handler := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
 
 	meta, _ := json.Marshal(map[string]any{
 		"compound_type": "sequential",
@@ -303,9 +303,9 @@ func TestChatHandler_PublishPlanRequest_Compound(t *testing.T) {
 
 func TestChatHandler_PublishPlanRequest_WarnsOnNoSubscribers(t *testing.T) {
 	// Create a bus with no subscribers
-	bus := bus.New(nil, slogDiscardLogger())
+	msgBus := bus.New(nil, slogDiscardLogger())
 
-	handler := NewChatHandler(nil, nil, bus, slogDiscardLogger())
+	handler := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
 
 	result := &DispatchResult{
 		Task: &task.Task{

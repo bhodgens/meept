@@ -183,7 +183,7 @@ func TestNavigateToBranch_TargetNotInPath(t *testing.T) {
 
 	session, _ := store.Create("test-not-in-path")
 	ids := helperCreateMessages(t, store, session.ID, 3)
-	store.SetLeafMessageID(session.ID, ids[2])
+	_ = store.SetLeafMessageID(session.ID, ids[2])
 
 	// Create a separate message not on this path (different parent chain)
 	separateMsg := Message{
@@ -194,7 +194,7 @@ func TestNavigateToBranch_TargetNotInPath(t *testing.T) {
 		EntryType: "message",
 		BranchID:  "other",
 	}
-	store.SaveMessages(session.ID, []Message{separateMsg})
+	_ = store.SaveMessages(session.ID, []Message{separateMsg})
 
 	// Get the orphan's ID
 	msgs, _ := store.GetMessages(session.ID, 3, 1)
@@ -214,7 +214,7 @@ func TestNavigateToBranch_NoOpWhenTargetEqualsLeaf(t *testing.T) {
 
 	session, _ := store.Create("test-noop")
 	ids := helperCreateMessages(t, store, session.ID, 3)
-	store.SetLeafMessageID(session.ID, ids[2])
+	_ = store.SetLeafMessageID(session.ID, ids[2])
 
 	result, err := bm.NavigateToBranch(context.Background(), session.ID, ids[2])
 	if err != nil {
@@ -254,7 +254,7 @@ func TestNavigateToBranch_ShortBranchNoSummary(t *testing.T) {
 
 	session, _ := store.Create("test-short")
 	ids := helperCreateMessages(t, store, session.ID, 3)
-	store.SetLeafMessageID(session.ID, ids[2])
+	_ = store.SetLeafMessageID(session.ID, ids[2])
 
 	// Navigate to message 2 (abandons only 1 message)
 	result, err := bm.NavigateToBranch(context.Background(), session.ID, ids[1])
@@ -285,7 +285,7 @@ func TestNavigateToBranch_WithSummarization(t *testing.T) {
 
 	session, _ := store.Create("test-summarize")
 	ids := helperCreateMessages(t, store, session.ID, 7)
-	store.SetLeafMessageID(session.ID, ids[6])
+	_ = store.SetLeafMessageID(session.ID, ids[6])
 
 	// Navigate to message 3 (abandons 4 messages: indices 3,4,5,6)
 	// threshold is 3, 4 >= 3, so summarization should trigger
@@ -345,7 +345,7 @@ func TestNavigateToBranch_SummarizerError(t *testing.T) {
 
 	session, _ := store.Create("test-summarizer-error")
 	ids := helperCreateMessages(t, store, session.ID, 7)
-	store.SetLeafMessageID(session.ID, ids[6])
+	_ = store.SetLeafMessageID(session.ID, ids[6])
 
 	// Should succeed even if summarizer fails
 	result, err := bm.NavigateToBranch(context.Background(), session.ID, ids[2])
@@ -598,7 +598,7 @@ func TestIntegration_NavigateAndSummaryPersistence(t *testing.T) {
 
 	session, _ := store.Create("integration-test")
 	ids := helperCreateMessages(t, store, session.ID, 7)
-	store.SetLeafMessageID(session.ID, ids[6])
+	_ = store.SetLeafMessageID(session.ID, ids[6])
 
 	// Navigate from message 7 back to message 3
 	result, err := bm.NavigateToBranch(context.Background(), session.ID, ids[2])

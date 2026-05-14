@@ -30,7 +30,7 @@ func mockHTTPServer(t *testing.T, handler func(method string, params json.RawMes
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	// Chat endpoint (dedicated, not via bus/call)
@@ -62,7 +62,7 @@ func mockHTTPServer(t *testing.T, handler func(method string, params json.RawMes
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"reply": resultMap["reply"]})
+		_ = json.NewEncoder(w).Encode(map[string]string{"reply": resultMap["reply"]})
 	})
 
 	// Bus/call proxy endpoint - mirrors the JSON-RPC interface over HTTP
@@ -80,7 +80,7 @@ func mockHTTPServer(t *testing.T, handler func(method string, params json.RawMes
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(map[string]any{
 				"error": map[string]any{
 					"code":    -32603,
 					"message": err.Error(),
@@ -91,7 +91,7 @@ func mockHTTPServer(t *testing.T, handler func(method string, params json.RawMes
 
 		resultData, _ := json.Marshal(result)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"result": json.RawMessage(resultData),
 		})
 	})
@@ -162,7 +162,7 @@ func (s *mockRPCServer) handleConn(conn net.Conn) {
 		}
 
 		var length int
-		fmt.Sscanf(lengthStr.String(), "%d", &length)
+		_, _ = fmt.Sscanf(lengthStr.String(), "%d", &length)
 
 		payload := make([]byte, length)
 		n, err := conn.Read(payload)
@@ -203,8 +203,8 @@ func (s *mockRPCServer) handleConn(conn net.Conn) {
 
 		respData, _ := json.Marshal(resp)
 		header := fmt.Sprintf("%d\n", len(respData))
-		conn.Write([]byte(header))
-		conn.Write(respData)
+		_, _ = conn.Write([]byte(header))
+		_, _ = conn.Write(respData)
 	}
 }
 
@@ -254,7 +254,7 @@ func statusHandler(method string, params json.RawMessage) (any, error) {
 		return map[string]any{"tasks": []any{}}, nil
 	case "task.create":
 		var p map[string]string
-		json.Unmarshal(params, &p)
+		_ = json.Unmarshal(params, &p)
 		return map[string]any{
 			"id":          "task-123",
 			"name":        p["name"],
@@ -516,7 +516,7 @@ func TestHTTPTransport_GenericCallWithParams(t *testing.T) {
 			return nil, fmt.Errorf("unexpected method: %s", method)
 		}
 		var p map[string]string
-		json.Unmarshal(params, &p)
+		_ = json.Unmarshal(params, &p)
 		return map[string]string{"echo": p["input"]}, nil
 	})
 	defer server.Close()

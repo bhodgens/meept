@@ -199,8 +199,8 @@ func TestRegistry_JobTracking(t *testing.T) {
 	_ = reg.IncrementJobCount(ctx, task.ID)
 	_ = reg.IncrementJobCount(ctx, task.ID)
 
-	reg.CompleteJob(ctx, task.ID)
-	reg.CompleteJob(ctx, task.ID)
+	_ = reg.CompleteJob(ctx, task.ID)
+	_ = reg.CompleteJob(ctx, task.ID)
 
 	got, _ := reg.Get(ctx, task.ID)
 	if got.TotalJobs != 3 {
@@ -216,8 +216,8 @@ func TestRegistry_AutoComplete(t *testing.T) {
 	ctx := context.Background()
 
 	task, _ := reg.Create(ctx, "test", "desc")
-	reg.IncrementJobCount(ctx, task.ID)
-	reg.CompleteJob(ctx, task.ID)
+	_ = reg.IncrementJobCount(ctx, task.ID)
+	_ = reg.CompleteJob(ctx, task.ID)
 
 	got, _ := reg.Get(ctx, task.ID)
 	if got.State != StateCompleted {
@@ -251,8 +251,8 @@ func TestRegistry_ListSummaries(t *testing.T) {
 	reg := newTestRegistry(t)
 	ctx := context.Background()
 
-	reg.Create(ctx, "task-1", "desc1")
-	reg.Create(ctx, "task-2", "desc2")
+	_, _ = reg.Create(ctx, "task-1", "desc1")
+	_, _ = reg.Create(ctx, "task-2", "desc2")
 
 	summaries, err := reg.ListSummaries(ctx, 10)
 	if err != nil {
@@ -282,7 +282,7 @@ func TestHandler_MessageRouting(t *testing.T) {
 	if err := handler.Start(ctx); err != nil {
 		t.Fatalf("failed to start handler: %v", err)
 	}
-	defer handler.Stop(ctx)
+	defer func() { _ = handler.Stop(ctx) }()
 
 	// Subscribe to responses
 	respSub := msgBus.Subscribe("test-resp", "task.result")
@@ -312,7 +312,7 @@ func TestHandler_MessageRouting(t *testing.T) {
 		}
 		// Verify it's not an error
 		var result map[string]any
-		json.Unmarshal(resp.Payload, &result)
+		_ = json.Unmarshal(resp.Payload, &result)
 		if _, hasErr := result["error"]; hasErr {
 			t.Errorf("got error response: %s", string(resp.Payload))
 		}
@@ -338,14 +338,14 @@ func TestHandler_ListViaBus(t *testing.T) {
 
 	// Pre-create some tasks
 	ctx := context.Background()
-	reg.Create(ctx, "task-a", "desc")
-	reg.Create(ctx, "task-b", "desc")
+	_, _ = reg.Create(ctx, "task-a", "desc")
+	_, _ = reg.Create(ctx, "task-b", "desc")
 
 	handler := NewHandler(reg, msgBus, nil)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	handler.Start(ctx)
-	defer handler.Stop(ctx)
+	_ = handler.Start(ctx)
+	defer func() { _ = handler.Stop(ctx) }()
 
 	respSub := msgBus.Subscribe("test-list", "task.result")
 
@@ -364,7 +364,7 @@ func TestHandler_ListViaBus(t *testing.T) {
 	select {
 	case resp := <-respSub.Channel:
 		var tasks []any
-		json.Unmarshal(resp.Payload, &tasks)
+		_ = json.Unmarshal(resp.Payload, &tasks)
 		if len(tasks) < 2 {
 			t.Errorf("expected at least 2 tasks, got %d (payload: %s)", len(tasks), string(resp.Payload))
 		}

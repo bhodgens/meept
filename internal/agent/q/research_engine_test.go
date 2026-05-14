@@ -504,7 +504,7 @@ func TestResearchEngineGenerateAgentSpecContent(t *testing.T) {
 
 	content := eng.generateAgentSpecContent(pattern)
 
-	if len(content) == 0 {
+	if content == "" {
 		t.Fatal("generateAgentSpecContent() returned empty content")
 	}
 	if !containsStrQ(content, "debugging_specialist") {

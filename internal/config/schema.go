@@ -101,16 +101,16 @@ type ToolingConfig struct {
 
 // CompactionConfig configures LLM-based context compaction.
 type CompactionConfig struct {
-	Enabled           bool    `json:"enabled"            toml:"enabled"`
-	Model             string  `json:"model"              toml:"model"`
-	ReserveTokens     int     `json:"reserve_tokens"     toml:"reserve_tokens"`
-	KeepRecentTokens  int     `json:"keep_recent_tokens" toml:"keep_recent_tokens"`
+	Enabled           bool    `json:"enabled"             toml:"enabled"`
+	Model             string  `json:"model"               toml:"model"`
+	ReserveTokens     int     `json:"reserve_tokens"      toml:"reserve_tokens"`
+	KeepRecentTokens  int     `json:"keep_recent_tokens"  toml:"keep_recent_tokens"`
 	MaxResponseTokens int     `json:"max_response_tokens" toml:"max_response_tokens"`
-	SummaryFormat     string  `json:"summary_format"     toml:"summary_format"`
-	TriggerRatio      float64 `json:"trigger_ratio"      toml:"trigger_ratio"`
-	IterativeUpdates  bool    `json:"iterative_updates"  toml:"iterative_updates"`
-	TrackFileOps      bool    `json:"track_file_ops"     toml:"track_file_ops"`
-	TimeoutSeconds    int     `json:"timeout_seconds"    toml:"timeout_seconds"`
+	SummaryFormat     string  `json:"summary_format"      toml:"summary_format"`
+	TriggerRatio      float64 `json:"trigger_ratio"       toml:"trigger_ratio"`
+	IterativeUpdates  bool    `json:"iterative_updates"   toml:"iterative_updates"`
+	TrackFileOps      bool    `json:"track_file_ops"      toml:"track_file_ops"`
+	TimeoutSeconds    int     `json:"timeout_seconds"     toml:"timeout_seconds"`
 }
 
 // SessionConfig configures session persistence, branching, and compaction.

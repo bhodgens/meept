@@ -54,7 +54,7 @@ func TestCalendarListTool_Execute(t *testing.T) {
 
 	client, server := newTestCalendarClient(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(eventsJSON))
+	_, _ = w.Write([]byte(eventsJSON))
 	})
 	defer server.Close()
 
@@ -117,7 +117,7 @@ func TestCalendarCreateTool_Execute(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(createdJSON))
+		_, _ = w.Write([]byte(createdJSON))
 	})
 	defer server.Close()
 
@@ -162,7 +162,7 @@ func TestCalendarQuickAddTool_Execute(t *testing.T) {
 
 	client, server := newTestCalendarClient(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(quickJSON))
+		_, _ = w.Write([]byte(quickJSON))
 	})
 	defer server.Close()
 
@@ -204,7 +204,7 @@ func TestCalendarTodayTool_Execute(t *testing.T) {
 
 	client, server := newTestCalendarClient(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(eventsJSON))
+		_, _ = w.Write([]byte(eventsJSON))
 	})
 	defer server.Close()
 
@@ -226,7 +226,7 @@ func TestCalendarTodayTool_Execute(t *testing.T) {
 func TestCalendarTodayTool_Execute_NoEvents(t *testing.T) {
 	client, server := newTestCalendarClient(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"items": []}`))
+		_, _ = w.Write([]byte(`{"items": []}`))
 	})
 	defer server.Close()
 

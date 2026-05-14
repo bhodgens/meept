@@ -48,7 +48,7 @@ func newTestDetectorWithRoot(_ *testing.T, root string) *IssueDetector {
 func writeLog(t *testing.T, path, content string) {
 	t.Helper()
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to write log file: %v", err)
 	}
 }

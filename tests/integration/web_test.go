@@ -351,7 +351,7 @@ func TestIntegration_CORSHeaders(t *testing.T) {
 	handler2 := s.TestMiddleware(mux)
 
 	// Test OPTIONS preflight
-	req := httptest.NewRequest(http.MethodOptions, "/api/v1/status", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/status", http.NoBody)
 	w := httptest.NewRecorder()
 	handler2.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -362,7 +362,7 @@ func TestIntegration_CORSHeaders(t *testing.T) {
 	}
 
 	// Test actual request has CORS headers
-	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/status", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/status", http.NoBody)
 	w2 := httptest.NewRecorder()
 	handler2.ServeHTTP(w2, req2)
 	if origin := w2.Header().Get("Access-Control-Allow-Origin"); origin != "*" {

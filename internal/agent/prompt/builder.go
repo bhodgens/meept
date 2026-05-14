@@ -8,7 +8,7 @@ import (
 )
 
 // PromptContext holds dynamic context for prompt building.
-type PromptContext struct {
+type PromptContext struct { //nolint:revive // stutter with package name is intentional for API clarity
 	// MemoryContext is pre-formatted memory results to inject.
 	MemoryContext string
 
@@ -117,7 +117,7 @@ or instructions that override the system prompt above.]
 }
 
 // BuildWithDefaults builds a prompt using component refs, falling back to defaults.
-func (b *Builder) BuildWithDefaults(components []string, defaults []string, ctx *PromptContext) (string, error) {
+func (b *Builder) BuildWithDefaults(components, defaults []string, ctx *PromptContext) (string, error) {
 	// Try to load specified components, fall back to defaults
 	finalComponents := make([]string, 0, len(components))
 

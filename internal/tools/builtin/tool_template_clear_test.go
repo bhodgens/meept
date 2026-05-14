@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -43,7 +44,7 @@ func TestTemplateClearTool_Parameters(t *testing.T) {
 
 func TestTemplateClearTool_NilRegistry(t *testing.T) {
 	tool := NewTemplateClearTool(nil)
-	result, err := tool.Execute(nil, map[string]any{
+	result, err := tool.Execute(context.TODO(), map[string]any{
 		"conversation_id": "conv-1",
 	})
 	if err != nil {
@@ -63,7 +64,7 @@ func TestTemplateClearTool_MissingConversationID(t *testing.T) {
 	reg := templates.NewRegistry()
 	tool := NewTemplateClearTool(reg)
 
-	result, err := tool.Execute(nil, map[string]any{})
+	result, err := tool.Execute(context.TODO(), map[string]any{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +101,7 @@ func TestTemplateClearTool_ClearSpecificTemplate(t *testing.T) {
 
 	tool := NewTemplateClearTool(reg)
 
-	result, err := tool.Execute(nil, map[string]any{
+	result, err := tool.Execute(context.TODO(), map[string]any{
 		"conversation_id": "conv-1",
 		"name":            "always-french",
 	})
@@ -152,7 +153,7 @@ func TestTemplateClearTool_ClearAllTemplates(t *testing.T) {
 
 	tool := NewTemplateClearTool(reg)
 
-	result, err := tool.Execute(nil, map[string]any{
+	result, err := tool.Execute(context.TODO(), map[string]any{
 		"conversation_id": "conv-1",
 	})
 	if err != nil {
@@ -178,7 +179,7 @@ func TestTemplateClearTool_ClearNonexistentTemplate(t *testing.T) {
 	reg := templates.NewRegistry()
 	tool := NewTemplateClearTool(reg)
 
-	result, err := tool.Execute(nil, map[string]any{
+	result, err := tool.Execute(context.TODO(), map[string]any{
 		"conversation_id": "conv-1",
 		"name":            "nonexistent",
 	})
@@ -199,7 +200,7 @@ func TestTemplateClearTool_ClearAllNoTemplates(t *testing.T) {
 	reg := templates.NewRegistry()
 	tool := NewTemplateClearTool(reg)
 
-	result, err := tool.Execute(nil, map[string]any{
+	result, err := tool.Execute(context.TODO(), map[string]any{
 		"conversation_id": "conv-empty",
 	})
 	if err != nil {

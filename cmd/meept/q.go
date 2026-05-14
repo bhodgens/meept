@@ -41,7 +41,7 @@ Examples:
 
 func newQStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   cmdStatus,
 		Short: "Show Q Agent status and configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()

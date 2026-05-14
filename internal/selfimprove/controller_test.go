@@ -12,7 +12,7 @@ func newTestController(t *testing.T, b *bus.MessageBus) *Controller {
 	t.Helper()
 	cfg := DefaultConfig()
 	cfg.DataPath = t.TempDir()
-	cfg.Validate()
+	_ = cfg.Validate()
 	return &Controller{
 		config:        cfg,
 		bus:           b,

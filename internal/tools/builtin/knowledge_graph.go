@@ -30,9 +30,9 @@ func (t *EntityCreateTool) Description() string {
 
 func (t *EntityCreateTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"entity_id": {
+			schemaPropEntityID: {
 				Type:        "string",
 				Description: "Unique identifier for the entity (will be used as memory_id in the graph).",
 			},
@@ -122,7 +122,7 @@ func (t *EntityLinkTool) Description() string {
 
 func (t *EntityLinkTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"source_id": {
 				Type:        "string",
@@ -268,9 +268,9 @@ func (t *EntityQueryTool) Description() string {
 
 func (t *EntityQueryTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"entity_id": {
+			schemaPropEntityID: {
 				Type:        "string",
 				Description: "ID of the entity to query for related entities.",
 			},
@@ -279,7 +279,7 @@ func (t *EntityQueryTool) Parameters() llm.FunctionParameters {
 				Description: "Optional: filter by specific relation type ('reference', 'similar', 'temporal', 'co_accessed', 'causal'). If not specified, returns all relations.",
 				Enum:        []string{"reference", "similar", "temporal", "co_accessed", "causal", ""},
 			},
-			"limit": {
+			schemaPropLimit: {
 				Type:        "integer",
 				Description: "Maximum number of related entities to return (default 20, max 100).",
 			},
@@ -424,7 +424,7 @@ func (t *GraphStatsTool) Description() string {
 
 func (t *GraphStatsTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type:       "object",
+		Type:       schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{},
 		Required:   []string{},
 	}
@@ -489,7 +489,7 @@ func (t *ComputePageRankTool) Description() string {
 
 func (t *ComputePageRankTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type:       "object",
+		Type:       schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{},
 		Required:   []string{},
 	}
@@ -540,7 +540,7 @@ func (t *DetectCommunitiesTool) Description() string {
 
 func (t *DetectCommunitiesTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"return_mapping": {
 				Type:        "boolean",
@@ -621,13 +621,13 @@ func (t *GetCommunitySiblingsTool) Description() string {
 
 func (t *GetCommunitySiblingsTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"entity_id": {
+			schemaPropEntityID: {
 				Type:        "string",
 				Description: "ID of the entity to find community siblings for.",
 			},
-			"limit": {
+			schemaPropLimit: {
 				Type:        "integer",
 				Description: "Maximum number of siblings to return (default 20, max 100).",
 			},

@@ -193,7 +193,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 
 	// Publish task.planned event for TUI
 	sp.publishEvent("task.planned", map[string]any{
-		"task_id":     req.TaskID,
+		KeyTaskID:     req.TaskID,
 		"session_id":  req.SessionID,
 		"total_steps": len(steps),
 		"ready_steps": len(promoted),
@@ -201,7 +201,7 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 
 	// Publish orchestrator.schedule to trigger tactical scheduling
 	sp.publishEvent("orchestrator.schedule", map[string]any{
-		"task_id": req.TaskID,
+		KeyTaskID: req.TaskID,
 	})
 
 	return nil
@@ -303,7 +303,7 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
 	// Simple intents that never need decomposition
 	switch req.Intent {
-	case "chat", "report", "recall", "platform", "search", "analyze":
+	case string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentPlatform), string(IntentSearch), string(IntentAnalyze):
 		return false
 	}
 
@@ -334,7 +334,7 @@ func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
 // ReplanFailedTask re-plans a failed task into smaller steps for retry.
 // This is called by the EscalationManager when a task fails and needs to be
 // broken down into more manageable pieces.
-func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID string, failureReason string) error {
+func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failureReason string) error {
 	sp.logger.Info("Re-planning failed task",
 		"task_id", taskID,
 		"failure_reason", failureReason,
@@ -378,7 +378,7 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID string,
 	req := PlanRequest{
 		TaskID: taskID,
 		Input:  replanDesc,
-		Intent: "plan",
+		Intent: string(IntentPlan),
 	}
 
 	return sp.Plan(ctx, req)

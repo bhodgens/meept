@@ -169,7 +169,7 @@ func TestStoreRemove(t *testing.T) {
 	}
 
 	// Add jobs
-	store.Add(JobConfig{
+	_ = store.Add(JobConfig{
 		ID:       "remove-1",
 		Name:     "Remove 1",
 		Type:     JobTypeReminder,
@@ -178,7 +178,7 @@ func TestStoreRemove(t *testing.T) {
 			Message: "Test",
 		},
 	})
-	store.Add(JobConfig{
+	_ = store.Add(JobConfig{
 		ID:       "remove-2",
 		Name:     "Remove 2",
 		Type:     JobTypeReminder,
@@ -225,7 +225,7 @@ func TestStoreUpdate(t *testing.T) {
 			Message: "Original",
 		},
 	}
-	store.Add(job)
+	_ = store.Add(job)
 
 	// Update
 	job.Name = "Updated Name"
@@ -259,7 +259,7 @@ func TestStoreUpdateLastRun(t *testing.T) {
 	}
 
 	// Add job
-	store.Add(JobConfig{
+	_ = store.Add(JobConfig{
 		ID:       "lastrun-test",
 		Name:     "Last Run Test",
 		Type:     JobTypeReminder,
@@ -311,7 +311,7 @@ func TestStoreSetEnabled(t *testing.T) {
 	}
 
 	// Add enabled job
-	store.Add(JobConfig{
+	_ = store.Add(JobConfig{
 		ID:       "enabled-test",
 		Name:     "Enabled Test",
 		Type:     JobTypeReminder,
@@ -358,7 +358,7 @@ func TestStoreList(t *testing.T) {
 
 	// Add jobs
 	for i := range 5 {
-		store.Add(JobConfig{
+		_ = store.Add(JobConfig{
 			ID:       string(rune('a' + i)),
 			Name:     "Job",
 			Type:     JobTypeReminder,
@@ -385,7 +385,7 @@ func TestStoreClear(t *testing.T) {
 
 	// Add jobs
 	for i := range 3 {
-		store.Add(JobConfig{
+		_ = store.Add(JobConfig{
 			ID:       string(rune('a' + i)),
 			Name:     "Job",
 			Type:     JobTypeReminder,
@@ -419,7 +419,7 @@ func TestStoreExportImport(t *testing.T) {
 	}
 
 	// Add jobs
-	store1.Add(JobConfig{
+	_ = store1.Add(JobConfig{
 		ID:       "export-1",
 		Name:     "Export 1",
 		Type:     JobTypeReminder,
@@ -428,7 +428,7 @@ func TestStoreExportImport(t *testing.T) {
 			Message: "Test 1",
 		},
 	})
-	store1.Add(JobConfig{
+	_ = store1.Add(JobConfig{
 		ID:       "export-2",
 		Name:     "Export 2",
 		Type:     JobTypeShell,
@@ -481,7 +481,7 @@ func TestStoreImportReplace(t *testing.T) {
 	}
 
 	// Add existing job
-	store.Add(JobConfig{
+	_ = store.Add(JobConfig{
 		ID:       "existing",
 		Name:     "Existing",
 		Type:     JobTypeReminder,
@@ -536,7 +536,7 @@ func TestStoreAtomicWrite(t *testing.T) {
 	}
 
 	// Add a job
-	store.Add(JobConfig{
+	_ = store.Add(JobConfig{
 		ID:       "atomic-test",
 		Name:     "Atomic Test",
 		Type:     JobTypeReminder,
@@ -572,7 +572,7 @@ func TestStoreConcurrency(t *testing.T) {
 		go func(n int) {
 			//nolint:gosec // value bounded by upstream
 			jobID := string(rune('a' + n))
-			store.Add(JobConfig{
+			_ = store.Add(JobConfig{
 				ID:       jobID,
 				Name:     "Concurrent",
 				Type:     JobTypeReminder,

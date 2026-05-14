@@ -30,18 +30,18 @@ func (t *MemoryStoreTool) Description() string {
 
 func (t *MemoryStoreTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"content": {
+			schemaPropContent: {
 				Type:        "string",
 				Description: "The content to store in memory. Should be clear and self-contained.",
 			},
-			"type": {
+			schemaPropType: {
 				Type:        "string",
 				Description: "Memory type: 'episodic' for conversations/interactions, 'task' for technical knowledge.",
 				Enum:        []string{"episodic", "task"},
 			},
-			"category": {
+			schemaPropCategory: {
 				Type:        "string",
 				Description: "Optional category to organize the memory (e.g., 'conversation', 'code', 'decision').",
 			},
@@ -90,9 +90,9 @@ func (t *MemoryStoreTool) Execute(ctx context.Context, args map[string]any) (any
 
 	return map[string]any{
 		"success":   true,
-		"memory_id": id,
-		"type":      memTypeStr,
-		"category":  category,
+		schemaPropMemoryID: id,
+		schemaPropType:      memTypeStr,
+		schemaPropCategory:  category,
 	}, nil
 }
 
@@ -114,18 +114,18 @@ func (t *MemorySearchTool) Description() string {
 
 func (t *MemorySearchTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"query": {
+			schemaPropQuery: {
 				Type:        "string",
 				Description: "Search query to find relevant memories.",
 			},
-			"type": {
+			schemaPropType: {
 				Type:        "string",
 				Description: "Optional: filter to 'episodic' or 'task' memories only.",
 				Enum:        []string{"episodic", "task", ""},
 			},
-			"limit": {
+			schemaPropLimit: {
 				Type:        "integer",
 				Description: "Maximum number of results to return (default 10, max 50).",
 			},
@@ -185,9 +185,9 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 	for _, r := range results {
 		formatted = append(formatted, map[string]any{
 			"id":        r.Memory.ID,
-			"content":   r.Memory.Content,
-			"type":      string(r.Memory.Type),
-			"category":  r.Memory.Category,
+			schemaPropContent:   r.Memory.Content,
+			schemaPropType:      string(r.Memory.Type),
+			schemaPropCategory:  r.Memory.Category,
 			"relevance": r.RelevanceScore,
 			"source":    r.Source,
 		})
@@ -195,8 +195,8 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 
 	return map[string]any{
 		"results": formatted,
-		"count":   len(formatted),
-		"query":   query,
+		schemaPropCount:   len(formatted),
+		schemaPropQuery:   query,
 	}, nil
 }
 
@@ -218,9 +218,9 @@ func (t *MemoryGetContextTool) Description() string {
 
 func (t *MemoryGetContextTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"query": {
+			schemaPropQuery: {
 				Type:        "string",
 				Description: "The query or topic to get relevant context for.",
 			},
@@ -258,17 +258,17 @@ func (t *MemoryGetContextTool) Execute(ctx context.Context, args map[string]any)
 	for _, r := range results {
 		formatted = append(formatted, map[string]any{
 			"id":        r.Memory.ID,
-			"content":   r.Memory.Content,
-			"type":      string(r.Memory.Type),
-			"category":  r.Memory.Category,
+			schemaPropContent:   r.Memory.Content,
+			schemaPropType:      string(r.Memory.Type),
+			schemaPropCategory:  r.Memory.Category,
 			"relevance": r.RelevanceScore,
 		})
 	}
 
 	return map[string]any{
 		"context": formatted,
-		"count":   len(formatted),
-		"query":   query,
+		schemaPropCount:   len(formatted),
+		schemaPropQuery:   query,
 	}, nil
 }
 
@@ -304,9 +304,9 @@ func (t *MemoryGetVersionTool) Description() string {
 
 func (t *MemoryGetVersionTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"memory_id": {
+			schemaPropMemoryID: {
 				Type:        "string",
 				Description: "The ID of the memory to retrieve.",
 			},
@@ -341,9 +341,9 @@ func (t *MemoryGetVersionTool) Execute(ctx context.Context, args map[string]any)
 	// Build result with version metadata
 	result := map[string]any{
 		"id":         mem.ID,
-		"content":    mem.Content,
-		"type":       string(mem.Type),
-		"category":   mem.Category,
+		schemaPropContent:    mem.Content,
+		schemaPropType:       string(mem.Type),
+		schemaPropCategory:   mem.Category,
 		"created_at": mem.CreatedAt,
 	}
 
@@ -381,9 +381,9 @@ func (t *MemoryGetVersionHistoryTool) Description() string {
 
 func (t *MemoryGetVersionHistoryTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"memory_id": {
+			schemaPropMemoryID: {
 				Type:        "string",
 				Description: "The ID of the memory to retrieve version history for.",
 			},
@@ -410,9 +410,9 @@ func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[stri
 
 	if len(memories) == 0 {
 		return map[string]any{
-			"memory_id": memoryID,
+			schemaPropMemoryID: memoryID,
 			"versions":  []any{},
-			"message":   "No version history found",
+			schemaPropMessage:   "No version history found",
 		}, nil
 	}
 
@@ -421,7 +421,7 @@ func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[stri
 	for _, mem := range memories {
 		version := map[string]any{
 			"id":         mem.ID,
-			"content":    mem.Content,
+			schemaPropContent:    mem.Content,
 			"created_at": mem.CreatedAt,
 		}
 
@@ -445,7 +445,7 @@ func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[stri
 	}
 
 	return map[string]any{
-		"memory_id":       memoryID,
+		schemaPropMemoryID:       memoryID,
 		"version_count":   len(versions),
 		"versions":        versions,
 		"current_version": getCurrentVersionFromList(versions),

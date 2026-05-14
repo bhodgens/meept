@@ -562,7 +562,7 @@ func (c *Controller) saveState() error {
 	defer c.mu.Unlock()
 
 	//nolint:gosec // user config directory/file permissions
-	_ = os.MkdirAll(c.config.DataPath, 0755)
+	_ = os.MkdirAll(c.config.DataPath, 0o755)
 
 	state := persistedState{
 		Issues:              c.issues,
@@ -583,7 +583,7 @@ func (c *Controller) saveState() error {
 
 	statePath := filepath.Join(c.config.DataPath, "state.json")
 	//nolint:gosec // user config directory/file permissions
-	return os.WriteFile(statePath, data, 0644)
+	return os.WriteFile(statePath, data, 0o644)
 }
 
 func (c *Controller) loadState() error {

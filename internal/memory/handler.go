@@ -185,7 +185,7 @@ func (h *Handler) sendResults(replyTo string, results []MemoryResult) {
 }
 
 // sendError publishes an error response.
-func (h *Handler) sendError(replyTo string, errMsg string) {
+func (h *Handler) sendError(replyTo, errMsg string) {
 	response := map[string]any{
 		"error":   errMsg,
 		"results": []any{},

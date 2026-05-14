@@ -18,12 +18,12 @@ import (
 // TestOrchestrator_SubscriptionSetup verifies that the Orchestrator
 // subscribes to the expected bus topics.
 func TestOrchestrator_SubscriptionSetup(t *testing.T) {
-	bus := bus.New(nil, slogDiscardLogger())
-	defer bus.Close()
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
 
 	// Create minimal orchestrator with nil deps (we're only testing subscriptions)
 	orchestrator := &Orchestrator{
-		bus:    bus,
+		bus:    msgBus,
 		logger: slogDiscardLogger(),
 	}
 
@@ -39,7 +39,7 @@ func TestOrchestrator_SubscriptionSetup(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Verify bus has subscribers for expected topics
-	stats := bus.Stats()
+	stats := msgBus.Stats()
 
 	expectedTopics := []string{
 		"orchestrator.plan",
@@ -61,11 +61,11 @@ func TestOrchestrator_SubscriptionSetup(t *testing.T) {
 
 // TestOrchestrator_handlePlanRequest_InvalidPayload verifies error handling for invalid payloads.
 func TestOrchestrator_handlePlanRequest_InvalidPayload(t *testing.T) {
-	bus := bus.New(nil, slogDiscardLogger())
-	defer bus.Close()
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
 
 	orchestrator := &Orchestrator{
-		bus:    bus,
+		bus:    msgBus,
 		logger: slogDiscardLogger(),
 	}
 
@@ -87,11 +87,11 @@ func TestOrchestrator_handlePlanRequest_InvalidPayload(t *testing.T) {
 
 // TestOrchestrator_handleScheduleRequest_InvalidPayload verifies error handling for invalid payloads.
 func TestOrchestrator_handleScheduleRequest_InvalidPayload(t *testing.T) {
-	bus := bus.New(nil, slogDiscardLogger())
-	defer bus.Close()
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
 
 	orchestrator := &Orchestrator{
-		bus:    bus,
+		bus:    msgBus,
 		logger: slogDiscardLogger(),
 	}
 

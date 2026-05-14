@@ -131,7 +131,7 @@ func (t *Trainer) Train(ctx context.Context, opts TrainOptions) (*TrainResult, e
 		opts.OutputDir = expandPath(t.config.AdapterDir)
 	}
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(opts.OutputDir, 0755); err != nil {
+	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -173,7 +173,7 @@ func (t *Trainer) trainWithUnsloth(ctx context.Context, opts TrainOptions) (*Tra
 	scriptPath := filepath.Join(opts.OutputDir, "train_unsloth.py")
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write training script: %w", err)
 	}
 
@@ -197,7 +197,7 @@ func (t *Trainer) trainWithAxolotl(ctx context.Context, opts TrainOptions) (*Tra
 	config := t.generateAxolotlConfig(opts)
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(configPath, []byte(config), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -220,7 +220,7 @@ func (t *Trainer) trainWithTRL(ctx context.Context, opts TrainOptions) (*TrainRe
 	scriptPath := filepath.Join(opts.OutputDir, "train_trl.py")
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write training script: %w", err)
 	}
 
@@ -243,7 +243,7 @@ func (t *Trainer) trainWithLlamaFactory(ctx context.Context, opts TrainOptions) 
 	datasetPath := filepath.Join(opts.OutputDir, "dataset_info.json")
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(datasetPath, []byte(datasetConfig), 0644); err != nil {
+	if err := os.WriteFile(datasetPath, []byte(datasetConfig), 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write dataset config: %w", err)
 	}
 

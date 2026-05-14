@@ -18,33 +18,33 @@ const (
 )
 
 var intentThresholds = map[string]float64{
-	"git":      0.85,
-	"schedule": 0.80,
-	"code":     0.75,
-	"debug":    0.75,
-	"review":   0.75,
-	"plan":     0.70,
-	"platform": 0.70,
-	"report":   0.70,
-	"recall":   0.70,
-	"analyze":  0.60,
-	"search":   0.60,
-	"chat":     0.50,
+	string(IntentGit):      0.85,
+	string(IntentSchedule): 0.80,
+	string(IntentCode):     0.75,
+	string(IntentDebug):    0.75,
+	string(ActionReview):   0.75,
+	string(IntentPlan):     0.70,
+	string(IntentPlatform): 0.70,
+	string(IntentReport):   0.70,
+	string(IntentRecall):   0.70,
+	string(IntentAnalyze):  0.60,
+	string(IntentSearch):   0.60,
+	string(IntentChat):     0.50,
 }
 
 var agentMapping = map[string]string{
-	"git":      config.AgentIDCommitter,
-	"schedule": config.AgentIDScheduler,
-	"code":     config.AgentIDCoder,
-	"debug":    config.AgentIDDebugger,
-	"review":   config.AgentIDCoder,
-	"plan":     config.AgentIDPlanner,
-	"platform": config.AgentIDChat,
-	"report":   config.AgentIDChat,
-	"recall":   config.AgentIDChat,
-	"analyze":  config.AgentIDAnalyst,
-	"search":   config.AgentIDAnalyst,
-	"chat":     config.AgentIDChat,
+	string(IntentGit):      config.AgentIDCommitter,
+	string(IntentSchedule): config.AgentIDScheduler,
+	string(IntentCode):     config.AgentIDCoder,
+	string(IntentDebug):    config.AgentIDDebugger,
+	string(ActionReview):   config.AgentIDCoder,
+	string(IntentPlan):     config.AgentIDPlanner,
+	string(IntentPlatform): config.AgentIDChat,
+	string(IntentReport):   config.AgentIDChat,
+	string(IntentRecall):   config.AgentIDChat,
+	string(IntentAnalyze):  config.AgentIDAnalyst,
+	string(IntentSearch):   config.AgentIDAnalyst,
+	string(IntentChat):     config.AgentIDChat,
 }
 
 type LLMClassifier struct {
@@ -251,7 +251,7 @@ func (c *LLMClassifier) getIntentDescription(intent string) string {
 	return "Unknown intent"
 }
 
-func (c *LLMClassifier) parseResponse(content string, originalInput string) (*Intent, error) {
+func (c *LLMClassifier) parseResponse(content, originalInput string) (*Intent, error) {
 	var resp classificationResponse
 
 	cleanContent := strings.TrimSpace(content)

@@ -368,10 +368,7 @@ func (m *QueueModel) renderStatsPanel() string {
 	completed := m.stats.ByState["completed"]
 	failed := m.stats.ByState["failed"]
 
-	parts = append(parts, labelStyle.Render("Pending: ")+pendingStyle.Render(fmt.Sprintf("%d", pending)))
-	parts = append(parts, labelStyle.Render("Processing: ")+processingStyle.Render(fmt.Sprintf("%d", processing)))
-	parts = append(parts, labelStyle.Render("Completed: ")+completedStyle.Render(fmt.Sprintf("%d", completed)))
-	parts = append(parts, labelStyle.Render("Failed: ")+failedStyle.Render(fmt.Sprintf("%d", failed)))
+	parts = append(parts, labelStyle.Render("Pending: ")+pendingStyle.Render(fmt.Sprintf("%d", pending)), labelStyle.Render("Processing: ")+processingStyle.Render(fmt.Sprintf("%d", processing)), labelStyle.Render("Completed: ")+completedStyle.Render(fmt.Sprintf("%d", completed)), labelStyle.Render("Failed: ")+failedStyle.Render(fmt.Sprintf("%d", failed)))
 
 	if m.stats.DeadCount > 0 {
 		deadStyle := lipgloss.NewStyle().

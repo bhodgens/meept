@@ -140,7 +140,7 @@ hourly_token_limit = 50000
 block_financial = false
 `
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

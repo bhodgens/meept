@@ -166,7 +166,7 @@ func WithTrainingStore(store *SQLiteTrainingStore) TeacherClientOption {
 }
 
 // NewTeacherClient creates a new teacher client.
-func NewTeacherClient(primary *llm.Client, fallback *llm.Client, config *TeacherConfig, opts ...TeacherClientOption) *TeacherClient {
+func NewTeacherClient(primary, fallback *llm.Client, config *TeacherConfig, opts ...TeacherClientOption) *TeacherClient {
 	t := &TeacherClient{
 		primary:  primary,
 		fallback: fallback,
@@ -187,7 +187,7 @@ func NewTeacherClient(primary *llm.Client, fallback *llm.Client, config *Teacher
 }
 
 // GetResponse gets a teacher response for the given messages.
-func (t *TeacherClient) GetResponse(ctx context.Context, messages []llm.ChatMessage) (string, string, error) {
+func (t *TeacherClient) GetResponse(ctx context.Context, messages []llm.ChatMessage) (response, reasoning string, err error) {
 	// Check circuit breaker
 	if !t.circuitBreaker.Allow() {
 		return "", "", fmt.Errorf("circuit breaker open: teacher service unavailable")

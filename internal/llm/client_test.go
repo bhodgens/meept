@@ -47,7 +47,7 @@ func TestClientChat(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	server := httptest.NewServer(handler)
@@ -86,7 +86,7 @@ func TestClientChatWithTools(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify tools were sent
 		var req map[string]any
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		if _, ok := req["tools"]; !ok {
 			t.Error("Expected tools in request")
@@ -120,7 +120,7 @@ func TestClientChatWithTools(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	server := httptest.NewServer(handler)
@@ -179,7 +179,7 @@ func TestClientChatRetry(t *testing.T) {
 		if attempts < 3 {
 			// Return 503 to trigger retry
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("Service unavailable"))
+		_, _ = w.Write([]byte("Service unavailable"))
 			return
 		}
 
@@ -199,7 +199,7 @@ func TestClientChatRetry(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	server := httptest.NewServer(handler)
@@ -230,7 +230,7 @@ func TestClientChatRetry(t *testing.T) {
 func TestClientChatAPIError(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid request"))
+	_, _ = w.Write([]byte("Invalid request"))
 	})
 
 	server := httptest.NewServer(handler)
@@ -286,7 +286,7 @@ func TestClientWithBudget(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	})
 
 	server := httptest.NewServer(handler)

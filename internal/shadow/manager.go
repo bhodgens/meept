@@ -71,7 +71,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	// Initialize data directory
 	dataDir := expandPath(cfg.Config.DataDir)
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
@@ -152,7 +152,7 @@ func (m *Manager) IsEnabled() bool {
 }
 
 // GetTeacherResponse gets a response from the teacher model.
-func (m *Manager) GetTeacherResponse(ctx context.Context, messages []llm.ChatMessage) (string, string, error) {
+func (m *Manager) GetTeacherResponse(ctx context.Context, messages []llm.ChatMessage) (response, reasoning string, err error) {
 	if m.teacher == nil {
 		return "", "", fmt.Errorf("teacher not configured")
 	}

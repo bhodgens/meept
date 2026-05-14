@@ -276,7 +276,7 @@ func NewTaskReportAggregator() *TaskReportAggregator {
 
 // ExtractRecommendations extracts recommendations from a step's result text.
 // It looks for structured recommendation blocks in the agent output.
-func (a *TaskReportAggregator) ExtractRecommendations(stepResult string, agentID string) []CategorizedRecommendation {
+func (a *TaskReportAggregator) ExtractRecommendations(stepResult, agentID string) []CategorizedRecommendation {
 	if stepResult == "" {
 		return nil
 	}

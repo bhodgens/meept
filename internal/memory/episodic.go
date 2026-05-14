@@ -113,7 +113,7 @@ func (e *EpisodicMemory) HasFTS5() bool {
 
 // Store persists a new episodic memory.
 // Returns the unique ID of the stored item.
-func (e *EpisodicMemory) Store(ctx context.Context, content string, category string, metadata map[string]any) (string, error) {
+func (e *EpisodicMemory) Store(ctx context.Context, content, category string, metadata map[string]any) (string, error) {
 	if !e.store.HasFTS5Public() {
 		e.logger.Debug("Storing without FTS5 (slower search)")
 	}

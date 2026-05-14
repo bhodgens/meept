@@ -140,7 +140,7 @@ func (c *Client) Store(ctx context.Context, content string, metadata map[string]
 }
 
 // StoreWithZone persists content in a specific zone.
-func (c *Client) StoreWithZone(ctx context.Context, content string, zone string, metadata map[string]any) (string, error) {
+func (c *Client) StoreWithZone(ctx context.Context, content, zone string, metadata map[string]any) (string, error) {
 	req := StoreRequest{
 		Content:  content,
 		Zone:     zone,
@@ -276,7 +276,7 @@ func (c *Client) WithZone(zone string) *Client {
 }
 
 // post sends a POST request to the memvid service.
-func (c *Client) post(ctx context.Context, path string, body any, result any) error {
+func (c *Client) post(ctx context.Context, path string, body, result any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
@@ -313,7 +313,7 @@ func (c *Client) post(ctx context.Context, path string, body any, result any) er
 
 // get sends a GET request to the memvid service.
 func (c *Client) get(ctx context.Context, path string, result any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint+path, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}

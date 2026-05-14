@@ -460,7 +460,7 @@ func TestWrapToolOutput(t *testing.T) {
 // Helper function to check if a string contains another string
 func orchContainsString(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && (haystack == needle ||
-		len(needle) == 0 ||
+		needle == "" ||
 		(len(haystack) > len(needle) && orchContainsSubstring(haystack, needle)))
 }
 

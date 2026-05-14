@@ -33,7 +33,7 @@ func (b *SQLiteConsolidationBackend) GetExpiredMemories(ctx context.Context, not
 	return b.manager.GetExpiredMemories(ctx, notAccessedSinceDays)
 }
 
-func (b *SQLiteConsolidationBackend) StoreSummary(ctx context.Context, content string, category string, metadata map[string]any) (string, error) {
+func (b *SQLiteConsolidationBackend) StoreSummary(ctx context.Context, content, category string, metadata map[string]any) (string, error) {
 	if b.episodic == nil {
 		return "", fmt.Errorf("episodic memory not available")
 	}

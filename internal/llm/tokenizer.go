@@ -20,7 +20,7 @@ type HeuristicTokenizer struct{}
 
 // CountTokens estimates tokens using 3 characters per token heuristic.
 func (h *HeuristicTokenizer) CountTokens(text string) int {
-	if len(text) == 0 {
+	if text == "" {
 		return 0
 	}
 	return int(math.Ceil(float64(len(text)) / 3.0))
@@ -62,7 +62,7 @@ func NewTiktokenTokenizer(encoding string) *TiktokenTokenizer {
 // CountTokens returns accurate token count using tiktoken.
 // Falls back to heuristic if tiktoken encoding was not loaded.
 func (t *TiktokenTokenizer) CountTokens(text string) int {
-	if len(text) == 0 {
+	if text == "" {
 		return 0
 	}
 
@@ -98,7 +98,7 @@ func NewTokenCache(tokenizer Tokenizer) *TokenCache {
 
 // CountTokens returns cached token count or computes and caches it.
 func (c *TokenCache) CountTokens(text string) int {
-	if len(text) == 0 {
+	if text == "" {
 		return 0
 	}
 
@@ -207,7 +207,7 @@ func containsIgnoreCase(s, substr string) bool {
 // EstimateTokenCountHeuristic estimates tokens using the 3 chars/token heuristic.
 // This is exported for use by other packages that need a quick estimate.
 func EstimateTokenCountHeuristic(content string) int {
-	if len(content) == 0 {
+	if content == "" {
 		return 0
 	}
 	return int(math.Ceil(float64(len(content)) / 3.0))

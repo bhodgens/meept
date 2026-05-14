@@ -281,7 +281,7 @@ func TestHandler_StatsViaBus(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	_ = handler.Start(ctx)
-	defer handler.Stop(ctx)
+	defer func() { _ = handler.Stop(ctx) }()
 
 	respSub := msgBus.Subscribe("test-stats", "queue.result")
 

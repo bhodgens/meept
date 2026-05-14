@@ -77,7 +77,7 @@ func TestDaemonStartup(t *testing.T) {
 	// Wait for status to be "running" with retry (race-free check)
 	// This ensures we read the status after Run() has set it
 	var status models.DaemonStatus
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		status = d.Status()
 		if status == models.StatusRunning {
 			break
@@ -124,7 +124,7 @@ func BenchmarkDaemonStartup(b *testing.B) {
 
 		go func() {
 			// Run daemon briefly
-			go d.Run(ctx)
+			_ = d.Run(ctx)
 			// Wait for socket
 			for range 100 {
 				if _, err := os.Stat(cfg.SocketPath); err == nil {
@@ -162,7 +162,7 @@ func BenchmarkRPCThroughput(b *testing.B) {
 
 	ctx := b.Context()
 
-	go d.Run(ctx)
+	_ = d.Run(ctx)
 
 	// Wait for socket
 	deadline := time.Now().Add(2 * time.Second)
@@ -192,14 +192,14 @@ func BenchmarkRPCThroughput(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		// Send request
-		conn.SetWriteDeadline(time.Now().Add(time.Second))
+		_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 		if _, err := conn.Write([]byte(frame)); err != nil {
 			b.Fatalf("Write failed: %v", err)
 		}
 
 		// Read response (simplified - just read some bytes)
 		buf := make([]byte, 256)
-		conn.SetReadDeadline(time.Now().Add(time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 		if _, err := conn.Read(buf); err != nil {
 			b.Fatalf("Read failed: %v", err)
 		}
@@ -225,7 +225,7 @@ func BenchmarkConcurrentRPC(b *testing.B) {
 
 	ctx := b.Context()
 
-	go d.Run(ctx)
+	_ = d.Run(ctx)
 
 	// Wait for socket
 	deadline := time.Now().Add(2 * time.Second)
@@ -272,12 +272,12 @@ func BenchmarkConcurrentRPC(b *testing.B) {
 			buf := make([]byte, 256)
 
 			for ops.Load() < int64(b.N) {
-				conn.SetWriteDeadline(time.Now().Add(time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 				if _, err := conn.Write([]byte(frame)); err != nil {
 					return
 				}
 
-				conn.SetReadDeadline(time.Now().Add(time.Second))
+				_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 				if _, err := conn.Read(buf); err != nil {
 					return
 				}
@@ -313,7 +313,7 @@ func TestRPCLoadTest(t *testing.T) {
 
 	ctx := t.Context()
 
-	go d.Run(ctx)
+	_ = d.Run(ctx)
 
 	// Wait for socket
 	deadline := time.Now().Add(2 * time.Second)
@@ -356,13 +356,13 @@ func TestRPCLoadTest(t *testing.T) {
 			buf := make([]byte, 256)
 
 			for range numRequests / concurrency {
-				conn.SetWriteDeadline(time.Now().Add(time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
 				if _, err := conn.Write([]byte(frame)); err != nil {
 					failCount.Add(1)
 					continue
 				}
 
-				conn.SetReadDeadline(time.Now().Add(time.Second))
+				_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 				if _, err := conn.Read(buf); err != nil {
 					failCount.Add(1)
 					continue

@@ -19,14 +19,14 @@ func TestDiscovery_SingleTier(t *testing.T) {
 	// Create skills directory
 	skillsDir := filepath.Join(tmpDir, "skills")
 	//nolint:gosec // test directory/file
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		t.Fatalf("Failed to create skills dir: %v", err)
 	}
 
 	// Create a skill in a subdirectory
 	subDir := filepath.Join(skillsDir, "code-review")
 	//nolint:gosec // test directory/file
-	if err := os.MkdirAll(subDir, 0755); err != nil {
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
 		t.Fatalf("Failed to create skill subdir: %v", err)
 	}
 
@@ -40,7 +40,7 @@ tags: [development]
 Review the provided code.
 `
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(filepath.Join(subDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(subDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write skill file: %v", err)
 	}
 
@@ -53,7 +53,7 @@ description: A flat skill file
 Flat skill instructions.
 `
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(filepath.Join(skillsDir, "flat-skill.md"), []byte(flatSkill), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillsDir, "flat-skill.md"), []byte(flatSkill), 0o644); err != nil {
 		t.Fatalf("Failed to write flat skill: %v", err)
 	}
 
@@ -102,7 +102,7 @@ func TestDiscovery_Shadowing(t *testing.T) {
 
 	for _, dir := range []string{projectDir, userDir} {
 		//nolint:gosec // test directory/file
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("Failed to create dir: %v", err)
 		}
 	}
@@ -124,11 +124,11 @@ User instructions.
 `
 
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(filepath.Join(projectDir, "shared-skill.md"), []byte(projectSkill), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "shared-skill.md"), []byte(projectSkill), 0o644); err != nil {
 		t.Fatalf("Failed to write project skill: %v", err)
 	}
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(filepath.Join(userDir, "shared-skill.md"), []byte(userSkill), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(userDir, "shared-skill.md"), []byte(userSkill), 0o644); err != nil {
 		t.Fatalf("Failed to write user skill: %v", err)
 	}
 
@@ -196,7 +196,7 @@ description: Skill with mixed case name
 Instructions.
 `
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(filepath.Join(tmpDir, "mixed.md"), []byte(skillContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "mixed.md"), []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write skill: %v", err)
 	}
 
@@ -243,7 +243,7 @@ description: This should be excluded
 Not a real skill.
 `
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte(readme), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte(readme), 0o644); err != nil {
 		t.Fatalf("Failed to write README: %v", err)
 	}
 
@@ -256,7 +256,7 @@ description: A real skill
 Real instructions.
 `
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(filepath.Join(tmpDir, "real-skill.md"), []byte(skill), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "real-skill.md"), []byte(skill), 0o644); err != nil {
 		t.Fatalf("Failed to write skill: %v", err)
 	}
 
@@ -301,7 +301,7 @@ description: Test skill
 Body.
 `
 		//nolint:gosec // test directory/file
-		if err := os.WriteFile(filepath.Join(tmpDir, name+".md"), []byte(content), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tmpDir, name+".md"), []byte(content), 0o644); err != nil {
 			t.Fatalf("Failed to write skill: %v", err)
 		}
 	}
@@ -343,7 +343,7 @@ description: Test
 Body.
 `
 		//nolint:gosec // test directory/file
-		if err := os.WriteFile(filepath.Join(tmpDir, "skill"+string(rune('a'+i))+".md"), []byte(content), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(tmpDir, "skill"+string(rune('a'+i))+".md"), []byte(content), 0o644); err != nil {
 			t.Fatalf("Failed to write skill: %v", err)
 		}
 	}

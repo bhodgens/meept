@@ -134,7 +134,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 
 	if c.budget != nil {
 		if !c.budget.CheckBudget() {
-			return nil, &BudgetExceededError{Message: "Token budget exceeded - request blocked"}
+			return nil, &BudgetExceededError{Message: "ErrBudgetExceeded"}
 		}
 		if err := c.budget.WaitForRateLimit(ctx); err != nil {
 			return nil, err
@@ -253,7 +253,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	if c.budget != nil {
 		reportProgress(ProgressStageStarting, "Checking token budget...")
 		if !c.budget.CheckBudget() {
-			return nil, &BudgetExceededError{Message: "Token budget exceeded - request blocked"}
+			return nil, &BudgetExceededError{Message: "ErrBudgetExceeded"}
 		}
 
 		reportProgress(ProgressStageStarting, "Waiting for rate limit...")
@@ -517,7 +517,7 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 			apiMessages = append(apiMessages, anthropicMessage{
 				Role: string(msg.Role),
 				Content: []anthropicContent{{
-					Type: "text",
+					Type: ContentTypeText,
 					Text: msg.Content,
 				}},
 			})
@@ -527,30 +527,31 @@ func (c *AnthropicClient) buildRequest(messages []ChatMessage, opts *chatOptions
 	// Handle tool calls in assistant messages
 	// LLM-2 FIX: Use the mapping to find the correct apiMessages index
 	for i, msg := range messages {
-		if msg.Role == RoleAssistant && len(msg.ToolCalls) > 0 {
-			apiIdx, ok := msgIndexToAPIIndex[i]
-			if !ok {
-				continue // System message or other non-mapped message
-			}
-			// Replace the simple text content with structured content
-			var content []anthropicContent
-			if msg.Content != "" {
-				content = append(content, anthropicContent{
-					Type: "text",
-					Text: msg.Content,
-				})
-			}
-			for _, tc := range msg.ToolCalls {
-				content = append(content, anthropicContent{
-					Type:  "tool_use",
-					ID:    tc.ID,
-					Name:  tc.Function.Name,
-					Input: json.RawMessage(tc.Function.Arguments),
-				})
-			}
-			if apiIdx < len(apiMessages) && apiMessages[apiIdx].Role == "assistant" {
-				apiMessages[apiIdx].Content = content
-			}
+		if msg.Role != RoleAssistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		apiIdx, ok := msgIndexToAPIIndex[i]
+		if !ok {
+			continue // System message or other non-mapped message
+		}
+		// Replace the simple text content with structured content
+		var content []anthropicContent
+		if msg.Content != "" {
+			content = append(content, anthropicContent{
+				Type: ContentTypeText,
+				Text: msg.Content,
+			})
+		}
+		for _, tc := range msg.ToolCalls {
+			content = append(content, anthropicContent{
+				Type:  ContentTypeToolUse,
+				ID:    tc.ID,
+				Name:  tc.Function.Name,
+				Input: json.RawMessage(tc.Function.Arguments),
+			})
+		}
+		if apiIdx < len(apiMessages) && apiMessages[apiIdx].Role == "assistant" {
+			apiMessages[apiIdx].Content = content
 		}
 	}
 
@@ -826,7 +827,7 @@ func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(P
 				blocks = append(blocks, accum)
 
 				// Report extended thinking start
-				if streamEvent.ContentBlock.Type == "thinking" && progress != nil {
+				if streamEvent.ContentBlock.Type == ContentTypeThinking && progress != nil {
 					progress(ProgressStageThinking, "Extended thinking in progress...")
 				}
 			}
@@ -902,7 +903,7 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 			}
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   block.ID,
-				Type: "function",
+				Type: ContentTypeFunction,
 				Function: ToolCallFunction{
 					Name:      block.Name,
 					Arguments: string(input),
@@ -951,7 +952,7 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) *Response {
 			}
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   block.ID,
-				Type: "function",
+				Type: ContentTypeFunction,
 				Function: ToolCallFunction{
 					Name:      block.Name,
 					Arguments: string(input),

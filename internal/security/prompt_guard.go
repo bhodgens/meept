@@ -63,8 +63,8 @@ func NewPromptGuardWithInterval(interval int) *PromptGuard {
 
 	// Compile injection detection patterns
 	pg.injectionREs = []*injectionRE{
-		{Pattern: regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above)\s+instructions?`), Type: "instruction_override"},
-		{Pattern: regexp.MustCompile(`(?i)(disregard|forget|override)\s+(all\s+)?instructions?`), Type: "instruction_override"},
+		{Pattern: regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above)\s+instructions?`), Type: TypeInstructionOverride},
+		{Pattern: regexp.MustCompile(`(?i)(disregard|forget|override)\s+(all\s+)?instructions?`), Type: TypeInstructionOverride},
 		{Pattern: regexp.MustCompile(`(?i)(you\s+are\s+now|act\s+as|pretend\s+to\s+be)`), Type: "role_switch"},
 		{Pattern: regexp.MustCompile(`(?i)new\s+instructions?\s*:`), Type: "instruction_injection"},
 		{Pattern: regexp.MustCompile(`(?im)^\s*system\s*:`), Type: "role_marker"},
@@ -143,13 +143,13 @@ func (pg *PromptGuard) InjectSafetyReminders(messages []Message) []Message {
 	for _, msg := range messages {
 		result = append(result, msg)
 
-		if msg.Role != "system" {
+		if msg.Role != RoleSystem {
 			nonSystemCount++
 		}
 
 		if nonSystemCount > 0 &&
 			nonSystemCount%pg.ReminderInterval == 0 &&
-			msg.Role != "system" {
+			msg.Role != RoleSystem {
 			result = append(result, Message{
 				Role:    "system",
 				Content: SafetyReminder,
@@ -180,7 +180,7 @@ func (pg *PromptGuard) DetectInjection(text string) (bool, []InjectionMatch) {
 }
 
 // GuardedPrompt wraps user input with detection and boundary markers.
-func (pg *PromptGuard) GuardedPrompt(userInput string) (string, bool, []InjectionMatch) {
+func (pg *PromptGuard) GuardedPrompt(userInput string) (prompt string, hasInjections bool, matches []InjectionMatch) {
 	hasInjection, matches := pg.DetectInjection(userInput)
 	wrapped := pg.WrapUserInput(userInput)
 	return wrapped, hasInjection, matches

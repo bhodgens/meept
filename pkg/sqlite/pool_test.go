@@ -188,7 +188,7 @@ func TestPoolConcurrent(t *testing.T) {
 
 	// Concurrent inserts
 	var wg sync.WaitGroup
-	errors := make(chan error, 10)
+	errCh := make(chan error, 10)
 
 	for i := range 10 {
 		wg.Add(1)
@@ -196,15 +196,15 @@ func TestPoolConcurrent(t *testing.T) {
 			defer wg.Done()
 			_, err := pool.Exec(ctx, "INSERT INTO test (name) VALUES (?)", n)
 			if err != nil {
-				errors <- err
+				errCh <- err
 			}
 		}(i)
 	}
 
 	wg.Wait()
-	close(errors)
+	close(errCh)
 
-	for err := range errors {
+	for err := range errCh {
 		t.Errorf("Concurrent insert failed: %v", err)
 	}
 

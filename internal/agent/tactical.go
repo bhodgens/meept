@@ -176,11 +176,11 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 		}
 	}
 	ts.publishEvent("task.progress", map[string]any{
-		"task_id":         taskID,
+		KeyTaskID:         taskID,
 		"scheduled_steps": scheduledCount,
 		"current_step":    currentStepDesc,
-		"chat_visible":    true,
-		"token_usage":     0, // No token data available at scheduling time
+		KeyChatVisible:    true,
+		KeyTokenUsage:     0, // No token data available at scheduling time
 	})
 
 	return nil
@@ -458,11 +458,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 					"max_retries", maxRetries,
 				)
 				ts.publishEvent("task.validation_retry", map[string]any{
-					"task_id":     step.TaskID,
-					"step_id":     step.ID,
+					KeyTaskID:     step.TaskID,
+					KeyStepID:     step.ID,
 					"retry_count": step.ValidationRetryCount,
 					"max_retries": maxRetries,
-					"error":       validationErr.Error(),
+					string(MessageTypeError):       validationErr.Error(),
 				})
 				return nil // Don't proceed to completion; step will be retried
 			}
@@ -484,10 +484,10 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 
 	// Publish step completed event with details
 	ts.publishEvent("task.step_completed", map[string]any{
-		"task_id":     step.TaskID,
-		"step_id":     step.ID,
+		KeyTaskID:     step.TaskID,
+		KeyStepID:     step.ID,
 		"description": step.Description,
-		"agent_id":    step.AgentID,
+		KeyAgentID:    step.AgentID,
 		"result":      truncateString(resultStr, 200),
 		"state":       string(task.StepCompleted),
 		"duration":    time.Since(startTime).String(),
@@ -500,10 +500,10 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 
 		// Publish review request event
 		ts.publishEvent("step.review_requested", map[string]any{
-			"step_id":   step.ID,
-			"task_id":   step.TaskID,
+			KeyStepID:   step.ID,
+			KeyTaskID:   step.TaskID,
 			"tool_hint": step.ToolHint,
-			"agent_id":  step.AgentID,
+			KeyAgentID:  step.AgentID,
 		})
 
 		// Perform review (synchronously for now)
@@ -650,16 +650,16 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		}
 
 		ts.publishEvent("task.completed", map[string]any{
-			"task_id":         step.TaskID,
+			KeyTaskID:         step.TaskID,
 			"name":            t.Name,
-			"completed_jobs":  t.CompletedJobs,
-			"total_jobs":      t.TotalJobs,
+			KeyCompletedJobs:  t.CompletedJobs,
+			KeyTotalJobs:      t.TotalJobs,
 			"linked_sessions": t.LinkedSessions,
 			"steps":           stepSummaries,
 			"execution_time":  executionTime,
 			"result":          resultSummary,
 			"agents_used":     agentsUsed,
-			"token_usage":     t.TokenUsage,
+			KeyTokenUsage:     t.TokenUsage,
 		})
 
 		ts.logger.Info("Task completed",
@@ -679,11 +679,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 
 		// Publish progress update (chat_visible=true so UI shows in chat)
 		ts.publishEvent("task.progress", map[string]any{
-			"task_id":        step.TaskID,
-			"completed_jobs": t.CompletedJobs,
-			"total_jobs":     t.TotalJobs,
+			KeyTaskID:        step.TaskID,
+			KeyCompletedJobs: t.CompletedJobs,
+			KeyTotalJobs:     t.TotalJobs,
 			"current_step":   nextStepDesc,
-			"chat_visible":   true,
+			KeyChatVisible:   true,
 		})
 	}
 
@@ -746,7 +746,7 @@ func (ts *TacticalScheduler) handleReviewResult(ctx context.Context, step *task.
 
 // OnJobFailed handles a failed job by updating the step and potentially
 // marking the task as failed.
-func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobErr string) error {
+func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr string) error {
 	step, err := ts.stepStore.GetByJobID(jobID)
 	if err != nil {
 		return fmt.Errorf("failed to find step for job %s: %w", jobID, err)
@@ -760,10 +760,10 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 
 	// Publish error to chat immediately (not silent)
 	ts.publishEvent("task.error", map[string]any{
-		"task_id":      step.TaskID,
-		"step_id":      step.ID,
-		"error":        jobErr,
-		"chat_visible": true, // Errors always visible
+		KeyTaskID:      step.TaskID,
+		KeyStepID:      step.ID,
+		string(MessageTypeError):        jobErr,
+		KeyChatVisible: true, // Errors always visible
 	})
 
 	// Check if this is a retryable error (rate limit or transient failure)
@@ -888,13 +888,13 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 		ts.cleanupValidationGateCounter(step.TaskID)
 
 		ts.publishEvent("task.failed", map[string]any{
-			"task_id":         step.TaskID,
+			KeyTaskID:         step.TaskID,
 			"name":            t.Name,
 			"failed_jobs":     t.FailedJobs,
-			"completed_jobs":  t.CompletedJobs,
-			"total_jobs":      t.TotalJobs,
+			KeyCompletedJobs:  t.CompletedJobs,
+			KeyTotalJobs:      t.TotalJobs,
 			"failed_step":     step.ID,
-			"error":           jobErr,
+			string(MessageTypeError):           jobErr,
 			"linked_sessions": t.LinkedSessions,
 		})
 
@@ -913,12 +913,12 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 		}
 
 		ts.publishEvent("task.progress", map[string]any{
-			"task_id":        step.TaskID,
+			KeyTaskID:        step.TaskID,
 			"failed_jobs":    t.FailedJobs,
-			"completed_jobs": t.CompletedJobs,
-			"total_jobs":     t.TotalJobs,
+			KeyCompletedJobs: t.CompletedJobs,
+			KeyTotalJobs:     t.TotalJobs,
 			"current_step":   nextStepDesc,
-			"chat_visible":   true,
+			KeyChatVisible:   true,
 		})
 	}
 
@@ -928,17 +928,17 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID string, jobE
 // selectAgent maps a step's ToolHint to the appropriate agent ID.
 func (ts *TacticalScheduler) selectAgent(step *task.TaskStep) string {
 	switch step.ToolHint {
-	case "code", "refactor":
+	case string(IntentCode), "refactor":
 		return config.AgentIDCoder
-	case "debug", "fix":
+	case string(IntentDebug), "fix":
 		return config.AgentIDDebugger
-	case "analyze", "research":
+	case string(IntentAnalyze), string(IntentResearch):
 		return config.AgentIDAnalyst
-	case "git", "commit":
+	case string(IntentGit), "commit":
 		return config.AgentIDCommitter
-	case "schedule":
+	case string(IntentSchedule):
 		return config.AgentIDScheduler
-	case "plan":
+	case string(IntentPlan):
 		return config.AgentIDPlanner
 	default:
 		return config.AgentIDChat
@@ -962,10 +962,10 @@ func (ts *TacticalScheduler) publishEvent(topic string, data map[string]any) {
 // publishTokenProgress publishes a task.progress event with token_usage data.
 func (ts *TacticalScheduler) publishTokenProgress(t *task.Task) {
 	ts.publishEvent("task.progress", map[string]any{
-		"task_id":        t.ID,
-		"completed_jobs": t.CompletedJobs,
-		"total_jobs":     t.TotalJobs,
-		"token_usage":    t.TokenUsage,
+		KeyTaskID:        t.ID,
+		KeyCompletedJobs: t.CompletedJobs,
+		KeyTotalJobs:     t.TotalJobs,
+		KeyTokenUsage:    t.TokenUsage,
 	})
 }
 
@@ -1082,7 +1082,7 @@ func (ts *TacticalScheduler) buildStepSummaries(taskID string) []map[string]any 
 			"description":         s.Description,
 			"state":               string(s.State),
 			"result":              truncateString(s.Result, 100),
-			"agent_id":            s.AgentID,
+			KeyAgentID:            s.AgentID,
 			"accumulated_context": truncateString(s.AccumulatedContext, 200),
 		}
 	}

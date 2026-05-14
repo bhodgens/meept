@@ -8,7 +8,7 @@ import (
 
 // TaintLogger is an interface for logging taint violations.
 type TaintLogger interface { //nolint:revive // stutter is intentional
-	LogViolation(violation *TaintViolation)
+	LogViolation(violation *TaintViolationError)
 }
 
 // DefaultTaintLogger is the default implementation of TaintLogger.
@@ -25,7 +25,7 @@ func NewDefaultTaintLogger(logger *slog.Logger) *DefaultTaintLogger {
 }
 
 // LogViolation logs a taint violation.
-func (l *DefaultTaintLogger) LogViolation(violation *TaintViolation) {
+func (l *DefaultTaintLogger) LogViolation(violation *TaintViolationError) {
 	l.logger.Warn("taint violation",
 		"label", violation.Label.String(),
 		"sink", violation.SinkName,

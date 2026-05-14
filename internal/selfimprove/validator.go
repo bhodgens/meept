@@ -128,7 +128,7 @@ func (v *FixValidator) ValidateBatch(ctx context.Context, fixes []*ProposedFix) 
 // createSandbox creates a sandbox directory.
 func (v *FixValidator) createSandbox(fixID string) (string, error) {
 	sandboxPath := filepath.Join(v.config.WorkDirTemplate, fixID)
-	if err := os.MkdirAll(sandboxPath, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
+	if err := os.MkdirAll(sandboxPath, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		return "", err
 	}
 	v.sandboxes[fixID] = sandboxPath
@@ -164,7 +164,7 @@ func (v *FixValidator) applyFix(sandboxPath string, fix *ProposedFix) error {
 		return fmt.Errorf("original code not found in file")
 	}
 
-	return os.WriteFile(filePath, []byte(newContent), 0644) //nolint:gosec // workspace plan/data files are user-readable
+	return os.WriteFile(filePath, []byte(newContent), 0o644) //nolint:gosec // workspace plan/data files are user-readable
 }
 
 // parseDiff parses a conflict-style diff.

@@ -87,18 +87,18 @@ func (h *SkillsHandler) handleList(_ context.Context, msg *models.BusMessage) {
 		skillsData := make([]map[string]any, len(skillsList))
 		for i, s := range skillsList {
 			skillsData[i] = map[string]any{
-				"name":        s.Name,
-				"description": s.Description,
-				"tags":        s.Tags,
-				"requires":    s.Requires,
-				"path":        s.Path,
-				"priority":    s.Priority,
-				"risk_level":  s.RiskLevel,
+				RPCKeyName:        s.Name,
+				RPCKeyDescription: s.Description,
+				RPCKeyTags:        s.Tags,
+				RPCKeyRequires:    s.Requires,
+				RPCKeyPath:        s.Path,
+				RPCKeyPriority:    s.Priority,
+				RPCKeyRiskLevel:  s.RiskLevel,
 			}
 		}
 		result = map[string]any{
 			"skills": skillsData,
-			"count":  len(skillsData),
+			RPCKeyCount:  len(skillsData),
 		}
 	}
 
@@ -128,16 +128,16 @@ func (h *SkillsHandler) handleGet(_ context.Context, msg *models.BusMessage) {
 	}
 
 	result := map[string]any{
-		"name":           skill.Name,
-		"description":    skill.Description,
-		"tags":           skill.Tags,
-		"requires":       skill.Requires,
+		RPCKeyName:           skill.Name,
+		RPCKeyDescription:    skill.Description,
+		RPCKeyTags:           skill.Tags,
+		RPCKeyRequires:       skill.Requires,
 		"examples":       skill.Examples,
 		"body":           skill.Body,
-		"path":           skill.Path,
-		"priority":       skill.Priority,
+		RPCKeyPath:           skill.Path,
+		RPCKeyPriority:       skill.Priority,
 		"allowed_tools":  skill.AllowedTools,
-		"risk_level":     skill.RiskLevel,
+		RPCKeyRiskLevel:     skill.RiskLevel,
 		"max_iterations": skill.MaxIterations,
 	}
 
@@ -180,8 +180,8 @@ func (h *SkillsHandler) handleExecute(ctx context.Context, msg *models.BusMessag
 	}
 
 	result := map[string]any{
-		"content":           execResult.Content,
-		"model":             execResult.Model,
+		RPCKeyContent:           execResult.Content,
+		RPCKeyModel:             execResult.Model,
 		"prompt_tokens":     execResult.PromptTokens,
 		"completion_tokens": execResult.CompletionTokens,
 		"total_tokens":      execResult.TotalTokens,
@@ -228,19 +228,19 @@ func RegisterSkillsHandlers(server *Server, registry *skills.Registry, executor 
 		skillsData := make([]map[string]any, len(skillsList))
 		for i, s := range skillsList {
 			skillsData[i] = map[string]any{
-				"name":        s.Name,
-				"description": s.Description,
-				"tags":        s.Tags,
-				"requires":    s.Requires,
-				"path":        s.Path,
-				"priority":    s.Priority,
-				"risk_level":  s.RiskLevel,
+				RPCKeyName:        s.Name,
+				RPCKeyDescription: s.Description,
+				RPCKeyTags:        s.Tags,
+				RPCKeyRequires:    s.Requires,
+				RPCKeyPath:        s.Path,
+				RPCKeyPriority:    s.Priority,
+				RPCKeyRiskLevel:  s.RiskLevel,
 			}
 		}
 
 		return map[string]any{
 			"skills": skillsData,
-			"count":  len(skillsData),
+			RPCKeyCount:  len(skillsData),
 		}, nil
 	})
 
@@ -263,16 +263,16 @@ func RegisterSkillsHandlers(server *Server, registry *skills.Registry, executor 
 		}
 
 		return map[string]any{
-			"name":           skill.Name,
-			"description":    skill.Description,
-			"tags":           skill.Tags,
-			"requires":       skill.Requires,
+			RPCKeyName:           skill.Name,
+			RPCKeyDescription:    skill.Description,
+			RPCKeyTags:           skill.Tags,
+			RPCKeyRequires:       skill.Requires,
 			"examples":       skill.Examples,
 			"body":           skill.Body,
-			"path":           skill.Path,
-			"priority":       skill.Priority,
+			RPCKeyPath:           skill.Path,
+			RPCKeyPriority:       skill.Priority,
 			"allowed_tools":  skill.AllowedTools,
-			"risk_level":     skill.RiskLevel,
+			RPCKeyRiskLevel:     skill.RiskLevel,
 			"max_iterations": skill.MaxIterations,
 		}, nil
 	})
@@ -307,8 +307,8 @@ func RegisterSkillsHandlers(server *Server, registry *skills.Registry, executor 
 		}
 
 		return map[string]any{
-			"content":           result.Content,
-			"model":             result.Model,
+			RPCKeyContent:           result.Content,
+			RPCKeyModel:             result.Model,
 			"prompt_tokens":     result.PromptTokens,
 			"completion_tokens": result.CompletionTokens,
 			"total_tokens":      result.TotalTokens,

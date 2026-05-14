@@ -28,13 +28,13 @@ func (t *TaskCreateTool) Description() string {
 
 func (t *TaskCreateTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"name": {
+			schemaPropName: {
 				Type:        "string",
 				Description: "Short descriptive name for the task.",
 			},
-			"description": {
+			schemaPropDescription: {
 				Type:        "string",
 				Description: "Detailed description of what the task involves.",
 			},
@@ -97,9 +97,9 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	return map[string]any{
 		"success":     true,
 		"task_id":     newTask.ID,
-		"name":        newTask.Name,
-		"state":       string(newTask.State),
-		"description": newTask.Description,
+		schemaPropName:        newTask.Name,
+		schemaPropState:       string(newTask.State),
+		schemaPropDescription: newTask.Description,
 	}, nil
 }
 
@@ -121,7 +121,7 @@ func (t *TaskGetTool) Description() string {
 
 func (t *TaskGetTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"id": {
 				Type:        "string",
@@ -152,9 +152,9 @@ func (t *TaskGetTool) Execute(ctx context.Context, args map[string]any) (any, er
 
 	return map[string]any{
 		"id":              taskObj.ID,
-		"name":            taskObj.Name,
-		"description":     taskObj.Description,
-		"state":           string(taskObj.State),
+		schemaPropName:            taskObj.Name,
+		schemaPropDescription:     taskObj.Description,
+		schemaPropState:           string(taskObj.State),
 		"project_dir":     taskObj.ProjectDir,
 		"total_jobs":      taskObj.TotalJobs,
 		"completed_jobs":  taskObj.CompletedJobs,
@@ -187,14 +187,14 @@ func (t *TaskListTool) Description() string {
 
 func (t *TaskListTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"state": {
+			schemaPropState: {
 				Type:        "string",
 				Description: "Optional state filter: pending, planning, executing, testing, completed, failed, cancelled.",
 				Enum:        []string{"pending", "planning", "executing", "testing", "completed", "failed", "cancelled", ""},
 			},
-			"limit": {
+			schemaPropLimit: {
 				Type:        "integer",
 				Description: "Maximum number of tasks to return (default 20, max 100).",
 			},
@@ -240,8 +240,8 @@ func (t *TaskListTool) Execute(ctx context.Context, args map[string]any) (any, e
 	for _, taskObj := range tasks {
 		formatted = append(formatted, map[string]any{
 			"id":         taskObj.ID,
-			"name":       taskObj.Name,
-			"state":      string(taskObj.State),
+			schemaPropName:       taskObj.Name,
+			schemaPropState:      string(taskObj.State),
 			"progress":   taskObj.Progress(),
 			"updated_at": taskObj.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		})
@@ -249,7 +249,7 @@ func (t *TaskListTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	return map[string]any{
 		"tasks": formatted,
-		"count": len(formatted),
+		schemaPropCount: len(formatted),
 	}, nil
 }
 
@@ -271,21 +271,21 @@ func (t *TaskUpdateTool) Description() string {
 
 func (t *TaskUpdateTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"id": {
 				Type:        "string",
 				Description: "The task ID to update.",
 			},
-			"name": {
+			schemaPropName: {
 				Type:        "string",
 				Description: "New name for the task.",
 			},
-			"description": {
+			schemaPropDescription: {
 				Type:        "string",
 				Description: "New description for the task.",
 			},
-			"state": {
+			schemaPropState: {
 				Type:        "string",
 				Description: "New state: pending, planning, executing, testing, completed, failed, cancelled.",
 				Enum:        []string{"pending", "planning", "executing", "testing", "completed", "failed", "cancelled"},
@@ -357,8 +357,8 @@ func (t *TaskUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 	return map[string]any{
 		"success": true,
 		"task_id": taskObj.ID,
-		"name":    taskObj.Name,
-		"state":   string(taskObj.State),
+		schemaPropName:    taskObj.Name,
+		schemaPropState:   string(taskObj.State),
 	}, nil
 }
 

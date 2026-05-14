@@ -363,7 +363,7 @@ func (r *Resolver) RotateToNextModel(aliasName string) (*ModelConfig, error) {
 }
 
 // GetAliasHealth returns the current health status for an alias.
-func (r *Resolver) GetAliasHealth(aliasName string) (currentIndex int, consecutiveFails int, cooldownUntil time.Time, ok bool) {
+func (r *Resolver) GetAliasHealth(aliasName string) (currentIndex, consecutiveFails int, cooldownUntil time.Time, ok bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

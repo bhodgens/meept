@@ -221,7 +221,7 @@ func (em *EscalationManager) triggerReplan(ctx context.Context, failure FailureC
 		TaskID:    failure.TaskID,
 		SessionID: "",
 		Input:     replanDescription,
-		Intent:    "plan",
+		Intent:    string(IntentPlan),
 	}
 
 	if err := em.planner.Plan(ctx, req); err != nil {
@@ -261,12 +261,12 @@ func (em *EscalationManager) publishEscalationEvent(_ context.Context, failure F
 	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "escalation-manager", map[string]any{
-		"task_id":   failure.TaskID,
-		"step_id":   failure.StepID,
-		"agent_id":  failure.AgentID,
+		KeyTaskID:   failure.TaskID,
+		KeyStepID:   failure.StepID,
+		KeyAgentID:  failure.AgentID,
 		"level":     level,
 		"action":    action,
-		"error":     failure.Error,
+		string(MessageTypeError):     failure.Error,
 		"timestamp": time.Now().UTC(),
 	})
 	if err != nil {

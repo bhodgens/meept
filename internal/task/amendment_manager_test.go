@@ -117,7 +117,7 @@ func TestAmendmentManager_NoHandler(t *testing.T) {
 	defer mgr.Close()
 
 	req := NewAmendmentRequest("task-1", AmendmentInjectContext, "test")
-	mgr.Submit(context.Background(), req)
+	_ = mgr.Submit(context.Background(), req)
 
 	reply, err := mgr.Process(context.Background(), req.ID)
 	if err != nil {

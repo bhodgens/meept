@@ -101,13 +101,14 @@ func NewModelPicker(config ModelPickerConfig) *ModelPicker {
 	// Pre-select provider if specified
 	if config.PreselectProvider != "" {
 		for i, p := range CanonicalProviders {
-			if p.ID == config.PreselectProvider {
-				mp.providerList.Select(i)
-				mp.selectedProvider = &CanonicalProviders[i]
-				mp.loadModelsForProvider(&CanonicalProviders[i])
-				mp.mode = ModeSelectModel
-				break
+			if p.ID != config.PreselectProvider {
+				continue
 			}
+			mp.providerList.Select(i)
+			mp.selectedProvider = &CanonicalProviders[i]
+			mp.loadModelsForProvider(&CanonicalProviders[i])
+			mp.mode = ModeSelectModel
+			break
 		}
 	}
 

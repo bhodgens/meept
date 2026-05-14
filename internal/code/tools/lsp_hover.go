@@ -33,17 +33,17 @@ Requires an LSP server for the file's language to be configured and running.`
 
 func (t *LSPHoverTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"file_path": {
+			SchemaPropFilePath: {
 				Type:        "string",
 				Description: "Path to the source file containing the symbol.",
 			},
-			"line": {
+			SchemaPropLine: {
 				Type:        "integer",
 				Description: "Line number (0-indexed) of the symbol.",
 			},
-			"character": {
+			SchemaPropCharacter: {
 				Type:        "integer",
 				Description: "Column/character offset (0-indexed) within the line.",
 			},
@@ -100,11 +100,11 @@ func (t *LSPHoverTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	if hover == nil {
 		return map[string]any{
-			"found":     false,
-			"message":   "No hover information available at this location",
-			"file_path": filePath,
-			"line":      line,
-			"character": char,
+			SchemaPropFound:     false,
+			SchemaPropMessage:   "No hover information available at this location",
+			SchemaPropFilePath: filePath,
+			SchemaPropLine:      line,
+			SchemaPropCharacter: char,
 		}, nil
 	}
 
@@ -112,17 +112,17 @@ func (t *LSPHoverTool) Execute(ctx context.Context, args map[string]any) (any, e
 	content := extractHoverContent(hover)
 
 	result := map[string]any{
-		"found":   true,
+		SchemaPropFound:   true,
 		"content": content,
 	}
 
 	// Add range if available
 	if hover.Range != nil {
 		result["range"] = map[string]any{
-			"start_line": hover.Range.Start.Line,
-			"start_char": hover.Range.Start.Character,
-			"end_line":   hover.Range.End.Line,
-			"end_char":   hover.Range.End.Character,
+			SchemaPropStartLine: hover.Range.Start.Line,
+			SchemaPropStartChar: hover.Range.Start.Character,
+			SchemaPropEndLine:   hover.Range.End.Line,
+			SchemaPropEndChar:   hover.Range.End.Character,
 		}
 	}
 

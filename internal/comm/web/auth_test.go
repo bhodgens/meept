@@ -8,7 +8,7 @@ import (
 
 func TestNoAuth(t *testing.T) {
 	auth := NoAuth{}
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	if !auth.Authenticate(req) {
 		t.Fatalf("NoAuth should always authenticate")
 	}
@@ -16,7 +16,7 @@ func TestNoAuth(t *testing.T) {
 
 func TestBearerAuth_Valid(t *testing.T) {
 	auth := NewBearerAuth("token1", "token2")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Authorization", "Bearer token1")
 	if !auth.Authenticate(req) {
 		t.Fatalf("expected valid authentication")
@@ -25,7 +25,7 @@ func TestBearerAuth_Valid(t *testing.T) {
 
 func TestBearerAuth_Invalid(t *testing.T) {
 	auth := NewBearerAuth("token1")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	if auth.Authenticate(req) {
 		t.Fatalf("expected invalid authentication")
@@ -34,7 +34,7 @@ func TestBearerAuth_Invalid(t *testing.T) {
 
 func TestBearerAuth_MissingHeader(t *testing.T) {
 	auth := NewBearerAuth("token1")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	if auth.Authenticate(req) {
 		t.Fatalf("expected failure with missing header")
 	}
@@ -42,7 +42,7 @@ func TestBearerAuth_MissingHeader(t *testing.T) {
 
 func TestBearerAuth_WrongScheme(t *testing.T) {
 	auth := NewBearerAuth("token1")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 	if auth.Authenticate(req) {
 		t.Fatalf("expected failure with wrong scheme")
@@ -51,7 +51,7 @@ func TestBearerAuth_WrongScheme(t *testing.T) {
 
 func TestBasicAuth_Valid(t *testing.T) {
 	auth := NewBasicAuth(map[string]string{"admin": "secret"})
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.SetBasicAuth("admin", "secret")
 	if !auth.Authenticate(req) {
 		t.Fatalf("expected valid authentication")
@@ -60,7 +60,7 @@ func TestBasicAuth_Valid(t *testing.T) {
 
 func TestBasicAuth_WrongPassword(t *testing.T) {
 	auth := NewBasicAuth(map[string]string{"admin": "secret"})
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.SetBasicAuth("admin", "wrong")
 	if auth.Authenticate(req) {
 		t.Fatalf("expected invalid authentication")
@@ -69,7 +69,7 @@ func TestBasicAuth_WrongPassword(t *testing.T) {
 
 func TestBasicAuth_UnknownUser(t *testing.T) {
 	auth := NewBasicAuth(map[string]string{"admin": "secret"})
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.SetBasicAuth("unknown", "secret")
 	if auth.Authenticate(req) {
 		t.Fatalf("expected invalid authentication")
@@ -78,7 +78,7 @@ func TestBasicAuth_UnknownUser(t *testing.T) {
 
 func TestAPIKeyAuth_Header(t *testing.T) {
 	auth := NewAPIKeyAuth([]string{"key1", "key2"}, "", "")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("X-API-Key", "key1")
 	if !auth.Authenticate(req) {
 		t.Fatalf("expected valid authentication via header")
@@ -87,7 +87,7 @@ func TestAPIKeyAuth_Header(t *testing.T) {
 
 func TestAPIKeyAuth_QueryParam(t *testing.T) {
 	auth := NewAPIKeyAuth([]string{"key1"}, "", "")
-	req := httptest.NewRequest(http.MethodGet, "/?api_key=key1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/?api_key=key1", http.NoBody)
 	if !auth.Authenticate(req) {
 		t.Fatalf("expected valid authentication via query param")
 	}
@@ -95,7 +95,7 @@ func TestAPIKeyAuth_QueryParam(t *testing.T) {
 
 func TestAPIKeyAuth_InvalidKey(t *testing.T) {
 	auth := NewAPIKeyAuth([]string{"key1"}, "", "")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("X-API-Key", "wrong")
 	if auth.Authenticate(req) {
 		t.Fatalf("expected invalid authentication")
@@ -104,7 +104,7 @@ func TestAPIKeyAuth_InvalidKey(t *testing.T) {
 
 func TestAPIKeyAuth_CustomHeader(t *testing.T) {
 	auth := NewAPIKeyAuth([]string{"key1"}, "X-Custom-Key", "")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("X-Custom-Key", "key1")
 	if !auth.Authenticate(req) {
 		t.Fatalf("expected valid authentication via custom header")
@@ -117,21 +117,21 @@ func TestChainAuth(t *testing.T) {
 	auth := NewChainAuth(bearer, apiKey)
 
 	// Test bearer auth works
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Authorization", "Bearer token1")
 	if !auth.Authenticate(req) {
 		t.Fatalf("expected valid bearer auth through chain")
 	}
 
 	// Test API key auth works
-	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	req2.Header.Set("X-API-Key", "key1")
 	if !auth.Authenticate(req2) {
 		t.Fatalf("expected valid API key auth through chain")
 	}
 
 	// Test invalid auth fails
-	req3 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	if auth.Authenticate(req3) {
 		t.Fatalf("expected failure with no credentials")
 	}
@@ -155,7 +155,7 @@ func TestIPWhitelistAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 			req.RemoteAddr = tt.remote
 			if tt.forward != "" {
 				req.Header.Set("X-Forwarded-For", tt.forward)

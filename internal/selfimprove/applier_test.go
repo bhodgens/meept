@@ -1,6 +1,7 @@
 package selfimprove
 
 import (
+	"bytes"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -19,7 +20,7 @@ func TestRollback_RestoresNestedPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	projectRoot := filepath.Join(tmpDir, "project")
 	//nolint:gosec // test directory/file
-	if err := os.MkdirAll(filepath.Join(projectRoot, "sub", "dir"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(projectRoot, "sub", "dir"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
@@ -27,25 +28,25 @@ func TestRollback_RestoresNestedPath(t *testing.T) {
 	nestedFile := filepath.Join(projectRoot, relPath)
 	originalContent := []byte("package original\n")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(nestedFile, originalContent, 0644); err != nil {
+	if err := os.WriteFile(nestedFile, originalContent, 0o644); err != nil {
 		t.Fatalf("write original file: %v", err)
 	}
 
 	// Backup directory (mirror applier layout).
 	backupDir := filepath.Join(tmpDir, "backups")
 	//nolint:gosec // test directory/file
-	if err := os.MkdirAll(backupDir, 0755); err != nil {
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatalf("mkdir backup: %v", err)
 	}
 	backupPath := filepath.Join(backupDir, "fix1_foo.go.backup")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(backupPath, originalContent, 0644); err != nil {
+	if err := os.WriteFile(backupPath, originalContent, 0o644); err != nil {
 		t.Fatalf("write backup: %v", err)
 	}
 
 	// Simulate modification to the nested file.
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(nestedFile, []byte("package modified\n"), 0644); err != nil {
+	if err := os.WriteFile(nestedFile, []byte("package modified\n"), 0o644); err != nil {
 		t.Fatalf("modify file: %v", err)
 	}
 
@@ -73,7 +74,7 @@ func TestRollback_RestoresNestedPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read nested file: %v", err)
 	}
-	if string(got) != string(originalContent) {
+	if !bytes.Equal(got, originalContent) {
 		t.Errorf("nested file content = %q, want %q", got, originalContent)
 	}
 

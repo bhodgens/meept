@@ -82,18 +82,18 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	ctx, h.cancel = context.WithCancel(ctx)
 
 	// Subscribe to chat requests
-	chatSub := h.bus.Subscribe("chat-handler", "chat.request")
+	chatSub := h.bus.Subscribe(SourceChatHandler, "chat.request")
 
 	// Subscribe to worker list requests
 	workerSub := h.bus.Subscribe("worker-handler", "agent.workers.list")
 
 	// Subscribe to task completion events for result push-back
-	taskCompletedSub := h.bus.Subscribe("chat-handler", "task.completed")
-	taskFailedSub := h.bus.Subscribe("chat-handler", "task.failed")
+	taskCompletedSub := h.bus.Subscribe(SourceChatHandler, "task.completed")
+	taskFailedSub := h.bus.Subscribe(SourceChatHandler, "task.failed")
 
 	// Subscribe to agent progress events to keep worker state in sync with
 	// the agent loop's stage transitions (thinking vs. executing tools).
-	progressSub := h.bus.Subscribe("chat-handler", "agent.progress")
+	progressSub := h.bus.Subscribe(SourceChatHandler, "agent.progress")
 
 	h.wg.Add(5)
 
@@ -251,7 +251,7 @@ func (h *ChatHandler) handleWorkerListRequest(msg *models.BusMessage) {
 		ID:        generateMessageID(),
 		Type:      models.MessageTypeResponse,
 		Topic:     "agent.workers.result",
-		Source:    "chat-handler",
+		Source:    SourceChatHandler,
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
 		ReplyTo:   msg.ID,
@@ -283,7 +283,7 @@ func (h *ChatHandler) Stop(ctx context.Context) error {
 
 // Name returns the component name for the registry.
 func (h *ChatHandler) Name() string {
-	return "chat-handler"
+	return SourceChatHandler
 }
 
 // handleRequest processes a single chat request.
@@ -434,7 +434,7 @@ func (h *ChatHandler) publishPlanRequest(result *DispatchResult, sessionID strin
 		ID:        generateMessageID(),
 		Type:      models.MessageTypeRequest,
 		Topic:     "orchestrator.plan",
-		Source:    "chat-handler",
+		Source:    SourceChatHandler,
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
 	}
@@ -464,7 +464,7 @@ func (h *ChatHandler) sendResponse(replyTo string, response ChatResponse) {
 		ID:        generateMessageID(),
 		Type:      models.MessageTypeResponse,
 		Topic:     "chat.response",
-		Source:    "chat-handler",
+		Source:    SourceChatHandler,
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
 		ReplyTo:   replyTo, // This matches the original request ID for the proxy
@@ -532,7 +532,7 @@ func (h *ChatHandler) publishWorkerEvent(topic string, w *Worker) {
 		ID:        generateMessageID(),
 		Type:      models.MessageTypeEvent,
 		Topic:     topic,
-		Source:    "chat-handler",
+		Source:    SourceChatHandler,
 		Timestamp: time.Now().UTC(),
 		Payload:   payload,
 	}

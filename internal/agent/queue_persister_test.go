@@ -266,7 +266,7 @@ func TestQueuePersister_EnqueueAsync_Multiple(t *testing.T) {
 
 	p := newTestPersister(t, "conv-multi", 10*time.Second)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		p.EnqueueAsync(QueuedMessage{
 			ID:        fmt.Sprintf("msg-%d", i),
 			Content:   fmt.Sprintf("content %d", i),
@@ -388,7 +388,7 @@ func TestQueuePersister_ClearPending(t *testing.T) {
 	p := newTestPersister(t, "conv-clear", 0)
 
 	// Persist some messages.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		msg := QueuedMessage{
 			ID:        fmt.Sprintf("clr-%d", i),
 			Content:   "to be cleared",
@@ -498,7 +498,7 @@ func TestQueuePersister_FlushOnTimer_Debounce(t *testing.T) {
 	p := newTestPersister(t, "conv-debounce", 80*time.Millisecond)
 
 	// Enqueue multiple messages rapidly.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		p.EnqueueAsync(QueuedMessage{
 			ID:        fmt.Sprintf("deb-%d", i),
 			Content:   "debounce msg",
@@ -662,11 +662,11 @@ func TestQueuePersister_ConcurrentAccess(t *testing.T) {
 	var errCount atomic.Int64
 
 	// Concurrent PersistSync calls.
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			for i := 0; i < messagesPerWriter; i++ {
+			for i := range messagesPerWriter {
 				msg := QueuedMessage{
 					ID:        fmt.Sprintf("cw-%d-%d", workerID, i),
 					Content:   "concurrent msg",
@@ -682,11 +682,11 @@ func TestQueuePersister_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Concurrent EnqueueAsync calls.
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			for i := 0; i < messagesPerWriter; i++ {
+			for i := range messagesPerWriter {
 				p.EnqueueAsync(QueuedMessage{
 					ID:        fmt.Sprintf("ce-%d-%d", workerID, i),
 					Content:   "async concurrent msg",
@@ -699,24 +699,20 @@ func TestQueuePersister_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Concurrent Flush calls.
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 5 {
+		wg.Go(func() {
 			p.Flush()
-		}()
+		})
 	}
 
 	// Concurrent LoadPending calls.
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 5 {
+		wg.Go(func() {
 			_, err := p.LoadPending()
 			if err != nil {
 				errCount.Add(1)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

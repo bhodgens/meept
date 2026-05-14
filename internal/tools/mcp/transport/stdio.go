@@ -195,7 +195,7 @@ func (t *StdioTransport) Close() error {
 		return nil
 	case <-time.After(5 * time.Second):
 		// Force kill
-		t.cmd.Process.Kill()
+		_ = t.cmd.Process.Kill()
 		<-done
 		return nil
 	}

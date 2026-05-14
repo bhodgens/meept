@@ -58,8 +58,8 @@ func TestOAuth2Authenticator_SaveAndLoadToken(t *testing.T) {
 
 	// Verify file permissions
 	info, _ := os.Stat(tokenPath)
-	if info.Mode().Perm() != 0600 {
-		t.Errorf("expected file permissions 0600, got %o", info.Mode().Perm())
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("expected file permissions 0o600, got %o", info.Mode().Perm())
 	}
 
 	// Load
@@ -131,7 +131,7 @@ func TestOAuth2Authenticator_Exchange(t *testing.T) {
 			ExpiresIn:    3600,
 			RefreshToken: "mock-refresh-token",
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp) //nolint:gosec // test mock token
 	}))
 	defer server.Close()
 
@@ -464,7 +464,7 @@ func TestReminderWatcher_TriggerReminder(t *testing.T) {
 // --- Helper ---
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstr(s, substr))
+	return len(s) >= len(substr) && (s == substr || s != "" && containsSubstr(s, substr))
 }
 
 func containsSubstr(s, substr string) bool {

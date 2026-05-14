@@ -158,7 +158,7 @@ func (a *OpenAIAdapter) CreateFineTuneJob(ctx context.Context, trainingFileID, m
 
 // GetFineTuneJob retrieves the status of a fine-tuning job.
 func (a *OpenAIAdapter) GetFineTuneJob(ctx context.Context, jobID string) (*FineTuneJob, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/fine_tuning/jobs/"+jobID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/fine_tuning/jobs/"+jobID, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (a *OpenAIAdapter) GetFineTuneJob(ctx context.Context, jobID string) (*Fine
 // ListFineTuneJobs lists all fine-tuning jobs.
 func (a *OpenAIAdapter) ListFineTuneJobs(ctx context.Context, limit int) ([]*FineTuneJob, error) {
 	url := fmt.Sprintf("%s/fine_tuning/jobs?limit=%d", a.baseURL, limit)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (a *OpenAIAdapter) ListFineTuneJobs(ctx context.Context, limit int) ([]*Fin
 
 // CancelFineTuneJob cancels a running fine-tuning job.
 func (a *OpenAIAdapter) CancelFineTuneJob(ctx context.Context, jobID string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/fine_tuning/jobs/"+jobID+"/cancel", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/fine_tuning/jobs/"+jobID+"/cancel", http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func (a *OpenAIAdapter) WaitForJob(ctx context.Context, jobID string, pollInterv
 
 // DeleteFile deletes an uploaded file.
 func (a *OpenAIAdapter) DeleteFile(ctx context.Context, fileID string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.baseURL+"/files/"+fileID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.baseURL+"/files/"+fileID, http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func (a *OpenAIAdapter) DeleteFile(ctx context.Context, fileID string) error {
 
 // DeleteModel deletes a fine-tuned model.
 func (a *OpenAIAdapter) DeleteModel(ctx context.Context, modelID string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.baseURL+"/models/"+modelID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, a.baseURL+"/models/"+modelID, http.NoBody)
 	if err != nil {
 		return err
 	}

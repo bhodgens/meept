@@ -174,9 +174,9 @@ func (m *Manager) AllTools() []ToolInfo {
 
 	var allTools []ToolInfo
 	for _, client := range m.clients {
-		tools := client.ListTools()
+		toolList := client.ListTools()
 		// Prefix tool names with server name
-		for _, t := range tools {
+		for _, t := range toolList {
 			prefixedTool := ToolInfo{
 				Name:        fmt.Sprintf("%s.%s", client.Name(), t.Name),
 				Description: t.Description,

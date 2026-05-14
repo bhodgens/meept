@@ -96,7 +96,7 @@ func (e *Exporter) Export(ctx context.Context, opts ExportOptions) (*ExportResul
 
 	// Ensure output directory exists
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -205,7 +205,7 @@ func (e *Exporter) exportJSONL(ctx context.Context, writer *bufio.Writer, opts E
 	return count, nil
 }
 
-func (e *Exporter) exportDPO(ctx context.Context, writer *bufio.Writer, opts ExportOptions) (int, []string, error) {
+func (e *Exporter) exportDPO(ctx context.Context, writer *bufio.Writer, opts ExportOptions) (n int, result []string, err error) {
 	pairOpts := ListPairsOptions{
 		MinMargin:      opts.MinMargin,
 		UnexportedOnly: true,
@@ -401,7 +401,7 @@ func (e *Exporter) exportAlpaca(ctx context.Context, writer *bufio.Writer, opts 
 // The training.db is self-contained and portable for use on training machines.
 func (e *Exporter) ExportDatabase(ctx context.Context, srcPath, outputPath string) error {
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -580,7 +580,7 @@ func jaccardSimilarity(a, b map[string]int) float64 {
 }
 
 func expandPath(path string) string {
-	if len(path) > 0 && path[0] == '~' {
+	if path != "" && path[0] == '~' {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, path[1:])
 	}

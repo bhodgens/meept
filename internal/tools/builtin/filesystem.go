@@ -45,9 +45,9 @@ func (t *ReadFileTool) Description() string {
 
 func (t *ReadFileTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"path": {
+			schemaPropPath: {
 				Type:        "string",
 				Description: "Absolute or ~-prefixed path to the file.",
 			},
@@ -55,7 +55,7 @@ func (t *ReadFileTool) Parameters() llm.FunctionParameters {
 				Type:        "integer",
 				Description: "Line number to start reading from (1-based, optional).",
 			},
-			"limit": {
+			schemaPropLimit: {
 				Type:        "integer",
 				Description: "Maximum number of lines to read (optional).",
 			},
@@ -261,13 +261,13 @@ func (t *WriteFileTool) Description() string {
 
 func (t *WriteFileTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"path": {
+			schemaPropPath: {
 				Type:        "string",
 				Description: "Absolute or ~-prefixed path to the file.",
 			},
-			"content": {
+			schemaPropContent: {
 				Type:        "string",
 				Description: "The text content to write.",
 			},
@@ -306,7 +306,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 	// Create parent directories
 	dir := filepath.Dir(resolved)
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -318,7 +318,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 	}
 
 	//nolint:gosec // user config directory/file permissions
-	f, err := os.OpenFile(resolved, flag, 0644)
+	f, err := os.OpenFile(resolved, flag, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
@@ -404,7 +404,7 @@ func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]an
 
 	dir := filepath.Dir(resolved)
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -416,7 +416,7 @@ func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]an
 	}
 
 	//nolint:gosec // user config directory/file permissions
-	f, err := os.OpenFile(resolved, flag, 0644)
+	f, err := os.OpenFile(resolved, flag, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
@@ -491,9 +491,9 @@ func (t *DeleteFileTool) Description() string {
 
 func (t *DeleteFileTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"path": {
+			schemaPropPath: {
 				Type:        "string",
 				Description: "Absolute or ~-prefixed path to the file to delete.",
 			},
@@ -576,9 +576,9 @@ func (t *ListDirectoryTool) Description() string {
 
 func (t *ListDirectoryTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"path": {
+			schemaPropPath: {
 				Type:        "string",
 				Description: "Absolute or ~-prefixed path to the directory.",
 			},
@@ -614,8 +614,8 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	rawPath, _ := args["path"].(string)
 	recursive, _ := args["recursive"].(bool)
 	maxEntries := 200
-	if max, ok := args["max_entries"].(float64); ok && max > 0 {
-		maxEntries = min(int(max), MaxListEntries)
+	if maxVal, ok := args["max_entries"].(float64); ok && maxVal > 0 {
+		maxEntries = min(int(maxVal), MaxListEntries)
 	}
 
 	if rawPath == "" {
@@ -680,7 +680,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (a
 	}, nil
 }
 
-func (t *ListDirectoryTool) listDirect(dir string, max int) ([]DirEntry, bool, error) {
+func (t *ListDirectoryTool) listDirect(dir string, maxEntries int) ([]DirEntry, bool, error) {
 	dirEntries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, false, err
@@ -690,7 +690,7 @@ func (t *ListDirectoryTool) listDirect(dir string, max int) ([]DirEntry, bool, e
 	truncated := false
 
 	for _, de := range dirEntries {
-		if len(entries) >= max {
+		if len(entries) >= maxEntries {
 			truncated = true
 			break
 		}
@@ -715,7 +715,7 @@ func (t *ListDirectoryTool) listDirect(dir string, max int) ([]DirEntry, bool, e
 	return entries, truncated, nil
 }
 
-func (t *ListDirectoryTool) listRecursive(root string, max int) ([]DirEntry, bool) {
+func (t *ListDirectoryTool) listRecursive(root string, maxEntries int) ([]DirEntry, bool) {
 	entries := make([]DirEntry, 0)
 	truncated := false
 	errorCount := 0
@@ -732,7 +732,7 @@ func (t *ListDirectoryTool) listRecursive(root string, max int) ([]DirEntry, boo
 			return nil
 		}
 
-		if len(entries) >= max {
+		if len(entries) >= maxEntries {
 			truncated = true
 			return filepath.SkipAll
 		}

@@ -764,13 +764,13 @@ func TestShouldFetchOnQuery(t *testing.T) {
 }
 
 func TestAgentLoop_PublishTokenUsage(t *testing.T) {
-	bus := bus.New(nil, slogDiscardLogger())
+	msgBus := bus.New(nil, slogDiscardLogger())
 
 	// Subscribe to llm.tokens.used
-	sub := bus.Subscribe("test", "llm.tokens.used")
-	defer bus.Unsubscribe(sub)
+	sub := msgBus.Subscribe("test", "llm.tokens.used")
+	defer msgBus.Unsubscribe(sub)
 
-	loop := NewAgentLoop(WithMessageBus(bus))
+	loop := NewAgentLoop(WithMessageBus(msgBus))
 
 	// Publish token usage
 	loop.publishTokenUsage("conv-1", 1500)

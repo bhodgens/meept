@@ -1075,7 +1075,7 @@ func (g *KnowledgeGraph) invalidateCache() {
 
 // GetEdgesForMemory retrieves all edges for a memory, split into outgoing and incoming.
 // This is useful for sync operations where edges need to be serialized with the memory.
-func (g *KnowledgeGraph) GetEdgesForMemory(ctx context.Context, memoryID string) (out []MemoryEdge, in []MemoryEdge, err error) {
+func (g *KnowledgeGraph) GetEdgesForMemory(ctx context.Context, memoryID string) (out, in []MemoryEdge, err error) {
 	g.mu.RLock()
 	if !g.initialized {
 		g.mu.RUnlock()
@@ -1226,7 +1226,7 @@ func (g *KnowledgeGraph) GetMemoriesWithHighPageRank(ctx context.Context, thresh
 
 // GetHighDegreeNodes returns memory IDs that are hub nodes (high connectivity).
 // Used by distillation policy to identify structurally important memories.
-func (g *KnowledgeGraph) GetHighDegreeNodes(ctx context.Context, minDegree int, limit int) ([]string, error) {
+func (g *KnowledgeGraph) GetHighDegreeNodes(ctx context.Context, minDegree, limit int) ([]string, error) {
 	g.mu.RLock()
 	if !g.initialized {
 		g.mu.RUnlock()

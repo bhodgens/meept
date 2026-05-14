@@ -33,7 +33,7 @@ func NewRulesDiscovery(logger *slog.Logger) *RulesDiscovery {
 
 // findRulesFile returns the path and content of the highest-priority rules file.
 // Returns ("", embeddedRules) if no file is found in any tier.
-func (r *RulesDiscovery) findRulesFile() (string, string) {
+func (r *RulesDiscovery) findRulesFile() (path, content string) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "~"

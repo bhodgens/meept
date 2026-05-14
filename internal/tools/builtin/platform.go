@@ -30,7 +30,7 @@ func (t *PlatformStatusTool) Description() string {
 
 func (t *PlatformStatusTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type:       "object",
+		Type:       schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{},
 		Required:   []string{},
 	}
@@ -61,7 +61,7 @@ func (t *PlatformAgentsTool) Description() string {
 
 func (t *PlatformAgentsTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type:       "object",
+		Type:       schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{},
 		Required:   []string{},
 	}
@@ -125,7 +125,7 @@ func (t *PlatformToolsTool) Description() string {
 
 func (t *PlatformToolsTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type:       "object",
+		Type:       schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{},
 		Required:   []string{},
 	}
@@ -185,13 +185,13 @@ func (t *DelegateTaskTool) Description() string {
 
 func (t *DelegateTaskTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"agent_id": {
 				Type:        "string",
 				Description: "The ID of the agent to delegate to (e.g., 'coder', 'planner', 'analyst').",
 			},
-			"message": {
+			schemaPropMessage: {
 				Type:        "string",
 				Description: "The message/task to send to the agent.",
 			},
@@ -222,7 +222,7 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 
 	agentID, _ := args["agent_id"].(string)
 	message, _ := args["message"].(string)
-	context, _ := args["context"].(string)
+	contextStr, _ := args["context"].(string)
 
 	if agentID == "" {
 		return DelegateResult{
@@ -256,8 +256,8 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 
 	// Build the full message with context
 	fullMessage := message
-	if context != "" {
-		fullMessage = "Context: " + context + "\n\nTask: " + message
+	if contextStr != "" {
+		fullMessage = "Context: " + contextStr + "\n\nTask: " + message
 	}
 
 	// Generate a conversation ID for this delegation
@@ -350,9 +350,9 @@ func (t *SessionHistoryTool) Description() string {
 
 func (t *SessionHistoryTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"limit": {
+			schemaPropLimit: {
 				Type:        "integer",
 				Description: "Maximum number of recent tasks to return (default: 10, max: 50).",
 			},

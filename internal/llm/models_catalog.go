@@ -14,7 +14,7 @@ type ModelCatalogEntry struct {
 
 // ProviderModels maps provider IDs to their model catalogs.
 var ProviderModels = map[string][]ModelCatalogEntry{
-	"anthropic": {
+	ProviderIDAnthropic: {
 		{
 			ModelID:       "claude-opus-4-7",
 			Name:          "Claude Opus 4.7",
@@ -46,7 +46,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			Capabilities:  []string{"completion", "code", "reasoning"},
 		},
 	},
-	"openai": {
+	ProviderIDOpenAI: {
 		{
 			ModelID:       "gpt-5.4",
 			Name:          "GPT-5.4",
@@ -80,7 +80,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			Capabilities:  []string{"completion", "code", "reasoning", "tool_use"},
 		},
 	},
-	"ollama": {
+	ProviderIDOllama: {
 		{
 			ModelID:       "llama3.2",
 			Name:          "Llama 3.2",
@@ -102,7 +102,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			Capabilities:  []string{"code", "tool_use"},
 		},
 	},
-	"zai": {
+	ProviderIDZAI: {
 		{
 			ModelID:       "glm-4.7",
 			Name:          "GLM-4.7",
@@ -124,7 +124,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			Capabilities:  []string{"completion", "code", "reasoning"},
 		},
 	},
-	"google": {
+	ProviderIDGoogle: {
 		{
 			ModelID:       "gemini-2.5-pro",
 			Name:          "Gemini 2.5 Pro",
@@ -146,7 +146,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			Capabilities:  []string{"completion", "code", "reasoning"},
 		},
 	},
-	"deepseek": {
+	ProviderIDDeepSeek: {
 		{
 			ModelID:       "deepseek-chat",
 			Name:          "DeepSeek Chat",
@@ -204,7 +204,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			Capabilities:  []string{"completion", "code", "reasoning"},
 		},
 	},
-	"bedrock": {
+	ProviderIDBedrock: {
 		{
 			ModelID:       "anthropic.claude-sonnet-4-6-v2:0",
 			Name:          "Claude Sonnet 4.6 (Bedrock)",

@@ -47,7 +47,7 @@ type Token struct {
 	AccessToken  string    `json:"access_token"`  //nolint:gosec // field name, not a secret
 	TokenType    string    `json:"token_type"`
 	RefreshToken string    `json:"refresh_token,omitempty"` //nolint:gosec // field name, not a secret
-	Expiry       time.Time `json:"expiry,omitempty,omitzero"` //nolint:modernize
+	Expiry       time.Time `json:"expiry,omitempty,omitzero"` //nolint:modernize // keep omitempty for backward compat
 }
 
 // Valid returns true if the token is valid and not expired.
@@ -198,7 +198,7 @@ func (a *OAuth2Authenticator) Refresh(ctx context.Context, refreshToken string) 
 func (a *OAuth2Authenticator) SaveToken(token *Token) error {
 	// Ensure directory exists
 	dir := filepath.Dir(a.tokenPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create token directory: %w", err)
 	}
 
@@ -208,7 +208,7 @@ func (a *OAuth2Authenticator) SaveToken(token *Token) error {
 		return fmt.Errorf("failed to marshal token: %w", err)
 	}
 
-	if err := os.WriteFile(a.tokenPath, data, 0600); err != nil {
+	if err := os.WriteFile(a.tokenPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write token file: %w", err)
 	}
 

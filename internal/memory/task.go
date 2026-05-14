@@ -127,7 +127,7 @@ func (t *TaskMemory) HasFTS5() bool {
 
 // Store persists a new task memory.
 // Returns the unique ID of the stored item.
-func (t *TaskMemory) Store(ctx context.Context, content string, domain string, metadata map[string]any) (string, error) {
+func (t *TaskMemory) Store(ctx context.Context, content, domain string, metadata map[string]any) (string, error) {
 	if domain == "" {
 		domain = "general"
 	}
@@ -152,7 +152,7 @@ func (t *TaskMemory) Store(ctx context.Context, content string, domain string, m
 // Search finds task memories matching the query.
 // Uses FTS5 when available, falls back to LIKE-based queries otherwise.
 // If domain is specified, results are limited to that domain.
-func (t *TaskMemory) Search(ctx context.Context, query string, domain string, limit int) ([]MemoryResult, error) {
+func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int) ([]MemoryResult, error) {
 	if !t.store.Initialized() {
 		return nil, errors.New("task memory not initialized")
 	}

@@ -41,9 +41,9 @@ Requires an LSP server for the file's language to be configured and running.`
 
 func (t *LSPDiagnosticsTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"file_path": {
+			SchemaPropFilePath: {
 				Type:        "string",
 				Description: "Path to the source file to analyze.",
 			},
@@ -139,12 +139,12 @@ func (t *LSPDiagnosticsTool) Execute(ctx context.Context, args map[string]any) (
 	result := make([]map[string]any, 0, len(filtered))
 	for _, d := range filtered {
 		item := map[string]any{
-			"message":    d.Message,
+			SchemaPropMessage:    d.Message,
 			"severity":   severityToString(d.Severity),
-			"start_line": d.Range.Start.Line,
-			"start_char": d.Range.Start.Character,
-			"end_line":   d.Range.End.Line,
-			"end_char":   d.Range.End.Character,
+			SchemaPropStartLine: d.Range.Start.Line,
+			SchemaPropStartChar: d.Range.Start.Character,
+			SchemaPropEndLine:   d.Range.End.Line,
+			SchemaPropEndChar:   d.Range.End.Character,
 		}
 		if d.Code != "" {
 			item["code"] = d.Code
@@ -159,7 +159,7 @@ func (t *LSPDiagnosticsTool) Execute(ctx context.Context, args map[string]any) (
 	counts := countBySeverity(filtered)
 
 	return map[string]any{
-		"file_path":   filePath,
+		SchemaPropFilePath:   filePath,
 		"diagnostics": result,
 		"total_count": len(result),
 		"counts":      counts,

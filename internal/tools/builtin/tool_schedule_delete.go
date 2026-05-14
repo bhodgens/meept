@@ -27,9 +27,9 @@ func (t *ScheduleDeleteTool) Description() string {
 
 func (t *ScheduleDeleteTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"job_id": {
+			schemaPropJobID: {
 				Type:        "string",
 				Description: "The job ID to delete.",
 			},
@@ -49,7 +49,7 @@ func (t *ScheduleDeleteTool) Execute(ctx context.Context, args map[string]any) (
 	if t.sched == nil {
 		return ScheduleDeleteResult{
 			Success: false,
-			Error:   "scheduler not available",
+			Error:   errSchedulerNotAvailable,
 		}, nil
 	}
 
@@ -57,7 +57,7 @@ func (t *ScheduleDeleteTool) Execute(ctx context.Context, args map[string]any) (
 	if jobID == "" {
 		return ScheduleDeleteResult{
 			Success: false,
-			Error:   "job_id is required",
+			Error:   errJobIDRequired,
 		}, nil
 	}
 
@@ -94,9 +94,9 @@ func (t *SchedulePauseTool) Description() string {
 
 func (t *SchedulePauseTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"job_id": {
+			schemaPropJobID: {
 				Type:        "string",
 				Description: "The job ID to pause.",
 			},
@@ -116,7 +116,7 @@ func (t *SchedulePauseTool) Execute(ctx context.Context, args map[string]any) (a
 	if t.sched == nil {
 		return SchedulePauseResult{
 			Success: false,
-			Error:   "scheduler not available",
+			Error:   errSchedulerNotAvailable,
 		}, nil
 	}
 
@@ -124,7 +124,7 @@ func (t *SchedulePauseTool) Execute(ctx context.Context, args map[string]any) (a
 	if jobID == "" {
 		return SchedulePauseResult{
 			Success: false,
-			Error:   "job_id is required",
+			Error:   errJobIDRequired,
 		}, nil
 	}
 
@@ -161,9 +161,9 @@ func (t *ScheduleResumeTool) Description() string {
 
 func (t *ScheduleResumeTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"job_id": {
+			schemaPropJobID: {
 				Type:        "string",
 				Description: "The job ID to resume.",
 			},
@@ -183,7 +183,7 @@ func (t *ScheduleResumeTool) Execute(ctx context.Context, args map[string]any) (
 	if t.sched == nil {
 		return ScheduleResumeResult{
 			Success: false,
-			Error:   "scheduler not available",
+			Error:   errSchedulerNotAvailable,
 		}, nil
 	}
 
@@ -191,7 +191,7 @@ func (t *ScheduleResumeTool) Execute(ctx context.Context, args map[string]any) (
 	if jobID == "" {
 		return ScheduleResumeResult{
 			Success: false,
-			Error:   "job_id is required",
+			Error:   errJobIDRequired,
 		}, nil
 	}
 
@@ -228,9 +228,9 @@ func (t *ScheduleRunNowTool) Description() string {
 
 func (t *ScheduleRunNowTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"job_id": {
+			schemaPropJobID: {
 				Type:        "string",
 				Description: "The job ID to run immediately.",
 			},
@@ -250,7 +250,7 @@ func (t *ScheduleRunNowTool) Execute(ctx context.Context, args map[string]any) (
 	if t.sched == nil {
 		return ScheduleRunNowResult{
 			Success: false,
-			Error:   "scheduler not available",
+			Error:   errSchedulerNotAvailable,
 		}, nil
 	}
 
@@ -258,7 +258,7 @@ func (t *ScheduleRunNowTool) Execute(ctx context.Context, args map[string]any) (
 	if jobID == "" {
 		return ScheduleRunNowResult{
 			Success: false,
-			Error:   "job_id is required",
+			Error:   errJobIDRequired,
 		}, nil
 	}
 

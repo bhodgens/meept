@@ -19,7 +19,7 @@ import (
 )
 
 // AgentEventType identifies the type of agent lifecycle event.
-type AgentEventType string
+type AgentEventType string //nolint:revive // stutter with package name is intentional for API clarity
 
 const (
 	// Session lifecycle
@@ -71,7 +71,7 @@ const (
 
 // AgentEvent is the envelope for all typed agent events.
 // Type is the discriminating field. Data holds the event-specific payload.
-type AgentEvent struct {
+type AgentEvent struct { //nolint:revive // stutter with package name is intentional for API clarity
 	Type           AgentEventType `json:"type"`
 	Timestamp      time.Time      `json:"timestamp"`
 	AgentID        string         `json:"agent_id"`
@@ -81,7 +81,7 @@ type AgentEvent struct {
 }
 
 // AgentEventData is the interface all event payloads implement.
-type AgentEventData interface {
+type AgentEventData interface { //nolint:revive // stutter with package name is intentional for API clarity
 	agentEventData()
 }
 
@@ -111,7 +111,7 @@ func (SessionEndData) agentEventData() {}
 // --- Agent Lifecycle Events ---
 
 // AgentStartData is emitted when the agent loop starts.
-type AgentStartData struct {
+type AgentStartData struct { //nolint:revive // stutter with package name is intentional for API clarity
 	AgentID   string `json:"agent_id"`
 	AgentType string `json:"agent_type"`
 	ModelRef  string `json:"model_ref"`
@@ -120,7 +120,7 @@ type AgentStartData struct {
 func (AgentStartData) agentEventData() {}
 
 // AgentEndData is emitted when the agent loop ends.
-type AgentEndData struct {
+type AgentEndData struct { //nolint:revive // stutter with package name is intentional for API clarity
 	AgentID  string        `json:"agent_id"`
 	Reason   string        `json:"reason"`
 	Duration time.Duration `json:"duration"`

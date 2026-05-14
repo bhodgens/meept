@@ -32,7 +32,7 @@ Examples:
 
 func newQueueStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   cmdStatus,
 		Short: "Show queue statistics",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := connectDaemon()
@@ -92,7 +92,7 @@ func newQueueListCmd() *cobra.Command {
 	var limit int
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List jobs in the queue",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := connectDaemon()

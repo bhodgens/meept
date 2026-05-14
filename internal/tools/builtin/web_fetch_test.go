@@ -17,10 +17,10 @@ func TestWebFetchTool_Execute(t *testing.T) {
 		switch r.URL.Path {
 		case "/plain":
 			w.Header().Set("Content-Type", "text/plain")
-			w.Write([]byte("Hello, World!"))
+		_, _ = w.Write([]byte("Hello, World!"))
 		case "/html":
 			w.Header().Set("Content-Type", "text/html")
-			w.Write([]byte(`<!DOCTYPE html>
+			_, _ = w.Write([]byte(`<!DOCTYPE html>
 <html>
 <head><title>Test</title></head>
 <body>
@@ -34,9 +34,9 @@ func TestWebFetchTool_Execute(t *testing.T) {
 			http.Error(w, "Not Found", http.StatusNotFound)
 		case "/slow":
 			time.Sleep(5 * time.Second)
-			w.Write([]byte("slow"))
+			_, _ = w.Write([]byte("slow"))
 		default:
-			w.Write([]byte("default"))
+			_, _ = w.Write([]byte("default"))
 		}
 	}))
 	defer server.Close()
@@ -201,7 +201,7 @@ func TestWebFetchTool_Timeout(t *testing.T) {
 	// Create a slow server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
-		w.Write([]byte("slow response"))
+		_, _ = w.Write([]byte("slow response"))
 	}))
 	defer server.Close()
 
@@ -223,7 +223,7 @@ func TestWebFetchTool_Redirects(t *testing.T) {
 	redirectCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/final" {
-			w.Write([]byte("final destination"))
+			_, _ = w.Write([]byte("final destination"))
 			return
 		}
 		redirectCount++

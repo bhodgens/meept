@@ -7,11 +7,11 @@ import (
 )
 
 // truncateStr is a test helper to limit error message output.
-func truncateStr(s string, max int) string {
-	if len(s) <= max {
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
 		return s
 	}
-	return s[:max] + "..."
+	return s[:maxLen] + "..."
 }
 
 // skipIfNoGrammar skips the test if the tree-sitter grammar for the given language

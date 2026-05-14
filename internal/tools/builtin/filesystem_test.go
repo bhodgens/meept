@@ -15,7 +15,7 @@ func TestReadFileTool(t *testing.T) {
 	filePath := filepath.Join(dir, "test.txt")
 	content := "line 1\nline 2\nline 3\nline 4\nline 5"
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,7 +124,7 @@ func TestWriteFileTool(t *testing.T) {
 	// Test overwrite
 	t.Run("overwrite", func(t *testing.T) {
 		filePath := filepath.Join(dir, "overwrite_test.txt")
-		os.WriteFile(filePath, []byte("original"), 0644)
+		_ = os.WriteFile(filePath, []byte("original"), 0o644) //nolint:gosec // test uses temp dir
 
 		_, err := tool.Execute(ctx, map[string]any{
 			"path":    filePath,
@@ -143,7 +143,7 @@ func TestWriteFileTool(t *testing.T) {
 	// Test append
 	t.Run("append", func(t *testing.T) {
 		filePath := filepath.Join(dir, "append_test.txt")
-		os.WriteFile(filePath, []byte("original"), 0644)
+		_ = os.WriteFile(filePath, []byte("original"), 0o644) //nolint:gosec // test uses temp dir
 
 		_, err := tool.Execute(ctx, map[string]any{
 			"path":    filePath,
@@ -197,7 +197,7 @@ func TestDeleteFileTool(t *testing.T) {
 	// Test basic delete
 	t.Run("basic delete", func(t *testing.T) {
 		filePath := filepath.Join(dir, "delete_test.txt")
-		os.WriteFile(filePath, []byte("to be deleted"), 0644)
+		_ = os.WriteFile(filePath, []byte("to be deleted"), 0o644) //nolint:gosec // test uses temp dir
 
 		_, err := tool.Execute(ctx, map[string]any{"path": filePath})
 		if err != nil {
@@ -220,7 +220,7 @@ func TestDeleteFileTool(t *testing.T) {
 	// Test delete directory
 	t.Run("delete directory", func(t *testing.T) {
 		subdir := filepath.Join(dir, "subdir")
-		os.Mkdir(subdir, 0755)
+		_ = os.Mkdir(subdir, 0o755) //nolint:gosec // test uses temp dir
 
 		_, err := tool.Execute(ctx, map[string]any{"path": subdir})
 		if err == nil {
@@ -233,10 +233,10 @@ func TestListDirectoryTool(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create test structure
-	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content"), 0644)
-	os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("content"), 0644)
-	os.Mkdir(filepath.Join(dir, "subdir"), 0755)
-	os.WriteFile(filepath.Join(dir, "subdir", "nested.txt"), []byte("content"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content"), 0o644) //nolint:gosec // test uses temp dir
+	_ = os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("content"), 0o644) //nolint:gosec // test uses temp dir
+	_ = os.Mkdir(filepath.Join(dir, "subdir"), 0o755)                            //nolint:gosec // test uses temp dir
+	_ = os.WriteFile(filepath.Join(dir, "subdir", "nested.txt"), []byte("content"), 0o644) //nolint:gosec // test uses temp dir
 
 	tool := NewListDirectoryTool(nil)
 	ctx := context.Background()

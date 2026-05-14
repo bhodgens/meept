@@ -192,7 +192,7 @@ func (s *SyncManager) Hydrate(ctx context.Context, req HydrationRequest) (*Hydra
 }
 
 // hydrateByIDs fetches specific memories by ID and imports them locally.
-func (s *SyncManager) hydrateByIDs(ctx context.Context, ids []string) (int, int, error) {
+func (s *SyncManager) hydrateByIDs(ctx context.Context, ids []string) (requested, stored int, err error) {
 	client := s.memvid.WithZone(SharedZone)
 	memories, err := client.GetByIDs(ctx, ids)
 	if err != nil {
@@ -218,7 +218,7 @@ func (s *SyncManager) hydrateByIDs(ctx context.Context, ids []string) (int, int,
 }
 
 // hydrateByQuery searches shared storage and imports relevant memories.
-func (s *SyncManager) hydrateByQuery(ctx context.Context, query string, limit int) (int, int, error) {
+func (s *SyncManager) hydrateByQuery(ctx context.Context, query string, limit int) (fetched, stored int, err error) {
 	client := s.memvid.WithZone(SharedZone)
 	results, err := client.Search(ctx, query, limit)
 	if err != nil {
@@ -244,7 +244,7 @@ func (s *SyncManager) hydrateByQuery(ctx context.Context, query string, limit in
 }
 
 // importMemory stores a memvid memory locally and restores its edges.
-func (s *SyncManager) importMemory(ctx context.Context, mv memvid.Memory) (bool, int, error) {
+func (s *SyncManager) importMemory(ctx context.Context, mv memvid.Memory) (ok bool, n int, err error) {
 	// Extract edges from metadata
 	edgesOut, edgesIn, err := s.edgeCodec.ExtractEdgesFromMetadata(mv.Metadata)
 	if err != nil {

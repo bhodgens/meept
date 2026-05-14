@@ -82,7 +82,7 @@ func TestAnalyze_Fallback(t *testing.T) {
 func TestAnalyze_FallbackWithGoSource(t *testing.T) {
 	dir := t.TempDir()
 	goFile := filepath.Join(dir, "main.go")
-	os.WriteFile(goFile, []byte("package main"), 0644)
+	_ = os.WriteFile(goFile, []byte("package main"), 0o644) //nolint:gosec // test uses temp dir
 
 	cfg := AIInfraConfig{AnalysisModel: "test"}
 	a := NewRootCauseAnalyzer(cfg, nil, dir, slog.Default())
@@ -163,7 +163,7 @@ func TestExtractRelevantCode(t *testing.T) {
 	for i := range lines {
 		lines[i] = "line " + string(rune('a'+i%26))
 	}
-	os.WriteFile(goFile, []byte(lines[0]+"\n"+lines[1]+"\n"+lines[2]+"\n"+lines[3]), 0644)
+	_ = os.WriteFile(goFile, []byte(lines[0]+"\n"+lines[1]+"\n"+lines[2]+"\n"+lines[3]), 0o644) //nolint:gosec // test uses temp dir
 
 	a := newTestAnalyzer(t)
 	issue := Issue{

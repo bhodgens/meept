@@ -52,7 +52,8 @@ func makeLongString(tokens int) string {
 // makeMessages builds a message list with a system prompt, then alternating
 // user/assistant pairs. Each message has ~100 tokens of content.
 func makeMessages(pairs int) []ChatMessage {
-	msgs := []ChatMessage{{Role: RoleSystem, Content: "system prompt"}}
+	msgs := make([]ChatMessage, 0, 1+2*pairs)
+	msgs = append(msgs, ChatMessage{Role: RoleSystem, Content: "system prompt"})
 	for i := range pairs {
 		msgs = append(msgs,
 			ChatMessage{Role: RoleUser, Content: fmt.Sprintf("user message %d %s", i, makeLongString(90))},
@@ -1692,10 +1693,3 @@ func TestCompact_SplitTurnFails_FallsBackToSingleSummary(t *testing.T) {
 	}
 }
 
-// min helper for string slicing
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

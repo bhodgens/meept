@@ -89,7 +89,7 @@ func (s *MemoryService) Recent(ctx context.Context, limit int) ([]MemoryResult, 
 }
 
 // Export exports memories in JSON format.
-func (s *MemoryService) Export(ctx context.Context, format string, category string) ([]byte, error) {
+func (s *MemoryService) Export(ctx context.Context, format, category string) ([]byte, error) {
 	if format != "json" {
 		return nil, wrapError("memory", "Export", fmt.Errorf("unsupported format: %s", format))
 	}

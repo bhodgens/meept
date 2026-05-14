@@ -43,7 +43,7 @@ func (s *stubConsolidationBackend) GetExpiredMemories(_ context.Context, _ int) 
 	return nil, errors.New("not implemented")
 }
 
-func (s *stubConsolidationBackend) StoreSummary(_ context.Context, _ string, _ string, _ map[string]any) (string, error) {
+func (s *stubConsolidationBackend) StoreSummary(_ context.Context, _, _ string, _ map[string]any) (string, error) {
 	return "", errors.New("not implemented")
 }
 

@@ -407,7 +407,7 @@ func validatePythonCode(code string) float64 {
 	lines := strings.Split(code, "\n")
 	hasConsistentIndent := true
 	for _, line := range lines {
-		if len(line) > 0 && line[0] == ' ' {
+		if line != "" && line[0] == ' ' {
 			// Check if indentation is multiple of 4
 			spaces := 0
 			for _, c := range line {
@@ -796,12 +796,6 @@ func hasBalancedBrackets(s string) bool {
 	return len(stack) == 0
 }
 
-func clamp(v, min, max float64) float64 {
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
+func clamp(v, lo, hi float64) float64 {
+	return min(max(v, lo), hi)
 }

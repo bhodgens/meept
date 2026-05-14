@@ -226,7 +226,7 @@ func exprToString(expr ast.Expr) string {
 
 // generateDocs creates markdown files for each struct
 func generateDocs(structs []StructInfo, outputDir string) error {
-	if err := os.MkdirAll(outputDir, 0755); err != nil { //nolint:gosec // generated docs directory is public
+	if err := os.MkdirAll(outputDir, 0o755); err != nil { //nolint:gosec // generated docs directory is public
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -240,25 +240,32 @@ func generateDocs(structs []StructInfo, outputDir string) error {
 			continue
 		}
 
-		filename := filepath.Join(outputDir, structInfo.Section+".md")
-		file, err := os.Create(filename)
-		if err != nil {
-			return fmt.Errorf("failed to create file %s: %w", filename, err)
-		}
-		defer file.Close()
-
-		data := TemplateData{
-			SectionName: structInfo.Section,
-			Description: structInfo.Description,
-			Example:     structInfo.Example,
-			Fields:      structInfo.Fields,
-		}
-
-		if err := tmpl.Execute(file, data); err != nil {
-			return fmt.Errorf("failed to execute template for %s: %w", structInfo.Section, err)
+		if err := writeStructDoc(outputDir, tmpl, structInfo); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+func writeStructDoc(outputDir string, tmpl *template.Template, info StructInfo) error {
+	filename := filepath.Join(outputDir, info.Section+".md")
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file %s: %w", filename, err)
+	}
+	defer file.Close()
+
+	data := TemplateData{
+		SectionName: info.Section,
+		Description: info.Description,
+		Example:     info.Example,
+		Fields:      info.Fields,
+	}
+
+	if err := tmpl.Execute(file, data); err != nil {
+		return fmt.Errorf("failed to execute template for %s: %w", info.Section, err)
+	}
 	return nil
 }
 

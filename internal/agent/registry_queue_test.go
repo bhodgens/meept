@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"sync"
 	"testing"
 )
@@ -141,7 +142,7 @@ func TestRegistry_GetQueueWithVersion_NotFound(t *testing.T) {
 	r := newTestRegistry()
 
 	_, err := r.GetQueueWithVersion("nonexistent", 1)
-	if err != ErrQueueNotFound {
+	if !errors.Is(err, ErrQueueNotFound) {
 		t.Errorf("error = %v, want ErrQueueNotFound", err)
 	}
 }
@@ -154,7 +155,7 @@ func TestRegistry_GetQueueWithVersion_GenerationMismatch(t *testing.T) {
 	gen := r.RegisterActiveQueue("conv-1", q)
 
 	_, err := r.GetQueueWithVersion("conv-1", gen+1)
-	if err != ErrGenerationMismatch {
+	if !errors.Is(err, ErrGenerationMismatch) {
 		t.Errorf("error = %v, want ErrGenerationMismatch", err)
 	}
 }
@@ -170,7 +171,7 @@ func TestRegistry_GetQueueWithVersion_ClosedQueue(t *testing.T) {
 	q.Close()
 
 	_, err := r.GetQueueWithVersion("conv-1", gen)
-	if err != ErrQueueClosed {
+	if !errors.Is(err, ErrQueueClosed) {
 		t.Errorf("error = %v, want ErrQueueClosed", err)
 	}
 }
@@ -194,12 +195,12 @@ func TestRegistry_ConcurrentRegistration(t *testing.T) {
 		id  string
 		gen uint64
 	}, goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		regs[i].id = "conv-" + string(rune('0'+i%10)) + "-" + string(rune('0'+i/10))
 	}
 
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
 			q := NewMessageQueue()
@@ -210,7 +211,7 @@ func TestRegistry_ConcurrentRegistration(t *testing.T) {
 
 	// Phase 2: Concurrent reads for all registered conversations.
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
 			got, gotGen := r.GetActiveQueue(regs[idx].id)
@@ -227,7 +228,7 @@ func TestRegistry_ConcurrentRegistration(t *testing.T) {
 
 	// Phase 3: Concurrent unregistration.
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
 			r.UnregisterActiveQueue(regs[idx].id)
@@ -236,7 +237,7 @@ func TestRegistry_ConcurrentRegistration(t *testing.T) {
 	wg.Wait()
 
 	// All should be gone.
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		got, _ := r.GetActiveQueue(regs[i].id)
 		if got != nil {
 			t.Errorf("GetActiveQueue(%q) should return nil after unregister", regs[i].id)

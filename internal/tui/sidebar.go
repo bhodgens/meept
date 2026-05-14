@@ -136,7 +136,7 @@ type SidebarToolCall struct {
 // NewSidebarModel creates a new sidebar model.
 // eventRPC is a separate RPC client for event stream polling, so it doesn't
 // block on the main client's mutex during long-running Chat calls.
-func NewSidebarModel(rpc *RPCClient, eventRPC *RPCClient, styles *Styles, animationEnabled bool) *SidebarModel {
+func NewSidebarModel(rpc, eventRPC *RPCClient, styles *Styles, animationEnabled bool) *SidebarModel {
 	s := &SidebarModel{
 		rpc:           rpc,
 		styles:        styles,
@@ -739,23 +739,24 @@ func (s *SidebarModel) handleTaskProgressEvent(e BusEvent) {
 
 	// Update the matching task in tasksData
 	for i := range s.tasksData {
-		if s.tasksData[i].ID == taskID {
-			if currentStep != "" {
-				s.tasksData[i].CurrentStep = currentStep
-			}
-			// Update job counts from event data (source of truth)
-			if completed, ok := payloadMap["completed_jobs"].(float64); ok {
-				s.tasksData[i].CompletedJobs = int(completed)
-			}
-			if total, ok := payloadMap["total_jobs"].(float64); ok {
-				s.tasksData[i].TotalJobs = int(total)
-			}
-			// Update token usage from event data
-			if tokenUsage, ok := payloadMap["token_usage"].(float64); ok {
-				s.tasksData[i].TokenUsage = int(tokenUsage)
-			}
-			break
+		if s.tasksData[i].ID != taskID {
+			continue
 		}
+		if currentStep != "" {
+			s.tasksData[i].CurrentStep = currentStep
+		}
+		// Update job counts from event data (source of truth)
+		if completed, ok := payloadMap["completed_jobs"].(float64); ok {
+			s.tasksData[i].CompletedJobs = int(completed)
+		}
+		if total, ok := payloadMap["total_jobs"].(float64); ok {
+			s.tasksData[i].TotalJobs = int(total)
+		}
+		// Update token usage from event data
+		if tokenUsage, ok := payloadMap["token_usage"].(float64); ok {
+			s.tasksData[i].TokenUsage = int(tokenUsage)
+		}
+		break
 	}
 }
 

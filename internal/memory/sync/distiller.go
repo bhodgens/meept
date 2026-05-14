@@ -40,14 +40,14 @@ type promotionMetrics struct {
 
 // ShouldPromote evaluates whether a single memory should be promoted.
 // Returns: should promote, reason, computed score.
-func (p *DistillationPolicy) ShouldPromote(ctx context.Context, mem memory.MemoryResult) (bool, string, float64) {
+func (p *DistillationPolicy) ShouldPromote(ctx context.Context, mem memory.MemoryResult) (ok bool, reason string, score float64) {
 	_, promote, reason, score := p.shouldPromoteWithMetrics(ctx, mem)
 	return promote, reason, score
 }
 
 // shouldPromoteWithMetrics evaluates promotion and also returns the computed metrics
 // to avoid redundant graph queries.
-func (p *DistillationPolicy) shouldPromoteWithMetrics(ctx context.Context, mem memory.MemoryResult) (promotionMetrics, bool, string, float64) {
+func (p *DistillationPolicy) shouldPromoteWithMetrics(ctx context.Context, mem memory.MemoryResult) (metrics promotionMetrics, ok bool, reason string, score float64) {
 	var m promotionMetrics
 
 	// Check minimum age

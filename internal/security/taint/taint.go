@@ -62,7 +62,7 @@ func NewTaintedValue(value string, taints []TaintLabel, source string) *TaintedV
 }
 
 // Clean creates a clean (untainted) value with no labels.
-func Clean(value string, source string) *TaintedValue {
+func Clean(value, source string) *TaintedValue {
 	return &TaintedValue{
 		Value:  value,
 		Taints: []TaintLabel{},
@@ -172,9 +172,9 @@ func AgentMessageSink() *TaintSink {
 	}
 }
 
-// TaintViolation describes a taint policy violation: a labelled value
+// TaintViolationError describes a taint policy violation: a labelled value
 // tried to reach a sink that blocks that label.
-type TaintViolation struct { //nolint:revive // stutter is intentional
+type TaintViolationError struct { //nolint:revive // stutter with package name is intentional for API clarity
 	// Label is the offending label.
 	Label TaintLabel
 	// SinkName is the sink that rejected the value.
@@ -186,7 +186,7 @@ type TaintViolation struct { //nolint:revive // stutter is intentional
 }
 
 // Error returns the error message for the violation.
-func (v TaintViolation) Error() string {
+func (v TaintViolationError) Error() string {
 	return fmt.Sprintf("taint violation: label '%s' from source '%s' is not allowed to reach sink '%s'",
 		v.Label, v.Source, v.SinkName)
 }
@@ -324,8 +324,8 @@ func (t *Tracker) Propagate(values ...*TaintedValue) *TaintedValue {
 }
 
 // CheckSink checks whether a value is safe to flow into the given sink.
-// Returns nil if safe, or a TaintViolation describing the conflict.
-func (t *Tracker) CheckSink(value *TaintedValue, sink *TaintSink) *TaintViolation {
+// Returns nil if safe, or a TaintViolationError describing the conflict.
+func (t *Tracker) CheckSink(value *TaintedValue, sink *TaintSink) *TaintViolationError {
 	if value == nil {
 		return nil
 	}
@@ -339,7 +339,7 @@ func (t *Tracker) CheckSink(value *TaintedValue, sink *TaintSink) *TaintViolatio
 			if len(truncated) > 100 {
 				truncated = truncated[:100] + "..."
 			}
-			return &TaintViolation{
+			return &TaintViolationError{
 				Label:    label,
 				SinkName: sink.Name,
 				Source:   value.Source,
@@ -352,7 +352,7 @@ func (t *Tracker) CheckSink(value *TaintedValue, sink *TaintSink) *TaintViolatio
 
 // CheckShellCommand checks if a shell command should be blocked by taint tracking.
 // Returns a violation if blocked, nil if allowed.
-func (t *Tracker) CheckShellCommand(command string) *TaintViolation {
+func (t *Tracker) CheckShellCommand(command string) *TaintViolationError {
 	sink := ShellExecSink()
 
 	// First check if the command has suspicious patterns
@@ -369,7 +369,7 @@ func (t *Tracker) CheckShellCommand(command string) *TaintViolation {
 
 // CheckWebFetch checks if a URL should be blocked by taint tracking.
 // Returns a violation if blocked, nil if allowed.
-func (t *Tracker) CheckWebFetch(url string) *TaintViolation {
+func (t *Tracker) CheckWebFetch(url string) *TaintViolationError {
 	sink := NetFetchSink()
 
 	// Check for exfiltration patterns

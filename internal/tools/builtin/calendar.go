@@ -29,13 +29,13 @@ func (t *CalendarListTool) Description() string {
 
 func (t *CalendarListTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"start": {
+			schemaPropStart: {
 				Type:        "string",
 				Description: "Start date/time in RFC3339 format (e.g., 2024-01-15T09:00:00Z)",
 			},
-			"end": {
+			schemaPropEnd: {
 				Type:        "string",
 				Description: "End date/time in RFC3339 format",
 			},
@@ -92,21 +92,21 @@ func (t *CalendarCreateTool) Description() string {
 
 func (t *CalendarCreateTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"summary": {
 				Type:        "string",
 				Description: "Event title/summary",
 			},
-			"start": {
+			schemaPropStart: {
 				Type:        "string",
 				Description: "Start date/time in RFC3339 format",
 			},
-			"end": {
+			schemaPropEnd: {
 				Type:        "string",
 				Description: "End date/time in RFC3339 format",
 			},
-			"description": {
+			schemaPropDescription: {
 				Type:        "string",
 				Description: "Event description (optional)",
 			},
@@ -173,7 +173,7 @@ func (t *CalendarQuickAddTool) Description() string {
 
 func (t *CalendarQuickAddTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"text": {
 				Type:        "string",
@@ -216,7 +216,7 @@ func (t *CalendarTodayTool) Description() string {
 
 func (t *CalendarTodayTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type:       "object",
+		Type:       schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{},
 		Required:   []string{},
 	}

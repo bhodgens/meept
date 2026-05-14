@@ -115,7 +115,7 @@ type ModeChangeMsg struct {
 }
 
 // VimActionMsg carries a vim action.
-type VimActionMsg struct {
+type VimActionMsg struct { //nolint:revive // stutter with package name is intentional for API clarity
 	Action Action
 }
 
@@ -186,7 +186,7 @@ func (s *State) handleNormalMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 
 	// Single character commands
 	switch key {
-	case "j", "down":
+	case "j", KeyDown:
 		s.Count = 0
 		return Action{Type: ActionMoveDown, Count: count}, true
 
@@ -280,7 +280,7 @@ func (s *State) handleNormalMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 		s.Pending = s.LeaderKey
 		return Action{Type: ActionNone}, true
 
-	case "esc":
+	case KeyEsc:
 		s.Count = 0
 		s.Pending = ""
 		return Action{Type: ActionNone}, true
@@ -329,7 +329,7 @@ func (s *State) handleInsertMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 	}
 
 	// Standard escape
-	if key == "esc" {
+	if key == KeyEsc {
 		s.Mode = ModeNormal
 		s.LastKey = ""
 		return Action{Type: ActionModeChange, Target: "normal"}, true
@@ -341,11 +341,11 @@ func (s *State) handleInsertMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 
 func (s *State) handleVisualMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 	switch key {
-	case "esc":
+	case KeyEsc:
 		s.Mode = ModeNormal
 		return Action{Type: ActionModeChange, Target: "normal"}, true
 
-	case "j", "down":
+	case "j", KeyDown:
 		return Action{Type: ActionMoveDown, Count: 1}, true
 
 	case "k", "up":
@@ -365,26 +365,26 @@ func (s *State) handleVisualMode(key string, _ tea.KeyPressMsg) (Action, bool) {
 
 func (s *State) handleCommandMode(key string, msg tea.KeyPressMsg) (Action, bool) {
 	switch key {
-	case "esc":
+	case KeyEsc:
 		s.Mode = ModeNormal
 		s.Pending = ""
 		return Action{Type: ActionModeChange, Target: "normal"}, true
 
-	case "enter":
+	case KeyEnter:
 		cmd := s.Pending
 		s.Mode = ModeNormal
 		s.Pending = ""
 		return s.executeCommand(cmd), true
 
 	case "backspace":
-		if len(s.Pending) > 0 {
+		if s.Pending != "" {
 			s.Pending = s.Pending[:len(s.Pending)-1]
 		}
 		return Action{Type: ActionNone}, true
 
 	default:
 		// Accumulate command
-		if len(msg.Text) > 0 {
+		if msg.Text != "" {
 			s.Pending += key
 		}
 		return Action{Type: ActionNone}, true

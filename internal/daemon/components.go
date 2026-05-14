@@ -485,8 +485,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 	}
 
-	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter))
-	agentOpts = append(agentOpts, agent.WithHookRegistry(hookRegistry))
+	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter), agent.WithHookRegistry(hookRegistry))
 
 	// Note: memvid and taskStore are wired AFTER their initialization below
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
@@ -1478,46 +1477,47 @@ func createLLMConfig(cfg *config.ModelsConfig, logger *slog.Logger) *llm.ModelCo
 		}
 
 		for id, model := range provider.Models {
-			if id == targetModel || model.Name == targetModel {
-				caps := make(map[string]bool)
-				for _, capName := range model.Capabilities {
-					caps[capName] = true
-				}
+			if id != targetModel && model.Name != targetModel {
+				continue
+			}
+			caps := make(map[string]bool)
+			for _, capName := range model.Capabilities {
+				caps[capName] = true
+			}
 
-				apiKey := provider.Options.APIKey
-				//nolint:gosec // field name, not a secret
-				hasKey := apiKey != "" && apiKey != "${GALA_API_KEY}" // Check for unexpanded env var
+			apiKey := provider.Options.APIKey
+			//nolint:gosec // field name, not a secret
+			hasKey := apiKey != "" && apiKey != "${GALA_API_KEY}" // Check for unexpanded env var
 
-				logger.Info("Resolved model configuration",
-					"provider", providerID,
-					"model_id", id,
-					"model_name", model.Name,
-					"base_url", provider.Options.BaseURL,
-					"has_api_key", hasKey,
-					"capabilities", model.Capabilities,
-					"context_limit", model.ContextLimit,
-					"max_output", model.MaxOutput,
+			logger.Info("Resolved model configuration",
+				"provider", providerID,
+				"model_id", id,
+				"model_name", model.Name,
+				"base_url", provider.Options.BaseURL,
+				"has_api_key", hasKey,
+				"capabilities", model.Capabilities,
+				"context_limit", model.ContextLimit,
+				"max_output", model.MaxOutput,
+			)
+
+			if !hasKey {
+				logger.Warn("API key not set or not expanded",
+					"expected_env", "GALA_API_KEY",
+					"hint", "Set GALA_API_KEY environment variable",
 				)
+			}
 
-				if !hasKey {
-					logger.Warn("API key not set or not expanded",
-						"expected_env", "GALA_API_KEY",
-						"hint", "Set GALA_API_KEY environment variable",
-					)
-				}
-
-				return &llm.ModelConfig{
-					BaseURL:              provider.Options.BaseURL,
-					ModelID:              model.Name, // Use the actual model name, not the config key
-					APIKey:               apiKey,
-					CostPerMillionInput:  model.InputCost,
-					CostPerMillionOutput: model.OutputCost,
-					MaxTokens:            model.MaxOutput,
-					Temperature:          model.Temperature,
-					ContextLimit:         model.ContextLimit,
-					Capabilities:         caps,
-					ProviderID:           providerID,
-				}
+			return &llm.ModelConfig{
+				BaseURL:              provider.Options.BaseURL,
+				ModelID:              model.Name, // Use the actual model name, not the config key
+				APIKey:               apiKey,
+				CostPerMillionInput:  model.InputCost,
+				CostPerMillionOutput: model.OutputCost,
+				MaxTokens:            model.MaxOutput,
+				Temperature:          model.Temperature,
+				ContextLimit:         model.ContextLimit,
+				Capabilities:         caps,
+				ProviderID:           providerID,
 			}
 		}
 	}
@@ -1977,7 +1977,7 @@ func (a *learningPipelineAdapter) StorePattern(ctx context.Context, pattern *age
 	return a.pipeline.StorePattern(ctx, siPattern)
 }
 
-func (a *learningPipelineAdapter) Retrieve(ctx context.Context, query string, domain string, k int) ([]*agent.LearnedPattern, error) {
+func (a *learningPipelineAdapter) Retrieve(ctx context.Context, query, domain string, k int) ([]*agent.LearnedPattern, error) {
 	patterns, err := a.pipeline.Retrieve(ctx, query, domain, k)
 	if err != nil {
 		return nil, err

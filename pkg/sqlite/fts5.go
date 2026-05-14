@@ -78,7 +78,7 @@ func (q *FTS5Query) Build() string {
 	// Quote each term for safety
 	quotedTerms := make([]string, len(q.terms))
 	for i, t := range q.terms {
-		quotedTerms[i] = fmt.Sprintf(`"%s"`, t)
+		quotedTerms[i] = fmt.Sprintf("%q", t)
 	}
 
 	query := strings.Join(quotedTerms, " "+q.operator+" ")
@@ -100,7 +100,7 @@ func (q *FTS5Query) BuildPhrase() string {
 
 	// Join terms with spaces inside quotes for phrase matching
 	phrase := strings.Join(q.terms, " ")
-	return fmt.Sprintf(`"%s"`, phrase)
+	return fmt.Sprintf("%q", phrase)
 }
 
 // BuildPrefix constructs a prefix query (matches terms starting with the given prefixes).
@@ -112,7 +112,7 @@ func (q *FTS5Query) BuildPrefix() string {
 	// Add * to each term for prefix matching
 	prefixTerms := make([]string, len(q.terms))
 	for i, t := range q.terms {
-		prefixTerms[i] = fmt.Sprintf(`"%s"*`, t)
+		prefixTerms[i] = fmt.Sprintf("%q*", t)
 	}
 
 	return strings.Join(prefixTerms, " "+q.operator+" ")
@@ -203,7 +203,7 @@ func abs(x float64) float64 {
 // CreateFTS5Table returns SQL to create an FTS5 virtual table.
 // contentTable: optional backing content table (empty for standalone)
 // columns: column names to index
-func CreateFTS5Table(tableName string, contentTable string, columns ...string) string {
+func CreateFTS5Table(tableName, contentTable string, columns ...string) string {
 	var sb strings.Builder
 	sb.WriteString("CREATE VIRTUAL TABLE IF NOT EXISTS ")
 	sb.WriteString(tableName)

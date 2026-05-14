@@ -224,7 +224,7 @@ func BenchmarkSecurityHandler_CheckPermission(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		h.handleCheckPermission(context.Background(), params)
+		_, _ = h.handleCheckPermission(context.Background(), params)
 	}
 }
 
@@ -246,6 +246,6 @@ func BenchmarkSecurityHandler_CheckBatch(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		h.handleCheckBatch(context.Background(), params)
+		_, _ = h.handleCheckBatch(context.Background(), params)
 	}
 }

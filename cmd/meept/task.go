@@ -38,7 +38,7 @@ func newTaskListCmd() *cobra.Command {
 	var limit int
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List tasks",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := connectDaemon()

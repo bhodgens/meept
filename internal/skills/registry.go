@@ -122,12 +122,11 @@ func (r *Registry) FindByTag(tag string) []*Skill {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	normalizedTag := strings.ToLower(strings.TrimSpace(tag))
 	var results []*Skill
 
 	for _, skill := range r.skills {
 		for _, t := range skill.Tags {
-			if strings.ToLower(t) == normalizedTag {
+			if strings.EqualFold(t, tag) {
 				results = append(results, skill)
 				break
 			}
@@ -174,16 +173,15 @@ func hasAllTags(skill *Skill, normalizedTags []string) bool {
 }
 
 // FindByCapability returns skills that require a specific capability.
-func (r *Registry) FindByCapability(cap string) []*Skill {
+func (r *Registry) FindByCapability(capability string) []*Skill {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	normalizedCap := strings.ToLower(strings.TrimSpace(cap))
 	var results []*Skill
 
 	for _, skill := range r.skills {
 		for _, c := range skill.Requires {
-			if strings.ToLower(c) == normalizedCap {
+			if strings.EqualFold(c, capability) {
 				results = append(results, skill)
 				break
 			}
@@ -332,7 +330,7 @@ func matchScore(skill *Skill, queryLower string) int {
 
 	// Tag match
 	for _, tag := range skill.Tags {
-		if strings.ToLower(tag) == queryLower {
+		if strings.EqualFold(tag, queryLower) {
 			score += 20
 		} else if strings.Contains(strings.ToLower(tag), queryLower) {
 			score += 5

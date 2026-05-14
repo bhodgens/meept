@@ -82,13 +82,13 @@ func (t *WebSearchTool) Description() string {
 
 func (t *WebSearchTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"query": {
+			schemaPropQuery: {
 				Type:        "string",
 				Description: "The search query string.",
 			},
-			"limit": {
+			schemaPropLimit: {
 				Type:        "integer",
 				Description: "Maximum number of results to return (default 10, max 30).",
 			},
@@ -130,7 +130,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, 
 	searchURL := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

@@ -176,7 +176,7 @@ func TestL2Cache_FileAware(t *testing.T) {
 
 	tmpFile := filepath.Join(tmpDir, "test.go")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(tmpFile, []byte("package test"), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte("package test"), 0o644); err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
 

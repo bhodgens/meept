@@ -533,10 +533,10 @@ func (s *Server) handleDaemonStatus(w http.ResponseWriter, r *http.Request) {
 		state = "idle"
 		// Check for active work via metrics
 		if s.metricsService != nil {
-			if metrics, err := s.metricsService.GetLiveMetrics(); err == nil {
-				if metrics.ActiveAgents > 0 || metrics.QueueDepth > 0 {
+			if liveMetrics, err := s.metricsService.GetLiveMetrics(); err == nil {
+				if liveMetrics.ActiveAgents > 0 || liveMetrics.QueueDepth > 0 {
 					state = "working"
-				} else if metrics.ModelFailovers > 0 {
+				} else if liveMetrics.ModelFailovers > 0 {
 					state = "error"
 				}
 			}
@@ -580,13 +580,13 @@ func (s *Server) handleLiveMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metrics, err := s.metricsService.GetLiveMetrics()
+	liveMetrics, err := s.metricsService.GetLiveMetrics()
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, metrics)
+	s.writeJSON(w, http.StatusOK, liveMetrics)
 }
 
 // handleHistoricalMetrics handles GET /api/v1/metrics/historical.

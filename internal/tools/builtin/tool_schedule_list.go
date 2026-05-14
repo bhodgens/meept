@@ -29,9 +29,9 @@ func (t *ScheduleListTool) Description() string {
 
 func (t *ScheduleListTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"job_type": {
+			schemaPropJobType: {
 				Type:        "string",
 				Description: "Optional filter by job type: agent, shell, reminder, optimization, security, learning.",
 				Enum:        []string{"agent", "shell", "reminder", "optimization", "security", "learning", ""},
@@ -138,9 +138,9 @@ func (t *ScheduleGetTool) Description() string {
 
 func (t *ScheduleGetTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"job_id": {
+			schemaPropJobID: {
 				Type:        "string",
 				Description: "The job ID to retrieve.",
 			},

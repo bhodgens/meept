@@ -15,7 +15,7 @@ func newStatusCmd() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "status",
+		Use:   cmdStatus,
 		Short: "Show daemon status",
 		Long: `Display the current status of the Meept daemon.
 

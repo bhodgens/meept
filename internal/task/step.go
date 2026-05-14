@@ -279,7 +279,7 @@ func (s *StepStore) migrate() error {
 		"ALTER TABLE task_steps ADD COLUMN memory_refs TEXT",
 		"ALTER TABLE task_steps ADD COLUMN accumulated_context TEXT",
 	} {
-		s.db.Exec(col)
+		_, _ = s.db.Exec(col)
 	}
 
 	return nil

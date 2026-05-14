@@ -30,13 +30,13 @@ type Client struct {
 }
 
 // NewClient creates a new MCP client.
-func NewClient(name string, transport transport.Transport, logger *slog.Logger) *Client {
+func NewClient(name string, tp transport.Transport, logger *slog.Logger) *Client {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Client{
 		name:      name,
-		transport: transport,
+		transport: tp,
 		logger:    logger,
 	}
 }

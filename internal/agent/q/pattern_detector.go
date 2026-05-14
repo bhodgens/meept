@@ -482,13 +482,6 @@ func containsAnomaly(flags []string, target string) bool {
 	return slices.Contains(flags, target)
 }
 
-func min(a, b float64) float64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func sqrt(x float64) float64 {
 	if x <= 0 {
 		return 0

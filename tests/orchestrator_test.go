@@ -206,8 +206,8 @@ func TestTacticalScheduler_OnJobCompleted(t *testing.T) {
 	}
 
 	// Set step 0 as scheduled with a job ID
-	env.stepStore.SetState(step0.ID, task.StepScheduled)
-	env.stepStore.SetJobID(step0.ID, "job-0")
+	_ = env.stepStore.SetState(step0.ID, task.StepScheduled)
+	_ = env.stepStore.SetJobID(step0.ID, "job-0")
 
 	// Complete job-0
 	if err := env.tactical.OnJobCompleted(ctx, "job-0", json.RawMessage(`"done"`)); err != nil {
@@ -250,8 +250,8 @@ func TestTacticalScheduler_OnJobFailed(t *testing.T) {
 	if err := env.stepStore.Create(step); err != nil {
 		t.Fatalf("failed to create step: %v", err)
 	}
-	env.stepStore.SetState(step.ID, task.StepScheduled)
-	env.stepStore.SetJobID(step.ID, "job-fail")
+	_ = env.stepStore.SetState(step.ID, task.StepScheduled)
+	_ = env.stepStore.SetJobID(step.ID, "job-fail")
 
 	// Fail the job
 	if err := env.tactical.OnJobFailed(ctx, "job-fail", "simulated error"); err != nil {
@@ -327,7 +327,7 @@ func TestOrchestratorPlanFlow_EndToEnd(t *testing.T) {
 	if err := env.orch.Start(ctx); err != nil {
 		t.Fatalf("Failed to start orchestrator: %v", err)
 	}
-	defer env.orch.Stop(ctx)
+	defer func() { _ = env.orch.Stop(ctx) }()
 
 	// Give subscriptions time to register
 	time.Sleep(50 * time.Millisecond)

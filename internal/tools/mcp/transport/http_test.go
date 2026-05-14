@@ -47,7 +47,7 @@ func TestHTTPTransport_Send(t *testing.T) {
 
 		// Send response
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"jsonrpc": "2.0",
 			"id":      req["id"],
 			"result":  map[string]any{"status": "ok"},
@@ -97,7 +97,7 @@ func TestHTTPTransport_SendWithHeaders(t *testing.T) {
 		receivedHeaders = r.Header
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
 	defer server.Close()
 
@@ -138,7 +138,7 @@ func TestHTTPTransport_SessionID(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
 	}))
 	defer server.Close()
 
@@ -149,14 +149,14 @@ func TestHTTPTransport_SessionID(t *testing.T) {
 	defer transport.Close()
 
 	// First request
-	transport.Send(ctx, []byte(`{"jsonrpc":"2.0","id":1,"method":"test"}`))
+	_, _ = transport.Send(ctx, []byte(`{"jsonrpc":"2.0","id":1,"method":"test"}`))
 
 	if transport.GetSessionID() != "test-session-123" {
 		t.Error("Session ID not stored")
 	}
 
 	// Second request
-	transport.Send(ctx, []byte(`{"jsonrpc":"2.0","id":2,"method":"test"}`))
+	_, _ = transport.Send(ctx, []byte(`{"jsonrpc":"2.0","id":2,"method":"test"}`))
 
 	if callCount != 2 {
 		t.Errorf("expected 2 calls, got %d", callCount)
@@ -169,9 +169,9 @@ func TestHTTPTransport_SSEResponse(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 
 		// Write SSE format response
-		w.Write([]byte("event: message\n"))
-		w.Write([]byte(`data: {"jsonrpc":"2.0","id":1,"result":{"status":"from_sse"}}` + "\n"))
-		w.Write([]byte("\n"))
+		_, _ = w.Write([]byte("event: message\n"))
+		_, _ = w.Write([]byte(`data: {"jsonrpc":"2.0","id":1,"result":{"status":"from_sse"}}` + "\n"))
+		_, _ = w.Write([]byte("\n"))
 	}))
 	defer server.Close()
 

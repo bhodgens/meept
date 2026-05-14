@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/skills"
 )
 
@@ -92,7 +93,7 @@ func (m *CapabilityMatcher) matchPlatformPatterns(inputLower string) *MatchResul
 	for _, pattern := range platformPatterns {
 		if strings.Contains(inputLower, pattern) {
 			return &MatchResult{
-				AgentID:         "chat",
+				AgentID:         config.AgentIDChat,
 				Confidence:      0.9,
 				MatchType:       "platform",
 				IntentType:      "platform",
@@ -119,7 +120,7 @@ func (m *CapabilityMatcher) matchByCapabilityIndex(inputLower string) *MatchResu
 	// Find which agent has this skill
 	agentID := m.findAgentForSkill(match.Entry.Name)
 	if agentID == "" {
-		agentID = "chat" // Fallback
+		agentID = config.AgentIDChat // Fallback
 	}
 
 	// Extract matched keywords
@@ -138,8 +139,8 @@ func (m *CapabilityMatcher) matchByCapabilityIndex(inputLower string) *MatchResu
 	return &MatchResult{
 		AgentID:         agentID,
 		Confidence:      match.Confidence,
-		MatchType:       "skill",
-		IntentType:      "skill",
+		MatchType:       string(IntentSkill),
+		IntentType:      string(IntentSkill),
 		MatchedSkill:    match.Entry.Name,
 		MatchedKeywords: matchedKeywords,
 	}
@@ -291,10 +292,10 @@ func (m *CapabilityMatcher) MatchWithFallback(input string, minConfidence float6
 	}
 
 	return &MatchResult{
-		AgentID:    "chat",
+		AgentID:    config.AgentIDChat,
 		Confidence: 0.3,
 		MatchType:  "fallback",
-		IntentType: "chat",
+		IntentType: string(IntentChat),
 	}
 }
 
@@ -310,7 +311,7 @@ func (m *CapabilityMatcher) MatchAll(input string) []*MatchResult {
 		for _, match := range matches {
 			agentID := m.findAgentForSkill(match.Entry.Name)
 			if agentID == "" {
-				agentID = "chat"
+				agentID = config.AgentIDChat
 			}
 
 			var keywords []string
@@ -321,8 +322,8 @@ func (m *CapabilityMatcher) MatchAll(input string) []*MatchResult {
 			results = append(results, &MatchResult{
 				AgentID:         agentID,
 				Confidence:      match.Confidence,
-				MatchType:       "skill",
-				IntentType:      "skill",
+				MatchType:       string(IntentSkill),
+				IntentType:      string(IntentSkill),
 				MatchedSkill:    match.Entry.Name,
 				MatchedKeywords: keywords,
 			})

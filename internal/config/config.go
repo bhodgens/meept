@@ -315,7 +315,7 @@ func stripJSON5Comments(s string) string {
 
 // EnsureDataDir creates the data directory if it doesn't exist.
 func EnsureDataDir(cfg *Config) error {
-	if err := os.MkdirAll(cfg.Daemon.DataDir, 0700); err != nil {
+	if err := os.MkdirAll(cfg.Daemon.DataDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 	return nil

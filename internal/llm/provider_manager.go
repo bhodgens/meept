@@ -88,10 +88,10 @@ type ProviderManager struct {
 
 // isAnthropic checks whether the given ModelConfig points to an Anthropic endpoint.
 func isAnthropic(cfg *ModelConfig) bool {
-	if cfg.ProviderID == "anthropic" {
+	if cfg.ProviderID == ProviderIDAnthropic {
 		return true
 	}
-	return strings.Contains(strings.ToLower(cfg.BaseURL), "anthropic")
+	return strings.Contains(strings.ToLower(cfg.BaseURL), ProviderIDAnthropic)
 }
 
 // createChatterFor creates a Chatter for a ModelConfig, selecting the right
@@ -585,31 +585,32 @@ func (pm *ProviderManager) runHealthCheck(ctx context.Context) {
 
 	// Health check: try a minimal request on unhealthy providers only
 	for _, entry := range pm.providers {
-		if entry.Health.Status == ProviderStatusUnhealthy {
-			// Try a minimal request
-			checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-
-			messages := []ChatMessage{
-				{Role: RoleUser, Content: "test"},
-			}
-
-			start := time.Now()
-			_, err := entry.Chatter.Chat(checkCtx, messages, WithMaxTokens(1))
-			latency := time.Since(start)
-			cancel()
-
-			if err == nil {
-				pm.logger.Info("Health check passed for unhealthy provider",
-					"provider", entry.Config.ProviderID,
-				)
-				pm.mu.Lock()
-				entry.Health.Status = ProviderStatusDegraded
-				entry.Health.ConsecutiveFails = 0
-				pm.mu.Unlock()
-			}
-
-			_ = latency // Could use for latency tracking
+		if entry.Health.Status != ProviderStatusUnhealthy {
+			continue
 		}
+		// Try a minimal request
+		checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+
+		messages := []ChatMessage{
+			{Role: RoleUser, Content: "test"},
+		}
+
+		start := time.Now()
+		_, err := entry.Chatter.Chat(checkCtx, messages, WithMaxTokens(1))
+		latency := time.Since(start)
+		cancel()
+
+		if err == nil {
+			pm.logger.Info("Health check passed for unhealthy provider",
+				"provider", entry.Config.ProviderID,
+			)
+			pm.mu.Lock()
+			entry.Health.Status = ProviderStatusDegraded
+			entry.Health.ConsecutiveFails = 0
+			pm.mu.Unlock()
+		}
+
+		_ = latency // Could use for latency tracking
 	}
 }
 

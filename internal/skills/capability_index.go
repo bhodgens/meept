@@ -288,12 +288,11 @@ func (ci *CapabilityIndex) GetKeywordsForSkill(skillName string) []string {
 	ci.mu.RLock()
 	defer ci.mu.RUnlock()
 
-	nameLower := strings.ToLower(skillName)
 	var keywords []string
 
 	for keyword, entries := range ci.byKeyword {
 		for _, e := range entries {
-			if strings.ToLower(e.Entry.Name) == nameLower {
+			if strings.EqualFold(e.Entry.Name, skillName) {
 				keywords = append(keywords, keyword)
 				break
 			}

@@ -125,7 +125,7 @@ func ParseMetadataOnly(path string) (*AgentMetadata, error) {
 
 // splitFrontmatter splits YAML frontmatter from the markdown body.
 // The frontmatter must be delimited by --- markers.
-func splitFrontmatter(text string) (frontmatter string, body string, err error) {
+func splitFrontmatter(text string) (frontmatter, body string, err error) {
 	trimmed := strings.TrimLeft(text, " \t\n\r")
 	if !strings.HasPrefix(trimmed, "---") {
 		return "", "", ErrNoFrontmatter

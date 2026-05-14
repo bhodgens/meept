@@ -180,7 +180,7 @@ func (b *Bot) getUpdates(ctx context.Context) ([]Update, error) {
 
 	apiURL := fmt.Sprintf("%s%s/getUpdates?%s", telegramAPIBase, b.config.Token, params.Encode())
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +398,7 @@ func splitMessage(text string, maxLen int) []string {
 	}
 
 	var messages []string
-	for len(text) > 0 {
+	for text != "" {
 		end := min(maxLen, len(text))
 
 		// Try to split at newline or space

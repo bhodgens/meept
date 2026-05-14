@@ -476,14 +476,14 @@ func filterRunningTasks(tasks []types.TaskExtended) []types.TaskExtended {
 }
 
 // truncate truncates a string to maxLen, adding ... if truncated.
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+func truncate(str string, maxLen int) string {
+	if len(str) <= maxLen {
+		return str
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return str[:maxLen]
 	}
-	return s[:maxLen-3] + "..."
+	return str[:maxLen-3] + "..."
 }
 
 // coalesce returns the first non-empty string from the given list.

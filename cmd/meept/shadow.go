@@ -38,7 +38,7 @@ Shadow training enables model improvement through:
 
 func newShadowStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   cmdStatus,
 		Short: "Show shadow training status and statistics",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
@@ -185,7 +185,7 @@ func newShadowExamplesListCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List few-shot examples",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
@@ -384,7 +384,7 @@ func newShadowAdaptersListCmd() *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List registered adapters",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
@@ -698,12 +698,12 @@ Training backends (auto-detected if not specified):
 				}
 
 				//nolint:gosec // user config directory/file permissions
-				if err := os.MkdirAll(outputDir, 0755); err != nil {
+				if err := os.MkdirAll(outputDir, 0o755); err != nil {
 					return fmt.Errorf("failed to create output directory: %w", err)
 				}
 
 				//nolint:gosec // user config directory/file permissions
-				if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+				if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
 					return fmt.Errorf("failed to write script: %w", err)
 				}
 

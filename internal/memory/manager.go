@@ -140,7 +140,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	if dataDir == "" {
 		dataDir = "~/.meept/memory"
 	}
-	if len(dataDir) > 0 && dataDir[0] == '~' {
+	if dataDir != "" && dataDir[0] == '~' {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return fmt.Errorf("failed to get home directory: %w", err)
@@ -150,7 +150,7 @@ func (m *Manager) Initialize(ctx context.Context) error {
 	m.dataDir = dataDir
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 

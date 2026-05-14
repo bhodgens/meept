@@ -924,7 +924,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 		// Auto-focus: if viewport is focused and a printable character is typed,
 		// redirect focus to the input and forward the keystroke
-		if m.focused == FocusViewport && len(msg.Text) > 0 {
+		if m.focused == FocusViewport && msg.Text != "" {
 			m.SetFocus(FocusInput)
 			var taCmd tea.Cmd
 			m.textarea, taCmd = m.textarea.Update(msg)
@@ -2199,7 +2199,7 @@ func (m *ChatModel) getTextareaBounds() (startY, endY int) {
 
 // parseAsyncAck checks if a reply is an async task acknowledgment JSON.
 // Returns (isAsync, taskID, message).
-func parseAsyncAck(reply string) (bool, string, string) {
+func parseAsyncAck(reply string) (ok bool, taskID, message string) {
 	// Quick check: must start with { to be JSON
 	trimmed := strings.TrimSpace(reply)
 	if !strings.HasPrefix(trimmed, "{") {

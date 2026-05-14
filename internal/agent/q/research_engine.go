@@ -86,7 +86,7 @@ func (e *ResearchEngine) determineResearchType(pattern PatternReport) string {
 // 3. Missing tool? -> Tool call failed with "not found" or capability gap
 // 4. Bad prompt? -> Agent output shows confusion or goes off-track
 // 5. Missing memory? -> Relevant memories exist but not injected
-func (e *ResearchEngine) applyCausalAttribution(ctx context.Context, pattern PatternReport, analyses []*SessionAnalysis) (string, []EvidenceLink) {
+func (e *ResearchEngine) applyCausalAttribution(_ context.Context, pattern PatternReport, analyses []*SessionAnalysis) (string, []EvidenceLink) {
 	switch pattern.MisconfigurationType {
 	case "capability_gap":
 		return e.analyzeCapabilityGap(pattern, analyses)
@@ -242,7 +242,7 @@ func (e *ResearchEngine) analyzeHighErrorRate(pattern PatternReport, analyses []
 }
 
 // analyzeGeneric performs generic analysis when specific type is unclear.
-func (e *ResearchEngine) analyzeGeneric(pattern PatternReport, analyses []*SessionAnalysis) (string, []EvidenceLink) {
+func (e *ResearchEngine) analyzeGeneric(_ PatternReport, analyses []*SessionAnalysis) (string, []EvidenceLink) {
 	evidence := make([]EvidenceLink, 0, minInt(len(analyses), 5))
 
 	// Collect general evidence
@@ -281,7 +281,7 @@ func (e *ResearchEngine) computeConfidence(pattern PatternReport, evidence []Evi
 }
 
 // generateRecommendations generates recommendations based on root cause.
-func (e *ResearchEngine) generateRecommendations(pattern PatternReport, rootCause string, analyses []*SessionAnalysis) []Recommendation {
+func (e *ResearchEngine) generateRecommendations(pattern PatternReport, rootCause string, _ []*SessionAnalysis) []Recommendation {
 	recommendations := make([]Recommendation, 0)
 
 	switch pattern.RecommendedAction {
@@ -340,7 +340,7 @@ func (e *ResearchEngine) recommendSpecUpdate(pattern PatternReport, rootCause st
 }
 
 // recommendModelReassignment generates a recommendation for model reassignment.
-func (e *ResearchEngine) recommendModelReassignment(pattern PatternReport, rootCause string) Recommendation {
+func (e *ResearchEngine) recommendModelReassignment(pattern PatternReport, _ string) Recommendation {
 	return Recommendation{
 		Type:           "reassign_model",
 		Title:          fmt.Sprintf("Reassign model for %s tasks", pattern.AffectedIntent),

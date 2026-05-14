@@ -122,7 +122,7 @@ func (m *DocumentManager) CloseFile(ctx context.Context, filePath string) error 
 }
 
 // UpdateFile updates a document's content and notifies the LSP server.
-func (m *DocumentManager) UpdateFile(ctx context.Context, filePath string, newContent string) error {
+func (m *DocumentManager) UpdateFile(ctx context.Context, filePath, newContent string) error {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)

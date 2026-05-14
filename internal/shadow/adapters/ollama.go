@@ -35,7 +35,7 @@ func NewOllamaAdapter(endpoint string, store shadow.AdaptersStore) *OllamaAdapte
 
 // ListModels lists available Ollama models.
 func (a *OllamaAdapter) ListModels(ctx context.Context) ([]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.endpoint+"/api/tags", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.endpoint+"/api/tags", http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (a *OllamaAdapter) GetActiveModelName(ctx context.Context, baseModel string
 
 // Ping checks if Ollama is reachable.
 func (a *OllamaAdapter) Ping(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.endpoint+"/api/version", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.endpoint+"/api/version", http.NoBody)
 	if err != nil {
 		return err
 	}

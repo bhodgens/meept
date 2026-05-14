@@ -85,7 +85,7 @@ func (ke *KeywordExtractor) ExtractFromEntry(entry *SkillIndexEntry) []Extracted
 		}
 		// Also extract the full example as a phrase (for exact matching)
 		phrase := strings.ToLower(strings.TrimSpace(example))
-		if len(phrase) > 0 && len(strings.Fields(phrase)) <= ke.maxPhraseLen {
+		if phrase != "" && len(strings.Fields(phrase)) <= ke.maxPhraseLen {
 			keywords = append(keywords, ExtractedKeyword{
 				Keyword: phrase,
 				Source:  SourceExample,

@@ -41,7 +41,7 @@ func newBranchListCmd() *cobra.Command {
 	var sessionID string
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "list branches in a session",
 		Long: `List all conversation branches in a session.
 
@@ -159,7 +159,7 @@ func runBranchList(sessionID string) error {
 	}
 
 	// Call session.branches.list
-	result, err := client.Call("session.branches.list", map[string]string{"session_id": sessionID})
+	result, err := client.Call("session.branches.list", map[string]string{paramSessionID: sessionID})
 	if err != nil {
 		return fmt.Errorf("failed to list branches: %w", err)
 	}
@@ -224,7 +224,7 @@ func runBranchSummary(sessionID string) error {
 	}
 
 	// Call session.branches.list
-	result, err := client.Call("session.branches.list", map[string]string{"session_id": sessionID})
+	result, err := client.Call("session.branches.list", map[string]string{paramSessionID: sessionID})
 	if err != nil {
 		return fmt.Errorf("failed to list branches: %w", err)
 	}
@@ -266,7 +266,7 @@ func runBranchSummary(sessionID string) error {
 
 		if b.Summary != "" {
 			// Indent the summary text under the branch entry
-			for _, line := range strings.Split(b.Summary, "\n") {
+			for line := range strings.SplitSeq(b.Summary, "\n") {
 				fmt.Printf("     %s\n", line)
 			}
 		} else {
@@ -293,7 +293,7 @@ func runBranchNavigate(sessionID string, targetMessageID int64) error {
 	}
 
 	params := map[string]any{
-		"session_id":        sessionID,
+		paramSessionID:        sessionID,
 		"target_message_id": targetMessageID,
 	}
 
@@ -343,9 +343,9 @@ func runBranchFork(sessionID string, fromMessageID int64, forkName string) error
 	}
 
 	params := map[string]any{
-		"session_id":      sessionID,
+		paramSessionID:      sessionID,
 		"from_message_id": fromMessageID,
-		"name":            forkName,
+		paramName:            forkName,
 	}
 
 	result, err := client.Call("session.fork", params)
@@ -387,7 +387,7 @@ func runBranchTree(sessionID string) error {
 		}
 	}
 
-	result, err := client.Call("session.tree.get", map[string]string{"session_id": sessionID})
+	result, err := client.Call("session.tree.get", map[string]string{paramSessionID: sessionID})
 	if err != nil {
 		return fmt.Errorf("failed to get tree: %w", err)
 	}

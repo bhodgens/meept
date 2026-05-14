@@ -32,7 +32,7 @@ func newSkillsListCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   cmdList,
 		Short: "List available skills",
 		Long:  "List all skills discovered from the skill directories.",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -158,7 +158,7 @@ func newSkillsShowCmd() *cobra.Command {
 			}
 			defer c.Close()
 
-			params := map[string]string{"name": skillName}
+			params := map[string]string{paramName: skillName}
 			rawResult, err := c.Call("skills.get", params)
 			if err != nil {
 				return fmt.Errorf("failed to get skill: %w", err)

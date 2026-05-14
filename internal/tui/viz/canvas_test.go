@@ -188,7 +188,7 @@ func TestBrailleEncoding(t *testing.T) {
 	c.SetPixel(0, 0, true)
 	output := c.Render()
 
-	// U+2800 + 0x01 = U+2801
+	// unicode encoding: U+2800 + 0x01 = U+2801
 	if !strings.ContainsRune(output, '\u2801') {
 		t.Errorf("Single top-left dot should render as U+2801, got %q", output)
 	}
@@ -198,7 +198,7 @@ func TestBrailleEncoding(t *testing.T) {
 	c.SetPixel(1, 3, true)
 	output = c.Render()
 
-	// U+2800 + 0x80 = U+2880
+	// unicode encoding: U+2800 + 0x80 = U+2880
 	if !strings.ContainsRune(output, '\u2880') {
 		t.Errorf("Single bottom-right dot should render as U+2880, got %q", output)
 	}

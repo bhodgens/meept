@@ -418,7 +418,7 @@ func newSelfImproveFullCycleCmd() *cobra.Command {
 
 func newSelfImproveStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   cmdStatus,
 		Short: "show self-improvement status",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := dialRPC()

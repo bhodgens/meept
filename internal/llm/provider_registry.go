@@ -10,6 +10,37 @@ const (
 	TransportBedrockConverse   ProviderTransport = "bedrock_converse"
 )
 
+// Provider ID constants used across catalog, registry, and broker.
+const (
+	ProviderIDAnthropic = "anthropic"
+	ProviderIDOpenAI    = "openai"
+	ProviderIDOllama    = "ollama"
+	ProviderIDZAI       = "zai"
+	ProviderIDGoogle    = "google"
+	ProviderIDDeepSeek  = "deepseek"
+	ProviderIDBedrock   = "bedrock"
+)
+
+// Content type constants for API response parsing.
+const (
+	ContentTypeText    = "text"
+	ContentTypeToolUse = "tool_use"
+	ContentTypeThinking = "thinking"
+	ContentTypeFunction = "function"
+
+	// Capability strings used in model definitions.
+	CapCode      = "code"
+	CapReasoning = "reasoning"
+	CapToolUse   = "tool_use"
+	CapThinking  = "thinking"
+	CapImages    = "images"
+	CapStreaming = "streaming"
+	CapCompletion = "completion"
+
+	// Budget exceeded error message.
+	ErrBudgetExceeded = "Token budget exceeded - request blocked"
+)
+
 // AuthType defines how authentication is performed.
 type AuthType string
 
@@ -37,14 +68,14 @@ type ProviderDef struct {
 var CanonicalProviders = []ProviderDef{
 	//nolint:gosec // field name, not a secret
 	{
-		ID:           "anthropic",
+		ID:           ProviderIDAnthropic,
 		Name:         "Anthropic",
 		Transport:    TransportAnthropicMessages,
 		AuthType:     AuthAPIKey,
 		APIKeyEnvVar: "ANTHROPIC_API_KEY",
 		BaseURL:      "https://api.anthropic.com",
 		DocURL:       "https://docs.anthropic.com",
-		Supports:     []string{"streaming", "tools", "images", "thinking"},
+		Supports:     []string{CapStreaming, "tools", CapImages, CapThinking},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -55,21 +86,21 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "OPENROUTER_API_KEY",
 		BaseURL:      "https://openrouter.ai/api/v1",
 		DocURL:       "https://openrouter.ai/docs",
-		Supports:     []string{"streaming", "tools", "images"},
+		Supports:     []string{CapStreaming, "tools", CapImages},
 	},
 	//nolint:gosec // field name, not a secret
 	{
-		ID:           "openai",
+		ID:           ProviderIDOpenAI,
 		Name:         "OpenAI",
 		Transport:    TransportOpenAIChat,
 		AuthType:     AuthAPIKey,
 		APIKeyEnvVar: "OPENAI_API_KEY",
 		BaseURL:      "https://api.openai.com/v1",
 		DocURL:       "https://platform.openai.com/docs",
-		Supports:     []string{"streaming", "tools", "images", "responses"},
+		Supports:     []string{CapStreaming, "tools", CapImages, "responses"},
 	},
 	{
-		ID:           "ollama",
+		ID:           ProviderIDOllama,
 		Name:         "Ollama",
 		Transport:    TransportOpenAIChat,
 		AuthType:     AuthEnvVar,
@@ -79,7 +110,7 @@ var CanonicalProviders = []ProviderDef{
 	},
 	//nolint:gosec // field name, not a secret
 	{
-		ID:           "zai",
+		ID:           ProviderIDZAI,
 		Name:         "Z.ai",
 		Transport:    TransportOpenAIChat,
 		AuthType:     AuthAPIKey,
@@ -90,25 +121,25 @@ var CanonicalProviders = []ProviderDef{
 	},
 	//nolint:gosec // field name, not a secret
 	{
-		ID:           "google",
+		ID:           ProviderIDGoogle,
 		Name:         "Google AI",
 		Transport:    TransportOpenAIChat,
 		AuthType:     AuthAPIKey,
 		APIKeyEnvVar: "GOOGLE_API_KEY",
 		BaseURL:      "https://generativelanguage.googleapis.com/v1beta/openai",
 		DocURL:       "https://ai.google.dev",
-		Supports:     []string{"streaming", "tools", "images"},
+		Supports:     []string{CapStreaming, "tools", CapImages},
 	},
 	//nolint:gosec // field name, not a secret
 	{
-		ID:           "deepseek",
+		ID:           ProviderIDDeepSeek,
 		Name:         "DeepSeek",
 		Transport:    TransportOpenAIChat,
 		AuthType:     AuthAPIKey,
 		APIKeyEnvVar: "DEEPSEEK_API_KEY",
 		BaseURL:      "https://api.deepseek.com/v1",
 		DocURL:       "https://platform.deepseek.com/docs",
-		Supports:     []string{"streaming", "code", "reasoning"},
+		Supports:     []string{CapStreaming, CapCode, CapReasoning},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -143,7 +174,7 @@ var CanonicalProviders = []ProviderDef{
 		Supports:     []string{"streaming", "models"},
 	},
 	{
-		ID:           "bedrock",
+		ID:           ProviderIDBedrock,
 		Name:         "AWS Bedrock",
 		Transport:    TransportBedrockConverse,
 		AuthType:     AuthEnvVar,

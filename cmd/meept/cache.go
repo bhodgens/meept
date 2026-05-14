@@ -31,7 +31,7 @@ Examples:
 
 func newCacheStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   cmdStatus,
 		Short: "Show cache statistics",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCacheStatus()

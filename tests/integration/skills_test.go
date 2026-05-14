@@ -46,7 +46,7 @@ You are a test skill. Follow these instructions carefully.
 `
 	skillPath := filepath.Join(tempDir, "test-skill.md")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(skillPath, []byte(skillContent), 0644); err != nil {
+	if err := os.WriteFile(skillPath, []byte(skillContent), 0o644); err != nil {
 		t.Fatalf("Failed to write skill file: %v", err)
 	}
 
@@ -513,7 +513,7 @@ Analyze the provided data and extract key insights.
 	for _, sd := range skillsData {
 		path := filepath.Join(tempDir, sd.filename)
 		//nolint:gosec // test directory/file
-		if err := os.WriteFile(path, []byte(sd.content), 0644); err != nil {
+		if err := os.WriteFile(path, []byte(sd.content), 0o644); err != nil {
 			t.Fatalf("Failed to write %s: %v", sd.filename, err)
 		}
 	}

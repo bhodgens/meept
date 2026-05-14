@@ -21,13 +21,13 @@ func TestController_Detect_Integration(t *testing.T) {
 	// Create a small Go file with a TODO that the detector should find.
 	src := filepath.Join(projectDir, "main.go")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(src, []byte("package main\n\nfunc main() {\n\t// TODO: fix this\n}\n"), 0644); err != nil {
+	if err := os.WriteFile(src, []byte("package main\n\nfunc main() {\n\t// TODO: fix this\n}\n"), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
 
 	cfg := selfimprove.DefaultConfig()
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
-	cfg.Validate()
+	_ = cfg.Validate()
 
 	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
@@ -48,7 +48,7 @@ func TestController_StatusRoundTrip(t *testing.T) {
 
 	cfg := selfimprove.DefaultConfig()
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
-	cfg.Validate()
+	_ = cfg.Validate()
 
 	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
@@ -76,7 +76,7 @@ func TestScheduler_StopVerifiesIdempotent(t *testing.T) {
 
 	cfg := selfimprove.DefaultConfig()
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
-	cfg.Validate()
+	_ = cfg.Validate()
 
 	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 	sched := selfimprove.NewScheduler(ctrl, 1*time.Hour, slog.New(slog.DiscardHandler))
@@ -93,7 +93,7 @@ func TestScheduler_StartStop(t *testing.T) {
 
 	cfg := selfimprove.DefaultConfig()
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
-	cfg.Validate()
+	_ = cfg.Validate()
 
 	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
@@ -128,7 +128,7 @@ func TestController_ProgressCallback(t *testing.T) {
 
 	cfg := selfimprove.DefaultConfig()
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
-	cfg.Validate()
+	_ = cfg.Validate()
 
 	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 
@@ -183,7 +183,7 @@ func TestController_BusIntegration(t *testing.T) {
 
 	cfg := selfimprove.DefaultConfig()
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
-	cfg.Validate()
+	_ = cfg.Validate()
 
 	ctrl := selfimprove.NewController(cfg, msgBus, nil, projectDir, slog.New(slog.DiscardHandler))
 
@@ -224,7 +224,7 @@ func TestApplier_ApproveReject_Integration(t *testing.T) {
 	targetFile := filepath.Join(projectDir, "hello.go")
 	original := []byte("package main\n\nfunc hello() string {\n\treturn \"hello\"\n}\n")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(targetFile, original, 0644); err != nil {
+	if err := os.WriteFile(targetFile, original, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -232,7 +232,7 @@ func TestApplier_ApproveReject_Integration(t *testing.T) {
 	cfg.DataPath = filepath.Join(t.TempDir(), "si-data")
 	cfg.Safety.RequireHumanApproval = true
 	cfg.Safety.AutoApplyLowRisk = false
-	cfg.Validate()
+	_ = cfg.Validate()
 
 	ctrl := selfimprove.NewController(cfg, nil, nil, projectDir, slog.New(slog.DiscardHandler))
 

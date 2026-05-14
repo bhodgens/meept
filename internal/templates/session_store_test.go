@@ -69,7 +69,7 @@ func TestSessionStore_ActivateMaxTemplates(t *testing.T) {
 	store := NewSessionStore()
 
 	// Fill up to the max.
-	for i := 0; i < MaxSessionScopedTemplates; i++ {
+	for i := range MaxSessionScopedTemplates {
 		active := ActiveTemplate{
 			Name:            "template-" + string(rune('a'+i)),
 			SubstitutedBody: "body",
@@ -184,7 +184,7 @@ func TestSessionStore_DeactivateNonExistent(t *testing.T) {
 func TestSessionStore_Clear(t *testing.T) {
 	store := NewSessionStore()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		active := ActiveTemplate{
 			Name:            "template-" + string(rune('a'+i)),
 			SubstitutedBody: "body",

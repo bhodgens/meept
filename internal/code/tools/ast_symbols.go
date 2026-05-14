@@ -33,9 +33,9 @@ Returns symbol names, kinds, locations, and signatures. Useful for understanding
 
 func (t *ASTSymbolsTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"file_path": {
+			SchemaPropFilePath: {
 				Type:        "string",
 				Description: "Path to the source file to analyze.",
 			},
@@ -96,9 +96,9 @@ func (t *ASTSymbolsTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	return map[string]any{
-		"file_path": filePath,
+		SchemaPropFilePath: filePath,
 		"symbols":   symbols,
-		"count":     len(symbols),
+		SchemaPropCount:     len(symbols),
 	}, nil
 }
 

@@ -43,7 +43,7 @@ func DefaultOrchestratorConfig() OrchestratorConfig {
 		MonitorOutput:      true,
 		RedactOutput:       true,
 		ScanShellCommands:  true,
-		TirithBinary:       "tirith",
+		TirithBinary:       BinaryTirith,
 		EnableAuditLog:     false,
 		AuditDBPath:        "",
 	}
@@ -129,7 +129,7 @@ func NewOrchestrator(cfg OrchestratorConfig, logger *slog.Logger) *Orchestrator 
 
 // SanitizeInput processes user input through the security pipeline.
 // Returns the (possibly modified) text, whether it was blocked, and any warnings.
-func (o *Orchestrator) SanitizeInput(text string) (string, bool, []Warning) {
+func (o *Orchestrator) SanitizeInput(text string) (sanitized string, ok bool, warnings []Warning) {
 	o.inputsProcessed.Add(1)
 
 	if !o.config.SanitizeInputs || o.sanitizer == nil {
@@ -144,20 +144,21 @@ func (o *Orchestrator) SanitizeInput(text string) (string, bool, []Warning) {
 	blocked := false
 	for _, threat := range result.ThreatsDetected {
 		// Block on critical injection patterns
-		if isCriticalThreat(threat.Type) {
-			blocked = true
-			o.inputsBlocked.Add(1)
-			o.logger.Warn("Input blocked due to critical threat",
-				"threat_type", threat.Type,
-				"threat_message", threat.Message,
-			)
-			o.logAuditEvent("input_blocked", "critical", map[string]any{
-				"threat_type": threat.Type,
-				"message":     threat.Message,
-				"text_length": len(text),
-			}, "sanitizer")
-			break
+		if !isCriticalThreat(threat.Type) {
+			continue
 		}
+		blocked = true
+		o.inputsBlocked.Add(1)
+		o.logger.Warn("Input blocked due to critical threat",
+			"threat_type", threat.Type,
+			"threat_message", threat.Message,
+		)
+		o.logAuditEvent("input_blocked", "critical", map[string]any{
+			"threat_type": threat.Type,
+			"message":     threat.Message,
+			"text_length": len(text),
+		}, "sanitizer")
+		break
 	}
 
 	if result.WasModified {
@@ -190,7 +191,7 @@ func (o *Orchestrator) SanitizeInput(text string) (string, bool, []Warning) {
 
 // ScanOutput processes LLM output for credential leakage.
 // Returns the (possibly redacted) text, whether credentials were found, and any warnings.
-func (o *Orchestrator) ScanOutput(text string) (string, bool, []Warning) {
+func (o *Orchestrator) ScanOutput(text string) (sanitized string, ok bool, warnings []Warning) {
 	o.outputsScanned.Add(1)
 
 	if !o.config.MonitorOutput || o.outputMonitor == nil {
@@ -224,7 +225,7 @@ func (o *Orchestrator) ScanOutput(text string) (string, bool, []Warning) {
 
 // ScanShellCommand scans a shell command before execution using Tirith.
 // Returns whether the command should be blocked, whether there's a warning, and the reason.
-func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (blocked bool, warning bool, reason string) {
+func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (blocked, warning bool, reason string) {
 	o.commandsScanned.Add(1)
 
 	if !o.config.ScanShellCommands || o.tirithScanner == nil {

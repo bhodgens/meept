@@ -27,13 +27,13 @@ func (t *TemplateClearTool) Description() string {
 
 func (t *TemplateClearTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"name": {
+			schemaPropName: {
 				Type:        "string",
 				Description: "Specific template name to deactivate. If omitted, all session-scoped templates for the conversation are cleared.",
 			},
-			"conversation_id": {
+			schemaPropConversationID: {
 				Type:        "string",
 				Description: "The conversation ID to clear templates for.",
 			},

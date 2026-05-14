@@ -53,14 +53,14 @@ type ReviewPolicy struct {
 // DefaultReviewPolicy returns sensible defaults for review policy.
 func DefaultReviewPolicy() *ReviewPolicy {
 	return &ReviewPolicy{
-		RequireReview: []string{"code", "refactor", "debug", "git", "fix"},
-		SkipReview:    []string{"chat", "report", "recall", "search", "analyze"},
+		RequireReview: []string{string(IntentCode), "refactor", string(IntentDebug), string(IntentGit), "fix"},
+		SkipReview:    []string{string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentSearch), string(IntentAnalyze)},
 		ReviewerMapping: map[string]string{
-			config.AgentIDCoder:     "code-reviewer",
+			config.AgentIDCoder:     SourceCodeReviewer,
 			config.AgentIDDebugger:  "debug-reviewer",
 			config.AgentIDPlanner:   "planner-reviewer",
 			config.AgentIDAnalyst:   "analyst-reviewer",
-			config.AgentIDCommitter: "code-reviewer",
+			config.AgentIDCommitter: SourceCodeReviewer,
 		},
 		MaxRevisionCycles: 3,
 		AutoApprovePatterns: []string{
@@ -106,16 +106,16 @@ func (p *ReviewPolicy) SelectReviewer(step *task.TaskStep) string {
 
 	// Map tool hint to reviewer
 	switch step.ToolHint {
-	case "code", "refactor":
-		return "code-reviewer"
-	case "debug", "fix":
+	case string(IntentCode), "refactor":
+		return SourceCodeReviewer
+	case string(IntentDebug), "fix":
 		return "debug-reviewer"
-	case "plan":
+	case string(IntentPlan):
 		return "planner-reviewer"
-	case "analyze", "research":
+	case string(IntentAnalyze), string(IntentResearch):
 		return "analyst-reviewer"
-	case "git", "commit":
-		return "code-reviewer"
+	case string(IntentGit), "commit":
+		return SourceCodeReviewer
 	default:
 		return "test-reviewer" // Default reviewer
 	}
@@ -177,8 +177,8 @@ type ValidationPolicy struct {
 func DefaultValidationPolicy() *ValidationPolicy {
 	return &ValidationPolicy{
 		Enabled:              true,
-		RequireValidation:    []string{"code", "refactor", "debug", "git", "fix", "commit"},
-		SkipValidation:       []string{"chat", "report", "recall", "search", "analyze", "platform"},
+		RequireValidation:    []string{string(IntentCode), "refactor", string(IntentDebug), string(IntentGit), "fix", "commit"},
+		SkipValidation:       []string{string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentSearch), string(IntentAnalyze), string(IntentPlatform)},
 		MaxValidationLoops:   3,
 		SkipValidationAgents: []string{config.AgentIDChat, config.AgentIDAnalyst},
 	}

@@ -48,7 +48,7 @@ func (c *httpClient) Close() error { return nil }
 func (c *httpClient) IsConnected() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/health", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/health", http.NoBody)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return false

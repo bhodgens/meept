@@ -366,8 +366,8 @@ func (c *L2Cache) Count() int {
 	return count
 }
 
-// l2InspectEntry is a lightweight result for inspection.
-type l2InspectEntry struct {
+// L2InspectEntry is a lightweight result for inspection.
+type L2InspectEntry struct {
 	ModelID    string
 	Response   *Response
 	CreatedAt  time.Time
@@ -377,7 +377,7 @@ type l2InspectEntry struct {
 }
 
 // Inspect searches for entries matching the given prompt hash in the L2 cache.
-func (c *L2Cache) Inspect(promptHash string) []l2InspectEntry {
+func (c *L2Cache) Inspect(promptHash string) []L2InspectEntry {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -391,7 +391,7 @@ func (c *L2Cache) Inspect(promptHash string) []l2InspectEntry {
 	}
 	defer rows.Close()
 
-	var results []l2InspectEntry
+	var results []L2InspectEntry
 	for rows.Next() {
 		var (
 			modelID        string
@@ -420,7 +420,7 @@ func (c *L2Cache) Inspect(promptHash string) []l2InspectEntry {
 			_ = json.Unmarshal([]byte(fileHashesJSON), &fileHashes)
 		}
 
-		results = append(results, l2InspectEntry{
+		results = append(results, L2InspectEntry{
 			ModelID:    modelID,
 			Response:   &response,
 			CreatedAt:  createdAt,

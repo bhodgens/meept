@@ -113,7 +113,7 @@ func (s *Store) migrate() error {
 
 	for _, m := range migrations {
 		// Ignore errors - column may already exist
-		s.db.Exec(m)
+		_, _ = s.db.Exec(m)
 	}
 
 	return nil

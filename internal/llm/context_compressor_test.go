@@ -11,7 +11,8 @@ import (
 // count non-system messages whose token count (heuristic) is tokensPerMsg each.
 func makeCompressorMessages(count int) []ChatMessage {
 	const tokensPerMsg = 100
-	msgs := []ChatMessage{{Role: RoleSystem, Content: "system prompt"}}
+	msgs := make([]ChatMessage, 0, 1+count)
+	msgs = append(msgs, ChatMessage{Role: RoleSystem, Content: "system prompt"})
 	for range count {
 		msgs = append(msgs, ChatMessage{
 			Role:    RoleUser,

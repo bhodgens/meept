@@ -84,7 +84,7 @@ func newDaemonRestartCmd() *cobra.Command {
 
 func newDaemonStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
+		Use:   cmdStatus,
 		Short: "Check daemon status",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStatus(false)
@@ -140,7 +140,7 @@ func startDaemon(foreground bool) error {
 
 	// Redirect output to log file
 	logFile := filepath.Join(stateDir, "meept.log")
-	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}

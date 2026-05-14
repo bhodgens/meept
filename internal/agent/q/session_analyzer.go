@@ -90,48 +90,49 @@ func (a *SessionAnalyzer) parseSessionData(memories []memvid.MemoryResult) (*Ses
 	for _, mem := range memories {
 		// Parse metadata JSON to extract session info
 		// This is simplified - in production, you'd unmarshal the JSON properly
-		if zone := mem.Memory.Zone; zone == "sessions" {
-			// Extract intents, agent_id, outcome from metadata
-			if intents, ok := mem.Memory.Metadata["intents"].([]string); ok {
-				data.Intents = intents
+		if zone := mem.Memory.Zone; zone != "sessions" {
+			continue
+		}
+		// Extract intents, agent_id, outcome from metadata
+		if intents, ok := mem.Memory.Metadata["intents"].([]string); ok {
+			data.Intents = intents
+		}
+		if agentID, ok := mem.Memory.Metadata["agent_id"].(string); ok {
+			data.AgentID = agentID
+		}
+		if outcome, ok := mem.Memory.Metadata["outcome"].(string); ok {
+			data.Outcome = outcome
+		}
+		if startTime, ok := mem.Memory.Metadata["start_time"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, startTime); err == nil {
+				data.StartTime = t
 			}
-			if agentID, ok := mem.Memory.Metadata["agent_id"].(string); ok {
-				data.AgentID = agentID
+		}
+		if endTime, ok := mem.Memory.Metadata["end_time"].(string); ok {
+			if t, err := time.Parse(time.RFC3339, endTime); err == nil {
+				data.EndTime = t
 			}
-			if outcome, ok := mem.Memory.Metadata["outcome"].(string); ok {
-				data.Outcome = outcome
-			}
-			if startTime, ok := mem.Memory.Metadata["start_time"].(string); ok {
-				if t, err := time.Parse(time.RFC3339, startTime); err == nil {
-					data.StartTime = t
-				}
-			}
-			if endTime, ok := mem.Memory.Metadata["end_time"].(string); ok {
-				if t, err := time.Parse(time.RFC3339, endTime); err == nil {
-					data.EndTime = t
-				}
-			}
-			if duration, ok := mem.Memory.Metadata["duration_seconds"].(float64); ok {
-				data.Metrics.Duration = time.Duration(duration) * time.Second
-			}
-			if iterations, ok := mem.Memory.Metadata["iterations"].(float64); ok {
-				data.Metrics.Iterations = int(iterations)
-			}
-			if tokenUsage, ok := mem.Memory.Metadata["token_usage"].(float64); ok {
-				data.Metrics.TokenUsage = int(tokenUsage)
-			}
-			if toolCalls, ok := mem.Memory.Metadata["tool_calls"].(float64); ok {
-				data.Metrics.ToolCalls = int(toolCalls)
-			}
-			if agentSwitches, ok := mem.Memory.Metadata["agent_switches"].(float64); ok {
-				data.Metrics.AgentSwitches = int(agentSwitches)
-			}
-			if errors, ok := mem.Memory.Metadata["errors"].(float64); ok {
-				data.Metrics.Errors = int(errors)
-			}
-			if revisions, ok := mem.Memory.Metadata["revisions"].(float64); ok {
-				data.Metrics.Revisions = int(revisions)
-			}
+		}
+		if duration, ok := mem.Memory.Metadata["duration_seconds"].(float64); ok {
+			data.Metrics.Duration = time.Duration(duration) * time.Second
+		}
+		if iterations, ok := mem.Memory.Metadata["iterations"].(float64); ok {
+			data.Metrics.Iterations = int(iterations)
+		}
+		if tokenUsage, ok := mem.Memory.Metadata["token_usage"].(float64); ok {
+			data.Metrics.TokenUsage = int(tokenUsage)
+		}
+		if toolCalls, ok := mem.Memory.Metadata["tool_calls"].(float64); ok {
+			data.Metrics.ToolCalls = int(toolCalls)
+		}
+		if agentSwitches, ok := mem.Memory.Metadata["agent_switches"].(float64); ok {
+			data.Metrics.AgentSwitches = int(agentSwitches)
+		}
+		if errors, ok := mem.Memory.Metadata["errors"].(float64); ok {
+			data.Metrics.Errors = int(errors)
+		}
+		if revisions, ok := mem.Memory.Metadata["revisions"].(float64); ok {
+			data.Metrics.Revisions = int(revisions)
 		}
 	}
 

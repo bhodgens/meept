@@ -52,13 +52,13 @@ type Config struct {
 }
 
 // New creates a new RPC server.
-func New(cfg *Config, bus *bus.MessageBus, logger *slog.Logger) *Server {
+func New(cfg *Config, msgBus *bus.MessageBus, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Server{
 		socketPath: cfg.SocketPath,
-		bus:        bus,
+		bus:        msgBus,
 		logger:     logger,
 		startTime:  time.Now(),
 		handlers:   make(map[string]Handler),
@@ -99,7 +99,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.listener = listener
 
 	// Set socket permissions
-	if err := os.Chmod(s.socketPath, 0600); err != nil {
+	if err := os.Chmod(s.socketPath, 0o600); err != nil {
 		s.logger.Warn("rpc: failed to set socket permissions", "error", err)
 	}
 
@@ -311,10 +311,10 @@ func (s *Server) registerBuiltinHandlers() {
 		s.mu.RUnlock()
 
 		return map[string]any{
-			"status":             "running",
+			RPCKeyStatus:             "running",
 			"version":            "0.2.0-go",
 			"uptime_seconds":     time.Since(s.startTime).Seconds(),
-			"model":              "",
+			RPCKeyModel:              "",
 			"default_model":      "",
 			"tokens_used":        0,
 			"tokens_remaining":   100000,
@@ -374,7 +374,7 @@ func (s *Server) registerBuiltinHandlers() {
 			"id":      amendmentID,
 			"task_id": req.TaskID,
 			"type":    req.Type,
-			"content": req.Content,
+			RPCKeyContent: req.Content,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal amendment payload: %w", err)
@@ -391,8 +391,8 @@ func (s *Server) registerBuiltinHandlers() {
 
 		return map[string]string{
 			"id":      amendmentID,
-			"status":  "submitted",
-			"message": fmt.Sprintf("amendment %s submitted for task %s", req.Type, req.TaskID),
+			RPCKeyStatus:  "submitted",
+			RPCKeyMessage: fmt.Sprintf("amendment %s submitted for task %s", req.Type, req.TaskID),
 		}, nil
 	})
 }

@@ -82,7 +82,7 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(dbPath)
 	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create metrics directory: %w", err)
 	}
 
@@ -537,18 +537,19 @@ type Event struct {
 
 // SubscribeMetrics returns a channel for receiving metric updates.
 // The returned stop function must be called to unsubscribe and close the channel.
-func (s *Store) SubscribeMetrics() (<-chan *LiveMetricsSnapshot, func()) {
-	ch := make(chan *LiveMetricsSnapshot, 10)
+func (s *Store) SubscribeMetrics() (ch <-chan *LiveMetricsSnapshot, stop func()) {
+	rawCh := make(chan *LiveMetricsSnapshot, 10)
+	ch = rawCh
 
 	s.subMu.Lock()
-	s.subscribers[ch] = struct{}{}
+	s.subscribers[rawCh] = struct{}{}
 	s.subMu.Unlock()
 
-	stop := func() {
+	stop = func() {
 		s.subMu.Lock()
-		delete(s.subscribers, ch)
+		delete(s.subscribers, rawCh)
 		s.subMu.Unlock()
-		close(ch)
+		close(rawCh)
 	}
 
 	return ch, stop

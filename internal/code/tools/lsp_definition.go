@@ -33,17 +33,17 @@ Requires an LSP server for the file's language to be configured and running.`
 
 func (t *LSPDefinitionTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
-			"file_path": {
+			SchemaPropFilePath: {
 				Type:        "string",
 				Description: "Path to the source file containing the symbol.",
 			},
-			"line": {
+			SchemaPropLine: {
 				Type:        "integer",
 				Description: "Line number (0-indexed) of the symbol.",
 			},
-			"character": {
+			SchemaPropCharacter: {
 				Type:        "integer",
 				Description: "Column/character offset (0-indexed) within the line.",
 			},
@@ -100,11 +100,11 @@ func (t *LSPDefinitionTool) Execute(ctx context.Context, args map[string]any) (a
 
 	if len(locations) == 0 {
 		return map[string]any{
-			"found":     false,
-			"message":   "No definition found at this location",
-			"file_path": filePath,
-			"line":      line,
-			"character": char,
+			SchemaPropFound:     false,
+			SchemaPropMessage:   "No definition found at this location",
+			SchemaPropFilePath: filePath,
+			SchemaPropLine:      line,
+			SchemaPropCharacter: char,
 		}, nil
 	}
 
@@ -112,18 +112,18 @@ func (t *LSPDefinitionTool) Execute(ctx context.Context, args map[string]any) (a
 	definitions := make([]map[string]any, len(locations))
 	for i, loc := range locations {
 		definitions[i] = map[string]any{
-			"file_path":  lsp.URIToPath(loc.URI),
-			"start_line": loc.Range.Start.Line,
-			"start_char": loc.Range.Start.Character,
-			"end_line":   loc.Range.End.Line,
-			"end_char":   loc.Range.End.Character,
+			SchemaPropFilePath:  lsp.URIToPath(loc.URI),
+			SchemaPropStartLine: loc.Range.Start.Line,
+			SchemaPropStartChar: loc.Range.Start.Character,
+			SchemaPropEndLine:   loc.Range.End.Line,
+			SchemaPropEndChar:   loc.Range.End.Character,
 		}
 	}
 
 	return map[string]any{
-		"found":       true,
+		SchemaPropFound:       true,
 		"definitions": definitions,
-		"count":       len(definitions),
+		SchemaPropCount:       len(definitions),
 	}, nil
 }
 

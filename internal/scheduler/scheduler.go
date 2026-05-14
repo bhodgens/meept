@@ -144,7 +144,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Publish startup event
 	if s.bus != nil {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler", map[string]any{
-			"event":    "started",
+			SchedulerKeyEvent:    "started",
 			"jobs":     len(s.jobs),
 			"timezone": s.location.String(),
 		})
@@ -186,7 +186,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 	// Publish shutdown event
 	if s.bus != nil {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler", map[string]any{
-			"event": "stopped",
+			SchedulerKeyEvent: "stopped",
 		})
 		s.bus.Publish("scheduler.stopped", msg)
 	}
@@ -480,8 +480,8 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 	// Publish job start event
 	if s.bus != nil {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+jobID, map[string]any{
-			"event":   "job_started",
-			"job_id":  jobID,
+			SchedulerKeyEvent:   "job_started",
+			SchedulerKeyJobID:  jobID,
 			"name":    job.Name(),
 			"type":    job.Type(),
 		})
@@ -503,12 +503,12 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 	// Publish completion event
 	if s.bus != nil {
 		result := map[string]any{
-			"event":    "job_completed",
-			"job_id":   jobID,
+			SchedulerKeyEvent:    "job_completed",
+			SchedulerKeyJobID:   jobID,
 			"name":     job.Name(),
 			"type":     job.Type(),
 			"duration": duration.String(),
-			"success":  err == nil,
+			SchedulerKeySuccess:  err == nil,
 		}
 		if err != nil {
 			result["error"] = err.Error()

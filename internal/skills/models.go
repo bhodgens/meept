@@ -59,8 +59,8 @@ type Skill struct {
 }
 
 // HasCapability checks if the skill requires a specific capability.
-func (s *Skill) HasCapability(cap string) bool {
-	return slices.Contains(s.Requires, cap)
+func (s *Skill) HasCapability(capability string) bool {
+	return slices.Contains(s.Requires, capability)
 }
 
 // HasTag checks if the skill has a specific tag.

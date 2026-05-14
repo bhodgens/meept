@@ -628,10 +628,10 @@ func TestConversationStoreGetOrRestore_Eviction(t *testing.T) {
 	store := NewConversationStore(2)
 
 	// Fill up store
-	store.GetOrRestore("conv-1", func() ([]llm.ChatMessage, error) {
+	_, _ = store.GetOrRestore("conv-1", func() ([]llm.ChatMessage, error) {
 		return []llm.ChatMessage{{Role: llm.RoleUser, Content: "msg1"}}, nil
 	})
-	store.GetOrRestore("conv-2", func() ([]llm.ChatMessage, error) {
+	_, _ = store.GetOrRestore("conv-2", func() ([]llm.ChatMessage, error) {
 		return []llm.ChatMessage{{Role: llm.RoleUser, Content: "msg2"}}, nil
 	})
 
@@ -640,7 +640,7 @@ func TestConversationStoreGetOrRestore_Eviction(t *testing.T) {
 	}
 
 	// Add one more - should evict oldest
-	store.GetOrRestore("conv-3", func() ([]llm.ChatMessage, error) {
+	_, _ = store.GetOrRestore("conv-3", func() ([]llm.ChatMessage, error) {
 		return []llm.ChatMessage{{Role: llm.RoleUser, Content: "msg3"}}, nil
 	})
 

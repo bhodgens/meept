@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // sqlite3 driver registration
 )
 
 // SQLiteStore implements Store using SQLite for persistence.
@@ -171,17 +171,16 @@ func (s *SQLiteStore) migrationBackfillParentID() error {
 	if err != nil {
 		return fmt.Errorf("failed to query sessions for backfill: %w", err)
 	}
+	defer sessionRows.Close()
 
 	var sessionIDs []string
 	for sessionRows.Next() {
 		var sid string
 		if err := sessionRows.Scan(&sid); err != nil {
-			sessionRows.Close()
 			return fmt.Errorf("failed to scan session id for backfill: %w", err)
 		}
 		sessionIDs = append(sessionIDs, sid)
 	}
-	sessionRows.Close()
 	if err := sessionRows.Err(); err != nil {
 		return fmt.Errorf("failed iterating sessions for backfill: %w", err)
 	}
@@ -235,12 +234,11 @@ func (s *SQLiteStore) backfillSession(sessionID string, batchSize int) (int, err
 		for rows.Next() {
 			var r backfillRow
 			if err := rows.Scan(&r.id, &r.prevID); err != nil {
-				rows.Close()
 				return totalUpdated, fmt.Errorf("failed to scan message for backfill: %w", err)
 			}
 			batch = append(batch, r)
 		}
-		rows.Close()
+		rows.Close() //nolint:sqlclosecheck // manual close in loop; defer would accumulate
 		if err := rows.Err(); err != nil {
 			return totalUpdated, fmt.Errorf("failed iterating messages for backfill: %w", err)
 		}
@@ -1105,6 +1103,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	if err != nil {
 		return nil, fmt.Errorf("failed to query messages for fork: %w", err)
 	}
+	defer rows.Close()
 
 	type sourceMsg struct {
 		oldID     int64
@@ -1124,7 +1123,6 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		var parentID sql.NullInt64
 		if err := rows.Scan(&sm.oldID, &sm.role, &sm.content, &sm.timestamp, &parentID,
 			&sm.entryType, &sm.branchID, &sm.model, &sm.name, &sm.toolCallID); err != nil {
-			rows.Close()
 			return nil, fmt.Errorf("failed to scan source message: %w", err)
 		}
 		if parentID.Valid {
@@ -1132,7 +1130,6 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		}
 		sourceMsgs = append(sourceMsgs, sm)
 	}
-	rows.Close()
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed iterating source messages: %w", err)
@@ -1224,14 +1221,15 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 		if err != nil {
 			return nil, fmt.Errorf("failed to query tool calls for fork: %w", err)
 		}
+		defer tcRows.Close() //nolint:sqlclosecheck // defer in loop is safe here; each iteration re-assigns tcRows
 
 		tcInsertStmt, err := tx.Prepare(`
 			INSERT INTO session_tool_calls (message_id, tool_name, tool_call_id, arguments, result, seq)
 			VALUES (?, ?, ?, ?, ?, ?)`)
 		if err != nil {
-			tcRows.Close()
 			return nil, fmt.Errorf("failed to prepare tool call insert: %w", err)
 		}
+		defer tcInsertStmt.Close() //nolint:sqlclosecheck // defer in loop is safe here; each iteration re-assigns tcInsertStmt
 
 		for tcRows.Next() {
 			var tcID int64
@@ -1240,8 +1238,6 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 			var tcResult sql.NullString
 			var tcSeq int
 			if err := tcRows.Scan(&tcID, &tcMsgID, &tcToolName, &tcToolCallID, &tcArgs, &tcResult, &tcSeq); err != nil {
-				tcInsertStmt.Close()
-				tcRows.Close()
 				return nil, fmt.Errorf("failed to scan tool call: %w", err)
 			}
 			newMsgID, ok := oldToNew[tcMsgID]
@@ -1253,13 +1249,9 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 				resultVal = tcResult.String
 			}
 			if _, err := tcInsertStmt.Exec(newMsgID, tcToolName, tcToolCallID, tcArgs, resultVal, tcSeq); err != nil {
-				tcInsertStmt.Close()
-				tcRows.Close()
 				return nil, fmt.Errorf("failed to insert copied tool call: %w", err)
 			}
 		}
-		tcInsertStmt.Close()
-		tcRows.Close()
 		if err := tcRows.Err(); err != nil {
 			return nil, fmt.Errorf("failed iterating tool calls: %w", err)
 		}
@@ -1349,7 +1341,7 @@ type CompactionContent struct {
 // (the last compressed message) to point to compactionID instead. This makes
 // GetMessagePath walk through the compaction entry, skipping the compacted
 // messages in the tree.
-func (s *SQLiteStore) ReparentAfterCompaction(sessionID string, afterID int64, compactionID int64) error {
+func (s *SQLiteStore) ReparentAfterCompaction(sessionID string, afterID, compactionID int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

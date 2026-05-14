@@ -1191,7 +1191,7 @@ func (m *TasksModel) renderTaskDetailModal() string {
 
 	if task.ContextQuery != "" {
 		content.WriteString(labelStyle.Render("Query:"))
-		content.WriteString(valueStyle.Render(fmt.Sprintf("\"%s\"", task.ContextQuery)))
+		content.WriteString(valueStyle.Render(fmt.Sprintf("%q", task.ContextQuery)))
 		content.WriteString("\n")
 	}
 

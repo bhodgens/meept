@@ -113,17 +113,17 @@ func (b *ErrorBuilder) MissingRequiredError(paramName string) *ToolExecutionErro
 		Message:    fmt.Sprintf("Missing required parameter: %s", paramName),
 		Suggestion: fmt.Sprintf("The '%s' parameter is required for this tool. Please provide it in the arguments.", paramName),
 		InvalidArg: paramName,
-		Example:    fmt.Sprintf("{\"%s\": \"value\"}", paramName),
+		Example:    fmt.Sprintf("{%q: \"value\"}", paramName),
 	}
 }
 
 // InvalidTypeError creates an error for type mismatches
-func (b *ErrorBuilder) InvalidTypeError(paramName string, expectedType string, receivedValue any) *ToolExecutionError {
+func (b *ErrorBuilder) InvalidTypeError(paramName, expectedType string, receivedValue any) *ToolExecutionError {
 	received := "null"
 	if receivedValue != nil {
 		switch v := receivedValue.(type) {
 		case string:
-			received = fmt.Sprintf("string (\"%s\")", v)
+			received = fmt.Sprintf("string (%q)", v)
 		case float64:
 			received = fmt.Sprintf("number (%v)", v)
 		case bool:
@@ -138,7 +138,7 @@ func (b *ErrorBuilder) InvalidTypeError(paramName string, expectedType string, r
 	}
 
 	suggestion := fmt.Sprintf("The '%s' parameter must be a %s. Please check the value and try again.", paramName, expectedType)
-	example := fmt.Sprintf("{\"%s\": <%s example>}", paramName, expectedType)
+	example := fmt.Sprintf("{%q: <%s example>}", paramName, expectedType)
 
 	return &ToolExecutionError{
 		Code:       ErrCodeInvalidType,
@@ -153,7 +153,7 @@ func (b *ErrorBuilder) InvalidTypeError(paramName string, expectedType string, r
 }
 
 // InvalidValueError creates an error for invalid values
-func (b *ErrorBuilder) InvalidValueError(paramName string, reason string, validOptions []string) *ToolExecutionError {
+func (b *ErrorBuilder) InvalidValueError(paramName, reason string, validOptions []string) *ToolExecutionError {
 	suggestion := fmt.Sprintf("The value provided for '%s' is invalid: %s", paramName, reason)
 	example := ""
 
@@ -163,7 +163,7 @@ func (b *ErrorBuilder) InvalidValueError(paramName string, reason string, validO
 		} else {
 			suggestion += fmt.Sprintf("\nValid options include: %s", strings.Join(validOptions[:5], ", "))
 		}
-		example = fmt.Sprintf("{\"%s\": \"%s\"}", paramName, validOptions[0])
+		example = fmt.Sprintf("{%q: %q}", paramName, validOptions[0])
 	}
 
 	return &ToolExecutionError{
@@ -178,7 +178,7 @@ func (b *ErrorBuilder) InvalidValueError(paramName string, reason string, validO
 }
 
 // PermissionDeniedError creates an error for permission issues
-func (b *ErrorBuilder) PermissionDeniedError(resource string, reason string) *ToolExecutionError {
+func (b *ErrorBuilder) PermissionDeniedError(resource, reason string) *ToolExecutionError {
 	suggestion := "This action was blocked by the security engine. If you believe this is an error, contact your administrator."
 
 	return &ToolExecutionError{
@@ -218,7 +218,7 @@ func (b *ErrorBuilder) TimeoutError(action string, timeoutSeconds int) *ToolExec
 }
 
 // CreateErrorFromJSON creates a ToolExecutionError from a JSON error message (for backward compatibility)
-func CreateErrorFromJSON(toolName string, errMsg string) *ToolExecutionError {
+func CreateErrorFromJSON(toolName, errMsg string) *ToolExecutionError {
 	builder := NewErrorBuilder(toolName)
 
 	// Try to identify error type from message
@@ -256,7 +256,7 @@ func SerializeError(toolName string, err error) map[string]any {
 }
 
 // ParseAndEnhanceError attempts to parse JSON args and provide detailed error information
-func ParseAndEnhanceError(toolName string, argsJSON string, parseErr error) *ToolExecutionError {
+func ParseAndEnhanceError(toolName, argsJSON string, parseErr error) *ToolExecutionError {
 	builder := NewErrorBuilder(toolName)
 
 	// Basic syntax error

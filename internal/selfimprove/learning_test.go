@@ -42,7 +42,7 @@ func TestLearningPipeline_JudgeHeuristic(t *testing.T) {
 	lp := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
 
 	ctx := context.Background()
-	lp.Initialize(ctx)
+	_ = lp.Initialize(ctx)
 
 	// Create a successful trajectory
 	trajectory := Trajectory{
@@ -85,7 +85,7 @@ func TestLearningPipeline_JudgeHeuristic_Unsuccessful(t *testing.T) {
 	lp := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
 
 	ctx := context.Background()
-	lp.Initialize(ctx)
+	_ = lp.Initialize(ctx)
 
 	// Create an unsuccessful trajectory
 	trajectory := Trajectory{
@@ -124,7 +124,7 @@ func TestLearningPipeline_DistillHeuristic(t *testing.T) {
 	lp := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
 
 	ctx := context.Background()
-	lp.Initialize(ctx)
+	_ = lp.Initialize(ctx)
 
 	trajectory := Trajectory{
 		ID:        "traj-001",
@@ -179,7 +179,7 @@ func TestLearningPipeline_StoreAndRetrieve(t *testing.T) {
 	lp := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
 
 	ctx := context.Background()
-	lp.Initialize(ctx)
+	_ = lp.Initialize(ctx)
 
 	pattern := &LearnedPattern{
 		ID:          "pat-001",
@@ -237,7 +237,7 @@ func TestLearningPipeline_Consolidate(t *testing.T) {
 	lp := NewLearningPipeline(cfg, nil, tmpDir, nil)
 
 	ctx := context.Background()
-	lp.Initialize(ctx)
+	_ = lp.Initialize(ctx)
 
 	// Directly set patterns to bypass StorePattern's dedup logic
 	// This simulates patterns that may have been stored before dedup was added
@@ -315,7 +315,7 @@ func TestLearningPipeline_RecordPatternUse(t *testing.T) {
 	lp := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
 
 	ctx := context.Background()
-	lp.Initialize(ctx)
+	_ = lp.Initialize(ctx)
 
 	pattern := &LearnedPattern{
 		ID:          "pat-001",
@@ -330,7 +330,7 @@ func TestLearningPipeline_RecordPatternUse(t *testing.T) {
 		ContentHash: "hash-001",
 	}
 
-	lp.StorePattern(ctx, pattern)
+	_ = lp.StorePattern(ctx, pattern)
 
 	// Record some uses
 	lp.RecordPatternUse("pat-001", true)
@@ -366,7 +366,7 @@ func TestLearningPipeline_DomainFiltering(t *testing.T) {
 	lp := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
 
 	ctx := context.Background()
-	lp.Initialize(ctx)
+	_ = lp.Initialize(ctx)
 
 	// Add patterns from different domains
 	patterns := []*LearnedPattern{
@@ -409,7 +409,7 @@ func TestLearningPipeline_DomainFiltering(t *testing.T) {
 	}
 
 	for _, p := range patterns {
-		lp.StorePattern(ctx, p)
+		_ = lp.StorePattern(ctx, p)
 	}
 
 	// Retrieve for code domain - should get code + general
@@ -454,7 +454,7 @@ func TestLearningPipeline_Persistence(t *testing.T) {
 
 	// First instance
 	lp1 := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
-	lp1.Initialize(ctx)
+	_ = lp1.Initialize(ctx)
 
 	pattern := &LearnedPattern{
 		ID:          "pat-001",
@@ -468,12 +468,12 @@ func TestLearningPipeline_Persistence(t *testing.T) {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-	lp1.StorePattern(ctx, pattern)
+	_ = lp1.StorePattern(ctx, pattern)
 	lp1.Close()
 
 	// Second instance - should load persisted patterns
 	lp2 := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
-	lp2.Initialize(ctx)
+	_ = lp2.Initialize(ctx)
 
 	patterns := lp2.GetPatterns()
 	if len(patterns) != 1 {
@@ -535,7 +535,7 @@ func TestLearningPipeline_FullPipeline(t *testing.T) {
 	lp := NewLearningPipeline(DefaultLearningConfig(), nil, tmpDir, nil)
 
 	ctx := context.Background()
-	lp.Initialize(ctx)
+	_ = lp.Initialize(ctx)
 
 	// Run full pipeline: Judge -> Distill -> Store
 	trajectory := Trajectory{

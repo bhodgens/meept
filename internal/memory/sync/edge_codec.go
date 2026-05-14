@@ -38,7 +38,7 @@ func NewEdgeCodec() *EdgeCodec {
 // EncodeEdges converts memory edges to EdgeRef slices for metadata storage.
 // It separates edges into outgoing (where memoryID is the source) and
 // incoming (where memoryID is the target).
-func (c *EdgeCodec) EncodeEdges(memoryID string, edges []memory.MemoryEdge) (out []EdgeRef, in []EdgeRef) {
+func (c *EdgeCodec) EncodeEdges(memoryID string, edges []memory.MemoryEdge) (out, in []EdgeRef) {
 	for _, edge := range edges {
 		ref := EdgeRef{
 			ID:     edge.ID,
@@ -59,7 +59,7 @@ func (c *EdgeCodec) EncodeEdges(memoryID string, edges []memory.MemoryEdge) (out
 
 // DecodeEdges converts EdgeRef slices from metadata back to MemoryEdge format.
 // The memoryID is used to reconstruct the full edge with proper source/target.
-func (c *EdgeCodec) DecodeEdges(memoryID string, out []EdgeRef, in []EdgeRef) []memory.MemoryEdge {
+func (c *EdgeCodec) DecodeEdges(memoryID string, out, in []EdgeRef) []memory.MemoryEdge {
 	edges := make([]memory.MemoryEdge, 0, len(out)+len(in))
 
 	for _, ref := range out {
@@ -87,7 +87,7 @@ func (c *EdgeCodec) DecodeEdges(memoryID string, out []EdgeRef, in []EdgeRef) []
 
 // InjectEdgesIntoMetadata adds edge references to memory metadata.
 // Creates new metadata map if nil.
-func (c *EdgeCodec) InjectEdgesIntoMetadata(metadata map[string]any, out []EdgeRef, in []EdgeRef) map[string]any {
+func (c *EdgeCodec) InjectEdgesIntoMetadata(metadata map[string]any, out, in []EdgeRef) map[string]any {
 	if metadata == nil {
 		metadata = make(map[string]any)
 	}
@@ -104,7 +104,7 @@ func (c *EdgeCodec) InjectEdgesIntoMetadata(metadata map[string]any, out []EdgeR
 
 // ExtractEdgesFromMetadata retrieves edge references from memory metadata.
 // Returns empty slices if no edges are present.
-func (c *EdgeCodec) ExtractEdgesFromMetadata(metadata map[string]any) (out []EdgeRef, in []EdgeRef, err error) {
+func (c *EdgeCodec) ExtractEdgesFromMetadata(metadata map[string]any) (out, in []EdgeRef, err error) {
 	if metadata == nil {
 		return nil, nil, nil
 	}

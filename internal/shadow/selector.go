@@ -334,17 +334,16 @@ func (s *Selector) FormatForInjection(examples []*FewShotExample) []Message {
 	})
 
 	for i, example := range examples {
-		// Add user message
-		messages = append(messages, Message{
-			Role:    "user",
-			Content: formatExampleHeader(i+1, example.UserMessage),
-		})
-
-		// Add assistant response
-		messages = append(messages, Message{
-			Role:    "assistant",
-			Content: example.AssistantResponse,
-		})
+		messages = append(messages,
+			Message{
+				Role:    "user",
+				Content: formatExampleHeader(i+1, example.UserMessage),
+			},
+			Message{
+				Role:    "assistant",
+				Content: example.AssistantResponse,
+			},
+		)
 	}
 
 	// Add separator

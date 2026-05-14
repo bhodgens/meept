@@ -85,7 +85,7 @@ func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts
 }
 
 // BuildContext builds relevant context for a task based on Claude artifacts.
-func (am *ArtifactManager) BuildContext(taskDesc string, workingDir string) (string, bool) {
+func (am *ArtifactManager) BuildContext(taskDesc, workingDir string) (string, bool) {
 	// Ensure directory is scanned
 	artifacts, err := am.ScanDirectory(workingDir)
 	if err != nil || !artifacts.Available || am.contextBuilder == nil {

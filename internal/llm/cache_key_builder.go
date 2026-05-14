@@ -37,7 +37,7 @@ var (
 	reFilePrefix = regexp.MustCompile(`(?i)\bfile:\s*([^\s,;)}\]]+)`)
 
 	// @path/to/file.go
-	reAtPath = regexp.MustCompile(`@([\w./\-]+\.[\w]+)`)
+	reAtPath = regexp.MustCompile(`@([\w./\-]+\.\w+)`)
 
 	// path/to/file.go:42 (colon + digits at end -- line reference)
 	rePathWithLine = regexp.MustCompile(`(?:^|[\s(=\["'])((?:[\w.\-]+/)+[\w.\-]+\.[\w]+):(\d+)(?:$|[\s,;)}\]])`)
@@ -187,7 +187,7 @@ func (b *CacheKeyBuilder) ComputePromptHash(messages []ChatMessage) string {
 // (optionally) a standalone prompt string. If FileAware is enabled, file
 // references are extracted from the prompt and all message contents, their
 // contents are hashed, and the hashes are included in the key.
-func (b *CacheKeyBuilder) Build(prompt string, modelID string, messages []ChatMessage) CacheKey {
+func (b *CacheKeyBuilder) Build(prompt, modelID string, messages []ChatMessage) CacheKey {
 	key := CacheKey{
 		ModelID: modelID,
 	}
@@ -243,7 +243,7 @@ func isAllDigits(s string) bool {
 			return false
 		}
 	}
-	return len(s) > 0
+	return s != ""
 }
 
 // isKnownNonFile rejects paths whose extension maps to a common TLD or other

@@ -156,7 +156,7 @@ func (hd *HallucinationDetector) RegisterKnownSymbol(name string, isFile bool) {
 }
 
 // RegisterKnownSymbols registers multiple known symbols at once.
-func (hd *HallucinationDetector) RegisterKnownSymbols(symbols map[string]bool, files map[string]bool) {
+func (hd *HallucinationDetector) RegisterKnownSymbols(symbols, files map[string]bool) {
 	hd.mu.Lock()
 	defer hd.mu.Unlock()
 

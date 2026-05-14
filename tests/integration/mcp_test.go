@@ -81,7 +81,7 @@ fi
 `
 	scriptPath := filepath.Join(tempDir, "mock-mcp.sh")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to write mock server script: %v", err)
 	}
 
@@ -171,7 +171,7 @@ done
 `
 	scriptPath := filepath.Join(tempDir, "exec-mcp.sh")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to write mock server script: %v", err)
 	}
 
@@ -236,7 +236,7 @@ done
 `
 	scriptPath := filepath.Join(tempDir, "shutdown-mcp.sh")
 	//nolint:gosec // test directory/file
-	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
 		t.Fatalf("Failed to write mock server script: %v", err)
 	}
 
@@ -297,15 +297,15 @@ done
 `
 	script1 := filepath.Join(tempDir, "server1.sh")
 	script2 := filepath.Join(tempDir, "server2.sh")
-	os.WriteFile(script1, []byte(scriptContent), 0755)
-	os.WriteFile(script2, []byte(scriptContent), 0755)
+	_ = os.WriteFile(script1, []byte(scriptContent), 0o755) //nolint:gosec // test uses temp dir
+	_ = os.WriteFile(script2, []byte(scriptContent), 0o755) //nolint:gosec // test uses temp dir
 
 	manager := mcp.NewManager(nil)
 	ctx := context.Background()
 
 	// Start multiple servers
-	manager.StartServer(ctx, mcp.ServerConfig{Name: "server1", Command: []string{"bash", script1}, Type: "stdio"})
-	manager.StartServer(ctx, mcp.ServerConfig{Name: "server2", Command: []string{"bash", script2}, Type: "stdio"})
+	_ = manager.StartServer(ctx, mcp.ServerConfig{Name: "server1", Command: []string{"bash", script1}, Type: "stdio"})
+	_ = manager.StartServer(ctx, mcp.ServerConfig{Name: "server2", Command: []string{"bash", script2}, Type: "stdio"})
 
 	if count := manager.ServerCount(); count != 2 {
 		t.Errorf("Expected 2 servers, got %d", count)
@@ -344,9 +344,9 @@ done
 	scriptA := filepath.Join(tempDir, "serverA.sh")
 	scriptB := filepath.Join(tempDir, "serverB.sh")
 	scriptC := filepath.Join(tempDir, "serverC.sh")
-	os.WriteFile(scriptA, []byte(scriptContent), 0755)
-	os.WriteFile(scriptB, []byte(scriptContent), 0755)
-	os.WriteFile(scriptC, []byte(scriptContent), 0755)
+	_ = os.WriteFile(scriptA, []byte(scriptContent), 0o755) //nolint:gosec // test uses temp dir
+	_ = os.WriteFile(scriptB, []byte(scriptContent), 0o755) //nolint:gosec // test uses temp dir
+	_ = os.WriteFile(scriptC, []byte(scriptContent), 0o755) //nolint:gosec // test uses temp dir
 
 	manager := mcp.NewManager(nil)
 	ctx := context.Background()
@@ -427,7 +427,7 @@ while read line; do
 done
 `
 	scriptPath := filepath.Join(tempDir, "wrapper-mcp.sh")
-	os.WriteFile(scriptPath, []byte(scriptContent), 0755)
+	_ = os.WriteFile(scriptPath, []byte(scriptContent), 0o755) //nolint:gosec // test uses temp dir
 
 	manager := mcp.NewManager(nil)
 	ctx := context.Background()
@@ -515,7 +515,7 @@ while read line; do
 done
 `
 	scriptPath := filepath.Join(tempDir, "dup.sh")
-	os.WriteFile(scriptPath, []byte(scriptContent), 0755)
+	_ = os.WriteFile(scriptPath, []byte(scriptContent), 0o755) //nolint:gosec // test uses temp dir
 
 	manager := mcp.NewManager(nil)
 	ctx := context.Background()
@@ -566,7 +566,7 @@ while read line; do
 done
 `
 	scriptPath := filepath.Join(tempDir, "reg.sh")
-	os.WriteFile(scriptPath, []byte(scriptContent), 0755)
+	_ = os.WriteFile(scriptPath, []byte(scriptContent), 0o755) //nolint:gosec // test uses temp dir
 
 	mcpManager := mcp.NewManager(nil)
 	ctx := context.Background()

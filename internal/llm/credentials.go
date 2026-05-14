@@ -40,14 +40,14 @@ func (cs *CredentialStore) load() error {
 }
 
 func (cs *CredentialStore) save() error {
-	if err := os.MkdirAll(filepath.Dir(cs.filepath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cs.filepath), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cs.creds, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cs.filepath, data, 0600)
+	return os.WriteFile(cs.filepath, data, 0o600)
 }
 
 // Get returns the API key for a provider.

@@ -305,8 +305,7 @@ func BuildSystemPromptWithOverride(override string, tools []ToolDescription) str
 	}
 
 	var sections []string
-	sections = append(sections, override)
-	sections = append(sections, "\n# Available Tools")
+	sections = append(sections, override, "\n# Available Tools")
 	for _, tool := range tools {
 		sections = append(sections, formatToolDescription(tool))
 	}

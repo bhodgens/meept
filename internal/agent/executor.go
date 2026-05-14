@@ -19,26 +19,26 @@ import (
 // ToolActionMap maps tool names to permission action categories.
 var ToolActionMap = map[string]string{
 	// File operations
-	"shell":          "shell_execute",
-	"file_read":      "file_read",
-	"file_write":     "file_write",
-	"file_delete":    "file_delete",
-	"list_directory": "file_read",
+	"shell":          ToolShellExecute,
+	ToolFileRead:     ToolFileRead,
+	ToolFileWrite:    ToolFileWrite,
+	ToolFileDelete:   ToolFileDelete,
+	ToolListDirectory: ToolFileRead,
 
 	// Network operations
-	"web_search": "network_request",
-	"web_fetch":  "network_request",
+	ToolWebSearch: "network_request",
+	ToolWebFetch:  "network_request",
 
 	// Memory operations
-	"memory_search":      "memory_read",
-	"memory_get_context": "memory_read",
-	"memory_store":       "memory_write",
-	"memory_delete":      "memory_write",
+	ToolMemorySearch:     "memory_read",
+	ToolMemoryGetContext: "memory_read",
+	ToolMemoryStore:      "memory_write",
+	ToolMemoryDelete:     "memory_write",
 
 	// Platform introspection (read-only, safe)
-	"platform_status": "platform_read",
-	"platform_agents": "platform_read",
-	"platform_tools":  "platform_read",
+	ToolPlatformStatus: "platform_read",
+	ToolPlatformAgents: "platform_read",
+	ToolPlatformTools:  "platform_read",
 
 	// Task management
 	"task_create": "task_write",
@@ -50,16 +50,16 @@ var ToolActionMap = map[string]string{
 	"delegate_task": "agent_delegate",
 
 	// Code intelligence - AST (read-only, safe)
-	"ast_parse":   "code_read",
-	"ast_symbols": "code_read",
-	"ast_query":   "code_read",
+	"ast_parse":   ToolCodeRead,
+	"ast_symbols": ToolCodeRead,
+	"ast_query":   ToolCodeRead,
 
 	// Code intelligence - LSP (read-only, requires server)
-	"lsp_goto_definition":   "code_read",
-	"lsp_find_references":   "code_read",
-	"lsp_hover":             "code_read",
-	"lsp_workspace_symbols": "code_read",
-	"lsp_diagnostics":       "code_read",
+	"lsp_goto_definition":   ToolCodeRead,
+	"lsp_find_references":   ToolCodeRead,
+	"lsp_hover":             ToolCodeRead,
+	"lsp_workspace_symbols": ToolCodeRead,
+	"lsp_diagnostics":       ToolCodeRead,
 }
 
 // ToolRegistry provides access to available tools.
@@ -241,7 +241,7 @@ func looksLikeCode(s string) bool {
 	lines := strings.SplitSeq(s, "\n")
 	for line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if len(trimmed) == 0 {
+		if trimmed == "" {
 			continue
 		}
 		for _, ch := range trimmed {
@@ -395,19 +395,19 @@ func WithExecutorCache(cache *ResultCache) ExecutorOption {
 }
 
 // WithExecutorBus sets the message bus for streaming progress events.
-func WithExecutorBus(bus *bus.MessageBus) ExecutorOption {
+func WithExecutorBus(msgBus *bus.MessageBus) ExecutorOption {
 	return func(e *Executor) {
-		if bus != nil {
-			e.bus = bus
+		if msgBus != nil {
+			e.bus = msgBus
 		}
 	}
 }
 
 // NewExecutor creates a new tool executor.
-func NewExecutor(registry ToolRegistry, security *security.PermissionChecker, opts ...ExecutorOption) *Executor {
+func NewExecutor(registry ToolRegistry, permChecker *security.PermissionChecker, opts ...ExecutorOption) *Executor {
 	e := &Executor{
 		registry:    registry,
-		security:    security,
+		security:    permChecker,
 		logger:      slog.Default(),
 		parallelism: 4, // Default parallelism
 	}
@@ -730,19 +730,19 @@ func ResultsToChatMessages(results []*ExecutionResult) []llm.ChatMessage {
 }
 
 // publishToolProgress emits a tool execution progress event on the bus.
-func (e *Executor) publishToolProgress(ctx context.Context, toolCallID, toolName string, pu tools.ProgressUpdate) {
+func (e *Executor) publishToolProgress(_ context.Context, toolCallID, toolName string, pu tools.ProgressUpdate) {
 	if e.bus == nil {
 		return
 	}
 	payload := map[string]any{
 		"tool_call_id": toolCallID,
 		"tool_name":    toolName,
-		"agent_id":     e.agentID,
+		KeyAgentID:     e.agentID,
 		"message":      pu.Message,
 		"percent":      pu.Percent,
 	}
 	if len(pu.PartialResult) > 0 {
-		payload["partial_result"] = json.RawMessage(pu.PartialResult)
+		payload["partial_result"] = pu.PartialResult
 	}
 	msg, err := models.NewBusMessage(models.MessageTypeStatusUpdate, "executor", payload)
 	if err != nil {
@@ -760,7 +760,7 @@ func (e *Executor) publishToolComplete(toolCallID, toolName string, result *Exec
 	payload := map[string]any{
 		"tool_call_id": toolCallID,
 		"tool_name":    toolName,
-		"agent_id":     e.agentID,
+		KeyAgentID:     e.agentID,
 		"success":      result.Success,
 		"terminate":    result.Terminate,
 		"cached":       result.Cached,
@@ -812,11 +812,11 @@ func (r *PlaceholderToolRegistry) Get(name string) tools.Tool {
 
 // List returns all available tools.
 func (r *PlaceholderToolRegistry) List() []tools.Tool {
-	tools := make([]tools.Tool, 0, len(r.tools))
+	result := make([]tools.Tool, 0, len(r.tools))
 	for _, t := range r.tools {
-		tools = append(tools, t)
+		result = append(result, t)
 	}
-	return tools
+	return result
 }
 
 // GetDefinitions returns tool definitions for the LLM.

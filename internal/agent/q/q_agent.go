@@ -339,7 +339,7 @@ func (q *QAgent) generateSummary(result *AnalysisResult) string {
 // saveArtifacts saves analysis artifacts to disk.
 func (q *QAgent) saveArtifacts(result *AnalysisResult, designs []*AgentDesign) error {
 	dir := expandPath(q.config.AnalysisDir)
-	if err := os.MkdirAll(dir, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		return fmt.Errorf("failed to create analysis directory: %w", err)
 	}
 
@@ -348,36 +348,37 @@ func (q *QAgent) saveArtifacts(result *AnalysisResult, designs []*AgentDesign) e
 	if err != nil {
 		return fmt.Errorf("failed to marshal report: %w", err)
 	}
-	if err := os.WriteFile(reportPath, reportData, 0644); err != nil { //nolint:gosec // outcomes log is user-readable by design
+	if err := os.WriteFile(reportPath, reportData, 0o644); err != nil { //nolint:gosec // outcomes log is user-readable by design
 		return fmt.Errorf("failed to write report: %w", err)
 	}
 	q.logger.Info("saved analysis report", "path", reportPath)
 
 	for _, rec := range result.Recommendations {
-		if rec.Type == "new_skill" && rec.Implementation.SkillSpec != nil {
-			skillDir := filepath.Join(dir, "skills", rec.Implementation.SkillSpec.ID)
-			if err := os.MkdirAll(skillDir, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
-				q.logger.Warn("failed to create skill directory", "error", err)
-				continue
-			}
-			skillFile := filepath.Join(skillDir, "SKILL.md")
-			content := q.skillDesigner.GenerateFullSkillFile(rec.Implementation.SkillSpec)
-			if err := os.WriteFile(skillFile, []byte(content), 0644); err != nil { //nolint:gosec // outcomes log is user-readable by design
-				q.logger.Warn("failed to write skill file", "error", err)
-			}
-			q.logger.Info("saved skill", "path", skillFile)
+		if rec.Type != "new_skill" || rec.Implementation.SkillSpec == nil {
+			continue
 		}
+		skillDir := filepath.Join(dir, "skills", rec.Implementation.SkillSpec.ID)
+		if err := os.MkdirAll(skillDir, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
+			q.logger.Warn("failed to create skill directory", "error", err)
+			continue
+		}
+		skillFile := filepath.Join(skillDir, "SKILL.md")
+		content := q.skillDesigner.GenerateFullSkillFile(rec.Implementation.SkillSpec)
+		if err := os.WriteFile(skillFile, []byte(content), 0o644); err != nil { //nolint:gosec // outcomes log is user-readable by design
+			q.logger.Warn("failed to write skill file", "error", err)
+		}
+		q.logger.Info("saved skill", "path", skillFile)
 	}
 
 	for _, design := range designs {
 		agentDir := filepath.Join(dir, "agents", design.ID)
-		if err := os.MkdirAll(agentDir, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
+		if err := os.MkdirAll(agentDir, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 			return fmt.Errorf("failed to create agent directory: %w", err)
 		}
 
 		agentFile := filepath.Join(agentDir, "AGENT.md")
 		content := q.agentDesigner.GenerateFullAgentFile(design)
-		if err := os.WriteFile(agentFile, []byte(content), 0644); err != nil { //nolint:gosec // outcomes log is user-readable by design
+		if err := os.WriteFile(agentFile, []byte(content), 0o644); err != nil { //nolint:gosec // outcomes log is user-readable by design
 			return fmt.Errorf("failed to write agent spec: %w", err)
 		}
 		q.logger.Info("saved agent specification", "path", agentFile)
@@ -391,11 +392,11 @@ func (q *QAgent) logOutcome(result *AnalysisResult) error {
 	logPath := expandPath(q.config.OutcomesLog)
 
 	dir := filepath.Dir(logPath)
-	if err := os.MkdirAll(dir, 0755); err != nil { //nolint:gosec // task workspace dirs are user-readable
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		return fmt.Errorf("failed to create outcomes directory: %w", err)
 	}
 
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) //nolint:gosec // outcomes log is user-readable by design
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // outcomes log is user-readable by design
 	if err != nil {
 		return fmt.Errorf("failed to open outcomes log: %w", err)
 	}

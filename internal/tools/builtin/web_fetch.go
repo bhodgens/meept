@@ -83,7 +83,7 @@ func (t *WebFetchTool) Description() string {
 
 func (t *WebFetchTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
-		Type: "object",
+		Type: schemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
 			"url": {
 				Type:        "string",
@@ -124,7 +124,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 	}
 
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -237,7 +237,7 @@ func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any
 		maxLength = int(ml)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

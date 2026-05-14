@@ -138,9 +138,9 @@ func TestSkillIndex_FindByTag(t *testing.T) {
 	}
 
 	// Find by testing tag
-	testing := idx.FindByTag("testing")
-	if len(testing) != 1 {
-		t.Errorf("FindByTag(testing) returned %d entries, want 1", len(testing))
+	testingSkills := idx.FindByTag("testing")
+	if len(testingSkills) != 1 {
+		t.Errorf("FindByTag(testing) returned %d entries, want 1", len(testingSkills))
 	}
 
 	// Find non-existent tag
