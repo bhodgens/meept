@@ -468,6 +468,26 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
+
+	// Wire typed event system and hooks
+	hookRegistry := agent.NewHookRegistry(logger.With("component", "hook-registry"))
+	emitter := agent.NewEventEmitter("default", msgBus, logger.With("component", "event-emitter"))
+
+	// Register security hooks if security orchestrator is available
+	if c.SecurityOrchestrator != nil {
+		if beforeTC := agent.NewSecurityBeforeToolCall(c.SecurityOrchestrator); beforeTC != nil {
+			hookRegistry.RegisterBeforeToolCall("security-before-tool", agent.HookPriorityCritical, beforeTC)
+			logger.Info("Registered security BeforeToolCall hook")
+		}
+		if transformCtx := agent.NewSecurityTransformContext(c.SecurityOrchestrator); transformCtx != nil {
+			hookRegistry.RegisterTransformContext("security-transform", agent.HookPriorityCritical, transformCtx)
+			logger.Info("Registered security TransformContext hook")
+		}
+	}
+
+	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter))
+	agentOpts = append(agentOpts, agent.WithHookRegistry(hookRegistry))
+
 	// Note: memvid and taskStore are wired AFTER their initialization below
 	c.AgentLoop = agent.NewAgentLoop(agentOpts...)
 	// Wire context firewall settings from LLM config

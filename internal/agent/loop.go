@@ -441,6 +441,10 @@ type AgentLoop struct {
 	// Agent identity
 	agentID string
 
+	// Typed event system and hooks
+	emitter *EventEmitter
+	hooks   *HookRegistry
+
 	// Skill discovery (lightweight, metadata-driven)
 	capabilityIndex *skills.CapabilityIndex
 	skillLoader     *skills.LazySkillLoader
@@ -655,6 +659,24 @@ func WithProgressEnabled(enabled bool) LoopOption {
 func WithSecurityOrchestrator(orch *intsecurity.Orchestrator) LoopOption {
 	return func(l *AgentLoop) {
 		l.securityOrch = orch
+	}
+}
+
+// WithEventEmitter sets the typed event emitter for lifecycle events.
+func WithEventEmitter(emitter *EventEmitter) LoopOption {
+	return func(l *AgentLoop) {
+		if emitter != nil {
+			l.emitter = emitter
+		}
+	}
+}
+
+// WithHookRegistry sets the hook registry for agent interceptors.
+func WithHookRegistry(hooks *HookRegistry) LoopOption {
+	return func(l *AgentLoop) {
+		if hooks != nil {
+			l.hooks = hooks
+		}
 	}
 }
 
@@ -1318,6 +1340,13 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		}
 	}
 
+	// Emit typed session start event
+	l.emitSafe(ctx, AgentEventSessionStart, SessionStartData{
+		SessionID: conversationID,
+		Input:     userMessage,
+		AgentSpec: l.agentID,
+	})
+
 	// Register queue for external access if both queue and registry are available
 	if l.agentRegistry != nil && l.queue != nil {
 		// Wire persister for follow-up persistence when DB is available
@@ -1368,6 +1397,18 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		if deferErr == nil {
 			l.bus.Publish(bus.EventAgentEnded, endMsg)
 		}
+
+		// Emit typed session end event
+		l.emitSafe(context.Background(), AgentEventSessionEnd, SessionEndData{
+			SessionID: conversationID,
+			Outcome:   reason,
+			Error: func() string {
+				if err != nil {
+					return err.Error()
+				}
+				return ""
+			}(),
+		})
 	}()
 
 	// Sanitize user input through security orchestrator
@@ -1874,6 +1915,33 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 	convBudget := l.conversationTokenBudget()
 	inWarningZone := false
 
+	// Emit typed agent start event
+	agentStartTime := time.Now()
+	modelRef := l.modelRef
+	if l.llmClient != nil {
+		modelRef = l.llmClient.Config().ModelID
+	}
+	l.emitSafeWithFields(ctx, AgentEvent{
+		Type:           AgentEventAgentStart,
+		ConversationID: conversationID,
+		Data: AgentStartData{
+			AgentID:   l.agentID,
+			AgentType: l.agentID, // agent ID serves as type
+			ModelRef:  modelRef,
+		},
+	})
+	defer func() {
+		// Emit typed agent end event
+		l.emitSafeWithFields(context.Background(), AgentEvent{
+			Type:           AgentEventAgentEnd,
+			ConversationID: conversationID,
+			Data: AgentEndData{
+				AgentID:  l.agentID,
+				Duration: time.Since(agentStartTime),
+			},
+		})
+	}()
+
 	for iteration := 1; iteration <= l.config.MaxIterations; iteration++ {
 		select {
 		case <-ctx.Done():
@@ -1951,6 +2019,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		if l.registry != nil {
 			tools = l.registry.GetDefinitions()
 		}
+
+		// Emit typed turn start event
+		turnStartTime := time.Now()
+		_ = turnStartTime // used later for turn end
+		l.emitSafeWithFields(ctx, AgentEvent{
+			Type:           AgentEventTurnStart,
+			ConversationID: conversationID,
+			Iteration:      iteration,
+			Data: TurnStartData{
+				TurnNumber:       iteration,
+				TotalTokensSoFar: totalTokens,
+				MessagesCount:    conv.Len(),
+				ToolCount:        len(tools),
+			},
+		})
 
 		// Enforce token budget before LLM call to prevent context explosion.
 		// Reserve space for tool definitions using accurate token counting.
@@ -2040,6 +2123,17 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// Publish token usage event
 		l.publishTokenUsage(conversationID, totalTokens)
 
+		// Emit typed after provider response event
+		l.emitSafeWithFields(ctx, AgentEvent{
+			Type:           AgentEventAfterProviderResponse,
+			ConversationID: conversationID,
+			Iteration:      iteration,
+			Data: AfterProviderResponseData{
+				ModelID:        response.Model,
+				ResponseTokens: response.Usage.TotalTokens,
+			},
+		})
+
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
 			// Add assistant message with tool calls
@@ -2081,8 +2175,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				l.watchdog.UpdateHeartbeat(workerID, iteration, StageExecuting)
 			}
 
-			// Execute tools
-			results := l.executeToolCalls(ctx, response.ToolCalls)
+			// Execute tools with hook integration
+			results := l.executeToolCallsWithHooks(ctx, response.ToolCalls, conversationID, iteration)
 
 			// Record tool calls for cycle detection
 			for _, tc := range response.ToolCalls {
@@ -2119,6 +2213,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 			// Publish iteration completed event
 			l.publishIteration(conversationID, iteration)
+
+			// Emit typed turn end event (tool execution turn)
+			l.emitTurnEnd(ctx, conversationID, iteration, true, len(response.ToolCalls), response.Usage.TotalTokens, turnStartTime)
+
+			// Settle async event listeners at natural pause point
+			l.emitterWaitForIdle(ctx)
 
 			// Continue loop for LLM to process tool results
 			continue
@@ -2215,6 +2315,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Publish iteration completed event
 		l.publishIteration(conversationID, iteration)
+
+		// Emit typed turn end event (text response, no tools)
+		l.emitTurnEnd(ctx, conversationID, iteration, false, 0, response.Usage.TotalTokens, turnStartTime)
+
+		// Settle async event listeners
+		l.emitterWaitForIdle(ctx)
 
 		// Capture interaction for shadow training
 		if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
@@ -3385,4 +3491,140 @@ func (l *AgentLoop) currentModelInfo() (modelID, providerID string) {
 		}
 	}
 	return "unknown", "unknown"
+}
+
+// emitSafe emits a typed event if the emitter is configured.
+// No-op if emitter is nil, so existing code works without an emitter.
+func (l *AgentLoop) emitSafe(ctx context.Context, eventType AgentEventType, data AgentEventData) {
+	if l.emitter == nil {
+		return
+	}
+	l.emitter.Emit(ctx, eventType, data)
+}
+
+// emitSafeWithFields emits a typed event with explicit metadata fields.
+// No-op if emitter is nil.
+func (l *AgentLoop) emitSafeWithFields(ctx context.Context, event AgentEvent) {
+	if l.emitter == nil {
+		return
+	}
+	l.emitter.EmitWithFields(ctx, event)
+}
+
+// emitTurnEnd emits a typed turn end event with standard fields.
+func (l *AgentLoop) emitTurnEnd(ctx context.Context, conversationID string, iteration int, hadToolCalls bool, toolCallCount int, responseTokens int, turnStartTime time.Time) {
+	stoppedBy := ""
+	if iteration >= l.config.MaxIterations {
+		stoppedBy = "max_iterations"
+	}
+	l.emitSafeWithFields(ctx, AgentEvent{
+		Type:           AgentEventTurnEnd,
+		ConversationID: conversationID,
+		Iteration:      iteration,
+		Data: TurnEndData{
+			TurnNumber:     iteration,
+			HadToolCalls:   hadToolCalls,
+			ToolCallCount:  toolCallCount,
+			ResponseTokens: responseTokens,
+			StoppedBy:      stoppedBy,
+		},
+	})
+}
+
+// emitterWaitForIdle waits for async event listeners to settle.
+// No-op if emitter is nil.
+func (l *AgentLoop) emitterWaitForIdle(ctx context.Context) {
+	if l.emitter == nil {
+		return
+	}
+	if err := l.emitter.WaitForIdle(ctx); err != nil {
+		l.logger.Debug("WaitForIdle returned error",
+			"error", err,
+		)
+	}
+}
+
+// executeToolCallsWithHooks runs tool calls with hook interception and typed events.
+// For each tool call: runs BeforeToolCall hooks (may block), emits ToolExecutionStart,
+// executes the tool, runs AfterToolCall hooks (may override result), emits ToolExecutionEnd.
+func (l *AgentLoop) executeToolCallsWithHooks(ctx context.Context, toolCalls []llm.ToolCall, conversationID string, iteration int) []*ExecutionResult {
+	var results []*ExecutionResult
+
+	for _, tc := range toolCalls {
+		// Run BeforeToolCall hooks
+		if l.hooks != nil {
+			blockResult := l.hooks.RunBeforeToolCalls(ctx, tc)
+			if blockResult.Block {
+				// Tool blocked by hook
+				l.logger.Info("Tool call blocked by hook",
+					"tool", tc.Function.Name,
+					"reason", blockResult.Reason,
+					"conversation", conversationID,
+				)
+				// Emit tool execution end with blocked=true
+				l.emitSafeWithFields(ctx, AgentEvent{
+					Type:           AgentEventToolExecutionEnd,
+					ConversationID: conversationID,
+					Iteration:      iteration,
+					Data: ToolExecutionEndData{
+						ToolCallID:  tc.ID,
+						ToolName:    tc.Function.Name,
+						Blocked:     true,
+						BlockReason: blockResult.Reason,
+					},
+				})
+				// Add a synthetic blocked result
+				results = append(results, &ExecutionResult{
+					ToolCallID: tc.ID,
+					Success:    false,
+					Error:      fmt.Sprintf("blocked by hook: %s", blockResult.Reason),
+				})
+				continue
+			}
+		}
+
+		// Emit tool execution start
+		l.emitSafeWithFields(ctx, AgentEvent{
+			Type:           AgentEventToolExecutionStart,
+			ConversationID: conversationID,
+			Iteration:      iteration,
+			Data: ToolExecutionStartData{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Arguments:  tc.Function.Arguments,
+			},
+		})
+
+		// Execute the tool
+		execStart := time.Now()
+		result := l.executor.Execute(ctx, tc)
+
+		// Run AfterToolCall hooks
+		if l.hooks != nil {
+			overrideResult := l.hooks.RunAfterToolCalls(ctx, tc, result)
+			if overrideResult.Override && overrideResult.Result != nil {
+				result = overrideResult.Result
+			}
+		}
+
+		// Emit tool execution end
+		l.emitSafeWithFields(ctx, AgentEvent{
+			Type:           AgentEventToolExecutionEnd,
+			ConversationID: conversationID,
+			Iteration:      iteration,
+			Data: ToolExecutionEndData{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Success:    result.Success,
+				Result:     result.ToJSON(),
+				Error:      result.Error,
+				Cached:     result.Cached,
+				Duration:   time.Since(execStart),
+			},
+		})
+
+		results = append(results, result)
+	}
+
+	return results
 }
