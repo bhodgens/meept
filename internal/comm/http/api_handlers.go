@@ -3,9 +3,11 @@ package http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/services"
 )
@@ -47,6 +49,85 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleChatStream handles GET /api/v1/chat/stream.
+// It provides an SSE endpoint for real-time tool progress and agent events.
+func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Bus == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "bus service not available")
+		return
+	}
+
+	sse, err := NewSSEWriter(w)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	// Subscribe to tool progress and agent events
+	subID := fmt.Sprintf("sse-chat-%d", time.Now().UnixNano())
+	sub, unsub := s.services.Bus.Subscribe(subID, "tool.execution.progress")
+	if sub == nil {
+		sse.SendError("bus subscription failed")
+		return
+	}
+	defer unsub()
+
+	// Also subscribe to agent progress events
+	agentSub, agentUnsub := s.services.Bus.Subscribe(subID+"-agent", "agent.progress")
+	if agentSub != nil {
+		defer agentUnsub()
+	}
+
+	// Send initial connection event
+	if err := sse.SendEvent("connected", map[string]string{"status": "ok"}); err != nil {
+		return
+	}
+
+	// Heartbeat ticker
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	// Event loop: forward bus events as SSE, send heartbeats, detect disconnect
+	for {
+		select {
+		case <-r.Context().Done():
+			// Client disconnected
+			return
+
+		case msg, ok := <-sub.Channel:
+			if !ok {
+				return
+			}
+			// Forward tool progress as SSE
+			var payload map[string]any
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				continue
+			}
+			if err := sse.SendEvent("tool_progress", payload); err != nil {
+				return // Client disconnected
+			}
+
+		case msg, ok := <-agentSub.Channel:
+			if !ok {
+				return
+			}
+			// Forward agent progress as SSE
+			var payload map[string]any
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				continue
+			}
+			if err := sse.SendEvent("agent_progress", payload); err != nil {
+				return
+			}
+
+		case <-heartbeat.C:
+			if err := sse.SendComment(); err != nil {
+				return // Client disconnected
+			}
+		}
+	}
 }
 
 // ===== Memory Endpoints =====

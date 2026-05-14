@@ -190,6 +190,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
 	// Chat endpoints
 	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
+	mux.HandleFunc("GET /api/v1/chat/stream", s.handleChatStream)
 	mux.HandleFunc("POST /api/v1/chat/steer", s.handleChatSteer)
 	mux.HandleFunc("POST /api/v1/chat/steer-explicit", s.handleChatSteerExplicit)
 	mux.HandleFunc("POST /api/v1/chat/followup", s.handleChatFollowUp)

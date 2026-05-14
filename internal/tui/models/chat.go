@@ -419,6 +419,10 @@ type ProgressUpdateMsg struct {
 	TokensUsed    int
 	ContextResets int
 	ChatVisible   bool
+	// Tool-level streaming progress fields
+	ToolName    string
+	ToolMessage string
+	ToolPercent int
 }
 
 // IsChatVisible returns true if this progress update should display in chat.

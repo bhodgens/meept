@@ -766,3 +766,93 @@ func TestHandleChatQueueStatus_NoService(t *testing.T) {
 		t.Errorf("error = %s, want 'chat service not available'", body["error"])
 	}
 }
+
+func TestSSEWriter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("SendEvent", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		sse, err := NewSSEWriter(rec)
+		if err != nil {
+			t.Fatalf("NewSSEWriter: %v", err)
+		}
+
+		if err := sse.SendEvent("test_event", map[string]string{"key": "value"}); err != nil {
+			t.Fatalf("SendEvent: %v", err)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "event: test_event") {
+			t.Error("expected event type in output")
+		}
+		if !strings.Contains(body, `data: {"key":"value"}`) {
+			t.Errorf("expected data in output, got: %s", body)
+		}
+
+		// Verify headers
+		ct := rec.Header().Get("Content-Type")
+		if ct != "text/event-stream" {
+			t.Errorf("Content-Type = %s, want text/event-stream", ct)
+		}
+	})
+
+	t.Run("SendComment", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		sse, err := NewSSEWriter(rec)
+		if err != nil {
+			t.Fatalf("NewSSEWriter: %v", err)
+		}
+
+		if err := sse.SendComment(); err != nil {
+			t.Fatalf("SendComment: %v", err)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, ": heartbeat") {
+			t.Errorf("expected heartbeat comment, got: %s", body)
+		}
+	})
+
+	t.Run("SendError", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		sse, err := NewSSEWriter(rec)
+		if err != nil {
+			t.Fatalf("NewSSEWriter: %v", err)
+		}
+
+		if err := sse.SendError("something went wrong"); err != nil {
+			t.Fatalf("SendError: %v", err)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "event: error") {
+			t.Error("expected error event in output")
+		}
+		if !strings.Contains(body, "something went wrong") {
+			t.Errorf("expected error message in output, got: %s", body)
+		}
+	})
+}
+
+func TestHandleChatStream_NoService(t *testing.T) {
+	t.Parallel()
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/stream", nil)
+	w := httptest.NewRecorder()
+
+	server.handleChatStream(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if body["error"] != "bus service not available" {
+		t.Errorf("error = %s, want 'bus service not available'", body["error"])
+	}
+}

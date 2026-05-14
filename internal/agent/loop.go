@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -798,6 +799,10 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 		if loop.cache != nil {
 			executorOpts = append(executorOpts, WithExecutorCache(loop.cache))
 			loop.logger.Debug("Wired result cache to executor")
+		}
+		if loop.bus != nil {
+			executorOpts = append(executorOpts, WithExecutorBus(loop.bus))
+			loop.logger.Debug("Wired message bus to executor")
 		}
 		loop.executor = NewExecutor(
 			loop.registry,
@@ -2120,6 +2125,15 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Publish iteration completed event
 			l.publishIteration(conversationID, iteration)
 
+			// Check if all tools unanimously signal termination
+			if ShouldTerminate(results) {
+				l.logger.Info("All tools signal termination, skipping LLM follow-up",
+					"conversation", conversationID,
+					"iteration", iteration,
+				)
+				return l.buildTerminateResponse(results), nil
+			}
+
 			// Continue loop for LLM to process tool results
 			continue
 		}
@@ -2916,6 +2930,27 @@ func (l *AgentLoop) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCa
 	}
 
 	return results
+}
+
+// buildTerminateResponse formats tool results into a user-facing response
+// when all tools signal termination (unanimous consent).
+func (l *AgentLoop) buildTerminateResponse(results []*ExecutionResult) string {
+	var sb strings.Builder
+	for _, r := range results {
+		if r == nil || !r.Success {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		if data, err := json.Marshal(r.Result); err == nil {
+			sb.WriteString(string(data))
+		}
+	}
+	if sb.Len() == 0 {
+		return "done"
+	}
+	return sb.String()
 }
 
 // buildSystemPrompt constructs the system prompt.

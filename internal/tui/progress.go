@@ -15,6 +15,10 @@ type ProgressState struct {
 	TokensUsed    int
 	ContextResets int
 	LastUpdate    time.Time
+	// Tool-level streaming progress
+	ToolName    string
+	ToolMessage string
+	ToolPercent int
 }
 
 // Render returns the formatted progress string for display
@@ -46,7 +50,12 @@ func (p *ProgressState) Render() string {
 
 	// Current tool
 	if p.CurrentTool != "" {
-		parts = append(parts, fmt.Sprintf("→ %s", p.CurrentTool))
+		parts = append(parts, fmt.Sprintf("-> %s", p.CurrentTool))
+	}
+
+	// Tool-level streaming message
+	if p.ToolMessage != "" {
+		parts = append(parts, p.ToolMessage)
 	}
 
 	// Tokens

@@ -457,3 +457,22 @@ var (
 	_ tools.Tool = (*DelegateTaskTool)(nil)
 	_ tools.Tool = (*SessionHistoryTool)(nil)
 )
+
+// TerminatingTool implementations for platform tools.
+// These tools return definitive results that do not need LLM follow-up.
+
+// TerminateHint implements tools.TerminatingTool for PlatformStatusTool.
+func (t *PlatformStatusTool) TerminateHint(args map[string]any) bool { return true }
+
+// TerminateHint implements tools.TerminatingTool for PlatformAgentsTool.
+func (t *PlatformAgentsTool) TerminateHint(args map[string]any) bool { return true }
+
+// TerminateHint implements tools.TerminatingTool for PlatformToolsTool.
+func (t *PlatformToolsTool) TerminateHint(args map[string]any) bool { return true }
+
+// Ensure platform tools implement TerminatingTool
+var (
+	_ tools.TerminatingTool = (*PlatformStatusTool)(nil)
+	_ tools.TerminatingTool = (*PlatformAgentsTool)(nil)
+	_ tools.TerminatingTool = (*PlatformToolsTool)(nil)
+)

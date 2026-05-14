@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/security"
 )
 
@@ -632,4 +634,366 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// mockStreamingTool is a mock tool that implements both Tool and StreamingTool.
+type mockStreamingTool struct {
+	name         string
+	description  string
+	result       any
+	err          error
+	updates      []tools.ProgressUpdate
+}
+
+func newMockStreamingTool(name string, result any, err error, updates []tools.ProgressUpdate) *mockStreamingTool {
+	return &mockStreamingTool{
+		name:        name,
+		description: "streaming mock",
+		result:      result,
+		err:         err,
+		updates:     updates,
+	}
+}
+
+func (t *mockStreamingTool) Name() string        { return t.name }
+func (t *mockStreamingTool) Description() string { return t.description }
+func (t *mockStreamingTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{Type: "object", Properties: map[string]llm.ParameterProperty{}}
+}
+func (t *mockStreamingTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	return t.result, t.err
+}
+func (t *mockStreamingTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
+	for _, u := range t.updates {
+		onUpdate(u)
+	}
+	return t.result, t.err
+}
+
+// mockTerminatingTool is a mock tool that implements both Tool and TerminatingTool.
+type mockTerminatingTool struct {
+	name        string
+	description string
+	result      any
+	err         error
+	terminate   bool
+}
+
+func newMockTerminatingTool(name string, result any, terminate bool) *mockTerminatingTool {
+	return &mockTerminatingTool{
+		name:        name,
+		description: "terminating mock",
+		result:      result,
+		terminate:   terminate,
+	}
+}
+
+func (t *mockTerminatingTool) Name() string        { return t.name }
+func (t *mockTerminatingTool) Description() string { return t.description }
+func (t *mockTerminatingTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{Type: "object", Properties: map[string]llm.ParameterProperty{}}
+}
+func (t *mockTerminatingTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	return t.result, t.err
+}
+func (t *mockTerminatingTool) TerminateHint(args map[string]any) bool {
+	return t.terminate
+}
+
+func TestStreamingToolDetection(t *testing.T) {
+	t.Run("streaming tool emits progress via bus", func(t *testing.T) {
+		registry := NewPlaceholderToolRegistry()
+		progressUpdates := []tools.ProgressUpdate{
+			{Message: "starting...", Percent: 10},
+			{Message: "halfway...", Percent: 50},
+			{Message: "done", Percent: 100},
+		}
+		streamingMock := newMockStreamingTool("platform_status", "result", nil, progressUpdates)
+		registry.Register(streamingMock)
+
+		// Create a bus and subscribe to progress events
+		testBus := bus.New(nil, nil)
+		sub := testBus.Subscribe("test-executor", "tool.execution.progress")
+		defer testBus.Unsubscribe(sub)
+
+		// nil security uses fail-closed which allows platform_status
+		executor := NewExecutor(registry, nil, WithExecutorBus(testBus))
+
+		toolCall := llm.ToolCall{
+			ID:       "call_stream_1",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"},
+		}
+
+		result := executor.Execute(context.Background(), toolCall)
+		if !result.Success {
+			t.Fatalf("expected success, got error: %s", result.Error)
+		}
+		if result.Result != "result" {
+			t.Errorf("expected result='result', got %v", result.Result)
+		}
+
+		// Verify progress events were published
+		received := 0
+		for {
+			select {
+			case msg := <-sub.Channel:
+				received++
+				if msg.Topic != "tool.execution.progress" {
+					t.Errorf("expected topic=tool.execution.progress, got %s", msg.Topic)
+				}
+				if received >= 3 {
+					goto doneStream
+				}
+			default:
+				goto doneStream
+			}
+		}
+	doneStream:
+		if received != 3 {
+			t.Errorf("expected 3 progress events, got %d", received)
+		}
+	})
+
+	t.Run("streaming tool falls back to Execute when no bus", func(t *testing.T) {
+		registry := NewPlaceholderToolRegistry()
+		progressUpdates := []tools.ProgressUpdate{
+			{Message: "starting...", Percent: 10},
+		}
+		streamingMock := newMockStreamingTool("platform_status", "result", nil, progressUpdates)
+		registry.Register(streamingMock)
+
+		// nil security uses fail-closed which allows platform_status
+		executor := NewExecutor(registry, nil) // No bus
+
+		toolCall := llm.ToolCall{
+			ID:       "call_stream_2",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"},
+		}
+
+		result := executor.Execute(context.Background(), toolCall)
+		if !result.Success {
+			t.Fatalf("expected success, got error: %s", result.Error)
+		}
+		if result.Result != "result" {
+			t.Errorf("expected result='result', got %v", result.Result)
+		}
+	})
+}
+
+func TestTerminateHintPropagation(t *testing.T) {
+	t.Run("terminating tool sets Terminate=true", func(t *testing.T) {
+		registry := NewPlaceholderToolRegistry()
+		registry.Register(newMockTerminatingTool("platform_status", "final answer", true))
+
+		// nil security: fail-closed allows platform_status
+		executor := NewExecutor(registry, nil)
+
+		toolCall := llm.ToolCall{
+			ID:       "call_term_1",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"},
+		}
+
+		result := executor.Execute(context.Background(), toolCall)
+		if !result.Success {
+			t.Fatalf("expected success, got error: %s", result.Error)
+		}
+		if !result.Terminate {
+			t.Error("expected Terminate=true for terminating tool")
+		}
+	})
+
+	t.Run("non-terminating tool sets Terminate=false", func(t *testing.T) {
+		registry := NewPlaceholderToolRegistry()
+		registry.Register(newMockTerminatingTool("platform_status", "intermediate result", false))
+
+		executor := NewExecutor(registry, nil)
+
+		toolCall := llm.ToolCall{
+			ID:       "call_nonterm_1",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"},
+		}
+
+		result := executor.Execute(context.Background(), toolCall)
+		if !result.Success {
+			t.Fatalf("expected success, got error: %s", result.Error)
+		}
+		if result.Terminate {
+			t.Error("expected Terminate=false for non-terminating tool")
+		}
+	})
+
+	t.Run("ToolResult with Terminate=true propagates", func(t *testing.T) {
+		registry := NewPlaceholderToolRegistry()
+		registry.Register(NewMockTool("platform_status", "Test", func(ctx context.Context, args map[string]any) (any, error) {
+			return &tools.ToolResult{
+				Success:   true,
+				Result:    "final answer",
+				Terminate: true,
+			}, nil
+		}))
+
+		executor := NewExecutor(registry, nil)
+
+		toolCall := llm.ToolCall{
+			ID:       "call_tr_1",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"},
+		}
+
+		result := executor.Execute(context.Background(), toolCall)
+		if !result.Success {
+			t.Fatalf("expected success, got error: %s", result.Error)
+		}
+		if !result.Terminate {
+			t.Error("expected Terminate=true from ToolResult.Terminate")
+		}
+	})
+
+	t.Run("regular tool has Terminate=false", func(t *testing.T) {
+		registry := NewPlaceholderToolRegistry()
+		registry.Register(NewMockTool("platform_status", "Test", func(ctx context.Context, args map[string]any) (any, error) {
+			return "normal result", nil
+		}))
+
+		executor := NewExecutor(registry, nil)
+
+		toolCall := llm.ToolCall{
+			ID:       "call_reg_1",
+			Type:     "function",
+			Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"},
+		}
+
+		result := executor.Execute(context.Background(), toolCall)
+		if !result.Success {
+			t.Fatalf("expected success, got error: %s", result.Error)
+		}
+		if result.Terminate {
+			t.Error("expected Terminate=false for regular tool")
+		}
+	})
+}
+
+func TestShouldTerminate(t *testing.T) {
+	t.Run("empty results", func(t *testing.T) {
+		if ShouldTerminate(nil) {
+			t.Error("expected false for nil results")
+		}
+		if ShouldTerminate([]*ExecutionResult{}) {
+			t.Error("expected false for empty results")
+		}
+	})
+
+	t.Run("all terminate", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: true},
+			{ToolCallID: "c2", Success: true, Terminate: true},
+		}
+		if !ShouldTerminate(results) {
+			t.Error("expected true when all results have Terminate=true")
+		}
+	})
+
+	t.Run("mixed results", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: true},
+			{ToolCallID: "c2", Success: true, Terminate: false},
+		}
+		if ShouldTerminate(results) {
+			t.Error("expected false when not all results have Terminate=true")
+		}
+	})
+
+	t.Run("nil result in batch", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: true},
+			nil,
+		}
+		if ShouldTerminate(results) {
+			t.Error("expected false when batch contains nil result")
+		}
+	})
+
+	t.Run("single terminating result", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: true},
+		}
+		if !ShouldTerminate(results) {
+			t.Error("expected true for single terminating result")
+		}
+	})
+}
+
+func TestCacheHitProgressEvent(t *testing.T) {
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(NewMockTool("memory_search", "Cached", func(ctx context.Context, args map[string]any) (any, error) {
+		return "cached result", nil
+	}))
+
+	testBus := bus.New(nil, nil)
+	sub := testBus.Subscribe("test-cache", "tool.execution.progress")
+	defer testBus.Unsubscribe(sub)
+
+	cache := NewResultCache(CacheConfig{
+		MaxEntries:   100,
+		DefaultTTL:   5 * time.Minute,
+		EnabledTools: []string{"memory_search"},
+	}, nil)
+	// nil security: fail-closed allows memory_search
+	executor := NewExecutor(registry, nil, WithExecutorCache(cache), WithExecutorBus(testBus))
+
+	// First call populates cache
+	toolCall := llm.ToolCall{
+		ID:       "call_cache_1",
+		Type:     "function",
+		Function: llm.ToolCallFunction{Name: "memory_search", Arguments: "{}"},
+	}
+	result1 := executor.Execute(context.Background(), toolCall)
+	if !result1.Success {
+		t.Fatalf("first call: expected success, got error: %s", result1.Error)
+	}
+	if result1.Cached {
+		t.Error("first call should not be cached")
+	}
+
+	// Second call hits cache
+	toolCall2 := llm.ToolCall{
+		ID:       "call_cache_2",
+		Type:     "function",
+		Function: llm.ToolCallFunction{Name: "memory_search", Arguments: "{}"},
+	}
+	result2 := executor.Execute(context.Background(), toolCall2)
+	if !result2.Success {
+		t.Fatalf("second call: expected success, got error: %s", result2.Error)
+	}
+	if !result2.Cached {
+		t.Error("second call should be cached")
+	}
+
+	// Verify cache-hit progress event was published
+	select {
+	case msg := <-sub.Channel:
+		if msg.Topic != "tool.execution.progress" {
+			t.Errorf("expected topic=tool.execution.progress, got %s", msg.Topic)
+		}
+	default:
+		t.Error("expected cache-hit progress event")
+	}
+}
+
+func TestWithExecutorBusNilGuard(t *testing.T) {
+	testBus := bus.New(nil, nil)
+	executor := NewExecutor(nil, nil, WithExecutorBus(testBus))
+	if executor.bus != testBus {
+		t.Error("expected bus to be set")
+	}
+
+	// Nil bus should not panic
+	executor2 := NewExecutor(nil, nil, WithExecutorBus(nil))
+	if executor2.bus != nil {
+		t.Error("expected nil bus")
+	}
 }

@@ -717,6 +717,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+			case "tool.execution.progress":
+				// Extract tool-level streaming progress
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					progressMsg := models.ProgressUpdateMsg{}
+					if v, ok := payloadMap["tool_name"].(string); ok {
+						progressMsg.ToolName = v
+						progressMsg.CurrentTool = v
+					}
+					if v, ok := payloadMap["message"].(string); ok {
+						progressMsg.ToolMessage = v
+						progressMsg.Stage = v
+					}
+					if v, ok := payloadMap["percent"].(float64); ok {
+						progressMsg.ToolPercent = int(v)
+						progressMsg.Percent = v
+					}
+					if v, ok := payloadMap["agent_id"].(string); ok {
+						progressMsg.AgentID = v
+					}
+					if cmd := a.chat.Update(progressMsg); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
 			case "task.completed", "task.failed":
 				// Inject task result message into chat
 				if payloadMap, ok := e.Payload.(map[string]any); ok {

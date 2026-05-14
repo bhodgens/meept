@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
@@ -91,8 +92,9 @@ type ExecutionResult struct {
 	Success    bool              `json:"success"`
 	Result     any               `json:"result,omitempty"`
 	Error      string            `json:"error,omitempty"`
-	Cached     bool              `json:"cached,omitempty"`   // True if result came from cache
-	Evidence   []models.Evidence `json:"evidence,omitempty"` // Evidence of tool side-effects
+	Cached     bool              `json:"cached,omitempty"`    // True if result came from cache
+	Evidence   []models.Evidence `json:"evidence,omitempty"`  // Evidence of tool side-effects
+	Terminate  bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
 }
 
 // ToJSON converts the result to a JSON string.
@@ -352,8 +354,9 @@ type Executor struct {
 	security    *security.PermissionChecker
 	logger      *slog.Logger
 	parallelism int
-	agentID     string // Identifier for the agent/worker using this executor
-	cache       *ResultCache
+	agentID     string           // Identifier for the agent/worker using this executor
+	cache       *ResultCache     // Tool result cache
+	bus         *bus.MessageBus  // Optional: for publishing streaming progress events
 }
 
 // ExecutorOption is a functional option for configuring an Executor.
@@ -385,7 +388,18 @@ func WithExecutorAgentID(id string) ExecutorOption {
 // WithExecutorCache sets the result cache for the executor.
 func WithExecutorCache(cache *ResultCache) ExecutorOption {
 	return func(e *Executor) {
-		e.cache = cache
+		if cache != nil {
+			e.cache = cache
+		}
+	}
+}
+
+// WithExecutorBus sets the message bus for streaming progress events.
+func WithExecutorBus(bus *bus.MessageBus) ExecutorOption {
+	return func(e *Executor) {
+		if bus != nil {
+			e.bus = bus
+		}
 	}
 }
 
@@ -437,6 +451,12 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 				"agent", e.agentID,
 				"tool", toolName,
 			)
+			// Emit synthetic cache-hit progress event
+			e.publishToolProgress(ctx, toolCall.ID, toolName, tools.ProgressUpdate{
+				Message:    "cache hit",
+				Percent:    100,
+				ToolCallID: toolCall.ID,
+			})
 			return &ExecutionResult{
 				ToolCallID: toolCall.ID,
 				Success:    true,
@@ -520,7 +540,17 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		"args_summary", summarizeArgs(args),
 	)
 
-	toolResult, toolErr := tool.Execute(ctx, args)
+	// Check if tool supports streaming progress
+	var toolResult any
+	var toolErr error
+	if st, ok := tool.(tools.StreamingTool); ok && e.bus != nil {
+		toolResult, toolErr = st.ExecuteStreaming(ctx, args, func(pu tools.ProgressUpdate) {
+			pu.ToolCallID = toolCall.ID
+			e.publishToolProgress(ctx, toolCall.ID, toolName, pu)
+		})
+	} else {
+		toolResult, toolErr = tool.Execute(ctx, args)
+	}
 	if toolErr != nil {
 		e.logger.Error("Tool execution failed",
 			"agent", e.agentID,
@@ -536,15 +566,29 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 
 	// Extract evidence from ToolResult if present
 	var evidence []models.Evidence
-	if tr, ok := toolResult.(*tools.ToolResult); ok && tr != nil && len(tr.Evidence) > 0 {
-		evidence = tr.Evidence
-		e.logger.Debug("Tool produced evidence",
-			"agent", e.agentID,
-			"tool", toolName,
-			"evidence_count", len(evidence),
-		)
+	var terminate bool
+	if tr, ok := toolResult.(*tools.ToolResult); ok && tr != nil {
+		if len(tr.Evidence) > 0 {
+			evidence = tr.Evidence
+			e.logger.Debug("Tool produced evidence",
+				"agent", e.agentID,
+				"tool", toolName,
+				"evidence_count", len(evidence),
+			)
+		}
+		// Check ToolResult-level Terminate flag
+		if tr.Terminate {
+			terminate = true
+		}
 		// Use the actual result from ToolResult
 		toolResult = tr.Result
+	}
+
+	// Check TerminatingTool interface for per-call terminate hint
+	if tt, ok := tool.(tools.TerminatingTool); ok {
+		if tt.TerminateHint(args) {
+			terminate = true
+		}
 	}
 
 	// Store in cache after successful execution (cache the result, not evidence)
@@ -562,6 +606,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		Result:     toolResult,
 		Cached:     false, // Fresh result, not from cache
 		Evidence:   evidence,
+		Terminate:  terminate,
 	}
 }
 
@@ -675,6 +720,43 @@ func ResultsToChatMessages(results []*ExecutionResult) []llm.ChatMessage {
 		messages[i] = r.ToChatMessage()
 	}
 	return messages
+}
+
+// publishToolProgress emits a tool execution progress event on the bus.
+func (e *Executor) publishToolProgress(ctx context.Context, toolCallID, toolName string, pu tools.ProgressUpdate) {
+	if e.bus == nil {
+		return
+	}
+	payload := map[string]any{
+		"tool_call_id": toolCallID,
+		"tool_name":    toolName,
+		"agent_id":     e.agentID,
+		"message":      pu.Message,
+		"percent":      pu.Percent,
+	}
+	if len(pu.PartialResult) > 0 {
+		payload["partial_result"] = json.RawMessage(pu.PartialResult)
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeStatusUpdate, "executor", payload)
+	if err != nil {
+		e.logger.Warn("Failed to create progress bus message", "error", err)
+		return
+	}
+	e.bus.Publish("tool.execution.progress", msg)
+}
+
+// ShouldTerminate checks if ALL results in the batch indicate termination.
+// Returns true only if every result has Terminate=true and at least one result exists.
+func ShouldTerminate(results []*ExecutionResult) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, r := range results {
+		if r == nil || !r.Terminate {
+			return false
+		}
+	}
+	return true
 }
 
 // PlaceholderToolRegistry is a simple implementation for testing.

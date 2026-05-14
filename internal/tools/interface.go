@@ -40,10 +40,11 @@ type Tool interface {
 // ToolResult is the standardized result envelope returned by tool execution.
 //nolint:revive // stutter with package name is intentional for API clarity
 type ToolResult struct {
-	Success  bool              `json:"success"`
-	Result   any               `json:"result,omitempty"`
-	Error    string            `json:"error,omitempty"`
-	Evidence []models.Evidence `json:"evidence,omitempty"` // NEW: evidence of side-effects
+	Success   bool              `json:"success"`
+	Result    any               `json:"result,omitempty"`
+	Error     string            `json:"error,omitempty"`
+	Evidence  []models.Evidence `json:"evidence,omitempty"`
+	Terminate bool              `json:"terminate,omitempty"` // Advisory: hint that result is final and needs no LLM follow-up
 }
 
 // NewSuccessResult creates a successful tool result.

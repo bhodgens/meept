@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -278,6 +279,153 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	}, nil
 }
 
+// ExecuteStreaming implements tools.StreamingTool. It runs the shell command
+// and emits progress updates as the command produces output.
+func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
+	command, _ := args["command"].(string)
+	if strings.TrimSpace(command) == "" {
+		return nil, fmt.Errorf("empty command")
+	}
+
+	// Parse timeout
+	timeout := t.defaultTimeout
+	if timeoutSec, ok := args["timeout"].(float64); ok && timeoutSec > 0 {
+		timeout = time.Duration(timeoutSec) * time.Second
+	}
+
+	// Parse working directory
+	workDir := t.workingDir
+	if wd, ok := args["working_dir"].(string); ok && wd != "" {
+		resolved, err := resolvePath(wd)
+		if err != nil {
+			return nil, fmt.Errorf("invalid working directory: %w", err)
+		}
+		workDir = resolved
+	}
+
+	// Check command risk level
+	risk := t.classifyRisk(command)
+	if risk == RiskCritical {
+		baseCmd := extractBaseCommand(command)
+		return nil, fmt.Errorf("command blocked for safety: %s", baseCmd)
+	}
+
+	// Scan command with Tirith via security orchestrator
+	if t.securityOrch != nil {
+		blocked, _, reason := t.securityOrch.ScanShellCommand(ctx, command)
+		if blocked {
+			return nil, fmt.Errorf("command blocked by security scanner: %s", reason)
+		}
+	}
+
+	// Emit initial progress
+	onUpdate(tools.ProgressUpdate{
+		Message: fmt.Sprintf("running %s...", command),
+		Percent: 10,
+	})
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Execute the command with output streaming
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.Dir = workDir
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// Emit progress at ~50% after starting the command
+	onUpdate(tools.ProgressUpdate{
+		Message: fmt.Sprintf("executing %s...", extractBaseCommand(command)),
+		Percent: 50,
+	})
+
+	err := cmd.Run()
+
+	// Get outputs
+	stdoutStr := stdout.String()
+	stderrStr := stderr.String()
+	truncated := false
+
+	// Truncate if too large
+	if len(stdoutStr) > MaxOutputSize {
+		stdoutStr = stdoutStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stdout.String()))
+		truncated = true
+	}
+	if len(stderrStr) > MaxOutputSize {
+		stderrStr = stderrStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stderr.String()))
+		truncated = true
+	}
+
+	// Determine return code
+	returnCode := 0
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			onUpdate(tools.ProgressUpdate{
+				Message: fmt.Sprintf("command timed out after %v", timeout),
+				Percent: 100,
+			})
+			return nil, fmt.Errorf("command timed out after %v", timeout)
+		}
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
+			returnCode = exitErr.ExitCode()
+		} else {
+			return nil, fmt.Errorf("failed to execute command: %w", err)
+		}
+	}
+
+	// Emit completion progress with output summary
+	outputSummary := ""
+	if len(stdoutStr) > 100 {
+		outputSummary = stdoutStr[:100] + "..."
+	} else {
+		outputSummary = stdoutStr
+	}
+	onUpdate(tools.ProgressUpdate{
+		Message: fmt.Sprintf("completed (exit code %d)", returnCode),
+		Percent: 100,
+		PartialResult: func() json.RawMessage {
+			data, _ := json.Marshal(map[string]string{"output_preview": outputSummary})
+			return data
+		}(),
+	})
+
+	// Build evidence
+	evidence := make([]models.Evidence, 0, 2)
+	evidence = append(evidence, models.NewEvidence(
+		models.EvidenceProcessExit,
+		command,
+		fmt.Sprintf("%d", returnCode),
+		t.Name(),
+	))
+	outputForHash := stdoutStr + stderrStr
+	if len(outputForHash) > MaxOutputSize {
+		outputForHash = outputForHash[:MaxOutputSize]
+	}
+	h := sha256.Sum256([]byte(outputForHash))
+	outputHash := hex.EncodeToString(h[:])
+	evidence = append(evidence, models.NewEvidence(
+		models.EvidenceShellOutput,
+		command,
+		outputHash,
+		t.Name(),
+	))
+
+	return tools.ToolResult{
+		Success: returnCode == 0,
+		Result: ShellResult{
+			Stdout:     stdoutStr,
+			Stderr:     stderrStr,
+			ReturnCode: returnCode,
+			Truncated:  truncated,
+		},
+		Evidence: evidence,
+	}, nil
+}
+
 // classifyRisk determines the risk level of a command.
 func (t *ShellExecuteTool) classifyRisk(command string) ShellCommandRisk {
 	command = strings.TrimSpace(command)
@@ -366,5 +514,8 @@ func extractBaseCommand(command string) string {
 	return ""
 }
 
-// Ensure ShellExecuteTool implements the Tool interface
-var _ tools.Tool = (*ShellExecuteTool)(nil)
+// Ensure ShellExecuteTool implements the Tool and StreamingTool interfaces
+var (
+	_ tools.Tool         = (*ShellExecuteTool)(nil)
+	_ tools.StreamingTool = (*ShellExecuteTool)(nil)
+)

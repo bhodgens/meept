@@ -279,6 +279,13 @@ var (
 	_ tools.Tool = (*MemoryGetContextTool)(nil)
 )
 
+// TerminateHint implements tools.TerminatingTool for MemoryStoreTool.
+// Memory store returns a simple confirmation that needs no LLM follow-up.
+func (t *MemoryStoreTool) TerminateHint(args map[string]any) bool { return true }
+
+// Ensure MemoryStoreTool implements TerminatingTool
+var _ tools.TerminatingTool = (*MemoryStoreTool)(nil)
+
 // MemoryGetVersionTool retrieves a specific version of a memory by ID.
 type MemoryGetVersionTool struct {
 	manager *memory.Manager

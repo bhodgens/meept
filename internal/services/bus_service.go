@@ -82,3 +82,16 @@ func (s *BusService) Stats(ctx context.Context) (*BusStatsResponse, error) {
 	// TODO: Get actual stats from bus
 	return &BusStatsResponse{}, nil
 }
+
+// Subscribe creates a bus subscription. Returns the subscriber and an unsubscribe function.
+// Returns nil if the bus is not available.
+func (s *BusService) Subscribe(id, topic string) (*bus.Subscriber, func()) {
+	if s.bus == nil {
+		return nil, nil
+	}
+	sub := s.bus.Subscribe(id, topic)
+	unsub := func() {
+		s.bus.Unsubscribe(sub)
+	}
+	return sub, unsub
+}
