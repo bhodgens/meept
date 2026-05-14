@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" //nolint:revive // blank import for side effects
 )
 
 // OrchestratorConfig holds configuration for the security orchestrator.

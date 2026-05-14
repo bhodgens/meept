@@ -113,6 +113,13 @@ func (s *SQLiteStore) migrate() error {
 	s.migrationCreateIndex("CREATE INDEX IF NOT EXISTS idx_session_messages_session_parent ON session_messages(session_id, parent_id)", "idx_session_messages_session_parent")
 	s.migrationCreateIndex("CREATE INDEX IF NOT EXISTS idx_session_messages_session_branch ON session_messages(session_id, branch_id)", "idx_session_messages_session_branch")
 
+	// Backfill parent_id for messages created before the column existed.
+	// Orders messages by id ASC within each session and chains them so each
+	// message's parent_id points to the previous message in that session.
+	if err := s.migrationBackfillParentID(); err != nil {
+		return fmt.Errorf("failed to backfill parent_id: %w", err)
+	}
+
 	return nil
 }
 
@@ -133,6 +140,138 @@ func (s *SQLiteStore) migrationCreateIndex(stmt, indexName string) {
 	if _, err := s.db.Exec(stmt); err != nil {
 		s.logger.Debug("Index creation note", "index", indexName, "info", err.Error())
 	}
+}
+
+// migrationBackfillParentID populates parent_id for messages that were created
+// before the column existed. For each session it chains messages in insertion
+// order (id ASC) so each message points to the previous one. The first message
+// in every session keeps parent_id = NULL. Only rows where parent_id IS NULL
+// are touched, making the migration idempotent and safe to re-run.
+func (s *SQLiteStore) migrationBackfillParentID() error {
+	const batchSize = 500
+
+	// Count how many messages still need a parent_id.
+	var needBackfill int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM session_messages WHERE parent_id IS NULL`,
+	).Scan(&needBackfill); err != nil {
+		return fmt.Errorf("failed to count messages needing backfill: %w", err)
+	}
+	if needBackfill == 0 {
+		s.logger.Debug("parent_id backfill not needed")
+		return nil
+	}
+
+	s.logger.Info("backfilling parent_id for historical messages", "count", needBackfill)
+
+	// Retrieve distinct sessions that have at least one NULL parent_id message.
+	sessionRows, err := s.db.Query(
+		`SELECT DISTINCT session_id FROM session_messages WHERE parent_id IS NULL`,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to query sessions for backfill: %w", err)
+	}
+
+	var sessionIDs []string
+	for sessionRows.Next() {
+		var sid string
+		if err := sessionRows.Scan(&sid); err != nil {
+			sessionRows.Close()
+			return fmt.Errorf("failed to scan session id for backfill: %w", err)
+		}
+		sessionIDs = append(sessionIDs, sid)
+	}
+	sessionRows.Close()
+	if err := sessionRows.Err(); err != nil {
+		return fmt.Errorf("failed iterating sessions for backfill: %w", err)
+	}
+
+	var totalUpdated int
+	for _, sid := range sessionIDs {
+		updated, err := s.backfillSession(sid, batchSize)
+		if err != nil {
+			return err
+		}
+		totalUpdated += updated
+	}
+
+	s.logger.Info("parent_id backfill complete", "total_updated", totalUpdated)
+	return nil
+}
+
+// backfillSession chains messages within a single session in batches.
+// For each message with NULL parent_id, it sets parent_id to the id of the
+// immediately preceding message (by id ASC) in the session — regardless of
+// whether that predecessor already has a parent_id. The very first message
+// in the session keeps parent_id = NULL.
+func (s *SQLiteStore) backfillSession(sessionID string, batchSize int) (int, error) {
+	var totalUpdated int
+
+	for {
+		// Fetch a batch of NULL-parent messages with the id of their
+		// immediately preceding sibling (LAG). This correctly handles
+		// mixed scenarios where some messages already have parent_id set.
+		rows, err := s.db.Query(`
+			SELECT id, prev_id FROM (
+				SELECT id,
+				       LAG(id) OVER (ORDER BY id) AS prev_id,
+				       parent_id,
+				       ROW_NUMBER() OVER (ORDER BY id) AS rn
+				FROM session_messages
+				WHERE session_id = ?
+			) sub
+			WHERE parent_id IS NULL
+			ORDER BY id ASC
+			LIMIT ?`, sessionID, batchSize)
+		if err != nil {
+			return totalUpdated, fmt.Errorf("failed to query messages for backfill: %w", err)
+		}
+
+		type backfillRow struct {
+			id     int64
+			prevID sql.NullInt64
+		}
+		var batch []backfillRow
+		for rows.Next() {
+			var r backfillRow
+			if err := rows.Scan(&r.id, &r.prevID); err != nil {
+				rows.Close()
+				return totalUpdated, fmt.Errorf("failed to scan message for backfill: %w", err)
+			}
+			batch = append(batch, r)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return totalUpdated, fmt.Errorf("failed iterating messages for backfill: %w", err)
+		}
+
+		if len(batch) == 0 {
+			break
+		}
+
+		for _, r := range batch {
+			if !r.prevID.Valid {
+				// This is the first message in the session; keep parent_id NULL.
+				continue
+			}
+			result, err := s.db.Exec(
+				`UPDATE session_messages SET parent_id = ? WHERE id = ? AND parent_id IS NULL`,
+				r.prevID.Int64, r.id,
+			)
+			if err != nil {
+				return totalUpdated, fmt.Errorf("failed to update parent_id for message %d: %w", r.id, err)
+			}
+			n, _ := result.RowsAffected()
+			totalUpdated += int(n)
+		}
+
+		// If we got fewer than batchSize rows, we're done with this session.
+		if len(batch) < batchSize {
+			break
+		}
+	}
+
+	return totalUpdated, nil
 }
 
 // Create creates a new session with the given name.

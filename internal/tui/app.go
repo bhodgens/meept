@@ -80,6 +80,7 @@ type App struct {
 	sessionRename  *SessionRenameModal
 	confirmModal   *ConfirmModal
 	fuzzyFinder    *FuzzyFinderModal
+	branchPicker   *BranchPickerModal
 
 	// Current session
 	currentSession *types.Session
@@ -192,6 +193,7 @@ func NewApp(socketPath string) *App {
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	app.sessionRename = NewSessionRenameModal(styles)
 	app.fuzzyFinder = NewFuzzyFinderModal(styles, rpc)
+	app.branchPicker = NewBranchPickerModal(styles, rpc)
 
 	// Initialize slash autocomplete
 	app.slashAutocomplete = NewSlashAutocomplete(styles)
@@ -420,9 +422,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(a.fuzzyFinder.FetchSessions(), a.fuzzyFinder.FetchTasks())
 		}
 
-		// Check for Ctrl+B to show branch info
+		// Check for Ctrl+B to show branch picker
 		if msg.String() == "ctrl+b" {
-			return a, a.fetchBranchInfo()
+			if a.currentSession == nil {
+				a.statusMessage = "no active session"
+				a.statusMessageTime = time.Now()
+				return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+					return StatusMessageClearMsg{}
+				})
+			}
+			a.activeModal = ModalBranchPicker
+			a.branchPicker.Show()
+			if a.currentSession.Name != "" {
+				a.branchPicker.SetActiveBranchID(a.currentSession.Name)
+			}
+			return a, a.branchPicker.RefreshBranches(a.currentSession.ID)
 		}
 
 		// Global escape handler
@@ -955,6 +969,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case BranchInfoMsg:
+		if a.activeModal == ModalBranchPicker {
+			// Populate the branch picker modal
+			if msg.Err != nil {
+				a.branchPicker.SetBranches(nil)
+				a.statusMessage = fmt.Sprintf("branch error: %v", msg.Err)
+				a.statusMessageTime = time.Now()
+			} else {
+				a.branchPicker.SetBranches(msg.Branches)
+			}
+			return a, nil
+		}
+		// Fallback: show branch info as status message
 		if msg.Err != nil {
 			a.statusMessage = fmt.Sprintf("branch error: %v", msg.Err)
 		} else if len(msg.Branches) == 0 {
@@ -968,6 +994,38 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.statusMessageTime = time.Now()
 		return a, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+			return StatusMessageClearMsg{}
+		})
+
+	case BranchNavigateMsg:
+		a.activeModal = ModalNone
+		if msg.Err != nil {
+			a.statusMessage = fmt.Sprintf("navigate failed: %v", msg.Err)
+			a.statusMessageTime = time.Now()
+			return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+		}
+		// Navigate to the selected branch via RPC
+		if a.currentSession != nil {
+			sessionID := a.currentSession.ID
+			targetLeafID := msg.Branch.LeafID
+			branchID := msg.Branch.ID
+			return a, func() tea.Msg {
+				err := a.rpc.NavigateBranch(sessionID, targetLeafID)
+				if err != nil {
+					return BranchNavigateMsg{Err: err}
+				}
+				return BranchNavigateResultMsg{BranchID: branchID}
+			}
+		}
+		return a, nil
+
+	case BranchNavigateResultMsg:
+		a.branchPicker.SetActiveBranchID(msg.BranchID)
+		a.statusMessage = fmt.Sprintf("switched to branch: %s", msg.BranchID)
+		a.statusMessageTime = time.Now()
+		return a, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 			return StatusMessageClearMsg{}
 		})
 
@@ -1148,6 +1206,13 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
+
+	case ModalBranchPicker:
+		cmd := a.branchPicker.HandleKey(keyStr)
+		if !a.branchPicker.IsVisible() {
+			a.activeModal = ModalNone
+		}
+		return a, cmd
 	}
 
 	return a, nil
@@ -1295,6 +1360,8 @@ func (a *App) renderModalOverlay() string {
 		}
 	case ModalFuzzyFinder:
 		return a.fuzzyFinder.View(a.width, a.height)
+	case ModalBranchPicker:
+		return a.branchPicker.View(a.width, a.height)
 	}
 	return ""
 }
@@ -1583,6 +1650,11 @@ type StatusMessageClearMsg struct{}
 type BranchInfoMsg struct {
 	Branches []BranchInfo
 	Err      error
+}
+
+// BranchNavigateResultMsg carries the result of a successful branch navigation.
+type BranchNavigateResultMsg struct {
+	BranchID string
 }
 
 // fetchBranchInfo fetches branch info for the current session and logs it.

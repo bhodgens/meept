@@ -23,6 +23,7 @@ const (
 	ModalSessionRename
 	ModalConfirm
 	ModalFuzzyFinder
+	ModalBranchPicker
 )
 
 // ModalItem represents an item in a modal menu.
@@ -1189,4 +1190,270 @@ func formatRelativeTime(t time.Time) string {
 	}
 
 	return t.Format("Jan 2")
+}
+
+// BranchPickerModal is a modal for selecting and navigating to a conversation branch.
+type BranchPickerModal struct {
+	*Modal
+	branches       []BranchInfo
+	activeBranchID string // ID of the currently active branch
+	selected       int
+	rpc            *RPCClient
+	styles         *Styles
+	width          int
+	scrollOffset   int // For scrolling through long branch lists
+}
+
+// BranchNavigateMsg indicates a branch navigation request.
+type BranchNavigateMsg struct {
+	Branch BranchInfo
+	Err    error
+}
+
+// NewBranchPickerModal creates a new branch picker modal.
+func NewBranchPickerModal(styles *Styles, rpc *RPCClient) *BranchPickerModal {
+	return &BranchPickerModal{
+		Modal:   NewModal("branches", styles),
+		styles:  styles,
+		rpc:     rpc,
+		width:   80,
+	}
+}
+
+// RefreshBranches fetches the branch list from the daemon.
+func (b *BranchPickerModal) RefreshBranches(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		if b.rpc == nil || !b.rpc.IsConnected() {
+			return BranchInfoMsg{Branches: nil, Err: fmt.Errorf("not connected")}
+		}
+
+		branches, err := b.rpc.ListBranches(sessionID)
+		return BranchInfoMsg{Branches: branches, Err: err}
+	}
+}
+
+// SetBranches updates the branch list and resets selection.
+func (b *BranchPickerModal) SetBranches(branches []BranchInfo) {
+	b.branches = branches
+	b.selected = 0
+	b.scrollOffset = 0
+
+	// Default active branch to the first one if not set
+	if b.activeBranchID == "" && len(branches) > 0 {
+		b.activeBranchID = branches[0].ID
+	}
+
+	// Position selection on the active branch
+	for i, br := range branches {
+		if br.ID == b.activeBranchID {
+			b.selected = i
+			break
+		}
+	}
+}
+
+// SetActiveBranchID sets the currently active branch ID for indicator display.
+func (b *BranchPickerModal) SetActiveBranchID(id string) {
+	b.activeBranchID = id
+}
+
+// View renders the branch picker modal.
+func (b *BranchPickerModal) View(screenW, screenH int) string {
+	if !b.visible {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	boxStyle := b.styles.ModalBox.Width(b.width)
+
+	// Title
+	titleStyle := b.styles.ModalTitle.Width(b.width - 4)
+	sb.WriteString(titleStyle.Render("branches"))
+	sb.WriteString("\n")
+
+	// Separator
+	sb.WriteString(b.styles.Muted.Render(strings.Repeat("─", b.width-4)))
+	sb.WriteString("\n")
+
+	if len(b.branches) == 0 {
+		sb.WriteString(b.styles.Muted.Render("no branches found"))
+		sb.WriteString("\n")
+	} else {
+		// Column widths
+		idColWidth := 18
+		msgColWidth := 8
+		summaryColWidth := b.width - idColWidth - msgColWidth - 10 // 10 for spacing/indicators
+
+		// Header
+		header := fmt.Sprintf("  %-*s  %-*s  %s",
+			idColWidth, "branch id",
+			msgColWidth, "msgs",
+			"summary")
+		sb.WriteString(b.styles.Muted.Render(header))
+		sb.WriteString("\n")
+		sb.WriteString(b.styles.Muted.Render(strings.Repeat("─", b.width-4)))
+		sb.WriteString("\n")
+
+		// Calculate visible range for scrolling
+		maxVisible := min(len(b.branches), 15) // show up to 15 branches
+		if b.scrollOffset > len(b.branches)-maxVisible {
+			b.scrollOffset = max(0, len(b.branches)-maxVisible)
+		}
+		end := min(b.scrollOffset+maxVisible, len(b.branches))
+
+		for i := b.scrollOffset; i < end; i++ {
+			br := b.branches[i]
+			style := b.styles.ModalItem
+			if i == b.selected {
+				style = b.styles.ModalItemSelected
+			}
+
+			// Pointer for selected item
+			pointer := "  "
+			if i == b.selected {
+				pointer = "▸ "
+			}
+
+			// Active branch indicator
+			activeIndicator := " "
+			if br.ID == b.activeBranchID {
+				activeIndicator = "*"
+			}
+
+			// Branch ID (truncated)
+			branchID := br.ID
+			if len(branchID) > idColWidth {
+				branchID = branchID[:idColWidth-3] + "..."
+			} else {
+				branchID = fmt.Sprintf("%-*s", idColWidth, branchID)
+			}
+
+			// Message count
+			msgCount := fmt.Sprintf("%-*d", msgColWidth, br.MessageCount)
+
+			// Summary (truncated)
+			summary := br.Summary
+			if summary == "" {
+				summary = "(no summary)"
+			}
+			if len(summary) > summaryColWidth {
+				summary = summary[:summaryColWidth-3] + "..."
+			}
+
+			activeStyle := b.styles.Muted
+			if i == b.selected {
+				activeStyle = b.styles.ModalItemSelected
+			}
+			activeStr := activeStyle.Render(activeIndicator)
+
+			line := fmt.Sprintf("%s%s %s %s  %s", pointer, activeStr, branchID, msgCount, summary)
+			sb.WriteString(style.Render(line))
+			sb.WriteString("\n")
+		}
+
+		// Scroll indicator
+		if len(b.branches) > maxVisible {
+			sb.WriteString(b.styles.Muted.Render(fmt.Sprintf("  showing %d-%d of %d", b.scrollOffset+1, end, len(b.branches))))
+			sb.WriteString("\n")
+		}
+	}
+
+	// Footer with actions
+	sb.WriteString("\n")
+	sb.WriteString(b.styles.Muted.Render(strings.Repeat("─", b.width-4)))
+	sb.WriteString("\n")
+	actions := []string{
+		b.styles.HelpKey.Render("[↑/↓]") + b.styles.HelpValue.Render(" navigate"),
+		b.styles.HelpKey.Render("[enter]") + b.styles.HelpValue.Render(" switch"),
+		b.styles.HelpKey.Render("[esc]") + b.styles.HelpValue.Render(" cancel"),
+	}
+	sb.WriteString(strings.Join(actions, "  "))
+
+	content := boxStyle.Render(sb.String())
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, content)
+}
+
+// HandleKey processes key input for the branch picker.
+// Returns a tea.Cmd if an action should be performed.
+func (b *BranchPickerModal) HandleKey(keyStr string) tea.Cmd {
+	if len(b.branches) == 0 {
+		if keyStr == "esc" || keyStr == "q" {
+			b.Hide()
+		}
+		return nil
+	}
+
+	maxVisible := min(len(b.branches), 15)
+
+	switch keyStr {
+	case "up", "k":
+		if b.selected > 0 {
+			b.selected--
+			if b.selected < b.scrollOffset {
+				b.scrollOffset = b.selected
+			}
+		}
+	case "down", "j":
+		if b.selected < len(b.branches)-1 {
+			b.selected++
+			if b.selected >= b.scrollOffset+maxVisible {
+				b.scrollOffset = b.selected - maxVisible + 1
+			}
+		}
+	case "enter":
+		if b.selected >= 0 && b.selected < len(b.branches) {
+			br := b.branches[b.selected]
+			b.Hide()
+			return func() tea.Msg {
+				return BranchNavigateMsg{Branch: br}
+			}
+		}
+	case "esc", "q":
+		b.Hide()
+	}
+
+	return nil
+}
+
+// HandleMouse processes mouse events for the branch picker.
+func (b *BranchPickerModal) HandleMouse(msg tea.MouseMsg, screenW, screenH int) tea.Cmd {
+	if !b.visible || len(b.branches) == 0 {
+		return nil
+	}
+
+	click, ok := msg.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return nil
+	}
+
+	mouse := click.Mouse()
+
+	// Calculate modal dimensions and position (centered)
+	headerLines := 4 // title + separator + column header + separator
+	footerLines := 3 // separator + actions + padding
+	modalH := headerLines + min(len(b.branches), 15) + footerLines
+	modalX := (screenW - b.width) / 2
+	modalY := (screenH - modalH) / 2
+
+	// Check if click is within modal horizontal bounds
+	if mouse.X < modalX || mouse.X >= modalX+b.width {
+		return nil
+	}
+
+	relY := mouse.Y - modalY - headerLines
+	maxVisible := min(len(b.branches), 15)
+
+	if relY >= 0 && relY < maxVisible {
+		idx := b.scrollOffset + relY
+		if idx >= 0 && idx < len(b.branches) {
+			br := b.branches[idx]
+			b.Hide()
+			return func() tea.Msg {
+				return BranchNavigateMsg{Branch: br}
+			}
+		}
+	}
+
+	return nil
 }

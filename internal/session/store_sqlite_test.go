@@ -1113,3 +1113,255 @@ func TestSQLiteStore_MigrationIdempotent(t *testing.T) {
 	// Verify all 3 sessions exist
 	_ = os.Remove(dbPath)
 }
+
+func TestBackfillParentID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "backfill.db")
+
+	// Create a database with the old schema (no parent_id column).
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	oldSchema := `
+	CREATE TABLE sessions (
+		id              TEXT PRIMARY KEY,
+		name            TEXT NOT NULL,
+		conversation_id TEXT UNIQUE NOT NULL,
+		created_at      TEXT NOT NULL,
+		last_activity   TEXT NOT NULL,
+		attached_clients TEXT DEFAULT '[]',
+		worker_ids      TEXT DEFAULT '[]',
+		description     TEXT DEFAULT ''
+	);
+	CREATE TABLE session_messages (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id  TEXT NOT NULL,
+		role        TEXT NOT NULL,
+		content     TEXT NOT NULL,
+		timestamp   TEXT NOT NULL,
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	);`
+	if _, err := db.Exec(oldSchema); err != nil {
+		db.Close()
+		t.Fatalf("failed to create old schema: %v", err)
+	}
+
+	// Insert two sessions with multiple messages each.
+	ts := time.Now().UTC().Format(time.RFC3339)
+	for _, sid := range []string{"sess-a", "sess-b"} {
+		_, err := db.Exec(`INSERT INTO sessions (id, name, conversation_id, created_at, last_activity)
+			VALUES (?, ?, ?, ?, ?)`, sid, sid, "conv-"+sid, ts, ts)
+		if err != nil {
+			db.Close()
+			t.Fatalf("failed to insert session %s: %v", sid, err)
+		}
+
+		for i := 0; i < 5; i++ {
+			_, err := db.Exec(
+				`INSERT INTO session_messages (session_id, role, content, timestamp) VALUES (?, 'user', ?, ?)`,
+				sid, fmt.Sprintf("msg-%d", i), ts,
+			)
+			if err != nil {
+				db.Close()
+				t.Fatalf("failed to insert message %d for %s: %v", i, sid, err)
+			}
+		}
+	}
+
+	// Verify the message count before migration.
+	var msgCount int
+	err = db.QueryRow(`SELECT COUNT(*) FROM session_messages`).Scan(&msgCount)
+	if err != nil {
+		db.Close()
+		t.Fatalf("failed to count messages before migration: %v", err)
+	}
+	if msgCount != 10 {
+		db.Close()
+		t.Fatalf("expected 10 messages before migration, got %d", msgCount)
+	}
+	db.Close()
+
+	// Open with SQLiteStore — triggers migration including backfill.
+	store, err := NewSQLiteStore(dbPath, slog.Default())
+	if err != nil {
+		t.Fatalf("failed to open SQLiteStore: %v", err)
+	}
+	defer store.Close()
+
+	// Verify backfill for sess-a.
+	verifyBackfill(t, store, "sess-a", 5)
+	// Verify backfill for sess-b.
+	verifyBackfill(t, store, "sess-b", 5)
+
+	// Verify idempotency: re-open the store and confirm nothing changes.
+	store.Close()
+	store2, err := NewSQLiteStore(dbPath, slog.Default())
+	if err != nil {
+		t.Fatalf("failed to reopen SQLiteStore: %v", err)
+	}
+	defer store2.Close()
+
+	verifyBackfill(t, store2, "sess-a", 5)
+	verifyBackfill(t, store2, "sess-b", 5)
+}
+
+func verifyBackfill(t *testing.T, store *SQLiteStore, sessionID string, expectedCount int) {
+	t.Helper()
+
+	msgs, err := store.GetMessages(sessionID, 0, 100)
+	if err != nil {
+		t.Fatalf("failed to get messages for %s: %v", sessionID, err)
+	}
+	if len(msgs) != expectedCount {
+		t.Fatalf("expected %d messages for %s, got %d", expectedCount, sessionID, len(msgs))
+	}
+
+	// First message must have nil parent_id.
+	if msgs[0].ParentID != nil {
+		t.Errorf("first message in %s should have nil parent_id, got %d", sessionID, *msgs[0].ParentID)
+	}
+
+	// Each subsequent message should point to the previous one.
+	for i := 1; i < len(msgs); i++ {
+		if msgs[i].ParentID == nil {
+			t.Errorf("message %d in %s (id=%d) should have non-nil parent_id", i, sessionID, msgs[i].ID)
+		} else if *msgs[i].ParentID != msgs[i-1].ID {
+			t.Errorf("message %d in %s: expected parent_id=%d, got %d",
+				i, sessionID, msgs[i-1].ID, *msgs[i].ParentID)
+		}
+	}
+}
+
+func TestBackfillParentID_WithExistingValues(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "backfill_existing.db")
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+
+	// Create schema with parent_id column already present.
+	oldSchema := `
+	CREATE TABLE sessions (
+		id              TEXT PRIMARY KEY,
+		name            TEXT NOT NULL,
+		conversation_id TEXT UNIQUE NOT NULL,
+		created_at      TEXT NOT NULL,
+		last_activity   TEXT NOT NULL,
+		attached_clients TEXT DEFAULT '[]',
+		worker_ids      TEXT DEFAULT '[]',
+		description     TEXT DEFAULT ''
+	);
+	CREATE TABLE session_messages (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id  TEXT NOT NULL,
+		role        TEXT NOT NULL,
+		content     TEXT NOT NULL,
+		timestamp   TEXT NOT NULL,
+		parent_id   INTEGER,
+		FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+	);`
+	if _, err := db.Exec(oldSchema); err != nil {
+		db.Close()
+		t.Fatalf("failed to create schema: %v", err)
+	}
+
+	ts := time.Now().UTC().Format(time.RFC3339)
+	_, err = db.Exec(`INSERT INTO sessions (id, name, conversation_id, created_at, last_activity)
+		VALUES ('sess-mixed', 'mixed', 'conv-mixed', ?, ?)`, ts, ts)
+	if err != nil {
+		db.Close()
+		t.Fatalf("failed to insert session: %v", err)
+	}
+
+	// Insert 4 messages: some with parent_id already set, some without.
+	// msg1: root (parent_id = NULL) -> should stay NULL
+	// msg2: already has parent_id = msg1.id -> should NOT be overwritten
+	// msg3: parent_id = NULL -> should be backfilled to msg2.id
+	// msg4: parent_id = NULL -> should be backfilled to msg3.id
+
+	// msg1 - root, no parent
+	res, err := db.Exec(`INSERT INTO session_messages (session_id, role, content, timestamp, parent_id) VALUES ('sess-mixed', 'user', 'msg1', ?, NULL)`, ts)
+	if err != nil {
+		db.Close()
+		t.Fatalf("failed to insert msg1: %v", err)
+	}
+	msg1ID, _ := res.LastInsertId()
+
+	// msg2 - already has parent pointing to msg1
+	res, err = db.Exec(`INSERT INTO session_messages (session_id, role, content, timestamp, parent_id) VALUES ('sess-mixed', 'assistant', 'msg2', ?, ?)`, ts, msg1ID)
+	if err != nil {
+		db.Close()
+		t.Fatalf("failed to insert msg2: %v", err)
+	}
+	msg2ID, _ := res.LastInsertId()
+
+	// msg3 - no parent (needs backfill)
+	res, err = db.Exec(`INSERT INTO session_messages (session_id, role, content, timestamp, parent_id) VALUES ('sess-mixed', 'user', 'msg3', ?, NULL)`, ts)
+	if err != nil {
+		db.Close()
+		t.Fatalf("failed to insert msg3: %v", err)
+	}
+	msg3ID, _ := res.LastInsertId()
+
+	// msg4 - no parent (needs backfill)
+	res, err = db.Exec(`INSERT INTO session_messages (session_id, role, content, timestamp, parent_id) VALUES ('sess-mixed', 'assistant', 'msg4', ?, NULL)`, ts)
+	if err != nil {
+		db.Close()
+		t.Fatalf("failed to insert msg4: %v", err)
+	}
+	msg4ID, _ := res.LastInsertId()
+
+	db.Close()
+
+	// Open with SQLiteStore to trigger migration.
+	store, err := NewSQLiteStore(dbPath, slog.Default())
+	if err != nil {
+		t.Fatalf("failed to open SQLiteStore: %v", err)
+	}
+	defer store.Close()
+
+	msgs, err := store.GetMessages("sess-mixed", 0, 100)
+	if err != nil {
+		t.Fatalf("failed to get messages: %v", err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(msgs))
+	}
+
+	// msg1: root, parent_id should stay nil.
+	if msgs[0].ParentID != nil {
+		t.Errorf("msg1 (id=%d) should have nil parent_id, got %d", msgs[0].ID, *msgs[0].ParentID)
+	}
+
+	// msg2: already had parent_id pointing to msg1, should be unchanged.
+	if msgs[1].ParentID == nil {
+		t.Errorf("msg2 (id=%d) should have non-nil parent_id", msgs[1].ID)
+	} else if *msgs[1].ParentID != msg1ID {
+		t.Errorf("msg2: expected parent_id=%d (original), got %d", msg1ID, *msgs[1].ParentID)
+	}
+
+	// msg3: was NULL, should now be backfilled to msg2's id.
+	if msgs[2].ParentID == nil {
+		t.Errorf("msg3 (id=%d) should have been backfilled with parent_id=%d", msgs[2].ID, msg2ID)
+	} else if *msgs[2].ParentID != msg2ID {
+		t.Errorf("msg3: expected parent_id=%d, got %d", msg2ID, *msgs[2].ParentID)
+	}
+
+	// msg4: was NULL, should now be backfilled to msg3's id.
+	if msgs[3].ParentID == nil {
+		t.Errorf("msg4 (id=%d) should have been backfilled with parent_id=%d", msgs[3].ID, msg3ID)
+	} else if *msgs[3].ParentID != msg3ID {
+		t.Errorf("msg4: expected parent_id=%d, got %d", msg3ID, *msgs[3].ParentID)
+	}
+
+	// Sanity-check IDs match what we inserted.
+	if msgs[0].ID != msg1ID || msgs[1].ID != msg2ID || msgs[2].ID != msg3ID || msgs[3].ID != msg4ID {
+		t.Errorf("message IDs don't match expected: got %d,%d,%d,%d; expected %d,%d,%d,%d",
+			msgs[0].ID, msgs[1].ID, msgs[2].ID, msgs[3].ID,
+			msg1ID, msg2ID, msg3ID, msg4ID)
+	}
+}
