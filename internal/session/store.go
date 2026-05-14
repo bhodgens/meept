@@ -36,6 +36,18 @@ type Branch struct {
 	Summary      string `json:"summary,omitempty"`
 }
 
+// CompactionEntry represents a compaction entry that summarizes a range of
+// compressed messages. The Content field holds the raw JSON and CompressedIDs
+// is parsed from that JSON for convenience.
+type CompactionEntry struct {
+	ID            int64   `json:"id"`
+	SessionID     string  `json:"session_id"`
+	ParentID      *int64  `json:"parent_id,omitempty"`
+	Content       string  `json:"content"`
+	Timestamp     time.Time `json:"timestamp"`
+	CompressedIDs []int64 `json:"compressed_ids"`
+}
+
 // TreeNode represents a single node in the conversation tree for visualization.
 type TreeNode struct {
 	ID        int64  `json:"id"`
@@ -138,6 +150,10 @@ type Store interface {
 	// to compactionID instead. This ensures the tree path walks through the
 	// compaction entry, skipping the compacted messages.
 	ReparentAfterCompaction(sessionID string, afterID int64, compactionID int64) error
+
+	// GetCompactionEntries retrieves all compaction entries for a session,
+	// ordered by ID. Returns an empty slice if no compaction entries exist.
+	GetCompactionEntries(sessionID string) ([]CompactionEntry, error)
 
 	// SaveToolCalls persists tool calls associated with a message.
 	SaveToolCalls(messageID int64, toolCalls []ToolCall) error

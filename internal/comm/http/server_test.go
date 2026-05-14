@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
 )
@@ -854,5 +855,145 @@ func TestHandleChatStream_NoService(t *testing.T) {
 	}
 	if body["error"] != "bus service not available" {
 		t.Errorf("error = %s, want 'bus service not available'", body["error"])
+	}
+}
+
+func TestHandleChatStream_SSEToolProgressEvent(t *testing.T) {
+	t.Parallel()
+
+	// Create a real bus and wrap it in a BusService
+	msgBus := bus.New(nil, nil)
+	busSvc := services.NewBusService(msgBus)
+	svcReg := &services.ServiceRegistry{Bus: busSvc}
+	server := NewServer(ServerConfig{EnableCORS: true}, nil, nil, nil, svcReg, nil)
+
+	// Create a cancellable context to simulate client disconnect
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/stream", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	// Run the handler in a goroutine since it blocks on the event loop
+	done := make(chan struct{})
+	go func() {
+		server.handleChatStream(w, req)
+		close(done)
+	}()
+
+	// Wait briefly for the handler to subscribe, then publish a progress event
+	time.Sleep(50 * time.Millisecond)
+
+	progressPayload := map[string]any{
+		"tool_call_id": "call_123",
+		"tool_name":    "file_read",
+		"agent_id":     "coder",
+		"message":      "reading file...",
+		"percent":      50,
+	}
+	_ = busSvc.Publish(context.Background(), services.PublishRequest{
+		Topic:   "tool.execution.progress",
+		Type:    "event",
+		Source:  "executor",
+		Payload: progressPayload,
+	})
+
+	// Give the event time to propagate
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel context to stop the handler
+	cancel()
+
+	// Wait for handler to finish
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not finish in time")
+	}
+
+	body := w.Body.String()
+
+	// Should contain the connected event
+	if !strings.Contains(body, "event: connected") {
+		t.Error("expected connected event in SSE output")
+	}
+
+	// Should contain the tool_progress event with correct data
+	if !strings.Contains(body, "event: tool_progress") {
+		t.Error("expected tool_progress event in SSE output")
+	}
+	if !strings.Contains(body, `"tool_name":"file_read"`) {
+		t.Errorf("expected tool_name in SSE data, got: %s", body)
+	}
+	if !strings.Contains(body, `"tool_call_id":"call_123"`) {
+		t.Errorf("expected tool_call_id in SSE data, got: %s", body)
+	}
+	if !strings.Contains(body, `"percent":50`) {
+		t.Errorf("expected percent in SSE data, got: %s", body)
+	}
+
+	// Verify SSE headers
+	ct := w.Header().Get("Content-Type")
+	if ct != "text/event-stream" {
+		t.Errorf("Content-Type = %s, want text/event-stream", ct)
+	}
+}
+
+func TestHandleChatStream_SSEToolCompleteEvent(t *testing.T) {
+	t.Parallel()
+
+	msgBus := bus.New(nil, nil)
+	busSvc := services.NewBusService(msgBus)
+	svcReg := &services.ServiceRegistry{Bus: busSvc}
+	server := NewServer(ServerConfig{EnableCORS: true}, nil, nil, nil, svcReg, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/stream", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		server.handleChatStream(w, req)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	completePayload := map[string]any{
+		"tool_call_id": "call_456",
+		"tool_name":    "shell",
+		"agent_id":     "coder",
+		"success":      true,
+		"terminate":    true,
+		"cached":       false,
+	}
+	_ = busSvc.Publish(context.Background(), services.PublishRequest{
+		Topic:   "tool.execution.complete",
+		Type:    "event",
+		Source:  "executor",
+		Payload: completePayload,
+	})
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not finish in time")
+	}
+
+	body := w.Body.String()
+
+	if !strings.Contains(body, "event: tool_complete") {
+		t.Error("expected tool_complete event in SSE output")
+	}
+	if !strings.Contains(body, `"tool_call_id":"call_456"`) {
+		t.Errorf("expected tool_call_id in SSE data, got: %s", body)
+	}
+	if !strings.Contains(body, `"terminate":true`) {
+		t.Errorf("expected terminate in SSE data, got: %s", body)
 	}
 }

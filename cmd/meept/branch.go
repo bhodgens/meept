@@ -29,6 +29,7 @@ Examples:
 	}
 
 	cmd.AddCommand(newBranchListCmd())
+	cmd.AddCommand(newBranchSummaryCmd())
 	cmd.AddCommand(newBranchNavigateCmd())
 	cmd.AddCommand(newBranchForkCmd())
 	cmd.AddCommand(newBranchTreeCmd())
@@ -48,6 +49,27 @@ Displays an indented tree-like list showing branch names, message counts,
 and summary status.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBranchList(sessionID)
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session", "", "Session ID (defaults to most recent)")
+
+	return cmd
+}
+
+func newBranchSummaryCmd() *cobra.Command {
+	var sessionID string
+
+	cmd := &cobra.Command{
+		Use:   "summary",
+		Short: "show a summary of each branch in a session",
+		Long: `Display a summary of each conversation branch in a session.
+
+Shows branch IDs, message counts, and the full summary text for each
+branch (if available). Summaries are generated automatically when
+navigating away from a branch with enough abandoned messages.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBranchSummary(sessionID)
 		},
 	}
 
@@ -186,6 +208,75 @@ func runBranchList(sessionID string) error {
 }
 
 type branchInfo = types.BranchInfo
+
+func runBranchSummary(sessionID string) error {
+	client, err := connectDaemon()
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
+	}
+	defer client.Close()
+
+	if sessionID == "" {
+		sessionID, err = resolveMostRecentSessionID(client)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Call session.branches.list
+	result, err := client.Call("session.branches.list", map[string]string{"session_id": sessionID})
+	if err != nil {
+		return fmt.Errorf("failed to list branches: %w", err)
+	}
+
+	var resp struct {
+		Branches []branchInfo `json:"branches"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return fmt.Errorf("failed to parse branches response: %w", err)
+	}
+
+	if len(resp.Branches) == 0 {
+		fmt.Println("no branches found")
+		return nil
+	}
+
+	fmt.Println("branch summaries")
+	fmt.Println("================")
+	fmt.Println()
+
+	for i, b := range resp.Branches {
+		currentTag := ""
+		if i == 0 {
+			currentTag = " (current)"
+		}
+
+		if i == 0 {
+			fmt.Printf("  %s%s (%d msgs)\n",
+				b.ID,
+				currentTag,
+				b.MessageCount,
+			)
+		} else {
+			fmt.Printf("  └─ %s (%d msgs)\n",
+				b.ID,
+				b.MessageCount,
+			)
+		}
+
+		if b.Summary != "" {
+			// Indent the summary text under the branch entry
+			for _, line := range strings.Split(b.Summary, "\n") {
+				fmt.Printf("     %s\n", line)
+			}
+		} else {
+			fmt.Println("     (no summary)")
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
 
 func runBranchNavigate(sessionID string, targetMessageID int64) error {
 	client, err := connectDaemon()

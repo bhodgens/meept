@@ -618,6 +618,35 @@ func (s *MemoryStore) ReparentAfterCompaction(sessionID string, afterID int64, c
 	return fmt.Errorf("not implemented: ReparentAfterCompaction in MemoryStore")
 }
 
+// GetCompactionEntries retrieves compaction entries from in-memory messages.
+// It filters messages by entry_type 'compaction' and parses the JSON content
+// to extract CompressedIDs.
+func (s *MemoryStore) GetCompactionEntries(sessionID string) ([]CompactionEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	msgs := s.messages[sessionID]
+	var entries []CompactionEntry
+	for _, msg := range msgs {
+		if msg.EntryType != "compaction" {
+			continue
+		}
+		entry := CompactionEntry{
+			ID:        msg.ID,
+			SessionID: msg.SessionID,
+			ParentID:  msg.ParentID,
+			Content:   msg.Content,
+			Timestamp: msg.Timestamp,
+		}
+		var content CompactionContent
+		if err := json.Unmarshal([]byte(msg.Content), &content); err == nil {
+			entry.CompressedIDs = content.CompressedIDs
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
 // SaveToolCalls is not supported for MemoryStore (tool calls are only persisted in SQLite).
 func (s *MemoryStore) SaveToolCalls(messageID int64, toolCalls []ToolCall) error {
 	return nil

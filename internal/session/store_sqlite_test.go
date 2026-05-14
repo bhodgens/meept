@@ -1365,3 +1365,185 @@ func TestBackfillParentID_WithExistingValues(t *testing.T) {
 			msg1ID, msg2ID, msg3ID, msg4ID)
 	}
 }
+
+func TestSQLiteStore_GetCompactionEntries_WithEntries(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	session, err := store.Create("test-compaction")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Create a message chain so we have a valid parent for compaction.
+	msgs := []Message{
+		{SessionID: session.ID, Role: "user", Content: "hello", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "assistant", Content: "hi there", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "user", Content: "how are you", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "assistant", Content: "doing well", EntryType: "message", BranchID: "main"},
+	}
+	if err := store.SaveMessages(session.ID, msgs); err != nil {
+		t.Fatalf("failed to save messages: %v", err)
+	}
+
+	allMsgs, err := store.GetMessages(session.ID, 0, 100)
+	if err != nil {
+		t.Fatalf("failed to get messages: %v", err)
+	}
+	if len(allMsgs) < 4 {
+		t.Fatalf("expected at least 4 messages, got %d", len(allMsgs))
+	}
+
+	// Insert a compaction entry replacing messages 2 and 3 (IDs at index 1 and 2).
+	compactionID, err := store.InsertCompaction(
+		session.ID,
+		allMsgs[0].ID,   // parent is message 1
+		"Summary of messages 2 and 3",
+		[]int64{allMsgs[1].ID, allMsgs[2].ID},
+	)
+	if err != nil {
+		t.Fatalf("failed to insert compaction: %v", err)
+	}
+	if compactionID <= 0 {
+		t.Fatalf("expected positive compaction ID, got %d", compactionID)
+	}
+
+	// Retrieve compaction entries.
+	entries, err := store.GetCompactionEntries(session.ID)
+	if err != nil {
+		t.Fatalf("failed to get compaction entries: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 compaction entry, got %d", len(entries))
+	}
+
+	e := entries[0]
+	if e.ID != compactionID {
+		t.Errorf("expected ID %d, got %d", compactionID, e.ID)
+	}
+	if e.SessionID != session.ID {
+		t.Errorf("expected session_id %q, got %q", session.ID, e.SessionID)
+	}
+	if e.ParentID == nil {
+		t.Error("expected parent_id to be set")
+	} else if *e.ParentID != allMsgs[0].ID {
+		t.Errorf("expected parent_id %d, got %d", allMsgs[0].ID, *e.ParentID)
+	}
+	if len(e.CompressedIDs) != 2 {
+		t.Fatalf("expected 2 compressed IDs, got %d", len(e.CompressedIDs))
+	}
+	if e.CompressedIDs[0] != allMsgs[1].ID || e.CompressedIDs[1] != allMsgs[2].ID {
+		t.Errorf("expected compressed IDs [%d,%d], got [%d,%d]",
+			allMsgs[1].ID, allMsgs[2].ID, e.CompressedIDs[0], e.CompressedIDs[1])
+	}
+	if e.Timestamp.IsZero() {
+		t.Error("expected non-zero timestamp")
+	}
+	// Content should contain valid JSON with the summary.
+	if e.Content == "" {
+		t.Error("expected non-empty content")
+	}
+}
+
+func TestSQLiteStore_GetCompactionEntries_NoEntries(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	session, err := store.Create("test-no-compaction")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Add some regular messages (no compaction entries).
+	msgs := []Message{
+		{SessionID: session.ID, Role: "user", Content: "hello", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "assistant", Content: "hi", EntryType: "message", BranchID: "main"},
+	}
+	if err := store.SaveMessages(session.ID, msgs); err != nil {
+		t.Fatalf("failed to save messages: %v", err)
+	}
+
+	entries, err := store.GetCompactionEntries(session.ID)
+	if err != nil {
+		t.Fatalf("failed to get compaction entries: %v", err)
+	}
+
+	if len(entries) != 0 {
+		t.Errorf("expected 0 compaction entries, got %d", len(entries))
+	}
+}
+
+func TestSQLiteStore_GetCompactionEntries_MultipleEntries(t *testing.T) {
+	store, _ := testHelper(t)
+	defer store.Close()
+
+	session, err := store.Create("test-multi-compaction")
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Create messages for the session.
+	msgs := []Message{
+		{SessionID: session.ID, Role: "user", Content: "msg1", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "assistant", Content: "msg2", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "user", Content: "msg3", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "assistant", Content: "msg4", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "user", Content: "msg5", EntryType: "message", BranchID: "main"},
+		{SessionID: session.ID, Role: "assistant", Content: "msg6", EntryType: "message", BranchID: "main"},
+	}
+	if err := store.SaveMessages(session.ID, msgs); err != nil {
+		t.Fatalf("failed to save messages: %v", err)
+	}
+
+	allMsgs, err := store.GetMessages(session.ID, 0, 100)
+	if err != nil {
+		t.Fatalf("failed to get messages: %v", err)
+	}
+
+	// Insert two compaction entries.
+	id1, err := store.InsertCompaction(
+		session.ID,
+		allMsgs[0].ID,
+		"First compaction summary",
+		[]int64{allMsgs[1].ID, allMsgs[2].ID},
+	)
+	if err != nil {
+		t.Fatalf("failed to insert first compaction: %v", err)
+	}
+
+	id2, err := store.InsertCompaction(
+		session.ID,
+		id1, // parent is the first compaction entry
+		"Second compaction summary",
+		[]int64{allMsgs[3].ID, allMsgs[4].ID},
+	)
+	if err != nil {
+		t.Fatalf("failed to insert second compaction: %v", err)
+	}
+
+	entries, err := store.GetCompactionEntries(session.ID)
+	if err != nil {
+		t.Fatalf("failed to get compaction entries: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 compaction entries, got %d", len(entries))
+	}
+
+	// Entries should be ordered by ID.
+	if entries[0].ID != id1 {
+		t.Errorf("expected first entry ID %d, got %d", id1, entries[0].ID)
+	}
+	if entries[1].ID != id2 {
+		t.Errorf("expected second entry ID %d, got %d", id2, entries[1].ID)
+	}
+
+	// Verify each entry has correct compressed IDs.
+	if len(entries[0].CompressedIDs) != 2 {
+		t.Errorf("first entry: expected 2 compressed IDs, got %d", len(entries[0].CompressedIDs))
+	}
+	if len(entries[1].CompressedIDs) != 2 {
+		t.Errorf("second entry: expected 2 compressed IDs, got %d", len(entries[1].CompressedIDs))
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/skills"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/security"
 )
 
@@ -35,6 +36,41 @@ func (m *mockLLMClient) Chat(ctx context.Context, messages []llm.ChatMessage, op
 	resp := m.responses[m.callCount]
 	m.callCount++
 	return resp, nil
+}
+
+func (m *mockLLMClient) ChatWithProgress(ctx context.Context, messages []llm.ChatMessage, progress llm.ProgressCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return m.Chat(ctx, messages, opts...)
+}
+
+func (m *mockLLMClient) Config() *llm.ModelConfig {
+	return &llm.ModelConfig{ModelID: "mock-model"}
+}
+
+// mockChatter implements llm.Chatter for testing the terminate path.
+type mockChatter struct {
+	responses []*llm.Response
+	callCount int
+}
+
+func newMockChatter(responses ...*llm.Response) *mockChatter {
+	return &mockChatter{responses: responses}
+}
+
+func (m *mockChatter) Chat(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	if m.callCount >= len(m.responses) {
+		return nil, errors.New("no more mock responses")
+	}
+	resp := m.responses[m.callCount]
+	m.callCount++
+	return resp, nil
+}
+
+func (m *mockChatter) ChatWithProgress(ctx context.Context, messages []llm.ChatMessage, progress llm.ProgressCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return m.Chat(ctx, messages, opts...)
+}
+
+func (m *mockChatter) Config() *llm.ModelConfig {
+	return &llm.ModelConfig{ModelID: "mock-chatter"}
 }
 
 func TestNewAgentLoop(t *testing.T) {
@@ -753,5 +789,174 @@ func TestAgentLoop_PublishTokenUsage(t *testing.T) {
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timeout waiting for token usage event")
+	}
+}
+
+func TestBuildTerminateResponse(t *testing.T) {
+	t.Run("single successful result", func(t *testing.T) {
+		loop := NewAgentLoop()
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Result: map[string]any{"answer": 42}},
+		}
+		got := loop.buildTerminateResponse(results)
+		if !strings.Contains(got, `"answer"`) || !strings.Contains(got, "42") {
+			t.Errorf("expected result content, got: %s", got)
+		}
+	})
+
+	t.Run("multiple successful results joined", func(t *testing.T) {
+		loop := NewAgentLoop()
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Result: "first"},
+			{ToolCallID: "c2", Success: true, Result: "second"},
+		}
+		got := loop.buildTerminateResponse(results)
+		if !strings.Contains(got, "first") || !strings.Contains(got, "second") {
+			t.Errorf("expected both results, got: %s", got)
+		}
+	})
+
+	t.Run("skips failed results", func(t *testing.T) {
+		loop := NewAgentLoop()
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: false, Error: "failed"},
+			{ToolCallID: "c2", Success: true, Result: "ok"},
+		}
+		got := loop.buildTerminateResponse(results)
+		if !strings.Contains(got, "ok") {
+			t.Errorf("expected successful result, got: %s", got)
+		}
+		if strings.Contains(got, "failed") {
+			t.Error("should not contain failed result")
+		}
+	})
+
+	t.Run("all failed returns done", func(t *testing.T) {
+		loop := NewAgentLoop()
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: false, Error: "err"},
+		}
+		got := loop.buildTerminateResponse(results)
+		if got != "done" {
+			t.Errorf("expected 'done', got: %s", got)
+		}
+	})
+}
+
+// mockTerminatingLoopTool returns a ToolResult with Terminate=true for the loop test.
+type mockTerminatingLoopTool struct {
+	name string
+}
+
+func (t *mockTerminatingLoopTool) Name() string        { return t.name }
+func (t *mockTerminatingLoopTool) Description() string { return "terminating test tool" }
+func (t *mockTerminatingLoopTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{Type: "object", Properties: map[string]llm.ParameterProperty{}}
+}
+func (t *mockTerminatingLoopTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	return &tools.ToolResult{
+		Success:   true,
+		Result:    "final answer from terminating tool",
+		Terminate: true,
+	}, nil
+}
+
+func TestAgentLoop_TerminatePathReturnsToolResults(t *testing.T) {
+	// Set up a terminating tool in the registry
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(&mockTerminatingLoopTool{name: "platform_status"})
+
+	secChecker := security.NewPermissionChecker(security.Config{})
+
+	// Create an executor with the terminating tool
+	executor := NewExecutor(registry, secChecker)
+
+	// Create the loop with the executor
+	loop := NewAgentLoop(
+		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
+	)
+	loop.executor = executor
+
+	// Execute tool calls directly and verify the terminate path
+	toolCalls := []llm.ToolCall{
+		{ID: "tc-1", Type: "function", Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"}},
+	}
+
+	results := loop.executeToolCalls(context.Background(), toolCalls)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	if !results[0].Success {
+		t.Errorf("expected success, got error: %s", results[0].Error)
+	}
+	if !results[0].Terminate {
+		t.Error("expected Terminate=true from terminating tool")
+	}
+
+	// Verify ShouldTerminate correctly identifies all-terminate batch
+	if !ShouldTerminate(results) {
+		t.Error("ShouldTerminate should return true when all results have Terminate=true")
+	}
+
+	// Verify buildTerminateResponse produces expected output
+	response := loop.buildTerminateResponse(results)
+	if !strings.Contains(response, "final answer from terminating tool") {
+		t.Errorf("expected tool result in response, got: %s", response)
+	}
+}
+
+func TestAgentLoop_TerminatePathSkipsLLMFollowUp(t *testing.T) {
+	// This test verifies that when all tools signal termination,
+	// no additional LLM call is needed. We use the mock chatter
+	// and verify it is never called (callCount stays 0).
+	chatter := newMockChatter(
+		// First response: LLM returns a tool call to the terminating tool
+		&llm.Response{
+			Content:      "I will look that up",
+			FinishReason: "tool_calls",
+			ToolCalls: []llm.ToolCall{
+				{ID: "tc-term", Type: "function", Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"}},
+			},
+		},
+		// Second response: should never be reached due to termination
+		&llm.Response{
+			Content:      "this should never be reached",
+			FinishReason: "stop",
+		},
+	)
+
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(&mockTerminatingLoopTool{name: "platform_status"})
+
+	secChecker := security.NewPermissionChecker(security.Config{})
+	testBus := bus.New(nil, slogDiscardLogger())
+	executor := NewExecutor(registry, secChecker)
+
+	loop := NewAgentLoop(
+		WithLLMChatter(chatter),
+		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
+		WithMessageBus(testBus),
+		WithAgentConfig(AgentConfig{MaxIterations: 10}),
+	)
+	loop.executor = executor
+
+	// Run the loop
+	response, err := loop.RunOnce(context.Background(), "test query", "conv-term-test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The response should contain the tool result, not the LLM follow-up
+	if !strings.Contains(response, "final answer from terminating tool") {
+		t.Errorf("expected tool result in response, got: %s", response)
+	}
+
+	// The LLM chatter should have been called exactly once (for the initial tool call response)
+	// The second response should NOT have been consumed because termination skipped the follow-up
+	if chatter.callCount != 1 {
+		t.Errorf("expected exactly 1 LLM call, got %d (terminate should skip follow-up)", chatter.callCount)
 	}
 }

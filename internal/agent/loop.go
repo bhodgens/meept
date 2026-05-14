@@ -1240,7 +1240,15 @@ func (l *AgentLoop) maybeCompact(conversationID string) {
 		}
 	}
 
+	// Emit before-compact event
+	l.emitSafe(context.Background(), AgentEventSessionBeforeCompact, SessionBeforeCompactData{
+		MessageCount: conv.Len(),
+		TokenCount:   0, // not available at this layer
+		Reason:       "session_compaction",
+	})
+
 	// Perform the actual in-memory removal
+	msgCountBefore := conv.Len()
 	tokensSaved := conv.RemoveCompactedMessages(candidates)
 
 	if tokensSaved > 0 {
@@ -1286,6 +1294,14 @@ func (l *AgentLoop) maybeCompact(conversationID string) {
 			"compaction_id", compactionID,
 			"compressed_count", len(compressedIDs),
 		)
+
+		// Emit after-compact event
+		l.emitSafe(context.Background(), AgentEventSessionCompact, SessionCompactData{
+			MessageCountBefore: msgCountBefore,
+			MessageCountAfter:  conv.Len(),
+			TokensSaved:        tokensSaved,
+			Method:             "session_compaction",
+		})
 	}
 }
 
@@ -1416,9 +1432,12 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 		})
 	}()
 
-	// Sanitize user input through security orchestrator
+	// Sanitize user input through security orchestrator.
+	// Only run direct sanitization if hooks are not registered -- when hooks
+	// are active, the SecurityTransformContext hook handles this during the
+	// TransformContext phase inside the reasoning cycle.
 	sanitizedMessage := userMessage
-	if l.securityOrch != nil {
+	if l.hooks == nil && l.securityOrch != nil {
 		cleanText, blocked, warnings := l.securityOrch.SanitizeInput(userMessage)
 		if blocked {
 			l.logger.Warn("User input blocked by security",
@@ -1976,6 +1995,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				"budget", convBudget,
 				"conversation", conversationID,
 			)
+			l.emitterWaitForIdle(ctx)
 			return "I've used my full token budget for this request. Here is what I accomplished so far -- " +
 				"please let me know if you'd like me to continue in a follow-up.", ErrConversationBudgetExhausted
 		}
@@ -2010,9 +2030,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			"conversation", conversationID,
 		)
 
-		// Publish progress: thinking
-		l.publishProgress(conversationID, iteration, "thinking", "", totalTokens)
-
 		// Update watchdog heartbeat
 		if l.watchdog != nil {
 			workerID := l.agentID + ":" + conversationID
@@ -2040,9 +2057,40 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			},
 		})
 
+		// Run PrepareNextTurn hooks (between turns, after TurnStart)
+		if l.hooks != nil && iteration > 1 {
+			mod := l.hooks.RunPrepareNextTurn(ctx, TurnState{
+				ConversationID: conversationID,
+				Iteration:      iteration,
+				Messages:       conv.GetMessages(),
+				ModelRef:       modelRef,
+				TotalTokens:    totalTokens,
+			})
+			if mod.Modified {
+				l.logger.Debug("Next turn modified by hook", "reason", mod.Reason)
+				if len(mod.ExtraMessages) > 0 {
+					for _, em := range mod.ExtraMessages {
+						conv.AddUserMessage(em.Content)
+					}
+				}
+				if mod.ModelOverride != "" && l.llmClient != nil {
+					// Switch model for this turn
+					if l.resolver != nil {
+						mc, resolveErr := l.resolver.ResolveForAlias(mod.ModelOverride)
+						if resolveErr == nil {
+							l.llmClient.SwitchModel(mc)
+							l.logger.Debug("Model overridden by PrepareNextTurn hook",
+								"model", mc.ModelID,
+							)
+						}
+					}
+				}
+			}
+		}
+
 		// Enforce token budget before LLM call to prevent context explosion.
 		// Reserve space for tool definitions using accurate token counting.
-		// Tool definitions are sent alongside messages but not counted by TruncateByTokens.
+		// Tool definitions are sent alongside messages but not counted by GetWindowedMessages.
 		var toolOverhead int
 		if len(tools) > 0 {
 			// Use actual token counting for tool definitions
@@ -2053,14 +2101,46 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		effectiveBudget := max(IterationTokenBudget-toolOverhead,
 			// minimum budget for messages
 			2000)
-		removed := conv.TruncateByTokens(effectiveBudget)
-		if removed > 0 {
-			l.logger.Debug("Truncated conversation for token budget",
-				"removed", removed,
-				"budget", effectiveBudget,
-				"tool_overhead", toolOverhead,
-				"conversation", conversationID,
-			)
+
+		// When tree-based compaction is active, skip legacy TruncateByTokens.
+		// Compaction is handled by maybeCompact (runs after each turn) which
+		// emits persistent compaction entries to SQLite. GetWindowedMessages
+		// below handles windowing for the current LLM call without deleting.
+		useCompaction := l.sessionStore != nil && l.sessionConfig.Compaction && !l.sessionConfig.LegacyTruncation
+		if !useCompaction {
+			msgCountBefore := conv.Len()
+			removed := conv.TruncateByTokens(effectiveBudget)
+			if removed > 0 {
+				l.logger.Debug("Truncated conversation for token budget",
+					"removed", removed,
+					"budget", effectiveBudget,
+					"tool_overhead", toolOverhead,
+					"conversation", conversationID,
+				)
+
+				// Emit compaction events for truncation
+				l.emitSafeWithFields(ctx, AgentEvent{
+					Type:           AgentEventSessionBeforeCompact,
+					ConversationID: conversationID,
+					Iteration:      iteration,
+					Data: SessionBeforeCompactData{
+						MessageCount: msgCountBefore,
+						TokenCount:   totalTokens,
+						Reason:       "token_budget_truncation",
+					},
+				})
+				l.emitSafeWithFields(ctx, AgentEvent{
+					Type:           AgentEventSessionCompact,
+					ConversationID: conversationID,
+					Iteration:      iteration,
+					Data: SessionCompactData{
+						MessageCountBefore: msgCountBefore,
+						MessageCountAfter:  conv.Len(),
+						TokensSaved:        0, // precise count not available from TruncateByTokens
+						Method:             "truncation",
+					},
+				})
+			}
 		}
 
 		// Get messages for LLM with windowed context to prevent token explosion
@@ -2109,6 +2189,46 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 		}
 
+		// Run transform context hooks before LLM call
+		if l.hooks != nil {
+			transform := l.hooks.RunTransformContext(ctx, messages, tools)
+			if transform.Modified {
+				l.logger.Debug("Context transformed by hook", "reason", transform.Reason)
+				messages = transform.Messages
+				if transform.ToolDefs != nil {
+					tools = transform.ToolDefs
+					// Re-apply tools option if modified
+					chatOpts = l.resolveInferenceParams()
+					if len(tools) > 0 && !inWarningZone {
+						chatOpts = append(chatOpts, llm.WithTools(tools))
+					}
+				}
+			}
+		}
+
+		// Emit BeforeProviderRequest event
+		l.emitSafeWithFields(ctx, AgentEvent{
+			Type:           AgentEventBeforeProviderRequest,
+			ConversationID: conversationID,
+			Iteration:      iteration,
+			Data: BeforeProviderRequestData{
+				ModelID:    modelRef,
+				Messages:   messages,
+				Tools:      tools,
+				TokenCount: totalTokens,
+			},
+		})
+
+		// Emit BeforeProviderPayload event (serialized payload info)
+		l.emitSafeWithFields(ctx, AgentEvent{
+			Type:           AgentEventBeforeProviderPayload,
+			ConversationID: conversationID,
+			Iteration:      iteration,
+			Data: BeforeProviderPayloadData{
+				ModelID: modelRef,
+			},
+		})
+
 		response, err := l.chatWithFailover(ctx, messages, chatOpts...)
 		if err != nil {
 			l.logger.Error("LLM call failed",
@@ -2125,10 +2245,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			l.budgetTracker.RecordUsage(response.Usage.TotalTokens)
 		}
 
-		// Publish token usage event
-		l.publishTokenUsage(conversationID, totalTokens)
-
-		// Emit typed after provider response event
+		// Emit typed after provider response event (bridges to "llm.tokens.used")
 		l.emitSafeWithFields(ctx, AgentEvent{
 			Type:           AgentEventAfterProviderResponse,
 			ConversationID: conversationID,
@@ -2143,9 +2260,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		if response.HasToolCalls() {
 			// Add assistant message with tool calls
 			conv.AddAssistantMessageWithToolCalls(response.Content, response.ToolCalls)
-
-			// Publish agent action event
-			l.publishAction(conversationID, iteration, response.ToolCalls)
 
 			// Capture tool-use interaction for shadow training
 			if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
@@ -2193,6 +2307,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					)
 					exhaustMsg := fmt.Sprintf("I detected I was repeating the same action (%s) and stopped to avoid getting stuck. "+
 						"Please provide more specific guidance or clarify what you'd like me to do.", tc.Function.Name)
+					l.emitterWaitForIdle(ctx)
 					return exhaustMsg, ErrCycleDetected
 				}
 			}
@@ -2234,6 +2349,25 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Settle async event listeners at natural pause point
 			l.emitterWaitForIdle(ctx)
 
+			// Run ShouldStopAfterTurn hooks after tool execution turn
+			if l.hooks != nil {
+				stopDecision := l.hooks.RunShouldStopAfterTurn(ctx, TurnState{
+					ConversationID: conversationID,
+					Iteration:      iteration,
+					Messages:       conv.GetMessages(),
+					ModelRef:       modelRef,
+					TotalTokens:    totalTokens,
+					LastResponse:   response.Content,
+				})
+				if stopDecision.Stop {
+					l.logger.Info("Loop stopped by hook after tool execution",
+						"reason", stopDecision.Reason,
+						"iteration", iteration,
+					)
+					return response.Content, nil
+				}
+			}
+
 			// Continue loop for LLM to process tool results
 			continue
 		}
@@ -2246,6 +2380,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			)
 			exhaustMsg := "I noticed my responses were converging without making new progress. " +
 				"Please provide more specific guidance or clarify what you'd like me to do."
+			l.emitterWaitForIdle(ctx)
 			return exhaustMsg, ErrConvergenceDetected
 		}
 
@@ -2282,6 +2417,25 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 				// Publish iteration completed event
 				l.publishIteration(conversationID, iteration)
+
+				// Run ShouldStopAfterTurn hooks (hallucination recovery path)
+				if l.hooks != nil {
+					stopDecision := l.hooks.RunShouldStopAfterTurn(ctx, TurnState{
+						ConversationID: conversationID,
+						Iteration:      iteration,
+						Messages:       conv.GetMessages(),
+						ModelRef:       modelRef,
+						TotalTokens:    totalTokens,
+						LastResponse:   response.Content,
+					})
+					if stopDecision.Stop {
+						l.logger.Info("Loop stopped by hook during hallucination recovery",
+							"reason", stopDecision.Reason,
+							"iteration", iteration,
+						)
+						return response.Content, nil
+					}
+				}
 				continue
 			}
 		}
@@ -2295,6 +2449,25 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			// Add a nudge message and continue the loop
 			conv.AddAssistantMessage("[empty response - waiting for content]")
 			conv.AddUserMessage("[system: Your response was empty. Please provide a substantive answer or explanation. If you intended to use tools, include tool calls in your response.]")
+
+			// Run ShouldStopAfterTurn hooks (empty response nudge path)
+			if l.hooks != nil {
+				stopDecision := l.hooks.RunShouldStopAfterTurn(ctx, TurnState{
+					ConversationID: conversationID,
+					Iteration:      iteration,
+					Messages:       conv.GetMessages(),
+					ModelRef:       modelRef,
+					TotalTokens:    totalTokens,
+					LastResponse:   "",
+				})
+				if stopDecision.Stop {
+					l.logger.Info("Loop stopped by hook after empty response",
+						"reason", stopDecision.Reason,
+						"iteration", iteration,
+					)
+					return "", nil
+				}
+			}
 			continue
 		}
 
@@ -2359,6 +2532,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		"max", l.config.MaxIterations,
 		"conversation", conversationID,
 	)
+
+	// Settle async event listeners before loop exit
+	l.emitterWaitForIdle(ctx)
 
 	exhaustMsg := "I've reached the maximum number of reasoning steps for this turn. " +
 		"Here is what I have so far -- please let me know if you'd like me to continue."

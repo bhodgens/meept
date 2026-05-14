@@ -1373,6 +1373,58 @@ func (s *SQLiteStore) ReparentAfterCompaction(sessionID string, afterID int64, c
 	return nil
 }
 
+// GetCompactionEntries retrieves all compaction entries for a session,
+// ordered by ID. Returns an empty slice if none exist.
+func (s *SQLiteStore) GetCompactionEntries(sessionID string) ([]CompactionEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`
+		SELECT id, session_id, content, timestamp, parent_id
+		FROM session_messages
+		WHERE session_id = ? AND entry_type = 'compaction'
+		ORDER BY id`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query compaction entries: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []CompactionEntry
+	for rows.Next() {
+		var entry CompactionEntry
+		var ts string
+		var parentID sql.NullInt64
+		if err := rows.Scan(&entry.ID, &entry.SessionID, &entry.Content, &ts, &parentID); err != nil {
+			return nil, fmt.Errorf("failed to scan compaction entry: %w", err)
+		}
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			entry.Timestamp = t
+		}
+		if parentID.Valid {
+			entry.ParentID = &parentID.Int64
+		}
+
+		// Parse the JSON content to extract CompressedIDs
+		var content CompactionContent
+		if err := json.Unmarshal([]byte(entry.Content), &content); err == nil {
+			entry.CompressedIDs = content.CompressedIDs
+		} else {
+			s.logger.Warn("Failed to parse compaction content JSON",
+				"entry_id", entry.ID,
+				"error", err,
+			)
+		}
+
+		entries = append(entries, entry)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed iterating compaction entries: %w", err)
+	}
+
+	return entries, nil
+}
+
 // --- Tool call operations ---
 
 // SaveToolCalls persists tool calls associated with a message.

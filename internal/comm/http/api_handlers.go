@@ -80,6 +80,12 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		defer agentUnsub()
 	}
 
+	// Subscribe to tool completion events
+	completeSub, completeUnsub := s.services.Bus.Subscribe(subID+"-complete", "tool.execution.complete")
+	if completeSub != nil {
+		defer completeUnsub()
+	}
+
 	// Send initial connection event
 	if err := sse.SendEvent("connected", map[string]string{"status": "ok"}); err != nil {
 		return
@@ -119,6 +125,19 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if err := sse.SendEvent("agent_progress", payload); err != nil {
+				return
+			}
+
+		case msg, ok := <-completeSub.Channel:
+			if !ok {
+				return
+			}
+			// Forward tool completion as SSE
+			var payload map[string]any
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				continue
+			}
+			if err := sse.SendEvent("tool_complete", payload); err != nil {
 				return
 			}
 

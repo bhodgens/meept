@@ -515,5 +515,126 @@ func (c *HTTPClient) CacheInvalidate(filePath string) error {
 	return err
 }
 
+// ============================================================================
+// Branch Methods
+// ============================================================================
+
+// NavigateBranch navigates to a prior message in a session, creating a new branch.
+func (c *HTTPClient) NavigateBranch(sessionID string, targetMessageID int64) error {
+	req := struct {
+		TargetMessageID int64 `json:"target_message_id"`
+	}{
+		TargetMessageID: targetMessageID,
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequest(http.MethodPost,
+		c.baseURL+"/api/v1/sessions/"+sessionID+"/branch",
+		bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
+	}
+	return nil
+}
+
+// ListBranches lists all branches in a session.
+func (c *HTTPClient) ListBranches(sessionID string) ([]types.BranchInfo, error) {
+	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/sessions/" + sessionID + "/branches")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
+	}
+	var result struct {
+		Branches []types.BranchInfo `json:"branches"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse branches response: %w", err)
+	}
+	return result.Branches, nil
+}
+
+// ForkSession forks a session from a specific message, returning the new session ID.
+func (c *HTTPClient) ForkSession(sessionID string, fromMessageID int64, name string) (string, error) {
+	req := struct {
+		FromMessageID int64  `json:"from_message_id"`
+		Name          string `json:"name,omitempty"`
+	}{
+		FromMessageID: fromMessageID,
+		Name:          name,
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	httpReq, err := http.NewRequest(http.MethodPost,
+		c.baseURL+"/api/v1/sessions/"+sessionID+"/fork",
+		bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
+	}
+	var session struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &session); err != nil {
+		return "", fmt.Errorf("failed to parse fork response: %w", err)
+	}
+	return session.ID, nil
+}
+
+// GetTree returns the conversation tree for a session.
+func (c *HTTPClient) GetTree(sessionID string) ([]types.TreeNodeInfo, error) {
+	resp, err := c.httpClient.Get(c.baseURL + "/api/v1/sessions/" + sessionID + "/tree")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(data))
+	}
+	var result struct {
+		Nodes []types.TreeNodeInfo `json:"nodes"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse tree response: %w", err)
+	}
+	return result.Nodes, nil
+}
+
 // Ensure HTTPClient implements DaemonClient at compile time.
 var _ DaemonClient = (*HTTPClient)(nil)

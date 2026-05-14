@@ -457,12 +457,14 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 				Percent:    100,
 				ToolCallID: toolCall.ID,
 			})
-			return &ExecutionResult{
+			cachedExecResult := &ExecutionResult{
 				ToolCallID: toolCall.ID,
 				Success:    true,
 				Result:     cachedResult,
 				Cached:     true,
 			}
+			e.publishToolComplete(toolCall.ID, toolName, cachedExecResult)
+			return cachedExecResult
 		}
 	}
 
@@ -600,7 +602,7 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		)
 	}
 
-	return &ExecutionResult{
+	result := &ExecutionResult{
 		ToolCallID: toolCall.ID,
 		Success:    true,
 		Result:     toolResult,
@@ -608,6 +610,11 @@ func (e *Executor) Execute(ctx context.Context, toolCall llm.ToolCall) *Executio
 		Evidence:   evidence,
 		Terminate:  terminate,
 	}
+
+	// Publish tool.execution.complete event after successful execution
+	e.publishToolComplete(toolCall.ID, toolName, result)
+
+	return result
 }
 
 // ExecuteAll runs multiple tool calls, potentially in parallel.
@@ -743,6 +750,27 @@ func (e *Executor) publishToolProgress(ctx context.Context, toolCallID, toolName
 		return
 	}
 	e.bus.Publish("tool.execution.progress", msg)
+}
+
+// publishToolComplete emits a tool.execution.complete event on the bus.
+func (e *Executor) publishToolComplete(toolCallID, toolName string, result *ExecutionResult) {
+	if e.bus == nil {
+		return
+	}
+	payload := map[string]any{
+		"tool_call_id": toolCallID,
+		"tool_name":    toolName,
+		"agent_id":     e.agentID,
+		"success":      result.Success,
+		"terminate":    result.Terminate,
+		"cached":       result.Cached,
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "executor", payload)
+	if err != nil {
+		e.logger.Warn("Failed to create complete bus message", "error", err)
+		return
+	}
+	e.bus.Publish("tool.execution.complete", msg)
 }
 
 // ShouldTerminate checks if ALL results in the batch indicate termination.
