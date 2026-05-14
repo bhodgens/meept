@@ -792,6 +792,162 @@ func TestAgentLoop_PublishTokenUsage(t *testing.T) {
 	}
 }
 
+func TestEmitToolExecutionStart(t *testing.T) {
+	testBus := bus.New(nil, slogDiscardLogger())
+
+	// Subscribe to the legacy "agent.action" topic that the bridge publishes to.
+	sub := testBus.Subscribe("test-emit-action", "agent.action")
+	defer testBus.Unsubscribe(sub)
+
+	emitter := NewEventEmitter("test-agent", testBus, slogDiscardLogger())
+
+	emitter.Emit(context.Background(), AgentEventToolExecutionStart, ToolExecutionStartData{
+		ToolCallID: "call_42",
+		ToolName:   "file_read",
+		Arguments:  `{"path":"/tmp/test.txt"}`,
+	})
+
+	select {
+	case msg := <-sub.Channel:
+		var raw map[string]any
+		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
+			t.Fatalf("failed to unmarshal event: %v", err)
+		}
+		if raw["type"] != string(AgentEventToolExecutionStart) {
+			t.Errorf("expected type %s, got %v", AgentEventToolExecutionStart, raw["type"])
+		}
+		data, ok := raw["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected data to be map, got %T", raw["data"])
+		}
+		if data["tool_name"] != "file_read" {
+			t.Errorf("expected tool_name=file_read, got %v", data["tool_name"])
+		}
+		if data["tool_call_id"] != "call_42" {
+			t.Errorf("expected tool_call_id=call_42, got %v", data["tool_call_id"])
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for agent.action legacy topic from emitter bridge")
+	}
+}
+
+func TestEmitToolExecutionEnd(t *testing.T) {
+	testBus := bus.New(nil, slogDiscardLogger())
+
+	sub := testBus.Subscribe("test-emit-result", "agent.result")
+	defer testBus.Unsubscribe(sub)
+
+	emitter := NewEventEmitter("test-agent", testBus, slogDiscardLogger())
+
+	emitter.Emit(context.Background(), AgentEventToolExecutionEnd, ToolExecutionEndData{
+		ToolCallID: "call_99",
+		ToolName:   "file_read",
+		Success:    true,
+		Result:     "file contents here",
+	})
+
+	select {
+	case msg := <-sub.Channel:
+		var raw map[string]any
+		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
+			t.Fatalf("failed to unmarshal event: %v", err)
+		}
+		if raw["type"] != string(AgentEventToolExecutionEnd) {
+			t.Errorf("expected type %s, got %v", AgentEventToolExecutionEnd, raw["type"])
+		}
+		data, ok := raw["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected data to be map, got %T", raw["data"])
+		}
+		if data["tool_name"] != "file_read" {
+			t.Errorf("expected tool_name=file_read, got %v", data["tool_name"])
+		}
+		if data["success"] != true {
+			t.Errorf("expected success=true, got %v", data["success"])
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for agent.result legacy topic from emitter bridge")
+	}
+}
+
+func TestEmitAfterProviderResponse(t *testing.T) {
+	testBus := bus.New(nil, slogDiscardLogger())
+
+	sub := testBus.Subscribe("test-emit-tokens", "llm.tokens.used")
+	defer testBus.Unsubscribe(sub)
+
+	emitter := NewEventEmitter("test-agent", testBus, slogDiscardLogger())
+
+	emitter.Emit(context.Background(), AgentEventAfterProviderResponse, AfterProviderResponseData{
+		ModelID:        "mock-model",
+		StatusCode:     200,
+		ResponseTokens: 1500,
+		Latency:        120 * time.Millisecond,
+	})
+
+	select {
+	case msg := <-sub.Channel:
+		var raw map[string]any
+		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
+			t.Fatalf("failed to unmarshal event: %v", err)
+		}
+		if raw["type"] != string(AgentEventAfterProviderResponse) {
+			t.Errorf("expected type %s, got %v", AgentEventAfterProviderResponse, raw["type"])
+		}
+		data, ok := raw["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected data to be map, got %T", raw["data"])
+		}
+		if tokens, _ := data["response_tokens"].(float64); tokens != 1500 {
+			t.Errorf("expected response_tokens=1500, got %v", data["response_tokens"])
+		}
+		if data["model_id"] != "mock-model" {
+			t.Errorf("expected model_id=mock-model, got %v", data["model_id"])
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for llm.tokens.used legacy topic from emitter bridge")
+	}
+}
+
+func TestEmitTurnStart(t *testing.T) {
+	testBus := bus.New(nil, slogDiscardLogger())
+
+	sub := testBus.Subscribe("test-emit-progress", "agent.progress")
+	defer testBus.Unsubscribe(sub)
+
+	emitter := NewEventEmitter("test-agent", testBus, slogDiscardLogger())
+
+	emitter.Emit(context.Background(), AgentEventTurnStart, TurnStartData{
+		TurnNumber:       3,
+		TotalTokensSoFar: 4500,
+		MessagesCount:    12,
+		ToolCount:        2,
+	})
+
+	select {
+	case msg := <-sub.Channel:
+		var raw map[string]any
+		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
+			t.Fatalf("failed to unmarshal event: %v", err)
+		}
+		if raw["type"] != string(AgentEventTurnStart) {
+			t.Errorf("expected type %s, got %v", AgentEventTurnStart, raw["type"])
+		}
+		data, ok := raw["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected data to be map, got %T", raw["data"])
+		}
+		if turn, _ := data["turn_number"].(float64); turn != 3 {
+			t.Errorf("expected turn_number=3, got %v", data["turn_number"])
+		}
+		if tokens, _ := data["total_tokens_so_far"].(float64); tokens != 4500 {
+			t.Errorf("expected total_tokens_so_far=4500, got %v", data["total_tokens_so_far"])
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for agent.progress legacy topic from emitter bridge")
+	}
+}
+
 func TestBuildTerminateResponse(t *testing.T) {
 	t.Run("single successful result", func(t *testing.T) {
 		loop := NewAgentLoop()
@@ -841,6 +997,120 @@ func TestBuildTerminateResponse(t *testing.T) {
 			t.Errorf("expected 'done', got: %s", got)
 		}
 	})
+}
+
+func TestShouldTerminate_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty slice returns false", func(t *testing.T) {
+		if ShouldTerminate(nil) {
+			t.Error("expected false for nil slice")
+		}
+		if ShouldTerminate([]*ExecutionResult{}) {
+			t.Error("expected false for empty slice")
+		}
+	})
+
+	t.Run("all terminate true returns true", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: true},
+			{ToolCallID: "c2", Success: true, Terminate: true},
+		}
+		if !ShouldTerminate(results) {
+			t.Error("expected true when all results have Terminate=true")
+		}
+	})
+
+	t.Run("mixed terminate returns false", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: true},
+			{ToolCallID: "c2", Success: true, Terminate: false},
+		}
+		if ShouldTerminate(results) {
+			t.Error("expected false when not all results have Terminate=true")
+		}
+	})
+
+	t.Run("nil result in slice returns false", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: true},
+			nil,
+		}
+		if ShouldTerminate(results) {
+			t.Error("expected false when a result is nil")
+		}
+	})
+
+	t.Run("single result with terminate true", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: true},
+		}
+		if !ShouldTerminate(results) {
+			t.Error("expected true for single terminating result")
+		}
+	})
+
+	t.Run("single result with terminate false", func(t *testing.T) {
+		results := []*ExecutionResult{
+			{ToolCallID: "c1", Success: true, Terminate: false},
+		}
+		if ShouldTerminate(results) {
+			t.Error("expected false for single non-terminating result")
+		}
+	})
+}
+
+func TestShouldTerminate_IntegrationWithLoopPath(t *testing.T) {
+	t.Parallel()
+
+	// Verify that when ShouldTerminate returns true, the loop returns
+	// buildTerminateResponse output without making a second LLM call.
+	// This uses a mockChatter that would fail if called a second time
+	// (by providing only one response), proving the follow-up never happens.
+
+	chatter := newMockChatter(
+		&llm.Response{
+			Content:      "checking platform status",
+			FinishReason: "tool_calls",
+			ToolCalls: []llm.ToolCall{
+				{ID: "tc-1", Type: "function", Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"}},
+			},
+		},
+		// No second response -- if the loop calls Chat() again, it panics with
+		// "no more mock responses", proving termination skipped the follow-up.
+	)
+
+	registry := NewPlaceholderToolRegistry()
+	registry.Register(&mockTerminatingLoopTool{name: "platform_status"})
+
+	secChecker := security.NewPermissionChecker(security.Config{})
+	testBus := bus.New(nil, slogDiscardLogger())
+	executor := NewExecutor(registry, secChecker)
+
+	loop := NewAgentLoop(
+		WithLLMChatter(chatter),
+		WithToolRegistry(registry),
+		WithSecurityChecker(secChecker),
+		WithMessageBus(testBus),
+		WithAgentConfig(AgentConfig{MaxIterations: 10}),
+	)
+	loop.executor = executor
+
+	response, err := loop.RunOnce(context.Background(), "show status", "conv-integration")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Response must come from buildTerminateResponse, not from an LLM follow-up
+	if !strings.Contains(response, "final answer from terminating tool") {
+		t.Errorf("expected terminate response content, got: %s", response)
+	}
+
+	// The chatter must have been called exactly once
+	if chatter.callCount != 1 {
+		t.Errorf("expected exactly 1 LLM call (terminate should skip follow-up), got %d",
+			chatter.callCount)
+	}
 }
 
 // mockTerminatingLoopTool returns a ToolResult with Terminate=true for the loop test.

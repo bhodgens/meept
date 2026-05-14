@@ -2285,9 +2285,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				toolNames.WriteString(tc.Function.Name)
 			}
 
-			// Publish progress: executing tools
-			l.publishProgress(conversationID, iteration, "executing", toolNames.String(), totalTokens)
-
 			// Update watchdog heartbeat for executing stage
 			if l.watchdog != nil {
 				workerID := l.agentID + ":" + conversationID
@@ -2327,9 +2324,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			for _, result := range results {
 				conv.AddToolResult(result.ToolCallID, result.ToCompressedJSON(dynamicToolBudget))
 			}
-
-			// Publish agent result event
-			l.publishResult(conversationID, iteration, results)
 
 			// Publish iteration completed event
 			l.publishIteration(conversationID, iteration)
@@ -2496,9 +2490,6 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			"iterations", iteration,
 			"conversation", conversationID,
 		)
-
-		// Publish progress: complete
-		l.publishProgress(conversationID, iteration, "complete", "", totalTokens)
 
 		// Publish iteration completed event
 		l.publishIteration(conversationID, iteration)
@@ -3350,7 +3341,9 @@ func (l *AgentLoop) buildSystemPromptWithOverride() string {
 	return l.config.SystemPromptOveride + "\n\n## Global Rules\n\n" + l.config.GlobalRules
 }
 
-// publishAction publishes an agent action event.
+// Deprecated: Use EventEmitter with AgentEvent* types instead.
+// The emitter bridge publishes to the same legacy bus topics.
+// This method exists only for backward-compatible tests.
 func (l *AgentLoop) publishAction(conversationID string, iteration int, toolCalls []llm.ToolCall) {
 	if l.bus == nil {
 		return
@@ -3379,7 +3372,9 @@ func (l *AgentLoop) publishAction(conversationID string, iteration int, toolCall
 	l.bus.Publish("agent.action", msg)
 }
 
-// publishResult publishes an agent result event.
+// Deprecated: Use EventEmitter with AgentEvent* types instead.
+// The emitter bridge publishes to the same legacy bus topics.
+// This method exists only for backward-compatible tests.
 func (l *AgentLoop) publishResult(conversationID string, iteration int, results []*ExecutionResult) {
 	if l.bus == nil {
 		return
@@ -3409,7 +3404,9 @@ func (l *AgentLoop) publishResult(conversationID string, iteration int, results 
 	l.bus.Publish("agent.result", msg)
 }
 
-// publishProgress publishes a progress event to the message bus.
+// Deprecated: Use EventEmitter with AgentEvent* types instead.
+// The emitter bridge publishes to the same legacy bus topics.
+// This method exists only for backward-compatible tests.
 func (l *AgentLoop) publishProgress(conversationID string, iteration int, stage string, detail string, tokenCount int) {
 	// Skip if progress disabled or no bus
 	if !l.progressEnabled || l.bus == nil {
@@ -3447,7 +3444,9 @@ func (l *AgentLoop) publishProgress(conversationID string, iteration int, stage 
 	}
 }
 
-// publishTokenUsage publishes token usage to the message bus.
+// Deprecated: Use EventEmitter with AgentEvent* types instead.
+// The emitter bridge publishes to the same legacy bus topics.
+// This method exists only for backward-compatible tests.
 func (l *AgentLoop) publishTokenUsage(conversationID string, totalTokens int) {
 	if l.bus == nil {
 		return

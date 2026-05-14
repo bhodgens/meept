@@ -390,5 +390,12 @@ func dayOfWeekToNumber(day string) (int, error) {
 	}
 }
 
+// TerminateHint implements tools.TerminatingTool -- cron creation returns
+// a confirmation that does not need LLM follow-up processing.
+func (t *CronCreateTool) TerminateHint(args map[string]any) bool { return true }
+
 // Ensure CronCreateTool implements the Tool interface
 var _ tools.Tool = (*CronCreateTool)(nil)
+
+// Ensure CronCreateTool implements TerminatingTool.
+var _ tools.TerminatingTool = (*CronCreateTool)(nil)

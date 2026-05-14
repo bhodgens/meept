@@ -55,6 +55,16 @@ func NewSuccessResult(result any) *ToolResult {
 	}
 }
 
+// NewSuccessResultWithTerminate creates a successful tool result that signals
+// the agent loop to skip LLM follow-up processing.
+func NewSuccessResultWithTerminate(result any) *ToolResult {
+	return &ToolResult{
+		Success:   true,
+		Result:    result,
+		Terminate: true,
+	}
+}
+
 // NewErrorResult creates a failed tool result.
 func NewErrorResult(err string) *ToolResult {
 	return &ToolResult{

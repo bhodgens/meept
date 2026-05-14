@@ -833,6 +833,163 @@ func TestSSEWriter(t *testing.T) {
 			t.Errorf("expected error message in output, got: %s", body)
 		}
 	})
+
+	t.Run("MultipleEventsInSequence", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		sse, err := NewSSEWriter(rec)
+		if err != nil {
+			t.Fatalf("NewSSEWriter: %v", err)
+		}
+
+		// Send several events in sequence to verify they are each delimited
+		if err := sse.SendEvent("progress", map[string]any{"percent": 10}); err != nil {
+			t.Fatalf("SendEvent 1: %v", err)
+		}
+		if err := sse.SendEvent("progress", map[string]any{"percent": 50}); err != nil {
+			t.Fatalf("SendEvent 2: %v", err)
+		}
+		if err := sse.SendEvent("progress", map[string]any{"percent": 100}); err != nil {
+			t.Fatalf("SendEvent 3: %v", err)
+		}
+		if err := sse.SendComment(); err != nil {
+			t.Fatalf("SendComment: %v", err)
+		}
+		if err := sse.SendEvent("done", map[string]string{"status": "complete"}); err != nil {
+			t.Fatalf("SendEvent done: %v", err)
+		}
+
+		body := rec.Body.String()
+
+		// Each SSE event must be separated by a blank line (\n\n)
+		// Verify the three progress events appear in order
+		idx10 := strings.Index(body, `"percent":10`)
+		idx50 := strings.Index(body, `"percent":50`)
+		idx100 := strings.Index(body, `"percent":100`)
+		if idx10 == -1 || idx50 == -1 || idx100 == -1 {
+			t.Fatalf("expected all three percent values, got: %s", body)
+		}
+		if !(idx10 < idx50 && idx50 < idx100) {
+			t.Errorf("progress events not in order: idx10=%d idx50=%d idx100=%d", idx10, idx50, idx100)
+		}
+
+		// Heartbeat comment should appear between last progress and done
+		if !strings.Contains(body, ": heartbeat") {
+			t.Error("expected heartbeat comment in sequential output")
+		}
+
+		// Done event should be last
+		if !strings.Contains(body, "event: done") {
+			t.Errorf("expected done event, got: %s", body)
+		}
+	})
+
+	t.Run("SpecialCharactersInData", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		sse, err := NewSSEWriter(rec)
+		if err != nil {
+			t.Fatalf("NewSSEWriter: %v", err)
+		}
+
+		// Data with quotes, unicode, and backslashes that JSON must escape
+		data := map[string]string{
+			"message": `he said "hello" and left`,
+			"path":    `C:\Users\test\file.txt`,
+			"emoji":   "unicode: \u2713",
+		}
+		if err := sse.SendEvent("special", data); err != nil {
+			t.Fatalf("SendEvent: %v", err)
+		}
+
+		body := rec.Body.String()
+
+		// The JSON marshaler will escape quotes with \"
+		if !strings.Contains(body, `he said \"hello\" and left`) {
+			t.Errorf("expected escaped quotes in SSE data, got: %s", body)
+		}
+		// Backslashes should be escaped
+		if !strings.Contains(body, `C:\\Users\\test\\file.txt`) {
+			t.Errorf("expected escaped backslashes in SSE data, got: %s", body)
+		}
+		// Unicode should be preserved (Go's json.Marshal emits UTF-8 directly for \uXXXX)
+		if !strings.Contains(body, "unicode:") {
+			t.Errorf("expected unicode field in SSE data, got: %s", body)
+		}
+		// Verify the round-tripped data is valid JSON by decoding it from the SSE frame
+		dataLineIdx := strings.Index(body, "data: ")
+		if dataLineIdx == -1 {
+			t.Fatalf("no data line in SSE output")
+		}
+		dataJSON := body[dataLineIdx+6:]
+		dataJSON = strings.TrimRight(dataJSON, "\n")
+		var decoded map[string]string
+		if err := json.Unmarshal([]byte(dataJSON), &decoded); err != nil {
+			t.Fatalf("SSE data is not valid JSON: %v, data: %q", err, dataJSON)
+		}
+		if decoded["emoji"] != "unicode: \u2713" {
+			t.Errorf("emoji round-trip failed: got %q", decoded["emoji"])
+		}
+
+		// Verify the output is valid SSE framing: event line + data line + blank line
+		if !strings.Contains(body, "event: special\n") {
+			t.Errorf("expected 'event: special' line, got: %s", body)
+		}
+		if !strings.HasPrefix(body[strings.Index(body, "event: special"):], "event: special\ndata: ") {
+			t.Errorf("expected SSE framing after event line, got: %s", body)
+		}
+	})
+
+	t.Run("CloseWithFinalEvent", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		sse, err := NewSSEWriter(rec)
+		if err != nil {
+			t.Fatalf("NewSSEWriter: %v", err)
+		}
+
+		if err := sse.CloseWithFinalEvent(); err != nil {
+			t.Fatalf("CloseWithFinalEvent: %v", err)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "event: done") {
+			t.Error("expected done event from CloseWithFinalEvent")
+		}
+		if !strings.Contains(body, `"status":"complete"`) {
+			t.Errorf("expected status complete in output, got: %s", body)
+		}
+	})
+
+	t.Run("HeartbeatBetweenEvents", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		sse, err := NewSSEWriter(rec)
+		if err != nil {
+			t.Fatalf("NewSSEWriter: %v", err)
+		}
+
+		if err := sse.SendEvent("progress", map[string]string{"step": "1"}); err != nil {
+			t.Fatalf("SendEvent: %v", err)
+		}
+		if err := sse.SendComment(); err != nil {
+			t.Fatalf("SendComment: %v", err)
+		}
+		if err := sse.SendEvent("progress", map[string]string{"step": "2"}); err != nil {
+			t.Fatalf("SendEvent 2: %v", err)
+		}
+
+		body := rec.Body.String()
+
+		// Verify ordering: event step 1, then heartbeat, then event step 2
+		step1Idx := strings.Index(body, `"step":"1"`)
+		heartbeatIdx := strings.Index(body, ": heartbeat")
+		step2Idx := strings.Index(body, `"step":"2"`)
+
+		if step1Idx == -1 || heartbeatIdx == -1 || step2Idx == -1 {
+			t.Fatalf("expected step 1, heartbeat, step 2 in body, got: %s", body)
+		}
+		if !(step1Idx < heartbeatIdx && heartbeatIdx < step2Idx) {
+			t.Errorf("expected step1 < heartbeat < step2, got indices: %d, %d, %d",
+				step1Idx, heartbeatIdx, step2Idx)
+		}
+	})
 }
 
 func TestHandleChatStream_NoService(t *testing.T) {
@@ -933,6 +1090,76 @@ func TestHandleChatStream_SSEToolProgressEvent(t *testing.T) {
 	}
 
 	// Verify SSE headers
+	ct := w.Header().Get("Content-Type")
+	if ct != "text/event-stream" {
+		t.Errorf("Content-Type = %s, want text/event-stream", ct)
+	}
+}
+
+func TestHandleChatStream_SSEAgentProgressEvent(t *testing.T) {
+	t.Parallel()
+
+	msgBus := bus.New(nil, nil)
+	busSvc := services.NewBusService(msgBus)
+	svcReg := &services.ServiceRegistry{Bus: busSvc}
+	server := NewServer(ServerConfig{EnableCORS: true}, nil, nil, nil, svcReg, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/chat/stream", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		server.handleChatStream(w, req)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	agentPayload := map[string]any{
+		"agent_id": "coder",
+		"stage":    "executing",
+		"message":  "running tools...",
+		"percent":  75,
+	}
+	_ = busSvc.Publish(context.Background(), services.PublishRequest{
+		Topic:   "agent.progress",
+		Type:    "event",
+		Source:  "agent",
+		Payload: agentPayload,
+	})
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not finish in time")
+	}
+
+	body := w.Body.String()
+
+	if !strings.Contains(body, "event: connected") {
+		t.Error("expected connected event in SSE output")
+	}
+
+	// Should contain the agent_progress event forwarded from agent.progress topic
+	if !strings.Contains(body, "event: agent_progress") {
+		t.Error("expected agent_progress event in SSE output")
+	}
+	if !strings.Contains(body, `"stage":"executing"`) {
+		t.Errorf("expected stage in SSE data, got: %s", body)
+	}
+	if !strings.Contains(body, `"percent":75`) {
+		t.Errorf("expected percent in SSE data, got: %s", body)
+	}
+	if !strings.Contains(body, `"agent_id":"coder"`) {
+		t.Errorf("expected agent_id in SSE data, got: %s", body)
+	}
+
 	ct := w.Header().Get("Content-Type")
 	if ct != "text/event-stream" {
 		t.Errorf("Content-Type = %s, want text/event-stream", ct)

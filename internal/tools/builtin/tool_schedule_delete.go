@@ -277,10 +277,29 @@ func (t *ScheduleRunNowTool) Execute(ctx context.Context, args map[string]any) (
 	}, nil
 }
 
+// TerminateHint implements tools.TerminatingTool -- schedule operations return
+// confirmations that do not need LLM follow-up processing.
+func (t *ScheduleDeleteTool) TerminateHint(args map[string]any) bool { return true }
+
+// TerminateHint implements tools.TerminatingTool.
+func (t *SchedulePauseTool) TerminateHint(args map[string]any) bool { return true }
+
+// TerminateHint implements tools.TerminatingTool.
+func (t *ScheduleResumeTool) TerminateHint(args map[string]any) bool { return true }
+
+// TerminateHint implements tools.TerminatingTool.
+func (t *ScheduleRunNowTool) TerminateHint(args map[string]any) bool { return true }
+
 // Ensure tools implement the Tool interface
 var (
 	_ tools.Tool = (*ScheduleDeleteTool)(nil)
 	_ tools.Tool = (*SchedulePauseTool)(nil)
 	_ tools.Tool = (*ScheduleResumeTool)(nil)
 	_ tools.Tool = (*ScheduleRunNowTool)(nil)
+
+	// Ensure schedule management tools implement TerminatingTool
+	_ tools.TerminatingTool = (*ScheduleDeleteTool)(nil)
+	_ tools.TerminatingTool = (*SchedulePauseTool)(nil)
+	_ tools.TerminatingTool = (*ScheduleResumeTool)(nil)
+	_ tools.TerminatingTool = (*ScheduleRunNowTool)(nil)
 )

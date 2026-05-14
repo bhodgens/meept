@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -217,3 +218,97 @@ func stripHTML(html string) string {
 
 // Ensure WebFetchTool implements the Tool interface
 var _ tools.Tool = (*WebFetchTool)(nil)
+
+// ExecuteStreaming implements tools.StreamingTool with progress updates during fetch.
+func (t *WebFetchTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
+	url, _ := args["url"].(string)
+	if url == "" {
+		return nil, fmt.Errorf("no URL specified")
+	}
+
+	onUpdate(tools.ProgressUpdate{Message: fmt.Sprintf("fetching %s...", url), Percent: 10})
+
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return nil, fmt.Errorf("only http:// and https:// URLs are supported")
+	}
+
+	maxLength := t.maxLength
+	if ml, ok := args["max_length"].(float64); ok && ml > 0 {
+		maxLength = int(ml)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Meept/0.2 (autonomous assistant)")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain,*/*")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("request timed out after %v", t.timeout)
+		}
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	onUpdate(tools.ProgressUpdate{Message: fmt.Sprintf("received response, reading body (%d status)...", resp.StatusCode), Percent: 40})
+
+	limitedReader := io.LimitReader(resp.Body, MaxResponseSize)
+	body, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	onUpdate(tools.ProgressUpdate{
+		Message: fmt.Sprintf("received %d bytes, parsing response...", len(body)),
+		Percent: 70,
+	})
+
+	contentType := resp.Header.Get("Content-Type")
+	text := string(body)
+
+	if strings.Contains(strings.ToLower(contentType), "html") || strings.HasPrefix(strings.TrimSpace(text), "<!") {
+		text = stripHTML(text)
+	}
+
+	truncated := false
+	if len(text) > maxLength {
+		text = text[:maxLength]
+		truncated = true
+	}
+
+	result := FetchResult{
+		Content:     text,
+		URL:         resp.Request.URL.String(),
+		StatusCode:  resp.StatusCode,
+		ContentType: contentType,
+		Truncated:   truncated,
+	}
+
+	evidence := []models.Evidence{
+		models.NewEvidence(
+			models.EvidenceAPIResponse,
+			url,
+			fmt.Sprintf("status=%d,size=%d,content_type=%s", resp.StatusCode, len(body), contentType),
+			t.Name(),
+		),
+	}
+
+	partialJSON, _ := json.Marshal(map[string]any{"url": result.URL, "status": result.StatusCode, "size": len(body)})
+	onUpdate(tools.ProgressUpdate{Message: "complete", Percent: 100, PartialResult: partialJSON})
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   result,
+		Evidence: evidence,
+	}, nil
+}
+
+// Ensure WebFetchTool implements the StreamingTool interface.
+var _ tools.StreamingTool = (*WebFetchTool)(nil)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -151,6 +152,97 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 	}, nil
 }
 
+// ExecuteStreaming implements tools.StreamingTool with progress updates during file reads.
+func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
+	rawPath, _ := args["path"].(string)
+	if rawPath == "" {
+		return nil, fmt.Errorf("no path specified")
+	}
+
+	resolved, err := resolvePath(rawPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	if t.checker != nil && !t.checker.CheckPath(resolved) {
+		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	info, err := os.Stat(resolved)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("file not found: %s", resolved)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat file: %w", err)
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("path is a directory, not a file: %s", resolved)
+	}
+	if info.Size() > MaxReadSize {
+		return nil, fmt.Errorf("file too large (%d bytes, max %d)", info.Size(), MaxReadSize)
+	}
+
+	onUpdate(tools.ProgressUpdate{
+		Message: fmt.Sprintf("reading %s (%d bytes)...", resolved, info.Size()),
+		Percent: 10,
+	})
+
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	text := string(content)
+
+	offset, _ := args["offset"].(float64)
+	limit, _ := args["limit"].(float64)
+
+	if offset > 0 || limit > 0 {
+		lines := strings.Split(text, "\n")
+		start := 0
+		if offset > 0 {
+			start = max(int(offset)-1, 0)
+			if start >= len(lines) {
+				return "", nil
+			}
+		}
+		end := len(lines)
+		if limit > 0 {
+			end = min(start+int(limit), len(lines))
+		}
+		text = strings.Join(lines[start:end], "\n")
+	}
+
+	evInfo, err := os.Stat(resolved)
+	var evidence []models.Evidence
+	if err == nil {
+		evidence = append(evidence, models.NewEvidence(
+			models.EvidenceFileExists,
+			resolved,
+			fmt.Sprintf("size=%d", evInfo.Size()),
+			t.Name(),
+		))
+	}
+
+	h := sha256.Sum256(content)
+	hash := hex.EncodeToString(h[:])
+	evidence = append(evidence, models.NewEvidence(
+		models.EvidenceFileHash,
+		resolved,
+		hash,
+		t.Name(),
+	))
+
+	partialJSON, _ := json.Marshal(map[string]any{"path": resolved, "size": len(content)})
+	onUpdate(tools.ProgressUpdate{Message: "read complete", Percent: 100, PartialResult: partialJSON})
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   text,
+		Evidence: evidence,
+	}, nil
+}
+
 // WriteFileTool writes content to a file.
 type WriteFileTool struct {
 	checker *security.PermissionChecker
@@ -274,6 +366,105 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 			t.Name(),
 		))
 	}
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content)),
+		Evidence: evidence,
+	}, nil
+}
+
+// ExecuteStreaming implements tools.StreamingTool with progress updates during file writes.
+func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
+	rawPath, _ := args["path"].(string)
+	content, _ := args["content"].(string)
+	appendMode, _ := args["append"].(bool)
+
+	if rawPath == "" {
+		return nil, fmt.Errorf("no path specified")
+	}
+
+	if len(content) > MaxWriteSize {
+		return nil, fmt.Errorf("content too large (max %d bytes)", MaxWriteSize)
+	}
+
+	resolved, err := resolvePath(rawPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	if t.checker != nil && !t.checker.CheckPath(resolved) {
+		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	onUpdate(tools.ProgressUpdate{
+		Message: fmt.Sprintf("writing %s (%d bytes)...", resolved, len(content)),
+		Percent: 10,
+	})
+
+	dir := filepath.Dir(resolved)
+	//nolint:gosec // user config directory/file permissions
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	var flag int
+	if appendMode {
+		flag = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	} else {
+		flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+
+	//nolint:gosec // user config directory/file permissions
+	f, err := os.OpenFile(resolved, flag, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(content); err != nil {
+		return nil, fmt.Errorf("failed to write file: %w", err)
+	}
+
+	info, err := os.Stat(resolved)
+	if err != nil {
+		slog.Warn("WriteFileTool: failed to stat file for evidence", "path", resolved, "error", err)
+	}
+
+	var hash string
+	hashData, err := os.ReadFile(resolved)
+	if err != nil {
+		slog.Warn("WriteFileTool: failed to read file for hash", "path", resolved, "error", err)
+	} else {
+		h := sha256.Sum256(hashData)
+		hash = hex.EncodeToString(h[:])
+	}
+
+	action := "wrote"
+	if appendMode {
+		action = "appended to"
+	}
+
+	evidence := []models.Evidence{}
+	if err == nil {
+		evidence = append(evidence, models.NewEvidence(
+			models.EvidenceFileExists,
+			resolved,
+			fmt.Sprintf("size=%d", info.Size()),
+			t.Name(),
+		))
+	}
+	if hash != "" {
+		evidence = append(evidence, models.NewEvidence(
+			models.EvidenceFileHash,
+			resolved,
+			hash,
+			t.Name(),
+		))
+	}
+
+	partialJSON, _ := json.Marshal(map[string]any{"path": resolved, "bytes": len(content)})
+	onUpdate(tools.ProgressUpdate{Message: "write complete", Percent: 100, PartialResult: partialJSON})
 
 	return tools.ToolResult{
 		Success:  true,
@@ -601,4 +792,8 @@ var (
 	_ tools.Tool = (*WriteFileTool)(nil)
 	_ tools.Tool = (*DeleteFileTool)(nil)
 	_ tools.Tool = (*ListDirectoryTool)(nil)
+
+	// Ensure streaming tools implement StreamingTool
+	_ tools.StreamingTool = (*ReadFileTool)(nil)
+	_ tools.StreamingTool = (*WriteFileTool)(nil)
 )

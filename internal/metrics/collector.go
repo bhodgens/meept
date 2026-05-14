@@ -5,12 +5,113 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// AgentEventType identifies a typed agent event. This mirrors the type from
+// internal/agent/events.go to avoid an import cycle (agent -> metrics).
+type AgentEventType string
+
+// Typed event type constants used by the metrics collector.
+const (
+	AgentEventAfterProviderResponse AgentEventType = "after_provider_response"
+	AgentEventTurnEnd               AgentEventType = "turn_end"
+	AgentEventSessionEnd            AgentEventType = "session_end"
+	AgentEventToolExecutionStart    AgentEventType = "tool_execution_start"
+	AgentEventToolExecutionEnd      AgentEventType = "tool_execution_end"
+)
+
+// AgentEventData is the interface all event payloads implement.
+// This mirrors the interface from internal/agent/events.go to avoid an import cycle.
+type AgentEventData interface {
+	agentEventData()
+}
+
+// AgentEvent is the envelope for typed agent events.
+type AgentEvent struct {
+	Type           AgentEventType `json:"type"`
+	Timestamp      time.Time      `json:"timestamp"`
+	AgentID        string         `json:"agent_id"`
+	ConversationID string         `json:"conversation_id"`
+	Iteration      int            `json:"iteration"`
+	Data           AgentEventData `json:"data"`
+}
+
+// --- Event data types used by the metrics collector ---
+// These mirror the types from internal/agent/events.go.
+
+// AfterProviderResponseData is emitted after receiving an LLM provider response.
+type AfterProviderResponseData struct {
+	ModelID        string        `json:"model_id"`
+	StatusCode     int           `json:"status_code"`
+	ResponseTokens int           `json:"response_tokens"`
+	Latency        time.Duration `json:"latency"`
+	Cached         bool          `json:"cached"`
+	Error          string        `json:"error,omitempty"`
+}
+
+func (AfterProviderResponseData) agentEventData() {}
+
+// TurnEndData is emitted at the end of each loop iteration.
+type TurnEndData struct {
+	TurnNumber     int  `json:"turn_number"`
+	HadToolCalls   bool `json:"had_tool_calls"`
+	ToolCallCount  int  `json:"tool_call_count"`
+	ResponseTokens int  `json:"response_tokens"`
+	StoppedBy      string `json:"stopped_by"`
+}
+
+func (TurnEndData) agentEventData() {}
+
+// SessionEndData is emitted when an agent session ends.
+type SessionEndData struct {
+	SessionID   string        `json:"session_id"`
+	Outcome     string        `json:"outcome"`
+	Duration    time.Duration `json:"duration"`
+	TotalTokens int           `json:"total_tokens"`
+	TotalIter   int           `json:"total_iter"`
+	Error       string        `json:"error,omitempty"`
+}
+
+func (SessionEndData) agentEventData() {}
+
+// ToolExecutionStartData is emitted before a tool is executed.
+type ToolExecutionStartData struct {
+	ToolCallID string `json:"tool_call_id"`
+	ToolName   string `json:"tool_name"`
+	Arguments  string `json:"arguments"`
+}
+
+func (ToolExecutionStartData) agentEventData() {}
+
+// ToolExecutionEndData is emitted after a tool execution completes.
+type ToolExecutionEndData struct {
+	ToolCallID  string        `json:"tool_call_id"`
+	ToolName    string        `json:"tool_name"`
+	Success     bool          `json:"success"`
+	Result      string        `json:"result"`
+	Error       string        `json:"error,omitempty"`
+	Cached      bool          `json:"cached"`
+	Duration    time.Duration `json:"duration"`
+	Blocked     bool          `json:"blocked"`
+	BlockReason string        `json:"block_reason,omitempty"`
+}
+
+func (ToolExecutionEndData) agentEventData() {}
+
+// TypedEventEmitter is the interface satisfied by agent.EventEmitter.
+// Defined here to avoid an import cycle (agent -> metrics).
+type TypedEventEmitter interface {
+	// On registers a synchronous listener for a specific event type.
+	On(eventType AgentEventType, name string, listener func(ctx context.Context, event AgentEvent))
+	// OnAsync registers an asynchronous listener for a specific event type.
+	OnAsync(eventType AgentEventType, name string, listener func(ctx context.Context, event AgentEvent))
+}
 
 // Collector collects metrics from various sources.
 type Collector struct {
@@ -20,6 +121,7 @@ type Collector struct {
 	wg              sync.WaitGroup
 	getQueueDepth   func() int
 	getActiveAgents func() int
+	logger          *slog.Logger
 }
 
 // CollectorConfig configures the metrics collector.
@@ -50,6 +152,7 @@ func NewCollector(store *Store, messageBus *bus.MessageBus, cfg *CollectorConfig
 		stopChan:        make(chan struct{}),
 		getQueueDepth:   cfg.GetQueueDepth,
 		getActiveAgents: cfg.GetActiveAgents,
+		logger:          slog.Default().With("component", "metrics-collector"),
 	}
 
 	if cfg.Enabled {
@@ -277,6 +380,130 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 			"reviewer":       payload.Reviewer,
 			"confidence":     payload.Confidence,
 			"revision_count": payload.RevisionCount,
+		},
+	)
+}
+
+// RegisterEventListeners subscribes the collector to typed agent events via an
+// EventEmitter. This supplements the existing bus subscriptions so the collector
+// works with both legacy bus topics and the new typed event system.
+//
+// All listeners are registered as async since metrics collection should not
+// block the agent loop.
+func (c *Collector) RegisterEventListeners(emitter TypedEventEmitter) {
+	// Track LLM token usage from provider responses.
+	emitter.OnAsync(AgentEventAfterProviderResponse, "metrics.token-tracking",
+		func(ctx context.Context, event AgentEvent) {
+			data, ok := event.Data.(AfterProviderResponseData)
+			if !ok {
+				return
+			}
+
+			if data.Error != "" {
+				c.store.RecordEvent("llm.error", "error", "LLM request failed",
+					map[string]any{
+						"model": data.ModelID,
+						"error": data.Error,
+					},
+				)
+				return
+			}
+
+			if data.Cached {
+				c.store.Record("llm.cache_hits", 1, map[string]string{
+					"model": data.ModelID,
+				})
+			}
+
+			c.RecordLLMCall(data.ModelID, 0, data.ResponseTokens, data.Latency)
+		},
+	)
+
+	// Track agent iterations at turn boundaries.
+	emitter.OnAsync(AgentEventTurnEnd, "metrics.turn-tracking",
+		func(ctx context.Context, event AgentEvent) {
+			data, ok := event.Data.(TurnEndData)
+			if !ok {
+				return
+			}
+
+			agentID := event.AgentID
+			if agentID == "" {
+				agentID = "unknown"
+			}
+			c.RecordAgentIteration(agentID)
+
+			if data.HadToolCalls {
+				c.store.Record("agent.tool_turns", 1, map[string]string{
+					"agent_id": agentID,
+				})
+			}
+		},
+	)
+
+	// Track session-level metrics when sessions complete.
+	emitter.OnAsync(AgentEventSessionEnd, "metrics.session-tracking",
+		func(ctx context.Context, event AgentEvent) {
+			data, ok := event.Data.(SessionEndData)
+			if !ok {
+				return
+			}
+
+			c.store.Record("session.duration", data.Duration.Seconds(), map[string]string{
+				"outcome": data.Outcome,
+			})
+			c.store.Record("session.tokens", float64(data.TotalTokens), map[string]string{
+				"outcome": data.Outcome,
+			})
+			c.store.Record("session.iterations", float64(data.TotalIter), map[string]string{
+				"outcome": data.Outcome,
+			})
+
+			if data.Error != "" {
+				c.store.RecordEvent("session.error", "error", "Session ended with error",
+					map[string]any{
+						"session_id": data.SessionID,
+						"outcome":    data.Outcome,
+						"error":      data.Error,
+					},
+				)
+			}
+
+			c.store.RecordEvent("session.completed", "info",
+				fmt.Sprintf("Session %s ended (%s, %d tokens, %d iterations)",
+					data.SessionID, data.Outcome, data.TotalTokens, data.TotalIter),
+				map[string]any{
+					"session_id":   data.SessionID,
+					"outcome":      data.Outcome,
+					"total_tokens": data.TotalTokens,
+					"total_iter":   data.TotalIter,
+					"duration":     data.Duration.String(),
+				},
+			)
+		},
+	)
+
+	// Track tool execution start for tool call counting.
+	emitter.OnAsync(AgentEventToolExecutionStart, "metrics.tool-start",
+		func(ctx context.Context, event AgentEvent) {
+			data, ok := event.Data.(ToolExecutionStartData)
+			if !ok {
+				return
+			}
+			c.store.Record("tool.calls", 1, map[string]string{
+				"tool_name": data.ToolName,
+			})
+		},
+	)
+
+	// Track tool execution end for duration and success/failure.
+	emitter.OnAsync(AgentEventToolExecutionEnd, "metrics.tool-end",
+		func(ctx context.Context, event AgentEvent) {
+			data, ok := event.Data.(ToolExecutionEndData)
+			if !ok {
+				return
+			}
+			c.RecordToolCall(data.ToolName, data.Duration, data.Success)
 		},
 	)
 }

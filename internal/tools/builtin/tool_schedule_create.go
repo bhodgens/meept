@@ -218,3 +218,10 @@ func (t *ScheduleCreateTool) Execute(ctx context.Context, args map[string]any) (
 
 // Ensure ScheduleCreateTool implements the Tool interface
 var _ tools.Tool = (*ScheduleCreateTool)(nil)
+
+// TerminateHint implements tools.TerminatingTool -- schedule creation returns
+// a confirmation that does not need LLM follow-up processing.
+func (t *ScheduleCreateTool) TerminateHint(args map[string]any) bool { return true }
+
+// Ensure ScheduleCreateTool implements TerminatingTool.
+var _ tools.TerminatingTool = (*ScheduleCreateTool)(nil)

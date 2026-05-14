@@ -1,6 +1,9 @@
 package viz
 
 import (
+	"context"
+	"log/slog"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -8,6 +11,96 @@ import (
 
 // VizTickMsg signals a visualization frame update.
 type VizTickMsg struct{}
+
+// --- Typed event types for agent events (mirrors internal/agent/events.go) ---
+
+// AgentEventType identifies a typed agent event.
+type AgentEventType string
+
+const (
+	AgentEventTurnStart          AgentEventType = "turn_start"
+	AgentEventTurnEnd            AgentEventType = "turn_end"
+	AgentEventToolExecutionStart AgentEventType = "tool_execution_start"
+	AgentEventToolExecutionUpdate AgentEventType = "tool_execution_update"
+	AgentEventToolExecutionEnd   AgentEventType = "tool_execution_end"
+)
+
+// AgentEventData is the interface all event payloads implement.
+type AgentEventData interface {
+	agentEventData()
+}
+
+// AgentEvent is the envelope for typed agent events.
+type AgentEvent struct {
+	Type           AgentEventType `json:"type"`
+	Timestamp      time.Time      `json:"timestamp"`
+	AgentID        string         `json:"agent_id"`
+	ConversationID string         `json:"conversation_id"`
+	Iteration      int            `json:"iteration"`
+	Data           AgentEventData `json:"data"`
+}
+
+// TurnStartData is emitted at the beginning of each loop iteration.
+type TurnStartData struct {
+	TurnNumber       int `json:"turn_number"`
+	TotalTokensSoFar int `json:"total_tokens_so_far"`
+	MessagesCount    int `json:"messages_count"`
+	ToolCount        int `json:"tool_count"`
+}
+
+func (TurnStartData) agentEventData() {}
+
+// TurnEndData is emitted at the end of each loop iteration.
+type TurnEndData struct {
+	TurnNumber     int    `json:"turn_number"`
+	HadToolCalls   bool   `json:"had_tool_calls"`
+	ToolCallCount  int    `json:"tool_call_count"`
+	ResponseTokens int    `json:"response_tokens"`
+	StoppedBy      string `json:"stopped_by"`
+}
+
+func (TurnEndData) agentEventData() {}
+
+// ToolExecutionStartData is emitted before a tool is executed.
+type ToolExecutionStartData struct {
+	ToolCallID string `json:"tool_call_id"`
+	ToolName   string `json:"tool_name"`
+	Arguments  string `json:"arguments"`
+}
+
+func (ToolExecutionStartData) agentEventData() {}
+
+// ToolExecutionUpdateData is emitted during tool execution progress.
+type ToolExecutionUpdateData struct {
+	ToolCallID string `json:"tool_call_id"`
+	ToolName   string `json:"tool_name"`
+	Status     string `json:"status"`
+	Detail     string `json:"detail"`
+}
+
+func (ToolExecutionUpdateData) agentEventData() {}
+
+// ToolExecutionEndData is emitted after a tool execution completes.
+type ToolExecutionEndData struct {
+	ToolCallID  string        `json:"tool_call_id"`
+	ToolName    string        `json:"tool_name"`
+	Success     bool          `json:"success"`
+	Result      string        `json:"result"`
+	Error       string        `json:"error,omitempty"`
+	Cached      bool          `json:"cached"`
+	Duration    time.Duration `json:"duration"`
+	Blocked     bool          `json:"blocked"`
+	BlockReason string        `json:"block_reason,omitempty"`
+}
+
+func (ToolExecutionEndData) agentEventData() {}
+
+// TypedEventEmitter is the interface satisfied by agent.EventEmitter.
+// Defined here to avoid an import cycle.
+type TypedEventEmitter interface {
+	On(eventType AgentEventType, name string, listener func(ctx context.Context, event AgentEvent))
+	OnAsync(eventType AgentEventType, name string, listener func(ctx context.Context, event AgentEvent))
+}
 
 // AgentActivityData represents agent data for visualization sync.
 type AgentActivityData struct {
@@ -34,6 +127,21 @@ type DispatchViz struct {
 	center     Point
 	frame      int
 	fps        int
+
+	// pendingEventsMu guards the pending event state written by sync listeners.
+	pendingEventsMu sync.Mutex
+	// pendingActivity holds agent activity updates that have arrived via typed
+	// events since the last Update tick. They are flushed into robot states
+	// during Update so that rendering stays on the Bubble Tea tick cadence.
+	pendingActivity map[string]*agentActivityEntry
+	logger          *slog.Logger
+}
+
+// agentActivityEntry tracks the latest activity for a single agent.
+type agentActivityEntry struct {
+	agentID  string
+	state    string // reasoning, tool_exec, waiting, complete, error
+	progress float64
 }
 
 // NewDispatchViz creates a new dispatch visualization with the given width.
@@ -43,9 +151,11 @@ func NewDispatchViz(width int) *DispatchViz {
 	height := max(width/5, 4)
 
 	v := &DispatchViz{
-		width:  width,
-		height: height,
-		fps:    12,
+		width:           width,
+		height:          height,
+		fps:             12,
+		pendingActivity: make(map[string]*agentActivityEntry),
+		logger:          slog.Default().With("component", "dispatch-viz"),
 	}
 
 	v.initCanvas()
@@ -141,6 +251,9 @@ func (v *DispatchViz) Update(msg tea.Msg) tea.Cmd {
 	if _, ok := msg.(VizTickMsg); ok {
 		v.frame++
 
+		// Flush any pending typed-event activity into robot states.
+		v.flushPendingActivity()
+
 		// Update all entities
 		for _, r := range v.robots {
 			r.Update()
@@ -196,6 +309,138 @@ func (v *DispatchViz) SyncWithData(agents []AgentActivityData, workers []WorkerD
 			}
 		}
 	}
+}
+
+// flushPendingActivity drains pending typed-event activity and applies it to
+// the matching robots. Called once per animation tick inside Update so that
+// visual state stays consistent with the Bubble Tea update cadence.
+func (v *DispatchViz) flushPendingActivity() {
+	v.pendingEventsMu.Lock()
+	pending := v.pendingActivity
+	v.pendingActivity = make(map[string]*agentActivityEntry, len(pending))
+	v.pendingEventsMu.Unlock()
+
+	if len(pending) == 0 {
+		return
+	}
+
+	// Build a slice of AgentActivityData from pending entries for reuse
+	// with the existing SyncWithData path.
+	activities := make([]AgentActivityData, 0, len(pending))
+	for _, entry := range pending {
+		activities = append(activities, AgentActivityData{
+			AgentID:  entry.agentID,
+			State:    entry.state,
+			Progress: entry.progress,
+		})
+	}
+
+	// Match activities to robots by agent ID.
+	for _, r := range v.robots {
+		for _, act := range activities {
+			if r.AgentID == act.AgentID {
+				newState := mapAgentState(act.State)
+				if r.State != newState {
+					r.SetState(newState)
+					switch newState {
+					case RobotMovingToCenter, RobotDispatchingSubtask:
+						r.MoveTo(v.center)
+					case RobotTaskComplete, RobotIdle:
+						r.MoveToHome()
+					}
+				}
+				r.Progress = act.Progress
+				break
+			}
+		}
+	}
+}
+
+// pushActivity records a pending activity update from a typed event.
+func (v *DispatchViz) pushActivity(agentID, state string, progress float64) {
+	v.pendingEventsMu.Lock()
+	v.pendingActivity[agentID] = &agentActivityEntry{
+		agentID:  agentID,
+		state:    state,
+		progress: progress,
+	}
+	v.pendingEventsMu.Unlock()
+}
+
+// RegisterEventListeners subscribes the visualization to typed agent events via
+// an EventEmitter. Sync listeners are used so that state mutations are visible
+// before the next animation tick renders.
+//
+// The existing SyncWithData path continues to work for callers that push data
+// externally (e.g., from RPC polling). Typed events are additive.
+func (v *DispatchViz) RegisterEventListeners(emitter TypedEventEmitter) {
+	// Turn start: agent begins reasoning.
+	emitter.On(AgentEventTurnStart, "viz.turn-start",
+		func(ctx context.Context, event AgentEvent) {
+			v.pushActivity(event.AgentID, "reasoning", 0)
+		},
+	)
+
+	// Turn end: agent finished one iteration.
+	emitter.On(AgentEventTurnEnd, "viz.turn-end",
+		func(ctx context.Context, event AgentEvent) {
+			data, ok := event.Data.(TurnEndData)
+			if !ok {
+				return
+			}
+			// If the turn had tool calls, transition to tool_exec briefly;
+			// otherwise the agent is completing (will be overridden by next
+			// turn_start or session_end).
+			state := "waiting"
+			if data.HadToolCalls {
+				state = "tool_exec"
+			}
+			v.pushActivity(event.AgentID, state, 1.0)
+		},
+	)
+
+	// Tool execution start: agent is executing a tool.
+	emitter.On(AgentEventToolExecutionStart, "viz.tool-start",
+		func(ctx context.Context, event AgentEvent) {
+			v.pushActivity(event.AgentID, "tool_exec", 0)
+		},
+	)
+
+	// Tool execution update: progress during tool execution.
+	emitter.On(AgentEventToolExecutionUpdate, "viz.tool-update",
+		func(ctx context.Context, event AgentEvent) {
+			data, ok := event.Data.(ToolExecutionUpdateData)
+			if !ok {
+				return
+			}
+			progress := 0.5 // Default mid-progress for generic updates
+			switch data.Status {
+			case "running", "in_progress":
+				progress = 0.3
+			case "nearly_done", "finishing":
+				progress = 0.8
+			case "streaming":
+				progress = 0.6
+			}
+			v.pushActivity(event.AgentID, "tool_exec", progress)
+		},
+	)
+
+	// Tool execution end: tool completed (success or failure).
+	emitter.On(AgentEventToolExecutionEnd, "viz.tool-end",
+		func(ctx context.Context, event AgentEvent) {
+			data, ok := event.Data.(ToolExecutionEndData)
+			if !ok {
+				return
+			}
+			if !data.Success {
+				v.pushActivity(event.AgentID, "error", 1.0)
+				return
+			}
+			// Tool done, agent transitions back to reasoning for the next turn.
+			v.pushActivity(event.AgentID, "reasoning", 1.0)
+		},
+	)
 }
 
 // mapAgentState converts an agent state string to a RobotState.

@@ -188,8 +188,19 @@ func (t *ScheduleGetTool) Execute(ctx context.Context, args map[string]any) (any
 	return info, nil
 }
 
+// TerminateHint implements tools.TerminatingTool -- schedule listing returns
+// read-only data that does not need LLM follow-up processing.
+func (t *ScheduleListTool) TerminateHint(args map[string]any) bool { return true }
+
+// TerminateHint implements tools.TerminatingTool.
+func (t *ScheduleGetTool) TerminateHint(args map[string]any) bool { return true }
+
 // Ensure tools implement the Tool interface
 var (
 	_ tools.Tool = (*ScheduleListTool)(nil)
 	_ tools.Tool = (*ScheduleGetTool)(nil)
+
+	// Ensure schedule listing tools implement TerminatingTool
+	_ tools.TerminatingTool = (*ScheduleListTool)(nil)
+	_ tools.TerminatingTool = (*ScheduleGetTool)(nil)
 )
