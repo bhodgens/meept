@@ -113,6 +113,7 @@ nav:
       - Models CLI Reference: reference/models-cli.md
       - RPC API: reference/rpc.md
       - Tool Reference: reference/tools.md
+      - Agent Loop & Tool Architecture: reference/agent-loop-tools.md
       - Logging: reference/logging.md
       - Metrics & Debugging: reference/metrics.md
       - Generated Docs: reference/generated/
