@@ -820,8 +820,10 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case KeyEnter:
-			// Enter always sends message (when focused on input and not loading)
-			if m.focused != FocusInput || m.loading {
+			// Enter sends message when focused on input.
+			// When agent is active (loading), messages are queued as follow-ups
+			// or steering messages rather than starting a new request.
+			if m.focused != FocusInput || (m.loading && !m.agentActive) {
 				return nil
 			}
 			return m.doSendMessage()
