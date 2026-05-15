@@ -91,5 +91,7 @@
     "auto_copy_on_release": false,
     // Lines to scroll per mouse wheel event
     "scroll_speed": 3,
+    // Agent progress verbosity: "quiet" (task-only), "normal" (task + tools), "verbose" (everything)
+    "verbosity": "normal",
   },
 }
