@@ -50,11 +50,12 @@ const flushDelay = 3 * time.Second
 
 // ChatMessage represents a single chat message.
 type ChatMessage struct {
-	Role      string // "user", "assistant", "system", or "pending"
-	Content   string
-	Timestamp time.Time
-	State     MessageState
-	Progress  *ProgressState // Progress state for pending messages
+	Role         string // "user", "assistant", "system", "participant", or "pending"
+	Content      string
+	SourceClient string // Client identifier for participant messages (e.g. "claude", "tui")
+	Timestamp    time.Time
+	State        MessageState
+	Progress     *ProgressState // Progress state for pending messages
 
 	// Rendering cache
 	rendered   string // Cached rendered output
@@ -1226,6 +1227,8 @@ func (m *ChatModel) getMessageContent(msg ChatMessage) string {
 		prefix = "You: "
 	case RoleAssistant:
 		prefix = "Meept: "
+	case RoleParticipant:
+		prefix = fmt.Sprintf("[%s] ", msg.SourceClient)
 	case StatePending:
 		prefix = ""
 	case RoleSystem:
@@ -1279,6 +1282,18 @@ func (m *ChatModel) addMessage(role, content string) {
 // AddSystemMessage adds a system message to the chat transcript.
 func (m *ChatModel) AddSystemMessage(content string) {
 	m.addMessage(RoleSystem, content)
+}
+
+// AddParticipantMessage adds a message from a session participant to the chat transcript.
+func (m *ChatModel) AddParticipantMessage(sourceClient, content string) {
+	m.messages = append(m.messages, ChatMessage{
+		Role:         RoleParticipant,
+		Content:      content,
+		SourceClient: sourceClient,
+		Timestamp:    time.Now().UTC(),
+		State:        MessageNormal,
+	})
+	m.updateViewport()
 }
 
 // trackDirtyMessage adds a message to the dirty buffer for later persistence.
@@ -1594,6 +1609,8 @@ func (m *ChatModel) updateViewport() {
 			style = m.userStyle
 		case RoleAssistant:
 			style = m.assistantStyle
+		case RoleParticipant:
+			style = m.systemStyle
 		case StatePending:
 			style = m.pendingStyle
 		case RoleSystem:
@@ -1612,6 +1629,8 @@ func (m *ChatModel) updateViewport() {
 		isNewTurn := false
 		switch msg.Role {
 		case RoleUser:
+			isNewTurn = true
+		case RoleParticipant:
 			isNewTurn = true
 		case RoleSystem:
 			// System message starts a new turn only if the previous message

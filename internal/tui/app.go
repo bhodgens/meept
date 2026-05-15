@@ -968,6 +968,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					a.chat.UpdateQueueStatus(status)
 				}
+
+			// Multi-client participant messages
+			case "chat.message.received":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					sourceClient, _ := payloadMap["source_client"].(string)
+					content, _ := payloadMap["content"].(string)
+					if sourceClient != "" && sourceClient != "tui" && content != "" && a.chat != nil {
+						a.chat.AddParticipantMessage(sourceClient, content)
+					}
+				}
 			}
 		}
 		// Also forward to sidebar for activity feed updates

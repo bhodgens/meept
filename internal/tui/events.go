@@ -52,6 +52,7 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 			"memory.*",
 			"worker.*",
 			"llm.*",
+			"chat.*",
 			"conversation.*",
 		},
 		BufferSize:   50,

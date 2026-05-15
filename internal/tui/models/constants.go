@@ -23,6 +23,7 @@ const (
 	RoleUser        = "user"
 	RoleAssistant   = "assistant"
 	RoleSystem      = "system"
+	RoleParticipant = "participant"
 	RolePending     = "pending"
 )
 
