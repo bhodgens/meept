@@ -746,21 +746,20 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// First, check if mouse event is in the textarea input area
-		if textareaStartY, _ := m.getTextareaBounds(); textareaStartY >= 0 {
-			// Forward mouse events to textarea handler
-			return m.HandleInputMouse(msg)
-		}
+		// Route mouse events based on position and active drag state.
+		mousePos := msg.(interface{ Mouse() tea.Mouse }).Mouse()
+		textareaStartY, textareaEndY := m.getTextareaBounds()
+		inTextarea := textareaStartY >= 0 &&
+			mousePos.Y >= textareaStartY && mousePos.Y <= textareaEndY
 
 		switch msg := msg.(type) {
 		case tea.MouseWheelMsg:
-			// Handle wheel scrolling - this prevents terminal buffer scroll
-			mouse := msg.Mouse()
+			// Mouse wheel always scrolls the viewport regardless of position
 			lines := m.scrollSpeed
 			if lines <= 0 {
 				lines = 3
 			}
-			switch mouse.Button {
+			switch mousePos.Button {
 			case tea.MouseWheelUp:
 				m.viewport.ScrollUp(lines)
 			case tea.MouseWheelDown:
@@ -769,19 +768,29 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case tea.MouseClickMsg:
-			mouse := msg.Mouse()
-			if !m.isClickInViewportArea(mouse) {
-				return nil
+			if inTextarea {
+				return m.HandleInputMouse(msg)
 			}
-			return m.handleMousePress(msg)
+			if m.isClickInViewportArea(mousePos) {
+				return m.handleMousePress(msg)
+			}
+			return nil
 
 		case tea.MouseMotionMsg:
+			// Route drag to whichever handler owns the active drag
+			if m.inputMouseDown {
+				return m.HandleInputMouse(msg)
+			}
 			if m.mouseDown {
 				return m.handleMouseDrag(msg)
 			}
 			return nil
 
 		case tea.MouseReleaseMsg:
+			// Route release to whichever handler owns the active drag
+			if m.inputMouseDown {
+				return m.HandleInputMouse(msg)
+			}
 			if m.mouseDown {
 				return m.handleMouseRelease(msg)
 			}
