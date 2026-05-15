@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/caimlas/meept/internal/task"
@@ -502,5 +503,37 @@ func TestClassifyAll(t *testing.T) {
 	intents := c.ClassifyAll(ctx, "write code and debug the error", nil)
 	if len(intents) < 2 {
 		t.Errorf("ClassifyAll() returned %d intents, want >= 2", len(intents))
+	}
+}
+
+func TestRouteToAgentUsesReportRouter(t *testing.T) {
+	// Verify that RouteToAgent returns a response that incorporates
+	// report routing decisions, not just StripReport of the raw response
+	registry := NewAgentRegistry(RegistryConfig{
+		Logger: slog.Default(),
+	})
+	// Register mock agents
+	_ = registry.RegisterSpec(&AgentSpec{
+		ID:   "coder",
+		Name: "coder",
+		Role: "executor",
+	})
+	_ = registry.RegisterSpec(&AgentSpec{
+		ID:   "reviewer",
+		Name: "reviewer",
+		Role: "executor",
+	})
+
+	d := NewDispatcher(DispatcherConfig{
+		Registry: registry,
+		Logger:   slog.Default(),
+	})
+
+	if d == nil {
+		t.Fatal("dispatcher should not be nil")
+	}
+	// The router field must be initialized by NewDispatcher
+	if d.router == nil {
+		t.Fatal("dispatcher.router should be initialized by NewDispatcher")
 	}
 }

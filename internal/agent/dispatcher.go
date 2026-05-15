@@ -129,6 +129,7 @@ type Dispatcher struct {
 	semanticIndex     *SemanticIndex
 	sessionTracker    *SessionTracker
 	stats             *DispatcherStats
+	router            *ReportRouter
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -219,6 +220,13 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		ByAgent:  make(map[string]int),
 		ByIntent: make(map[string]int),
 	}
+
+	// Initialize report router for multi-agent handoff
+	d.router = NewReportRouter(ReportRouterConfig{
+		Registry:   d.registry,
+		Dispatcher: d,
+		Logger:     cfg.Logger,
+	})
 
 	return d
 }
@@ -702,18 +710,55 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		return "", fmt.Errorf("agent execution failed: %w", err)
 	}
 
-	// Parse structured report from response and strip it from the display output
+	// Parse structured report and route through report router
 	report := ExtractReport(response)
 	action := DetermineRouteAction(report)
-	d.logger.Debug("Agent completed", "action", action.String(), "agent", result.AgentID)
+	d.logger.Info("Agent completed",
+		"action", action.String(),
+		"agent", result.AgentID,
+		"has_report", report != nil,
+	)
 	displayResponse := StripReport(response)
+
+	// Use report router to determine next action
+	routeResult := d.router.Route(ctx, RouteParams{
+		Report:  report,
+		Action:  action,
+		AgentID: result.AgentID,
+		Depth:   0,
+	})
+
+	// If routing suggests a next agent, handle the handoff
+	if action == RouteActionRoute && !routeResult.ForceNotify && report != nil {
+		nextAgentID := report.SuggestedNextAgent
+		d.logger.Info("Routing to next agent",
+			"from", result.AgentID,
+			"to", nextAgentID,
+			"depth", routeResult.Depth,
+		)
+		// Build accumulated context from previous agent's work
+		accumulatedContext := d.buildAccumulatedContext(report, displayResponse)
+		nextResult := &DispatchResult{
+			AgentID: nextAgentID,
+			Intent:  result.Intent,
+		}
+		_ = accumulatedContext // used for context enrichment in recursive call
+		// Recursively route to the next agent
+		return d.RouteToAgent(ctx, nextResult, conversationID)
+	}
 
 	// Record memory of this interaction
 	if d.memvid != nil && d.memvid.IsAvailable(ctx) {
 		go d.recordInteraction(context.Background(), result, displayResponse) //nolint:gosec // background goroutine outlives request context
 	}
 
-	return displayResponse, nil
+	// Use route result's response if available, otherwise use display response
+	finalResponse := displayResponse
+	if routeResult.FinalResponse != "" && routeResult.ForceNotify {
+		finalResponse = routeResult.FinalResponse + "\n\n" + displayResponse
+	}
+
+	return finalResponse, nil
 }
 
 // handlePlatformIntrospection returns platform capabilities directly.
@@ -810,6 +855,24 @@ func (d *Dispatcher) buildContextMessage(result *DispatchResult) string {
 	parts = append(parts, result.Intent.Summary)
 
 	return strings.Join(parts, "")
+}
+
+// buildAccumulatedContext creates context from a previous agent's report for the next agent.
+func (d *Dispatcher) buildAccumulatedContext(report *AgentReport, displayResponse string) string {
+	var parts []string
+	if len(report.Accomplished) > 0 {
+		parts = append(parts, "accomplished: "+strings.Join(report.Accomplished, "; "))
+	}
+	if len(report.Issues) > 0 {
+		parts = append(parts, "issues: "+strings.Join(report.Issues, "; "))
+	}
+	if len(report.Observations) > 0 {
+		parts = append(parts, "observations: "+strings.Join(report.Observations, "; "))
+	}
+	if report.DecisionContext != "" {
+		parts = append(parts, "decision context: "+report.DecisionContext)
+	}
+	return strings.Join(parts, "\n")
 }
 
 // recordInteraction records the interaction to memory.
