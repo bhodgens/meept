@@ -20,13 +20,14 @@ const (
 
 // BusMessage represents a message on the internal message bus.
 type BusMessage struct {
-	ID        string          `json:"id"`
-	Type      MessageType     `json:"type"`
-	Topic     string          `json:"topic,omitempty"`
-	Source    string          `json:"source"`
-	Timestamp time.Time       `json:"timestamp"`
-	Payload   json.RawMessage `json:"payload"`
-	ReplyTo   string          `json:"reply_to,omitempty"`
+	ID           string          `json:"id"`
+	Type         MessageType     `json:"type"`
+	Topic        string          `json:"topic,omitempty"`
+	Source       string          `json:"source"`
+	SourceClient string          `json:"source_client,omitempty"`
+	Timestamp    time.Time       `json:"timestamp"`
+	Payload      json.RawMessage `json:"payload"`
+	ReplyTo      string          `json:"reply_to,omitempty"`
 }
 
 // NewBusMessage creates a new BusMessage with a generated ID.
