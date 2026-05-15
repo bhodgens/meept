@@ -127,6 +127,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newCalendarCmd())
 	rootCmd.AddCommand(newBranchCmd())
 	rootCmd.AddCommand(newHelpCmd(rootCmd))
+	rootCmd.AddCommand(newMCPChatServerCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
