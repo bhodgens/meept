@@ -517,6 +517,37 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 
+	// Start progress synthesizer for tiered agent activity summaries.
+	// Subscribes to all agent events via wildcard and republishes condensed
+	// SynthesizedProgressEvent messages on the "agent.progress.synthesized" topic.
+	progressSynthesizer := agent.NewProgressSynthesizer(msgBus, c.LLMClient, logger.With("component", "progress-synthesizer"))
+	progressSub := msgBus.Subscribe("progress-synthesizer", "agent.event.*")
+	go func() {
+		for msg := range progressSub.Channel {
+			var event agent.AgentEvent
+			if err := json.Unmarshal(msg.Payload, &event); err != nil {
+				continue
+			}
+			synthesized := progressSynthesizer.Synthesize(event)
+			if synthesized == nil {
+				continue
+			}
+			payload, err := json.Marshal(synthesized)
+			if err != nil {
+				continue
+			}
+			synthMsg := &models.BusMessage{
+				ID:        msg.ID + "-synth",
+				Type:      models.MessageTypeEvent,
+				Source:    "progress-synthesizer",
+				Timestamp: synthesized.Timestamp,
+				Payload:   payload,
+			}
+			msgBus.Publish("agent.progress.synthesized", synthMsg)
+		}
+	}()
+	logger.Info("Progress synthesizer started, subscribed to agent.event.*")
+
 	// Chat handler created later after dispatcher (if multi-agent enabled)
 
 	// Create status handler with budget tracking
