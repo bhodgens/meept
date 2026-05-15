@@ -21,6 +21,12 @@
     },
   },
 
+  // MCP chat server configuration (for external agent platforms like Claude)
+  "mcp_chat_server": {
+    "enabled": true,
+    "socket_path": "~/.meept/meept.sock",
+  },
+
   // LLM configuration (models moved to models.json5)
   "llm": {
     "budget": {
