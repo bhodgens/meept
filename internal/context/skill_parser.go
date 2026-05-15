@@ -8,7 +8,16 @@ import (
 	"strings"
 )
 
-// ParseSkillFile parses a SKILL.md file
+// ErrNoFrontmatter is returned (alongside a valid Skill) when a SKILL.md
+// file has no YAML frontmatter. Callers should log a warning but still use
+// the returned skill.
+var ErrNoFrontmatter = fmt.Errorf("no frontmatter found")
+
+// ParseSkillFile parses a SKILL.md file.
+// YAML frontmatter is optional: when present it populates Name/Description/etc.
+// When absent, the slug (directory name) is used as the name, the entire file
+// content becomes the body, and ErrNoFrontmatter is returned alongside the
+// valid skill so callers can emit a warning.
 func ParseSkillFile(path string) (*Skill, error) {
 	// Read the file
 	content, err := os.ReadFile(path)
@@ -24,10 +33,15 @@ func ParseSkillFile(path string) (*Skill, error) {
 	// Extract skill slug from path
 	skill.Slug = extractSkillSlug(path)
 
-	// Parse YAML frontmatter
+	// Parse YAML frontmatter (optional)
 	frontmatter, body, err := extractYAMLFrontmatter(string(content))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+		// No frontmatter — use slug as name, full content as body.
+		skill.Name = skill.Slug
+		skill.Content = strings.TrimSpace(string(content))
+		skill.Version = "0.1.0"
+		skill.Category = inferSkillCategory(skill.Slug, skill.Path)
+		return skill, ErrNoFrontmatter
 	}
 
 	// Parse frontmatter fields

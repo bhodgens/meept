@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -154,11 +155,18 @@ func (d *Discovery) scanTierMetadataOnly(tier DiscoveryTier, entries map[string]
 func (d *Discovery) loadSkillMetadata(path string, priority int, entries map[string]*SkillIndexEntry) {
 	entry, err := ParseSkillMetadataOnly(path)
 	if err != nil {
-		d.logger.Warn("Failed to parse skill metadata",
-			"path", path,
-			"error", err,
-		)
-		return
+		if errors.Is(err, ErrNoFrontmatter) {
+			// Missing frontmatter — still usable, just warn.
+			d.logger.Warn("Skill file has no frontmatter, using slug as name",
+				"path", path,
+			)
+		} else {
+			d.logger.Warn("Failed to parse skill metadata",
+				"path", path,
+				"error", err,
+			)
+			return
+		}
 	}
 
 	entry.Priority = priority
@@ -273,9 +281,23 @@ func (d *Discovery) scanTier(tier DiscoveryTier) error {
 func (d *Discovery) loadSkillFile(path string, priority int) {
 	skill, err := ParseSkillFile(path)
 	if err != nil {
-		d.logger.Warn("Failed to parse skill file",
+		if errors.Is(err, ErrNoFrontmatter) {
+			// Missing frontmatter — still usable, just warn.
+			d.logger.Warn("Skill file has no frontmatter, using slug as name",
+				"path", path,
+			)
+		} else {
+			d.logger.Warn("Failed to parse skill file",
+				"path", path,
+				"error", err,
+			)
+			return
+		}
+	}
+
+	if skill.Name == "" {
+		d.logger.Warn("Skill has no name, skipping",
 			"path", path,
-			"error", err,
 		)
 		return
 	}

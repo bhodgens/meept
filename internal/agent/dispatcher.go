@@ -149,6 +149,7 @@ type DispatcherConfig struct {
 	TemplateRegistry  *templates.Registry
 	Logger            *slog.Logger
 	LLMClient         *llm.Client
+	ClassifierClient  *llm.Client // Separate client for classification (nil = use LLMClient)
 	ClassifierModel   string
 	CapabilityMatcher *CapabilityMatcher
 	EmbeddingClient   EmbeddingClient
@@ -178,10 +179,15 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	// Add keyword-based classifier
 	d.keywordClassifier = &KeywordClassifier{}
 
-	// Add LLM-based classifier if client is provided
-	if cfg.LLMClient != nil {
+	// Add LLM-based classifier if a client is provided.
+	// Prefer the dedicated ClassifierClient; fall back to the main LLMClient.
+	classifierClient := cfg.ClassifierClient
+	if classifierClient == nil {
+		classifierClient = cfg.LLMClient
+	}
+	if classifierClient != nil {
 		d.llmClassifier = NewLLMClassifier(LLMClassifierConfig{
-			Client: cfg.LLMClient,
+			Client: classifierClient,
 			Model:  cfg.ClassifierModel,
 			Logger: cfg.Logger,
 		})

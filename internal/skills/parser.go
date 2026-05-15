@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -36,6 +37,7 @@ func (e *ParseError) Unwrap() error {
 
 // ParseSkillMetadataOnly parses only the YAML frontmatter from a SKILL.md file.
 // This is faster than ParseSkillFile as it skips parsing the body content.
+// YAML frontmatter is optional: when absent the slug (directory name) is used as the name.
 func ParseSkillMetadataOnly(path string) (*SkillIndexEntry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -48,6 +50,16 @@ func ParseSkillMetadataOnly(path string) (*SkillIndexEntry, error) {
 
 	frontmatter, _, err := splitFrontmatter(string(data))
 	if err != nil {
+		if errors.Is(err, ErrNoFrontmatter) {
+			// No frontmatter — derive name from directory.
+			// Return valid entry alongside ErrNoFrontmatter so callers can warn.
+			slug := slugFromPath(path)
+			return &SkillIndexEntry{
+				Name:      slug,
+				Path:      path,
+				RiskLevel: "medium",
+			}, ErrNoFrontmatter
+		}
 		return nil, &ParseError{
 			Path:    path,
 			Message: "failed to split frontmatter",
@@ -117,9 +129,19 @@ func ParseSkillFile(path string) (*Skill, error) {
 }
 
 // ParseSkillText parses raw SKILL.md text and returns a Skill.
+// YAML frontmatter is optional: when absent the full text becomes the body.
 func ParseSkillText(text string) (*Skill, error) {
 	frontmatter, body, err := splitFrontmatter(text)
 	if err != nil {
+		if errors.Is(err, ErrNoFrontmatter) {
+			// No frontmatter — use full text as body, no name set.
+			// Return valid skill alongside ErrNoFrontmatter so callers can warn.
+			return &Skill{
+				Body:          strings.TrimSpace(text),
+				RiskLevel:     "medium",
+				MaxIterations: 10,
+			}, ErrNoFrontmatter
+		}
 		return nil, err
 	}
 
@@ -256,4 +278,13 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 	}
 
 	return &meta, nil
+}
+
+// slugFromPath derives a skill slug from the file path by using the parent directory name.
+func slugFromPath(path string) string {
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		return filepath.Base(dir)
+	}
+	return "unknown"
 }

@@ -47,6 +47,8 @@ type Components struct {
 	Config               *config.Config
 	ModelsConfig         *config.ModelsConfig
 	LLMClient            *llm.Client
+	ClassifierClient     *llm.Client // Separate client for intent classification (nil = use LLMClient)
+	SummarizerClient     *llm.Client // Separate client for session summarization (nil = use LLMClient)
 	LLMResolver          *llm.Resolver
 	ToolRegistry         *tools.Registry
 	SecurityChecker      *security.PermissionChecker
@@ -249,6 +251,29 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			"budget_hourly_limit", cfg.LLM.Budget.HourlyTokenLimit,
 			"budget_daily_limit", cfg.LLM.Budget.DailyTokenLimit,
 		)
+
+		// Create auxiliary LLM clients for classifier and summarizer
+		classifierRef := c.ModelsConfig.ClassifierModel
+		if classifierRef == "" {
+			classifierRef = c.ModelsConfig.SmallModel
+		}
+		c.ClassifierClient = createAuxiliaryLLMClient(c.ModelsConfig, classifierRef, logger.With("component", "classifier-llm"), budgetTracker)
+		if c.ClassifierClient != nil {
+			logger.Info("Classifier LLM client initialized", "model", classifierRef)
+		} else {
+			logger.Info("Classifier will use main LLM client", "reason", "no classifier_model or small_model configured")
+		}
+
+		summarizerRef := c.ModelsConfig.SummarizerModel
+		if summarizerRef == "" {
+			summarizerRef = c.ModelsConfig.SmallModel
+		}
+		c.SummarizerClient = createAuxiliaryLLMClient(c.ModelsConfig, summarizerRef, logger.With("component", "summarizer-llm"), budgetTracker)
+		if c.SummarizerClient != nil {
+			logger.Info("Summarizer LLM client initialized", "model", summarizerRef)
+		} else {
+			logger.Info("Summarizer will use main LLM client", "reason", "no summarizer_model or small_model configured")
+		}
 	} else {
 		logger.Error("FATAL: No LLM configured - chat will not work",
 			"hint", "Check models.json5 configuration and ensure model exists",
@@ -585,9 +610,20 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	sessionOpts := []session.HandlerOption{}
 	var summarizer *session.Summarizer
 	if c.LLMClient != nil {
-		summarizer = session.NewSummarizer(c.LLMClient, logger.With("component", "summarizer"))
+		summarizerLLM := c.SummarizerClient
+		if summarizerLLM == nil {
+			summarizerLLM = c.LLMClient
+		}
+		summarizer = session.NewSummarizer(summarizerLLM, logger.With("component", "summarizer"))
 		sessionOpts = append(sessionOpts, session.WithSummarizer(summarizer))
-		logger.Info("Session summarizer enabled with LLM client")
+		logger.Info("Session summarizer enabled",
+			"model_source", func() string {
+				if c.SummarizerClient != nil {
+					return "summarizer_model"
+				}
+				return "main_model"
+			}(),
+		)
 	} else {
 		logger.Warn("Session summarizer disabled - no LLM client available")
 	}
@@ -812,6 +848,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			Logger:            logger.With("component", "dispatcher"),
 			CapabilityMatcher: capMatcher,
 			LLMClient:         c.LLMClient,
+			ClassifierClient:  c.ClassifierClient,
 			ClassifierModel:   c.Config.MultiAgent.ClassifierModel,
 			SessionMaxAge:     30 * time.Minute,
 		})
@@ -1456,6 +1493,29 @@ func createLLMConfig(cfg *config.ModelsConfig, logger *slog.Logger) *llm.ModelCo
 		return nil
 	}
 
+	return resolveModelRef(cfg, modelRef, logger)
+}
+
+// createAuxiliaryLLMClient creates an LLM client for an auxiliary role (classifier,
+// summarizer). If modelRef is empty it returns nil so the caller can fall back to
+// the main client. The returned client shares no state with the main client.
+func createAuxiliaryLLMClient(cfg *config.ModelsConfig, modelRef string, logger *slog.Logger, budget *llm.Budget) *llm.Client {
+	if modelRef == "" {
+		return nil
+	}
+	llmCfg := resolveModelRef(cfg, modelRef, logger)
+	if llmCfg == nil {
+		return nil
+	}
+	opts := []llm.ClientOption{llm.WithLogger(logger)}
+	if budget != nil {
+		opts = append(opts, llm.WithBudget(budget))
+	}
+	return llm.NewClient(llmCfg, opts...)
+}
+
+// resolveModelRef resolves a "provider/model-id" reference into an LLM config.
+func resolveModelRef(cfg *config.ModelsConfig, modelRef string, logger *slog.Logger) *llm.ModelConfig {
 	logger.Info("Resolving model", "model_ref", modelRef)
 
 	// Parse provider/model format

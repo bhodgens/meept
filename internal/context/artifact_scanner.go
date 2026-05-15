@@ -1,6 +1,7 @@
 package context
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -136,12 +137,19 @@ func ScanSkillsDirectory(skillsDir string) ([]*Skill, error) {
 		// Parse the skill file
 		skill, err := ParseSkillFile(path)
 		if err != nil {
-			// Log but don't fail the entire scan
-			slog.Default().Warn("failed to parse skill file",
-				"path", path,
-				"error", err,
-			)
-			return nil
+			if errors.Is(err, ErrNoFrontmatter) {
+				// Missing frontmatter — still usable, just warn.
+				slog.Default().Warn("skill file has no frontmatter, using slug as name",
+					"path", path,
+				)
+			} else {
+				// Hard parse failure — skip this file.
+				slog.Default().Warn("failed to parse skill file",
+					"path", path,
+					"error", err,
+				)
+				return nil
+			}
 		}
 
 		skills = append(skills, skill)

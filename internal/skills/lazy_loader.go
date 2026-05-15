@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -130,13 +131,21 @@ func (l *LazySkillLoader) loadAndCache(ctx context.Context, key string) (*Skill,
 	// Parse full skill from file
 	skill, err := ParseSkillFile(indexEntry.Path)
 	if err != nil {
-		l.stats.Errors++
-		l.logger.Warn("Failed to load skill",
-			"name", key,
-			"path", indexEntry.Path,
-			"error", err,
-		)
-		return nil, fmt.Errorf("failed to load skill %s: %w", key, err)
+		if errors.Is(err, ErrNoFrontmatter) {
+			// Missing frontmatter — still usable, just warn.
+			l.logger.Warn("Skill file has no frontmatter, using slug as name",
+				"name", key,
+				"path", indexEntry.Path,
+			)
+		} else {
+			l.stats.Errors++
+			l.logger.Warn("Failed to load skill",
+				"name", key,
+				"path", indexEntry.Path,
+				"error", err,
+			)
+			return nil, fmt.Errorf("failed to load skill %s: %w", key, err)
+		}
 	}
 
 	l.stats.Loads++
