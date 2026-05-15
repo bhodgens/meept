@@ -36,6 +36,39 @@ const (
 	ViewMemory
 )
 
+// VerbosityLevel controls how much progress detail to show in the TUI.
+type VerbosityLevel int
+
+const (
+	VerbosityQuiet   VerbosityLevel = 0
+	VerbosityNormal  VerbosityLevel = 1
+	VerbosityVerbose VerbosityLevel = 2
+)
+
+func (v VerbosityLevel) String() string {
+	switch v {
+	case VerbosityQuiet:
+		return "quiet"
+	case VerbosityNormal:
+		return "normal"
+	case VerbosityVerbose:
+		return "verbose"
+	default:
+		return "unknown"
+	}
+}
+
+func parseVerbosity(s string) VerbosityLevel {
+	switch s {
+	case "quiet":
+		return VerbosityQuiet
+	case "verbose":
+		return VerbosityVerbose
+	default:
+		return VerbosityNormal
+	}
+}
+
 // AppFocus tracks which component has focus.
 type AppFocus int
 
@@ -107,6 +140,9 @@ type App struct {
 
 	// Error state
 	err error
+
+	// Verbosity level for agent progress display
+	verbosity VerbosityLevel
 
 	// Toast notifications
 	notifications *components.NotificationManager
@@ -205,6 +241,9 @@ func NewApp(socketPath string) *App {
 
 	// Initialize notification manager
 	app.notifications = components.NewNotificationManager()
+
+	// Initialize verbosity from client config
+	app.verbosity = parseVerbosity(clientConfig.Chat.Verbosity)
 
 	return app
 }
@@ -414,6 +453,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.activeModal = ModalSessionPicker
 			a.sessionPicker.Show()
 			return a, a.sessionPicker.RefreshSessions()
+		}
+
+		// Check for Ctrl+V: cycle verbosity level
+		if msg.String() == "ctrl+v" {
+			a.verbosity = (a.verbosity + 1) % 3
+			a.statusMessage = fmt.Sprintf("verbosity: %s", a.verbosity)
+			a.statusMessageTime = time.Now()
+			return a, nil
 		}
 
 		// Check for Ctrl+P to open fuzzy finder
@@ -1603,6 +1650,9 @@ func (a *App) renderStatusBar() string {
 		parts = append(parts, a.styles.Muted.Render(projectDisplay))
 	}
 
+	// Verbosity indicator
+	parts = append(parts, a.styles.Muted.Render(fmt.Sprintf("verbosity: %s", a.verbosity)))
+
 	content := strings.Join(parts, " │ ")
 
 	// Status bar spans only the main content area (excludes sidebar)
@@ -1652,6 +1702,7 @@ func (a *App) getQuickActions() []string {
 					a.styles.HelpKey.Render("i")+" "+a.styles.HelpValue.Render("insert"),
 					a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("scroll"),
 					a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"),
+					a.styles.HelpKey.Render("^V")+" "+a.styles.HelpValue.Render("verbosity"),
 				)
 			}
 		} else {
