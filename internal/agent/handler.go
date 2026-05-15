@@ -54,6 +54,7 @@ type Worker struct {
 type ChatRequest struct {
 	Message        string `json:"message"`
 	ConversationID string `json:"conversation_id"`
+	SourceClient   string `json:"source_client,omitempty"`
 }
 
 // ChatResponse is the payload for chat.response messages.
@@ -419,6 +420,26 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	conversationID := req.ConversationID
 	if conversationID == "" {
 		conversationID = generateConversationID()
+	}
+
+	// Broadcast chat.message.received for bilateral visibility.
+	// All session participants see who sent what.
+	if req.SourceClient != "" {
+		broadcastPayload, _ := json.Marshal(map[string]string{
+			"session_id":    conversationID,
+			"source_client": req.SourceClient,
+			"content":       req.Message,
+			"timestamp":     time.Now().UTC().Format(time.RFC3339),
+		})
+		broadcastMsg := &models.BusMessage{
+			ID:        generateMessageID(),
+			Type:      models.MessageTypeEvent,
+			Topic:     "chat.message.received",
+			Source:    SourceChatHandler,
+			Timestamp: time.Now().UTC(),
+			Payload:   broadcastPayload,
+		}
+		h.bus.Publish("chat.message.received", broadcastMsg)
 	}
 
 	// Create worker to track this request

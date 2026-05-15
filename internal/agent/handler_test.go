@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 func TestChatRequest_Unmarshal(t *testing.T) {
@@ -622,5 +624,193 @@ func TestCompoundTaskAck_MinimalTask(t *testing.T) {
 	}
 	if strings.Contains(ack, "est.") {
 		t.Error("duration should not appear when 0")
+	}
+}
+
+func TestChatRequestSourceClient(t *testing.T) {
+	raw := `{"message": "hello", "conversation_id": "conv-1", "source_client": "claude"}`
+	var req ChatRequest
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if req.SourceClient != "claude" {
+		t.Errorf("SourceClient = %q, want %q", req.SourceClient, "claude")
+	}
+	if req.Message != "hello" {
+		t.Errorf("Message = %q, want %q", req.Message, "hello")
+	}
+}
+
+func TestChatRequestSourceClientDefault(t *testing.T) {
+	raw := `{"message": "hello", "conversation_id": "conv-1"}`
+	var req ChatRequest
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if req.SourceClient != "" {
+		t.Errorf("SourceClient should be empty when not provided, got %q", req.SourceClient)
+	}
+}
+
+func TestChatRequestSourceClientOmitEmpty(t *testing.T) {
+	req := ChatRequest{
+		Message:        "hello",
+		ConversationID: "conv-1",
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	if _, exists := m["source_client"]; exists {
+		t.Error("source_client should be omitted when empty")
+	}
+}
+
+func TestChatMessageReceivedData(t *testing.T) {
+	data := ChatMessageReceivedData{
+		SessionID:    "sess-1",
+		SourceClient: "tui",
+		Content:      "hello world",
+	}
+
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded ChatMessageReceivedData
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if decoded.SessionID != "sess-1" {
+		t.Errorf("SessionID = %q, want %q", decoded.SessionID, "sess-1")
+	}
+	if decoded.SourceClient != "tui" {
+		t.Errorf("SourceClient = %q, want %q", decoded.SourceClient, "tui")
+	}
+	if decoded.Content != "hello world" {
+		t.Errorf("Content = %q, want %q", decoded.Content, "hello world")
+	}
+}
+
+func TestChatClientDisconnectedData(t *testing.T) {
+	data := ChatClientDisconnectedData{
+		SessionID:    "sess-2",
+		SourceClient: "claude",
+	}
+
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded ChatClientDisconnectedData
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if decoded.SessionID != "sess-2" {
+		t.Errorf("SessionID = %q, want %q", decoded.SessionID, "sess-2")
+	}
+	if decoded.SourceClient != "claude" {
+		t.Errorf("SourceClient = %q, want %q", decoded.SourceClient, "claude")
+	}
+}
+
+func TestHandleRequestBroadcastsMessageReceived(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	loop := NewAgentLoop()
+	handler := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
+
+	// Subscribe to chat.message.received to verify broadcast
+	sub := msgBus.Subscribe("test-handler", "chat.message.received")
+	defer msgBus.Unsubscribe(sub)
+
+	// Build a chat request with source_client and call handleRequest directly
+	payload, _ := json.Marshal(ChatRequest{
+		Message:        "hello from claude",
+		ConversationID: "conv-test",
+		SourceClient:   "claude",
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "req-1",
+		Type:      models.MessageTypeRequest,
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	// Call handleRequest directly (not through bus subscription)
+	// so we don't need a fully wired AgentLoop for RunOnce.
+	// Note: handleRequest will call RunOnce which may fail without LLM client,
+	// but the broadcast happens before that point.
+	handler.handleRequest(context.Background(), reqMsg)
+
+	// Wait for broadcast
+	select {
+	case msg := <-sub.Channel:
+		var event map[string]any
+		if err := json.Unmarshal(msg.Payload, &event); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		if event["source_client"] != "claude" {
+			t.Errorf("source_client = %v, want claude", event["source_client"])
+		}
+		if event["content"] != "hello from claude" {
+			t.Errorf("content = %v, want 'hello from claude'", event["content"])
+		}
+		if event["session_id"] != "conv-test" {
+			t.Errorf("session_id = %v, want 'conv-test'", event["session_id"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for chat.message.received broadcast")
+	}
+}
+
+func TestHandleRequestNoBroadcastWithoutSourceClient(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	loop := NewAgentLoop()
+	handler := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
+
+	// Subscribe to chat.message.received
+	sub := msgBus.Subscribe("test-handler", "chat.message.received")
+	defer msgBus.Unsubscribe(sub)
+
+	// Build a chat request WITHOUT source_client
+	payload, _ := json.Marshal(ChatRequest{
+		Message:        "hello world",
+		ConversationID: "conv-no-source",
+	})
+	reqMsg := &models.BusMessage{
+		ID:        "req-2",
+		Type:      models.MessageTypeRequest,
+		Source:    "test",
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	handler.handleRequest(context.Background(), reqMsg)
+
+	// Should NOT receive a broadcast
+	select {
+	case msg := <-sub.Channel:
+		t.Errorf("unexpected broadcast when source_client is empty: %+v", msg)
+	case <-time.After(200 * time.Millisecond):
+		// Expected: no broadcast
+	}
+}
+
+func TestChatVisibilityEventTypes(t *testing.T) {
+	if AgentEventChatMessageReceived != "chat_message_received" {
+		t.Errorf("AgentEventChatMessageReceived = %q, want %q", AgentEventChatMessageReceived, "chat_message_received")
+	}
+	if AgentEventChatClientDisconnected != "chat_client_disconnected" {
+		t.Errorf("AgentEventChatClientDisconnected = %q, want %q", AgentEventChatClientDisconnected, "chat_client_disconnected")
 	}
 }

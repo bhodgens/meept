@@ -67,6 +67,10 @@ const (
 	AgentEventSavePoint AgentEventType = "save_point"
 	AgentEventAbort     AgentEventType = "abort"
 	AgentEventSettled   AgentEventType = "settled"
+
+	// Chat visibility events
+	AgentEventChatMessageReceived   AgentEventType = "chat_message_received"
+	AgentEventChatClientDisconnected AgentEventType = "chat_client_disconnected"
 )
 
 // AgentEvent is the envelope for all typed agent events.
@@ -353,3 +357,23 @@ type SettledData struct {
 }
 
 func (SettledData) agentEventData() {}
+
+// --- Chat Message Visibility Events ---
+
+// ChatMessageReceivedData is emitted when a client sends a message to a session.
+// Broadcast to all session participants for bilateral visibility.
+type ChatMessageReceivedData struct {
+	SessionID    string `json:"session_id"`
+	SourceClient string `json:"source_client"`
+	Content      string `json:"content"`
+}
+
+func (ChatMessageReceivedData) agentEventData() {}
+
+// ChatClientDisconnectedData is emitted when a client disconnects from a session.
+type ChatClientDisconnectedData struct {
+	SessionID    string `json:"session_id"`
+	SourceClient string `json:"source_client"`
+}
+
+func (ChatClientDisconnectedData) agentEventData() {}

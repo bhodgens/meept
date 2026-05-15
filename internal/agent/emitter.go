@@ -241,10 +241,11 @@ func (e *EventEmitter) bridgeToBus(event AgentEvent) {
 
 // legacyTopicMap maps typed event types to legacy bus topics for backward compatibility.
 var legacyTopicMap = map[AgentEventType]string{
-	AgentEventTurnStart:           "agent.progress",
-	AgentEventToolExecutionStart:  "agent.action",
-	AgentEventToolExecutionEnd:    "agent.result",
+	AgentEventTurnStart:             "agent.progress",
+	AgentEventToolExecutionStart:    "agent.action",
+	AgentEventToolExecutionEnd:      "agent.result",
 	AgentEventAfterProviderResponse: "llm.tokens.used",
+	AgentEventChatMessageReceived:   "chat.message.received",
 }
 
 // generateEventID creates a unique event ID.
