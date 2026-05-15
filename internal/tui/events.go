@@ -46,6 +46,7 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 	return &EventStreamConfig{
 		Topics: []string{
 			"agent.*",
+			"agent.progress.*",
 			"task.*",
 			"step.*",
 			"queue.*",

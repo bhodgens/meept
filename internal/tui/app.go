@@ -978,6 +978,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.chat.AddParticipantMessage(sourceClient, content)
 					}
 				}
+
+			// Synthesized progress events (filtered by verbosity)
+			case "agent.progress.synthesized":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					tier := VerbosityNormal
+					if v, ok := payloadMap["tier"].(float64); ok {
+						tier = VerbosityLevel(int(v))
+					}
+					message, _ := payloadMap["message"].(string)
+					if tier <= a.verbosity && message != "" && a.chat != nil {
+						a.chat.AddSystemMessage(message)
+					}
+				}
 			}
 		}
 		// Also forward to sidebar for activity feed updates
