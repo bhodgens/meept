@@ -867,6 +867,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		// Wire step store for fetching step summaries in ACK and completion messages
 		if c.TaskRegistry != nil {
 			c.ChatHandler.SetStepStore(c.TaskRegistry.StepStore())
+			c.ChatHandler.SetTaskStore(c.TaskRegistry.Store())
 		}
 
 		logger.Info("ChatHandler initialized with dispatcher")
@@ -951,6 +952,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		// Wire step store for fetching step summaries in ACK and completion messages
 		if c.TaskRegistry != nil {
 			c.ChatHandler.SetStepStore(c.TaskRegistry.StepStore())
+			c.ChatHandler.SetTaskStore(c.TaskRegistry.Store())
 		}
 	}
 

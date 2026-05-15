@@ -514,6 +514,7 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				s.handleStepCompletedEvent(e)
 			case "step.review_completed", "task.review_completed":
 				s.handleReviewCompletedEvent(e)
+				cmds = append(cmds, s.refreshData())
 			case "task.planned", "task.completed", EventTaskFailed:
 				cmds = append(cmds, s.refreshData())
 			}

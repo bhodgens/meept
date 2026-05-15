@@ -28,6 +28,7 @@ type ChatHandler struct {
 	logger       *slog.Logger
 	metricsStore *metrics.Store  // Optional: metrics store for duration estimates
 	stepStore    *task.StepStore // Optional: step store for fetching step summaries
+	taskStore    *task.Store     // Optional: task store for looking up linked sessions
 
 	// Worker tracking
 	workers   map[string]*Worker
@@ -282,10 +283,13 @@ func (h *ChatHandler) handleReviewCompleted(msg *models.BusMessage) {
 
 	// Look up linked sessions from task store
 	var linkedSessions []string
-	if h.stepStore != nil {
-		// Try to find the task through step's task_id
-		// We don't have direct access to taskStore, so use the step's task_id
-		// to find linked sessions through the task
+	if h.taskStore != nil && payload.TaskID != "" {
+		sessions, err := h.taskStore.GetLinkedSessions(payload.TaskID)
+		if err != nil {
+			h.logger.Warn("Failed to get linked sessions for review feedback", "task_id", payload.TaskID, "error", err)
+		} else {
+			linkedSessions = sessions
+		}
 	}
 
 	// Build human-readable review feedback message
@@ -939,6 +943,11 @@ func (h *ChatHandler) SetMetricsStore(store *metrics.Store) {
 // SetStepStore sets the step store for fetching step summaries.
 func (h *ChatHandler) SetStepStore(store *task.StepStore) {
 	h.stepStore = store
+}
+
+// SetTaskStore sets the task store for looking up linked sessions.
+func (h *ChatHandler) SetTaskStore(store *task.Store) {
+	h.taskStore = store
 }
 
 // generateWorkerID creates a unique worker ID.
