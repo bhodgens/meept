@@ -162,7 +162,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	// Budget gate
 	if c.budget != nil {
 		if !c.budget.CheckBudget() {
-			return nil, &BudgetExceededError{Message: "ErrBudgetExceeded"}
+			return nil, &BudgetExceededError{Message: ErrBudgetExceeded}
 		}
 		if err := c.budget.WaitForRateLimit(ctx); err != nil {
 			return nil, err
@@ -308,7 +308,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	if c.budget != nil {
 		reportProgress(ProgressStageStarting, "Checking token budget...")
 		if !c.budget.CheckBudget() {
-			return nil, &BudgetExceededError{Message: "ErrBudgetExceeded"}
+			return nil, &BudgetExceededError{Message: ErrBudgetExceeded}
 		}
 
 		reportProgress(ProgressStageStarting, "Waiting for rate limit...")

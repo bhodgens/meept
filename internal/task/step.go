@@ -327,7 +327,7 @@ func (s *StepStore) Create(step *TaskStep) error {
 		return fmt.Errorf("failed to create step: %w", err)
 	}
 
-	s.logger.Debug("Step created", "id", step.ID, "task_id", step.TaskID, "sequence", step.Sequence)
+	s.logger.Debug("Step created", "id", step.ID, KeyTaskID, step.TaskID, "sequence", step.Sequence)
 	return nil
 }
 

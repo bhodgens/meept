@@ -9,8 +9,8 @@ func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
 	if s.toolLister == nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{
 			"tools":   []any{},
-			"count":   0,
-			"message": "tool listing not configured",
+			KeyCount:   0,
+			KeyMessage: "tool listing not configured",
 		})
 		return
 	}
@@ -23,6 +23,6 @@ func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"tools": tools,
-		"count": len(tools),
+		KeyCount: len(tools),
 	})
 }

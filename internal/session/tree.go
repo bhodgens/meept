@@ -59,7 +59,7 @@ func AssembleBranch(messages []Message, toolCallsMap map[int64][]ToolCall) []llm
 				Role:    llm.RoleSystem,
 				Content: "[Branch Summary] " + msg.Content,
 			})
-		case "message", "branch_point", "":
+		case KeyMessage, "branch_point", "":
 			// Regular messages (and branch points, which behave like messages in context)
 			chatMsg := llm.ChatMessage{
 				Role:    llm.Role(msg.Role),
@@ -117,8 +117,8 @@ func ConvertChatMessagesToSessionMessages(conversationID string, messages []llm.
 			Role:       string(msg.Role),
 			Content:    msg.Content,
 			Timestamp:  now.Add(time.Duration(i) * time.Microsecond), // Ensure ordering
-			EntryType:  "message",
-			BranchID:   "main",
+			EntryType:  KeyMessage,
+			BranchID:   BranchMain,
 			Name:       msg.Name,
 			ToolCallID: msg.ToolCallID,
 		}

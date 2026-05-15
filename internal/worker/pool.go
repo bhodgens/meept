@@ -13,6 +13,11 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// Map key constants for worker events.
+const (
+	KeyCapabilities = "capabilities"
+)
+
 // Pool manages a collection of workers.
 type Pool struct {
 	workers   map[string]*Worker
@@ -155,7 +160,7 @@ func (p *Pool) AddWorker(caps []string) (*Worker, error) {
 
 	p.publishEvent("worker.started", map[string]any{
 		"worker_id":    worker.ID,
-		"capabilities": caps,
+		KeyCapabilities: caps,
 	})
 
 	return worker, nil
@@ -454,7 +459,7 @@ func (h *Handler) handleAdd(_ context.Context, msg *models.BusMessage) (any, err
 
 	return map[string]any{
 		"worker_id":    worker.ID,
-		"capabilities": worker.Capabilities,
+		KeyCapabilities: worker.Capabilities,
 		"state":        string(worker.GetState()),
 	}, nil
 }
@@ -483,7 +488,7 @@ func (h *Handler) handleList(_ context.Context, _ *models.BusMessage) (any, erro
 		workerList = append(workerList, map[string]any{
 			"id":             ws.ID,
 			"state":          string(ws.State),
-			"capabilities":   ws.Capabilities,
+			KeyCapabilities:   ws.Capabilities,
 			"start_time":     ws.StartTime.Format(time.RFC3339),
 			"last_active":    ws.LastActive.Format(time.RFC3339),
 			"jobs_complete":  ws.JobsComplete,
@@ -512,7 +517,7 @@ func (h *Handler) handleStats(_ context.Context, _ *models.BusMessage) (any, err
 		workerStats = append(workerStats, map[string]any{
 			"id":             ws.ID,
 			"state":          string(ws.State),
-			"capabilities":   ws.Capabilities,
+			KeyCapabilities:   ws.Capabilities,
 			"start_time":     ws.StartTime.Format(time.RFC3339),
 			"last_active":    ws.LastActive.Format(time.RFC3339),
 			"jobs_complete":  ws.JobsComplete,

@@ -15,6 +15,11 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// Operation type constants.
+const (
+	OperationDistill = "distill"
+)
+
 // SharedZone is the memvid zone for cross-agent shared memories.
 const SharedZone = "shared"
 
@@ -324,7 +329,7 @@ func (s *SyncManager) Distill(ctx context.Context, taskID, agentID string) (*Dis
 		if s.config.Sync.RetryOnFailure {
 			s.queueRetry(RetryItem{
 				ID:          fmt.Sprintf("distill-%s-%d", taskID, time.Now().UnixNano()),
-				Operation:   "distill",
+				Operation:   OperationDistill,
 				TaskID:      taskID,
 				AgentID:     agentID,
 				Attempts:    0,
@@ -397,7 +402,7 @@ func (s *SyncManager) Distill(ctx context.Context, taskID, agentID string) (*Dis
 			if s.config.Sync.RetryOnFailure {
 				s.queueRetry(RetryItem{
 					ID:          fmt.Sprintf("promote-%s-%d", candidate.MemoryID, time.Now().UnixNano()),
-					Operation:   "distill",
+					Operation:   OperationDistill,
 					MemoryID:    candidate.MemoryID,
 					Memory:      distilled,
 					Attempts:    0,
@@ -629,10 +634,10 @@ func (s *SyncManager) processRetryQueue(ctx context.Context) {
 
 		var err error
 		switch {
-		case item.Operation == "distill" && item.Memory != nil:
+		case item.Operation == OperationDistill && item.Memory != nil:
 			// Retry promoting a specific memory
 			err = s.promoteToShared(ctx, item.Memory)
-		case item.Operation == "distill" && (item.TaskID != "" || item.AgentID != ""):
+		case item.Operation == OperationDistill && (item.TaskID != "" || item.AgentID != ""):
 			// Replay full distillation (queued when memvid was entirely unavailable)
 			_, err = s.Distill(ctx, item.TaskID, item.AgentID)
 		default:

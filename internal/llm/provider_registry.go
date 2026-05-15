@@ -40,6 +40,9 @@ const (
 
 	// Budget exceeded error message.
 	ErrBudgetExceeded = "Token budget exceeded - request blocked"
+
+	// Metrics dimension keys.
+	KeyLevel = "level"
 )
 
 // AuthType defines how authentication is performed.
@@ -76,7 +79,7 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "ANTHROPIC_API_KEY",
 		BaseURL:      "https://api.anthropic.com",
 		DocURL:       "https://docs.anthropic.com",
-		Supports:     []string{CapStreaming, "tools", CapImages, CapThinking},
+		Supports:     []string{CapStreaming, CapTools, CapImages, CapThinking},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -87,7 +90,7 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "OPENROUTER_API_KEY",
 		BaseURL:      "https://openrouter.ai/api/v1",
 		DocURL:       "https://openrouter.ai/docs",
-		Supports:     []string{CapStreaming, "tools", CapImages},
+		Supports:     []string{CapStreaming, CapTools, CapImages},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -98,7 +101,7 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "OPENAI_API_KEY",
 		BaseURL:      "https://api.openai.com/v1",
 		DocURL:       "https://platform.openai.com/docs",
-		Supports:     []string{CapStreaming, "tools", CapImages, "responses"},
+		Supports:     []string{CapStreaming, CapTools, CapImages, "responses"},
 	},
 	{
 		ID:           ProviderIDOllama,
@@ -107,7 +110,7 @@ var CanonicalProviders = []ProviderDef{
 		AuthType:     AuthEnvVar,
 		BaseURL:      "http://localhost:11434/v1",
 		DocURL:       "https://ollama.ai/docs",
-		Supports:     []string{"streaming", "local"},
+		Supports:     []string{CapStreaming, "local"},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -118,7 +121,7 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "ZAI_API_KEY",
 		BaseURL:      "https://api.z.ai/api/coding/paas/v4",
 		DocURL:       "https://docs.z.ai",
-		Supports:     []string{"streaming", "tools"},
+		Supports:     []string{CapStreaming, CapTools},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -129,7 +132,7 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "GOOGLE_API_KEY",
 		BaseURL:      "https://generativelanguage.googleapis.com/v1beta/openai",
 		DocURL:       "https://ai.google.dev",
-		Supports:     []string{CapStreaming, "tools", CapImages},
+		Supports:     []string{CapStreaming, CapTools, CapImages},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -151,7 +154,7 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "XAI_API_KEY",
 		BaseURL:      "https://api.x.ai/v1",
 		DocURL:       "https://docs.x.ai",
-		Supports:     []string{"streaming", "reasoning"},
+		Supports:     []string{CapStreaming, CapReasoning},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -162,7 +165,7 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "GROQ_API_KEY",
 		BaseURL:      "https://api.groq.com/openai/v1",
 		DocURL:       "https://console.groq.com/docs",
-		Supports:     []string{"streaming", "fast"},
+		Supports:     []string{CapStreaming, "fast"},
 	},
 	{
 		ID:           "together",
@@ -172,7 +175,7 @@ var CanonicalProviders = []ProviderDef{
 		APIKeyEnvVar: "TOGETHER_API_KEY",
 		BaseURL:      "https://api.together.xyz/v1",
 		DocURL:       "https://docs.together.ai",
-		Supports:     []string{"streaming", "models"},
+		Supports:     []string{CapStreaming, "models"},
 	},
 	{
 		ID:           ProviderIDBedrock,
@@ -181,7 +184,7 @@ var CanonicalProviders = []ProviderDef{
 		AuthType:     AuthEnvVar,
 		BaseURL:      "",
 		DocURL:       "https://docs.aws.amazon.com/bedrock",
-		Supports:     []string{"streaming", "tools", "aws"},
+		Supports:     []string{CapStreaming, CapTools, "aws"},
 	},
 }
 

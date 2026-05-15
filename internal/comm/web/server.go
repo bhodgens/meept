@@ -453,7 +453,7 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusOK, map[string]any{
 			"results": []any{},
 			"query":   query,
-			"message": "memory search not configured",
+			KeyMessage: "memory search not configured",
 		})
 		return
 	}
@@ -467,7 +467,7 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"results": results,
 		"query":   query,
-		"count":   len(results),
+		KeyCount:   len(results),
 	})
 }
 
@@ -476,7 +476,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 	if s.skillsLister == nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{
 			"skills":  []any{},
-			"message": "skills listing not configured",
+			KeyMessage: "skills listing not configured",
 		})
 		return
 	}
@@ -501,7 +501,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"skills": skills,
-		"count":  len(skills),
+		KeyCount:  len(skills),
 	})
 }
 
@@ -510,7 +510,7 @@ func (s *Server) handleJobsList(w http.ResponseWriter, r *http.Request) {
 	if s.jobsLister == nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{
 			"jobs":    []any{},
-			"message": "jobs listing not configured",
+			KeyMessage: "jobs listing not configured",
 		})
 		return
 	}
@@ -523,7 +523,7 @@ func (s *Server) handleJobsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"jobs":  jobs,
-		"count": len(jobs),
+		KeyCount: len(jobs),
 	})
 }
 

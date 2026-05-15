@@ -265,7 +265,7 @@ func (e *Engine) Check(action, toolName string, details map[string]string, conve
 	if action == ActionShellExecute {
 		cmd := details["command"]
 		cmdRisk, cmdSource, cmdImmutable := e.evaluateCommand(cmd)
-		if cmdSource != "shell_execute" {
+		if cmdSource != ActionShellExecute {
 			// A specific command pattern matched; use its risk level
 			// (may raise or lower the base rule risk)
 			effectiveRisk = cmdRisk
@@ -382,7 +382,7 @@ func (e *Engine) lookupBaseRule(action, toolName string) (RiskLevel, bool) {
 // evaluateCommand evaluates a shell command against compiled patterns.
 func (e *Engine) evaluateCommand(command string) (RiskLevel, string, bool) {
 	if command == "" {
-		return RiskMedium, "shell_execute", false
+		return RiskMedium, ActionShellExecute, false
 	}
 
 	for _, cp := range e.compiledCommands {
@@ -391,7 +391,7 @@ func (e *Engine) evaluateCommand(command string) (RiskLevel, string, bool) {
 		}
 	}
 
-	return RiskMedium, "shell_execute", false
+	return RiskMedium, ActionShellExecute, false
 }
 
 // normalizePathForComparison ensures a directory path ends with a path separator
@@ -851,7 +851,7 @@ func (e *Engine) GetContextForLLM(decision Decision, action string, details map[
 	lines = append(lines, "# Security Context (current action)", fmt.Sprintf("- Action: %s", action))
 
 	switch action {
-	case "shell_execute":
+	case ActionShellExecute:
 		if cmd := details["command"]; cmd != "" {
 			if len(cmd) > 100 {
 				cmd = cmd[:100] + "..."

@@ -69,12 +69,12 @@ func NewPromptGuardWithInterval(interval int) *PromptGuard {
 		{Pattern: regexp.MustCompile(`(?i)new\s+instructions?\s*:`), Type: "instruction_injection"},
 		{Pattern: regexp.MustCompile(`(?im)^\s*system\s*:`), Type: "role_marker"},
 		{Pattern: regexp.MustCompile(`(?im)^\s*assistant\s*:`), Type: "role_marker"},
-		{Pattern: regexp.MustCompile(`(?i)<\|im_start\|>`), Type: "special_token"},
-		{Pattern: regexp.MustCompile(`(?i)<\|im_end\|>`), Type: "special_token"},
-		{Pattern: regexp.MustCompile(`(?i)\[INST\]`), Type: "special_token"},
-		{Pattern: regexp.MustCompile(`(?i)\[/INST\]`), Type: "special_token"},
-		{Pattern: regexp.MustCompile(`(?i)<<SYS>>`), Type: "special_token"},
-		{Pattern: regexp.MustCompile(`(?i)<</SYS>>`), Type: "special_token"},
+		{Pattern: regexp.MustCompile(`(?i)<\|im_start\|>`), Type: LabelSpecialToken},
+		{Pattern: regexp.MustCompile(`(?i)<\|im_end\|>`), Type: LabelSpecialToken},
+		{Pattern: regexp.MustCompile(`(?i)\[INST\]`), Type: LabelSpecialToken},
+		{Pattern: regexp.MustCompile(`(?i)\[/INST\]`), Type: LabelSpecialToken},
+		{Pattern: regexp.MustCompile(`(?i)<<SYS>>`), Type: LabelSpecialToken},
+		{Pattern: regexp.MustCompile(`(?i)<</SYS>>`), Type: LabelSpecialToken},
 	}
 
 	return pg

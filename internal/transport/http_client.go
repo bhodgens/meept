@@ -12,6 +12,12 @@ import (
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
+// Map key constants for HTTP API calls.
+const (
+	KeyLimit     = "limit"
+	KeySessionID = "session_id"
+)
+
 // httpClient implements transport.Client over HTTP REST.
 // All RPC-style methods are proxied through the /api/v1/bus/call endpoint,
 // which mirrors the JSON-RPC interface over HTTP.
@@ -171,7 +177,7 @@ func (c *httpClient) ListJobs() (*types.JobListResponse, error) {
 
 // QueryMemory queries the memory store.
 func (c *httpClient) QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error) {
-	result, err := c.callAPI("memory.query", map[string]any{"query": query, "limit": limit})
+	result, err := c.callAPI("memory.query", map[string]any{"query": query, KeyLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +190,7 @@ func (c *httpClient) QueryMemory(query string, limit int) (*types.MemoryQueryRes
 
 // GetRecentMemories retrieves recent memories.
 func (c *httpClient) GetRecentMemories(limit int) (*types.MemoryQueryResponse, error) {
-	result, err := c.callAPI("memory.recent", map[string]any{"limit": limit})
+	result, err := c.callAPI("memory.recent", map[string]any{KeyLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +229,7 @@ func (c *httpClient) GetQueueStats() (*types.QueueStatsResponse, error) {
 
 // ListQueueJobs lists queue jobs.
 func (c *httpClient) ListQueueJobs(state string, limit int) (*types.QueueJobListResponse, error) {
-	result, err := c.callAPI("queue.list", map[string]any{"state": state, "limit": limit})
+	result, err := c.callAPI("queue.list", map[string]any{"state": state, KeyLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +242,7 @@ func (c *httpClient) ListQueueJobs(state string, limit int) (*types.QueueJobList
 
 // ListTasks lists tasks.
 func (c *httpClient) ListTasks(state string, limit int) (*types.TaskListResponse, error) {
-	result, err := c.callAPI("task.list", map[string]any{"state": state, "limit": limit})
+	result, err := c.callAPI("task.list", map[string]any{"state": state, KeyLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -341,13 +347,13 @@ func (c *httpClient) CreateSession(name string) (*types.Session, error) {
 
 // AttachSession attaches a client to a session.
 func (c *httpClient) AttachSession(sessionID, clientID string) error {
-	_, err := c.callAPI("session.attach", map[string]string{"session_id": sessionID, "client_id": clientID})
+	_, err := c.callAPI("session.attach", map[string]string{KeySessionID: sessionID, "client_id": clientID})
 	return err
 }
 
 // DetachSession detaches a client from a session.
 func (c *httpClient) DetachSession(sessionID, clientID string) error {
-	_, err := c.callAPI("session.detach", map[string]string{"session_id": sessionID, "client_id": clientID})
+	_, err := c.callAPI("session.detach", map[string]string{KeySessionID: sessionID, "client_id": clientID})
 	return err
 }
 
@@ -366,7 +372,7 @@ func (c *httpClient) GetMostRecentSession() (*types.Session, error) {
 
 // GetSessionMessages retrieves session messages.
 func (c *httpClient) GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error) {
-	result, err := c.callAPI("session.messages.get", map[string]any{"session_id": sessionID, "offset": offset, "limit": limit})
+	result, err := c.callAPI("session.messages.get", map[string]any{KeySessionID: sessionID, "offset": offset, KeyLimit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -379,13 +385,13 @@ func (c *httpClient) GetSessionMessages(sessionID string, offset, limit int) (*t
 
 // SaveSessionMessages saves messages to a session.
 func (c *httpClient) SaveSessionMessages(sessionID string, messages []types.SessionMessage) error {
-	_, err := c.callAPI("session.messages.save", map[string]any{"session_id": sessionID, "messages": messages})
+	_, err := c.callAPI("session.messages.save", map[string]any{KeySessionID: sessionID, "messages": messages})
 	return err
 }
 
 // UpdateSessionDescription updates a session description.
 func (c *httpClient) UpdateSessionDescription(sessionID, description string) error {
-	_, err := c.callAPI("session.update_description", map[string]string{"session_id": sessionID, "description": description})
+	_, err := c.callAPI("session.update_description", map[string]string{KeySessionID: sessionID, "description": description})
 	return err
 }
 
@@ -414,7 +420,7 @@ func (c *httpClient) DeleteSession(sessionID string) error {
 
 // StopSession stops a session.
 func (c *httpClient) StopSession(sessionID string) (*types.StopSessionResponse, error) {
-	result, err := c.callAPI("session.stop", map[string]string{"session_id": sessionID})
+	result, err := c.callAPI("session.stop", map[string]string{KeySessionID: sessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +433,7 @@ func (c *httpClient) StopSession(sessionID string) (*types.StopSessionResponse, 
 
 // GetSessionChildTasks returns child task IDs for a session.
 func (c *httpClient) GetSessionChildTasks(sessionID string) ([]string, error) {
-	result, err := c.callAPI("session.get_child_tasks", map[string]string{"session_id": sessionID})
+	result, err := c.callAPI("session.get_child_tasks", map[string]string{KeySessionID: sessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -482,13 +488,13 @@ func (c *httpClient) CancelTask(taskID string) error {
 
 // LinkTaskSession links a session to a task.
 func (c *httpClient) LinkTaskSession(taskID, sessionID string) error {
-	_, err := c.callAPI("task.link", map[string]string{"task_id": taskID, "session_id": sessionID})
+	_, err := c.callAPI("task.link", map[string]string{"task_id": taskID, KeySessionID: sessionID})
 	return err
 }
 
 // UnlinkTaskSession removes a session link from a task.
 func (c *httpClient) UnlinkTaskSession(taskID, sessionID string) error {
-	_, err := c.callAPI("task.unlink", map[string]string{"task_id": taskID, "session_id": sessionID})
+	_, err := c.callAPI("task.unlink", map[string]string{"task_id": taskID, KeySessionID: sessionID})
 	return err
 }
 

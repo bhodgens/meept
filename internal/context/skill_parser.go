@@ -215,7 +215,7 @@ func inferSkillCategory(slug, _ string) string {
 
 	switch {
 	case strings.Contains(lower, "agent"):
-		return "agent"
+		return SectionAgent
 	case strings.Contains(lower, "diagram") || strings.Contains(lower, "mermaid"):
 		return "visualization"
 	case strings.Contains(lower, "docx") || strings.Contains(lower, "document"):

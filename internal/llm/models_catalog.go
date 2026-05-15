@@ -23,7 +23,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     15.0,
 			OutputCost:    75.0,
-			Capabilities:  []string{"completion", "code", "reasoning", "tool_use", "thinking"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse, CapThinking},
 		},
 		{
 			ModelID:       "claude-sonnet-4-6",
@@ -33,7 +33,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     3.0,
 			OutputCost:    15.0,
-			Capabilities:  []string{"completion", "code", "reasoning", "tool_use"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse},
 		},
 		{
 			ModelID:       "claude-haiku-4-5-20251001",
@@ -43,7 +43,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     4096,
 			InputCost:     1.0,
 			OutputCost:    5.0,
-			Capabilities:  []string{"completion", "code", "reasoning"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
 		},
 	},
 	ProviderIDOpenAI: {
@@ -55,7 +55,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     16384,
 			InputCost:     2.5,
 			OutputCost:    10.0,
-			Capabilities:  []string{"completion", "code", "reasoning", "tool_use", "images"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse, CapImages},
 		},
 		{
 			ModelID:       "gpt-4.1-mini",
@@ -65,7 +65,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     0.5,
 			OutputCost:    2.0,
-			Capabilities:  []string{"completion", "code", "reasoning"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
 		},
 	},
 	"openrouter": {
@@ -77,7 +77,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     3.0,
 			OutputCost:    15.0,
-			Capabilities:  []string{"completion", "code", "reasoning", "tool_use"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse},
 		},
 	},
 	ProviderIDOllama: {
@@ -89,7 +89,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     4096,
 			InputCost:     0.0,
 			OutputCost:    0.0,
-			Capabilities:  []string{"code", "tool_use", "reasoning"},
+			Capabilities:  []string{CapCode, CapToolUse, CapReasoning},
 		},
 		{
 			ModelID:       "qwen2.5-coder",
@@ -99,7 +99,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     0.0,
 			OutputCost:    0.0,
-			Capabilities:  []string{"code", "tool_use"},
+			Capabilities:  []string{CapCode, CapToolUse},
 		},
 	},
 	ProviderIDZAI: {
@@ -111,7 +111,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     0.0,
 			OutputCost:    0.0,
-			Capabilities:  []string{"completion", "code", "reasoning", "tool_use"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse},
 		},
 		{
 			ModelID:       "glm-4.5-air",
@@ -121,7 +121,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     4096,
 			InputCost:     0.0,
 			OutputCost:    0.0,
-			Capabilities:  []string{"completion", "code", "reasoning"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
 		},
 	},
 	ProviderIDGoogle: {
@@ -133,7 +133,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     65536,
 			InputCost:     1.25,
 			OutputCost:    10.0,
-			Capabilities:  []string{"completion", "code", "reasoning", "tool_use", "images"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse, CapImages},
 		},
 		{
 			ModelID:       "gemini-2.5-flash",
@@ -143,7 +143,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     65536,
 			InputCost:     0.075,
 			OutputCost:    1.0,
-			Capabilities:  []string{"completion", "code", "reasoning"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
 		},
 	},
 	ProviderIDDeepSeek: {
@@ -155,7 +155,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     0.27,
 			OutputCost:    1.1,
-			Capabilities:  []string{"completion", "code", "reasoning"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
 		},
 		{
 			ModelID:       "deepseek-coder",
@@ -165,7 +165,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     0.27,
 			OutputCost:    1.1,
-			Capabilities:  []string{"code", "tool_use"},
+			Capabilities:  []string{CapCode, CapToolUse},
 		},
 	},
 	"xai": {
@@ -177,7 +177,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     5.0,
 			OutputCost:    15.0,
-			Capabilities:  []string{"completion", "reasoning"},
+			Capabilities:  []string{CapCompletion, CapReasoning},
 		},
 	},
 	"groq": {
@@ -189,7 +189,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     32768,
 			InputCost:     0.59,
 			OutputCost:    0.79,
-			Capabilities:  []string{"completion", "code", "reasoning", "fast"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, "fast"},
 		},
 	},
 	"together": {
@@ -201,7 +201,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     4096,
 			InputCost:     0.88,
 			OutputCost:    0.88,
-			Capabilities:  []string{"completion", "code", "reasoning"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
 		},
 	},
 	ProviderIDBedrock: {
@@ -213,7 +213,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     3.0,
 			OutputCost:    15.0,
-			Capabilities:  []string{"completion", "code", "reasoning", "tool_use"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse},
 		},
 		{
 			ModelID:       "anthropic.claude-opus-4-7-v1:0",
@@ -223,7 +223,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     8192,
 			InputCost:     15.0,
 			OutputCost:    75.0,
-			Capabilities:  []string{"completion", "code", "reasoning", "tool_use", "thinking"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning, CapToolUse, CapThinking},
 		},
 		{
 			ModelID:       "meta.llama3-70b-instruct-v1:0",
@@ -233,7 +233,7 @@ var ProviderModels = map[string][]ModelCatalogEntry{
 			MaxOutput:     2048,
 			InputCost:     2.65,
 			OutputCost:    3.5,
-			Capabilities:  []string{"completion", "code", "reasoning"},
+			Capabilities:  []string{CapCompletion, CapCode, CapReasoning},
 		},
 	},
 }

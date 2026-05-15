@@ -324,7 +324,7 @@ func (c *L1Cache) recordEvictionMetric() {
 	if c.metricsStore == nil {
 		return
 	}
-	c.metricsStore.Record("cache.eviction", 1, map[string]string{"level": "l1", "reason": "lru"})
+	c.metricsStore.Record("cache.eviction", 1, map[string]string{KeyLevel: "l1", "reason": "lru"})
 }
 
 // recordEvictionMetricBatch records a batch eviction metric with a reason tag.
@@ -332,7 +332,7 @@ func (c *L1Cache) recordEvictionMetricBatch(count int, reason string) {
 	if c.metricsStore == nil {
 		return
 	}
-	c.metricsStore.Record("cache.eviction", float64(count), map[string]string{"level": "l1", "reason": reason})
+	c.metricsStore.Record("cache.eviction", float64(count), map[string]string{KeyLevel: "l1", "reason": reason})
 }
 
 // recordEntryCountMetric records the current L1 entry count as a metric.
@@ -340,7 +340,7 @@ func (c *L1Cache) recordEntryCountMetric() {
 	if c.metricsStore == nil {
 		return
 	}
-	c.metricsStore.Record("cache.entry_count", float64(len(c.entries)), map[string]string{"level": "l1"})
+	c.metricsStore.Record("cache.entry_count", float64(len(c.entries)), map[string]string{KeyLevel: "l1"})
 }
 
 // cleanupExpired removes all expired entries.

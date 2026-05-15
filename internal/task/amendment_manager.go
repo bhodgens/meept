@@ -74,7 +74,7 @@ func (m *AmendmentManager) Submit(ctx context.Context, req *AmendmentRequest) er
 
 	m.logger.Info("Amendment submitted",
 		"request_id", req.ID,
-		"task_id", req.TaskID,
+		KeyTaskID, req.TaskID,
 		"type", req.Type,
 	)
 
@@ -155,7 +155,7 @@ func (m *AmendmentManager) CancelPendingForTask(taskID string) {
 			req.Status = AmendmentIgnored
 			m.logger.Debug("Ignored pending amendment due to task cancellation",
 				"request_id", id,
-				"task_id", taskID,
+				KeyTaskID, taskID,
 			)
 		}
 	}

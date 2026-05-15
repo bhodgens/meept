@@ -69,5 +69,5 @@ func (s *SSEWriter) Write(p []byte) (int, error) {
 
 // CloseWithFinalEvent sends a final done event.
 func (s *SSEWriter) CloseWithFinalEvent() error {
-	return s.SendEvent("done", map[string]string{"status": "complete"})
+	return s.SendEvent("done", map[string]string{KeyStatus: "complete"})
 }

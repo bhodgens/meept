@@ -14,7 +14,7 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 		agents := defaultAgentList()
 		s.writeJSON(w, http.StatusOK, map[string]any{
 			"agents": agents,
-			"count":  len(agents),
+			KeyCount:  len(agents),
 		})
 		return
 	}
@@ -27,7 +27,7 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"agents": agents,
-		"count":  len(agents),
+		KeyCount:  len(agents),
 	})
 }
 
@@ -67,12 +67,12 @@ func (s *Server) handleAgentsDelegate(w http.ResponseWriter, r *http.Request) {
 func defaultAgentList() []AgentEntry {
 	return []AgentEntry{
 		{ID: config.AgentIDDispatcher, Name: config.AgentIDDispatcher, Role: "Dispatcher", Description: "Intake, classify, route to specialists", Enabled: true},
-		{ID: config.AgentIDChat, Name: config.AgentIDChat, Role: "Executor", Description: "General conversation", Enabled: true},
-		{ID: config.AgentIDCoder, Name: config.AgentIDCoder, Role: "Executor", Description: "File ops, shell, coding tasks", Enabled: true},
-		{ID: config.AgentIDDebugger, Name: config.AgentIDDebugger, Role: "Executor", Description: "Troubleshooting, bug fixing", Enabled: true},
-		{ID: config.AgentIDPlanner, Name: config.AgentIDPlanner, Role: "Executor", Description: "Task decomposition, planning", Enabled: true},
-		{ID: config.AgentIDAnalyst, Name: config.AgentIDAnalyst, Role: "Executor", Description: "Research, data analysis", Enabled: true},
-		{ID: config.AgentIDCommitter, Name: config.AgentIDCommitter, Role: "Executor", Description: "Git operations", Enabled: true},
-		{ID: config.AgentIDScheduler, Name: config.AgentIDScheduler, Role: "Executor", Description: "Job scheduling", Enabled: true},
+		{ID: config.AgentIDChat, Name: config.AgentIDChat, Role: RoleExecutor, Description: "General conversation", Enabled: true},
+		{ID: config.AgentIDCoder, Name: config.AgentIDCoder, Role: RoleExecutor, Description: "File ops, shell, coding tasks", Enabled: true},
+		{ID: config.AgentIDDebugger, Name: config.AgentIDDebugger, Role: RoleExecutor, Description: "Troubleshooting, bug fixing", Enabled: true},
+		{ID: config.AgentIDPlanner, Name: config.AgentIDPlanner, Role: RoleExecutor, Description: "Task decomposition, planning", Enabled: true},
+		{ID: config.AgentIDAnalyst, Name: config.AgentIDAnalyst, Role: RoleExecutor, Description: "Research, data analysis", Enabled: true},
+		{ID: config.AgentIDCommitter, Name: config.AgentIDCommitter, Role: RoleExecutor, Description: "Git operations", Enabled: true},
+		{ID: config.AgentIDScheduler, Name: config.AgentIDScheduler, Role: RoleExecutor, Description: "Job scheduling", Enabled: true},
 	}
 }

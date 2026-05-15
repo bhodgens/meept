@@ -15,6 +15,17 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// Constants for session management.
+const (
+	// BranchMain is the default branch ID for sessions.
+	BranchMain = "main"
+
+	// Map key constants for session payloads and queries.
+	KeyStatus    = "status"
+	KeyMessage   = "message"
+	KeySessionID = "session_id"
+)
+
 // Session represents an active conversation session that can be shared
 // by multiple clients.
 //nolint:revive // stutter with package name is intentional for API clarity
@@ -411,7 +422,7 @@ func (s *MemoryStore) GetMessagePath(sessionID string, leafID int64) ([]Message,
 }
 
 // GetMessageBranches returns branch information for a session.
-// MemoryStore returns a single "main" branch if messages exist.
+// MemoryStore returns a single BranchMain branch if messages exist.
 func (s *MemoryStore) GetMessageBranches(sessionID string) ([]Branch, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -427,7 +438,7 @@ func (s *MemoryStore) GetMessageBranches(sessionID string) ([]Branch, error) {
 	for _, msg := range msgs {
 		bid := msg.BranchID
 		if bid == "" {
-			bid = "main"
+			bid = BranchMain
 		}
 		branchMap[bid]++
 		if msg.ID > branchMaxID[bid] {
@@ -928,7 +939,7 @@ func (h *Handler) handleAttach(msg *models.BusMessage) (any, error) {
 		return nil, err
 	}
 
-	return map[string]string{"status": "attached"}, nil
+	return map[string]string{KeyStatus: "attached"}, nil
 }
 
 // handleDetach detaches a client from a session.
@@ -945,7 +956,7 @@ func (h *Handler) handleDetach(msg *models.BusMessage) (any, error) {
 		return nil, err
 	}
 
-	return map[string]string{"status": "detached"}, nil
+	return map[string]string{KeyStatus: "detached"}, nil
 }
 
 // handleDelete deletes a session.
@@ -961,7 +972,7 @@ func (h *Handler) handleDelete(msg *models.BusMessage) (any, error) {
 		return nil, fmt.Errorf("session not found: %s", params.ID)
 	}
 
-	return map[string]string{"status": "deleted"}, nil
+	return map[string]string{KeyStatus: "deleted"}, nil
 }
 
 // handleSaveMessages saves messages for a session.
@@ -978,7 +989,7 @@ func (h *Handler) handleSaveMessages(msg *models.BusMessage) (any, error) {
 		return nil, err
 	}
 
-	return map[string]string{"status": "saved"}, nil
+	return map[string]string{KeyStatus: "saved"}, nil
 }
 
 // handleGetMessages retrieves messages for a session.
@@ -1023,7 +1034,7 @@ func (h *Handler) handleUpdateDescription(msg *models.BusMessage) (any, error) {
 		return nil, err
 	}
 
-	return map[string]string{"status": "updated"}, nil
+	return map[string]string{KeyStatus: "updated"}, nil
 }
 
 // handleGenerateDescription generates a description using LLM summarization.
@@ -1041,7 +1052,7 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 	}
 
 	h.logger.Debug("Generate description params",
-		"session_id", params.SessionID,
+		KeySessionID, params.SessionID,
 		"first_message_len", len(params.FirstMessage),
 		"project_name", params.ProjectName,
 	)
@@ -1057,7 +1068,7 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 	var name, description string
 	if h.summarizer != nil {
 		h.logger.Info("Using LLM-based summarization",
-			"session_id", params.SessionID,
+			KeySessionID, params.SessionID,
 		)
 		// Use LLM-based summarization
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -1070,14 +1081,14 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		if err != nil {
 			h.logger.Warn("Summarization failed, using fallback",
 				"error", err,
-				"session_id", params.SessionID,
+				KeySessionID, params.SessionID,
 			)
 			fallback := extractSimpleResult(params.FirstMessage)
 			name = fallback.Name
 			description = fallback.Description
 		} else {
 			h.logger.Info("LLM summarization succeeded",
-				"session_id", params.SessionID,
+				KeySessionID, params.SessionID,
 				"name", result.Name,
 				"description", result.Description,
 			)
@@ -1086,7 +1097,7 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		}
 	} else {
 		h.logger.Warn("No summarizer available, using simple extraction",
-			"session_id", params.SessionID,
+			KeySessionID, params.SessionID,
 		)
 		// Fallback to simple extraction
 		fallback := extractSimpleResult(params.FirstMessage)
@@ -1099,7 +1110,7 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		if err := h.store.UpdateName(params.SessionID, name); err != nil {
 			h.logger.Error("Failed to save generated name",
 				"error", err,
-				"session_id", params.SessionID,
+				KeySessionID, params.SessionID,
 				"name", name,
 			)
 			// Continue even if name update fails
@@ -1110,23 +1121,23 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 	if err := h.store.UpdateDescription(params.SessionID, description); err != nil {
 		h.logger.Error("Failed to save generated description",
 			"error", err,
-			"session_id", params.SessionID,
+			KeySessionID, params.SessionID,
 			"description", description,
 		)
 		return nil, err
 	}
 
 	h.logger.Info("Session name and description generated and saved",
-		"session_id", params.SessionID,
+		KeySessionID, params.SessionID,
 		"name", name,
 		"description", description,
 	)
 
 	return map[string]string{
-		"session_id":  params.SessionID,
+		KeySessionID:  params.SessionID,
 		"name":        name,
 		"description": description,
-		"status":      "generated",
+		KeyStatus:      "generated",
 	}, nil
 }
 
@@ -1150,7 +1161,7 @@ func (h *Handler) handleStop(msg *models.BusMessage) (any, error) {
 		// Publish stop event to worker
 		stopPayload, _ := json.Marshal(map[string]string{
 			"worker_id":  workerID,
-			"session_id": params.SessionID,
+			KeySessionID: params.SessionID,
 			"action":     "stop",
 		})
 		stopMsg := &models.BusMessage{
@@ -1166,13 +1177,13 @@ func (h *Handler) handleStop(msg *models.BusMessage) (any, error) {
 	}
 
 	h.logger.Info("Session stop requested",
-		"session_id", params.SessionID,
+		KeySessionID, params.SessionID,
 		"workers_stopped", len(stoppedWorkers),
 	)
 
 	return map[string]any{
-		"status":          "stopped",
-		"session_id":      params.SessionID,
+		KeyStatus:          "stopped",
+		KeySessionID:      params.SessionID,
 		"workers_stopped": stoppedWorkers,
 	}, nil
 }
@@ -1194,7 +1205,7 @@ func (h *Handler) handleGetChildTasks(msg *models.BusMessage) (any, error) {
 	// Return worker IDs as "child tasks" for now
 	// A more complete implementation would query a task store
 	return map[string]any{
-		"session_id": params.SessionID,
+		KeySessionID: params.SessionID,
 		"tasks":      session.WorkerIDs,
 	}, nil
 }

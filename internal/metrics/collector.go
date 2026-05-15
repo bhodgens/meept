@@ -17,6 +17,13 @@ import (
 // internal/agent/events.go to avoid an import cycle (agent -> metrics).
 type AgentEventType string
 
+// Dimension key constants for metric labels.
+const (
+	DimModel     = "model"
+	DimReviewer  = "reviewer"
+	DimOutcome   = "outcome"
+)
+
 // Typed event type constants used by the metrics collector.
 const (
 	AgentEventAfterProviderResponse AgentEventType = "after_provider_response"
@@ -257,16 +264,16 @@ func (c *Collector) collect() {
 // RecordLLMCall records an LLM API call.
 func (c *Collector) RecordLLMCall(model string, inputTokens, outputTokens int, latency time.Duration) {
 	c.store.Record("llm.calls", 1, map[string]string{
-		"model": model,
+		DimModel: model,
 	})
 	c.store.Record("tokens.input", float64(inputTokens), map[string]string{
-		"model": model,
+		DimModel: model,
 	})
 	c.store.Record("tokens.output", float64(outputTokens), map[string]string{
-		"model": model,
+		DimModel: model,
 	})
 	c.store.Record("llm.latency", latency.Seconds(), map[string]string{
-		"model": model,
+		DimModel: model,
 	})
 }
 
@@ -336,10 +343,10 @@ func (c *Collector) RecordModelResolution(modelID, provider string) {
 func (c *Collector) RecordReviewResult(status, reviewerID string, confidence float64) {
 	c.store.Record("review.completed", 1, map[string]string{
 		"status":   status,
-		"reviewer": reviewerID,
+		DimReviewer: reviewerID,
 	})
 	c.store.Record("review.confidence", confidence, map[string]string{
-		"reviewer": reviewerID,
+		DimReviewer: reviewerID,
 	})
 
 	switch status {
@@ -369,7 +376,7 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 	// Track average revision cycles
 	if payload.RevisionCount > 0 {
 		c.store.Record("review.revision_cycles", float64(payload.RevisionCount), map[string]string{
-			"reviewer": payload.Reviewer,
+			DimReviewer: payload.Reviewer,
 		})
 	}
 
@@ -377,7 +384,7 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 		fmt.Sprintf("Review %s by %s (confidence %.2f, revisions %d)", payload.Status, payload.Reviewer, payload.Confidence, payload.RevisionCount),
 		map[string]any{
 			"status":         payload.Status,
-			"reviewer":       payload.Reviewer,
+			DimReviewer:       payload.Reviewer,
 			"confidence":     payload.Confidence,
 			"revision_count": payload.RevisionCount,
 		},
@@ -402,7 +409,7 @@ func (c *Collector) RegisterEventListeners(emitter TypedEventEmitter) {
 			if data.Error != "" {
 				c.store.RecordEvent("llm.error", "error", "LLM request failed",
 					map[string]any{
-						"model": data.ModelID,
+						DimModel: data.ModelID,
 						"error": data.Error,
 					},
 				)
@@ -411,7 +418,7 @@ func (c *Collector) RegisterEventListeners(emitter TypedEventEmitter) {
 
 			if data.Cached {
 				c.store.Record("llm.cache_hits", 1, map[string]string{
-					"model": data.ModelID,
+					DimModel: data.ModelID,
 				})
 			}
 
@@ -450,20 +457,20 @@ func (c *Collector) RegisterEventListeners(emitter TypedEventEmitter) {
 			}
 
 			c.store.Record("session.duration", data.Duration.Seconds(), map[string]string{
-				"outcome": data.Outcome,
+				DimOutcome: data.Outcome,
 			})
 			c.store.Record("session.tokens", float64(data.TotalTokens), map[string]string{
-				"outcome": data.Outcome,
+				DimOutcome: data.Outcome,
 			})
 			c.store.Record("session.iterations", float64(data.TotalIter), map[string]string{
-				"outcome": data.Outcome,
+				DimOutcome: data.Outcome,
 			})
 
 			if data.Error != "" {
 				c.store.RecordEvent("session.error", "error", "Session ended with error",
 					map[string]any{
 						"session_id": data.SessionID,
-						"outcome":    data.Outcome,
+						DimOutcome:    data.Outcome,
 						"error":      data.Error,
 					},
 				)
@@ -474,7 +481,7 @@ func (c *Collector) RegisterEventListeners(emitter TypedEventEmitter) {
 					data.SessionID, data.Outcome, data.TotalTokens, data.TotalIter),
 				map[string]any{
 					"session_id":   data.SessionID,
-					"outcome":      data.Outcome,
+					DimOutcome:      data.Outcome,
 					"total_tokens": data.TotalTokens,
 					"total_iter":   data.TotalIter,
 					"duration":     data.Duration.String(),

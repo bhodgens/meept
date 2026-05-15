@@ -54,6 +54,7 @@ const (
 
 	// Memory type constants.
 	schemaMemoryEpisodic = "episodic"
+	schemaMemoryTask     = "task"
 
 	// Job type constants for scheduler tools.
 	schemaJobTypeShell = "shell"

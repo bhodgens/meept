@@ -14,6 +14,12 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// Map key constants for queue operations.
+const (
+	KeyJobID  = "job_id"
+	KeyStatus = "status"
+)
+
 // IsTaskCancelledFunc defines a function type for checking task cancellation.
 type IsTaskCancelledFunc func(taskID string) (bool, string)
 
@@ -123,7 +129,7 @@ func (q *PersistentQueue) Enqueue(ctx context.Context, job *Job) error {
 
 	// Publish event
 	q.publishEvent("queue.enqueue", map[string]any{
-		"job_id":   job.ID,
+		KeyJobID:   job.ID,
 		"type":     job.Type,
 		"priority": job.Priority.String(),
 		"task_id":  job.TaskID,
@@ -154,7 +160,7 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 		// Skip cancelled tasks
 		if job.TaskID != "" {
 			if cancelled, _ := q.isTaskCancelled(job.TaskID); cancelled {
-				q.logger.Debug("Skipping job from cancelled task", "job_id", job.ID, "task_id", job.TaskID)
+				q.logger.Debug("Skipping job from cancelled task", KeyJobID, job.ID, "task_id", job.TaskID)
 				continue
 			}
 		}
@@ -177,7 +183,7 @@ func (q *PersistentQueue) Claim(ctx context.Context, workerID string, caps []str
 
 	if claimedJob != nil {
 		q.publishEvent("queue.job.claimed", map[string]any{
-			"job_id":    claimedJob.ID,
+			KeyJobID:    claimedJob.ID,
 			"worker_id": workerID,
 		})
 	}
@@ -211,7 +217,7 @@ func (q *PersistentQueue) Complete(ctx context.Context, jobID string, result any
 	}
 
 	q.publishEvent("queue.job.completed", map[string]any{
-		"job_id": jobID,
+		KeyJobID: jobID,
 	})
 
 	return nil
@@ -231,7 +237,7 @@ func (q *PersistentQueue) Fail(ctx context.Context, jobID string, err error) err
 	}
 
 	q.publishEvent("queue.job.failed", map[string]any{
-		"job_id": jobID,
+		KeyJobID: jobID,
 		"error":  err.Error(),
 	})
 
@@ -252,7 +258,7 @@ func (q *PersistentQueue) Retry(ctx context.Context, jobID string) error {
 	}
 
 	q.publishEvent("queue.job.retry", map[string]any{
-		"job_id": jobID,
+		KeyJobID: jobID,
 	})
 
 	return nil
@@ -305,7 +311,7 @@ func (q *PersistentQueue) RecoverFromDeadLetter(ctx context.Context, jobID strin
 	}
 
 	q.publishEvent("queue.job.recovered", map[string]any{
-		"job_id": jobID,
+		KeyJobID: jobID,
 	})
 
 	return recovered, nil
@@ -560,7 +566,7 @@ func (h *Handler) handleComplete(ctx context.Context, msg *models.BusMessage) (a
 		return nil, err
 	}
 
-	return map[string]string{"status": "completed"}, nil
+	return map[string]string{KeyStatus: "completed"}, nil
 }
 
 func (h *Handler) handleFail(ctx context.Context, msg *models.BusMessage) (any, error) {
@@ -576,7 +582,7 @@ func (h *Handler) handleFail(ctx context.Context, msg *models.BusMessage) (any, 
 		return nil, err
 	}
 
-	return map[string]string{"status": "failed"}, nil
+	return map[string]string{KeyStatus: "failed"}, nil
 }
 
 func (h *Handler) handleRetry(ctx context.Context, msg *models.BusMessage) (any, error) {
@@ -591,7 +597,7 @@ func (h *Handler) handleRetry(ctx context.Context, msg *models.BusMessage) (any,
 		return nil, err
 	}
 
-	return map[string]string{"status": "retried"}, nil
+	return map[string]string{KeyStatus: "retried"}, nil
 }
 
 func (h *Handler) handleGet(ctx context.Context, msg *models.BusMessage) (any, error) {
@@ -671,7 +677,7 @@ func (h *Handler) handleRecover(ctx context.Context, msg *models.BusMessage) (an
 		return nil, err
 	}
 
-	return map[string]any{"job": job, "status": "recovered"}, nil
+	return map[string]any{"job": job, KeyStatus: "recovered"}, nil
 }
 
 func (h *Handler) handleDeadLetter(ctx context.Context, msg *models.BusMessage) (any, error) {

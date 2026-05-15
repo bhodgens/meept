@@ -346,7 +346,7 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 
 // handleHealth handles health check requests.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "ok"})
 }
 
 // handleGetClientConfig handles GET /api/v1/config/client.
@@ -387,7 +387,7 @@ func (s *Server) handleSaveClientConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeySaved})
 }
 
 // handleGetModelsConfig handles GET /api/v1/config/models.
@@ -428,7 +428,7 @@ func (s *Server) handleSaveModelsConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeySaved})
 }
 
 // handleListAgents handles GET /api/v1/config/agents.
@@ -446,7 +446,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"agents": agents,
-		"count":  len(agents),
+		KeyCount:  len(agents),
 	})
 }
 
@@ -496,7 +496,7 @@ func (s *Server) handleSaveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeySaved})
 }
 
 // handleDeleteAgent handles DELETE /api/v1/config/agents/{id}.
@@ -517,7 +517,7 @@ func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "deleted"})
 }
 
 // handleDaemonStatus handles GET /api/v1/daemon/status.
@@ -570,7 +570,7 @@ func (s *Server) handleDaemonRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "restarted"})
 }
 
 // handleLiveMetrics handles GET /api/v1/metrics/live.
@@ -629,7 +629,7 @@ func (s *Server) handleHistoricalMetrics(w http.ResponseWriter, r *http.Request)
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"points": points,
-		"count":  len(points),
+		KeyCount:  len(points),
 	})
 }
 
@@ -643,7 +643,7 @@ func (s *Server) handleMetricsStream(w http.ResponseWriter, r *http.Request) {
 	// WebSocket upgrade would be handled here
 	// For now, return a simple SSE-style response
 	s.writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "websocket_not_implemented",
+		KeyStatus:  "websocket_not_implemented",
 		"message": "use polling as fallback",
 	})
 }
@@ -679,5 +679,5 @@ func (s *Server) handleSaveMenubarConfig(w http.ResponseWriter, r *http.Request)
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeySaved})
 }

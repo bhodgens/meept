@@ -411,7 +411,7 @@ var SuspiciousPatterns = []string{
 	"base64 -d",
 	"$(curl",
 	"`curl",
-	"eval ",
+	patternEval,
 	"wget ",
 	"$(wget",
 	"`wget",

@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// Context section and role constants.
+const (
+	SectionAgent             = "agent"
+	SectionArchitectureOverview = "Architecture Overview"
+)
+
 // ContextBuilder builds context from artifacts for agent prompts
 //nolint:revive // stutter with package name is intentional for API clarity
 type ContextBuilder struct {
@@ -66,7 +72,7 @@ func (cb *ContextBuilder) BuildForTask(task string) *BuildContext {
 		cb.buildCodeContext(ctx)
 	case "architecture":
 		cb.buildArchitectureContext(ctx)
-	case "agent":
+	case SectionAgent:
 		cb.buildAgentContext(ctx)
 	case "general":
 		cb.buildGeneralContext(ctx)
@@ -91,7 +97,7 @@ func (cb *ContextBuilder) classifyTask(task string) string {
 		strings.Contains(taskLower, "structure"):
 		return "architecture"
 	case strings.Contains(taskLower, "agent") || strings.Contains(taskLower, "delegate"):
-		return "agent"
+		return SectionAgent
 	default:
 		return "general"
 	}
@@ -99,7 +105,7 @@ func (cb *ContextBuilder) classifyTask(task string) string {
 
 // buildBuildContext builds context for build tasks
 func (cb *ContextBuilder) buildBuildContext(ctx *BuildContext) {
-	ctx.RelevantSections = []string{"Build Commands", "Architecture Overview"}
+	ctx.RelevantSections = []string{"Build Commands", SectionArchitectureOverview}
 
 	if cb.artifacts.HasCLAUDEMD() {
 		// Get build commands
@@ -155,7 +161,7 @@ func (cb *ContextBuilder) buildTestContext(ctx *BuildContext) {
 
 // buildCodeContext builds context for code generation/modification tasks
 func (cb *ContextBuilder) buildCodeContext(ctx *BuildContext) {
-	ctx.RelevantSections = []string{"Architecture Overview", "Key Components", "Code Conventions"}
+	ctx.RelevantSections = []string{SectionArchitectureOverview, "Key Components", "Code Conventions"}
 
 	if cb.artifacts.HasCLAUDEMD() {
 		doc := cb.artifacts.CLAUDEMD
@@ -214,7 +220,7 @@ func (cb *ContextBuilder) buildCodeContext(ctx *BuildContext) {
 
 // buildArchitectureContext builds context for architecture questions
 func (cb *ContextBuilder) buildArchitectureContext(ctx *BuildContext) {
-	ctx.RelevantSections = []string{"Architecture Overview", "Key Components", "Project Structure"}
+	ctx.RelevantSections = []string{SectionArchitectureOverview, "Key Components", "Project Structure"}
 
 	if cb.artifacts.HasCLAUDEMD() {
 		doc := cb.artifacts.CLAUDEMD
@@ -292,13 +298,13 @@ func (cb *ContextBuilder) buildAgentContext(ctx *BuildContext) {
 
 	// Include agent development skills
 	if cb.artifacts.HasSkills() {
-		cb.buildSkillInfo(ctx, []string{"agent"})
+		cb.buildSkillInfo(ctx, []string{SectionAgent})
 	}
 }
 
 // buildGeneralContext builds context for general tasks
 func (cb *ContextBuilder) buildGeneralContext(ctx *BuildContext) {
-	ctx.RelevantSections = []string{"Architecture Overview", "Project Structure", "Code Conventions"}
+	ctx.RelevantSections = []string{SectionArchitectureOverview, "Project Structure", "Code Conventions"}
 
 	if cb.artifacts.HasCLAUDEMD() {
 		doc := cb.artifacts.CLAUDEMD

@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+// Common suspicious pattern substrings.
+const (
+	patternEval = "eval "
+)
+
 // ShellInjectionPattern is a regex pattern for detecting shell injection attempts.
 var ShellInjectionPattern = regexp.MustCompile(
 	`(?:[;&|` + "`" + `]|>\s*\w|\$\(.*\)|` + "``" + `\([^)]*\))`,
@@ -101,7 +106,7 @@ func DetectSuspiciousPatterns(command string) (string, bool) {
 		"subshell_wget":  "$(wget",
 		"backtick_curl":  "`curl",
 		"backtick_wget":  "`wget",
-		"eval_statement": "eval ",
+		"eval_statement": patternEval,
 		"eval_subshell":  "eval $(",
 	}
 

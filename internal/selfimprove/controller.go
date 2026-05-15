@@ -24,6 +24,9 @@ import (
 // (started, detecting, analyzing, generating, validating, applying, completed).
 const statusTopic = "selfimprove.status"
 
+// KeyCycleID is the map key for cycle identifiers.
+const KeyCycleID = "cycle_id"
+
 // ProgressCallback is invoked during cycle execution to report progress.
 // phase is one of "detecting", "analyzing", "generating", "validating",
 // "applying". progress is 0.0-1.0. message is a human-readable description.
@@ -150,8 +153,8 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	}
 	c.mu.Unlock()
 
-	c.logger.Info("starting improvement cycle", "cycle_id", cycleID)
-	c.publishStatus("started", map[string]any{"cycle_id": cycleID})
+	c.logger.Info("starting improvement cycle", KeyCycleID, cycleID)
+	c.publishStatus("started", map[string]any{KeyCycleID: cycleID})
 	c.emitProgress("started", 0.0, "cycle "+cycleID+" starting")
 
 	defer func() {
@@ -163,7 +166,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 
 	// Phase 1: Detection
 	c.logger.Info("phase 1 - detecting issues")
-	c.publishStatus("detecting", map[string]any{"cycle_id": cycleID})
+	c.publishStatus("detecting", map[string]any{KeyCycleID: cycleID})
 	c.emitProgress("detecting", 0.1, "detecting issues in codebase")
 
 	issues, err := c.detector.DetectAll(ctx)
@@ -192,7 +195,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 
 	// Phase 2: Analysis
 	c.logger.Info("phase 2 - analyzing issues", "count", len(issues))
-	c.publishStatus("analyzing", map[string]any{"cycle_id": cycleID, "issues_count": len(issues)})
+	c.publishStatus("analyzing", map[string]any{KeyCycleID: cycleID, "issues_count": len(issues)})
 	c.emitProgress("analyzing", 0.3, fmt.Sprintf("analyzing %d issues", len(issues)))
 
 	c.mu.Lock()
@@ -234,7 +237,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 
 	// Phase 3: Generation
 	c.logger.Info("phase 3 - generating fixes", "analyses_count", analysesCount)
-	c.publishStatus("generating", map[string]any{"cycle_id": cycleID, "analyses_count": analysesCount})
+	c.publishStatus("generating", map[string]any{KeyCycleID: cycleID, "analyses_count": analysesCount})
 	c.emitProgress("generating", 0.5, fmt.Sprintf("generating fixes for %d analyses", analysesCount))
 
 	c.mu.Lock()
@@ -294,7 +297,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	c.mu.Unlock()
 
 	c.logger.Info("phase 4 - validating fixes", "fixes_count", len(fixesCopy))
-	c.publishStatus("validating", map[string]any{"cycle_id": cycleID, "fixes_count": len(fixesCopy)})
+	c.publishStatus("validating", map[string]any{KeyCycleID: cycleID, "fixes_count": len(fixesCopy)})
 	c.emitProgress("validating", 0.7, fmt.Sprintf("validating %d fixes", len(fixesCopy)))
 
 	for _, fix := range fixesCopy {
@@ -328,7 +331,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	}
 
 	c.logger.Info("phase 5 - applying fixes", "validated_count", len(validatedFixes))
-	c.publishStatus("applying", map[string]any{"cycle_id": cycleID, "validated_count": len(validatedFixes)})
+	c.publishStatus("applying", map[string]any{KeyCycleID: cycleID, "validated_count": len(validatedFixes)})
 	c.emitProgress("applying", 0.9, fmt.Sprintf("applying %d validated fixes", len(validatedFixes)))
 
 	for _, pair := range validatedFixes {
@@ -365,7 +368,7 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 	c.mu.Unlock()
 
 	c.logger.Info("cycle completed",
-		"cycle_id", cycleID,
+		KeyCycleID, cycleID,
 		"detected", cycle.IssuesDetected,
 		"analyzed", cycle.IssuesAnalyzed,
 		"generated", cycle.FixesGenerated,
@@ -531,7 +534,7 @@ func (c *Controller) publishStatus(phase string, data any) {
 		"selfimprove."+cycleID,
 		map[string]any{
 			"phase":    phase,
-			"cycle_id": cycleID,
+			KeyCycleID: cycleID,
 			"data":     data,
 		},
 	)

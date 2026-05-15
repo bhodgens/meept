@@ -39,7 +39,7 @@ func (t *MemoryStoreTool) Parameters() llm.FunctionParameters {
 			schemaPropType: {
 				Type:        schemaTypeString,
 				Description: "Memory type: 'episodic' for conversations/interactions, 'task' for technical knowledge.",
-				Enum:        []string{schemaMemoryEpisodic, "task"},
+				Enum:        []string{schemaMemoryEpisodic, schemaMemoryTask},
 			},
 			schemaPropCategory: {
 				Type:        schemaTypeString,
@@ -69,7 +69,7 @@ func (t *MemoryStoreTool) Execute(ctx context.Context, args map[string]any) (any
 	switch memTypeStr {
 	case schemaMemoryEpisodic:
 		memType = memory.MemoryTypeEpisodic
-	case "task":
+	case schemaMemoryTask:
 		memType = memory.MemoryTypeTask
 	default:
 		return nil, fmt.Errorf("invalid memory type: %s (use 'episodic' or 'task')", memTypeStr)
@@ -123,7 +123,7 @@ func (t *MemorySearchTool) Parameters() llm.FunctionParameters {
 			schemaPropType: {
 				Type:        schemaTypeString,
 				Description: "Optional: filter to 'episodic' or 'task' memories only.",
-				Enum:        []string{schemaMemoryEpisodic, "task", ""},
+				Enum:        []string{schemaMemoryEpisodic, schemaMemoryTask, ""},
 			},
 			schemaPropLimit: {
 				Type:        schemaTypeInteger,
@@ -169,7 +169,7 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 		switch memTypeStr {
 		case schemaMemoryEpisodic:
 			memQuery.Type = memory.MemoryTypeEpisodic
-		case "task":
+		case schemaMemoryTask:
 			memQuery.Type = memory.MemoryTypeTask
 		}
 	}

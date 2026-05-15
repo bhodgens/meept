@@ -618,12 +618,12 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []Message) error {
 		if msg.EntryType != "" {
 			entryType = msg.EntryType
 		} else {
-			entryType = "message"
+			entryType = KeyMessage
 		}
 		if msg.BranchID != "" {
 			branchID = msg.BranchID
 		} else {
-			branchID = "main"
+			branchID = BranchMain
 		}
 
 		_, err := stmt.Exec(sessionID, msg.Role, msg.Content, msg.Timestamp.Format(time.RFC3339),
@@ -1161,11 +1161,11 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 			// If old parent wasn't in the copied set, this becomes a root message
 		}
 
-		entryType := "message"
+		entryType := KeyMessage
 		if sm.entryType.Valid && sm.entryType.String != "" {
 			entryType = sm.entryType.String
 		}
-		branchID := "main"
+		branchID := BranchMain
 		if sm.branchID.Valid && sm.branchID.String != "" {
 			branchID = sm.branchID.String
 		}

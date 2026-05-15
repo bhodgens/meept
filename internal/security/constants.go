@@ -29,6 +29,12 @@ const (
 	LabelSpecialTokenPhi    = "special_token_phi"
 	LabelSpecialToken       = "special_token"
 
+	// Pattern type constants.
+	PatternTypeRegex = "regex"
+
+	// Eval detection pattern.
+	PatternEval = "eval "
+
 	// Binary name.
 	BinaryTirith = "tirith"
 

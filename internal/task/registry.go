@@ -12,6 +12,12 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// Map key constants for task operations.
+const (
+	KeyTaskID = "task_id"
+	KeyStatus = "status"
+)
+
 // Registry manages tasks and provides a unified API.
 type Registry struct {
 	store           *Store
@@ -70,7 +76,7 @@ func (r *Registry) Create(ctx context.Context, name, description string) (*Task,
 	}
 
 	r.publishEvent("task.create", map[string]any{
-		"task_id": task.ID,
+		KeyTaskID: task.ID,
 		"name":    task.Name,
 	})
 
@@ -99,7 +105,7 @@ func (r *Registry) Update(ctx context.Context, task *Task) error {
 	}
 
 	r.publishEvent("task.update", map[string]any{
-		"task_id": task.ID,
+		KeyTaskID: task.ID,
 		"state":   task.State.String(),
 	})
 
@@ -120,7 +126,7 @@ func (r *Registry) Delete(ctx context.Context, taskID string) error {
 	}
 
 	r.publishEvent("task.delete", map[string]any{
-		"task_id": taskID,
+		KeyTaskID: taskID,
 	})
 
 	return nil
@@ -196,7 +202,7 @@ func (r *Registry) LinkSession(ctx context.Context, taskID, sessionID string) er
 	}
 
 	r.publishEvent("task.link", map[string]any{
-		"task_id":    taskID,
+		KeyTaskID:   taskID,
 		"session_id": sessionID,
 	})
 
@@ -217,7 +223,7 @@ func (r *Registry) UnlinkSession(ctx context.Context, taskID, sessionID string) 
 	}
 
 	r.publishEvent("task.unlink", map[string]any{
-		"task_id":    taskID,
+		KeyTaskID:   taskID,
 		"session_id": sessionID,
 	})
 
@@ -633,7 +639,7 @@ func (h *Handler) handleDelete(ctx context.Context, msg *models.BusMessage) (any
 		return nil, err
 	}
 
-	return map[string]string{"status": "deleted"}, nil
+	return map[string]string{KeyStatus: "deleted"}, nil
 }
 
 // handleCancel flips a task into StateCancelled and triggers the interrupt token.
@@ -660,7 +666,7 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
 
 	if task.State.IsTerminal() {
 		return map[string]any{
-			"status":  "noop",
+			KeyStatus: "noop",
 			"state":   string(task.State),
 			"message": "task already in terminal state",
 		}, nil
@@ -677,7 +683,7 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
 	}
 
 	if err := h.registry.interruptMgr.Trigger(params.ID, reason, msgText); err != nil {
-		h.logger.Warn("Failed to trigger interrupt", "task_id", params.ID, "error", err)
+		h.logger.Warn("Failed to trigger interrupt", KeyTaskID, params.ID, "error", err)
 	}
 
 	// Update task state
@@ -688,13 +694,13 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
 
 	// Publish cancellation event
 	h.registry.publishEvent("task.cancelled", map[string]any{
-		"task_id": params.ID,
+		KeyTaskID: params.ID,
 		"reason":  reason,
 		"message": msgText,
 	})
 
 	return map[string]any{
-		"status": "cancelled",
+		KeyStatus: "cancelled",
 		"state":  string(task.State),
 		"reason": reason,
 	}, nil
@@ -713,7 +719,7 @@ func (h *Handler) handleLink(ctx context.Context, msg *models.BusMessage) (any, 
 		return nil, err
 	}
 
-	return map[string]string{"status": "linked"}, nil
+	return map[string]string{KeyStatus: "linked"}, nil
 }
 
 func (h *Handler) handleUnlink(ctx context.Context, msg *models.BusMessage) (any, error) {
@@ -729,7 +735,7 @@ func (h *Handler) handleUnlink(ctx context.Context, msg *models.BusMessage) (any
 		return nil, err
 	}
 
-	return map[string]string{"status": "unlinked"}, nil
+	return map[string]string{KeyStatus: "unlinked"}, nil
 }
 
 func (h *Handler) handleSteps(_ context.Context, msg *models.BusMessage) (any, error) {

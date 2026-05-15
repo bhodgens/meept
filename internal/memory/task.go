@@ -50,6 +50,13 @@ CREATE TRIGGER IF NOT EXISTS task_fts_au AFTER UPDATE ON task_memories BEGIN
 END`
 )
 
+// Default memory domain constants.
+const (
+	DomainGeneral  = "general"
+	DomainCode     = "code"
+	DomainCommands = "commands"
+)
+
 // TaskMemory stores and retrieves domain-specific technical knowledge.
 // It supports multiple domains (e.g., "general", "code", "commands") and
 // uses SQLite with FTS5 for full-text search when available, falling back
@@ -77,7 +84,7 @@ type TaskMemoryConfig struct {
 func DefaultTaskMemoryConfig(dataDir string) TaskMemoryConfig {
 	return TaskMemoryConfig{
 		DataDir:  dataDir,
-		Domains:  []string{"general", "code", "commands"},
+		Domains:  []string{DomainGeneral, DomainCode, DomainCommands},
 		PoolSize: 5,
 		Logger:   slog.Default(),
 	}
@@ -89,7 +96,7 @@ func NewTaskMemory(cfg TaskMemoryConfig) (*TaskMemory, error) {
 		cfg.Logger = slog.Default()
 	}
 	if len(cfg.Domains) == 0 {
-		cfg.Domains = []string{"general"}
+		cfg.Domains = []string{DomainGeneral}
 	}
 
 	// Create the shared FTS store with task-specific config
@@ -129,7 +136,7 @@ func (t *TaskMemory) HasFTS5() bool {
 // Returns the unique ID of the stored item.
 func (t *TaskMemory) Store(ctx context.Context, content, domain string, metadata map[string]any) (string, error) {
 	if domain == "" {
-		domain = "general"
+		domain = DomainGeneral
 	}
 
 	id := generateUUID()

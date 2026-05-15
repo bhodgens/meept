@@ -34,7 +34,7 @@ func (m *InterruptManager) GetOrCreate(taskID string) *InterruptToken {
 
 	tok := NewInterruptToken(taskID)
 	m.tokens[taskID] = tok
-	m.logger.Debug("Created interrupt token", "task_id", taskID)
+	m.logger.Debug("Created interrupt token", KeyTaskID, taskID)
 	return tok
 }
 
@@ -61,7 +61,7 @@ func (m *InterruptManager) Trigger(taskID string, reason InterruptReason, messag
 
 	tok.Trigger(reason, message)
 	m.logger.Info("Task interrupted",
-		"task_id", taskID,
+		KeyTaskID, taskID,
 		"reason", reason,
 		"message", message,
 	)
@@ -74,7 +74,7 @@ func (m *InterruptManager) Remove(taskID string) {
 	defer m.mu.Unlock()
 
 	delete(m.tokens, taskID)
-	m.logger.Debug("Removed interrupt token", "task_id", taskID)
+	m.logger.Debug("Removed interrupt token", KeyTaskID, taskID)
 }
 
 // ListActive returns all active task IDs with interrupt tokens.

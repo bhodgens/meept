@@ -1727,7 +1727,7 @@ func registerPlatformTools(
 	if statusHandler != nil {
 		statusFunc = func() map[string]any {
 			return map[string]any{
-				"status":         "running",
+				KeyStatus:         StateRunning,
 				"uptime_seconds": time.Since(statusHandler.startTime).Seconds(),
 				"version":        "0.2.0-go",
 			}
@@ -2369,7 +2369,7 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 	uptime := time.Since(h.startTime).Seconds()
 
 	response := map[string]any{
-		"status":          "running",
+		KeyStatus:          StateRunning,
 		"uptime_seconds":  uptime,
 		"version":         "0.2.0-go",
 		"bus_subscribers": len(h.bus.Stats()),
@@ -2554,7 +2554,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	result := map[string]any{
 		"job_id":   job.ID,
 		"response": response,
-		"status":   "completed",
+		KeyStatus:   "completed",
 	}
 	if isStepJob {
 		result["step_id"] = stepPayload.StepID
@@ -2586,7 +2586,7 @@ func (h *webHandlerAdapter) Chat(ctx context.Context, message string) (string, e
 // Status returns the daemon status via the web handler.
 func (h *webHandlerAdapter) Status(ctx context.Context) (map[string]any, error) {
 	status := map[string]any{
-		"status":  "running",
+		KeyStatus:  StateRunning,
 		"version": "0.3.0-go",
 	}
 
@@ -2698,7 +2698,7 @@ func (a *jobsListerAdapter) ListJobs() ([]web.JobInfo, error) {
 		if !j.Enabled {
 			status = "paused"
 		} else if j.IsRunning {
-			status = "running"
+			status = StateRunning
 		}
 
 		webJobs[i] = web.JobInfo{

@@ -12,6 +12,14 @@ import (
 	"github.com/caimlas/meept/internal/services"
 )
 
+// Response payload key constants.
+const (
+	KeyStatus = "status"
+	KeyCount  = "count"
+	KeySaved  = "saved"
+	KeyQueued = "queued"
+)
+
 // handleServiceError writes appropriate HTTP response based on service error type.
 func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 	switch {
@@ -87,7 +95,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send initial connection event
-	if err := sse.SendEvent("connected", map[string]string{"status": "ok"}); err != nil {
+	if err := sse.SendEvent("connected", map[string]string{KeyStatus: "ok"}); err != nil {
 		return
 	}
 
@@ -172,7 +180,7 @@ func (s *Server) handleMemoryQuery(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"memories": results,
-		"count":    len(results),
+		KeyCount:    len(results),
 	})
 }
 
@@ -198,7 +206,7 @@ func (s *Server) handleMemoryRecent(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"memories": results,
-		"count":    len(results),
+		KeyCount:    len(results),
 	})
 }
 
@@ -283,7 +291,7 @@ func (s *Server) handleQueueList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"jobs":  jobs,
-		"count": len(jobs),
+		KeyCount: len(jobs),
 	})
 }
 
@@ -351,7 +359,7 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"tasks": tasks,
-		"count": len(tasks),
+		KeyCount: len(tasks),
 	})
 }
 
@@ -424,7 +432,7 @@ func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "deleted"})
 }
 
 // ===== Session Endpoints =====
@@ -475,7 +483,7 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"sessions": sessions,
-		"count":    len(sessions),
+		KeyCount:    len(sessions),
 	})
 }
 
@@ -519,7 +527,7 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "deleted"})
 }
 
 // ===== Worker Endpoints =====
@@ -566,7 +574,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"skills": skills,
-		"count":  len(skills),
+		KeyCount:  len(skills),
 	})
 }
 
@@ -657,7 +665,7 @@ func (s *Server) handleSelfImproveTrigger(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "triggered"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "triggered"})
 }
 
 // ===== Cache Endpoints =====
@@ -696,7 +704,7 @@ func (s *Server) handleCacheClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "cleared"})
 }
 
 // handleCacheInvalidate handles POST /api/v1/cache/invalidate.
@@ -717,7 +725,7 @@ func (s *Server) handleCacheInvalidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "invalidated"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "invalidated"})
 }
 
 // handleCacheInspect handles GET /api/v1/cache/inspect.
@@ -783,7 +791,7 @@ func (s *Server) handleSchedulerListJobs(w http.ResponseWriter, r *http.Request)
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"jobs":  jobs,
-		"count": len(jobs),
+		KeyCount: len(jobs),
 	})
 }
 
@@ -829,7 +837,7 @@ func (s *Server) handleBusPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "published"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "published"})
 }
 
 // handleBusStats handles GET /api/v1/bus/stats.
@@ -925,7 +933,7 @@ func (s *Server) handleQueueComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "completed"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "completed"})
 }
 
 // handleQueueFail handles POST /api/v1/queue/jobs/{id}/fail.
@@ -957,7 +965,7 @@ func (s *Server) handleQueueFail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "failed"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "failed"})
 }
 
 // handleQueueRetry handles POST /api/v1/queue/jobs/{id}/retry.
@@ -978,7 +986,7 @@ func (s *Server) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "retried"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "retried"})
 }
 
 // ===== Additional Task Endpoints =====
@@ -1003,7 +1011,7 @@ func (s *Server) handleTaskCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "cancelled"})
 }
 
 // handleTaskSteps handles GET /api/v1/tasks/{id}/steps.
@@ -1027,7 +1035,7 @@ func (s *Server) handleTaskSteps(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"steps": steps,
-		"count": len(steps),
+		KeyCount: len(steps),
 	})
 }
 
@@ -1182,7 +1190,7 @@ func (s *Server) handleSessionBranches(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"branches": branches,
-		"count":    len(branches),
+		KeyCount:    len(branches),
 	})
 }
 
@@ -1246,7 +1254,7 @@ func (s *Server) handleSessionTree(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"nodes": nodes,
-		"count": len(nodes),
+		KeyCount: len(nodes),
 	})
 }
 
@@ -1323,7 +1331,7 @@ func (s *Server) handleWorkerRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "removed"})
 }
 
 // handleWorkerScale handles POST /api/v1/workers/scale.
@@ -1348,7 +1356,7 @@ func (s *Server) handleWorkerScale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "scaled"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "scaled"})
 }
 
 // ===== Additional Self-Improve Endpoints =====
@@ -1365,7 +1373,7 @@ func (s *Server) handleSelfImproveAnalyze(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "analyzed"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "analyzed"})
 }
 
 // handleSelfImproveGenerate handles POST /api/v1/selfimprove/generate.
@@ -1390,7 +1398,7 @@ func (s *Server) handleSelfImproveGenerate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "generated"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "generated"})
 }
 
 // handleSelfImproveValidate handles POST /api/v1/selfimprove/validate.
@@ -1441,7 +1449,7 @@ func (s *Server) handleSelfImproveApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "applied"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "applied"})
 }
 
 // handleSelfImproveReject handles POST /api/v1/selfimprove/reject.
@@ -1468,7 +1476,7 @@ func (s *Server) handleSelfImproveReject(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "rejected"})
 }
 
 // ===== Chat Steering Endpoints =====
@@ -1491,7 +1499,7 @@ func (s *Server) handleChatSteer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeyQueued})
 }
 
 // handleChatSteerExplicit handles POST /api/v1/chat/steer-explicit.
@@ -1514,7 +1522,7 @@ func (s *Server) handleChatSteerExplicit(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{
-		"status": "queued",
+		KeyStatus: KeyQueued,
 		"mode":   "explicit",
 	})
 }
@@ -1537,7 +1545,7 @@ func (s *Server) handleChatFollowUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeyQueued})
 }
 
 // handleChatQueueStatus handles GET /api/v1/chat/queue/{id}.
@@ -1591,7 +1599,7 @@ func (s *Server) handleQueueSteerRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeyQueued})
 }
 
 // handleQueueFollowUpRoute handles POST /api/v1/queue/followup.
@@ -1613,7 +1621,7 @@ func (s *Server) handleQueueFollowUpRoute(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeyQueued})
 }
 
 // handleQueueStatusRoute handles GET /api/v1/queue/status/{id}.
@@ -1668,5 +1676,5 @@ func (s *Server) handleChatWithAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{"status": "queued"})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeyQueued})
 }

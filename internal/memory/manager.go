@@ -281,7 +281,7 @@ func (m *Manager) initSQLiteBackends(ctx context.Context) error {
 		taskDir := filepath.Join(m.dataDir, "task")
 		domains := m.config.Task.Domains
 		if len(domains) == 0 {
-			domains = []string{"general", "code", "commands"}
+			domains = []string{DomainGeneral, DomainCode, DomainCommands}
 		}
 		taskMem, err := NewTaskMemory(TaskMemoryConfig{
 			DataDir: taskDir,
@@ -455,7 +455,7 @@ func (m *Manager) storeViaSQLite(ctx context.Context, mem Memory) (string, error
 		}
 		domain := mem.Category
 		if domain == "" {
-			domain = "general"
+			domain = DomainGeneral
 		}
 		return m.task.Store(ctx, mem.Content, domain, mem.Metadata)
 

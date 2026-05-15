@@ -105,16 +105,16 @@ func (bm *BranchManager) NavigateToBranch(ctx context.Context, sessionID string,
 
 	// Collect abandoned = path[targetIdx+1:]
 	abandoned := path[targetIdx+1:]
-	oldBranchID := "main"
+	oldBranchID := BranchMain
 	if len(abandoned) > 0 {
 		oldBranchID = abandoned[0].BranchID
 		if oldBranchID == "" {
-			oldBranchID = "main"
+			oldBranchID = BranchMain
 		}
 	} else if len(path) > 0 {
 		oldBranchID = path[len(path)-1].BranchID
 		if oldBranchID == "" {
-			oldBranchID = "main"
+			oldBranchID = BranchMain
 		}
 	}
 

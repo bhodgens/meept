@@ -134,7 +134,7 @@ func (c *AnthropicClient) Chat(ctx context.Context, messages []ChatMessage, opts
 
 	if c.budget != nil {
 		if !c.budget.CheckBudget() {
-			return nil, &BudgetExceededError{Message: "ErrBudgetExceeded"}
+			return nil, &BudgetExceededError{Message: ErrBudgetExceeded}
 		}
 		if err := c.budget.WaitForRateLimit(ctx); err != nil {
 			return nil, err
@@ -253,7 +253,7 @@ func (c *AnthropicClient) ChatWithProgress(ctx context.Context, messages []ChatM
 	if c.budget != nil {
 		reportProgress(ProgressStageStarting, "Checking token budget...")
 		if !c.budget.CheckBudget() {
-			return nil, &BudgetExceededError{Message: "ErrBudgetExceeded"}
+			return nil, &BudgetExceededError{Message: ErrBudgetExceeded}
 		}
 
 		reportProgress(ProgressStageStarting, "Waiting for rate limit...")
