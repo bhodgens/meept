@@ -21,7 +21,7 @@
     },
   },
 
-  // MCP chat server configuration (for external agent platforms like Claude)
+  // MCP chat server configuration
   "mcp_chat_server": {
     "enabled": true,
     "socket_path": "~/.meept/meept.sock",
