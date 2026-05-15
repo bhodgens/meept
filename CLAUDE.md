@@ -229,7 +229,7 @@ The HTTP API uses a **service layer pattern** to share business logic between RP
   as `RiskMedium` instead of the default `RiskHigh` for unknown commands. Use for
   project-local CLIs (`mytool`, `mycli`) that the operator has vetted.
 - `LLMClassifierConfig.Timeout time.Duration` — per-classification HTTP timeout;
-  defaults to 5 s when unset.
+  defaults to 10 s when unset. Daemon wiring uses 15 s explicitly.
 - `ContextFirewall.Stats()` returns `FirewallStats` with counters for
   `SummarizationFailures`, `DroppedMessages`, `DropEvents`, `CompactionEvents`,
   `CompactionTokensSaved`, and `CompactionFallbacks` so operators can monitor

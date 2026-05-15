@@ -577,5 +577,65 @@ func decodeStringSlice(s string) []string {
 	return slice
 }
 
+// RecoverStaleTasks finds all tasks in non-terminal states (pending, planning,
+// executing, testing) and marks them as failed with reason "daemon_shutdown".
+// It also marks any non-terminal steps belonging to those tasks as failed.
+// Returns the number of tasks that were recovered.
+func (s *Store) RecoverStaleTasks() (int, error) {
+	// Collect IDs of stale tasks in non-terminal states.
+	rows, err := s.db.Query(`
+		SELECT id FROM tasks
+		WHERE state IN ('pending', 'planning', 'executing', 'testing')`)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query stale tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var taskIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			s.logger.Error("Failed to scan stale task ID", "error", err)
+			continue
+		}
+		taskIDs = append(taskIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("failed to iterate stale tasks: %w", err)
+	}
+
+	if len(taskIDs) == 0 {
+		return 0, nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Mark stale tasks as failed.
+	_, err = s.db.Exec(`
+		UPDATE tasks
+		SET state = 'failed', updated_at = ?
+		WHERE state IN ('pending', 'planning', 'executing', 'testing')`,
+		now)
+	if err != nil {
+		return 0, fmt.Errorf("failed to mark stale tasks as failed: %w", err)
+	}
+
+	// Mark non-terminal steps belonging to stale tasks as failed.
+	for _, taskID := range taskIDs {
+		_, err := s.db.Exec(`
+			UPDATE task_steps
+			SET state = 'failed', result = 'daemon_shutdown', updated_at = ?
+			WHERE task_id = ? AND state NOT IN ('completed', 'approved', 'failed', 'skipped', 'rejected')`,
+			now, taskID)
+		if err != nil {
+			s.logger.Error("Failed to mark stale steps as failed", "task_id", taskID, "error", err)
+			// Continue processing remaining tasks.
+		}
+	}
+
+	s.logger.Info("Recovered stale tasks", "count", len(taskIDs))
+	return len(taskIDs), nil
+}
+
 // Ensure TaskStore implements io.Closer
 var _ io.Closer = (*Store)(nil)

@@ -736,6 +736,63 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 				}
+			case "step.review_completed", "task.review_completed":
+				// Handle review events - show rejection/revision feedback in chat
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					reviewStatus, _ := payloadMap["status"].(string)
+					feedback, _ := payloadMap["feedback"].(string)
+					taskID, _ := payloadMap["task_id"].(string)
+					stepID, _ := payloadMap["step_id"].(string)
+					revisionCount := 0
+					if rc, ok := payloadMap["revision_count"].(float64); ok {
+						revisionCount = int(rc)
+					}
+
+					switch reviewStatus {
+					case "rejected":
+						// Show rejection with feedback and revision info
+						summary := fmt.Sprintf("step %s: review rejected", stepID)
+						if revisionCount > 0 {
+							summary = fmt.Sprintf("step %s: review rejected (revision #%d)", stepID, revisionCount)
+						}
+						if feedback != "" {
+							summary += fmt.Sprintf(" -- %s", feedback)
+						}
+						resultMsg := models.ChatTaskResultMsg{
+							State:         "reviewing",
+							TaskID:        taskID,
+							ResultSummary: summary,
+						}
+						if cmd := a.chat.Update(resultMsg); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					case "needs_info":
+						// Show needs-info feedback
+						summary := fmt.Sprintf("step %s: review needs more info", stepID)
+						if feedback != "" {
+							summary += fmt.Sprintf(" -- %s", feedback)
+						}
+						resultMsg := models.ChatTaskResultMsg{
+							State:         "reviewing",
+							TaskID:        taskID,
+							ResultSummary: summary,
+						}
+						if cmd := a.chat.Update(resultMsg); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					case "approved":
+						// Show approval (lighter touch - just a progress update)
+						progressMsg := models.ProgressUpdateMsg{
+							Stage:       "review approved",
+							CurrentTool: fmt.Sprintf("step %s approved", stepID),
+							Percent:     100,
+							ChatVisible: true,
+						}
+						if cmd := a.chat.Update(progressMsg); cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+					}
+				}
 			case "tool.execution.progress":
 				// Extract tool-level streaming progress
 				if payloadMap, ok := e.Payload.(map[string]any); ok {

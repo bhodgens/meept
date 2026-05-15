@@ -506,6 +506,15 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			KeyAgentID:  step.AgentID,
 		})
 
+		// Also publish under task.* prefix for backward compatibility with
+		// subscribers (TUI, ChatHandler) that subscribe to task.* but not step.*.
+		ts.publishEvent("task.review_requested", map[string]any{
+			KeyStepID:   step.ID,
+			KeyTaskID:   step.TaskID,
+			"tool_hint": step.ToolHint,
+			KeyAgentID:  step.AgentID,
+		})
+
 		// Perform review (synchronously for now)
 		reviewResult, err := ts.reviewManager.ReviewStep(ctx, step)
 		if err != nil {

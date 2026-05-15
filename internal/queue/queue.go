@@ -218,6 +218,7 @@ func (q *PersistentQueue) Complete(ctx context.Context, jobID string, result any
 
 	q.publishEvent("queue.job.completed", map[string]any{
 		KeyJobID: jobID,
+		"result":  result,
 	})
 
 	return nil

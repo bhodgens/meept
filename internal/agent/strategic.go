@@ -301,10 +301,12 @@ func (sp *StrategicPlanner) createFallbackSteps(req PlanRequest, parentRefs []st
 // Simple intents and short requests are handled as single-step tasks to avoid
 // over-decomposition and unnecessary LLM calls.
 func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
-	// Simple intents that never need decomposition
 	switch req.Intent {
 	case string(IntentChat), string(IntentReport), string(IntentRecall), string(IntentPlatform), string(IntentSearch), string(IntentAnalyze):
 		return false
+	case string(IntentCompound):
+		// Compound intents always need decomposition into sub-tasks
+		return true
 	}
 
 	// Short requests (<100 chars) without complex action verbs are likely simple

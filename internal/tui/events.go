@@ -47,6 +47,7 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 		Topics: []string{
 			"agent.*",
 			"task.*",
+			"step.*",
 			"queue.*",
 			"memory.*",
 			"worker.*",

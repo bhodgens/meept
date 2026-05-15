@@ -75,6 +75,7 @@ func (am *ArtifactManager) ScanDirectory(dir string) (*artifactcontext.Artifacts
 		am.logger.Debug("Claude artifacts detected",
 			"directory", dir,
 			"claude_md", artifacts.CLAUDEMD != nil,
+			"readme", artifacts.HasREADME(),
 			"claude_dir", artifacts.ClaudeDir != nil,
 			"skills", skillCount,
 			"agents", agentCount,
@@ -242,25 +243,41 @@ func (am *ArtifactManager) BuildAgentReferences(taskDesc, workingDir string) str
 
 // BuildFullArtifactContext builds a comprehensive context section combining
 // project context, commands, skills, and agents.
+//
+// CLAUDE.md content is included verbatim (not lossy-summarized) because it
+// contains authoritative project instructions. README.md content is included
+// as a summary since READMEs can be very large.
 func (am *ArtifactManager) BuildFullArtifactContext(taskDesc, workingDir string) string {
 	var sections []string
 
-	// Add project context
-	if ctx := am.BuildArtifactContextSection(taskDesc, workingDir); ctx != "" {
-		sections = append(sections, ctx)
+	// Ensure directory is scanned
+	artifacts, err := am.ScanDirectory(workingDir)
+	if err != nil || !artifacts.Available {
+		return ""
 	}
 
-	// Add command suggestions
-	if cmd := am.BuildCommandSuggestions(taskDesc, workingDir); cmd != "" {
-		sections = append(sections, cmd)
+	// P3b: Include CLAUDE.md verbatim — bypass the lossy ContextBuilder.
+	// The ContextBuilder decomposes CLAUDE.md into subsections and only
+	// injects task-relevant pieces, dropping most of the content. We need
+	// the full content because it contains authoritative project instructions.
+	if artifacts.HasCLAUDEMD() && artifacts.CLAUDEMD.RawContent != "" {
+		claudeSection := fmt.Sprintf("# CLAUDE.md (full content)\n\n%s", artifacts.CLAUDEMD.RawContent)
+		sections = append(sections, claudeSection)
 	}
 
-	// Add skill references
+	// P3a: Include README.md content (summary for large files).
+	if artifacts.HasREADME() {
+		readmeSummary := summarizeREADME(artifacts.READMEContent)
+		readmeSection := fmt.Sprintf("# README.md\n\n%s", readmeSummary)
+		sections = append(sections, readmeSection)
+	}
+
+	// Add skill references (these are concise and safe to include as-is)
 	if skill := am.BuildSkillReferences(taskDesc, workingDir); skill != "" {
 		sections = append(sections, skill)
 	}
 
-	// Add agent references
+	// Add agent references (these are concise and safe to include as-is)
 	if agent := am.BuildAgentReferences(taskDesc, workingDir); agent != "" {
 		sections = append(sections, agent)
 	}
@@ -270,6 +287,26 @@ func (am *ArtifactManager) BuildFullArtifactContext(taskDesc, workingDir string)
 	}
 
 	return strings.Join(sections, "\n\n---\n\n")
+}
+
+// summarizeREADME produces a condensed version of a README when the full
+// content would be too large for the context window. For reasonably sized
+// READMEs (under 4KB), the full content is returned as-is. Larger READMEs
+// are truncated to the first 4KB with a truncation notice.
+func summarizeREADME(content string) string {
+	const maxReadmeBytes = 4 * 1024 // 4KB
+
+	if len(content) <= maxReadmeBytes {
+		return content
+	}
+
+	truncated := content[:maxReadmeBytes]
+	// Walk back to the last newline to avoid cutting mid-line
+	if idx := strings.LastIndex(truncated, "\n"); idx > 0 {
+		truncated = truncated[:idx]
+	}
+	truncated += "\n\n[... README truncated at 4KB ...]"
+	return truncated
 }
 
 // GetCacheStats returns cache statistics for debugging.

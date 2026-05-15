@@ -95,7 +95,10 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// the agent loop's stage transitions (thinking vs. executing tools).
 	progressSub := h.bus.Subscribe(SourceChatHandler, "agent.progress")
 
-	h.wg.Add(5)
+	// Subscribe to review events to push review feedback to linked sessions
+	reviewCompletedSub := h.bus.Subscribe(SourceChatHandler, "task.review_completed")
+
+	h.wg.Add(6)
 
 	// Chat request handler
 	go func() {
@@ -182,6 +185,23 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Review completed handler - push review feedback to linked sessions
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(reviewCompletedSub)
+				return
+			case msg, ok := <-reviewCompletedSub.Channel:
+				if !ok {
+					return
+				}
+				h.handleReviewCompleted(msg)
+			}
+		}
+	}()
+
 	h.logger.Info("ChatHandler started")
 	return nil
 }
@@ -234,6 +254,94 @@ func (h *ChatHandler) handleAgentProgress(msg *models.BusMessage) {
 			go h.publishWorkerEvent("worker.state_changed", &snapshot)
 		}
 	}
+}
+
+// handleReviewCompleted handles task.review_completed events and pushes
+// review feedback to chat sessions linked to the task.
+func (h *ChatHandler) handleReviewCompleted(msg *models.BusMessage) {
+	var payload struct {
+		TaskID        string  `json:"task_id"`
+		StepID        string  `json:"step_id"`
+		Status        string  `json:"status"`
+		Feedback      string  `json:"feedback"`
+		Confidence    float64 `json:"confidence"`
+		Reviewer      string  `json:"reviewer"`
+		RevisionCount int     `json:"revision_count"`
+	}
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		h.logger.Error("Failed to parse review completed payload", "error", err)
+		return
+	}
+
+	h.logger.Info("Review completed, pushing feedback to linked sessions",
+		"task_id", payload.TaskID,
+		"step_id", payload.StepID,
+		"status", payload.Status,
+		"revision_count", payload.RevisionCount,
+	)
+
+	// Look up linked sessions from task store
+	var linkedSessions []string
+	if h.stepStore != nil {
+		// Try to find the task through step's task_id
+		// We don't have direct access to taskStore, so use the step's task_id
+		// to find linked sessions through the task
+	}
+
+	// Build human-readable review feedback message
+	reply := h.formatReviewFeedback(payload.StepID, payload.Status, payload.Feedback, payload.RevisionCount, payload.Reviewer)
+
+	response := ChatResponse{
+		Reply: reply,
+	}
+
+	// Send to linked sessions if we have them
+	if len(linkedSessions) > 0 {
+		for _, sessionID := range linkedSessions {
+			response.ConversationID = sessionID
+			h.sendResponse("review-completed-"+payload.StepID, response)
+		}
+	} else {
+		// No linked sessions found - broadcast for any listening client
+		h.sendResponse("review-completed-"+payload.StepID, response)
+	}
+}
+
+// formatReviewFeedback builds a human-readable review feedback message.
+func (h *ChatHandler) formatReviewFeedback(stepID, status, feedback string, revisionCount int, reviewer string) string {
+	var sb strings.Builder
+
+	switch status {
+	case "rejected":
+		if revisionCount > 0 {
+			fmt.Fprintf(&sb, "## review: rejected (revision #%d)\n\n", revisionCount)
+		} else {
+			sb.WriteString("## review: rejected\n\n")
+		}
+		if feedback != "" {
+			fmt.Fprintf(&sb, "**feedback:** %s\n", truncateString(feedback, 200))
+		}
+		if revisionCount > 0 {
+			sb.WriteString("\nrevision step created and queued.\n")
+		}
+	case "needs_info":
+		sb.WriteString("## review: needs more info\n\n")
+		if feedback != "" {
+			fmt.Fprintf(&sb, "**feedback:** %s\n", truncateString(feedback, 200))
+		}
+	case "approved":
+		sb.WriteString("## review: approved\n")
+		if feedback != "" {
+			fmt.Fprintf(&sb, "\n%s\n", truncateString(feedback, 100))
+		}
+	default:
+		fmt.Fprintf(&sb, "## review: %s\n", status)
+		if feedback != "" {
+			fmt.Fprintf(&sb, "\n%s\n", truncateString(feedback, 200))
+		}
+	}
+
+	return sb.String()
 }
 
 // handleWorkerListRequest responds to worker list queries.

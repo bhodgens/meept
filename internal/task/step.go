@@ -331,8 +331,15 @@ func (s *StepStore) Create(step *TaskStep) error {
 	return nil
 }
 
-// Update updates an existing task step.
+// Update updates an existing task step and records state transitions.
 func (s *StepStore) Update(step *TaskStep) error {
+	// Fetch current state for transition recording
+	var oldState StepState
+	row := s.db.QueryRow("SELECT state FROM task_steps WHERE id = ?", step.ID)
+	if err := row.Scan(&oldState); err != nil {
+		return fmt.Errorf("failed to get current state for step %s: %w", step.ID, err)
+	}
+
 	depsJSON := encodeStringSlice(step.DependsOn)
 	recsJSON := encodeRecommendations(step.Recommendations)
 	evidenceJSON := encodeEvidenceSlice(step.Evidence)
@@ -371,6 +378,19 @@ func (s *StepStore) Update(step *TaskStep) error {
 	if err != nil {
 		s.logger.Error("Failed to update step", "id", step.ID, "error", err)
 		return fmt.Errorf("failed to update step: %w", err)
+	}
+
+	// Record transition when state actually changed
+	if oldState != step.State {
+		if err := s.RecordTransition(&StateTransition{
+			StepID:    step.ID,
+			FromState: oldState,
+			ToState:   step.State,
+			Reason:    "update",
+			Timestamp: time.Now().UTC(),
+		}); err != nil {
+			s.logger.Warn("Failed to record state transition", "step_id", step.ID, "error", err)
+		}
 	}
 
 	return nil
@@ -497,8 +517,15 @@ func (s *StepStore) PromoteReadySteps(taskID string) ([]*TaskStep, error) {
 	return promoted, nil
 }
 
-// SetState updates a step's state.
+// SetState updates a step's state and records the transition.
 func (s *StepStore) SetState(id string, state StepState) error {
+	// Fetch current state for transition recording
+	var oldState StepState
+	row := s.db.QueryRow("SELECT state FROM task_steps WHERE id = ?", id)
+	if err := row.Scan(&oldState); err != nil {
+		return fmt.Errorf("failed to get current state for step %s: %w", id, err)
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.Exec(`
 		UPDATE task_steps SET state = ?, updated_at = ? WHERE id = ?`,
@@ -506,6 +533,20 @@ func (s *StepStore) SetState(id string, state StepState) error {
 	if err != nil {
 		return fmt.Errorf("failed to set step state: %w", err)
 	}
+
+	// Record transition when state actually changed
+	if oldState != state {
+		if err := s.RecordTransition(&StateTransition{
+			StepID:    id,
+			FromState: oldState,
+			ToState:   state,
+			Reason:    "state_change",
+			Timestamp: time.Now().UTC(),
+		}); err != nil {
+			s.logger.Warn("Failed to record state transition", "step_id", id, "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -801,8 +842,8 @@ func (s *StepStore) SetStateWithReason(id string, state StepState, reason string
 		return fmt.Errorf("failed to set step state: %w", err)
 	}
 
-	// Record transition if logging is enabled and state actually changed
-	if s.logTransitions && currentStepState != state {
+	// Record transition when state actually changed
+	if currentStepState != state {
 		if err := s.RecordTransition(&StateTransition{
 			StepID:    id,
 			FromState: currentStepState,
@@ -810,7 +851,7 @@ func (s *StepStore) SetStateWithReason(id string, state StepState, reason string
 			Reason:    reason,
 			Timestamp: time.Now().UTC(),
 		}); err != nil {
-			s.logger.Warn("Failed to record state transition", "error", err)
+			s.logger.Warn("Failed to record state transition", "step_id", id, "error", err)
 		}
 	}
 

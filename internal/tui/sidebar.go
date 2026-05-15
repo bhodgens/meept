@@ -104,6 +104,8 @@ type SidebarTaskItem struct {
 	Created       string
 	CurrentStep   string // Description of the currently executing step
 	TokenUsage    int
+	ReviewStatus  string // Current review status: "reviewing", "revision #N", "approved", "rejected"
+	RevisionCount int    // Number of revision cycles for current step
 }
 
 // SidebarMemoryItem represents a recent memory item in the sidebar.
@@ -510,6 +512,8 @@ func (s *SidebarModel) Update(msg tea.Msg) tea.Cmd {
 				cmds = append(cmds, s.refreshData())
 			case "task.step_completed":
 				s.handleStepCompletedEvent(e)
+			case "step.review_completed", "task.review_completed":
+				s.handleReviewCompletedEvent(e)
 			case "task.planned", "task.completed", EventTaskFailed:
 				cmds = append(cmds, s.refreshData())
 			}
@@ -780,6 +784,48 @@ func (s *SidebarModel) handleStepCompletedEvent(e BusEvent) {
 			s.tasksData[i].CurrentStep = ""
 			break
 		}
+	}
+}
+
+// handleReviewCompletedEvent updates task data when a review completes.
+func (s *SidebarModel) handleReviewCompletedEvent(e BusEvent) {
+	payloadMap, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+
+	taskID, _ := payloadMap["task_id"].(string)
+	if taskID == "" {
+		return
+	}
+
+	reviewStatus, _ := payloadMap["status"].(string)
+	revisionCount := 0
+	if rc, ok := payloadMap["revision_count"].(float64); ok {
+		revisionCount = int(rc)
+	}
+
+	for i := range s.tasksData {
+		if s.tasksData[i].ID != taskID {
+			continue
+		}
+		switch reviewStatus {
+		case "rejected":
+			if revisionCount > 0 {
+				s.tasksData[i].ReviewStatus = fmt.Sprintf("revision #%d", revisionCount)
+			} else {
+				s.tasksData[i].ReviewStatus = "rejected"
+			}
+		case "needs_info":
+			s.tasksData[i].ReviewStatus = "reviewing..."
+		case "approved":
+			s.tasksData[i].ReviewStatus = "approved"
+			s.tasksData[i].RevisionCount = 0
+		default:
+			s.tasksData[i].ReviewStatus = "reviewing..."
+		}
+		s.tasksData[i].RevisionCount = revisionCount
+		break
 	}
 }
 
@@ -1262,6 +1308,26 @@ func (s *SidebarModel) renderTasksPanel() string {
 						stepDesc = stepDesc[:stepMaxLen-3] + "..."
 					}
 					fmt.Fprintf(&b, "    -> %s\n", s.styles.Muted.Render(stepDesc))
+				}
+
+				// Line 3b (optional): review status when reviewing/rejected
+				if task.ReviewStatus != "" && task.ReviewStatus != "approved" {
+					reviewStyle := s.styles.Muted
+					reviewIcon := "..."
+					switch {
+					case task.ReviewStatus == "reviewing...":
+						reviewIcon = "..."
+						reviewStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber))
+					case strings.HasPrefix(task.ReviewStatus, "revision #"):
+						reviewIcon = task.ReviewStatus
+						reviewStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ColorAmber))
+					case task.ReviewStatus == "rejected":
+						reviewIcon = "!"
+						reviewStyle = s.styles.Error
+					}
+					fmt.Fprintf(&b, "    %s %s\n",
+						reviewStyle.Render(reviewIcon),
+						s.styles.Muted.Render("review"))
 				}
 
 				// Line 4 (optional): token usage when > 0

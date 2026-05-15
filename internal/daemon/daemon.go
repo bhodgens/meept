@@ -353,6 +353,19 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
+	// Recover stale tasks left in non-terminal states from a previous daemon run.
+	// Marks them and their pending steps as failed so they don't accumulate forever.
+	if d.components != nil && d.components.TaskRegistry != nil {
+		if store := d.components.TaskRegistry.Store(); store != nil {
+			count, err := store.RecoverStaleTasks()
+			if err != nil {
+				d.logger.Error("daemon: failed to recover stale tasks", "error", err)
+			} else if count > 0 {
+				d.logger.Info("daemon: recovered stale tasks from previous run", "count", count)
+			}
+		}
+	}
+
 	// Start HTTP server for menubar app
 	if d.httpServer != nil {
 		go func() {

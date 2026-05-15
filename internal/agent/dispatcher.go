@@ -151,6 +151,7 @@ type DispatcherConfig struct {
 	LLMClient         *llm.Client
 	ClassifierClient  *llm.Client // Separate client for classification (nil = use LLMClient)
 	ClassifierModel   string
+	ClassifierTimeout time.Duration // Per-classification timeout; 0 = defaultClassifierTimeout (10s).
 	CapabilityMatcher *CapabilityMatcher
 	EmbeddingClient   EmbeddingClient
 	SessionMaxAge     time.Duration
@@ -187,9 +188,10 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 	}
 	if classifierClient != nil {
 		d.llmClassifier = NewLLMClassifier(LLMClassifierConfig{
-			Client: classifierClient,
-			Model:  cfg.ClassifierModel,
-			Logger: cfg.Logger,
+			Client:  classifierClient,
+			Model:   cfg.ClassifierModel,
+			Timeout: cfg.ClassifierTimeout,
+			Logger:  cfg.Logger,
 		})
 	}
 
@@ -488,6 +490,10 @@ func (d *Dispatcher) createTask(_ context.Context, input string, intent *Intent,
 		if err := d.taskStore.Create(t); err != nil {
 			d.logger.Error("Failed to create task", "error", err)
 			return nil
+		}
+		// Persist the session-task link to the DB
+		if err := d.taskStore.LinkSession(t.ID, sessionID); err != nil {
+			d.logger.Warn("Failed to link session", "error", err)
 		}
 	}
 

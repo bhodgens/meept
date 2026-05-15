@@ -9,11 +9,12 @@ import (
 
 // Artifacts represents all Claude artifacts found in a directory
 type Artifacts struct {
-	WorkingDir  string
-	CLAUDEMD    *CLAUDEDocument
-	ClaudeDir   *ClaudeDirectory
-	Available   bool
-	LastScanned time.Time
+	WorkingDir    string
+	CLAUDEMD      *CLAUDEDocument
+	ClaudeDir     *ClaudeDirectory
+	READMEContent string // raw content of README.md (nil/empty if absent)
+	Available     bool
+	LastScanned   time.Time
 }
 
 // CLAUDEDocument represents a parsed CLAUDE.md file
@@ -152,6 +153,11 @@ func (a *Artifacts) HasSkills() bool {
 	return a.ClaudeDir != nil && len(a.ClaudeDir.Skills) > 0
 }
 
+// HasREADME returns true if README.md content is available
+func (a *Artifacts) HasREADME() bool {
+	return a.READMEContent != ""
+}
+
 // GetCommandsForCategory returns commands for a specific category
 func (a *Artifacts) GetCommandsForCategory(category string) []BuildCommand {
 	if !a.HasCLAUDEMD() {
@@ -257,6 +263,7 @@ func (ac *ArtifactCache) Put(dir string, artifacts *Artifacts) {
 	if artifacts.CLAUDEMD != nil {
 		size = int64(len(artifacts.CLAUDEMD.RawContent))
 	}
+	size += int64(len(artifacts.READMEContent))
 
 	ac.entries[dir] = &CacheEntry{
 		artifacts:  artifacts,

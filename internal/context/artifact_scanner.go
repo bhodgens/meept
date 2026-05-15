@@ -52,6 +52,13 @@ func (as *ArtifactScanner) Scan() (*Artifacts, error) {
 		artifacts.Available = true
 	}
 
+	// Scan for README.md (try common casing variants)
+	readmeContent := scanReadme(normalizedDir)
+	if readmeContent != "" {
+		artifacts.READMEContent = readmeContent
+		artifacts.Available = true
+	}
+
 	// Scan for .claude/ directory
 	claudeDirPath := filepath.Join(normalizedDir, ".claude")
 	if DirExists(claudeDirPath) {
@@ -71,6 +78,33 @@ func (as *ArtifactScanner) Scan() (*Artifacts, error) {
 	}
 
 	return artifacts, nil
+}
+
+// scanReadme attempts to find and read a README file in the given directory.
+// It checks README.md, readme.md, Readme.md, and README (no extension).
+// Returns the file content or an empty string if no README is found.
+func scanReadme(dir string) string {
+	candidates := []string{
+		"README.md",
+		"readme.md",
+		"Readme.md",
+		"README",
+		"readme",
+	}
+
+	for _, name := range candidates {
+		path := filepath.Join(dir, name)
+		if FileExists(path) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				slog.Default().Warn("failed to read README file", "path", path, "error", err)
+				continue
+			}
+			return string(data)
+		}
+	}
+
+	return ""
 }
 
 // ScanClaudeDirectory scans the .claude/ directory

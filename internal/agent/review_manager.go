@@ -487,6 +487,23 @@ func (rm *ReviewManager) publishReviewEvent(stepID, taskID string, result *Revie
 	}
 
 	rm.bus.Publish("step.review_completed", msg)
+
+	// Also publish under task.* prefix for backward compatibility with
+	// subscribers (TUI, ChatHandler) that subscribe to task.* but not step.*.
+	taskMsg, taskErr := models.NewBusMessage(models.MessageTypeEvent, "review-manager", map[string]any{
+		KeyStepID:        stepID,
+		KeyTaskID:        taskID,
+		"status":         string(result.Status),
+		"feedback":       result.Feedback,
+		"confidence":     result.Confidence,
+		"reviewer":       result.ReviewerID,
+		"revision_count": revisionCount,
+	})
+	if taskErr != nil {
+		rm.logger.Error("Failed to create task.review_completed message", "error", taskErr)
+		return
+	}
+	rm.bus.Publish("task.review_completed", taskMsg)
 }
 
 // SetPolicy updates the review policy.

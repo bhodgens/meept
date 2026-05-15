@@ -14,7 +14,7 @@ import (
 
 const (
 	// defaultClassifierTimeout is used when LLMClassifierConfig.Timeout is zero.
-	defaultClassifierTimeout = 5 * time.Second
+	defaultClassifierTimeout = 10 * time.Second
 )
 
 var intentThresholds = map[string]float64{
