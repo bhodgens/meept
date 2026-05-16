@@ -38,7 +38,7 @@ func (h *SelfImproveHandler) RegisterSelfImproveMethods(server *Server) {
 
 func (h *SelfImproveHandler) ctrl() (*selfimprove.Controller, error) {
 	if h.controller == nil {
-		return nil, fmt.Errorf("self-improve not enabled")
+		return nil, fmt.Errorf("self-improve not enabled: set selfimprove.enabled = true in ~/.meept/meept.json5 and restart the daemon")
 	}
 	return h.controller, nil
 }
@@ -59,54 +59,86 @@ func (h *SelfImproveHandler) handleDetect(ctx context.Context, params json.RawMe
 	}, nil
 }
 
-// handleAnalyze runs the analysis phase on previously-detected issues.
+// handleAnalyze runs analysis on previously-detected issues, or runs detection
+// first if no cached issues are available.
 func (h *SelfImproveHandler) handleAnalyze(ctx context.Context, params json.RawMessage) (any, error) {
 	ctrl, err := h.ctrl()
 	if err != nil {
 		return nil, err
 	}
-	// Re-detect to get fresh issues, then analyze.
-	// The controller's RunFullCycle does all phases; for single-phase access
-	// we delegate to a lightweight wrapper.
-	issues, err := ctrl.Detect(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("detection failed: %w", err)
-	}
-	if len(issues) == 0 {
-		return map[string]any{"analyses": []any{}, RPCKeyCount: 0}, nil
-	}
+
+	// Check if there are cached issues from a prior detection.
 	status := ctrl.GetStatus()
+	var issues []selfimprove.Issue
+	if status.IssuesCount > 0 {
+		issues = ctrl.GetIssues()
+	}
+
+	if len(issues) == 0 {
+		// No cached issues; run detection first.
+		detected, err := ctrl.Detect(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("detection failed: %w", err)
+		}
+		issues = detected
+	}
+
+	analyses, err := ctrl.Analyze(ctx, issues)
+	if err != nil {
+		return nil, fmt.Errorf("analysis failed: %w", err)
+	}
+	if analyses == nil {
+		analyses = []*selfimprove.RootCauseAnalysis{}
+	}
+
 	return map[string]any{
 		"issues":       issues,
-		"analyses":     status,
+		"analyses":     analyses,
 		"issues_count": len(issues),
+		"analyses_count": len(analyses),
 	}, nil
 }
 
-// handleGenerate runs the fix generation phase.
+// handleGenerate runs fix generation on previously-analyzed issues.
 func (h *SelfImproveHandler) handleGenerate(ctx context.Context, params json.RawMessage) (any, error) {
 	ctrl, err := h.ctrl()
 	if err != nil {
 		return nil, err
 	}
+	fixes, err := ctrl.Generate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("generation failed: %w", err)
+	}
+	if fixes == nil {
+		fixes = []*selfimprove.ProposedFix{}
+	}
 	status := ctrl.GetStatus()
 	return map[string]any{
 		RPCKeyStatus:       status,
-		"fixes_count":  status.FixesCount,
+		"fixes":          fixes,
+		"fixes_count":    len(fixes),
 		"pending":      status.PendingApprovals,
 	}, nil
 }
 
-// handleValidate runs the validation phase.
+// handleValidate runs validation on previously-generated fixes.
 func (h *SelfImproveHandler) handleValidate(ctx context.Context, params json.RawMessage) (any, error) {
 	ctrl, err := h.ctrl()
 	if err != nil {
 		return nil, err
 	}
+	validations, err := ctrl.Validate(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+	if validations == nil {
+		validations = []*selfimprove.ValidationResult{}
+	}
 	status := ctrl.GetStatus()
 	return map[string]any{
 		RPCKeyStatus:             status,
-		"validations_count":  status.ValidationsCount,
+		"validations":        validations,
+		"validations_count":  len(validations),
 	}, nil
 }
 

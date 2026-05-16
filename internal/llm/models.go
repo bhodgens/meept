@@ -3,6 +3,7 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -291,10 +292,48 @@ type Choice struct {
 }
 
 // ResponseMessage represents the message in a response choice.
+// Content may be a string, null, or an array of content blocks
+// (e.g., [{type: "text", text: "..."}]). We use json.RawMessage to
+// handle all formats.
 type ResponseMessage struct {
 	Role      string          `json:"role"`
-	Content   *string         `json:"content"`
+	Content   json.RawMessage `json:"content"`
 	ToolCalls []RawToolCall   `json:"tool_calls,omitempty"`
+}
+
+// ContentString extracts the text content from the Content field,
+// handling both plain string and array-of-blocks formats.
+func (m *ResponseMessage) ContentString() string {
+	if len(m.Content) == 0 {
+		return ""
+	}
+	// Try plain string first
+	var s string
+	if err := json.Unmarshal(m.Content, &s); err == nil {
+		return s
+	}
+	// Try array of content blocks: [{type: "text", text: "..."}]
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(m.Content, &blocks); err == nil {
+		var sb strings.Builder
+		first := true
+		for _, b := range blocks {
+			if b.Type != "text" {
+				continue
+			}
+			if !first {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(b.Text)
+			first = false
+		}
+		return sb.String()
+	}
+	// Fallback: return raw JSON as string
+	return string(m.Content)
 }
 
 // RawToolCall represents the raw tool call from the API.

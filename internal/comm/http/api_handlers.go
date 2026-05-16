@@ -856,6 +856,21 @@ func (s *Server) handleBusStats(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, stats)
 }
 
+// handleFirewallStats handles GET /api/v1/metrics/firewall.
+func (s *Server) handleFirewallStats(w http.ResponseWriter, r *http.Request) {
+	if s.FirewallStatsGetter == nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+
+	stats := s.FirewallStatsGetter()
+	if stats == nil {
+		stats = map[string]any{}
+	}
+
+	s.writeJSON(w, http.StatusOK, stats)
+}
+
 // ===== Additional Queue Endpoints =====
 // ===== Additional Queue Endpoints =====
 

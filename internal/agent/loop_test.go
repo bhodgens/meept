@@ -1179,8 +1179,9 @@ func TestAgentLoop_TerminatePathReturnsToolResults(t *testing.T) {
 
 func TestAgentLoop_TerminatePathSkipsLLMFollowUp(t *testing.T) {
 	// This test verifies that when all tools signal termination,
-	// no additional LLM call is needed. We use the mock chatter
-	// and verify it is never called (callCount stays 0).
+	// the LLM synthesis call produces a natural language response
+	// (not raw tool results). We use the mock chatter and verify
+	// exactly 2 LLM calls: one for the tool call, one for synthesis.
 	chatter := newMockChatter(
 		// First response: LLM returns a tool call to the terminating tool
 		&llm.Response{
@@ -1190,9 +1191,9 @@ func TestAgentLoop_TerminatePathSkipsLLMFollowUp(t *testing.T) {
 				{ID: "tc-term", Type: "function", Function: llm.ToolCallFunction{Name: "platform_status", Arguments: "{}"}},
 			},
 		},
-		// Second response: should never be reached due to termination
+		// Second response: LLM synthesis call that synthesizes tool results
 		&llm.Response{
-			Content:      "this should never be reached",
+			Content:      "The platform is healthy. Here is a summary of the tool result: final answer from terminating tool",
 			FinishReason: "stop",
 		},
 	)
@@ -1219,14 +1220,15 @@ func TestAgentLoop_TerminatePathSkipsLLMFollowUp(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// The response should contain the tool result, not the LLM follow-up
+	// The response should be the LLM-synthesized answer that references the tool result
 	if !strings.Contains(response, "final answer from terminating tool") {
-		t.Errorf("expected tool result in response, got: %s", response)
+		t.Errorf("expected LLM-synthesized response containing tool result, got: %s", response)
 	}
 
-	// The LLM chatter should have been called exactly once (for the initial tool call response)
-	// The second response should NOT have been consumed because termination skipped the follow-up
-	if chatter.callCount != 1 {
-		t.Errorf("expected exactly 1 LLM call, got %d (terminate should skip follow-up)", chatter.callCount)
+	// The LLM chatter should have been called exactly twice:
+	// 1) initial call that produced the tool call
+	// 2) synthesis call after tool termination
+	if chatter.callCount != 2 {
+		t.Errorf("expected exactly 2 LLM calls (tool call + synthesis), got %d", chatter.callCount)
 	}
 }

@@ -97,7 +97,7 @@ func TestLLMClassifier_NoClient(t *testing.T) {
 		Client: nil,
 		Model:  "",
 		Logger: nil,
-	})
+	}, nil)
 
 	ctx := context.Background()
 	intent, err := c.Classify(ctx, "test input", nil)
@@ -376,11 +376,11 @@ func TestDispatcher_FallbackChain(t *testing.T) {
 			wantAgent: "debugger",
 		},
 		{
-			name:           "no classifier matches falls through to chat",
+			name:           "very short unrecognized input routed to chat via guard",
 			input:          "xyzzy fnord quux",
 			wantType:       "chat",
 			wantAgent:      "chat",
-			wantConfidence: 0.3,
+			wantConfidence: 0.9, // short-message guard (was 0.3 via final fallback)
 			wantExactConf:  true,
 		},
 	}

@@ -408,13 +408,17 @@ func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor, triggerRatio
 }
 
 // Chat sends a request through context filtering.
+// Validation runs AFTER the reduction pipeline so that salvageable requests
+// are given a chance through compaction, compression, summarization, and
+// hard-limit context dropping. Only if the reduced context still exceeds the
+// model limit is the request rejected.
 func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
-	// Validate context size before processing
-	if err := f.ValidateContextSize(messages); err != nil {
+	processed := f.processMessages(ctx, messages)
+
+	// Validate context size after reduction
+	if err := f.ValidateContextSize(processed); err != nil {
 		return nil, err
 	}
-
-	processed := f.processMessages(ctx, messages)
 
 	resp, err := f.inner.Chat(ctx, processed, opts...)
 	if err == nil && f.logger != nil {
@@ -425,13 +429,14 @@ func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts
 }
 
 // ChatWithProgress sends a request with progress reporting through context filtering.
+// Validation runs AFTER the reduction pipeline (same as Chat).
 func (f *ContextFirewall) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
-	// Validate context size before processing
-	if err := f.ValidateContextSize(messages); err != nil {
+	processed := f.processMessages(ctx, messages)
+
+	// Validate context size after reduction
+	if err := f.ValidateContextSize(processed); err != nil {
 		return nil, err
 	}
-
-	processed := f.processMessages(ctx, messages)
 
 	resp, err := f.inner.ChatWithProgress(ctx, processed, progress, opts...)
 	if err == nil && f.logger != nil {
@@ -512,7 +517,7 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 			currentTokens = cr.TokensAfter
 			utilization = float64(currentTokens) / float64(f.model.ContextLimit)
 		} else {
-			f.logger.Debug("compaction returned without compacting",
+			f.logger.Warn("compaction returned without compacting, falling back to compressor",
 				"utilization", utilization,
 			)
 			f.compactionFallbacks.Add(1)
@@ -525,7 +530,7 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	if f.compressor != nil {
 		cr := f.compressor.Compress(ctx, result, utilization)
 		if cr.Compressed {
-			f.logger.Debug("proactive compression applied",
+			f.logger.Info("proactive compression applied",
 				"stage", cr.Stage.String(),
 				"tokens_before", cr.TokensBefore,
 				"tokens_after", cr.TokensAfter,
@@ -730,10 +735,30 @@ func (f *ContextFirewall) greedyChunk(parts []string, maxChars int, sep string) 
 }
 
 // countTokens counts tokens in a message slice using the configured tokenizer.
+// Includes ToolCalls (function name + arguments) and ToolCallID fields which
+// are serialized to the API and consume tokens.
 func (f *ContextFirewall) countTokens(messages []ChatMessage) int {
 	total := 0
 	for _, msg := range messages {
-		total += f.tokenizer.CountTokens(msg.Content)
+		total += f.countMessageTokens(msg)
+	}
+	return total
+}
+
+// countMessageTokens returns the token count for a single ChatMessage,
+// accounting for Content, ToolCalls (function name + arguments),
+// ToolCallID, and Name fields.
+func (f *ContextFirewall) countMessageTokens(msg ChatMessage) int {
+	total := f.tokenizer.CountTokens(msg.Content)
+	for _, tc := range msg.ToolCalls {
+		total += f.tokenizer.CountTokens(tc.Function.Name)
+		total += f.tokenizer.CountTokens(tc.Function.Arguments)
+	}
+	if msg.ToolCallID != "" {
+		total += f.tokenizer.CountTokens(msg.ToolCallID)
+	}
+	if msg.Name != "" {
+		total += f.tokenizer.CountTokens(msg.Name)
 	}
 	return total
 }

@@ -200,10 +200,12 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if llmCfg != nil {
 		// Create budget tracker from config
 		budgetTracker = llm.NewBudget(llm.BudgetConfig{
-			HourlyLimit:    cfg.LLM.Budget.HourlyTokenLimit,
-			DailyLimit:     cfg.LLM.Budget.DailyTokenLimit,
-			RateLimitRPM:   cfg.LLM.Budget.RateLimitRPM,
-			Aggressiveness: cfg.LLM.Budget.Aggressiveness,
+			HourlyLimit:      cfg.LLM.Budget.HourlyTokenLimit,
+			DailyLimit:       cfg.LLM.Budget.DailyTokenLimit,
+			RateLimitRPM:     cfg.LLM.Budget.RateLimitRPM,
+			Aggressiveness:   cfg.LLM.Budget.Aggressiveness,
+			PerTaskBudget:    cfg.LLM.Budget.PerTaskTokenLimit,
+			PerSessionBudget: cfg.LLM.Budget.PerSessionTokenLimit,
 		}, logger.With("component", "budget"))
 
 		// Create token cache if enabled
@@ -251,6 +253,8 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			"base_url", llmCfg.BaseURL,
 			"budget_hourly_limit", cfg.LLM.Budget.HourlyTokenLimit,
 			"budget_daily_limit", cfg.LLM.Budget.DailyTokenLimit,
+			"budget_per_task_limit", cfg.LLM.Budget.PerTaskTokenLimit,
+			"budget_per_session_limit", cfg.LLM.Budget.PerSessionTokenLimit,
 		)
 
 		// Create auxiliary LLM clients for classifier and summarizer
@@ -367,7 +371,13 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		siCfg.DataPath = siDataPath
 		siCfg.MaxIterationsPerCycle = cfg.SelfImprove.MaxIterationsPerCycle
 		siCfg.MaxFixesPerCycle = cfg.SelfImprove.MaxFixesPerCycle
+		// Map safety config fields from config to runtime SelfImprove config.
 		siCfg.Safety.RequireHumanApproval = cfg.SelfImprove.Safety.RequireHumanApproval
+		siCfg.Safety.RequireTestsPass = cfg.SelfImprove.Safety.RequireTestsPass
+		siCfg.Safety.RequireBuildSuccess = true // sandbox Validate enforces this by default
+		siCfg.Safety.ProtectedPatterns = cfg.SelfImprove.Safety.BlockedPaths
+		siCfg.Safety.MaxConsecutiveFailures = 5 // use default; circuit breaker is defensive
+		siCfg.Safety.MaxFailuresPerIssue = 3    // use default per-issue cap
 
 		c.SelfImproveCtrl = selfimprove.NewController(
 			siCfg,
@@ -914,6 +924,11 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			c.ChatHandler.SetTaskStore(c.TaskRegistry.Store())
 		}
 
+		// Wire budget tracker for async dispatch pre-check (issues 0022/0039)
+		if budgetTracker != nil {
+			c.ChatHandler.SetBudget(budgetTracker)
+		}
+
 		logger.Info("ChatHandler initialized with dispatcher")
 
 		// Subscribe to dispatcher.stats requests
@@ -1009,6 +1024,11 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		if c.TaskRegistry != nil {
 			c.ChatHandler.SetStepStore(c.TaskRegistry.StepStore())
 			c.ChatHandler.SetTaskStore(c.TaskRegistry.Store())
+		}
+
+		// Wire budget tracker for async dispatch pre-check (issues 0022/0039)
+		if budgetTracker != nil {
+			c.ChatHandler.SetBudget(budgetTracker)
 		}
 	}
 

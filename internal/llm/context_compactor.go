@@ -243,7 +243,7 @@ func (c *ContextCompactor) findCutPoint(messages []ChatMessage) CutResult {
 	tokenCount := 0
 	cutIdx := len(nonSystem)
 	for i := range slices.Backward(nonSystem) {
-		msgTokens := c.tokenizer.CountTokens(nonSystem[i].Content)
+		msgTokens := c.countMessageTokens(nonSystem[i])
 		if tokenCount+msgTokens > keepBudget && i < len(nonSystem)-1 { cutIdx = i + 1; break }
 		tokenCount += msgTokens
 	}
@@ -465,6 +465,25 @@ func (c *ContextCompactor) buildCompactionMessage(summary string, fileOps *FileO
 
 func (c *ContextCompactor) countTokens(messages []ChatMessage) int {
 	total := 0
-	for _, msg := range messages { total += c.tokenizer.CountTokens(msg.Content) }
+	for _, msg := range messages {
+		total += c.countMessageTokens(msg)
+	}
+	return total
+}
+
+// countMessageTokens returns the token count for a single ChatMessage,
+// accounting for Content, ToolCalls, ToolCallID, and Name fields.
+func (c *ContextCompactor) countMessageTokens(msg ChatMessage) int {
+	total := c.tokenizer.CountTokens(msg.Content)
+	for _, tc := range msg.ToolCalls {
+		total += c.tokenizer.CountTokens(tc.Function.Name)
+		total += c.tokenizer.CountTokens(tc.Function.Arguments)
+	}
+	if msg.ToolCallID != "" {
+		total += c.tokenizer.CountTokens(msg.ToolCallID)
+	}
+	if msg.Name != "" {
+		total += c.tokenizer.CountTokens(msg.Name)
+	}
 	return total
 }

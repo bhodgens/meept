@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
@@ -30,6 +31,13 @@ type ChatHandler struct {
 	metricsStore       *metrics.Store  // Optional: metrics store for duration estimates
 	stepStore          *task.StepStore // Optional: step store for fetching step summaries
 	taskStore          *task.Store     // Optional: task store for looking up linked sessions
+
+	// Budget tracking for async dispatch pre-check (Issue 0039)
+	budget *llm.Budget
+
+	// Synchronous dispatch mode: when true, async-dispatched tasks wait
+	// for completion instead of returning immediately (Issue 0022).
+	syncMode bool
 
 	// Worker tracking
 	workers   map[string]*Worker
@@ -550,22 +558,48 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			h.logger.Error("Dispatch failed", "error", dispatchErr)
 			err = dispatchErr
 		case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
-			// Async dispatch: send ack immediately, let orchestrator handle it
-			h.logger.Info("Async dispatch: sending ack and publishing plan request",
-				"task_id", result.Task.ID,
-				"agent", result.AgentID,
-				"intent", result.Intent.Type,
-			)
-			// Build human-readable acknowledgment
-			// Use dispatcher-provided steps, falling back to step store
-			steps := result.Steps
-			if len(steps) == 0 {
-				steps = h.fetchStepSummaries(result.Task.ID)
+			// Issue 0039: budget pre-check before async dispatch.
+			// Block before creating a zombie task that can never complete.
+			if h.budget != nil && !h.budget.CheckBudget() {
+				// Cancel the task that ClassifyAndRoute just created
+				if h.taskStore != nil && result.Task != nil {
+					result.Task.SetState(task.StateFailed)
+					if updateErr := h.taskStore.Update(result.Task); updateErr != nil {
+						h.logger.Warn("Failed to cancel budget-blocked task",
+							"task_id", result.Task.ID, "error", updateErr)
+					}
+				}
+				err = &llm.BudgetExceededError{Message: llm.ErrBudgetExceeded}
+				break
 			}
-			reply = h.FormatEnhancedAsyncTaskAck(result, steps, h.estimateDuration(result.Task.ID, len(steps)), h.getPlanReference(result.Task.ID))
 
-			// Publish plan request to orchestrator
-			h.publishPlanRequest(result, conversationID)
+			if h.syncMode {
+				// Issue 0022: synchronous mode -- wait for task completion
+				h.logger.Info("Sync dispatch: publishing plan request and waiting for completion",
+					"task_id", result.Task.ID,
+					"agent", result.AgentID,
+					"intent", result.Intent.Type,
+				)
+				h.publishPlanRequest(result, conversationID)
+				reply = h.waitForTaskCompletion(ctx, result.Task.ID)
+			} else {
+				// Async dispatch: send ack immediately, let orchestrator handle it
+				h.logger.Info("Async dispatch: sending ack and publishing plan request",
+					"task_id", result.Task.ID,
+					"agent", result.AgentID,
+					"intent", result.Intent.Type,
+				)
+				// Build human-readable acknowledgment
+				// Use dispatcher-provided steps, falling back to step store
+				steps := result.Steps
+				if len(steps) == 0 {
+					steps = h.fetchStepSummaries(result.Task.ID)
+				}
+				reply = h.FormatEnhancedAsyncTaskAck(result, steps, h.estimateDuration(result.Task.ID, len(steps)), h.getPlanReference(result.Task.ID))
+
+				// Publish plan request to orchestrator
+				h.publishPlanRequest(result, conversationID)
+			}
 		default:
 			h.logger.Debug("Dispatched to agent",
 				"agent", result.AgentID,
@@ -1043,6 +1077,57 @@ func (h *ChatHandler) SetStepStore(store *task.StepStore) {
 // SetTaskStore sets the task store for looking up linked sessions.
 func (h *ChatHandler) SetTaskStore(store *task.Store) {
 	h.taskStore = store
+}
+
+// SetBudget sets the token budget tracker for async dispatch pre-checks.
+// This prevents zombie tasks from being created when the budget is exceeded.
+func (h *ChatHandler) SetBudget(budget *llm.Budget) {
+	h.budget = budget
+}
+
+// SetSyncMode enables or disables synchronous dispatch mode.
+// When enabled, async-dispatched tasks are waited on in the handler
+// instead of returning immediately.
+func (h *ChatHandler) SetSyncMode(enabled bool) {
+	h.syncMode = enabled
+}
+
+// waitForTaskCompletion waits for a task to reach a terminal state
+// and returns the final result string. Returns immediately if the task
+// is already terminal or if the store/ctx is not available.
+func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) string {
+	if h.taskStore == nil || taskID == "" {
+		return ""
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	done := time.After(10 * time.Minute) // overall timeout
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-done:
+			h.logger.Warn("Task wait timeout exceeded", "task_id", taskID)
+			return ""
+		case <-ticker.C:
+			t, err := h.taskStore.GetByID(taskID)
+			if err != nil {
+				h.logger.Debug("Failed to poll task status", "task_id", taskID, "error", err)
+				continue
+			}
+			if t == nil {
+				continue
+			}
+			if t.State.IsTerminal() {
+				if t.State == task.StateFailed {
+					return fmt.Sprintf("Task %s failed after reaching terminal state.", taskID)
+				}
+				return fmt.Sprintf("Task %s completed.", taskID)
+			}
+		}
+	}
 }
 
 // generateWorkerID creates a unique worker ID.

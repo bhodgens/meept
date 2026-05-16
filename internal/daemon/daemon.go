@@ -156,6 +156,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		return nil, fmt.Errorf("failed to create components: %w", err)
 	}
 
+	// Set default model info on RPC server for status reporting
+	if rpcServer != nil && components.ModelsConfig != nil {
+		rpcServer.SetDefaultModel(components.ModelsConfig.Model)
+	}
+
 	// Register skills handlers (both direct and bus-based)
 	if rpcServer != nil && fullCfg.Skills.Enabled && components.SkillRegistry != nil {
 		rpc.RegisterSkillsHandlers(rpcServer, components.SkillRegistry, components.SkillExecutor)
@@ -193,6 +198,20 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		queueHandler.RegisterQueueMethods(rpcServer)
 		if components.AgentRegistry != nil {
 			logger.Info("Queue RPC handlers registered")
+		}
+
+		// Register scheduler RPC handlers (direct Go handlers override bus proxy)
+		if components.Scheduler != nil {
+			scheduler.RegisterRPCHandlers(rpcServer, components.Scheduler)
+			logger.Info("Scheduler RPC handlers registered")
+		}
+
+		// Wire firewall stats getter (exposes context firewall metrics via RPC)
+		if rpcServer != nil && components.AgentLoop != nil {
+			rpcServer.FirewallStatsGetter = func() map[string]any {
+				return components.AgentLoop.FirewallStats()
+			}
+			logger.Info("Firewall stats RPC getter registered")
 		}
 	}
 
@@ -276,6 +295,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg := http.DefaultServerConfig()
 			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, svcRegistry, logger)
+			// Wire firewall stats getter for HTTP endpoint
+			if components.AgentLoop != nil {
+				httpSrv.FirewallStatsGetter = func() map[string]any {
+					return components.AgentLoop.FirewallStats()
+				}
+				logger.Info("Firewall stats HTTP getter registered")
+			}
 			logger.Info("HTTP server created", "addr", httpCfg.Addr)
 		}
 	} else {

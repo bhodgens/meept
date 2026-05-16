@@ -550,7 +550,11 @@ func (h *Handler) handleList(ctx context.Context, msg *models.BusMessage) (any, 
 		limit = 100
 	}
 
-	return h.registry.List(ctx, state, limit)
+	tasks, err := h.registry.List(ctx, state, limit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"tasks": tasks}, nil
 }
 
 // TaskExtendedResponse represents a task with all extended fields for TUI display.

@@ -3,13 +3,13 @@
   "model": "zai/glm-4.7",
 
   // Fast/cheap model for classification, summarization
-  "small_model": "zai/glm-4.5-air",
+  "small_model": "local/lfm-code",
 
   // Model for intent classification (defaults to small_model)
-  "classifier_model": "zai/glm-4.5-air",
+  "classifier_model": "local/lfm-code",
 
   // Model for session summarization (defaults to small_model)
-  "summarizer_model": "zai/glm-4.5-air",
+  "summarizer_model": "local/lfm-code",
 
   // Model aliases with cooldown-based failover
   "model_aliases": {
@@ -37,6 +37,24 @@
   "disabled_providers": ["gala-mlx", "gala-llama"],
 
   "providers": {
+    "local": {
+      "api": "openai",
+      "options": {
+        "baseURL": "http://127.0.0.1:8080/v1"
+      },
+      "models": {
+        "lfm-code": {
+          "name": "LFM2.5-1.2B-Instruct.Q8_0",
+          "capabilities": ["completion", "code", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 2048,
+          "temperature": 0.7
+        }
+      }
+    },
+
     "zai": {
       "api": "openai",
       "options": {

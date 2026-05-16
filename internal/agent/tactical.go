@@ -370,6 +370,8 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 	}
 	if err := ts.stepStore.SetResult(step.ID, resultStr); err != nil {
 		ts.logger.Error("Failed to set step result", "step_id", step.ID, "error", err)
+	} else {
+		step.Result = resultStr
 	}
 
 	// NEW: Extract evidence from result before validation
@@ -806,6 +808,8 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 				// Clear error result since we're retrying
 				if err := ts.stepStore.SetResult(step.ID, ""); err != nil {
 					ts.logger.Error("Failed to clear step result for retry", "step_id", step.ID, "error", err)
+				} else {
+					step.Result = ""
 				}
 				// Publish retry event
 				ts.publishEvent("queue.job.retry", map[string]any{
@@ -827,6 +831,8 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 	// Mark step failed
 	if err := ts.stepStore.SetResult(step.ID, jobErr); err != nil {
 		ts.logger.Error("Failed to set step error result", "step_id", step.ID, "error", err)
+	} else {
+		step.Result = jobErr
 	}
 	if err := ts.stepStore.SetState(step.ID, task.StepFailed); err != nil {
 		ts.logger.Error("Failed to set step state to failed", "step_id", step.ID, "error", err)

@@ -188,12 +188,14 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		classifierClient = cfg.LLMClient
 	}
 	if classifierClient != nil {
-		d.llmClassifier = NewLLMClassifier(LLMClassifierConfig{
-			Client:  classifierClient,
-			Model:   cfg.ClassifierModel,
-			Timeout: cfg.ClassifierTimeout,
-			Logger:  cfg.Logger,
-		})
+		d.llmClassifier = NewLLMClassifier(
+			LLMClassifierConfig{
+				Client:  classifierClient,
+				Model:   cfg.ClassifierModel,
+				Timeout: cfg.ClassifierTimeout,
+			},
+			cfg.Logger,
+		)
 	}
 
 	// Initialize semantic index if embedding client is provided
@@ -308,12 +310,33 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 }
 
 // classifyIntent uses classifiers to determine intent with fallback chain:
-// 1. Try capability matcher (fast, no LLM) if available and confident
-// 2. Try LLM classifier (if available)
-// 3. If LLM fails OR confidence < threshold → try Keyword classifier
-// 4. If Keyword fails → return Chat fallback
+// 1. Short-message guard: brief inputs route directly to chat (Issues 0006, 0029, 0036)
+// 2. Try capability matcher (fast, no LLM) if available and confident
+// 3. Try LLM classifier (if available)
+// 4. If LLM fails OR confidence < threshold → try Keyword classifier
+// 5. If Keyword fails AND no strong keyword signal → improved heuristic fallback (Issue 0036)
+// 6. Final fallback to Chat for clarification
 func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *MemoryContext) *Intent {
 	d.recordTotalDispatch()
+
+	// --- Guard: short/simple messages skip the full classifier chain ---
+	// Tiny models over-classify simple greetings, arithmetic, and short phrases
+	// as compound multi-agent tasks. Short inputs are overwhelmingly chat.
+	if isShortSimpleMessage(input) {
+		d.logger.Debug("Short/simple message guard: routing to chat",
+			"input", input,
+			"length", len(input),
+		)
+		d.recordClassificationMethod("short_message_guard")
+		d.recordAgent(config.AgentIDChat)
+		d.recordIntentType(string(IntentChat))
+		return &Intent{
+			Type:       string(IntentChat),
+			Confidence: 0.9,
+			AgentType:  config.AgentIDChat,
+			Summary:    extractSummary(input),
+		}
+	}
 
 	// Step 1: Try capability matcher first (fast, no LLM)
 	if d.capabilityMatcher != nil {
@@ -369,10 +392,10 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		}
 	}
 
-	// Step 3: Try Keyword classifier
+	// Step 3: Try Keyword classifier (with minimum confidence threshold)
 	if d.keywordClassifier != nil {
 		intent, err := d.keywordClassifier.Classify(ctx, input, memCtx)
-		if err == nil && intent != nil {
+		if err == nil && intent != nil && intent.Confidence >= 0.3 {
 			d.logger.Debug("Keyword classifier succeeded",
 				"intent", intent.Type,
 				"confidence", intent.Confidence,
@@ -382,7 +405,13 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 			d.recordIntentType(intent.Type)
 			return d.applyContextWeighting(intent, memCtx, input)
 		}
-		d.logger.Warn("Keyword classifier failed", "error", err)
+		if intent != nil {
+			d.logger.Debug("Keyword classifier result below threshold",
+				"intent", intent.Type,
+				"confidence", intent.Confidence,
+				"threshold", 0.3,
+			)
+		}
 	}
 
 	// Step 3.5: Semantic matching (before fallback)
@@ -406,7 +435,21 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 		}
 	}
 
-	// Step 4: Fallback to Chat for clarification
+	// Step 4: Improved heuristic fallback (Issue 0036)
+	// Use targeted keyword rules with proper agent routing, avoiding the
+	// previous behavior where code tasks were routed to scheduler/committer.
+	if heuristic := heuristicFallback(input); heuristic != nil {
+		d.logger.Debug("Heuristic fallback succeeded",
+			"intent", heuristic.Type,
+			"confidence", heuristic.Confidence,
+		)
+		d.recordClassificationMethod("heuristic_fallback")
+		d.recordAgent(heuristic.AgentType)
+		d.recordIntentType(heuristic.Type)
+		return d.applyContextWeighting(heuristic, memCtx, input)
+	}
+
+	// Step 5: Final fallback to Chat for clarification
 	d.recordFallback(input, "all_classifiers_failed", 0.0, config.AgentIDChat)
 	d.recordClassificationMethod("fallback")
 	d.recordAgent(config.AgentIDChat)
@@ -517,13 +560,45 @@ type MultiIntent struct {
 }
 
 // DetectCompound analyzes intents and determines if they're compound.
+// Adds confidence and complexity guards (Issues 0006, 0029):
+// - Requires at least 2 intents with confidence >= 0.5
+// - Both must be non-chat intents to qualify as compound
 func (m *MultiIntent) DetectCompound() bool {
 	if len(m.Intents) < 2 {
 		m.IsCompound = false
 		return false
 	}
-	m.IsCompound = true
+
+	// Filter to high-confidence intents only
+	var strongIntents []*Intent
 	for _, intent := range m.Intents {
+		if intent.Confidence >= 0.5 {
+			strongIntents = append(strongIntents, intent)
+		}
+	}
+
+	// Need at least 2 high-confidence intents (Issue 0029)
+	if len(strongIntents) < 2 {
+		m.IsCompound = false
+		return false
+	}
+
+	// At least one must be non-chat (Issue 0029: "thanks, that's all for now"
+	// matched chat + scheduler, but that's not truly compound)
+	hasNonChat := false
+	for _, intent := range strongIntents {
+		if intent.Type != string(IntentChat) && intent.Type != string(IntentPlatform) {
+			hasNonChat = true
+			break
+		}
+	}
+	if !hasNonChat {
+		m.IsCompound = false
+		return false
+	}
+
+	m.IsCompound = true
+	for _, intent := range strongIntents {
 		if intent.RequiresPlanning {
 			m.CompoundType = "sequential"
 			return true
@@ -598,7 +673,18 @@ func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, _, s
 }
 
 // classifyMultiIntent runs classification to detect all potential intents.
+// Adds complexity heuristics (Issue 0029): short messages without compound
+// signal words are skipped to avoid false positive compound detection.
 func (d *Dispatcher) classifyMultiIntent(ctx context.Context, input string, memCtx *MemoryContext) *MultiIntent {
+	// Early exit: short messages without compound signal words should not
+	// be considered compound tasks (Issue 0029).
+	if !hasCompoundSignalWords(input) {
+		return &MultiIntent{
+			IsCompound: false,
+			Summary:    extractSummary(input),
+		}
+	}
+
 	var intents []*Intent
 
 	// Run keyword classifier for all matches
@@ -1518,4 +1604,250 @@ func (d *Dispatcher) FollowUpActiveAgent(ctx context.Context, conversationID, co
 		return ErrQueueNotFound
 	}
 	return queue.FollowUp(ctx, content, source)
+}
+
+// --- Dispatcher heuristics (Issues 0006, 0029, 0036) ---
+
+const (
+	// shortMessageThreshold is the character length below which messages
+	// are considered simple and routed directly to the chat agent.
+	shortMessageThreshold = 50
+
+	// compoundKeywordThreshold is the min message length that must contain
+	// compound signal words to qualify for multi-intent analysis.
+	compoundKeywordThreshold = 80
+)
+
+// isShortSimpleMessage returns true if the input is too short or too simple
+// to warrant more than a single chat agent response.
+// Guards against tiny-model over-classification (Issues 0006, 0029, 0036).
+func isShortSimpleMessage(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if len(trimmed) == 0 {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+
+	// Pure arithmetic or math expressions
+	if strings.Contains(lower, "what is ") && (strings.Contains(lower, "+") || strings.Contains(lower, "-") || strings.Contains(lower, "*") || strings.Contains(lower, "/")) {
+		return true
+	}
+
+	// Very short messages (under 10 chars) are trivially chat unless they
+	// contain keyword indicators for specialist agents.
+	if len(trimmed) < 10 {
+		// Even very short messages should not be blocked if they contain
+		// keyword-level intent signals (e.g. "commit these changes" -> git)
+		if len(trimmed) < 5 {
+			return true
+		}
+		// Check if keywords match specialist intents -- if so, don't guard
+		if hasKeywordMatch(trimmed) {
+			return false
+		}
+		return true
+	}
+
+	// For messages up to shortMessageThreshold chars: block only if they
+	// are purely conversational / greetings with no domain-specific keywords.
+	if len(trimmed) < shortMessageThreshold {
+		// If the message contains keyword indicators for any specialist,
+		// let the classifier handle it.
+		if hasKeywordMatch(trimmed) {
+			return false
+		}
+		// Pure conversational patterns that don't warrant specialist routing
+		simplePatterns := []string{
+			"what's up", "how are you", "hey", "hello", "hi there",
+			"is this working", "are you there", "can you hear me",
+			"hello world", "hi", "hey there",
+		}
+		for _, p := range simplePatterns {
+			if lower == p {
+				return true
+			}
+		}
+		// Single-word or two-word questions that are clearly chat
+		words := strings.Fields(lower)
+		if len(words) <= 3 {
+			return true
+		}
+		return false
+	}
+
+	return false
+}
+
+// hasKeywordMatch returns true if the input contains keywords that match
+// specialist intent patterns, indicating the message should not be
+// short-circuited to chat.
+func hasKeywordMatch(input string) bool {
+	lower := strings.ToLower(strings.TrimSpace(input))
+	// Keywords mapped to specialist agents (from keywordPatterns)
+	specialistKeywords := []string{
+		// Git
+		"commit", "push", "pull", "merge", "branch", "rebase",
+		// Debug
+		"bug", "error", "exception", "crash", "debug", "fix ",
+		// Code
+		"write", "create", "implement", "add feature", "refactor",
+		// Review
+		"code review", "review pr", "check code",
+		// Schedule
+		"remind", "alarm", "timer",
+		// Plan
+		"plan", "design", "architect",
+		// Research/Analysis
+		"research", "analyze", "explain",
+		// Search
+		"search", "find", "look up",
+		// Security
+		"security", "vulnerability", "exploit",
+		// Git
+		"git",
+	}
+	for _, kw := range specialistKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// compoundSignalWords lists conjunctions and signal words that indicate a
+// request genuinely contains multiple distinct intents.
+var compoundSignalWords = []string{
+	" and also", " as well as ", " plus ", " while ", " then ",
+	" and do", " and create", " and write", " and fix",
+	" and implement", " and also create", " and also write",
+	" and also fix", " and also implement", " and also add",
+	" and then", " but also", " at the same time",
+	"first", "second", "after that", "next",
+}
+
+// hasCompoundSignalWords returns true if the input is long enough and contains
+// at least one compound signal word, suggesting multiple distinct intents.
+func hasCompoundSignalWords(input string) bool {
+	if len(input) < compoundKeywordThreshold {
+		return false
+	}
+	lower := strings.ToLower(input)
+	for _, word := range compoundSignalWords {
+		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// heuristicFallback provides targeted keyword-based routing when all other
+// classifiers fail (Issue 0036). Rules are ordered by specificity and
+// confidence to avoid misrouting code tasks to scheduler/committer.
+func heuristicFallback(input string) *Intent {
+	lower := strings.ToLower(strings.TrimSpace(input))
+
+	// Code-related rules with explicit confidence >= 0.3
+	// These address the bug where "write a Go function" was routed to chat
+	// instead of coder.
+	simpleCodeKeywords := []string{
+		"write a", "write some", "write code", "write a function",
+		"create a file", "create a new", "create a function",
+		"implement a", "implement the", "implement new",
+		"add a function", "add a new", "add a feature", "add a method",
+		"add an endpoint", "add a route",
+		"build a", "build me a",
+		"make a", "make me a",
+		"generate a", "generate the",
+		"code a",
+	}
+	for _, kw := range simpleCodeKeywords {
+		if strings.Contains(lower, kw) {
+			return &Intent{
+				Type:       string(IntentCode),
+				Confidence: 0.55,
+				AgentType:  config.AgentIDCoder,
+				Summary:    extractSummary(input),
+			}
+		}
+	}
+
+	// More granular code indicators
+	codeIndicators := []string{
+		"function", "method", "class", "struct", "interface",
+		"type def", "import ", "package ", "def ", "fn ",
+	}
+	if hasCodeVerb(lower) {
+		for _, ind := range codeIndicators {
+			if strings.Contains(lower, ind) {
+				return &Intent{
+					Type:       string(IntentCode),
+					Confidence: 0.5,
+					AgentType:  config.AgentIDCoder,
+					Summary:    extractSummary(input),
+				}
+			}
+		}
+	}
+
+	// Debug-related
+	debugKeywords := []string{
+		"fix ", "bug", "error:", "exception", "crash",
+		"panic", "segfault", "not working", "broken",
+		"debug", "trace", "stack trace",
+	}
+	for _, kw := range debugKeywords {
+		if strings.Contains(lower, kw) {
+			return &Intent{
+				Type:       string(IntentDebug),
+				Confidence: 0.55,
+				AgentType:  config.AgentIDDebugger,
+				Summary:    extractSummary(input),
+			}
+		}
+	}
+
+	// Git-related
+	gitKeywords := []string{
+		"commit", "push", "pull", "merge", "branch",
+		"rebase", "revert", "checkout",
+	}
+	for _, kw := range gitKeywords {
+		if strings.Contains(lower, kw) {
+			return &Intent{
+				Type:       string(IntentGit),
+				Confidence: 0.55,
+				AgentType:  config.AgentIDCommitter,
+				Summary:    extractSummary(input),
+			}
+		}
+	}
+
+	// Analysis/explanation
+	analysisKeywords := []string{
+		"what is ", "what does ", "explain ", "how does ",
+		"how to ", "what's the difference", "compare",
+	}
+	for _, kw := range analysisKeywords {
+		if strings.Contains(lower, kw) {
+			return &Intent{
+				Type:       string(IntentAnalyze),
+				Confidence: 0.45,
+				AgentType:  config.AgentIDAnalyst,
+				Summary:    extractSummary(input),
+			}
+		}
+	}
+
+	return nil
+}
+
+// hasCodeVerb checks if input contains a verb commonly associated with code tasks.
+func hasCodeVerb(lower string) bool {
+	codeVerbs := []string{"write", "create", "implement", "build", "add", "make", "generate", "code", "develop"}
+	for _, verb := range codeVerbs {
+		if strings.Contains(lower, verb) {
+			return true
+		}
+	}
+	return false
 }

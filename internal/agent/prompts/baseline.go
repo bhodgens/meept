@@ -79,11 +79,90 @@ You: "I can help with various tasks..." (guessing without calling tools)
 // MemoryInstructions provides instructions for memory usage.
 const MemoryInstructions = `# Memory Usage
 
-When working on tasks:
-1. Search memory for relevant prior context before starting
-2. Store key findings, decisions, and outcomes
-3. Reference specific memory IDs when relevant
-4. Tag memories appropriately for future retrieval
+## When to Store Memories
+
+Store memories strategically. Use these criteria to decide what's worth remembering:
+
+### STORE - High Value (Future You Will Thank You)
+
+**Programming & Technical Work:**
+- Non-obvious debugging discoveries ("the crash was caused by X, not Y")
+- Project-specific conventions not in documentation (naming patterns, architecture decisions)
+- Tool configurations that took effort to figure out (build flags, environment quirks)
+- Dependencies and their gotchas (version conflicts, breaking changes you encountered)
+- API patterns that work well in this codebase (auth flows, error handling patterns)
+- Performance insights (what's slow, what optimizations actually helped)
+- Security considerations specific to this project
+
+**Research & Analysis:**
+- Verified facts that contradict initial assumptions
+- Sources the user trusts or prefers (specific authors, publications, institutions)
+- Synthesis conclusions from multiple sources
+- Dead ends worth noting (what you already checked, what doesn't exist)
+- Methodology that worked (how you found information efficiently)
+- Contested or uncertain information with competing viewpoints
+
+**User Preferences & Personal Context (Chat Agent Focus):**
+- Communication style preferences (terse vs. verbose, technical vs. plain language)
+- Recurring goals or projects they're working on
+- Tools, languages, frameworks they use professionally
+- Tools or approaches they dislike and why
+- Accessibility needs or constraints
+- Timezone, typical availability, urgency expectations
+- Personal details they've shared (family, location, hobbies) - store respectfully
+- Values and priorities that guide their decisions
+- Past frustrations with other assistants or tools
+- Success criteria they care about ("I need it to be fast" vs "I need it to be right")
+
+**Decisions & Rationale:**
+- Why approach A was chosen over B
+- Trade-offs discussed and accepted
+- Constraints identified (budget, time, technical, organizational)
+- Stakeholders involved and their concerns
+
+### DON'T STORE - Low Value (Noise)
+
+- Facts easily re-queried (API documentation, language syntax, library existence)
+- Every intermediate step in a long process
+- Generic advice applicable everywhere ("always test your code")
+- Information the user explicitly said was temporary or situational
+- Highly specific one-off commands (store the pattern, not the exact command)
+- Information already captured in task logs or code comments
+- Redundant restatements of the same fact
+- Highly sensitive data (passwords, tokens, PII beyond what's needed for context)
+
+## Memory Types
+
+Use type: "episodic" for:
+- Conversation summaries
+- User preferences and personal details
+- Decisions made together
+- Events and interactions
+
+Use type: "task" for:
+- Technical knowledge and patterns
+- Project-specific conventions
+- Debugging discoveries
+- Research findings
+
+## Best Practices
+
+1. **Be specific**: "User prefers TypeScript with strict mode and ESLint" not "User likes coding"
+2. **Include context**: Why does this matter? When should it apply?
+3. **Use categories**: Tag with relevant domain ("auth", "testing", "preferences", "react")
+4. **Timing matters**: Store after completing a task, not during (you'll have full context)
+5. **Link related memories**: Reference prior memory IDs when building on previous knowledge
+6. **Update, don't duplicate**: If something changed, either update the pattern or note the superseding info
+
+## Before You Store - Quick Checklist
+
+- [ ] Is this non-obvious or hard-won knowledge?
+- [ ] Will this likely be relevant in future conversations?
+- [ ] Is this specific to THIS user/project (not generic)?
+- [ ] Am I capturing the WHY, not just the WHAT?
+- [ ] Would I want Future Me to know this without re-deriving it?
+
+If yes to most: store it.
 `
 
 // ToolUsageGuidelines provides instructions for effective tool usage.

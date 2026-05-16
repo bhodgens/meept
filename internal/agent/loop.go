@@ -972,6 +972,42 @@ func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig)
 	l.config.SummaryLevelThreshold = fw.SummaryLevelThreshold
 }
 
+// Fire wallStats returns a map representation of the context firewall stats.
+// If no context firewall is active (e.g., using a ProviderManager), returns nil.
+func (l *AgentLoop) FirewallStats() map[string]any {
+	l.mu.RLock()
+	chatter := l.llm
+	l.mu.RUnlock()
+
+	fw, ok := chatter.(*llm.ContextFirewall)
+	if !ok {
+		return nil
+	}
+
+	stats := fw.Stats()
+	m := map[string]any{
+		"summarization_failures": stats.SummarizationFailures,
+		"dropped_messages":       stats.DroppedMessages,
+		"drop_events":            stats.DropEvents,
+		"compaction_events":      stats.CompactionEvents,
+		"compaction_tokens_saved": stats.CompactionTokensSaved,
+		"compaction_fallbacks":   stats.CompactionFallbacks,
+	}
+
+	// Include compression stats when proactive compression is enabled
+	if stats.TotalCompressions > 0 || stats.CompressionWarningEvents > 0 {
+		m["compression_warning_events"] = stats.CompressionWarningEvents
+		m["compression_summarize_events"] = stats.CompressionSummarizeEvents
+		m["compression_aggressive_events"] = stats.CompressionAggressiveEvents
+		m["compression_hard_limit_events"] = stats.CompressionHardLimitEvents
+		m["compression_tokens_saved"] = stats.CompressionTokensSaved
+		m["avg_quality_score"] = stats.AvgQualityScore
+		m["total_compressions"] = stats.TotalCompressions
+	}
+
+	return m
+}
+
 // getOrCreateConversation retrieves or creates a conversation for the given ID.
 // If session persistence is enabled and the conversation is not in the ConversationStore,
 // it attempts to restore from SQLite. Otherwise, it creates a new empty conversation.
@@ -2330,11 +2366,38 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 			// Check if all tools unanimously signal termination
 			if ShouldTerminate(results) {
-				l.logger.Info("All tools signal termination, skipping LLM follow-up",
+				l.logger.Info("All tools signal termination, making final LLM synthesis call",
 					"conversation", conversationID,
 					"iteration", iteration,
 				)
-				return l.buildTerminateResponse(results), nil
+
+				// Make a final LLM call to synthesize tool results into a natural
+				// language response. Do not send tools so the LLM produces text output.
+				synthesisMessages := conv.GetWindowedMessages(max(IterationTokenBudget, 2000))
+				synthesisMessages = append(synthesisMessages, llm.ChatMessage{
+					Role:    llm.RoleUser,
+					Content: "[system: synthesize the above tool results into a clear, concise response for the user. Do not make any additional tool calls.]",
+				})
+
+				synthesisOpts := l.resolveInferenceParams()
+				synthesisResp, synthesisErr := l.chatWithFailover(ctx, synthesisMessages, synthesisOpts...)
+				if synthesisErr != nil {
+					l.logger.Warn("LLM synthesis call failed after tool termination, using raw results",
+						"conversation", conversationID,
+						"iteration", iteration,
+						"error", synthesisErr,
+					)
+					return l.buildTerminateResponse(results), nil
+				}
+				totalTokens += synthesisResp.Usage.TotalTokens
+
+				l.logger.Info("LLM synthesis completed after tool termination",
+					"conversation", conversationID,
+					"iteration", iteration,
+					"tokens", synthesisResp.Usage.TotalTokens,
+				)
+
+				return synthesisResp.Content, nil
 			}
 
 			// Emit typed turn end event (tool execution turn)

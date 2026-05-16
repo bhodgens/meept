@@ -16,11 +16,12 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
-// Connection timeouts
+// Default timeouts.
 const (
-	readIdleTimeout  = 5 * time.Minute  // Max time waiting for a request
-	writeTimeout     = 30 * time.Second // Max time to write response
-	operationTimeout = 10 * time.Minute // Max time for a single RPC operation
+	DefaultShutdownTimeout = 30 * time.Second // Graceful shutdown deadline
+	readIdleTimeout        = 5 * time.Minute  // Max time waiting for a request
+	writeTimeout           = 30 * time.Second // Max time to write response
+	operationTimeout       = 10 * time.Minute // Max time for a single RPC operation
 )
 
 // Handler is a function that handles an RPC method.
@@ -28,15 +29,21 @@ type Handler func(ctx context.Context, params json.RawMessage) (any, error)
 
 // Server implements a JSON-RPC 2.0 server over Unix sockets.
 type Server struct {
-	socketPath string
-	listener   net.Listener
-	bus        *bus.MessageBus
-	logger     *slog.Logger
-	startTime  time.Time
+	socketPath   string
+	listener     net.Listener
+	bus          *bus.MessageBus
+	logger       *slog.Logger
+	startTime    time.Time
+	defaultModel string // Configured default model for status reporting
+	shutdown     time.Duration
 
 	mu       sync.RWMutex
 	handlers map[string]Handler
 	running  atomic.Bool
+
+	// FirewallStatsGetter is an optional callback that returns firewall stats.
+	// When set, stats are included in the status response.
+	FirewallStatsGetter func() map[string]any
 
 	// Connection tracking
 	connMu   sync.Mutex
@@ -44,11 +51,19 @@ type Server struct {
 	connWg   sync.WaitGroup
 	closeCh  chan struct{}
 	stopOnce sync.Once
+
+	// Active request tracking for graceful shutdown
+	activeReqs atomic.Int64
+
+	// Per-request handlers
+	requestHandlers []func()
 }
 
 // Config holds server configuration.
 type Config struct {
-	SocketPath string
+	SocketPath     string
+	Shutdown       time.Duration // Graceful shutdown deadline (default 30s)
+	ShutdownNotify func()        // Called when a request completes during shutdown
 }
 
 // New creates a new RPC server.
@@ -56,20 +71,35 @@ func New(cfg *Config, msgBus *bus.MessageBus, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{
-		socketPath: cfg.SocketPath,
-		bus:        msgBus,
-		logger:     logger,
-		startTime:  time.Now(),
-		handlers:   make(map[string]Handler),
-		conns:      make(map[net.Conn]struct{}),
-		closeCh:    make(chan struct{}),
+	shutdown := cfg.Shutdown
+	if shutdown <= 0 {
+		shutdown = DefaultShutdownTimeout
 	}
+	s := &Server{
+		socketPath:   cfg.SocketPath,
+		bus:          msgBus,
+		logger:       logger,
+		startTime:    time.Now(),
+		shutdown:     shutdown,
+		handlers:     make(map[string]Handler),
+		conns:        make(map[net.Conn]struct{}),
+		closeCh:      make(chan struct{}),
+		requestHandlers: make([]func(), 0),
+	}
+	if cfg.ShutdownNotify != nil {
+		s.requestHandlers = append(s.requestHandlers, cfg.ShutdownNotify)
+	}
+	return s
 }
 
 // Name implements registry.Component.
 func (s *Server) Name() string {
 	return "rpc.server"
+}
+
+// SetDefaultModel sets the default model name for status reporting.
+func (s *Server) SetDefaultModel(model string) {
+	s.defaultModel = model
 }
 
 // Running implements registry.Component.
@@ -140,17 +170,29 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	s.connMu.Unlock()
 
-	// Wait for connections to finish
+	// Wait for active requests to drain with configurable timeout
 	done := make(chan struct{})
 	go func() {
 		s.connWg.Wait()
 		close(done)
 	}()
 
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdown)
+	defer cancel()
+
 	select {
 	case <-done:
+		// All requests drained
+	case <-shutdownCtx.Done():
+		n := s.activeReqs.Load()
+		if n > 0 {
+			s.logger.Warn("rpc: shutdown timed out with active requests",
+				"active", n,
+				"timeout", s.shutdown,
+			)
+		}
 	case <-ctx.Done():
-		s.logger.Warn("rpc: shutdown timed out")
+		s.logger.Warn("rpc: shutdown cancelled")
 	}
 
 	// Remove socket
@@ -264,6 +306,14 @@ func (s *Server) dispatch(ctx context.Context, req *models.JSONRPCRequest) *mode
 		)
 	}
 
+	s.activeReqs.Add(1)
+	defer func() {
+		s.activeReqs.Add(-1)
+		for _, fn := range s.requestHandlers {
+			fn()
+		}
+	}()
+
 	// Create a timeout context for this specific operation
 	// This ensures handlers don't run forever even if connection stays open
 	opCtx, cancel := context.WithTimeout(ctx, operationTimeout)
@@ -310,22 +360,39 @@ func (s *Server) registerBuiltinHandlers() {
 		}
 		s.mu.RUnlock()
 
-		return map[string]any{
+		result := map[string]any{
 			RPCKeyStatus:             "running",
 			"version":            "0.2.0-go",
 			"uptime_seconds":     time.Since(s.startTime).Seconds(),
-			RPCKeyModel:              "",
-			"default_model":      "",
+			RPCKeyModel:          s.defaultModel,
+			"default_model":      s.defaultModel,
 			"tokens_used":        0,
 			"tokens_remaining":   100000,
 			"budget_used":        0.0,
 			"budget_remaining":   10.0,
 			"registered_methods": methods,
 			"bus_subscribers":    busStats["_total"],
-		}, nil
+		}
+
+		// Include firewall stats if a getter is configured
+		if s.FirewallStatsGetter != nil {
+			if fwStats := s.FirewallStatsGetter(); fwStats != nil {
+				result["firewall"] = fwStats
+			}
+		}
+
+		return result, nil
 	}
 	s.RegisterHandler("status", statusHandler)
 	s.RegisterHandler("daemon.status", statusHandler)
+
+	// Get firewall stats (standalone endpoint)
+	s.RegisterHandler("firewall.stats", func(ctx context.Context, params json.RawMessage) (any, error) {
+		if s.FirewallStatsGetter == nil {
+			return map[string]any{}, nil
+		}
+		return s.FirewallStatsGetter(), nil
+	})
 
 	// Bus publish
 	s.RegisterHandler("bus.publish", func(ctx context.Context, params json.RawMessage) (any, error) {

@@ -552,7 +552,12 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		return nil, &ClientError{Message: "failed to read response", Cause: err}
 	}
 
-	c.logger.Debug("LLM response received", "status", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"))
+	// Log response body preview at debug level for diagnosis
+	bodyPreview := string(respBody)
+	if len(bodyPreview) > 500 {
+		bodyPreview = bodyPreview[:500] + "..."
+	}
+	c.logger.Debug("LLM response received", "status", resp.StatusCode, "content_type", resp.Header.Get("Content-Type"), "body_preview", bodyPreview)
 
 	// Check for rate limit (429) specifically
 	if resp.StatusCode == http.StatusTooManyRequests {
@@ -639,9 +644,7 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 	msg := choice.Message
 
 	var content string
-	if msg.Content != nil {
-		content = *msg.Content
-	}
+	content = msg.ContentString()
 
 	var toolCalls []ToolCall
 	if len(msg.ToolCalls) > 0 {

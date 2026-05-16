@@ -363,10 +363,14 @@ func TestHandler_ListViaBus(t *testing.T) {
 
 	select {
 	case resp := <-respSub.Channel:
-		var tasks []any
-		_ = json.Unmarshal(resp.Payload, &tasks)
-		if len(tasks) < 2 {
-			t.Errorf("expected at least 2 tasks, got %d (payload: %s)", len(tasks), string(resp.Payload))
+		var wrapper struct {
+			Tasks []any `json:"tasks"`
+		}
+		if err := json.Unmarshal(resp.Payload, &wrapper); err != nil {
+			t.Fatalf("failed to unmarshal list response: %v (payload: %s)", err, string(resp.Payload))
+		}
+		if len(wrapper.Tasks) < 2 {
+			t.Errorf("expected at least 2 tasks, got %d (payload: %s)", len(wrapper.Tasks), string(resp.Payload))
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for list response")

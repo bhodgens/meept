@@ -421,6 +421,163 @@ func (c *Controller) GetApplier() *ChangeApplier {
 	return c.applier
 }
 
+// GetIssues returns the currently cached issues. Thread-safe (read lock).
+func (c *Controller) GetIssues() []Issue {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.issues
+}
+
+// Analyze runs root-cause analysis on the given issues independently of detection.
+// This is the standalone entry point for the analysis phase that RPC handlers
+// and CLI commands use when they want analysis without running a full cycle.
+func (c *Controller) Analyze(ctx context.Context, issues []Issue) ([]*RootCauseAnalysis, error) {
+	if len(issues) == 0 {
+		return nil, nil
+	}
+
+	c.mu.Lock()
+	c.analyses = nil
+	c.mu.Unlock()
+
+	var analyses []*RootCauseAnalysis
+	for _, issue := range issues[:min(len(issues), c.config.MaxIterationsPerCycle)] {
+		if c.checkCircuitBreaker() {
+			c.logger.Warn("stopping analysis due to circuit breaker")
+			break
+		}
+
+		if c.shouldSkipIssue(issue.ID) {
+			continue
+		}
+
+		analysis, err := c.analyzer.Analyze(ctx, issue)
+		if err != nil {
+			c.recordFailure(issue.ID)
+			c.logger.Warn("analysis failed for issue", "issue_id", issue.ID, "error", err)
+			continue
+		}
+		analyses = append(analyses, analysis)
+		c.mu.Lock()
+		c.analyses = append(c.analyses, analysis)
+		c.mu.Unlock()
+		c.recordSuccess(issue.ID)
+	}
+
+	_ = c.saveState()
+	return analyses, nil
+}
+
+// Generate runs fix generation on previously-analyzed issues.
+// It uses the controller's cached analyses; if none exist it returns empty results.
+func (c *Controller) Generate(ctx context.Context) ([]*ProposedFix, error) {
+	c.mu.RLock()
+	analyses := c.analyses
+	issues := c.issues
+	c.mu.RUnlock()
+
+	if len(analyses) == 0 {
+		return nil, nil
+	}
+
+	// Build issue lookup map.
+	issueMap := make(map[string]Issue)
+	for _, issue := range issues {
+		issueMap[issue.ID] = issue
+	}
+
+	c.mu.Lock()
+	c.fixes = nil
+	c.mu.Unlock()
+
+	var fixes []*ProposedFix
+	for _, analysis := range analyses[:min(len(analyses), c.config.MaxFixesPerCycle)] {
+		if c.checkCircuitBreaker() {
+			break
+		}
+
+		if c.shouldSkipIssue(analysis.IssueID) {
+			continue
+		}
+
+		issue := issueMap[analysis.IssueID]
+		fix, err := c.generator.Generate(ctx, analysis, issue)
+		if err != nil {
+			c.recordFailure(analysis.IssueID)
+			c.logger.Warn("generation failed for analysis", "analysis_issue_id", analysis.IssueID, "error", err)
+			continue
+		}
+		if fix != nil {
+			fixes = append(fixes, fix)
+			c.mu.Lock()
+			c.fixes = append(c.fixes, fix)
+			c.mu.Unlock()
+			c.recordSuccess(analysis.IssueID)
+		}
+	}
+
+	_ = c.saveState()
+	return fixes, nil
+}
+
+// Validate runs validation on previously-generated fixes.
+// It uses the controller's cached fixes; if none exist it returns empty results.
+func (c *Controller) Validate(ctx context.Context) ([]*ValidationResult, error) {
+	c.mu.RLock()
+	fixes := c.fixes
+	c.mu.RUnlock()
+
+	if len(fixes) == 0 {
+		return nil, nil
+	}
+
+	c.mu.Lock()
+	c.validations = nil
+	c.mu.Unlock()
+
+	var validations []*ValidationResult
+	for _, fix := range fixes {
+		result, err := c.validator.Validate(ctx, fix)
+		if err != nil {
+			c.recordFailure(fix.IssueID)
+			c.logger.Warn("validation failed for fix", "fix_id", fix.ID, "error", err)
+			continue
+		}
+		validations = append(validations, result)
+		if result.Success {
+			c.recordSuccess(fix.IssueID)
+		} else {
+			c.recordFailure(fix.IssueID)
+		}
+	}
+
+	// Store all results at once to minimize lock contention
+	c.mu.Lock()
+	c.validations = append(c.validations, validations...)
+	c.mu.Unlock()
+
+	_ = c.saveState()
+	return validations, nil
+}
+
+// GetCachedFixes returns the currently cached fixes. Thread-safe (read lock).
+func (c *Controller) GetCachedFixes() []*ProposedFix {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make([]*ProposedFix, len(c.fixes))
+	copy(result, c.fixes)
+	return result
+}
+
+// GetCachedValidations returns the currently cached validations. Thread-safe (read lock).
+func (c *Controller) GetCachedValidations() []*ValidationResult {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make([]*ValidationResult, len(c.validations))
+	copy(result, c.validations)
+	return result
+}
+
 // GetStatus returns the current status.
 func (c *Controller) GetStatus() *ControllerStatus {
 	c.mu.RLock()

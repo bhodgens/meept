@@ -30,7 +30,7 @@ func TestClientChat(t *testing.T) {
 					Index: 0,
 					Message: ResponseMessage{
 						Role:    "assistant",
-						Content: stringPtr("Hello, world!"),
+						Content: json.RawMessage(`"Hello, world!"`),
 					},
 					FinishReason: "stop",
 				},
@@ -191,7 +191,7 @@ func TestClientChatRetry(t *testing.T) {
 				{
 					Message: ResponseMessage{
 						Role:    "assistant",
-						Content: stringPtr("Success after retry"),
+						Content: json.RawMessage(`"Success after retry"`),
 					},
 					FinishReason: "stop",
 				},
@@ -269,7 +269,7 @@ func TestClientWithBudget(t *testing.T) {
 				{
 					Message: ResponseMessage{
 						Role:    "assistant",
-						Content: stringPtr("Hello"),
+						Content: json.RawMessage(`"Hello"`),
 					},
 					FinishReason: "stop",
 				},
@@ -349,6 +349,38 @@ func TestClientBudgetExceeded(t *testing.T) {
 	}
 }
 
-func stringPtr(s string) *string {
-	return &s
+func TestContentString_PlainString(t *testing.T) {
+	msg := ResponseMessage{Content: json.RawMessage(`"Hello, world!"`)}
+	got := msg.ContentString()
+	if got != "Hello, world!" {
+		t.Errorf("ContentString() = %q, want %q", got, "Hello, world!")
+	}
+}
+
+func TestContentString_Nil(t *testing.T) {
+	msg := ResponseMessage{Content: nil}
+	got := msg.ContentString()
+	if got != "" {
+		t.Errorf("ContentString() = %q, want empty string", got)
+	}
+}
+
+func TestContentString_ArrayBlocks(t *testing.T) {
+	msg := ResponseMessage{
+		Content: json.RawMessage(`[{"type":"text","text":"Hello"},{"type":"text","text":"World"}]`),
+	}
+	got := msg.ContentString()
+	if got != "Hello\nWorld" {
+		t.Errorf("ContentString() = %q, want %q", got, "Hello\nWorld")
+	}
+}
+
+func TestContentString_ArrayBlocksWithNonText(t *testing.T) {
+	msg := ResponseMessage{
+		Content: json.RawMessage(`[{"type":"image","url":"..."},{"type":"text","text":"desc"}]`),
+	}
+	got := msg.ContentString()
+	if got != "desc" {
+		t.Errorf("ContentString() = %q, want %q", got, "desc")
+	}
 }

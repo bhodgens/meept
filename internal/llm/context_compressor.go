@@ -293,10 +293,28 @@ func (c *ContextCompressor) Compress(ctx context.Context, messages []ChatMessage
 }
 
 // countTokens sums the token counts of all messages using the configured tokenizer.
+// Includes ToolCalls (function name + arguments) and ToolCallID.
 func (c *ContextCompressor) countTokens(messages []ChatMessage) int {
 	total := 0
 	for _, msg := range messages {
-		total += c.tokenizer.CountTokens(msg.Content)
+		total += c.countMessageTokens(msg)
+	}
+	return total
+}
+
+// countMessageTokens returns the token count for a single ChatMessage,
+// accounting for Content, ToolCalls, ToolCallID, and Name fields.
+func (c *ContextCompressor) countMessageTokens(msg ChatMessage) int {
+	total := c.tokenizer.CountTokens(msg.Content)
+	for _, tc := range msg.ToolCalls {
+		total += c.tokenizer.CountTokens(tc.Function.Name)
+		total += c.tokenizer.CountTokens(tc.Function.Arguments)
+	}
+	if msg.ToolCallID != "" {
+		total += c.tokenizer.CountTokens(msg.ToolCallID)
+	}
+	if msg.Name != "" {
+		total += c.tokenizer.CountTokens(msg.Name)
 	}
 	return total
 }
@@ -436,9 +454,15 @@ func (c *ContextCompressor) summarizeWithLLM(ctx context.Context, messages []Cha
 }
 
 // aggressiveCompress keeps system messages, critical messages outside the tail,
-// plus the last 4 non-system messages. This is differentiated from
-// dropOldContext (which keeps only the last 2).
-func (c *ContextCompressor) aggressiveCompress(_ context.Context, messages []ChatMessage) []ChatMessage {
+// plus the last 4 non-system messages. It first attempts smart compaction
+// before falling back to keepTail truncation.
+func (c *ContextCompressor) aggressiveCompress(ctx context.Context, messages []ChatMessage) []ChatMessage {
+	if c.compactor != nil {
+		result := c.compactor.Compact(ctx, messages)
+		if result.Compacted {
+			return result.Messages
+		}
+	}
 	return keepTail(messages, 4)
 }
 

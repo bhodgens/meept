@@ -48,11 +48,11 @@ type StateTransition struct {
 
 // ValidTransitions defines allowed state transitions.
 var ValidTransitions = map[State][]State{
-	StateIdle:       {StateClaiming, StateStopping},
+	StateIdle:       {StateClaiming, StateStopping, StateStopped},
 	StateClaiming:   {StateProcessing, StateIdle, StateError, StateStopping},
 	StateProcessing: {StateComplete, StateError, StateStopping},
 	StateComplete:   {StateIdle, StateStopping},
-	StateError:      {StateIdle, StateStopping},
+	StateError:      {StateIdle, StateStopping, StateStopped},
 	StateStopping:   {StateStopped},
 	StateStopped:    {StateIdle},
 }

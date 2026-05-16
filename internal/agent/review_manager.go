@@ -127,6 +127,46 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep) (*
 		}, nil
 	}
 
+	// SKIP: Tool execution failed — nothing meaningful to review.
+	// The step has already been or will be marked as failed; spawning a
+	// reviewer agent to confirm an error is pure token waste.
+	if rm.stepHasError(step) {
+		rm.logger.Info("Skipping review: step execution produced an error",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
+		return &ReviewResult{
+			Status:     ReviewApproved,
+			Feedback:   "Skipped review — step has execution error",
+			Confidence: 1.0,
+		}, nil
+	}
+
+	// SKIP: Trivial task — fewer than 3 steps in the task means low
+	// complexity where LLM review cost outweighs benefit. Use a
+	// lightweight heuristic check instead.
+	if rm.isTrivialTask(step) {
+		rm.logger.Info("Skipping full review: trivial task (<3 steps), using heuristic",
+			"step_id", step.ID,
+			"tool_hint", step.ToolHint,
+		)
+		if rm.heuristicReviewPasses(step) {
+			if err := rm.stepStore.SetState(step.ID, task.StepApproved); err != nil {
+				rm.logger.Error("Failed to set step to approved", "error", err)
+			}
+			return &ReviewResult{
+				Status:     ReviewApproved,
+				Feedback:   "Auto-approved (heuristic check: trivial task, non-empty result)",
+				Confidence: 1.0,
+			}, nil
+		}
+		return &ReviewResult{
+			Status:     ReviewRejected,
+			Feedback:   "Heuristic check failed: non-empty result but no meaningful content",
+			Confidence: 0.7,
+		}, nil
+	}
+
 	// Select reviewer agent
 	reviewerID := rm.policy.SelectReviewer(step)
 	rm.logger.Debug("Selected reviewer",
@@ -706,4 +746,69 @@ func (rm *ReviewManager) GetValidationPolicy() *ValidationPolicy {
 // GetPolicy returns the current review policy.
 func (rm *ReviewManager) GetPolicy() *ReviewPolicy {
 	return rm.policy
+}
+
+// stepHasError returns true if the step result appears to contain an error
+// or failure message, making a review redundant.
+func (rm *ReviewManager) stepHasError(step *task.TaskStep) bool {
+	result := strings.TrimSpace(step.Result)
+	if result == "" {
+		return false // Empty result: will be caught by later heuristic, not "error"
+	}
+
+	lower := strings.ToLower(result)
+	errorIndicators := []string{
+		"message:error",
+		"message: error",
+		"error executing",
+		"error running",
+		"error:",
+		"failed to",
+		"could not",
+		"unable to",
+		"rpc error",
+		"permission denied",
+		"access denied",
+		"not found",
+		"timeout",
+		"connection refused",
+	}
+	for _, indicator := range errorIndicators {
+		if strings.Contains(lower, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTrivialTask returns true if the task has fewer than 3 steps.
+// Low step-count tasks are trivial enough that an LLM review's token cost
+// outweighs any benefit from a thorough inspection.
+func (rm *ReviewManager) isTrivialTask(step *task.TaskStep) bool {
+	if rm.stepStore == nil {
+		return false // Cannot determine task size, default to full review
+	}
+	steps, err := rm.stepStore.ListByTaskID(step.TaskID)
+	if err != nil {
+		rm.logger.Debug("Failed to list task steps for review gating",
+			"task_id", step.TaskID, "error", err)
+		return false
+	}
+	return len(steps) < 3
+}
+
+// heuristicReviewPasses performs a lightweight, non-LLM check to determine
+// whether a low-risk step should pass review. It returns true when the
+// step has a non-empty, meaningful result — the default state for benign
+// operations that did not fail.
+func (rm *ReviewManager) heuristicReviewPasses(step *task.TaskStep) bool {
+	result := strings.TrimSpace(step.Result)
+	if result == "" {
+		return false
+	}
+	// If result is purely whitespace or very short (no meaningful content)
+	if len(result) < 3 {
+		return false
+	}
+	return true
 }

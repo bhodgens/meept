@@ -73,11 +73,10 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("security.record_override", p.makeProxy("security.record_override", "security.result", 10*time.Second))
 	server.RegisterHandler("security.approve_action", p.makeFireAndForget("security.approve_action"))
 
-	// Skills methods
-	server.RegisterHandler("skills.list", p.makeProxy("skills.list", "skills.result", 10*time.Second))
-	server.RegisterHandler("skills.get", p.makeProxy("skills.get", "skills.result", 10*time.Second))
-	server.RegisterHandler("skills.execute", p.makeProxy("skills.execute", "skills.result", 120*time.Second))
-	server.RegisterHandler("skills.triage", p.makeProxy("skills.triage", "skills.result", 10*time.Second))
+	// Note: skills methods are NOT proxied here.
+	// Direct RPC handlers are registered by RegisterSkillsHandlers (internal/rpc/skills.go)
+	// in daemon.go when skills are enabled. When disabled, no handler is registered,
+	// and the RPC server will return "method not found" instead of timing out.
 
 	// Agent/Worker methods
 	server.RegisterHandler("agent.workers.list", p.makeProxy("agent.workers.list", "agent.workers.result", 10*time.Second))

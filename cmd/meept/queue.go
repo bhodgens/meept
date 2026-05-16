@@ -147,7 +147,7 @@ func newQueueListCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&state, "state", "s", "pending", "Filter by state (pending, claimed, processing, completed, failed, dead)")
+	cmd.Flags().StringVarP(&state, "state", "", "pending", "Filter by state (pending, claimed, processing, completed, failed, dead)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 20, "Maximum number of jobs to return")
 
 	return cmd

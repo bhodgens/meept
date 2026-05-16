@@ -418,8 +418,8 @@ func TestDetectCompound(t *testing.T) {
 		{
 			name: "multi sequential",
 			intents: []*Intent{
-				{Type: "code", AgentType: "coder"},
-				{Type: "plan", AgentType: "planner", RequiresPlanning: true},
+				{Type: "code", AgentType: "coder", Confidence: 0.8},
+				{Type: "plan", AgentType: "planner", RequiresPlanning: true, Confidence: 0.7},
 			},
 			wantCompound: true,
 			wantType:     "sequential",
@@ -427,11 +427,35 @@ func TestDetectCompound(t *testing.T) {
 		{
 			name: "multi parallel",
 			intents: []*Intent{
-				{Type: "code", AgentType: "coder"},
-				{Type: "chat", AgentType: "chat"},
+				{Type: "code", AgentType: "coder", Confidence: 0.7},
+				{Type: "debug", AgentType: "debugger", Confidence: 0.7},
 			},
 			wantCompound: true,
 			wantType:     "parallel",
+		},
+		{
+			name: "chat+scheduler is not compound",
+			intents: []*Intent{
+				{Type: "chat", AgentType: "chat", Confidence: 0.6},
+				{Type: "schedule", AgentType: "scheduler", Confidence: 0.3},
+			},
+			wantCompound: false, // no non-chat intent above 0.5 threshold
+			wantType:     "",
+		},
+		{
+			name:         "low confidence intents are not compound",
+			intents:      []*Intent{{Type: "code", Confidence: 0.1}, {Type: "plan", Confidence: 0.2}},
+			wantCompound: false,
+			wantType:     "",
+		},
+		{
+			name: "only chat intents are not compound",
+			intents: []*Intent{
+				{Type: "chat", AgentType: "chat", Confidence: 0.7},
+				{Type: "platform", AgentType: "chat", Confidence: 0.7},
+			},
+			wantCompound: false, // both are chat/platform
+			wantType:     "",
 		},
 	}
 

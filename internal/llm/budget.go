@@ -22,12 +22,22 @@ type Budget struct {
 	rateLimitRPM   int
 	aggressiveness float64
 
+	// Per-task and per-session caps (0 = no cap)
+	perTaskBudget  int
+	perSessionBudget int
+
 	// Sliding window for the last hour
 	hourlyWindow []usageRecord
 
 	// Daily tracking - reset at midnight UTC
 	dailyUsed  int
 	currentDay int // ordinal day number
+
+	// Per-task tracking
+	tasks map[string]int // taskID -> tokens used in this task
+
+	// Per-session tracking
+	sessions map[string]int // sessionID -> tokens used in this session
 
 	// RPM tracking (sliding window of request timestamps)
 	requestTimestamps []time.Time
@@ -37,10 +47,12 @@ type Budget struct {
 
 // BudgetConfig holds configuration for token budget tracking.
 type BudgetConfig struct {
-	HourlyLimit    int
-	DailyLimit     int
-	RateLimitRPM   int
-	Aggressiveness float64
+	HourlyLimit      int
+	DailyLimit       int
+	RateLimitRPM     int
+	Aggressiveness   float64
+	PerTaskBudget    int // max tokens per single task (0 = no cap)
+	PerSessionBudget int // max tokens per single session (0 = no cap)
 }
 
 // NewBudget creates a new token budget tracker.
@@ -59,15 +71,19 @@ func NewBudget(cfg BudgetConfig, logger *slog.Logger) *Budget {
 	now := time.Now().UTC()
 
 	return &Budget{
-		hourlyLimit:       cfg.HourlyLimit,
-		dailyLimit:        cfg.DailyLimit,
-		rateLimitRPM:      cfg.RateLimitRPM,
-		aggressiveness:    cfg.Aggressiveness,
-		hourlyWindow:      make([]usageRecord, 0),
-		dailyUsed:         0,
-		currentDay:        dayOrdinal(now),
-		requestTimestamps: make([]time.Time, 0),
-		logger:            logger,
+		hourlyLimit:        cfg.HourlyLimit,
+		dailyLimit:         cfg.DailyLimit,
+		rateLimitRPM:       cfg.RateLimitRPM,
+		aggressiveness:     cfg.Aggressiveness,
+		perTaskBudget:      cfg.PerTaskBudget,
+		perSessionBudget:   cfg.PerSessionBudget,
+		hourlyWindow:       make([]usageRecord, 0),
+		dailyUsed:          0,
+		currentDay:         dayOrdinal(now),
+		requestTimestamps:  make([]time.Time, 0),
+		tasks:              make(map[string]int),
+		sessions:           make(map[string]int),
+		logger:             logger,
 	}
 }
 
@@ -174,31 +190,159 @@ func (b *Budget) RecordUsage(usage TokenUsage) {
 	)
 }
 
+// RecordUsageWithScope records token usage and tracks it per-task and per-session.
+func (b *Budget) RecordUsageWithScope(usage TokenUsage, taskID, sessionID string) {
+	if usage.TotalTokens < 0 {
+		b.logger.Warn("Negative token count - ignoring", "tokens", usage.TotalTokens)
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	now := time.Now()
+	b.maybeResetDaily()
+
+	b.hourlyWindow = append(b.hourlyWindow, usageRecord{
+		timestamp: now,
+		tokens:    usage.TotalTokens,
+	})
+	b.dailyUsed += usage.TotalTokens
+	b.requestTimestamps = append(b.requestTimestamps, now)
+
+	// Track per-task
+	if len(taskID) > 0 {
+		b.tasks[taskID] += usage.TotalTokens
+	}
+	// Track per-session
+	if len(sessionID) > 0 {
+		b.sessions[sessionID] += usage.TotalTokens
+	}
+
+	b.logger.Debug("Recorded token usage with scope",
+		"tokens", usage.TotalTokens,
+		"hourly", b.hourlyUsed(),
+		"daily", b.dailyUsed,
+		"task", taskID,
+		"session", sessionID,
+	)
+}
+
 // CheckBudget returns true if the current usage is within all budget limits.
+// When both hourlyLimit and dailyLimit are 0 (unconfigured), all requests are allowed.
 func (b *Budget) CheckBudget() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// Allow all requests when both budget limits are unconfigured (zero)
+	if b.hourlyLimit == 0 && b.dailyLimit == 0 {
+		return true
+	}
+
 	b.maybeResetDaily()
 	b.pruneHourlyWindow()
 
-	hourlyOK := b.hourlyUsed() < b.effectiveLimit(b.hourlyLimit)
-	dailyOK := b.dailyUsed < b.effectiveLimit(b.dailyLimit)
+	// Only enforce limits that are configured (non-zero)
+	var hourlyOK, dailyOK bool
+	if b.hourlyLimit > 0 {
+		hourlyOK = b.hourlyUsed() < b.effectiveLimit(b.hourlyLimit)
+	} else {
+		hourlyOK = true
+	}
+	if b.dailyLimit > 0 {
+		dailyOK = b.dailyUsed < b.effectiveLimit(b.dailyLimit)
+	} else {
+		dailyOK = true
+	}
 	return hourlyOK && dailyOK
+}
+
+// CheckBudgetWithScope validates budgets including per-task and per-session caps.
+// taskID and sessionID can be empty strings if per-task/per-session caps are not configured.
+func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Allow all requests when budget is unconfigured (limits = 0)
+	if b.hourlyLimit == 0 && b.dailyLimit == 0 {
+		return true
+	}
+
+	b.maybeResetDaily()
+	b.pruneHourlyWindow()
+
+	// Per-task cap check
+	if b.perTaskBudget > 0 && len(taskID) > 0 {
+		if taskUsed, exists := b.tasks[taskID]; exists {
+			if taskUsed >= b.perTaskBudget {
+				return false
+			}
+		}
+	}
+
+	// Per-session cap check
+	if b.perSessionBudget > 0 && len(sessionID) > 0 {
+		if sessionUsed, exists := b.sessions[sessionID]; exists {
+			if sessionUsed >= b.perSessionBudget {
+				return false
+			}
+		}
+	}
+
+	// Only enforce limits that are configured (non-zero)
+	var hourlyOK, dailyOK bool
+	if b.hourlyLimit > 0 {
+		hourlyOK = b.hourlyUsed() < b.effectiveLimit(b.hourlyLimit)
+	} else {
+		hourlyOK = true
+	}
+	if b.dailyLimit > 0 {
+		dailyOK = b.dailyUsed < b.effectiveLimit(b.dailyLimit)
+	} else {
+		dailyOK = true
+	}
+
+	return hourlyOK && dailyOK
+}
+
+// RecordTaskUsage tracks tokens consumed by a specific task.
+func (b *Budget) RecordTaskUsage(taskID string, tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.tasks[taskID] += tokens
+}
+
+// RecordSessionUsage tracks tokens consumed by a specific session.
+func (b *Budget) RecordSessionUsage(sessionID string, tokens int) {
+	if tokens <= 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sessions[sessionID] += tokens
 }
 
 // Status represents a snapshot of current budget status.
 type Status struct {
-	HourlyUsed      int     `json:"hourly_used"`
-	HourlyLimit     int     `json:"hourly_limit"`
-	HourlyRemaining int     `json:"hourly_remaining"`
-	DailyUsed       int     `json:"daily_used"`
-	DailyLimit      int     `json:"daily_limit"`
-	DailyRemaining  int     `json:"daily_remaining"`
-	RPMCurrent      int     `json:"rpm_current"`
-	RPMLimit        int     `json:"rpm_limit"`
-	Aggressiveness  float64 `json:"aggressiveness"`
-	WithinBudget    bool    `json:"within_budget"`
+	HourlyUsed         int     `json:"hourly_used"`
+	HourlyLimit        int     `json:"hourly_limit"`
+	HourlyRemaining    int     `json:"hourly_remaining"`
+	DailyUsed          int     `json:"daily_used"`
+	DailyLimit         int     `json:"daily_limit"`
+	DailyRemaining     int     `json:"daily_remaining"`
+	PerTaskBudget      int     `json:"per_task_budget"`
+	PerTaskUsed        int     `json:"per_task_used"`
+	PerSessionBudget   int     `json:"per_session_budget"`
+	PerSessionUsed     int     `json:"per_session_used"`
+	RPMCurrent         int     `json:"rpm_current"`
+	RPMLimit           int     `json:"rpm_limit"`
+	Aggressiveness     float64 `json:"aggressiveness"`
+	WithinBudget       bool    `json:"within_budget"`
+	TaskBudgetExhausted bool    `json:"task_budget_exhausted"`
+	SessionBudgetExhausted bool `json:"session_budget_exhausted"`
 }
 
 // GetStatus returns a snapshot of current budget status.
@@ -217,17 +361,53 @@ func (b *Budget) GetStatus() Status {
 	hourlyRemaining := max(effHourly-hourlyUsed, 0)
 	dailyRemaining := max(effDaily-b.dailyUsed, 0)
 
+	// Aggregate task/session usage
+	totalTaskUsed := 0
+	for _, v := range b.tasks {
+		totalTaskUsed += v
+	}
+	totalSessionUsed := 0
+	for _, v := range b.sessions {
+		totalSessionUsed += v
+	}
+
+	// Check if any specific task or session has exhausted its cap
+	taskBudgetExhausted := false
+	sessionBudgetExhausted := false
+	if b.perTaskBudget > 0 {
+		for _, used := range b.tasks {
+			if used >= b.perTaskBudget {
+				taskBudgetExhausted = true
+				break
+			}
+		}
+	}
+	if b.perSessionBudget > 0 {
+		for _, used := range b.sessions {
+			if used >= b.perSessionBudget {
+				sessionBudgetExhausted = true
+				break
+			}
+		}
+	}
+
 	return Status{
-		HourlyUsed:      hourlyUsed,
-		HourlyLimit:     effHourly,
-		HourlyRemaining: hourlyRemaining,
-		DailyUsed:       b.dailyUsed,
-		DailyLimit:      effDaily,
-		DailyRemaining:  dailyRemaining,
-		RPMCurrent:      len(b.requestTimestamps),
-		RPMLimit:        b.rateLimitRPM,
-		Aggressiveness:  b.aggressiveness,
-		WithinBudget:    hourlyUsed < effHourly && b.dailyUsed < effDaily,
+		HourlyUsed:             hourlyUsed,
+		HourlyLimit:            effHourly,
+		HourlyRemaining:        hourlyRemaining,
+		DailyUsed:              b.dailyUsed,
+		DailyLimit:             effDaily,
+		DailyRemaining:         dailyRemaining,
+		PerTaskBudget:          b.perTaskBudget,
+		PerTaskUsed:            totalTaskUsed,
+		PerSessionBudget:       b.perSessionBudget,
+		PerSessionUsed:         totalSessionUsed,
+		RPMCurrent:             len(b.requestTimestamps),
+		RPMLimit:               b.rateLimitRPM,
+		Aggressiveness:         b.aggressiveness,
+		WithinBudget:           hourlyUsed < effHourly && b.dailyUsed < effDaily,
+		TaskBudgetExhausted:    taskBudgetExhausted,
+		SessionBudgetExhausted: sessionBudgetExhausted,
 	}
 }
 

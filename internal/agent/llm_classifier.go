@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/config"
@@ -15,6 +18,9 @@ import (
 const (
 	// defaultClassifierTimeout is used when LLMClassifierConfig.Timeout is zero.
 	defaultClassifierTimeout = 10 * time.Second
+	// defaultUnavailableCooldown is how long the classifier treats the endpoint
+	// as unavailable after a failure, before retrying.
+	defaultUnavailableCooldown = 60 * time.Second
 )
 
 var intentThresholds = map[string]float64{
@@ -52,6 +58,27 @@ type LLMClassifier struct {
 	model   string
 	timeout time.Duration
 	logger  Logger
+
+	// unavailable tracks whether the classifier endpoint is known-to-be-down.
+	// When set, subsequent classification attempts are skipped for the
+	// cooldown duration, reducing per-request latency and log noise.
+	unavailable atomicBool
+	unavailUntil time.Time
+	unavailMu    sync.RWMutex
+
+	cooldown time.Duration // how long to cache "unavailable" (default 60s)
+}
+
+// atomicBool is a sync-compatible boolean backed by atomic.Int32.
+type atomicBool struct{ v atomic.Int32 }
+
+func (b *atomicBool) Load() bool { return b.v.Load() == 1 }
+func (b *atomicBool) Store(v bool) {
+	if v {
+		b.v.Store(1)
+	} else {
+		b.v.Store(0)
+	}
 }
 
 type Logger interface {
@@ -75,20 +102,49 @@ type LLMClassifierConfig struct {
 	Logger  Logger
 }
 
-func NewLLMClassifier(cfg LLMClassifierConfig) *LLMClassifier {
-	logger := cfg.Logger
-	if logger == nil {
-		logger = stdLogger{}
+func NewLLMClassifier(cfg LLMClassifierConfig, logger *slog.Logger) *LLMClassifier {
+	var l Logger
+	if cfg.Logger != nil {
+		l = cfg.Logger
+	} else {
+		l = &slogAdapter{logger}
 	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = defaultClassifierTimeout
 	}
 	return &LLMClassifier{
-		client:  cfg.Client,
-		model:   cfg.Model,
-		timeout: timeout,
-		logger:  logger,
+		client:   cfg.Client,
+		model:    cfg.Model,
+		timeout:  timeout,
+		logger:   l,
+		cooldown: defaultUnavailableCooldown,
+	}
+}
+
+// slogAdapter bridges *slog.Logger to the Logger interface.
+type slogAdapter struct {
+	l *slog.Logger
+}
+
+func (a *slogAdapter) Debug(msg string, args ...any) {
+	if a.l != nil {
+		a.l.Debug(msg, args...)
+	}
+}
+func (a *slogAdapter) Warn(msg string, args ...any) {
+	if a.l != nil {
+		a.l.Warn(msg, args...)
+	}
+}
+func (a *slogAdapter) Error(msg string, args ...any) {
+	if a.l != nil {
+		a.l.Error(msg, args...)
+	}
+}
+func (a *slogAdapter) Info(msg string, args ...any) {
+	if a.l != nil {
+		a.l.Info(msg, args...)
 	}
 }
 
@@ -101,6 +157,21 @@ type classificationResponse struct {
 func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *MemoryContext) (*Intent, error) {
 	if c.client == nil {
 		return nil, fmt.Errorf("LLM classifier: no client configured")
+	}
+
+	// Check if we've cached an "unavailable" status and haven't yet exceeded
+	// the cooldown window.
+	if c.unavailable.Load() {
+		c.unavailMu.RLock()
+		unavailUntil := c.unavailUntil
+		c.unavailMu.RUnlock()
+		if time.Now().Before(unavailUntil) {
+			// Still within cooldown; skip the connection attempt.
+			return nil, fmt.Errorf("LLM classifier unavailable (cooldown, retry after %s)",
+				unavailUntil.Truncate(time.Second).Format(time.TimeOnly))
+		}
+		// Cooldown expired; allow a retry.
+		c.unavailable.Store(false)
 	}
 
 	classificationPrompt := c.buildClassificationPrompt(input)
@@ -117,13 +188,28 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 		llm.WithTemperature(0.1),
 	)
 	if err != nil {
-		c.logger.Debug("LLM classification failed", "error", err)
+		// Cache the failure so future requests skip this endpoint.
+		c.unavailable.Store(true)
+		c.unavailMu.Lock()
+		c.unavailUntil = time.Now().Add(c.cooldown)
+		c.unavailMu.Unlock()
+		c.logger.Warn("LLM classifier unavailable, falling back to keyword",
+			"error", err,
+			"retry_after", c.cooldown,
+		)
 		return nil, err
 	}
 
 	if resp == nil || resp.Content == "" {
+		c.unavailable.Store(true)
+		c.unavailMu.Lock()
+		c.unavailUntil = time.Now().Add(c.cooldown)
+		c.unavailMu.Unlock()
 		return nil, fmt.Errorf("LLM classification: empty response")
 	}
+
+	// Success: clear the unavailable flag.
+	c.unavailable.Store(false)
 
 	return c.parseResponse(resp.Content, input)
 }
@@ -132,6 +218,17 @@ func (c *LLMClassifier) Classify(ctx context.Context, input string, memCtx *Memo
 func (c *LLMClassifier) ClassifyMulti(ctx context.Context, input string, ctxMemory []memory.MemoryResult) []*Intent {
 	if c.client == nil {
 		return nil
+	}
+
+	// Check cooldown before attempting per-request classification.
+	if c.unavailable.Load() {
+		c.unavailMu.RLock()
+		unavailUntil := c.unavailUntil
+		c.unavailMu.RUnlock()
+		if time.Now().Before(unavailUntil) {
+			return nil
+		}
+		c.unavailable.Store(false)
 	}
 
 	// Use a prompt that asks LLM to detect ALL intents
@@ -164,11 +261,19 @@ If no intents detected, return empty array [].`, input)
 		llm.WithTemperature(0.1),
 	)
 	if err != nil {
+		c.unavailable.Store(true)
+		c.unavailMu.Lock()
+		c.unavailUntil = time.Now().Add(c.cooldown)
+		c.unavailMu.Unlock()
 		c.logger.Debug("LLM multi-intent classification failed", "error", err)
 		return nil
 	}
 
 	if resp == nil || resp.Content == "" {
+		c.unavailable.Store(true)
+		c.unavailMu.Lock()
+		c.unavailUntil = time.Now().Add(c.cooldown)
+		c.unavailMu.Unlock()
 		return nil
 	}
 
@@ -209,6 +314,20 @@ If no intents detected, return empty array [].`, input)
 	}
 
 	return intents
+}
+
+// MarkUnavailable explicitly sets the classifier as unavailable, preventing
+// further classification attempts until the cooldown expires.
+func (c *LLMClassifier) MarkUnavailable() {
+	c.unavailable.Store(true)
+	c.unavailMu.Lock()
+	c.unavailUntil = time.Now().Add(c.cooldown)
+	c.unavailMu.Unlock()
+}
+
+// UnmarkUnavailable clears the unavailable flag, allowing immediate retries.
+func (c *LLMClassifier) UnmarkUnavailable() {
+	c.unavailable.Store(false)
 }
 
 func (c *LLMClassifier) buildClassificationPrompt(input string) string {

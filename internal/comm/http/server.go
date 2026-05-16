@@ -57,14 +57,16 @@ type MetricsService interface {
 type Server struct {
 	mu sync.RWMutex
 
-	config         ServerConfig
-	configService  *ConfigService
-	daemonCtrl     DaemonController
-	metricsService MetricsService
-	services       *services.ServiceRegistry
-	logger         *slog.Logger
-	server         *http.Server
-	running        bool
+	config          ServerConfig
+	configService   *ConfigService
+	daemonCtrl      DaemonController
+	metricsService  MetricsService
+	services        *services.ServiceRegistry
+	logger          *slog.Logger
+	server          *http.Server
+	running         bool
+	// FirewallStatsGetter is an optional callback that returns firewall stats.
+	FirewallStatsGetter func() map[string]any
 }
 
 // AgentInfo describes an agent for listing.
@@ -276,6 +278,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/bus/publish", s.handleBusPublish)
 	mux.HandleFunc("GET /api/v1/bus/stats", s.handleBusStats)
 
+	// Firewall stats endpoint
+	mux.HandleFunc("GET /api/v1/metrics/firewall", s.handleFirewallStats)
 }
 
 // middleware applies common middleware (CORS, logging, auth).

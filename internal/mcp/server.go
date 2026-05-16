@@ -12,20 +12,24 @@ import (
 
 // Server implements an MCP server that talks to meept-daemon via RPC.
 type Server struct {
-	input  io.Reader
-	output io.Writer
-	client transport.Client
-	logger *slog.Logger
+	input   io.Reader
+	bufRead *BufferedReader
+	output  io.Writer
+	client  transport.Client
+	logger  *slog.Logger
 }
 
 // NewServer creates a new MCP server reading from input and writing to output.
 // client may be nil for testing (tools will return errors).
+// A BufferedReader is created to persist the bufio.Reader across message loops.
 func NewServer(input io.Reader, output io.Writer, client transport.Client) *Server {
+	br := NewBufferedReader(input)
 	return &Server{
-		input:  input,
-		output: output,
-		client: client,
-		logger: slog.Default().With("component", "mcp-server"),
+		input:   input,
+		bufRead: br,
+		output:  output,
+		client:  client,
+		logger:  slog.Default().With("component", "mcp-server"),
 	}
 }
 
@@ -44,7 +48,7 @@ func (s *Server) Run() error {
 
 // processOne reads and handles a single JSON-RPC message.
 func (s *Server) processOne() error {
-	req, err := ReadMessage(s.input)
+	req, err := ReadMessageBuffered(s.bufRead)
 	if err != nil {
 		return err
 	}
@@ -173,10 +177,26 @@ func (s *Server) handleToolsCall(req *JSONRPCRequest) *JSONRPCResponse {
 		}
 	}
 
+	var text string
+	switch v := result.(type) {
+	case string:
+		text = v
+	case json.RawMessage:
+		text = string(v)
+	default:
+		// Marshal the result as JSON for proper formatting
+		data, err := json.Marshal(result)
+		if err != nil {
+			text = fmt.Sprintf("error marshaling result: %v", err)
+		} else {
+			text = string(data)
+		}
+	}
+
 	return &JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
-		Result:  mustMarshal(map[string]any{"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("%v", result)}}}),
+		Result:  mustMarshal(map[string]any{"content": []map[string]any{{"type": "text", "text": text}}}),
 	}
 }
 

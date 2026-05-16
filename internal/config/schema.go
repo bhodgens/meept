@@ -291,10 +291,12 @@ type LLMMetricsConfig struct {
 
 // BudgetConfig holds token budget settings.
 type BudgetConfig struct {
-	HourlyTokenLimit int     `json:"hourly_token_limit" toml:"hourly_token_limit"`
-	DailyTokenLimit  int     `json:"daily_token_limit"  toml:"daily_token_limit"`
-	RateLimitRPM     int     `json:"rate_limit_rpm"     toml:"rate_limit_rpm"`
-	Aggressiveness   float64 `json:"aggressiveness"     toml:"aggressiveness"`
+	HourlyTokenLimit   int     `json:"hourly_token_limit" toml:"hourly_token_limit"`
+	DailyTokenLimit    int     `json:"daily_token_limit"  toml:"daily_token_limit"`
+	RateLimitRPM       int     `json:"rate_limit_rpm"     toml:"rate_limit_rpm"`
+	Aggressiveness     float64 `json:"aggressiveness"     toml:"aggressiveness"`
+	PerTaskTokenLimit  int     `json:"per_task_token_limit"  toml:"per_task_token_limit"`   // max tokens per single task (0 = no cap)
+	PerSessionTokenLimit int   `json:"per_session_token_limit" toml:"per_session_token_limit"` // max tokens per single session (0 = no cap)
 }
 
 // MemoryBackend defines the storage backend for memory.
@@ -955,10 +957,12 @@ func DefaultConfig() *Config {
 		},
 		LLM: LLMConfig{
 			Budget: BudgetConfig{
-				HourlyTokenLimit: 100000,
-				DailyTokenLimit:  1000000,
-				RateLimitRPM:     30,
-				Aggressiveness:   0.5,
+				HourlyTokenLimit:     100000,
+				DailyTokenLimit:      1000000,
+				RateLimitRPM:         30,
+				Aggressiveness:       0.5,
+				PerTaskTokenLimit:    50000,    // 50% of hourly budget max per task
+				PerSessionTokenLimit: 100000,   // 100% of hourly budget max per session
 			},
 			Broker: LLMBrokerConfig{
 				MaxErrorRate:    0.10,
