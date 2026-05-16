@@ -235,7 +235,12 @@ func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (bl
 
 	// Check if Tirith is available (graceful degradation)
 	if !o.tirithScanner.IsAvailable(ctx) {
-		o.logger.Debug("Tirith not available, allowing command execution")
+		o.logger.Warn("Tirith not available, allowing command execution without security scan",
+			"command", truncateCommand(command),
+		)
+		o.logAuditEvent("tirith_unavailable", "warning", map[string]any{
+			"command": truncateCommand(command),
+		}, "tirith")
 		return false, false, "tirith scanner not available"
 	}
 
@@ -243,6 +248,12 @@ func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (bl
 	result := o.tirithScanner.Scan(ctx, command)
 	if result == nil {
 		// Scan failed - allow execution (graceful degradation)
+		o.logger.Warn("Tirith scan returned nil, allowing command execution",
+			"command", truncateCommand(command),
+		)
+		o.logAuditEvent("scan_failed", "warning", map[string]any{
+			"command": truncateCommand(command),
+		}, "tirith")
 		return false, false, ""
 	}
 
@@ -288,6 +299,10 @@ func (o *Orchestrator) ScanShellCommand(ctx context.Context, command string) (bl
 		return false, true, reason
 	}
 
+	// Command was clean - log at DEBUG level for audit trail
+	o.logger.Debug("Shell command scanned and allowed",
+		"command", truncateCommand(command),
+	)
 	return false, false, ""
 }
 

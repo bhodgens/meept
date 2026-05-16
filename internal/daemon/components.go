@@ -83,8 +83,9 @@ type Components struct {
 
 	// Memvid and multi-agent
 	MemvidClient  *memvid.Client
-	AgentRegistry *agent.AgentRegistry
-	Dispatcher    *agent.Dispatcher
+	AgentRegistry        *agent.AgentRegistry
+	Dispatcher         *agent.Dispatcher
+	CollaborativePlanner *agent.CollaborativePlanner
 
 	// Shadow training
 	ShadowManager *shadow.Manager
@@ -500,13 +501,13 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Register security hooks if security orchestrator is available
 	if c.SecurityOrchestrator != nil {
-		if beforeTC := agent.NewSecurityBeforeToolCall(c.SecurityOrchestrator); beforeTC != nil {
+		if beforeTC := agent.NewSecurityBeforeToolCall(c.SecurityOrchestrator, logger.With("hook", "security-before-tool")); beforeTC != nil {
 			hookRegistry.RegisterBeforeToolCall("security-before-tool", agent.HookPriorityCritical, beforeTC)
-			logger.Info("Registered security BeforeToolCall hook")
+			logger.Info("Registered security BeforeToolCall hook with comprehensive logging")
 		}
-		if transformCtx := agent.NewSecurityTransformContext(c.SecurityOrchestrator); transformCtx != nil {
+		if transformCtx := agent.NewSecurityTransformContext(c.SecurityOrchestrator, logger.With("hook", "security-transform")); transformCtx != nil {
 			hookRegistry.RegisterTransformContext("security-transform", agent.HookPriorityCritical, transformCtx)
-			logger.Info("Registered security TransformContext hook")
+			logger.Info("Registered security TransformContext hook with comprehensive logging")
 		}
 	}
 
@@ -892,8 +893,20 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		// Register template tools if template registry is available
 		registerTemplateTools(c.ToolRegistry, c.TemplateRegistry, logger)
 
+		// Create workspace manager for collaborative planning
+		workspaceManager := agent.NewWorkspaceManager(agent.DefaultWorkspaceConfig(), logger.With("component", "workspace-manager"))
+
+		// Create collaborative planner for programming task review/approval workflow
+		c.CollaborativePlanner = agent.NewCollaborativePlanner(
+			&llmDecomposer{llm: c.LLMClient, logger: logger.With("component", "llm-decomposer")},
+			c.LLMClient,
+			workspaceManager,
+			logger.With("component", "collaborative-planner"),
+		)
+		logger.Info("Collaborative planner initialized", "mode", "programming_task_review")
+
 		// Create chat handler with dispatcher for multi-agent routing
-		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, msgBus, logger)
+		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, c.Dispatcher, c.CollaborativePlanner, msgBus, logger)
 
 		// Wire step store for fetching step summaries in ACK and completion messages
 		if c.TaskRegistry != nil {
@@ -977,8 +990,20 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			logger.Info("Orchestrator initialized with strategic and tactical layers")
 		}
 	} else {
+		// Create workspace manager for collaborative planning
+		workspaceManager := agent.NewWorkspaceManager(agent.DefaultWorkspaceConfig(), logger.With("component", "workspace-manager"))
+
+		// Create collaborative planner for programming task review/approval workflow
+		c.CollaborativePlanner = agent.NewCollaborativePlanner(
+			&llmDecomposer{llm: c.LLMClient, logger: logger.With("component", "llm-decomposer")},
+			c.LLMClient,
+			workspaceManager,
+			logger.With("component", "collaborative-planner"),
+		)
+		logger.Info("Collaborative planner initialized", "mode", "programming_task_review")
+
 		// Create chat handler without dispatcher (single-agent mode)
-		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, msgBus, logger)
+		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, c.CollaborativePlanner, msgBus, logger)
 
 		// Wire step store for fetching step summaries in ACK and completion messages
 		if c.TaskRegistry != nil {
@@ -2816,3 +2841,50 @@ var (
 	_ web.JobsLister     = (*jobsListerAdapter)(nil)
 	_ web.Handler        = (*webHandlerAdapter)(nil)
 )
+
+// llmDecomposer implements agent.Planner interface using direct LLM calls for task decomposition
+type llmDecomposer struct {
+	llm    *llm.Client
+	logger *slog.Logger
+}
+
+func (d *llmDecomposer) Decompose(ctx context.Context, message string) ([]agent.TaskStep, error) {
+	systemPrompt := "You are a task planning expert. Break down requests into concrete numbered steps for software development or automation tasks."
+	userPrompt := fmt.Sprintf("Break down this task into numbered steps:\n\n%s", message)
+
+	resp, err := d.llm.Chat(ctx, []llm.ChatMessage{
+		{Role: llm.RoleSystem, Content: systemPrompt},
+		{Role: llm.RoleUser, Content: userPrompt},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("LLM decomposition failed: %w", err)
+	}
+
+	steps := []agent.TaskStep{}
+	lines := strings.Split(resp.Content, "\n")
+	stepNum := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		stepText := line
+		if len(line) > 2 && line[1] == '.' {
+			stepText = strings.TrimSpace(line[2:])
+		}
+		stepNum++
+		steps = append(steps, agent.TaskStep{
+			ID:          fmt.Sprintf("step-%d", stepNum),
+			Description: stepText,
+			DependsOn:   []string{},
+			ToolHint:    "coder",
+		})
+	}
+
+	if len(steps) == 0 {
+		steps = append(steps, agent.TaskStep{ID: "step-1", Description: message, DependsOn: []string{}, ToolHint: "coder"})
+	}
+
+	d.logger.Debug("Task decomposed", "steps", len(steps))
+	return steps, nil
+}

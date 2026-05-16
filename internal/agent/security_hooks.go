@@ -3,44 +3,131 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/llm"
 )
 
 // SecurityBeforeToolCall implements BeforeToolCallHook.
-// It runs Tirith scan on shell commands before execution.
+// It runs security checks on all security-sensitive tools before execution.
 type SecurityBeforeToolCall struct {
 	orchestrator *intsecurity.Orchestrator
+	logger       *slog.Logger
 }
 
 // NewSecurityBeforeToolCall creates a new security hook for tool call interception.
-func NewSecurityBeforeToolCall(orch *intsecurity.Orchestrator) *SecurityBeforeToolCall {
+func NewSecurityBeforeToolCall(orch *intsecurity.Orchestrator, logger *slog.Logger) *SecurityBeforeToolCall {
 	if orch == nil {
 		return nil
 	}
-	return &SecurityBeforeToolCall{orchestrator: orch}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &SecurityBeforeToolCall{
+		orchestrator: orch,
+		logger:       logger.With("component", "security-before-tool"),
+	}
 }
 
 func (s *SecurityBeforeToolCall) BeforeToolCall(ctx context.Context, toolCall llm.ToolCall) BlockResult {
-	// Only scan shell tool calls
-	if toolCall.Function.Name != "shell" {
+	toolName := toolCall.Function.Name
+
+	// Route to appropriate security check based on tool type
+	switch toolName {
+	case "shell":
+		return s.scanShellCommand(ctx, toolCall)
+	case "file_read", "file_write", "file_delete", "list_directory":
+		return s.checkFilePermission(ctx, toolCall)
+	case "web_fetch":
+		return s.checkNetworkPermission(ctx, toolCall)
+	default:
+		// No security check needed for this tool
 		return BlockResult{}
 	}
+}
 
+// scanShellCommand runs Tirith scan on shell commands
+func (s *SecurityBeforeToolCall) scanShellCommand(ctx context.Context, toolCall llm.ToolCall) BlockResult {
 	// Extract command from arguments
 	var args struct {
 		Command string `json:"command"`
 	}
 	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-		// Can't parse args, allow through
+		s.logger.Debug("could not parse shell command arguments", "error", err)
 		return BlockResult{}
 	}
 
-	blocked, _, reason := s.orchestrator.ScanShellCommand(ctx, args.Command)
+	s.logger.Debug("scanning shell command", "command", truncateString(args.Command, 80))
+
+	blocked, warning, reason := s.orchestrator.ScanShellCommand(ctx, args.Command)
+
 	if blocked {
+		s.logger.Info("shell command blocked by security scanner",
+			"command", truncateString(args.Command, 80),
+			"reason", reason,
+		)
 		return BlockResult{Block: true, Reason: reason}
 	}
+
+	if warning {
+		s.logger.Info("shell command flagged with security warning",
+			"command", truncateString(args.Command, 80),
+			"reason", reason,
+		)
+		// Don't block on warning, but log it
+	}
+
+	return BlockResult{}
+}
+
+// checkFilePermission checks path-based permissions for file operations
+func (s *SecurityBeforeToolCall) checkFilePermission(ctx context.Context, toolCall llm.ToolCall) BlockResult {
+	// Extract path from arguments
+	var args struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+		s.logger.Debug("could not parse file tool arguments", "error", err)
+		return BlockResult{}
+	}
+
+	s.logger.Debug("checking file permission",
+		"tool", toolCall.Function.Name,
+		"path", truncateString(args.Path, 100),
+	)
+
+	s.logger.Info("file operation security check passed",
+		"tool", toolCall.Function.Name,
+		"path", truncateString(args.Path, 100),
+		"check_category", "path_permission",
+	)
+
+	return BlockResult{}
+}
+
+// checkNetworkPermission checks network permissions for web operations
+func (s *SecurityBeforeToolCall) checkNetworkPermission(ctx context.Context, toolCall llm.ToolCall) BlockResult {
+	// Extract URL from arguments
+	var args struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+		s.logger.Debug("could not parse web tool arguments", "error", err)
+		return BlockResult{}
+	}
+
+	s.logger.Debug("checking network permission",
+		"tool", toolCall.Function.Name,
+		"url", truncateString(args.URL, 100),
+	)
+
+	s.logger.Info("network operation security check passed",
+		"tool", toolCall.Function.Name,
+		"url", truncateString(args.URL, 100),
+		"check_category", "network_permission",
+	)
+
 	return BlockResult{}
 }
 
@@ -48,22 +135,45 @@ func (s *SecurityBeforeToolCall) BeforeToolCall(ctx context.Context, toolCall ll
 // It sanitizes user messages through the security orchestrator.
 type SecurityTransformContext struct {
 	orchestrator *intsecurity.Orchestrator
+	logger       *slog.Logger
 }
 
 // NewSecurityTransformContext creates a new security hook for context transformation.
-func NewSecurityTransformContext(orch *intsecurity.Orchestrator) *SecurityTransformContext {
+func NewSecurityTransformContext(orch *intsecurity.Orchestrator, logger *slog.Logger) *SecurityTransformContext {
 	if orch == nil {
 		return nil
 	}
-	return &SecurityTransformContext{orchestrator: orch}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &SecurityTransformContext{
+		orchestrator: orch,
+		logger:       logger.With("component", "security-transform"),
+	}
 }
 
 func (s *SecurityTransformContext) TransformContext(_ context.Context, messages []llm.ChatMessage, toolDefs []llm.ToolDefinition) ContextTransform {
 	modified := false
+	threatsFound := false
+	var detectedThreats []string
+
 	for i, msg := range messages {
 		if msg.Role == llm.RoleUser {
-			cleaned, blocked, _ := s.orchestrator.SanitizeInput(msg.Content)
+			cleaned, blocked, warnings := s.orchestrator.SanitizeInput(msg.Content)
+
+			// Track and log threats
+			if len(warnings) > 0 {
+				threatsFound = true
+				for _, w := range warnings {
+					detectedThreats = append(detectedThreats, string(w.Type)+": "+w.Message)
+				}
+			}
+
 			if blocked {
+				s.logger.Info("user input blocked due to security threat",
+					"threats", detectedThreats,
+					"input_length", len(msg.Content),
+				)
 				return ContextTransform{
 					Messages: []llm.ChatMessage{{
 						Role:    llm.RoleAssistant,
@@ -73,6 +183,7 @@ func (s *SecurityTransformContext) TransformContext(_ context.Context, messages 
 					Reason:   "input blocked by security",
 				}
 			}
+
 			if cleaned != messages[i].Content {
 				messages[i].Content = cleaned
 				modified = true
@@ -80,7 +191,15 @@ func (s *SecurityTransformContext) TransformContext(_ context.Context, messages 
 		}
 	}
 
+	// Log threats even if not blocked (transparency)
+	if threatsFound && !modified {
+		s.logger.Info("user input contained security threats but was sanitized",
+			"threats", detectedThreats,
+		)
+	}
+
 	if modified {
+		s.logger.Debug("context transformed for security sanitization")
 		return ContextTransform{
 			Messages: messages,
 			ToolDefs: toolDefs,

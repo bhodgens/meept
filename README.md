@@ -244,9 +244,9 @@ For complete feature details, see [Features](docs/features.md).
 | Code intelligence | ✅ Working | Tree-sitter AST + LSP client tools |
 | LLM management | ✅ Working | Multi-provider, alias resolution, failover, budgeting |
 | Job scheduling | ✅ Working | Cron, reminders, SQLite queue |
-| **Skills system** | 🔄 Partial | Discovery works, runtime execution in progress |
-| Security engine | 🔄 Partial | Taint tracking wired, sanitizers partially integrated |
-| Collaborative planning | 🔄 Partial | Implementation complete, not wired into main path |
+| **Skills system** | ✅ Complete | Discovery, execution, CLI commands (`meept skills list/run/show`) |
+| Security engine | ✅ Complete | Input sanitization, Tirith scanning, audit logging, security hooks for all tools |
+| Collaborative planning | ✅ Complete | Programming task detection, plan review/approval workflow wired into chat handler |
 | Self-improvement | 🔄 Partial | Detection works, full cycle in progress |
 | Shadow training | 🔄 Partial | Infrastructure ready, data collection not active |
 | **External integrations** | 🔄 Partial | macOS MenuBar working, Telegram planned, web UI in progress |

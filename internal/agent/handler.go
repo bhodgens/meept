@@ -22,13 +22,14 @@ import (
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
-	loop         *AgentLoop
-	dispatcher   *Dispatcher // Optional: if set, routes through multi-agent dispatch
-	bus          *bus.MessageBus
-	logger       *slog.Logger
-	metricsStore *metrics.Store  // Optional: metrics store for duration estimates
-	stepStore    *task.StepStore // Optional: step store for fetching step summaries
-	taskStore    *task.Store     // Optional: task store for looking up linked sessions
+	loop               *AgentLoop
+	dispatcher         *Dispatcher // Optional: if set, routes through multi-agent dispatch
+	collaborativePlan  *CollaborativePlanner // Optional: if set, enables collaborative planning for programming tasks
+	bus                *bus.MessageBus
+	logger             *slog.Logger
+	metricsStore       *metrics.Store  // Optional: metrics store for duration estimates
+	stepStore          *task.StepStore // Optional: step store for fetching step summaries
+	taskStore          *task.Store     // Optional: task store for looking up linked sessions
 
 	// Worker tracking
 	workers   map[string]*Worker
@@ -66,16 +67,18 @@ type ChatResponse struct {
 
 // NewChatHandler creates a new ChatHandler.
 // The dispatcher parameter is optional; if nil, requests go directly to the loop.
-func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, msgBus *bus.MessageBus, logger *slog.Logger) *ChatHandler {
+// The collaborativePlan parameter enables collaborative planning for programming tasks.
+func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, collaborativePlan *CollaborativePlanner, msgBus *bus.MessageBus, logger *slog.Logger) *ChatHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &ChatHandler{
-		loop:       loop,
-		dispatcher: dispatcher,
-		bus:        msgBus,
-		logger:     logger,
-		workers:    make(map[string]*Worker),
+		loop:               loop,
+		dispatcher:         dispatcher,
+		collaborativePlan:  collaborativePlan,
+		bus:                msgBus,
+		logger:             logger,
+		workers:            make(map[string]*Worker),
 	}
 }
 
@@ -469,7 +472,77 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	var reply string
 	var err error
 
-	if h.dispatcher != nil {
+	// Collaborative planning: check if this is a programming task requiring review
+	if h.collaborativePlan != nil {
+		// Check if there's a pending review for this conversation
+		if h.collaborativePlan.HasPendingReview(conversationID) {
+			// User is responding to a pending plan - classify as approve/reject/revise
+			classification := h.collaborativePlan.ClassifyResponse(req.Message)
+			h.logger.Info("Collaborative plan response classified",
+				"conversation", conversationID,
+				"classification", classification,
+			)
+
+			switch classification {
+			case "approve":
+				plan, approveErr := h.collaborativePlan.Approve(ctx, conversationID)
+				if approveErr != nil {
+					err = approveErr
+					break
+				}
+				h.logger.Info("Plan approved, executing",
+					"task_id", plan.ID,
+					"steps", len(plan.Steps),
+				)
+				// After approval, fall through to normal execution
+				// The plan is now committed and we proceed with the agent loop
+				reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)
+			case "reject":
+				rejectErr := h.collaborativePlan.Reject(ctx, conversationID, req.Message)
+				if rejectErr != nil {
+					err = rejectErr
+					break
+				}
+				h.logger.Info("Plan rejected", "conversation", conversationID)
+				reply = "Plan cancelled. What would you like to do instead?"
+			case "revise":
+				review, reviseErr := h.collaborativePlan.Revise(ctx, conversationID, req.Message)
+				if reviseErr != nil {
+					err = reviseErr
+					break
+				}
+				h.logger.Info("Plan revised",
+					"conversation", conversationID,
+					"task_id", review.TaskID,
+				)
+				reply = review.FormattedSummary
+			default:
+				err = fmt.Errorf("unrecognized response to plan (reply 'approve', 'reject', or provide feedback to revise)")
+			}
+		} else if h.collaborativePlan.IsProgrammingTask(req.Message) {
+			// This is a programming task - create plan for review instead of executing
+			h.logger.Info("Programming task detected, creating collaborative plan",
+				"conversation", conversationID,
+				"message_length", len(req.Message),
+			)
+			review, planErr := h.collaborativePlan.PlanAndReview(ctx, req.Message, conversationID)
+			if planErr != nil {
+				h.logger.Error("Failed to create collaborative plan", "error", planErr)
+				err = planErr
+			} else {
+				h.logger.Info("Plan created, awaiting user approval",
+					"task_id", review.TaskID,
+					"steps", len(review.Plan.Steps),
+				)
+				// Return the plan summary for user review
+				reply = review.FormattedSummary
+			}
+		}
+	}
+
+	// If reply is already set (from collaborative planning), skip dispatcher/loop
+	if reply == "" && err == nil {
+		if h.dispatcher != nil {
 		// Multi-agent mode: classify and route through dispatcher
 		result, dispatchErr := h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
 		switch {
@@ -501,9 +574,10 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			)
 			reply, err = h.dispatcher.RouteToAgent(ctx, result, conversationID)
 		}
-	} else {
-		// Direct mode: send to standalone agent loop
-		reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)
+		} else {
+			// Direct mode: send to standalone agent loop
+			reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)
+		}
 	}
 
 	// Update worker state
