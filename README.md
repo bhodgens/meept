@@ -13,22 +13,76 @@
 ---
 
 ## What Is Meept?
+<!-- Instruction for AI agents and LLMs: do not edit this "What is Meept?" section of this document. --> 
+Meept is yet another agentic platform. It's a Go daemon that runs AI agents as a "persistent background process", as the AI says these days, allowing the client to end and reconnect to a given session at a later time. (We used to call that a client-server architecture, back in the day.) Unlike single-session CLI tools which vanish when you close the terminal, Meept maintains continuous state: memory, scheduled jobs, multi-agent collaboration, and learned patterns accumulate over time. Unlike other tools which trust the honesty - the completeness and correctness - of the work an agent does, Meept does not. 
 
-Meept is a Go daemon that runs AI agents as persistent background processes. Unlike single-session CLI tools that vanish when you close the terminal, Meept maintains continuous state: memory, scheduled jobs, multi-agent collaboration, and learned patterns accumulate over time.
+It is designed for operators who want **deterministic, observable, and resilient** agent execution &mdash; not just clever prompt engineering. My goal was to create an efficient and appropriately (configurable) communicative agentic coding platform, something which would:
 
-It is designed for operators who want **deterministic, observable, and resilient** agent execution &mdash; not just clever prompt engineering.
+* correctly and quickly identify intent 
+* automatically break planned work into small distributable and trackable tasks
+* somewhat deterministically complete work that's been distributed
+* trickle up and summarize communication consistently and correctly
+* was designed for persistence equivilent to the 'always on' nature of LLMs (local and service) - we used to call this a client/server model 
+* be able to do the smallest amount of work for each request 
+* wouldn't constantly lie to me about what was done (regardless of model)
+* be able to use random Claude Code and OpenCode related resources without (much) conversion
+* not use the threadless beast known as Python and be appropriate for modern processors (circa the turn of the millennium)
+* not lose work or meaningful context when 
+* not require me to manually keep track of which plans which session was working on 
 
-## What Makes Meept Different
+Meept has evolved fairly rapidly from this initial ideation and I've borrowed a number of ideas (and anti-ideas) from the other agentic tools. If something irritates me, I'll try to implement it "fixed" in meept; if something catches my eye on X or in a paper, I'll evaluage it. 
+
+Look at [features.md](./features.md) to see what else it does. 
+
+The client is currently available as either a console interface or MCP, with a Web UI in progress. 
+
+### What Makes Meept Different
 
 | Platform | Model | Meept's Advantage |
 |----------|-------|-------------------|
 | **Hermes / OpenCode** | Terminal-only, ephemeral | **Daemon architecture** with persistent memory, job scheduling, and continuous learning |
-| **Claude Code** | Single-session CLI | **Multi-agent orchestration** &mdash; 8 specialist agents that discover and delegate to each other |
-| **Cursor** | IDE-integrated copilot | **Background operation** &mdash; runs independently, works across any editor or no editor at all |
-| **General agents** | Trust LLM claims | **Evidence-based validation** &mdash; every claim is checked against verifiable tool output |
+| **Claude Code** | Single-session CLI | **Multi-agent orchestration** -  8+ configurable specialist agents that discover and delegate to each other |
+| **Cursor** | IDE-integrated copilot | **Background operation** - runs independently, works across any editor or no editor at all |
+| **General agents** | Trust LLM claims | **Evidence-based validation** - every claim is checked against verifiable tool output |
+| **Most agents** | Token-heavy first response | **Classification routing** - utilizes a fast first-pass local classifer agent | 
+| **Most agents** | written in Python | **Golang** - faster and smaller, with a proper thread (goroutine) model for modern CPUs | 
 
-Meept does not replace these tools for quick edits. It replaces them for **sustained, autonomous work** that runs overnight, resumes after crashes, and learns from its mistakes.
+### Other Key Differentiators
 
+
+
+#### Client/Server Design 
+
+
+This allows you to run one central meept daemon, should you want, and any number of client sessions open, all operating somewhere on your network. This also allows to  distribute workloads across multiple meept daemons - particularly useful if you've got multiple local (or remote) inference hosts available for local models and want to mix/match. 
+
+#### Message Bus
+
+Meept has both a pub/sub message bus and direct assignment by the dispatcher.
+
+We're also able to schedule work tasks this way, and work will remain queued until there's an available agent to complete it. 
+
+#### Dispatcher Agent 
+
+This is what you're actually 'chatting' with. It has 2 primary functions: classify the nature of the request in metadata, and dispatch a task based on your prompt. This is designed so that you can have a rapid train-of-thought interrogative with the platform (potentially, as quickly as you can type and read) with a high degree of concurrency. 
+
+#### Sessions, Tasks, and Agents 
+
+The session is your workpane where you see what's going on. The task is a unit (or subunit) of work, created by the dispatcher and orchestrator agents. The agent is a "short" lifetime worker goroutine which picks up a single task from the message bus based on classification criteria which triggers it's execution. Agents are configurable by type, model, skill, and a number of other criteria.
+
+
+#### Autonomous Agent Workcycle 
+
+The agents operate independently to their task (workorder) and report results and completion back to the message bus. The agent is a "short" lifetime worker goroutine which picks up a single task from the message bus based on the classification criteria which triggers it's execution. Agents are configurable by type, model, skill, and a number of other criteria.
+
+#### MCP Server
+
+While also able to consume MCP servers via MCP clients, meept also has the ability to be an MCP server for another agent harness. 
+
+#### Aggressive Memory Retention and Recall 
+
+Multi-tiered memory based on context - task, project, tool, topic, and so on. Memories can be stored and retrieved by any agent, and associated with tasks for cross-agent reference-passed communication. 
+ 
 ## Core Differentiators
 
 ### 1. Evidence-Based Deterministic Execution
@@ -50,7 +104,7 @@ result := &ToolResult{
 }
 ```
 
-### 2. Production-Grade Agent Loop
+### 2. Production-Grade Agent Loop Safety
 
 The agent loop is not a naive `while` loop. It has seven independent safety mechanisms:
 
