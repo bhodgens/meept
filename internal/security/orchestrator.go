@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3" //nolint:revive // blank import for side effects
+	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
 // OrchestratorConfig holds configuration for the security orchestrator.
@@ -168,6 +168,18 @@ func (o *Orchestrator) SanitizeInput(text string) (sanitized string, ok bool, wa
 			"was_modified", result.WasModified,
 		)
 		o.logAuditEvent("input_sanitized", "warning", map[string]any{
+			"threats":     result.ThreatsDetected,
+			"text_length": len(text),
+		}, "sanitizer")
+	}
+
+	// FIX #SECURITY: Log warnings even if input wasn't blocked or modified
+	// This ensures sanitizer warnings are in the audit trail
+	if !blocked && !result.WasModified && len(result.ThreatsDetected) > 0 {
+		o.logger.Debug("Input triggered warnings (not blocked)",
+			"warnings", len(result.ThreatsDetected),
+		)
+		o.logAuditEvent("input_warning", "info", map[string]any{
 			"threats":     result.ThreatsDetected,
 			"text_length": len(text),
 		}, "sanitizer")

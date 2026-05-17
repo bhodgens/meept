@@ -83,6 +83,10 @@ type DetectionConfig struct {
 
 	// HistorySize: how many iterations to keep in history
 	HistorySize int
+
+	// MaxNudgeAttempts: maximum consecutive empty-content nudges allowed
+	// before giving up. Defaults to 3.
+	MaxNudgeAttempts int
 }
 
 // DefaultDetectionConfig returns sensible detection defaults.
@@ -91,6 +95,7 @@ func DefaultDetectionConfig() DetectionConfig {
 		CycleThreshold:       3, // 3 similar tool calls in a row
 		ConvergenceThreshold: 3, // 3 similar responses in a row
 		HistorySize:          10,
+		MaxNudgeAttempts:     3, // max empty nudges before failing
 	}
 }
 
@@ -426,6 +431,9 @@ type AgentLoop struct {
 
 	// Watchdog for stuck/timeout monitoring
 	watchdog *Watchdog
+
+	// Nudge attempt tracking for empty responses
+	nudgeAttempts int
 
 	// Agent identity
 	agentID string
@@ -2499,10 +2507,22 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Check for empty response (no tool calls, no content) - nudge the model
 		if strings.TrimSpace(response.Content) == "" {
+			l.nudgeAttempts++
 			l.logger.Warn("LLM returned empty content, nudging for more information",
 				"iteration", iteration,
+				"nudge_attempts", l.nudgeAttempts,
+				"max_nudges", l.detectionConfig.MaxNudgeAttempts,
 				"conversation", conversationID,
 			)
+
+			// FIX #0037/#0039: Cap nudge attempts to avoid infinite loops
+			if l.nudgeAttempts >= l.detectionConfig.MaxNudgeAttempts {
+				l.logger.Warn("Max nudge attempts reached, returning error to user",
+					"nudge_attempts", l.nudgeAttempts,
+					"conversation", conversationID,
+				)
+				return "", fmt.Errorf("agent failed to produce output after %d attempts", l.nudgeAttempts)
+			}
 			// Add a nudge message and continue the loop
 			conv.AddAssistantMessage("[empty response - waiting for content]")
 			conv.AddUserMessage("[system: Your response was empty. Please provide a substantive answer or explanation. If you intended to use tools, include tool calls in your response.]")
@@ -2529,6 +2549,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 
 		// Case 2: LLM returned text response (no tool calls) - check for follow-ups
+		// Reset nudge counter since we got a valid response
+		l.nudgeAttempts = 0
+
 		// Check follow-up queue before returning
 		if l.queue != nil {
 			if followMsgs := l.queue.DrainFollowUp(); len(followMsgs) > 0 {

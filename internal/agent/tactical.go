@@ -586,15 +586,17 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		promoted, err := ts.stepStore.PromoteReadySteps(step.TaskID)
 		if err != nil {
 			ts.logger.Error("Failed to promote ready steps", "error", err)
-		} else if len(promoted) > 0 {
+		}
+		if len(promoted) > 0 {
 			ts.logger.Info("Promoted newly unblocked steps",
 				"task_id", step.TaskID,
 				"count", len(promoted),
 			)
-			// Schedule the newly unblocked steps
-			if err := ts.ScheduleReadySteps(ctx, step.TaskID); err != nil {
-				ts.logger.Error("Failed to schedule unblocked steps", "error", err)
-			}
+		}
+		// FIX #0024: Always schedule ready steps after job completion (not just newly promoted)
+		// This ensures semaphore-blocked steps get re-scheduled when slots free up
+		if err := ts.ScheduleReadySteps(ctx, step.TaskID); err != nil {
+			ts.logger.Error("Failed to schedule ready steps", "error", err)
 		}
 	}
 
@@ -994,6 +996,14 @@ func (ts *TacticalScheduler) isRateLimitError(errMsg string) bool {
 // isRetryableError checks if an error is transient and worth retrying.
 // This includes rate limits, timeouts, network errors, and other temporary failures.
 func (ts *TacticalScheduler) isRetryableError(errMsg string) bool {
+	// Non-retryable errors should never be retried (FIX #0042)
+	if strings.Contains(errMsg, "token budget exceeded") ||
+		strings.Contains(errMsg, "budget exceeded") ||
+		strings.Contains(errMsg, "context size") ||
+		strings.Contains(errMsg, "context window") {
+		return false
+	}
+
 	// Always retry rate limits
 	if ts.isRateLimitError(errMsg) {
 		return true

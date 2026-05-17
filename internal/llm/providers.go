@@ -80,19 +80,25 @@ func LoadProvidersConfig(path string) (*ProvidersConfig, error) {
 }
 
 // LoadProvidersConfigDefault loads providers config from the default locations.
+// Priority: user config (~/.meept/models.json5) > project config (config/models.json5)
 func LoadProvidersConfigDefault() (*ProvidersConfig, error) {
-	// Try project-local first
-	if _, err := os.Stat("config/models.json5"); err == nil {
-		return LoadProvidersConfig("config/models.json5")
-	}
-
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configPath := filepath.Join(homeDir, ".meept", "models.json5")
-	return LoadProvidersConfig(configPath)
+	// Try user config first (FIX #0001 - user config takes precedence)
+	userPath := filepath.Join(homeDir, ".meept", "models.json5")
+	if _, err := os.Stat(userPath); err == nil {
+		return LoadProvidersConfig(userPath)
+	}
+
+	// Fall back to project-local config
+	if _, err := os.Stat("config/models.json5"); err == nil {
+		return LoadProvidersConfig("config/models.json5")
+	}
+
+	return nil, fmt.Errorf("models.json5 not found in ~/.meept/ or config/")
 }
 
 // expandEnvVars expands environment variables in a string.

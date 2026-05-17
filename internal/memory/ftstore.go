@@ -113,6 +113,13 @@ func (s *SQLiteFTSStore) initSchema(ctx context.Context) error {
 			}
 		}
 
+		// FIX #0020: Run schema migrations for backward compatibility
+		// This adds columns that may be missing from older database versions
+		if err := s.migrateSchema(ctx, db); err != nil {
+			s.logger.Warn("Schema migration had issues", "error", err)
+			// Continue anyway - the table exists, just may lack some columns
+		}
+
 		// Try to create FTS5 virtual table
 		if len(s.config.Schema) > 1 {
 			_, err := db.ExecContext(ctx, s.config.Schema[1])
@@ -140,6 +147,50 @@ func (s *SQLiteFTSStore) initSchema(ctx context.Context) error {
 
 		return nil
 	})
+}
+
+// migrateSchema applies schema migrations to existing tables.
+// FIX #0020: Adds columns that may be missing from older database versions.
+func (s *SQLiteFTSStore) migrateSchema(ctx context.Context, db *sql.DB) error {
+	// Check and add last_accessed_at column if missing (episodic/task memory)
+	columns := []string{"last_accessed_at", "parent_id", "is_current", "version"}
+	for _, col := range columns {
+		if err := s.addColumnIfMissing(ctx, db, s.config.TableName, col, "TEXT", "DEFAULT ''"); err != nil {
+			s.logger.Debug("Column migration skipped", "column", col, "error", err)
+		}
+	}
+	return nil
+}
+
+// addColumnIfMissing adds a column to a table if it doesn't exist.
+func (s *SQLiteFTSStore) addColumnIfMissing(ctx context.Context, db *sql.DB, tableName, columnName, colType, defaultVal string) error {
+	// Check if column exists by querying all columns
+	query := fmt.Sprintf("PRAGMA table_info(%s)", tableName)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, dtype, dflt string
+		var notnull, pk int
+		if err := rows.Scan(&cid, &name, &dtype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == columnName {
+			return nil // Column exists, nothing to do
+		}
+	}
+
+	// Column doesn't exist, add it
+	alterSQL := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s %s", tableName, columnName, colType, defaultVal)
+	if _, err := db.ExecContext(ctx, alterSQL); err != nil {
+		return fmt.Errorf("failed to add column %s: %w", columnName, err)
+	}
+	s.logger.Info("Schema migration: added column", "table", tableName, "column", columnName)
+	return nil
 }
 
 // GetPool returns the connection pool for custom queries.

@@ -38,6 +38,28 @@ type DetectionConfig struct {
 	SlowQueryThreshold time.Duration `json:"slow_query_threshold"`
 	// Metrics to monitor
 	Metrics []string `json:"metrics"`
+
+	// Tool-scanning toggles (FIX #0056 - wire from schema)
+	ScanPytest      bool `json:"scan_pytest"`
+	ScanLint        bool `json:"scan_lint"`
+	ScanTypeCheck   bool `json:"scan_type_check"`
+	ScanRuntimeLogs bool `json:"scan_runtime_logs"`
+
+	// Runtime log scanning
+	LogFile          string `json:"log_file"`
+	LogLookbackHours int    `json:"log_lookback_hours"`
+
+	// Tool arguments
+	PytestArgs []string `json:"pytest_args"`
+	MypyArgs   []string `json:"mypy_args"`
+	RuffArgs   []string `json:"ruff_args"`
+
+	// Code-scanning error patterns (applied in ScanCode)
+	CodeErrorPatterns []string `json:"code_error_patterns"`
+
+	// TODO de-duplication
+	MaxCodeIssuesPerFile int  `json:"max_code_issues_per_file"`
+	DeduplicateTODOs     bool `json:"deduplicate_todos"`
 }
 
 // AIInfraConfig holds AI infrastructure settings.
@@ -110,6 +132,15 @@ func DefaultConfig() Config {
 				"latency_p99",
 				"memory_usage",
 			},
+			// FIX #0056 - Tool scanning defaults
+			ScanPytest:         true,
+			ScanLint:           true,
+			ScanTypeCheck:      true,
+			ScanRuntimeLogs:    true,
+			LogFile:            filepath.Join(homeDir, ".meept", "meept.log"),
+			LogLookbackHours:   24,
+			MaxCodeIssuesPerFile: 20,
+			DeduplicateTODOs:   true,
 		},
 		AIInfra: AIInfraConfig{
 			AnalysisModel:       "claude-sonnet-4-5-20250929",

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3" // sqlite3 driver registration
+	_ "modernc.org/sqlite" // sqlite3 driver registration
 )
 
 // SQLiteStore implements Store using SQLite for persistence.

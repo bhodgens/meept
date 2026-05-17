@@ -20,7 +20,7 @@ import (
 const (
 	DefaultShutdownTimeout = 30 * time.Second // Graceful shutdown deadline
 	readIdleTimeout        = 5 * time.Minute  // Max time waiting for a request
-	writeTimeout           = 30 * time.Second // Max time to write response
+	writeTimeout           = 5 * time.Minute  // Max time to write response (FIX #0056: was 30s, increased for long-running ops like selfimprove.cycle)
 	operationTimeout       = 10 * time.Minute // Max time for a single RPC operation
 )
 
@@ -44,6 +44,10 @@ type Server struct {
 	// FirewallStatsGetter is an optional callback that returns firewall stats.
 	// When set, stats are included in the status response.
 	FirewallStatsGetter func() map[string]any
+
+	// BudgetStatusGetter is an optional callback that returns budget status.
+	// Used by the status handler to report actual token usage (FIX #0031/#0035).
+	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int)
 
 	// Connection tracking
 	connMu   sync.Mutex
@@ -361,17 +365,23 @@ func (s *Server) registerBuiltinHandlers() {
 		s.mu.RUnlock()
 
 		result := map[string]any{
-			RPCKeyStatus:             "running",
-			"version":            "0.2.0-go",
-			"uptime_seconds":     time.Since(s.startTime).Seconds(),
-			RPCKeyModel:          s.defaultModel,
-			"default_model":      s.defaultModel,
-			"tokens_used":        0,
-			"tokens_remaining":   100000,
-			"budget_used":        0.0,
-			"budget_remaining":   10.0,
+			RPCKeyStatus:           "running",
+			"version":          "0.2.0-go",
+			"uptime_seconds":   time.Since(s.startTime).Seconds(),
+			RPCKeyModel:        s.defaultModel,
+			"default_model":    s.defaultModel,
+			"tokens_used":      0,
+			"tokens_remaining": 100000,
+			"budget_used":      0.0,
+			"budget_remaining": 10.0,
 			"registered_methods": methods,
-			"bus_subscribers":    busStats["_total"],
+			"bus_subscribers":  busStats["_total"],
+			"rpm_current":      0,
+			"rpm_limit":        0,
+			"hourly_used":      0,
+			"hourly_remaining": 0,
+			"daily_used":       0,
+			"daily_remaining":  0,
 		}
 
 		// Include firewall stats if a getter is configured
@@ -379,6 +389,17 @@ func (s *Server) registerBuiltinHandlers() {
 			if fwStats := s.FirewallStatsGetter(); fwStats != nil {
 				result["firewall"] = fwStats
 			}
+		}
+
+		// Include budget stats if a getter is configured (FIX #0031/#0035)
+		if s.BudgetStatusGetter != nil {
+			hu, hr, du, dr, rc, rl := s.BudgetStatusGetter()
+			result["tokens_used"] = hu
+			result["tokens_remaining"] = hr
+			result["daily_used"] = du
+			result["daily_remaining"] = dr
+			result["rpm_current"] = rc
+			result["rpm_limit"] = rl
 		}
 
 		return result, nil

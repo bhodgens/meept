@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -22,16 +23,71 @@ Examples:
   meept memory                    # List recent memories
   meept memory "project setup"    # Search for specific memories
   meept memory -n 50 "config"     # Search with custom limit`,
+	}
+
+	cmd.AddCommand(newMemoryExportCmd())
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 10, "Maximum number of results")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		query := ""
+		if len(args) > 0 {
+			query = strings.Join(args, " ")
+		}
+		return runMemorySearch(query, limit)
+	}
+
+	return cmd
+}
+
+func newMemoryExportCmd() *cobra.Command {
+	var format, category string
+
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export memories",
+		Long: `Export memories in a specified format.
+
+Formats: json, markdown
+Categories: episodic, task, personality (or omit for all)
+
+Examples:
+  meept memory export                  # Export all memories as JSON
+  meept memory export -f markdown      # Export in markdown format
+  meept memory export -c episodic      # Export only episodic memories`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			query := ""
-			if len(args) > 0 {
-				query = strings.Join(args, " ")
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
 			}
-			return runMemorySearch(query, limit)
+			defer client.Close()
+
+			params := map[string]string{
+				"format":   format,
+				"category": category,
+			}
+
+			rawResult, err := client.Call("memory.export", params)
+			if err != nil {
+				return fmt.Errorf("failed to export memories: %w", err)
+			}
+
+			var result map[string]any
+			if err := json.Unmarshal(rawResult, &result); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			if errMsg, ok := result["error"].(string); ok && errMsg != "" {
+				return fmt.Errorf("%s", errMsg)
+			}
+
+			count, _ := result["count"].(float64)
+			fmt.Printf("Exported %d memories\n", int(count))
+			return nil
 		},
 	}
 
-	cmd.Flags().IntVarP(&limit, "limit", "n", 10, "Maximum number of results")
+	cmd.Flags().StringVarP(&format, "format", "f", "json", "Export format: json, markdown")
+	cmd.Flags().StringVarP(&category, "category", "c", "", "Filter by category")
 
 	return cmd
 }

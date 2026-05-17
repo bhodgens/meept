@@ -12,7 +12,7 @@ import (
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // TestOrchestrator_SubscriptionSetup verifies that the Orchestrator

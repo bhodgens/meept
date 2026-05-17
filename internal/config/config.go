@@ -187,6 +187,7 @@ type ProviderOptions struct {
 	BaseURL string `json:"baseURL"`
 	APIKey  string `json:"apiKey"` //nolint:gosec // field name, not a secret
 	Timeout int    `json:"timeout"`
+	NoAuth  bool   `json:"noAuth"` // FIX #0004 - true for providers that don't require API key (e.g., local LLMs)
 }
 
 // Model represents a model configuration.
@@ -238,18 +239,25 @@ func LoadModelsConfig(path string) (*ModelsConfig, error) {
 }
 
 // LoadModelsConfigDefault loads models config from the default location.
+// Priority: user config (~/.meept/models.json5) > project config (config/models.json5)
 func LoadModelsConfigDefault() (*ModelsConfig, error) {
-	// Try project-local first
-	if _, err := os.Stat("config/models.json5"); err == nil {
-		return LoadModelsConfig("config/models.json5")
-	}
-
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	return LoadModelsConfig(filepath.Join(homeDir, ".meept", "models.json5"))
+	// Try user config first (FIX #0001 - user config takes precedence)
+	userPath := filepath.Join(homeDir, ".meept", "models.json5")
+	if _, err := os.Stat(userPath); err == nil {
+		return LoadModelsConfig(userPath)
+	}
+
+	// Fall back to project-local config
+	if _, err := os.Stat("config/models.json5"); err == nil {
+		return LoadModelsConfig("config/models.json5")
+	}
+
+	return nil, fmt.Errorf("models.json5 not found in ~/.meept/ or config/")
 }
 
 // StripJSON5Comments removes // and /* */ comments from JSON5 content.

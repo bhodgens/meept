@@ -182,6 +182,15 @@ func (p *ProxyHandler) makeProxy(requestTopic, responseTopic string, timeout tim
 						return
 					}
 					if resp.ReplyTo == msgID {
+						// FIX #0038: Validate response topic to prevent cross-talk
+						if resp.Topic != "" && resp.Topic != responseTopic {
+							slog.Debug("proxy: discarding response from wrong topic",
+								"expected", responseTopic,
+								"actual", resp.Topic,
+								"msgID", msgID,
+							)
+							continue
+						}
 						select {
 						case respChan <- resp:
 						default:
@@ -253,7 +262,9 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	subID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
 
 	// Create cancellable context for cleanup when client disconnects
-	subCtx, cancelFunc := context.WithCancel(ctx)
+	// FIX #0051: Use context.Background() instead of ctx to prevent
+	// subscription from being killed when the RPC operation context completes.
+	subCtx, cancelFunc := context.WithCancel(context.Background())
 
 	// Create internal subscription state
 	sub := &busSubscription{

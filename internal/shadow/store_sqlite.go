@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3" // sqlite3 driver registration
+	_ "modernc.org/sqlite" // sqlite3 driver registration
 )
 
 // Ensure implementations satisfy interfaces

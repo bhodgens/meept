@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	_ "modernc.org/sqlite"
 	"time"
 )
 

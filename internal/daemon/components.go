@@ -379,6 +379,20 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		siCfg.Safety.MaxConsecutiveFailures = 5 // use default; circuit breaker is defensive
 		siCfg.Safety.MaxFailuresPerIssue = 3    // use default per-issue cap
 
+		// FIX #0056 - Map detection config fields from schema to runtime
+		siCfg.Detection.ScanPytest = cfg.SelfImprove.Detection.ScanPytest
+		siCfg.Detection.ScanLint = cfg.SelfImprove.Detection.ScanLint
+		siCfg.Detection.ScanTypeCheck = cfg.SelfImprove.Detection.ScanTypeCheck
+		siCfg.Detection.ScanRuntimeLogs = cfg.SelfImprove.Detection.ScanRuntimeLogs
+		siCfg.Detection.LogFile = cfg.SelfImprove.Detection.LogFile
+		siCfg.Detection.LogLookbackHours = cfg.SelfImprove.Detection.LogLookbackHours
+		siCfg.Detection.PytestArgs = cfg.SelfImprove.Detection.PytestArgs
+		siCfg.Detection.MypyArgs = cfg.SelfImprove.Detection.MypyArgs
+		siCfg.Detection.RuffArgs = cfg.SelfImprove.Detection.RuffArgs
+		siCfg.Detection.CodeErrorPatterns = cfg.SelfImprove.Detection.CodeErrorPatterns
+		siCfg.Detection.MaxCodeIssuesPerFile = cfg.SelfImprove.Detection.MaxCodeIssuesPerFile
+		siCfg.Detection.DeduplicateTODOs = cfg.SelfImprove.Detection.DeduplicateTODOs
+
 		c.SelfImproveCtrl = selfimprove.NewController(
 			siCfg,
 			msgBus,
@@ -1505,19 +1519,9 @@ func (c *Components) Stop(ctx context.Context) error {
 }
 
 // loadModelsConfigWithPath loads models config and returns the path it was loaded from.
+// Priority: user config (~/.meept/models.json5) > project config (config/models.json5)
 func loadModelsConfigWithPath(logger *slog.Logger) (*config.ModelsConfig, string, error) {
-	// Try project-local first
-	localPath := "config/models.json5"
-	if _, err := os.Stat(localPath); err == nil {
-		logger.Debug("Found models config", "path", localPath)
-		cfg, err := config.LoadModelsConfig(localPath)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to load %s: %w", localPath, err)
-		}
-		return cfg, localPath, nil
-	}
-
-	// Try user home directory
+	// Try user home directory first (FIX #0001 - user config takes precedence)
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get home directory: %w", err)
@@ -1533,7 +1537,18 @@ func loadModelsConfigWithPath(logger *slog.Logger) (*config.ModelsConfig, string
 		return cfg, homePath, nil
 	}
 
-	return nil, "", fmt.Errorf("models.json5 not found in config/ or ~/.meept/")
+	// Fall back to project-local config
+	localPath := "config/models.json5"
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Debug("Found models config", "path", localPath)
+		cfg, err := config.LoadModelsConfig(localPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to load %s: %w", localPath, err)
+		}
+		return cfg, localPath, nil
+	}
+
+	return nil, "", fmt.Errorf("models.json5 not found in ~/.meept/ or config/")
 }
 
 // getProviderNames returns a list of configured provider names.
@@ -1626,7 +1641,8 @@ func resolveModelRef(cfg *config.ModelsConfig, modelRef string, logger *slog.Log
 
 			apiKey := provider.Options.APIKey
 			//nolint:gosec // field name, not a secret
-			hasKey := apiKey != "" && apiKey != "${GALA_API_KEY}" // Check for unexpanded env var
+			// FIX #0004 - hasKey is true if provider is NoAuth OR has a valid API key
+			hasKey := provider.Options.NoAuth || (apiKey != "" && apiKey != "${GALA_API_KEY}")
 
 			logger.Info("Resolved model configuration",
 				"provider", providerID,
@@ -1639,7 +1655,8 @@ func resolveModelRef(cfg *config.ModelsConfig, modelRef string, logger *slog.Log
 				"max_output", model.MaxOutput,
 			)
 
-			if !hasKey {
+			// Only warn if API key is missing AND provider is not marked as NoAuth
+			if !hasKey && !provider.Options.NoAuth {
 				logger.Warn("API key not set or not expanded",
 					"expected_env", "GALA_API_KEY",
 					"hint", "Set GALA_API_KEY environment variable",
@@ -1969,8 +1986,8 @@ func buildProviderConfigs(cfg *config.ModelsConfig, logger *slog.Logger) []*llm.
 			continue
 		}
 
-		// Skip if no API key
-		if provider.Options.APIKey == "" {
+		// Skip if no API key and provider requires one (FIX #0004 - allow NoAuth providers)
+		if provider.Options.APIKey == "" && !provider.Options.NoAuth {
 			logger.Debug("Skipping provider without API key", "provider", providerID)
 			continue
 		}

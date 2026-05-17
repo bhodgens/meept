@@ -16,7 +16,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/pathutil"
-	_ "github.com/mattn/go-sqlite3" // sqlite3 driver registration
+	_ "modernc.org/sqlite" // sqlite3 driver registration
 )
 
 // compiledPattern holds a pre-compiled regex pattern with metadata.

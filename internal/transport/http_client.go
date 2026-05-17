@@ -142,9 +142,13 @@ func (c *httpClient) Chat(message, conversationID string) (string, error) {
 	}
 	var result struct {
 		Reply string `json:"reply"`
+		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return "", err
+	}
+	if result.Error != "" {
+		return result.Reply, fmt.Errorf("%s", result.Error)
 	}
 	return result.Reply, nil
 }

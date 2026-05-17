@@ -65,6 +65,9 @@ func (r *AgentReport) HasIssues() bool {
 // extractReportRegex matches a JSON code block containing a report.
 var extractReportRegex = regexp.MustCompile("(?s)```json\\s*\\n(\\{[^`]*\"status\"[^`]*\\})\\s*\\n```")
 
+// claimsBlockRegex matches a JSON code block containing claims/evidence.
+var claimsBlockRegex = regexp.MustCompile("(?s)```json\\s*\\n\\{.*?\"claims\".*?\\}.*?\\n```")
+
 // ExtractReport parses an AgentReport from the agent's response.
 // It looks for a JSON code block containing a status field.
 // Returns nil if no valid report is found.
@@ -149,9 +152,12 @@ func isValidStatus(status string) bool {
 	}
 }
 
-// StripReport removes the report JSON block from the response.
-// This returns the response without the report for user display.
+// StripReport removes the report JSON block and claims/evidence blocks from the response.
+// This returns the response without structured metadata for user display.
 func StripReport(response string) string {
+	// Remove claims/evidence JSON code block (FIX #0047)
+	response = claimsBlockRegex.ReplaceAllString(response, "")
+
 	// Remove JSON code block with report
 	matches := extractReportRegex.FindStringSubmatch(response)
 	if len(matches) >= 1 {

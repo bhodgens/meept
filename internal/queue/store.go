@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3" //nolint:revive // blank import for side effects
+	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
 // ErrNoJobAvailable is returned when no claimable job is found.

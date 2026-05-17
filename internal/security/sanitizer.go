@@ -195,6 +195,52 @@ func initPatterns() {
 				Label:    "prompt_extraction_attempt",
 				MinLevel: StrictnessStrict,
 			},
+			// FIX #SECURITY: Social engineering detection patterns
+			// Authority claims
+			{
+				Pattern:  regexp.MustCompile(`(?i)(i\s+am|this\s+is)\s+(your?\s+)?(admin|administrator|owner|boss|manager|supervisor|developer|system\s+admin|root\s+user)`),
+				Label:    "social_engineering_authority",
+				MinLevel: StrictnessStandard,
+			},
+			{
+				Pattern:  regexp.MustCompile(`(?i)(as\s+your?\s+)?(creator|developer|admin|owner)\s*,?\s*(i\s+)?(order|command|authorize|instruct|direct)\s+you`),
+				Label:    "social_engineering_authority",
+				MinLevel: StrictnessStandard,
+			},
+			// Urgency triggers
+			{
+				Pattern:  regexp.MustCompile(`(?i)(urgent|emergency|critical|immediate|asap|right\s+now|instantly|without\s+delay|immediately)`),
+				Label:    "social_engineering_urgency",
+				MinLevel: StrictnessPermissive,
+			},
+			{
+				Pattern:  regexp.MustCompile(`(?i)(this\s+is\s+not\s+a\s+(drill|test|simulation)|time\s+sensitive|act\s+fast|no\s+time)`),
+				Label:    "social_engineering_urgency",
+				MinLevel: StrictnessStandard,
+			},
+			// Credential requests
+			{
+				Pattern:  regexp.MustCompile(`(?i)(what\s+is|give\s+me|show\s+me|tell\s+me|share|provide)\s+(your?\s+)?(password|api\s+key|secret|token|credential|private\s+key|auth\s+code)`),
+				Label:    "credential_request_attempt",
+				MinLevel: StrictnessStandard,
+			},
+			{
+				Pattern:  regexp.MustCompile(`(?i)(send\s+me|transfer|wire|pay)\s+(money|funds|crypto|bitcoin|payment)`),
+				Label:    "financial_request_attempt",
+				MinLevel: StrictnessStrict,
+			},
+			// Emotional manipulation
+			{
+				Pattern:  regexp.MustCompile(`(?i)(please\s+i'?m\s+(begging|desperate)|help\s+me\s+(please|or\s+i('|i'?ll))|this\s+is\s+(life\s+or\s+death|critical|extremely\s+important))`),
+				Label:    "social_engineering_emotional",
+				MinLevel: StrictnessPermissive,
+			},
+			// Trust building attempts
+			{
+				Pattern:  regexp.MustCompile(`(?i)(trust\s+me|you\s+can\s+(trust|rely)\s+on\s+me|we'?re\s+friends|I'?m\s+(here\s+to\s+)?help\s+you)`),
+				Label:    "social_engineering_trust",
+				MinLevel: StrictnessPermissive,
+			},
 		}
 
 		// Structural tokens to escape

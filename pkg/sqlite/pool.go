@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3" // SQLite driver with FTS5 support
+	_ "modernc.org/sqlite" // SQLite driver with FTS5 support
 )
 
 // Rows is an interface that both *sql.Rows and *pooledRows implement.
@@ -119,7 +119,7 @@ func (p *Pool) createConn() (*sql.DB, error) {
 	// Use URI mode for more options
 	dsn := "file:" + p.dbPath + "?_fk=1&cache=shared"
 
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("modernc.org/sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}

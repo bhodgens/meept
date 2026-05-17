@@ -276,9 +276,14 @@ func (c *RPCClient) Chat(message, conversationID string) (string, error) {
 
 	var resp struct {
 		Reply string `json:"reply"`
+		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(result, &resp); err != nil {
 		return "", fmt.Errorf("failed to parse chat response: %w", err)
+	}
+
+	if resp.Error != "" {
+		return resp.Reply, fmt.Errorf("%s", resp.Error)
 	}
 
 	return resp.Reply, nil

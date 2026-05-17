@@ -807,6 +807,12 @@ type DetectionConfig struct {
 	PytestArgs       []string `json:"pytest_args"        toml:"pytest_args"`
 	MypyArgs         []string `json:"mypy_args"          toml:"mypy_args"`
 	RuffArgs         []string `json:"ruff_args"          toml:"ruff_args"`
+
+	// Code-scanning error patterns (FIX #0056)
+	CodeErrorPatterns []string `json:"code_error_patterns" toml:"code_error_patterns"`
+	// TODO de-duplication
+	MaxCodeIssuesPerFile int  `json:"max_code_issues_per_file" toml:"max_code_issues_per_file"`
+	DeduplicateTODOs     bool `json:"deduplicate_todos" toml:"deduplicate_todos"`
 }
 
 // OrchestratorConfig holds hierarchical orchestrator settings.
