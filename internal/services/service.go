@@ -38,6 +38,8 @@ type ServiceRegistry struct {
 	Scheduler   *SchedulerService
 	Bus         *BusService
 	Templates   *TemplatesService
+	Daemon      *DaemonService
+	Model       *ModelService
 }
 
 // Config holds dependencies for service instantiation.
@@ -57,6 +59,10 @@ type Config struct {
 	TokenCache     *llm.TokenCacheCoordinator
 	SecurityChecker *security.PermissionChecker
 	Scheduler      *scheduler.Scheduler
+	DaemonController DaemonController
+	PidFile        string
+	StateDir       string
+	BinPath        string
 }
 
 // NewRegistry creates all services with their dependencies.
@@ -108,6 +114,11 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	if cfg.Scheduler != nil {
 		reg.Scheduler = NewSchedulerService(cfg.Scheduler)
 	}
+	if cfg.DaemonController != nil || cfg.PidFile != "" {
+		reg.Daemon = NewDaemonService(cfg.PidFile, cfg.StateDir, cfg.BinPath, cfg.DaemonController)
+	}
+	// ModelService is always available if stateDir is set (for credential store)
+	reg.Model, _ = NewModelService("", cfg.StateDir)
 
 	return reg, nil
 }

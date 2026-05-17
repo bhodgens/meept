@@ -817,6 +817,279 @@ func (s *Server) handleSchedulerAddJob(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusCreated, job)
 }
 
+// handleSchedulerRemoveJob handles DELETE /api/v1/scheduler/jobs/{id}.
+func (s *Server) handleSchedulerRemoveJob(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Scheduler == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	if err := s.services.Scheduler.RemoveJob(r.Context(), services.RemoveJobRequest{ID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "removed"})
+}
+
+// handleSchedulerEnableJob handles POST /api/v1/scheduler/jobs/{id}/enable.
+func (s *Server) handleSchedulerEnableJob(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Scheduler == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Scheduler.EnableJob(r.Context(), services.EnableJobRequest{
+		ID:      id,
+		Enabled: req.Enabled,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "updated"})
+}
+
+// handleSchedulerPauseJob handles POST /api/v1/scheduler/jobs/{id}/pause.
+func (s *Server) handleSchedulerPauseJob(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Scheduler == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	if err := s.services.Scheduler.PauseJob(r.Context(), services.PauseJobRequest{ID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "paused"})
+}
+
+// handleSchedulerResumeJob handles POST /api/v1/scheduler/jobs/{id}/resume.
+func (s *Server) handleSchedulerResumeJob(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Scheduler == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	if err := s.services.Scheduler.ResumeJob(r.Context(), services.ResumeJobRequest{ID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "resumed"})
+}
+
+
+// ===== Model Endpoints =====
+
+// handleModelsList handles GET /api/v1/models.
+func (s *Server) handleModelsList(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	models, err := s.services.Model.List(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"models": models,
+		"count":  len(models),
+	})
+}
+
+// handleModelsProviders handles GET /api/v1/models/providers.
+func (s *Server) handleModelsProviders(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	providers, err := s.services.Model.Providers(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"providers": providers,
+		"count":     len(providers),
+	})
+}
+
+// handleModelsGetDefault handles GET /api/v1/models/default.
+func (s *Server) handleModelsGetDefault(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	model, err := s.services.Model.GetDefault(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, model)
+}
+
+// handleModelsSetDefault handles POST /api/v1/models/default.
+func (s *Server) handleModelsSetDefault(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Model.SetDefault(r.Context(), req.Provider, req.Model); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// handleModelsRemove handles DELETE /api/v1/models/{provider}/{model}.
+func (s *Server) handleModelsRemove(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	provider := r.PathValue("provider")
+	model := r.PathValue("model")
+
+	if provider == "" || model == "" {
+		s.writeError(w, http.StatusBadRequest, "provider and model are required")
+		return
+	}
+
+	if err := s.services.Model.Remove(r.Context(), provider, model); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// handleModelsGetCredential handles GET /api/v1/models/credentials/{provider}.
+func (s *Server) handleModelsGetCredential(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	provider := r.PathValue("provider")
+	if provider == "" {
+		s.writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	cred, err := s.services.Model.GetCredential(r.Context(), provider)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{
+		"provider": provider,
+		"credential": cred,
+	})
+}
+
+// handleModelsSetCredential handles POST /api/v1/models/credentials/{provider}.
+func (s *Server) handleModelsSetCredential(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	provider := r.PathValue("provider")
+	if provider == "" {
+		s.writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	var req struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Model.SetCredential(r.Context(), provider, req.APIKey); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// handleModelsDeleteCredential handles DELETE /api/v1/models/credentials/{provider}.
+func (s *Server) handleModelsDeleteCredential(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	provider := r.PathValue("provider")
+	if provider == "" {
+		s.writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	if err := s.services.Model.DeleteCredential(r.Context(), provider); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
 // ===== Bus Endpoints =====
 
 // handleBusPublish handles POST /api/v1/bus/publish.
