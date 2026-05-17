@@ -4,6 +4,8 @@ import '../../theme/colors.dart';
 import '../../theme/effects.dart';
 import 'navigation_rail.dart';
 import 'tab_content.dart';
+import '../sidebar/tools_panel.dart';
+import '../sidebar/metrics_panel.dart';
 
 enum HomeTab { agents, tasks, sessions }
 
@@ -39,13 +41,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     _buildNavigationPane(),
                     // Divider
                     _buildVerticalDivider(),
-                    // Center/Right: Tab content
+                    // Center: Tab content
                     Expanded(
                       child: _buildTabContent(),
                     ),
+                    // Right pane: Tools panel
+                    const ToolsPanel(isExpanded: true),
                   ],
                 ),
               ),
+              // Bottom metrics panel
+              const MetricsPanel(),
             ],
           ),
         ),
