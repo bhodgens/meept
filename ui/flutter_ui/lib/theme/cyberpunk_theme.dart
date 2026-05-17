@@ -57,7 +57,7 @@ abstract class CyberpunkTheme {
             const IconThemeData(color: CyberpunkColors.orangeBright),
       );
 
-  static CardTheme get _cardTheme => CardTheme(
+  static CardThemeData get _cardTheme => CardThemeData(
         color: CyberpunkColors.midGray,
         elevation: 4,
         shadowColor: CyberpunkColors.orangeDark,

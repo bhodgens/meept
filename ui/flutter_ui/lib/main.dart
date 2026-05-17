@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'core/theme/cyberpunk_theme.dart';
+import 'theme/cyberpunk_theme.dart';
 import 'features/home/home_screen.dart';
 
 void main() async {

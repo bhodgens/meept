@@ -41,7 +41,7 @@ class WebSocketService {
 
     try {
       final wsPath = path ?? '/ws';
-      final uri = Uri('ws://$_host:$_port$wsPath');
+      final uri = Uri.parse('ws://$_host:$_port$wsPath');
 
       _channel = WebSocketChannel.connect(uri);
 

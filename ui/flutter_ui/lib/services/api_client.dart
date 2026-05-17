@@ -13,11 +13,11 @@ class ApiClient {
     int? port,
     String? apiKey,
   })  : baseUrl =
-            'http://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/$apiVersion',
+            'http://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}',
         _dio = Dio(
           BaseOptions(
             baseUrl:
-                'http://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/$apiVersion',
+                'http://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}',
             connectTimeout: AppConstants.connectionTimeout,
             receiveTimeout: AppConstants.receiveTimeout,
             headers: {
@@ -169,7 +169,7 @@ class ApiClient {
   Future<List<Task>> listTasks({String? sessionId}) async {
     final data = await get<Map<String, dynamic>>(
       '/tasks',
-      queryParameters: if (sessionId != null) {'session_id': sessionId},
+      queryParameters: sessionId != null ? {'session_id': sessionId} : null,
     );
     final tasks = (data['tasks'] as List)
         .map((t) => Task.fromJson(t as Map<String, dynamic>))
@@ -187,7 +187,7 @@ class ApiClient {
   Future<List<Job>> listJobs({String? agentId}) async {
     final data = await get<Map<String, dynamic>>(
       '/queue/jobs',
-      queryParameters: if (agentId != null) {'agent_id': agentId},
+      queryParameters: agentId != null ? {'agent_id': agentId} : null,
     );
     final jobs = (data['jobs'] as List)
         .map((j) => Job.fromJson(j as Map<String, dynamic>))
