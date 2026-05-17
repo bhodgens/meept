@@ -141,6 +141,7 @@ r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 ## Production Deployment Checklist
 
 - [ ] Enable API key authentication (`require_auth: true`)
+- [ ] Replace default key `d@ng3r_NOT_A_Secure_key_REGENERATE_M3`
 - [ ] Generate strong API keys (32+ random bytes, base64 encoded)
 - [ ] Store API keys in environment variables or secrets manager
 - [ ] Deploy behind HTTPS-terminating reverse proxy

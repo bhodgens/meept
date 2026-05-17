@@ -10,15 +10,60 @@ http://localhost:8081
 
 ## Authentication
 
-API key authentication is optional. To enable:
+API key authentication is **enabled by default** with an intentionally obvious placeholder key.
 
-1. Set `require_auth: true` in `transport.http` config
-2. Configure API keys via the `api_keys` list
+**⚠️ SECURITY WARNING:** The default key `d@ng3r_NOT_A_Secure_key_REGENERATE_M3` must be changed before production use!
 
-When enabled, include the API key in the Authorization header:
+### Configure API Keys
+
+1. **Generate a secure key:**
+   ```bash
+   openssl rand -base64 32
+   ```
+
+2. **Update your config** (`~/.meept/meept.json5`):
+   ```json5
+   {
+     transport: {
+       http: {
+         enabled: true,
+         require_auth: true,
+         api_keys: ["your-generated-secure-key-here"]
+       }
+     }
+   }
+   ```
+
+3. **Restart the daemon**
+
+### Using Authentication
+
+Include the API key in the `Authorization` header:
+
 ```bash
-curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8081/api/v1/chat
+curl -H "Authorization: Bearer your-secure-key" http://localhost:8081/api/v1/chat
 ```
+
+Or set as environment variable:
+```bash
+export MEEPT_API_KEY="your-secure-key"
+curl -H "Authorization: Bearer $MEEPT_API_KEY" http://localhost:8081/api/v1/chat
+```
+
+### Default Configuration
+
+The default config (`config/meept.json5`) includes:
+```json5
+transport: {
+  http: {
+    enabled: false,  // Enable for web/menubar clients
+    require_auth: true,
+    api_keys: ["d@ng3r_NOT_A_Secure_key_REGENERATE_M3"] // ⚠️ CHANGE THIS!
+  }
+}
+```
+
+The daemon will log a **security warning** at startup if you're using the default key.
 
 ---
 
