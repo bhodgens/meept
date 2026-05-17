@@ -67,6 +67,10 @@ type Server struct {
 	running         bool
 	// FirewallStatsGetter is an optional callback that returns firewall stats.
 	FirewallStatsGetter func() map[string]any
+
+	// BudgetStatusGetter is an optional callback that returns budget stats.
+	// Used by the status handler to report actual token usage (FIX #0031/#0035).
+	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int)
 }
 
 // AgentInfo describes an agent for listing.
@@ -183,8 +187,21 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/config/agents/{id}", s.handleDeleteAgent)
 
 	// Daemon control
+	// Daemon control
 	mux.HandleFunc("GET /api/v1/daemon/status", s.handleDaemonStatus)
 	mux.HandleFunc("POST /api/v1/daemon/restart", s.handleDaemonRestart)
+	mux.HandleFunc("POST /api/v1/daemon/start", s.handleDaemonStart)
+	mux.HandleFunc("POST /api/v1/daemon/stop", s.handleDaemonStop)
+
+	// Model endpoints
+	mux.HandleFunc("GET /api/v1/models", s.handleModelsList)
+	mux.HandleFunc("GET /api/v1/models/providers", s.handleModelsProviders)
+	mux.HandleFunc("GET /api/v1/models/default", s.handleModelsGetDefault)
+	mux.HandleFunc("POST /api/v1/models/default", s.handleModelsSetDefault)
+	mux.HandleFunc("DELETE /api/v1/models/{provider}/{model}", s.handleModelsRemove)
+	mux.HandleFunc("GET /api/v1/models/credentials/{provider}", s.handleModelsGetCredential)
+	mux.HandleFunc("POST /api/v1/models/credentials/{provider}", s.handleModelsSetCredential)
+	mux.HandleFunc("DELETE /api/v1/models/credentials/{provider}", s.handleModelsDeleteCredential)
 
 	// Metrics
 	mux.HandleFunc("GET /api/v1/metrics/live", s.handleLiveMetrics)
@@ -271,8 +288,24 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/security/check", s.handleSecurityCheck)
 
 	// Scheduler endpoints
+
+	// Scheduler endpoints
 	mux.HandleFunc("GET /api/v1/scheduler/jobs", s.handleSchedulerListJobs)
 	mux.HandleFunc("POST /api/v1/scheduler/jobs", s.handleSchedulerAddJob)
+	mux.HandleFunc("DELETE /api/v1/scheduler/jobs/{id}", s.handleSchedulerRemoveJob)
+	mux.HandleFunc("POST /api/v1/scheduler/jobs/{id}/enable", s.handleSchedulerEnableJob)
+	mux.HandleFunc("POST /api/v1/scheduler/jobs/{id}/pause", s.handleSchedulerPauseJob)
+	mux.HandleFunc("POST /api/v1/scheduler/jobs/{id}/resume", s.handleSchedulerResumeJob)
+
+	// Calendar endpoints
+	mux.HandleFunc("GET /api/v1/calendar/events", s.handleCalendarList)
+	mux.HandleFunc("GET /api/v1/calendar/events/{id}", s.handleCalendarGet)
+	mux.HandleFunc("POST /api/v1/calendar/events", s.handleCalendarCreate)
+	mux.HandleFunc("PUT /api/v1/calendar/events/{id}", s.handleCalendarUpdate)
+	mux.HandleFunc("DELETE /api/v1/calendar/events/{id}", s.handleCalendarDelete)
+	mux.HandleFunc("GET /api/v1/calendar/today", s.handleCalendarToday)
+	mux.HandleFunc("GET /api/v1/calendar/upcoming", s.handleCalendarUpcoming)
+	mux.HandleFunc("POST /api/v1/calendar/quickadd", s.handleCalendarQuickAdd)
 
 	// Bus endpoints
 	mux.HandleFunc("POST /api/v1/bus/publish", s.handleBusPublish)
@@ -575,6 +608,36 @@ func (s *Server) handleDaemonRestart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "restarted"})
+}
+
+// handleDaemonStart handles POST /api/v1/daemon/start.
+func (s *Server) handleDaemonStart(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Daemon == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "daemon service not available")
+		return
+	}
+
+	if err := s.services.Daemon.Start(r.Context()); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
+}
+
+// handleDaemonStop handles POST /api/v1/daemon/stop.
+func (s *Server) handleDaemonStop(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Daemon == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "daemon service not available")
+		return
+	}
+
+	if err := s.services.Daemon.Stop(r.Context()); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
 }
 
 // handleLiveMetrics handles GET /api/v1/metrics/live.

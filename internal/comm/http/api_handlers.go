@@ -817,6 +817,279 @@ func (s *Server) handleSchedulerAddJob(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusCreated, job)
 }
 
+// handleSchedulerRemoveJob handles DELETE /api/v1/scheduler/jobs/{id}.
+func (s *Server) handleSchedulerRemoveJob(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Scheduler == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	if err := s.services.Scheduler.RemoveJob(r.Context(), services.RemoveJobRequest{ID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "removed"})
+}
+
+// handleSchedulerEnableJob handles POST /api/v1/scheduler/jobs/{id}/enable.
+func (s *Server) handleSchedulerEnableJob(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Scheduler == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Scheduler.EnableJob(r.Context(), services.EnableJobRequest{
+		ID:      id,
+		Enabled: req.Enabled,
+	}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "updated"})
+}
+
+// handleSchedulerPauseJob handles POST /api/v1/scheduler/jobs/{id}/pause.
+func (s *Server) handleSchedulerPauseJob(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Scheduler == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	if err := s.services.Scheduler.PauseJob(r.Context(), services.PauseJobRequest{ID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "paused"})
+}
+
+// handleSchedulerResumeJob handles POST /api/v1/scheduler/jobs/{id}/resume.
+func (s *Server) handleSchedulerResumeJob(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Scheduler == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "scheduler service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "job id is required")
+		return
+	}
+
+	if err := s.services.Scheduler.ResumeJob(r.Context(), services.ResumeJobRequest{ID: id}); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "resumed"})
+}
+
+
+// ===== Model Endpoints =====
+
+// handleModelsList handles GET /api/v1/models.
+func (s *Server) handleModelsList(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	models, err := s.services.Model.List(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"models": models,
+		"count":  len(models),
+	})
+}
+
+// handleModelsProviders handles GET /api/v1/models/providers.
+func (s *Server) handleModelsProviders(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	providers, err := s.services.Model.Providers(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"providers": providers,
+		"count":     len(providers),
+	})
+}
+
+// handleModelsGetDefault handles GET /api/v1/models/default.
+func (s *Server) handleModelsGetDefault(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	model, err := s.services.Model.GetDefault(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, model)
+}
+
+// handleModelsSetDefault handles POST /api/v1/models/default.
+func (s *Server) handleModelsSetDefault(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Model.SetDefault(r.Context(), req.Provider, req.Model); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// handleModelsRemove handles DELETE /api/v1/models/{provider}/{model}.
+func (s *Server) handleModelsRemove(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	provider := r.PathValue("provider")
+	model := r.PathValue("model")
+
+	if provider == "" || model == "" {
+		s.writeError(w, http.StatusBadRequest, "provider and model are required")
+		return
+	}
+
+	if err := s.services.Model.Remove(r.Context(), provider, model); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}
+
+// handleModelsGetCredential handles GET /api/v1/models/credentials/{provider}.
+func (s *Server) handleModelsGetCredential(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	provider := r.PathValue("provider")
+	if provider == "" {
+		s.writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	cred, err := s.services.Model.GetCredential(r.Context(), provider)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{
+		"provider": provider,
+		"credential": cred,
+	})
+}
+
+// handleModelsSetCredential handles POST /api/v1/models/credentials/{provider}.
+func (s *Server) handleModelsSetCredential(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	provider := r.PathValue("provider")
+	if provider == "" {
+		s.writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	var req struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Model.SetCredential(r.Context(), provider, req.APIKey); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// handleModelsDeleteCredential handles DELETE /api/v1/models/credentials/{provider}.
+func (s *Server) handleModelsDeleteCredential(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Model == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "model service not available")
+		return
+	}
+
+	provider := r.PathValue("provider")
+	if provider == "" {
+		s.writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+
+	if err := s.services.Model.DeleteCredential(r.Context(), provider); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
 // ===== Bus Endpoints =====
 
 // handleBusPublish handles POST /api/v1/bus/publish.
@@ -1692,4 +1965,224 @@ func (s *Server) handleChatWithAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeyQueued})
+}
+
+// ===== Calendar Endpoints =====
+
+// handleCalendarList handles GET /api/v1/calendar/events.
+func (s *Server) handleCalendarList(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Calendar == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "calendar service not available")
+		return
+	}
+
+	timeMin := r.URL.Query().Get("time_min")
+	timeMax := r.URL.Query().Get("time_max")
+	maxResults := 50
+	if mr := r.URL.Query().Get("max_results"); mr != "" {
+		if n, err := strconv.Atoi(mr); err == nil && n > 0 {
+			maxResults = n
+		}
+	}
+
+	var tMin, tMax time.Time
+	if timeMin != "" {
+		var err error
+		tMin, err = time.Parse(time.RFC3339, timeMin)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, "invalid time_min format")
+			return
+		}
+	}
+	if timeMax != "" {
+		var err error
+		tMax, err = time.Parse(time.RFC3339, timeMax)
+		if err != nil {
+			s.writeError(w, http.StatusBadRequest, "invalid time_max format")
+			return
+		}
+	}
+
+	req := services.ListEventsRequest{
+		TimeMin:    tMin,
+		TimeMax:    tMax,
+		MaxResults: maxResults,
+	}
+
+	resp, err := s.services.Calendar.ListEvents(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleCalendarGet handles GET /api/v1/calendar/events/{id}.
+func (s *Server) handleCalendarGet(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Calendar == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "calendar service not available")
+		return
+	}
+
+	eventID := r.PathValue("id")
+	if eventID == "" {
+		s.writeError(w, http.StatusBadRequest, "event id required")
+		return
+	}
+
+	event, err := s.services.Calendar.GetEvent(r.Context(), eventID)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, event)
+}
+
+// handleCalendarCreate handles POST /api/v1/calendar/events.
+func (s *Server) handleCalendarCreate(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Calendar == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "calendar service not available")
+		return
+	}
+
+	var req services.CreateEventRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	event, err := s.services.Calendar.CreateEvent(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusCreated, event)
+}
+
+// handleCalendarUpdate handles PUT /api/v1/calendar/events/{id}.
+func (s *Server) handleCalendarUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Calendar == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "calendar service not available")
+		return
+	}
+
+	eventID := r.PathValue("id")
+	if eventID == "" {
+		s.writeError(w, http.StatusBadRequest, "event id required")
+		return
+	}
+
+	var req services.UpdateEventRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.ID = eventID
+
+	event, err := s.services.Calendar.UpdateEvent(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, event)
+}
+
+// handleCalendarDelete handles DELETE /api/v1/calendar/events/{id}.
+func (s *Server) handleCalendarDelete(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Calendar == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "calendar service not available")
+		return
+	}
+
+	eventID := r.PathValue("id")
+	if eventID == "" {
+		s.writeError(w, http.StatusBadRequest, "event id required")
+		return
+	}
+
+	if err := s.services.Calendar.DeleteEvent(r.Context(), eventID); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// handleCalendarToday handles GET /api/v1/calendar/today.
+func (s *Server) handleCalendarToday(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Calendar == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "calendar service not available")
+		return
+	}
+
+	resp, err := s.services.Calendar.GetToday(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleCalendarUpcoming handles GET /api/v1/calendar/upcoming.
+func (s *Server) handleCalendarUpcoming(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Calendar == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "calendar service not available")
+		return
+	}
+
+	duration := 24 * time.Hour
+	if d := r.URL.Query().Get("duration"); d != "" {
+		if parsed, err := time.ParseDuration(d); err == nil {
+			duration = parsed
+		}
+	}
+
+	maxResults := 10
+	if mr := r.URL.Query().Get("max_results"); mr != "" {
+		if n, err := strconv.Atoi(mr); err == nil && n > 0 {
+			maxResults = n
+		}
+	}
+
+	resp, err := s.services.Calendar.GetUpcoming(r.Context(), duration, maxResults)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleCalendarQuickAdd handles POST /api/v1/calendar/quickadd.
+func (s *Server) handleCalendarQuickAdd(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Calendar == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "calendar service not available")
+		return
+	}
+
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Text == "" {
+		s.writeError(w, http.StatusBadRequest, "text required")
+		return
+	}
+
+	event, err := s.services.Calendar.QuickAdd(r.Context(), req.Text)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusCreated, event)
 }

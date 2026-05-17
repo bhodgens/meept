@@ -213,6 +213,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			}
 			logger.Info("Firewall stats RPC getter registered")
 		}
+
+		// Wire budget stats getter (FIX #0031/#0035 - exposes token budget via RPC)
+		if rpcServer != nil && components.LLMClient != nil {
+			budget := components.LLMClient.Budget()
+			if budget != nil {
+				rpcServer.BudgetStatusGetter = func() (int, int, int, int, int, int) {
+					bs := budget.GetStatus()
+					return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit
+				}
+				logger.Info("Budget stats RPC getter registered")
+			}
+		}
 	}
 
 	// Create config service for HTTP server
@@ -283,6 +295,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		TokenCache:      nilSafeTokenCache(components),
 		SecurityChecker: nilSafeSecurityChecker(components),
 		Scheduler:       nilSafeScheduler(components),
+		CalendarClient:  nil, // Calendar integration requires OAuth setup
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
@@ -301,6 +314,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 					return components.AgentLoop.FirewallStats()
 				}
 				logger.Info("Firewall stats HTTP getter registered")
+			}
+
+			// Wire budget stats getter for HTTP endpoint (FIX #0031/#0035)
+			if components.LLMClient != nil {
+				budget := components.LLMClient.Budget()
+				if budget != nil {
+					httpSrv.BudgetStatusGetter = func() (int, int, int, int, int, int) {
+						bs := budget.GetStatus()
+						return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit
+					}
+					logger.Info("Budget stats HTTP getter registered")
+				}
 			}
 			logger.Info("HTTP server created", "addr", httpCfg.Addr)
 		}
