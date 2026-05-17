@@ -293,6 +293,16 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/scheduler/jobs/{id}/pause", s.handleSchedulerPauseJob)
 	mux.HandleFunc("POST /api/v1/scheduler/jobs/{id}/resume", s.handleSchedulerResumeJob)
 
+	// Calendar endpoints
+	mux.HandleFunc("GET /api/v1/calendar/events", s.handleCalendarList)
+	mux.HandleFunc("GET /api/v1/calendar/events/{id}", s.handleCalendarGet)
+	mux.HandleFunc("POST /api/v1/calendar/events", s.handleCalendarCreate)
+	mux.HandleFunc("PUT /api/v1/calendar/events/{id}", s.handleCalendarUpdate)
+	mux.HandleFunc("DELETE /api/v1/calendar/events/{id}", s.handleCalendarDelete)
+	mux.HandleFunc("GET /api/v1/calendar/today", s.handleCalendarToday)
+	mux.HandleFunc("GET /api/v1/calendar/upcoming", s.handleCalendarUpcoming)
+	mux.HandleFunc("POST /api/v1/calendar/quickadd", s.handleCalendarQuickAdd)
+
 	// Bus endpoints
 	mux.HandleFunc("POST /api/v1/bus/publish", s.handleBusPublish)
 	mux.HandleFunc("GET /api/v1/bus/stats", s.handleBusStats)
