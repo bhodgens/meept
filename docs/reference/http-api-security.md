@@ -54,11 +54,29 @@ httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
 httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
 ```
 
-### Gap 2: No HTTPS/TLS Support
+### HTTPS/TLS Support
 
-**Problem:** HTTP server only supports plaintext HTTP.
+**Status:** ✅ Implemented - HTTPS by default with auto-generated self-signed certificate
 
-**Fix Options:**
+The HTTP server now enables HTTPS by default:
+- Auto-generates self-signed certificate on first startup
+- Certificate valid for 1 year
+- Stored in `~/.meept/meept.crt` and `~/.meept/meept.key`
+- Uses ECDSA P-256 keys for efficiency
+
+**Configuration:**
+```json5
+{
+  transport: {
+    http: {
+      use_tls: true,        // Enable HTTPS
+      auto_tls_cert: true,  // Auto-generate self-signed cert
+    }
+  }
+}
+```
+
+**For production:** Replace with a real certificate via:
 
 1. **Reverse Proxy (Recommended):** Deploy behind nginx, Caddy, or Traefik:
    ```nginx
@@ -144,7 +162,9 @@ r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 - [ ] Replace default key `d@ng3r_NOT_A_Secure_key_REGENERATE_M3`
 - [ ] Generate strong API keys (32+ random bytes, base64 encoded)
 - [ ] Store API keys in environment variables or secrets manager
-- [ ] Deploy behind HTTPS-terminating reverse proxy
+- [ ] Replace self-signed cert with real certificate (Let's Encrypt / CA)
+- [ ] Or deploy behind HTTPS-terminating reverse proxy (Caddy, nginx)
+- [ ] Set `auto_tls_cert: false` when using real certs
 - [ ] Configure firewall to restrict access to port 8081
 - [ ] Enable request logging and monitoring
 - [ ] Set up rate limiting (e.g., 100 requests/minute per client)

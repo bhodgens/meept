@@ -3,10 +3,21 @@ package http
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/big"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -23,6 +34,10 @@ type ServerConfig struct {
 	EnableCORS     bool          // Enable CORS headers
 	APIKeys        []string      // Valid API keys for authentication
 	RequireAuth    bool          // Require API key authentication
+	UseTLS         bool          // Enable HTTPS (default: true)
+	TLSCertFile    string        // TLS certificate file path
+	TLSKeyFile     string        // TLS key file path
+	AutoTLSCert    bool          // Auto-generate self-signed cert if not exists
 }
 
 // DefaultServerConfig returns sensible defaults for the menubar HTTP server.
@@ -119,19 +134,40 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
 
+	handler := s.middleware(mux)
+
+	// Generate TLS cert if needed
+	if s.config.UseTLS && s.config.AutoTLSCert {
+		if err := s.ensureTLSCert(); err != nil {
+			s.logger.Error("Failed to generate TLS certificate", "error", err)
+			s.logger.Warn("⚠️  Running WITHOUT HTTPS! Set auto_tls_cert: false to disable TLS.")
+			s.config.UseTLS = false
+		}
+	}
+
 	s.server = &http.Server{
 		Addr:           s.config.Addr,
-		Handler:        s.middleware(mux),
+		Handler:        handler,
 		ReadTimeout:    s.config.ReadTimeout,
 		WriteTimeout:   s.config.WriteTimeout,
 		MaxHeaderBytes: s.config.MaxHeaderBytes,
 	}
 
-	s.logger.Info("menubar HTTP server starting", "addr", s.config.Addr)
+	if s.config.UseTLS {
+		s.logger.Info("menubar HTTPS server starting", "addr", s.config.Addr, "tls", true)
+	} else {
+		s.logger.Warn("⚠️  menubar HTTP server starting (NO TLS)", "addr", s.config.Addr)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if s.config.UseTLS {
+			err = s.server.ListenAndServeTLS(s.config.TLSCertFile, s.config.TLSKeyFile)
+		} else {
+			err = s.server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
@@ -743,4 +779,117 @@ func (s *Server) handleSaveMenubarConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeySaved})
+}
+
+
+// ensureTLSCert ensures TLS certificate and key files exist, generating self-signed if needed.
+func (s *Server) ensureTLSCert() error {
+	certExists := fileExists(s.config.TLSCertFile)
+	keyExists := fileExists(s.config.TLSKeyFile)
+
+	if certExists && keyExists {
+		s.logger.Debug("TLS certificate files already exist")
+		return nil
+	}
+
+	s.logger.Info("Generating self-signed TLS certificate...",
+		"cert", s.config.TLSCertFile,
+		"key", s.config.TLSKeyFile)
+
+	// Ensure directory exists
+	certDir := filepath.Dir(s.config.TLSCertFile)
+	if err := os.MkdirAll(certDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create cert directory: %w", err)
+	}
+
+	// Generate private key
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	// Generate certificate template
+	notBefore := time.Now()
+	notAfter := notBefore.Add(365 * 24 * time.Hour) // Valid for 1 year
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Meept Development"},
+			CommonName:   "localhost",
+		},
+		NotBefore: notBefore,
+		NotAfter:  notAfter,
+		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+		},
+		IPAddresses: []net.IP{
+			net.ParseIP("127.0.0.1"),
+			net.ParseIP("::1"),
+		},
+		DNSNames: []string{
+			"localhost",
+			"*.localhost",
+		},
+	}
+
+	// Generate certificate
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	// Write certificate file
+	certOut, err := os.Create(s.config.TLSCertFile)
+	if err != nil {
+		return fmt.Errorf("failed to create cert file: %w", err)
+	}
+	defer certOut.Close()
+
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		return fmt.Errorf("failed to write cert: %w", err)
+	}
+
+	// Write key file
+	keyOut, err := os.Create(s.config.TLSKeyFile)
+	if err != nil {
+		return fmt.Errorf("failed to create key file: %w", err)
+	}
+	defer keyOut.Close()
+
+	privBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return fmt.Errorf("failed to marshal key: %w", err)
+	}
+
+	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes}); err != nil {
+		return fmt.Errorf("failed to write key: %w", err)
+	}
+
+	// Set restrictive permissions
+	if err := os.Chmod(s.config.TLSCertFile, 0o600); err != nil {
+		s.logger.Warn("Failed to set cert permissions", "error", err)
+	}
+	if err := os.Chmod(s.config.TLSKeyFile, 0o600); err != nil {
+		s.logger.Warn("Failed to set key permissions", "error", err)
+	}
+
+	s.logger.Info("Self-signed TLS certificate generated",
+		"cert", s.config.TLSCertFile,
+		"key", s.config.TLSKeyFile,
+		"valid_until", notAfter.Format(time.RFC3339))
+
+	return nil
+}
+
+// fileExists checks if a file exists.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

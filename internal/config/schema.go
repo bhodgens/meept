@@ -202,10 +202,12 @@ type RPCTransportConfig struct {
 
 // HTTPTransportConfig configures the HTTP REST transport.
 type HTTPTransportConfig struct {
-	Enabled     bool     `json:"enabled"      toml:"enabled"`      // Enable HTTP server (default: false)
-	Addr        string   `json:"addr"         toml:"addr"`         // Listen address (default: ":8081")
-	RequireAuth bool     `json:"require_auth" toml:"require_auth"` // Require API key authentication
-	APIKeys     []string `json:"api_keys"     toml:"api_keys"`     // Valid API keys for authentication
+	Enabled      bool     `json:"enabled"       toml:"enabled"`       // Enable HTTP server (default: false)
+	Addr         string   `json:"addr"          toml:"addr"`          // Listen address (default: ":8081")
+	RequireAuth  bool     `json:"require_auth"  toml:"require_auth"`  // Require API key authentication
+	APIKeys      []string `json:"api_keys"      toml:"api_keys"`      // Valid API keys for authentication
+	UseTLS       bool     `json:"use_tls"       toml:"use_tls"`       // Enable HTTPS (default: true)
+	AutoTLSCert  bool     `json:"auto_tls_cert" toml:"auto_tls_cert"` // Auto-generate self-signed cert
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.

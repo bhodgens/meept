@@ -313,6 +313,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
 			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
 			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
+			httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
+			httpCfg.AutoTLSCert = fullCfg.Transport.HTTP.AutoTLSCert
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, svcRegistry, logger)
 			// Wire firewall stats getter for HTTP endpoint
 			if components.AgentLoop != nil {
