@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+
+	_ "modernc.org/sqlite"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"

@@ -211,6 +211,15 @@ func (cd *convergenceDetector) recordResponse(content string, hasTools bool) boo
 	cd.mu.Lock()
 	defer cd.mu.Unlock()
 
+	// FIX #0037/#0039: Skip recording empty content to allow nudge handler
+	// to work. Recording empty responses caused convergence detection to
+	// trigger prematurely during empty-nudge loops since all empty strings
+	// hash to the same value.
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return false
+	}
+
 	// Normalize and hash content
 	normalized := normalizeContent(content)
 	contentHash := hashString(normalized)

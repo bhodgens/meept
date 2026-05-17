@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"testing"
+
+	_ "modernc.org/sqlite"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
