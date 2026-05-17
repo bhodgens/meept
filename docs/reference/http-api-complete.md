@@ -5,12 +5,23 @@ Comprehensive documentation for the Meept HTTP API, exposing full daemon functio
 ## Base URL
 
 ```
-http://localhost:8081
+https://localhost:8081
 ```
+
+**Note:** The server uses HTTPS by default with a self-signed certificate. Your browser/http client will warn about the certificate - this is expected for development.
+
+For curl, use `-k` to skip cert verification:
+```bash
+curl -k https://localhost:8081/api/v1/health
+```
+
+To disable HTTPS (not recommended), set `use_tls: false` in your config.
 
 ## Authentication
 
-API key authentication is **enabled by default** with an intentionally obvious placeholder key.
+**HTTPS is enabled by default** with an auto-generated self-signed certificate.
+
+API key authentication is also **enabled by default** with an intentionally obvious placeholder key.
 
 **⚠️ SECURITY WARNING:** The default key `d@ng3r_NOT_A_Secure_key_REGENERATE_M3` must be changed before production use!
 
