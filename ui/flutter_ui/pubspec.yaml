@@ -1,0 +1,64 @@
+name: meept_ui
+description: Meept Cyberpunk Flutter UI - Web and macOS desktop client
+version: 1.0.0+1
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.10.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+
+  # HTTP & WebSocket
+  dio: ^5.4.0
+  web_socket_channel: ^2.4.0
+
+  # Local storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  shared_preferences: ^2.2.2
+
+  # UI & Animation
+  google_fonts: ^6.1.0
+  flutter_animate: ^4.3.0
+  shimmer: ^3.0.0
+
+  # Utilities
+  intl: ^0.19.0
+  uuid: ^4.2.2
+  collection: ^1.18.0
+  equatable: ^2.0.5
+
+  # macOS specific
+  window_manager: ^0.3.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  build_runner: ^2.4.8
+  riverpod_generator: ^2.3.9
+  hive_generator: ^2.0.1
+  json_serializable: ^6.7.1
+  json_annotation: ^4.8.1
+
+flutter:
+  uses-material-design: false
+  fonts:
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+        - asset: assets/fonts/JetBrainsMono-Bold.ttf
+          weight: 700
+    - family: ShareTechMono
+      fonts:
+        - asset: assets/fonts/ShareTechMono-Regular.ttf
+  assets:
+    - assets/images/
+    - assets/shaders/
