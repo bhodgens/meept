@@ -294,11 +294,28 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		SelfImprove:     nilSafeSelfImprove(components),
 		TokenCache:      nilSafeTokenCache(components),
 		SecurityChecker: nilSafeSecurityChecker(components),
-		Scheduler:       nilSafeScheduler(components),
-		CalendarClient:  nil, // Calendar integration requires OAuth setup
+		Scheduler:        nilSafeScheduler(components),
+		CalendarClient:   nil, // Calendar integration requires OAuth setup
+		DaemonController: daemonControl,
+		PidFile:          cfg.PIDFile,
+		StateDir:         cfg.StateDir,
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
+	}
+
+	// Register daemon and model RPC handlers (after service registry is created)
+	if rpcServer != nil {
+		if svcRegistry.Daemon != nil {
+			daemonHandler := NewDaemonRPCHandler(svcRegistry.Daemon)
+			daemonHandler.RegisterDaemonMethods(rpcServer)
+			logger.Info("Daemon RPC handlers registered")
+		}
+		if svcRegistry.Model != nil {
+			modelHandler := services.NewModelRPCHandler(svcRegistry.Model)
+			modelHandler.RegisterModelMethods(rpcServer)
+			logger.Info("Model RPC handlers registered")
+		}
 	}
 
 	// Create HTTP server (if enabled)
@@ -307,6 +324,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if configService != nil && daemonControl != nil && metricsStore != nil {
 			httpCfg := http.DefaultServerConfig()
 			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
+			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
+			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
+			httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
+			httpCfg.AutoTLSCert = fullCfg.Transport.HTTP.AutoTLSCert
 			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, svcRegistry, logger)
 			// Wire firewall stats getter for HTTP endpoint
 			if components.AgentLoop != nil {

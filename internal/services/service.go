@@ -61,11 +61,11 @@ type Config struct {
 	TokenCache     *llm.TokenCacheCoordinator
 	SecurityChecker *security.PermissionChecker
 	Scheduler      *scheduler.Scheduler
+	CalendarClient *calendar.Client
 	DaemonController DaemonController
 	PidFile        string
 	StateDir       string
 	BinPath        string
-	CalendarClient *calendar.Client
 }
 
 // NewRegistry creates all services with their dependencies.
