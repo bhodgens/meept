@@ -11,6 +11,12 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 # Build CLI
 go build -o bin/meept ./cmd/meept
 
+# Build everything (daemon + CLI + gendoc + GUI)
+make build
+
+# Build only the Flutter GUI
+make build-gui
+
 # Run all tests
 go test ./... -v
 

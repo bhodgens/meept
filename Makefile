@@ -1,4 +1,4 @@
-.PHONY: help build build-all build-daemon build-cli test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app
+.PHONY: help build build-all build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-clean
 
 help:
 	@echo "Usage: make [target]"
@@ -13,6 +13,7 @@ help:
 	@echo "  build-daemon     Build only the daemon binary"
 	@echo "  build-cli        Build only the CLI binary"
 	@echo "  build-gendoc     Build only the documentation generator"
+	@echo "  build-gui        Build Flutter GUI (macOS/linux/windows)"
 	@echo "  build-release    Build with version info from git"
 	@echo "  menubar          Build macOS menubar app (Swift, binary)"
 	@echo "  menubar-xcode    Build macOS menubar app (Xcode, .app bundle)"
@@ -22,7 +23,7 @@ help:
 	@echo "  menubar-install-app-bundle  Install .app bundle to ~/Applications"
 	@echo "  menubar-app          Build menubar as .app bundle"
 	@echo "  menubar-install-app-bundle  Install menubar .app to ~/Applications"
-	@echo "  install          Install binaries to GOPATH/bin"
+	@echo "  install          Install binaries + GUI to GOPATH/bin"
 	@echo ""
 	@echo "Testing:"
 	@echo "  test             Run tests (short mode)"
@@ -114,7 +115,7 @@ deps:
 
 build: build-all
 
-build-all: build-daemon build-cli build-gendoc
+build-all: build-daemon build-cli build-gendoc build-gui
 	@echo ""
 	@echo "Build complete:"
 	@ls -lh $(BIN_DIR)/
@@ -145,6 +146,13 @@ install: build
 	@echo "Installing binaries to GOPATH/bin..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
+	@if [ -f $(GUI_BIN) ]; then \
+		cp $(GUI_BIN) $$(go env GOPATH)/bin/meept-gui; \
+		chmod +x $$(go env GOPATH)/bin/meept-gui; \
+		echo "Installed meept-gui to $$(go env GOPATH)/bin/meept-gui"; \
+	else \
+		echo "Skipping meept-gui (not built — run 'make build-gui' first)"; \
+	fi
 	@echo "Installing config files..."
 	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
 	@echo "Copying config templates (if not present)..."
@@ -228,6 +236,7 @@ status: build-cli
 
 clean:
 	rm -rf $(BIN_DIR)/ coverage/
+	@cd $(FLUTTER_UI_DIR) && flutter clean 2>/dev/null || true
 	go clean -cache -testcache
 
 lint:
@@ -378,6 +387,19 @@ MENUBAR_BIN := $(MENUBAR_DIR)/.build/release/MeeptMenuBar
 MENUBAR_APP := $(MENUBAR_DIR)/.build/Release/MeeptMenuBar.app
 MENUBAR_XCODEPROJ := $(MENUBAR_DIR)/MeeptMenuBar.xcodeproj
 
+FLUTTER_UI_DIR := ui/flutter_ui
+UNAME_S := $(shell uname -s 2>/dev/null || echo Linux)
+ifeq ($(UNAME_S),Darwin)
+  GUI_PLATFORM := macos
+  GUI_BIN := $(BIN_DIR)/meept-gui-darwin-$(shell uname -m)
+else ifeq ($(UNAME_S),Linux)
+  GUI_PLATFORM := linux
+  GUI_BIN := $(BIN_DIR)/meept-gui-linux-$(shell uname -m)
+else
+  GUI_PLATFORM := windows
+  GUI_BIN := $(BIN_DIR)/meept-gui-windows-amd64.exe
+endif
+
 # Build using Swift Package Manager (binary output, fast)
 menubar:
 	@echo "Building menubar app (SPM)..."
@@ -432,3 +454,23 @@ menubar-install-app-bundle: menubar-app
 	rm -rf ~/Applications/MeeptMenuBar.app
 	cp -r $(MENUBAR_APP) ~/Applications/
 	@echo "Installed: ~/Applications/MeeptMenuBar.app"
+
+# =============================================================================
+# Flutter GUI (meept-gui)
+# =============================================================================
+
+build-gui:
+	@mkdir -p $(BIN_DIR)
+	@echo "Building meept-gui for $(GUI_PLATFORM)..."
+	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release
+ifeq ($(GUI_PLATFORM),macos)
+	cp $(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/meept_ui.app/Contents/MacOS/meept_ui $(GUI_BIN)
+else ifeq ($(GUI_PLATFORM),linux)
+	cp $(FLUTTER_UI_DIR)/build/linux/x64/release/bundle/meept_ui $(GUI_BIN)
+else
+	cp $(FLUTTER_UI_DIR)/build/windows/x64/runner/Release/meept_ui.exe $(GUI_BIN)
+endif
+	@echo "Built $(GUI_BIN) ($$(du -h $(GUI_BIN) | cut -f1))"
+
+gui-clean:
+	rm -rf $(FLUTTER_UI_DIR)/build
