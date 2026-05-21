@@ -1,93 +1,75 @@
 import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../models/session.dart';
+import 'sessions_list.dart';
+import 'sessions_detail.dart';
 
-class SessionsOverviewTab extends StatelessWidget {
+/// Sessions overview tab - master-detail view with list and detail panes
+class SessionsOverviewTab extends StatefulWidget {
   const SessionsOverviewTab({super.key});
+
+  @override
+  State<SessionsOverviewTab> createState() => _SessionsOverviewTabState();
+}
+
+class _SessionsOverviewTabState extends State<SessionsOverviewTab> {
+  Session? _selectedSession;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      color: CyberpunkColors.black,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Text(
-                'SESSIONS',
-                style: CyberpunkTypography.headlineLarge,
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: () {
-                  // Create new session
-                },
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('NEW SESSION'),
-              ),
-            ],
+          SessionsList(
+            sessions: _getSessions(),
+            selectedSessionId: _selectedSession?.id,
+            onSessionSelected: (sessionId) {
+              setState(() {
+                _selectedSession = _getSessionById(sessionId);
+              });
+            },
           ),
-          const SizedBox(height: 16),
-          // Session stats - placeholder
-          _buildSessionStats(),
-          const SizedBox(height: 16),
-          // Session list - placeholder
-          Expanded(
-            child: Center(
-              child: Text(
-                'SESSION_LIST_PLACEHOLDER',
-                style: CyberpunkTypography.bodyMedium,
-              ),
-            ),
-          ),
+          if (_selectedSession != null)
+            SessionsDetailPane(session: _selectedSession!),
         ],
       ),
     );
   }
 
-  Widget _buildSessionStats() {
-    return Row(
-      children: [
-        _buildStatCard('total', '24', CyberpunkColors.orangePrimary),
-        const SizedBox(width: 12),
-        _buildStatCard('active', '3', CyberpunkColors.greenSuccess),
-        const SizedBox(width: 12),
-        _buildStatCard('completed', '18', CyberpunkColors.blueInfo),
-        const SizedBox(width: 12),
-        _buildStatCard('tokens', '156K', Colors.purple),
-      ],
-    );
+  List<Session> _getSessions() {
+    // TODO: Replace with Riverpod provider
+    return [
+      Session(
+        id: 'session-001',
+        title: 'API Integration Task',
+        createdAt: DateTime.now().subtract(const Duration(hours: 2)),
+        lastActivityAt: DateTime.now(),
+        duration: const Duration(hours: 1, minutes: 45, seconds: 30),
+        tokenCount: 12500,
+        taskIds: ['task-001', 'task-002'],
+        status: 'active',
+      ),
+      Session(
+        id: 'session-002',
+        title: 'debugging flutter ui',
+        createdAt: DateTime.now().subtract(const Duration(days: 1)),
+        lastActivityAt: DateTime.now().subtract(const Duration(hours: 5)),
+        duration: const Duration(minutes: 45),
+        tokenCount: 5200,
+        taskIds: ['task-003'],
+        status: 'completed',
+      ),
+    ];
   }
 
-  Widget _buildStatCard(String label, String value, Color color) {
-    return Container(
-      width: 120,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        border: Border.all(color: color, width: 1),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: CyberpunkTypography.headlineMedium.copyWith(
-              color: color,
-              fontSize: 28,
-            ),
-          ),
-          Text(
-            label.toUpperCase(),
-            style: CyberpunkTypography.bodySmall.copyWith(
-              color: color.withOpacity(0.8),
-              fontSize: 10,
-              letterSpacing: 1,
-            ),
-          ),
-        ],
-      ),
-    );
+  Session? _getSessionById(String id) {
+    final sessions = _getSessions();
+    try {
+      return sessions.firstWhere((s) => s.id == id);
+    } catch (e) {
+      return null;
+    }
   }
 }

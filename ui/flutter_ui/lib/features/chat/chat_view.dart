@@ -4,6 +4,7 @@ import '../../theme/typography.dart';
 import 'chat_message_list.dart';
 import 'chat_input.dart';
 
+/// Chat view - main chat pane with header, message list, and input
 class ChatView extends StatefulWidget {
   final String sessionId;
 
@@ -50,14 +51,14 @@ class _ChatViewState extends State<ChatView> {
           ),
           const SizedBox(width: 8),
           Text(
-            'CHAT ACTIVE',
+            'chat active',
             style: CyberpunkTypography.label.copyWith(
               color: CyberpunkColors.greenSuccess,
             ),
           ),
           const Spacer(),
           Text(
-            'SESSION: ${widget.sessionId.substring(0, 8)}',
+            'session: ${widget.sessionId.substring(0, 8)}',
             style: CyberpunkTypography.bodySmall,
           ),
         ],

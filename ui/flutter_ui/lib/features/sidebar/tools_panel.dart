@@ -4,8 +4,9 @@ import '../../theme/typography.dart';
 
 class ToolsPanel extends StatelessWidget {
   final bool isExpanded;
+  final VoidCallback? onCollapseToggle;
 
-  const ToolsPanel({super.key, this.isExpanded = true});
+  const ToolsPanel({super.key, this.isExpanded = true, this.onCollapseToggle});
 
   @override
   Widget build(BuildContext context) {
@@ -47,12 +48,25 @@ class ToolsPanel extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.apps, color: CyberpunkColors.orangePrimary, size: 20),
+          IconButton(
+            icon: const Icon(
+              Icons.chevron_left,
+              color: CyberpunkColors.orangePrimary,
+              size: 18,
+            ),
+            onPressed: onCollapseToggle,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+          const SizedBox(width: 4),
+          const Icon(Icons.apps, color: CyberpunkColors.orangePrimary, size: 20),
           if (isExpanded) ...[
             const SizedBox(width: 8),
             Text(
-              'TOOLS',
-              style: CyberpunkTypography.label,
+              'tools',
+              style: CyberpunkTypography.label.copyWith(
+                color: CyberpunkColors.orangePrimary,
+              ),
             ),
           ],
         ],
@@ -65,13 +79,13 @@ class ToolsPanel extends StatelessWidget {
       leading: Icon(icon, color: CyberpunkColors.orangeBright, size: 20),
       title: isExpanded
           ? Text(
-              label,
+              label.toLowerCase(),
               style: CyberpunkTypography.bodyMedium,
             )
           : null,
       subtitle: isExpanded && status.isNotEmpty
           ? Text(
-              status,
+              status.toLowerCase(),
               style: CyberpunkTypography.bodySmall.copyWith(fontSize: 10),
             )
           : null,

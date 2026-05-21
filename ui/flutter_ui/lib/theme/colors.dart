@@ -20,6 +20,7 @@ abstract class CyberpunkColors {
   static const Color greenSuccess = Color(0xFF00FFAA);
   static const Color redAlert = Color(0xFFFF3366);
   static const Color yellowWarning = Color(0xFFFFCC00);
+  static const Color blueInfo = Color(0xFF3399FF);
 
   // Terminal colors
   static const Color terminalGreen = Color(0xFF33FF33);
