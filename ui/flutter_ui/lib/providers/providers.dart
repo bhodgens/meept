@@ -1,4 +1,5 @@
 export 'task_provider.dart';
+export 'agent_provider.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/api_client.dart';
@@ -19,11 +20,6 @@ final sessionProvider =
   return SessionNotifier(apiClient: client);
 });
 
-// Agents provider
-final agentsProvider = FutureProvider<List<Agent>>((ref) async {
-  final client = ref.watch(apiClientProvider);
-  return client.listAgents();
-});
 
 // Active session state
 final activeSessionProvider = StateProvider<Session?>((ref) => null);
