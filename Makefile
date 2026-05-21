@@ -9,7 +9,7 @@ help:
 	@echo "  deps             Download Go dependencies"
 	@echo ""
 	@echo "Build:"
-	@echo "  build            Build all binaries (daemon + CLI + gendoc)"
+	@echo "  build            Build all binaries (daemon + CLI + gendoc + lite)"
 	@echo "  build-daemon     Build only the daemon binary"
 	@echo "  build-cli        Build only the CLI binary"
 	@echo "  build-gendoc     Build only the documentation generator"
@@ -40,6 +40,8 @@ help:
 	@echo "  clean            Remove build artifacts"
 	@echo "  menubar-clean    Remove menubar build artifacts"
 	@echo "  gui-deps         Install Flutter/CocoaPods dependencies (macOS)"
+	@echo "  gui-web          Build Flutter web app (release)"
+	@echo "  gui-web-run      Run Flutter web dev server with hot reload"
 	@echo ""
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
@@ -116,7 +118,7 @@ deps:
 
 build: build-all
 
-build-all: build-daemon build-cli build-gendoc build-gui
+build-all: build-daemon build-cli build-gendoc build-gui build-lite
 	@echo ""
 	@echo "Build complete:"
 	@ls -lh $(BIN_DIR)/
@@ -147,7 +149,12 @@ install: build
 	@echo "Installing binaries to GOPATH/bin..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
-	@if [ -f $(GUI_BIN) ]; then \
+	@echo "Installing meept-lite..."
+	go install $(GO_BUILD_FLAGS) ./cmd/meept-lite
+	@if [ -d $(BIN_DIR)/meept_ui.app ]; then \
+		cp -r $(BIN_DIR)/meept_ui.app $$(go env GOPATH)/bin/meept_ui.app; \
+		echo "Installed meept_ui.app to $$(go env GOPATH)/bin/meept_ui.app"; \
+	elif [ -f $(GUI_BIN) ]; then \
 		cp $(GUI_BIN) $$(go env GOPATH)/bin/meept-gui; \
 		chmod +x $$(go env GOPATH)/bin/meept-gui; \
 		echo "Installed meept-gui to $$(go env GOPATH)/bin/meept-gui"; \
@@ -187,22 +194,22 @@ install: build
 # Testing
 # =============================================================================
 
-test:
+	est:
 	@echo "Running tests (short mode)..."
 	go test ./... -short
 
-test-verbose:
+	est-verbose:
 	@echo "Running tests (verbose)..."
 	go test ./... -v
 
-test-cover:
+	est-cover:
 	@echo "Running tests with coverage..."
 	@mkdir -p coverage
 	go test ./... -coverprofile=coverage/coverage.out
 	go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 	@echo "Coverage report: coverage/coverage.html"
 
-test-race:
+	est-race:
 	@echo "Running tests with race detector..."
 	go test ./... -race
 
@@ -236,7 +243,7 @@ status: build-cli
 # =============================================================================
 
 clean:
-	rm -rf $(BIN_DIR)/ coverage/
+	rm -rf $(BIN_DIR)/meept_ui.app $(BIN_DIR)/meept-gui-* coverage/
 	@cd $(FLUTTER_UI_DIR) && flutter clean 2>/dev/null || true
 	go clean -cache -testcache
 
@@ -489,10 +496,40 @@ build-gui: gui-deps
 	@echo "Building meept-gui for $(GUI_PLATFORM)..."
 	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release
 ifeq ($(GUI_PLATFORM),macos)
-	cp $(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/meept_ui.app/Contents/MacOS/meept_ui $(GUI_BIN)
+	cp -r $(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/meept_ui.app $(BIN_DIR)/meept_ui.app
+	@echo "Built $(BIN_DIR)/meept_ui.app ($$(du -h $(BIN_DIR)/meept_ui.app | cut -f1))"
 else ifeq ($(GUI_PLATFORM),linux)
 	cp $(FLUTTER_UI_DIR)/build/linux/x64/release/bundle/meept_ui $(GUI_BIN)
+	@echo "Built $(GUI_BIN) ($$(du -h $(GUI_BIN) | cut -f1))"
 else
 	cp $(FLUTTER_UI_DIR)/build/windows/x64/runner/Release/meept_ui.exe $(GUI_BIN)
-endif
 	@echo "Built $(GUI_BIN) ($$(du -h $(GUI_BIN) | cut -f1))"
+endif
+
+# =============================================================================
+# meept-lite (minimalistic TUI client)
+# =============================================================================
+
+LITE := $(BIN_DIR)/meept-lite
+
+build-lite:
+	@mkdir -p $(BIN_DIR)
+	@echo "Building meept-lite..."
+	go build $(GO_BUILD_FLAGS) -o $(LITE) ./cmd/meept-lite
+	@echo "Built $(LITE) ($$(du -h $(LITE) | cut -f1))"
+
+install-lite: build-lite
+	@echo "Installing meept-lite to GOPATH/bin..."
+	go install $(GO_BUILD_FLAGS) ./cmd/meept-lite
+	@echo "Installed meept-lite to $$(go env GOPATH)/bin/meept-lite"
+
+# Flutter Web Development
+gui-web:
+	@echo "Building Flutter web app..."
+	cd $(FLUTTER_UI_DIR) && flutter build web --release
+	@echo "Built $(FLUTTER_UI_DIR)/build/web"
+
+gui-web-run:
+	@echo "Starting Flutter web dev server with hot reload..."
+	@echo "Open http://localhost:59714 in your browser"
+	cd $(FLUTTER_UI_DIR) && flutter run -d chrome --web-port=59714 --web-renderer=canvaskit
