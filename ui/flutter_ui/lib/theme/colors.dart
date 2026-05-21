@@ -1,45 +1,46 @@
 import 'package:flutter/material.dart';
 
-/// Cyberpunk color palette - orange/black theme
+/// ORANGE VOID cyberpunk color palette
 abstract class CyberpunkColors {
-  // Primary colors
-  static const Color black = Color(0xFF0A0A0A);
+  // Base colors
+  static const Color black = Color(0xFF000000);
   static const Color darkGray = Color(0xFF1A1A1A);
   static const Color midGray = Color(0xFF2A2A2A);
-  static const Color lightGray = Color(0xFF3A3A3A);
+  static const Color lightGray = Color(0xFF333333);
 
-  // Accent - Orange spectrum
+  // Primary - Orange spectrum
   static const Color orangePrimary = Color(0xFFFF6600);
-  static const Color orangeBright = Color(0xFFFF8533);
-  static const Color orangeDark = Color(0xFFCC5200);
-  static const Color orangeGlow = Color(0xFFFFA666);
+  static const Color orangeBright = Color(0xFFFF8800);
+  static const Color orangeDark = Color(0xFFCC5500);
+  static const Color orangeGlow = Color(0xFFFFAA33);
+  static const Color orangeAccent = Color(0xFFFF9933);
 
   // Secondary accents
-  static const Color redAlert = Color(0xFFFF3333);
-  static const Color greenSuccess = Color(0xFF33FF66);
-  static const Color blueInfo = Color(0xFF3399FF);
+  static const Color cyanAccent = Color(0xFF00FFFF);
+  static const Color greenSuccess = Color(0xFF00FFAA);
+  static const Color redAlert = Color(0xFFFF3366);
   static const Color yellowWarning = Color(0xFFFFCC00);
 
   // Terminal colors
   static const Color terminalGreen = Color(0xFF33FF33);
   static const Color terminalAmber = Color(0xFFFFB000);
 
-  // Gradients
-  static const List<Color> orangeGradient = [
-    Color(0xFFFF6600),
-    Color(0xFFFF8533),
-    Color(0xFFCC5200),
-  ];
-
-  static const List<Color> darkGradient = [
-    Color(0xFF0A0A0A),
-    Color(0xFF1A1A1A),
-    Color(0xFF2A2A2A),
-  ];
-
-  // Opacity variants
+  // Transparent variants
   static Color orangeTransparent(double opacity) =>
       orangePrimary.withOpacity(opacity);
   static Color blackTransparent(double opacity) =>
       black.withOpacity(opacity);
+
+  // Gradients
+  static const List<Color> orangeGradient = [
+    Color(0xFFFF6600),
+    Color(0xFFFF8800),
+    Color(0xFFCC5500),
+  ];
+
+  static const List<Color> darkGradient = [
+    Color(0xFF000000),
+    Color(0xFF1A1A1A),
+    Color(0xFF2A2A2A),
+  ];
 }
