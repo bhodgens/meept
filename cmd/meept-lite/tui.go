@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/sharedclient"
+	"github.com/caimlas/meept/internal/sharedclient/menus"
 	"github.com/caimlas/meept/internal/transport"
+	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/nsf/termbox-go"
 )
 
@@ -22,6 +24,15 @@ type TUI struct {
 	prompt       *sharedclient.PromptRenderer
 	history      *sharedclient.History
 	autocomplete *sharedclient.SlashAutocomplete
+
+	// Menus
+	sessionMenu  *menus.SessionMenu
+	tasksMenu    *menus.TasksMenu
+	queueMenu    *menus.QueueMenu
+	memoryMenu   *menus.MemoryMenu
+	chatMenu     *menus.ChatMenu
+	cmdPalette   *menus.CommandPalette
+	activeMenu   interface{ IsVisible() bool; Hide(); Render() }
 
 	// Input state
 	inputBuffer strings.Builder
@@ -54,12 +65,140 @@ func NewTUI(client transport.Client, sessionMgr *sharedclient.SessionManager) *T
 	history := sharedclient.NewHistory(1000)
 	autocomplete := sharedclient.NewSlashAutocomplete()
 
-	return &TUI{
+	t := &TUI{
 		client:       client,
 		sessionMgr:   sessionMgr,
 		prompt:       prompt,
 		history:      history,
 		autocomplete: autocomplete,
+	}
+
+	// Initialize menus
+	t.sessionMenu = menus.NewSessionMenu(client, sessionMgr)
+	t.tasksMenu = menus.NewTasksMenu(client)
+	t.queueMenu = menus.NewQueueMenu(client)
+	t.memoryMenu = menus.NewMemoryMenu(client)
+	t.chatMenu = menus.NewChatMenu()
+	t.cmdPalette = menus.NewCommandPalette()
+
+	// Set up menu callbacks
+	t.setupMenuCallbacks()
+
+	return t
+}
+
+// setupMenuCallbacks sets up the callback functions for menu actions.
+func (t *TUI) setupMenuCallbacks() {
+	// Session menu callbacks
+	t.sessionMenu.SetCallbacks(
+		func(sess *types.Session) {
+			if sess != nil {
+				t.sessionMgr.SwitchSession(nil, sess.ID)
+				t.prompt.SetSessionName(t.sessionMgr.GetSessionName())
+				t.addScrollback(fmt.Sprintf("switched to session: %s", t.sessionMgr.GetSessionName()))
+			}
+		},
+		func(name string) {
+			if name == "new-session" {
+				t.addScrollback("use /session create <name> to create a new session")
+			}
+		},
+		func(id string) {
+			if err := t.sessionMgr.DeleteSession(nil, id); err != nil {
+				t.addScrollback(fmt.Sprintf("error deleting session: %v", err))
+			} else {
+				t.addScrollback(fmt.Sprintf("deleted session: %s", id))
+			}
+		},
+		func() { t.activeMenu = nil },
+	)
+
+	// Chat menu callbacks
+	t.chatMenu.SetCallbacks(
+		func() {
+			t.scrollback = t.scrollback[:0]
+			if ctx := t.client; ctx != nil {
+				name := t.sessionMgr.GetSessionName() + " (copy)"
+				if sess, err := ctx.CreateSession(name); err == nil {
+					t.sessionMgr.SetSession(sess)
+					t.prompt.SetSessionName(sess.Name)
+				}
+			}
+			t.addScrollback("new conversation started")
+		},
+		func() {
+			t.scrollback = t.scrollback[:0]
+			t.addScrollback("scrollback cleared")
+		},
+		func() { t.activeMenu = nil },
+	)
+
+	// Command palette callbacks
+	t.cmdPalette.SetCallbacks(
+		func(cmd string) {
+			t.executePaletteCommand(cmd)
+		},
+		func() { t.activeMenu = nil },
+	)
+
+	// Memory menu callbacks
+	t.memoryMenu.SetCallbacks(
+		func(mem *types.MemoryItem) {
+			if mem != nil {
+				t.addScrollback(fmt.Sprintf("memory: %s", mem.Content))
+			}
+		},
+		func(query string) {
+			t.addScrollback("memory search: use /memory search <query>")
+		},
+		func() { t.activeMenu = nil },
+	)
+
+	// Tasks menu callbacks
+	t.tasksMenu.SetCallbacks(
+		func(task *types.Task) {
+			if task != nil {
+				t.addScrollback(fmt.Sprintf("task: %s (state: %s)", task.Name, task.State))
+			}
+		},
+		func() { t.activeMenu = nil },
+	)
+
+	// Queue menu callbacks
+	t.queueMenu.SetCallbacks(
+		func(job *types.QueueJob) {
+			if job != nil {
+				t.addScrollback(fmt.Sprintf("queue job: %s (priority: %d)", job.Type, job.Priority))
+			}
+		},
+		func() { t.activeMenu = nil },
+	)
+}
+
+// executePaletteCommand executes a command from the command palette.
+func (t *TUI) executePaletteCommand(cmd string) {
+	switch cmd {
+	case "session":
+		t.sessionMenu.Show()
+		t.activeMenu = t.sessionMenu
+	case "tasks":
+		t.tasksMenu.Show()
+		t.activeMenu = t.tasksMenu
+	case "queue":
+		t.queueMenu.Show()
+		t.activeMenu = t.queueMenu
+	case "memory":
+		t.memoryMenu.Show()
+		t.activeMenu = t.memoryMenu
+	case "chat":
+		t.chatMenu.Show()
+		t.activeMenu = t.chatMenu
+	case "help":
+		t.executeSlashCommand(&sharedclient.SlashCommand{Name: "help"})
+	case "status":
+		t.executeSlashCommand(&sharedclient.SlashCommand{Name: "status"})
+	case "usage":
+		t.executeSlashCommand(&sharedclient.SlashCommand{Name: "usage"})
 	}
 }
 
@@ -219,10 +358,17 @@ func (t *TUI) handleKeyEvent(ev termbox.Event) {
 		return
 	}
 
-	// Handle escape for cancelling autocomplete or command mode
+	// Handle escape for cancelling autocomplete, command mode, or menus
 	if ev.Key == termbox.KeyEsc {
 		if t.autocomplete.IsVisible() {
 			t.autocomplete.Hide()
+			t.render()
+			return
+		}
+		if t.activeMenu != nil {
+			t.activeMenu.Hide()
+			t.activeMenu = nil
+			t.commandMode = false
 			t.render()
 			return
 		}
@@ -230,6 +376,42 @@ func (t *TUI) handleKeyEvent(ev termbox.Event) {
 			t.commandMode = false
 			t.render()
 			return
+		}
+	}
+
+	// Handle active menu input
+	if t.activeMenu != nil {
+		switch menu := t.activeMenu.(type) {
+		case *menus.SessionMenu:
+			if menu.HandleKey(ev.Ch, ev.Key) {
+				t.render()
+				return
+			}
+		case *menus.TasksMenu:
+			if menu.HandleKey(ev.Ch, ev.Key) {
+				t.render()
+				return
+			}
+		case *menus.QueueMenu:
+			if menu.HandleKey(ev.Ch, ev.Key) {
+				t.render()
+				return
+			}
+		case *menus.MemoryMenu:
+			if menu.HandleKey(ev.Ch, ev.Key) {
+				t.render()
+				return
+			}
+		case *menus.ChatMenu:
+			if menu.HandleKey(ev.Ch, ev.Key) {
+				t.render()
+				return
+			}
+		case *menus.CommandPalette:
+			if menu.HandleKey(ev.Ch, ev.Key) {
+				t.render()
+				return
+			}
 		}
 	}
 
@@ -330,19 +512,26 @@ func (t *TUI) handleCommandModeKey(ev termbox.Event) {
 		key = "ctrl+x"
 	}
 
+	// Open the appropriate menu
 	switch key {
 	case "s":
-		t.addScrollback("[ctrl+x s] session menu - coming in Phase 4")
+		t.sessionMenu.Show()
+		t.activeMenu = t.sessionMenu
 	case "t":
-		t.addScrollback("[ctrl+x t] tasks menu - coming in Phase 4")
+		t.tasksMenu.Show()
+		t.activeMenu = t.tasksMenu
 	case "q":
-		t.addScrollback("[ctrl+x q] queue menu - coming in Phase 4")
+		t.queueMenu.Show()
+		t.activeMenu = t.queueMenu
 	case "m":
-		t.addScrollback("[ctrl+x m] memory menu - coming in Phase 4")
+		t.memoryMenu.Show()
+		t.activeMenu = t.memoryMenu
 	case "c":
-		t.addScrollback("[ctrl+x c] chat menu - coming in Phase 4")
+		t.chatMenu.Show()
+		t.activeMenu = t.chatMenu
 	case "ctrl+x":
-		t.addScrollback("[ctrl+x ctrl+x] command palette - coming in Phase 4")
+		t.cmdPalette.Show()
+		t.activeMenu = t.cmdPalette
 	default:
 		t.addScrollback(fmt.Sprintf("[unknown command mode key: %s]", key))
 	}
@@ -564,7 +753,13 @@ func (t *TUI) render() {
 		t.renderAutocomplete()
 	}
 
-	// Render command mode indicator
+	// Render active menu (takes priority)
+	if t.activeMenu != nil {
+		t.activeMenu.Render()
+		return
+	}
+
+	// Render command mode indicator (only when no menu is active)
 	if t.commandMode {
 		indicator := "COMMAND MODE: s=session, t=tasks, q=queue, m=memory, c=chat, ^x=palette"
 		y := height - 2
