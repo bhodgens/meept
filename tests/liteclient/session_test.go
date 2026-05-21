@@ -34,6 +34,12 @@ type mockSessionHandler struct {
 }
 
 func (h *mockSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Handle health check (GET request)
+	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/health" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	
 	var req struct {
 		Method string          `json:"method"`
 		Params json.RawMessage `json:"params"`

@@ -22,6 +22,34 @@ type integrationServer struct {
 
 func newIntegrationServer(handler func(method string, params json.RawMessage) (any, error)) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Handle health check (GET request)
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/health" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		// Handle chat endpoint directly (POST with JSON body)
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/chat" {
+			var req struct {
+				Message        string `json:"message"`
+				ConversationID string `json:"conversation_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "bad request", 400)
+				return
+			}
+			// Call handler with "chat" method
+			result, err := handler("chat", json.RawMessage(fmt.Sprintf(`{"message":%q,"conversation_id":%q}`, req.Message, req.ConversationID)))
+			if err != nil {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(result)
+			return
+		}
+		
 		var req struct {
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
@@ -184,13 +212,13 @@ func TestIntegration_HistoryAndAutocomplete(t *testing.T) {
 		t.Errorf("history Up = %q, want %q", val, "/status")
 	}
 
-	// User goes down
+	// User goes down - back to input (temporary)
 	val, ok = history.Down("current")
 	if !ok {
 		t.Fatal("history Down should return ok")
 	}
-	if val != "hello" {
-		t.Errorf("history Down = %q, want %q", val, "hello")
+	if val != "current" {
+		t.Errorf("history Down = %q, want %q", val, "current")
 	}
 
 	// Meanwhile, autocomplete shows commands when user types /

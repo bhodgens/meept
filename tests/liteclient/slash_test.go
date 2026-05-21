@@ -81,7 +81,6 @@ func TestParseSlash_NotACommand(t *testing.T) {
 		"/",
 		"  /",
 		"  hello",
-		"/help is nice after trim", // ParseSlash trims whitespace, so this is a valid command
 	}
 
 	for _, input := range tests {

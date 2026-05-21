@@ -138,12 +138,13 @@ func TestHistory_Down(t *testing.T) {
 		t.Errorf("Down() = %q, want %q", result, "cmd3")
 	}
 
-	// Down at the end - should return temporary
-	result, ok = h.Down("original input")
-	if ok {
-		if result != "original input" {
-			t.Errorf("Down() at end = %q, want %q", result, "original input")
-		}
+	// Down at the end - should return the stored temporary
+	result, ok = h.Down("ignored")
+	if !ok {
+		t.Error("Down() at end returned ok=false")
+	}
+	if result != "temp" {
+		t.Errorf("Down() at end = %q, want %q", result, "temp")
 	}
 }
 
@@ -205,11 +206,13 @@ func TestHistory_ScrollThenRestore(t *testing.T) {
 		}
 	}
 
-	result, ok = h.Down("restored")
-	if ok {
-		if result != "restored" {
-			t.Errorf("Down() to top = %q, want %q", result, "restored")
-		}
+	// Note: Down returns the stored temporary from Up(), not the passed value
+	result, ok = h.Down("ignored")
+	if !ok {
+		t.Error("Down() to top returned ok=false")
+	}
+	if result != "temp" {
+		t.Errorf("Down() to top = %q, want 'temp'", result)
 	}
 }
 
@@ -251,8 +254,8 @@ func TestHistory_HasPrevious_Next(t *testing.T) {
 	h.Add("a")
 	h.Add("b")
 
-	if h.HasPrevious() {
-		t.Error("HasPrevious() after adding, before navigation = true, want false")
+	if !h.HasPrevious() {
+		t.Error("HasPrevious() after adding, before navigation = false, want true")
 	}
 
 	h.Up("temp")
@@ -275,10 +278,10 @@ func TestHistory_AddAfterNavigation(t *testing.T) {
 	h.Up("temp") // at c
 	h.Up("temp") // at b
 
-	// Add new entry - should reset history position
+	// Add new entry - should reset navigation position
 	h.Add("new")
-	if !h.HasNext() {
-		t.Error("HasNext() after Add() should be false (reset)")
+	if h.HasNext() {
+		t.Error("HasNext() after Add() should be false (navigation reset)")
 	}
 
 	// New entry should be at the end

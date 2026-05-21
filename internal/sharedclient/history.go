@@ -92,7 +92,7 @@ func (h *History) HasPrevious() bool {
 
 // HasNext returns true if there's a next entry.
 func (h *History) HasNext() bool {
-	return h.current > 0
+	return h.current >= 0
 }
 
 // Len returns the number of entries in history.
