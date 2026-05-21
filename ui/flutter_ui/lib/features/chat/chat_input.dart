@@ -30,8 +30,8 @@ class _ChatInputState extends ConsumerState<ChatInput> {
 
     final chatNotifier = ref.read(chatProvider.notifier);
     chatNotifier.sendMessage(
-      message: text,
       sessionId: widget.sessionId,
+      text: text,
       agentId: _selectedAgent,
     );
 

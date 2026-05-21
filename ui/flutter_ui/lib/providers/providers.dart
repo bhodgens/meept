@@ -1,10 +1,11 @@
 export 'task_provider.dart';
 export 'agent_provider.dart';
-export 'session_notifier.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/api_client.dart';
 import '../services/websocket_service.dart';
+import '../services/session_notifier.dart';
+import '../models/api_models.dart';
 
 // API Client provider
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
