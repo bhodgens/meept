@@ -1,21 +1,20 @@
 import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../models/api_models.dart';
 
 class ChatMessageBubble extends StatelessWidget {
-  final String message;
-  final bool isUser;
-  final DateTime? timestamp;
+  final ChatMessage message;
 
   const ChatMessageBubble({
     super.key,
     required this.message,
-    required this.isUser,
-    this.timestamp,
   });
 
   @override
   Widget build(BuildContext context) {
+    final isUser = message.role == 'user';
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -29,7 +28,8 @@ class ChatMessageBubble extends StatelessWidget {
               ? CyberpunkColors.orangePrimary.withOpacity(0.2)
               : CyberpunkColors.midGray,
           border: Border.all(
-            color: isUser ? CyberpunkColors.orangePrimary : CyberpunkColors.lightGray,
+            color:
+                isUser ? CyberpunkColors.orangePrimary : CyberpunkColors.lightGray,
             width: 1,
           ),
           borderRadius: BorderRadius.only(
@@ -43,23 +43,19 @@ class ChatMessageBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              message,
+              message.content,
               style: CyberpunkTypography.bodyMedium.copyWith(
-                color: isUser
-                    ? CyberpunkColors.orangeGlow
-                    : CyberpunkColors.orangeGlow,
+                color: CyberpunkColors.orangeGlow,
               ),
             ),
-            if (timestamp != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                _formatTime(timestamp!),
-                style: CyberpunkTypography.bodySmall.copyWith(
-                  color: CyberpunkColors.lightGray,
-                  fontSize: 10,
-                ),
+            const SizedBox(height: 4),
+            Text(
+              _formatTime(message.timestamp),
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.lightGray,
+                fontSize: 10,
               ),
-            ],
+            ),
           ],
         ),
       ),

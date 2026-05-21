@@ -1,23 +1,96 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 
 /// Sessions list widget - displays all sessions with selection
-class SessionsList extends StatelessWidget {
-  final List<Session> sessions;
-  final String? selectedSessionId;
-  final ValueChanged<String> onSessionSelected;
+class SessionsList extends ConsumerStatefulWidget {
+  const SessionsList({super.key});
 
-  const SessionsList({
-    super.key,
-    required this.sessions,
-    this.selectedSessionId,
-    required this.onSessionSelected,
-  });
+  @override
+  ConsumerState<SessionsList> createState() => _SessionsListState();
+}
+
+class _SessionsListState extends ConsumerState<SessionsList> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(sessionProvider.notifier).loadSessions();
+    });
+  }
+
+  void _showCreateSessionDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text('create session', style: CyberpunkTypography.headlineMedium),
+        content: TextField(
+          controller: controller,
+          style: CyberpunkTypography.bodyMedium,
+          decoration: InputDecoration(
+            hintText: 'enter session title...',
+            hintStyle: CyberpunkTypography.bodySmall,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('cancel', style: CyberpunkTypography.bodyMedium),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (controller.text.isNotEmpty) {
+                ref
+                    .read(sessionProvider.notifier)
+                    .createSession(controller.text);
+                Navigator.pop(context);
+              }
+            },
+            child: Text('create', style: CyberpunkTypography.bodyMedium),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteConfirmation(String sessionId, String title) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text('delete session?', style: CyberpunkTypography.headlineMedium),
+        content: Text('"$title"', style: CyberpunkTypography.bodyMedium),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('cancel', style: CyberpunkTypography.bodyMedium),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: CyberpunkColors.redAlert),
+            onPressed: () {
+              ref
+                  .read(sessionProvider.notifier)
+                  .deleteSession(sessionId);
+              Navigator.pop(context);
+            },
+            child: Text('delete', style: CyberpunkTypography.bodyMedium),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final sessionState = ref.watch(sessionProvider);
+    final activeSession = ref.watch(activeSessionProvider);
+
     return Container(
       width: 280,
       decoration: BoxDecoration(
@@ -44,23 +117,45 @@ class SessionsList extends StatelessWidget {
                 IconButton(
                   icon: const Icon(Icons.add, size: 18),
                   color: CyberpunkColors.orangePrimary,
-                  onPressed: () {
-                    // Create new session
-                  },
+                  onPressed: _showCreateSessionDialog,
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: sessions.length,
-              itemBuilder: (context, index) {
-                final session = sessions[index];
-                final isSelected = session.id == selectedSessionId;
-                return _buildSessionTile(session, isSelected);
-              },
+          if (sessionState.isLoading)
+            const Expanded(
+              child: Center(
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (sessionState.error != null)
+            Expanded(
+              child: Center(
+                child: Text(
+                  'error: ${sessionState.error}',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.redAlert,
+                  ),
+                ),
+              ),
+            )
+          else if (sessionState.sessions.isEmpty)
+            const Expanded(
+              child: Center(
+                child: Text('no sessions'),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: sessionState.sessions.length,
+                itemBuilder: (context, index) {
+                  final session = sessionState.sessions[index];
+                  final isSelected = activeSession?.id == session.id;
+                  return _buildSessionTile(session, isSelected);
+                },
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -68,7 +163,8 @@ class SessionsList extends StatelessWidget {
 
   Widget _buildSessionTile(Session session, bool isSelected) {
     return InkWell(
-      onTap: () => onSessionSelected(session.id),
+      onTap: () =>
+          ref.read(activeSessionProvider.notifier).state = session,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
@@ -84,21 +180,33 @@ class SessionsList extends StatelessWidget {
             ),
           ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Text(
-              session.title.toLowerCase(),
-              style: CyberpunkTypography.bodyMedium.copyWith(
-                color: isSelected
-                    ? CyberpunkColors.orangePrimary
-                    : CyberpunkColors.greenSuccess,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    session.title.toLowerCase(),
+                    style: CyberpunkTypography.bodyMedium.copyWith(
+                      color: isSelected
+                          ? CyberpunkColors.orangePrimary
+                          : CyberpunkColors.greenSuccess,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatLastActivity(session.updatedAt),
+                    style: CyberpunkTypography.bodySmall,
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              _formatLastActivity(session.updatedAt),
-              style: CyberpunkTypography.bodySmall,
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 16),
+              color: CyberpunkColors.orangeDark,
+              onPressed: () =>
+                  _showDeleteConfirmation(session.id, session.title),
             ),
           ],
         ),

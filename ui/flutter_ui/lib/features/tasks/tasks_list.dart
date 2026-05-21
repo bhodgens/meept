@@ -1,25 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 
-/// Tasks list widget - displays all tasks with status indicators
-class TasksList extends StatelessWidget {
-  final List<Task> tasks;
-  final String? selectedTaskId;
-  final ValueChanged<Task> onTaskSelected;
+/// Tasks list widget - displays all tasks for the active session
+class TasksList extends ConsumerStatefulWidget {
+  const TasksList({super.key});
 
-  const TasksList({
-    super.key,
-    required this.tasks,
-    this.selectedTaskId,
-    required this.onTaskSelected,
-  });
+  @override
+  ConsumerState<TasksList> createState() => _TasksListState();
+}
+
+class _TasksListState extends ConsumerState<TasksList> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(taskProvider.notifier).loadTasks();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final taskState = ref.watch(taskProvider);
+
     return Container(
-      width: 320,
+      width: 280,
       decoration: BoxDecoration(
         border: Border(
           right: BorderSide(
@@ -45,82 +53,96 @@ class TasksList extends StatelessWidget {
                   icon: const Icon(Icons.add, size: 18),
                   color: CyberpunkColors.orangePrimary,
                   onPressed: () {
-                    // Create new task
+                    // TODO: Show create task dialog
                   },
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: tasks.length,
-              itemBuilder: (context, index) {
-                final task = tasks[index];
-                final isSelected = task.id == selectedTaskId;
-                return _buildTaskTile(task, isSelected);
-              },
+          if (taskState.isLoading)
+            const Expanded(
+              child: Center(
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (taskState.error != null)
+            Expanded(
+              child: Center(
+                child: Text(
+                  'error: ${taskState.error}',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.redAlert,
+                  ),
+                ),
+              ),
+            )
+          else if (taskState.tasks.isEmpty)
+            const Expanded(
+              child: Center(
+                child: Text('no tasks'),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: taskState.tasks.length,
+                itemBuilder: (context, index) {
+                  final task = taskState.tasks[index];
+                  return _buildTaskTile(task);
+                },
+              ),
             ),
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildTaskTile(Task task, bool isSelected) {
-    return InkWell(
-      onTap: () => onTaskSelected(task),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? CyberpunkColors.orangePrimary.withOpacity(0.1)
-              : null,
-          border: Border(
-            left: BorderSide(
-              color: _getStatusColor(task.status),
-              width: 2,
-            ),
+  Widget _buildTaskTile(Task task) {
+    final statusColor = _getStatusColor(task.status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+            color: statusColor,
+            width: 2,
           ),
         ),
-        child: Row(
-          children: [
-            _buildStatusIndicator(task.status),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    task.title.toLowerCase(),
-                    style: CyberpunkTypography.bodyMedium.copyWith(
-                      color: isSelected
-                          ? CyberpunkColors.orangePrimary
-                          : CyberpunkColors.greenSuccess,
-                    ),
-                  ),
-                  Text(
-                    task.status.toLowerCase(),
-                    style: CyberpunkTypography.bodySmall.copyWith(
-                      color: _getStatusColor(task.status),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
-    );
-  }
-
-  Widget _buildStatusIndicator(String status) {
-    final color = _getStatusColor(status);
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            task.title.toLowerCase(),
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.greenSuccess,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  task.status.toLowerCase(),
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: statusColor,
+                    fontFamily: 'SourceCodePro',
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _formatAge(task.createdAt),
+                style: CyberpunkTypography.bodySmall,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -128,8 +150,7 @@ class TasksList extends StatelessWidget {
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'pending':
-        return CyberpunkColors.yellowWarning;
-      case 'in_progress':
+        return CyberpunkColors.orangePrimary;
       case 'running':
         return CyberpunkColors.blueInfo;
       case 'completed':
@@ -137,7 +158,16 @@ class TasksList extends StatelessWidget {
       case 'failed':
         return CyberpunkColors.redAlert;
       default:
-        return Colors.grey;
+        return CyberpunkColors.midGray;
     }
+  }
+
+  String _formatAge(DateTime date) {
+    final now = DateTime.now();
+    final diff = now.difference(date);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 }
