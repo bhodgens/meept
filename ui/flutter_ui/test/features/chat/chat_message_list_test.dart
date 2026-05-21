@@ -1,0 +1,277 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:meept_ui/features/chat/chat_message_list.dart';
+import 'package:meept_ui/features/chat/chat_message_bubble.dart';
+import 'package:meept_ui/models/api_models.dart';
+import 'package:meept_ui/providers/chat_provider.dart';
+import 'package:meept_ui/services/api_client.dart';
+import 'package:meept_ui/services/websocket_service.dart';
+
+// ===== Mock / Stub Classes =====
+
+class _StubApiClient extends ApiClient {
+  _StubApiClient() : super(host: 'localhost', port: 8081);
+
+  @override
+  Future<T> get<T>(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+  }) async {
+    throw UnimplementedError('not needed');
+  }
+
+  @override
+  Future<T> post<T>(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+  }) async {
+    return {
+      'id': 'msg',
+      'role': 'assistant',
+      'content': 'response',
+      'timestamp': DateTime.now().toIso8601String(),
+    } as T;
+  }
+
+  @override
+  Future<T> put<T>(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+  }) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<T> delete<T>(String path) async {
+    throw UnimplementedError();
+  }
+}
+
+class _StubWebSocket extends WebSocketService {
+  _StubWebSocket() : super(host: 'localhost', port: 8081);
+
+  @override
+  Future<void> connect({String? path}) async {}
+
+  @override
+  void disconnect() {}
+
+  @override
+  void send(Map<String, dynamic> message) {}
+}
+
+/// A widget that sets the chat state after the first frame, then rebuilds
+/// with the child. This avoids modifying provider state during build.
+class _InitialChatState extends ConsumerStatefulWidget {
+  final Widget child;
+  final ChatState initialState;
+
+  const _InitialChatState({
+    required this.child,
+    required this.initialState,
+  });
+
+  @override
+  ConsumerState<_InitialChatState> createState() => _InitialChatStateState();
+}
+
+class _InitialChatStateState extends ConsumerState<_InitialChatState> {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Set initial state after dependencies are loaded (post-frame)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(chatProvider.notifier).state = widget.initialState;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// Builds an app widget suitable for tests, with the chat provider
+/// pre-configured with the given state.
+Widget _buildTestApp({
+  required Widget child,
+  required ChatState initialChatState,
+}) {
+  return ProviderScope(
+    overrides: [
+      chatProvider.overrideWith(
+        (_) => ChatNotifier(
+          apiClient: _StubApiClient(),
+          websocket: _StubWebSocket(),
+        ),
+      ),
+    ],
+    child: MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: _InitialChatState(
+          child: child,
+          initialState: initialChatState,
+        ),
+      ),
+    ),
+  );
+}
+
+// ===== Test fixtures =====
+
+final fixtureMessages = <ChatMessage>[
+  ChatMessage(
+    id: '1',
+    role: 'user',
+    content: 'hello',
+    timestamp: DateTime.utc(2024, 1, 1, 10, 0),
+  ),
+  ChatMessage(
+    id: '2',
+    role: 'assistant',
+    content: 'hi there',
+    timestamp: DateTime.utc(2024, 1, 1, 10, 1),
+  ),
+];
+
+void main() {
+  group('ChatMessageList', () {
+    testWidgets('displays placeholder when no messages', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatMessageList(sessionId: 'test-session'),
+        initialChatState: const ChatState(),
+      ));
+
+      await tester.pumpAndSettle();
+
+      expect(find.text('no messages yet', skipOffstage: false), findsOneWidget);
+      expect(
+        find.text('start the conversation', skipOffstage: false),
+        findsOneWidget,
+      );
+      expect(find.byType(ChatMessageBubble), findsNothing);
+    });
+
+    testWidgets('displays messages from chatProvider', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatMessageList(sessionId: 'test-session'),
+        initialChatState: ChatState(messages: fixtureMessages),
+      ));
+
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ChatMessageBubble), findsNWidgets(2));
+    });
+
+    testWidgets('each bubble shows message content', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatMessageList(sessionId: 'test-session'),
+        initialChatState: ChatState(messages: fixtureMessages),
+      ));
+
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('hello', skipOffstage: false),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('hi there', skipOffstage: false),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shows loading indicator when isLoading is true',
+        (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatMessageList(sessionId: 'test-session'),
+        initialChatState: ChatState(
+          messages: fixtureMessages,
+          isLoading: true,
+        ),
+      ));
+
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        find.text('thinking...', skipOffstage: false),
+        findsOneWidget,
+      );
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shows error banner when error is present', (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatMessageList(sessionId: 'test-session'),
+        initialChatState: ChatState(
+          messages: fixtureMessages,
+          error: 'connection failed',
+        ),
+      ));
+
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byIcon(Icons.error_outline),
+        findsOneWidget,
+      );
+      expect(
+        find.text('connection failed', skipOffstage: false),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('does not show placeholder when messages exist',
+        (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatMessageList(sessionId: 'test-session'),
+        initialChatState: ChatState(messages: fixtureMessages),
+      ));
+
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('no messages yet', skipOffstage: false),
+        findsNothing,
+      );
+    });
+
+    testWidgets('does not show loading indicator when not loading',
+        (tester) async {
+      await tester.pumpWidget(_buildTestApp(
+        child: const ChatMessageList(sessionId: 'test-session'),
+        initialChatState: ChatState(messages: fixtureMessages),
+      ));
+
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('thinking...', skipOffstage: false),
+        findsNothing,
+      );
+    });
+  });
+
+  group('MessagePlaceholder', () {
+    testWidgets('renders chat bubble icon', (tester) async {
+      await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(body: const MessagePlaceholder()),
+        ),
+      ));
+
+      expect(
+        find.byIcon(Icons.chat_bubble_outline),
+        findsOneWidget,
+      );
+    });
+  });
+}
