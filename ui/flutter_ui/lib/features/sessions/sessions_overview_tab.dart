@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
-import '../../models/session.dart';
+import '../../models/api_models.dart';
 import 'sessions_list.dart';
 import 'sessions_detail.dart';
 
@@ -45,21 +45,15 @@ class _SessionsOverviewTabState extends State<SessionsOverviewTab> {
         id: 'session-001',
         title: 'API Integration Task',
         createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-        lastActivityAt: DateTime.now(),
-        duration: const Duration(hours: 1, minutes: 45, seconds: 30),
-        tokenCount: 12500,
-        taskIds: ['task-001', 'task-002'],
-        status: 'active',
+        updatedAt: DateTime.now(),
+        messageCount: 42,
       ),
       Session(
         id: 'session-002',
         title: 'debugging flutter ui',
         createdAt: DateTime.now().subtract(const Duration(days: 1)),
-        lastActivityAt: DateTime.now().subtract(const Duration(hours: 5)),
-        duration: const Duration(minutes: 45),
-        tokenCount: 5200,
-        taskIds: ['task-003'],
-        status: 'completed',
+        updatedAt: DateTime.now().subtract(const Duration(hours: 5)),
+        messageCount: 18,
       ),
     ];
   }

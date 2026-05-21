@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
-import '../../models/session.dart';
+import '../../models/api_models.dart';
 
 /// Session detail pane - displays in-depth session information
 class SessionsDetailPane extends StatelessWidget {
@@ -29,19 +29,14 @@ class SessionsDetailPane extends StatelessWidget {
               session.title.toLowerCase(),
             ),
             _buildDetailRow(
-              'duration',
-              _formatDuration(session.duration),
+              'updated',
+              _formatDateTime(session.updatedAt),
             ),
             _buildDetailRow(
-              'tokens',
-              '${session.tokenCount}',
-            ),
-            _buildDetailRow(
-              'status',
-              session.status.toLowerCase(),
+              'messages',
+              '${session.messageCount}',
             ),
             const Spacer(),
-            _buildTasksSection(),
           ],
         ),
       ),
@@ -74,46 +69,7 @@ class SessionsDetailPane extends StatelessWidget {
     );
   }
 
-  Widget _buildTasksSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Divider(color: CyberpunkColors.midGray),
-        const SizedBox(height: 8),
-        Text(
-          'associated tasks',
-          style: CyberpunkTypography.label.copyWith(
-            color: CyberpunkColors.orangePrimary,
-          ),
-        ),
-        const SizedBox(height: 12),
-        ...session.taskIds.map((taskId) => _buildTaskChip(taskId)),
-      ],
-    );
-  }
-
-  Widget _buildTaskChip(String taskId) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: CyberpunkColors.orangePrimary.withOpacity(0.1),
-        border: Border.all(color: CyberpunkColors.orangePrimary),
-        borderRadius: BorderRadius.circular(2),
-      ),
-      child: Text(
-        taskId.substring(0, 8).toLowerCase(),
-        style: CyberpunkTypography.label.copyWith(
-          color: CyberpunkColors.orangePrimary,
-        ),
-      ),
-    );
-  }
-
-  String _formatDuration(Duration duration) {
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60);
-    final seconds = duration.inSeconds.remainder(60);
-    return '${hours}h ${minutes}m ${seconds}s';
+  String _formatDateTime(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 }

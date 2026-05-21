@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
-import '../../theme/typography.dart';
-import '../../models/task.dart';
+import '../../models/api_models.dart';
 import 'tasks_list.dart';
 import 'tasks_detail.dart';
 
-/// Tasks tab - master-detail view with task list and agent detail
+/// Tasks tab - master-detail view with task list and detail
 class TasksTab extends StatefulWidget {
   const TasksTab({super.key});
 
@@ -40,28 +39,24 @@ class _TasksTabState extends State<TasksTab> {
       Task(
         id: 'task-001',
         title: 'Implement HTTP API Endpoints',
-        status: TaskStatus.running,
+        description: 'Create REST API endpoints for the Flutter client',
+        status: 'in_progress',
         createdAt: DateTime.now().subtract(const Duration(hours: 3)),
-        lastActivityAt: DateTime.now(),
-        agentIds: ['coder', 'debugger'],
-        sessionId: 'session-001',
       ),
       Task(
         id: 'task-002',
         title: 'fix flutter ui theme',
-        status: TaskStatus.pending,
+        description: 'Update the Flutter UI to use the ORANGE VOID theme',
+        status: 'pending',
         createdAt: DateTime.now().subtract(const Duration(hours: 1)),
-        agentIds: ['coder'],
-        sessionId: 'session-001',
       ),
       Task(
         id: 'task-003',
         title: 'update documentation',
-        status: TaskStatus.complete,
+        description: 'Update the project documentation with new features',
+        status: 'completed',
         createdAt: DateTime.now().subtract(const Duration(days: 1)),
-        lastActivityAt: DateTime.now().subtract(const Duration(hours: 5)),
-        agentIds: ['analyst'],
-        sessionId: 'session-002',
+        completedAt: DateTime.now().subtract(const Duration(hours: 5)),
       ),
     ];
   }

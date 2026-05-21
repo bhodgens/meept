@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
-import '../../models/session.dart';
+import '../../models/api_models.dart';
 
 /// Sessions list widget - displays all sessions with selection
 class SessionsList extends StatelessWidget {
@@ -97,7 +97,7 @@ class SessionsList extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              _formatLastActivity(session.lastActivityAt),
+              _formatLastActivity(session.updatedAt),
               style: CyberpunkTypography.bodySmall,
             ),
           ],

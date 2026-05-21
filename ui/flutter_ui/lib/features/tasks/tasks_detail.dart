@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
-import '../../models/task.dart';
+import '../../models/api_models.dart';
 
-/// Task detail pane - displays task info and agent list
+/// Task detail pane - displays task info
 class TasksDetail extends StatelessWidget {
   final Task task;
 
@@ -34,51 +34,24 @@ class TasksDetail extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             Text(
-              'agents',
+              'description',
               style: CyberpunkTypography.label.copyWith(
                 color: CyberpunkColors.orangePrimary,
               ),
             ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: ListView.builder(
-                itemCount: task.agentIds.length,
-                itemBuilder: (context, index) {
-                  final agentId = task.agentIds[index];
-                  return _buildAgentTile(agentId);
-                },
-              ),
+            const SizedBox(height: 8),
+            Text(
+              task.description.toLowerCase(),
+              style: CyberpunkTypography.bodyMedium,
             ),
+            const Spacer(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildAgentTile(String agentId) {
-    return InkWell(
-      onTap: () {
-        // Open agent transcript
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: CyberpunkColors.darkGray,
-          border: Border.all(color: CyberpunkColors.orangeDark),
-          borderRadius: BorderRadius.circular(2),
-        ),
-        child: Text(
-          agentId.toLowerCase(),
-          style: CyberpunkTypography.bodyMedium.copyWith(
-            color: CyberpunkColors.greenSuccess,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusIndicator(TaskStatus status) {
+  Widget _buildStatusIndicator(String status) {
     final color = _getStatusColor(status);
     return Container(
       width: 10,
@@ -90,16 +63,19 @@ class TasksDetail extends StatelessWidget {
     );
   }
 
-  Color _getStatusColor(TaskStatus status) {
-    switch (status) {
-      case TaskStatus.pending:
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
         return CyberpunkColors.yellowWarning;
-      case TaskStatus.running:
+      case 'in_progress':
+      case 'running':
         return CyberpunkColors.blueInfo;
-      case TaskStatus.complete:
+      case 'completed':
         return CyberpunkColors.greenSuccess;
-      case TaskStatus.error:
+      case 'failed':
         return CyberpunkColors.redAlert;
+      default:
+        return Colors.grey;
     }
   }
 }
