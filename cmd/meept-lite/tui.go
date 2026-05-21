@@ -58,7 +58,7 @@ func (t *TUI) Run() error {
 
 	termbox.SetInputMode(termbox.InputAlt)
 	termbox.SetOutputMode(termbox.Output256)
-	termbox.Clear(termbox.Attribute(liteclient.ColorBackground), termbox.Attribute(liteclient.ColorBackground))
+	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 
 	// Initial render
 	t.render()
@@ -383,7 +383,7 @@ func (t *TUI) scrollDown() {
 }
 
 func (t *TUI) render() {
-	termbox.Clear(termbox.Attribute(liteclient.ColorBackground), termbox.Attribute(liteclient.ColorBackground))
+	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	width, height := termbox.Size()
 
 	// Calculate scrollback area (everything except prompt line)
@@ -415,7 +415,7 @@ func (t *TUI) render() {
 			if x >= width {
 				break
 			}
-			termbox.SetCell(x, i, r, termbox.Attribute(liteclient.ColorWhite), termbox.Attribute(liteclient.ColorBackground))
+			termbox.SetCell(x, i, r, termbox.Attribute(liteclient.ColorWhite), termbox.ColorDefault)
 		}
 	}
 
@@ -429,7 +429,7 @@ func (t *TUI) render() {
 		}
 		if x > 0 && y >= 0 {
 			for i, r := range indicator {
-				termbox.SetCell(x+i, y, r, termbox.Attribute(liteclient.ColorMuted), termbox.Attribute(liteclient.ColorBackground))
+				termbox.SetCell(x+i, y, r, termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
 			}
 		}
 	}
@@ -459,7 +459,7 @@ func (t *TUI) render() {
 			if x+i >= width {
 				break
 			}
-			termbox.SetCell(x+i, y, r, termbox.Attribute(liteclient.ColorOrange)|termbox.AttrBold, termbox.Attribute(liteclient.ColorBackground))
+			termbox.SetCell(x+i, y, r, termbox.Attribute(liteclient.ColorOrange)|termbox.AttrBold, termbox.ColorDefault)
 		}
 	}
 
@@ -483,18 +483,18 @@ func (t *TUI) renderAutocomplete() {
 	// Draw box background
 	for y := popupY; y < popupY+boxHeight && y < height; y++ {
 		for x := popupX; x < popupX+boxWidth && x < width; x++ {
-			termbox.SetCell(x, y, ' ', 0, termbox.Attribute(liteclient.ColorBackground))
+			termbox.SetCell(x, y, ' ', 0, termbox.ColorDefault)
 		}
 	}
 
 	// Draw border
 	for x := popupX; x < popupX+boxWidth && x < width; x++ {
-		termbox.SetCell(x, popupY, '-', termbox.Attribute(liteclient.ColorMuted), termbox.Attribute(liteclient.ColorBackground))
-		termbox.SetCell(x, popupY+boxHeight-1, '-', termbox.Attribute(liteclient.ColorMuted), termbox.Attribute(liteclient.ColorBackground))
+		termbox.SetCell(x, popupY, '-', termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
+		termbox.SetCell(x, popupY+boxHeight-1, '-', termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
 	}
 	for y := popupY; y < popupY+boxHeight && y < height; y++ {
-		termbox.SetCell(popupX, y, '|', termbox.Attribute(liteclient.ColorMuted), termbox.Attribute(liteclient.ColorBackground))
-		termbox.SetCell(popupX+boxWidth-1, y, '|', termbox.Attribute(liteclient.ColorMuted), termbox.Attribute(liteclient.ColorBackground))
+		termbox.SetCell(popupX, y, '|', termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
+		termbox.SetCell(popupX+boxWidth-1, y, '|', termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
 	}
 
 	// Header
@@ -502,7 +502,7 @@ func (t *TUI) renderAutocomplete() {
 	for i := 0; i < len(header) && popupX+1+i < width; i++ {
 		r := rune(header[i])
 		attr := termbox.Attribute(liteclient.ColorOrange) | termbox.AttrBold
-		termbox.SetCell(popupX+1+i, popupY, r, attr, termbox.Attribute(liteclient.ColorBackground))
+		termbox.SetCell(popupX+1+i, popupY, r, attr, termbox.ColorDefault)
 	}
 
 	// Items
@@ -520,7 +520,7 @@ func (t *TUI) renderAutocomplete() {
 			fg = termbox.Attribute(liteclient.ColorOrange) | termbox.AttrBold
 		}
 
-		termbox.SetCell(popupX+2, y, rune(marker[0]), fg, termbox.Attribute(liteclient.ColorBackground))
+		termbox.SetCell(popupX+2, y, rune(marker[0]), fg, termbox.ColorDefault)
 
 		// Command name
 		xPos := popupX + 4
@@ -528,7 +528,7 @@ func (t *TUI) renderAutocomplete() {
 			if xPos >= popupX+boxWidth-1 {
 				break
 			}
-			termbox.SetCell(xPos, y, r, fg, termbox.Attribute(liteclient.ColorBackground))
+			termbox.SetCell(xPos, y, r, fg, termbox.ColorDefault)
 			xPos++
 		}
 	}
@@ -542,6 +542,6 @@ func (t *TUI) renderAutocomplete() {
 	y := popupY + boxHeight - 2
 	for i := 0; i < len(hint) && hintX+i < popupX+boxWidth-2; i++ {
 		r := rune(hint[i])
-		termbox.SetCell(hintX+i, y, r, termbox.Attribute(liteclient.ColorMuted), termbox.Attribute(liteclient.ColorBackground))
+		termbox.SetCell(hintX+i, y, r, termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
 	}
 }

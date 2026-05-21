@@ -38,41 +38,41 @@ func (p *PromptRenderer) Render(y int) int {
 	x := 0
 
 	// | orange
-	termbox.SetCell(x, y, '|', termbox.Attribute(ColorOrange)|termbox.AttrBold, termbox.Attribute(ColorBackground))
+	termbox.SetCell(x, y, '|', termbox.Attribute(ColorOrange)|termbox.AttrBold, termbox.ColorDefault)
 	x++
 
 	// space
-	termbox.SetCell(x, y, ' ', 0, termbox.Attribute(ColorBackground))
+	termbox.SetCell(x, y, ' ', 0, 0)
 	x++
 
 	// meept orange
 	for _, r := range "meept" {
-		termbox.SetCell(x, y, r, termbox.Attribute(ColorOrange)|termbox.AttrBold, termbox.Attribute(ColorBackground))
+		termbox.SetCell(x, y, r, termbox.Attribute(ColorOrange)|termbox.AttrBold, termbox.ColorDefault)
 		x++
 	}
 
 	// : white
-	termbox.SetCell(x, y, ':', termbox.Attribute(ColorWhite), termbox.Attribute(ColorBackground))
+	termbox.SetCell(x, y, ':', termbox.Attribute(ColorWhite), termbox.ColorDefault)
 	x++
 
 	// session-name grey
 	for _, r := range p.sessionName {
-		termbox.SetCell(x, y, r, termbox.Attribute(ColorGrey), termbox.Attribute(ColorBackground))
+		termbox.SetCell(x, y, r, termbox.Attribute(ColorGrey), termbox.ColorDefault)
 		x++
 	}
 
 	// space
-	termbox.SetCell(x, y, ' ', 0, termbox.Attribute(ColorBackground))
+	termbox.SetCell(x, y, ' ', 0, 0)
 	x++
 
 	// #> white
 	for _, r := range "#>" {
-		termbox.SetCell(x, y, r, termbox.Attribute(ColorWhite)|termbox.AttrBold, termbox.Attribute(ColorBackground))
+		termbox.SetCell(x, y, r, termbox.Attribute(ColorWhite)|termbox.AttrBold, termbox.ColorDefault)
 		x++
 	}
 
 	// space after prompt for input cursor
-	termbox.SetCell(x, y, ' ', 0, termbox.Attribute(ColorBackground))
+	termbox.SetCell(x, y, ' ', 0, 0)
 
 	return x // Return the X position after the prompt
 }
@@ -82,7 +82,7 @@ func (p *PromptRenderer) RenderInput(x, y int, input string, cursorX int) {
 	// Clear rest of line
 	width, _ := termbox.Size()
 	for i := x; i < width; i++ {
-		termbox.SetCell(i, y, ' ', 0, termbox.Attribute(ColorBackground))
+		termbox.SetCell(i, y, ' ', 0, 0)
 	}
 
 	// Render input text
@@ -91,12 +91,12 @@ func (p *PromptRenderer) RenderInput(x, y int, input string, cursorX int) {
 		if x+i >= width {
 			break
 		}
-		termbox.SetCell(x+i, y, r, termbox.Attribute(ColorWhite), termbox.Attribute(ColorBackground))
+		termbox.SetCell(x+i, y, r, termbox.Attribute(ColorWhite), termbox.ColorDefault)
 		i++
 	}
 
 	// Draw cursor
 	if x+cursorX < width {
-		termbox.SetCell(x+cursorX, y, '█', termbox.Attribute(ColorWhite)|termbox.AttrReverse, termbox.Attribute(ColorBackground))
+		termbox.SetCell(x+cursorX, y, '█', termbox.Attribute(ColorWhite)|termbox.AttrReverse, termbox.ColorDefault)
 	}
 }
