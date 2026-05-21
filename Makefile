@@ -1,4 +1,4 @@
-.PHONY: help build build-all build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-clean
+.PHONY: help build build-all build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean
 
 help:
 	@echo "Usage: make [target]"
@@ -39,6 +39,7 @@ help:
 	@echo "  mod-tidy         Tidy go modules"
 	@echo "  clean            Remove build artifacts"
 	@echo "  menubar-clean    Remove menubar build artifacts"
+	@echo "  gui-deps         Install Flutter/CocoaPods dependencies (macOS)"
 	@echo ""
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
@@ -459,7 +460,31 @@ menubar-install-app-bundle: menubar-app
 # Flutter GUI (meept-gui)
 # =============================================================================
 
-build-gui:
+gui-deps:
+	@echo "Checking Flutter and CocoaPods dependencies..."
+	@if ! command -v flutter >/dev/null 2>&1; then \
+		echo "Error: Flutter is not installed. Install from https://flutter.dev"; \
+		exit 1; \
+	fi
+	@if ! flutter --version >/dev/null 2>&1; then \
+		echo "Error: Flutter is not working correctly. Run 'flutter doctor'."; \
+		exit 1; \
+	fi
+	@echo "Flutter version: $$(flutter --version --machine 2>/dev/null | head -1 || flutter --version)"
+ifeq ($(GUI_PLATFORM),macos)
+	@if ! command -v pod >/dev/null 2>&1; then \
+		echo "CocoaPods not found. Installing..."; \
+		sudo gem install cocoapods; \
+	fi
+	@echo "Running CocoaPods install for macOS Flutter app..."
+	cd $(FLUTTER_UI_DIR)/macos && pod install
+endif
+	@echo "Flutter dependencies check complete."
+
+gui-clean:
+	rm -rf $(FLUTTER_UI_DIR)/build
+
+build-gui: gui-deps
 	@mkdir -p $(BIN_DIR)
 	@echo "Building meept-gui for $(GUI_PLATFORM)..."
 	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release
@@ -471,6 +496,3 @@ else
 	cp $(FLUTTER_UI_DIR)/build/windows/x64/runner/Release/meept_ui.exe $(GUI_BIN)
 endif
 	@echo "Built $(GUI_BIN) ($$(du -h $(GUI_BIN) | cut -f1))"
-
-gui-clean:
-	rm -rf $(FLUTTER_UI_DIR)/build
