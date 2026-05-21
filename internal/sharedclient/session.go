@@ -1,21 +1,41 @@
-package liteclient
+package sharedclient
 
 import (
 	"context"
 
-	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/tui/types"
 )
 
-// SessionManager handles session operations for meept-lite.
+// SessionClient is the interface required by SessionManager.
+// It allows transport.Client or any other implementation to be used.
+type SessionClient interface {
+	GetMostRecentSession() (*types.Session, error)
+	CreateSession(name string) (*types.Session, error)
+	ListSessions() (*types.SessionListResponse, error)
+	DeleteSession(sessionID string) error
+	UpdateSessionDescription(sessionID, description string) error
+}
+
+// sessionAdapter adapts transport.Client to SessionClient.
+// This adapter is defined here to avoid import cycles: liteclient can't import
+// transport (which imports tui), so we accept interfaces instead.
+type sessionAdapter struct {
+	client SessionClient
+}
+
+func (a *sessionAdapter) GetMostRecentSession() (*types.Session, error) {
+	return a.client.GetMostRecentSession()
+}
+
+// SessionManager handles session operations for both meept-lite and meept TUI.
 type SessionManager struct {
-	client        transport.Client
+	client        SessionClient
 	currentSession *types.Session
 	defaultName   string
 }
 
 // NewSessionManager creates a new session manager.
-func NewSessionManager(client transport.Client, defaultName string) *SessionManager {
+func NewSessionManager(client SessionClient, defaultName string) *SessionManager {
 	return &SessionManager{
 		client:      client,
 		defaultName: defaultName,

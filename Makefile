@@ -1,4 +1,4 @@
-.PHONY: help build build-all build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean
+.PHONY: help build build-all build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
 
 help:
 	@echo "Usage: make [target]"
@@ -41,7 +41,8 @@ help:
 	@echo "  menubar-clean    Remove menubar build artifacts"
 	@echo "  gui-deps         Install Flutter/CocoaPods dependencies (macOS)"
 	@echo "  gui-web          Build Flutter web app (release)"
-	@echo "  gui-web-run      Run Flutter web dev server with hot reload"
+	@echo "  gui-web-run      Run Flutter web dev server with hot reload (Chrome)"
+	@echo "  gui-dev-server   Run Flutter web dev server (web-server backend)"
 	@echo ""
 	@echo "Daemon:"
 	@echo "  daemon           Build and run daemon (foreground)"
@@ -523,6 +524,7 @@ install-lite: build-lite
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-lite
 	@echo "Installed meept-lite to $$(go env GOPATH)/bin/meept-lite"
 
+
 # Flutter Web Development
 gui-web:
 	@echo "Building Flutter web app..."
@@ -531,5 +533,38 @@ gui-web:
 
 gui-web-run:
 	@echo "Starting Flutter web dev server with hot reload..."
+	@echo ""
+	@echo "============================================"
+	@echo "  Meept Flutter Web Dev Server"
+	@echo "============================================"
+	@echo ""
+	@echo "  Dev URL: http://localhost:59714"
+	@echo "  API:     http://localhost:8081/api/v1"
+	@echo ""
+	@echo "  Hot reload: press 'r'"
+	@echo "  Hot restart: press 'R'"
+	@echo "  Quit: press 'q'"
+	@echo ""
+	@if ! curl -s http://localhost:8081/health > /dev/null 2>&1; then \
+		echo "  [!] WARNING: Daemon not detected on port 8081"; \
+		echo "  The app will not work without the daemon running."; \
+		echo ""; \
+		echo "  Fix: Run 'make daemon' in another terminal"; \
+		echo "       Or enable HTTP in ~/.meept/meept.json5:"; \
+		echo ""; \
+		echo "       transport: {"; \
+		echo "         http: { enabled: true, addr: \":8081\" }"; \
+		echo "       }"; \
+		echo ""; \
+		echo "  Continuing anyway..."; \
+		echo ""; \
+	else \
+		echo "  [OK] Daemon detected on port 8081"; \
+		echo ""; \
+	fi
+	cd $(FLUTTER_UI_DIR) && flutter run -d chrome --web-port=59714 
+
+gui-dev-server:
+	@echo "Starting Flutter web dev server (web-server target)..."
 	@echo "Open http://localhost:59714 in your browser"
-	cd $(FLUTTER_UI_DIR) && flutter run -d chrome --web-port=59714 --web-renderer=canvaskit
+	cd $(FLUTTER_UI_DIR) && flutter run -d web-server --web-port=59714 

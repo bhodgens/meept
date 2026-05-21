@@ -1,4 +1,4 @@
-package liteclient
+package sharedclient
 
 import "slices"
 

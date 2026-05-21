@@ -10,15 +10,31 @@
 - **Ctrl-X key combos** - Same command menus as meept (accessed via `ctrl+x` leader)
 - **Session management** - Named sessions via `ctrl-x s` style commands
 - **Colored prompt** - `|` orange, `meept` orange, `:` white, `session-name` grey, `#>` white
-- **Command menus** - tcell-rendered overlays (modal, blocking input)
+- **Command menus** - termbox-rendered overlays (modal, blocking input)
 - **Slash autocomplete** - Popup box (like full TUI)
 - **Pasted text** - Shows `[pasted X lines]` indicator
+- **Transparent background** - Terminal transparency preserved (no colored background)
+
+## Shared Library Refactoring
+
+The `internal/sharedclient/` package provides shared functionality for both clients:
+
+| Package | Used by meept-lite | Used by meept (TUI) |
+|---------|-------------------|---------------------|
+| `slash.go` | Yes | Yes (refactored) |
+| `slash_autocomplete.go` | Yes | Yes (refactored) |
+| `history.go` | Yes | Yes (refactored) |
+| `session.go` | Yes | Yes (refactored) |
+| `colors.go` | Yes | No (uses own palette) |
+| `prompt.go` | Yes | No (own prompt renderer) |
+
+**Refactoring goal**: The full `meept` TUI should import and use `internal/sharedclient/` for slash parsing, history, session management, and autocomplete—eliminating code duplication.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              Shared Library (internal/liteclient/)          │
+│              Shared Library (internal/sharedclient/)          │
 ├─────────────────────────────────────────────────────────────┤
 │  client.go         - Transport connection & RPC calls       │
 │  slash.go          - Slash command parsing (reuse)          │
@@ -32,7 +48,7 @@
         ┌────────────────────────┐
         │   cmd/meept-lite/      │
         │   main.go + tui.go     │
-        │   - tcell terminal     │
+        │   - termbox-go terminal     │
         │   - Fixed prompt       │
         │   - Scrollback         │
         └────────────────────────┘
@@ -69,7 +85,7 @@
 
 ## Technical Decisions
 
-### 1. Terminal Library: **tcell**
+### 1. Terminal Library: **termbox-go**
 
 **Rationale:**
 - Direct control over terminal regions (alt screen vs. main buffer)
@@ -104,7 +120,7 @@
 
 ### 4. Scrollback Behavior
 
-- Use **tcell's alt screen** with manual region management
+- Use **termbox-go's alt screen** with manual region management
 - Prompt rendered in fixed bottom row
 - Scrollback area is everything above prompt
 - When user scrolls up, prompt stays visible with indicator: `▼ N lines from bottom`
@@ -130,7 +146,7 @@ Follow patterns from existing TUI (`internal/tui/config.go`):
 | `ctrl+x c` | Chat (clear/new) | `Keybindings.CommandPalette.ViewChat` |
 | `ctrl+x ctrl+x` | Command palette | double-ctrl-x pattern |
 
-**Menu rendering**: tcell-rendered overlay modals (blocking input)
+**Menu rendering**: termbox-go-rendered overlay modals (blocking input)
 - Modal centered on screen
 - Items listed with key shortcuts
 - Navigation: `↑/↓` or `j/k`, `Enter` to select, `Esc` to cancel
@@ -167,9 +183,9 @@ Support same patterns as full meept:
 
 | Task | Description |
 |------|-------------|
-| P1.1 | Create `internal/liteclient/` directory with shared components |
+| P1.1 | Create `internal/sharedclient/` directory with shared components |
 | P1.2 | Implement `transport.Client` wrapper for common operations |
-| P1.3 | Create `cmd/meept-lite/main.go` with tcell initialization |
+| P1.3 | Create `cmd/meept-lite/main.go` with termbox-go initialization |
 | P1.4 | Implement fixed prompt rendering at bottom row |
 | P1.5 | Implement basic input handling (text entry, enter to send) |
 | P1.6 | Basic chat loop: send message → print response to scrollback |
@@ -187,7 +203,7 @@ Support same patterns as full meept:
 
 | Task | Description |
 |------|-------------|
-| P2.1 | Copy `internal/tui/slash.go` to `internal/liteclient/slash.go` |
+| P2.1 | Copy `internal/tui/slash.go` to `internal/sharedclient/slash.go` |
 | P2.2 | Implement slash command execution handlers |
 | P2.3 | Implement history tracking (sent commands) |
 | P2.4 | Implement ↑/↓ history navigation |
@@ -207,7 +223,7 @@ Support same patterns as full meept:
 
 | Task | Description |
 |------|-------------|
-| P3.1 | Copy session logic from `internal/tui/` to `internal/liteclient/` |
+| P3.1 | Copy session logic from `internal/tui/` to `internal/sharedclient/` |
 | P3.2 | Query daemon for current session name |
 | P3.3 | Implement `--session` CLI flag |
 | P3.4 | Implement `/session list/create/switch` commands |
@@ -226,7 +242,7 @@ Support same patterns as full meept:
 
 | Task | Description |
 |------|-------------|
-| P4.1 | Copy `internal/tui/config.go` keybinding structs to `liteclient/config.go` |
+| P4.1 | Copy `internal/tui/config.go` keybinding structs to `sharedclient/config.go` |
 | P4.2 | Implement command mode state machine (NORMAL → COMMAND_WAIT → DISPATCH) |
 | P4.3 | Copy modal rendering from `internal/tui/modal.go` (Modal, SessionPickerModal) |
 | P4.4 | Implement `ctrl+x s` session menu (with list/create/switch) |
@@ -239,7 +255,7 @@ Support same patterns as full meept:
 **Acceptance Criteria:**
 - `ctrl+x` enters command mode with visual indicator
 - All Ctrl-X patterns open appropriate menus
-- Menus render as tcell overlays (modal, blocking)
+- Menus render as termbox-go overlays (modal, blocking)
 - Navigation works (↑/↓/Enter/Esc)
 - Key shortcuts work (e.g., `1-9` for session selection)
 
@@ -268,7 +284,7 @@ Support same patterns as full meept:
 ## File Structure
 
 ```
-internal/liteclient/
+internal/sharedclient/
 ├── client.go           # Transport wrapper
 ├── slash.go            # Slash command parsing (copied/adapted)
 ├── slash_autocomplete.go  # Popup autocomplete (copied/adapted)
@@ -287,11 +303,11 @@ internal/liteclient/
 
 cmd/meept-lite/
 ├── main.go             # Entry point, CLI flags
-├── tui.go              # Terminal UI (tcell-based)
+├── tui.go              # Terminal UI (termbox-go-based)
 ├── command_mode.go     # Ctrl-X state machine and dispatch
 └── handlers.go         # Command handlers
 
-tests/liteclient/
+tests/sharedclient/
 ├── slash_test.go       # Slash command tests
 ├── history_test.go     # History navigation tests
 ├── command_mode_test.go # Ctrl-X state machine tests
@@ -378,7 +394,7 @@ Copy from `internal/tui/slash.go`:
 
 | Risk | Impact | Mitigation |
 |------|--------|-------------|
-| tcell learning curve | Medium | Follow existing tcell examples; minimal feature set |
+| termbox-go learning curve | Medium | Follow existing termbox-go examples; minimal feature set |
 | Scrollback + fixed prompt | Medium | Use alt screen; render prompt separately from scrollback |
 | Command menu complexity | Low | Simple inline menus first; enhance later |
 | Transport incompatibility | Low | Use same Client interface as existing client |
@@ -415,3 +431,28 @@ Copy from `internal/tui/slash.go`:
 - Transport: `internal/transport/client.go`
 - Session types: `internal/tui/types/types.go`
 - Slash commands: `internal/tui/slash.go`
+
+---
+
+### Phase 6: Refactor Meept TUI to Use Shared Library
+
+**Goal:** Eliminate code duplication by migrating the full meept TUI to use `internal/sharedclient/`
+
+| Task | Description |
+|------|-------------|
+| P6.1 | Audit `internal/tui/slash.go` vs `internal/sharedclient/slash.go` - consolidate |
+| P6.2 | Audit `internal/tui/slash_autocomplete.go` - migrate to sharedclient |
+| P6.3 | Audit history handling in `internal/tui/models/chat.go` - migrate to sharedclient |
+| P6.4 | Audit session management - migrate to sharedclient/session.go |
+| P6.5 | Update `internal/tui/` to import and use `internal/sharedclient/` |
+| P6.6 | Remove duplicated code from `internal/tui/` |
+| P6.7 | Run tests to ensure no regressions in meept TUI |
+| P6.8 | Update documentation to reflect shared architecture |
+
+**Acceptance Criteria:**
+- Both `meept` and `meept-lite` use the same slash command parsing
+- Both use the same autocomplete component
+- Both use the same history management
+- Both use the same session manager
+- No regressions in existing meept TUI functionality
+- Reduced code duplication (fewer total lines)

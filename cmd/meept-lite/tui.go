@@ -2,21 +2,26 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
-	"github.com/caimlas/meept/internal/liteclient"
+	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/transport"
 	"github.com/nsf/termbox-go"
+)
+
+const (
+	pasteBufferSize = 64 * 1024 // max 64KB paste
 )
 
 // TUI represents the meept-lite terminal interface.
 type TUI struct {
 	client       transport.Client
-	sessionMgr   *liteclient.SessionManager
-	prompt       *liteclient.PromptRenderer
-	history      *liteclient.History
-	autocomplete *liteclient.SlashAutocomplete
+	sessionMgr   *sharedclient.SessionManager
+	prompt       *sharedclient.PromptRenderer
+	history      *sharedclient.History
+	autocomplete *sharedclient.SlashAutocomplete
 
 	// Input state
 	inputBuffer strings.Builder
@@ -30,15 +35,24 @@ type TUI struct {
 	commandMode   bool
 	commandKey    string // waiting for second key after ctrl+x
 
+	// Bracketed paste support
+	inPaste     bool
+	pasteBuffer strings.Builder
+	pasteSeq    strings.Builder // builds the bracket sequence [200~ or [201~
+	_pasteState int            // 0=idle, 1-5=parsing, 6=inside paste
+
 	// Running state
 	quitting bool
+
+	// Command handler (lazily initialized)
+	commandHandler *CommandHandler
 }
 
 // NewTUI creates a new TUI instance.
-func NewTUI(client transport.Client, sessionMgr *liteclient.SessionManager) *TUI {
-	prompt := liteclient.NewPromptRenderer(sessionMgr.GetSessionName())
-	history := liteclient.NewHistory(1000)
-	autocomplete := liteclient.NewSlashAutocomplete()
+func NewTUI(client transport.Client, sessionMgr *sharedclient.SessionManager) *TUI {
+	prompt := sharedclient.NewPromptRenderer(sessionMgr.GetSessionName())
+	history := sharedclient.NewHistory(1000)
+	autocomplete := sharedclient.NewSlashAutocomplete()
 
 	return &TUI{
 		client:       client,
@@ -56,9 +70,13 @@ func (t *TUI) Run() error {
 	}
 	defer termbox.Close()
 
-	termbox.SetInputMode(termbox.InputAlt)
+	// Enable bracketed paste mode
+	termbox.SetInputMode(termbox.InputAlt | termbox.InputMouse)
 	termbox.SetOutputMode(termbox.Output256)
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
+
+	// Send bracketed paste enable sequence (write to stdout)
+	fmt.Print("\x1b[?2004h")
 
 	// Initial render
 	t.render()
@@ -71,6 +89,31 @@ func (t *TUI) Run() error {
 	return nil
 }
 
+// quit saves state before exiting.
+func (t *TUI) quit() {
+	// Flush any pending scrollback to "session" via session manager
+	if t.sessionMgr != nil && t.sessionMgr.GetCurrentSession() != nil {
+		// Update the session description with last user message or conversation summary
+		lastUserMsg := ""
+		for i := len(t.scrollback) - 1; i >= 0; i-- {
+			line := t.scrollback[i]
+			if strings.HasPrefix(line, "you: ") {
+				lastUserMsg = line[5:]
+				break
+			}
+		}
+		if lastUserMsg != "" {
+			_ = t.sessionMgr.UpdateSessionDescription(nil, lastUserMsg)
+		}
+	}
+
+	// Show shutdown message in scrollback
+	t.addScrollback("")
+	t.addScrollback("[session state saved] bye.")
+	t.render()
+	termbox.Flush()
+}
+
 func (t *TUI) handleEvent(ev termbox.Event) {
 	switch ev.Type {
 	case termbox.EventKey:
@@ -79,11 +122,103 @@ func (t *TUI) handleEvent(ev termbox.Event) {
 		termbox.Sync()
 		t.render()
 	case termbox.EventError:
-		// Ignore errors, keep running
+		if t.client != nil && !t.client.IsConnected() {
+			t.addScrollback("error: connection to daemon lost")
+			t.render()
+		}
+		// Don't quit - keep running in case it reconnects
 	}
 }
 
 func (t *TUI) handleKeyEvent(ev termbox.Event) {
+	// --- Bracketed paste detection ---
+	// In bracketed paste mode, terminals send:
+	//   ESC [ 2 0 0 ~  (start) then <paste text> then ESC [ 2 0 1 ~  (end)
+	// termbox-go splits these into individual events in InputAlt mode.
+	// We use a simple state machine: _pasteState tracks our position
+	// in the bracketed paste sequence.
+	switch t._pasteState {
+	case 0: // looking for paste start / end
+		if ev.Type == termbox.EventKey && ev.Key == termbox.KeyEsc {
+			t._pasteState = 1
+			t.pasteSeq.Reset()
+			return
+		}
+	case 1: // saw ESC, expecting "["
+		if ev.Type == termbox.EventKey && ev.Ch == '[' {
+			t._pasteState = 2
+			return
+		}
+		t._pasteState = 0
+		// Fall through to normal handling
+	case 2: // saw "[", looking for "200" or "201"
+		if ev.Type == termbox.EventKey {
+			switch ev.Ch {
+			case '2':
+				t.pasteSeq.WriteByte('2')
+				t._pasteState = 3
+				return
+			case '0':
+				t.pasteSeq.WriteByte('0')
+				t._pasteState = 3
+				return
+			}
+		}
+		t._pasteState = 0
+		// Fall through
+	case 3: // saw "[2", expecting "0"
+		if ev.Type == termbox.EventKey && ev.Ch == '0' {
+			t.pasteSeq.WriteByte('0')
+			t._pasteState = 4
+			return
+		}
+		t._pasteState = 0
+		// Fall through
+	case 4: // saw "[20", expecting "0" or "1"
+		if ev.Type == termbox.EventKey {
+			if ev.Ch == '0' {
+				t.pasteSeq.WriteByte('0')
+				t._pasteState = 5
+				t.pasteSeq.WriteByte('0')
+				return
+			}
+			if ev.Ch == '1' {
+				t.pasteSeq.WriteByte('1')
+				t._pasteState = 5
+				t.pasteSeq.WriteByte('1')
+				return
+			}
+		}
+		t._pasteState = 0
+		// Fall through
+	case 5: // saw "[200" or "[201", expecting "~"
+		if ev.Type == termbox.EventKey && ev.Ch == '~' {
+			seq := t.pasteSeq.String()
+			if seq == "[200~" {
+				// Paste start
+				t.inPaste = true
+				t._pasteState = 6
+				return
+			}
+			if seq == "[201~" {
+				// Paste end
+				t.inPaste = false
+				t._pasteState = 0
+				t.flushPaste()
+				return
+			}
+		}
+		t._pasteState = 0
+		// Fall through
+	case 6: // inside paste, collecting characters
+		if ev.Type == termbox.EventKey && ev.Ch != 0 {
+			t.pasteBuffer.WriteRune(ev.Ch)
+			return
+		}
+		// Ignore non-character events during paste
+		return
+	}
+
 	// Handle escape for cancelling autocomplete or command mode
 	if ev.Key == termbox.KeyEsc {
 		if t.autocomplete.IsVisible() {
@@ -225,7 +360,7 @@ func (t *TUI) handleEnter() {
 	t.autocomplete.Hide()
 
 	// Check for slash command
-	if cmd := liteclient.ParseSlash(input); cmd != nil {
+	if cmd := sharedclient.ParseSlash(input); cmd != nil {
 		t.executeSlashCommand(cmd)
 	} else {
 		// Regular chat message
@@ -283,6 +418,8 @@ func (t *TUI) handleCtrlC() {
 	if t.inputBuffer.Len() > 0 {
 		t.inputBuffer.Reset()
 		t.cursorX = 0
+	} else if !t.quitting {
+		t.quit()
 	} else {
 		t.quitting = true
 	}
@@ -308,11 +445,24 @@ func (t *TUI) sendChatMessage(message string) {
 	t.addScrollback(fmt.Sprintf("you: %s", message))
 	t.render()
 
+	// Check connection before sending
+	if t.client == nil || !t.client.IsConnected() {
+		t.addScrollback("error: not connected to daemon -- make sure the daemon is running:\n  meept daemon start")
+		t.render()
+		return
+	}
+
 	// Send to daemon (in goroutine to avoid blocking UI)
 	go func() {
 		reply, err := t.client.Chat(message, t.sessionMgr.GetSessionName())
 		if err != nil {
-			t.addScrollback(fmt.Sprintf("error: %v", err))
+			if strings.Contains(err.Error(), "connection refused") ||
+				strings.Contains(err.Error(), "no such file") ||
+				strings.Contains(err.Error(), "network unreachable") {
+				t.addScrollback("error: unable to reach the daemon. is it running?")
+			} else {
+				t.addScrollback(fmt.Sprintf("error: %v", err))
+			}
 		} else {
 			t.addScrollback(fmt.Sprintf("meept: %s", reply))
 		}
@@ -320,44 +470,11 @@ func (t *TUI) sendChatMessage(message string) {
 	}()
 }
 
-func (t *TUI) executeSlashCommand(cmd *liteclient.SlashCommand) {
-	switch cmd.Name {
-	case "help":
-		t.showHelp()
-	case "clear":
-		t.scrollback = t.scrollback[:0]
-		t.addScrollback("scrollback cleared")
-	case "new":
-		t.scrollback = t.scrollback[:0]
-		t.addScrollback("conversation cleared")
-	default:
-		t.addScrollback(fmt.Sprintf("[slash command /%s not yet implemented in Phase 1]", cmd.Name))
+func (t *TUI) executeSlashCommand(cmd *sharedclient.SlashCommand) {
+	if t.commandHandler == nil {
+		t.commandHandler = NewCommandHandler(t)
 	}
-}
-
-func (t *TUI) showHelp() {
-	help := []string{
-		"available commands:",
-		"  /help [command]     show help for commands",
-		"  /new, /clear        start fresh conversation",
-		"  /retry              retry last response",
-		"  /undo               remove last exchange",
-		"  /usage              show token usage for session",
-		"  /stop               stop current session's work",
-		"  /status             show daemon health status",
-		"  /session            session management",
-		"  /tasks              list all tasks",
-		"",
-		"keyboard shortcuts:",
-		"  ctrl+x  enter command mode",
-		"  ctrl+c  clear input / quit",
-		"  ctrl+g  return to bottom",
-		"  up/down history navigation",
-		"  pgup/pgdn scroll scrollback",
-	}
-	for _, line := range help {
-		t.addScrollback(line)
-	}
+	t.commandHandler.Handle(context.Background(), cmd)
 }
 
 func (t *TUI) addScrollback(line string) {
@@ -415,7 +532,7 @@ func (t *TUI) render() {
 			if x >= width {
 				break
 			}
-			termbox.SetCell(x, i, r, termbox.Attribute(liteclient.ColorWhite), termbox.ColorDefault)
+			termbox.SetCell(x, i, r, termbox.Attribute(sharedclient.ColorWhite), termbox.ColorDefault)
 		}
 	}
 
@@ -429,7 +546,7 @@ func (t *TUI) render() {
 		}
 		if x > 0 && y >= 0 {
 			for i, r := range indicator {
-				termbox.SetCell(x+i, y, r, termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
+				termbox.SetCell(x+i, y, r, termbox.Attribute(sharedclient.ColorMuted), termbox.ColorDefault)
 			}
 		}
 	}
@@ -459,11 +576,33 @@ func (t *TUI) render() {
 			if x+i >= width {
 				break
 			}
-			termbox.SetCell(x+i, y, r, termbox.Attribute(liteclient.ColorOrange)|termbox.AttrBold, termbox.ColorDefault)
+			termbox.SetCell(x+i, y, r, termbox.Attribute(sharedclient.ColorOrange)|termbox.AttrBold, termbox.ColorDefault)
 		}
 	}
 
 	termbox.Flush()
+}
+
+// flushPaste appends the accumulated paste text to the input buffer and shows the indicator.
+func (t *TUI) flushPaste() {
+	data := t.pasteBuffer.String()
+	if data == "" {
+		return
+	}
+
+	lines := strings.Split(data, "\n")
+	lineCount := len(lines)
+
+	for _, line := range lines {
+		t.inputBuffer.WriteString(line)
+		// Newline character between lines
+		if len(lines) > 1 {
+			t.inputBuffer.WriteString("\n")
+		}
+	}
+	t.cursorX = len(t.inputBuffer.String())
+	t.addScrollback(fmt.Sprintf("[pasted %d lines]", lineCount))
+	t.render()
 }
 
 func (t *TUI) renderAutocomplete() {
@@ -489,19 +628,19 @@ func (t *TUI) renderAutocomplete() {
 
 	// Draw border
 	for x := popupX; x < popupX+boxWidth && x < width; x++ {
-		termbox.SetCell(x, popupY, '-', termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
-		termbox.SetCell(x, popupY+boxHeight-1, '-', termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
+		termbox.SetCell(x, popupY, '-', termbox.Attribute(sharedclient.ColorMuted), termbox.ColorDefault)
+		termbox.SetCell(x, popupY+boxHeight-1, '-', termbox.Attribute(sharedclient.ColorMuted), termbox.ColorDefault)
 	}
 	for y := popupY; y < popupY+boxHeight && y < height; y++ {
-		termbox.SetCell(popupX, y, '|', termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
-		termbox.SetCell(popupX+boxWidth-1, y, '|', termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
+		termbox.SetCell(popupX, y, '|', termbox.Attribute(sharedclient.ColorMuted), termbox.ColorDefault)
+		termbox.SetCell(popupX+boxWidth-1, y, '|', termbox.Attribute(sharedclient.ColorMuted), termbox.ColorDefault)
 	}
 
 	// Header
 	header := " commands "
 	for i := 0; i < len(header) && popupX+1+i < width; i++ {
 		r := rune(header[i])
-		attr := termbox.Attribute(liteclient.ColorOrange) | termbox.AttrBold
+		attr := termbox.Attribute(sharedclient.ColorOrange) | termbox.AttrBold
 		termbox.SetCell(popupX+1+i, popupY, r, attr, termbox.ColorDefault)
 	}
 
@@ -514,10 +653,10 @@ func (t *TUI) renderAutocomplete() {
 
 		// Selection indicator
 		marker := " "
-		fg := termbox.Attribute(liteclient.ColorWhite)
+		fg := termbox.Attribute(sharedclient.ColorWhite)
 		if i == selectedIdx {
 			marker = ">"
-			fg = termbox.Attribute(liteclient.ColorOrange) | termbox.AttrBold
+			fg = termbox.Attribute(sharedclient.ColorOrange) | termbox.AttrBold
 		}
 
 		termbox.SetCell(popupX+2, y, rune(marker[0]), fg, termbox.ColorDefault)
@@ -542,6 +681,6 @@ func (t *TUI) renderAutocomplete() {
 	y := popupY + boxHeight - 2
 	for i := 0; i < len(hint) && hintX+i < popupX+boxWidth-2; i++ {
 		r := rune(hint[i])
-		termbox.SetCell(hintX+i, y, r, termbox.Attribute(liteclient.ColorMuted), termbox.ColorDefault)
+		termbox.SetCell(hintX+i, y, r, termbox.Attribute(sharedclient.ColorMuted), termbox.ColorDefault)
 	}
 }

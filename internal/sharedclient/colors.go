@@ -1,5 +1,5 @@
 // Package liteclient provides a minimalistic console client for meept.
-package liteclient
+package sharedclient
 
 import "github.com/nsf/termbox-go"
 

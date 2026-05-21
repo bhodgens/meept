@@ -58,7 +58,7 @@ class _ChatViewState extends State<ChatView> {
           ),
           const Spacer(),
           Text(
-            'session: ${widget.sessionId.substring(0, 8)}',
+            'session: ${widget.sessionId.length >= 8 ? widget.sessionId.substring(0, 8) : widget.sessionId}',
             style: CyberpunkTypography.bodySmall,
           ),
         ],

@@ -1,6 +1,7 @@
-package liteclient
+package sharedclient
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -111,6 +112,8 @@ func (s *SlashAutocomplete) Select() (string, bool) {
 }
 
 // UpdateCommands refreshes the command list (e.g., after skills are installed).
+// New commands are merged with existing ones; duplicates are removed and
+// the merged list is sorted for consistent ordering.
 func (s *SlashAutocomplete) UpdateCommands(commands []string) {
 	merged := make([]string, 0, len(s.commands)+len(commands))
 	seen := make(map[string]struct{})
@@ -134,6 +137,22 @@ func (s *SlashAutocomplete) UpdateCommands(commands []string) {
 	s.updateFiltered()
 }
 
+// ReplaceCommands replaces the complete command list.
+// Duplicates are removed and the list is sorted.
+func (s *SlashAutocomplete) ReplaceCommands(commands []string) {
+	unique := commands[:0]
+	seen := make(map[string]struct{}, len(commands))
+	for _, cmd := range commands {
+		if _, ok := seen[cmd]; !ok {
+			seen[cmd] = struct{}{}
+			unique = append(unique, cmd)
+		}
+	}
+	sortStrings(unique)
+	s.commands = unique
+	s.updateFiltered()
+}
+
 // GetFilteredCommands returns the currently filtered commands.
 func (s *SlashAutocomplete) GetFilteredCommands() []string {
 	return s.filtered
@@ -145,9 +164,11 @@ func (s *SlashAutocomplete) GetSelectedIndex() int {
 }
 
 // GetVisibleItems returns the items to display (handles scrolling).
+// Returns the visible items, the global start index, and the index of the
+// selected item within the visible subset.
 func (s *SlashAutocomplete) GetVisibleItems() ([]string, int, int) {
 	if len(s.filtered) <= s.maxHeight {
-		return s.filtered, 0, len(s.filtered)
+		return s.filtered, 0, s.selected
 	}
 
 	// Keep selected item visible
@@ -162,4 +183,32 @@ func (s *SlashAutocomplete) GetVisibleItems() ([]string, int, int) {
 	}
 
 	return s.filtered[startIdx:endIdx], startIdx, s.selected - startIdx
+}
+
+// VisibleCount returns the total number of filtered commands.
+func (s *SlashAutocomplete) VisibleCount() int {
+	return len(s.filtered)
+}
+
+// FilterText returns the current filter string.
+func (s *SlashAutocomplete) FilterText() string {
+	return s.filter
+}
+
+// MaxHeight returns the maximum visible items before scrolling.
+func (s *SlashAutocomplete) MaxHeight() int {
+	return s.maxHeight
+}
+
+// Commands returns a copy of all available commands.
+func (s *SlashAutocomplete) Commands() []string {
+	return slices.Clone(s.commands)
+}
+
+// MergeCommands adds extra commands (template names, skill names) to the
+// existing command list. Duplicates are removed. The merged list
+// is sorted for consistent autocomplete ordering.
+// This is an alias for UpdateCommands for compatibility with tui usage patterns.
+func (s *SlashAutocomplete) MergeCommands(extra []string) {
+	s.UpdateCommands(extra)
 }

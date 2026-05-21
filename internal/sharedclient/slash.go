@@ -1,4 +1,4 @@
-package liteclient
+package sharedclient
 
 import (
 	"strings"
@@ -30,6 +30,9 @@ var builtinCommands = map[string]struct{}{
 	"interrupt": {},
 	"tasks":     {},
 }
+
+// CommandTasks is the "tasks" command name, exported for compatibility with tui/constants.go.
+const CommandTasks = "tasks"
 
 // ParseSlash parses a slash command from input text.
 // Returns nil if the input is not a slash command.
@@ -128,15 +131,18 @@ func IsBuiltin(name string) bool {
 	return ok
 }
 
-// sortStrings sorts a slice of strings in place using simple insertion sort.
+// SortStrings sorts a slice of strings in place using simple insertion sort.
 // This avoids importing the sort package for a small slice.
-func sortStrings(s []string) {
+func SortStrings(s []string) {
 	for i := 1; i < len(s); i++ {
 		for j := i; j > 0 && s[j] < s[j-1]; j-- {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}
 }
+
+// sortStrings is an alias for SortStrings, used internally.
+var sortStrings = SortStrings
 
 // IsSlashCommand checks if input starts with a slash command.
 func IsSlashCommand(input string) bool {

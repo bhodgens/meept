@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/caimlas/meept/internal/transport"
-	"github.com/caimlas/meept/internal/liteclient"
+	"github.com/caimlas/meept/internal/sharedclient"
 )
 
 var (
@@ -49,13 +49,25 @@ func main() {
 	}
 
 	if err := client.Connect(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to connect to daemon: %v\n\nMake sure the daemon is running:\n  meept daemon start\n")
+		host := "localhost:8081"
+		if transportFlag == "http" && httpURLFlag != "http://localhost:8081" {
+			host = httpURLFlag
+		}
+		fmt.Fprintf(os.Stderr, "failed to connect to daemon (%v)\n", err)
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "make sure the daemon is running:")
+		if transportFlag == "http" {
+			fmt.Fprintf(os.Stderr, "  meept daemon start --http-listen %s\n\n", host)
+		} else {
+			fmt.Fprintln(os.Stderr, "  meept daemon start")
+		}
+		fmt.Fprintln(os.Stderr, "or use --socket/-s or --http-url to specify the address")
 		os.Exit(1)
 	}
 	defer client.Close()
 
 	// Create session manager
-	sessionMgr := liteclient.NewSessionManager(client, "default")
+	sessionMgr := sharedclient.NewSessionManager(client, "default")
 	if err := sessionMgr.LoadOrCreateSession(nil, sessionName); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load session: %v\n", err)
 		os.Exit(1)
