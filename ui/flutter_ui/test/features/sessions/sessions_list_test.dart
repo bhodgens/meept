@@ -101,7 +101,7 @@ void main() {
                     children: [
                       const SizedBox(
                         height: 400,
-                        child: const SessionsList(),
+                        child: SessionsList(),
                       ),
                       Text(
                         'active: ${capturedActiveSession?.id ?? "none"}',

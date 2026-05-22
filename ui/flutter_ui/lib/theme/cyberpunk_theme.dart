@@ -54,7 +54,7 @@ abstract class CyberpunkTheme {
         centerTitle: false,
         titleTextStyle: CyberpunkTypography.headlineMedium,
         actionsIconTheme:
-            const IconThemeData(color: CyberpunkColors.orangeBright),
+            IconThemeData(color: CyberpunkColors.orangeBright),
       );
 
   static CardThemeData get _cardTheme => CardThemeData(
@@ -99,20 +99,20 @@ abstract class CyberpunkTheme {
         filled: true,
         fillColor: CyberpunkColors.darkGray,
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        border: const OutlineInputBorder(
+            EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        border: OutlineInputBorder(
           borderSide: BorderSide(color: CyberpunkColors.midGray),
           borderRadius: BorderRadius.all(Radius.circular(2)),
         ),
-        enabledBorder: const OutlineInputBorder(
+        enabledBorder: OutlineInputBorder(
           borderSide: BorderSide(color: CyberpunkColors.midGray),
           borderRadius: BorderRadius.all(Radius.circular(2)),
         ),
-        focusedBorder: const OutlineInputBorder(
+        focusedBorder: OutlineInputBorder(
           borderSide: BorderSide(color: CyberpunkColors.orangePrimary, width: 2),
           borderRadius: BorderRadius.all(Radius.circular(2)),
         ),
-        errorBorder: const OutlineInputBorder(
+        errorBorder: OutlineInputBorder(
           borderSide: BorderSide(color: CyberpunkColors.redAlert),
           borderRadius: BorderRadius.all(Radius.circular(2)),
         ),

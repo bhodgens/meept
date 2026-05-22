@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/providers.dart';
 import '../../theme/colors.dart';
-import '../../theme/typography.dart';
 import 'sessions_list.dart';
 import 'sessions_detail.dart';
 

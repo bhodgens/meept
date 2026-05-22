@@ -156,10 +156,10 @@ class _ToolsPanelState extends ConsumerState<ToolsPanel> {
               padding:
                   const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: const BoxDecoration(
-                color: const Color(0xFFFF303020),
+                color: Color(0x80FF3030),
                 border: Border(
-                  bottom: const BorderSide(
-                    color: const Color(0xFFFF303080),
+                  bottom: BorderSide(
+                    color: Color(0x80FF3080),
                     width: 1,
                   ),
                 ),

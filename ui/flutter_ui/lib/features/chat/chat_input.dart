@@ -241,7 +241,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                 height: 18,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: const AlwaysStoppedAnimation<Color>(CyberpunkColors.black),
+                  valueColor: AlwaysStoppedAnimation<Color>(CyberpunkColors.black),
                 ),
               )
             : const Icon(

@@ -16,7 +16,7 @@ class CyberpunkLoader extends StatelessWidget {
             width: 48,
             height: 48,
             child: CircularProgressIndicator(
-              valueColor: const AlwaysStoppedAnimation<Color>(
+              valueColor: AlwaysStoppedAnimation<Color>(
                 CyberpunkColors.orangePrimary,
               ),
               strokeWidth: 3,

@@ -29,10 +29,10 @@ class TasksTab extends ConsumerWidget {
             TasksDetail(task: selectedTask),
           if (selectedTask == null)
             const Expanded(
-              child: const Center(
-                child: const Text(
+              child: Center(
+                child: Text(
                   'select a task',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: CyberpunkColors.orangePrimary,
                   ),
                 ),

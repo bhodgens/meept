@@ -1,10 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:meept_ui/models/api_models.dart';
-import 'package:meept_ui/providers/chat_provider.dart';
+import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/api_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
@@ -76,6 +73,7 @@ class _TestWebSocket extends WebSocketService {
   @override
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
 
+  @override
   bool get isConnected => _connected;
 
   List<Map<String, dynamic>> get sentMessages => List.unmodifiable(_sentMessages);
@@ -334,7 +332,7 @@ void main() {
       // Simulate a streaming response with multiple chunks
       for (int i = 0; i < 5; i++) {
         ws.pushMessage({
-          'id': 'stream-${i}',
+          'id': 'stream-$i',
           'type': 'chat_message',
           'role': 'assistant',
           'content': 'chunk $i',

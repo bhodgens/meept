@@ -136,8 +136,8 @@ Widget _buildTestApp({
       theme: ThemeData.dark(),
       home: Scaffold(
         body: _InitialChatState(
-          child: child,
           initialState: initialChatState,
+          child: child,
         ),
       ),
     ),
@@ -287,7 +287,7 @@ void main() {
       await tester.pumpWidget(ProviderScope(
         child: MaterialApp(
           theme: ThemeData.dark(),
-          home: const Scaffold(body: const MessagePlaceholder()),
+          home: const Scaffold(body: MessagePlaceholder()),
         ),
       ));
 
