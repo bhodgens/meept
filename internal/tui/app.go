@@ -563,7 +563,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				if input == "" || strings.HasPrefix(input, "/") {
 					a.slashAutocomplete.Show("")
-					DebugLog(fmt.Sprintf("SLASH Show(): visible=%v, filtered=%d commands", a.slashAutocomplete.IsVisible(), len(a.slashAutocomplete.filtered)))
+					DebugLog(fmt.Sprintf("SLASH Show(): visible=%v, filtered=%d commands", a.slashAutocomplete.IsVisible(), len(a.slashAutocomplete.GetFilteredCommands())))
 				} else {
 					DebugLog("SLASH: NOT showing popup, input condition failed")
 				}
@@ -1208,7 +1208,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			filter := after
 			filter = strings.TrimSpace(filter)
 			a.slashAutocomplete.SetFilter(filter)
-			if len(a.slashAutocomplete.filtered) == 0 {
+			if len(a.slashAutocomplete.GetFilteredCommands()) == 0 {
 				a.slashAutocomplete.Hide()
 			}
 		} else if currentInput == "" && a.slashAutocomplete.IsVisible() {

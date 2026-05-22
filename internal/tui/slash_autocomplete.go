@@ -6,47 +6,38 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/caimlas/meept/internal/sharedclient"
 )
 
 // SlashAutocomplete is a type-ahead autocomplete popup for slash commands.
 // It appears when the user types "/" at the start of the input.
+// Uses sharedclient.SlashAutocomplete for data management.
 type SlashAutocomplete struct {
-	visible   bool
-	commands  []string // All available commands
-	filtered  []string // Commands matching current filter
-	selected  int      // Currently selected index
-	filter    string   // Current filter text (what user typed after /)
-	maxHeight int      // Maximum visible items before scrolling
-	styles    *Styles
+	data    *sharedclient.SlashAutocomplete // Shared data layer
+	visible bool
+	styles  *Styles
 }
 
 // NewSlashAutocomplete creates a new autocomplete component.
 func NewSlashAutocomplete(styles *Styles) *SlashAutocomplete {
-	commands := BuiltinCommands()
-	// Also add skill commands if needed (for now just builtins)
-
 	return &SlashAutocomplete{
-		visible:   false,
-		commands:  commands,
-		filtered:  commands,
-		selected:  0,
-		filter:    "",
-		maxHeight: 8,
-		styles:    styles,
+		data:    sharedclient.NewSlashAutocomplete(),
+		visible: false,
+		styles:  styles,
 	}
 }
 
 // Show makes the autocomplete visible with the given filter.
 func (s *SlashAutocomplete) Show(filter string) {
 	s.visible = true
-	s.filter = filter
-	s.updateFiltered()
-	s.selected = 0
+	s.data.Show(filter)
 }
 
 // Hide hides the autocomplete.
 func (s *SlashAutocomplete) Hide() {
 	s.visible = false
+	s.data.Hide()
 }
 
 // IsVisible returns whether the autocomplete is visible.
@@ -56,44 +47,17 @@ func (s *SlashAutocomplete) IsVisible() bool {
 
 // SetFilter updates the filter and recomputes matching commands.
 func (s *SlashAutocomplete) SetFilter(filter string) {
-	s.filter = filter
-	s.updateFiltered()
-	if len(s.filtered) > 0 && s.selected >= len(s.filtered) {
-		s.selected = len(s.filtered) - 1
-	}
-}
-
-// updateFiltered recomputes the list of commands matching the current filter.
-func (s *SlashAutocomplete) updateFiltered() {
-	if s.filter == "" {
-		s.filtered = make([]string, len(s.commands))
-		copy(s.filtered, s.commands)
-		return
-	}
-
-	s.filtered = s.filtered[:0]
-	for _, cmd := range s.commands {
-		if strings.HasPrefix(cmd, s.filter) {
-			s.filtered = append(s.filtered, cmd)
-		}
-	}
+	s.data.SetFilter(filter)
 }
 
 // GetSelectedCommand returns the currently selected command name.
 func (s *SlashAutocomplete) GetSelectedCommand() string {
-	if s.selected >= 0 && s.selected < len(s.filtered) {
-		return s.filtered[s.selected]
-	}
-	return ""
+	return s.data.GetSelectedCommand()
 }
 
 // GetSelectedCommandWithSlash returns the selected command with leading slash.
 func (s *SlashAutocomplete) GetSelectedCommandWithSlash() string {
-	cmd := s.GetSelectedCommand()
-	if cmd != "" {
-		return "/" + cmd
-	}
-	return ""
+	return s.data.GetSelectedCommandWithSlash()
 }
 
 // HandleKeyResult indicates how a key was handled by the autocomplete.
@@ -116,19 +80,14 @@ func (s *SlashAutocomplete) HandleKey(key string) (HandleKeyResult, tea.Cmd) {
 
 	switch key {
 	case "up", "ctrl+k":
-		if s.selected > 0 {
-			s.selected--
-		}
+		s.data.Up()
 		return HandleKeyNavigated, nil
 	case KeyDown, "ctrl+j", KeyTab:
-		if s.selected < len(s.filtered)-1 {
-			s.selected++
-		}
+		s.data.Down()
 		return HandleKeyNavigated, nil
 	case KeyEnter:
 		// Insert selected command and return it for execution
-		if len(s.filtered) > 0 {
-			cmd := s.GetSelectedCommandWithSlash()
+		if cmd, ok := s.data.Select(); ok {
 			return HandleKeyInsert, func() tea.Msg {
 				return SlashAutocompleteMsg{Command: cmd}
 			}
@@ -136,7 +95,7 @@ func (s *SlashAutocomplete) HandleKey(key string) (HandleKeyResult, tea.Cmd) {
 		return HandleKeyPassThrough, nil
 	case KeyEsc:
 		s.Hide()
-		return HandleKeyNavigated, nil // Consume the key
+		return HandleKeyNavigated, nil
 	}
 
 	// Any other key - pass through to input (autocomplete will be hidden by caller)
@@ -151,19 +110,14 @@ type SlashAutocompleteMsg struct {
 // View renders the autocomplete popup.
 // Returns empty string if not visible.
 func (s *SlashAutocomplete) View() string {
-	if !s.visible || len(s.filtered) == 0 {
+	if !s.visible {
 		return ""
 	}
 
-	// Calculate which items to show (support scrolling if many results)
-	startIdx := 0
-	endIdx := len(s.filtered)
-	if len(s.filtered) > s.maxHeight {
-		// Keep selected item visible
-		if s.selected >= s.maxHeight {
-			startIdx = s.selected - s.maxHeight + 1
-		}
-		endIdx = startIdx + s.maxHeight
+	// Use sharedclient's GetVisibleItems for scrolling logic
+	items, _, selectedInItems := s.data.GetVisibleItems()
+	if len(items) == 0 {
+		return ""
 	}
 
 	var b strings.Builder
@@ -178,24 +132,23 @@ func (s *SlashAutocomplete) View() string {
 	b.WriteString("\n")
 
 	// Items
-	for i := startIdx; i < endIdx && i < len(s.filtered); i++ {
-		cmd := s.filtered[i]
-
+	for i, cmd := range items {
 		style := s.styles.ModalItem
-		if i == s.selected {
+		if i == selectedInItems {
 			style = s.styles.ModalItemSelected
 		}
 
 		// Show match indicator
 		matchMarker := " "
-		if i == s.selected {
+		if i == selectedInItems {
 			matchMarker = "▸"
 		}
 
 		// Highlight the matched portion
+		filter := s.data.FilterText()
 		var label string
-		if strings.HasPrefix(cmd, s.filter) && s.filter != "" {
-			matchedLen := min(len(s.filter), len(cmd))
+		if strings.HasPrefix(cmd, filter) && filter != "" {
+			matchedLen := min(len(filter), len(cmd))
 			label = s.styles.HelpKey.Render(cmd[:matchedLen]) + cmd[matchedLen:]
 		} else {
 			label = cmd
@@ -207,10 +160,10 @@ func (s *SlashAutocomplete) View() string {
 	}
 
 	// Footer hint
-	if len(s.filtered) > 1 {
+	if len(items) > 1 {
 		b.WriteString("\n")
 		hint := "↑/↓ navigate · enter select · esc cancel"
-		if len(s.filtered) > s.maxHeight {
+		if s.data.VisibleCount() > s.data.MaxHeight() {
 			hint += " · " + lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("scrolling")
 		}
 		b.WriteString(s.styles.Muted.Render(hint))
@@ -221,45 +174,23 @@ func (s *SlashAutocomplete) View() string {
 
 // UpdateCommands refreshes the command list (e.g., after skills are installed).
 func (s *SlashAutocomplete) UpdateCommands(commands []string) {
-	s.commands = commands
-	s.updateFiltered()
+	s.data.UpdateCommands(commands)
 }
 
 // MergeCommands adds extra commands (template names, skill names) to the
 // existing built-in command list. Duplicates are removed. The merged list
 // is sorted for consistent autocomplete ordering.
 func (s *SlashAutocomplete) MergeCommands(extra []string) {
-	seen := make(map[string]struct{}, len(s.commands)+len(extra))
-
-	// Start with current commands
-	merged := make([]string, 0, len(s.commands)+len(extra))
-	for _, cmd := range s.commands {
-		if _, ok := seen[cmd]; !ok {
-			seen[cmd] = struct{}{}
-			merged = append(merged, cmd)
-		}
-	}
-
-	// Add extras
-	for _, cmd := range extra {
-		if _, ok := seen[cmd]; !ok {
-			seen[cmd] = struct{}{}
-			merged = append(merged, cmd)
-		}
-	}
-
-	// Sort for consistent ordering
-	sortStrings(merged)
-	s.commands = merged
-	s.updateFiltered()
+	s.data.MergeCommands(extra)
 }
 
 // GetFilteredCommands returns the currently filtered commands.
 func (s *SlashAutocomplete) GetFilteredCommands() []string {
-	return s.filtered
+	return s.data.GetFilteredCommands()
 }
 
 // GetSelectedIndex returns the currently selected index.
 func (s *SlashAutocomplete) GetSelectedIndex() int {
-	return s.selected
+	_, _, selectedInItems := s.data.GetVisibleItems()
+	return selectedInItems
 }
