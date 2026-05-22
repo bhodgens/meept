@@ -18,10 +18,6 @@ class _ChatTabState extends State<ChatTab> {
   bool _isSidebarCollapsed = false;
   String _activeTool = '';
 
-  final List<String> _toolRoutes = [
-    'memory', 'files', 'terminal', 'calendar', 'metrics', 'settings',
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Container(

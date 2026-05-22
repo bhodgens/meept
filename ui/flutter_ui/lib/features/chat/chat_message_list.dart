@@ -19,8 +19,6 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   final ScrollController _scrollController = ScrollController();
   bool _isAtBottom = true;
 
-  String? _lastSessionId;
-
   @override
   void initState() {
     super.initState();

@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../models/api_models.dart';
-import '../../providers/chat_provider.dart';
 import '../../providers/providers.dart';
 
 /// Chat input widget - fixed height bottom pane for text entry

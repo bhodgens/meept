@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
-import '../../providers/task_provider.dart';
 import 'tasks_list.dart';
 import 'tasks_detail.dart';
 import '../../models/api_models.dart';
