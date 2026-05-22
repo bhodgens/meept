@@ -128,6 +128,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newQCmd())
 	rootCmd.AddCommand(newCalendarCmd())
 	rootCmd.AddCommand(newBranchCmd())
+	rootCmd.AddCommand(newRuntimeCmd())
 	rootCmd.SetHelpCommand(newHelpCmd(rootCmd))
 	rootCmd.AddCommand(newMCPChatServerCmd())
 
