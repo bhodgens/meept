@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
@@ -32,17 +34,60 @@ class ChatState {
 /// StateNotifier that manages chat messages for a session
 class ChatNotifier extends StateNotifier<ChatState> {
   ChatNotifier({required this.apiClient, required this.websocket})
-      : super(const ChatState());
+      : super(const ChatState()) {
+    _initWebSocket();
+  }
 
   final ApiClient apiClient;
   final WebSocketService websocket;
+  StreamSubscription<Map<String, dynamic>>? _chatSubscription;
 
-  /// Load chat history for a session
+  /// Initialize WebSocket connection and subscribe to chat messages
+  void _initWebSocket() {
+    websocket.connect();
+
+    _chatSubscription = websocket.messageStream.listen((message) {
+      if (message['type'] == 'chat.message' ||
+          message['type'] == 'chat_message' ||
+          message['role'] != null) {
+        addStreamMessage(message);
+      }
+    });
+  }
+
+  /// Load chat history for a session and subscribe to updates
   Future<void> loadMessages(String sessionId) async {
-    state = const ChatState(isLoading: true);
-    // Chat messages would be loaded via websocket stream
-    // For now, initialize empty and rely on stream
-    state = const ChatState(isLoading: false);
+    state = ChatState(
+      messages: state.messages,
+      isLoading: true,
+      error: null,
+    );
+
+    // Unsubscribe from previous session and resubscribe to the new one
+    _chatSubscription?.cancel();
+
+    final subscription = websocket.messageStream.listen((message) {
+      if (message['type'] == 'chat_message' &&
+          message['session_id'] == sessionId) {
+        addStreamMessage(message);
+      }
+    });
+    _chatSubscription = subscription;
+
+    // Send subscribe request if connected
+    if (websocket.isConnected) {
+      websocket.send({
+        'type': 'subscribe',
+        'channel': 'chat',
+        'session_id': sessionId,
+      });
+    }
+
+    state = ChatState(
+      messages: state.messages,
+      isLoading: false,
+      error: null,
+    );
   }
 
   /// Send a message and append it to the messages list
@@ -136,6 +181,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Clear all messages
   void clearMessages() {
     state = const ChatState();
+  }
+
+  @override
+  void dispose() {
+    _chatSubscription?.cancel();
+    _chatSubscription = null;
+    super.dispose();
   }
 }
 
