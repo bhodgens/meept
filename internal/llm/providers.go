@@ -17,6 +17,9 @@ type ProviderConfig struct {
 	API     string                `json:"api"`
 	Options ProviderOptionsConfig `json:"options"`
 	Models  map[string]ModelDef   `json:"models"`
+	// Lifecycle holds local LLM runtime lifecycle configuration (llama.cpp, MLX).
+	// Nil means no local runtime lifecycle management for this provider.
+	Lifecycle *RuntimeLifecycleConfig `json:"lifecycle,omitempty"`
 }
 
 // ProviderOptionsConfig holds provider-specific options.
