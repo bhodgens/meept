@@ -258,11 +258,18 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		)
 
 		// Create auxiliary LLM clients for classifier and summarizer
+		// Use resolver for alias-based model selection (enables fallback rotation)
 		classifierRef := c.ModelsConfig.ClassifierModel
 		if classifierRef == "" {
 			classifierRef = c.ModelsConfig.SmallModel
 		}
-		c.ClassifierClient = createAuxiliaryLLMClient(c.ModelsConfig, classifierRef, logger.With("component", "classifier-llm"), budgetTracker)
+		c.ClassifierClient = createAuxiliaryLLMClientWithResolver(
+			c.ModelsConfig,
+			classifierRef,
+			c.LLMResolver,
+			logger.With("component", "classifier-llm"),
+			budgetTracker,
+		)
 		if c.ClassifierClient != nil {
 			logger.Info("Classifier LLM client initialized", "model", classifierRef)
 		} else {
@@ -273,7 +280,13 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		if summarizerRef == "" {
 			summarizerRef = c.ModelsConfig.SmallModel
 		}
-		c.SummarizerClient = createAuxiliaryLLMClient(c.ModelsConfig, summarizerRef, logger.With("component", "summarizer-llm"), budgetTracker)
+		c.SummarizerClient = createAuxiliaryLLMClientWithResolver(
+			c.ModelsConfig,
+			summarizerRef,
+			c.LLMResolver,
+			logger.With("component", "summarizer-llm"),
+			budgetTracker,
+		)
 		if c.SummarizerClient != nil {
 			logger.Info("Summarizer LLM client initialized", "model", summarizerRef)
 		} else {
@@ -1593,6 +1606,7 @@ func createLLMConfig(cfg *config.ModelsConfig, logger *slog.Logger) *llm.ModelCo
 // createAuxiliaryLLMClient creates an LLM client for an auxiliary role (classifier,
 // summarizer). If modelRef is empty it returns nil so the caller can fall back to
 // the main client. The returned client shares no state with the main client.
+// Deprecated: Use createAuxiliaryLLMClientWithResolver for alias-based fallback support.
 func createAuxiliaryLLMClient(cfg *config.ModelsConfig, modelRef string, logger *slog.Logger, budget *llm.Budget) *llm.Client {
 	if modelRef == "" {
 		return nil
@@ -1601,6 +1615,50 @@ func createAuxiliaryLLMClient(cfg *config.ModelsConfig, modelRef string, logger 
 	if llmCfg == nil {
 		return nil
 	}
+	opts := []llm.ClientOption{llm.WithLogger(logger)}
+	if budget != nil {
+		opts = append(opts, llm.WithBudget(budget))
+	}
+	return llm.NewClient(llmCfg, opts...)
+}
+
+// createAuxiliaryLLMClientWithResolver creates an LLM client for an auxiliary role
+// with support for alias-based model fallback. If the modelRef is an alias defined
+// in model_aliases, it uses the resolver to get the current model with automatic
+// failover. If modelRef is empty or resolution fails, returns nil.
+func createAuxiliaryLLMClientWithResolver(
+	cfg *config.ModelsConfig,
+	modelRef string,
+	resolver *llm.Resolver,
+	logger *slog.Logger,
+	budget *llm.Budget,
+) *llm.Client {
+	if modelRef == "" {
+		return nil
+	}
+
+	// Check if modelRef is an alias - try to resolve it first
+	var llmCfg *llm.ModelConfig
+	if resolver != nil {
+		aliasCfg, err := resolver.ResolveForAlias(modelRef)
+		if err == nil {
+			// modelRef is an alias, use the resolved model
+			logger.Info("Resolved model alias", "alias", modelRef, "model", aliasCfg.ModelID)
+			llmCfg = aliasCfg
+		} else {
+			// Not an alias or alias resolution failed, try direct model reference
+			logger.Debug("Model alias resolution failed, trying direct reference", "error", err)
+			llmCfg = resolveModelRef(cfg, modelRef, logger)
+		}
+	} else {
+		// No resolver available, use direct model reference
+		llmCfg = resolveModelRef(cfg, modelRef, logger)
+	}
+
+	if llmCfg == nil {
+		return nil
+	}
+
 	opts := []llm.ClientOption{llm.WithLogger(logger)}
 	if budget != nil {
 		opts = append(opts, llm.WithBudget(budget))

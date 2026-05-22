@@ -2526,6 +2526,26 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 			// FIX #0037/#0039: Cap nudge attempts to avoid infinite loops
 			if l.nudgeAttempts >= l.detectionConfig.MaxNudgeAttempts {
+				// Try model rotation before giving up
+				if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
+					newModel, rotateErr := l.resolver.RotateToNextModel(l.modelRef)
+					if rotateErr == nil {
+						l.logger.Info("Empty response - rotated to alternate model",
+							"alias", l.modelRef,
+							"new_model", newModel.ModelID,
+							"nudge_attempts", l.nudgeAttempts,
+						)
+						// Record failure for the previous model
+						l.resolver.RecordAliasFailure(l.modelRef, fmt.Errorf("empty response"))
+						// Reset nudge counter for new model
+						l.nudgeAttempts = 0
+						// Continue with new model (it will be used on next Chat call)
+						conv.AddAssistantMessage("[empty response - switching model]")
+						continue
+					}
+					l.logger.Warn("Model rotation failed", "error", rotateErr)
+				}
+
 				l.logger.Warn("Max nudge attempts reached, returning error to user",
 					"nudge_attempts", l.nudgeAttempts,
 					"conversation", conversationID,
