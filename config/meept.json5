@@ -18,6 +18,12 @@
     "http": {
       "enabled": false,
       "addr": ":8081",
+      // Modular endpoints - enable/disable individual transport features
+      "rest": true,       // REST API at /api/v1/*
+      "websocket": false, // WebSocket at /ws (for Flutter UI)
+      "ws_path": "/ws",
+      "mcp": false,       // MCP over HTTP+SSE at /mcp (for AI agents)
+      "mcp_path": "/mcp",
     },
   },
 

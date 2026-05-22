@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
@@ -60,6 +61,18 @@ func (r *BenchmarkRunner) Run(ctx context.Context, corpus *TestCorpus, modelName
 		"benchmark", r.config.BenchmarkName,
 	)
 
+	// Create a model-specific client with the correct ModelID.
+	// The shared client may not have ModelID set, and the LLM classifier
+	// sends the request's "model" field from the client's Config.ModelID.
+	origCfg := r.client.Config()
+	modelClient := llm.NewClient(&llm.ModelConfig{
+		BaseURL: origCfg.BaseURL,
+		ModelID: modelName,
+		APIKey:  origCfg.APIKey,
+	},
+		llm.WithTimeout(30*time.Second),
+	)
+
 	categories := corpus.CategoryNames()
 	for _, catName := range categories {
 		cases := corpus.Categories[catName]
@@ -69,7 +82,7 @@ func (r *BenchmarkRunner) Run(ctx context.Context, corpus *TestCorpus, modelName
 			start := time.Now()
 
 			classifier := agent.NewLLMClassifier(agent.LLMClassifierConfig{
-				Client:  r.client,
+				Client:  modelClient,
 				Model:   modelName,
 				Timeout: r.config.ClassifierTimeout,
 				Logger:  &benchmarkLogger{logger: logger, prefix: modelName},
@@ -106,7 +119,7 @@ func (r *BenchmarkRunner) Run(ctx context.Context, corpus *TestCorpus, modelName
 					}
 				}
 				acc := float64(correct) / float64(current) * 100
-				logger.Info("progress", "model", modelName, "done", current, "total", total, "accuracy", "%.1f", acc)
+				logger.Info("progress", "model", modelName, "done", current, "total", total, "accuracy", fmt.Sprintf("%.1f", acc))
 			}
 		}
 	}
@@ -114,9 +127,9 @@ func (r *BenchmarkRunner) Run(ctx context.Context, corpus *TestCorpus, modelName
 	modelMetrics := collector.GenerateModelMetrics(modelName)
 	logger.Info("benchmark complete",
 		"model", modelName,
-		"accuracy", "%.2f", modelMetrics.OverallAccuracy*100,
+		"accuracy", fmt.Sprintf("%.2f", modelMetrics.OverallAccuracy*100),
 		"tests", modelMetrics.TotalTests,
-		"error", modelMetrics.TotalErrors,
+		"errors", modelMetrics.TotalErrors,
 	)
 
 	return modelMetrics

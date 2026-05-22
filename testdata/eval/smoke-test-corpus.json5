@@ -1,0 +1,26 @@
+{
+  name: "Classifier Smoke Test",
+  version: "1.0",
+  categories: {
+    chat: [
+      { input: "hello", expected_intent: "chat", expected_agent: "chat" },
+      { input: "what can you do", expected_intent: "platform", expected_agent: "chat" },
+    ],
+    code: [
+      { input: "create a function to sort users", expected_intent: "code", expected_agent: "coder" },
+      { input: "write a REST API endpoint", expected_intent: "code", expected_agent: "coder" },
+    ],
+    debug: [
+      { input: "why is this test failing", expected_intent: "debug", expected_agent: "debugger" },
+      { input: "fix the nil pointer dereference", expected_intent: "debug", expected_agent: "debugger" },
+    ],
+    git: [
+      { input: "commit these changes", expected_intent: "git", expected_agent: "committer" },
+      { input: "push to main branch", expected_intent: "git", expected_agent: "committer" },
+    ],
+    analyze: [
+      { input: "what are the best practices for API design", expected_intent: "analyze", expected_agent: "analyst" },
+      { input: "compare different database options", expected_intent: "analyze", expected_agent: "analyst" },
+    ],
+  },
+}

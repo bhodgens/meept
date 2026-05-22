@@ -945,7 +945,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			CapabilityMatcher: capMatcher,
 			LLMClient:         c.LLMClient,
 			ClassifierClient:  c.ClassifierClient,
-			ClassifierModel:   c.Config.MultiAgent.ClassifierModel,
+			ClassifierModel:   c.ModelsConfig.ClassifierModel,
 			ClassifierTimeout: 15 * time.Second, // Generous timeout for classifier; avoids cascade to weak keyword fallback.
 			SessionMaxAge:     30 * time.Minute,
 		})

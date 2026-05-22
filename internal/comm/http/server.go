@@ -12,6 +12,8 @@ import (
 	"encoding/pem"
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 	"log/slog"
 	"math/big"
 	"net"
@@ -21,8 +23,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/mcp"
+	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
+
+	"golang.org/x/net/websocket"
 )
 
 // ServerConfig holds configuration for the HTTP server.
@@ -86,8 +93,15 @@ type Server struct {
 	// BudgetStatusGetter is an optional callback that returns budget stats.
 	// Used by the status handler to report actual token usage (FIX #0031/#0035).
 	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int)
-}
 
+	wsHub *WebSocketHub
+
+	// MCP over HTTP+SSE support
+	mcpClient        transport.Client
+	mcpServices   *services.ServiceRegistry
+	mcpSessions sync.Map // map[string]*MCPSession
+	mcpPath     string
+}
 // AgentInfo describes an agent for listing.
 type AgentInfo struct {
 	ID          string `json:"id"`
@@ -107,7 +121,7 @@ type Agent struct {
 }
 
 // NewServer creates a new HTTP API server.
-func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonController, metricsSvc MetricsService, svcRegistry *services.ServiceRegistry, logger *slog.Logger) *Server {
+func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonController, metricsSvc MetricsService, svcRegistry *services.ServiceRegistry, logger *slog.Logger, opts ...ServerOption) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = ":8081"
 	}
@@ -115,7 +129,7 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 		logger = slog.Default()
 	}
 
-	return &Server{
+	s := &Server{
 		config:         cfg,
 		configService:  configSvc,
 		daemonCtrl:     daemonCtrl,
@@ -123,7 +137,135 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 		services:       svcRegistry,
 		logger:         logger,
 	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
 }
+
+// WebSocketHub manages WebSocket client connections and broadcasts messages.
+type WebSocketHub struct {
+	mu      sync.RWMutex
+	clients map[*websocket.Conn]struct{}
+	logger  *slog.Logger
+}
+
+// NewWebSocketHub creates a new WebSocket hub.
+func NewWebSocketHub(logger *slog.Logger) *WebSocketHub {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &WebSocketHub{
+		clients: make(map[*websocket.Conn]struct{}),
+		logger:  logger,
+	}
+}
+
+// Register adds a WebSocket client connection.
+func (h *WebSocketHub) Register(conn *websocket.Conn) {
+	h.mu.Lock()
+	h.clients[conn] = struct{}{}
+	h.mu.Unlock()
+	h.logger.Debug("ws client registered", "remote", conn.RemoteAddr())
+}
+
+// Unregister removes a WebSocket client connection and closes it.
+func (h *WebSocketHub) Unregister(conn *websocket.Conn) {
+	h.mu.Lock()
+	delete(h.clients, conn)
+	h.mu.Unlock()
+	conn.Close()
+	h.logger.Debug("ws client unregistered", "remote", conn.RemoteAddr())
+}
+
+// ClientCount returns the number of connected clients.
+func (h *WebSocketHub) ClientCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients)
+}
+
+// Broadcast sends a typed message to all connected WebSocket clients.
+func (h *WebSocketHub) Broadcast(msgType string, data any) {
+	payload, err := json.Marshal(map[string]any{
+		"type": msgType,
+		"data": data,
+	})
+	if err != nil {
+		h.logger.Error("ws broadcast marshal error", "error", err)
+		return
+	}
+
+	var failedConns []*websocket.Conn
+
+	h.mu.RLock()
+	for conn := range h.clients {
+		if _, err := conn.Write(payload); err != nil {
+			h.logger.Warn("ws write error, will remove client", "error", err)
+			failedConns = append(failedConns, conn)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, conn := range failedConns {
+		h.Unregister(conn)
+	}
+}
+
+// WithWebSocket enables WebSocket support on the /ws endpoint.
+func WithWebSocket(msgBus *bus.MessageBus) ServerOption {
+	return func(s *Server) {
+		if msgBus == nil {
+			return
+		}
+		s.wsHub = NewWebSocketHub(s.logger)
+
+		// Subscribe to bus events and broadcast to WebSocket clients
+		// Note: using a single wildcard subscription to catch all relevant events
+		sub := msgBus.Subscribe("http-ws", "*")
+
+		go func() {
+			for msg := range sub.Channel {
+				s.wsHub.Broadcast(msg.Topic, msg.Payload)
+			}
+		}()
+	}
+}
+
+
+// MCPSession represents an MCP over HTTP+SSE client session.
+type MCPSession struct {
+	mu        sync.RWMutex
+	sessionID string
+	eventChan chan *SSEEvent
+	done      chan struct{}
+}
+
+// SSEEvent represents a Server-Sent Event.
+type SSEEvent struct {
+	ID   string
+	Type string
+	Data []byte
+}
+
+// WithMCP enables MCP over HTTP+SSE support.
+func WithMCP(services *services.ServiceRegistry, mcpPath string) ServerOption {
+	return func(s *Server) {
+		if services == nil {
+			return
+		}
+		s.mcpServices = services
+		if mcpPath == "" {
+			mcpPath = "/mcp"
+		}
+		s.mcpPath = mcpPath
+	}
+}
+
+// ServerOption is a functional option for configuring a Server.
+type ServerOption func(*Server)
 
 // Start starts the HTTP server.
 func (s *Server) Start(ctx context.Context) error {
@@ -243,12 +385,19 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/live", s.handleLiveMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/historical", s.handleHistoricalMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
+
+	// WebSocket endpoint (if enabled)
+	if s.wsHub != nil {
+		mux.HandleFunc("GET /ws", s.handleWebSocket)
+	}
+
+	// MCP over HTTP+SSE endpoints (if enabled)
+	if s.mcpClient != nil {
+		mux.HandleFunc(fmt.Sprintf("POST %s", s.mcpPath), s.handleMCPPost)
+		mux.HandleFunc(fmt.Sprintf("GET %s/sse", s.mcpPath), s.handleMCPSSE)
+	}
+
 	// Chat endpoints
-	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
-	mux.HandleFunc("GET /api/v1/chat/stream", s.handleChatStream)
-	mux.HandleFunc("POST /api/v1/chat/steer", s.handleChatSteer)
-	mux.HandleFunc("POST /api/v1/chat/steer-explicit", s.handleChatSteerExplicit)
-	mux.HandleFunc("POST /api/v1/chat/followup", s.handleChatFollowUp)
 	mux.HandleFunc("GET /api/v1/chat/queue/{id}", s.handleChatQueueStatus)
 	mux.HandleFunc("POST /api/v1/chat/with-agent", s.handleChatWithAgent)
 
@@ -896,4 +1045,345 @@ func (s *Server) ensureTLSCert() error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// handleWebSocket handles GET /ws WebSocket connections.
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	if s.wsHub == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "WebSocket not enabled")
+		return
+	}
+
+	wsHandler := websocket.Handler(func(conn *websocket.Conn) {
+		s.wsHub.Register(conn)
+		defer s.wsHub.Unregister(conn)
+
+		for {
+			var msg WSMessage
+			if err := websocket.JSON.Receive(conn, &msg); err != nil {
+				return
+			}
+			s.handleWSMessage(conn, &msg)
+		}
+	})
+
+	wsHandler.ServeHTTP(w, r)
+}
+
+// WSMessage represents a message sent/received over WebSocket.
+type WSMessage struct {
+	Type string          `json:"type"`
+	Data json.RawMessage `json:"data,omitempty"`
+}
+
+// handleWSMessage processes incoming WebSocket messages.
+func (s *Server) handleWSMessage(conn *websocket.Conn, msg *WSMessage) {
+	switch msg.Type {
+	case "ping":
+		_ = websocket.JSON.Send(conn, WSMessage{Type: "pong"})
+	case "subscribe":
+		_ = websocket.JSON.Send(conn, WSMessage{Type: "subscribed"})
+	default:
+		s.logger.Debug("ws unknown message type", "type", msg.Type)
+	}
+}
+
+
+// handleMCPPost handles POST /mcp - JSON-RPC requests over HTTP.
+func (s *Server) handleMCPPost(w http.ResponseWriter, r *http.Request) {
+	if s.mcpServices == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "MCP not enabled")
+		return
+	}
+
+	// Verify Content-Type
+	ct := r.Header.Get("Content-Type")
+	if !strings.Contains(ct, "application/json") {
+		s.writeError(w, http.StatusBadRequest, "Content-Type must be application/json")
+		return
+	}
+
+	// Read body with limit
+	body, err := io.ReadAll(io.LimitReader(r.Body, 10*1024*1024))
+	if err != nil {
+		s.logger.Error("MCP POST: read body", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "failed to read body")
+		return
+	}
+
+	// Parse JSON-RPC request
+	var req mcp.JSONRPCRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		s.logger.Error("MCP POST: parse JSON-RPC", "error", err)
+		s.writeError(w, http.StatusBadRequest, "invalid JSON-RPC request")
+		return
+	}
+
+	// Process JSON-RPC request
+	resp := s.processMCPRequest(r.Context(), &req)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		s.logger.Error("MCP POST: encode response", "error", err)
+	}
+}
+
+// processMCPRequest routes and processes MCP JSON-RPC requests.
+func (s *Server) processMCPRequest(ctx context.Context, req *mcp.JSONRPCRequest) *mcp.JSONRPCResponse {
+	switch req.Method {
+	case "initialize":
+		return s.handleMCPInitialize(req)
+	case "notifications/initialized":
+		return nil
+	case "tools/list":
+		return s.handleMCPToolsList(req)
+	case "tools/call":
+		return s.handleMCPToolsCall(req)
+	default:
+		return &mcp.JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &mcp.JSONRPCError{
+				Code:    -32601,
+				Message: fmt.Sprintf("method not found: %s", req.Method),
+			},
+		}
+	}
+}
+
+// handleMCPInitialize handles MCP initialize request.
+func (s *Server) handleMCPInitialize(req *mcp.JSONRPCRequest) *mcp.JSONRPCResponse {
+	result, _ := json.Marshal(map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+		"serverInfo": map[string]any{
+			"name":    "meept",
+			"version": "0.2.0",
+		},
+	})
+	return &mcp.JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  result,
+	}
+}
+
+// handleMCPToolsList handles MCP tools/list request.
+func (s *Server) handleMCPToolsList(req *mcp.JSONRPCRequest) *mcp.JSONRPCResponse {
+	tools := mcp.ToolDefinitions()
+	result, _ := json.Marshal(map[string]any{
+		"tools": tools,
+	})
+	return &mcp.JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  result,
+	}
+}
+
+// handleMCPToolsCall handles MCP tools/call request.
+func (s *Server) handleMCPToolsCall(req *mcp.JSONRPCRequest) *mcp.JSONRPCResponse {
+	var params struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	if len(req.Params) > 0 {
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return &mcp.JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &mcp.JSONRPCError{Code: -32602, Message: "invalid params"},
+			}
+		}
+	}
+
+	// Validate tool name
+	switch params.Name {
+	case "meept_sessions", "meept_send", "meept_events", "meept_status", "meept_session_history":
+		// known tools
+	default:
+		if params.Name == "" {
+			return &mcp.JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   &mcp.JSONRPCError{Code: -32602, Message: "missing tool name"},
+			}
+		}
+		return &mcp.JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &mcp.JSONRPCError{Code: -32601, Message: fmt.Sprintf("unknown tool: %s", params.Name)},
+		}
+	}
+
+	if s.mcpServices == nil {
+		return &mcp.JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &mcp.JSONRPCError{Code: -32000, Message: "services not available"},
+		}
+	}
+
+	var result any
+	var err error
+
+	switch params.Name {
+	case "meept_sessions":
+		result, err = s.mcpToolSessions(params.Arguments)
+	case "meept_send":
+		result, err = s.mcpToolSend(params.Arguments)
+	case "meept_events":
+		result, err = s.mcpToolEvents(params.Arguments)
+	case "meept_status":
+		result, err = s.mcpToolStatus(params.Arguments)
+	case "meept_session_history":
+		result, err = s.mcpToolSessionHistory(params.Arguments)
+	}
+
+	if err != nil {
+		return &mcp.JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  mustMarshalMCP(map[string]any{"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("error: %v", err)}}}),
+		}
+	}
+
+	var text string
+	switch v := result.(type) {
+	case string:
+		text = v
+	case json.RawMessage:
+		text = string(v)
+	default:
+		data, err := json.Marshal(result)
+		if err != nil {
+			text = fmt.Sprintf("error marshaling result: %v", err)
+		} else {
+			text = string(data)
+		}
+	}
+
+	return &mcp.JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  mustMarshalMCP(map[string]any{"content": []map[string]any{{"type": "text", "text": text}}}),
+	}
+}
+
+func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
+	if s.mcpServices == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "MCP not enabled")
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		s.writeError(w, http.StatusInternalServerError, "SSE not supported")
+		return
+	}
+
+	// Create session for this client
+	session := &MCPSession{
+		sessionID: fmt.Sprintf("http-%d", time.Now().UnixNano()),
+		eventChan: make(chan *SSEEvent, 100),
+		done:      make(chan struct{}),
+	}
+	s.mcpSessions.Store(session.sessionID, session)
+	defer s.mcpSessions.Delete(session.sessionID)
+
+	// Send initial session ID
+	fmt.Fprintf(w, "event: session\n")
+	fmt.Fprintf(w, "data: {\"session_id\":\"%s\"}\n", session.sessionID)
+	fmt.Fprintf(w, "\n")
+	flusher.Flush()
+
+	// Stream events until client disconnects
+	<-r.Context().Done()
+	close(session.done)
+}
+
+
+// mustMarshalMCP marshals a value to json.RawMessage for MCP responses.
+func mustMarshalMCP(v any) json.RawMessage {
+	data, _ := json.Marshal(v)
+	return data
+}
+
+// mcpToolSessions handles MCP meept_sessions tool.
+// TODO: Wire to actual session store via service registry
+func (s *Server) mcpToolSessions(args map[string]any) (any, error) {
+	action, _ := args["action"].(string)
+	switch action {
+	case "list":
+		// Stub - return empty list
+		return []any{}, nil
+	case "create":
+		name, _ := args["name"].(string)
+		if name == "" {
+			name = "mcp-session"
+		}
+		return map[string]any{
+			"status":     "created",
+			"session_id": fmt.Sprintf("mcp-%d", time.Now().UnixNano()),
+			"name":       name,
+		}, nil
+	case "attach":
+		sessionID, _ := args["session_id"].(string)
+		return map[string]any{
+			"status":     "attached",
+			"session_id": sessionID,
+			"history":    []any{},
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown action: %s", action)
+	}
+}
+
+// mcpToolSend handles MCP meept_send tool.
+// TODO: Wire to chat service for actual message sending
+func (s *Server) mcpToolSend(args map[string]any) (any, error) {
+	sessionID, _ := args["session_id"].(string)
+	message, _ := args["message"].(string)
+	if sessionID == "" || message == "" {
+		return nil, fmt.Errorf("session_id and message are required")
+	}
+	return map[string]any{
+		"response": fmt.Sprintf("Message queued for session %s", sessionID),
+	}, nil
+}
+
+// mcpToolEvents handles MCP meept_events tool.
+// TODO: Wire to bus service for actual event polling
+func (s *Server) mcpToolEvents(args map[string]any) (any, error) {
+	subID, _ := args["subscription_id"].(string)
+	if subID == "" {
+		return nil, fmt.Errorf("subscription_id is required")
+	}
+	return map[string]any{
+		"events": []any{},
+	}, nil
+}
+
+// mcpToolStatus handles MCP meept_status tool.
+func (s *Server) mcpToolStatus(args map[string]any) (any, error) {
+	if s.mcpServices.Daemon == nil {
+		return nil, fmt.Errorf("daemon service not available")
+	}
+	return s.mcpServices.Daemon.Status(context.Background())
+}
+
+// mcpToolSessionHistory handles MCP meept_session_history tool.
+// TODO: Wire to session store for actual history retrieval
+func (s *Server) mcpToolSessionHistory(args map[string]any) (any, error) {
+	sessionID, _ := args["session_id"].(string)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	return []any{}, nil
 }

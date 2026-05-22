@@ -17,8 +17,8 @@ import (
 )
 
 func main() {
-	modelA := flag.String("model-a", "local/lfm-combined-sft", "First model to benchmark")
-	modelB := flag.String("model-b", "local/lfm-thinking-claude", "Second model to benchmark")
+	modelA := flag.String("model-a", "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft", "First model to benchmark (full path or model ID)")
+	modelB := flag.String("model-b", "/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit", "Second model to benchmark (full path or model ID)")
 	outputDir := flag.String("output", "docs/eval", "Directory to write benchmark reports")
 	detailed := flag.Bool("detailed", false, "Print verbose per-test output")
 	benchmarkName := flag.String("name", "classifier-eval", "Benchmark name / label")

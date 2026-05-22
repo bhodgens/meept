@@ -30,7 +30,7 @@ type CategoryMetrics struct {
 	Incorrect        int     `json:"incorrect"`
 	Errors           int     `json:"errors"`
 	Accuracy         float64 `json:"accuracy"`
-	AvgConfidence    float64 `json:"avg_confusion"`
+	AvgConfidence    float64 `json:"avg_confidence"`
 	AvgLatency       float64 `json:"avg_latency_ms"`
 	TotalTokens      int     `json:"total_tokens"`
 	MinLatency       float64 `json:"min_latency_ms"`

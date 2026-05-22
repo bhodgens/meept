@@ -200,7 +200,7 @@ type RPCTransportConfig struct {
 	SocketPath string `json:"socket_path" toml:"socket_path"` // Unix socket path (default: "~/.meept/meept.sock")
 }
 
-// HTTPTransportConfig configures the HTTP REST transport.
+// HTTPTransportConfig configures the HTTP transport with modular endpoint support.
 type HTTPTransportConfig struct {
 	Enabled      bool     `json:"enabled"       toml:"enabled"`       // Enable HTTP server (default: false)
 	Addr         string   `json:"addr"          toml:"addr"`          // Listen address (default: ":8081")
@@ -208,6 +208,13 @@ type HTTPTransportConfig struct {
 	APIKeys      []string `json:"api_keys"      toml:"api_keys"`      // Valid API keys for authentication
 	UseTLS       bool     `json:"use_tls"       toml:"use_tls"`       // Enable HTTPS (default: true)
 	AutoTLSCert  bool     `json:"auto_tls_cert" toml:"auto_tls_cert"` // Auto-generate self-signed cert
+
+	// Modular endpoints - enable/disable individual transport features
+	REST      bool   `json:"rest"       toml:"rest"`       // Enable REST API at /api/v1/* (default: true)
+	WebSocket bool   `json:"websocket"  toml:"websocket"`  // Enable WebSocket at /ws (default: false)
+	WSPath    string `json:"ws_path"    toml:"ws_path"`    // WebSocket endpoint path (default: "/ws")
+	MCP       bool   `json:"mcp"        toml:"mcp"`        // Enable MCP over HTTP+SSE at /mcp (default: false)
+	MCPPath   string `json:"mcp_path"   toml:"mcp_path"`   // MCP endpoint path (default: "/mcp")
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.
@@ -961,8 +968,13 @@ func DefaultConfig() *Config {
 				SocketPath: "~/.meept/meept.sock",
 			},
 			HTTP: HTTPTransportConfig{
-				Enabled: false,
-				Addr:    ":8081",
+				Enabled:   false,
+				Addr:      ":8081",
+				REST:      true,    // REST API enabled by default when HTTP is enabled
+				WebSocket: false,   // WebSocket disabled by default
+				WSPath:    "/ws",
+				MCP:       false,   // MCP disabled by default
+				MCPPath:   "/mcp",
 			},
 		},
 		LLM: LLMConfig{

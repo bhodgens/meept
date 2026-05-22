@@ -327,8 +327,26 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
 			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
 			httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
-			httpCfg.AutoTLSCert = fullCfg.Transport.HTTP.AutoTLSCert
-			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, svcRegistry, logger)
+			// Build functional options based on config
+			var httpOpts []http.ServerOption
+			
+			// WebSocket support (if enabled)
+			if fullCfg.Transport.HTTP.WebSocket && msgBus != nil {
+				httpOpts = append(httpOpts, http.WithWebSocket(msgBus))
+				logger.Info("WebSocket endpoint enabled", "path", "/ws")
+			}
+			
+			// MCP over HTTP+SSE support (if enabled)
+			if fullCfg.Transport.HTTP.MCP && svcRegistry != nil {
+				mcpPath := fullCfg.Transport.HTTP.MCPPath
+				if mcpPath == "" {
+					mcpPath = "/mcp"
+				}
+				httpOpts = append(httpOpts, http.WithMCP(svcRegistry, mcpPath))
+				logger.Info("MCP over HTTP+SSE enabled", "path", mcpPath)
+			}
+			
+			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, svcRegistry, logger, httpOpts...)
 			// Wire firewall stats getter for HTTP endpoint
 			if components.AgentLoop != nil {
 				httpSrv.FirewallStatsGetter = func() map[string]any {
