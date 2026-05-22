@@ -1,51 +1,51 @@
 # Classifier Benchmark Report
 
-**Benchmark:** Smoke-Test-Thinking-Claude
+**Benchmark:** Thinking-bf16-vs-4bit-Instruct
 
-**Run at:** 2026-05-22T16:42:50-06:00
+**Run at:** 2026-05-22T17:28:40-06:00
 
 ## Model A vs Model B
 
 | Metric | Model A | Model B |
 |--------|---------|---------|
-| **Weighted Score** | **0.601** | **0.601** |
-| Overall Accuracy | 58.8% | 58.8% |
-| Avg Confidence | 88.6% | 88.6% |
-| Avg Latency (ms) | 332 | 331 |
+| **Weighted Score** | **0.000** | **0.697** |
+| Overall Accuracy | 0.0% | 69.1% |
+| Avg Confidence | 0.0% | 94.8% |
+| Avg Latency (ms) | 0 | 279 |
 | Total Tokens | 0 | 0 |
-| Errors / Non-errors | 7/129 | 7/129 |
+| Errors / Non-errors | 136/0 | 3/133 |
 
-**Winner: Tie**
+**Winner: /Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit**
 
 ## Per-Category Breakdown
+
+### analyze
+
+| Metric | Model A | Model B |
+|--------|---------|---------|
+| Tests | 25 | 25 |
+| Accuracy | 0.0% | 32.0% |
 
 ### chat
 
 | Metric | Model A | Model B |
 |--------|---------|---------|
 | Tests | 10 | 10 |
-| Accuracy | 40.0% | 40.0% |
-
-### coding
-
-| Metric | Model A | Model B |
-|--------|---------|---------|
-| Tests | 25 | 25 |
-| Accuracy | 56.0% | 56.0% |
+| Accuracy | 0.0% | 100.0% |
 
 ### debugging
 
 | Metric | Model A | Model B |
 |--------|---------|---------|
 | Tests | 25 | 25 |
-| Accuracy | 88.0% | 88.0% |
+| Accuracy | 0.0% | 92.0% |
 
-### plan
+### git
 
 | Metric | Model A | Model B |
 |--------|---------|---------|
-| Tests | 5 | 5 |
-| Accuracy | 100.0% | 100.0% |
+| Tests | 10 | 10 |
+| Accuracy | 0.0% | 100.0% |
 
 ### platform
 
@@ -54,54 +54,54 @@
 | Tests | 5 | 5 |
 | Accuracy | 0.0% | 0.0% |
 
-### review
-
-| Metric | Model A | Model B |
-|--------|---------|---------|
-| Tests | 4 | 4 |
-| Accuracy | 25.0% | 25.0% |
-
-### schedule
-
-| Metric | Model A | Model B |
-|--------|---------|---------|
-| Tests | 5 | 5 |
-| Accuracy | 80.0% | 80.0% |
-
-### analyze
-
-| Metric | Model A | Model B |
-|--------|---------|---------|
-| Tests | 25 | 25 |
-| Accuracy | 56.0% | 56.0% |
-
-### git
-
-| Metric | Model A | Model B |
-|--------|---------|---------|
-| Tests | 10 | 10 |
-| Accuracy | 50.0% | 50.0% |
-
 ### recall
 
 | Metric | Model A | Model B |
 |--------|---------|---------|
 | Tests | 3 | 3 |
-| Accuracy | 33.3% | 33.3% |
+| Accuracy | 0.0% | 33.3% |
+
+### review
+
+| Metric | Model A | Model B |
+|--------|---------|---------|
+| Tests | 4 | 4 |
+| Accuracy | 0.0% | 25.0% |
+
+### coding
+
+| Metric | Model A | Model B |
+|--------|---------|---------|
+| Tests | 25 | 25 |
+| Accuracy | 0.0% | 64.0% |
+
+### plan
+
+| Metric | Model A | Model B |
+|--------|---------|---------|
+| Tests | 5 | 5 |
+| Accuracy | 0.0% | 60.0% |
 
 ### report
 
 | Metric | Model A | Model B |
 |--------|---------|---------|
 | Tests | 4 | 4 |
-| Accuracy | 25.0% | 25.0% |
+| Accuracy | 0.0% | 50.0% |
+
+### schedule
+
+| Metric | Model A | Model B |
+|--------|---------|---------|
+| Tests | 5 | 5 |
+| Accuracy | 0.0% | 100.0% |
 
 ### search
 
 | Metric | Model A | Model B |
 |--------|---------|---------|
 | Tests | 15 | 15 |
-| Accuracy | 60.0% | 60.0% |
+| Accuracy | 0.0% | 100.0% |
 
 
 ---

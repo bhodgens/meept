@@ -136,6 +136,46 @@
           "context_limit": 8192,
           "max_output": 512,
           "temperature": 0.1
+        },
+        "lfm-1.2b-4bit": {
+          "name": "/Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit",
+          "path": "/Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit",
+          "capabilities": ["completion", "code", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 512,
+          "temperature": 0.1
+        },
+        "lfm-thinking-8bit": {
+          "name": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-8bit",
+          "path": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-8bit",
+          "capabilities": ["completion", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 512,
+          "temperature": 0.1
+        },
+        "lfm-24b-8bit": {
+          "name": "/Volumes/LLMs/lmstudio-community/LFM2-24B-A2B-MLX-8bit",
+          "path": "/Volumes/LLMs/lmstudio-community/LFM2-24B-A2B-MLX-8bit",
+          "capabilities": ["completion", "code", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 16384,
+          "max_output": 512,
+          "temperature": 0.1
+        },
+        "lfm-thinking-bf16": {
+          "name": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-bf16",
+          "path": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-bf16",
+          "capabilities": ["completion", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 512,
+          "temperature": 0.1
         }
       }
     },

@@ -1,6 +1,6 @@
 {
-  "benchmark_name": "Smoke-Test-Thinking-Claude",
-  "run_at": "2026-05-22T16:42:50.445359-06:00",
+  "benchmark_name": "Thinking-bf16-vs-4bit-Instruct",
+  "run_at": "2026-05-22T17:28:40.318743-06:00",
   "config": {
     "BenchmarkName": "",
     "VariantInfo": "",
@@ -8,74 +8,87 @@
     "Logger": null
   },
   "model_a": {
-    "model_name": "/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit",
+    "model_name": "/Volumes/LLMs/lmstudio-community/LFM2.5-1.2B-Thinking-MLX-bf16",
     "total_tests": 136,
-    "total_correct": 80,
-    "total_incorrect": 49,
-    "total_errors": 7,
-    "overall_accuracy": 0.5882352941176471,
-    "avg_confidence": 0.8862499999999998,
-    "avg_latency_ms": 332.3897058823529,
+    "total_correct": 0,
+    "total_incorrect": 0,
+    "total_errors": 136,
+    "overall_accuracy": 0,
+    "avg_confidence": 0,
+    "avg_latency_ms": 0,
     "total_tokens": 0,
     "category_breakdown": [
       {
-        "category": "chat",
-        "test_count": 10,
-        "correct": 4,
-        "incorrect": 5,
-        "errors": 1,
-        "accuracy": 0.4,
-        "avg_confidence": 0.38,
-        "avg_latency_ms": 140.2,
+        "category": "analyze",
+        "test_count": 25,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 25,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 337,
-        "max_latency_ms": 363
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       },
       {
-        "category": "coding",
-        "test_count": 25,
-        "correct": 14,
-        "incorrect": 11,
-        "errors": 0,
-        "accuracy": 0.56,
-        "avg_confidence": 0.48399999999999993,
-        "avg_latency_ms": 200.6,
+        "category": "chat",
+        "test_count": 10,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 10,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 307,
-        "max_latency_ms": 480
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       },
       {
         "category": "debugging",
         "test_count": 25,
-        "correct": 22,
-        "incorrect": 3,
-        "errors": 0,
-        "accuracy": 0.88,
-        "avg_confidence": 0.804,
-        "avg_latency_ms": 316.76,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 25,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 313,
-        "max_latency_ms": 422
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       },
       {
-        "category": "plan",
-        "test_count": 5,
-        "correct": 5,
+        "category": "git",
+        "test_count": 10,
+        "correct": 0,
         "incorrect": 0,
-        "errors": 0,
-        "accuracy": 1,
-        "avg_confidence": 0.85,
-        "avg_latency_ms": 364.8,
+        "errors": 10,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 306,
-        "max_latency_ms": 491
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       },
       {
         "category": "platform",
         "test_count": 5,
         "correct": 0,
-        "incorrect": 5,
-        "errors": 0,
+        "incorrect": 0,
+        "errors": 5,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
+        "total_tokens": 0,
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
+      },
+      {
+        "category": "recall",
+        "test_count": 3,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 3,
         "accuracy": 0,
         "avg_confidence": 0,
         "avg_latency_ms": 0,
@@ -86,169 +99,195 @@
       {
         "category": "review",
         "test_count": 4,
-        "correct": 1,
-        "incorrect": 3,
-        "errors": 0,
-        "accuracy": 0.25,
-        "avg_confidence": 0.2375,
-        "avg_latency_ms": 77.25,
-        "total_tokens": 0,
-        "min_latency_ms": 309,
-        "max_latency_ms": 309
-      },
-      {
-        "category": "schedule",
-        "test_count": 5,
-        "correct": 4,
+        "correct": 0,
         "incorrect": 0,
-        "errors": 1,
-        "accuracy": 0.8,
-        "avg_confidence": 0.73,
-        "avg_latency_ms": 260.6,
+        "errors": 4,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 306,
-        "max_latency_ms": 340
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       },
       {
-        "category": "analyze",
+        "category": "coding",
         "test_count": 25,
-        "correct": 14,
-        "incorrect": 11,
-        "errors": 0,
-        "accuracy": 0.56,
-        "avg_confidence": 0.47599999999999987,
-        "avg_latency_ms": 200.56,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 25,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 302,
-        "max_latency_ms": 434
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       },
       {
-        "category": "git",
-        "test_count": 10,
-        "correct": 5,
-        "incorrect": 2,
-        "errors": 3,
-        "accuracy": 0.5,
-        "avg_confidence": 0.475,
-        "avg_latency_ms": 147.8,
+        "category": "plan",
+        "test_count": 5,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 5,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 267,
-        "max_latency_ms": 318
-      },
-      {
-        "category": "recall",
-        "test_count": 3,
-        "correct": 1,
-        "incorrect": 1,
-        "errors": 1,
-        "accuracy": 0.3333333333333333,
-        "avg_confidence": 0.3,
-        "avg_latency_ms": 114.66666666666667,
-        "total_tokens": 0,
-        "min_latency_ms": 344,
-        "max_latency_ms": 344
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       },
       {
         "category": "report",
         "test_count": 4,
-        "correct": 1,
-        "incorrect": 3,
-        "errors": 0,
-        "accuracy": 0.25,
-        "avg_confidence": 0.2125,
-        "avg_latency_ms": 91.25,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 4,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 365,
-        "max_latency_ms": 365
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
+      },
+      {
+        "category": "schedule",
+        "test_count": 5,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 5,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
+        "total_tokens": 0,
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       },
       {
         "category": "search",
         "test_count": 15,
-        "correct": 9,
-        "incorrect": 5,
-        "errors": 1,
-        "accuracy": 0.6,
-        "avg_confidence": 0.5099999999999999,
-        "avg_latency_ms": 207.86666666666667,
+        "correct": 0,
+        "incorrect": 0,
+        "errors": 15,
+        "accuracy": 0,
+        "avg_confidence": 0,
+        "avg_latency_ms": 0,
         "total_tokens": 0,
-        "min_latency_ms": 297,
-        "max_latency_ms": 425
+        "min_latency_ms": 0,
+        "max_latency_ms": 0
       }
     ],
     "per_intent_metrics": {
       "analyze": {
-        "true_pos": 14,
-        "false_pos": 3,
-        "false_neg": 11
+        "true_pos": 0,
+        "false_pos": 0,
+        "false_neg": 0
       },
       "chat": {
-        "true_pos": 4,
+        "true_pos": 0,
         "false_pos": 0,
-        "false_neg": 5
+        "false_neg": 0
       },
       "code": {
-        "true_pos": 14,
-        "false_pos": 5,
-        "false_neg": 11
+        "true_pos": 0,
+        "false_pos": 0,
+        "false_neg": 0
       },
       "debug": {
-        "true_pos": 22,
-        "false_pos": 3,
-        "false_neg": 3
+        "true_pos": 0,
+        "false_pos": 0,
+        "false_neg": 0
       },
       "git": {
-        "true_pos": 5,
-        "false_pos": 6,
-        "false_neg": 2
+        "true_pos": 0,
+        "false_pos": 0,
+        "false_neg": 0
       },
       "plan": {
-        "true_pos": 5,
-        "false_pos": 31,
+        "true_pos": 0,
+        "false_pos": 0,
         "false_neg": 0
       },
       "platform": {
         "true_pos": 0,
         "false_pos": 0,
-        "false_neg": 5
+        "false_neg": 0
       },
       "recall": {
-        "true_pos": 1,
+        "true_pos": 0,
         "false_pos": 0,
-        "false_neg": 1
+        "false_neg": 0
       },
       "report": {
-        "true_pos": 1,
+        "true_pos": 0,
         "false_pos": 0,
-        "false_neg": 3
+        "false_neg": 0
       },
       "review": {
-        "true_pos": 1,
+        "true_pos": 0,
         "false_pos": 0,
-        "false_neg": 3
+        "false_neg": 0
       },
       "schedule": {
-        "true_pos": 4,
-        "false_pos": 1,
+        "true_pos": 0,
+        "false_pos": 0,
         "false_neg": 0
       },
       "search": {
-        "true_pos": 9,
+        "true_pos": 0,
         "false_pos": 0,
-        "false_neg": 5
+        "false_neg": 0
       }
     }
   },
   "model_b": {
-    "model_name": "/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit",
+    "model_name": "/Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit",
     "total_tests": 136,
-    "total_correct": 80,
-    "total_incorrect": 49,
-    "total_errors": 7,
-    "overall_accuracy": 0.5882352941176471,
-    "avg_confidence": 0.8862499999999998,
-    "avg_latency_ms": 330.6029411764706,
+    "total_correct": 94,
+    "total_incorrect": 39,
+    "total_errors": 3,
+    "overall_accuracy": 0.6911764705882353,
+    "avg_confidence": 0.9478723404255334,
+    "avg_latency_ms": 279.09558823529414,
     "total_tokens": 0,
     "category_breakdown": [
+      {
+        "category": "analyze",
+        "test_count": 25,
+        "correct": 8,
+        "incorrect": 15,
+        "errors": 2,
+        "accuracy": 0.32,
+        "avg_confidence": 0.3,
+        "avg_latency_ms": 100.2,
+        "total_tokens": 0,
+        "min_latency_ms": 291,
+        "max_latency_ms": 357
+      },
+      {
+        "category": "coding",
+        "test_count": 25,
+        "correct": 16,
+        "incorrect": 9,
+        "errors": 0,
+        "accuracy": 0.64,
+        "avg_confidence": 0.6079999999999999,
+        "avg_latency_ms": 168.12,
+        "total_tokens": 0,
+        "min_latency_ms": 228,
+        "max_latency_ms": 319
+      },
+      {
+        "category": "plan",
+        "test_count": 5,
+        "correct": 3,
+        "incorrect": 1,
+        "errors": 1,
+        "accuracy": 0.6,
+        "avg_confidence": 0.5599999999999999,
+        "avg_latency_ms": 177.8,
+        "total_tokens": 0,
+        "min_latency_ms": 277,
+        "max_latency_ms": 321
+      },
       {
         "category": "platform",
         "test_count": 5,
@@ -265,54 +304,80 @@
       {
         "category": "report",
         "test_count": 4,
-        "correct": 1,
-        "incorrect": 3,
+        "correct": 2,
+        "incorrect": 2,
         "errors": 0,
-        "accuracy": 0.25,
-        "avg_confidence": 0.2125,
-        "avg_latency_ms": 91.75,
+        "accuracy": 0.5,
+        "avg_confidence": 0.475,
+        "avg_latency_ms": 132.5,
         "total_tokens": 0,
-        "min_latency_ms": 367,
-        "max_latency_ms": 367
+        "min_latency_ms": 243,
+        "max_latency_ms": 287
       },
       {
         "category": "schedule",
         "test_count": 5,
-        "correct": 4,
+        "correct": 5,
         "incorrect": 0,
-        "errors": 1,
-        "accuracy": 0.8,
-        "avg_confidence": 0.73,
-        "avg_latency_ms": 260.2,
+        "errors": 0,
+        "accuracy": 1,
+        "avg_confidence": 0.9400000000000001,
+        "avg_latency_ms": 275.2,
         "total_tokens": 0,
-        "min_latency_ms": 304,
-        "max_latency_ms": 337
+        "min_latency_ms": 246,
+        "max_latency_ms": 320
       },
       {
-        "category": "analyze",
-        "test_count": 25,
-        "correct": 14,
-        "incorrect": 11,
+        "category": "chat",
+        "test_count": 10,
+        "correct": 10,
+        "incorrect": 0,
         "errors": 0,
-        "accuracy": 0.56,
-        "avg_confidence": 0.47599999999999987,
-        "avg_latency_ms": 199.28,
+        "accuracy": 1,
+        "avg_confidence": 0.95,
+        "avg_latency_ms": 312.3,
         "total_tokens": 0,
-        "min_latency_ms": 304,
-        "max_latency_ms": 434
+        "min_latency_ms": 284,
+        "max_latency_ms": 349
+      },
+      {
+        "category": "debugging",
+        "test_count": 25,
+        "correct": 23,
+        "incorrect": 2,
+        "errors": 0,
+        "accuracy": 0.92,
+        "avg_confidence": 0.8739999999999997,
+        "avg_latency_ms": 256.4,
+        "total_tokens": 0,
+        "min_latency_ms": 234,
+        "max_latency_ms": 341
+      },
+      {
+        "category": "git",
+        "test_count": 10,
+        "correct": 10,
+        "incorrect": 0,
+        "errors": 0,
+        "accuracy": 1,
+        "avg_confidence": 0.9550000000000001,
+        "avg_latency_ms": 281.6,
+        "total_tokens": 0,
+        "min_latency_ms": 260,
+        "max_latency_ms": 310
       },
       {
         "category": "recall",
         "test_count": 3,
         "correct": 1,
-        "incorrect": 1,
-        "errors": 1,
+        "incorrect": 2,
+        "errors": 0,
         "accuracy": 0.3333333333333333,
         "avg_confidence": 0.3,
-        "avg_latency_ms": 110.66666666666667,
+        "avg_latency_ms": 87.33333333333333,
         "total_tokens": 0,
-        "min_latency_ms": 332,
-        "max_latency_ms": 332
+        "min_latency_ms": 262,
+        "max_latency_ms": 262
       },
       {
         "category": "review",
@@ -322,135 +387,70 @@
         "errors": 0,
         "accuracy": 0.25,
         "avg_confidence": 0.2375,
-        "avg_latency_ms": 77.5,
+        "avg_latency_ms": 72.5,
         "total_tokens": 0,
-        "min_latency_ms": 310,
-        "max_latency_ms": 310
+        "min_latency_ms": 290,
+        "max_latency_ms": 290
       },
       {
         "category": "search",
         "test_count": 15,
-        "correct": 9,
-        "incorrect": 5,
-        "errors": 1,
-        "accuracy": 0.6,
-        "avg_confidence": 0.5099999999999999,
-        "avg_latency_ms": 207.86666666666667,
-        "total_tokens": 0,
-        "min_latency_ms": 296,
-        "max_latency_ms": 425
-      },
-      {
-        "category": "chat",
-        "test_count": 10,
-        "correct": 4,
-        "incorrect": 5,
-        "errors": 1,
-        "accuracy": 0.4,
-        "avg_confidence": 0.38,
-        "avg_latency_ms": 139.7,
-        "total_tokens": 0,
-        "min_latency_ms": 338,
-        "max_latency_ms": 361
-      },
-      {
-        "category": "coding",
-        "test_count": 25,
-        "correct": 14,
-        "incorrect": 11,
-        "errors": 0,
-        "accuracy": 0.56,
-        "avg_confidence": 0.48399999999999993,
-        "avg_latency_ms": 207.28,
-        "total_tokens": 0,
-        "min_latency_ms": 313,
-        "max_latency_ms": 498
-      },
-      {
-        "category": "debugging",
-        "test_count": 25,
-        "correct": 22,
-        "incorrect": 3,
-        "errors": 0,
-        "accuracy": 0.88,
-        "avg_confidence": 0.804,
-        "avg_latency_ms": 309.72,
-        "total_tokens": 0,
-        "min_latency_ms": 293,
-        "max_latency_ms": 425
-      },
-      {
-        "category": "git",
-        "test_count": 10,
-        "correct": 5,
-        "incorrect": 2,
-        "errors": 3,
-        "accuracy": 0.5,
-        "avg_confidence": 0.475,
-        "avg_latency_ms": 146.9,
-        "total_tokens": 0,
-        "min_latency_ms": 265,
-        "max_latency_ms": 315
-      },
-      {
-        "category": "plan",
-        "test_count": 5,
-        "correct": 5,
+        "correct": 15,
         "incorrect": 0,
         "errors": 0,
         "accuracy": 1,
-        "avg_confidence": 0.85,
-        "avg_latency_ms": 364,
+        "avg_confidence": 0.9499999999999997,
+        "avg_latency_ms": 265.06666666666666,
         "total_tokens": 0,
-        "min_latency_ms": 307,
-        "max_latency_ms": 490
+        "min_latency_ms": 234,
+        "max_latency_ms": 320
       }
     ],
     "per_intent_metrics": {
       "analyze": {
-        "true_pos": 14,
-        "false_pos": 3,
-        "false_neg": 11
+        "true_pos": 8,
+        "false_pos": 1,
+        "false_neg": 15
       },
       "chat": {
-        "true_pos": 4,
-        "false_pos": 0,
-        "false_neg": 5
+        "true_pos": 10,
+        "false_pos": 8,
+        "false_neg": 0
       },
       "code": {
-        "true_pos": 14,
-        "false_pos": 5,
-        "false_neg": 11
+        "true_pos": 16,
+        "false_pos": 6,
+        "false_neg": 9
       },
       "debug": {
-        "true_pos": 22,
-        "false_pos": 3,
-        "false_neg": 3
-      },
-      "git": {
-        "true_pos": 5,
-        "false_pos": 6,
+        "true_pos": 23,
+        "false_pos": 5,
         "false_neg": 2
       },
-      "plan": {
-        "true_pos": 5,
-        "false_pos": 31,
+      "git": {
+        "true_pos": 10,
+        "false_pos": 10,
         "false_neg": 0
+      },
+      "plan": {
+        "true_pos": 3,
+        "false_pos": 3,
+        "false_neg": 1
       },
       "platform": {
         "true_pos": 0,
-        "false_pos": 0,
+        "false_pos": 1,
         "false_neg": 5
       },
       "recall": {
         "true_pos": 1,
         "false_pos": 0,
-        "false_neg": 1
+        "false_neg": 2
       },
       "report": {
-        "true_pos": 1,
-        "false_pos": 0,
-        "false_neg": 3
+        "true_pos": 2,
+        "false_pos": 2,
+        "false_neg": 2
       },
       "review": {
         "true_pos": 1,
@@ -458,14 +458,14 @@
         "false_neg": 3
       },
       "schedule": {
-        "true_pos": 4,
+        "true_pos": 5,
         "false_pos": 1,
         "false_neg": 0
       },
       "search": {
-        "true_pos": 9,
-        "false_pos": 0,
-        "false_neg": 5
+        "true_pos": 15,
+        "false_pos": 2,
+        "false_neg": 0
       }
     }
   }
