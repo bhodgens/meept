@@ -71,6 +71,21 @@
       "options": {
         "baseURL": "http://127.0.0.1:8080/v1"
       },
+      "lifecycle": {
+        "runtime": "llama-cpp",
+        "model_path": "~/models/lfm-code.Q8_0.gguf",
+        "auto_start": true,
+        "auto_stop_on_exit": true,
+        "pid_file": "~/.meept/run/llama.pid",
+        "spawn_command": ["llama-server", "-m", "${MODEL_PATH}", "--port", "8080"],
+        "spawn_timeout_seconds": 60,
+        "health_check": {
+          "endpoint": "/health",
+          "interval_seconds": 10,
+          "timeout_seconds": 5,
+          "unhealthy_threshold": 3
+        }
+      },
       "models": {
         "lfm-code": {
           "name": "LFM2.5-1.2B-Instruct.Q8_0",
