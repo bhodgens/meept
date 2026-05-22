@@ -1,24 +1,26 @@
 # LFM2.5 Classifier Model Comparison Report
 
-**Generated:** 2026-05-22
+**Generated:** 2026-05-22 (Updated 2026-05-22 Extended)
 **Benchmark Tool:** `meept-classifier-test`
 **Test Corpus:** 136 labeled examples across 12 intent categories
+
+**See also:** [Extended Comparison Report](./classifier-comparison-report-extended.md) - 5 model comparison with additional LFM2.5-1.2B-Instruct-MLX-4bit, LFM2-24B-A2B-MLX-8bit, Thinking-MLX-8bit, and Thinking-MLX-bf16 models.
 
 ---
 
 ## Executive Summary
 
-**Recommended Model:** `LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit`
+**Recommended Model:** `LFM2.5-1.2B-Instruct-MLX-4bit` (NEW - outperforms Thinking-Claude)
 
-The Thinking-Claude variant significantly outperforms the Combined-SFT variant across all key metrics:
+The standard Instruct 4-bit model achieves the best overall performance, while the Thinking-Claude variant ranks third:
 
-| Metric | Combined-SFT | Thinking-Claude | Difference |
-|--------|--------------|-----------------|------------|
-| **Accuracy** | 36.8% | 58.8% | **+22.0%** |
-| **Error Rate** | 29.4% (40/136) | 5.1% (7/136) | **-82% fewer errors** |
-| **Avg Confidence** | 79.4% | 88.6% | +9.2% |
-| **Avg Latency** | 330ms | 332ms | ~equal |
-| **Weighted Score** | 0.429 | 0.601 | **+40%** |
+| Metric | Combined-SFT | Thinking-Claude | 4bit-Instruct (NEW) |
+|--------|--------------|-----------------|---------------------|
+| **Accuracy** | 36.8% | 58.8% | **69.1%** |
+| **Error Rate** | 29.4% (40/136) | 5.1% (7/136) | **2.9% (4/136)** |
+| **Avg Confidence** | 79.4% | 88.6% | **94.6%** |
+| **Avg Latency** | 330ms | 332ms | **279ms** |
+| **Weighted Score** | 0.429 | 0.601 | **0.700** |
 
 ---
 
@@ -32,9 +34,22 @@ The Thinking-Claude variant significantly outperforms the Combined-SFT variant a
 
 ### Model B: LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit
 - **Path:** `/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit`
-- **Type:** Instruct with Thinking/Reasoning enhancements
+- **Type:** Instruct with Claude-style Chain of Thought
 - **Capabilities:** completion, reasoning
 - **Quantization:** 4-bit
+- **Status:** Third place (58.8% accuracy)
+
+### Model C: LFM2.5-1.2B-Instruct-MLX-4bit (WINNER)
+- **Path:** `/Volumes/LLMs/LFM2.5-1.2B-Instruct-MLX-4bit`
+- **Type:** Standard Instruct
+- **Capabilities:** completion, code, reasoning
+- **Quantization:** 4-bit MLX
+- **Status:** Best overall (69.1% accuracy, 2.9% error rate)
+
+### Additional Models Tested (see extended report):
+- **LFM2-24B-A2B-MLX-8bit:** 64.0% accuracy, 1102ms latency (too slow)
+- **LFM2.5-1.2B-Thinking-MLX-8bit:** 0% accuracy (complete failure)
+- **LFM2.5-1.2B-Thinking-MLX-bf16:** 0% accuracy (complete failure)
 
 ---
 
@@ -94,37 +109,38 @@ Both models are overconfident, but Thinking-Claude is better calibrated.
 
 ---
 
-## Recommendation
+## Recommendation (Updated)
 
-**Use `LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit` as the classifier model.**
+**Use `LFM2.5-1.2B-Instruct-MLX-4bit` as the classifier model.**
 
 ### Rationale:
-1. **60% higher accuracy** on technical intents (code, debug, git, analyze)
-2. **82% fewer errors** - more reliable in production
-3. **Equal latency** - no performance penalty
-4. **Better confidence calibration** - more trustworthy predictions
+1. **Highest accuracy** - 69.1% overall, beats Thinking-Claude by 10%
+2. **Lowest error rate** - Only 2.9% failure rate (4/136)
+3. **Fastest inference** - 279ms average latency
+4. **Best weighted score** - 0.700 vs 0.592 for Thinking-Claude
 
 ### Configuration:
 ```json5
 {
-  "classifier_model": "/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit",
-  "small_model": "/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit"
+  "classifier_model": "local/lfm-1.2b-4bit",
+  "small_model": "local/lfm-1.2b-4bit"
 }
 ```
 
 ### Caveats:
-1. **Chat intent performance drops** from 90% to 40% - consider adding a short-message heuristic to route simple greetings directly to chat
-2. **Platform queries fail** - may need prompt engineering or fine-tuning
-3. **4-bit quantization** - the model is quantized to 4-bit; if VRAM permits, a higher precision variant may perform better
+1. **Plan intent weaker** - 60% vs Thinking-Claude's 100% - consider routing planning tasks to a specialized model
+2. **Platform queries fail** - training data gap, not model capability
+3. **Review/recall weak** - 25-33% accuracy, may need memory integration
 
 ---
 
 ## Next Steps
 
-1. **Update daemon config** to use Thinking-Claude as the default classifier
-2. **Add short-message heuristic** to bypass classifier for messages < 20 chars
-3. **Improve platform intent training data** - add examples for capability queries
-4. **Consider prompt engineering** to improve chat and platform performance
+1. **Update daemon config** to use `lfm-1.2b-4bit` as the default classifier (DONE in extended config)
+2. **Investigate Thinking model failures** - 8bit and bf16 variants failed with 0% accuracy
+3. **Improve platform intent training data** - all models fail on capability queries (0%)
+4. **Address weak categories** - review (25%), recall (33%), analyze (32%) need improvement
+5. **Consider 24B for complex tasks** - if latency is acceptable, shows +24% on analyze
 
 ---
 
