@@ -59,7 +59,9 @@ func (h *HealthChecker) checkOnce() {
 	resp, err := h.client.Get(url)
 	if err != nil {
 		h.unhealthyCount++
-		h.healthy = false
+		if h.unhealthyCount >= h.config.HealthThreshold {
+			h.healthy = false
+		}
 		return
 	}
 	defer resp.Body.Close()
@@ -69,8 +71,9 @@ func (h *HealthChecker) checkOnce() {
 		h.healthy = true
 	} else {
 		h.unhealthyCount++
-		// Consecutive failure: stay unhealthy
-		h.healthy = false
+		if h.unhealthyCount >= h.config.HealthThreshold {
+			h.healthy = false
+		}
 	}
 }
 

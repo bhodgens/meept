@@ -273,9 +273,6 @@ func runRuntimeStop(ctx context.Context, provider string) error {
 		}
 	}
 
-	// Give a brief moment for cleanup
-	_ = time.Second
-
 	fmt.Printf("Runtime %s stopped\n", provider)
 	return nil
 }
