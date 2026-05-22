@@ -99,7 +99,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: isSelected
-              ? CyberpunkColors.orangePrimary.withOpacity(0.1)
+              ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
               : CyberpunkColors.black,
           border: Border.all(
             color: isSelected

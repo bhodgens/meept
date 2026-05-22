@@ -143,7 +143,7 @@ class _ErrorBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      color: CyberpunkColors.redAlert.withOpacity(0.2),
+      color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
       child: Row(
         children: [
           const Icon(Icons.error_outline,
@@ -175,7 +175,7 @@ class MessagePlaceholder extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
+          const Icon(
             Icons.chat_bubble_outline,
             size: 64,
             color: CyberpunkColors.midGray,

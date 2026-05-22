@@ -33,7 +33,7 @@ class _TasksListState extends ConsumerState<TasksList> {
       decoration: BoxDecoration(
         border: Border(
           right: BorderSide(
-            color: CyberpunkColors.orangeDark.withOpacity(0.3),
+            color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
             width: 1,
           ),
         ),
@@ -128,7 +128,7 @@ class _TasksListState extends ConsumerState<TasksList> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.2),
+                    color: statusColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: Text(
@@ -182,14 +182,14 @@ class _TasksListState extends ConsumerState<TasksList> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
-        title: Text(
+        title: const Text(
           'create task',
           style: CyberpunkTypography.headlineMedium,
         ),
         content: TextField(
           controller: controller,
           style: CyberpunkTypography.bodyMedium,
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             hintText: 'enter task title...',
             hintStyle: CyberpunkTypography.bodySmall,
           ),
@@ -199,7 +199,7 @@ class _TasksListState extends ConsumerState<TasksList> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('cancel', style: CyberpunkTypography.bodyMedium),
+            child: const Text('cancel', style: CyberpunkTypography.bodyMedium),
           ),
           FilledButton(
             onPressed: () {
@@ -209,7 +209,7 @@ class _TasksListState extends ConsumerState<TasksList> {
                 Navigator.pop(context);
               }
             },
-            child: Text('create', style: CyberpunkTypography.bodyMedium),
+            child: const Text('create', style: CyberpunkTypography.bodyMedium),
           ),
         ],
       ),

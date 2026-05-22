@@ -315,3 +315,36 @@ class Job extends Equatable {
   @override
   List<Object?> get props => [id, type, status, agentId];
 }
+
+// ===== Skill/Tool Models =====
+
+class Skill extends Equatable {
+  final String slug;
+  final String name;
+  final String description;
+  final String category;
+  final List<String> capabilities;
+  final bool enabled;
+
+  const Skill({
+    required this.slug,
+    required this.name,
+    required this.description,
+    this.category = '',
+    this.capabilities = const [],
+    this.enabled = true,
+  });
+
+  factory Skill.fromJson(Map<String, dynamic> json) => Skill(
+        slug: json['slug'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        description: json['description'] as String? ?? '',
+        category: json['category'] as String? ?? '',
+        capabilities:
+            (json['capabilities'] as List?)?.cast<String>() ?? [],
+        enabled: json['enabled'] as bool? ?? true,
+      );
+
+  @override
+  List<Object?> get props => [slug, name, description, category, enabled];
+}

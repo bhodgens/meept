@@ -119,7 +119,7 @@ class WebSocketService {
     if (_retryCount >= AppConstants.maxRetries) {
       return const Duration(seconds: 30); // fallback: wait 30s if all retries exhausted
     }
-    final baseDelay = Duration(seconds: 2);
+    final baseDelay = const Duration(seconds: 2);
     final exponentialDelay = baseDelay * (1 << _retryCount); // 2s, 4s, 8s
     // Add jitter: random 0-1000ms
     final jitter = Duration(milliseconds: Random().nextInt(1000));

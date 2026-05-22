@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../models/api_models.dart';
+import '../../../providers/providers.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 
-/// Tool item data class
+/// Maps skill slugs/icons to display labels and known Flutter icons
 class ToolItem {
   final IconData icon;
   final String label;
@@ -17,6 +19,64 @@ class ToolItem {
     required this.route,
   });
 }
+
+/// Icon mapping for well-known skill slugs
+final _skillIconMap = <String, IconData>{
+  'memory': Icons.memory,
+  'episodic_memory': Icons.memory,
+  'task_memory': Icons.assignment,
+  'files': Icons.folder,
+  'read_file': Icons.insert_drive_file,
+  'write_file': Icons.save,
+  'search_files': Icons.search,
+  'code_search': Icons.code,
+  'shell': Icons.terminal,
+  'execute': Icons.play_arrow,
+  'browser': Icons.language,
+  'calendar': Icons.calendar_today,
+  'metrics': Icons.insights,
+  'settings': Icons.settings,
+  'config': Icons.tune,
+  'skills': Icons.extension,
+};
+
+/// Display label for a skill slug (human-readable)
+String _slugToLabel(String slug) => slug
+    .split('_')
+    .map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1))
+    .join(' ')
+    .trim();
+
+/// Icon for a skill slug, falling back to a generic tool icon
+IconData _slugToIcon(String slug) =>
+    _skillIconMap[slug] ?? Icons.tune;
+
+/// Status string derived from a Skill model
+String _skillToStatus(Skill skill) {
+  final parts = <String>[];
+  if (!skill.enabled) parts.add('disabled');
+  if (skill.capabilities.isNotEmpty) {
+    parts.add(skill.capabilities.join(', '));
+  }
+  if (skill.category.isNotEmpty) {
+    parts.add(skill.category);
+  }
+  return parts.join(' · ');
+}
+
+/// Fallback hardcoded tool items used when the API is unavailable
+List<ToolItem> _fallbackTools() => [
+      const ToolItem(
+          icon: Icons.memory,
+          label: 'memory',
+          status: 'service unavailable',
+          route: 'memory'),
+      const ToolItem(
+          icon: Icons.extension,
+          label: 'skills',
+          status: 'service unavailable',
+          route: 'skills'),
+    ];
 
 class ToolsPanel extends ConsumerStatefulWidget {
   final bool isExpanded;
@@ -35,20 +95,54 @@ class ToolsPanel extends ConsumerStatefulWidget {
 }
 
 class _ToolsPanelState extends ConsumerState<ToolsPanel> {
-  final List<ToolItem> _tools = [
-    const ToolItem(icon: Icons.memory, label: 'memory', status: '128 entries', route: 'memory'),
-    const ToolItem(icon: Icons.folder, label: 'files', status: '24 files', route: 'files'),
-    const ToolItem(icon: Icons.terminal, label: 'terminal', status: 'active', route: 'terminal'),
-    const ToolItem(icon: Icons.calendar_today, label: 'calendar', status: '3 today', route: 'calendar'),
-    const ToolItem(icon: Icons.insights, label: 'metrics', status: 'live', route: 'metrics'),
-    const ToolItem(icon: Icons.settings, label: 'settings', status: '', route: 'settings'),
-  ];
+  List<ToolItem> _tools = [];
+
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTools();
+  }
+
+  Future<void> _loadTools() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final skills =
+          await ref.read(apiClientProvider).getSkills();
+      setState(() {
+        _tools = skills
+            .where((s) => s.enabled)
+            .map((s) => ToolItem(
+                  icon: _slugToIcon(s.slug),
+                  label: _slugToLabel(s.slug),
+                  status: _skillToStatus(s),
+                  route: s.slug,
+                ))
+            .toList();
+        _loading = false;
+        if (_tools.isEmpty) {
+          _tools = _fallbackTools();
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+        _tools = _fallbackTools();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: widget.isExpanded ? 300 : 50,
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
           left: BorderSide(color: CyberpunkColors.midGray, width: 1),
@@ -57,13 +151,62 @@ class _ToolsPanelState extends ConsumerState<ToolsPanel> {
       child: Column(
         children: [
           _buildHeader(),
-          Expanded(
-            child: ListView.builder(
-              itemCount: _tools.length,
-              itemBuilder: (context, index) {
-                return _buildToolItem(_tools[index]);
-              },
+          if (_error != null && widget.isExpanded)
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: const BoxDecoration(
+                color: const Color(0xFFFF303020),
+                border: Border(
+                  bottom: const BorderSide(
+                    color: const Color(0xFFFF303080),
+                    width: 1,
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline,
+                      color: Color(0xFFFF3030), size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _error!,
+                      style: const TextStyle(
+                        color: Color(0xFFFF6060),
+                        fontSize: 10,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _loadTools,
+                    child: const Icon(Icons.refresh,
+                        color: Color(0xFFFF6060), size: 16),
+                  ),
+                ],
+              ),
             ),
+          Expanded(
+            child: _loading
+                ? const Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                            Color(0xFFFFAA00)),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _tools.length,
+                    itemBuilder: (context, index) {
+                      return _buildToolItem(_tools[index]);
+                    },
+                  ),
           ),
         ],
       ),
@@ -73,7 +216,7 @@ class _ToolsPanelState extends ConsumerState<ToolsPanel> {
   Widget _buildHeader() {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         border: Border(
           bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
         ),

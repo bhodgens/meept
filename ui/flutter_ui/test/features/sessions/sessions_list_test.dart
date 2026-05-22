@@ -99,7 +99,7 @@ void main() {
                 home: Scaffold(
                   body: Column(
                     children: [
-                      SizedBox(
+                      const SizedBox(
                         height: 400,
                         child: const SessionsList(),
                       ),

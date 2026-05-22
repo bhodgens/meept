@@ -239,6 +239,20 @@ class ApiClient {
     return (data['memories'] as List).cast<Map<String, dynamic>>();
   }
 
+  // ===== Skills/Tools Endpoints =====
+
+  Future<List<Skill>> getSkills({String? category}) async {
+    final data = await get<Map<String, dynamic>>(
+      '/skills',
+      queryParameters:
+          category != null ? {'category': category} : null,
+    );
+    final skills = (data['skills'] as List)
+        .map((s) => Skill.fromJson(s as Map<String, dynamic>))
+        .toList();
+    return skills;
+  }
+
   // ===== Health Endpoint =====
 
   Future<Map<String, dynamic>> healthCheck() async {

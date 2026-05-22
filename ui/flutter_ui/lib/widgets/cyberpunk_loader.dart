@@ -12,11 +12,11 @@ class CyberpunkLoader extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
+          const SizedBox(
             width: 48,
             height: 48,
             child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(
+              valueColor: const AlwaysStoppedAnimation<Color>(
                 CyberpunkColors.orangePrimary,
               ),
               strokeWidth: 3,
@@ -26,7 +26,7 @@ class CyberpunkLoader extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               message!,
-              style: TextStyle(
+              style: const TextStyle(
                 fontFamily: 'JetBrainsMono',
                 color: CyberpunkColors.orangeGlow,
                 fontSize: 12,

@@ -287,7 +287,7 @@ void main() {
       await tester.pumpWidget(ProviderScope(
         child: MaterialApp(
           theme: ThemeData.dark(),
-          home: Scaffold(body: const MessagePlaceholder()),
+          home: const Scaffold(body: const MessagePlaceholder()),
         ),
       ));
 

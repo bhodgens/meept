@@ -31,7 +31,7 @@ class _ChatTabState extends State<ChatTab> {
               decoration: BoxDecoration(
                 border: Border(
                   right: BorderSide(
-                    color: CyberpunkColors.orangeDark.withOpacity(0.3),
+                    color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
                     width: 1,
                   ),
                 ),

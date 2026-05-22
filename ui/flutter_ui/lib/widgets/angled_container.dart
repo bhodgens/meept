@@ -31,7 +31,7 @@ class AngledContainer extends StatelessWidget {
             color: color ?? CyberpunkColors.darkGray,
             gradient: useGradient ? CyberpunkEffects.angularGradient : null,
             border: Border.all(
-              color: borderColor ?? CyberpunkColors.orangePrimary.withOpacity(0.3),
+              color: borderColor ?? CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
               width: 1.5,
             ),
             boxShadow: CyberpunkEffects.borderGlow(),

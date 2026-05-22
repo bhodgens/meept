@@ -54,7 +54,7 @@ class _GlitchTextState extends State<GlitchText>
           child: Text(
             widget.text,
             style: widget.style?.copyWith(
-              color: CyberpunkColors.orangePrimary.withOpacity(0.7),
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.7),
             ),
           ),
         ),
@@ -63,7 +63,7 @@ class _GlitchTextState extends State<GlitchText>
           child: Text(
             widget.text,
             style: widget.style?.copyWith(
-              color: CyberpunkColors.blueInfo.withOpacity(0.7),
+              color: CyberpunkColors.blueInfo.withValues(alpha: 0.7),
             ),
           ),
         ),

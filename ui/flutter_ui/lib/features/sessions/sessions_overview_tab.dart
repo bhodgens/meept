@@ -19,7 +19,7 @@ class SessionsOverviewTab extends StatelessWidget {
           color: CyberpunkColors.black,
           child: Row(
             children: [
-              SessionsList(),
+              const SessionsList(),
               if (activeSession != null)
                 SessionsDetailPane(session: activeSession),
             ],

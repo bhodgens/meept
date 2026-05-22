@@ -19,9 +19,9 @@ class ScanlineOverlay extends StatelessWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              (color ?? Colors.black).withOpacity(0),
-              (color ?? Colors.black).withOpacity(opacity),
-              (color ?? Colors.black).withOpacity(0),
+              (color ?? Colors.black).withValues(alpha: 0),
+              (color ?? Colors.black).withValues(alpha: opacity),
+              (color ?? Colors.black).withValues(alpha: 0),
             ],
             stops: const [0.0, 0.5, 1.0],
           ),

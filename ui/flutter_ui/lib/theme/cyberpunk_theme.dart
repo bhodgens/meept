@@ -47,7 +47,7 @@ abstract class CyberpunkTheme {
         labelLarge: CyberpunkTypography.label,
       );
 
-  static AppBarTheme get _appBarTheme => AppBarTheme(
+  static AppBarTheme get _appBarTheme => const AppBarTheme(
         backgroundColor: CyberpunkColors.darkGray,
         foregroundColor: CyberpunkColors.orangePrimary,
         elevation: 0,
@@ -95,7 +95,7 @@ abstract class CyberpunkTheme {
       );
 
   static InputDecorationTheme get _inputDecorationTheme =>
-      InputDecorationTheme(
+      const InputDecorationTheme(
         filled: true,
         fillColor: CyberpunkColors.darkGray,
         contentPadding:
@@ -135,7 +135,7 @@ abstract class CyberpunkTheme {
   static BoxDecoration panelDecoration = BoxDecoration(
     color: CyberpunkColors.darkGray,
     border: Border.all(
-      color: CyberpunkColors.orangeDark.withOpacity(0.3),
+      color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
       width: 1,
     ),
     boxShadow: CyberpunkEffects.borderGlow(),
@@ -145,7 +145,7 @@ abstract class CyberpunkTheme {
   static BoxDecoration angledPanelDecoration = BoxDecoration(
     color: CyberpunkColors.darkGray,
     border: Border.all(
-      color: CyberpunkColors.orangePrimary.withOpacity(0.3),
+      color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
       width: 1.5,
     ),
     gradient: CyberpunkEffects.angularGradient,

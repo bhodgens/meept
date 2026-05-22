@@ -6,12 +6,12 @@ abstract class CyberpunkEffects {
   /// Orange glow shadow for text and widgets
   static List<BoxShadow> glowShadow({double intensity = 1.0}) => [
         BoxShadow(
-          color: CyberpunkColors.orangePrimary.withOpacity(0.5 * intensity),
+          color: CyberpunkColors.orangePrimary.withValues(alpha: 0.5 * intensity),
           blurRadius: 10 * intensity,
           spreadRadius: 2 * intensity,
         ),
         BoxShadow(
-          color: CyberpunkColors.orangeGlow.withOpacity(0.3 * intensity),
+          color: CyberpunkColors.orangeGlow.withValues(alpha: 0.3 * intensity),
           blurRadius: 20 * intensity,
           spreadRadius: 5 * intensity,
         ),
@@ -20,7 +20,7 @@ abstract class CyberpunkEffects {
   /// Subtle border glow for containers
   static List<BoxShadow> borderGlow({double intensity = 1.0}) => [
         BoxShadow(
-          color: CyberpunkColors.orangeDark.withOpacity(0.3 * intensity),
+          color: CyberpunkColors.orangeDark.withValues(alpha: 0.3 * intensity),
           blurRadius: 5 * intensity,
           spreadRadius: 1 * intensity,
         ),
@@ -49,9 +49,9 @@ abstract class CyberpunkEffects {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.black.withOpacity(0),
-            Colors.black.withOpacity(opacity),
-            Colors.black.withOpacity(0),
+            Colors.black.withValues(alpha: 0),
+            Colors.black.withValues(alpha: opacity),
+            Colors.black.withValues(alpha: 0),
           ],
           stops: const [0.0, 0.5, 1.0],
         ),

@@ -28,9 +28,9 @@ abstract class CyberpunkColors {
 
   // Transparent variants
   static Color orangeTransparent(double opacity) =>
-      orangePrimary.withOpacity(opacity);
+      orangePrimary.withValues(alpha: opacity);
   static Color blackTransparent(double opacity) =>
-      black.withOpacity(opacity);
+      black.withValues(alpha: opacity);
 
   // Gradients
   static const List<Color> orangeGradient = [

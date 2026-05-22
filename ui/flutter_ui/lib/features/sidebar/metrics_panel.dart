@@ -63,10 +63,10 @@ class _MetricsPanelState extends ConsumerState<MetricsPanel> {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: CyberpunkColors.darkGray.withOpacity(0.5),
+          color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
           border: Border(
             top: BorderSide(
-              color: CyberpunkColors.orangePrimary.withOpacity(0.3),
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
               width: 1,
             ),
           ),
@@ -90,10 +90,10 @@ class _MetricsPanelState extends ConsumerState<MetricsPanel> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: CyberpunkColors.darkGray.withOpacity(0.5),
+          color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
           border: Border(
             top: BorderSide(
-              color: CyberpunkColors.orangePrimary.withOpacity(0.3),
+              color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
               width: 1,
             ),
           ),
@@ -101,7 +101,7 @@ class _MetricsPanelState extends ConsumerState<MetricsPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               'SYSTEM METRICS',
               style: CyberpunkTypography.label,
             ),

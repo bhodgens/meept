@@ -28,11 +28,10 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
-        title: Text('create session', style: CyberpunkTypography.headlineMedium),
+        title: const Text('create session', style: CyberpunkTypography.headlineMedium),
         content: TextField(
           controller: controller,
-          style: CyberpunkTypography.bodyMedium,
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             hintText: 'enter session title...',
             hintStyle: CyberpunkTypography.bodySmall,
           ),
@@ -40,7 +39,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('cancel', style: CyberpunkTypography.bodyMedium),
+            child: const Text('cancel', style: CyberpunkTypography.bodyMedium),
           ),
           FilledButton(
             onPressed: () {
@@ -51,7 +50,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                 Navigator.pop(context);
               }
             },
-            child: Text('create', style: CyberpunkTypography.bodyMedium),
+            child: const Text('create', style: CyberpunkTypography.bodyMedium),
           ),
         ],
       ),
@@ -63,12 +62,12 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
-        title: Text('delete session?', style: CyberpunkTypography.headlineMedium),
+        title: const Text('delete session?', style: CyberpunkTypography.headlineMedium),
         content: Text('"$title"', style: CyberpunkTypography.bodyMedium),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('cancel', style: CyberpunkTypography.bodyMedium),
+            child: const Text('cancel', style: CyberpunkTypography.bodyMedium),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -79,7 +78,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                   .deleteSession(sessionId);
               Navigator.pop(context);
             },
-            child: Text('delete', style: CyberpunkTypography.bodyMedium),
+            child: const Text('delete', style: CyberpunkTypography.bodyMedium),
           ),
         ],
       ),
@@ -96,7 +95,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       decoration: BoxDecoration(
         border: Border(
           right: BorderSide(
-            color: CyberpunkColors.orangeDark.withOpacity(0.3),
+            color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
             width: 1,
           ),
         ),
@@ -169,7 +168,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: isSelected
-              ? CyberpunkColors.orangePrimary.withOpacity(0.1)
+              ? CyberpunkColors.orangePrimary.withValues(alpha: 0.1)
               : null,
           border: Border(
             left: BorderSide(

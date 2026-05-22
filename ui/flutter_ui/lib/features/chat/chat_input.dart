@@ -45,7 +45,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     return Container(
       height: 80,
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
           top: BorderSide(color: CyberpunkColors.orangePrimary, width: 1),
@@ -236,12 +236,12 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           borderRadius: BorderRadius.circular(4),
         ),
         child: chatState.isLoading
-            ? SizedBox(
+            ? const SizedBox(
                 width: 18,
                 height: 18,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(CyberpunkColors.black),
+                  valueColor: const AlwaysStoppedAnimation<Color>(CyberpunkColors.black),
                 ),
               )
             : const Icon(
