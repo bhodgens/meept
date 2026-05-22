@@ -178,6 +178,75 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 | POST | `/api/v1/config/agents/{id}` | Save agent |
 | DELETE | `/api/v1/config/agents/{id}` | Delete agent |
 
+
+### WebSocket
+
+| Method | Path | Description | Config |
+|--------|------|-------------|--------|
+| GET | `/ws` | WebSocket connection for real-time events | `websocket: true` |
+
+The WebSocket endpoint provides bidirectional real-time communication for the Flutter UI and other web clients.
+
+**Connection:**
+```bash
+wscat -c ws://localhost:8081/ws
+```
+
+**Message Format:**
+```json
+{"type": "ping", "data": {}}
+```
+
+**Supported Message Types:**
+- `ping` - Keep-alive, responds with `pong`
+- `subscribe` - Subscribe to real-time updates
+
+**Bus Event Broadcasting:**
+When enabled, the WebSocket handler subscribes to the message bus and broadcasts events to all connected clients in real-time.
+
+### MCP (Model Context Protocol)
+
+| Method | Path | Description | Config |
+|--------|------|-------------|--------|
+| POST | `/mcp` | MCP JSON-RPC requests | `mcp: true` |
+| GET | `/mcp/sse` | MCP Server-Sent Events stream | `mcp: true` |
+
+The MCP endpoints allow AI agents (Claude Code, Cline, etc.) to interact with meept via the Model Context Protocol.
+
+**Initialize:**
+```bash
+curl -X POST http://localhost:8081/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+```
+
+**List Tools:**
+```bash
+curl -X POST http://localhost:8081/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
+
+**Call Tool:**
+```bash
+curl -X POST http://localhost:8081/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"meept_sessions","arguments":{"action":"list"}}}'
+```
+
+**MCP Tools:**
+- `meept_sessions` - Session management (list/create/attach)
+- `meept_send` - Send messages to sessions
+- `meept_events` - Poll bus events
+- `meept_status` - Get daemon status
+- `meept_session_history` - Get session message history
+
+**SSE Stream:**
+The `/mcp/sse` endpoint provides a stream of server-sent events for async notifications:
+```bash
+curl -N http://localhost:8081/mcp/sse
+```
+
 ## Error Responses
 
 All errors return JSON with an `error` field:

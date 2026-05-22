@@ -168,10 +168,28 @@ The daemon supports two transports (can be enabled independently):
       addr: ":8081",
       require_auth: false,          // Require API key authentication
       api_keys: [],                 // List of valid API keys
+      
+      // Modular endpoint configuration (unified HTTP server)
+      rest: true,                   // REST API at /api/v1/* (default: true)
+      websocket: false,             // WebSocket at /ws for Flutter UI (default: false)
+      ws_path: "/ws",               // WebSocket endpoint path
+      mcp: false,                   // MCP over HTTP+SSE for AI agents (default: false)
+      mcp_path: "/mcp",             // MCP endpoint path
     },
   },
 }
 ```
+
+**Unified HTTP Server Architecture:**
+
+When HTTP transport is enabled, a single HTTP server at the configured port (default: 8081) serves all HTTP endpoints:
+
+| Endpoint | Method | Purpose | Config Flag |
+|----------|--------|---------|-------------|
+| `/api/v1/*` | Various | REST API (40+ endpoints) | `rest` |
+| `/ws` | GET | WebSocket for real-time updates | `websocket` |
+| `/mcp` | POST | MCP JSON-RPC requests | `mcp` |
+| `/mcp/sse` | GET | MCP Server-Sent Events stream | `mcp` |
 
 Clients connect via `--transport` flag:
 ```bash

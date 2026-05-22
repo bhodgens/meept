@@ -30,6 +30,7 @@ type ServiceRegistry struct {
 	Task        *TaskService
 	Queue       *QueueService
 	Session     *SessionService
+	SessionStore session.Store  // Exposed for MCP handler access
 	Worker      *WorkerService
 	Pipeline    *PipelineService
 	Skills      *SkillsService
@@ -95,6 +96,7 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	}
 	if cfg.SessionStore != nil {
 		reg.Session = NewSessionService(cfg.SessionStore)
+		reg.SessionStore = cfg.SessionStore
 	}
 	if cfg.WorkerPool != nil {
 		reg.Worker = NewWorkerService(cfg.WorkerPool)

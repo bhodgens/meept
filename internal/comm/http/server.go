@@ -1271,9 +1271,10 @@ func (s *Server) handleMCPToolsCall(req *mcp.JSONRPCRequest) *mcp.JSONRPCRespons
 	}
 }
 
+// handleMCPSSE handles GET /mcp/sse - Server-Sent Events for async MCP notifications.
 func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
-	if s.mcpServices == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "MCP not enabled")
+	if s.mcpServices == nil || s.mcpServices.Bus == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "MCP or bus service not enabled")
 		return
 	}
 
@@ -1281,6 +1282,7 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -1297,6 +1299,27 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 	s.mcpSessions.Store(session.sessionID, session)
 	defer s.mcpSessions.Delete(session.sessionID)
 
+	// Subscribe to bus events for MCP clients
+	// Topics: chat messages, agent events, worker events
+	sub, cleanup := s.mcpServices.Bus.Subscribe(session.sessionID, "*")
+	defer cleanup()
+
+	// Forward bus events to SSE channel
+	go func() {
+		for msg := range sub.Channel {
+			event := &SSEEvent{
+				ID:   fmt.Sprintf("%d", time.Now().UnixNano()),
+				Type: msg.Topic,
+				Data: msg.Payload,
+			}
+			select {
+			case session.eventChan <- event:
+			case <-session.done:
+				return
+			}
+		}
+	}()
+
 	// Send initial session ID
 	fmt.Fprintf(w, "event: session\n")
 	fmt.Fprintf(w, "data: {\"session_id\":\"%s\"}\n", session.sessionID)
@@ -1304,11 +1327,24 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	// Stream events until client disconnects
-	<-r.Context().Done()
-	close(session.done)
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-session.done:
+			return
+		case event, ok := <-session.eventChan:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "id: %s\n", event.ID)
+			fmt.Fprintf(w, "event: %s\n", event.Type)
+			fmt.Fprintf(w, "data: %s\n", string(event.Data))
+			fmt.Fprintf(w, "\n")
+			flusher.Flush()
+		}
+	}
 }
-
-
 // mustMarshalMCP marshals a value to json.RawMessage for MCP responses.
 func mustMarshalMCP(v any) json.RawMessage {
 	data, _ := json.Marshal(v)
@@ -1316,29 +1352,40 @@ func mustMarshalMCP(v any) json.RawMessage {
 }
 
 // mcpToolSessions handles MCP meept_sessions tool.
-// TODO: Wire to actual session store via service registry
 func (s *Server) mcpToolSessions(args map[string]any) (any, error) {
+	if s.mcpServices.SessionStore == nil {
+		return nil, fmt.Errorf("session store not available")
+	}
+
 	action, _ := args["action"].(string)
 	switch action {
 	case "list":
-		// Stub - return empty list
-		return []any{}, nil
+		sessions, err := s.mcpServices.SessionStore.List()
+		if err != nil {
+			return nil, err
+		}
+		return sessions, nil
 	case "create":
 		name, _ := args["name"].(string)
 		if name == "" {
 			name = "mcp-session"
 		}
-		return map[string]any{
-			"status":     "created",
-			"session_id": fmt.Sprintf("mcp-%d", time.Now().UnixNano()),
-			"name":       name,
-		}, nil
+		sess, err := s.mcpServices.SessionStore.Create(name)
+		if err != nil {
+			return nil, err
+		}
+		return sess, nil
 	case "attach":
 		sessionID, _ := args["session_id"].(string)
+		sess := s.mcpServices.SessionStore.Get(sessionID)
+		if sess == nil {
+			return nil, fmt.Errorf("session not found: %s", sessionID)
+		}
+		messages, _ := s.mcpServices.SessionStore.GetMessages(sessionID, 0, 50)
 		return map[string]any{
 			"status":     "attached",
 			"session_id": sessionID,
-			"history":    []any{},
+			"history":    messages,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
@@ -1379,11 +1426,18 @@ func (s *Server) mcpToolStatus(args map[string]any) (any, error) {
 }
 
 // mcpToolSessionHistory handles MCP meept_session_history tool.
-// TODO: Wire to session store for actual history retrieval
 func (s *Server) mcpToolSessionHistory(args map[string]any) (any, error) {
+	if s.mcpServices.SessionStore == nil {
+		return nil, fmt.Errorf("session store not available")
+	}
+
 	sessionID, _ := args["session_id"].(string)
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
-	return []any{}, nil
+	limit := 50
+	if l, ok := args["limit"].(float64); ok {
+		limit = int(l)
+	}
+	return s.mcpServices.SessionStore.GetMessages(sessionID, 0, limit)
 }

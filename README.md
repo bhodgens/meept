@@ -58,6 +58,8 @@ Instead of massive context due to plan files and SKILLS.md, everything gets load
 | **Most agents** | Token-heavy first response | **Classification routing** - utilizes a fast first-pass local classifer agent | 
 | **Most agents** | written in Python | **Golang** - faster and smaller, with a proper thread (goroutine) model for modern CPUs | 
 
+I've also borrowed  ideas implemented in agentic harnesses like the venerable [oh-my-pi](https://github.com/can1357/oh-my-pi) and [Hermes Agent](https://github.com/nousresearch/hermes-agent), as well as other projects, when I find a feature which I think would improve things. 
+
 ## Other Key Differentiators
 #### Autonomous Agent Workcycle 
 
