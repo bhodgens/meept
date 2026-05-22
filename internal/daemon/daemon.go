@@ -410,6 +410,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 		)
 	}
 
+	// Start local LLM runtimes
+	if d.components != nil && d.components.RuntimeManager != nil {
+		if err := d.components.RuntimeManager.StartAll(ctx); err != nil {
+			d.logger.Error("Failed to start LLM runtimes", "error", err)
+			return err
+		}
+	}
+
 	// Metrics collector is started automatically by NewCollector
 
 	// Recover pending follow-ups from queue persistence.
@@ -513,6 +521,13 @@ func (d *Daemon) shutdown() error {
 	}
 	if d.metricsStore != nil {
 		d.metricsStore.Close()
+	}
+
+	// Stop local LLM runtimes
+	if d.components != nil && d.components.RuntimeManager != nil {
+		if err := d.components.RuntimeManager.StopAll(ctx); err != nil {
+			d.logger.Error("Failed to stop LLM runtimes", "error", err)
+		}
 	}
 
 	// Stop agent components first

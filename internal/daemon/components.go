@@ -103,6 +103,9 @@ type Components struct {
 	// Token cache for LLM responses
 	TokenCache *llm.TokenCacheCoordinator
 
+	// Local LLM runtime lifecycle manager
+	RuntimeManager *llm.RuntimeManager
+
 	// MCP integration
 	MCPManager *mcp.Manager
 
@@ -357,6 +360,30 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Fall back to single client if no provider manager
 	if c.LLMProvider == nil && c.LLMClient != nil {
 		c.LLMProvider = c.LLMClient
+	}
+
+	// Create runtime manager and scan providers for lifecycle configs
+	c.RuntimeManager = llm.NewRuntimeManager(logger)
+	lifecycleCfg, lifecycleCfgErr := llm.LoadProvidersConfigDefault()
+	if lifecycleCfgErr != nil {
+		logger.Debug("No providers config available for runtime scanning", "error", lifecycleCfgErr)
+	} else {
+		for providerID, provider := range lifecycleCfg.Providers {
+			if provider.Lifecycle == nil {
+				continue
+			}
+
+			rtCfg, err := llm.ValidateAndNormalize(*provider.Lifecycle)
+			if err != nil {
+				logger.Warn("Skipping invalid runtime config", "provider", providerID, "error", err)
+				continue
+			}
+
+			baseURL := provider.Options.BaseURL
+			if err := c.RuntimeManager.RegisterConfig(providerID, rtCfg, baseURL); err != nil {
+				logger.Error("Failed to register runtime config", "provider", providerID, "error", err)
+			}
+		}
 	}
 
 	// Create learning pipeline
