@@ -4,7 +4,7 @@
 
   // Fast/cheap model for classification, summarization
   // Use "classifier" or "summarizer" aliases for automatic fallback
-  "small_model": "local/lfm-thinking-claude",
+  "small_model": "local/lfm-1.2b-4bit",  // Best classifier (69.1% accuracy, 2.9% error rate)
 
   // Model for intent classification (use alias "classifier" for fallback)
   "classifier_model": "classifier",
@@ -16,7 +16,8 @@
   "model_aliases": {
     "classifier": {
       "models": [
-        "local/lfm-thinking-claude",  // Primary: Thinking-Claude (58.8% accuracy, 5.1% error rate)
+        "local/lfm-1.2b-4bit",        // Primary: Best overall (69.1% accuracy, 2.9% error rate, 279ms)
+        "local/lfm-thinking-claude",  // Fallback 1: Thinking-Claude (58.8% accuracy, better on plan intent)
         "local/lfm-code",             // Fallback 1: fast local model
         "zai/glm-4.5-air",            // Fallback 2: remote API
         "ollama/llama3.2"             // Fallback 3: local Ollama
