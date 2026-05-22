@@ -73,14 +73,14 @@ Defaults in `DefaultConfig()`:
 **WebSocket Support:**
 - `WebSocketHub` - Manages WebSocket connections with broadcast capability
 - `WithWebSocket(msgBus *bus.MessageBus)` - Functional option enabling `/ws` endpoint
-- Subscribes to message bus and broadcasts events to connected clients
+- Subscribes to message bus with wildcard (`*`) and broadcasts events to connected clients
 
 **MCP over HTTP+SSE:**
 - `MCPSession` - Session management for MCP clients
 - `SSEEvent` - Server-Sent Event structure
 - `WithMCP(services *ServiceRegistry, mcpPath string)` - Functional option enabling `/mcp` endpoints
 - `POST /mcp` - JSON-RPC request handler (implements initialize, tools/list, tools/call)
-- `GET /mcp/sse` - Server-Sent Events stream for async notifications
+- `GET /mcp/sse` - Server-Sent Events stream with bus event forwarding
 
 **Functional Options Pattern:**
 ```go
@@ -105,14 +105,18 @@ if fullCfg.Transport.HTTP.MCP && svcRegistry != nil {
 httpSrv = http.NewServer(httpCfg, ..., httpOpts...)
 ```
 
+### 4. Service Wiring (`internal/services/service.go`)
+
+Added `SessionStore session.Store` field to `ServiceRegistry` for direct MCP access to session operations.
+
 ## Endpoints
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/v1/*` | Various | Existing REST API (40+ endpoints) |
-| `/ws` | GET | WebSocket for Flutter UI real-time updates |
-| `/mcp` | POST | MCP JSON-RPC requests |
-| `/mcp/sse` | GET | MCP Server-Sent Events stream |
+| Endpoint | Method | Purpose | Config Flag |
+|----------|--------|---------|-------------|
+| `/api/v1/*` | Various | Existing REST API (40+ endpoints) | `rest` |
+| `/ws` | GET | WebSocket for Flutter UI real-time updates | `websocket` |
+| `/mcp` | POST | MCP JSON-RPC requests | `mcp` |
+| `/mcp/sse` | GET | MCP Server-Sent Events stream | `mcp` |
 
 ## MCP JSON-RPC Methods
 
@@ -120,13 +124,23 @@ httpSrv = http.NewServer(httpCfg, ..., httpOpts...)
 |--------|--------|-------------|
 | `initialize` | Complete | Returns MCP protocol version 2024-11-05 |
 | `notifications/initialized` | Complete | No-op notification |
-| `tools/list` | Complete | Returns tool definitions |
-| `tools/call` | Stubbed | Calls MCP tools (sessions, send, events, status, history) |
+| `tools/list` | Complete | Returns tool definitions from `mcp.ToolDefinitions()` |
+| `tools/call` | **WIRED** | Calls MCP tools via SessionStore |
+
+**MCP Tools (tools/call):**
+| Tool | Status | Implementation |
+|------|--------|----------------|
+| `meept_sessions` | WIRED | Uses `SessionStore.List()`, `Create()`, `Get()` |
+| `meept_send` | Stub | Returns placeholder response |
+| `meept_events` | Stub | Returns empty events |
+| `meept_status` | WIRED | Uses `DaemonService.Status()` |
+| `meept_session_history` | WIRED | Uses `SessionStore.GetMessages()` |
 
 ## Testing
 
 ```bash
-# Start daemon with HTTP transport enabled
+# Build and start daemon with HTTP transport enabled
+go build -o bin/meept-daemon ./cmd/meept-daemon
 ./bin/meept-daemon -f
 
 # Test WebSocket (requires wscat)
@@ -144,14 +158,26 @@ curl -X POST http://localhost:8081/mcp \
 curl -X POST http://localhost:8081/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+# Test MCP JSON-RPC sessions list
+curl -X POST http://localhost:8081/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"meept_sessions","arguments":{"action":"list"}}}'
+
+# Run unit tests
+go test ./internal/comm/http/... -v
 ```
 
 ## Files Changed
 
 - `internal/config/schema.go` - Added modular transport config fields
-- `config/meept.json5` - Updated template with modular transport example
-- `internal/comm/http/server.go` - Added WebSocketHub, MCP handlers, functional options
+- `internal/services/service.go` - Added `SessionStore` field to `ServiceRegistry`
+- `internal/comm/http/server.go` - Added WebSocketHub, MCP handlers, functional options, SSE streaming
+- `internal/comm/http/unified_http_test.go` - Integration tests for WebSocket and MCP options
 - `internal/daemon/daemon.go` - Wired functional options based on config
+- `CLAUDE.md` - Updated transport configuration section
+- `docs/reference/http-api.md` - Added WebSocket and MCP endpoint documentation
+- `docs/plans/2026-05-22-unified-http-server.md` - This plan document
 
 ## Status
 
@@ -162,35 +188,27 @@ curl -X POST http://localhost:8081/mcp \
 - [x] Sprint 3: MCP HTTP+SSE Handler
 - [x] Sprint 4: Functional Options Pattern
 - [x] Sprint 5: Daemon Wiring
-- [x] Sprint 6: MCP Tool Implementations (stubbed)
-- [ ] Sprint 7: Integration Testing
-- [ ] Sprint 8: Documentation Updates
+- [x] Sprint 6: MCP Tool Implementations (wired SessionStore)
+- [x] Sprint 7: Integration Testing
+- [x] Sprint 8: Documentation Updates
 
-## Remaining Work
+## Remaining Work (Optional Enhancements)
 
-### Service Wiring (High Priority)
-The MCP tool implementations are stubbed. To fully wire them:
+### Chat Service Wiring (Low Priority)
+- Add `SendMessage(sessionID, message string)` method to `ChatService`
+- Wire `meept_send` tool to actually publish messages to chat bus
 
-1. **SessionStore Access**: Add `SessionStore session.Store` to `ServiceRegistry` or expose via `SessionService`
-2. **Chat Service**: Add `SendMessage(sessionID, message string)` method to `ChatService`
-3. **Bus Service**: Add `Poll(subscriptionID, since string)` method to `BusService`
+### Bus Polling (Low Priority)
+- Add `Poll(subscriptionID, since string)` method to `BusService`
+- Wire `meept_events` tool to return actual bus events
 
-### MCP SSE Streaming (Medium Priority)
-- Wire bus subscription in `handleMCPSSE` to forward events to SSE stream
-- Implement session cleanup on client disconnect
-
-### Testing (High Priority)
-- End-to-end WebSocket test with Flutter UI
-- MCP JSON-RPC integration tests
-- SSE stream connection test
-
-### Documentation (Low Priority)
-- Update CLAUDE.md transport section
-- Add HTTP API reference for WebSocket and MCP endpoints
-- Update architecture diagrams
+### Testing Enhancements (Medium Priority)
+- End-to-end WebSocket test with actual Flutter UI
+- MCP JSON-RPC full integration test with session operations
+- SSE stream test verifying bus event forwarding
 
 ## Known Limitations
 
-1. **MCP tools return stub responses** - Session management and message sending are not wired to actual services
-2. **SSE stream is empty** - No bus events are forwarded to SSE clients
-3. **No session persistence** - MCP sessions are in-memory only
+1. **meept_send returns stub** - Messages are not actually published to chat bus
+2. **meept_events returns empty** - Bus event polling not implemented
+3. **No session persistence for MCP** - Sessions are in-memory only (same as rest of system)

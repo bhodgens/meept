@@ -57,6 +57,26 @@
       "models": ["local/lfm-thinking-claude"],
       "timeout": 30,
       "max_fails": 1
+    },
+    "classifier-test-1.2b-4bit": {
+      "models": ["local/lfm-1.2b-4bit"],
+      "timeout": 30,
+      "max_fails": 1
+    },
+    "classifier-test-thinking-8bit": {
+      "models": ["local/lfm-thinking-8bit"],
+      "timeout": 30,
+      "max_fails": 1
+    },
+    "classifier-test-24b-8bit": {
+      "models": ["local/lfm-24b-8bit"],
+      "timeout": 30,
+      "max_fails": 1
+    },
+    "classifier-test-thinking-bf16": {
+      "models": ["local/lfm-thinking-bf16"],
+      "timeout": 30,
+      "max_fails": 1
     }
   },
 
