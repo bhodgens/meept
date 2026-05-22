@@ -50,6 +50,28 @@ class TaskNotifier extends StateNotifier<TaskState> {
       );
     }
   }
+
+  /// Create a new task
+  Future<Task?> createTask({
+    required String title,
+    String? sessionId,
+  }) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final task = await apiClient.createTask(
+        title: title,
+        sessionId: sessionId,
+      );
+      state = state.copyWith(tasks: [...state.tasks, task], isLoading: false);
+      return task;
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString(),
+      );
+      return null;
+    }
+  }
 }
 
 /// Task state provider

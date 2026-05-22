@@ -181,6 +181,22 @@ class ApiClient {
     return Task.fromJson(data as Map<String, dynamic>);
   }
 
+  // ===== Task Endpoints (write) =====
+
+  Future<Task> createTask({
+    required String title,
+    String? sessionId,
+  }) async {
+    final data = await post<Map<String, dynamic>>(
+      '/tasks',
+      data: {
+        'name': title,
+        if (sessionId != null) 'session_id': sessionId,
+      },
+    );
+    return Task.fromJson(data as Map<String, dynamic>);
+  }
+
   // ===== Queue Endpoints =====
 
   Future<List<Job>> listJobs({String? agentId}) async {

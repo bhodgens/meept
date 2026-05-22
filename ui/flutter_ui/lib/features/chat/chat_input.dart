@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../models/api_models.dart';
 import '../../providers/chat_provider.dart';
+import '../../providers/providers.dart';
 
 /// Chat input widget - fixed height bottom pane for text entry
 class ChatInput extends ConsumerStatefulWidget {
@@ -11,7 +13,7 @@ class ChatInput extends ConsumerStatefulWidget {
   const ChatInput({super.key, required this.sessionId});
 
   @override
-  State<ChatInput> createState() => _ChatInputState();
+  ConsumerState<ChatInput> createState() => _ChatInputState();
 }
 
 class _ChatInputState extends ConsumerState<ChatInput> {
@@ -92,9 +94,80 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   }
 
   Widget _buildAgentSelector() {
-    return GestureDetector(
-      onTap: () {
-        // TODO: Show agent selection dropdown
+    final agents = ref.watch(agentProvider);
+    final activeAgent = ref.watch(activeAgentProvider);
+
+    final selectedAgentId = activeAgent?.id ?? _selectedAgent;
+
+    return PopupMenuButton<String>(
+      onSelected: (String agentId) {
+        final agent = agents.agents.firstWhere(
+          (a) => a.id == agentId,
+          orElse: () => Agent(
+            id: agentId,
+            name: agentId,
+            description: '',
+            prompt: '',
+            enabled: true,
+          ),
+        );
+        ref.read(activeAgentProvider.notifier).state = agent;
+        setState(() {
+          _selectedAgent = agentId;
+        });
+      },
+      itemBuilder: (BuildContext context) {
+        if (agents.isLoading) {
+          return [
+            const PopupMenuItem<String>(
+              enabled: false,
+              value: '__loading__',
+              child: SizedBox(
+                width: 120,
+                child: LinearProgressIndicator(),
+              ),
+            ),
+          ];
+        }
+
+        // Always include the fallback hardcoded agent
+        final allAgents = <Agent>[
+          Agent(
+            id: _selectedAgent,
+            name: _selectedAgent,
+            description: '',
+            prompt: '',
+            enabled: true,
+          ),
+          ...agents.agents,
+        ];
+
+        return allAgents.map((Agent agent) {
+          return PopupMenuItem<String>(
+            value: agent.id,
+            child: Row(
+              children: [
+                Icon(
+                  _getAgentIcon(agent.id),
+                  size: 16,
+                  color: agent.id == selectedAgentId
+                      ? CyberpunkColors.orangePrimary
+                      : CyberpunkColors.greenSuccess,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  agent.name,
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    fontFamily: 'SourceCodePro',
+                    color: agent.id == selectedAgentId
+                        ? CyberpunkColors.orangePrimary
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList();
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -106,27 +179,54 @@ class _ChatInputState extends ConsumerState<ChatInput> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.smart_toy,
+            Icon(
+              _getAgentIcon(selectedAgentId),
               size: 16,
               color: CyberpunkColors.orangePrimary,
             ),
             const SizedBox(width: 6),
             Text(
-              _selectedAgent,
+              activeAgent?.name ?? _selectedAgent,
               style: CyberpunkTypography.label.copyWith(
                 fontSize: 10,
                 color: CyberpunkColors.orangePrimary,
               ),
             ),
-            const Icon(Icons.expand_more, size: 14, color: CyberpunkColors.orangePrimary),
+            const Icon(
+              Icons.expand_more,
+              size: 14,
+              color: CyberpunkColors.orangePrimary,
+            ),
           ],
         ),
       ),
     );
   }
 
+  IconData _getAgentIcon(String id) {
+    final lower = id.toLowerCase();
+    switch (lower) {
+      case 'coder':
+        return Icons.code;
+      case 'debugger':
+        return Icons.bug_report;
+      case 'planner':
+        return Icons.account_tree;
+      case 'analyst':
+        return Icons.analytics;
+      case 'chat':
+        return Icons.chat;
+      case 'committer':
+        return Icons.history;
+      case 'scheduler':
+        return Icons.schedule;
+      default:
+        return Icons.smart_toy;
+    }
+  }
+
   Widget _buildSendButton() {
+    final chatState = ref.watch(chatProvider);
     return GestureDetector(
       onTap: chatState.isLoading ? null : _handleSend,
       child: Container(

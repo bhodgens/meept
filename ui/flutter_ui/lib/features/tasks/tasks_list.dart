@@ -52,9 +52,7 @@ class _TasksListState extends ConsumerState<TasksList> {
                 IconButton(
                   icon: const Icon(Icons.add, size: 18),
                   color: CyberpunkColors.orangePrimary,
-                  onPressed: () {
-                    // TODO: Show create task dialog
-                  },
+                  onPressed: _showCreateTaskDialog,
                 ),
               ],
             ),
@@ -169,5 +167,45 @@ class _TasksListState extends ConsumerState<TasksList> {
     if (diff.inHours < 1) return '${diff.inMinutes}m ago';
     if (diff.inDays < 1) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+
+  void _showCreateTaskDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text(
+          'create task',
+          style: CyberpunkTypography.headlineMedium,
+        ),
+        content: TextField(
+          controller: controller,
+          style: CyberpunkTypography.bodyMedium,
+          decoration: InputDecoration(
+            hintText: 'enter task title...',
+            hintStyle: CyberpunkTypography.bodySmall,
+          ),
+          maxLines: 3,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('cancel', style: CyberpunkTypography.bodyMedium),
+          ),
+          FilledButton(
+            onPressed: () {
+              final title = controller.text.trim();
+              if (title.isNotEmpty) {
+                ref.read(taskProvider.notifier).createTask(title: title);
+                Navigator.pop(context);
+              }
+            },
+            child: Text('create', style: CyberpunkTypography.bodyMedium),
+          ),
+        ],
+      ),
+    );
   }
 }
