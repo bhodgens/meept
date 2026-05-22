@@ -231,3 +231,7 @@ export OPENROUTER_API_KEY="your-key"
 3. **Availability check**: Skip disabled providers
 4. **Fallback handling**: Use model aliases for high availability
 5. **Budget enforcement**: Respect token limits and rate limits
+
+## Runtime Lifecycle Management
+
+Meept can automatically manage local LLM runtimes (spawn on startup, health monitoring, graceful shutdown). See [LLM Runtime Lifecycle Management](llm-lifecycle.md) for configuration details.

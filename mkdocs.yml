@@ -83,6 +83,7 @@ nav:
       - Daemon: configuration/daemon.md
       - Agents: configuration/agents.md
       - LLM & Models: configuration/llm.md
+      - Runtime Lifecycle: configuration/llm-lifecycle.md
       - Examples:
           - configuration/examples/index.md
           - Minimal: configuration/examples/minimal.md
