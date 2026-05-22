@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/tui/render"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
@@ -91,8 +92,8 @@ type ChatModel struct {
 	progressState *ProgressState
 
 	// Per-session input history
-	sessionHistory map[string][]string
-	historyIdx     int    // current position in history, -1 means not browsing
+	history        *sharedclient.SessionHistory
+	historyIdx     int    // current position in history for display (>=0 = browsing, -1 = not browsing)
 	savedInput     string // saved current input when browsing history
 
 	// Message persistence - buffered writes
@@ -265,7 +266,7 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 		pendingMsgIdx:     -1,
 		historyIdx:        -1,
 		sessionMessages:   make(map[string][]ChatMessage),
-		sessionHistory:    make(map[string][]string),
+		history:           sharedclient.NewSessionHistory(maxHistorySize),
 		dirtyMessages:     make(map[string][]ChatMessage),
 		mdRenderer:        mdRenderer,
 		renderMarkdown:    true, // Enable markdown by default
@@ -605,6 +606,9 @@ func (m *ChatModel) HandleEscape() tea.Cmd {
 	if m.historyIdx >= 0 {
 		m.historyIdx = -1
 		m.textarea.SetValue(m.savedInput)
+		if m.history != nil && m.sessionID != "" {
+			m.history.Reset(m.sessionID)
+		}
 		return nil
 	}
 	// If focused on viewport, switch to input
@@ -650,7 +654,7 @@ func (m *ChatModel) currentHistory() []string {
 	if m.sessionID == "" {
 		return nil
 	}
-	return m.sessionHistory[m.sessionID]
+	return m.history.GetEntries(m.sessionID)
 }
 
 // addToHistory adds a message to the input history buffer for the current session.
@@ -659,21 +663,7 @@ func (m *ChatModel) addToHistory(text string) {
 		return
 	}
 
-	history := m.sessionHistory[m.sessionID]
-
-	// Don't add duplicate of last entry
-	if len(history) > 0 && history[len(history)-1] == text {
-		return
-	}
-
-	history = append(history, text)
-
-	// Trim history if too large
-	if len(history) > maxHistorySize {
-		history = history[1:]
-	}
-
-	m.sessionHistory[m.sessionID] = history
+	m.history.Add(m.sessionID, text)
 
 	// Reset history browsing position
 	m.historyIdx = -1
@@ -688,29 +678,42 @@ func (m *ChatModel) navigateHistory(direction int) {
 	}
 
 	if m.historyIdx == -1 {
-		// Starting to browse - save current input
-		m.savedInput = m.textarea.Value()
 		if direction < 0 {
-			// Going up - start at end of history
+			// Going up - save current input and start browsing
+			m.savedInput = m.textarea.Value()
+			// Reset sharedclient so Up() stores our temporary
+			m.history.Reset(m.sessionID)
+			entry, ok := m.history.Up(m.sessionID, m.savedInput)
+			if !ok {
+				return
+			}
 			m.historyIdx = len(history) - 1
-		} else {
-			return // Can't go down from current input
+			m.textarea.SetValue(entry)
 		}
-	} else {
-		newIdx := m.historyIdx + direction
-		if newIdx < 0 {
-			newIdx = 0
-		} else if newIdx >= len(history) {
-			// Back to current input
-			m.historyIdx = -1
-			m.textarea.SetValue(m.savedInput)
-			return
-		}
-		m.historyIdx = newIdx
+		return // Can't go down from current input
 	}
 
-	// Set textarea to history entry
-	m.textarea.SetValue(history[m.historyIdx])
+	newIdx := m.historyIdx + direction
+	if newIdx < 0 {
+		newIdx = 0
+	} else if newIdx >= len(history) {
+		// Back to current input - clear navigator state
+		m.historyIdx = -1
+		m.savedInput = ""
+		m.history.Reset(m.sessionID)
+		return
+	}
+	m.historyIdx = newIdx
+
+	entry, ok := m.history.Down(m.sessionID, "")
+	if !ok {
+		// Reached end of history
+		m.historyIdx = -1
+		m.savedInput = ""
+		m.history.Reset(m.sessionID)
+		return
+	}
+	m.textarea.SetValue(entry)
 }
 
 // selectPreviousMessage moves selection to the previous message.
@@ -1579,9 +1582,10 @@ func (m *ChatModel) loadServerMessages(sessionID string, serverMsgs []types.Sess
 	}
 
 	// Merge history (don't overwrite existing entries)
-	existing := m.sessionHistory[sessionID]
-	if len(existing) == 0 {
-		m.sessionHistory[sessionID] = history
+	if len(m.history.GetEntries(sessionID)) == 0 {
+		for _, h := range history {
+			m.history.Add(sessionID, h)
+		}
 	}
 }
 
@@ -1923,6 +1927,9 @@ func (m *ChatModel) Reset() {
 	m.selectedMsgIdx = -1
 	m.historyIdx = -1
 	m.savedInput = ""
+	if m.history != nil {
+		m.history.Reset("")
+	}
 	m.updateViewport()
 }
 
@@ -1952,6 +1959,9 @@ func (m *ChatModel) SetSession(session *types.Session) tea.Cmd {
 	m.selectedMsgIdx = -1
 	m.historyIdx = -1
 	m.savedInput = ""
+	if m.history != nil {
+		m.history.Reset(m.sessionID)
+	}
 	m.sessionDescription = session.Description
 
 	// Restore previous messages for this session, or start fresh

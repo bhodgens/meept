@@ -144,8 +144,8 @@ func TestChatModel_NewChatModel(t *testing.T) {
 	if model.sessionMessages == nil {
 		t.Error("expected sessionMessages map to be initialized")
 	}
-	if model.sessionHistory == nil {
-		t.Error("expected sessionHistory map to be initialized")
+	if model.history == nil {
+		t.Error("expected history to be initialized")
 	}
 	if model.dirtyMessages == nil {
 		t.Error("expected dirtyMessages map to be initialized")
@@ -423,7 +423,7 @@ func TestChatModel_InputHistory_PerSession(t *testing.T) {
 	model.addToHistory("first message")
 	model.addToHistory("second message")
 
-	history1 := model.sessionHistory["sess-1"]
+	history1 := model.history.GetEntries("sess-1")
 	if len(history1) != 2 {
 		t.Errorf("expected 2 history items in sess-1, got %d", len(history1))
 	}
@@ -435,13 +435,13 @@ func TestChatModel_InputHistory_PerSession(t *testing.T) {
 	// Add to history in session 2
 	model.addToHistory("session 2 message")
 
-	history2 := model.sessionHistory["sess-2"]
+	history2 := model.history.GetEntries("sess-2")
 	if len(history2) != 1 {
 		t.Errorf("expected 1 history item in sess-2, got %d", len(history2))
 	}
 
 	// Verify session 1 history is preserved
-	history1 = model.sessionHistory["sess-1"]
+	history1 = model.history.GetEntries("sess-1")
 	if len(history1) != 2 {
 		t.Errorf("expected session 1 history to be preserved, got %d items", len(history1))
 	}
@@ -470,8 +470,8 @@ func TestChatModel_InputHistoryDuplicates(t *testing.T) {
 	model.addToHistory("same message")
 	model.addToHistory("same message")
 
-	if len(model.sessionHistory["sess-1"]) != 1 {
-		t.Errorf("expected 1 history item (no duplicates), got %d", len(model.sessionHistory["sess-1"]))
+	if len(model.history.GetEntries("sess-1")) != 1 {
+		t.Errorf("expected 1 history item (no duplicates), got %d", len(model.history.GetEntries("sess-1")))
 	}
 }
 
@@ -481,7 +481,7 @@ func TestChatModel_InputHistoryEmpty(t *testing.T) {
 
 	model.addToHistory("")
 
-	if len(model.sessionHistory["sess-1"]) != 0 {
+	if len(model.history.GetEntries("sess-1")) != 0 {
 		t.Error("expected empty string not to be added to history")
 	}
 }
@@ -678,7 +678,7 @@ func TestChatModel_HandleEscape_ResetsHistory(t *testing.T) {
 	model := newTestChatModel()
 	model.SetSize(80, 24)
 	model.sessionID = "sess-1"
-	model.sessionHistory["sess-1"] = []string{"old message"}
+	model.history.Add("sess-1", "old message")
 	model.savedInput = "current input"
 	model.historyIdx = 0
 	model.textarea.SetValue("old message")
@@ -991,8 +991,8 @@ func TestChatModel_SessionLoadFromServer(t *testing.T) {
 	}
 
 	// Check history was populated
-	if len(model.sessionHistory["sess-1"]) != 1 {
-		t.Errorf("expected 1 history entry from loaded user message, got %d", len(model.sessionHistory["sess-1"]))
+	if len(model.history.GetEntries("sess-1")) != 1 {
+		t.Errorf("expected 1 history entry from loaded user message, got %d", len(model.history.GetEntries("sess-1")))
 	}
 }
 

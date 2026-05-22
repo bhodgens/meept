@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -118,6 +119,9 @@ type App struct {
 	// Current session
 	currentSession *types.Session
 
+	// SessionManager is the shared session manager used by both TUI and meept-lite
+	sessionMgr *sharedclient.SessionManager
+
 	// Project directory
 	projectDir string
 
@@ -206,6 +210,7 @@ func NewApp(socketPath string) *App {
 	app := &App{
 		styles:      styles,
 		rpc:         rpc,
+		sessionMgr:  sharedclient.NewSessionManager(rpc, clientConfig.Session.DefaultName),
 		eventRPC:    eventRPC,
 		currentView: ViewChat,
 		chat: models.NewChatModelWithConfig(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, clientConfig.Keybindings.EscapeBehavior, inputConfig, models.ChatConfig{
@@ -256,27 +261,28 @@ func (a *App) Init() tea.Cmd {
 	)
 }
 
-// loadSession attempts to load or create a session.
+// loadSession attempts to load or create a session using SessionManager.
 func (a *App) loadSession() tea.Msg {
 	// Wait for connection first - this will be called after connectDaemon
 	if !a.rpc.IsConnected() {
 		return nil
 	}
 
-	// Try to auto-resume if enabled
+	// Auto-resume: try to load most recent session before using default
 	if a.clientConfig.Session.AutoResume {
 		session, err := a.rpc.GetMostRecentSession()
 		if err == nil && session != nil {
+			a.sessionMgr.SetSession(session)
 			return SessionLoadedMsg{Session: session, IsNew: false}
 		}
 	}
 
-	// Create a new session
+	// Fall back to creating a new session (same logic as SessionManager would do)
 	session, err := a.rpc.CreateSession(a.clientConfig.Session.DefaultName)
 	if err != nil {
-		return SessionLoadedMsg{Session: nil, Err: err}
+		return SessionLoadedMsg{Session: nil, Err: err, IsNew: false}
 	}
-
+	a.sessionMgr.SetSession(session)
 	return SessionLoadedMsg{Session: session, IsNew: true}
 }
 
@@ -630,6 +636,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Switch to selected session
 		if msg.Session != nil {
 			a.currentSession = msg.Session
+			a.sessionMgr.SetSession(msg.Session)
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
@@ -1176,6 +1183,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.currentSession.Description = msg.Description
 		}
+		// Sync SessionManager so GetSessionName reflects the new description
+		if a.sessionMgr != nil {
+			if a.currentSession != nil && a.currentSession.ID == msg.SessionID {
+				a.sessionMgr.SetSession(a.currentSession)
+			}
+		}
 		// Still delegate to chat model
 
 	case SlashAutocompleteMsg:
@@ -1327,6 +1340,7 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if sess := a.fuzzyFinder.GetSelectedSession(); sess != nil {
 				// Switch to selected session
 				a.currentSession = sess
+				a.sessionMgr.SetSession(sess)
 				a.tasks.SetCurrentSession(sess.ID)
 				sessionCmd := a.chat.SetSession(sess)
 				a.statusMessage = fmt.Sprintf("Switched to: %s", sess.Name)
@@ -1357,42 +1371,46 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// createSession creates a new session via RPC.
+// createSession creates a new session via SessionManager.
 func (a *App) createSession(name string) tea.Cmd {
 	return func() tea.Msg {
-		session, err := a.rpc.CreateSession(name)
+		err := a.sessionMgr.CreateSession(nil, name)
 		if err != nil {
 			return SessionLoadedMsg{Session: nil, Err: err}
 		}
-		return SessionSwitchMsg{Session: session}
+		updatedSession := a.sessionMgr.GetCurrentSession()
+		return SessionSwitchMsg{Session: updatedSession}
 	}
 }
 
-// deleteSession deletes a session via RPC.
+// deleteSession deletes a session via SessionManager.
 func (a *App) deleteSession(sessionID string) tea.Cmd {
 	return func() tea.Msg {
-		err := a.rpc.DeleteSession(sessionID)
+		err := a.sessionMgr.DeleteSession(nil, sessionID)
 		if err != nil {
 			// Just refresh the list to show current state
-			_ = err
 		}
 		// Refresh session list
-		resp, _ := a.rpc.ListSessions()
-		if resp != nil {
-			return SessionListMsg{Sessions: resp.Sessions}
+		sessions, _ := a.sessionMgr.ListSessions(nil)
+		if len(sessions) > 0 {
+			return SessionListMsg{Sessions: sessions}
 		}
 		return SessionListMsg{Sessions: nil}
 	}
 }
 
 // renameSession renames a session via RPC (updates description).
+// We call RPC directly because SessionManager.UpdateSessionDescription
+// always operates on the current session, but the rename modal can target
+// any session from the picker.
 func (a *App) renameSession(sessionID, newName string) tea.Cmd {
 	return func() tea.Msg {
 		err := a.rpc.UpdateSessionDescription(sessionID, newName)
 		if err != nil {
 			return CopyErrorMsg{Err: err} // Reuse error display
 		}
-		// Return message to update UI
+		// Refresh session list so names stay in sync
+		_, _ = a.sessionMgr.ListSessions(nil)
 		return models.SessionDescriptionUpdatedMsg{
 			SessionID:   sessionID,
 			Description: newName,
