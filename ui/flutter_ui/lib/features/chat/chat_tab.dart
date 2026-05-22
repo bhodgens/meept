@@ -16,6 +16,11 @@ class ChatTab extends StatefulWidget {
 
 class _ChatTabState extends State<ChatTab> {
   bool _isSidebarCollapsed = false;
+  String _activeTool = '';
+
+  final List<String> _toolRoutes = [
+    'memory', 'files', 'terminal', 'calendar', 'metrics', 'settings',
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +30,7 @@ class _ChatTabState extends State<ChatTab> {
         children: [
           // Main chat pane (transcript + input)
           Expanded(
-            flex: 3,
+            flex: _activeTool.isEmpty ? 3 : 2,
             child: Container(
               decoration: BoxDecoration(
                 border: Border(
@@ -35,18 +40,101 @@ class _ChatTabState extends State<ChatTab> {
                   ),
                 ),
               ),
-              child: ChatView(sessionId: widget.sessionId),
+              child: _buildMainContent(),
             ),
           ),
+          // Tool detail pane (when a tool is selected)
+          if (_activeTool.isNotEmpty)
+            Expanded(
+              flex: 1,
+              child: _buildToolDetail(),
+            ),
           // Right sidebar (tools panel) - collapsible
-          if (!_isSidebarCollapsed)
+          if (!_isSidebarCollapsed && _activeTool.isEmpty)
             ToolsPanel(
               isExpanded: !_isSidebarCollapsed,
               onCollapseToggle: () =>
                   setState(() => _isSidebarCollapsed = !_isSidebarCollapsed),
             ),
+          if (!_isSidebarCollapsed && _activeTool.isNotEmpty)
+            ToolsPanel(
+              isExpanded: !_isSidebarCollapsed,
+              onCollapseToggle: () =>
+                  setState(() => _isSidebarCollapsed = !_isSidebarCollapsed),
+              onToolSelected: (route) => setState(() => _activeTool = route),
+            ),
         ],
       ),
     );
   }
+
+  Widget _buildMainContent() {
+    if (_activeTool.isNotEmpty) {
+      return _buildToolView();
+    }
+    return ChatView(sessionId: widget.sessionId);
+  }
+
+  Widget _buildToolView() {
+    return Container(
+      color: CyberpunkColors.darkGray,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              _toolIconFor(_activeTool),
+              size: 48,
+              color: CyberpunkColors.orangeBright,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '${_activeTool.toLowerCase()} view',
+              style: CyberpunkTypography.bodyMedium.copyWith(
+                color: CyberpunkColors.orangePrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'coming soon',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.orangeDark,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToolDetail() {
+    return Container(
+      color: CyberpunkColors.darkGray,
+      child: Center(
+        child: Text(
+          'tool details: ${_activeTool.toLowerCase()}',
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.orangeDark,
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _toolIconFor(String route) {
+    final item = _tools.firstWhere(
+      (t) => t.route == route,
+      orElse: () => const ToolItem(icon: Icons.help, label: '', status: '', route: ''),
+    );
+    return item.icon;
+  }
+
+  final List<ToolItem> _tools = [
+    const ToolItem(icon: Icons.memory, label: 'memory', status: '128 entries', route: 'memory'),
+    const ToolItem(icon: Icons.folder, label: 'files', status: '24 files', route: 'files'),
+    const ToolItem(icon: Icons.terminal, label: 'terminal', status: 'active', route: 'terminal'),
+    const ToolItem(icon: Icons.calendar_today, label: 'calendar', status: '3 today', route: 'calendar'),
+    const ToolItem(icon: Icons.insights, label: 'metrics', status: 'live', route: 'metrics'),
+    const ToolItem(icon: Icons.settings, label: 'settings', status: '', route: 'settings'),
+  ];
 }

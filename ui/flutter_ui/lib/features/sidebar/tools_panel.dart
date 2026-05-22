@@ -1,17 +1,53 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 
-class ToolsPanel extends StatelessWidget {
+/// Tool item data class
+class ToolItem {
+  final IconData icon;
+  final String label;
+  final String status;
+  final String route;
+
+  const ToolItem({
+    required this.icon,
+    required this.label,
+    required this.status,
+    required this.route,
+  });
+}
+
+class ToolsPanel extends ConsumerStatefulWidget {
   final bool isExpanded;
   final VoidCallback? onCollapseToggle;
+  final ValueChanged<String>? onToolSelected;
 
-  const ToolsPanel({super.key, this.isExpanded = true, this.onCollapseToggle});
+  const ToolsPanel({
+    super.key,
+    this.isExpanded = true,
+    this.onCollapseToggle,
+    this.onToolSelected,
+  });
+
+  @override
+  ConsumerState<ToolsPanel> createState() => _ToolsPanelState();
+}
+
+class _ToolsPanelState extends ConsumerState<ToolsPanel> {
+  final List<ToolItem> _tools = [
+    const ToolItem(icon: Icons.memory, label: 'memory', status: '128 entries', route: 'memory'),
+    const ToolItem(icon: Icons.folder, label: 'files', status: '24 files', route: 'files'),
+    const ToolItem(icon: Icons.terminal, label: 'terminal', status: 'active', route: 'terminal'),
+    const ToolItem(icon: Icons.calendar_today, label: 'calendar', status: '3 today', route: 'calendar'),
+    const ToolItem(icon: Icons.insights, label: 'metrics', status: 'live', route: 'metrics'),
+    const ToolItem(icon: Icons.settings, label: 'settings', status: '', route: 'settings'),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: isExpanded ? 300 : 50,
+      width: widget.isExpanded ? 300 : 50,
       decoration: BoxDecoration(
         color: CyberpunkColors.darkGray,
         border: Border(
@@ -22,15 +58,11 @@ class ToolsPanel extends StatelessWidget {
         children: [
           _buildHeader(),
           Expanded(
-            child: ListView(
-              children: [
-                _buildToolItem(Icons.memory, 'Memory', '128 entries'),
-                _buildToolItem(Icons.folder, 'Files', '24 files'),
-                _buildToolItem(Icons.terminal, 'Terminal', 'Active'),
-                _buildToolItem(Icons.calendar_today, 'Calendar', '3 events today'),
-                _buildToolItem(Icons.insights, 'Metrics', 'Live'),
-                _buildToolItem(Icons.settings, 'Settings', ''),
-              ],
+            child: ListView.builder(
+              itemCount: _tools.length,
+              itemBuilder: (context, index) {
+                return _buildToolItem(_tools[index]);
+              },
             ),
           ),
         ],
@@ -49,18 +81,18 @@ class ToolsPanel extends StatelessWidget {
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(
-              Icons.chevron_left,
+            icon: Icon(
+              widget.isExpanded ? Icons.chevron_left : Icons.chevron_right,
               color: CyberpunkColors.orangePrimary,
               size: 18,
             ),
-            onPressed: onCollapseToggle,
+            onPressed: widget.onCollapseToggle,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),
           const SizedBox(width: 4),
           const Icon(Icons.apps, color: CyberpunkColors.orangePrimary, size: 20),
-          if (isExpanded) ...[
+          if (widget.isExpanded) ...[
             const SizedBox(width: 8),
             Text(
               'tools',
@@ -74,23 +106,27 @@ class ToolsPanel extends StatelessWidget {
     );
   }
 
-  Widget _buildToolItem(IconData icon, String label, String status) {
+  Widget _buildToolItem(ToolItem tool) {
     return ListTile(
-      leading: Icon(icon, color: CyberpunkColors.orangeBright, size: 20),
-      title: isExpanded
+      leading: Icon(tool.icon, color: CyberpunkColors.orangeBright, size: 20),
+      title: widget.isExpanded
           ? Text(
-              label.toLowerCase(),
+              tool.label.toLowerCase(),
               style: CyberpunkTypography.bodyMedium,
             )
           : null,
-      subtitle: isExpanded && status.isNotEmpty
+      subtitle: widget.isExpanded && tool.status.isNotEmpty
           ? Text(
-              status.toLowerCase(),
+              tool.status.toLowerCase(),
               style: CyberpunkTypography.bodySmall.copyWith(fontSize: 10),
             )
           : null,
       onTap: () {
-        // TODO: Handle tool selection
+        if (widget.onToolSelected != null) {
+          widget.onToolSelected!(tool.route);
+        } else {
+          debugPrint('tool selected: ${tool.route}');
+        }
       },
     );
   }
