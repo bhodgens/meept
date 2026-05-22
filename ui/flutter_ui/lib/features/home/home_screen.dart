@@ -25,12 +25,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Initialize providers on app start
+    // Initialize all providers and start WebSocket on app start
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(sessionProvider.notifier).loadSessions();
       ref.read(taskProvider.notifier).loadTasks();
       ref.read(agentProvider.notifier).loadAgents();
-      // Chat provider is initialized when first message is sent
+      // Initialize chat provider (triggers WebSocket connect + subscription)
+      ref.read(chatProvider);
     });
   }
 

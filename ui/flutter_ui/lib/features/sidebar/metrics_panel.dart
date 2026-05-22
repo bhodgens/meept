@@ -1,38 +1,164 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../services/api_client.dart';
+import '../../providers/providers.dart';
+import 'dart:async';
 
-class MetricsPanel extends StatelessWidget {
+/// Metrics panel - displays live system metrics from the API
+class MetricsPanel extends ConsumerStatefulWidget {
   const MetricsPanel({super.key});
 
   @override
+  ConsumerState<MetricsPanel> createState() => _MetricsPanelState();
+}
+
+class _MetricsPanelState extends ConsumerState<MetricsPanel> {
+  Map<String, dynamic>? _metrics;
+  bool _isLoading = false;
+  String? _error;
+  Timer? _periodicRefresh;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMetrics();
+    // Refresh every 10 seconds
+    _periodicRefresh = Timer.periodic(const Duration(seconds: 10), (_) => _loadMetrics());
+  }
+
+  @override
+  void dispose() {
+    _periodicRefresh?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadMetrics() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+    });
+    try {
+      final data = await ref.read(apiClientProvider).getLiveMetrics();
+      if (mounted) {
+        setState(() {
+          _metrics = data;
+          _isLoading = false;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: CyberpunkColors.darkGray.withOpacity(0.5),
-        border: Border(
-          top: BorderSide(color: CyberpunkColors.orangePrimary.withOpacity(0.3), width: 1),
+    if (_error != null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: CyberpunkColors.darkGray.withOpacity(0.5),
+          border: Border(
+            top: BorderSide(
+              color: CyberpunkColors.orangePrimary.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+        ),
+        child: Text(
+          'error: $_error',
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.redAlert,
+          ),
+        ),
+      );
+    }
+
+    final activeAgents = _metrics?['active_agents'] ?? '-';
+    final queueDepth = _metrics?['queue_depth'] ?? '-';
+    final tokenUsageRate = _metrics?['token_usage_rate'];
+    final requestsPerSec = _metrics?['requests_per_sec'] ?? '-';
+
+    return RefreshIndicator(
+      onRefresh: _loadMetrics,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: CyberpunkColors.darkGray.withOpacity(0.5),
+          border: Border(
+            top: BorderSide(
+              color: CyberpunkColors.orangePrimary.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'SYSTEM METRICS',
+              style: CyberpunkTypography.label,
+            ),
+            const SizedBox(height: 12),
+            _buildMetricRow(
+              'ACTIVE AGENTS',
+              _formatValue(activeAgents, intType: true),
+              CyberpunkColors.blueInfo,
+            ),
+            const SizedBox(height: 8),
+            _buildMetricRow(
+              'QUEUE DEPTH',
+              _formatValue(queueDepth, intType: true),
+              CyberpunkColors.orangePrimary,
+            ),
+            const SizedBox(height: 8),
+            _buildMetricRow(
+              'TOKENS/SEC',
+              tokenUsageRate != null
+                  ? (tokenUsageRate is double
+                      ? tokenUsageRate.toStringAsFixed(1)
+                      : tokenUsageRate.toString())
+                  : '-',
+              CyberpunkColors.greenSuccess,
+            ),
+            const SizedBox(height: 8),
+            _buildMetricRow(
+              'REQ/MIN',
+              _formatValue(requestsPerSec, intType: true),
+              Colors.purple,
+            ),
+            if (_isLoading) const SizedBox(height: 8),
+            if (_isLoading)
+              const Center(
+                child: SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      CyberpunkColors.orangePrimary,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'SYSTEM METRICS',
-            style: CyberpunkTypography.label,
-          ),
-          const SizedBox(height: 12),
-          _buildMetricRow('ACTIVE AGENTS', '8', CyberpunkColors.blueInfo),
-          const SizedBox(height: 8),
-          _buildMetricRow('QUEUE DEPTH', '3', CyberpunkColors.orangePrimary),
-          const SizedBox(height: 8),
-          _buildMetricRow('TOKENS/SEC', '245', CyberpunkColors.greenSuccess),
-          const SizedBox(height: 8),
-          _buildMetricRow('REQ/MIN', '42', Colors.purple),
-        ],
-      ),
     );
+  }
+
+  String _formatValue(dynamic value, {bool intType = false}) {
+    if (value == '-') return '-';
+    if (value == null || value == 0) return '-';
+    if (intType) return value.toString();
+    return value.toString();
   }
 
   Widget _buildMetricRow(String label, String value, Color color) {

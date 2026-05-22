@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../core/constants.dart';
 
@@ -8,6 +9,7 @@ class WebSocketService {
   WebSocketChannel? _channel;
   final String _host;
   final int _port;
+  final String? _apiKey;
   final StreamController<Map<String, dynamic>> _messageController =
       StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<String> _errorController =
@@ -16,13 +18,20 @@ class WebSocketService {
       StreamController<bool>.broadcast();
 
   bool _isConnected = false;
+  bool _isConnOpen = false;
+  bool _wasExplicitlyDisconnected = false;
   Timer? _pingTimer;
+
+  // Reconnect tracking
+  int _retryCount = 0;
 
   WebSocketService({
     String? host,
     int? port,
+    String? apiKey,
   })  : _host = host ?? AppConstants.defaultApiHost,
-        _port = port ?? AppConstants.defaultApiPort;
+        _port = port ?? AppConstants.defaultApiPort,
+        _apiKey = apiKey;
 
   /// Connection state stream
   Stream<bool> get connectionStream => _connectionController.stream;
@@ -37,11 +46,15 @@ class WebSocketService {
 
   /// Connect to WebSocket
   Future<void> connect({String? path}) async {
-    if (_isConnected) return;
+    if (_isConnected || _isConnOpen || _wasExplicitlyDisconnected) return;
 
     try {
-      final wsPath = path ?? '/ws';
-      final uri = Uri.parse('ws://$_host:$_port$wsPath');
+      // Reset connection-open flag on new connect attempt
+      _isConnOpen = false;
+
+      final wsPath = path ?? '/api/v1/ws';
+      final uriBuilder = Uri.parse('ws://$_host:$_port$wsPath');
+      final uri = _buildUriWithAuth(uriBuilder);
 
       _channel = WebSocketChannel.connect(uri);
 
@@ -50,37 +63,87 @@ class WebSocketService {
           try {
             final message = jsonDecode(data as String) as Map<String, dynamic>;
             _messageController.add(message);
+
+            // On first received message, consider the connection fully open
+            if (!_isConnOpen) {
+              _isConnOpen = true;
+              // Verify it's a legit signal (ping response, status, or actual data)
+              final type = message['type'] as String?;
+              if (type == 'ping' || type == 'status' || type != null) {
+                _isConnected = true;
+                _connectionController.add(true);
+                _startPingTimer();
+                // Reset retry count on successful connection
+                _retryCount = 0;
+              }
+            }
           } catch (e) {
             _errorController.add('Failed to parse message: $e');
           }
         },
         onError: (error) {
           _isConnected = false;
+          _isConnOpen = false;
           _connectionController.add(false);
           _errorController.add('WebSocket error: $error');
+          _handleReconnect();
         },
         onDone: () {
           _isConnected = false;
+          _isConnOpen = false;
           _connectionController.add(false);
-          _startReconnectTimer();
+          _handleReconnect();
         },
       );
-
-      _isConnected = true;
-      _connectionController.add(true);
-      _startPingTimer();
     } catch (e) {
       _isConnected = false;
+      _isConnOpen = false;
       _connectionController.add(false);
       _errorController.add('Connection failed: $e');
+      _handleReconnect();
     }
+  }
+
+  /// Build WebSocket URI with auth token appended as query param.
+  Uri _buildUriWithAuth(Uri baseUri) {
+    if (_apiKey != null && _apiKey!.isNotEmpty) {
+      final queryParameters = Map<String, dynamic>.from(baseUri.queryParameters)
+        ..['token'] = _apiKey!;
+      return baseUri.replace(queryParameters: queryParameters);
+    }
+    return baseUri;
+  }
+
+  /// Exponential backoff with jitter for reconnection.
+  Duration _computeReconnectDelay() {
+    if (_retryCount >= AppConstants.maxRetries) {
+      return const Duration(seconds: 30); // fallback: wait 30s if all retries exhausted
+    }
+    final baseDelay = Duration(seconds: 2);
+    final exponentialDelay = baseDelay * (1 << _retryCount); // 2s, 4s, 8s
+    // Add jitter: random 0-1000ms
+    final jitter = Duration(milliseconds: Random().nextInt(1000));
+    _retryCount++;
+    return exponentialDelay + jitter;
+  }
+
+  void _handleReconnect() {
+    final delay = _computeReconnectDelay();
+    Timer(delay, () {
+      connect();
+    });
   }
 
   /// Disconnect from WebSocket
   void disconnect() {
+    _wasExplicitlyDisconnected = true;
     _pingTimer?.cancel();
+    _pingTimer = null;
     _channel?.sink.close();
+    _channel = null;
     _isConnected = false;
+    _isConnOpen = false;
+    _retryCount = 0;
     _connectionController.add(false);
   }
 
@@ -97,12 +160,6 @@ class WebSocketService {
     _pingTimer?.cancel();
     _pingTimer = Timer.periodic(AppConstants.pingInterval, (_) {
       send({'type': 'ping', 'timestamp': DateTime.now().toIso8601String()});
-    });
-  }
-
-  void _startReconnectTimer() {
-    Timer(Duration(seconds: 5), () {
-      connect();
     });
   }
 

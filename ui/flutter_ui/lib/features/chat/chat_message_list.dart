@@ -19,10 +19,25 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   final ScrollController _scrollController = ScrollController();
   bool _isAtBottom = true;
 
+  String? _lastSessionId;
+
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    _loadMessages();
+  }
+
+  @override
+  void didUpdateWidget(ChatMessageList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.sessionId != oldWidget.sessionId) {
+      _loadMessages();
+    }
+  }
+
+  Future<void> _loadMessages() async {
+    await ref.read(chatProvider.notifier).loadMessages(widget.sessionId);
   }
 
   @override

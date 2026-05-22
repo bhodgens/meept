@@ -158,9 +158,9 @@ class Task extends Equatable {
 
   factory Task.fromJson(Map<String, dynamic> json) => Task(
         id: json['id'] as String,
-        title: json['title'] as String,
-        description: json['description'] as String,
-        status: json['status'] as String,
+        title: json['name'] as String? ?? json['title'] as String? ?? '',
+        description: json['description'] as String? ?? '',
+        status: json['state'] as String? ?? json['status'] as String? ?? 'pending',
         agentId: json['agent_id'] as String?,
         sessionId: json['session_id'] as String?,
         createdAt: DateTime.parse(json['created_at'] as String),

@@ -6,11 +6,6 @@ import 'features/home/home_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Hive storage
-  // await Hive.initFlutter();
-  // await Hive.openBox('settings');
-  // await Hive.openBox('cache');
-
   runApp(
     const ProviderScope(
       child: CyberpunkApp(),

@@ -100,24 +100,15 @@ class ApiClient {
 
   Future<Map<String, dynamic>> sendChatMessage({
     required String message,
-    String? sessionId,
-    String? agentId,
+    String? conversationId,
   }) async {
     return post<Map<String, dynamic>>(
       '/chat',
       data: {
         'message': message,
-        if (sessionId != null) 'session_id': sessionId,
-        if (agentId != null) 'agent_id': agentId,
+        if (conversationId != null) 'conversation_id': conversationId,
       },
     );
-  }
-
-  Future<Map<String, dynamic>> getChatStream({
-    required String id,
-  }) async {
-    return get<Map<String, dynamic>>('/chat/stream',
-        queryParameters: {'id': id});
   }
 
   // ===== Session Endpoints =====
@@ -132,7 +123,7 @@ class ApiClient {
 
   Future<Session> getSession(String id) async {
     final data = await get<Map<String, dynamic>>('/sessions/$id');
-    return Session.fromJson(data as Map<String, dynamic>);
+    return Session.fromJson(data);
   }
 
   Future<Session> createSession({
@@ -146,7 +137,7 @@ class ApiClient {
         if (agentId != null) 'agent_id': agentId,
       },
     );
-    return Session.fromJson(data as Map<String, dynamic>);
+    return Session.fromJson(data);
   }
 
   Future<void> deleteSession(String id) async {
@@ -178,7 +169,7 @@ class ApiClient {
 
   Future<Task> getTask(String id) async {
     final data = await get<Map<String, dynamic>>('/tasks/$id');
-    return Task.fromJson(data as Map<String, dynamic>);
+    return Task.fromJson(data);
   }
 
   // ===== Task Endpoints (write) =====
@@ -194,7 +185,7 @@ class ApiClient {
         if (sessionId != null) 'session_id': sessionId,
       },
     );
-    return Task.fromJson(data as Map<String, dynamic>);
+    return Task.fromJson(data);
   }
 
   // ===== Queue Endpoints =====
@@ -235,7 +226,61 @@ class ApiClient {
         if (category != null) 'category': category,
       },
     );
-    return (data['results'] as List).cast<Map<String, dynamic>>();
+    return (data['memories'] as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> getRecentMemories({
+    int limit = 10,
+  }) async {
+    final data = await get<Map<String, dynamic>>(
+      '/memory/recent',
+      queryParameters: {'limit': limit},
+    );
+    return (data['memories'] as List).cast<Map<String, dynamic>>();
+  }
+
+  // ===== Health Endpoint =====
+
+  Future<Map<String, dynamic>> healthCheck() async {
+    return get<Map<String, dynamic>>('/health');
+  }
+
+  // ===== Task Endpoints (write) =====
+
+  Future<void> deleteTask(String id) async {
+    await delete('/tasks/$id');
+  }
+
+  Future<Task> updateTask(
+    String id, {
+    String? title,
+    String? status,
+  }) async {
+    final data = <String, dynamic>{};
+    if (title != null) data['name'] = title;
+    if (status != null) data['state'] = status;
+    return post<Task>('/tasks/$id', data: data);
+  }
+
+  Future<Task> cancelTask(String id) async {
+    final data = await post<Map<String, dynamic>>('/tasks/$id/cancel');
+    return Task.fromJson(data);
+  }
+
+  // ===== Daemon Endpoints =====
+
+  Future<Map<String, dynamic>> getDaemonStatus() async {
+    return get<Map<String, dynamic>>('/daemon/status');
+  }
+
+  // ===== Config/Agent Endpoints =====
+
+  Future<Agent> updateAgent(
+    String id,
+    Map<String, dynamic> config,
+  ) async {
+    final data = await post<Map<String, dynamic>>('/config/agents/$id', data: config);
+    return Agent.fromJson(data);
   }
 }
 

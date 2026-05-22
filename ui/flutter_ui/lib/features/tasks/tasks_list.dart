@@ -7,7 +7,9 @@ import '../../models/api_models.dart';
 
 /// Tasks list widget - displays all tasks for the active session
 class TasksList extends ConsumerStatefulWidget {
-  const TasksList({super.key});
+  final ValueChanged<Task>? onTaskSelected;
+
+  const TasksList({super.key, this.onTaskSelected});
 
   @override
   ConsumerState<TasksList> createState() => _TasksListState();
@@ -97,50 +99,55 @@ class _TasksListState extends ConsumerState<TasksList> {
 
   Widget _buildTaskTile(Task task) {
     final statusColor = _getStatusColor(task.status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(
-            color: statusColor,
-            width: 2,
-          ),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            task.title.toLowerCase(),
-            style: CyberpunkTypography.bodyMedium.copyWith(
-              color: CyberpunkColors.greenSuccess,
+    return InkWell(
+      onTap: () {
+        widget.onTaskSelected?.call(task);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+              color: statusColor,
+              width: 2,
             ),
           ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-                child: Text(
-                  task.status.toLowerCase(),
-                  style: CyberpunkTypography.bodySmall.copyWith(
-                    color: statusColor,
-                    fontFamily: 'SourceCodePro',
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              task.title.toLowerCase(),
+              style: CyberpunkTypography.bodyMedium.copyWith(
+                color: CyberpunkColors.greenSuccess,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(
+                    task.status.toLowerCase(),
+                    style: CyberpunkTypography.bodySmall.copyWith(
+                      color: statusColor,
+                      fontFamily: 'SourceCodePro',
+                    ),
                   ),
                 ),
-              ),
-              const Spacer(),
-              Text(
-                _formatAge(task.createdAt),
-                style: CyberpunkTypography.bodySmall,
-              ),
-            ],
-          ),
-        ],
+                const Spacer(),
+                Text(
+                  _formatAge(task.createdAt),
+                  style: CyberpunkTypography.bodySmall,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,7 +20,8 @@ class _StubApiClient extends ApiClient {
     String path, {
     Map<String, dynamic>? queryParameters,
   }) async {
-    throw UnimplementedError('not needed');
+    // Return empty list for sessions/tasks/agents queries
+    return {'sessions': [], 'tasks': [], 'agents': [], 'results': []} as T;
   }
 
   @override
@@ -27,12 +30,15 @@ class _StubApiClient extends ApiClient {
     dynamic data,
     Map<String, dynamic>? queryParameters,
   }) async {
-    return {
-      'id': 'msg',
-      'role': 'assistant',
-      'content': 'response',
-      'timestamp': DateTime.now().toIso8601String(),
-    } as T;
+    if (path == '/chat') {
+      return {
+        'id': 'msg',
+        'role': 'assistant',
+        'content': 'response',
+        'timestamp': DateTime.now().toIso8601String(),
+      } as T;
+    }
+    return {'sessions': [], 'tasks': [], 'agents': [], 'results': []} as T;
   }
 
   @override
@@ -41,17 +47,21 @@ class _StubApiClient extends ApiClient {
     dynamic data,
     Map<String, dynamic>? queryParameters,
   }) async {
-    throw UnimplementedError();
+    return {'sessions': [], 'tasks': [], 'agents': [], 'results': []} as T;
   }
 
   @override
   Future<T> delete<T>(String path) async {
-    throw UnimplementedError();
+    return {'success': true} as T;
   }
 }
 
 class _StubWebSocket extends WebSocketService {
   _StubWebSocket() : super(host: 'localhost', port: 8081);
+  final _messageController = StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
 
   @override
   Future<void> connect({String? path}) async {}
@@ -61,6 +71,19 @@ class _StubWebSocket extends WebSocketService {
 
   @override
   void send(Map<String, dynamic> message) {}
+
+  @override
+  bool get isConnected => true;
+}
+
+/// Test-specific ChatNotifier that doesn't load messages on init
+class _TestChatNotifier extends ChatNotifier {
+  _TestChatNotifier({required super.apiClient, required super.websocket});
+
+  @override
+  Future<void> loadMessages(String sessionId) async {
+    // No-op in tests - state is set directly
+  }
 }
 
 /// A widget that sets the chat state after the first frame, then rebuilds
@@ -82,7 +105,7 @@ class _InitialChatStateState extends ConsumerState<_InitialChatState> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Set initial state after dependencies are loaded (post-frame)
+    // Set initial state immediately (before first frame)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         ref.read(chatProvider.notifier).state = widget.initialState;
@@ -103,7 +126,7 @@ Widget _buildTestApp({
   return ProviderScope(
     overrides: [
       chatProvider.overrideWith(
-        (_) => ChatNotifier(
+        (_) => _TestChatNotifier(
           apiClient: _StubApiClient(),
           websocket: _StubWebSocket(),
         ),

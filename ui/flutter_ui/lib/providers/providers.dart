@@ -1,5 +1,8 @@
+export 'chat_provider.dart';
 export 'task_provider.dart';
 export 'agent_provider.dart';
+
+import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/api_client.dart';
@@ -28,3 +31,53 @@ final activeAgentProvider = StateProvider<Agent?>((ref) => null);
 
 // Connection state
 final connectionStateProvider = StateProvider<bool>((ref) => false);
+
+/// Monitors WebSocket + HTTP health and updates connectionStateProvider
+class ConnectionMonitor {
+  final WebSocketService _websocket;
+  final ApiClient _apiClient;
+  Timer? _timer;
+
+  ConnectionMonitor({
+    required WebSocketService websocket,
+    required ApiClient apiClient,
+  })  : _websocket = websocket,
+        _apiClient = apiClient {
+    _listenToWebSocket();
+    _startHealthChecks();
+  }
+
+  void _listenToWebSocket() {
+    // Wire WebSocket connection events to the connection state provider
+    _websocket.connectionStream.listen((connected) {
+      connectionStateProvider.overrideWith((ref) => connected);
+    });
+  }
+
+  void _startHealthChecks() {
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      // If WebSocket is not connected, try an HTTP health check to verify
+      // the daemon is still reachable
+      if (!_websocket.isConnected) {
+        try {
+          await _apiClient.get<Map<String, dynamic>>('/daemon/status');
+          connectionStateProvider.overrideWith((ref) => true);
+        } catch (_) {
+          connectionStateProvider.overrideWith((ref) => false);
+        }
+      }
+    });
+  }
+
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
+  }
+}
+
+/// Single connection monitor instance, created once at app startup
+final connectionMonitorProvider = Provider<ConnectionMonitor>((ref) {
+  final websocket = ref.watch(websocketProvider);
+  final client = ref.watch(apiClientProvider);
+  return ConnectionMonitor(websocket: websocket, apiClient: client);
+});
