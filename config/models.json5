@@ -46,6 +46,16 @@
       "models": ["zai/glm-4.5-air", "ollama/qwen2.5-coder"],
       "timeout": 20,
       "max_fails": 3
+    },
+    "classifier-test-a": {
+      "models": ["local/lfm-combined-sft"],
+      "timeout": 30,
+      "max_fails": 1
+    },
+    "classifier-test-b": {
+      "models": ["local/lfm-thinking-claude"],
+      "timeout": 30,
+      "max_fails": 1
     }
   },
 
@@ -70,6 +80,26 @@
           "context_limit": 8192,
           "max_output": 2048,
           "temperature": 0.7
+        },
+        "lfm-combined-sft": {
+          "name": "lfm2.5-1.2b-combined-serialized-sft",
+          "path": "/Volumes/LLMs/lfm2.5-1.2b-combined-serialized-sft",
+          "capabilities": ["completion", "code", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 512,
+          "temperature": 0.1
+        },
+        "lfm-thinking-claude": {
+          "name": "LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit",
+          "path": "/Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit",
+          "capabilities": ["completion", "reasoning"],
+          "input_cost": 0.0,
+          "output_cost": 0.0,
+          "context_limit": 8192,
+          "max_output": 512,
+          "temperature": 0.1
         }
       }
     },
