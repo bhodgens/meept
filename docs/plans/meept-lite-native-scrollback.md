@@ -328,6 +328,16 @@ func main() {
 | Main buffer + cursor positioning | ✅ | ✅ | Medium |
 | Full rewrite (Option E) | ✅ | ✅ | High |
 
+## Implementation Analysis (2026-05-22)
+
+Attempted partial fix using ANSI sequences with termbox input handling. Findings:
+
+1. **Render coupling**: The `render()` function and helpers (`renderAutocomplete()`, menu rendering) are deeply coupled with termbox-go's `SetCell` API
+2. **Menu system**: `internal/sharedclient/menus/` all use termbox rendering
+3. **Prompt renderer**: `sharedclient.PromptRenderer` uses termbox coordinates
+
+**Conclusion**: A partial fix is not feasible without breaking the menu system and prompt rendering. The entire rendering pipeline needs to be rewritten together.
+
 ## Conclusion
 
 **Recommended: Option E** - Full rewrite without termbox-go.
@@ -338,7 +348,12 @@ This provides:
 - Simpler codebase (direct ANSI, no library abstraction)
 - Better long-term maintainability
 
-**Estimated effort:** 4-6 hours for complete rewrite
+**Estimated effort:** 6-8 hours for complete rewrite (updated from 4-6 due to menu system complexity)
+
+**Alternative**: Keep current implementation and document the limitation. Users can:
+1. Use the full TUI (`meept chat`) which has better scrollback support
+2. Use daemon HTTP API directly for integrations
+3. Increase terminal scrollback buffer size in terminal settings
 
 ## Related Files
 
