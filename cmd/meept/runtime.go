@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -38,6 +39,7 @@ Examples:
 
 func newRuntimeStatusCmd() *cobra.Command {
 	var provider string
+	var format string
 
 	cmd := &cobra.Command{
 		Use:   "status [provider]",
@@ -47,15 +49,18 @@ func newRuntimeStatusCmd() *cobra.Command {
 			if len(args) > 0 {
 				provider = args[0]
 			}
-			return runRuntimeStatus(cmd.Context(), provider)
+			return runRuntimeStatusFormatted(cmd.Context(), provider, format)
 		},
 	}
+
+	cmd.Flags().StringVar(&format, "format", "text", "Output format: text or json")
 
 	return cmd
 }
 
 func newRuntimeStartCmd() *cobra.Command {
 	var provider string
+	var wait bool
 
 	cmd := &cobra.Command{
 		Use:   "start [provider]",
@@ -65,9 +70,11 @@ func newRuntimeStartCmd() *cobra.Command {
 			if len(args) > 0 {
 				provider = args[0]
 			}
-			return runRuntimeStart(cmd.Context(), provider)
+			return runRuntimeStart(cmd.Context(), provider, wait)
 		},
 	}
+
+	cmd.Flags().BoolVar(&wait, "wait", true, "Wait for runtime to become healthy before returning")
 
 	return cmd
 }
@@ -154,8 +161,12 @@ func readPID(path string) (int, error) {
 	return strconv.Atoi(string(data))
 }
 
-// runRuntimeStatus shows the current runtime status.
-func runRuntimeStatus(ctx context.Context, provider string) error {
+// runRuntimeStatusFormatted shows the current runtime status in the requested format.
+func runRuntimeStatusFormatted(ctx context.Context, provider, format string) error {
+	if provider == "" {
+		provider = "local"
+	}
+
 	_, pc, err := loadRuntimeConfig(provider)
 	if err != nil {
 		return err
@@ -163,9 +174,15 @@ func runRuntimeStatus(ctx context.Context, provider string) error {
 
 	pidFile := pidFileFromConfig(pc.Lifecycle)
 
-	// Check if PID file exists
 	data, err := os.ReadFile(pidFile)
 	if os.IsNotExist(err) {
+		if format == "json" {
+			return jsonOutput(map[string]any{
+				"provider": provider,
+				"running":  false,
+				"pid":      nil,
+			})
+		}
 		fmt.Printf("Runtime %s: not running (no PID file)\n", provider)
 		return nil
 	}
@@ -178,28 +195,51 @@ func runRuntimeStatus(ctx context.Context, provider string) error {
 		return fmt.Errorf("invalid PID in file: %w", err)
 	}
 
-	if !checkProcessAlive(pid) {
+	running := checkProcessAlive(pid)
+	if !running {
+		if format == "json" {
+			return jsonOutput(map[string]any{
+				"provider": provider,
+				"running":  false,
+				"pid":      pid,
+				"note":     "process dead, stale PID file",
+			})
+		}
 		fmt.Printf("Runtime %s: not running (process dead, PID: %d)\n", provider, pid)
-		os.Remove(pidFile)
 		return nil
 	}
-
-	// Process is running
-	fmt.Printf("Runtime %s: running (PID: %d)\n", provider, pid)
 
 	baseURL := pc.Options.BaseURL
 	healthEndpoint := pc.Lifecycle.HealthCheck.Endpoint
 	if healthEndpoint == "" {
 		healthEndpoint = "/health"
 	}
+
+	if format == "json" {
+		return jsonOutput(map[string]any{
+			"provider":        provider,
+			"running":         true,
+			"pid":             pid,
+			"health_endpoint": baseURL + healthEndpoint,
+			"pid_file":        pidFile,
+		})
+	}
+
+	fmt.Printf("Runtime %s: running (PID: %d)\n", provider, pid)
 	fmt.Printf("  Health endpoint:  %s%s\n", baseURL, healthEndpoint)
 	fmt.Printf("  PID file:         %s\n", pidFile)
-
 	return nil
 }
 
+// jsonOutput writes data as indented JSON to stdout.
+func jsonOutput(data any) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(data)
+}
+
 // runRuntimeStart starts the runtime.
-func runRuntimeStart(ctx context.Context, provider string) error {
+func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
 	_, pc, err := loadRuntimeConfig(provider)
 	if err != nil {
 		return err
@@ -230,6 +270,21 @@ func runRuntimeStart(ctx context.Context, provider string) error {
 	}
 
 	fmt.Printf("Runtime %s started (PID: %d)\n", provider, runtimeProc.PID())
+
+	if wait {
+		baseURL := pc.Options.BaseURL
+		hc := llm.NewHealthChecker(rtCfg, baseURL)
+		hc.Start(ctx)
+		defer hc.Stop()
+
+		fmt.Printf("Waiting for runtime to become healthy")
+		if err := hc.WaitForHealthy(ctx, rtCfg.SpawnTimeout); err != nil {
+			fmt.Printf(" - timeout\n")
+			return fmt.Errorf("runtime did not become healthy within %v: %w", rtCfg.SpawnTimeout, err)
+		}
+		fmt.Printf(" - healthy\n")
+	}
+
 	return nil
 }
 
@@ -283,7 +338,7 @@ func runRuntimeRestart(ctx context.Context, provider string) error {
 		fmt.Fprintf(os.Stderr, "Warning: stop failed: %v\n", err)
 	}
 	time.Sleep(1 * time.Second)
-	return runRuntimeStart(ctx, provider)
+	return runRuntimeStart(ctx, provider, true)
 }
 
 // runtimePIDConfig builds a minimal RuntimeConfig from a provider,
