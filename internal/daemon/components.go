@@ -1164,8 +1164,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 		// Create web handler adapter (implements web.Handler interface)
 		webHandler := &webHandlerAdapter{
-			agentLoop:     c.AgentLoop,
-			statusHandler: c.StatusHandler,
+			agentLoop:      c.AgentLoop,
+			statusHandler:  c.StatusHandler,
+			runtimeManager: c.RuntimeManager,
 		}
 
 		// Create authenticator
@@ -2810,8 +2811,9 @@ var _ worker.JobProcessor = (*AgentJobProcessor)(nil)
 
 // webHandlerAdapter adapts AgentLoop and StatusHandler to the web.Handler interface.
 type webHandlerAdapter struct {
-	agentLoop     *agent.AgentLoop
-	statusHandler *StatusHandler
+	agentLoop      *agent.AgentLoop
+	statusHandler  *StatusHandler
+	runtimeManager *llm.RuntimeManager
 }
 
 // Chat handles a chat request via the web handler.
@@ -2850,6 +2852,22 @@ func (h *webHandlerAdapter) Status(ctx context.Context) (map[string]any, error) 
 				"rpm_limit":        budgetStatus.RPMLimit,
 				"within_budget":    budgetStatus.WithinBudget,
 			}
+		}
+	}
+
+	// Add runtime health info if available
+	if h.runtimeManager != nil {
+		runtimeStatuses := h.runtimeManager.Status()
+		if len(runtimeStatuses) > 0 {
+			runtimeInfo := make(map[string]any)
+			for _, rs := range runtimeStatuses {
+				runtimeInfo[rs.ProviderID] = map[string]any{
+					"running": rs.Running,
+					"healthy": rs.Healthy,
+					"pid":     rs.PID,
+				}
+			}
+			status["runtimes"] = runtimeInfo
 		}
 	}
 

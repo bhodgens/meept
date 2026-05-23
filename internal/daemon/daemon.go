@@ -296,6 +296,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		SecurityChecker: nilSafeSecurityChecker(components),
 		Scheduler:        nilSafeScheduler(components),
 		CalendarClient:   nil, // Calendar integration requires OAuth setup
+		RuntimeManager:   nilSafeRuntimeManager(components),
 		DaemonController: daemonControl,
 		PidFile:          cfg.PIDFile,
 		StateDir:         cfg.StateDir,
@@ -824,4 +825,11 @@ func nilSafeTemplateRegistry(c *Components) *templates.Registry {
 		return nil
 	}
 	return c.TemplateRegistry
+}
+
+func nilSafeRuntimeManager(c *Components) *llm.RuntimeManager {
+	if c == nil {
+		return nil
+	}
+	return c.RuntimeManager
 }

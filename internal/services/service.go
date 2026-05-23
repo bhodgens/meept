@@ -43,6 +43,7 @@ type ServiceRegistry struct {
 	Daemon      *DaemonService
 	Model       *ModelService
 	Calendar    *CalendarService
+	Runtime     *RuntimeService
 }
 
 // Config holds dependencies for service instantiation.
@@ -64,6 +65,7 @@ type Config struct {
 	Scheduler      *scheduler.Scheduler
 	CalendarClient *calendar.Client
 	DaemonController DaemonController
+	RuntimeManager *llm.RuntimeManager
 	PidFile        string
 	StateDir       string
 	BinPath        string
@@ -128,6 +130,11 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	// CalendarService is available if client is configured
 	if cfg.CalendarClient != nil {
 		reg.Calendar = NewCalendarService(cfg.CalendarClient)
+	}
+
+	// RuntimeService is available if runtime manager is configured
+	if cfg.RuntimeManager != nil {
+		reg.Runtime = NewRuntimeService(cfg.RuntimeManager)
 	}
 
 	return reg, nil
