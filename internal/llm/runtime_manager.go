@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+// MetricsRecorder records runtime-related metrics.
+type MetricsRecorder interface {
+	RecordRuntimeHealth(providerID string, healthy bool)
+	RecordRuntimeSpawn(providerID string, duration time.Duration, success bool)
+	RecordRuntimeRestart(providerID string, attempt int, success bool)
+}
+
 // restartState tracks auto-restart attempts for a provider.
 type restartState struct {
 	attempts    int
@@ -23,6 +30,7 @@ type RuntimeManager struct {
 	restartStates  map[string]*restartState
 	mu             sync.Mutex
 	logger         *slog.Logger
+	metrics        MetricsRecorder
 }
 
 // NewRuntimeManager creates a new manager.
@@ -34,6 +42,13 @@ func NewRuntimeManager(logger *slog.Logger) *RuntimeManager {
 		restartStates:  make(map[string]*restartState),
 		logger:         logger,
 	}
+}
+
+// SetMetricsRecorder sets the metrics recorder for runtime events.
+func (m *RuntimeManager) SetMetricsRecorder(rec MetricsRecorder) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics = rec
 }
 
 // RegisterConfig registers a runtime configuration.
@@ -206,9 +221,12 @@ func (m *RuntimeManager) StartProvider(ctx context.Context, providerID string) e
 	hc := m.healthCheckers[providerID]
 
 	m.logger.Info("Starting runtime", "provider", providerID)
+	start := time.Now()
 	if err := proc.Start(ctx); err != nil {
+		m.recordSpawn(providerID, time.Since(start), false)
 		return fmt.Errorf("failed to start runtime %s: %w", providerID, err)
 	}
+	m.recordSpawn(providerID, time.Since(start), true)
 
 	hc.Start(ctx)
 
@@ -301,7 +319,27 @@ func (m *RuntimeManager) attemptAutoRestart(providerID string) {
 
 	if err := m.RestartProvider(ctx, providerID); err != nil {
 		m.logger.Error("Auto-restart failed", "provider", providerID, "error", err)
+		m.recordRestart(providerID, rs.attempts, false)
 	} else {
 		m.logger.Info("Auto-restart succeeded", "provider", providerID, "attempt", rs.attempts)
+		m.recordRestart(providerID, rs.attempts, true)
+	}
+}
+
+func (m *RuntimeManager) recordSpawn(providerID string, duration time.Duration, success bool) {
+	m.mu.Lock()
+	rec := m.metrics
+	m.mu.Unlock()
+	if rec != nil {
+		rec.RecordRuntimeSpawn(providerID, duration, success)
+	}
+}
+
+func (m *RuntimeManager) recordRestart(providerID string, attempt int, success bool) {
+	m.mu.Lock()
+	rec := m.metrics
+	m.mu.Unlock()
+	if rec != nil {
+		rec.RecordRuntimeRestart(providerID, attempt, success)
 	}
 }
