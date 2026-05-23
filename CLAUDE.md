@@ -453,7 +453,7 @@ make docs-generate    # Generate reference docs from Go source
 
 **IMPORTANT**: When making changes to the implementation, always update related documentation to stay in sync:
 
-1. **diagram.md**: Update architecture diagrams when adding/modifying components, agents, tools, or data flows
+1. **concepts/architecture.md**: Update architecture diagrams when adding/modifying components, agents, tools, or data flows
 2. **CLAUDE.md**: Update this file when changing architecture patterns, adding new agents, or modifying key behaviors
 3. **Code comments**: Keep inline documentation accurate when modifying function signatures or behavior
 4. **features.md**: Always update features as they are implemented or changed to match the code.

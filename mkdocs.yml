@@ -115,6 +115,7 @@ nav:
       - Token Cache CLI: reference/token-cache-cli.md
       - Models CLI Reference: reference/models-cli.md
       - RPC API: reference/rpc.md
+      - HTTP API: reference/http-api.md
       - Tool Reference: reference/tools.md
       - Agent Loop & Tool Architecture: reference/agent-loop-tools.md
       - Logging: reference/logging.md

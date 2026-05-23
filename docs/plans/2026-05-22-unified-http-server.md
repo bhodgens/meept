@@ -72,7 +72,7 @@ Defaults in `DefaultConfig()`:
 
 **WebSocket Support:**
 - `WebSocketHub` - Manages WebSocket connections with broadcast capability
-- `WithWebSocket(msgBus *bus.MessageBus)` - Functional option enabling `/ws` endpoint
+- `WithWebSocket(msgBus *bus.MessageBus, wsPath string)` - Functional option enabling WebSocket endpoint at configurable path
 - Subscribes to message bus with wildcard (`*`) and broadcasts events to connected clients
 
 **MCP over HTTP+SSE:**
@@ -81,6 +81,10 @@ Defaults in `DefaultConfig()`:
 - `WithMCP(services *ServiceRegistry, mcpPath string)` - Functional option enabling `/mcp` endpoints
 - `POST /mcp` - JSON-RPC request handler (implements initialize, tools/list, tools/call)
 - `GET /mcp/sse` - Server-Sent Events stream with bus event forwarding
+
+**Listener Management:**
+- `Addr() string` - Returns actual bound address (useful with `:0` for kernel-assigned ports)
+- Uses `net.Listen` + `Serve`/`ServeTLS` for port discovery instead of `ListenAndServe`
 
 **Functional Options Pattern:**
 ```go
@@ -95,10 +99,18 @@ Conditional endpoint enabling based on configuration:
 var httpOpts []http.ServerOption
 
 if fullCfg.Transport.HTTP.WebSocket && msgBus != nil {
-    httpOpts = append(httpOpts, http.WithWebSocket(msgBus))
+    wsPath := fullCfg.Transport.HTTP.WSPath
+    if wsPath == "" {
+        wsPath = "/ws"
+    }
+    httpOpts = append(httpOpts, http.WithWebSocket(msgBus, wsPath))
 }
 
 if fullCfg.Transport.HTTP.MCP && svcRegistry != nil {
+    mcpPath := fullCfg.Transport.HTTP.MCPPath
+    if mcpPath == "" {
+        mcpPath = "/mcp"
+    }
     httpOpts = append(httpOpts, http.WithMCP(svcRegistry, mcpPath))
 }
 
@@ -128,13 +140,13 @@ Added `SessionStore session.Store` field to `ServiceRegistry` for direct MCP acc
 | `tools/call` | **WIRED** | Calls MCP tools via SessionStore |
 
 **MCP Tools (tools/call):**
-| Tool | Status | Implementation |
-|------|--------|----------------|
-| `meept_sessions` | WIRED | Uses `SessionStore.List()`, `Create()`, `Get()` |
-| `meept_send` | Stub | Returns placeholder response |
-| `meept_events` | Stub | Returns empty events |
-| `meept_status` | WIRED | Uses `DaemonService.Status()` |
-| `meept_session_history` | WIRED | Uses `SessionStore.GetMessages()` |
+| Tool | HTTP Status | Stdio Status | Implementation |
+|------|-------------|--------------|----------------|
+| `meept_sessions` | WIRED | WIRED | HTTP: `SessionStore` direct; Stdio: RPC `ListSessions/CreateSession/AttachSession` |
+| `meept_send` | WIRED | WIRED | HTTP: `BusService.Publish("chat.request")`; Stdio: RPC `chat` method |
+| `meept_events` | WIRED | Wired (broken) | HTTP: MCPSession event buffer with `since` filtering; Stdio: RPC `bus.poll` (broken — bug 0051) |
+| `meept_status` | WIRED | WIRED | HTTP: `DaemonService.Status()`; Stdio: RPC `Status()` |
+| `meept_session_history` | WIRED | WIRED | HTTP: `SessionStore.GetMessages()`; Stdio: RPC `GetSessionMessages()` |
 
 ## Testing
 
@@ -181,34 +193,35 @@ go test ./internal/comm/http/... -v
 
 ## Status
 
-**IMPLEMENTATION COMPLETE**
+**IMPLEMENTATION COMPLETE** (with fixes applied 2026-05-22)
 
 - [x] Sprint 1: Configuration Schema
-- [x] Sprint 2: WebSocket Handler
+- [x] Sprint 2: WebSocket Handler (with configurable path)
 - [x] Sprint 3: MCP HTTP+SSE Handler
 - [x] Sprint 4: Functional Options Pattern
-- [x] Sprint 5: Daemon Wiring
+- [x] Sprint 5: Daemon Wiring (with WSPath passthrough)
 - [x] Sprint 6: MCP Tool Implementations (wired SessionStore)
-- [x] Sprint 7: Integration Testing
+- [x] Sprint 7: Integration Testing (functional route registration tests added)
 - [x] Sprint 8: Documentation Updates
+
+### Fixes Applied (2026-05-22)
+
+1. **CRITICAL: MCP route registration guard** — Route setup checked `s.mcpClient` (never assigned) instead of `s.mcpServices`. All MCP endpoints returned 404. Fixed to check `s.mcpServices != nil`.
+2. **WebSocket path not configurable** — `WithWebSocket` accepted no path argument; daemon wiring hardcoded `/ws`. Fixed `WithWebSocket` to accept `wsPath` parameter; daemon now reads `WSPath` from config.
+3. **Dead code removed** — Removed unused `mcpClient transport.Client` field and `internal/transport` import from `server.go`.
+4. **Listener address discovery** — Changed `Start()` from `ListenAndServe`/`ListenAndServeTLS` to `net.Listen` + `Serve`/`ServeTLS`, enabling `Addr()` to return the actual bound address for `:0` testing.
+5. **WebSocket Hijacker passthrough** — `loggingResponseWriter` now implements `http.Hijacker` and `http.Flusher` by delegating to the underlying `ResponseWriter`, fixing WebSocket upgrade and SSE streaming through the logging middleware.
+6. **meept_send wired to bus** — HTTP MCP `meept_send` now publishes `chat.request` messages via `BusService.Publish()`, matching the stdio path behavior.
+7. **meept_events event buffering** — HTTP MCP `meept_events` now reads from the MCPSession's event buffer (populated by the SSE bus subscription), with `since` timestamp filtering.
+8. **Functional tests added** — Route registration tests, MCP initialize handshake, meept_send bus verification, tools/list completeness, meept_status.
 
 ## Remaining Work (Optional Enhancements)
 
-### Chat Service Wiring (Low Priority)
-- Add `SendMessage(sessionID, message string)` method to `ChatService`
-- Wire `meept_send` tool to actually publish messages to chat bus
-
-### Bus Polling (Low Priority)
-- Add `Poll(subscriptionID, since string)` method to `BusService`
-- Wire `meept_events` tool to return actual bus events
-
-### Testing Enhancements (Medium Priority)
+### Testing Enhancements (Low Priority)
 - End-to-end WebSocket test with actual Flutter UI
-- MCP JSON-RPC full integration test with session operations
-- SSE stream test verifying bus event forwarding
+- SSE stream test verifying bus event forwarding end-to-end
 
 ## Known Limitations
 
-1. **meept_send returns stub** - Messages are not actually published to chat bus
-2. **meept_events returns empty** - Bus event polling not implemented
-3. **No session persistence for MCP** - Sessions are in-memory only (same as rest of system)
+1. **No session persistence for MCP** — Sessions are in-memory only (same as rest of system)
+2. **Stdio meept_events broken** — Stdio MCP path's `bus.poll` is broken due to bug 0051 (context cancellation); HTTP path works correctly via session buffering

@@ -327,13 +327,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
 			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
 			httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
+			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
 			// Build functional options based on config
 			var httpOpts []http.ServerOption
 			
 			// WebSocket support (if enabled)
 			if fullCfg.Transport.HTTP.WebSocket && msgBus != nil {
-				httpOpts = append(httpOpts, http.WithWebSocket(msgBus))
-				logger.Info("WebSocket endpoint enabled", "path", "/ws")
+				wsPath := fullCfg.Transport.HTTP.WSPath
+				if wsPath == "" {
+					wsPath = "/ws"
+				}
+				httpOpts = append(httpOpts, http.WithWebSocket(msgBus, wsPath))
+				logger.Info("WebSocket endpoint enabled", "path", wsPath)
 			}
 			
 			// MCP over HTTP+SSE support (if enabled)

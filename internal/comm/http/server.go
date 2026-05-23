@@ -2,6 +2,7 @@
 package http
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -25,7 +26,6 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/mcp"
-	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
 
@@ -45,6 +45,7 @@ type ServerConfig struct {
 	TLSCertFile    string        // TLS certificate file path
 	TLSKeyFile     string        // TLS key file path
 	AutoTLSCert    bool          // Auto-generate self-signed cert if not exists
+	RESTEnabled    bool          // Enable REST API at /api/v1/* (default: true)
 }
 
 // DefaultServerConfig returns sensible defaults for the menubar HTTP server.
@@ -57,6 +58,7 @@ func DefaultServerConfig() ServerConfig {
 		EnableCORS:     true,    // Enable CORS for local menubar app
 		RequireAuth:    false,   // Disabled by default for local development
 		APIKeys:        []string{},
+		RESTEnabled:    true, // REST API enabled by default
 	}
 }
 
@@ -86,6 +88,7 @@ type Server struct {
 	services        *services.ServiceRegistry
 	logger          *slog.Logger
 	server          *http.Server
+	listener        net.Listener
 	running         bool
 	// FirewallStatsGetter is an optional callback that returns firewall stats.
 	FirewallStatsGetter func() map[string]any
@@ -97,10 +100,10 @@ type Server struct {
 	wsHub *WebSocketHub
 
 	// MCP over HTTP+SSE support
-	mcpClient        transport.Client
-	mcpServices   *services.ServiceRegistry
+	mcpServices *services.ServiceRegistry
 	mcpSessions sync.Map // map[string]*MCPSession
 	mcpPath     string
+	wsPath      string
 }
 // AgentInfo describes an agent for listing.
 type AgentInfo struct {
@@ -214,12 +217,16 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 	}
 }
 
-// WithWebSocket enables WebSocket support on the /ws endpoint.
-func WithWebSocket(msgBus *bus.MessageBus) ServerOption {
+// WithWebSocket enables WebSocket support.
+func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 	return func(s *Server) {
 		if msgBus == nil {
 			return
 		}
+		if wsPath == "" {
+			wsPath = "/ws"
+		}
+		s.wsPath = wsPath
 		s.wsHub = NewWebSocketHub(s.logger)
 
 		// Subscribe to bus events and broadcast to WebSocket clients
@@ -235,12 +242,22 @@ func WithWebSocket(msgBus *bus.MessageBus) ServerOption {
 }
 
 
+// mcpEventRecord stores a buffered bus event for MCP polling.
+type mcpEventRecord struct {
+	Topic     string    `json:"topic"`
+	Type      string    `json:"type"`
+	Source    string    `json:"source"`
+	Timestamp time.Time `json:"timestamp"`
+	Payload   any       `json:"payload"`
+}
+
 // MCPSession represents an MCP over HTTP+SSE client session.
 type MCPSession struct {
 	mu        sync.RWMutex
 	sessionID string
 	eventChan chan *SSEEvent
 	done      chan struct{}
+	events    []mcpEventRecord // buffered events for meept_events polling
 }
 
 // SSEEvent represents a Server-Sent Event.
@@ -266,6 +283,17 @@ func WithMCP(services *services.ServiceRegistry, mcpPath string) ServerOption {
 
 // ServerOption is a functional option for configuring a Server.
 type ServerOption func(*Server)
+
+// Addr returns the actual address the server is listening on. Useful when
+// binding to :0 to discover the kernel-assigned port.
+func (s *Server) Addr() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.listener != nil {
+		return s.listener.Addr().String()
+	}
+	return s.config.Addr
+}
 
 // Start starts the HTTP server.
 func (s *Server) Start(ctx context.Context) error {
@@ -308,10 +336,19 @@ func (s *Server) Start(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
 		var err error
+		ln, listenErr := net.Listen("tcp", s.config.Addr)
+		if listenErr != nil {
+			errCh <- listenErr
+			return
+		}
+		s.mu.Lock()
+		s.listener = ln
+		s.mu.Unlock()
+
 		if s.config.UseTLS {
-			err = s.server.ListenAndServeTLS(s.config.TLSCertFile, s.config.TLSKeyFile)
+			err = s.server.ServeTLS(ln, s.config.TLSCertFile, s.config.TLSKeyFile)
 		} else {
-			err = s.server.ListenAndServe()
+			err = s.server.Serve(ln)
 		}
 		if err != nil && err != http.ErrServerClosed {
 			errCh <- err
@@ -348,8 +385,27 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // setupRoutes configures the HTTP routes.
 func (s *Server) setupRoutes(mux *http.ServeMux) {
-	// Health check
+	// Health check (always available)
 	mux.HandleFunc("GET /health", s.handleHealth)
+
+	if s.config.RESTEnabled {
+		s.setupRESTRoutes(mux)
+	}
+
+	// WebSocket endpoint (if enabled)
+	if s.wsHub != nil {
+		mux.HandleFunc(fmt.Sprintf("GET %s", s.wsPath), s.handleWebSocket)
+	}
+
+	// MCP over HTTP+SSE endpoints (if enabled)
+	if s.mcpServices != nil {
+		mux.HandleFunc(fmt.Sprintf("POST %s", s.mcpPath), s.handleMCPPost)
+		mux.HandleFunc(fmt.Sprintf("GET %s/sse", s.mcpPath), s.handleMCPSSE)
+	}
+}
+
+// setupRESTRoutes registers all /api/v1/* REST API endpoints.
+func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 
 	// Config endpoints
@@ -385,17 +441,6 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/live", s.handleLiveMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/historical", s.handleHistoricalMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
-
-	// WebSocket endpoint (if enabled)
-	if s.wsHub != nil {
-		mux.HandleFunc("GET /ws", s.handleWebSocket)
-	}
-
-	// MCP over HTTP+SSE endpoints (if enabled)
-	if s.mcpClient != nil {
-		mux.HandleFunc(fmt.Sprintf("POST %s", s.mcpPath), s.handleMCPPost)
-		mux.HandleFunc(fmt.Sprintf("GET %s/sse", s.mcpPath), s.handleMCPSSE)
-	}
 
 	// Chat endpoints
 	mux.HandleFunc("GET /api/v1/chat/queue/{id}", s.handleChatQueueStatus)
@@ -542,6 +587,8 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 }
 
 // loggingResponseWriter wraps http.ResponseWriter to capture the status code.
+// It delegates http.Hijacker and http.Flusher to the underlying writer so
+// that WebSocket upgrade and SSE streaming work through the logging middleware.
 type loggingResponseWriter struct {
 	http.ResponseWriter
 	statusCode int
@@ -550,6 +597,19 @@ type loggingResponseWriter struct {
 func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.statusCode = code
 	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (lrw *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := lrw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+func (lrw *loggingResponseWriter) Flush() {
+	if fl, ok := lrw.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
 }
 
 // writeJSON writes a JSON response.
@@ -1122,6 +1182,12 @@ func (s *Server) handleMCPPost(w http.ResponseWriter, r *http.Request) {
 	// Process JSON-RPC request
 	resp := s.processMCPRequest(r.Context(), &req)
 
+	// Notifications (e.g., notifications/initialized) return nil — respond with 204 No Content
+	if resp == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -1298,13 +1364,14 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mcpSessions.Store(session.sessionID, session)
 	defer s.mcpSessions.Delete(session.sessionID)
+	defer close(session.done)
 
 	// Subscribe to bus events for MCP clients
 	// Topics: chat messages, agent events, worker events
 	sub, cleanup := s.mcpServices.Bus.Subscribe(session.sessionID, "*")
 	defer cleanup()
 
-	// Forward bus events to SSE channel
+	// Forward bus events to SSE channel and buffer for polling
 	go func() {
 		for msg := range sub.Channel {
 			event := &SSEEvent{
@@ -1312,6 +1379,25 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 				Type: msg.Topic,
 				Data: msg.Payload,
 			}
+			// Buffer for meept_events polling
+			var payload any
+			if len(msg.Payload) > 0 {
+				_ = json.Unmarshal(msg.Payload, &payload)
+			}
+			session.mu.Lock()
+			session.events = append(session.events, mcpEventRecord{
+				Topic:     msg.Topic,
+				Type:      string(msg.Type),
+				Source:    msg.Source,
+				Timestamp: msg.Timestamp,
+				Payload:   payload,
+			})
+			// Cap buffer at 200 events
+			if len(session.events) > 200 {
+				session.events = session.events[len(session.events)-200:]
+			}
+			session.mu.Unlock()
+
 			select {
 			case session.eventChan <- event:
 			case <-session.done:
@@ -1393,28 +1479,77 @@ func (s *Server) mcpToolSessions(args map[string]any) (any, error) {
 }
 
 // mcpToolSend handles MCP meept_send tool.
-// TODO: Wire to chat service for actual message sending
 func (s *Server) mcpToolSend(args map[string]any) (any, error) {
 	sessionID, _ := args["session_id"].(string)
 	message, _ := args["message"].(string)
 	if sessionID == "" || message == "" {
 		return nil, fmt.Errorf("session_id and message are required")
 	}
+
+	if s.mcpServices.Bus == nil {
+		return nil, fmt.Errorf("bus service not available")
+	}
+
+	err := s.mcpServices.Bus.Publish(context.Background(), services.PublishRequest{
+		Topic:  "chat.request",
+		Type:   "request",
+		Source: "mcp-http",
+		Payload: map[string]any{
+			"message":        message,
+			"conversation_id": sessionID,
+			"source_client":  "mcp-http",
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to publish message: %w", err)
+	}
+
 	return map[string]any{
 		"response": fmt.Sprintf("Message queued for session %s", sessionID),
 	}, nil
 }
 
 // mcpToolEvents handles MCP meept_events tool.
-// TODO: Wire to bus service for actual event polling
 func (s *Server) mcpToolEvents(args map[string]any) (any, error) {
 	subID, _ := args["subscription_id"].(string)
 	if subID == "" {
 		return nil, fmt.Errorf("subscription_id is required")
 	}
-	return map[string]any{
-		"events": []any{},
-	}, nil
+
+	sessVal, ok := s.mcpSessions.Load(subID)
+	if !ok {
+		return nil, fmt.Errorf("subscription not found: %s", subID)
+	}
+	sess := sessVal.(*MCPSession)
+
+	since, _ := args["since"].(string)
+	sess.mu.RLock()
+	defer sess.mu.RUnlock()
+
+	var events []mcpEventRecord
+	if since != "" {
+		sinceTime, err := time.Parse(time.RFC3339Nano, since)
+		if err != nil {
+			// Try RFC3339 as fallback
+			sinceTime, _ = time.Parse(time.RFC3339, since)
+		}
+		if !sinceTime.IsZero() {
+			for _, e := range sess.events {
+				if e.Timestamp.After(sinceTime) {
+					events = append(events, e)
+				}
+			}
+		} else {
+			events = sess.events
+		}
+	} else {
+		events = sess.events
+	}
+
+	if events == nil {
+		events = []mcpEventRecord{}
+	}
+	return map[string]any{"events": events}, nil
 }
 
 // mcpToolStatus handles MCP meept_status tool.
