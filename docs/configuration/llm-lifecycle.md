@@ -118,6 +118,83 @@ rm ~/.meept/run/llama.pid
 meept runtime restart
 ```
 
+## Auto-Restart Policy
+
+When a runtime becomes unhealthy, Meept can automatically attempt to restart it:
+
+```json5
+"restart_policy": {
+  "enabled": true,
+  "max_attempts": 3,
+  "cooldown_seconds": 30,
+  "reset_after_seconds": 300
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | false | Enable automatic restart on unhealthy |
+| `max_attempts` | int | 3 | Maximum restart attempts before giving up |
+| `cooldown_seconds` | int | 30 | Minimum seconds between restart attempts |
+| `reset_after_seconds` | int | 300 | Reset failure count after this many seconds of healthy operation |
+
+When `enabled: true`, the health checker monitors the runtime and triggers a restart after `unhealthy_threshold` consecutive failures. After `max_attempts` failed restarts, it stops trying and logs an error. The failure counter resets after the runtime stays healthy for `reset_after_seconds`.
+
+## HTTP API
+
+Runtime management is available via the HTTP API when the daemon is running:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/runtime/status` | Status of all managed runtimes |
+| GET | `/api/v1/runtime/status/{provider}` | Status of a specific provider |
+| POST | `/api/v1/runtime/start/{provider}` | Start a provider's runtime |
+| POST | `/api/v1/runtime/stop/{provider}` | Stop a provider's runtime |
+| POST | `/api/v1/runtime/restart/{provider}` | Restart a provider's runtime |
+
+## RPC Methods
+
+Runtime management is also available via RPC:
+
+| Method | Parameters | Description |
+|--------|------------|-------------|
+| `runtime.status` | `{"provider": "local"}` (optional) | Get runtime status |
+| `runtime.start` | `{"provider": "local"}` | Start a runtime |
+| `runtime.stop` | `{"provider": "local"}` | Stop a runtime |
+| `runtime.restart` | `{"provider": "local"}` | Restart a runtime |
+
+## Daemon Status
+
+Runtime health information is included in the daemon status response (`GET /api/v1/daemon/status`) under the `runtimes` key:
+
+```json
+{
+  "running": true,
+  "runtimes": {
+    "local": {
+      "running": true,
+      "healthy": true,
+      "pid": 12345,
+      "runtime": "llama-cpp"
+    }
+  }
+}
+```
+
+## Metrics
+
+Runtime lifecycle events are recorded to the metrics subsystem:
+
+| Metric | Description |
+|--------|-------------|
+| `runtime.healthy` | 1.0 if healthy, 0.0 if not (per provider) |
+| `runtime.spawn.duration` | Time to spawn a runtime process |
+| `runtime.spawn.success` | Count of successful spawns |
+| `runtime.spawn.failure` | Count of failed spawns |
+| `runtime.restart.attempts` | Restart attempt number |
+| `runtime.restart.success` | Count of successful restarts |
+| `runtime.restart.failure` | Count of failed restarts |
+
 ## Supported Runtimes
 
 ### llama.cpp
