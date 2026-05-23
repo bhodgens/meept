@@ -257,6 +257,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components.ChatHandler.SetMetricsStore(metricsStore)
 	}
 
+	// Wire metrics recorder to runtime manager for lifecycle metrics
+	if metricsStore != nil && components != nil && components.RuntimeManager != nil {
+		components.RuntimeManager.SetMetricsRecorder(&runtimeMetricsAdapter{store: metricsStore})
+	}
+
 	// Create metrics collector with getter functions for actual values
 	var coll *metrics.Collector
 	if metricsStore != nil && components != nil {
@@ -316,6 +321,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			modelHandler := services.NewModelRPCHandler(svcRegistry.Model)
 			modelHandler.RegisterModelMethods(rpcServer)
 			logger.Info("Model RPC handlers registered")
+		}
+
+		// Runtime management handlers
+		if svcRegistry.Runtime != nil {
+			runtimeHandler := rpc.NewRuntimeRPCHandler(svcRegistry.Runtime)
+			runtimeHandler.RegisterRuntimeMethods(rpcServer)
+			logger.Info("Runtime RPC handlers registered")
 		}
 	}
 
@@ -730,6 +742,52 @@ func (w *metricsStoreWrapper) GetHistoricalMetrics(ctx context.Context, from, to
 
 func (w *metricsStoreWrapper) SubscribeMetrics() (_ <-chan *metrics.LiveMetricsSnapshot, _ func()) {
 	return w.store.SubscribeMetrics()
+}
+
+// runtimeMetricsAdapter adapts metrics.Store to implement llm.MetricsRecorder.
+type runtimeMetricsAdapter struct {
+	store *metrics.Store
+}
+
+func (a *runtimeMetricsAdapter) RecordRuntimeHealth(providerID string, healthy bool) {
+	if a.store == nil {
+		return
+	}
+	val := 0.0
+	if healthy {
+		val = 1.0
+	}
+	a.store.Record("runtime.healthy", val, map[string]string{
+		"provider": providerID,
+	})
+}
+
+func (a *runtimeMetricsAdapter) RecordRuntimeSpawn(providerID string, duration time.Duration, success bool) {
+	if a.store == nil {
+		return
+	}
+	tags := map[string]string{"provider": providerID}
+	a.store.Record("runtime.spawn.duration", duration.Seconds(), tags)
+	if success {
+		a.store.Record("runtime.spawn.success", 1, tags)
+	} else {
+		a.store.Record("runtime.spawn.failure", 1, tags)
+	}
+}
+
+func (a *runtimeMetricsAdapter) RecordRuntimeRestart(providerID string, attempt int, success bool) {
+	if a.store == nil {
+		return
+	}
+	tags := map[string]string{
+		"provider": providerID,
+	}
+	a.store.Record("runtime.restart.attempts", float64(attempt), tags)
+	if success {
+		a.store.Record("runtime.restart.success", 1, tags)
+	} else {
+		a.store.Record("runtime.restart.failure", 1, tags)
+	}
 }
 
 // nil-safe accessors extract fields from *Components, returning nil when
