@@ -106,6 +106,12 @@
           "interval_seconds": 10,
           "timeout_seconds": 5,
           "unhealthy_threshold": 3
+        },
+        "restart_policy": {
+          "enabled": true,
+          "max_attempts": 3,
+          "cooldown_seconds": 30,
+          "reset_after_seconds": 300
         }
       },
       "models": {
