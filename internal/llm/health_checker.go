@@ -3,10 +3,14 @@ package llm
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 )
+
+// HealthChangeCallback is invoked when health state changes.
+type HealthChangeCallback func(healthy bool)
 
 // HealthChecker performs periodic HTTP health checks on a runtime.
 type HealthChecker struct {
@@ -18,15 +22,18 @@ type HealthChecker struct {
 	mu             sync.RWMutex
 	stopCh         chan struct{}
 	stopped        bool
+	onHealthChange HealthChangeCallback
+	logger         *slog.Logger
 }
 
 // NewHealthChecker creates a new health checker.
 func NewHealthChecker(cfg *RuntimeConfig, baseURL string) *HealthChecker {
 	return &HealthChecker{
-		config:   cfg,
-		client:   &http.Client{Timeout: cfg.HealthTimeout},
-		baseURL:  baseURL,
-		stopCh:   make(chan struct{}),
+		config:  cfg,
+		client:  &http.Client{Timeout: cfg.HealthTimeout},
+		baseURL: baseURL,
+		stopCh:  make(chan struct{}),
+		logger:  slog.Default().With("component", "health-checker"),
 	}
 }
 
@@ -55,6 +62,8 @@ func (h *HealthChecker) checkOnce() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	wasHealthy := h.healthy
+
 	url := h.baseURL + h.config.HealthEndpoint
 	resp, err := h.client.Get(url)
 	if err != nil {
@@ -62,6 +71,7 @@ func (h *HealthChecker) checkOnce() {
 		if h.unhealthyCount >= h.config.HealthThreshold {
 			h.healthy = false
 		}
+		h.notifyTransition(wasHealthy)
 		return
 	}
 	defer resp.Body.Close()
@@ -75,6 +85,22 @@ func (h *HealthChecker) checkOnce() {
 			h.healthy = false
 		}
 	}
+	h.notifyTransition(wasHealthy)
+}
+
+func (h *HealthChecker) notifyTransition(wasHealthy bool) {
+	if wasHealthy == h.healthy {
+		return
+	}
+	if h.healthy {
+		h.logger.Info("Runtime became healthy")
+	} else {
+		h.logger.Warn("Runtime became unhealthy", "consecutive_failures", h.unhealthyCount)
+	}
+	if h.onHealthChange != nil {
+		cb := h.onHealthChange
+		go cb(h.healthy)
+	}
 }
 
 // Stop stops the health checker.
@@ -86,6 +112,13 @@ func (h *HealthChecker) Stop() {
 		close(h.stopCh)
 		h.stopped = true
 	}
+}
+
+// OnHealthChange sets a callback invoked on health state transitions.
+func (h *HealthChecker) OnHealthChange(cb HealthChangeCallback) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onHealthChange = cb
 }
 
 // IsHealthy returns true if the runtime is considered healthy based on recent checks.

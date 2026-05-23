@@ -19,7 +19,8 @@ type RuntimeLifecycleConfig struct {
 	PIDFile        string          `json:"pid_file"`         // Path to PID file
 	SpawnCommand   []string        `json:"spawn_command"`    // Command and args to spawn runtime
 	SpawnTimeout   int             `json:"spawn_timeout_seconds"`
-	HealthCheck    HealthCheckConfig `json:"health_check"`
+	HealthCheck    HealthCheckConfig   `json:"health_check"`
+	RestartPolicy  RestartPolicyConfig `json:"restart_policy"`
 }
 
 // HealthCheckConfig holds health check configuration.
@@ -28,6 +29,14 @@ type HealthCheckConfig struct {
 	IntervalSeconds    int    `json:"interval_seconds"`
 	TimeoutSeconds     int    `json:"timeout_seconds"`
 	UnhealthyThreshold int    `json:"unhealthy_threshold"`
+}
+
+// RestartPolicyConfig holds restart policy configuration.
+type RestartPolicyConfig struct {
+	Enabled           bool `json:"enabled"`               // Enable auto-restart on unhealthy
+	MaxAttempts       int  `json:"max_attempts"`          // Max restart attempts (default: 3)
+	CooldownSeconds   int  `json:"cooldown_seconds"`      // Seconds between restart attempts (default: 30)
+	ResetAfterSeconds int  `json:"reset_after_seconds"`   // Reset failure count after this many seconds of healthy (default: 300)
 }
 
 // RuntimeType represents a supported LLM runtime.
@@ -47,10 +56,14 @@ type RuntimeConfig struct {
 	AutoStop        bool
 	SpawnCommand    []string
 	SpawnTimeout    time.Duration
-	HealthEndpoint  string
-	HealthInterval  time.Duration
-	HealthTimeout   time.Duration
-	HealthThreshold int
+	HealthEndpoint    string
+	HealthInterval    time.Duration
+	HealthTimeout     time.Duration
+	HealthThreshold   int
+	RestartEnabled    bool
+	RestartMaxAttempts int
+	RestartCooldown   time.Duration
+	RestartResetAfter time.Duration
 }
 
 // ValidateAndNormalize validates the config and expands paths.
@@ -110,18 +123,35 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 		healthThreshold = cfg.HealthCheck.UnhealthyThreshold
 	}
 
+	restartMaxAttempts := 3
+	if cfg.RestartPolicy.MaxAttempts > 0 {
+		restartMaxAttempts = cfg.RestartPolicy.MaxAttempts
+	}
+	restartCooldown := 30 * time.Second
+	if cfg.RestartPolicy.CooldownSeconds > 0 {
+		restartCooldown = time.Duration(cfg.RestartPolicy.CooldownSeconds) * time.Second
+	}
+	restartResetAfter := 300 * time.Second
+	if cfg.RestartPolicy.ResetAfterSeconds > 0 {
+		restartResetAfter = time.Duration(cfg.RestartPolicy.ResetAfterSeconds) * time.Second
+	}
+
 	return &RuntimeConfig{
-		Type:            rt,
-		ModelPath:       modelPath,
-		PIDFile:         pidFile,
-		AutoStart:       cfg.AutoStart,
-		AutoStop:        cfg.AutoStopOnExit,
-		SpawnCommand:    spawnCmd,
-		SpawnTimeout:    spawnTimeout,
-		HealthEndpoint:  cfg.HealthCheck.Endpoint,
-		HealthInterval:  healthInterval,
-		HealthTimeout:   healthTimeout,
-		HealthThreshold: healthThreshold,
+		Type:              rt,
+		ModelPath:         modelPath,
+		PIDFile:           pidFile,
+		AutoStart:         cfg.AutoStart,
+		AutoStop:          cfg.AutoStopOnExit,
+		SpawnCommand:      spawnCmd,
+		SpawnTimeout:      spawnTimeout,
+		HealthEndpoint:    cfg.HealthCheck.Endpoint,
+		HealthInterval:    healthInterval,
+		HealthTimeout:     healthTimeout,
+		HealthThreshold:   healthThreshold,
+		RestartEnabled:    cfg.RestartPolicy.Enabled,
+		RestartMaxAttempts: restartMaxAttempts,
+		RestartCooldown:   restartCooldown,
+		RestartResetAfter: restartResetAfter,
 	}, nil
 }
 

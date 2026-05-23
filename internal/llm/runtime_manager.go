@@ -5,13 +5,22 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 )
+
+// restartState tracks auto-restart attempts for a provider.
+type restartState struct {
+	attempts    int
+	lastRestart time.Time
+	lastFailure time.Time
+}
 
 // RuntimeManager manages local LLM runtime lifecycle.
 type RuntimeManager struct {
 	configs        map[string]*RuntimeConfig
 	processes      map[string]*RuntimeProcess
 	healthCheckers map[string]*HealthChecker
+	restartStates  map[string]*restartState
 	mu             sync.Mutex
 	logger         *slog.Logger
 }
@@ -22,6 +31,7 @@ func NewRuntimeManager(logger *slog.Logger) *RuntimeManager {
 		configs:        make(map[string]*RuntimeConfig),
 		processes:      make(map[string]*RuntimeProcess),
 		healthCheckers: make(map[string]*HealthChecker),
+		restartStates:  make(map[string]*restartState),
 		logger:         logger,
 	}
 }
@@ -41,7 +51,26 @@ func (m *RuntimeManager) RegisterConfig(providerID string, cfg *RuntimeConfig, b
 	hc := NewHealthChecker(cfg, baseURL)
 	m.healthCheckers[providerID] = hc
 
-	m.logger.Info("Registered runtime config", "provider", providerID, "runtime", cfg.Type)
+	// Wire auto-restart callback
+	if cfg.RestartEnabled {
+		m.restartStates[providerID] = &restartState{}
+		pid := providerID // capture for closure
+		hc.OnHealthChange(func(healthy bool) {
+			if !healthy {
+				go m.attemptAutoRestart(pid)
+			} else {
+				m.mu.Lock()
+				if rs, ok := m.restartStates[pid]; ok {
+					if !rs.lastFailure.IsZero() && time.Since(rs.lastFailure) > m.configs[pid].RestartResetAfter {
+						rs.attempts = 0
+					}
+				}
+				m.mu.Unlock()
+			}
+		})
+	}
+
+	m.logger.Info("Registered runtime config", "provider", providerID, "runtime", cfg.Type, "auto_restart", cfg.RestartEnabled)
 	return nil
 }
 
@@ -229,4 +258,50 @@ func (m *RuntimeManager) GetHealthChecker(providerID string) (*HealthChecker, bo
 	defer m.mu.Unlock()
 	hc, ok := m.healthCheckers[providerID]
 	return hc, ok
+}
+
+func (m *RuntimeManager) attemptAutoRestart(providerID string) {
+	m.mu.Lock()
+	cfg, ok := m.configs[providerID]
+	if !ok || !cfg.RestartEnabled {
+		m.mu.Unlock()
+		return
+	}
+
+	rs := m.restartStates[providerID]
+	if rs == nil {
+		m.mu.Unlock()
+		return
+	}
+
+	if rs.attempts >= cfg.RestartMaxAttempts {
+		m.logger.Error("Auto-restart max attempts reached, giving up",
+			"provider", providerID, "attempts", rs.attempts)
+		m.mu.Unlock()
+		return
+	}
+
+	if !rs.lastRestart.IsZero() && time.Since(rs.lastRestart) < cfg.RestartCooldown {
+		m.mu.Unlock()
+		return
+	}
+
+	rs.attempts++
+	rs.lastRestart = time.Now()
+	rs.lastFailure = time.Now()
+	m.mu.Unlock()
+
+	m.logger.Warn("Attempting auto-restart",
+		"provider", providerID,
+		"attempt", rs.attempts,
+		"max", cfg.RestartMaxAttempts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.SpawnTimeout)
+	defer cancel()
+
+	if err := m.RestartProvider(ctx, providerID); err != nil {
+		m.logger.Error("Auto-restart failed", "provider", providerID, "error", err)
+	} else {
+		m.logger.Info("Auto-restart succeeded", "provider", providerID, "attempt", rs.attempts)
+	}
 }
