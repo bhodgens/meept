@@ -176,7 +176,7 @@ curl -X POST http://localhost:8081/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"meept_sessions","arguments":{"action":"list"}}}'
 
-# Run unit tests (27 tests covering REST, WebSocket, MCP, SSE)
+# Run unit tests (32 tests covering REST, WebSocket, MCP, SSE)
 go test ./internal/comm/http/... -v
 ```
 

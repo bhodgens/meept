@@ -927,3 +927,189 @@ func TestUnifiedHTTPServer_OptionNilGuards(t *testing.T) {
 		t.Fatal("server should still be created with nil services MCP option")
 	}
 }
+
+// TestUnifiedHTTPServer_MCPToolSendMissingParams verifies meept_send validates required params.
+func TestUnifiedHTTPServer_MCPToolSendMissingParams(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	svcRegistry := &services.ServiceRegistry{
+		Bus:          services.NewBusService(msgBus),
+		SessionStore: session.NewMemoryStore(nil),
+	}
+
+	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
+	defer cancel()
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+
+	// Missing session_id
+	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
+		"name":      "meept_send",
+		"arguments": map[string]any{"message": "hello"},
+	})
+	// Tool returns error content (not JSON-RPC error), so check result contains error text
+	if resp.Error != nil {
+		t.Fatalf("unexpected JSON-RPC error: %s", resp.Error.Message)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	content, _ := result["content"].([]any)
+	if len(content) == 0 {
+		t.Fatal("expected content in result")
+	}
+	textEntry, _ := content[0].(map[string]any)
+	text, _ := textEntry["text"].(string)
+	if !strings.Contains(text, "error") {
+		t.Errorf("expected error text about missing params, got: %s", text)
+	}
+
+	// Missing message
+	resp2 := mcpPost(t, client, baseURL, "tools/call", map[string]any{
+		"name":      "meept_send",
+		"arguments": map[string]any{"session_id": "test"},
+	})
+	if resp2.Error != nil {
+		t.Fatalf("unexpected JSON-RPC error: %s", resp2.Error.Message)
+	}
+	var result2 map[string]any
+	if err := json.Unmarshal(resp2.Result, &result2); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	content2, _ := result2["content"].([]any)
+	if len(content2) == 0 {
+		t.Fatal("expected content in result")
+	}
+	textEntry2, _ := content2[0].(map[string]any)
+	text2, _ := textEntry2["text"].(string)
+	if !strings.Contains(text2, "error") {
+		t.Errorf("expected error text about missing params, got: %s", text2)
+	}
+}
+
+// TestUnifiedHTTPServer_MCPToolSessionsUnknownAction verifies meept_sessions rejects unknown actions.
+func TestUnifiedHTTPServer_MCPToolSessionsUnknownAction(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	svcRegistry := &services.ServiceRegistry{
+		Bus:          services.NewBusService(msgBus),
+		SessionStore: session.NewMemoryStore(nil),
+	}
+
+	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
+	defer cancel()
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+
+	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
+		"name":      "meept_sessions",
+		"arguments": map[string]any{"action": "nonexistent_action"},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected JSON-RPC error: %s", resp.Error.Message)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	content, _ := result["content"].([]any)
+	if len(content) == 0 {
+		t.Fatal("expected content in result")
+	}
+	textEntry, _ := content[0].(map[string]any)
+	text, _ := textEntry["text"].(string)
+	if !strings.Contains(text, "unknown action") {
+		t.Errorf("expected error about unknown action, got: %s", text)
+	}
+}
+
+// TestUnifiedHTTPServer_MCPToolEventsMissingSubscription verifies meept_events requires subscription_id.
+func TestUnifiedHTTPServer_MCPToolEventsMissingSubscription(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	svcRegistry := &services.ServiceRegistry{
+		Bus:          services.NewBusService(msgBus),
+		SessionStore: session.NewMemoryStore(nil),
+	}
+
+	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
+	defer cancel()
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+
+	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
+		"name":      "meept_events",
+		"arguments": map[string]any{},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected JSON-RPC error: %s", resp.Error.Message)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	content, _ := result["content"].([]any)
+	if len(content) == 0 {
+		t.Fatal("expected content in result")
+	}
+	textEntry, _ := content[0].(map[string]any)
+	text, _ := textEntry["text"].(string)
+	if !strings.Contains(text, "subscription_id is required") {
+		t.Errorf("expected error about missing subscription_id, got: %s", text)
+	}
+}
+
+// TestUnifiedHTTPServer_MCPToolSessionHistoryMissingSession verifies meept_session_history handles missing session.
+func TestUnifiedHTTPServer_MCPToolSessionHistoryMissingSession(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	svcRegistry := &services.ServiceRegistry{
+		Bus:          services.NewBusService(msgBus),
+		SessionStore: session.NewMemoryStore(nil),
+	}
+
+	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
+	defer cancel()
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+
+	// Call with a session_id that doesn't exist — should return empty/nil, not crash
+	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
+		"name":      "meept_session_history",
+		"arguments": map[string]any{"session_id": "nonexistent-session"},
+	})
+	if resp.Error != nil {
+		t.Fatalf("unexpected JSON-RPC error: %s", resp.Error.Message)
+	}
+	// Should not crash — empty results are valid
+}
+
+// TestUnifiedHTTPServer_MCPInvalidParamsJSON verifies tools/call returns -32602 for malformed params.
+func TestUnifiedHTTPServer_MCPInvalidParamsJSON(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	svcRegistry := &services.ServiceRegistry{
+		Bus:          services.NewBusService(msgBus),
+		SessionStore: session.NewMemoryStore(nil),
+	}
+
+	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
+	defer cancel()
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+
+	// Send tools/call with params as a string instead of object
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":"not-an-object"}`
+	resp, err := client.Post(baseURL+"/mcp", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("MCP POST failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	var mcpResp mcpResponse
+	if err := json.Unmarshal(data, &mcpResp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if mcpResp.Error == nil {
+		t.Fatal("expected error for invalid params, got nil")
+	}
+	if mcpResp.Error.Code != -32602 {
+		t.Errorf("expected error code -32602, got %d", mcpResp.Error.Code)
+	}
+}
