@@ -11,6 +11,9 @@ flowchart TB
         TUI["TUI Mode<br/>internal/tui"]
         Telegram["Telegram Bot<br/>internal/comm/telegram"]
         WebUI["Web API<br/>internal/comm/web"]
+        MenuBar["MenuBar App<br/>menubar/"]
+        FlutterUI["Flutter UI<br/>via WebSocket"]
+        AIAgent["AI Agents<br/>via MCP"]
     end
 
     subgraph Daemon["Daemon Core"]
@@ -21,6 +24,7 @@ flowchart TB
 
     subgraph Communication["Communication Layer"]
         RPC["RPC Server<br/>Unix Socket JSON-RPC<br/>internal/rpc"]
+        HTTP["HTTP Server<br/>REST + WebSocket + MCP/SSE<br/>internal/comm/http"]
         Bus["Message Bus<br/>Pub/Sub<br/>internal/bus"]
     end
 
@@ -63,15 +67,20 @@ flowchart TB
 
     CLI --> RPC
     TUI --> RPC
+    MenuBar --> HTTP
+    FlutterUI --> HTTP
+    AIAgent --> HTTP
     Telegram --> Bus
     WebUI --> Bus
 
     DaemonMgr --> Config
     DaemonMgr --> Registry
     DaemonMgr --> RPC
+    DaemonMgr --> HTTP
     DaemonMgr --> Bus
 
     RPC <--> Bus
+    HTTP <--> Bus
     Bus --> AgentLoop
 
     AgentLoop --> Executor
@@ -112,6 +121,7 @@ flowchart TB
 | Component | Package | Description |
 |-----------|---------|-------------|
 | RPC Server | `internal/rpc` | Unix socket JSON-RPC server |
+| HTTP Server | `internal/comm/http` | REST API, WebSocket, MCP over HTTP+SSE |
 | Message Bus | `internal/bus` | Pub/sub message routing |
 
 ### Agent System

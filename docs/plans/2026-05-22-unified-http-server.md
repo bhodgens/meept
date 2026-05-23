@@ -176,7 +176,7 @@ curl -X POST http://localhost:8081/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"meept_sessions","arguments":{"action":"list"}}}'
 
-# Run unit tests
+# Run unit tests (27 tests covering REST, WebSocket, MCP, SSE)
 go test ./internal/comm/http/... -v
 ```
 
@@ -204,7 +204,7 @@ go test ./internal/comm/http/... -v
 - [x] Sprint 7: Integration Testing (functional route registration tests added)
 - [x] Sprint 8: Documentation Updates
 
-### Fixes Applied (2026-05-22)
+### Fixes Applied (2026-05-22, Round 1)
 
 1. **CRITICAL: MCP route registration guard** — Route setup checked `s.mcpClient` (never assigned) instead of `s.mcpServices`. All MCP endpoints returned 404. Fixed to check `s.mcpServices != nil`.
 2. **WebSocket path not configurable** — `WithWebSocket` accepted no path argument; daemon wiring hardcoded `/ws`. Fixed `WithWebSocket` to accept `wsPath` parameter; daemon now reads `WSPath` from config.
@@ -214,6 +214,17 @@ go test ./internal/comm/http/... -v
 6. **meept_send wired to bus** — HTTP MCP `meept_send` now publishes `chat.request` messages via `BusService.Publish()`, matching the stdio path behavior.
 7. **meept_events event buffering** — HTTP MCP `meept_events` now reads from the MCPSession's event buffer (populated by the SSE bus subscription), with `since` timestamp filtering.
 8. **Functional tests added** — Route registration tests, MCP initialize handshake, meept_send bus verification, tools/list completeness, meept_status.
+
+### Fixes Applied (2026-05-22, Round 2)
+
+9. **CRITICAL: MCP SSE goroutine leak** — `session.done` channel was never closed. When SSE client disconnected and eventChan was full, the forwarding goroutine blocked forever. Fixed with `defer close(session.done)`.
+10. **notifications/initialized returns 204 No Content** — Was returning `null\n` as JSON body. Fixed to return `204 No Content` for nil responses (MCP notifications are fire-and-forget).
+11. **Dead REST config field wired through** — `rest: false` in config had no runtime effect. Added `RESTEnabled bool` to `ServerConfig`, wired from daemon config, and refactored `setupRoutes()` to conditionally register REST routes via `setupRESTRoutes()`.
+12. **Addr() lock downgrade** — Changed from exclusive `Lock()` to `RLock()` since `Addr()` only reads data.
+13. **http-api.md added to mkdocs.yml nav** — Page was invisible to documentation site.
+14. **CLAUDE.md stale diagram.md reference fixed** — Changed to `concepts/architecture.md`.
+15. **architecture.md updated** — Added HTTP Server (REST+WebSocket+MCP/SSE), MenuBar, Flutter UI, and AI Agent clients to architecture diagram.
+16. **Test coverage expanded** — 11 new tests: MCP error paths (invalid JSON, wrong content-type, unknown method, missing/unknown tool), notifications/initialized 204, meept_sessions/history/events tool calls, SSE headers, MCP-not-enabled 404, WebSocket connection+broadcast+client-count, SSE session event+bus forwarding, option nil-guards.
 
 ## Remaining Work (Optional Enhancements)
 

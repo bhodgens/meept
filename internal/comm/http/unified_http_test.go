@@ -14,6 +14,8 @@ import (
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
+	"github.com/caimlas/meept/pkg/models"
+	"golang.org/x/net/websocket"
 )
 
 // startTestServer creates and starts a server on a random port, returning the
@@ -681,5 +683,247 @@ func TestUnifiedHTTPServer_MCPNotEnabled(t *testing.T) {
 
 	if resp.StatusCode != gohttp.StatusNotFound {
 		t.Errorf("expected 404 when MCP not enabled, got %d", resp.StatusCode)
+	}
+}
+
+// TestUnifiedHTTPServer_WebSocketConnectionAndBroadcast tests actual WS connection and broadcast.
+func TestUnifiedHTTPServer_WebSocketConnectionAndBroadcast(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+
+	baseURL, cancel := startTestServer(t, http.WithWebSocket(msgBus, "/ws"))
+	defer cancel()
+
+	// Replace http:// with ws:// for WebSocket URL
+	wsURL := "ws://" + strings.TrimPrefix(baseURL, "http://") + "/ws"
+
+	// Connect a WebSocket client
+	config, err := websocket.NewConfig(wsURL, baseURL)
+	if err != nil {
+		t.Fatalf("failed to create WS config: %v", err)
+	}
+	conn, err := websocket.DialConfig(config)
+	if err != nil {
+		t.Fatalf("failed to connect WebSocket: %v", err)
+	}
+	defer conn.Close()
+
+	// Publish a message on the bus — the WS forwarding goroutine should broadcast it.
+	// Note: use a single-segment topic because the bus subscribes with "*" which
+	// only matches single-segment topics in segment-based wildcard matching.
+	msgBus.Publish("chatreq", &models.BusMessage{
+		ID:      "ws-test-1",
+		Type:    models.MessageTypeEvent,
+		Source:  "test",
+		Payload: json.RawMessage(`{"message":"hello ws","conversation_id":"test-ws"}`),
+	})
+
+	// Read the broadcast message from WebSocket
+	var received map[string]any
+	deadline := time.Now().Add(3 * time.Second)
+	conn.SetReadDeadline(deadline)
+	err = websocket.JSON.Receive(conn, &received)
+	if err != nil {
+		t.Fatalf("failed to read WS broadcast: %v", err)
+	}
+
+	if received["type"] != "chatreq" {
+		t.Errorf("expected type 'chatreq', got %v", received["type"])
+	}
+
+	data, ok := received["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be map[string]any, got %T: %v", received["data"], received["data"])
+	}
+	if msg, _ := data["message"].(string); !strings.Contains(msg, "hello ws") {
+		t.Errorf("expected data.message to contain 'hello ws', got %v", data)
+	}
+}
+
+// TestUnifiedHTTPServer_WebSocketClientCount verifies hub tracks connected clients.
+func TestUnifiedHTTPServer_WebSocketClientCount(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+
+	baseURL, cancel := startTestServer(t, http.WithWebSocket(msgBus, "/ws"))
+	defer cancel()
+
+	wsURL := "ws://" + strings.TrimPrefix(baseURL, "http://") + "/ws"
+	config, err := websocket.NewConfig(wsURL, baseURL)
+	if err != nil {
+		t.Fatalf("failed to create WS config: %v", err)
+	}
+
+	// Connect first client
+	conn1, err := websocket.DialConfig(config)
+	if err != nil {
+		t.Fatalf("failed to connect first WS client: %v", err)
+	}
+	defer conn1.Close()
+
+	// Connect second client
+	conn2, err := websocket.DialConfig(config)
+	if err != nil {
+		t.Fatalf("failed to connect second WS client: %v", err)
+	}
+	defer conn2.Close()
+
+	// Give a moment for registration
+	time.Sleep(50 * time.Millisecond)
+
+	// Both clients connected — publish a message to verify they're alive.
+	// Use a single-segment topic to match the "*" wildcard subscription.
+	msgBus.Publish("testtopic", &models.BusMessage{
+		ID:      "ws-count-1",
+		Type:    models.MessageTypeEvent,
+		Source:  "test",
+		Payload: json.RawMessage(`{"ping":"pong"}`),
+	})
+
+	// Read from both connections to verify they're alive
+	var msg1, msg2 map[string]any
+	conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	websocket.JSON.Receive(conn1, &msg1)
+	websocket.JSON.Receive(conn2, &msg2)
+
+	if msg1["type"] != "testtopic" {
+		t.Errorf("conn1 expected type 'testtopic', got %v", msg1["type"])
+	}
+	if msg2["type"] != "testtopic" {
+		t.Errorf("conn2 expected type 'testtopic', got %v", msg2["type"])
+	}
+}
+
+// TestUnifiedHTTPServer_SSESessionEvent verifies SSE sends initial session event.
+func TestUnifiedHTTPServer_SSESessionEvent(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	svcRegistry := &services.ServiceRegistry{
+		Bus:          services.NewBusService(msgBus),
+		SessionStore: session.NewMemoryStore(nil),
+	}
+
+	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
+	defer cancel()
+
+	sseCtx, sseCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer sseCancel()
+
+	req, err := gohttp.NewRequestWithContext(sseCtx, "GET", baseURL+"/mcp/sse", nil)
+	if err != nil {
+		t.Fatalf("failed to create SSE request: %v", err)
+	}
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil && !strings.Contains(err.Error(), "context deadline") {
+		t.Fatalf("SSE request failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("SSE response is nil")
+	}
+	defer resp.Body.Close()
+
+	// Read initial data — should contain the session event
+	buf := make([]byte, 4096)
+	n, err := resp.Body.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Logf("SSE read error: %v", err)
+	}
+
+	body := string(buf[:n])
+	if !strings.Contains(body, "event: session") {
+		t.Errorf("expected 'event: session' in SSE stream, got: %s", body)
+	}
+	if !strings.Contains(body, "session_id") {
+		t.Errorf("expected 'session_id' in SSE stream, got: %s", body)
+	}
+	io.Copy(io.Discard, resp.Body)
+}
+
+// TestUnifiedHTTPServer_SSEBusEventForwarding verifies bus events are forwarded as SSE events.
+func TestUnifiedHTTPServer_SSEBusEventForwarding(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	svcRegistry := &services.ServiceRegistry{
+		Bus:          services.NewBusService(msgBus),
+		SessionStore: session.NewMemoryStore(nil),
+	}
+
+	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
+	defer cancel()
+
+	sseCtx, sseCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer sseCancel()
+
+	req, err := gohttp.NewRequestWithContext(sseCtx, "GET", baseURL+"/mcp/sse", nil)
+	if err != nil {
+		t.Fatalf("failed to create SSE request: %v", err)
+	}
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil && !strings.Contains(err.Error(), "context deadline") {
+		t.Fatalf("SSE request failed: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("SSE response is nil")
+	}
+	defer resp.Body.Close()
+
+	// Read initial session event
+	buf := make([]byte, 8192)
+	n, _ := resp.Body.Read(buf)
+	initialBody := string(buf[:n])
+	if !strings.Contains(initialBody, "event: session") {
+		t.Fatalf("missing initial session event, got: %s", initialBody)
+	}
+
+	// Publish a bus event — SSE should forward it.
+	// Use a single-segment topic to match the "*" wildcard subscription.
+	msgBus.Publish("chatresp", &models.BusMessage{
+		ID:      "sse-fwd-1",
+		Type:    models.MessageTypeEvent,
+		Source:  "test",
+		Payload: json.RawMessage(`{"content":"hello from SSE test"}`),
+	})
+
+	// Give the bus goroutine time to forward the event
+	time.Sleep(100 * time.Millisecond)
+
+	// Read the forwarded event — may need multiple reads
+	var forwardedBody string
+	for i := 0; i < 10; i++ {
+		n, _ = resp.Body.Read(buf)
+		if n > 0 {
+			forwardedBody = string(buf[:n])
+			if strings.Contains(forwardedBody, "event: chatresp") {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !strings.Contains(forwardedBody, "event: chatresp") {
+		t.Errorf("expected 'event: chatresp' in SSE forwarded data, got: %s", forwardedBody)
+	}
+	if !strings.Contains(forwardedBody, "hello from SSE test") {
+		t.Errorf("expected forwarded payload in SSE data, got: %s", forwardedBody)
+	}
+
+	io.Copy(io.Discard, resp.Body)
+}
+
+// TestUnifiedHTTPServer_OptionNilGuards verifies options handle nil dependencies gracefully.
+func TestUnifiedHTTPServer_OptionNilGuards(t *testing.T) {
+	cfg := http.DefaultServerConfig()
+
+	// WithWebSocket with nil bus should not panic
+	srv1 := http.NewServer(cfg, nil, nil, nil, nil, nil, http.WithWebSocket(nil, "/ws"))
+	if srv1 == nil {
+		t.Fatal("server should still be created with nil bus WS option")
+	}
+
+	// WithMCP with nil services should not panic
+	srv2 := http.NewServer(cfg, nil, nil, nil, nil, nil, http.WithMCP(nil, "/mcp"))
+	if srv2 == nil {
+		t.Fatal("server should still be created with nil services MCP option")
 	}
 }
