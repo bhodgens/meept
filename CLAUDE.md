@@ -55,14 +55,15 @@ make menubar-clean             # Clean menubar build artifacts
 # swift run         # Run menubar app
 # cp -r  # Install
 
-# Models management
-./bin/meept models                    # Interactive model management
-./bin/meept models list               # List configured models
-./bin/meept models providers          # List available providers
-./bin/meept models add                # Add new provider/model
-./bin/meept models remove <ref>       # Remove model
-./bin/meept models set-default <ref>  # Set default model
-./bin/meept models credentials        # Manage API credentials
+# Config management (replaces the old `meept models` command)
+./bin/meept config                    # Interactive config editor TUI
+./bin/meept config <section>          # Open TUI at specific section
+./bin/meept config list               # List config file paths and status
+./bin/meept config get <keypath>      # Get a config value
+./bin/meept config set <keypath> <v>  # Set a config value
+# Sections: daemon, transport, llm, models, agents, memory, security,
+#           mcp, client/tui, scheduler, plus ~20 advanced sections
+# Use `meept config models` for model management (replaces `meept models`)
 
 # ClawSkills commands
 ./bin/meept clawskills search "query"
@@ -117,7 +118,7 @@ User Input (CLI/Telegram/Web/MenuBar)
 | **Self-Improve** | `internal/selfimprove` (controller, detector, analyzer, generator, validator, applier) |
 | **Scheduler** | `internal/scheduler` (scheduler, jobs) |
 | **External** | `internal/comm/telegram`, `internal/comm/web`, `internal/calendar` |
-| **CLI** | `cmd/meept` (chat, status, jobs, memory, clawskills, selfimprove) |
+| **CLI** | `cmd/meept` (chat, status, config, jobs, memory, clawskills, selfimprove) |
 | **MenuBar** | `menubar/` (SwiftUI app), `internal/comm/http` (REST API) |
 | **Metrics** | `internal/metrics` (store, collector) |
 

@@ -152,6 +152,44 @@ meept selfimprove full-cycle
 meept selfimprove status
 ```
 
+### `meept config` - Configuration Management
+
+Interactive configuration editor and get/set operations. This replaces the old `meept models` command.
+
+```bash
+# Open interactive config editor TUI
+meept config
+
+# Open TUI at a specific section
+meept config <section>
+
+# List config file paths and status
+meept config list
+
+# Get a config value
+meept config get <keypath>
+
+# Set a config value
+meept config set <keypath> <value>
+```
+
+**Sections:** daemon, transport, llm, models, agents, memory, security, mcp, client/tui, scheduler (primary), plus ~20 advanced sections.
+
+**Examples:**
+```bash
+# Open models section (replaces old `meept models`)
+meept config models
+
+# Get the default model
+meept config get llm.default_model
+
+# Set a config value
+meept config set llm.default_model "claude-opus-4-6"
+
+# List all config files
+meept config list
+```
+
 ### `meept agents` - Agent Management
 
 List available agents and their capabilities.
