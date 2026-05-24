@@ -123,7 +123,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newSelfImproveCmd())
 	rootCmd.AddCommand(newShadowCmd())
 	rootCmd.AddCommand(newDevCmd())
-	rootCmd.AddCommand(newModelsCmd())
+	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newQCmd())
 	rootCmd.AddCommand(newCalendarCmd())
