@@ -114,8 +114,9 @@ func TestAppSectionFields(t *testing.T) {
 
 func TestAppSelectStubSection(t *testing.T) {
 	app := NewApp()
-	// Select a section that has no builder (should get stub)
-	app.SelectSection(2) // llm
+	// Select an advanced section that has no builder (should get stub)
+	app.ToggleAdvanced()
+	app.SelectSection(len(app.MenuItems()) - 1) // last advanced item, likely unimplemented
 	sec := app.Section()
 	if sec == nil {
 		t.Fatal("expected non-nil section")
