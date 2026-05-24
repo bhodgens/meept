@@ -318,14 +318,14 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			logger.Info("Daemon RPC handlers registered")
 		}
 		if svcRegistry.Model != nil {
-			modelHandler := services.NewModelRPCHandler(svcRegistry.Model)
+			modelHandler := NewModelRPCHandler(svcRegistry.Model)
 			modelHandler.RegisterModelMethods(rpcServer)
 			logger.Info("Model RPC handlers registered")
 		}
 
 		// Runtime management handlers
 		if svcRegistry.Runtime != nil {
-			runtimeHandler := rpc.NewRuntimeRPCHandler(svcRegistry.Runtime)
+			runtimeHandler := NewRuntimeRPCHandler(svcRegistry.Runtime)
 			runtimeHandler.RegisterRuntimeMethods(rpcServer)
 			logger.Info("Runtime RPC handlers registered")
 		}
@@ -334,7 +334,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	// Create HTTP server (if enabled)
 	var httpSrv *http.Server
 	if fullCfg.Transport.HTTP.Enabled {
-		if configService != nil && daemonControl != nil && metricsStore != nil {
+		if configService != nil && daemonControl != nil {
 			httpCfg := http.DefaultServerConfig()
 			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
 			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
@@ -364,7 +364,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("MCP over HTTP+SSE enabled", "path", mcpPath)
 			}
 			
-			httpSrv = http.NewServer(httpCfg, configService, daemonControl, &metricsStoreWrapper{store: metricsStore}, svcRegistry, logger, httpOpts...)
+			var metricsService interface {
+				GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error)
+				GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error)
+				SubscribeMetrics() (<-chan *metrics.LiveMetricsSnapshot, func())
+			}
+			if metricsStore != nil {
+				metricsService = &metricsStoreWrapper{store: metricsStore}
+			}
+			httpSrv = http.NewServer(httpCfg, configService, daemonControl, metricsService, svcRegistry, logger, httpOpts...)
 			// Wire firewall stats getter for HTTP endpoint
 			if components.AgentLoop != nil {
 				httpSrv.FirewallStatsGetter = func() map[string]any {

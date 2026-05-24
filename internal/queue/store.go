@@ -30,7 +30,7 @@ func NewStore(dbPath string, logger *slog.Logger) (*Store, error) {
 		logger = slog.Default()
 	}
 
-	db, err := sql.Open("modernc.org/sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

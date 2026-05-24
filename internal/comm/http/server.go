@@ -442,6 +442,13 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/historical", s.handleHistoricalMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
 
+	// Runtime management endpoints
+	mux.HandleFunc("GET /api/v1/runtime/status", s.handleRuntimeStatus)
+	mux.HandleFunc("GET /api/v1/runtime/status/{provider}", s.handleRuntimeStatusProvider)
+	mux.HandleFunc("POST /api/v1/runtime/start/{provider}", s.handleRuntimeStart)
+	mux.HandleFunc("POST /api/v1/runtime/stop/{provider}", s.handleRuntimeStop)
+	mux.HandleFunc("POST /api/v1/runtime/restart/{provider}", s.handleRuntimeRestart)
+
 	// Chat endpoints
 	mux.HandleFunc("GET /api/v1/chat/queue/{id}", s.handleChatQueueStatus)
 	mux.HandleFunc("POST /api/v1/chat/with-agent", s.handleChatWithAgent)
@@ -1575,4 +1582,87 @@ func (s *Server) mcpToolSessionHistory(args map[string]any) (any, error) {
 		limit = int(l)
 	}
 	return s.mcpServices.SessionStore.GetMessages(sessionID, 0, limit)
+}
+
+// handleRuntimeStatus handles GET /api/v1/runtime/status.
+func (s *Server) handleRuntimeStatus(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Runtime == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "runtime service not available")
+		return
+	}
+	resp, err := s.services.Runtime.Status(r.Context())
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleRuntimeStatusProvider handles GET /api/v1/runtime/status/{provider}.
+func (s *Server) handleRuntimeStatusProvider(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Runtime == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "runtime service not available")
+		return
+	}
+	provider := r.PathValue("provider")
+	if provider == "" {
+		provider = "local"
+	}
+	resp, err := s.services.Runtime.StatusForProvider(r.Context(), provider)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleRuntimeStart handles POST /api/v1/runtime/start/{provider}.
+func (s *Server) handleRuntimeStart(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Runtime == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "runtime service not available")
+		return
+	}
+	provider := r.PathValue("provider")
+	if provider == "" {
+		provider = "local"
+	}
+	if err := s.services.Runtime.StartProvider(r.Context(), provider); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
+}
+
+// handleRuntimeStop handles POST /api/v1/runtime/stop/{provider}.
+func (s *Server) handleRuntimeStop(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Runtime == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "runtime service not available")
+		return
+	}
+	provider := r.PathValue("provider")
+	if provider == "" {
+		provider = "local"
+	}
+	if err := s.services.Runtime.StopProvider(r.Context(), provider); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+// handleRuntimeRestart handles POST /api/v1/runtime/restart/{provider}.
+func (s *Server) handleRuntimeRestart(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Runtime == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "runtime service not available")
+		return
+	}
+	provider := r.PathValue("provider")
+	if provider == "" {
+		provider = "local"
+	}
+	if err := s.services.Runtime.RestartProvider(r.Context(), provider); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
 }

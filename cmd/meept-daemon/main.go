@@ -2,6 +2,7 @@
 package main
 
 import (
+	_ "modernc.org/sqlite" // Ensure sqlite driver is registered for side effects
 	"context"
 	"fmt"
 	"log/slog"

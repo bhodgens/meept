@@ -43,7 +43,7 @@ func NewSQLiteTrainingStore(dbPath string) (*SQLiteTrainingStore, error) {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	db, err := sql.Open("modernc.org/sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -659,7 +659,7 @@ func NewSQLiteExamplesStore(dbPath string) (*SQLiteExamplesStore, error) {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	db, err := sql.Open("modernc.org/sqlite", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -1065,7 +1065,7 @@ func NewSQLiteAdaptersStore(dbPath string) (*SQLiteAdaptersStore, error) {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	db, err := sql.Open("modernc.org/sqlite", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

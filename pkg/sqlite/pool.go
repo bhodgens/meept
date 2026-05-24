@@ -119,7 +119,7 @@ func (p *Pool) createConn() (*sql.DB, error) {
 	// Use URI mode for more options
 	dsn := "file:" + p.dbPath + "?_fk=1&cache=shared"
 
-	db, err := sql.Open("modernc.org/sqlite", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}

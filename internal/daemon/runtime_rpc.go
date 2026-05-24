@@ -1,10 +1,11 @@
-package rpc
+package daemon
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 
+	"github.com/caimlas/meept/internal/rpc"
 	"github.com/caimlas/meept/internal/services"
 )
 
@@ -19,7 +20,7 @@ func NewRuntimeRPCHandler(service *services.RuntimeService) *RuntimeRPCHandler {
 }
 
 // RegisterRuntimeMethods registers runtime RPC methods.
-func (h *RuntimeRPCHandler) RegisterRuntimeMethods(server *Server) {
+func (h *RuntimeRPCHandler) RegisterRuntimeMethods(server *rpc.Server) {
 	server.RegisterHandler("runtime.status", h.handleStatus)
 	server.RegisterHandler("runtime.start", h.handleStart)
 	server.RegisterHandler("runtime.stop", h.handleStop)
@@ -44,8 +45,8 @@ func (h *RuntimeRPCHandler) handleStatus(ctx context.Context, params json.RawMes
 			return nil, err
 		}
 		return map[string]any{
-			RPCKeyStatus: "ok",
-			"runtime":    resp,
+			rpc.RPCKeyStatus: "ok",
+			"runtime":        resp,
 		}, nil
 	}
 
@@ -54,8 +55,8 @@ func (h *RuntimeRPCHandler) handleStatus(ctx context.Context, params json.RawMes
 		return nil, err
 	}
 	return map[string]any{
-		RPCKeyStatus: "ok",
-		"runtimes":   resp.Runtimes,
+		rpc.RPCKeyStatus: "ok",
+		"runtimes":       resp.Runtimes,
 	}, nil
 }
 
@@ -78,8 +79,8 @@ func (h *RuntimeRPCHandler) handleStart(ctx context.Context, params json.RawMess
 		return nil, err
 	}
 	return map[string]any{
-		RPCKeyStatus: "started",
-		"provider":   req.Provider,
+		rpc.RPCKeyStatus: "started",
+		"provider":       req.Provider,
 	}, nil
 }
 
@@ -102,8 +103,8 @@ func (h *RuntimeRPCHandler) handleStop(ctx context.Context, params json.RawMessa
 		return nil, err
 	}
 	return map[string]any{
-		RPCKeyStatus: "stopped",
-		"provider":   req.Provider,
+		rpc.RPCKeyStatus: "stopped",
+		"provider":       req.Provider,
 	}, nil
 }
 
@@ -126,7 +127,7 @@ func (h *RuntimeRPCHandler) handleRestart(ctx context.Context, params json.RawMe
 		return nil, err
 	}
 	return map[string]any{
-		RPCKeyStatus: "restarted",
-		"provider":   req.Provider,
+		rpc.RPCKeyStatus: "restarted",
+		"provider":       req.Provider,
 	}, nil
 }

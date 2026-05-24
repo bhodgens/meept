@@ -327,19 +327,13 @@ func (m *RuntimeManager) attemptAutoRestart(providerID string) {
 }
 
 func (m *RuntimeManager) recordSpawn(providerID string, duration time.Duration, success bool) {
-	m.mu.Lock()
-	rec := m.metrics
-	m.mu.Unlock()
-	if rec != nil {
+	if rec := m.metrics; rec != nil {
 		rec.RecordRuntimeSpawn(providerID, duration, success)
 	}
 }
 
 func (m *RuntimeManager) recordRestart(providerID string, attempt int, success bool) {
-	m.mu.Lock()
-	rec := m.metrics
-	m.mu.Unlock()
-	if rec != nil {
+	if rec := m.metrics; rec != nil {
 		rec.RecordRuntimeRestart(providerID, attempt, success)
 	}
 }

@@ -1,4 +1,4 @@
-package services
+package daemon
 
 import (
 	"context"
@@ -6,15 +6,16 @@ import (
 	"fmt"
 
 	"github.com/caimlas/meept/internal/rpc"
+	"github.com/caimlas/meept/internal/services"
 )
 
 // ModelRPCHandler handles model RPC methods.
 type ModelRPCHandler struct {
-	model *ModelService
+	model *services.ModelService
 }
 
 // NewModelRPCHandler creates a new model RPC handler.
-func NewModelRPCHandler(model *ModelService) *ModelRPCHandler {
+func NewModelRPCHandler(model *services.ModelService) *ModelRPCHandler {
 	return &ModelRPCHandler{model: model}
 }
 
