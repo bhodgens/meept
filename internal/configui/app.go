@@ -38,6 +38,7 @@ type App struct {
 	editor        *FieldEditor
 	width, height int
 	styles        styles
+	errMsg        string
 }
 
 type styles struct {
@@ -316,7 +317,13 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (a *App) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
-		// Save handled by caller after tea.Quit
+		if a.section != nil {
+			if err := SaveSection(a.section); err != nil {
+				a.errMsg = err.Error()
+				return a, nil
+			}
+		}
+		a.errMsg = ""
 		a.BackToMenu()
 	case "n":
 		if a.section != nil {
@@ -325,6 +332,7 @@ func (a *App) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				f.Reset()
 			}
 		}
+		a.errMsg = ""
 		a.BackToMenu()
 	case "esc":
 		a.phase = PhaseSection
@@ -428,6 +436,9 @@ func (a *App) viewEditor() string {
 
 func (a *App) viewConfirm() string {
 	s := a.styles.title.Render("save changes?") + "\n\n"
+	if a.errMsg != "" {
+		s += a.styles.dirtyMarker.Render("error: "+a.errMsg) + "\n\n"
+	}
 	s += "  y - save\n"
 	s += "  n - discard\n"
 	s += "  esc - cancel\n"
