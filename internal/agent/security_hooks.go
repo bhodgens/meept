@@ -209,3 +209,47 @@ func (s *SecurityTransformContext) TransformContext(_ context.Context, messages 
 	}
 	return ContextTransform{}
 }
+
+// SecretObfuscationHook implements TransformContextHook.
+// It obfuscates secrets in all message content before sending to the LLM.
+type SecretObfuscationHook struct {
+	obfuscator *intsecurity.SecretObfuscator
+	logger     *slog.Logger
+}
+
+// NewSecretObfuscationHook creates a new hook that obfuscates secrets in messages.
+// Returns nil if the obfuscator is nil.
+func NewSecretObfuscationHook(obfuscator *intsecurity.SecretObfuscator, logger *slog.Logger) *SecretObfuscationHook {
+	if obfuscator == nil {
+		return nil
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &SecretObfuscationHook{
+		obfuscator: obfuscator,
+		logger:     logger.With("component", "secret-obfuscation"),
+	}
+}
+
+func (h *SecretObfuscationHook) TransformContext(_ context.Context, messages []llm.ChatMessage, toolDefs []llm.ToolDefinition) ContextTransform {
+	modified := false
+	for i, msg := range messages {
+		obfuscated := h.obfuscator.Obfuscate(msg.Content)
+		if obfuscated != msg.Content {
+			messages[i].Content = obfuscated
+			modified = true
+		}
+	}
+
+	if modified {
+		h.logger.Debug("obfuscated secrets in context messages")
+		return ContextTransform{
+			Messages: messages,
+			ToolDefs: toolDefs,
+			Modified: true,
+			Reason:   "secret obfuscation",
+		}
+	}
+	return ContextTransform{}
+}

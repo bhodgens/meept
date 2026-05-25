@@ -575,6 +575,19 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 	}
 
+	// Register secret obfuscation hook to protect secrets from LLM exposure.
+	secretObfuscator := intsecurity.NewSecretObfuscator()
+	if configDir, err := os.UserHomeDir(); err == nil {
+		secretsPath := filepath.Join(configDir, ".meept", "secrets.json5")
+		if err := secretObfuscator.LoadFromConfig(secretsPath); err != nil {
+			logger.Warn("failed to load secrets config", "path", secretsPath, "error", err)
+		}
+	}
+	if secretHook := agent.NewSecretObfuscationHook(secretObfuscator, logger.With("hook", "secret-obfuscation")); secretHook != nil {
+		hookRegistry.RegisterTransformContext("secret-obfuscation", agent.HookPriorityCritical, secretHook)
+		logger.Info("Registered secret obfuscation hook")
+	}
+
 	agentOpts = append(agentOpts, agent.WithEventEmitter(emitter), agent.WithHookRegistry(hookRegistry))
 
 	// Note: memvid and taskStore are wired AFTER their initialization below
@@ -1907,6 +1920,8 @@ func registerBuiltinTools(
 	registry.Register(builtin.NewFileEditTool(checker, readCache))
 	registry.Register(builtin.NewDeleteFileTool(checker))
 	registry.Register(builtin.NewListDirectoryTool(checker))
+	registry.Register(builtin.NewFileFindTool(checker))
+	registry.Register(builtin.NewFileGrepTool(checker))
 
 	// Shell tool with security orchestrator for Tirith scanning
 	wd, _ := os.Getwd()
@@ -2321,6 +2336,36 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 		}
 		if tool, err := codetools.NewLSPDiagnosticsTool(c.LSPManager); err != nil {
 			logger.Error("Failed to initialize LSP diagnostics tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPRenameTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP rename tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPCodeActionsTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP code actions tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPTypeDefinitionTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP type definition tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPImplementationTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP implementation tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPDocumentSymbolsTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP document symbols tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPFormatTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP format tool", "error", err)
 		} else {
 			c.ToolRegistry.Register(tool)
 		}
