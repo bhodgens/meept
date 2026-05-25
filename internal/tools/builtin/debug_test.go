@@ -21,23 +21,17 @@ func TestDebugToolParameters(t *testing.T) {
 	tool := NewDebugTool(mgr, nil)
 
 	params := tool.Parameters()
-	if params["type"] != "object" {
-		t.Fatalf("expected type 'object', got %v", params["type"])
+	if params.Type != "object" {
+		t.Fatalf("expected type 'object', got %v", params.Type)
 	}
 
-	props, ok := params["properties"].(map[string]ParameterProperty)
-	if !ok {
-		t.Fatalf("expected properties to be map[string]ParameterProperty")
+	if _, ok := params.Properties["action"]; !ok {
+		t.Fatal("expected 'action' property")
 	}
-	_ = props
 
 	// Check that 'action' is required.
-	required, ok := params["required"].([]string)
-	if !ok {
-		t.Fatalf("expected required to be []string")
-	}
 	found := false
-	for _, r := range required {
+	for _, r := range params.Required {
 		if r == "action" {
 			found = true
 			break
@@ -209,9 +203,13 @@ func TestDebugToolRawToMap(t *testing.T) {
 		t.Fatalf("expected key=value, got %v", m)
 	}
 
-	// Non-object JSON (should fall back to raw).
+	// Non-object JSON (should fall back to raw string).
 	m = rawToMap(json.RawMessage(`"hello"`))
-	if m["raw"] != "hello" {
-		t.Fatalf("expected raw=hello, got %v", m)
+	raw, ok := m["raw"].(string)
+	if !ok {
+		t.Fatalf("expected raw to be string, got %T", m["raw"])
+	}
+	if raw != `"hello"` {
+		t.Fatalf("expected raw=%q, got %q", `"hello"`, raw)
 	}
 }

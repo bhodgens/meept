@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -51,7 +52,7 @@ type DAPResponse struct {
 // DAPEvent is a DAP protocol event message.
 type DAPEvent struct {
 	Seq   int64           `json:"seq"`
-	Type  string          `json:"event"`
+	Type  string          `json:"type"`
 	Event string          `json:"event"`
 	Body  json.RawMessage `json:"body"`
 }
@@ -212,10 +213,14 @@ func (c *Client) readLoop(ctx context.Context) {
 			}
 			// EOF means the adapter exited.
 			if err == io.EOF {
-				c.logger.Debug("adapter stdout closed")
+				if c.logger != nil {
+					c.logger.Debug("adapter stdout closed")
+				}
 				return
 			}
-			c.logger.Error("failed to read DAP message", "error", err)
+			if c.logger != nil {
+				c.logger.Error("failed to read DAP message", "error", err)
+			}
 			return
 		}
 
@@ -232,7 +237,8 @@ func (c *Client) readMessage() (json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
-		line = trimCR(line)
+		// Trim both \r\n (Windows/DAP) and \n (bare newline).
+		line = strings.TrimRight(line, "\r\n")
 
 		if line == "" {
 			break
@@ -265,7 +271,9 @@ func (c *Client) dispatchMessage(msg json.RawMessage) {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(msg, &header); err != nil {
-		c.logger.Error("failed to parse DAP message type", "error", err)
+		if c.logger != nil {
+			c.logger.Error("failed to parse DAP message type", "error", err)
+		}
 		return
 	}
 
@@ -273,7 +281,9 @@ func (c *Client) dispatchMessage(msg json.RawMessage) {
 	case "response":
 		var resp DAPResponse
 		if err := json.Unmarshal(msg, &resp); err != nil {
-			c.logger.Error("failed to parse DAP response", "error", err)
+			if c.logger != nil {
+				c.logger.Error("failed to parse DAP response", "error", err)
+			}
 			return
 		}
 		c.handleResponse(&resp)
@@ -281,13 +291,17 @@ func (c *Client) dispatchMessage(msg json.RawMessage) {
 	case "event":
 		var evt DAPEvent
 		if err := json.Unmarshal(msg, &evt); err != nil {
-			c.logger.Error("failed to parse DAP event", "error", err)
+			if c.logger != nil {
+				c.logger.Error("failed to parse DAP event", "error", err)
+			}
 			return
 		}
 		c.handleEvent(&evt)
 
 	default:
-		c.logger.Warn("unknown DAP message type", "type", header.Type)
+		if c.logger != nil {
+			c.logger.Warn("unknown DAP message type", "type", header.Type)
+		}
 	}
 }
 

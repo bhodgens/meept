@@ -17,6 +17,7 @@ import (
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/code/lsp"
+	"github.com/caimlas/meept/internal/debug"
 	codetools "github.com/caimlas/meept/internal/code/tools"
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
@@ -143,6 +144,9 @@ type Components struct {
 	// Code intelligence
 	ASTParser  *ast.ParserManager
 	LSPManager *lsp.Manager
+
+	// Debug manager
+	DebugManager *debug.Manager
 
 	// Calendar integration
 	CalendarClient   *calendar.Client
@@ -847,6 +851,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if cfg.CodeIntel.Enabled {
 		c.initializeCodeIntel(cfg, logger)
 	}
+
+	// Initialize DAP debugging support
+	c.initializeDebugTools(c.ToolRegistry, c.SecurityChecker, logger)
 
 	// Initialize calendar integration if enabled
 	if cfg.Calendar.Enabled {
@@ -1553,6 +1560,14 @@ func (c *Components) Stop(ctx context.Context) error {
 	if c.LSPManager != nil {
 		if err := c.LSPManager.StopAll(ctx); err != nil {
 			c.Logger.Error("Failed to stop LSP servers", "error", err)
+			lastErr = err
+		}
+	}
+
+	// Stop all debug sessions
+	if c.DebugManager != nil {
+		if err := c.DebugManager.Close(); err != nil {
+			c.Logger.Error("Failed to stop debug manager", "error", err)
 			lastErr = err
 		}
 	}
@@ -2375,6 +2390,13 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 	}
 
 	logger.Info("Code intelligence initialized")
+}
+
+// initializeDebugTools sets up DAP debugging support.
+func (c *Components) initializeDebugTools(registry *tools.Registry, checker *security.PermissionChecker, logger *slog.Logger) {
+	c.DebugManager = debug.NewManager()
+	registry.Register(builtin.NewDebugTool(c.DebugManager, checker))
+	logger.Info("Debug tools registered")
 }
 
 // initializeCalendar sets up Google Calendar integration including OAuth token management,

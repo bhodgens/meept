@@ -78,13 +78,20 @@ func DetectAdapter(program string, workDir string) (*AdapterConfig, error) {
 	for i := range defaultAdapters {
 		a := &defaultAdapters[i]
 		s := 0
+		extMatch := false
 
 		// Check file extension match
 		for _, ft := range a.FileTypes {
 			if ext == ft {
 				s += 10
+				extMatch = true
 				break
 			}
+		}
+
+		// Require at least an extension match to be considered.
+		if !extMatch {
+			continue
 		}
 
 		// Check root markers

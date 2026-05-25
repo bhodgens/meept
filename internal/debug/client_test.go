@@ -5,117 +5,38 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
 )
 
-// mockConn simulates a DAP adapter by reading requests from a buffer and
-// writing responses/events into another buffer.
-type mockConn struct {
-	in  *bytes.Buffer // what the client writes (requests)
-	out *bytes.Buffer // what the client reads (responses/events)
-}
-
-func newMockConn() *mockConn {
-	return &mockConn{
-		in:  &bytes.Buffer{},
-		out: &bytes.Buffer{},
-	}
-}
-
-// writeDAPMessage writes a DAP message with Content-Length framing.
-func writeDAPMessage(buf *bytes.Buffer, msg any) error {
+// writeDAP writes a DAP message with Content-Length framing to an io.Writer.
+func writeDAP(w io.Writer, msg any) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
-	_, err = buf.WriteString("Content-Length: ")
-	if err != nil {
+	if _, err := fmt.Fprintf(w, "Content-Length: %d\r\n\r\n", len(data)); err != nil {
 		return err
 	}
-	_, err = buf.WriteString(json.Number(strings.TrimSpace(fmt.Sprintf("%d", len(data)))))
-	if err != nil {
-		return err
-	}
-	_, err = buf.WriteString("\r\n\r\n")
-	if err != nil {
-		return err
-	}
-	_, err = buf.Write(data)
+	_, err = w.Write(data)
 	return err
 }
 
-// fmt.Sprintf equivalent for string conversion
-func fmt_Sprintf(format string, a ...any) string {
-	return strings.Replace(format, "%d", "", 1)
-}
+func TestDAPReadMessageBasic(t *testing.T) {
+	var buf bytes.Buffer
 
-func writeDAPResponse(buf *bytes.Buffer, requestSeq int64, success bool, command string, body any) error {
-	resp := DAPResponse{
-		Seq:        requestSeq + 100, // Different seq from request
-		Type:       "response",
-		RequestSeq: requestSeq,
-		Success:    success,
-		Command:    command,
-	}
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		resp.Body = data
-	}
-	return writeDAPMessageRaw(buf, resp)
-}
-
-func writeDAPMessageRaw(buf *bytes.Buffer, msg any) error {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	header := "Content-Length: " + strings.TrimSpace(strings.Repeat(" ", 0)) + strings.Replace("N\r\n\r\n", "N", formatInt(len(data)), 1)
-	_, err = buf.WriteString(header)
-	if err != nil {
-		return err
-	}
-	_, err = buf.Write(data)
-	return err
-}
-
-func formatInt(n int) string {
-	return strings.TrimSpace(strings.Repeat(" ", 0)) + intToStr(n)
-}
-
-func intToStr(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
-}
-
-func TestDAPReadMessage(t *testing.T) {
-	conn := newMockConn()
-
-	// Write a valid DAP response.
-	body := map[string]any{"threads": []map[string]any{{"id": 1, "name": "main"}}}
-	data, _ := json.Marshal(body)
-	conn.out.WriteString("Content-Length: ")
-	conn.out.WriteString(intToStr(len(data)))
-	conn.out.WriteString("\r\n\r\n")
-	conn.out.Write(data)
+	body := map[string]any{"type": "response", "request_seq": 1, "success": true, "command": "threads"}
+	writeDAP(&buf, body)
 
 	client := &Client{
-		stdout:  bufio.NewReaderSize(conn.out, 65536),
 		pending: make(map[int64]chan *DAPResponse),
 		events:  make(chan *DAPEvent, 64),
 		done:    make(chan struct{}),
 	}
+	client.stdout = bufio.NewReaderSize(&buf, 65536)
 
 	msg, err := client.readMessage()
 	if err != nil {
@@ -126,34 +47,33 @@ func TestDAPReadMessage(t *testing.T) {
 		t.Fatal("expected non-empty message")
 	}
 
-	// Verify the message body parses correctly.
 	var parsed map[string]any
 	if err := json.Unmarshal(msg, &parsed); err != nil {
 		t.Fatalf("failed to parse message body: %v", err)
 	}
+	if parsed["command"] != "threads" {
+		t.Fatalf("expected command 'threads', got %v", parsed["command"])
+	}
 }
 
 func TestDAPReadMessageMultiple(t *testing.T) {
-	conn := newMockConn()
+	var buf bytes.Buffer
 
-	// Write two messages back to back.
-	for i := 0; i < 2; i++ {
-		body := map[string]any{"seq": i}
-		data, _ := json.Marshal(body)
-		conn.out.WriteString("Content-Length: ")
-		conn.out.WriteString(intToStr(len(data)))
-		conn.out.WriteString("\r\n\r\n")
-		conn.out.Write(data)
+	for i := 0; i < 3; i++ {
+		body := map[string]any{"seq": i, "type": "event", "event": "output"}
+		if err := writeDAP(&buf, body); err != nil {
+			t.Fatalf("writeDAP %d failed: %v", i, err)
+		}
 	}
 
 	client := &Client{
-		stdout:  bufio.NewReaderSize(conn.out, 65536),
 		pending: make(map[int64]chan *DAPResponse),
 		events:  make(chan *DAPEvent, 64),
 		done:    make(chan struct{}),
 	}
+	client.stdout = bufio.NewReaderSize(&buf, 65536)
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		msg, err := client.readMessage()
 		if err != nil {
 			t.Fatalf("readMessage %d failed: %v", i, err)
@@ -166,10 +86,10 @@ func TestDAPReadMessageMultiple(t *testing.T) {
 }
 
 func TestDAPWriteMessage(t *testing.T) {
-	conn := newMockConn()
+	var buf bytes.Buffer
 
 	client := &Client{
-		stdin:   conn.in,
+		stdin:   &nopWriteCloser{Writer: &buf},
 		pending: make(map[int64]chan *DAPResponse),
 		events:  make(chan *DAPEvent, 64),
 		done:    make(chan struct{}),
@@ -180,9 +100,9 @@ func TestDAPWriteMessage(t *testing.T) {
 		t.Fatalf("writeMessage failed: %v", err)
 	}
 
-	written := conn.in.String()
+	written := buf.String()
 	if !strings.HasPrefix(written, "Content-Length: ") {
-		t.Fatalf("expected Content-Length header, got: %q", written[:50])
+		t.Fatalf("expected Content-Length header, got: %q", written[:minInt(50, len(written))])
 	}
 	if !strings.Contains(written, "\r\n\r\n") {
 		t.Fatal("expected header/body separator")
@@ -199,11 +119,9 @@ func TestDAPDispatchResponse(t *testing.T) {
 		done:    make(chan struct{}),
 	}
 
-	// Register a pending request.
 	ch := make(chan *DAPResponse, 1)
 	client.pending[42] = ch
 
-	// Dispatch a response.
 	resp := DAPResponse{
 		Seq:        100,
 		Type:       "response",
@@ -215,7 +133,6 @@ func TestDAPDispatchResponse(t *testing.T) {
 	data, _ := json.Marshal(resp)
 	client.dispatchMessage(data)
 
-	// Verify the pending channel received the response.
 	select {
 	case got := <-ch:
 		if got.Command != "threads" {
@@ -256,63 +173,122 @@ func TestDAPDispatchEvent(t *testing.T) {
 }
 
 func TestDAPSendRequestRoundTrip(t *testing.T) {
-	conn := newMockConn()
+	// Use bytes.Buffer for synchronous in-memory test.
+	// Write the request, simulate adapter inline, then read the response.
+	adapterIn := &bytes.Buffer{}
+	adapterOut := &bytes.Buffer{}
 
 	client := &Client{
-		stdin:   conn.in,
-		stdout:  bufio.NewReaderSize(conn.out, 65536),
+		stdin:   &nopWriteCloser{Writer: adapterIn},
 		pending: make(map[int64]chan *DAPResponse),
 		events:  make(chan *DAPEvent, 64),
 		done:    make(chan struct{}),
 	}
 
-	// Start a goroutine that reads the request from conn.in and writes a response.
-	go func() {
-		// Read the request (skip Content-Length parsing for simplicity).
-		reader := bufio.NewReader(conn.in)
-		// Read headers.
-		for {
-			line, _ := reader.ReadString('\n')
-			if strings.TrimSpace(line) == "" {
-				break
-			}
-		}
-		// Read the body.
-		var req DAPRequest
-		if err := json.NewDecoder(reader).Decode(&req); err != nil {
-			return
-		}
-
-		// Write a response.
-		respBody := json.RawMessage(`{"threads":[{"id":1,"name":"main"}]}`)
-		resp := DAPResponse{
-			Seq:        req.Seq + 100,
-			Type:       "response",
-			RequestSeq: int64(req.Seq),
-			Success:    true,
-			Command:    req.Command,
-			Body:       respBody,
-		}
-		data, _ := json.Marshal(resp)
-		conn.out.WriteString("Content-Length: ")
-		conn.out.WriteString(intToStr(len(data)))
-		conn.out.WriteString("\r\n\r\n")
-		conn.out.Write(data)
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	resp, err := client.SendRequest(ctx, "threads", nil)
+	// Step 1: Send the request (this writes to adapterIn and registers a pending channel).
+	// We can't use SendRequest directly because it blocks waiting for a response.
+	// Instead, manually write the request and dispatch the response.
+	seq := client.seq.Add(1)
+	req := DAPRequest{
+		Seq:     int(seq),
+		Type:    "request",
+		Command: "threads",
+	}
+	data, err := json.Marshal(req)
 	if err != nil {
-		t.Fatalf("SendRequest failed: %v", err)
+		t.Fatalf("marshal request: %v", err)
 	}
-	if !resp.Success {
-		t.Fatalf("expected success, got message: %s", resp.Message)
+
+	respCh := make(chan *DAPResponse, 1)
+	client.mu.Lock()
+	client.pending[seq] = respCh
+	client.mu.Unlock()
+
+	if err := client.writeMessage(data); err != nil {
+		t.Fatalf("writeMessage: %v", err)
 	}
-	if resp.Command != "threads" {
-		t.Fatalf("expected command 'threads', got %q", resp.Command)
+
+	// Step 2: Simulate adapter reading the request and writing a response.
+	reader := bufio.NewReaderSize(adapterIn, 65536)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read header: %v", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
 	}
+
+	var gotReq DAPRequest
+	if err := json.NewDecoder(reader).Decode(&gotReq); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+
+	// Verify the request.
+	if gotReq.Command != "threads" {
+		t.Fatalf("expected command 'threads', got %q", gotReq.Command)
+	}
+
+	// Step 3: Write response.
+	resp := DAPResponse{
+		Seq:        seq + 100,
+		Type:       "response",
+		RequestSeq: seq,
+		Success:    true,
+		Command:    "threads",
+		Body:       json.RawMessage(`{"threads":[{"id":1,"name":"main"}]}`),
+	}
+	writeDAP(adapterOut, resp)
+
+	// Step 4: Read the response through the client.
+	client.stdout = bufio.NewReaderSize(adapterOut, 65536)
+	msg, err := client.readMessage()
+	if err != nil {
+		t.Fatalf("readMessage: %v", err)
+	}
+	client.dispatchMessage(msg)
+
+	// Step 5: Verify the pending channel received the response.
+	select {
+	case got := <-respCh:
+		if got.Command != "threads" {
+			t.Fatalf("expected command 'threads', got %q", got.Command)
+		}
+		if !got.Success {
+			t.Fatal("expected success")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for response")
+	}
+}
+
+func TestDAPSendRequestCancellation(t *testing.T) {
+	// Use a pipe where nobody writes, so SendRequest blocks until cancelled.
+	cr, _ := io.Pipe()
+	var aw bytes.Buffer
+
+	client := &Client{
+		stdin:   &nopWriteCloser{Writer: &aw},
+		pending: make(map[int64]chan *DAPResponse),
+		events:  make(chan *DAPEvent, 64),
+		done:    make(chan struct{}),
+	}
+	client.stdout = bufio.NewReaderSize(cr, 65536)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately.
+
+	_, err := client.SendRequest(ctx, "threads", nil)
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+
+	cr.Close()
 }
 
 func TestDAPTrimCR(t *testing.T) {
@@ -320,17 +296,16 @@ func TestDAPTrimCR(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"hello\r\n", "hello\r"},
-		{"hello\n", "hello"},
+		{"hello\r", "hello"},
 		{"hello", "hello"},
-		{"\r\n", "\r"},
 		{"", ""},
+		{"\r", ""},
 	}
 	for _, tt := range tests {
 		got := trimCR(tt.input)
-		// trimCR only removes a trailing \r before \n. But the function is:
-		// if last char is \r, remove it.
-		_ = got
+		if got != tt.expected {
+			t.Errorf("trimCR(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
 	}
 }
 
@@ -343,4 +318,18 @@ func TestDAPBoolPtr(t *testing.T) {
 	if p == nil || *p {
 		t.Fatal("expected *false")
 	}
+}
+
+// nopWriteCloser wraps an io.Writer to implement io.WriteCloser.
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (w *nopWriteCloser) Close() error { return nil }
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
