@@ -402,6 +402,135 @@ func (c *Client) DocumentSymbols(ctx context.Context, uri string) ([]DocumentSym
 	return nil, fmt.Errorf("failed to parse document symbols result")
 }
 
+// Rename renames a symbol at a given position.
+func (c *Client) Rename(ctx context.Context, uri string, line, char int, newName string) (*WorkspaceEdit, error) {
+	params := RenameParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Position:     Position{Line: line, Character: char},
+		NewName:      newName,
+	}
+
+	result, err := c.Call(ctx, "textDocument/rename", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(result) == 0 || string(result) == "null" {
+		return nil, nil
+	}
+
+	var edit WorkspaceEdit
+	if err := json.Unmarshal(result, &edit); err != nil {
+		return nil, fmt.Errorf("failed to parse rename result: %w", err)
+	}
+
+	return &edit, nil
+}
+
+// TypeDefinition finds the type definition of a symbol at a position.
+func (c *Client) TypeDefinition(ctx context.Context, uri string, line, char int) ([]Location, error) {
+	params := TextDocumentPositionParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Position:     Position{Line: line, Character: char},
+	}
+
+	result, err := c.Call(ctx, "textDocument/typeDefinition", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var locations []Location
+	if err := json.Unmarshal(result, &locations); err != nil {
+		// Try single location
+		var loc Location
+		if err := json.Unmarshal(result, &loc); err != nil {
+			return nil, fmt.Errorf("failed to parse type definition result: %w", err)
+		}
+		locations = []Location{loc}
+	}
+
+	return locations, nil
+}
+
+// Implementation finds implementations of a symbol at a position.
+func (c *Client) Implementation(ctx context.Context, uri string, line, char int) ([]Location, error) {
+	params := TextDocumentPositionParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Position:     Position{Line: line, Character: char},
+	}
+
+	result, err := c.Call(ctx, "textDocument/implementation", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var locations []Location
+	if err := json.Unmarshal(result, &locations); err != nil {
+		// Try single location
+		var loc Location
+		if err := json.Unmarshal(result, &loc); err != nil {
+			return nil, fmt.Errorf("failed to parse implementation result: %w", err)
+		}
+		locations = []Location{loc}
+	}
+
+	return locations, nil
+}
+
+// CodeActions retrieves available code actions for a range.
+func (c *Client) CodeActions(ctx context.Context, uri string, line, char int) ([]CodeAction, error) {
+	params := CodeActionParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Range: Range{
+			Start: Position{Line: line, Character: char},
+			End:   Position{Line: line, Character: char},
+		},
+		Context: CodeActionContext{},
+	}
+
+	result, err := c.Call(ctx, "textDocument/codeAction", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var actions []CodeAction
+	if err := json.Unmarshal(result, &actions); err != nil {
+		return nil, fmt.Errorf("failed to parse code actions result: %w", err)
+	}
+
+	return actions, nil
+}
+
+// Formatting formats a document.
+func (c *Client) Formatting(ctx context.Context, uri string) ([]TextEdit, error) {
+	params := struct {
+		TextDocument TextDocumentIdentifier `json:"textDocument"`
+		Options      FormattingOptions      `json:"options"`
+	}{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Options: FormattingOptions{
+			TabSize:      4,
+			InsertSpaces: true,
+		},
+	}
+
+	result, err := c.Call(ctx, "textDocument/formatting", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(result) == 0 || string(result) == "null" {
+		return nil, nil
+	}
+
+	var edits []TextEdit
+	if err := json.Unmarshal(result, &edits); err != nil {
+		return nil, fmt.Errorf("failed to parse formatting result: %w", err)
+	}
+
+	return edits, nil
+}
+
 // WaitForExit waits for the client to stop.
 func (c *Client) WaitForExit(timeout time.Duration) error {
 	select {

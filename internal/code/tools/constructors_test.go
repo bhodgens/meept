@@ -54,3 +54,39 @@ func TestNewLSPDiagnosticsTool_ErrorOnNil(t *testing.T) {
 		t.Fatal("expected error for nil manager, got nil")
 	}
 }
+
+func TestNewLSPRenameTool_ErrorOnNil(t *testing.T) {
+	if _, err := NewLSPRenameTool(nil); err == nil {
+		t.Fatal("expected error for nil manager, got nil")
+	}
+}
+
+func TestNewLSPCodeActionsTool_ErrorOnNil(t *testing.T) {
+	if _, err := NewLSPCodeActionsTool(nil); err == nil {
+		t.Fatal("expected error for nil manager, got nil")
+	}
+}
+
+func TestNewLSPTypeDefinitionTool_ErrorOnNil(t *testing.T) {
+	if _, err := NewLSPTypeDefinitionTool(nil); err == nil {
+		t.Fatal("expected error for nil manager, got nil")
+	}
+}
+
+func TestNewLSPImplementationTool_ErrorOnNil(t *testing.T) {
+	if _, err := NewLSPImplementationTool(nil); err == nil {
+		t.Fatal("expected error for nil manager, got nil")
+	}
+}
+
+func TestNewLSPDocumentSymbolsTool_ErrorOnNil(t *testing.T) {
+	if _, err := NewLSPDocumentSymbolsTool(nil); err == nil {
+		t.Fatal("expected error for nil manager, got nil")
+	}
+}
+
+func TestNewLSPFormatTool_ErrorOnNil(t *testing.T) {
+	if _, err := NewLSPFormatTool(nil); err == nil {
+		t.Fatal("expected error for nil manager, got nil")
+	}
+}

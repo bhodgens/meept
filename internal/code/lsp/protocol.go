@@ -266,6 +266,8 @@ type ServerCapabilities struct {
 	TextDocumentSync           any  `json:"textDocumentSync,omitempty"`
 	HoverProvider              bool `json:"hoverProvider,omitempty"`
 	DefinitionProvider         bool `json:"definitionProvider,omitempty"`
+	TypeDefinitionProvider     bool `json:"typeDefinitionProvider,omitempty"`
+	ImplementationProvider     bool `json:"implementationProvider,omitempty"`
 	ReferencesProvider         bool `json:"referencesProvider,omitempty"`
 	DocumentSymbolProvider     bool `json:"documentSymbolProvider,omitempty"`
 	WorkspaceSymbolProvider    bool `json:"workspaceSymbolProvider,omitempty"`
@@ -311,6 +313,69 @@ type JSONRPCError struct {
 
 func (e *JSONRPCError) Error() string {
 	return e.Message
+}
+
+// RenameParams is the parameter for textDocument/rename.
+type RenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	NewName      string                 `json:"newName"`
+}
+
+// WorkspaceEdit represents a collection of changes across multiple documents.
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes,omitempty"`
+}
+
+// TextEdit represents a text edit operation.
+type TextEdit struct {
+	Range  Range  `json:"range"`
+	NewText string `json:"newText"`
+}
+
+// CodeActionParams is the parameter for textDocument/codeAction.
+type CodeActionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+	Context      CodeActionContext      `json:"context"`
+}
+
+// CodeActionContext provides context for code actions.
+type CodeActionContext struct {
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+	Only        []string     `json:"only,omitempty"`
+}
+
+// CodeAction represents a code action.
+type CodeAction struct {
+	Title       string      `json:"title"`
+	Kind        string      `json:"kind,omitempty"`
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+	IsPreferred bool        `json:"isPreferred,omitempty"`
+	Disabled    *CodeActionDisabled `json:"disabled,omitempty"`
+	Edit        *WorkspaceEdit       `json:"edit,omitempty"`
+	Command     *Command             `json:"command,omitempty"`
+}
+
+// CodeActionDisabled represents a disabled code action.
+type CodeActionDisabled struct {
+	Reason string `json:"reason"`
+}
+
+// Command represents a command execution.
+type Command struct {
+	Title     string `json:"title"`
+	Command   string `json:"command"`
+	Arguments []any  `json:"arguments,omitempty"`
+}
+
+// FormattingOptions represents formatting options.
+type FormattingOptions struct {
+	TabSize                int  `json:"tabSize"`
+	InsertSpaces           bool `json:"insertSpaces"`
+	TrimTrailingWhitespace bool `json:"trimTrailingWhitespace,omitempty"`
+	InsertFinalNewline     bool `json:"insertFinalNewline,omitempty"`
+	TrimFinalNewlines      bool `json:"trimFinalNewlines,omitempty"`
 }
 
 // JSON-RPC error codes
