@@ -471,6 +471,9 @@ type AgentLoop struct {
 
 	// Branch navigation (coordinated with in-memory ConversationStore)
 	branchManager *session.BranchManager
+
+	// TT-SR stream rule enforcement
+	ttsrManager *TTSRManager
 }
 
 // shouldAutoInject returns true if memory context should be auto-injected before LLM calls.
@@ -800,6 +803,15 @@ func (l *AgentLoop) SetBranchManager(bm *session.BranchManager) {
 	defer l.mu.Unlock()
 	if bm != nil {
 		l.branchManager = bm
+	}
+}
+
+// WithTTSRManager sets the TT-SR stream rule manager.
+func WithTTSRManager(mgr *TTSRManager) LoopOption {
+	return func(l *AgentLoop) {
+		if mgr != nil {
+			l.ttsrManager = mgr
+		}
 	}
 }
 
@@ -2308,6 +2320,63 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				ResponseTokens: response.Usage.TotalTokens,
 			},
 		})
+
+		// TT-SR stream rule enforcement: check full response against rules.
+		// If an interrupting rule matches, inject a system message and retry
+		// the LLM call (once per turn). Non-interrupting matches are logged
+		// and marked for potential future injection.
+		if l.ttsrManager != nil {
+			// Check text content against rules
+			source := "text"
+			if response.HasToolCalls() {
+				source = "tool_call"
+			}
+			matches := l.ttsrManager.CheckDelta(source, response.Content, iteration)
+			for _, rule := range matches {
+				if rule.Interrupt {
+					l.logger.Info("TT-SR interrupt rule triggered",
+						"rule", rule.Name,
+						"iteration", iteration,
+						"conversation", conversationID,
+					)
+					// Inject rule enforcement as system message and retry
+					conv.AddSystemMessage(fmt.Sprintf(
+						"<system-rule-enforcement>\n%s\n</system-rule-enforcement>",
+						rule.Content,
+					))
+					l.ttsrManager.MarkInjected(rule.Name, iteration)
+
+					// Retry the LLM call once for this turn
+					messages = conv.GetWindowedMessages(effectiveBudget)
+					retryOpts := l.resolveInferenceParams()
+					if len(tools) > 0 && !inWarningZone {
+						retryOpts = append(retryOpts, llm.WithTools(tools))
+					}
+					retryResp, retryErr := l.chatWithFailover(ctx, messages, retryOpts...)
+					if retryErr != nil {
+						l.logger.Warn("TT-SR retry LLM call failed",
+							"error", retryErr,
+							"iteration", iteration,
+						)
+						return "", fmt.Errorf("LLM call failed after TT-SR retry: %w", retryErr)
+					}
+					totalTokens += retryResp.Usage.TotalTokens
+					if l.budgetTracker != nil {
+						l.budgetTracker.RecordUsage(retryResp.Usage.TotalTokens)
+					}
+					// Use the retried response from here on
+					response = retryResp
+					break // only one interrupt retry per turn
+				}
+				// Non-interrupting rule: mark and continue
+				l.logger.Info("TT-SR non-interrupt rule matched",
+					"rule", rule.Name,
+					"iteration", iteration,
+					"conversation", conversationID,
+				)
+				l.ttsrManager.MarkInjected(rule.Name, iteration)
+			}
+		}
 
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
