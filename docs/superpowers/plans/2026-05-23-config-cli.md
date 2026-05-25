@@ -2194,26 +2194,36 @@ Test the full flow:
 
 10. **Section jump from CLI** — FIXED: `meept config daemon` now jumps directly to the daemon section. Supports aliases (mcp, tui, client, agent, q), case-insensitive matching, prefix matching, and auto-enables advanced mode for advanced-only sections.
 
+### Issues Fixed in Session 3 (2026-05-25)
+
+11. **Drilldown save not wired** — FIXED: Added `drilldownPrefix` to `SectionModel`, all 5 save handlers now detect drilldown sub-sections and apply field changes to the correct nested config entry. Provider, agent, MCP server, and preset drilldown saves all functional.
+
+12. **Field coverage gaps** — FIXED: All 9 sparse sections now have near-complete field coverage. Agent Loop went from 2 to 33 fields, Shadow from 1 to 58, Self-Improve from 3 to 37, Distributed Memory from 2 to 16, Code Intel from 1 to 10, Tooling from 3 to 10, Q Agent from 4 to 13, Session from 5 to 10. LLM, Memory, and Client/TUI sections also expanded with sub-struct drilldowns.
+
 ### Remaining Issues
 
-11. **Drilldown save not wired** — Editing fields inside a drilldown item modifies the `DrilldownField.Items` in memory but the save handlers don't yet serialize drilldown changes back to config files. The items need to be applied back to the config struct on save.
+13. **Drilldown save for sub-struct groups** — Agent Loop, Shadow, Self-Improve, Distributed Memory, Code Intel sections use DrilldownFields for sub-struct groups (cache, errors, review, etc.). These are single-item drilldowns, not multi-item lists. The save handler needs to detect these and apply the nested field changes via dotpath keypaths (e.g., `agent.cache.enabled`). This is similar to Issue 11 but for the main config path.
 
-12. **Field coverage gaps** — Several sections have sparse field coverage (see table below). Most notably: agent_loop (2 of ~33), shadow (1 of ~40+), self-improve (3 of ~35), distributed_memory (2 of 16), code_intel (1 field).
+14. **LSP servers dynamic map** — Code Intel has an `lsp.servers` map that should be a dynamic drilldown (add/delete language servers). Not yet implemented.
 
-### Significant Field Coverage Gaps
+### Field Coverage (Updated)
 
-| Section | Fields in Schema | Fields in Builder | Missing |
-|---------|-----------------|-------------------|---------|
-| Agent Loop | ~33 | 2 | ~31 (6 sub-structs) |
-| Shadow | ~40+ | 1 | ~40 (7 sub-structs) |
-| Self-Improve | ~35 | 3 | ~32 (4 sub-structs) |
-| Distributed Memory | 16 | 2 | 14 (2 sub-structs) |
-| Client/TUI | ~30 | 18 | ~15 (keybindings, sidebar) |
-| LLM | ~40 | 22 | ~18 (context firewall, cache) |
-| Memory | ~30 | 19 | ~13 (limits, project_overrides) |
-| Tooling | 10 | 3 | 7 |
-| Q Agent | 13 | 4 | 9 |
-| Session | 10 | 5 | 5 |
-| Compaction | 10 | 7 | 3 |
-| Models | 4+ | 4 | 1 (model_aliases) |
-| Transport | 13 | 12 | 1 (auto_tls_cert) |
+| Section | Schema Fields | Exposed | Coverage |
+|---------|:------------:|:-------:|:--------:|
+| Agent Loop | ~33 | 33 | ~100% |
+| Shadow | ~58 | 58 | ~100% |
+| Self-Improve | ~37 | 37 | ~100% |
+| Distributed Memory | 16 | 16 | ~100% |
+| Code Intel | ~10 | 10 | ~100% |
+| Client/TUI | ~30 | 28 | ~93% |
+| LLM | ~40 | 38 | ~95% |
+| Memory | ~30 | 28 | ~93% |
+| Tooling | 10 | 10 | 100% |
+| Q Agent | 13 | 13 | 100% |
+| Session | 10 | 10 | 100% |
+| Compaction | 10 | 7 | 70% |
+| Models | 4+ | 4 | ~100% |
+| Transport | 13 | 12 | ~92% |
+| Plugins | 2 | 2 | 100% |
+
+**Total: ~310 fields across 33 sections, up from ~172 at start of session 2.**

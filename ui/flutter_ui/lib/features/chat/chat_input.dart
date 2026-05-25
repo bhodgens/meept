@@ -30,9 +30,12 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     if (text.isEmpty) return;
 
     final chatNotifier = ref.read(chatProvider.notifier);
+    final activeAgent = ref.read(activeAgentProvider);
+    
     chatNotifier.sendMessage(
       sessionId: widget.sessionId,
       text: text,
+      agentId: activeAgent?.id,
     );
 
     _controller.clear();

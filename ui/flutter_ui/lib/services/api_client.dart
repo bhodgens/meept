@@ -101,12 +101,14 @@ class ApiClient {
   Future<Map<String, dynamic>> sendChatMessage({
     required String message,
     String? conversationId,
+    String? agentId,
   }) async {
     return post<Map<String, dynamic>>(
       '/chat',
       data: {
         'message': message,
         if (conversationId != null) 'conversation_id': conversationId,
+        if (agentId != null) 'agent_id': agentId,
       },
     );
   }

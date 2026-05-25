@@ -108,6 +108,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
   Future<void> sendMessage({
     required String sessionId,
     required String text,
+    String? agentId,
   }) async {
     // Append user message immediately
     final userMessage = ChatMessage(
@@ -128,6 +129,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
       await apiClient.sendChatMessage(
         message: text,
         conversationId: sessionId,
+        agentId: agentId,
       );
       state = ChatState(
         messages: state.messages,
