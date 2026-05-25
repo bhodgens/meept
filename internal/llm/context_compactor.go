@@ -15,6 +15,7 @@ type CompactorConfig struct {
 	KeepRecentTokens  int
 	MaxResponseTokens int
 	SummaryFormat     string
+	Strategy          string // "structured" | "handoff" | "off"
 	TrackFileOps      bool
 	TimeoutSeconds    int
 }
@@ -25,6 +26,7 @@ func DefaultCompactorConfig() CompactorConfig {
 		KeepRecentTokens:  20000,
 		MaxResponseTokens: 13107,
 		SummaryFormat:     "structured",
+		Strategy:          "structured",
 		TrackFileOps:      true,
 		TimeoutSeconds:    30,
 	}
@@ -96,6 +98,19 @@ func NewContextCompactor(cfg CompactorConfig, summarizer Chatter, tokenizer Toke
 }
 
 func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) CompactResult {
+	// Strategy "off" skips compaction entirely.
+	strategy := c.config.Strategy
+	if strategy == "" {
+		strategy = c.config.SummaryFormat // fall back to SummaryFormat for backward compat
+	}
+	if strategy == "off" {
+		result := CompactResult{TokensBefore: c.countTokens(messages), Messages: messages}
+		return result
+	}
+
+	// Run tool output pruning before any compaction logic.
+	messages = c.pruneToolOutputs(messages)
+
 	tokensBefore := c.countTokens(messages)
 	result := CompactResult{TokensBefore: tokensBefore}
 	if c.summarizer == nil { result.Messages = messages; return result }
@@ -390,6 +405,16 @@ const narrativeCompactionPrompt = `Summarize the following conversation concisel
 </conversation>`
 
 func (c *ContextCompactor) buildSummaryPrompt(conversationText, existingSummary string) string {
+	strategy := c.config.Strategy
+	if strategy == "" {
+		strategy = c.config.SummaryFormat
+	}
+
+	// Handoff strategy always uses the handoff prompt (no iterative update).
+	if strategy == "handoff" {
+		return fmt.Sprintf(handoffCompactionPrompt, conversationText)
+	}
+
 	if existingSummary != "" && c.config.SummaryFormat != "narrative" {
 		return fmt.Sprintf(iterativeUpdatePrompt, existingSummary, conversationText)
 	}
@@ -397,6 +422,60 @@ func (c *ContextCompactor) buildSummaryPrompt(conversationText, existingSummary 
 		return fmt.Sprintf(narrativeCompactionPrompt, conversationText)
 	}
 	return fmt.Sprintf(structuredCompactionPrompt, conversationText)
+}
+
+const handoffCompactionPrompt = `You are producing a handoff summary for another agent that will continue this work.
+Capture exact technical state, not abstractions. The next agent needs precise information to resume without loss.
+
+## Goal
+[What the user is trying to accomplish, stated exactly as given]
+
+## Current State
+[Exact current state: what is working, what is broken, what is in progress]
+
+## Files
+- [list every file path touched, prefixed with "read: ", "write: ", or "edit: "]
+- include the exact path as used in the conversation, not paraphrased
+
+## Commands Run
+- [list every shell command executed and its exact result, one per line]
+
+## Test Results
+- [paste exact test output, error messages, and failure lines — not paraphrased]
+
+## Errors Encountered
+- [paste exact error messages, stack traces, and diagnostic output — not paraphrased]
+
+## Git State
+[exact branch name, last commit hash, uncommitted changes summary]
+
+## Symbols
+[exact function names, type names, variable names, and line numbers referenced]
+
+## Key Decisions
+- [list key decisions made with their rationale, one per line]
+
+## Next Steps
+[ordered list of what remains, with exact file paths and symbol names where applicable]
+
+## Critical Context
+[Any exact values, API endpoints, config values, or identifiers that must be preserved verbatim]
+
+<conversation>
+%s
+</conversation>`
+
+// getCompactionPrompt returns the compaction prompt template based on the
+// configured strategy. Returns an empty string when strategy is "off".
+func (c *ContextCompactor) getCompactionPrompt(strategy string) string {
+	switch strategy {
+	case "off":
+		return ""
+	case "handoff":
+		return handoffCompactionPrompt
+	default:
+		return structuredCompactionPrompt
+	}
 }
 
 var compactionSectionRe = regexp.MustCompile(`(?m)^##\s*(Goal|Constraints|Progress|Key Decisions|Files|Important Discoveries|Errors Encountered|Next Steps|Critical Context)\s*$`)
@@ -461,6 +540,102 @@ func (c *ContextCompactor) buildCompactionMessage(summary string, fileOps *FileO
 		sb.WriteString(fileOps.FormatCompact())
 	}
 	return ChatMessage{Role: RoleSystem, Content: sb.String()}
+}
+
+// pruneToolOutputs truncates oversized tool result messages that are outside
+// the most recent protected window. It runs before compaction to reduce token
+// pressure from verbose tool outputs.
+//
+// Algorithm:
+//  1. Walk messages backward.
+//  2. For tool result messages, estimate token count.
+//  3. Track a running total of protected tokens (most recent 40 000 tokens of
+//     tool output). Messages within the protected window are never pruned.
+//  4. Never prune tool results from "file_read" or "memory_search" tools.
+//  5. Only prune when total savings would exceed 20 000 tokens.
+//  6. Replace pruned output with "[Output truncated — N tokens saved]".
+func (c *ContextCompactor) pruneToolOutputs(messages []ChatMessage) []ChatMessage {
+	const (
+		protectedBudget = 40000 // protect most recent N tokens of tool output
+		minSavings      = 20000 // only prune if we can save at least this many
+	)
+
+	// Build a lookup from ToolCallID -> tool name by scanning assistant messages.
+	toolNameByID := make(map[string]string)
+	for _, msg := range messages {
+		if msg.Role == RoleAssistant {
+			for _, tc := range msg.ToolCalls {
+				toolNameByID[tc.ID] = tc.Function.Name
+			}
+		}
+	}
+
+	type pruneCandidate struct {
+		index  int
+		tokens int
+	}
+
+	var candidates []pruneCandidate
+	totalSavings := 0
+	protectedTokens := 0
+
+	// Walk backward to determine which tool outputs are outside the protected window.
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != RoleTool {
+			continue
+		}
+
+		tokens := c.tokenizer.CountTokens(msg.Content)
+
+		// Check if this tool output is from a protected tool.
+		toolName := toolNameByID[msg.ToolCallID]
+		if toolName == "file_read" || toolName == "memory_search" {
+			continue // never prune these
+		}
+
+		// If within the protected budget, skip.
+		protectedTokens += tokens
+		if protectedTokens <= protectedBudget {
+			continue
+		}
+
+		// Candidate for pruning — compute how much we'd save by truncating.
+		// We leave a small stub so the message still exists.
+		stubTokens := c.tokenizer.CountTokens(fmt.Sprintf("[Output truncated — %d tokens saved]", tokens))
+		savings := tokens - stubTokens
+		if savings > 0 {
+			candidates = append(candidates, pruneCandidate{index: i, tokens: savings})
+			totalSavings += savings
+		}
+	}
+
+	// Only prune if total savings exceed the minimum threshold.
+	if totalSavings < minSavings || len(candidates) == 0 {
+		return messages
+	}
+
+	// Build a new slice with pruned messages.
+	result := make([]ChatMessage, len(messages))
+	copy(result, messages)
+
+	for _, cand := range candidates {
+		orig := result[cand.index]
+		truncationNotice := fmt.Sprintf("[Output truncated — %d tokens saved]", cand.tokens)
+		result[cand.index] = ChatMessage{
+			Role:       orig.Role,
+			Content:    truncationNotice,
+			Name:       orig.Name,
+			ToolCalls:  orig.ToolCalls,
+			ToolCallID: orig.ToolCallID,
+		}
+	}
+
+	c.logger.Info("pruned oversized tool outputs",
+		"candidates", len(candidates),
+		"tokens_saved", totalSavings,
+	)
+	return result
 }
 
 func (c *ContextCompactor) countTokens(messages []ChatMessage) int {

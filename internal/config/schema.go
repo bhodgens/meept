@@ -107,6 +107,7 @@ type CompactionConfig struct {
 	KeepRecentTokens  int     `json:"keep_recent_tokens"  toml:"keep_recent_tokens"`
 	MaxResponseTokens int     `json:"max_response_tokens" toml:"max_response_tokens"`
 	SummaryFormat     string  `json:"summary_format"      toml:"summary_format"`
+	Strategy          string  `json:"strategy"            toml:"strategy"`           // "structured" | "handoff" | "off"
 	TriggerRatio      float64 `json:"trigger_ratio"       toml:"trigger_ratio"`
 	IterativeUpdates  bool    `json:"iterative_updates"   toml:"iterative_updates"`
 	TrackFileOps      bool    `json:"track_file_ops"      toml:"track_file_ops"`
@@ -1436,6 +1437,7 @@ func DefaultConfig() *Config {
 			KeepRecentTokens:  20000,
 			MaxResponseTokens: 13107,
 			SummaryFormat:     "structured",
+			Strategy:          "structured",
 			TriggerRatio:      0.60,
 			IterativeUpdates:  true,
 			TrackFileOps:      true,

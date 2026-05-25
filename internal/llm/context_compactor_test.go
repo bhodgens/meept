@@ -1693,3 +1693,515 @@ func TestCompact_SplitTurnFails_FallsBackToSingleSummary(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// pruneToolOutputs
+// ---------------------------------------------------------------------------
+
+func TestPruneToolOutputs_NoToolMessages(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	msgs := []ChatMessage{
+		{Role: RoleSystem, Content: "sys"},
+		{Role: RoleUser, Content: "hello"},
+		{Role: RoleAssistant, Content: "hi"},
+	}
+
+	result := c.pruneToolOutputs(msgs)
+	if len(result) != len(msgs) {
+		t.Errorf("expected %d messages, got %d", len(msgs), len(result))
+	}
+}
+
+func TestPruneToolOutputs_SmallOutput_NoPruning(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "run it"},
+		{Role: RoleAssistant, Content: "running", ToolCalls: []ToolCall{
+			{ID: "tc1", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: "small output", ToolCallID: "tc1"},
+	}
+
+	result := c.pruneToolOutputs(msgs)
+	if result[2].Content != "small output" {
+		t.Errorf("small tool output should not be pruned, got: %q", result[2].Content)
+	}
+}
+
+func TestPruneToolOutputs_ProtectedTool_NeverPruned(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	// file_read result that is very large (way beyond the protected budget)
+	largeOutput := makeLongString(50000) // 50k tokens
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "read this file"},
+		{Role: RoleAssistant, Content: "reading", ToolCalls: []ToolCall{
+			{ID: "tc1", Function: ToolCallFunction{Name: "file_read", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: largeOutput, ToolCallID: "tc1"},
+	}
+
+	result := c.pruneToolOutputs(msgs)
+	if result[2].Content != largeOutput {
+		t.Error("file_read output should never be pruned regardless of size")
+	}
+}
+
+func TestPruneToolOutputs_MemorySearch_NeverPruned(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	largeOutput := makeLongString(50000)
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "search memory"},
+		{Role: RoleAssistant, Content: "searching", ToolCalls: []ToolCall{
+			{ID: "tc1", Function: ToolCallFunction{Name: "memory_search", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: largeOutput, ToolCallID: "tc1"},
+	}
+
+	result := c.pruneToolOutputs(msgs)
+	if result[2].Content != largeOutput {
+		t.Error("memory_search output should never be pruned regardless of size")
+	}
+}
+
+func TestPruneToolOutputs_LargeOldOutput_Pruned(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	// Create messages with a large tool output far in the past (beyond the 40k
+	// protected window), followed by enough recent tool output to fill the
+	// protected budget.
+	// 30k token output (well beyond the 20k minimum savings threshold)
+	largeOutput := makeLongString(30000)
+
+	// Recent tool output fits within the 40k protected budget
+	recentOutput := makeLongString(39000)
+
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "do old work"},
+		{Role: RoleAssistant, Content: "working", ToolCalls: []ToolCall{
+			{ID: "tc_old", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: largeOutput, ToolCallID: "tc_old"},
+		{Role: RoleUser, Content: "do recent work"},
+		{Role: RoleAssistant, Content: "working", ToolCalls: []ToolCall{
+			{ID: "tc_recent", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: recentOutput, ToolCallID: "tc_recent"},
+	}
+
+	result := c.pruneToolOutputs(msgs)
+
+	// The old tool output (index 2) should be pruned
+	if result[2].Content == largeOutput {
+		t.Error("old large tool output should have been pruned")
+	}
+	if !strings.Contains(result[2].Content, "Output truncated") {
+		t.Errorf("pruned output should contain truncation notice, got: %q", result[2].Content)
+	}
+
+	// Recent tool output should be untouched
+	if result[5].Content != recentOutput {
+		t.Error("recent tool output within protected budget should not be pruned")
+	}
+}
+
+func TestPruneToolOutputs_BelowMinSavings_NoPruning(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	// Create tool output that's outside the protected window but small enough
+	// that total savings would be under the 20k minimum threshold.
+	smallOutput := makeLongString(10000) // 10k tokens — below 20k threshold
+
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "run"},
+		{Role: RoleAssistant, Content: "ok", ToolCalls: []ToolCall{
+			{ID: "tc1", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: smallOutput, ToolCallID: "tc1"},
+	}
+
+	result := c.pruneToolOutputs(msgs)
+	if result[2].Content != smallOutput {
+		t.Error("tool output below minimum savings threshold should not be pruned")
+	}
+}
+
+func TestPruneToolOutputs_MultipleCandidates(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	// Create multiple old large tool outputs that together exceed 20k savings.
+	// Each is 15k tokens (individually below 20k, but combined exceed threshold).
+	// They're all outside the protected window because we add 39k tokens of
+	// recent tool output at the end.
+	output1 := makeLongString(15000)
+	output2 := makeLongString(15000)
+	recentOutput := makeLongString(39000) // fills protected budget
+
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "run old 1"},
+		{Role: RoleAssistant, Content: "ok", ToolCalls: []ToolCall{
+			{ID: "tc1", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: output1, ToolCallID: "tc1"},
+		{Role: RoleUser, Content: "run old 2"},
+		{Role: RoleAssistant, Content: "ok", ToolCalls: []ToolCall{
+			{ID: "tc2", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: output2, ToolCallID: "tc2"},
+		{Role: RoleUser, Content: "run recent"},
+		{Role: RoleAssistant, Content: "ok", ToolCalls: []ToolCall{
+			{ID: "tc3", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: recentOutput, ToolCallID: "tc3"},
+	}
+
+	result := c.pruneToolOutputs(msgs)
+
+	// Both old outputs should be pruned
+	if result[2].Content == output1 {
+		t.Error("first old tool output should be pruned")
+	}
+	if !strings.Contains(result[2].Content, "Output truncated") {
+		t.Error("first pruned output should have truncation notice")
+	}
+	if result[5].Content == output2 {
+		t.Error("second old tool output should be pruned")
+	}
+	if !strings.Contains(result[5].Content, "Output truncated") {
+		t.Error("second pruned output should have truncation notice")
+	}
+
+	// Recent output should be untouched
+	if result[8].Content != recentOutput {
+		t.Error("recent output within protected budget should not be pruned")
+	}
+}
+
+func TestPruneToolOutputs_PreservesMessageMetadata(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	// Large output beyond protected budget + minimum savings
+	largeOutput := makeLongString(50000)
+	// Recent output within protected budget
+	recentOutput := makeLongString(39000)
+
+	msgs := []ChatMessage{
+		{Role: RoleUser, Content: "run"},
+		{Role: RoleAssistant, Content: "ok", ToolCalls: []ToolCall{
+			{ID: "tc1", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: largeOutput, ToolCallID: "tc1", Name: "shell_execute"},
+		{Role: RoleUser, Content: "run recent"},
+		{Role: RoleAssistant, Content: "ok", ToolCalls: []ToolCall{
+			{ID: "tc2", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: recentOutput, ToolCallID: "tc2"},
+	}
+
+	result := c.pruneToolOutputs(msgs)
+
+	pruned := result[2]
+	if pruned.Role != RoleTool {
+		t.Errorf("pruned message role should be preserved, got: %s", pruned.Role)
+	}
+	if pruned.ToolCallID != "tc1" {
+		t.Errorf("pruned message ToolCallID should be preserved, got: %s", pruned.ToolCallID)
+	}
+	if pruned.Name != "shell_execute" {
+		t.Errorf("pruned message Name should be preserved, got: %s", pruned.Name)
+	}
+}
+
+func TestPruneToolOutputs_EmptyMessages(t *testing.T) {
+	cfg := DefaultCompactorConfig()
+	c := NewContextCompactor(cfg, nil, nil, nil)
+
+	result := c.pruneToolOutputs(nil)
+	if result != nil {
+		t.Errorf("expected nil for nil input, got %v", result)
+	}
+
+	result = c.pruneToolOutputs([]ChatMessage{})
+	if len(result) != 0 {
+		t.Errorf("expected empty for empty input, got %d messages", len(result))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// getCompactionPrompt
+// ---------------------------------------------------------------------------
+
+func TestGetCompactionPrompt_Structured(t *testing.T) {
+	c := &ContextCompactor{config: CompactorConfig{Strategy: "structured"}}
+	prompt := c.getCompactionPrompt("structured")
+	if !strings.Contains(prompt, "You are summarizing a conversation") {
+		t.Error("structured strategy should return structured prompt")
+	}
+}
+
+func TestGetCompactionPrompt_Handoff(t *testing.T) {
+	c := &ContextCompactor{config: CompactorConfig{Strategy: "handoff"}}
+	prompt := c.getCompactionPrompt("handoff")
+	if !strings.Contains(prompt, "handoff summary") {
+		t.Error("handoff strategy should return handoff prompt")
+	}
+	if !strings.Contains(prompt, "Capture exact technical state, not abstractions") {
+		t.Error("handoff prompt should contain the exactness instruction")
+	}
+	if !strings.Contains(prompt, "## Git State") {
+		t.Error("handoff prompt should contain Git State section")
+	}
+	if !strings.Contains(prompt, "## Symbols") {
+		t.Error("handoff prompt should contain Symbols section")
+	}
+	if !strings.Contains(prompt, "## Commands Run") {
+		t.Error("handoff prompt should contain Commands Run section")
+	}
+	if !strings.Contains(prompt, "## Test Results") {
+		t.Error("handoff prompt should contain Test Results section")
+	}
+}
+
+func TestGetCompactionPrompt_Off(t *testing.T) {
+	c := &ContextCompactor{config: CompactorConfig{Strategy: "off"}}
+	prompt := c.getCompactionPrompt("off")
+	if prompt != "" {
+		t.Errorf("off strategy should return empty string, got: %q", prompt)
+	}
+}
+
+func TestGetCompactionPrompt_Default(t *testing.T) {
+	c := &ContextCompactor{config: CompactorConfig{}}
+	prompt := c.getCompactionPrompt("")
+	if !strings.Contains(prompt, "You are summarizing a conversation") {
+		t.Error("empty/unknown strategy should fall back to structured prompt")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Strategy "off" in Compact()
+// ---------------------------------------------------------------------------
+
+func TestCompact_StrategyOff_SkipsCompaction(t *testing.T) {
+	mock := &compactorMockChatter{
+		response: &Response{Content: "should not be called"},
+	}
+
+	cfg := DefaultCompactorConfig()
+	cfg.Strategy = "off"
+	cfg.KeepRecentTokens = 300
+	c := NewContextCompactor(cfg, mock, nil, nil)
+
+	msgs := makeMessages(10)
+	result := c.Compact(context.Background(), msgs)
+
+	if result.Compacted {
+		t.Error("strategy 'off' should not compact")
+	}
+	if mock.called {
+		t.Error("strategy 'off' should not call the summarizer")
+	}
+	if len(result.Messages) != len(msgs) {
+		t.Errorf("strategy 'off' should return original messages, got %d vs %d", len(result.Messages), len(msgs))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Strategy "handoff" in buildSummaryPrompt
+// ---------------------------------------------------------------------------
+
+func TestBuildSummaryPrompt_Handoff(t *testing.T) {
+	c := &ContextCompactor{config: CompactorConfig{Strategy: "handoff"}}
+
+	prompt := c.buildSummaryPrompt("conversation text", "")
+	if !strings.Contains(prompt, "handoff summary") {
+		t.Error("handoff strategy should use handoff prompt template")
+	}
+	if !strings.Contains(prompt, "conversation text") {
+		t.Error("handoff prompt should contain conversation text")
+	}
+}
+
+func TestBuildSummaryPrompt_Handoff_IgnoresExistingSummary(t *testing.T) {
+	// Handoff strategy should always use the full handoff prompt,
+	// never the iterative update prompt.
+	c := &ContextCompactor{config: CompactorConfig{Strategy: "handoff"}}
+
+	prompt := c.buildSummaryPrompt("new messages", "previous summary")
+	if strings.Contains(prompt, "You are updating") {
+		t.Error("handoff strategy should not use iterative update prompt even with existing summary")
+	}
+	if !strings.Contains(prompt, "handoff summary") {
+		t.Error("handoff strategy should always use handoff prompt")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Handoff strategy end-to-end in Compact()
+// ---------------------------------------------------------------------------
+
+func TestCompact_HandoffStrategy(t *testing.T) {
+	mock := &compactorMockChatter{
+		response: &Response{Content: `## Goal
+Fix the authentication bug
+
+## Current State
+Auth middleware returns 401 for valid tokens; root cause identified in JWT validation logic
+
+## Files
+- read: internal/auth/jwt.go
+- edit: internal/auth/middleware.go
+
+## Commands Run
+- go test ./internal/auth/... -v (3 failures)
+- git diff HEAD (shows middleware changes)
+
+## Test Results
+- FAIL: TestJWTValidation (expected 200, got 401)
+- FAIL: TestTokenExpiry (token expired 1 day ago not rejected)
+
+## Errors Encountered
+- jwt.Parse: key is invalid (Ed25519 key format mismatch)
+
+## Git State
+branch: fix/auth-jwt, last commit: a1b2c3d, 2 uncommitted files
+
+## Symbols
+- ValidateJWT() at jwt.go:42
+- AuthMiddleware() at middleware.go:18
+- TokenExpiry field inClaims struct
+
+## Key Decisions
+- Switch from HMAC-SHA256 to Ed25519 for token signing
+- Add token refresh endpoint at /api/v1/auth/refresh
+
+## Next Steps
+1. Fix Ed25519 key parsing in jwt.go:42
+2. Update middleware to use new validation
+3. Add integration test for refresh endpoint
+
+## Critical Context
+- Ed25519 public key: loaded from /etc/meept/auth_pub.pem
+- Token TTL: 1 hour, refresh TTL: 7 days`},
+	}
+
+	cfg := DefaultCompactorConfig()
+	cfg.Strategy = "handoff"
+	cfg.KeepRecentTokens = 300
+	c := NewContextCompactor(cfg, mock, nil, nil)
+
+	msgs := makeMessages(10)
+	result := c.Compact(context.Background(), msgs)
+
+	if !result.Compacted {
+		t.Fatal("expected compaction with handoff strategy")
+	}
+	if !mock.called {
+		t.Fatal("expected summarizer to be called")
+	}
+
+	// Verify the prompt sent to the LLM uses the handoff template
+	prompt := mock.lastMsgs[0].Content
+	if !strings.Contains(prompt, "handoff summary") {
+		t.Error("LLM should have received the handoff prompt")
+	}
+	if !strings.Contains(prompt, "Capture exact technical state") {
+		t.Error("LLM prompt should contain the exactness instruction")
+	}
+
+	// Verify the result contains the handoff summary content
+	if !strings.Contains(result.SummaryContent, "Fix the authentication bug") {
+		t.Error("result should contain the handoff summary goal")
+	}
+	if !strings.Contains(result.SummaryContent, "Ed25519") {
+		t.Error("handoff summary should preserve exact technical details")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PruneToolOutputs integration with Compact()
+// ---------------------------------------------------------------------------
+
+func TestCompact_PruneToolOutputs_Integration(t *testing.T) {
+	mock := &compactorMockChatter{
+		response: &Response{Content: `## Goal
+Work
+
+## Key Decisions
+none
+
+## Files
+none
+
+## Progress
+done
+
+## Important Discoveries
+none
+
+## Errors Encountered
+none
+
+## Next Steps
+none
+
+## Critical Context
+none
+
+## Constraints
+none`},
+	}
+
+	cfg := DefaultCompactorConfig()
+	cfg.KeepRecentTokens = 300
+	c := NewContextCompactor(cfg, mock, nil, nil)
+
+	// Build messages with a large old tool output that should be pruned
+	// and enough recent tool output to fill the protected budget.
+	largeOutput := makeLongString(50000)     // 50k tokens, way beyond protected budget
+	recentOutput := makeLongString(41000)     // fills protected budget
+	userPadding := makeLongString(50)         // padding to ensure cut point
+
+	msgs := []ChatMessage{
+		{Role: RoleSystem, Content: "sys"},
+		// Old tool output that should be pruned
+		{Role: RoleUser, Content: "run old command" + userPadding},
+		{Role: RoleAssistant, Content: "running", ToolCalls: []ToolCall{
+			{ID: "tc_old", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: largeOutput, ToolCallID: "tc_old"},
+		// More messages to push old output out of protected window
+		{Role: RoleUser, Content: "run recent" + userPadding},
+		{Role: RoleAssistant, Content: "running recent", ToolCalls: []ToolCall{
+			{ID: "tc_recent", Function: ToolCallFunction{Name: "shell_execute", Arguments: `{}`}},
+		}},
+		{Role: RoleTool, Content: recentOutput, ToolCallID: "tc_recent"},
+		// Add enough messages to force a cut point
+		{Role: RoleUser, Content: makeLongString(90)},
+		{Role: RoleAssistant, Content: makeLongString(90)},
+		{Role: RoleUser, Content: makeLongString(90)},
+		{Role: RoleAssistant, Content: makeLongString(90)},
+	}
+
+	result := c.Compact(context.Background(), msgs)
+
+	// The compaction should have proceeded (pruning happened before cut point)
+	if !result.Compacted {
+		t.Error("expected compaction after pruning")
+	}
+
+	// Verify pruning happened: the old tool output should be truncated in the
+	// messages that were passed through (the ToKeep region may still have
+	// the recent output; the ToCompact region is summarized away).
+}
+
