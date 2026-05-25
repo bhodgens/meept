@@ -90,58 +90,66 @@ class ChatRequest extends Equatable {
 
 class Session extends Equatable {
   final String id;
-  final String title;
+  final String title; // Backend returns 'name', we map it to 'title'
+  final String? description;
+  final String? conversationId;
   final DateTime createdAt;
-  final DateTime updatedAt;
-  final String? lastAgentId;
-  final int messageCount;
-  final Map<String, dynamic>? metadata;
+  final DateTime? lastActivity;
+  final List<String>? attachedClients;
 
   const Session({
     required this.id,
     required this.title,
+    this.description,
+    this.conversationId,
     required this.createdAt,
-    required this.updatedAt,
-    this.lastAgentId,
-    this.messageCount = 0,
-    this.metadata,
+    this.lastActivity,
+    this.attachedClients,
   });
 
   factory Session.fromJson(Map<String, dynamic> json) => Session(
         id: json['id'] as String,
-        title: json['title'] as String,
+        title: json['name'] as String? ?? json['title'] as String? ?? 'Untitled',
+        description: json['description'] as String?,
+        conversationId: json['conversation_id'] as String?,
         createdAt: DateTime.parse(json['created_at'] as String),
-        updatedAt: DateTime.parse(json['updated_at'] as String),
-        lastAgentId: json['last_agent_id'] as String?,
-        messageCount: json['message_count'] as int? ?? 0,
-        metadata: json['metadata'] as Map<String, dynamic>?,
+        lastActivity: json['last_activity'] != null
+            ? DateTime.parse(json['last_activity'] as String)
+            : null,
+        attachedClients: (json['attached_clients'] as List?)
+            ?.cast<String>(),
       );
 
   Map<String, dynamic> toJson() => {
         'id': id,
-        'title': title,
+        'name': title,
+        if (description != null) 'description': description,
+        if (conversationId != null) 'conversation_id': conversationId,
         'created_at': createdAt.toIso8601String(),
-        'updated_at': updatedAt.toIso8601String(),
-        if (lastAgentId != null) 'last_agent_id': lastAgentId,
-        'message_count': messageCount,
-        if (metadata != null) 'metadata': metadata,
+        if (lastActivity != null) 'last_activity': lastActivity!.toIso8601String(),
+        if (attachedClients != null) 'attached_clients': attachedClients,
       };
 
   @override
-  List<Object?> get props => [id, title, createdAt, updatedAt, lastAgentId];
+  List<Object?> get props => [id, title, description, conversationId, createdAt, lastActivity];
 }
 
 // ===== Task Models =====
 
 class Task extends Equatable {
   final String id;
-  final String title;
+  final String title; // Backend returns 'name'
   final String description;
-  final String status; // 'pending', 'in_progress', 'completed', 'failed'
+  final String status; // Backend returns 'state': 'pending', 'in_progress', 'completed', 'failed'
   final String? agentId;
   final String? sessionId;
   final DateTime createdAt;
+  final DateTime? updatedAt;
   final DateTime? completedAt;
+  final Map<String, dynamic>? metadata;
+  final int? totalJobs;
+  final int? completedJobs;
+  final int? failedJobs;
   final List<TaskStep>? steps;
 
   const Task({
@@ -152,7 +160,12 @@ class Task extends Equatable {
     this.agentId,
     this.sessionId,
     required this.createdAt,
+    this.updatedAt,
     this.completedAt,
+    this.metadata,
+    this.totalJobs,
+    this.completedJobs,
+    this.failedJobs,
     this.steps,
   });
 
@@ -164,9 +177,16 @@ class Task extends Equatable {
         agentId: json['agent_id'] as String?,
         sessionId: json['session_id'] as String?,
         createdAt: DateTime.parse(json['created_at'] as String),
+        updatedAt: json['updated_at'] != null
+            ? DateTime.parse(json['updated_at'] as String)
+            : null,
         completedAt: json['completed_at'] != null
             ? DateTime.parse(json['completed_at'] as String)
             : null,
+        metadata: json['metadata'] as Map<String, dynamic>?,
+        totalJobs: json['total_jobs'] as int?,
+        completedJobs: json['completed_jobs'] as int?,
+        failedJobs: json['failed_jobs'] as int?,
         steps: (json['steps'] as List?)
             ?.map((s) => TaskStep.fromJson(s as Map<String, dynamic>))
             .toList(),
@@ -174,14 +194,18 @@ class Task extends Equatable {
 
   Map<String, dynamic> toJson() => {
         'id': id,
-        'title': title,
+        'name': title,
         'description': description,
-        'status': status,
+        'state': status,
         if (agentId != null) 'agent_id': agentId,
         if (sessionId != null) 'session_id': sessionId,
         'created_at': createdAt.toIso8601String(),
-        if (completedAt != null)
-          'completed_at': completedAt!.toIso8601String(),
+        if (updatedAt != null) 'updated_at': updatedAt!.toIso8601String(),
+        if (completedAt != null) 'completed_at': completedAt!.toIso8601String(),
+        if (metadata != null) 'metadata': metadata,
+        if (totalJobs != null) 'total_jobs': totalJobs,
+        if (completedJobs != null) 'completed_jobs': completedJobs,
+        if (failedJobs != null) 'failed_jobs': failedJobs,
         if (steps != null) 'steps': steps!.map((s) => s.toJson()).toList(),
       };
 
@@ -238,25 +262,25 @@ class Agent extends Equatable {
   final String id;
   final String name;
   final String description;
-  final String prompt;
   final bool enabled;
+  final String? prompt; // Optional - backend may not return this
   final Map<String, dynamic>? frontmatter;
 
   const Agent({
     required this.id,
     required this.name,
     required this.description,
-    required this.prompt,
     required this.enabled,
+    this.prompt,
     this.frontmatter,
   });
 
   factory Agent.fromJson(Map<String, dynamic> json) => Agent(
         id: json['id'] as String,
         name: json['name'] as String,
-        description: json['description'] as String,
-        prompt: json['prompt'] as String,
-        enabled: json['enabled'] as bool,
+        description: json['description'] as String? ?? '',
+        enabled: json['enabled'] as bool? ?? true,
+        prompt: json['prompt'] as String?,
         frontmatter: json['frontmatter'] as Map<String, dynamic>?,
       );
 
@@ -264,13 +288,13 @@ class Agent extends Equatable {
         'id': id,
         'name': name,
         'description': description,
-        'prompt': prompt,
         'enabled': enabled,
+        if (prompt != null) 'prompt': prompt,
         if (frontmatter != null) 'frontmatter': frontmatter,
       };
 
   @override
-  List<Object?> get props => [id, name, description, prompt, enabled];
+  List<Object?> get props => [id, name, description, enabled, prompt];
 }
 
 // ===== Queue/Job Models =====

@@ -1,9 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
-
-/// Provider for ApiClient -- kept local to avoid circular import
-final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
+import 'providers.dart'; // Import apiClientProvider from providers.dart
 
 /// State tracked by TaskNotifier
 class TaskState {

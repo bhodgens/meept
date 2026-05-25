@@ -2165,3 +2165,47 @@ Test the full flow:
 - [x] **Type consistency:** Field types, function signatures match across tasks
 - [x] **File paths:** All exact paths provided
 - [x] **Build commands:** `go build ./cmd/meept/` and `go test ./internal/configui/...` specified
+
+---
+
+## Errata — Bugs Found During Implementation Review (2026-05-24)
+
+### Critical Bugs Fixed in Implementation
+
+1. **`View()` return type wrong** — Plan specified `View() string`; bubbletea v2 requires `View() tea.View`. Fixed in implementation using `tea.NewView()`.
+
+2. **`handleConfirmKey` did not actually save** — Plan had comment "Save handled by caller after tea.Quit" but no caller existed. Fixed: implementation calls `SaveSection(a.section)` on "y".
+
+3. **Log level case mismatch** — Plan used lowercase `"debug","info","warn","error"` but config constants are UPPERCASE. Fixed in implementation.
+
+4. **`saveMainConfigSection` used bare field keys** — Plan called `SetKeypath(cfg, "log_level", ...)` which would fail since `Config` has `Daemon`, not `log_level` at top level. Fixed: `SectionModel` now stores `sectionKey` (e.g. "daemon") and save prepends it to form `"daemon.log_level"`.
+
+5. **`applyFieldToConfig` silently discarded errors** — Plan used `_ = SetKeypath(...)`. Fixed: implementation returns errors.
+
+### Remaining Issues (Not Yet Fixed)
+
+6. **Multi-select editor non-functional** — `handleEditorKey` for `FieldMultiSelect` has empty up/down/space handlers. Needs `multiSelectCursor` field in `FieldEditor`.
+
+7. **Save stubs for non-main configs** — `saveClientConfig`, `saveModelsConfig`, `saveMCPServersConfig`, `saveAgentsConfig`, `savePresetsConfig` all return "not yet implemented" errors.
+
+8. **Drilldown navigation not implemented** — `app.go` has `// TODO: handle drilldown`. Cannot navigate into nested structs (providers, agents list, MCP servers list).
+
+9. **No `FloatField` type** — `NumberField` only handles integers. Float64 config values are either omitted or hacked via x100/x1000 integer multipliers.
+
+### Significant Field Coverage Gaps
+
+| Section | Fields in Schema | Fields in Builder | Missing |
+|---------|-----------------|-------------------|---------|
+| Agent Loop | ~33 | 2 | ~31 (6 sub-structs) |
+| Shadow | ~40+ | 1 | ~40 (7 sub-structs) |
+| Self-Improve | ~35 | 3 | ~32 (4 sub-structs) |
+| Distributed Memory | 16 | 2 | 14 (2 sub-structs) |
+| Client/TUI | ~30 | 18 | ~15 (keybindings, sidebar) |
+| LLM | ~40 | 22 | ~18 (context firewall, cache) |
+| Memory | ~30 | 19 | ~13 (limits, project_overrides) |
+| Tooling | 10 | 3 | 7 |
+| Q Agent | 13 | 4 | 9 |
+| Session | 10 | 5 | 5 |
+| Compaction | 10 | 7 | 3 |
+| Models | 4+ | 4 | 1 (model_aliases) |
+| Transport | 13 | 12 | 1 (auto_tls_cert) |

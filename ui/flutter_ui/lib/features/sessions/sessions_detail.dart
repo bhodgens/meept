@@ -29,13 +29,14 @@ class SessionsDetailPane extends StatelessWidget {
               session.title.toLowerCase(),
             ),
             _buildDetailRow(
-              'updated',
-              _formatDateTime(session.updatedAt),
+              'created',
+              _formatDateTime(session.createdAt),
             ),
-            _buildDetailRow(
-              'messages',
-              '${session.messageCount}',
-            ),
+            if (session.lastActivity != null)
+              _buildDetailRow(
+                'last activity',
+                _formatDateTime(session.lastActivity!),
+              ),
             const Spacer(),
           ],
         ),

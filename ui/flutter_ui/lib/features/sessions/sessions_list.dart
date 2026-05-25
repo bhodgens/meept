@@ -195,7 +195,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _formatLastActivity(session.updatedAt),
+                    _formatLastActivity(session.lastActivity ?? session.createdAt),
                     style: CyberpunkTypography.bodySmall,
                   ),
                 ],
