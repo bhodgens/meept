@@ -19,6 +19,10 @@ type Transport interface {
 	// The message should be a complete JSON-RPC request.
 	Send(ctx context.Context, message []byte) ([]byte, error)
 
+	// SendNotification sends a JSON-RPC notification without waiting for a response.
+	// Notifications are fire-and-forget: the message is written but no response is read.
+	SendNotification(ctx context.Context, message []byte) error
+
 	// Close terminates the transport connection.
 	Close() error
 

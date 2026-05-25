@@ -303,8 +303,5 @@ func (c *Client) sendNotification(ctx context.Context, method string, params any
 		return fmt.Errorf("failed to serialize notification: %w", err)
 	}
 
-	// For notifications, we don't wait for a response
-	// Some transports might still return data, but we ignore it
-	_, _ = c.transport.Send(ctx, data)
-	return nil
+	return c.transport.SendNotification(ctx, data)
 }

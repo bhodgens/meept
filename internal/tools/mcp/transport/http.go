@@ -172,6 +172,38 @@ func (t *HTTPTransport) parseSSEResponse(r io.Reader) ([]byte, error) {
 	return nil, fmt.Errorf("no response received in SSE stream")
 }
 
+// SendNotification sends a JSON-RPC notification via HTTP POST without waiting
+// for a meaningful response. It fires the request and discards the body.
+func (t *HTTPTransport) SendNotification(ctx context.Context, message []byte) error {
+	if !t.running.Load() {
+		return fmt.Errorf("transport not running")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(message))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
+
+	t.mu.RLock()
+	if t.sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", t.sessionID)
+	}
+	t.mu.RUnlock()
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	resp.Body.Close()
+
+	return nil
+}
+
 // Close terminates the HTTP transport.
 func (t *HTTPTransport) Close() error {
 	t.running.Store(false)

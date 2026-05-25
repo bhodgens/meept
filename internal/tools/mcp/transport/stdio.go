@@ -30,6 +30,16 @@ type StdioTransport struct {
 
 	// Request serialization
 	reqMu sync.Mutex
+
+	// stdoutFile is the raw stdout pipe so we can Close() it
+	// to unblock relayStdout on shutdown.
+	stdoutFile io.ReadCloser
+
+	// relayCh delivers stdout lines from the relay goroutine to Send().
+	relayCh chan stdoutLine
+
+	// relayDone is closed when relayStdout exits.
+	relayDone chan struct{}
 }
 
 // NewStdioTransport creates a new stdio transport.
@@ -87,12 +97,20 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 
 	t.cmd = cmd
 	t.stdin = stdin
+	t.stdoutFile = stdout
 	t.stdout = bufio.NewReader(stdout)
 	t.stderr = bufio.NewReader(stderr)
+	t.relayCh = make(chan stdoutLine, 1)
+	t.relayDone = make(chan struct{})
 	t.running.Store(true)
 
 	// Start stderr reader (log to stderr of parent process)
 	go t.drainStderr()
+
+	// Start stdout relay: reads lines from the subprocess and makes
+	// them available via a channel. This ensures exactly one reader
+	// goroutine owns the bufio.Reader so there are no concurrent reads.
+	go t.relayStdout()
 
 	return nil
 }
@@ -105,6 +123,35 @@ func (t *StdioTransport) drainStderr() {
 		_, err := t.stderr.Read(buf)
 		if err != nil {
 			return
+		}
+	}
+}
+
+// stdoutLine is delivered by relayStdout for each line read from the subprocess.
+type stdoutLine struct {
+	data []byte
+	err  error
+}
+
+// relayStdout reads lines from stdout in a single goroutine and sends them
+// on relayCh. This avoids spawning a new goroutine per Send() call that can
+// leak when Send() times out.
+func (t *StdioTransport) relayStdout() {
+	defer close(t.relayDone)
+
+	for {
+		line, err := t.stdout.ReadBytes('\n')
+		select {
+		case t.relayCh <- stdoutLine{data: line, err: err}:
+			if err != nil {
+				return
+			}
+		default:
+			// No one listening (Send timed out or transport closed).
+			// Discard the line and keep reading.
+			if err != nil {
+				return
+			}
 		}
 	}
 }
@@ -130,38 +177,39 @@ func (t *StdioTransport) Send(ctx context.Context, message []byte) ([]byte, erro
 		timeout = 30 * time.Second
 	}
 
-	type readResult struct {
-		data []byte
-		err  error
-	}
-	resultCh := make(chan readResult, 1)
-
-	// Create a context with timeout for the read operation
 	readCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	go func() {
-		line, err := t.stdout.ReadBytes('\n')
-		if err != nil {
-			resultCh <- readResult{nil, fmt.Errorf("failed to read response: %w", err)}
-			return
-		}
-		resultCh <- readResult{line, nil}
-	}()
-
 	select {
 	case <-readCtx.Done():
-		// Context cancelled or timed out - we cannot interrupt the blocked read,
-		// but marking the transport as not running will cause the goroutine to
-		// eventually exit when the process is closed or produces output.
-		// The goroutine will be cleaned up when Close() is called.
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return nil, fmt.Errorf("request timed out after %v", timeout)
-	case result := <-resultCh:
-		return result.data, result.err
+	case line := <-t.relayCh:
+		if line.err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", line.err)
+		}
+		return line.data, nil
 	}
+}
+
+// SendNotification sends a JSON-RPC notification without waiting for a response.
+// It writes the message to stdin but does not read from stdout.
+func (t *StdioTransport) SendNotification(_ context.Context, message []byte) error {
+	if !t.running.Load() {
+		return fmt.Errorf("transport not running")
+	}
+
+	// Serialize with requests to maintain write ordering
+	t.reqMu.Lock()
+	defer t.reqMu.Unlock()
+
+	if _, err := t.stdin.Write(append(message, '\n')); err != nil {
+		return fmt.Errorf("failed to write notification: %w", err)
+	}
+
+	return nil
 }
 
 // Close terminates the subprocess.
@@ -175,12 +223,16 @@ func (t *StdioTransport) Close() error {
 
 	t.running.Store(false)
 
-	// Close stdin to signal EOF
+	// Close stdin to signal EOF to the subprocess
 	if t.stdin != nil {
 		t.stdin.Close()
 	}
 
 	if t.cmd == nil || t.cmd.Process == nil {
+		// Close stdout file to unblock relayStdout
+		if t.stdoutFile != nil {
+			t.stdoutFile.Close()
+		}
 		return nil
 	}
 
@@ -192,13 +244,29 @@ func (t *StdioTransport) Close() error {
 
 	select {
 	case <-done:
-		return nil
+		// Process exited — pipes are now closed, relayStdout will unblock
 	case <-time.After(5 * time.Second):
-		// Force kill
+		// Force kill — this closes the process and its pipes
 		_ = t.cmd.Process.Kill()
 		<-done
-		return nil
 	}
+
+	// Close stdout file directly to ensure relayStdout unblocks
+	// (cmd.Wait closes the pipes, but do it explicitly to be safe).
+	if t.stdoutFile != nil {
+		t.stdoutFile.Close()
+	}
+
+	// Wait for the relay goroutine to finish
+	if t.relayDone != nil {
+		select {
+		case <-t.relayDone:
+		case <-time.After(2 * time.Second):
+			// Relay didn't exit in time; don't block forever
+		}
+	}
+
+	return nil
 }
 
 // IsRunning returns true if the subprocess is running.
