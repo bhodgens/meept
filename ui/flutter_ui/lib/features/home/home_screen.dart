@@ -65,8 +65,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildTabContent() {
+    // Watch active session to pass to chat tab
+    final activeSession = ref.watch(activeSessionProvider);
     return TabContent(
       selectedTab: _selectedTab,
+      activeSession: activeSession,
     );
   }
 }
