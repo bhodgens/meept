@@ -321,6 +321,35 @@ class ApiClient {
     final data = await post<Map<String, dynamic>>('/config/agents/$id', data: config);
     return Agent.fromJson(data);
   }
+
+  // ===== Config File Endpoints =====
+
+  Future<String> getClientConfig() async {
+    final data = await get<Map<String, dynamic>>('/config/client');
+    return data['content'] as String? ?? '';
+  }
+
+  Future<void> saveClientConfig(String content) async {
+    await post('/config/client', data: {'content': content});
+  }
+
+  Future<String> getModelsConfig() async {
+    final data = await get<Map<String, dynamic>>('/config/models');
+    return data['content'] as String? ?? '';
+  }
+
+  Future<void> saveModelsConfig(String content) async {
+    await post('/config/models', data: {'content': content});
+  }
+
+  Future<String> getMenubarConfig() async {
+    final data = await get<Map<String, dynamic>>('/config/menubar');
+    return data['content'] as String? ?? '';
+  }
+
+  Future<void> saveMenubarConfig(String content) async {
+    await post('/config/menubar', data: {'content': content});
+  }
 }
 
 /// API client exception

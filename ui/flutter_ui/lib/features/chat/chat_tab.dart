@@ -4,6 +4,7 @@ import '../../theme/typography.dart';
 import 'chat_view.dart';
 import '../sidebar/tools_panel.dart';
 import '../memory/memory_panel.dart';
+import '../settings/settings_panel.dart';
 
 /// Chat tab - 3-pane layout with message list, main view, and collapsible sidebar
 class ChatTab extends StatefulWidget {
@@ -41,7 +42,7 @@ class _ChatTabState extends State<ChatTab> {
             ),
           ),
           // Tool detail pane (when a tool is selected)
-          if (_activeTool.isNotEmpty && _activeTool != 'memory')
+          if (_activeTool.isNotEmpty && _activeTool != 'memory' && _activeTool != 'settings')
             Expanded(
               flex: 1,
               child: _buildToolDetail(),
@@ -73,12 +74,15 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   Widget _buildToolView() {
-    // Memory panel is fully implemented
+    // Fully implemented panels
     if (_activeTool == 'memory') {
       return const MemoryPanel();
     }
+    if (_activeTool == 'settings') {
+      return const SettingsPanel();
+    }
 
-    // Other tools still show placeholder
+    // Other tools show placeholder
     return Container(
       color: CyberpunkColors.darkGray,
       child: Center(
@@ -138,6 +142,6 @@ class _ChatTabState extends State<ChatTab> {
     const ToolItem(icon: Icons.terminal, label: 'terminal', status: 'coming soon', route: 'terminal'),
     const ToolItem(icon: Icons.calendar_today, label: 'calendar', status: 'coming soon', route: 'calendar'),
     const ToolItem(icon: Icons.insights, label: 'metrics', status: 'live', route: 'metrics'),
-    const ToolItem(icon: Icons.settings, label: 'settings', status: '', route: 'settings'),
+    const ToolItem(icon: Icons.settings, label: 'settings', status: 'ready', route: 'settings'),
   ];
 }
