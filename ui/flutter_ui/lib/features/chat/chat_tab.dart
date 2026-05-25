@@ -5,6 +5,7 @@ import 'chat_view.dart';
 import '../sidebar/tools_panel.dart';
 import '../memory/memory_panel.dart';
 import '../settings/settings_panel.dart';
+import '../files/files_panel.dart';
 
 /// Chat tab - 3-pane layout with message list, main view, and collapsible sidebar
 class ChatTab extends StatefulWidget {
@@ -81,6 +82,9 @@ class _ChatTabState extends State<ChatTab> {
     if (_activeTool == 'settings') {
       return const SettingsPanel();
     }
+    if (_activeTool == 'files') {
+      return const FilesPanel();
+    }
 
     // Other tools show placeholder
     return Container(
@@ -138,7 +142,7 @@ class _ChatTabState extends State<ChatTab> {
 
   final List<ToolItem> _tools = [
     const ToolItem(icon: Icons.memory, label: 'memory', status: 'ready', route: 'memory'),
-    const ToolItem(icon: Icons.folder, label: 'files', status: 'coming soon', route: 'files'),
+    const ToolItem(icon: Icons.folder, label: 'files', status: 'beta', route: 'files'),
     const ToolItem(icon: Icons.terminal, label: 'terminal', status: 'coming soon', route: 'terminal'),
     const ToolItem(icon: Icons.calendar_today, label: 'calendar', status: 'coming soon', route: 'calendar'),
     const ToolItem(icon: Icons.insights, label: 'metrics', status: 'live', route: 'metrics'),
