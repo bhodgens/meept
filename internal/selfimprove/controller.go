@@ -190,6 +190,8 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 		c.currentCycle.Status = CycleStatusCompleted
 		cycle := c.currentCycle
 		c.mu.Unlock()
+		c.publishStatus("completed", cycle)
+		c.emitProgress("completed", 1.0, "no issues detected")
 		return cycle, nil
 	}
 
@@ -232,6 +234,8 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 		c.currentCycle.Status = CycleStatusCompleted
 		cycle := c.currentCycle
 		c.mu.Unlock()
+		c.publishStatus("completed", cycle)
+		c.emitProgress("completed", 1.0, "no analyses completed")
 		return cycle, nil
 	}
 
@@ -285,6 +289,8 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 		c.currentCycle.Status = CycleStatusCompleted
 		cycle := c.currentCycle
 		c.mu.Unlock()
+		c.publishStatus("completed", cycle)
+		c.emitProgress("completed", 1.0, "no fixes generated")
 		return cycle, nil
 	}
 
@@ -327,6 +333,8 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 		c.currentCycle.Status = CycleStatusCompleted
 		cycle := c.currentCycle
 		c.mu.Unlock()
+		c.publishStatus("completed", cycle)
+		c.emitProgress("completed", 1.0, "no fixes passed validation")
 		return cycle, nil
 	}
 
