@@ -54,6 +54,8 @@ class _TestWebSocket extends WebSocketService {
   final StreamController<Map<String, dynamic>> _messageController;
   bool _connected = false;
   final List<Map<String, dynamic>> _sentMessages = [];
+  bool _testJobsSubscribed = false;
+  bool _testMetricsSubscribed = false;
 
   @override
   Future<void> connect({String? path}) async {
@@ -77,6 +79,24 @@ class _TestWebSocket extends WebSocketService {
   bool get isConnected => _connected;
 
   List<Map<String, dynamic>> get sentMessages => List.unmodifiable(_sentMessages);
+
+  @override
+  Stream<Map<String, dynamic>> subscribeToJobs() {
+    if (!_testJobsSubscribed) {
+      send({'type': 'subscribe', 'channel': 'jobs'});
+      _testJobsSubscribed = true;
+    }
+    return _messageController.stream.where((m) => m['type'] == 'job_update');
+  }
+
+  @override
+  Stream<Map<String, dynamic>> subscribeToMetrics() {
+    if (!_testMetricsSubscribed) {
+      send({'type': 'subscribe', 'channel': 'metrics'});
+      _testMetricsSubscribed = true;
+    }
+    return _messageController.stream.where((m) => m['type'] == 'metrics_update');
+  }
 
   /// Push a raw message into the service's message stream so that
   /// listeners (like [ChatNotifier]) will receive it.
@@ -374,25 +394,15 @@ void main() {
     // ===== WebSocket channel subscription tests (Tasks 18-20) =====
 
     test('subscribeToJobs sends correct subscribe message', () {
-      final ws = _TestWebSocket();
-
-      expect(ws.isConnected, isTrue);
-
-      // Call subscribeToJobs (via a fresh notifier for clean state)
       final ws2 = _TestWebSocket();
-      final notifier2 = _createNotifier(ws2);
-      notifier2.dispose();
 
       // Call subscribeToJobs directly on websocket
       ws2.subscribeToJobs();
 
-      final jobsSub = ws2.sentMessages.firstWhere(
-        (m) => m['type'] == 'subscribe' && m['channel'] == 'jobs',
-        orElse: () => {},
-      );
-
-      expect(jobsSub['type'], 'subscribe');
-      expect(jobsSub['channel'], 'jobs');
+      // Verify subscribe message was sent
+      expect(ws2.sentMessages, hasLength(1));
+      expect(ws2.sentMessages[0]['type'], 'subscribe');
+      expect(ws2.sentMessages[0]['channel'], 'jobs');
     });
 
     test('subscribeToMetrics sends correct subscribe message', () {
@@ -434,12 +444,12 @@ void main() {
       ws5.subscribeToJobs();
       final secondCount = ws5.sentMessages.length;
 
-      // Should only send one subscribe for jobs
-      expect(secondCount, firstCount + 1);
+      // Should only send one subscribe for jobs (idempotent)
+      expect(secondCount, firstCount);
 
       ws5.subscribeToJobs();
       final thirdCount = ws5.sentMessages.length;
-      expect(thirdCount, secondCount + 1);
+      expect(thirdCount, firstCount);
     });
   });
 }

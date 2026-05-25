@@ -52,4 +52,4 @@ site/
 worktrees/
 menubar/.build/
 menubar/MeeptMenuBar.app/
-test
+/test
