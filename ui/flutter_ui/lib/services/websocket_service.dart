@@ -49,7 +49,6 @@ class WebSocketService {
     if (_isConnected || _isConnOpen || _wasExplicitlyDisconnected) return;
 
     try {
-      // Reset connection-open flag on new connect attempt
       _isConnOpen = false;
 
       final wsPath = path ?? '/api/v1/ws';
@@ -64,28 +63,25 @@ class WebSocketService {
             final message = jsonDecode(data as String) as Map<String, dynamic>;
             _messageController.add(message);
 
-            // On first received message, consider the connection fully open
             if (!_isConnOpen) {
               _isConnOpen = true;
-              // Verify it's a legit signal (ping response, status, or actual data)
               final type = message['type'] as String?;
               if (type == 'ping' || type == 'status' || type != null) {
                 _isConnected = true;
                 _connectionController.add(true);
                 _startPingTimer();
-                // Reset retry count on successful connection
                 _retryCount = 0;
               }
             }
           } catch (e) {
-            _errorController.add('Failed to parse message: $e');
+            _errorController.add('Failed to parse message: \$e');
           }
         },
         onError: (error) {
           _isConnected = false;
           _isConnOpen = false;
           _connectionController.add(false);
-          _errorController.add('WebSocket error: $error');
+          _errorController.add('WebSocket error: \$error');
           _handleReconnect();
         },
         onDone: () {
@@ -99,12 +95,11 @@ class WebSocketService {
       _isConnected = false;
       _isConnOpen = false;
       _connectionController.add(false);
-      _errorController.add('Connection failed: $e');
+      _errorController.add('Connection failed: \$e');
       _handleReconnect();
     }
   }
 
-  /// Build WebSocket URI with auth token appended as query param.
   Uri _buildUriWithAuth(Uri baseUri) {
     if (_apiKey != null && _apiKey!.isNotEmpty) {
       final queryParameters = Map<String, dynamic>.from(baseUri.queryParameters)
@@ -114,14 +109,12 @@ class WebSocketService {
     return baseUri;
   }
 
-  /// Exponential backoff with jitter for reconnection.
   Duration _computeReconnectDelay() {
     if (_retryCount >= AppConstants.maxRetries) {
-      return const Duration(seconds: 30); // fallback: wait 30s if all retries exhausted
+      return const Duration(seconds: 30);
     }
     const baseDelay = Duration(seconds: 2);
-    final exponentialDelay = baseDelay * (1 << _retryCount); // 2s, 4s, 8s
-    // Add jitter: random 0-1000ms
+    final exponentialDelay = baseDelay * (1 << _retryCount);
     final jitter = Duration(milliseconds: Random().nextInt(1000));
     _retryCount++;
     return exponentialDelay + jitter;
@@ -134,7 +127,7 @@ class WebSocketService {
     });
   }
 
-  /// Disconnect from WebSocket
+  /// Disconnect from WebSocket and dispose resources
   void disconnect() {
     _wasExplicitlyDisconnected = true;
     _pingTimer?.cancel();
@@ -145,9 +138,13 @@ class WebSocketService {
     _isConnOpen = false;
     _retryCount = 0;
     _connectionController.add(false);
+
+    // Close StreamControllers to prevent memory leaks
+    _messageController.close();
+    _errorController.close();
+    _connectionController.close();
   }
 
-  /// Send message
   void send(Map<String, dynamic> message) {
     if (!_isConnected) {
       _errorController.add('Cannot send: not connected');
@@ -163,24 +160,26 @@ class WebSocketService {
     });
   }
 
-  /// Subscribe to chat messages
   Stream<Map<String, dynamic>> subscribeToChat(String sessionId) {
     send({'type': 'subscribe', 'channel': 'chat', 'session_id': sessionId});
     return _messageController.stream
         .where((m) => m['type'] == 'chat_message' && m['session_id'] == sessionId);
   }
 
-  /// Subscribe to job updates
   Stream<Map<String, dynamic>> subscribeToJobs() {
     send({'type': 'subscribe', 'channel': 'jobs'});
     return _messageController.stream
         .where((m) => m['type'] == 'job_update');
   }
 
-  /// Subscribe to metrics updates
   Stream<Map<String, dynamic>> subscribeToMetrics() {
     send({'type': 'subscribe', 'channel': 'metrics'});
     return _messageController.stream
         .where((m) => m['type'] == 'metrics_update');
+  }
+
+  /// Dispose all resources
+  void dispose() {
+    disconnect();
   }
 }

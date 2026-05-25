@@ -6,6 +6,9 @@ import '../services/api_client.dart';
 import '../services/websocket_service.dart';
 import 'providers.dart';
 
+/// Maximum number of messages to keep in memory
+const int _maxMessages = 500;
+
 /// State for the chat provider
 class ChatState {
   final List<ChatMessage> messages;
@@ -23,8 +26,14 @@ class ChatState {
     bool? isLoading,
     String? error,
   }) {
+    // Limit messages to prevent memory leaks
+    List<ChatMessage> limitedMessages = messages ?? this.messages;
+    if (limitedMessages.length > _maxMessages) {
+      // Keep only the most recent messages
+      limitedMessages = limitedMessages.sublist(limitedMessages.length - _maxMessages);
+    }
     return ChatState(
-      messages: messages ?? this.messages,
+      messages: limitedMessages,
       isLoading: isLoading ?? this.isLoading,
       error: error ?? this.error,
     );
@@ -57,22 +66,24 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   /// Load chat history for a session and subscribe to updates
   Future<void> loadMessages(String sessionId) async {
+    // Clear previous messages when loading a new session
     state = ChatState(
-      messages: state.messages,
+      messages: [],
       isLoading: true,
       error: null,
     );
 
-    // Unsubscribe from previous session and resubscribe to the new one
+    // Cancel previous subscription before creating new one
     _chatSubscription?.cancel();
+    _chatSubscription = null;
 
-    final subscription = websocket.messageStream.listen((message) {
+    // Create new subscription for this session
+    _chatSubscription = websocket.messageStream.listen((message) {
       if (message['type'] == 'chat_message' &&
           message['session_id'] == sessionId) {
         addStreamMessage(message);
       }
     });
-    _chatSubscription = subscription;
 
     // Send subscribe request if connected
     if (websocket.isConnected) {
@@ -83,11 +94,14 @@ class ChatNotifier extends StateNotifier<ChatState> {
       });
     }
 
-    state = ChatState(
-      messages: state.messages,
-      isLoading: false,
-      error: null,
-    );
+    // Fetch messages from server (this will populate messages via WebSocket)
+    try {
+      await apiClient.getSession(sessionId);
+    } catch (_) {
+      // Ignore errors, messages will come via WebSocket
+    }
+
+    state = state.copyWith(isLoading: false);
   }
 
   /// Send a message and append it to the messages list
