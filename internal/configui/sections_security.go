@@ -17,9 +17,22 @@ func buildSecurityFields() []Field {
 		NewToggleField("require_confirmation_high", "require confirmation high", s.RequireConfirmationHigh),
 		NewToggleField("require_confirmation_critical", "require confirmation critical", s.RequireConfirmationCritical),
 		NewToggleField("block_financial", "block financial", s.BlockFinancial),
-		NewDrilldownField("allowed_paths", "allowed paths", len(s.AllowedPaths)),
-		NewDrilldownField("blocked_paths", "blocked paths", len(s.BlockedPaths)),
+		NewDrilldownField("allowed_paths", "allowed paths", buildStringSliceItems("path", s.AllowedPaths)),
+		NewDrilldownField("blocked_paths", "blocked paths", buildStringSliceItems("path", s.BlockedPaths)),
 		NewToggleField("enable_audit_log", "enable audit log", s.EnableAuditLog),
 		NewTextField("audit_db_path", "audit db path", s.AuditDBPath),
 	}
+}
+
+// buildStringSliceItems converts a []string into DrilldownItem items where each
+// item has a single editable text field with the given fieldKey.
+func buildStringSliceItems(fieldKey string, ss []string) []DrilldownItem {
+	items := make([]DrilldownItem, 0, len(ss))
+	for _, s := range ss {
+		fields := []Field{
+			NewTextField(fieldKey, fieldKey, s),
+		}
+		items = append(items, DrilldownItem{Name: s, Fields: fields})
+	}
+	return items
 }

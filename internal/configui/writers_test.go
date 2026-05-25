@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/tools/mcp"
 )
 
 func TestAtomicWriteJSON(t *testing.T) {
@@ -96,5 +98,363 @@ func TestConfigFilePath(t *testing.T) {
 	p := ConfigFilePath("meept.json5")
 	if p == "" {
 		t.Error("expected non-empty path")
+	}
+}
+
+// --- Drilldown save tests ---
+// These tests verify that the drilldown save handlers correctly apply field
+// changes to nested config structures. They override the loader functions and
+// ConfigFilePath to use test-controlled data and temp directories.
+
+func TestSaveModelsConfigDrilldownProvider(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json5")
+
+	origLoader := loadProvidersConfig
+	origPath := ConfigFilePath
+	t.Cleanup(func() {
+		loadProvidersConfig = origLoader
+		ConfigFilePath = origPath
+	})
+
+	// Inject a config with an existing openai provider
+	loadProvidersConfig = func() (*llm.ProvidersConfig, error) {
+		return &llm.ProvidersConfig{
+			Model: "default-model",
+			Providers: map[string]llm.ProviderConfig{
+				"openai": {
+					API: "openai",
+					Options: llm.ProviderOptionsConfig{
+						BaseURL: "https://api.openai.com",
+						APIKey:  "old-key",
+						Timeout: 30,
+					},
+				},
+			},
+		}, nil
+	}
+	ConfigFilePath = func(name string) string { return path }
+
+	// Create a drilldown section for the openai provider
+	apiField := NewTextField("api", "api type", "openai")
+	baseURLField := NewTextField("options.baseURL", "base url", "https://api.openai.com")
+	apiKeyField := NewTextField("options.apiKey", "api key", "old-key")
+	timeoutField := NewNumberField("options.timeout", "timeout", 30)
+
+	// Simulate user changing the API key and base URL
+	apiKeyField.Set("new-secret-key")
+	baseURLField.Set("https://custom.proxy.com")
+
+	sm := NewDrilldownSectionModel(
+		"models > providers > openai", "models", "models.json5",
+		"providers.openai",
+		[]Field{apiField, baseURLField, apiKeyField, timeoutField},
+	)
+
+	if err := saveModelsConfig(sm); err != nil {
+		t.Fatalf("saveModelsConfig: %v", err)
+	}
+
+	// Verify the saved config has updated values
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	providers := got["providers"].(map[string]any)
+	openai := providers["openai"].(map[string]any)
+	opts := openai["options"].(map[string]any)
+	if opts["apiKey"] != "new-secret-key" {
+		t.Errorf("expected apiKey 'new-secret-key', got %v", opts["apiKey"])
+	}
+	if opts["baseURL"] != "https://custom.proxy.com" {
+		t.Errorf("expected baseURL 'https://custom.proxy.com', got %v", opts["baseURL"])
+	}
+	// Unchanged field should remain
+	if openai["api"] != "openai" {
+		t.Errorf("expected api 'openai', got %v", openai["api"])
+	}
+	if opts["timeout"] != float64(30) {
+		t.Errorf("expected timeout 30, got %v", opts["timeout"])
+	}
+}
+
+func TestSaveModelsConfigDrilldownNewProvider(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json5")
+
+	origLoader := loadProvidersConfig
+	origPath := ConfigFilePath
+	t.Cleanup(func() {
+		loadProvidersConfig = origLoader
+		ConfigFilePath = origPath
+	})
+
+	loadProvidersConfig = func() (*llm.ProvidersConfig, error) {
+		return &llm.ProvidersConfig{
+			Model:     "default-model",
+			Providers: map[string]llm.ProviderConfig{},
+		}, nil
+	}
+	ConfigFilePath = func(name string) string { return path }
+
+	// Create a drilldown section for a new provider
+	apiField := NewTextField("api", "api type", "")
+	baseURLField := NewTextField("options.baseURL", "base url", "")
+
+	// Simulate user setting values for new provider
+	apiField.Set("anthropic")
+	baseURLField.Set("https://api.anthropic.com")
+
+	sm := NewDrilldownSectionModel(
+		"models > providers > anthropic", "models", "models.json5",
+		"providers.anthropic",
+		[]Field{apiField, baseURLField},
+	)
+
+	if err := saveModelsConfig(sm); err != nil {
+		t.Fatalf("saveModelsConfig: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	providers := got["providers"].(map[string]any)
+	anthropic, ok := providers["anthropic"].(map[string]any)
+	if !ok {
+		t.Fatal("expected anthropic provider to be created")
+	}
+	if anthropic["api"] != "anthropic" {
+		t.Errorf("expected api 'anthropic', got %v", anthropic["api"])
+	}
+}
+
+func TestSaveAgentsConfigDrilldown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agents.json5")
+
+	origLoader := loadAgentsConfig
+	origPath := ConfigFilePath
+	t.Cleanup(func() {
+		loadAgentsConfig = origLoader
+		ConfigFilePath = origPath
+	})
+
+	loadAgentsConfig = func(*config.AgentsConfig) (map[string]*config.AgentDefinition, error) {
+		return map[string]*config.AgentDefinition{
+			"coder": {ID: "coder", Name: "Code Agent", Role: "executor", Model: "gpt-4", Enabled: true, CanDelegate: true},
+		}, nil
+	}
+	ConfigFilePath = func(name string) string { return path }
+
+	// Create drilldown section for the coder agent
+	nameField := NewTextField("name", "name", "Code Agent")
+	modelField := NewTextField("model", "model", "gpt-4")
+
+	// Simulate user changing the model
+	modelField.Set("claude-3.5-sonnet")
+
+	sm := NewDrilldownSectionModel(
+		"agents > agent definitions > coder", "agents", "agents.json5",
+		"agents.coder",
+		[]Field{nameField, modelField},
+	)
+
+	if err := saveAgentsConfig(sm); err != nil {
+		t.Fatalf("saveAgentsConfig: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	agents := got["agents"].([]any)
+	agent := agents[0].(map[string]any)
+	if agent["model"] != "claude-3.5-sonnet" {
+		t.Errorf("expected model 'claude-3.5-sonnet', got %v", agent["model"])
+	}
+	if agent["name"] != "Code Agent" {
+		t.Errorf("expected name 'Code Agent' (unchanged), got %v", agent["name"])
+	}
+}
+
+func TestSaveMCPServersConfigDrilldown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp_servers.json5")
+
+	origLoader := loadMCPConfig
+	origPath := ConfigFilePath
+	t.Cleanup(func() {
+		loadMCPConfig = origLoader
+		ConfigFilePath = origPath
+	})
+
+	loadMCPConfig = func() (*config.MCPServersConfig, error) {
+		return &config.MCPServersConfig{
+			Servers: []mcp.ServerConfig{
+				{Name: "myserver", Type: "stdio", Command: []string{"node", "server.js"}},
+			},
+		}, nil
+	}
+	ConfigFilePath = func(name string) string { return path }
+
+	// Create drilldown section for the MCP server
+	nameField := NewTextField("name", "name", "myserver")
+	typeField := NewSelectField("type", "type", "stdio", []string{"stdio", "http"})
+	urlField := NewTextField("url", "url", "")
+
+	// Simulate user changing type to http and adding url
+	typeField.Set("http")
+	urlField.Set("https://mcp.example.com/sse")
+
+	sm := NewDrilldownSectionModel(
+		"mcp servers > servers > myserver", "mcp_servers", "mcp_servers.json5",
+		"servers.myserver",
+		[]Field{nameField, typeField, urlField},
+	)
+
+	if err := saveMCPServersConfig(sm); err != nil {
+		t.Fatalf("saveMCPServersConfig: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	servers := got["servers"].([]any)
+	server := servers[0].(map[string]any)
+	if server["type"] != "http" {
+		t.Errorf("expected type 'http', got %v", server["type"])
+	}
+	if server["url"] != "https://mcp.example.com/sse" {
+		t.Errorf("expected url 'https://mcp.example.com/sse', got %v", server["url"])
+	}
+}
+
+func TestSavePresetsConfigDrilldown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "presets.json5")
+
+	origLoader := loadPresetsConfig
+	origPath := ConfigFilePath
+	t.Cleanup(func() {
+		loadPresetsConfig = origLoader
+		ConfigFilePath = origPath
+	})
+
+	loadPresetsConfig = func() (*config.PresetConfig, error) {
+		return &config.PresetConfig{
+			Default: "development",
+			Presets: map[string]*config.ModelPreset{
+				"development": {
+					Label:       "Development",
+					Description: "Balanced for coding tasks",
+					Params: config.ModelParams{
+						Temperature: 0.3,
+						TopP:        0.9,
+					},
+				},
+			},
+		}, nil
+	}
+	ConfigFilePath = func(name string) string { return path }
+
+	// Create drilldown section for the development preset
+	labelField := NewTextField("label", "label", "Development")
+	tempField := NewFloatField("params.temperature", "temperature", 0.3)
+
+	// Simulate user changing temperature
+	tempField.Set("0.7")
+
+	sm := NewDrilldownSectionModel(
+		"presets > presets > development", "presets", "presets.json5",
+		"presets.development",
+		[]Field{labelField, tempField},
+	)
+
+	if err := savePresetsConfig(sm); err != nil {
+		t.Fatalf("savePresetsConfig: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	presets := got["presets"].(map[string]any)
+	dev := presets["development"].(map[string]any)
+	params := dev["params"].(map[string]any)
+	if params["temperature"] != 0.7 {
+		t.Errorf("expected temperature 0.7, got %v", params["temperature"])
+	}
+	if dev["label"] != "Development" {
+		t.Errorf("expected label 'Development' (unchanged), got %v", dev["label"])
+	}
+}
+
+func TestSaveModelsConfigTopLevel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json5")
+
+	origLoader := loadProvidersConfig
+	origPath := ConfigFilePath
+	t.Cleanup(func() {
+		loadProvidersConfig = origLoader
+		ConfigFilePath = origPath
+	})
+
+	loadProvidersConfig = func() (*llm.ProvidersConfig, error) {
+		return &llm.ProvidersConfig{
+			Model: "old-model",
+			Providers: map[string]llm.ProviderConfig{
+				"openai": {API: "openai"},
+			},
+		}, nil
+	}
+	ConfigFilePath = func(name string) string { return path }
+
+	// Non-drilldown (top-level) section should still work
+	modelField := NewTextField("model", "default model", "old-model")
+	modelField.Set("new-model")
+
+	sm := NewSectionModel("models", "models", "models.json5", []Field{modelField})
+	if err := saveModelsConfig(sm); err != nil {
+		t.Fatalf("saveModelsConfig: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["model"] != "new-model" {
+		t.Errorf("expected model 'new-model', got %v", got["model"])
+	}
+	// Provider should be preserved
+	providers := got["providers"].(map[string]any)
+	if _, ok := providers["openai"]; !ok {
+		t.Error("expected openai provider to be preserved")
 	}
 }

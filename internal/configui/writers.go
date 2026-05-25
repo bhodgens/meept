@@ -10,7 +10,10 @@ import (
 )
 
 // ConfigFilePath resolves a config file path relative to ~/.meept/.
-func ConfigFilePath(name string) string {
+// It is a package-level variable so tests can override it to use temp dirs.
+var ConfigFilePath = configFilePath
+
+func configFilePath(name string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return name

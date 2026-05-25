@@ -26,9 +26,7 @@ func newConfigCmd() *cobra.Command {
 
 func runConfigTUI(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		// Jump to specific section
-		// TODO: implement section jumping via app.SelectSectionByName
-		fmt.Fprintf(os.Stderr, "jumping to section: %s\n", args[0])
+		return configui.RunWithSection(args[0])
 	}
 	return configui.RunApp()
 }

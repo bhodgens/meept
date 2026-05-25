@@ -244,3 +244,36 @@ func TestMoveDownSingleField(t *testing.T) {
 		t.Errorf("MoveUp on single field: cursor = %d, want 0", s.Cursor())
 	}
 }
+
+// --- Drilldown section model tests ---
+
+func TestNewDrilldownSectionModel(t *testing.T) {
+	fields := makeTestFields()
+	s := NewDrilldownSectionModel("test > items > myitem", "test", "test.json5", "items.myitem", fields)
+
+	if s.Title() != "test > items > myitem" {
+		t.Errorf("Title() = %q, want %q", s.Title(), "test > items > myitem")
+	}
+	if s.ConfigFile() != "test.json5" {
+		t.Errorf("ConfigFile() = %q, want %q", s.ConfigFile(), "test.json5")
+	}
+	if s.SectionKey() != "test" {
+		t.Errorf("SectionKey() = %q, want %q", s.SectionKey(), "test")
+	}
+	if !s.IsDrilldown() {
+		t.Error("IsDrilldown() = false, want true")
+	}
+	if s.DrilldownPrefix() != "items.myitem" {
+		t.Errorf("DrilldownPrefix() = %q, want %q", s.DrilldownPrefix(), "items.myitem")
+	}
+}
+
+func TestNewSectionModelNotDrilldown(t *testing.T) {
+	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
+	if s.IsDrilldown() {
+		t.Error("IsDrilldown() = true for normal section, want false")
+	}
+	if s.DrilldownPrefix() != "" {
+		t.Errorf("DrilldownPrefix() = %q, want empty string", s.DrilldownPrefix())
+	}
+}

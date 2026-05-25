@@ -123,3 +123,127 @@ func TestFieldHelp(t *testing.T) {
 		t.Errorf("help text mismatch")
 	}
 }
+
+func TestFloatField(t *testing.T) {
+	f := NewFloatField("aggressiveness", "Aggressiveness", 0.75)
+	if f.Key() != "aggressiveness" {
+		t.Errorf("expected key aggressiveness, got %s", f.Key())
+	}
+	if f.Label() != "Aggressiveness" {
+		t.Errorf("expected label Aggressiveness, got %s", f.Label())
+	}
+	if f.Get() != "0.75" {
+		t.Errorf("expected 0.75, got %s", f.Get())
+	}
+	if f.Type() != FieldFloat {
+		t.Errorf("expected FieldFloat type, got %v", f.Type())
+	}
+}
+
+func TestFloatFieldSetDirty(t *testing.T) {
+	f := NewFloatField("aggressiveness", "Aggressiveness", 0.75)
+	if f.IsDirty() {
+		t.Error("new field should not be dirty")
+	}
+	f.Set("0.5")
+	if !f.IsDirty() {
+		t.Error("field should be dirty after set")
+	}
+	if f.Get() != "0.5" {
+		t.Errorf("expected 0.5, got %s", f.Get())
+	}
+}
+
+func TestFloatFieldReset(t *testing.T) {
+	f := NewFloatField("aggressiveness", "Aggressiveness", 0.75)
+	f.Set("0.5")
+	f.Reset()
+	if f.IsDirty() {
+		t.Error("field should not be dirty after reset")
+	}
+	if f.Get() != "0.75" {
+		t.Errorf("expected original value 0.75 after reset, got %s", f.Get())
+	}
+}
+
+func TestFloatFieldRejectsNonNumeric(t *testing.T) {
+	f := NewFloatField("aggressiveness", "Aggressiveness", 0.75)
+	err := f.Set("abc")
+	if err == nil {
+		t.Error("expected error setting non-numeric value")
+	}
+}
+
+func TestFloatFieldDisplay(t *testing.T) {
+	tests := []struct {
+		value    float64
+		expected string
+	}{
+		{0.75, "0.75"},
+		{1.0, "1"},
+		{0.001, "0.001"},
+		{3.14159, "3.14159"},
+	}
+	for _, tt := range tests {
+		f := NewFloatField("test", "Test", tt.value)
+		if f.Display() != tt.expected {
+			t.Errorf("FloatField(%v).Display() = %q, want %q", tt.value, f.Display(), tt.expected)
+		}
+	}
+}
+
+func TestFloatFieldIntegerValue(t *testing.T) {
+	f := NewFloatField("ratio", "Ratio", 1.0)
+	if err := f.Set("0.85"); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if f.Get() != "0.85" {
+		t.Errorf("expected 0.85, got %s", f.Get())
+	}
+}
+
+func TestDrilldownFieldWithItems(t *testing.T) {
+	items := []DrilldownItem{
+		{Name: "item1", Fields: []Field{NewTextField("k", "K", "v")}},
+		{Name: "item2", Fields: []Field{NewTextField("k", "K", "v"), NewToggleField("b", "B", true)}},
+	}
+	f := NewDrilldownField("test", "Test", items)
+	if f.Type() != FieldDrilldown {
+		t.Errorf("expected FieldDrilldown, got %v", f.Type())
+	}
+	if f.Display() != "[2 items]" {
+		t.Errorf("expected '[2 items]', got %q", f.Display())
+	}
+	if len(f.Items) != 2 {
+		t.Errorf("expected 2 items, got %d", len(f.Items))
+	}
+	if f.Items[0].Name != "item1" {
+		t.Errorf("expected item1, got %s", f.Items[0].Name)
+	}
+	if len(f.Items[1].Fields) != 2 {
+		t.Errorf("expected 2 fields in item2, got %d", len(f.Items[1].Fields))
+	}
+	// Set should error
+	if err := f.Set("anything"); err == nil {
+		t.Error("expected error setting drilldown field")
+	}
+}
+
+func TestDrilldownFieldCount(t *testing.T) {
+	f := NewDrilldownFieldCount("test", "Test", 3)
+	if f.Display() != "[3 items]" {
+		t.Errorf("expected '[3 items]', got %q", f.Display())
+	}
+	if len(f.Items) != 3 {
+		t.Errorf("expected 3 items, got %d", len(f.Items))
+	}
+	// Items are empty shells (no Name, no Fields)
+	for i, item := range f.Items {
+		if item.Name != "" {
+			t.Errorf("item %d: expected empty name, got %q", i, item.Name)
+		}
+		if len(item.Fields) != 0 {
+			t.Errorf("item %d: expected empty fields, got %d", i, len(item.Fields))
+		}
+	}
+}

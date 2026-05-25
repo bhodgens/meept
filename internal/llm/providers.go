@@ -105,13 +105,25 @@ func LoadProvidersConfigDefault() (*ProvidersConfig, error) {
 }
 
 // expandEnvVars expands environment variables in a string.
+// Skips known placeholder variables that are expanded later (e.g., MODEL_PATH).
 func expandEnvVars(s string) string {
+	// Placeholder variables that should NOT be expanded here
+	// They are expanded later by ValidateAndNormalize in runtime_config.go
+	placeholderVars := map[string]bool{
+		"MODEL_PATH": true,
+	}
+
 	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
 		var varName string
 		if strings.HasPrefix(match, "${") {
 			varName = match[2 : len(match)-1]
 		} else {
 			varName = match[1:]
+		}
+
+		// Skip placeholder variables - they will be expanded later
+		if placeholderVars[varName] {
+			return match
 		}
 
 		if val, ok := os.LookupEnv(varName); ok {

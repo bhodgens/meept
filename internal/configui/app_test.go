@@ -3,6 +3,8 @@ package configui
 
 import (
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestNewApp(t *testing.T) {
@@ -152,4 +154,498 @@ func TestBuildSectionFieldsStub(t *testing.T) {
 	if fields[0].Key() != "_stub" {
 		t.Errorf("expected stub key '_stub', got %s", fields[0].Key())
 	}
+}
+
+func TestJumpToSectionExactTitle(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("daemon") {
+		t.Fatal("expected to find 'daemon' section")
+	}
+	if app.Phase() != PhaseSection {
+		t.Fatalf("expected PhaseSection, got %v", app.Phase())
+	}
+	sec := app.Section()
+	if sec == nil {
+		t.Fatal("expected non-nil section")
+	}
+	if sec.Title() != "daemon" {
+		t.Errorf("expected title 'daemon', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionExactTitleCaseInsensitive(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("Daemon") {
+		t.Fatal("expected to find 'Daemon' section")
+	}
+	if app.Phase() != PhaseSection {
+		t.Fatalf("expected PhaseSection, got %v", app.Phase())
+	}
+}
+
+func TestJumpToSectionExactKeyPath(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("mcp_servers") {
+		t.Fatal("expected to find 'mcp_servers' section")
+	}
+	if app.Phase() != PhaseSection {
+		t.Fatalf("expected PhaseSection, got %v", app.Phase())
+	}
+	sec := app.Section()
+	if sec == nil {
+		t.Fatal("expected non-nil section")
+	}
+	if sec.Title() != "mcp servers" {
+		t.Errorf("expected title 'mcp servers', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionAliasMCP(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("mcp") {
+		t.Fatal("expected alias 'mcp' to resolve")
+	}
+	sec := app.Section()
+	if sec.Title() != "mcp servers" {
+		t.Errorf("expected 'mcp servers', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionAliasTUI(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("tui") {
+		t.Fatal("expected alias 'tui' to resolve")
+	}
+	sec := app.Section()
+	if sec.Title() != "client / tui" {
+		t.Errorf("expected 'client / tui', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionAliasClient(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("client") {
+		t.Fatal("expected alias 'client' to resolve")
+	}
+	sec := app.Section()
+	if sec.Title() != "client / tui" {
+		t.Errorf("expected 'client / tui', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionAliasAgent(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("agent") {
+		t.Fatal("expected alias 'agent' to resolve")
+	}
+	sec := app.Section()
+	if sec.Title() != "agent loop" {
+		t.Errorf("expected 'agent loop', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionAliasQ(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("q") {
+		t.Fatal("expected alias 'q' to resolve")
+	}
+	sec := app.Section()
+	if sec.Title() != "q agent" {
+		t.Errorf("expected 'q agent', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionPrefixMatch(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("sec") {
+		t.Fatal("expected prefix 'sec' to match 'security'")
+	}
+	sec := app.Section()
+	if sec.Title() != "security" {
+		t.Errorf("expected 'security', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionPrefixKeyPath(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("dist") {
+		t.Fatal("expected prefix 'dist' to match 'distributed memory' via keypath")
+	}
+	sec := app.Section()
+	if sec.Title() != "distributed memory" {
+		t.Errorf("expected 'distributed memory', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionAdvancedAutoEnabled(t *testing.T) {
+	app := NewApp()
+	// "queue" is an advanced-only section
+	if !app.JumpToSection("queue") {
+		t.Fatal("expected to find 'queue' section (advanced)")
+	}
+	// Advanced mode should have been enabled automatically
+	if !app.showAdvanced {
+		t.Error("expected advanced mode to be auto-enabled for advanced-only section")
+	}
+	sec := app.Section()
+	if sec.Title() != "queue" {
+		t.Errorf("expected 'queue', got %q", sec.Title())
+	}
+}
+
+func TestJumpToSectionPrimaryNoAdvanced(t *testing.T) {
+	app := NewApp()
+	app.ToggleAdvanced() // turn on advanced
+	if !app.JumpToSection("daemon") {
+		t.Fatal("expected to find 'daemon' section")
+	}
+	// Since daemon is a primary item, advanced should be turned off
+	if app.showAdvanced {
+		t.Error("expected advanced mode to be off for primary section")
+	}
+}
+
+func TestJumpToSectionNotFound(t *testing.T) {
+	app := NewApp()
+	if app.JumpToSection("zzz-nonexistent") {
+		t.Error("expected JumpToSection to return false for unknown section")
+	}
+	if app.Phase() != PhaseMenu {
+		t.Errorf("expected PhaseMenu when not found, got %v", app.Phase())
+	}
+}
+
+func TestJumpToSectionWhitespace(t *testing.T) {
+	app := NewApp()
+	if !app.JumpToSection("  daemon  ") {
+		t.Fatal("expected whitespace-trimmed 'daemon' to match")
+	}
+	sec := app.Section()
+	if sec.Title() != "daemon" {
+		t.Errorf("expected 'daemon', got %q", sec.Title())
+	}
+}
+
+// --- Drilldown tests ---
+
+func TestDrilldownEnterAndBack(t *testing.T) {
+	app := NewApp()
+	// Build a section with a drilldown field
+	items := []DrilldownItem{
+		{Name: "first", Fields: []Field{NewTextField("k", "K", "v1")}},
+		{Name: "second", Fields: []Field{NewTextField("k", "K", "v2")}},
+	}
+	df := NewDrilldownField("things", "Things", items)
+	sectionFields := []Field{
+		NewTextField("name", "Name", "test"),
+		df,
+	}
+	app.section = NewSectionModel("test section", "test", "test.json5", sectionFields)
+	app.phase = PhaseSection
+
+	// Move cursor to the drilldown field (index 1)
+	app.section.MoveDown()
+	if app.section.Cursor() != 1 {
+		t.Fatalf("cursor should be at 1, got %d", app.section.Cursor())
+	}
+
+	// Press enter on the drilldown field
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a := model.(*App)
+	if a.Phase() != PhaseDrilldown {
+		t.Fatalf("expected PhaseDrilldown, got %v", a.Phase())
+	}
+	if len(a.drilldownItems) != 2 {
+		t.Errorf("expected 2 drilldown items, got %d", len(a.drilldownItems))
+	}
+	if a.drilldownCursor != 0 {
+		t.Errorf("expected cursor at 0, got %d", a.drilldownCursor)
+	}
+	if a.drilldownField != df {
+		t.Error("drilldownField should point to the DrilldownField")
+	}
+
+	// Navigate down
+	model, _ = a.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	a = model.(*App)
+	if a.drilldownCursor != 1 {
+		t.Errorf("expected cursor at 1, got %d", a.drilldownCursor)
+	}
+
+	// Go back with esc
+	model, _ = a.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	a = model.(*App)
+	if a.Phase() != PhaseSection {
+		t.Fatalf("expected PhaseSection after esc, got %v", a.Phase())
+	}
+	if a.drilldownField != nil {
+		t.Error("drilldownField should be nil after back")
+	}
+}
+
+func TestDrilldownNavigateUpDown(t *testing.T) {
+	app := NewApp()
+	items := []DrilldownItem{
+		{Name: "a", Fields: []Field{NewTextField("k", "K", "1")}},
+		{Name: "b", Fields: []Field{NewTextField("k", "K", "2")}},
+		{Name: "c", Fields: []Field{NewTextField("k", "K", "3")}},
+	}
+	df := NewDrilldownField("items", "Items", items)
+	app.section = NewSectionModel("test", "test", "test.json5", []Field{df})
+	app.phase = PhaseSection
+
+	// Enter drilldown
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a := model.(*App)
+
+	// Down twice using 'j' key
+	model, _ = a.Update(tea.KeyPressMsg{Text: "j"})
+	a = model.(*App)
+	model, _ = a.Update(tea.KeyPressMsg{Text: "j"})
+	a = model.(*App)
+	if a.drilldownCursor != 2 {
+		t.Errorf("expected cursor at 2, got %d", a.drilldownCursor)
+	}
+
+	// Down again should clamp
+	model, _ = a.Update(tea.KeyPressMsg{Text: "j"})
+	a = model.(*App)
+	if a.drilldownCursor != 2 {
+		t.Errorf("expected cursor clamped at 2, got %d", a.drilldownCursor)
+	}
+
+	// Up to top using 'k' key
+	model, _ = a.Update(tea.KeyPressMsg{Text: "k"})
+	a = model.(*App)
+	model, _ = a.Update(tea.KeyPressMsg{Text: "k"})
+	a = model.(*App)
+	if a.drilldownCursor != 0 {
+		t.Errorf("expected cursor at 0, got %d", a.drilldownCursor)
+	}
+
+	// Up again should clamp
+	model, _ = a.Update(tea.KeyPressMsg{Text: "k"})
+	a = model.(*App)
+	if a.drilldownCursor != 0 {
+		t.Errorf("expected cursor clamped at 0, got %d", a.drilldownCursor)
+	}
+}
+
+func TestDrilldownEnterItem(t *testing.T) {
+	app := NewApp()
+	items := []DrilldownItem{
+		{Name: "first", Fields: []Field{NewTextField("k", "K", "v1")}},
+		{Name: "second", Fields: []Field{NewTextField("k", "K", "v2")}},
+	}
+	df := NewDrilldownField("things", "Things", items)
+	app.section = NewSectionModel("test section", "test", "test.json5", []Field{df})
+	app.phase = PhaseSection
+
+	// Enter drilldown
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a := model.(*App)
+
+	// Enter on first item - should create a new section for the item's fields
+	model, _ = a.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a = model.(*App)
+	if a.Phase() != PhaseSection {
+		t.Fatalf("expected PhaseSection after entering item, got %v", a.Phase())
+	}
+	sec := a.Section()
+	if sec == nil {
+		t.Fatal("expected non-nil section")
+	}
+	// Title should include breadcrumb
+	if sec.Title() != "test section > Things > first" {
+		t.Errorf("expected breadcrumb title, got %q", sec.Title())
+	}
+	if sec.FieldCount() != 1 {
+		t.Errorf("expected 1 field in item section, got %d", sec.FieldCount())
+	}
+	// Verify drilldown prefix is set correctly
+	if !sec.IsDrilldown() {
+		t.Error("expected IsDrilldown() to be true for drilldown sub-section")
+	}
+	if sec.DrilldownPrefix() != "things.first" {
+		t.Errorf("expected drilldown prefix 'things.first', got %q", sec.DrilldownPrefix())
+	}
+	// SectionKey and ConfigFile should be inherited from parent
+	if sec.SectionKey() != "test" {
+		t.Errorf("expected section key 'test', got %q", sec.SectionKey())
+	}
+	if sec.ConfigFile() != "test.json5" {
+		t.Errorf("expected config file 'test.json5', got %q", sec.ConfigFile())
+	}
+}
+
+func TestDrilldownNewItem(t *testing.T) {
+	app := NewApp()
+	items := []DrilldownItem{
+		{Name: "existing", Fields: []Field{NewTextField("k", "K", "v")}},
+	}
+	df := NewDrilldownField("things", "Things", items)
+	app.section = NewSectionModel("test", "test", "test.json5", []Field{df})
+	app.phase = PhaseSection
+
+	// Enter drilldown
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a := model.(*App)
+
+	// Press 'n' to add new item
+	model, _ = a.Update(tea.KeyPressMsg{Text: "n"})
+	a = model.(*App)
+	if len(a.drilldownItems) != 2 {
+		t.Errorf("expected 2 items after new, got %d", len(a.drilldownItems))
+	}
+	if a.drilldownItems[1].Name != "new item" {
+		t.Errorf("expected 'new item', got %q", a.drilldownItems[1].Name)
+	}
+	if a.drilldownCursor != 1 {
+		t.Errorf("expected cursor at new item (1), got %d", a.drilldownCursor)
+	}
+	// DrilldownField should also be updated
+	if len(df.Items) != 2 {
+		t.Errorf("expected DrilldownField.Items to have 2 items, got %d", len(df.Items))
+	}
+}
+
+func TestDrilldownDeleteItem(t *testing.T) {
+	app := NewApp()
+	items := []DrilldownItem{
+		{Name: "first", Fields: []Field{NewTextField("k", "K", "v1")}},
+		{Name: "second", Fields: []Field{NewTextField("k", "K", "v2")}},
+		{Name: "third", Fields: []Field{NewTextField("k", "K", "v3")}},
+	}
+	df := NewDrilldownField("things", "Things", items)
+	app.section = NewSectionModel("test", "test", "test.json5", []Field{df})
+	app.phase = PhaseSection
+
+	// Enter drilldown
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a := model.(*App)
+
+	// Move to index 1
+	model, _ = a.Update(tea.KeyPressMsg{Text: "j"})
+	a = model.(*App)
+
+	// Delete item at index 1 ("second")
+	model, _ = a.Update(tea.KeyPressMsg{Text: "d"})
+	a = model.(*App)
+	if len(a.drilldownItems) != 2 {
+		t.Fatalf("expected 2 items after delete, got %d", len(a.drilldownItems))
+	}
+	if a.drilldownItems[0].Name != "first" {
+		t.Errorf("expected first item 'first', got %q", a.drilldownItems[0].Name)
+	}
+	if a.drilldownItems[1].Name != "third" {
+		t.Errorf("expected second item 'third', got %q", a.drilldownItems[1].Name)
+	}
+	// Cursor should now be at 1 (was at 1, now points to "third")
+	if a.drilldownCursor != 1 {
+		t.Errorf("expected cursor at 1 after delete, got %d", a.drilldownCursor)
+	}
+}
+
+func TestDrilldownDeleteLastItem(t *testing.T) {
+	app := NewApp()
+	items := []DrilldownItem{
+		{Name: "only", Fields: []Field{NewTextField("k", "K", "v")}},
+	}
+	df := NewDrilldownField("things", "Things", items)
+	app.section = NewSectionModel("test", "test", "test.json5", []Field{df})
+	app.phase = PhaseSection
+
+	// Enter drilldown
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a := model.(*App)
+
+	// Delete the only item
+	model, _ = a.Update(tea.KeyPressMsg{Text: "d"})
+	a = model.(*App)
+	if len(a.drilldownItems) != 0 {
+		t.Errorf("expected 0 items after delete, got %d", len(a.drilldownItems))
+	}
+	if a.drilldownCursor != 0 {
+		t.Errorf("expected cursor at 0 after deleting only item, got %d", a.drilldownCursor)
+	}
+}
+
+func TestDrilldownEmptyItemsNoOp(t *testing.T) {
+	app := NewApp()
+	df := NewDrilldownField("things", "Things", []DrilldownItem{})
+	app.section = NewSectionModel("test", "test", "test.json5", []Field{df})
+	app.phase = PhaseSection
+
+	// Enter drilldown - should stay at PhaseSection since items is empty
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a := model.(*App)
+	if a.Phase() != PhaseSection {
+		t.Errorf("expected PhaseSection for empty drilldown, got %v", a.Phase())
+	}
+}
+
+func TestDrilldownEnterEmptyFieldsNoOp(t *testing.T) {
+	app := NewApp()
+	items := []DrilldownItem{
+		{Name: "empty", Fields: []Field{}},
+	}
+	df := NewDrilldownField("things", "Things", items)
+	app.section = NewSectionModel("test", "test", "test.json5", []Field{df})
+	app.phase = PhaseSection
+
+	// Enter drilldown
+	model, _ := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a := model.(*App)
+	if a.Phase() != PhaseDrilldown {
+		t.Fatalf("expected PhaseDrilldown, got %v", a.Phase())
+	}
+
+	// Enter on item with empty fields should be no-op
+	model, _ = a.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	a = model.(*App)
+	if a.Phase() != PhaseDrilldown {
+		t.Errorf("expected PhaseDrilldown (no-op for empty fields), got %v", a.Phase())
+	}
+}
+
+func TestDrilldownViewBreadcrumb(t *testing.T) {
+	app := NewApp()
+	items := []DrilldownItem{
+		{Name: "item1", Fields: []Field{NewTextField("k", "K", "v")}},
+	}
+	df := NewDrilldownField("things", "Things", items)
+	app.section = NewSectionModel("my section", "mysec", "test.json5", []Field{df})
+	app.phase = PhaseDrilldown
+	app.drilldownField = df
+	app.drilldownItems = items
+	app.drilldownCursor = 0
+
+	view := app.View()
+	rendered := view.Content
+	if !contains(rendered, "my section") {
+		t.Error("view should contain section name in breadcrumb")
+	}
+	if !contains(rendered, "Things") {
+		t.Error("view should contain drilldown field label in breadcrumb")
+	}
+	if !contains(rendered, "item1") {
+		t.Error("view should contain item name")
+	}
+	if !contains(rendered, "enter edit") {
+		t.Error("view should contain help text for enter")
+	}
+}
+
+// contains is a helper for checking if a string contains a substring.
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && searchString(s, sub)
+}
+
+func searchString(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

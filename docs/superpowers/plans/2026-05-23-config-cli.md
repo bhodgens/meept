@@ -2182,15 +2182,23 @@ Test the full flow:
 
 5. **`applyFieldToConfig` silently discarded errors** — Plan used `_ = SetKeypath(...)`. Fixed: implementation returns errors.
 
-### Remaining Issues (Not Yet Fixed)
+### Issues Fixed in Session 2 (2026-05-25)
 
-6. **Multi-select editor non-functional** — `handleEditorKey` for `FieldMultiSelect` has empty up/down/space handlers. Needs `multiSelectCursor` field in `FieldEditor`.
+6. **Multi-select editor non-functional** — FIXED: Added `multiSelectCursor` to `FieldEditor`, wired up/down/space handlers in `handleEditorKey`.
 
-7. **Save stubs for non-main configs** — `saveClientConfig`, `saveModelsConfig`, `saveMCPServersConfig`, `saveAgentsConfig`, `savePresetsConfig` all return "not yet implemented" errors.
+7. **Save stubs for non-main configs** — FIXED: All 5 save handlers now fully implemented (`saveClientConfig`, `saveModelsConfig`, `saveMCPServersConfig`, `saveAgentsConfig`, `savePresetsConfig`). Uses shared `setStructField` helper for json-tag reflection on arbitrary struct types.
 
-8. **Drilldown navigation not implemented** — `app.go` has `// TODO: handle drilldown`. Cannot navigate into nested structs (providers, agents list, MCP servers list).
+8. **Drilldown navigation not implemented** — FIXED: Full drilldown navigation implemented. `DrilldownField` now holds `[]DrilldownItem` with name and fields. `PhaseDrilldown` added with up/down navigation, enter to edit items, `n` to create new, `d` to delete. Section builders (models, agents, MCP, security, transport, workers, presets) populate drilldown items from config data.
 
-9. **No `FloatField` type** — `NumberField` only handles integers. Float64 config values are either omitted or hacked via x100/x1000 integer multipliers.
+9. **No `FloatField` type** — FIXED: Added `FloatField` with `FieldFloat` constant. LLM aggressiveness, broker max_error_rate, compaction trigger_ratio, and q_agent min_confidence_score now use proper float fields instead of integer multiplier hacks.
+
+10. **Section jump from CLI** — FIXED: `meept config daemon` now jumps directly to the daemon section. Supports aliases (mcp, tui, client, agent, q), case-insensitive matching, prefix matching, and auto-enables advanced mode for advanced-only sections.
+
+### Remaining Issues
+
+11. **Drilldown save not wired** — Editing fields inside a drilldown item modifies the `DrilldownField.Items` in memory but the save handlers don't yet serialize drilldown changes back to config files. The items need to be applied back to the config struct on save.
+
+12. **Field coverage gaps** — Several sections have sparse field coverage (see table below). Most notably: agent_loop (2 of ~33), shadow (1 of ~40+), self-improve (3 of ~35), distributed_memory (2 of 16), code_intel (1 field).
 
 ### Significant Field Coverage Gaps
 

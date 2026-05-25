@@ -264,24 +264,44 @@ func (f *FloatField) Reset() {
 	f.dirty = false
 }
 
+// --- DrilldownItem ---
+
+// DrilldownItem represents a single item inside a DrilldownField (e.g. one
+// provider, one agent, one MCP server). Name is shown in the item list; Fields
+// holds the editable sub-fields for this item.
+type DrilldownItem struct {
+	Name   string
+	Fields []Field
+}
+
 // --- DrilldownField ---
 
 type DrilldownField struct {
 	baseField
-	ItemCount int
+	Items []DrilldownItem
 }
 
-func NewDrilldownField(key, label string, itemCount int) *DrilldownField {
+// NewDrilldownField creates a drilldown field with explicit items.
+func NewDrilldownField(key, label string, items []DrilldownItem) *DrilldownField {
 	return &DrilldownField{
 		baseField: baseField{key: key, label: label},
-		ItemCount: itemCount,
+		Items:     items,
+	}
+}
+
+// NewDrilldownFieldCount creates a drilldown field with only a count and no
+// items. Prefer NewDrilldownField when item data is available.
+func NewDrilldownFieldCount(key, label string, itemCount int) *DrilldownField {
+	return &DrilldownField{
+		baseField: baseField{key: key, label: label},
+		Items:     make([]DrilldownItem, itemCount),
 	}
 }
 
 func (f *DrilldownField) Type() FieldType { return FieldDrilldown }
 
 func (f *DrilldownField) Display() string {
-	return fmt.Sprintf("[%d items]", f.ItemCount)
+	return fmt.Sprintf("[%d items]", len(f.Items))
 }
 
 func (f *DrilldownField) Set(v string) error {

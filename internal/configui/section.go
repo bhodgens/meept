@@ -9,6 +9,14 @@ type SectionModel struct {
 	keyPath    string // config file name, e.g. "meept.json5"
 	fields     []Field
 	cursor     int
+
+	// drilldownPrefix is set when this SectionModel represents a sub-section
+	// created from a DrilldownItem. It holds the config keypath prefix that
+	// should be used instead of sectionKey when persisting field changes.
+	// For example, for provider "openai" in the models section, this would be
+	// "providers.openai", so that field "api" becomes "providers.openai.api".
+	// Empty string means this is a top-level section (normal save flow).
+	drilldownPrefix string
 }
 
 // NewSectionModel creates a SectionModel with the given title, section key
@@ -23,6 +31,20 @@ func NewSectionModel(title, sectionKey, configFile string, fields []Field) *Sect
 	}
 }
 
+// NewDrilldownSectionModel creates a SectionModel for a drilldown sub-section.
+// The drilldownPrefix is the config keypath prefix (e.g. "providers.openai")
+// used to persist field changes back to the correct nested location.
+func NewDrilldownSectionModel(title, sectionKey, configFile, drilldownPrefix string, fields []Field) *SectionModel {
+	return &SectionModel{
+		title:           title,
+		sectionKey:      sectionKey,
+		keyPath:         configFile,
+		fields:          fields,
+		cursor:          0,
+		drilldownPrefix: drilldownPrefix,
+	}
+}
+
 // Title returns the display name of the section.
 func (s *SectionModel) Title() string { return s.title }
 
@@ -34,6 +56,13 @@ func (s *SectionModel) ConfigFile() string { return s.keyPath }
 
 // SectionKey returns the section prefix used for keypath construction (e.g. "daemon").
 func (s *SectionModel) SectionKey() string { return s.sectionKey }
+
+// DrilldownPrefix returns the config keypath prefix for drilldown sub-sections.
+// Returns empty string for top-level sections.
+func (s *SectionModel) DrilldownPrefix() string { return s.drilldownPrefix }
+
+// IsDrilldown returns true if this SectionModel represents a drilldown sub-section.
+func (s *SectionModel) IsDrilldown() bool { return s.drilldownPrefix != "" }
 
 // Cursor returns the current cursor position (0-indexed).
 func (s *SectionModel) Cursor() int { return s.cursor }

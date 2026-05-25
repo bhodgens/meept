@@ -9,6 +9,6 @@ func buildWorkersFields() []Field {
 	return []Field{
 		NewNumberField("pool_size", "pool size", s.PoolSize),
 		NewNumberField("idle_timeout_seconds", "idle timeout seconds", s.IdleTimeoutSeconds),
-		NewDrilldownField("default_caps", "default capabilities", len(s.DefaultCaps)),
+		NewDrilldownField("default_caps", "default capabilities", buildStringSliceItems("capability", s.DefaultCaps)),
 	}
 }

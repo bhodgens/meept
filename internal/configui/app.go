@@ -2,6 +2,9 @@
 package configui
 
 import (
+	"fmt"
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -39,6 +42,11 @@ type App struct {
 	width, height int
 	styles        styles
 	errMsg        string
+
+	// Drilldown state: active when phase == PhaseDrilldown.
+	drilldownField  *DrilldownField // the field we drilled into
+	drilldownItems  []DrilldownItem
+	drilldownCursor int
 }
 
 type styles struct {
@@ -178,6 +186,8 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a.handleSectionKey(msg)
 	case PhaseEditor:
 		return a.handleEditorKey(msg)
+	case PhaseDrilldown:
+		return a.handleDrilldownKey(msg)
 	case PhaseConfirmSave:
 		return a.handleConfirmKey(msg)
 	}
@@ -224,11 +234,22 @@ func (a *App) handleSectionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if a.section != nil {
 			f := a.section.CurrentField()
-			if f != nil && f.Type() != FieldDrilldown {
+			if f == nil {
+				return a, nil
+			}
+			if f.Type() == FieldDrilldown {
+				df := f.(*DrilldownField)
+				if len(df.Items) == 0 {
+					return a, nil
+				}
+				a.drilldownField = df
+				a.drilldownItems = df.Items
+				a.drilldownCursor = 0
+				a.phase = PhaseDrilldown
+			} else {
 				a.editor = NewFieldEditor(f)
 				a.phase = PhaseEditor
 			}
-			// TODO: handle drilldown
 		}
 	case "d":
 		if a.section != nil {
@@ -314,6 +335,61 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a *App) handleDrilldownKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc":
+		a.drilldownField = nil
+		a.drilldownItems = nil
+		a.drilldownCursor = 0
+		a.phase = PhaseSection
+	case "up", "k":
+		if a.drilldownCursor > 0 {
+			a.drilldownCursor--
+		}
+	case "down", "j":
+		if a.drilldownCursor < len(a.drilldownItems)-1 {
+			a.drilldownCursor++
+		}
+	case "enter":
+		if a.drilldownCursor >= 0 && a.drilldownCursor < len(a.drilldownItems) {
+			item := a.drilldownItems[a.drilldownCursor]
+			if len(item.Fields) == 0 {
+				return a, nil
+			}
+			// Create a sub-section model for this item's fields with the
+			// drilldown prefix set so saves route to the correct nested path.
+			prefix := a.drilldownField.Key() + "." + item.Name
+			title := a.section.Title() + " > " + a.drilldownField.Label() + " > " + item.Name
+			a.section = NewDrilldownSectionModel(title, a.section.SectionKey(), a.section.ConfigFile(), prefix, item.Fields)
+			a.phase = PhaseSection
+		}
+	case "n":
+		a.drilldownItems = append(a.drilldownItems, DrilldownItem{
+			Name:   "new item",
+			Fields: []Field{},
+		})
+		if a.drilldownField != nil {
+			a.drilldownField.Items = a.drilldownItems
+		}
+		a.drilldownCursor = len(a.drilldownItems) - 1
+	case "d":
+		if len(a.drilldownItems) == 0 {
+			return a, nil
+		}
+		if a.drilldownCursor < 0 || a.drilldownCursor >= len(a.drilldownItems) {
+			return a, nil
+		}
+		a.drilldownItems = append(a.drilldownItems[:a.drilldownCursor], a.drilldownItems[a.drilldownCursor+1:]...)
+		if a.drilldownField != nil {
+			a.drilldownField.Items = a.drilldownItems
+		}
+		if a.drilldownCursor >= len(a.drilldownItems) && a.drilldownCursor > 0 {
+			a.drilldownCursor--
+		}
+	}
+	return a, nil
+}
+
 func (a *App) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
@@ -350,6 +426,8 @@ func (a *App) View() tea.View {
 		return tea.NewView(a.viewEditor())
 	case PhaseConfirmSave:
 		return tea.NewView(a.viewConfirm())
+	case PhaseDrilldown:
+		return tea.NewView(a.viewDrilldown())
 	case PhaseQuitting:
 		return tea.NewView("saving...")
 	}
@@ -445,9 +523,152 @@ func (a *App) viewConfirm() string {
 	return s
 }
 
+func (a *App) viewDrilldown() string {
+	if a.section == nil {
+		return ""
+	}
+	s := a.styles.breadcrumb.Render("meept config > "+a.section.Title()+" > ") + a.styles.title.Render(a.drilldownField.Label()) + "\n\n"
+
+	if len(a.drilldownItems) == 0 {
+		s += "  (no items)\n\n"
+	} else {
+		for i, item := range a.drilldownItems {
+			cursor := "  "
+			style := a.styles.unselected
+			if i == a.drilldownCursor {
+				cursor = "> "
+				style = a.styles.selected
+			}
+			s += cursor + style.Render(item.Name) + "  " + a.styles.value.Render(fmt.Sprintf("[%d fields]", len(item.Fields))) + "\n"
+		}
+	}
+
+	s += "\n" + a.styles.help.Render("up/down navigate  enter edit  n new  d delete  esc back")
+	return s
+}
+
+// sectionAliases maps shorthand names to the menu item Title they should match.
+var sectionAliases = map[string]string{
+	"mcp":       "mcp servers",
+	"tui":       "client / tui",
+	"client":    "client / tui",
+	"agent":     "agent loop",
+	"self":      "self-improve",
+	"selfimp":   "self-improve",
+	"q":         "q agent",
+	"distmem":   "distributed memory",
+	"mcpserver": "mcp servers",
+	"menubar":   "client / tui",
+}
+
+// JumpToSection searches allItems for a matching section and selects it.
+// It tries matching in order: exact Title, alias map, exact KeyPath,
+// case-insensitive prefix match on Title, case-insensitive prefix match on KeyPath.
+// If the matched item is an advanced section, advanced mode is enabled first.
+// Returns true if a section was found and selected.
+func (a *App) JumpToSection(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+
+	// 1. Exact Title match across all items.
+	for i, item := range a.allItems {
+		if strings.EqualFold(item.Title, lower) {
+			a.ensureVisible(i)
+			a.SelectSection(a.indexInMenu(item))
+			return true
+		}
+	}
+
+	// 2. Alias match (checked before KeyPath so e.g. "mcp" resolves to
+	//    "mcp servers" instead of the "mcp toggle" advanced item).
+	if resolved, ok := sectionAliases[lower]; ok {
+		for i, item := range a.allItems {
+			if strings.EqualFold(item.Title, resolved) {
+				a.ensureVisible(i)
+				a.SelectSection(a.indexInMenu(item))
+				return true
+			}
+		}
+	}
+
+	// 3. Exact KeyPath match.
+	for i, item := range a.allItems {
+		if strings.EqualFold(item.KeyPath, lower) {
+			a.ensureVisible(i)
+			a.SelectSection(a.indexInMenu(item))
+			return true
+		}
+	}
+
+	// 4. Case-insensitive prefix match on Title.
+	for i, item := range a.allItems {
+		if strings.HasPrefix(strings.ToLower(item.Title), lower) {
+			a.ensureVisible(i)
+			a.SelectSection(a.indexInMenu(item))
+			return true
+		}
+	}
+
+	// 5. Case-insensitive prefix match on KeyPath.
+	for i, item := range a.allItems {
+		if strings.HasPrefix(strings.ToLower(item.KeyPath), lower) {
+			a.ensureVisible(i)
+			a.SelectSection(a.indexInMenu(item))
+			return true
+		}
+	}
+
+	return false
+}
+
+// ensureVisible makes sure the item at allItems index i is visible in menuItems
+// by enabling advanced mode if the item is not in primaryItems.
+func (a *App) ensureVisible(allIdx int) {
+	item := a.allItems[allIdx]
+	for _, p := range a.primaryItems {
+		if p.Title == item.Title {
+			// Item is in primary; ensure advanced is off.
+			if a.showAdvanced {
+				a.showAdvanced = false
+				a.menuItems = a.primaryItems
+			}
+			return
+		}
+	}
+	// Item is advanced-only; enable advanced mode.
+	if !a.showAdvanced {
+		a.showAdvanced = true
+		a.menuItems = a.allItems
+	}
+}
+
+// indexInMenu returns the index of item within the current menuItems slice.
+func (a *App) indexInMenu(item MenuItem) int {
+	for i, mi := range a.menuItems {
+		if mi.Title == item.Title && mi.KeyPath == item.KeyPath {
+			return i
+		}
+	}
+	return 0
+}
+
 // RunApp launches the config editor TUI.
 func RunApp() error {
 	app := NewApp()
+	p := tea.NewProgram(app)
+	_, err := p.Run()
+	return err
+}
+
+// RunWithSection creates the config editor TUI and jumps directly to the
+// named section. If the section name is unknown, it prints an error and
+// falls back to the main menu.
+func RunWithSection(section string) error {
+	app := NewApp()
+	if section != "" {
+		if !app.JumpToSection(section) {
+			fmt.Printf("unknown section %q; opening main menu\n", section)
+		}
+	}
 	p := tea.NewProgram(app)
 	_, err := p.Run()
 	return err
