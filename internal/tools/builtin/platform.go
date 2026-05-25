@@ -3,6 +3,7 @@ package builtin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -167,9 +168,17 @@ func (t *PlatformToolsTool) Execute(ctx context.Context, args map[string]any) (a
 	}, nil
 }
 
+// delegateRegistry defines the subset of AgentRegistry used by DelegateTaskTool.
+// This enables testing with mock implementations.
+type delegateRegistry interface {
+	GetSpec(id string) (*agent.AgentSpec, bool)
+	ListSpecs() []*agent.AgentSpec
+	RunAgent(ctx context.Context, agentID, message, conversationID string) (string, error)
+}
+
 // DelegateTaskTool delegates a task to a specific agent.
 type DelegateTaskTool struct {
-	registry *agent.AgentRegistry
+	registry delegateRegistry
 }
 
 // NewDelegateTaskTool creates a new delegate task tool.
@@ -198,6 +207,10 @@ func (t *DelegateTaskTool) Parameters() llm.FunctionParameters {
 			"context": {
 				Type:        schemaTypeString,
 				Description: "Optional additional context to provide to the agent.",
+			},
+			"output_schema": {
+				Type:        schemaTypeObject,
+				Description: "Optional JSON Schema to validate subagent output. When provided, the subagent is instructed to produce JSON matching this schema.",
 			},
 		},
 		Required: []string{"agent_id", "message"},
@@ -260,6 +273,17 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 		fullMessage = "Context: " + contextStr + "\n\nTask: " + message
 	}
 
+	// Check for output_schema parameter
+	schemaRaw, hasSchema := args["output_schema"].(map[string]any)
+	if hasSchema {
+		schemaJSON, _ := json.Marshal(schemaRaw)
+		fullMessage = fmt.Sprintf(
+			"%s\n\nIMPORTANT: Your response must be valid JSON matching this schema:\n```json\n%s\n```\nRespond with ONLY the JSON, no additional text.",
+			fullMessage,
+			schemaJSON,
+		)
+	}
+
 	// Generate a conversation ID for this delegation
 	conversationID := "delegate-" + agentID + "-" + generateDelegateID()
 
@@ -271,6 +295,33 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 			Success: false,
 			Error:   err.Error(),
 		}, err
+	}
+
+	// If output_schema was provided, validate the response
+	if hasSchema {
+		data, extractErr := ExtractJSONFromText(response)
+		if extractErr != nil {
+			return tools.NewErrorResult(fmt.Sprintf(
+				"subagent did not produce valid JSON: %v\n\nRaw response: %s",
+				extractErr, response,
+			)), nil
+		}
+
+		if validateErr := ValidateJSONSchema(data, schemaRaw); validateErr != nil {
+			return tools.NewErrorResult(fmt.Sprintf(
+				"schema validation failed: %v",
+				validateErr,
+			)), nil
+		}
+
+		return tools.ToolResult{
+			Success: true,
+			Result: map[string]any{
+				"success":     true,
+				"data":        data,
+				"tokens_used": 0,
+			},
+		}, nil
 	}
 
 	return DelegateResult{
