@@ -143,7 +143,7 @@ func (a *App) SelectSection(idx int) {
 	}
 	item := a.menuItems[idx]
 	fields := BuildSectionFields(item.KeyPath)
-	a.section = NewSectionModel(item.Title, item.ConfigFile, fields)
+	a.section = NewSectionModel(item.Title, item.KeyPath, item.ConfigFile, fields)
 	a.phase = PhaseSection
 }
 
@@ -277,11 +277,11 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case FieldMultiSelect:
 		switch msg.String() {
 		case "up", "k":
-			// handled in view layer
+			a.editor.MultiSelectUp()
 		case "down", "j":
-			// handled in view layer
+			a.editor.MultiSelectDown()
 		case " ":
-			// toggle current option
+			a.editor.ToggleMultiSelectOption(a.editor.MultiSelectCursor())
 		case "enter":
 			a.phase = PhaseSection
 			a.editor = nil
@@ -290,7 +290,7 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.phase = PhaseSection
 			a.editor = nil
 		}
-	case FieldText, FieldMasked, FieldNumber:
+	case FieldText, FieldMasked, FieldNumber, FieldFloat:
 		switch msg.String() {
 		case "enter":
 			a.editor.ConfirmInput()
@@ -422,7 +422,7 @@ func (a *App) viewEditor() string {
 			s += cursor + prefix + opt + "\n"
 		}
 		s += "\n" + a.styles.help.Render("up/down navigate  enter confirm  esc cancel")
-	case FieldText, FieldMasked, FieldNumber:
+	case FieldText, FieldMasked, FieldNumber, FieldFloat:
 		display := a.editor.InputValue()
 		if f.Type() == FieldMasked && display != "" {
 			display = "......"

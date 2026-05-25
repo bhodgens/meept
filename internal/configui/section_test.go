@@ -15,13 +15,19 @@ func makeTestFields() []Field {
 
 func TestNewSectionModel(t *testing.T) {
 	fields := makeTestFields()
-	s := NewSectionModel("General", "meept.json5", fields)
+	s := NewSectionModel("General", "daemon", "meept.json5", fields)
 
 	if s.Title() != "General" {
 		t.Errorf("Title() = %q, want %q", s.Title(), "General")
 	}
 	if s.KeyPath() != "meept.json5" {
 		t.Errorf("KeyPath() = %q, want %q", s.KeyPath(), "meept.json5")
+	}
+	if s.ConfigFile() != "meept.json5" {
+		t.Errorf("ConfigFile() = %q, want %q", s.ConfigFile(), "meept.json5")
+	}
+	if s.SectionKey() != "daemon" {
+		t.Errorf("SectionKey() = %q, want %q", s.SectionKey(), "daemon")
 	}
 	if s.FieldCount() != 4 {
 		t.Errorf("FieldCount() = %d, want 4", s.FieldCount())
@@ -32,7 +38,7 @@ func TestNewSectionModel(t *testing.T) {
 }
 
 func TestNewSectionModelEmptyFields(t *testing.T) {
-	s := NewSectionModel("Empty", "empty.json5", nil)
+	s := NewSectionModel("Empty", "empty", "empty.json5", nil)
 	if s.FieldCount() != 0 {
 		t.Errorf("FieldCount() = %d, want 0", s.FieldCount())
 	}
@@ -42,7 +48,7 @@ func TestNewSectionModelEmptyFields(t *testing.T) {
 }
 
 func TestMoveDown(t *testing.T) {
-	s := NewSectionModel("General", "meept.json5", makeTestFields())
+	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 
 	// cursor starts at 0
 	if s.Cursor() != 0 {
@@ -72,7 +78,7 @@ func TestMoveDown(t *testing.T) {
 }
 
 func TestMoveUp(t *testing.T) {
-	s := NewSectionModel("General", "meept.json5", makeTestFields())
+	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 
 	// move to the bottom first
 	for i := 0; i < 3; i++ {
@@ -105,7 +111,7 @@ func TestMoveUp(t *testing.T) {
 }
 
 func TestMoveDownEmptyFields(t *testing.T) {
-	s := NewSectionModel("Empty", "empty.json5", nil)
+	s := NewSectionModel("Empty", "empty", "empty.json5", nil)
 	s.MoveDown()
 	if s.Cursor() != 0 {
 		t.Errorf("MoveDown on empty: cursor = %d, want 0", s.Cursor())
@@ -113,7 +119,7 @@ func TestMoveDownEmptyFields(t *testing.T) {
 }
 
 func TestMoveUpEmptyFields(t *testing.T) {
-	s := NewSectionModel("Empty", "empty.json5", nil)
+	s := NewSectionModel("Empty", "empty", "empty.json5", nil)
 	s.MoveUp()
 	if s.Cursor() != 0 {
 		t.Errorf("MoveUp on empty: cursor = %d, want 0", s.Cursor())
@@ -122,7 +128,7 @@ func TestMoveUpEmptyFields(t *testing.T) {
 
 func TestCurrentField(t *testing.T) {
 	fields := makeTestFields()
-	s := NewSectionModel("General", "meept.json5", fields)
+	s := NewSectionModel("General", "daemon", "meept.json5", fields)
 
 	// cursor at 0
 	f := s.CurrentField()
@@ -150,7 +156,7 @@ func TestCurrentField(t *testing.T) {
 }
 
 func TestCurrentFieldEmptyFields(t *testing.T) {
-	s := NewSectionModel("Empty", "empty.json5", nil)
+	s := NewSectionModel("Empty", "empty", "empty.json5", nil)
 	f := s.CurrentField()
 	if f != nil {
 		t.Errorf("CurrentField() on empty section = %v, want nil", f)
@@ -159,7 +165,7 @@ func TestCurrentFieldEmptyFields(t *testing.T) {
 
 func TestFields(t *testing.T) {
 	fields := makeTestFields()
-	s := NewSectionModel("General", "meept.json5", fields)
+	s := NewSectionModel("General", "daemon", "meept.json5", fields)
 
 	got := s.Fields()
 	if len(got) != len(fields) {
@@ -173,14 +179,14 @@ func TestFields(t *testing.T) {
 }
 
 func TestIsDirtyNoChanges(t *testing.T) {
-	s := NewSectionModel("General", "meept.json5", makeTestFields())
+	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 	if s.IsDirty() {
 		t.Error("IsDirty() = true on freshly created section, want false")
 	}
 }
 
 func TestIsDirtyWithOneDirtyField(t *testing.T) {
-	s := NewSectionModel("General", "meept.json5", makeTestFields())
+	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 
 	// modify the first field
 	s.CurrentField().Set("example.com")
@@ -191,7 +197,7 @@ func TestIsDirtyWithOneDirtyField(t *testing.T) {
 }
 
 func TestIsDirtyAfterReset(t *testing.T) {
-	s := NewSectionModel("General", "meept.json5", makeTestFields())
+	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 
 	// modify then reset
 	s.CurrentField().Set("example.com")
@@ -203,7 +209,7 @@ func TestIsDirtyAfterReset(t *testing.T) {
 }
 
 func TestIsDirtyMultipleFields(t *testing.T) {
-	s := NewSectionModel("General", "meept.json5", makeTestFields())
+	s := NewSectionModel("General", "daemon", "meept.json5", makeTestFields())
 
 	// modify second field (move down first)
 	s.MoveDown() // cursor at 1 (debug toggle)
@@ -219,14 +225,14 @@ func TestIsDirtyMultipleFields(t *testing.T) {
 }
 
 func TestIsDirtyEmptyFields(t *testing.T) {
-	s := NewSectionModel("Empty", "empty.json5", nil)
+	s := NewSectionModel("Empty", "empty", "empty.json5", nil)
 	if s.IsDirty() {
 		t.Error("IsDirty() = true on empty section, want false")
 	}
 }
 
 func TestMoveDownSingleField(t *testing.T) {
-	s := NewSectionModel("Single", "single.json5", []Field{
+	s := NewSectionModel("Single", "single", "single.json5", []Field{
 		NewTextField("only", "Only", "value"),
 	})
 	s.MoveDown()

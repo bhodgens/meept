@@ -18,6 +18,7 @@ const (
 	FieldMultiSelect
 	FieldMasked
 	FieldNumber
+	FieldFloat
 	FieldDrilldown // opens a sub-screen (list of structs)
 )
 
@@ -227,6 +228,38 @@ func (f *NumberField) Set(v string) error {
 }
 
 func (f *NumberField) Reset() {
+	f.current = f.orig
+	f.dirty = false
+}
+
+// --- FloatField ---
+
+type FloatField struct{ baseField }
+
+func NewFloatField(key, label string, value float64) *FloatField {
+	s := strconv.FormatFloat(value, 'f', -1, 64)
+	return &FloatField{baseField{key: key, label: label, orig: s, current: s}}
+}
+
+func (f *FloatField) Type() FieldType { return FieldFloat }
+
+func (f *FloatField) Set(v string) error {
+	if _, err := strconv.ParseFloat(v, 64); err != nil {
+		return fmt.Errorf("float field %q: %q is not a valid number", f.key, v)
+	}
+	f.current = v
+	f.dirty = f.current != f.orig
+	return nil
+}
+
+func (f *FloatField) Display() string {
+	if v, err := strconv.ParseFloat(f.current, 64); err == nil {
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+	return f.current
+}
+
+func (f *FloatField) Reset() {
 	f.current = f.orig
 	f.dirty = false
 }

@@ -450,6 +450,8 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/runtime/restart/{provider}", s.handleRuntimeRestart)
 
 	// Chat endpoints
+	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
+	mux.HandleFunc("GET /api/v1/chat/stream", s.handleChatStream)
 	mux.HandleFunc("GET /api/v1/chat/queue/{id}", s.handleChatQueueStatus)
 	mux.HandleFunc("POST /api/v1/chat/with-agent", s.handleChatWithAgent)
 

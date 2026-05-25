@@ -6,11 +6,12 @@ import "fmt"
 // FieldEditor handles inline editing of a single Field value.
 // It stores the original value at creation time so Cancel can revert.
 type FieldEditor struct {
-	field       Field
-	input       string
-	selectIdx   int
-	multiSelect map[int]bool
-	origValue   string
+	field            Field
+	input            string
+	selectIdx        int
+	multiSelect      map[int]bool
+	multiSelectCursor int
+	origValue        string
 }
 
 // NewFieldEditor creates a FieldEditor initialized from the field's current value.
@@ -29,6 +30,7 @@ func NewFieldEditor(f Field) *FieldEditor {
 	case FieldMultiSelect:
 		msf := f.(*MultiSelectField)
 		ed.multiSelect = buildMultiSelectState(msf.GetStrings(), msf.Options)
+		ed.multiSelectCursor = 0
 		ed.input = msf.Get()
 
 	default:
@@ -105,7 +107,7 @@ func (ed *FieldEditor) ToggleMultiSelectOption(i int) {
 // SetInput sets the text buffer for Text, Number, and Masked fields.
 func (ed *FieldEditor) SetInput(v string) error {
 	switch ed.field.Type() {
-	case FieldText, FieldNumber, FieldMasked:
+	case FieldText, FieldNumber, FieldFloat, FieldMasked:
 		ed.input = v
 		return nil
 	default:
@@ -140,6 +142,29 @@ func (ed *FieldEditor) MultiSelectState() map[int]bool {
 		out[k] = v
 	}
 	return out
+}
+
+// MultiSelectCursor returns the current multi-select cursor index.
+func (ed *FieldEditor) MultiSelectCursor() int {
+	return ed.multiSelectCursor
+}
+
+// MultiSelectUp moves the multi-select cursor up one option.
+func (ed *FieldEditor) MultiSelectUp() {
+	if ed.multiSelectCursor > 0 {
+		ed.multiSelectCursor--
+	}
+}
+
+// MultiSelectDown moves the multi-select cursor down one option.
+func (ed *FieldEditor) MultiSelectDown() {
+	if ed.field.Type() != FieldMultiSelect {
+		return
+	}
+	msf := ed.field.(*MultiSelectField)
+	if ed.multiSelectCursor < len(msf.Options)-1 {
+		ed.multiSelectCursor++
+	}
 }
 
 // --- helpers ---

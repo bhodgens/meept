@@ -4,20 +4,22 @@ package configui
 // SectionModel manages a scrollable list of config fields for one section.
 // It is a pure data model used by the App, not a bubbletea tea.Model.
 type SectionModel struct {
-	title   string
-	keyPath string
-	fields  []Field
-	cursor  int
+	title      string
+	sectionKey string // e.g. "daemon", "transport", "llm"
+	keyPath    string // config file name, e.g. "meept.json5"
+	fields     []Field
+	cursor     int
 }
 
-// NewSectionModel creates a SectionModel with the given title, config file
-// keyPath, and field slice. The cursor starts at 0.
-func NewSectionModel(title, keyPath string, fields []Field) *SectionModel {
+// NewSectionModel creates a SectionModel with the given title, section key
+// (e.g. "daemon"), config file name, and field slice. The cursor starts at 0.
+func NewSectionModel(title, sectionKey, configFile string, fields []Field) *SectionModel {
 	return &SectionModel{
-		title:   title,
-		keyPath: keyPath,
-		fields:  fields,
-		cursor:  0,
+		title:      title,
+		sectionKey: sectionKey,
+		keyPath:    configFile,
+		fields:     fields,
+		cursor:     0,
 	}
 }
 
@@ -26,6 +28,12 @@ func (s *SectionModel) Title() string { return s.title }
 
 // KeyPath returns the config file name this section edits.
 func (s *SectionModel) KeyPath() string { return s.keyPath }
+
+// ConfigFile returns the config file name this section edits (alias for KeyPath).
+func (s *SectionModel) ConfigFile() string { return s.keyPath }
+
+// SectionKey returns the section prefix used for keypath construction (e.g. "daemon").
+func (s *SectionModel) SectionKey() string { return s.sectionKey }
 
 // Cursor returns the current cursor position (0-indexed).
 func (s *SectionModel) Cursor() int { return s.cursor }
