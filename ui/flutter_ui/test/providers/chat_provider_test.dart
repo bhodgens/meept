@@ -237,8 +237,11 @@ void main() {
       });
       expect(notifier.state.messages, hasLength(1));
 
-      // Switch to another session
+      // Switch to another session (this clears messages)
       notifier.loadMessages('session-c');
+
+      // Messages are cleared when switching sessions
+      expect(notifier.state.messages, isEmpty);
 
       // Wrong-session messages still don't arrive
       ws.pushMessage({
@@ -249,7 +252,7 @@ void main() {
         'timestamp': DateTime.now().toIso8601String(),
         'session_id': 'session-a',
       });
-      expect(notifier.state.messages, hasLength(1));
+      expect(notifier.state.messages, isEmpty);
 
       // Correct-session message arrives
       ws.pushMessage({
@@ -260,7 +263,7 @@ void main() {
         'timestamp': DateTime.now().toIso8601String(),
         'session_id': 'session-c',
       });
-      expect(notifier.state.messages, hasLength(2));
+      expect(notifier.state.messages, hasLength(1));
     });
 
     test('loadMessages sends subscribe request to WebSocket', () {
