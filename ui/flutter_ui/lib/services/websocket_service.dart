@@ -5,6 +5,10 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../core/constants.dart';
 
 /// WebSocket service for real-time updates
+///
+/// Handles the Go backend's `{type, data}` message format by flattening
+/// nested `data` fields onto the top-level map so consumers can access
+/// `message['session_id']`, `message['job_id']`, etc. directly.
 class WebSocketService {
   WebSocketChannel? _channel;
   final String _host;
@@ -21,6 +25,18 @@ class WebSocketService {
   bool _isConnOpen = false;
   bool _wasExplicitlyDisconnected = false;
   Timer? _pingTimer;
+
+  // Channel subscription tracking
+  final Map<String, SessionSubscription> _chatSubscriptions = {};
+  bool _jobsSubscribed = false;
+  bool _metricsSubscribed = false;
+
+  /// Channels that have been requested via subscribe calls
+  Set<String> get _activeChannels => {
+        ..._chatSubscriptions.keys.map((_) => 'chat'),
+        if (_jobsSubscribed) 'jobs',
+        if (_metricsSubscribed) 'metrics',
+      };
 
   // Reconnect tracking
   int _retryCount = 0;
@@ -51,7 +67,7 @@ class WebSocketService {
     try {
       _isConnOpen = false;
 
-      final wsPath = path ?? '/api/v1/ws';
+      final wsPath = path ?? '/ws';
       final uriBuilder = Uri.parse('ws://$_host:$_port$wsPath');
       final uri = _buildUriWithAuth(uriBuilder);
 
@@ -61,11 +77,17 @@ class WebSocketService {
         (data) {
           try {
             final message = jsonDecode(data as String) as Map<String, dynamic>;
-            _messageController.add(message);
+
+            // Flatten the Go backend's {type, data} format so that fields
+            // nested inside `data` are promoted to the top level.
+            // This allows consumers to access message['session_id'],
+            // message['job_id'], message['role'] etc. directly.
+            final flatMessage = _flattenWSMessage(message);
+            _messageController.add(flatMessage);
 
             if (!_isConnOpen) {
               _isConnOpen = true;
-              final type = message['type'] as String?;
+              final type = flatMessage['type'] as String?;
               if (type == 'ping' || type == 'status' || type != null) {
                 _isConnected = true;
                 _connectionController.add(true);
@@ -100,6 +122,29 @@ class WebSocketService {
     }
   }
 
+  /// Flatten a Go backend `{type, data}` message into a flat map.
+  ///
+  /// If the message has a `data` field that is a map, promote all keys
+  /// from `data` onto the top-level map alongside `type`.  If there
+  /// is no `data` field, return the message unchanged.  Also converts
+  /// Go map-key convention `session_id` -> `session_id` (no-op) and
+  /// `job_id` etc. for consistency.
+  Map<String, dynamic> _flattenWSMessage(Map<String, dynamic> msg) {
+    final data = msg['data'];
+    if (data is Map<String, dynamic>) {
+      final flat = <String, dynamic>{
+        'type': msg['type'],
+      };
+      flat.addAll(data);
+      // Preserve timestamp from top level if data doesn't have one
+      if (msg['timestamp'] != null && flat['timestamp'] == null) {
+        flat['timestamp'] = msg['timestamp'];
+      }
+      return flat;
+    }
+    return msg..['timestamp'] = msg['timestamp'] ?? msg['timestamp'];
+  }
+
   Uri _buildUriWithAuth(Uri baseUri) {
     if (_apiKey != null && _apiKey!.isNotEmpty) {
       final queryParameters = Map<String, dynamic>.from(baseUri.queryParameters)
@@ -132,6 +177,9 @@ class WebSocketService {
     _wasExplicitlyDisconnected = true;
     _pingTimer?.cancel();
     _pingTimer = null;
+    _chatSubscriptions.clear();
+    _jobsSubscribed = false;
+    _metricsSubscribed = false;
     _channel?.sink.close();
     _channel = null;
     _isConnected = false;
@@ -160,26 +208,63 @@ class WebSocketService {
     });
   }
 
+  /// Session-scoped chat subscription.
+  ///
+  /// Returns a stream that emits only chat messages matching the given
+  /// [sessionId]. The Flutter client manages the server-side subscription
+  /// request internally.
   Stream<Map<String, dynamic>> subscribeToChat(String sessionId) {
-    send({'type': 'subscribe', 'channel': 'chat', 'session_id': sessionId});
-    return _messageController.stream
-        .where((m) => m['type'] == 'chat_message' && m['session_id'] == sessionId);
+    // Send subscribe request for this session
+    send({
+      'type': 'subscribe',
+      'channel': 'chat',
+      'session_id': sessionId,
+    });
+    _chatSubscriptions[sessionId] = SessionSubscription(sessionId);
+
+    return _messageController.stream.where((m) {
+      // Unflattened messages already have session_id promoted to top level
+      final type = m['type'] as String?;
+      final sid = m['session_id'] as String?;
+      return type == 'chat_message' && sid == sessionId;
+    });
   }
 
+  /// Subscribe to job queue updates via WebSocket.
+  ///
+  /// Returns a stream emitting [Map] entries for all job_update messages.
   Stream<Map<String, dynamic>> subscribeToJobs() {
-    send({'type': 'subscribe', 'channel': 'jobs'});
-    return _messageController.stream
-        .where((m) => m['type'] == 'job_update');
+    if (!_jobsSubscribed) {
+      send({'type': 'subscribe', 'channel': 'jobs'});
+      _jobsSubscribed = true;
+    }
+    return _messageController.stream.where((m) {
+      return m['type'] == 'job_update';
+    });
   }
 
+  /// Subscribe to metrics updates via WebSocket.
+  ///
+  /// Returns a stream emitting [Map] entries for all metrics_update messages.
   Stream<Map<String, dynamic>> subscribeToMetrics() {
-    send({'type': 'subscribe', 'channel': 'metrics'});
-    return _messageController.stream
-        .where((m) => m['type'] == 'metrics_update');
+    if (!_metricsSubscribed) {
+      send({'type': 'subscribe', 'channel': 'metrics'});
+      _metricsSubscribed = true;
+    }
+    return _messageController.stream.where((m) {
+      return m['type'] == 'metrics_update';
+    });
   }
 
   /// Dispose all resources
   void dispose() {
     disconnect();
   }
+}
+
+/// Tracks active per-session chat subscriptions.
+/// Used to ensure only relevant messages are forwarded to a session.
+class SessionSubscription {
+  final String sessionId;
+  const SessionSubscription(this.sessionId);
 }

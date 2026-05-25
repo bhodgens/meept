@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../providers/providers.dart';
 import 'chat_message_list.dart';
 import 'chat_input.dart';
 
 /// Chat view - main chat pane with header, message list, and input
-class ChatView extends StatefulWidget {
+class ChatView extends ConsumerStatefulWidget {
   final String sessionId;
 
   const ChatView({super.key, required this.sessionId});
 
   @override
-  State<ChatView> createState() => _ChatViewState();
+  ConsumerState<ChatView> createState() => _ChatViewState();
 }
 
-class _ChatViewState extends State<ChatView> {
+class _ChatViewState extends ConsumerState<ChatView> {
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -41,20 +43,34 @@ class _ChatViewState extends State<ChatView> {
       color: CyberpunkColors.darkGray,
       child: Row(
         children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: const BoxDecoration(
-              color: CyberpunkColors.greenSuccess,
-              shape: BoxShape.circle,
-            ),
+          Consumer(
+            builder: (context, ref, _) {
+              final connected = ref.watch(connectionStateProvider);
+              return Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: connected
+                      ? CyberpunkColors.greenSuccess
+                      : CyberpunkColors.redAlert,
+                  shape: BoxShape.circle,
+                ),
+              );
+            },
           ),
           const SizedBox(width: 8),
-          Text(
-            'chat active',
-            style: CyberpunkTypography.label.copyWith(
-              color: CyberpunkColors.greenSuccess,
-            ),
+          Consumer(
+            builder: (context, ref, _) {
+              final connected = ref.watch(connectionStateProvider);
+              return Text(
+                connected ? 'chat active' : 'daemon disconnected',
+                style: CyberpunkTypography.label.copyWith(
+                  color: connected
+                      ? CyberpunkColors.greenSuccess
+                      : CyberpunkColors.redAlert,
+                ),
+              );
+            },
           ),
           const Spacer(),
           Text(

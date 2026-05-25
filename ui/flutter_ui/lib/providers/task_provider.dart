@@ -70,6 +70,39 @@ class TaskNotifier extends StateNotifier<TaskState> {
       return null;
     }
   }
+
+  /// Update the state of a single task and refresh the list
+  Future<bool?> updateTaskStatus(String id, String newStatus) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      await apiClient.updateTask(id, state: newStatus);
+      // Refresh the full list from server
+      await loadTasks();
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString(),
+      );
+      return false;
+    }
+  }
+
+  /// Cancel a task and refresh the list
+  Future<bool> cancelTask(String id) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      await apiClient.cancelTask(id);
+      await loadTasks();
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString(),
+      );
+      return false;
+    }
+  }
 }
 
 /// Task state provider

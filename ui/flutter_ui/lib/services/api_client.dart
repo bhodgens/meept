@@ -89,8 +89,28 @@ class ApiClient {
   }
 
   ApiClientException _handleError(DioException e) {
+    String message;
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+        message = 'Connection timeout - is the daemon running?';
+        break;
+      case DioExceptionType.connectionError:
+        message = 'Cannot connect to daemon at $baseUrl';
+        break;
+      case DioExceptionType.badResponse:
+        message = 'Server error: ${e.response?.statusCode}';
+        break;
+      case DioExceptionType.cancel:
+        message = 'Request cancelled';
+        break;
+      case DioExceptionType.unknown:
+        message = 'Network error - check your connection';
+        break;
+      default:
+        message = e.message ?? 'Unknown error';
+    }
     return ApiClientException(
-      message: e.message ?? 'Unknown error',
+      message: message,
       statusCode: e.response?.statusCode ?? 0,
       response: e.response?.data,
     );
@@ -267,20 +287,23 @@ class ApiClient {
     await delete('/tasks/$id');
   }
 
+  /// Update a task's state (and optionally name/title) using PUT.
   Future<Task> updateTask(
     String id, {
-    String? title,
-    String? status,
+    String? name,
+    String? state,
   }) async {
     final data = <String, dynamic>{};
-    if (title != null) data['name'] = title;
-    if (status != null) data['state'] = status;
-    return post<Task>('/tasks/$id', data: data);
+    if (name != null) data['name'] = name;
+    if (state != null) data['state'] = state;
+    final resp = await put<Map<String, dynamic>>('/tasks/$id', data: data);
+    return Task.fromJson(resp);
   }
 
-  Future<Task> cancelTask(String id) async {
-    final data = await post<Map<String, dynamic>>('/tasks/$id/cancel');
-    return Task.fromJson(data);
+  /// Cancel a task via POST /tasks/{id}/cancel.
+  /// The backend returns {"status": "cancelled"}, so we return the raw map.
+  Future<Map<String, dynamic>> cancelTask(String id) async {
+    return post<Map<String, dynamic>>('/tasks/$id/cancel');
   }
 
   // ===== Daemon Endpoints =====

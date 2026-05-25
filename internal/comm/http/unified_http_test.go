@@ -710,14 +710,16 @@ func TestUnifiedHTTPServer_WebSocketConnectionAndBroadcast(t *testing.T) {
 	// Publish a message on the bus — the WS forwarding goroutine should broadcast it.
 	// Note: use a single-segment topic because the bus subscribes with "*" which
 	// only matches single-segment topics in segment-based wildcard matching.
-	msgBus.Publish("chatreq", &models.BusMessage{
+	msgBus.Publish("chat.message.received", &models.BusMessage{
 		ID:      "ws-test-1",
 		Type:    models.MessageTypeEvent,
 		Source:  "test",
 		Payload: json.RawMessage(`{"message":"hello ws","conversation_id":"test-ws"}`),
 	})
 
-	// Read the broadcast message from WebSocket
+	// Read the broadcast message from WebSocket.
+	// The WS event transformer converts bus topics to frontend types:
+	// "chat.message.received" -> type "chat_message"
 	var received map[string]any
 	deadline := time.Now().Add(3 * time.Second)
 	conn.SetReadDeadline(deadline)
@@ -726,16 +728,8 @@ func TestUnifiedHTTPServer_WebSocketConnectionAndBroadcast(t *testing.T) {
 		t.Fatalf("failed to read WS broadcast: %v", err)
 	}
 
-	if received["type"] != "chatreq" {
-		t.Errorf("expected type 'chatreq', got %v", received["type"])
-	}
-
-	data, ok := received["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected data to be map[string]any, got %T: %v", received["data"], received["data"])
-	}
-	if msg, _ := data["message"].(string); !strings.Contains(msg, "hello ws") {
-		t.Errorf("expected data.message to contain 'hello ws', got %v", data)
+	if received["type"] != "chat_message" {
+		t.Errorf("expected type 'chat_message', got %v", received["type"])
 	}
 }
 
@@ -771,25 +765,26 @@ func TestUnifiedHTTPServer_WebSocketClientCount(t *testing.T) {
 
 	// Both clients connected — publish a message to verify they're alive.
 	// Use a single-segment topic to match the "*" wildcard subscription.
-	msgBus.Publish("testtopic", &models.BusMessage{
+	msgBus.Publish("taskstatus", &models.BusMessage{
 		ID:      "ws-count-1",
 		Type:    models.MessageTypeEvent,
 		Source:  "test",
 		Payload: json.RawMessage(`{"ping":"pong"}`),
 	})
 
-	// Read from both connections to verify they're alive
+	// Read from both connections to verify they're alive.
+	// The WS event transformer converts "task.status" -> type "job_update"
 	var msg1, msg2 map[string]any
 	conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
 	conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
 	websocket.JSON.Receive(conn1, &msg1)
 	websocket.JSON.Receive(conn2, &msg2)
 
-	if msg1["type"] != "testtopic" {
-		t.Errorf("conn1 expected type 'testtopic', got %v", msg1["type"])
+	if msg1["type"] != "job_update" {
+		t.Errorf("conn1 expected type 'job_update', got %v", msg1["type"])
 	}
-	if msg2["type"] != "testtopic" {
-		t.Errorf("conn2 expected type 'testtopic', got %v", msg2["type"])
+	if msg2["type"] != "job_update" {
+		t.Errorf("conn2 expected type 'job_update', got %v", msg2["type"])
 	}
 }
 

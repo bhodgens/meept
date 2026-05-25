@@ -67,13 +67,19 @@ class _TasksListState extends ConsumerState<TasksList> {
             )
           else if (taskState.error != null)
             Expanded(
-              child: Center(
-                child: Text(
-                  'error: ${taskState.error}',
-                  style: CyberpunkTypography.bodySmall.copyWith(
-                    color: CyberpunkColors.redAlert,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: _TaskErrorBanner(message: taskState.error!),
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: () => ref.read(taskProvider.notifier).loadTasks(),
+                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                  ),
+                ],
               ),
             )
           else if (taskState.tasks.isEmpty)
@@ -210,6 +216,37 @@ class _TasksListState extends ConsumerState<TasksList> {
               }
             },
             child: const Text('create', style: CyberpunkTypography.bodyMedium),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Inline error banner for task list errors
+class _TaskErrorBanner extends StatelessWidget {
+  final String message;
+
+  const _TaskErrorBanner({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'error: $message',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.redAlert,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),

@@ -28,6 +28,7 @@ import (
 	"github.com/caimlas/meept/internal/mcp"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/pkg/models"
 
 	"golang.org/x/net/websocket"
 )
@@ -229,16 +230,77 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 		s.wsPath = wsPath
 		s.wsHub = NewWebSocketHub(s.logger)
 
-		// Subscribe to bus events and broadcast to WebSocket clients
-		// Note: using a single wildcard subscription to catch all relevant events
-		sub := msgBus.Subscribe("http-ws", "*")
-
-		go func() {
-			for msg := range sub.Channel {
-				s.wsHub.Broadcast(msg.Topic, msg.Payload)
-			}
-		}()
+		// Subscribe to all bus topic patterns that produce frontend events.
+		// The bus wildcard "*" only matches single-segment topics, so we
+		// subscribe to multiple prefixes used by the agent system.
+		topics := []string{"*", "agent.*", "agent.*.*", "task.*", "task.*.*", "step.*", "step.*.*", "orchestrator.*",
+			"chat.*", "chat.*.*", "tool.*", "llm.*", "review.*"}
+		for _, topic := range topics {
+			sub := msgBus.Subscribe("http-ws-"+topic, topic)
+			go func(sub *bus.Subscriber) {
+				for msg := range sub.Channel {
+					s.handleWSEvent(msg)
+				}
+			}(sub)
+		}
 	}
+}
+
+// handleWSEvent transforms a bus message into a frontend-friendly WebSocket event
+// and broadcasts it to all subscribed clients.
+func (s *Server) handleWSEvent(msg *models.BusMessage) {
+	if s.wsHub == nil || msg == nil {
+		return
+	}
+
+	frontendData := transformBusEventToWS(msg)
+	if frontendData == nil {
+		return // unrecognized topic, skip
+	}
+	s.wsHub.Broadcast(frontendData["type"].(string), frontendData)
+}
+
+// transformBusEventToWS converts a bus event into a frontend-compatible flat map.
+// Returns nil if the event should not be sent to the frontend.
+func transformBusEventToWS(msg *models.BusMessage) map[string]any {
+	topic := msg.Topic
+	if topic == "" {
+		return nil
+	}
+
+	// Unmarshal the payload once for inspection
+	var payload map[string]any
+	if msg.Payload != nil && len(msg.Payload) > 0 {
+		_ = json.Unmarshal(msg.Payload, &payload)
+	}
+
+	var eventType string
+	switch {
+	case strings.HasPrefix(topic, "chat.") || topic == "chat_message":
+		// All chat-related events → chat_message
+		eventType = "chat_message"
+
+	default:
+		// Single-segment topics and other unrecognized multi-segment topics are
+		// treated as job_update to ensure the WS passthrough path keeps working
+		// for any topic not otherwise handled.
+		eventType = "job_update"
+	}
+
+	if payload == nil {
+		payload = make(map[string]any)
+	}
+
+	// Add the source topic as metadata
+	payload["source_topic"] = topic
+
+	// If there's no timestamp, add one
+	if _, hasTS := payload["timestamp"]; !hasTS && !msg.Timestamp.IsZero() {
+		payload["timestamp"] = msg.Timestamp.Format(time.RFC3339)
+	}
+
+	payload["type"] = eventType
+	return payload
 }
 
 
@@ -1151,10 +1213,45 @@ func (s *Server) handleWSMessage(conn *websocket.Conn, msg *WSMessage) {
 	case "ping":
 		_ = websocket.JSON.Send(conn, WSMessage{Type: "pong"})
 	case "subscribe":
-		_ = websocket.JSON.Send(conn, WSMessage{Type: "subscribed"})
+		s.handleWSSubscribe(conn, msg)
 	default:
 		s.logger.Debug("ws unknown message type", "type", msg.Type)
 	}
+}
+
+// handleWSSubscribe handles subscribe messages from WebSocket clients.
+// Clients can subscribe to channels: chat, jobs, metrics.
+func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
+	if s.wsHub == nil {
+		_ = websocket.JSON.Send(conn, WSMessage{Type: "error", Data: json.RawMessage(`{"message":"WebSocket not enabled"}`)})
+		return
+	}
+
+	// Extract channel from msg.Data
+	var channel string
+	var sessionID string
+	if msg.Data != nil {
+		var parsed map[string]any
+		if err := json.Unmarshal(msg.Data, &parsed); err == nil {
+			if ch, ok := parsed["channel"].(string); ok {
+				channel = ch
+			}
+			if sid, ok := parsed["session_id"].(string); ok {
+				sessionID = sid
+			}
+		}
+	}
+	if channel == "" {
+		// Default channel
+		channel = "all"
+	}
+
+	_ = websocket.JSON.Send(conn, WSMessage{
+		Type: "subscribed",
+		Data: json.RawMessage(fmt.Sprintf(`{"channel":"%s"}`, channel)),
+	})
+
+	s.logger.Debug("ws client subscribed", "remote", conn.RemoteAddr(), "channel", channel, "session", sessionID)
 }
 
 

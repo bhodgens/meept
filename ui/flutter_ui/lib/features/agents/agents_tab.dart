@@ -57,11 +57,18 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             )
           else if (agentState.error != null)
             Center(
-              child: Text(
-                'error: ${agentState.error}',
-                style: CyberpunkTypography.bodySmall.copyWith(
-                  color: CyberpunkColors.redAlert,
-                ),
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: 280,
+                    child: _AgentErrorBanner(message: agentState.error!),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: () => ref.read(agentProvider.notifier).loadAgents(),
+                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                  ),
+                ],
               ),
             )
           else if (agentState.agents.isEmpty)
@@ -172,5 +179,36 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
       default:
         return Icons.smart_toy;
     }
+  }
+}
+
+/// Inline error banner for agent list errors
+class _AgentErrorBanner extends StatelessWidget {
+  final String message;
+
+  const _AgentErrorBanner({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.redAlert,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

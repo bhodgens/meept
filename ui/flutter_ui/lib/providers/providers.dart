@@ -1,6 +1,8 @@
 export 'chat_provider.dart';
 export 'task_provider.dart';
 export 'agent_provider.dart';
+export 'metrics_provider.dart';
+export 'job_provider.dart';
 
 import 'dart:async';
 
@@ -36,13 +38,16 @@ final connectionStateProvider = StateProvider<bool>((ref) => false);
 class ConnectionMonitor {
   final WebSocketService _websocket;
   final ApiClient _apiClient;
+  final ProviderContainer _container;
   Timer? _timer;
 
   ConnectionMonitor({
     required WebSocketService websocket,
     required ApiClient apiClient,
+    required ProviderContainer container,
   })  : _websocket = websocket,
-        _apiClient = apiClient {
+        _apiClient = apiClient,
+        _container = container {
     _listenToWebSocket();
     _startHealthChecks();
   }
@@ -50,7 +55,7 @@ class ConnectionMonitor {
   void _listenToWebSocket() {
     // Wire WebSocket connection events to the connection state provider
     _websocket.connectionStream.listen((connected) {
-      connectionStateProvider.overrideWith((ref) => connected);
+      _container.read(connectionStateProvider.notifier).state = connected;
     });
   }
 
@@ -61,9 +66,9 @@ class ConnectionMonitor {
       if (!_websocket.isConnected) {
         try {
           await _apiClient.get<Map<String, dynamic>>('/daemon/status');
-          connectionStateProvider.overrideWith((ref) => true);
+          _container.read(connectionStateProvider.notifier).state = true;
         } catch (_) {
-          connectionStateProvider.overrideWith((ref) => false);
+          _container.read(connectionStateProvider.notifier).state = false;
         }
       }
     });
@@ -79,5 +84,9 @@ class ConnectionMonitor {
 final connectionMonitorProvider = Provider<ConnectionMonitor>((ref) {
   final websocket = ref.watch(websocketProvider);
   final client = ref.watch(apiClientProvider);
-  return ConnectionMonitor(websocket: websocket, apiClient: client);
+  return ConnectionMonitor(
+    websocket: websocket,
+    apiClient: client,
+    container: ref.container,
+  );
 });

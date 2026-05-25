@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../widgets/error_banner.dart';
 import '../../providers/chat_provider.dart';
 import 'chat_message_bubble.dart';
 
@@ -123,42 +124,17 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
           ),
           if (chatState.error != null)
             Positioned(
-              bottom: 0,
+              bottom: 70, // Just above the chat input
               left: 0,
               right: 0,
-              child: _ErrorBanner(message: chatState.error!),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ErrorBanner extends StatelessWidget {
-  final String message;
-
-  const _ErrorBanner({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline,
-              color: CyberpunkColors.redAlert, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.redAlert,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: ErrorBanner(
+                  message: chatState.error!,
+                  onDismiss: () => ref.read(chatProvider.notifier).clearMessages(),
+                ),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
-          ),
         ],
       ),
     );

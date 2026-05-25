@@ -372,3 +372,58 @@ class Skill extends Equatable {
   @override
   List<Object?> get props => [slug, name, description, category, enabled];
 }
+
+// ===== Metrics Models =====
+
+class MetricsSnapshot extends Equatable {
+  final DateTime timestamp;
+  final int activeAgents;
+  final double requestsPerSec;
+  final double tokenUsageRate;
+  final int queueDepth;
+  final int totalSessions;
+  final int totalJobs;
+  final int runningJobs;
+  final int pendingJobs;
+  final String version;
+  final Map<String, dynamic>? metadata;
+
+  const MetricsSnapshot({
+    required this.timestamp,
+    this.activeAgents = 0,
+    this.requestsPerSec = 0.0,
+    this.tokenUsageRate = 0.0,
+    this.queueDepth = 0,
+    this.totalSessions = 0,
+    this.totalJobs = 0,
+    this.runningJobs = 0,
+    this.pendingJobs = 0,
+    this.version = '',
+    this.metadata,
+  });
+
+  factory MetricsSnapshot.fromJson(Map<String, dynamic> json) {
+    return MetricsSnapshot(
+      timestamp: json['timestamp'] != null
+          ? DateTime.parse(json['timestamp'] as String)
+          : DateTime.now(),
+      activeAgents: json['active_agents'] as int? ?? 0,
+      requestsPerSec: (json['requests_per_sec'] as num?)?.toDouble() ?? 0.0,
+      tokenUsageRate: (json['token_usage_rate'] as num?)?.toDouble() ?? 0.0,
+      queueDepth: json['queue_depth'] as int? ?? 0,
+      totalSessions: json['total_sessions'] as int? ?? 0,
+      totalJobs: json['total_jobs'] as int? ?? 0,
+      runningJobs: json['running_jobs'] as int? ?? 0,
+      pendingJobs: json['pending_jobs'] as int? ?? 0,
+      version: json['version'] as String? ?? '',
+      metadata: json['metadata'] as Map<String, dynamic>?,
+    );
+  }
+
+  @override
+  List<Object?> get props => [
+        timestamp, activeAgents, requestsPerSec, tokenUsageRate,
+        queueDepth, totalSessions, totalJobs, runningJobs, pendingJobs,
+        version,
+      ];
+}

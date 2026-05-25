@@ -129,13 +129,19 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             )
           else if (sessionState.error != null)
             Expanded(
-              child: Center(
-                child: Text(
-                  'error: ${sessionState.error}',
-                  style: CyberpunkTypography.bodySmall.copyWith(
-                    color: CyberpunkColors.redAlert,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: _SessionErrorBanner(message: sessionState.error!),
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: () => ref.read(sessionProvider.notifier).loadSessions(),
+                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                  ),
+                ],
               ),
             )
           else if (sessionState.sessions.isEmpty)
@@ -220,5 +226,36 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     if (diff.inHours < 1) return '${diff.inMinutes}m ago';
     if (diff.inDays < 1) return '${diff.inHours}h ago';
     return '${diff.inDays}d ago';
+  }
+}
+
+/// Inline error banner for session list errors
+class _SessionErrorBanner extends StatelessWidget {
+  final String message;
+
+  const _SessionErrorBanner({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      color: CyberpunkColors.redAlert.withValues(alpha: 0.2),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: CyberpunkColors.redAlert, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.redAlert,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
