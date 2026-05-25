@@ -1898,9 +1898,13 @@ func registerBuiltinTools(
 	sched *scheduler.Scheduler,
 	logger *slog.Logger,
 ) {
+	// Shared read cache for hashline edit recovery
+	readCache := builtin.NewReadCache(30)
+
 	// Filesystem tools
-	registry.Register(builtin.NewReadFileTool(checker))
+	registry.Register(builtin.NewReadFileTool(checker, readCache))
 	registry.Register(builtin.NewWriteFileTool(checker))
+	registry.Register(builtin.NewFileEditTool(checker, readCache))
 	registry.Register(builtin.NewDeleteFileTool(checker))
 	registry.Register(builtin.NewListDirectoryTool(checker))
 

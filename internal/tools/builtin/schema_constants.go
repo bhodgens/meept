@@ -7,6 +7,7 @@ const (
 	schemaTypeInteger = "integer"
 	schemaTypeBoolean = "boolean"
 	schemaTypeNumber  = "number"
+	schemaTypeArray   = "array"
 
 	// Common property name constants used as map keys in tool definitions.
 	schemaPropCommand       = "command"

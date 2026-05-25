@@ -2,8 +2,10 @@ package builtin
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/caimlas/meept/internal/tools"
@@ -19,12 +21,12 @@ func TestReadFileTool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tool := NewReadFileTool(nil)
+	tool := NewReadFileTool(nil, nil)
 	ctx := context.Background()
 
-	// Test basic read
+	// Test basic read (raw mode preserves original behavior)
 	t.Run("basic read", func(t *testing.T) {
-		result, err := tool.Execute(ctx, map[string]any{"path": filePath})
+		result, err := tool.Execute(ctx, map[string]any{"path": filePath, "raw": true})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -34,11 +36,32 @@ func TestReadFileTool(t *testing.T) {
 		}
 	})
 
-	// Test with offset
+	// Test hashline formatting (default)
+	t.Run("hashline read", func(t *testing.T) {
+		result, err := tool.Execute(ctx, map[string]any{"path": filePath})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		toolResult := result.(tools.ToolResult)
+		got, ok := toolResult.Result.(string)
+		if !ok {
+			t.Fatalf("expected string result, got %T", toolResult.Result)
+		}
+		// Should contain hashline format: LINE:HASH|content
+		if !containsHashlineFormat(got, 1, "line 1") {
+			t.Errorf("expected hashline format for line 1, got %q", got)
+		}
+		if !containsHashlineFormat(got, 3, "line 3") {
+			t.Errorf("expected hashline format for line 3, got %q", got)
+		}
+	})
+
+	// Test with offset (raw mode)
 	t.Run("with offset", func(t *testing.T) {
 		result, err := tool.Execute(ctx, map[string]any{
 			"path":   filePath,
 			"offset": float64(2),
+			"raw":    true,
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -50,12 +73,13 @@ func TestReadFileTool(t *testing.T) {
 		}
 	})
 
-	// Test with offset and limit
+	// Test with offset and limit (raw mode)
 	t.Run("with offset and limit", func(t *testing.T) {
 		result, err := tool.Execute(ctx, map[string]any{
 			"path":   filePath,
 			"offset": float64(2),
 			"limit":  float64(2),
+			"raw":    true,
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -64,6 +88,35 @@ func TestReadFileTool(t *testing.T) {
 		toolResult := result.(tools.ToolResult)
 		if toolResult.Result != expected {
 			t.Errorf("expected %q, got %q", expected, toolResult.Result)
+		}
+	})
+
+	// Test hashline with offset
+	t.Run("hashline with offset", func(t *testing.T) {
+		result, err := tool.Execute(ctx, map[string]any{
+			"path":   filePath,
+			"offset": float64(3),
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		toolResult := result.(tools.ToolResult)
+		got, ok := toolResult.Result.(string)
+		if !ok {
+			t.Fatalf("expected string result, got %T", toolResult.Result)
+		}
+		// Should start with line 3, not line 1
+		if !containsHashlineFormat(got, 3, "line 3") {
+			t.Errorf("expected hashline format for line 3, got %q", got)
+		}
+	})
+
+	// Test hashline consistency (same content produces same hash)
+	t.Run("hashline consistent", func(t *testing.T) {
+		result1, _ := tool.Execute(ctx, map[string]any{"path": filePath})
+		result2, _ := tool.Execute(ctx, map[string]any{"path": filePath})
+		if result1.(tools.ToolResult).Result != result2.(tools.ToolResult).Result {
+			t.Error("hashline output should be deterministic")
 		}
 	})
 
@@ -341,4 +394,16 @@ func TestResolvePath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// containsHashlineFormat checks if the output contains a hashline tag for the given line.
+func containsHashlineFormat(output string, lineNum int, content string) bool {
+	prefix := fmt.Sprintf("%d:", lineNum)
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, prefix) && strings.Contains(line, "|"+content) {
+			return true
+		}
+	}
+	return false
 }

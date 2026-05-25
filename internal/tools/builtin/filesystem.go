@@ -29,12 +29,13 @@ const (
 
 // ReadFileTool reads the contents of a file.
 type ReadFileTool struct {
-	checker *security.PermissionChecker
+	checker   *security.PermissionChecker
+	readCache *ReadCache
 }
 
 // NewReadFileTool creates a new file read tool.
-func NewReadFileTool(checker *security.PermissionChecker) *ReadFileTool {
-	return &ReadFileTool{checker: checker}
+func NewReadFileTool(checker *security.PermissionChecker, readCache *ReadCache) *ReadFileTool {
+	return &ReadFileTool{checker: checker, readCache: readCache}
 }
 
 func (t *ReadFileTool) Name() string { return "file_read" }
@@ -58,6 +59,10 @@ func (t *ReadFileTool) Parameters() llm.FunctionParameters {
 			schemaPropLimit: {
 				Type:        schemaTypeInteger,
 				Description: "Maximum number of lines to read (optional).",
+			},
+			"raw": {
+				Type:        schemaTypeBoolean,
+				Description: "If true, return content without hashline tags (default false). Use when you need the raw content, not for editing.",
 			},
 		},
 		Required: []string{schemaPropPath},
@@ -121,6 +126,38 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 			end = min(start+int(limit), len(lines))
 		}
 		text = strings.Join(lines[start:end], "\n")
+	}
+
+	// Determine raw mode
+	raw, _ := args["raw"].(bool)
+
+	// Store full file snapshot in read cache for edit recovery
+	if t.readCache != nil {
+		allLines := strings.Split(string(content), "\n")
+		if len(allLines) > 0 && allLines[len(allLines)-1] == "" {
+			allLines = allLines[:len(allLines)-1]
+		}
+		t.readCache.Store(resolved, allLines)
+	}
+
+	// Apply hashline formatting unless raw mode
+	if !raw {
+		var linesToFormat []string
+		var startLineNum int
+		if offset > 0 || limit > 0 {
+			linesToFormat = strings.Split(text, "\n")
+			startLineNum = 1
+			if offset > 0 {
+				startLineNum = int(offset)
+			}
+		} else {
+			linesToFormat = strings.Split(text, "\n")
+			if len(linesToFormat) > 0 && linesToFormat[len(linesToFormat)-1] == "" {
+				linesToFormat = linesToFormat[:len(linesToFormat)-1]
+			}
+			startLineNum = 1
+		}
+		text = FormatHashLines(linesToFormat, startLineNum)
 	}
 
 	// Compute evidence: file stat and hash
@@ -211,6 +248,38 @@ func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any
 			end = min(start+int(limit), len(lines))
 		}
 		text = strings.Join(lines[start:end], "\n")
+	}
+
+	// Determine raw mode
+	raw, _ := args["raw"].(bool)
+
+	// Store full file snapshot in read cache for edit recovery
+	if t.readCache != nil {
+		allLines := strings.Split(string(content), "\n")
+		if len(allLines) > 0 && allLines[len(allLines)-1] == "" {
+			allLines = allLines[:len(allLines)-1]
+		}
+		t.readCache.Store(resolved, allLines)
+	}
+
+	// Apply hashline formatting unless raw mode
+	if !raw {
+		var linesToFormat []string
+		var startLineNum int
+		if offset > 0 || limit > 0 {
+			linesToFormat = strings.Split(text, "\n")
+			startLineNum = 1
+			if offset > 0 {
+				startLineNum = int(offset)
+			}
+		} else {
+			linesToFormat = strings.Split(text, "\n")
+			if len(linesToFormat) > 0 && linesToFormat[len(linesToFormat)-1] == "" {
+				linesToFormat = linesToFormat[:len(linesToFormat)-1]
+			}
+			startLineNum = 1
+		}
+		text = FormatHashLines(linesToFormat, startLineNum)
 	}
 
 	evInfo, err := os.Stat(resolved)
