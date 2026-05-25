@@ -359,8 +359,38 @@ func (a *App) handleDrilldownKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// Create a sub-section model for this item's fields with the
 			// drilldown prefix set so saves route to the correct nested path.
 			prefix := a.drilldownField.Key() + "." + item.Name
+			// For single-item sub-struct drilldowns (e.g., agent.cache), field keys
+			// already include the sub-struct name (e.g., "cache.enabled"), so the
+			// prefix should be the section key to produce "agent.cache.enabled".
+			if len(a.drilldownItems) == 1 && item.Name == a.drilldownField.Key() {
+				prefix = a.section.SectionKey()
+			}
+			// For map[string]string drilldowns (e.g., vim.normal), the prefix
+			// should be the drilldown field key itself (the map path), not
+			// mapPath.mapKey, so the save handler can find and rebuild the map.
+			if isMapStringStringDrilldown(a.drilldownField) {
+				prefix = a.drilldownField.Key()
+			}
 			title := a.section.Title() + " > " + a.drilldownField.Label() + " > " + item.Name
-			a.section = NewDrilldownSectionModel(title, a.section.SectionKey(), a.section.ConfigFile(), prefix, item.Fields)
+
+			if sliceKeypath := detectStringSliceDrilldown(a.drilldownField, a.section.SectionKey()); sliceKeypath != "" {
+				// String slice drilldown: pass all items and the slice keypath
+				// so the save handler can reconstruct the full []string.
+				a.section = NewStringSliceDrilldownSectionModel(
+					title, a.section.SectionKey(), a.section.ConfigFile(),
+					prefix, sliceKeypath,
+					item.Fields, a.drilldownItems,
+				)
+			} else if isMapStringStringDrilldown(a.drilldownField) {
+				// map[string]string drilldown: pass all items so the save handler
+				// can rebuild the full map. Prefix is the map field path.
+				a.section = NewMapStringStringDrilldownSectionModel(
+					title, a.section.SectionKey(), a.section.ConfigFile(),
+					prefix, prefix, item.Fields, a.drilldownItems,
+				)
+			} else {
+				a.section = NewDrilldownSectionModel(title, a.section.SectionKey(), a.section.ConfigFile(), prefix, item.Fields)
+			}
 			a.phase = PhaseSection
 		}
 	case "n":
@@ -649,6 +679,39 @@ func (a *App) indexInMenu(item MenuItem) int {
 		}
 	}
 	return 0
+}
+
+// detectStringSliceDrilldown checks whether a DrilldownField represents a
+// []string slice by inspecting its items: all items must have exactly one
+// text field, and all must share the same field key. If so, it returns the
+// config keypath (sectionKey + "." + field.Key()) where the []string should
+// be persisted. Returns "" if the field is not a string-slice drilldown.
+func detectStringSliceDrilldown(df *DrilldownField, sectionKey string) string {
+	if len(df.Items) == 0 {
+		return ""
+	}
+	var fieldKey string
+	for _, item := range df.Items {
+		if len(item.Fields) != 1 {
+			return ""
+		}
+		f := item.Fields[0]
+		if f.Type() != FieldText {
+			return ""
+		}
+		if fieldKey == "" {
+			fieldKey = f.Key()
+		} else if f.Key() != fieldKey {
+			return ""
+		}
+	}
+	return sectionKey + "." + df.Key()
+}
+
+// isMapStringStringDrilldown returns true if the DrilldownField represents a
+// map[string]string (indicated by MapStringStringKey being set).
+func isMapStringStringDrilldown(df *DrilldownField) bool {
+	return df.MapStringStringKey != ""
 }
 
 // RunApp launches the config editor TUI.

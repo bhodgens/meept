@@ -279,6 +279,19 @@ type DrilldownItem struct {
 type DrilldownField struct {
 	baseField
 	Items []DrilldownItem
+
+	// StringSliceKey, when non-empty, indicates this drilldown represents a
+	// []string at the given keypath in the config (e.g. "security.allowed_paths").
+	// Each DrilldownItem has exactly one text field holding the string value.
+	// When saving, the full slice is reconstructed from all items rather than
+	// trying to resolve the item-level keypath via SetKeypath.
+	StringSliceKey string
+
+	// MapStringStringKey, when non-empty, indicates this drilldown represents a
+	// map[string]string at the given keypath in the config (e.g. "vim.normal").
+	// Each DrilldownItem.Name is the map key and has exactly one text field
+	// holding the value. When saving, the full map is reconstructed from items.
+	MapStringStringKey string
 }
 
 // NewDrilldownField creates a drilldown field with explicit items.
@@ -286,6 +299,30 @@ func NewDrilldownField(key, label string, items []DrilldownItem) *DrilldownField
 	return &DrilldownField{
 		baseField: baseField{key: key, label: label},
 		Items:     items,
+	}
+}
+
+// NewStringSliceDrilldownField creates a drilldown field that represents a
+// []string in the config. sliceKeypath is the full config keypath (e.g.
+// "security.allowed_paths") used to persist the reconstructed slice.
+// Each DrilldownItem should have exactly one text field holding the string value.
+func NewStringSliceDrilldownField(key, label, sliceKeypath string, items []DrilldownItem) *DrilldownField {
+	return &DrilldownField{
+		baseField:      baseField{key: key, label: label},
+		Items:          items,
+		StringSliceKey: sliceKeypath,
+	}
+}
+
+// NewMapStringStringDrilldownField creates a drilldown field that represents a
+// map[string]string in the config. mapKeypath is the config keypath (e.g.
+// "vim.normal") used to persist the map. Each DrilldownItem.Name is the map
+// key and has exactly one text field holding the value.
+func NewMapStringStringDrilldownField(key, label, mapKeypath string, items []DrilldownItem) *DrilldownField {
+	return &DrilldownField{
+		baseField:          baseField{key: key, label: label},
+		Items:              items,
+		MapStringStringKey: mapKeypath,
 	}
 }
 

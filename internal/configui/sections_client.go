@@ -1,7 +1,11 @@
 // internal/configui/sections_client.go
 package configui
 
-import "github.com/caimlas/meept/internal/tui"
+import (
+	"sort"
+
+	"github.com/caimlas/meept/internal/tui"
+)
 
 func buildClientFields() []Field {
 	cfg, _ := tui.LoadClientConfig()
@@ -39,6 +43,9 @@ func buildClientFields() []Field {
 		NewToggleField("vim.enabled", "vim enabled", cfg.Vim.Enabled),
 		NewTextField("vim.escape_insert", "vim escape insert", cfg.Vim.EscapeInsert),
 		NewTextField("vim.leader", "vim leader", cfg.Vim.Leader),
+		NewMapStringStringDrilldownField("vim.normal", "vim normal bindings", "vim.normal", buildMapStringStringItems(cfg.Vim.Normal)),
+		NewMapStringStringDrilldownField("vim.insert", "vim insert bindings", "vim.insert", buildMapStringStringItems(cfg.Vim.Insert)),
+		NewMapStringStringDrilldownField("vim.visual", "vim visual bindings", "vim.visual", buildMapStringStringItems(cfg.Vim.Visual)),
 		NewToggleField("rendering.markdown", "rendering markdown", cfg.Rendering.Markdown),
 		NewToggleField("rendering.syntax_highlighting", "rendering syntax highlighting", cfg.Rendering.SyntaxHighlighting),
 		NewTextField("rendering.theme", "rendering theme", cfg.Rendering.Theme),
@@ -54,4 +61,25 @@ func buildClientFields() []Field {
 		NewNumberField("chat.scroll_speed", "chat scroll speed", cfg.Chat.ScrollSpeed),
 		NewSelectField("chat.verbosity", "chat verbosity", cfg.Chat.Verbosity, []string{"quiet", "normal", "verbose"}),
 	}
+}
+
+// buildMapStringStringItems converts a map[string]string to DrilldownItems
+// sorted by key. Each item has the map key as Name and a single text field
+// holding the value.
+func buildMapStringStringItems(m map[string]string) []DrilldownItem {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	items := make([]DrilldownItem, 0, len(m))
+	for _, k := range keys {
+		items = append(items, DrilldownItem{
+			Name: k,
+			Fields: []Field{
+				NewTextField("value", k, m[k]),
+			},
+		})
+	}
+	return items
 }

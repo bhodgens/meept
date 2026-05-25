@@ -36,7 +36,8 @@ func GetKeypath(cfg *config.Config, path string) (string, error) {
 }
 
 // SetKeypath sets a dot-notation path on a config struct.
-func SetKeypath(cfg *config.Config, path string, value string) error {
+// The value can be a string (for scalar fields) or a []string (for string slice fields).
+func SetKeypath(cfg *config.Config, path string, value any) error {
 	parts := strings.Split(path, ".")
 	parent, err := resolvePath(reflect.ValueOf(cfg), parts[:len(parts)-1])
 	if err != nil {
@@ -56,29 +57,39 @@ func SetKeypath(cfg *config.Config, path string, value string) error {
 		tagName := strings.Split(tag, ",")[0]
 		if tagName == fieldName {
 			fv := parent.Field(i)
-			switch fv.Kind() {
-			case reflect.String:
-				fv.SetString(value)
-			case reflect.Bool:
-				b, err := strconv.ParseBool(value)
-				if err != nil {
-					return fmt.Errorf("invalid bool %q: %w", value, err)
+			switch val := value.(type) {
+			case string:
+				switch fv.Kind() {
+				case reflect.String:
+					fv.SetString(val)
+				case reflect.Bool:
+					b, err := strconv.ParseBool(val)
+					if err != nil {
+						return fmt.Errorf("invalid bool %q: %w", val, err)
+					}
+					fv.SetBool(b)
+				case reflect.Int, reflect.Int64:
+					n, err := strconv.Atoi(val)
+					if err != nil {
+						return fmt.Errorf("invalid int %q: %w", val, err)
+					}
+					fv.SetInt(int64(n))
+				case reflect.Float64:
+					f, err := strconv.ParseFloat(val, 64)
+					if err != nil {
+						return fmt.Errorf("invalid float %q: %w", val, err)
+					}
+					fv.SetFloat(f)
+				default:
+					return fmt.Errorf("unsupported type %s for field %s", fv.Kind(), fieldName)
 				}
-				fv.SetBool(b)
-			case reflect.Int, reflect.Int64:
-				n, err := strconv.Atoi(value)
-				if err != nil {
-					return fmt.Errorf("invalid int %q: %w", value, err)
+			case []string:
+				if fv.Kind() != reflect.Slice || fv.Type().Elem().Kind() != reflect.String {
+					return fmt.Errorf("field %s is not a []string", fieldName)
 				}
-				fv.SetInt(int64(n))
-			case reflect.Float64:
-				f, err := strconv.ParseFloat(value, 64)
-				if err != nil {
-					return fmt.Errorf("invalid float %q: %w", value, err)
-				}
-				fv.SetFloat(f)
+				fv.Set(reflect.ValueOf(val))
 			default:
-				return fmt.Errorf("unsupported type %s for field %s", fv.Kind(), fieldName)
+				return fmt.Errorf("unsupported value type %T for field %s", value, fieldName)
 			}
 			return nil
 		}

@@ -2200,11 +2200,25 @@ Test the full flow:
 
 12. **Field coverage gaps** — FIXED: All 9 sparse sections now have near-complete field coverage. Agent Loop went from 2 to 33 fields, Shadow from 1 to 58, Self-Improve from 3 to 37, Distributed Memory from 2 to 16, Code Intel from 1 to 10, Tooling from 3 to 10, Q Agent from 4 to 13, Session from 5 to 10. LLM, Memory, and Client/TUI sections also expanded with sub-struct drilldowns.
 
+### Issues Fixed in Session 4 (2026-05-25)
+
+13. **Keypath doubling in saveMainConfigSection** — FIXED: Added `resolveFullPath` helper that detects when field keys already contain the section prefix (e.g., `"llm.budget.limit"` for section `"llm"`) and avoids double-prepending. This fixes save for transport, LLM, memory, and all other sections using full dotpath keys.
+
+14. **Single-item sub-struct drilldown save** — FIXED: In `app.go`, added detection for single-item sub-struct drilldowns (where `item.Name == drilldownField.Key()`). These now use the section key as the drilldown prefix, producing correct keypaths like `"agent.cache.enabled"` instead of `"cache.cache.cache.enabled"`.
+
+15. **String slice drilldown save** — FIXED: Added `detectStringSliceDrilldown` runtime detection, `StringSliceDrilldownSectionModel` for passing all items, and `SetKeypath` support for `[]string` values. Security `allowed_paths`/`blocked_paths` and transport `api_keys` drilldowns now save correctly.
+
+16. **LSP servers dynamic map drilldown** — FIXED: Added `buildLSPServerItems` in `sections_code_intel.go` that creates drilldown items from `map[string]LSPServerConfig`. Added `applyMapDrilldownFields` in `save.go` that handles `map[string]Struct` persistence using reflection. Supports add/edit/delete of language server entries.
+
+17. **Map value reflection panics** — FIXED: `applyMapDrilldownFields` properly handles both pointer and struct-value maps. Creates addressable copies for struct-valued map entries to allow field modification.
+
+### Issues Fixed in Session 5 (2026-05-25)
+
+18. **Client/TUI vim `map[string]string` fields not exposed** — FIXED: Added `map[string]string` drilldown support via `NewMapStringStringDrilldownField` and `buildMapStringStringItems`. Vim normal/insert/visual mode keybinding maps are now exposed as editable drilldowns where each map entry (key → value) appears as an item. Added `MapStringStringDrilldownSectionModel` for passing all items to the save handler, and `resolveMapStringString` for locating the target map field via reflection. Save handler rebuilds the full `map[string]string` from all drilldown items.
+
 ### Remaining Issues
 
-13. **Drilldown save for sub-struct groups** — Agent Loop, Shadow, Self-Improve, Distributed Memory, Code Intel sections use DrilldownFields for sub-struct groups (cache, errors, review, etc.). These are single-item drilldowns, not multi-item lists. The save handler needs to detect these and apply the nested field changes via dotpath keypaths (e.g., `agent.cache.enabled`). This is similar to Issue 11 but for the main config path.
-
-14. **LSP servers dynamic map** — Code Intel has an `lsp.servers` map that should be a dynamic drilldown (add/delete language servers). Not yet implemented.
+None known. All plan issues resolved.
 
 ### Field Coverage (Updated)
 
@@ -2214,16 +2228,16 @@ Test the full flow:
 | Shadow | ~58 | 58 | ~100% |
 | Self-Improve | ~37 | 37 | ~100% |
 | Distributed Memory | 16 | 16 | ~100% |
-| Code Intel | ~10 | 10 | ~100% |
-| Client/TUI | ~30 | 28 | ~93% |
+| Code Intel | ~13 | 13 | ~100% |
+| Client/TUI | ~38 | 38 | ~100% |
 | LLM | ~40 | 38 | ~95% |
 | Memory | ~30 | 28 | ~93% |
 | Tooling | 10 | 10 | 100% |
 | Q Agent | 13 | 13 | 100% |
 | Session | 10 | 10 | 100% |
-| Compaction | 10 | 7 | 70% |
+| Compaction | 10 | 10 | 100% |
 | Models | 4+ | 4 | ~100% |
-| Transport | 13 | 12 | ~92% |
+| Transport | 13 | 13 | 100% |
 | Plugins | 2 | 2 | 100% |
 
-**Total: ~310 fields across 33 sections, up from ~172 at start of session 2.**
+**Total: ~330 fields across 33 sections.**

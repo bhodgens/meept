@@ -17,6 +17,22 @@ type SectionModel struct {
 	// "providers.openai", so that field "api" becomes "providers.openai.api".
 	// Empty string means this is a top-level section (normal save flow).
 	drilldownPrefix string
+
+	// stringSliceKeypath is set when this drilldown sub-section was created
+	// from a []string drilldown. It holds the config keypath where the full
+	// []string should be written (e.g. "security.allowed_paths").
+	// When non-empty, stringSliceItems holds all DrilldownItems so the slice
+	// can be reconstructed from their field values during save.
+	stringSliceKeypath string
+	stringSliceItems   []DrilldownItem
+
+	// mapStringStringKey is set when this drilldown sub-section was created
+	// from a map[string]string drilldown. It holds the config keypath where
+	// the full map should be written (e.g. "vim.normal"). When non-empty,
+	// mapStringStringItems holds all DrilldownItems so the map can be
+	// reconstructed from their Name (map key) and field values during save.
+	mapStringStringKey   string
+	mapStringStringItems []DrilldownItem
 }
 
 // NewSectionModel creates a SectionModel with the given title, section key
@@ -45,6 +61,42 @@ func NewDrilldownSectionModel(title, sectionKey, configFile, drilldownPrefix str
 	}
 }
 
+// NewStringSliceDrilldownSectionModel creates a SectionModel for a drilldown
+// sub-section that originated from a []string. The sliceKeypath is the full
+// config keypath (e.g. "security.allowed_paths") where the reconstructed slice
+// will be written. allItems contains all DrilldownItems so the full slice can
+// be rebuilt from their field values.
+func NewStringSliceDrilldownSectionModel(title, sectionKey, configFile, drilldownPrefix, sliceKeypath string, fields []Field, allItems []DrilldownItem) *SectionModel {
+	return &SectionModel{
+		title:              title,
+		sectionKey:         sectionKey,
+		keyPath:            configFile,
+		fields:             fields,
+		cursor:             0,
+		drilldownPrefix:    drilldownPrefix,
+		stringSliceKeypath: sliceKeypath,
+		stringSliceItems:   allItems,
+	}
+}
+
+// NewMapStringStringDrilldownSectionModel creates a SectionModel for a
+// drilldown sub-section that originated from a map[string]string. The
+// mapKeypath is the config keypath (e.g. "vim.normal") where the reconstructed
+// map will be written. allItems contains all DrilldownItems so the full map
+// can be rebuilt from their Names (map keys) and field values.
+func NewMapStringStringDrilldownSectionModel(title, sectionKey, configFile, drilldownPrefix, mapKeypath string, fields []Field, allItems []DrilldownItem) *SectionModel {
+	return &SectionModel{
+		title:                title,
+		sectionKey:           sectionKey,
+		keyPath:              configFile,
+		fields:               fields,
+		cursor:               0,
+		drilldownPrefix:      drilldownPrefix,
+		mapStringStringKey:   mapKeypath,
+		mapStringStringItems: allItems,
+	}
+}
+
 // Title returns the display name of the section.
 func (s *SectionModel) Title() string { return s.title }
 
@@ -63,6 +115,26 @@ func (s *SectionModel) DrilldownPrefix() string { return s.drilldownPrefix }
 
 // IsDrilldown returns true if this SectionModel represents a drilldown sub-section.
 func (s *SectionModel) IsDrilldown() bool { return s.drilldownPrefix != "" }
+
+// IsStringSliceDrilldown returns true if this drilldown originated from a []string.
+func (s *SectionModel) IsStringSliceDrilldown() bool { return s.stringSliceKeypath != "" }
+
+// StringSliceKeypath returns the config keypath where the reconstructed []string
+// should be written. Empty for non-string-slice drilldowns.
+func (s *SectionModel) StringSliceKeypath() string { return s.stringSliceKeypath }
+
+// StringSliceItems returns all DrilldownItems for reconstructing the full []string.
+func (s *SectionModel) StringSliceItems() []DrilldownItem { return s.stringSliceItems }
+
+// IsMapStringStringDrilldown returns true if this drilldown originated from a map[string]string.
+func (s *SectionModel) IsMapStringStringDrilldown() bool { return s.mapStringStringKey != "" }
+
+// MapStringStringKey returns the config keypath where the reconstructed map[string]string
+// should be written. Empty for non-map drilldowns.
+func (s *SectionModel) MapStringStringKey() string { return s.mapStringStringKey }
+
+// MapStringStringItems returns all DrilldownItems for reconstructing the full map[string]string.
+func (s *SectionModel) MapStringStringItems() []DrilldownItem { return s.mapStringStringItems }
 
 // Cursor returns the current cursor position (0-indexed).
 func (s *SectionModel) Cursor() int { return s.cursor }
