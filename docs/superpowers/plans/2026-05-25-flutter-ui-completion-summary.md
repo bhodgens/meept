@@ -1,7 +1,7 @@
 # Flutter UI Completion Summary
 
 **Date:** 2026-05-25
-**Status:** ~95% Complete (Terminal panel blocked on backend support)
+**Status:** 100% Complete
 
 ## Completed Panels
 
@@ -12,6 +12,7 @@
 | Settings | ✅ Ready | `features/settings/settings_panel.dart` | Edit client.json5, models.json5, menubar.json5 |
 | Calendar | ✅ Ready | `features/calendar/calendar_panel.dart` | Today's events, create event dialog |
 | Metrics | ✅ Ready | `features/metrics/metrics_panel.dart` | Live queue depth, active agents, job counts |
+| Terminal | ✅ Ready | `features/terminal/terminal_panel.dart` | Command history, execute commands, sessions |
 
 ## Test Results
 
@@ -22,23 +23,7 @@ Build: ✓ Built build/macos/Build/Products/Release/meept_ui.app (45.9MB)
 
 ## Remaining Work
 
-### Terminal Panel (Blocked)
-
-**Status:** Coming Soon - Requires backend HTTP API support
-
-**Missing Backend Components:**
-1. `GET /api/v1/terminal/history` - Shell command history endpoint
-2. `POST /api/v1/terminal/exec` - Command execution (optional, security review needed)
-3. `WebSocket /api/v1/terminal/stream` - Real-time output streaming
-4. `TerminalService` in `internal/services/`
-
-**Gap Analysis:** See `docs/superpowers/plans/2026-05-25-terminal-panel-gap.md`
-
-**Recommended Approach (MVP):**
-- Implement read-only history endpoint first
-- Query shell command audit log
-- No new command execution from UI (security)
-- Mark status as "beta" initially
+None - All panels are now implemented and wired up.
 
 ## Tools Panel Status
 
@@ -53,7 +38,7 @@ The `ToolsPanel` dynamically loads enabled skills from `/api/v1/skills`:
 |------|--------|----------------|
 | memory | ready | `features/memory/` |
 | files | beta | `features/files/` |
-| terminal | coming soon | N/A (backend required) |
+| terminal | ready | `features/terminal/` |
 | calendar | ready | `features/calendar/` |
 | metrics | ready | `features/metrics/` |
 | settings | ready | `features/settings/` |
@@ -76,8 +61,9 @@ ChatTab (main container)
 ## Commits
 
 ```
-0894a76 feat(calendar): implement CalendarPanel with Google Calendar integration
+d5c9439 feat(terminal): implement Terminal Panel with full backend HTTP API
 cb83e41 feat(metrics): wire up MetricsPanel to chat tab
+0894a76 feat(calendar): implement CalendarPanel with Google Calendar integration
 ```
 
 ## Related Files
@@ -89,15 +75,13 @@ cb83e41 feat(metrics): wire up MetricsPanel to chat tab
 
 ## Next Steps
 
-1. **For Terminal Panel:**
-   - Review gap analysis document
-   - Implement backend HTTP endpoints
-   - Create `TerminalService`
-   - Implement Flutter `TerminalPanel`
-   - Update status to "ready" or "beta"
-
-2. **For Production:**
+1. **For Production:**
    - Test each panel with live backend
    - Verify WebSocket real-time updates
    - Add integration tests for panels
    - Review error handling UX
+
+2. **Optional Terminal Enhancements:**
+   - WebSocket streaming for real-time output
+   - PTY session management
+   - Advanced command history filtering
