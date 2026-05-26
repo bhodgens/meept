@@ -429,8 +429,10 @@ type anthropicContentBlock struct {
 }
 
 type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
 type anthropicErrorResponse struct {
@@ -813,6 +815,8 @@ func (c *AnthropicClient) parseStreamingResponse(body io.Reader, progress func(P
 		case "message_start":
 			if streamEvent.Message != nil && streamEvent.Message.Usage != nil {
 				usage.InputTokens = streamEvent.Message.Usage.InputTokens
+				usage.CacheCreationInputTokens = streamEvent.Message.Usage.CacheCreationInputTokens
+				usage.CacheReadInputTokens = streamEvent.Message.Usage.CacheReadInputTokens
 			}
 
 		case "content_block_start":
@@ -927,6 +931,7 @@ func (c *AnthropicClient) buildResponseFromBlocks(blocks []contentBlockAccum, st
 			PromptTokens:     usage.InputTokens,
 			CompletionTokens: usage.OutputTokens,
 			TotalTokens:      usage.InputTokens + usage.OutputTokens,
+			CachedTokens:     usage.CacheReadInputTokens,
 		},
 		Model:        c.config.ModelID,
 		FinishReason: stopReason,
@@ -974,6 +979,7 @@ func (c *AnthropicClient) parseResponse(apiResp *anthropicResponse) *Response {
 			PromptTokens:     apiResp.Usage.InputTokens,
 			CompletionTokens: apiResp.Usage.OutputTokens,
 			TotalTokens:      apiResp.Usage.InputTokens + apiResp.Usage.OutputTokens,
+			CachedTokens:     apiResp.Usage.CacheReadInputTokens,
 		},
 		Model:        apiResp.Model,
 		FinishReason: apiResp.StopReason,

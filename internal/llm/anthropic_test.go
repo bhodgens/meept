@@ -417,3 +417,17 @@ func TestAnthropicClient_BuildRequest_MultipleSystemMessages(t *testing.T) {
 		t.Errorf("Expected tool_use content, got %q", req.Messages[1].Content[1].Type)
 	}
 }
+
+func TestAnthropicUsage_CacheFields(t *testing.T) {
+	raw := `{"input_tokens": 100, "output_tokens": 50, "cache_creation_input_tokens": 200, "cache_read_input_tokens": 80}`
+	var u anthropicUsage
+	if err := json.Unmarshal([]byte(raw), &u); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if u.CacheCreationInputTokens != 200 {
+		t.Errorf("CacheCreationInputTokens = %d, want 200", u.CacheCreationInputTokens)
+	}
+	if u.CacheReadInputTokens != 80 {
+		t.Errorf("CacheReadInputTokens = %d, want 80", u.CacheReadInputTokens)
+	}
+}
