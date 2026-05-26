@@ -338,7 +338,10 @@ Example workflow:
 
 			// Expand ~ in output path
 			if strings.HasPrefix(output, "~") {
-				home, _ := os.UserHomeDir()
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("failed to expand home directory: %w", err)
+				}
 				output = filepath.Join(home, output[1:])
 			}
 
@@ -455,7 +458,10 @@ func newShadowAdaptersRegisterCmd() *cobra.Command {
 
 			// Expand path
 			if strings.HasPrefix(adapterPath, "~") {
-				home, _ := os.UserHomeDir()
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("failed to expand home directory: %w", err)
+				}
 				adapterPath = filepath.Join(home, adapterPath[1:])
 			}
 
@@ -639,7 +645,10 @@ Training backends (auto-detected if not specified):
 
 			// Determine output directory
 			if outputDir == "" {
-				outputDir = expandShadowPath(cfg.Adapters.AdapterDir)
+				outputDir, err = expandShadowPath(cfg.Adapters.AdapterDir)
+				if err != nil {
+					return err
+				}
 			}
 
 			// Generate adapter name if not provided
@@ -652,7 +661,11 @@ Training backends (auto-detected if not specified):
 			var dataPath string
 			if exportFirst || execute {
 				timestamp := time.Now().Format("20060102")
-				dataPath = filepath.Join(expandShadowPath(cfg.Export.OutputDir), fmt.Sprintf("dpo_%s.jsonl", timestamp))
+				exportDir, err := expandShadowPath(cfg.Export.OutputDir)
+				if err != nil {
+					return err
+				}
+				dataPath = filepath.Join(exportDir, fmt.Sprintf("dpo_%s.jsonl", timestamp))
 
 				result, err := manager.Export(ctx, shadow.ExportOptions{
 					Format:         shadow.FormatDPO,
@@ -890,12 +903,15 @@ func cliConvertShadowConfig(cfg config.ShadowConfig) *shadow.Config {
 	}
 }
 
-func expandShadowPath(path string) string {
+func expandShadowPath(path string) (string, error) {
 	if strings.HasPrefix(path, "~") {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, path[1:])
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to expand home directory: %w", err)
+		}
+		return filepath.Join(home, path[1:]), nil
 	}
-	return path
+	return path, nil
 }
 
 func truncate(s string, maxLen int) string {
@@ -903,8 +919,9 @@ func truncate(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", "")
 
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return string(runes[:maxLen-3]) + "..."
 }

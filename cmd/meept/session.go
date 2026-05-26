@@ -44,7 +44,7 @@ func newSessionListCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			rawResult, err := client.Call("session.list", nil)
+			rawResult, err := client.Call("session.list", map[string]any{"limit": limit})
 			if err != nil {
 				return fmt.Errorf("failed to list sessions: %w", err)
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -63,7 +64,7 @@ func newQStatusCmd() *cobra.Command {
 			
 
 			// Create Q Agent and get status
-			qAgent := q.NewQAgent(nil, cfg.QAgent, memvidClient)
+			qAgent := q.NewQAgent(slog.Default(), cfg.QAgent, memvidClient)
 			status, err := qAgent.GetStatus(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to get status: %w", err)
@@ -132,7 +133,7 @@ Examples:
 			fmt.Printf("analyzing sessions idle for %d+ hours\n\n", cfg.QAgent.SessionIdleTriggerHours)
 
 			// Create Q Agent and run analysis
-			qAgent := q.NewQAgent(nil, cfg.QAgent, memvidClient)
+			qAgent := q.NewQAgent(slog.Default(), cfg.QAgent, memvidClient)
 			result, err := qAgent.RunAnalysis(ctx)
 			if err != nil {
 				return fmt.Errorf("analysis failed: %w", err)
@@ -161,7 +162,14 @@ Examples:
 
 			for i, pattern := range result.PatternsDetected {
 				fmt.Printf("%d. %s (%.0f%% confidence)\n", i+1, pattern.PatternType, pattern.Confidence*100)
-				fmt.Printf("   affected: %s\n", pattern.AffectedAgent+pattern.AffectedIntent)
+				affected := pattern.AffectedAgent
+				if pattern.AffectedIntent != "" {
+					if affected != "" {
+						affected += " / "
+					}
+					affected += pattern.AffectedIntent
+				}
+				fmt.Printf("   affected: %s\n", affected)
 				fmt.Printf("   sessions: %d\n", pattern.SessionCount)
 				fmt.Printf("   action:   %s\n\n", pattern.RecommendedAction)
 			}

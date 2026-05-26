@@ -477,8 +477,9 @@ type treeNodeInfo = types.TreeNodeInfo
 func truncateContent(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.TrimSpace(s)
-	if len(s) > maxLen {
-		return ": " + s[:maxLen-3] + "..."
+	runes := []rune(s)
+	if len(runes) > maxLen {
+		return ": " + string(runes[:maxLen-3]) + "..."
 	}
 	if s != "" {
 		return ": " + s

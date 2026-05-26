@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -67,6 +68,10 @@ func runStatus(jsonOutput bool) error {
 	status, err := client.Status()
 	if err != nil {
 		fmt.Printf("Daemon is running (PID %d) but status unavailable: %v\n", pid, err)
+		return nil
+	}
+	if status == nil {
+		fmt.Printf("Daemon is running (PID %d) but returned empty status\n", pid)
 		return nil
 	}
 
@@ -138,29 +143,19 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 }
 
 func printStatusJSON(status *types.DaemonStatusResponse, pid int) {
-	// Simple JSON output without encoding/json import cycle
-	fmt.Printf(`{
-  "status": "%s",
-  "pid": %d,
-  "uptime_seconds": %.2f,
-  "model": "%s",
-  "tokens_used": %d,
-  "tokens_remaining": %d,
-  "budget_used": %.4f,
-  "budget_remaining": %.4f,
-  "registered_methods": %d,
-  "bus_subscribers": %d
-}
-`,
-		status.Status,
-		pid,
-		status.UptimeSeconds,
-		status.Model,
-		status.TokensUsed,
-		status.TokensRemaining,
-		status.BudgetUsed,
-		status.BudgetRemaining,
-		len(status.RegisteredMethods),
-		status.BusSubscribers,
-	)
+	out := map[string]any{
+		"status":             status.Status,
+		"pid":                pid,
+		"uptime_seconds":    status.UptimeSeconds,
+		"model":             status.Model,
+		"tokens_used":       status.TokensUsed,
+		"tokens_remaining":  status.TokensRemaining,
+		"budget_used":       status.BudgetUsed,
+		"budget_remaining":  status.BudgetRemaining,
+		"registered_methods": len(status.RegisteredMethods),
+		"bus_subscribers":   status.BusSubscribers,
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(out)
 }

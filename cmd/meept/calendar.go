@@ -69,7 +69,10 @@ func runCalendarAuth(cmd *cobra.Command, args []string) error {
 
 	oauthCfg := calendar.DefaultOAuth2Config(cfg.ClientID, cfg.ClientSecret, redirectURI)
 
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to determine home directory: %w", err)
+	}
 	tokenPath := filepath.Join(homeDir, ".meept", "calendar_token.json")
 	auth := calendar.NewOAuth2Authenticator(oauthCfg, tokenPath)
 
@@ -153,7 +156,10 @@ func runCalendarToday(cmd *cobra.Command, args []string) error {
 
 	oauthCfg := calendar.DefaultOAuth2Config(cfg.ClientID, cfg.ClientSecret, redirectURI)
 
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to determine home directory: %w", err)
+	}
 	tokenPath := filepath.Join(homeDir, ".meept", "calendar_token.json")
 	auth := calendar.NewOAuth2Authenticator(oauthCfg, tokenPath)
 

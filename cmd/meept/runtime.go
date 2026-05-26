@@ -240,6 +240,9 @@ func jsonOutput(data any) error {
 
 // runRuntimeStart starts the runtime.
 func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
+	if provider == "" {
+		provider = "local"
+	}
 	_, pc, err := loadRuntimeConfig(provider)
 	if err != nil {
 		return err
@@ -290,6 +293,9 @@ func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
 
 // runRuntimeStop stops the runtime.
 func runRuntimeStop(ctx context.Context, provider string) error {
+	if provider == "" {
+		provider = "local"
+	}
 	_, pc, err := loadRuntimeConfig(provider)
 	if err != nil {
 		return err
@@ -334,6 +340,9 @@ func runRuntimeStop(ctx context.Context, provider string) error {
 
 // runRuntimeRestart restarts the runtime.
 func runRuntimeRestart(ctx context.Context, provider string) error {
+	if provider == "" {
+		provider = "local"
+	}
 	if err := runRuntimeStop(ctx, provider); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: stop failed: %v\n", err)
 	}
