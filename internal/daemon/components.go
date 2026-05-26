@@ -120,6 +120,9 @@ type Components struct {
 	SkillLoader     *skills.LazySkillLoader
 	CapabilityIndex *skills.CapabilityIndex
 
+	// TT-SR stream rule enforcement
+	TTSRManager *agent.TTSRManager
+
 	// Agent capabilities
 	CapabilitiesMap *agent.CapabilitiesMap
 
@@ -504,6 +507,13 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	c.ArtifactManager = agent.NewArtifactManager(logger.With("component", "artifact-manager"))
 	logger.Info("Artifact manager initialized")
 
+	// Create TT-SR stream rule manager and load rules from all skills directories
+	c.TTSRManager = agent.NewTTSRManager(logger)
+	ttsrDirs := ttsrSkillsDirs()
+	if err := c.TTSRManager.LoadRulesFromDirs(ttsrDirs); err != nil {
+		logger.Warn("Failed to load TT-SR rules", "error", err)
+	}
+
 	// Create agent loop
 	agentOpts := []agent.LoopOption{
 		agent.WithMessageBus(msgBus),
@@ -559,6 +569,13 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if c.ArtifactManager != nil {
 		agentOpts = append(agentOpts, agent.WithArtifactManager(c.ArtifactManager))
 		logger.Info("Agent loop configured with artifact manager")
+	}
+	// Wire TT-SR stream rule enforcement
+	if c.TTSRManager != nil {
+		agentOpts = append(agentOpts, agent.WithTTSRManager(c.TTSRManager))
+		logger.Info("Agent loop configured with TT-SR stream rule enforcement",
+			"rules", len(c.TTSRManager.Rules()),
+		)
 	}
 	// Always set an agent ID for security checks - use "default" when multi-agent is disabled
 	agentOpts = append(agentOpts, agent.WithAgentID("default"))
@@ -905,6 +922,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			Watchdog:              c.Watchdog,
 			HallucinationDetector: c.HallucinationDetector,
 			ArtifactManager:       c.ArtifactManager,
+			TTSRManager:           c.TTSRManager,
 			Queues:                cfg.Agent.Queues,
 			DB:                    getQueueDB(c),
 		})
@@ -2385,6 +2403,23 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 			c.ToolRegistry.Register(tool)
 		}
 		logger.Debug("Registered LSP tools")
+
+		// Wire LSP writethrough notifier into file tools
+		lspNotifier := builtin.NewLSPWriteNotifier(c.LSPManager, cfg.CodeIntel.LSP, logger.With("component", "lsp-writethrough"))
+		if lspNotifier != nil {
+			if tool := c.ToolRegistry.Get("file_write"); tool != nil {
+				if wt, ok := tool.(interface{ SetLSPNotifier(builtin.LSPWriteNotifier) }); ok {
+					wt.SetLSPNotifier(lspNotifier)
+					logger.Debug("Wired LSP writethrough into file_write tool")
+				}
+			}
+			if tool := c.ToolRegistry.Get("file_edit"); tool != nil {
+				if wt, ok := tool.(interface{ SetLSPNotifier(builtin.LSPWriteNotifier) }); ok {
+					wt.SetLSPNotifier(lspNotifier)
+					logger.Debug("Wired LSP writethrough into file_edit tool")
+				}
+			}
+		}
 	} else {
 		logger.Info("LSP tools not registered (no servers configured)")
 	}
@@ -3098,4 +3133,20 @@ func (d *llmDecomposer) Decompose(ctx context.Context, message string) ([]agent.
 
 	d.logger.Debug("Task decomposed", "steps", len(steps))
 	return steps, nil
+}
+
+// ttsrSkillsDirs returns the skills directories to scan for TT-SR rules,
+// in priority order (system-wide -> user-global -> project-local).
+// Non-existent directories are silently skipped by LoadRulesFromDirs.
+func ttsrSkillsDirs() []string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "~"
+	}
+
+	return []string{
+		filepath.Join(homeDir, ".config", "meept", "skills"),
+		filepath.Join(homeDir, ".meept", "skills"),
+		".meept/skills",
+	}
 }

@@ -3,9 +3,12 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"maps"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -159,6 +162,10 @@ type Conversation struct {
 	memoryContext string
 	// memorySnapshot is frozen at session start for API prefix caching
 	memorySnapshot string
+	// cachePrefixHash tracks SHA256 of system prompt + stabilized tools for cache invalidation.
+	cachePrefixHash string
+	// cachePrefixChanged is set to true when StabilizeToolPrefix detects a hash change.
+	cachePrefixChanged bool
 
 	// Anchor messages are exempt from truncation (validation instructions, escalation triggers)
 	anchorMessages map[string]bool // message content hash -> isAnchor
@@ -1068,7 +1075,80 @@ func (c *Conversation) ClearMemoryContext() {
 	c.memorySnapshot = ""
 }
 
-// InjectContext inserts a context message after the system prompt.
+// StabilizeToolPrefix creates a deterministic byte layout for tool definitions
+// and updates the cache prefix hash. Tools are sorted alphabetically by name,
+// and each tool is serialized as name + description + parameters sorted by key.
+// The resulting SHA256 hash enables detection of prefix changes for cache
+// invalidation. Returns the stabilized tool list sorted by name.
+func (c *Conversation) StabilizeToolPrefix(tools []llm.ToolDefinition) []llm.ToolDefinition {
+	// Sort tools by name for deterministic ordering
+	sorted := make([]llm.ToolDefinition, len(tools))
+	copy(sorted, tools)
+	slices.SortFunc(sorted, func(a, b llm.ToolDefinition) int {
+		return strings.Compare(a.Function.Name, b.Function.Name)
+	})
+
+	// Build deterministic serialization
+	var buf strings.Builder
+	buf.WriteString(c.systemPrompt)
+	buf.WriteByte(0) // separator
+
+	for _, tool := range sorted {
+		buf.WriteString(tool.Function.Name)
+		buf.WriteByte(0)
+		buf.WriteString(tool.Function.Description)
+		buf.WriteByte(0)
+
+		// Sort parameter keys for deterministic output
+		paramKeys := make([]string, 0, len(tool.Function.Parameters.Properties))
+		for k := range tool.Function.Parameters.Properties {
+			paramKeys = append(paramKeys, k)
+		}
+		sort.Strings(paramKeys)
+
+		for _, k := range paramKeys {
+			prop := tool.Function.Parameters.Properties[k]
+			buf.WriteString(k)
+			buf.WriteByte(0)
+			buf.WriteString(prop.Type)
+			buf.WriteByte(0)
+			buf.WriteString(prop.Description)
+			buf.WriteByte(0)
+		}
+		buf.WriteByte(0xFF) // tool boundary
+	}
+
+	// Compute SHA256
+	hash := sha256.Sum256([]byte(buf.String()))
+	newHash := hex.EncodeToString(hash[:])
+
+	c.mu.Lock()
+	c.cachePrefixChanged = (c.cachePrefixHash != "" && c.cachePrefixHash != newHash)
+	c.cachePrefixHash = newHash
+	c.mu.Unlock()
+
+	return sorted
+}
+
+// PrefixChanged returns true if the system prompt + tools hash has changed
+// since the last call to StabilizeToolPrefix. Returns true on the first call
+// (when no hash has been computed yet).
+func (c *Conversation) PrefixChanged() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.cachePrefixHash == "" {
+		return true
+	}
+	return c.cachePrefixChanged
+}
+
+// GetCachePrefixHash returns the current cache prefix hash for external
+// cache invalidation checks.
+func (c *Conversation) GetCachePrefixHash() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.cachePrefixHash
+}
 
 // InjectContextBounded inserts context with a token budget limit.
 // This is used for memory injection to prevent memory from dominating the context.

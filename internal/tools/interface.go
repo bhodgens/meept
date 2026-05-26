@@ -80,3 +80,28 @@ type ToolExecutor interface {
 	// Returns the result or an error if the tool is not found or execution fails.
 	Execute(ctx context.Context, toolName string, args map[string]any) (*ToolResult, error)
 }
+
+// PreviewResult describes a deferred action awaiting approval.
+type PreviewResult struct {
+	// Description is a human-readable summary of what the action will do.
+	Description string `json:"description"`
+	// Diff is an optional diff or preview content showing the proposed changes.
+	Diff string `json:"diff,omitempty"`
+	// ToolName is the name of the tool that produced this preview.
+	ToolName string `json:"tool_name"`
+	// ToolArgs are the original args for Apply/Discard.
+	ToolArgs map[string]any `json:"tool_args"`
+}
+
+// Deferrable is an optional interface that tools implement to support a
+// preview-then-apply workflow. When the agent loop encounters a tool that
+// implements Deferrable, it calls Preview first. The result is staged until
+// the agent explicitly resolves it via the "resolve" tool.
+type Deferrable interface {
+	// Preview describes what the tool would do without performing the action.
+	Preview(ctx context.Context, args map[string]any) (PreviewResult, error)
+	// Apply executes the deferred action.
+	Apply(ctx context.Context, args map[string]any) (any, error)
+	// Discard cleans up any staged state for the deferred action.
+	Discard(ctx context.Context, args map[string]any) error
+}

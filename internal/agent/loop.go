@@ -25,6 +25,7 @@ import (
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -474,6 +475,20 @@ type AgentLoop struct {
 
 	// TT-SR stream rule enforcement
 	ttsrManager *TTSRManager
+
+	// Deferrable tool interception: stores a pending preview from a tool
+	// that implements the Deferrable interface. When non-nil, the resolve
+	// tool is injected into the next LLM turn so the agent can apply or
+	// discard the deferred action.
+	pendingPreview *pendingDeferral
+}
+
+// pendingDeferral is the agent-loop counterpart of the builtin.pendingDeferral.
+// It holds the state needed to resolve a deferred tool action.
+type pendingDeferral struct {
+	tool    tools.Deferrable
+	args    map[string]any
+	preview tools.PreviewResult
 }
 
 // shouldAutoInject returns true if memory context should be auto-injected before LLM calls.
@@ -2105,6 +2120,12 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		var tools []llm.ToolDefinition
 		if l.registry != nil {
 			tools = l.registry.GetDefinitions()
+		}
+
+		// Inject the resolve tool when a deferrable preview is pending.
+		// This gives the LLM the ability to apply or discard the staged action.
+		if l.pendingPreview != nil {
+			tools = append(tools, resolveToolDefinition())
 		}
 
 		// Emit typed turn start event
@@ -3901,10 +3922,20 @@ func (l *AgentLoop) emitterWaitForIdle(ctx context.Context) {
 // executeToolCallsWithHooks runs tool calls with hook interception and typed events.
 // For each tool call: runs BeforeToolCall hooks (may block), emits ToolExecutionStart,
 // executes the tool, runs AfterToolCall hooks (may override result), emits ToolExecutionEnd.
+// Deferrable tools are intercepted: Preview is called instead of Execute, and the result
+// is staged until the agent calls the "resolve" tool. The resolve tool itself is handled
+// directly here (not through the executor) to settle the pending preview.
 func (l *AgentLoop) executeToolCallsWithHooks(ctx context.Context, toolCalls []llm.ToolCall, conversationID string, iteration int) []*ExecutionResult {
 	var results []*ExecutionResult
 
 	for _, tc := range toolCalls {
+		// Handle the internal "resolve" tool directly (not via executor).
+		if tc.Function.Name == "resolve" {
+			result := l.handleResolveTool(ctx, tc, conversationID, iteration)
+			results = append(results, result)
+			continue
+		}
+
 		// Run BeforeToolCall hooks
 		if l.hooks != nil {
 			blockResult := l.hooks.RunBeforeToolCalls(ctx, tc)
@@ -3934,6 +3965,18 @@ func (l *AgentLoop) executeToolCallsWithHooks(ctx context.Context, toolCalls []l
 					Error:      fmt.Sprintf("blocked by hook: %s", blockResult.Reason),
 				})
 				continue
+			}
+		}
+
+		// Check if the tool implements Deferrable and there is no pending preview.
+		// If the tool is deferrable, intercept with Preview instead of Execute.
+		if l.pendingPreview == nil && l.registry != nil {
+			if tool := l.registry.Get(tc.Function.Name); tool != nil {
+				if deferrable, ok := tool.(tools.Deferrable); ok {
+					result := l.handleDeferrableTool(ctx, tc, deferrable, conversationID, iteration)
+					results = append(results, result)
+					continue
+				}
 			}
 		}
 
@@ -3981,4 +4024,247 @@ func (l *AgentLoop) executeToolCallsWithHooks(ctx context.Context, toolCalls []l
 	}
 
 	return results
+}
+
+// handleDeferrableTool intercepts a tool call for a Deferrable tool, calling
+// Preview instead of Execute and staging the result as a pending preview.
+func (l *AgentLoop) handleDeferrableTool(ctx context.Context, tc llm.ToolCall, deferrable tools.Deferrable, conversationID string, iteration int) *ExecutionResult {
+	args, err := tc.ParsedArguments()
+	if err != nil {
+		return &ExecutionResult{
+			ToolCallID: tc.ID,
+			Success:    false,
+			Error:      fmt.Sprintf("invalid arguments for deferrable tool: %v", err),
+		}
+	}
+
+	// Emit tool execution start
+	l.emitSafeWithFields(ctx, AgentEvent{
+		Type:           AgentEventToolExecutionStart,
+		ConversationID: conversationID,
+		Iteration:      iteration,
+		Data: ToolExecutionStartData{
+			ToolCallID: tc.ID,
+			ToolName:   tc.Function.Name,
+			Arguments:  tc.Function.Arguments,
+		},
+	})
+
+	execStart := time.Now()
+
+	preview, err := deferrable.Preview(ctx, args)
+	if err != nil {
+		l.logger.Error("Deferrable tool preview failed",
+			"tool", tc.Function.Name,
+			"error", err,
+		)
+		result := &ExecutionResult{
+			ToolCallID: tc.ID,
+			Success:    false,
+			Error:      fmt.Sprintf("preview failed: %v", err),
+		}
+		l.emitSafeWithFields(ctx, AgentEvent{
+			Type:           AgentEventToolExecutionEnd,
+			ConversationID: conversationID,
+			Iteration:      iteration,
+			Data: ToolExecutionEndData{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Success:    false,
+				Error:      result.Error,
+				Duration:   time.Since(execStart),
+			},
+		})
+		return result
+	}
+
+	// Stage the pending preview
+	l.pendingPreview = &pendingDeferral{
+		tool:    deferrable,
+		args:    args,
+		preview: preview,
+	}
+
+	l.logger.Info("Deferrable tool preview staged",
+		"tool", tc.Function.Name,
+		"description", preview.Description,
+		"conversation", conversationID,
+		"iteration", iteration,
+	)
+
+	// Build a result describing the preview to send back to the LLM
+	previewResult := map[string]any{
+		"deferred":   true,
+		"tool_name":  preview.ToolName,
+		"description": preview.Description,
+		"message":    "action previewed and awaiting resolution. use the 'resolve' tool with action='apply' to execute or action='discard' to cancel.",
+	}
+	if preview.Diff != "" {
+		previewResult["diff"] = preview.Diff
+	}
+
+	result := &ExecutionResult{
+		ToolCallID: tc.ID,
+		Success:    true,
+		Result:     previewResult,
+	}
+
+	l.emitSafeWithFields(ctx, AgentEvent{
+		Type:           AgentEventToolExecutionEnd,
+		ConversationID: conversationID,
+		Iteration:      iteration,
+		Data: ToolExecutionEndData{
+			ToolCallID: tc.ID,
+			ToolName:   tc.Function.Name,
+			Success:    true,
+			Result:     result.ToJSON(),
+			Duration:   time.Since(execStart),
+		},
+	})
+
+	return result
+}
+
+// handleResolveTool processes the internal "resolve" tool call, applying or
+// discarding the pending deferrable preview.
+func (l *AgentLoop) handleResolveTool(ctx context.Context, tc llm.ToolCall, conversationID string, iteration int) *ExecutionResult {
+	if l.pendingPreview == nil {
+		return &ExecutionResult{
+			ToolCallID: tc.ID,
+			Success:    false,
+			Error:      "no pending preview to resolve",
+		}
+	}
+
+	args, err := tc.ParsedArguments()
+	if err != nil {
+		return &ExecutionResult{
+			ToolCallID: tc.ID,
+			Success:    false,
+			Error:      fmt.Sprintf("invalid arguments for resolve tool: %v", err),
+		}
+	}
+
+	action, _ := args["action"].(string)
+	pd := l.pendingPreview
+
+	// Emit tool execution start
+	l.emitSafeWithFields(ctx, AgentEvent{
+		Type:           AgentEventToolExecutionStart,
+		ConversationID: conversationID,
+		Iteration:      iteration,
+		Data: ToolExecutionStartData{
+			ToolCallID: tc.ID,
+			ToolName:   "resolve",
+			Arguments:  tc.Function.Arguments,
+		},
+	})
+
+	execStart := time.Now()
+	var result *ExecutionResult
+
+	switch action {
+	case "apply":
+		applyResult, applyErr := pd.tool.Apply(ctx, pd.args)
+		if applyErr != nil {
+			l.logger.Error("Deferrable tool apply failed",
+				"tool", pd.preview.ToolName,
+				"error", applyErr,
+			)
+			result = &ExecutionResult{
+				ToolCallID: tc.ID,
+				Success:    false,
+				Error:      fmt.Sprintf("apply failed for %s: %v", pd.preview.ToolName, applyErr),
+			}
+		} else {
+			l.logger.Info("Deferrable tool applied",
+				"tool", pd.preview.ToolName,
+				"conversation", conversationID,
+			)
+			result = &ExecutionResult{
+				ToolCallID: tc.ID,
+				Success:    true,
+				Result:     applyResult,
+			}
+		}
+
+	case "discard":
+		if discardErr := pd.tool.Discard(ctx, pd.args); discardErr != nil {
+			l.logger.Error("Deferrable tool discard failed",
+				"tool", pd.preview.ToolName,
+				"error", discardErr,
+			)
+			result = &ExecutionResult{
+				ToolCallID: tc.ID,
+				Success:    false,
+				Error:      fmt.Sprintf("discard failed for %s: %v", pd.preview.ToolName, discardErr),
+			}
+		} else {
+			l.logger.Info("Deferrable tool discarded",
+				"tool", pd.preview.ToolName,
+				"conversation", conversationID,
+			)
+			result = &ExecutionResult{
+				ToolCallID: tc.ID,
+				Success:    true,
+				Result: map[string]any{
+					"status":  "discarded",
+					"message": fmt.Sprintf("deferred action for %s has been cancelled", pd.preview.ToolName),
+				},
+			}
+		}
+
+	default:
+		result = &ExecutionResult{
+			ToolCallID: tc.ID,
+			Success:    false,
+			Error:      fmt.Sprintf("invalid resolve action %q: must be 'apply' or 'discard'", action),
+		}
+	}
+
+	// Clear pending state regardless of outcome
+	l.pendingPreview = nil
+
+	l.emitSafeWithFields(ctx, AgentEvent{
+		Type:           AgentEventToolExecutionEnd,
+		ConversationID: conversationID,
+		Iteration:      iteration,
+		Data: ToolExecutionEndData{
+			ToolCallID: tc.ID,
+			ToolName:   "resolve",
+			Success:    result.Success,
+			Result:     result.ToJSON(),
+			Error:      result.Error,
+			Duration:   time.Since(execStart),
+		},
+	})
+
+	return result
+}
+
+// resolveToolDefinition returns the LLM tool definition for the resolve tool.
+// This is injected into the tool list only when a deferrable preview is pending.
+func resolveToolDefinition() llm.ToolDefinition {
+	return llm.ToolDefinition{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "resolve",
+			Description: "resolve a pending preview. call with action='apply' to execute the deferred action, or action='discard' to cancel it.",
+			Parameters: llm.FunctionParameters{
+				Type: "object",
+				Properties: map[string]llm.ParameterProperty{
+					"action": {
+						Type:        "string",
+						Description: "either 'apply' to execute the deferred action or 'discard' to cancel it",
+						Enum:        []string{"apply", "discard"},
+					},
+					"reason": {
+						Type:        "string",
+						Description: "optional reason for the resolution decision",
+					},
+				},
+				Required: []string{"action"},
+			},
+		},
+	}
 }

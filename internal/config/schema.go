@@ -158,6 +158,12 @@ type LSPConfig struct {
 	AutoStartServers bool `json:"auto_start_servers" toml:"auto_start_servers"`
 	// ConnectionTimeoutSeconds is the timeout for connecting to LSP servers
 	ConnectionTimeoutSeconds int `json:"connection_timeout_seconds" toml:"connection_timeout_seconds"`
+	// FormatOnWrite requests LSP formatting after file writes (default: false)
+	FormatOnWrite bool `json:"format_on_write" toml:"format_on_write"`
+	// DiagnosticsOnWrite waits for LSP diagnostics after file writes (default: false)
+	DiagnosticsOnWrite bool `json:"diagnostics_on_write" toml:"diagnostics_on_write"`
+	// DiagnosticsTimeout is the max seconds to wait for diagnostics (default: 5)
+	DiagnosticsTimeout int `json:"diagnostics_timeout" toml:"diagnostics_timeout"`
 }
 
 // LSPServerConfig configures a single LSP server.
@@ -1409,6 +1415,9 @@ func DefaultConfig() *Config {
 				Servers:                  make(map[string]LSPServerConfig),
 				AutoStartServers:         true,
 				ConnectionTimeoutSeconds: 10,
+				FormatOnWrite:            false,
+				DiagnosticsOnWrite:       false,
+				DiagnosticsTimeout:       5,
 			},
 		},
 		Tooling: ToolingConfig{

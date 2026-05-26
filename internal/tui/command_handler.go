@@ -132,6 +132,18 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executeInterrupt(cmd.Args)
 	case "vim":
 		return h.executeVim()
+	case "diff":
+		return h.executeDiff()
+	case "model":
+		return h.executeModel(cmd.Args)
+	case "compact":
+		return h.executeCompact()
+	case "edit":
+		return h.executeEdit(cmd.Args)
+	case "plan":
+		return h.executePlan()
+	case "review":
+		return h.executeReview()
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
@@ -162,6 +174,12 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /amend <id> <type>  submit amendment to task\n")
 	sb.WriteString("  /interrupt <id>     interrupt a running task\n")
 	sb.WriteString("  /tasks              list all tasks\n")
+	sb.WriteString("  /diff               show git diff of changes\n")
+	sb.WriteString("  /model [name]       show or switch model\n")
+	sb.WriteString("  /compact            compact conversation context\n")
+	sb.WriteString("  /edit <path>        open file in system editor\n")
+	sb.WriteString("  /plan               enter planning mode\n")
+	sb.WriteString("  /review             review current changes\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -258,6 +276,44 @@ causing it to gracefully stop.
 examples:
   /interrupt task-123          interrupt with default reason
   /interrupt task-123 wrong direction`,
+
+		"diff": `usage: /diff
+
+show git diff of the current working directory. displays both staged
+and unstaged changes with file-level statistics.`,
+
+		"model": `usage: /model [name]
+
+show the current model or switch to a different one.
+without arguments, displays the active model.
+
+examples:
+  /model              show current model
+  /model gpt-4        switch to gpt-4`,
+
+		"compact": `usage: /compact
+
+compact the conversation context. reduces token usage by summarizing
+older messages while preserving recent context and key information.`,
+
+		"edit": `usage: /edit <file-path>
+
+open a file in the system editor (uses $EDITOR, defaults to vi).
+
+examples:
+  /edit main.go       open main.go in editor
+  /edit config.yaml   open config.yaml in editor`,
+
+		"plan": `usage: /plan
+
+enter planning mode. the next message you send will be treated as a
+planning request, causing the agent to decompose the task into steps
+before executing.`,
+
+		"review": `usage: /review
+
+review current changes in the working directory. shows a summary of
+staged and unstaged git changes with file statistics.`,
 	}
 
 	if text, ok := helpTexts[name]; ok {
@@ -745,6 +801,260 @@ func (h *CommandHandler) executeInterrupt(args []string) *CommandResult {
 	return &CommandResult{
 		Output: fmt.Sprintf("task %s interrupted (reason: %s)", taskID, reason),
 	}
+}
+
+// executeDiff shows a git diff of the current working directory.
+func (h *CommandHandler) executeDiff() *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+
+	result, err := h.rpc.Call("shell.execute", map[string]any{
+		"command": "git diff --stat && git diff",
+	})
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to get diff: %v", err),
+			IsError: true,
+		}
+	}
+
+	var resp struct {
+		Output string `json:"output"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to parse diff response: %v", err),
+			IsError: true,
+		}
+	}
+
+	if resp.Error != "" {
+		return &CommandResult{
+			Output:  fmt.Sprintf("diff error: %s", resp.Error),
+			IsError: true,
+		}
+	}
+
+	if resp.Output == "" {
+		return &CommandResult{Output: "no changes detected"}
+	}
+
+	return &CommandResult{Output: resp.Output}
+}
+
+// executeModel shows or switches the current model.
+func (h *CommandHandler) executeModel(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+
+	if len(args) == 0 {
+		// Show current model
+		status, err := h.rpc.Status()
+		if err != nil {
+			return &CommandResult{
+				Output:  fmt.Sprintf("failed to get status: %v", err),
+				IsError: true,
+			}
+		}
+		model := coalesce(status.Model, status.DefaultModel, "(not set)")
+		return &CommandResult{Output: fmt.Sprintf("current model: %s", model)}
+	}
+
+	// Switch model
+	modelName := s.Join(args, " ")
+	result, err := h.rpc.Call("config.set", map[string]any{
+		"key":   "llm.model",
+		"value": modelName,
+	})
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to switch model: %v", err),
+			IsError: true,
+		}
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("model switched to: %s", modelName),
+		}
+	}
+
+	if resp.Message != "" {
+		return &CommandResult{Output: resp.Message}
+	}
+	return &CommandResult{Output: fmt.Sprintf("model switched to: %s", modelName)}
+}
+
+// executeCompact triggers context compaction for the current session.
+func (h *CommandHandler) executeCompact() *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+
+	result, err := h.rpc.Call("session.compact", map[string]any{})
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to compact context: %v", err),
+			IsError: true,
+		}
+	}
+
+	var resp struct {
+		MessagesBefore int    `json:"messages_before"`
+		MessagesAfter  int    `json:"messages_after"`
+		TokensSaved    int    `json:"tokens_saved"`
+		Message        string `json:"message"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return &CommandResult{Output: "context compacted"}
+	}
+
+	if resp.Message != "" {
+		return &CommandResult{Output: resp.Message}
+	}
+
+	return &CommandResult{
+		Output: fmt.Sprintf("context compacted: %d -> %d messages (%d tokens saved)",
+			resp.MessagesBefore, resp.MessagesAfter, resp.TokensSaved),
+	}
+}
+
+// executeEdit opens a file in the system editor.
+func (h *CommandHandler) executeEdit(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+
+	if len(args) == 0 {
+		return &CommandResult{
+			Output:  "usage: /edit <file-path>",
+			IsError: true,
+		}
+	}
+
+	filePath := args[0]
+	result, err := h.rpc.Call("shell.execute", map[string]any{
+		"command": fmt.Sprintf("${EDITOR:-vi} %s", filePath),
+	})
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to open editor: %v", err),
+			IsError: true,
+		}
+	}
+
+	var resp struct {
+		Output string `json:"output"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return &CommandResult{Output: fmt.Sprintf("editing: %s", filePath)}
+	}
+
+	if resp.Error != "" {
+		return &CommandResult{
+			Output:  fmt.Sprintf("editor error: %s", resp.Error),
+			IsError: true,
+		}
+	}
+
+	return &CommandResult{Output: fmt.Sprintf("opened %s in editor", filePath)}
+}
+
+// executePlan enters planning mode for the current task.
+func (h *CommandHandler) executePlan() *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+
+	result, err := h.rpc.Call("session.set_mode", map[string]any{
+		"mode": "planning",
+	})
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to enter planning mode: %v", err),
+			IsError: true,
+		}
+	}
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return &CommandResult{Output: "planning mode activated"}
+	}
+
+	if resp.Message != "" {
+		return &CommandResult{Output: resp.Message}
+	}
+	return &CommandResult{Output: "planning mode activated - next message will be treated as a planning request"}
+}
+
+// executeReview reviews current changes in the working directory.
+func (h *CommandHandler) executeReview() *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+
+	result, err := h.rpc.Call("shell.execute", map[string]any{
+		"command": "git diff --stat && git diff --cached --stat",
+	})
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to review changes: %v", err),
+			IsError: true,
+		}
+	}
+
+	var resp struct {
+		Output string `json:"output"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to parse review response: %v", err),
+			IsError: true,
+		}
+	}
+
+	if resp.Error != "" {
+		return &CommandResult{
+			Output:  fmt.Sprintf("review error: %s", resp.Error),
+			IsError: true,
+		}
+	}
+
+	if resp.Output == "" {
+		return &CommandResult{Output: "no changes to review"}
+	}
+
+	return &CommandResult{Output: fmt.Sprintf("current changes:\n\n%s", resp.Output)}
 }
 
 // isTemplateNotFoundError checks whether an RPC error indicates that the

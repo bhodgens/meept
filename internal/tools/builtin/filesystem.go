@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -110,8 +111,14 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 	offset, _ := args["offset"].(float64)
 	limit, _ := args["limit"].(float64)
 
+	// Split into lines for range selection and context expansion.
+	allFileLines := strings.Split(text, "\n")
+
+	// Determine raw mode early so context expansion only applies to hashline output.
+	raw, _ := args["raw"].(bool)
+
 	if offset > 0 || limit > 0 {
-		lines := strings.Split(text, "\n")
+		lines := allFileLines
 		start := 0
 		if offset > 0 {
 			start = max(
@@ -125,19 +132,35 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 		if limit > 0 {
 			end = min(start+int(limit), len(lines))
 		}
-		text = strings.Join(lines[start:end], "\n")
+
+		if raw {
+			// Raw mode: exact range, no context expansion.
+			text = strings.Join(lines[start:end], "\n")
+		} else {
+			// Hashline mode: expand range with context lines for better editing anchors.
+			// Add 1 leading context line when offset > 1.
+			contextStart := start
+			if offset > 1 && start > 0 {
+				contextStart = start - 1
+			}
+			// Add up to 3 trailing context lines when limit is finite.
+			contextEnd := end
+			if limit > 0 {
+				contextEnd = min(end+3, len(lines))
+			}
+			text = strings.Join(lines[contextStart:contextEnd], "\n")
+		}
 	}
 
-	// Determine raw mode
-	raw, _ := args["raw"].(bool)
+	// Store full file snapshot in read cache for edit recovery
 
 	// Store full file snapshot in read cache for edit recovery
 	if t.readCache != nil {
-		allLines := strings.Split(string(content), "\n")
-		if len(allLines) > 0 && allLines[len(allLines)-1] == "" {
-			allLines = allLines[:len(allLines)-1]
+		snapshotLines := allFileLines
+		if len(snapshotLines) > 0 && snapshotLines[len(snapshotLines)-1] == "" {
+			snapshotLines = snapshotLines[:len(snapshotLines)-1]
 		}
-		t.readCache.Store(resolved, allLines)
+		t.readCache.Store(resolved, snapshotLines)
 	}
 
 	// Apply hashline formatting unless raw mode
@@ -146,10 +169,15 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 		var startLineNum int
 		if offset > 0 || limit > 0 {
 			linesToFormat = strings.Split(text, "\n")
-			startLineNum = 1
+			// Determine the actual starting line number accounting for context expansion.
+			contextStart := 0
 			if offset > 0 {
-				startLineNum = int(offset)
+				contextStart = max(int(offset)-1, 0)
+				if offset > 1 && contextStart > 0 {
+					contextStart-- // 1 leading context line
+				}
 			}
+			startLineNum = contextStart + 1 // 1-based
 		} else {
 			linesToFormat = strings.Split(text, "\n")
 			if len(linesToFormat) > 0 && linesToFormat[len(linesToFormat)-1] == "" {
@@ -234,8 +262,14 @@ func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any
 	offset, _ := args["offset"].(float64)
 	limit, _ := args["limit"].(float64)
 
+	// Split into lines for range selection and context expansion.
+	allFileLines := strings.Split(text, "\n")
+
+	// Determine raw mode early so context expansion only applies to hashline output.
+	raw, _ := args["raw"].(bool)
+
 	if offset > 0 || limit > 0 {
-		lines := strings.Split(text, "\n")
+		lines := allFileLines
 		start := 0
 		if offset > 0 {
 			start = max(int(offset)-1, 0)
@@ -247,19 +281,31 @@ func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any
 		if limit > 0 {
 			end = min(start+int(limit), len(lines))
 		}
-		text = strings.Join(lines[start:end], "\n")
-	}
 
-	// Determine raw mode
-	raw, _ := args["raw"].(bool)
+		if raw {
+			// Raw mode: exact range, no context expansion.
+			text = strings.Join(lines[start:end], "\n")
+		} else {
+			// Hashline mode: expand range with context lines for better editing anchors.
+			contextStart := start
+			if offset > 1 && start > 0 {
+				contextStart = start - 1
+			}
+			contextEnd := end
+			if limit > 0 {
+				contextEnd = min(end+3, len(lines))
+			}
+			text = strings.Join(lines[contextStart:contextEnd], "\n")
+		}
+	}
 
 	// Store full file snapshot in read cache for edit recovery
 	if t.readCache != nil {
-		allLines := strings.Split(string(content), "\n")
-		if len(allLines) > 0 && allLines[len(allLines)-1] == "" {
-			allLines = allLines[:len(allLines)-1]
+		snapshotLines := allFileLines
+		if len(snapshotLines) > 0 && snapshotLines[len(snapshotLines)-1] == "" {
+			snapshotLines = snapshotLines[:len(snapshotLines)-1]
 		}
-		t.readCache.Store(resolved, allLines)
+		t.readCache.Store(resolved, snapshotLines)
 	}
 
 	// Apply hashline formatting unless raw mode
@@ -268,10 +314,14 @@ func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any
 		var startLineNum int
 		if offset > 0 || limit > 0 {
 			linesToFormat = strings.Split(text, "\n")
-			startLineNum = 1
+			contextStart := 0
 			if offset > 0 {
-				startLineNum = int(offset)
+				contextStart = max(int(offset)-1, 0)
+				if offset > 1 && contextStart > 0 {
+					contextStart-- // 1 leading context line
+				}
 			}
+			startLineNum = contextStart + 1
 		} else {
 			linesToFormat = strings.Split(text, "\n")
 			if len(linesToFormat) > 0 && linesToFormat[len(linesToFormat)-1] == "" {
@@ -314,12 +364,21 @@ func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any
 
 // WriteFileTool writes content to a file.
 type WriteFileTool struct {
-	checker *security.PermissionChecker
+	checker     *security.PermissionChecker
+	lspNotifier LSPWriteNotifier
 }
 
 // NewWriteFileTool creates a new file write tool.
 func NewWriteFileTool(checker *security.PermissionChecker) *WriteFileTool {
 	return &WriteFileTool{checker: checker}
+}
+
+// SetLSPNotifier sets the LSP write notifier for post-write notifications.
+// This is called after tool registration when LSP is available.
+func (t *WriteFileTool) SetLSPNotifier(notifier LSPWriteNotifier) {
+	if notifier != nil {
+		t.lspNotifier = notifier
+	}
 }
 
 func (t *WriteFileTool) Name() string { return "file_write" }
@@ -357,6 +416,9 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 	if rawPath == "" {
 		return nil, fmt.Errorf("no path specified")
 	}
+
+	// Defensively strip any accidental hashline prefixes from content.
+	content = stripHashlinePrefixes(content)
 
 	if len(content) > MaxWriteSize {
 		return nil, fmt.Errorf("content too large (max %d bytes)", MaxWriteSize)
@@ -397,6 +459,9 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
+	// LSP writethrough notification
+	lspSuffix := t.lspNotifyWrite(ctx, resolved, content)
+
 	// Compute evidence: file stat and hash
 	info, err := os.Stat(resolved)
 	if err != nil {
@@ -436,14 +501,29 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 		))
 	}
 
+	msg := fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content))
+	if lspSuffix != "" {
+		msg += lspSuffix
+	}
+
 	return tools.ToolResult{
 		Success:  true,
-		Result:   fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content)),
+		Result:   msg,
 		Evidence: evidence,
 	}, nil
 }
 
-// ExecuteStreaming implements tools.StreamingTool with progress updates during file writes.
+// lspNotifyWrite is a helper that calls the LSP notifier and appends results to the summary.
+func (t *WriteFileTool) lspNotifyWrite(ctx context.Context, resolved, content string) string {
+	if t.lspNotifier == nil {
+		return ""
+	}
+	result := t.lspNotifier.NotifyWrite(ctx, resolved, content)
+	if result == nil {
+		return ""
+	}
+	return result.String()
+}
 func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
 	content, _ := args["content"].(string)
@@ -452,6 +532,9 @@ func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]an
 	if rawPath == "" {
 		return nil, fmt.Errorf("no path specified")
 	}
+
+	// Defensively strip any accidental hashline prefixes from content.
+	content = stripHashlinePrefixes(content)
 
 	if len(content) > MaxWriteSize {
 		return nil, fmt.Errorf("content too large (max %d bytes)", MaxWriteSize)
@@ -495,6 +578,9 @@ func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
+	// LSP writethrough notification
+	lspSuffix := t.lspNotifyWrite(ctx, resolved, content)
+
 	info, err := os.Stat(resolved)
 	if err != nil {
 		slog.Warn("WriteFileTool: failed to stat file for evidence", "path", resolved, "error", err)
@@ -535,9 +621,14 @@ func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]an
 	partialJSON, _ := json.Marshal(map[string]any{"path": resolved, "bytes": len(content)})
 	onUpdate(tools.ProgressUpdate{Message: "write complete", Percent: 100, PartialResult: partialJSON})
 
+	msg := fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content))
+	if lspSuffix != "" {
+		msg += lspSuffix
+	}
+
 	return tools.ToolResult{
 		Success:  true,
-		Result:   fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content)),
+		Result:   msg,
 		Evidence: evidence,
 	}, nil
 }
@@ -835,6 +926,17 @@ func (t *ListDirectoryTool) listRecursive(root string, maxEntries int) ([]DirEnt
 	}
 
 	return entries, truncated
+}
+
+// hashlinePrefixRe matches hashline prefixes like "123:ab|" at the start of a line.
+// Pattern: one or more digits, colon, two lowercase letters, pipe.
+var hashlinePrefixRe = regexp.MustCompile(`(?m)^\d+:[a-z]{2}\|`)
+
+// stripHashlinePrefixes removes any "LINE:HASH|" prefixes from content lines.
+// This defensively handles the case where the model accidentally includes
+// hashline tags in content meant to be written to a file.
+func stripHashlinePrefixes(content string) string {
+	return hashlinePrefixRe.ReplaceAllLiteralString(content, "")
 }
 
 // resolvePath expands ~ and resolves to absolute path.

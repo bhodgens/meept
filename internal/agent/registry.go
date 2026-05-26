@@ -66,6 +66,9 @@ type AgentRegistry struct {
 	hallucinationDetector *HallucinationDetector
 	artifactManager       *ArtifactManager
 
+	// TT-SR stream rule enforcement (shared across all agent loops)
+	ttsrManager *TTSRManager
+
 	// Queue tracking for conversation-scoped queue management
 	activeQueues map[string]*QueueEntry
 	activeQueuesMu sync.RWMutex
@@ -94,6 +97,9 @@ type RegistryConfig struct {
 	Watchdog              *Watchdog
 	HallucinationDetector *HallucinationDetector
 	ArtifactManager       *ArtifactManager
+
+	// TT-SR stream rule enforcement (shared across all agent loops)
+	TTSRManager *TTSRManager
 
 	// BundledAgentsPath is the path to bundled AGENT.md files (e.g., "config/agents").
 	BundledAgentsPath string
@@ -133,6 +139,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		watchdog:              cfg.Watchdog,
 		hallucinationDetector: cfg.HallucinationDetector,
 		artifactManager:       cfg.ArtifactManager,
+		ttsrManager:           cfg.TTSRManager,
 		queueConfig:           cfg.Queues,
 		db:                    cfg.DB,
 	}
@@ -303,6 +310,9 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 	}
 	if r.artifactManager != nil {
 		opts = append(opts, WithArtifactManager(r.artifactManager))
+	}
+	if r.ttsrManager != nil {
+		opts = append(opts, WithTTSRManager(r.ttsrManager))
 	}
 
 	// Create a message queue for steering/follow-up support (unless disabled).
@@ -716,6 +726,17 @@ func (r *AgentRegistry) SetSkillLoader(loader *skills.LazySkillLoader) {
 	// Invalidate all loops so they get recreated with skill loading
 	r.loops = make(map[string]*AgentLoop)
 	r.logger.Debug("Skill loader set, agent loops invalidated")
+}
+
+// SetTTSRManager sets the TT-SR stream rule manager for all agents.
+// Invalidates existing loops so they get recreated with the new manager.
+func (r *AgentRegistry) SetTTSRManager(mgr *TTSRManager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ttsrManager = mgr
+	// Invalidate all loops so they get recreated with TT-SR enforcement
+	r.loops = make(map[string]*AgentLoop)
+	r.logger.Debug("TT-SR manager set, agent loops invalidated")
 }
 
 // GlobalRules returns the global rules content.

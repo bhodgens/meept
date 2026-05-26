@@ -17,13 +17,22 @@ import (
 
 // FileEditTool performs incremental file edits using hashline-anchored line references.
 type FileEditTool struct {
-	checker   *security.PermissionChecker
-	readCache *ReadCache
+	checker     *security.PermissionChecker
+	readCache   *ReadCache
+	lspNotifier LSPWriteNotifier
 }
 
 // NewFileEditTool creates a new file edit tool.
 func NewFileEditTool(checker *security.PermissionChecker, readCache *ReadCache) *FileEditTool {
 	return &FileEditTool{checker: checker, readCache: readCache}
+}
+
+// SetLSPNotifier sets the LSP write notifier for post-write notifications.
+// This is called after tool registration when LSP is available.
+func (t *FileEditTool) SetLSPNotifier(notifier LSPWriteNotifier) {
+	if notifier != nil {
+		t.lspNotifier = notifier
+	}
 }
 
 func (t *FileEditTool) Name() string { return "file_edit" }
@@ -166,9 +175,15 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 					if err := os.WriteFile(resolved, []byte(result), 0o644); err != nil {
 						return nil, fmt.Errorf("recovery succeeded but write failed: %w", err)
 					}
+					msg := fmt.Sprintf("Edit applied with stale-anchor recovery to %s (%d lines)", resolved, len(recovered))
+					if t.lspNotifier != nil {
+						if lspResult := t.lspNotifier.NotifyWrite(ctx, resolved, result); lspResult != nil {
+							msg += lspResult.String()
+						}
+					}
 					return tools.ToolResult{
 						Success: true,
-						Result:  fmt.Sprintf("Edit applied with stale-anchor recovery to %s (%d lines)", resolved, len(recovered)),
+						Result:  msg,
 					}, nil
 				}
 			}
@@ -186,8 +201,233 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		}, nil
 	}
 
-	// Apply edits bottom-up (highest line first) to preserve indices.
-	// Convert ops to line-level operations.
+	// Apply boundary absorption to handle the model including duplicate context lines.
+	ops = absorbBoundaries(lines, ops)
+
+	// Apply edits using the shared helper.
+	result := t.applyEdits(lines, ops)
+
+	// Write result
+	output := strings.Join(result, "\n")
+	if err := os.WriteFile(resolved, []byte(output), 0o644); err != nil {
+		return nil, fmt.Errorf("failed to write file: %w", err)
+	}
+
+	// LSP writethrough notification
+	if t.lspNotifier != nil {
+		if lspResult := t.lspNotifier.NotifyWrite(ctx, resolved, output); lspResult != nil {
+			if suffix := lspResult.String(); suffix != "" {
+				summary := fmt.Sprintf("Applied %d edit(s) to %s (%d lines -> %d lines)", len(ops), resolved, len(lines), len(result))
+				summary += suffix
+				h := sha256.Sum256([]byte(output))
+				hash := hex.EncodeToString(h[:])
+				return tools.ToolResult{
+					Success: true,
+					Result:  summary,
+					Evidence: []models.Evidence{
+						models.NewEvidence(models.EvidenceFileExists, resolved, fmt.Sprintf("size=%d", len(output)), t.Name()),
+						models.NewEvidence(models.EvidenceFileHash, resolved, hash, t.Name()),
+					},
+				}, nil
+			}
+		}
+	}
+
+	// Compute evidence
+	h := sha256.Sum256([]byte(output))
+	hash := hex.EncodeToString(h[:])
+
+	evidence := []models.Evidence{
+		models.NewEvidence(models.EvidenceFileExists, resolved, fmt.Sprintf("size=%d", len(output)), t.Name()),
+		models.NewEvidence(models.EvidenceFileHash, resolved, hash, t.Name()),
+	}
+
+	summary := fmt.Sprintf("Applied %d edit(s) to %s (%d lines -> %d lines)", len(ops), resolved, len(lines), len(result))
+
+	return tools.ToolResult{
+		Success:  true,
+		Result:   summary,
+		Evidence: evidence,
+	}, nil
+}
+
+// absorbBoundaries detects when the model includes context lines in its replacement
+// content that already exist at the boundaries of the edit range, and shrinks the
+// content to avoid duplicating those lines. Only applies to "replace" ops.
+func absorbBoundaries(fileLines []string, ops []editOp) []editOp {
+	result := make([]editOp, len(ops))
+	for i, op := range ops {
+		result[i] = op
+
+		if op.Op != "replace" || op.Content == "" {
+			continue
+		}
+
+		// Parse anchor to get the start line number.
+		if op.Anchor == "BOF" || op.Anchor == "EOF" {
+			continue
+		}
+		startLine, _, _ := ParseAnchor(op.Anchor)
+		if startLine < 1 {
+			continue
+		}
+
+		endLine := startLine
+		if op.EndAnchor != "" {
+			endLine, _, _ = ParseAnchor(op.EndAnchor)
+		}
+
+		content := strings.Split(op.Content, "\n")
+		// Handle trailing newline
+		if len(content) > 1 && content[len(content)-1] == "" {
+			content = content[:len(content)-1]
+		}
+
+		// Check leading boundary: if the first line of content matches the line
+		// just before the anchor, skip it from the content and expand the anchor
+		// upward to include that line in the replacement range.
+		if len(content) > 0 && startLine > 1 {
+			beforeIdx := startLine - 2 // 0-based index of line before anchor
+			if beforeIdx >= 0 && beforeIdx < len(fileLines) && content[0] == fileLines[beforeIdx] {
+				content = content[1:]
+				startLine--
+				// Rebuild anchor with new line number and hash.
+				newHash := ComputeLineHash(fileLines[beforeIdx])
+				result[i].Anchor = fmt.Sprintf("%d:%s", startLine, newHash)
+			}
+		}
+
+		// Check trailing boundary: if the last line of content matches the line
+		// just after the end_anchor, skip it from the content and expand the
+		// end_anchor downward.
+		if len(content) > 0 {
+			afterIdx := endLine // 0-based index of line after end_anchor
+			if afterIdx < len(fileLines) && content[len(content)-1] == fileLines[afterIdx] {
+				content = content[:len(content)-1]
+				endLine++
+				newHash := ComputeLineHash(fileLines[afterIdx])
+				result[i].EndAnchor = fmt.Sprintf("%d:%s", endLine, newHash)
+			}
+		}
+
+		result[i].Content = strings.Join(content, "\n")
+	}
+
+	return result
+}
+
+// attemptRecovery tries to remap stale anchors from the cached snapshot onto the
+// current file content. For each anchor, it looks up the cached line at that line
+// number, then scans the current file for a matching line within a ±5 line window.
+// If all anchors are found, the ops are rewritten with the new line numbers and
+// applied against the current file.
+func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops []editOp) ([]string, error) {
+	// remap maps old (cached) line numbers to new (current) line numbers.
+	remap := make(map[int]int)
+
+	for _, op := range ops {
+		anchors := []string{op.Anchor}
+		if op.Op == "replace" || op.Op == "delete" {
+			if op.EndAnchor != "" {
+				anchors = append(anchors, op.EndAnchor)
+			}
+		}
+
+		for _, anchor := range anchors {
+			if anchor == "BOF" || anchor == "EOF" {
+				continue
+			}
+			lineNum, hash, err := ParseAnchor(anchor)
+			if err != nil {
+				return nil, fmt.Errorf("recovery: invalid anchor %q: %w", anchor, err)
+			}
+
+			// Already remapped?
+			if _, done := remap[lineNum]; done {
+				continue
+			}
+
+			// Validate anchor against cached snapshot.
+			if !ValidateAnchor(cachedLines, lineNum, hash) {
+				return nil, fmt.Errorf("recovery: anchor %q does not match cached snapshot", anchor)
+			}
+
+			// Get the cached line content.
+			cachedIdx := lineNum - 1
+			if cachedIdx < 0 || cachedIdx >= len(cachedLines) {
+				return nil, fmt.Errorf("recovery: cached line %d out of range", lineNum)
+			}
+			cachedContent := cachedLines[cachedIdx]
+
+			// Search current file for the same content within ±5 lines of the original position.
+			found := false
+			searchStart := max(lineNum-1-5, 0) // 0-based
+			searchEnd := min(lineNum-1+5, len(currentLines)-1)
+			for i := searchStart; i <= searchEnd; i++ {
+				if currentLines[i] == cachedContent {
+					remap[lineNum] = i + 1 // 1-based
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("recovery: could not relocate cached line %d in current file", lineNum)
+			}
+		}
+	}
+
+	// Build remapped ops by adjusting anchor line numbers.
+	remappedOps := make([]editOp, len(ops))
+	for i, op := range ops {
+		remappedOps[i] = op
+		remappedOps[i].Anchor = remapAnchor(op.Anchor, remap)
+		if op.EndAnchor != "" {
+			remappedOps[i].EndAnchor = remapAnchor(op.EndAnchor, remap)
+		}
+	}
+
+	// Validate remapped anchors against current file.
+	for _, op := range remappedOps {
+		if op.Anchor == "BOF" || op.Anchor == "EOF" {
+			continue
+		}
+		lineNum, hash, _ := ParseAnchor(op.Anchor)
+		if !ValidateAnchor(currentLines, lineNum, hash) {
+			return nil, fmt.Errorf("recovery: remapped anchor %q does not match current file", op.Anchor)
+		}
+		if (op.Op == "replace" || op.Op == "delete") && op.EndAnchor != "" {
+			endLineNum, endHash, _ := ParseAnchor(op.EndAnchor)
+			if !ValidateAnchor(currentLines, endLineNum, endHash) {
+				return nil, fmt.Errorf("recovery: remapped end_anchor %q does not match current file", op.EndAnchor)
+			}
+		}
+	}
+
+	// Apply the remapped edits against current file content.
+	result := t.applyEdits(currentLines, remappedOps)
+	return result, nil
+}
+
+// remapAnchor adjusts an anchor string using the remap table.
+// BOF and EOF anchors are returned unchanged.
+func remapAnchor(anchor string, remap map[int]int) string {
+	if anchor == "BOF" || anchor == "EOF" {
+		return anchor
+	}
+	lineNum, hash, err := ParseAnchor(anchor)
+	if err != nil {
+		return anchor
+	}
+	if newLine, ok := remap[lineNum]; ok {
+		return fmt.Sprintf("%d:%s", newLine, hash)
+	}
+	return anchor
+}
+
+// applyEdits applies the given edit operations against the provided lines and
+// returns the resulting lines. This is extracted from Execute so that recovery
+// can reuse the same logic.
+func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 	type lineOp struct {
 		opType    string // "delete_range", "insert"
 		startLine int    // 1-based
@@ -217,7 +457,6 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 				endLine, _, _ = ParseAnchor(op.EndAnchor)
 			}
 			content := strings.Split(op.Content, "\n")
-			// Handle trailing newline
 			if len(content) > 1 && content[len(content)-1] == "" {
 				content = content[:len(content)-1]
 			}
@@ -259,7 +498,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 				insertLine = len(lines) + 1
 			} else {
 				insertLine, _, _ = ParseAnchor(op.Anchor)
-				insertLine++ // after = next line
+				insertLine++
 			}
 			content := strings.Split(op.Content, "\n")
 			if len(content) > 1 && content[len(content)-1] == "" {
@@ -273,8 +512,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		}
 	}
 
-	// Sort: primary by descending startLine (bottom-up to preserve indices),
-	// secondary by delete before insert at the same line (for replace: delete gap then fill).
+	// Sort: primary by descending startLine, secondary by delete before insert.
 	sort.SliceStable(lineOps, func(i, j int) bool {
 		if lineOps[i].startLine != lineOps[j].startLine {
 			return lineOps[i].startLine > lineOps[j].startLine
@@ -282,15 +520,14 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		return lineOps[i].opType == "delete_range" && lineOps[j].opType == "insert"
 	})
 
-	// Apply in order
 	result := make([]string, len(lines))
 	copy(result, lines)
 
 	for _, op := range lineOps {
 		switch op.opType {
 		case "delete_range":
-			start := op.startLine - 1 // 0-based
-			end := op.endLine - 1     // 0-based inclusive
+			start := op.startLine - 1
+			end := op.endLine - 1
 			if start < 0 {
 				start = 0
 			}
@@ -303,7 +540,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 			result = append(result[:start], result[end+1:]...)
 
 		case "insert":
-			idx := op.startLine - 1 // 0-based insert position
+			idx := op.startLine - 1
 			if idx < 0 {
 				idx = 0
 			}
@@ -316,52 +553,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		}
 	}
 
-	// Write result
-	output := strings.Join(result, "\n")
-	if err := os.WriteFile(resolved, []byte(output), 0o644); err != nil {
-		return nil, fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// Compute evidence
-	h := sha256.Sum256([]byte(output))
-	hash := hex.EncodeToString(h[:])
-
-	evidence := []models.Evidence{
-		models.NewEvidence(models.EvidenceFileExists, resolved, fmt.Sprintf("size=%d", len(output)), t.Name()),
-		models.NewEvidence(models.EvidenceFileHash, resolved, hash, t.Name()),
-	}
-
-	summary := fmt.Sprintf("Applied %d edit(s) to %s (%d lines -> %d lines)", len(ops), resolved, len(lines), len(result))
-
-	return tools.ToolResult{
-		Success:  true,
-		Result:   summary,
-		Evidence: evidence,
-	}, nil
-}
-
-// attemptRecovery tries to apply edits against a cached snapshot and merge
-// the result onto the current file content.
-func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops []editOp) ([]string, error) {
-	// Validate all anchors against cached snapshot
-	for _, op := range ops {
-		if op.Anchor == "BOF" || op.Anchor == "EOF" {
-			continue
-		}
-		lineNum, hash, _ := ParseAnchor(op.Anchor)
-		if !ValidateAnchor(cachedLines, lineNum, hash) {
-			return nil, fmt.Errorf("anchor mismatch in cached snapshot")
-		}
-		if (op.Op == "replace" || op.Op == "delete") && op.EndAnchor != "" {
-			endLineNum, endHash, _ := ParseAnchor(op.EndAnchor)
-			if !ValidateAnchor(cachedLines, endLineNum, endHash) {
-				return nil, fmt.Errorf("end_anchor mismatch in cached snapshot")
-			}
-		}
-	}
-
-	// Full 3-way merge is complex; for now, reject if anchors are stale.
-	return nil, fmt.Errorf("stale anchors, recovery not yet fully implemented")
+	return result
 }
 
 // Ensure FileEditTool implements the Tool interface.

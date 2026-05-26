@@ -66,12 +66,38 @@ func (m *TTSRManager) LoadRules(skillsDir string) error {
 	// Reset rules on reload
 	m.rules = m.rules[:0]
 
+	m.scanDirLocked(skillsDir)
+
+	m.logger.Info("ttsr: rules loaded", "count", len(m.rules))
+	return nil
+}
+
+// LoadRulesFromDirs loads TT-SR rules from multiple directories, appending
+// rules from each. Existing rules are reset before loading. Non-existent
+// directories are silently skipped.
+func (m *TTSRManager) LoadRulesFromDirs(dirs []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.rules = m.rules[:0]
+
+	for _, dir := range dirs {
+		m.scanDirLocked(dir)
+	}
+
+	m.logger.Info("ttsr: rules loaded", "count", len(m.rules), "dirs", dirs)
+	return nil
+}
+
+// scanDirLocked scans a single directory for rule files. Caller must hold m.mu.
+func (m *TTSRManager) scanDirLocked(skillsDir string) {
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // no skills directory is fine
+			return // no skills directory is fine
 		}
-		return fmt.Errorf("ttsr: reading skills directory: %w", err)
+		m.logger.Warn("ttsr: reading skills directory", "path", skillsDir, "error", err)
+		return
 	}
 
 	for _, entry := range entries {
@@ -96,9 +122,6 @@ func (m *TTSRManager) LoadRules(skillsDir string) error {
 			}
 		}
 	}
-
-	m.logger.Info("ttsr: rules loaded", "count", len(m.rules))
-	return nil
 }
 
 // loadRuleFile loads a single rule file. Caller must hold m.mu.
