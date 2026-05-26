@@ -1099,6 +1099,12 @@ func (c *Conversation) StabilizeToolPrefix(tools []llm.ToolDefinition) []llm.Too
 		buf.WriteString(tool.Function.Description)
 		buf.WriteByte(0)
 
+		// Hash Required array for this tool
+		for _, r := range tool.Function.Parameters.Required {
+			buf.WriteString(r)
+			buf.WriteByte(0)
+		}
+
 		// Sort parameter keys for deterministic output
 		paramKeys := make([]string, 0, len(tool.Function.Parameters.Properties))
 		for k := range tool.Function.Parameters.Properties {
@@ -1114,6 +1120,11 @@ func (c *Conversation) StabilizeToolPrefix(tools []llm.ToolDefinition) []llm.Too
 			buf.WriteByte(0)
 			buf.WriteString(prop.Description)
 			buf.WriteByte(0)
+			// Hash Enum values
+			for _, e := range prop.Enum {
+				buf.WriteString(e)
+				buf.WriteByte(0)
+			}
 		}
 		buf.WriteByte(0xFF) // tool boundary
 	}

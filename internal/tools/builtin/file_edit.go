@@ -213,27 +213,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	// LSP writethrough notification
-	if t.lspNotifier != nil {
-		if lspResult := t.lspNotifier.NotifyWrite(ctx, resolved, output); lspResult != nil {
-			if suffix := lspResult.String(); suffix != "" {
-				summary := fmt.Sprintf("Applied %d edit(s) to %s (%d lines -> %d lines)", len(ops), resolved, len(lines), len(result))
-				summary += suffix
-				h := sha256.Sum256([]byte(output))
-				hash := hex.EncodeToString(h[:])
-				return tools.ToolResult{
-					Success: true,
-					Result:  summary,
-					Evidence: []models.Evidence{
-						models.NewEvidence(models.EvidenceFileExists, resolved, fmt.Sprintf("size=%d", len(output)), t.Name()),
-						models.NewEvidence(models.EvidenceFileHash, resolved, hash, t.Name()),
-					},
-				}, nil
-			}
-		}
-	}
-
-	// Compute evidence
+	// Compute evidence and summary (shared across both branches)
 	h := sha256.Sum256([]byte(output))
 	hash := hex.EncodeToString(h[:])
 
@@ -243,6 +223,15 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 	}
 
 	summary := fmt.Sprintf("Applied %d edit(s) to %s (%d lines -> %d lines)", len(ops), resolved, len(lines), len(result))
+
+	// Append LSP writethrough suffix if available
+	if t.lspNotifier != nil {
+		if lspResult := t.lspNotifier.NotifyWrite(ctx, resolved, output); lspResult != nil {
+			if suffix := lspResult.String(); suffix != "" {
+				summary += suffix
+			}
+		}
+	}
 
 	return tools.ToolResult{
 		Success:  true,

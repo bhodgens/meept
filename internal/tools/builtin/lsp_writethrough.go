@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/code/lsp"
@@ -188,15 +189,24 @@ func (n *lspWriteNotifier) formatFile(ctx context.Context, srv *lsp.ServerInstan
 func (n *lspWriteNotifier) collectDiagnostics(ctx context.Context, srv *lsp.ServerInstance, absPath string, content string) *DiagnosticsSummary {
 	uri := lsp.PathToURI(absPath)
 
-	// Set up a one-shot diagnostics listener
+	// Set up a one-shot diagnostics listener using sync.Once to guarantee
+	// the handler fires at most once, then unregisters itself to prevent
+	// listener accumulation across repeated calls.
 	diagChan := make(chan []lsp.Diagnostic, 1)
+	var once sync.Once
+
 	srv.Client.OnNotification("textDocument/publishDiagnostics", func(method string, params json.RawMessage) {
 		var diagParams lsp.PublishDiagnosticsParams
 		if err := json.Unmarshal(params, &diagParams); err != nil {
 			return
 		}
 		if diagParams.URI == uri {
-			diagChan <- diagParams.Diagnostics
+			once.Do(func() {
+				diagChan <- diagParams.Diagnostics
+				// Replace ourselves with a no-op so subsequent notifications
+				// for this URI don't accumulate dead closures.
+				srv.Client.OnNotification("textDocument/publishDiagnostics", func(string, json.RawMessage) {})
+			})
 		}
 	})
 

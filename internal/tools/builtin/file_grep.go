@@ -337,8 +337,13 @@ func (t *FileGrepTool) searchSingleFile(resolved string, re *regexp.Regexp, args
 		}
 	}
 
+	pattern, ok := args["pattern"].(string)
+	if !ok || pattern == "" {
+		return nil, fmt.Errorf("pattern is required")
+	}
+
 	result := GrepResult{
-		Query:   args["pattern"].(string),
+		Query:   pattern,
 		Path:    resolved,
 		Mode:    outputMode,
 		Matches: totalMatches,
@@ -361,7 +366,7 @@ func (t *FileGrepTool) searchSingleFile(resolved string, re *regexp.Regexp, args
 		models.NewEvidence(
 			models.EvidenceFileExists,
 			resolved,
-			fmt.Sprintf("pattern=%s,mode=%s,matches=%d", args["pattern"].(string), outputMode, totalMatches),
+			fmt.Sprintf("pattern=%s,mode=%s,matches=%d", pattern, outputMode, totalMatches),
 			t.Name(),
 		),
 	}
