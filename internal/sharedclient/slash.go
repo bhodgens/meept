@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -32,7 +33,11 @@ type CustomCommand struct {
 
 // customCommandCache holds discovered custom commands, keyed by command name.
 // Populated by DiscoverCustomCommands or SetCustomCommands (for testing).
-var customCommandCache map[string]CustomCommand
+// Protected by customCommandMu for concurrent access from TUI and daemon goroutines.
+var (
+	customCommandCache map[string]CustomCommand
+	customCommandMu    sync.RWMutex
+)
 
 // customCommandFrontmatter represents the YAML frontmatter of a command file.
 type customCommandFrontmatter struct {
@@ -168,6 +173,8 @@ func IsBuiltin(name string) bool {
 
 // IsCustomCommand returns true if the command is a user-defined custom command.
 func IsCustomCommand(name string) bool {
+	customCommandMu.RLock()
+	defer customCommandMu.RUnlock()
 	if customCommandCache == nil {
 		return false
 	}
@@ -178,6 +185,8 @@ func IsCustomCommand(name string) bool {
 // GetCustomCommand returns the custom command definition for the given name,
 // or the zero value and false if not found.
 func GetCustomCommand(name string) (CustomCommand, bool) {
+	customCommandMu.RLock()
+	defer customCommandMu.RUnlock()
 	if customCommandCache == nil {
 		return CustomCommand{}, false
 	}
@@ -187,6 +196,8 @@ func GetCustomCommand(name string) (CustomCommand, bool) {
 
 // CustomCommandNames returns a sorted list of all discovered custom command names.
 func CustomCommandNames() []string {
+	customCommandMu.RLock()
+	defer customCommandMu.RUnlock()
 	if customCommandCache == nil {
 		return nil
 	}
@@ -200,6 +211,8 @@ func CustomCommandNames() []string {
 
 // SetCustomCommands replaces the custom command cache. Used primarily for testing.
 func SetCustomCommands(cmds map[string]CustomCommand) {
+	customCommandMu.Lock()
+	defer customCommandMu.Unlock()
 	customCommandCache = cmds
 }
 
@@ -229,7 +242,9 @@ func DiscoverCustomCommands() map[string]CustomCommand {
 		}
 	}
 
+	customCommandMu.Lock()
 	customCommandCache = cmds
+	customCommandMu.Unlock()
 	return cmds
 }
 

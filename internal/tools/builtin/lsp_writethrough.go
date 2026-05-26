@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -61,12 +62,11 @@ type LSPWriteNotifier interface {
 
 // lspWriteNotifier is the concrete implementation wrapping the LSP manager.
 type lspWriteNotifier struct {
-	manager             *lsp.Manager
-	formatOnWrite       bool
-	diagnosticsOnWrite  bool
-	diagnosticsTimeout  time.Duration
-	diagnostics         map[string][]lsp.Diagnostic
-	logger              *slog.Logger
+	manager            *lsp.Manager
+	formatOnWrite      bool
+	diagnosticsOnWrite bool
+	diagnosticsTimeout time.Duration
+	logger             *slog.Logger
 }
 
 // NewLSPWriteNotifier creates a new LSP write notifier.
@@ -86,7 +86,6 @@ func NewLSPWriteNotifier(manager *lsp.Manager, cfg config.LSPConfig, logger *slo
 		formatOnWrite:      cfg.FormatOnWrite,
 		diagnosticsOnWrite: cfg.DiagnosticsOnWrite,
 		diagnosticsTimeout: timeout,
-		diagnostics:        make(map[string][]lsp.Diagnostic),
 		logger:             logger,
 	}
 }
@@ -291,7 +290,7 @@ func applyFormattingEdits(filePath string, edits []lsp.TextEdit) error {
 	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644)
 }
 
-// absPath resolves a file path to absolute.
+// absPath resolves a file path to absolute, expanding ~ and resolving relative paths.
 func absPath(path string) (string, error) {
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()
@@ -300,5 +299,9 @@ func absPath(path string) (string, error) {
 		}
 		path = home + path[1:]
 	}
-	return strings.TrimSpace(path), nil
+	abs, err := filepath.Abs(strings.TrimSpace(path))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
 }
