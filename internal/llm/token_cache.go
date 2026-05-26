@@ -52,17 +52,17 @@ func (e *CacheEntry) IsExpired() bool {
 
 // CacheStats holds statistics about cache performance.
 type CacheStats struct {
-	Hits          int
-	Misses        int
-	Evictions     int
-	EntryCount    int
-	HitRate       float64
-	L1Hits        int
-	L1Misses      int
-	L2Hits        int
-	L2Misses      int
-	L1Entries     int
-	L2Entries     int
+	Hits       int
+	Misses     int
+	Evictions  int
+	EntryCount int
+	HitRate    float64
+	L1Hits     int
+	L1Misses   int
+	L2Hits     int
+	L2Misses   int
+	L1Entries  int
+	L2Entries  int
 }
 
 // ResponseCache defines the interface for LLM response token caching.
@@ -151,38 +151,48 @@ func NewTokenCacheCoordinatorWithMetrics(config CacheConfig, metricsStore *metri
 
 // Get retrieves a cached response, checking L1 first, then L2.
 func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEntry, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	c.mu.RLock()
 	if !c.config.Enabled {
+		c.mu.RUnlock()
+		c.mu.Lock()
 		c.stats.Misses++
+		c.mu.Unlock()
 		c.recordMetric("cache.miss", 1, key)
 		return nil, false
 	}
+	c.mu.RUnlock()
 
-	// Check L1 first
+	// Check L1 first (read-only path)
 	if entry, found := c.l1Cache.Get(key); found {
+		c.mu.Lock()
 		c.stats.Hits++
 		c.stats.L1Hits++
+		c.mu.Unlock()
 		c.recordMetric("cache.hit", 1, key)
 		return entry, true
 	}
-	c.stats.L1Misses++
 
-	// Check L2 if enabled
+	// Check L2 if enabled (may promote to L1, needs write lock)
 	if c.l2Cache != nil {
 		if entry, found := c.l2Cache.Get(ctx, key); found {
+			c.mu.Lock()
 			// Promote to L1
 			c.l1Cache.Put(key, entry)
 			c.stats.Hits++
 			c.stats.L2Hits++
+			c.mu.Unlock()
 			c.recordMetric("cache.hit", 1, key)
 			return entry, true
 		}
+		c.mu.Lock()
 		c.stats.L2Misses++
+		c.mu.Unlock()
 	}
 
+	c.mu.Lock()
+	c.stats.L1Misses++
 	c.stats.Misses++
+	c.mu.Unlock()
 	c.recordMetric("cache.miss", 1, key)
 	return nil, false
 }

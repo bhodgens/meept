@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,11 +46,11 @@ type DebugSession struct {
 
 // Manager manages debug sessions.
 type Manager struct {
-	mu          sync.Mutex
-	sessions    map[string]*DebugSession
-	active      string // ID of the most recently active session
-	nextID      atomic.Int64
-	logger      *slog.Logger
+	mu       sync.Mutex
+	sessions map[string]*DebugSession
+	active   string // ID of the most recently active session
+	nextID   atomic.Int64
+	logger   *slog.Logger
 }
 
 // NewManager creates a new debug session manager.
@@ -67,6 +69,11 @@ func (m *Manager) Launch(ctx context.Context, adapterCfg *AdapterConfig, program
 	}
 	if program == "" {
 		return nil, fmt.Errorf("program path is required")
+	}
+
+	// Validate the adapter command to prevent command injection.
+	if err := validateAdapterCommand(adapterCfg.Command); err != nil {
+		return nil, fmt.Errorf("invalid adapter command: %w", err)
 	}
 
 	// Resolve working directory.
@@ -277,4 +284,36 @@ func parseJSON(data []byte, v any) error {
 		return fmt.Errorf("empty data")
 	}
 	return json.Unmarshal(data, v)
+}
+
+// validateAdapterCommand ensures the adapter command is a safe absolute path
+// that exists on disk and does not contain path traversal sequences.
+func validateAdapterCommand(cmd string) error {
+	if cmd == "" {
+		return fmt.Errorf("command is empty")
+	}
+	if strings.Contains(cmd, "..") {
+		return fmt.Errorf("command must not contain '..': %q", cmd)
+	}
+	if !filepath.IsAbs(cmd) {
+		// Allow bare names that can be resolved via PATH (e.g. "dlv", "gdb").
+		// Reject anything with path separators to prevent relative-path injection.
+		if strings.ContainsAny(cmd, "/\\") {
+			return fmt.Errorf("relative command path not allowed: %q", cmd)
+		}
+		// Verify the binary exists in PATH.
+		if _, err := exec.LookPath(cmd); err != nil {
+			return fmt.Errorf("command not found in PATH: %q", cmd)
+		}
+		return nil
+	}
+	// Absolute path: verify it exists on disk.
+	info, err := os.Stat(cmd)
+	if err != nil {
+		return fmt.Errorf("command not found: %q", cmd)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("command path is a directory: %q", cmd)
+	}
+	return nil
 }

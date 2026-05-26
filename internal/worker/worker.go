@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
@@ -20,6 +21,7 @@ type JobProcessor interface {
 }
 
 // Worker represents a single worker that processes jobs.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Worker struct {
 	ID           string
@@ -38,6 +40,7 @@ type Worker struct {
 	mu     sync.RWMutex
 	cancel context.CancelFunc
 	done   chan struct{}
+	wg     *sync.WaitGroup // optional: pool WaitGroup for tracking actual goroutine lifecycle
 
 	// State change notifications
 	stateChanges chan StateTransition
@@ -76,7 +79,7 @@ func NewWorker(cfg Config) (*Worker, error) {
 		processor:    cfg.Processor,
 		logger:       cfg.Logger,
 		done:         make(chan struct{}),
-		stateChanges: make(chan StateTransition, 10),
+		stateChanges: make(chan StateTransition, 256),
 	}, nil
 }
 
@@ -155,11 +158,17 @@ func (w *Worker) StateChanges() <-chan StateTransition {
 }
 
 func (w *Worker) run(ctx context.Context) {
+	if w.wg != nil {
+		w.wg.Add(1)
+	}
 	defer func() {
 		w.mu.Lock()
 		w.setState(StateStopped)
 		w.mu.Unlock()
 		close(w.done)
+		if w.wg != nil {
+			w.wg.Done()
+		}
 	}()
 
 	pollInterval := 1 * time.Second
@@ -367,15 +376,8 @@ func (w *Worker) emitTransition(from, to State, jobID string, err error) {
 	select {
 	case w.stateChanges <- transition:
 	default:
-		// Channel full, drain oldest and retry
-		select {
-		case <-w.stateChanges:
-		default:
-		}
-		select {
-		case w.stateChanges <- transition:
-		default:
-		}
+		w.logger.Warn("State transition channel full, dropping notification",
+			"worker", w.ID, "from", from, "to", to, "job", jobID)
 	}
 }
 
@@ -387,6 +389,7 @@ func (w *Worker) getCurrentJobID() string {
 }
 
 // WorkerStats holds worker statistics.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type WorkerStats struct {
 	ID           string
@@ -399,6 +402,9 @@ type WorkerStats struct {
 	CurrentJobID string
 }
 
+var workerIDCounter atomic.Uint64
+
 func generateWorkerID() string {
-	return fmt.Sprintf("worker-%d", time.Now().UnixNano())
+	seq := workerIDCounter.Add(1)
+	return fmt.Sprintf("worker-%d-%04d", time.Now().UnixNano(), seq)
 }

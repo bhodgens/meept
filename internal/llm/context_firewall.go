@@ -232,12 +232,12 @@ type ContextFirewall struct {
 	compactionTriggerRatio float64
 
 	// Counters (atomic-safe for concurrent callers)
-	summarizationFailures  atomic.Uint64
-	droppedMessages        atomic.Uint64
-	dropEvents             atomic.Uint64
-	compactionEvents       atomic.Uint64
-	compactionTokensSaved  atomic.Uint64
-	compactionFallbacks    atomic.Uint64
+	summarizationFailures atomic.Uint64
+	droppedMessages       atomic.Uint64
+	dropEvents            atomic.Uint64
+	compactionEvents      atomic.Uint64
+	compactionTokensSaved atomic.Uint64
+	compactionFallbacks   atomic.Uint64
 }
 
 // FirewallStats is a snapshot of firewall counters including compression stats.
@@ -304,7 +304,11 @@ func (f *ContextFirewall) Compress(ctx context.Context, messages []ChatMessage) 
 	}
 
 	currentTokens := f.countTokens(messages)
-	utilization := float64(currentTokens) / float64(f.model.ContextLimit)
+	contextLimit := f.model.ContextLimit
+	if contextLimit <= 0 {
+		contextLimit = 128000 // sensible default
+	}
+	utilization := float64(currentTokens) / float64(contextLimit)
 	result := f.compressor.Compress(ctx, messages, utilization)
 	return result, nil
 }

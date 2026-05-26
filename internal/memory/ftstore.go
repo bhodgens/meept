@@ -396,6 +396,14 @@ func splitString(s string, sep rune) []string {
 	return result
 }
 
+// escapeLikeWildcards escapes SQLite LIKE wildcard characters (% and _)
+// in user-supplied query strings to prevent unintended pattern matching.
+func escapeLikeWildcards(s string) string {
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
+}
+
 // FindDuplicateGroups finds groups of items with identical content exceeding the threshold.
 func (s *SQLiteFTSStore) FindDuplicateGroups(ctx context.Context, tableName string, thresholdChars int) ([][]string, error) {
 	s.mu.RLock()

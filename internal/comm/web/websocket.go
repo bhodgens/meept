@@ -16,6 +16,7 @@ type WSMessage struct {
 }
 
 // WebSocketHub manages WebSocket client connections and broadcasts messages.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type WebSocketHub struct {
 	mu      sync.RWMutex
@@ -69,19 +70,25 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 		return
 	}
 
-	// Collect failed connections to unregister after releasing the read lock
-	var failedConns []*websocket.Conn
-
+	// Collect connections under RLock, then release before writing to
+	// avoid holding the lock during potentially blocking writes (data race).
 	h.mu.RLock()
+	conns := make([]*websocket.Conn, 0, len(h.clients))
 	for conn := range h.clients {
+		conns = append(conns, conn)
+	}
+	h.mu.RUnlock()
+
+	// Write to each connection outside the lock.
+	var failedConns []*websocket.Conn
+	for _, conn := range conns {
 		if _, err := conn.Write(payload); err != nil {
 			h.logger.Warn("ws write error, will remove client", "error", err)
 			failedConns = append(failedConns, conn)
 		}
 	}
-	h.mu.RUnlock()
 
-	// Unregister failed connections outside the read lock to avoid deadlock
+	// Unregister failed connections (takes its own write lock).
 	for _, conn := range failedConns {
 		h.Unregister(conn)
 	}

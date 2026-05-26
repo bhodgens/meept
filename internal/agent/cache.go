@@ -46,7 +46,7 @@ const (
 
 // Source identifiers for event attribution.
 const (
-	SourceChatHandler = "chat-handler"
+	SourceChatHandler  = "chat-handler"
 	SourceCodeReviewer = "code-reviewer"
 )
 
@@ -107,12 +107,13 @@ type CacheStats struct {
 
 // ResultCache provides an in-memory cache for tool execution results.
 type ResultCache struct {
-	entries map[string]*CacheEntry
-	config  CacheConfig
-	mu      sync.RWMutex
-	stats   CacheStats
-	logger  *slog.Logger
-	stopCh  chan struct{}
+	entries  map[string]*CacheEntry
+	config   CacheConfig
+	mu       sync.RWMutex
+	stats    CacheStats
+	logger   *slog.Logger
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 // NewResultCache creates a new result cache with the given configuration.
@@ -401,8 +402,10 @@ func (c *ResultCache) Stop() {
 		return
 	}
 
-	close(c.stopCh)
-	c.logger.Debug("Cache cleanup stopped")
+	c.stopOnce.Do(func() {
+		close(c.stopCh)
+		c.logger.Debug("Cache cleanup stopped")
+	})
 }
 
 // cleanupExpired removes all expired entries from the cache.

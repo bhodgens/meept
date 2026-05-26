@@ -173,8 +173,8 @@ func TestContextFirewallMultiStageCompression(t *testing.T) {
 		msgs := makeCompressorMessages(6)
 		msgs = append(msgs, ChatMessage{Role: RoleUser, Content: strings.Repeat("y", 150)})
 
-_, _ = fw.Compress(context.Background(), msgs)
-_, _ = fw.Compress(context.Background(), msgs)
+		_, _ = fw.Compress(context.Background(), msgs)
+		_, _ = fw.Compress(context.Background(), msgs)
 
 		stats := fw.compressor.Stats()
 		if stats.SummarizeEvents != 2 {

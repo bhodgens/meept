@@ -705,8 +705,8 @@ func TestSQLiteStore_ForkSession_Basic(t *testing.T) {
 		msgIDs[i] = msgs[0].ID
 	}
 
-_ = 	// Set leaf to last message
-	store.SetLeafMessageID(session.ID, msgIDs[4])
+	_ = // Set leaf to last message
+		store.SetLeafMessageID(session.ID, msgIDs[4])
 
 	// Fork from message 3 (index 2)
 	forked, err := store.ForkSession(session.ID, msgIDs[2], "forked session")
@@ -896,10 +896,10 @@ func TestSQLiteStore_ForkSession_MessageNotFound(t *testing.T) {
 
 	session, _ := store.Create("test-fork-msgnotfound")
 
-_ = 	// Add one message
-	store.SaveMessages(session.ID, []Message{
-		{SessionID: session.ID, Role: "user", Content: "hello", Timestamp: time.Now().UTC()},
-	})
+	_ = // Add one message
+		store.SaveMessages(session.ID, []Message{
+			{SessionID: session.ID, Role: "user", Content: "hello", Timestamp: time.Now().UTC()},
+		})
 
 	// Try to fork from a non-existent message
 	_, err := store.ForkSession(session.ID, 99999, "fork")
@@ -939,10 +939,10 @@ func TestSQLiteStore_ExistingMethodsStillWork(t *testing.T) {
 		t.Errorf("expected empty list (no assistant msgs), got %d", len(list))
 	}
 
-_ = 	// Save assistant message
-	store.SaveMessages(session.ID, []Message{
-		{SessionID: session.ID, Role: "assistant", Content: "response", Timestamp: time.Now().UTC(), EntryType: "message", BranchID: "main"},
-	})
+	_ = // Save assistant message
+		store.SaveMessages(session.ID, []Message{
+			{SessionID: session.ID, Role: "assistant", Content: "response", Timestamp: time.Now().UTC(), EntryType: "message", BranchID: "main"},
+		})
 
 	// Test HasResponses
 	hasResponses, err := store.HasResponses(session.ID)
@@ -1403,7 +1403,7 @@ func TestSQLiteStore_GetCompactionEntries_WithEntries(t *testing.T) {
 	// Insert a compaction entry replacing messages 2 and 3 (IDs at index 1 and 2).
 	compactionID, err := store.InsertCompaction(
 		session.ID,
-		allMsgs[0].ID,   // parent is message 1
+		allMsgs[0].ID, // parent is message 1
 		"Summary of messages 2 and 3",
 		[]int64{allMsgs[1].ID, allMsgs[2].ID},
 	)

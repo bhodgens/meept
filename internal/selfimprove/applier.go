@@ -102,6 +102,12 @@ func (a *ChangeApplier) applyFix(_ context.Context, fix *ProposedFix) (*AppliedF
 
 	// Read the file
 	filePath := filepath.Join(a.projectRoot, fix.FilePath)
+
+	// Validate the resolved path is within projectRoot to prevent path traversal.
+	if !isWithinDir(a.projectRoot, filePath) {
+		return nil, fmt.Errorf("fix file path escapes project root: %q", fix.FilePath)
+	}
+
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
@@ -217,6 +223,19 @@ func (a *ChangeApplier) PendingApprovals() map[string]*pendingFix { //nolint:rev
 	result := make(map[string]*pendingFix)
 	maps.Copy(result, a.pendingApprovals)
 	return result
+}
+
+// isWithinDir reports whether target resolves inside dir.
+func isWithinDir(dir, target string) bool {
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(absTarget, absDir+string(os.PathSeparator)) || absTarget == absDir
 }
 
 // createBackup creates a backup of the file being modified.

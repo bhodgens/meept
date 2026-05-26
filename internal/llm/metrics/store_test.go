@@ -132,9 +132,9 @@ func TestStoreRecordCachedTokens(t *testing.T) {
 
 func TestClassifyError(t *testing.T) {
 	tests := []struct {
-		err        error
-		status     int
-		expected   ErrorType
+		err         error
+		status      int
+		expected    ErrorType
 		description string
 	}{
 		{nil, 200, ErrorTypeNone, "no error"},

@@ -118,8 +118,10 @@ func (s *Store) migrate() error {
 	}
 
 	for _, m := range migrations {
-		// Ignore errors - column may already exist
-		_, _ = s.db.Exec(m)
+		if _, err := s.db.Exec(m); err != nil {
+			s.logger.Warn("Migration step failed (column may already exist)",
+				"migration", m, "error", err)
+		}
 	}
 
 	return nil
@@ -521,6 +523,7 @@ func (s *Store) GetStats() (*QueueStats, error) {
 }
 
 // QueueStats holds queue statistics.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type QueueStats struct {
 	ByState    map[JobState]int

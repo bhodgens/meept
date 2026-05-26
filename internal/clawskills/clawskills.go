@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -20,7 +22,13 @@ const (
 
 	// ClawSkillPrefix is the prefix for clawskill slugs.
 	ClawSkillPrefix = "claw:"
+
+	// maxArchiveSize is the maximum size for a downloaded skill archive (50 MB).
+	maxArchiveSize int64 = 50 * 1024 * 1024
 )
+
+// validSlugRe matches only alphanumeric characters, hyphens, and underscores.
+var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // ClawSkillEntry represents a skill in the registry.
 type ClawSkillEntry struct {
@@ -67,8 +75,9 @@ func NewRegistryClient(registryURL string) *RegistryClient {
 
 // Search searches for clawskills matching a query.
 func (c *RegistryClient) Search(ctx context.Context, query string) ([]ClawSkillEntry, error) {
-	url := fmt.Sprintf("%s/search?q=%s", c.baseURL, query)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	safeQuery := url.QueryEscape(query)
+	reqURL := fmt.Sprintf("%s/search?q=%s", c.baseURL, safeQuery)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -95,8 +104,11 @@ func (c *RegistryClient) Search(ctx context.Context, query string) ([]ClawSkillE
 
 // Get fetches details for a specific clawskill.
 func (c *RegistryClient) Get(ctx context.Context, slug string) (*ClawSkillEntry, error) {
-	url := fmt.Sprintf("%s/skills/%s", c.baseURL, slug)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if !validateSlug(slug) {
+		return nil, fmt.Errorf("invalid slug: %q", slug)
+	}
+	reqURL := fmt.Sprintf("%s/skills/%s", c.baseURL, url.PathEscape(slug))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +138,11 @@ func (c *RegistryClient) Get(ctx context.Context, slug string) (*ClawSkillEntry,
 
 // Install downloads and installs a clawskill.
 func (c *RegistryClient) Install(ctx context.Context, slug, destDir string) (*ClawSkillInstalled, error) {
+	// Validate slug to prevent path traversal.
+	if !validateSlug(slug) {
+		return nil, fmt.Errorf("invalid slug: %q", slug)
+	}
+
 	// Get skill details
 	skill, err := c.Get(ctx, slug)
 	if err != nil {
@@ -134,6 +151,12 @@ func (c *RegistryClient) Install(ctx context.Context, slug, destDir string) (*Cl
 
 	// Create install directory
 	skillDir := filepath.Join(destDir, slug)
+
+	// Verify the resolved path stays within destDir.
+	if !isWithinDir(destDir, skillDir) {
+		return nil, fmt.Errorf("slug %q escapes install directory", slug)
+	}
+
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create install directory: %w", err)
 	}
@@ -141,7 +164,7 @@ func (c *RegistryClient) Install(ctx context.Context, slug, destDir string) (*Cl
 	// Download skill archive
 	archiveURL := skill.DownloadURL
 	if archiveURL == "" {
-		archiveURL = fmt.Sprintf("%s/skills/%s/download", c.baseURL, slug)
+		archiveURL = fmt.Sprintf("%s/skills/%s/download", c.baseURL, url.PathEscape(slug))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, http.NoBody)
@@ -163,7 +186,7 @@ func (c *RegistryClient) Install(ctx context.Context, slug, destDir string) (*Cl
 	}
 
 	// Read and extract archive (simplified - in production would handle tar.gz)
-	archiveData, err := io.ReadAll(resp.Body)
+	archiveData, err := io.ReadAll(io.LimitReader(resp.Body, maxArchiveSize))
 	if err != nil {
 		os.RemoveAll(skillDir)
 		return nil, err
@@ -248,7 +271,17 @@ func ListInstalled(installDir string) ([]ClawSkillInstalled, error) {
 
 // Uninstall removes an installed clawskill.
 func Uninstall(installDir, slug string) error {
+	// Validate slug to prevent path traversal.
+	if !validateSlug(slug) {
+		return fmt.Errorf("invalid slug: %q", slug)
+	}
 	skillDir := filepath.Join(installDir, slug)
+
+	// Verify the resolved path stays within installDir.
+	if !isWithinDir(installDir, skillDir) {
+		return fmt.Errorf("slug %q escapes install directory", slug)
+	}
+
 	if err := os.RemoveAll(skillDir); err != nil {
 		return fmt.Errorf("failed to remove skill: %w", err)
 	}
@@ -271,6 +304,24 @@ func getStringOr(m map[string]any, key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+// validateSlug checks that a slug contains only safe characters.
+func validateSlug(slug string) bool {
+	return validSlugRe.MatchString(slug)
+}
+
+// isWithinDir reports whether target resolves inside dir.
+func isWithinDir(dir, target string) bool {
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(absTarget, absDir+string(os.PathSeparator)) || absTarget == absDir
 }
 
 // Ensure slug has claw: prefix

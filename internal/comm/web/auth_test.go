@@ -138,7 +138,42 @@ func TestChainAuth(t *testing.T) {
 }
 
 func TestIPWhitelistAuth(t *testing.T) {
+	// Without trusted proxy: only RemoteAddr is trusted
 	auth := NewIPWhitelistAuth("127.0.0.1", "10.0.0.1")
+
+	tests := []struct {
+		name    string
+		remote  string
+		forward string
+		realIP  string
+		want    bool
+	}{
+		{"direct match", "127.0.0.1:1234", "", "", true},
+		{"forwarded for ignored without proxy", "1.2.3.4:1234", "10.0.0.1", "", false},
+		{"real ip ignored without proxy", "1.2.3.4:1234", "", "10.0.0.1", false},
+		{"no match", "1.2.3.4:1234", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			req.RemoteAddr = tt.remote
+			if tt.forward != "" {
+				req.Header.Set("X-Forwarded-For", tt.forward)
+			}
+			if tt.realIP != "" {
+				req.Header.Set("X-Real-IP", tt.realIP)
+			}
+			if got := auth.Authenticate(req); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestIPWhitelistAuth_WithTrustedProxy(t *testing.T) {
+	// With trusted proxy: forwarded headers are trusted
+	auth := NewIPWhitelistAuthWithProxy("127.0.0.1", "10.0.0.1")
 
 	tests := []struct {
 		name    string

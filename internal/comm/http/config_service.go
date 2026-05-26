@@ -79,7 +79,7 @@ func (s *ConfigService) LoadMenubarConfig() (string, error) {
 func (s *ConfigService) SaveMenubarConfig(content string) error {
 	path := s.getMenubarConfigPath()
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write menubar config: %w", err)
 	}
 	return nil
@@ -107,7 +107,7 @@ func (s *ConfigService) LoadClientConfig() (string, error) {
   }
 }`
 		//nolint:gosec // user config directory/file permissions
-		if err := os.WriteFile(path, []byte(defaultContent), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(defaultContent), 0o600); err != nil {
 			return "", fmt.Errorf("failed to create default client config: %w", err)
 		}
 		return defaultContent, nil
@@ -126,7 +126,7 @@ func (s *ConfigService) SaveClientConfig(content string) error {
 	path := s.getClientConfigPath()
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write client config: %w", err)
 	}
 
@@ -189,7 +189,7 @@ func (s *ConfigService) LoadModelsConfig() (string, error) {
   }
 }`
 		//nolint:gosec // user config directory/file permissions
-		if err := os.WriteFile(path, []byte(defaultContent), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(defaultContent), 0o600); err != nil {
 			return "", fmt.Errorf("failed to create default models config: %w", err)
 		}
 		return defaultContent, nil
@@ -208,7 +208,7 @@ func (s *ConfigService) SaveModelsConfig(content string) error {
 	path := s.getModelsConfigPath()
 
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		return fmt.Errorf("failed to write models config: %w", err)
 	}
 
@@ -376,7 +376,7 @@ func (s *ConfigService) SaveAgent(id string, agent *Agent) error {
 
 	agentPath := filepath.Join(agentDir, "AGENT.md")
 	//nolint:gosec // user config directory/file permissions
-	if err := os.WriteFile(agentPath, []byte(content.String()), 0o644); err != nil {
+	if err := os.WriteFile(agentPath, []byte(content.String()), 0o600); err != nil {
 		return fmt.Errorf("failed to write agent file: %w", err)
 	}
 

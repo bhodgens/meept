@@ -303,11 +303,11 @@ This is the narrative part of the summary that should be extracted cleanly.
 
 func TestFormatStructuredSummary(t *testing.T) {
 	ext := SummaryExtract{
-		Decisions:          []string{"use SQLite", "add caching"},
-		FilePaths:          []string{"internal/db.go"},
+		Decisions:           []string{"use SQLite", "add caching"},
+		FilePaths:           []string{"internal/db.go"},
 		UnresolvedQuestions: []string{"pool size?"},
-		TaskState:          "in progress",
-		KeyFindings:        []string{"WAL mode is fast"},
+		TaskState:           "in progress",
+		KeyFindings:         []string{"WAL mode is fast"},
 	}
 	narrative := "The team decided on SQLite."
 	result := formatStructuredSummary(1, ext, narrative)
@@ -349,9 +349,9 @@ func TestFormatStructuredSummary_EmptyExtract(t *testing.T) {
 
 func TestMarshalExtractAsJSON(t *testing.T) {
 	ext := SummaryExtract{
-		Decisions:  []string{"decide"},
-		FilePaths:  []string{"file.go"},
-		TaskState:  "active",
+		Decisions: []string{"decide"},
+		FilePaths: []string{"file.go"},
+		TaskState: "active",
 	}
 	jsonStr := marshalExtractAsJSON(ext)
 	if !strings.Contains(jsonStr, `"decide"`) {

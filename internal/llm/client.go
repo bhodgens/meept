@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm/metrics"
@@ -62,6 +63,7 @@ func (e *ClientError) Unwrap() error {
 // Client is an HTTP client for OpenAI-compatible chat completions endpoints.
 type Client struct {
 	config       *ModelConfig
+	configMu     sync.RWMutex
 	budget       *Budget
 	httpClient   *http.Client
 	logger       *slog.Logger
@@ -138,14 +140,18 @@ func NewClient(config *ModelConfig, opts ...ClientOption) *Client {
 
 // Chat sends a chat completion request and returns the parsed response.
 func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
+	c.configMu.RLock()
+	cfg := c.config
+	c.configMu.RUnlock()
+
 	// Apply chat options, starting with model defaults
 	chatOpts := &chatOptions{
-		temperature:      c.config.Temperature,
-		maxTokens:        c.config.MaxTokens,
-		topP:             c.config.TopP,
-		frequencyPenalty: c.config.FrequencyPenalty,
-		presencePenalty:  c.config.PresencePenalty,
-		stopSequences:    c.config.StopSequences,
+		temperature:      cfg.Temperature,
+		maxTokens:        cfg.MaxTokens,
+		topP:             cfg.TopP,
+		frequencyPenalty: cfg.FrequencyPenalty,
+		presencePenalty:  cfg.PresencePenalty,
+		stopSequences:    cfg.StopSequences,
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
@@ -153,7 +159,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
-		cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+		cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			return cached.Response, nil
 		}
@@ -175,7 +181,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		if estimatedTokens <= 0 {
 			estimatedTokens = 4096 // Safe default
 		}
-		timeout := c.timeoutCalc.Calculate(ctx, c.config.ProviderID, c.config.ModelID, estimatedTokens, defaultTimeout)
+		timeout := c.timeoutCalc.Calculate(ctx, cfg.ProviderID, cfg.ModelID, estimatedTokens, defaultTimeout)
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -188,7 +194,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 	}
 
 	payload := map[string]any{
-		"model":       c.config.ModelID,
+		"model":       cfg.ModelID,
 		"messages":    msgDicts,
 		"temperature": chatOpts.temperature,
 		"max_tokens":  chatOpts.maxTokens,
@@ -246,7 +252,7 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 
 		// Store in cache
 		if c.tokenCache != nil && c.keyBuilder != nil {
-			cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+			cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
@@ -282,14 +288,18 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	// Report starting stage
 	reportProgress(ProgressStageStarting, "Starting LLM request...")
 
+	c.configMu.RLock()
+	cfg := c.config
+	c.configMu.RUnlock()
+
 	// Apply chat options, starting with model defaults
 	chatOpts := &chatOptions{
-		temperature:      c.config.Temperature,
-		maxTokens:        c.config.MaxTokens,
-		topP:             c.config.TopP,
-		frequencyPenalty: c.config.FrequencyPenalty,
-		presencePenalty:  c.config.PresencePenalty,
-		stopSequences:    c.config.StopSequences,
+		temperature:      cfg.Temperature,
+		maxTokens:        cfg.MaxTokens,
+		topP:             cfg.TopP,
+		frequencyPenalty: cfg.FrequencyPenalty,
+		presencePenalty:  cfg.PresencePenalty,
+		stopSequences:    cfg.StopSequences,
 	}
 	for _, opt := range opts {
 		opt(chatOpts)
@@ -297,7 +307,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 
 	// Check cache
 	if c.tokenCache != nil && c.keyBuilder != nil {
-		cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+		cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
 		if cached, found := c.tokenCache.Get(ctx, cacheKey); found {
 			reportProgress(ProgressStageDone, "Cache hit")
 			return cached.Response, nil
@@ -324,7 +334,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 	}
 
 	payload := map[string]any{
-		"model":       c.config.ModelID,
+		"model":       cfg.ModelID,
 		"messages":    msgDicts,
 		"temperature": chatOpts.temperature,
 		"max_tokens":  chatOpts.maxTokens,
@@ -394,7 +404,7 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 
 		// Store in cache
 		if c.tokenCache != nil && c.keyBuilder != nil {
-			cacheKey := c.keyBuilder.Build("", c.config.ModelID, messages)
+			cacheKey := c.keyBuilder.Build("", cfg.ModelID, messages)
 			c.tokenCache.Put(ctx, cacheKey, resp)
 		}
 
@@ -488,10 +498,15 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	// Build URL - baseURL should be the full API base (e.g., http://host/v1 or http://host/api)
 	// We just append /chat/completions to whatever baseURL is configured
+	c.configMu.RLock()
 	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
+	modelID := c.config.ModelID
+	apiKey := c.config.APIKey
+	providerID := c.config.ProviderID
+	c.configMu.RUnlock()
 	url := baseURL + "/chat/completions"
 
-	c.logger.Debug("Making LLM request", "url", url, "model", c.config.ModelID)
+	c.logger.Debug("Making LLM request", "url", url, "model", modelID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -500,8 +515,8 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	if c.config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.config.APIKey)
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
 	// Time the HTTP request
@@ -530,8 +545,8 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		go func() {
 			record := metrics.RequestRecord{
 				Timestamp:  time.Now(),
-				ProviderID: c.config.ProviderID,
-				ModelID:    c.config.ModelID,
+				ProviderID: providerID,
+				ModelID:    modelID,
 				LatencyMs:  latencyMs,
 				HTTPStatus: httpStatus,
 				ErrorType:  errType,
@@ -567,8 +582,8 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		}
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
 		return nil, &RateLimitError{
-			ProviderID: c.config.ProviderID,
-			ModelID:    c.config.ModelID,
+			ProviderID: providerID,
+			ModelID:    modelID,
 			RetryAfter: retryAfter,
 			Cause:      &APIError{StatusCode: resp.StatusCode, Detail: detail},
 		}
@@ -616,8 +631,8 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 		go func() {
 			record := metrics.RequestRecord{
 				Timestamp:        time.Now(),
-				ProviderID:       c.config.ProviderID,
-				ModelID:          c.config.ModelID,
+				ProviderID:       providerID,
+				ModelID:          modelID,
 				PromptTokens:     chatResp.Usage.PromptTokens,
 				CompletionTokens: chatResp.Usage.CompletionTokens,
 				CachedTokens:     chatResp.Usage.PromptTokensDetails.CachedTokens,
@@ -657,7 +672,9 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 
 	model := chatResp.Model
 	if model == "" {
+		c.configMu.RLock()
 		model = c.config.ModelID
+		c.configMu.RUnlock()
 	}
 
 	return &Response{
@@ -675,12 +692,18 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 }
 
 // SwitchModel switches to a different model/endpoint at runtime.
-func (c *Client) SwitchModel(config *ModelConfig) {
+func (c *Client) SwitchModel(config *ModelConfig) error {
+	if config == nil {
+		return &ClientError{Message: "SwitchModel: config must not be nil"}
+	}
+	c.configMu.Lock()
 	c.config = config
+	c.configMu.Unlock()
 	c.logger.Info("Switched model",
 		"model", config.ModelID,
 		"base_url", config.BaseURL,
 	)
+	return nil
 }
 
 // Close closes the client (releases resources).
@@ -694,6 +717,8 @@ func (c *Client) Close() error {
 var _ io.Closer = (*Client)(nil)
 
 func (c *Client) Config() *ModelConfig {
+	c.configMu.RLock()
+	defer c.configMu.RUnlock()
 	return c.config
 }
 

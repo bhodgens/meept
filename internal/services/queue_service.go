@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/caimlas/meept/internal/queue"
 )
@@ -119,7 +120,11 @@ func (s *QueueService) Fail(ctx context.Context, req FailRequest) error {
 	if req.JobID == "" {
 		return wrapError("queue", "Fail", ErrInvalidInput)
 	}
-	return wrapError("queue", "Fail", s.q.Fail(ctx, req.JobID, wrapError("queue", "Fail", ErrInternal)))
+	failErr := fmt.Errorf("%s", req.Error)
+	if req.Error == "" {
+		failErr = ErrInternal
+	}
+	return wrapError("queue", "Fail", s.q.Fail(ctx, req.JobID, failErr))
 }
 
 // RetryRequest contains retry parameters.

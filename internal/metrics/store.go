@@ -2,10 +2,10 @@
 package metrics
 
 import (
-	"io"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -31,14 +31,14 @@ const (
 
 // Store manages metrics storage.
 type Store struct {
-	mu           sync.RWMutex
-	db           *sql.DB
-	batchSize    int
+	mu            sync.RWMutex
+	db            *sql.DB
+	batchSize     int
 	flushInterval time.Duration
-	batch        []metricValue
-	lastFlush    time.Time
-	stopChan   chan struct{}
-	closeOnce  sync.Once
+	batch         []metricValue
+	lastFlush     time.Time
+	stopChan      chan struct{}
+	closeOnce     sync.Once
 
 	// Subscriber management for real-time updates
 	subMu       sync.RWMutex
@@ -55,10 +55,10 @@ type metricValue struct {
 
 // StoreConfig configures the metrics store.
 type StoreConfig struct {
-	DatabasePath   string
-	BatchSize      int
-	FlushInterval  time.Duration
-	RetentionDays  int
+	DatabasePath  string
+	BatchSize     int
+	FlushInterval time.Duration
+	RetentionDays int
 }
 
 // DefaultStoreConfig returns default store configuration.
@@ -453,12 +453,14 @@ type MetricPoint struct {
 
 // Close closes the metrics store. Safe to call multiple times.
 func (s *Store) Close() error {
+	var dbErr error
 	s.closeOnce.Do(func() {
 		close(s.stopChan)
 		// Final flush
 		s.flush()
+		dbErr = s.db.Close()
 	})
-	return s.db.Close()
+	return dbErr
 }
 
 // expandPath expands ~ to the home directory.
@@ -529,11 +531,11 @@ func (s *Store) GetEvents(limit int, severity string) ([]Event, error) {
 
 // Event represents a logged event.
 type Event struct {
-	Timestamp time.Time         `json:"timestamp"`
-	EventType string            `json:"event_type"`
-	Severity  string            `json:"severity"`
-	Message   string            `json:"message"`
-	Context   map[string]any    `json:"context,omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
+	EventType string         `json:"event_type"`
+	Severity  string         `json:"severity"`
+	Message   string         `json:"message"`
+	Context   map[string]any `json:"context,omitempty"`
 }
 
 // SubscribeMetrics returns a channel for receiving metric updates.

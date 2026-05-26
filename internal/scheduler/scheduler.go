@@ -15,6 +15,7 @@ import (
 )
 
 // Scheduler wraps robfig/cron with job management and persistence.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Scheduler struct {
 	cron    *cron.Cron
@@ -31,6 +32,11 @@ type Scheduler struct {
 	runningJobs map[string]bool         // job ID -> is running
 	running     atomic.Bool
 	location    *time.Location
+
+	// RunNow tracking
+	runNowCtx    context.Context
+	runNowCancel context.CancelFunc
+	runNowWg     sync.WaitGroup
 }
 
 // Option is a functional option for configuring the Scheduler.
@@ -132,6 +138,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 
 	s.logger.Info("scheduler: starting", "timezone", s.location.String())
 
+	// Create shutdown-aware context for RunNow jobs
+	s.runNowCtx, s.runNowCancel = context.WithCancel(context.Background())
+
 	// Load persisted jobs
 	if err := s.loadPersistedJobs(); err != nil {
 		s.logger.Warn("scheduler: failed to load persisted jobs", "error", err)
@@ -144,9 +153,9 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Publish startup event
 	if s.bus != nil {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler", map[string]any{
-			SchedulerKeyEvent:    "started",
-			"jobs":     len(s.jobs),
-			"timezone": s.location.String(),
+			SchedulerKeyEvent: "started",
+			"jobs":            len(s.jobs),
+			"timezone":        s.location.String(),
 		})
 		s.bus.Publish("scheduler.started", msg)
 	}
@@ -165,6 +174,12 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 
 	// Stop accepting new jobs
 	s.running.Store(false)
+
+	// Cancel in-flight RunNow jobs and wait for them
+	if s.runNowCancel != nil {
+		s.runNowCancel()
+	}
+	s.runNowWg.Wait()
 
 	// Stop cron scheduler and wait for running jobs
 	cronCtx := s.cron.Stop()
@@ -300,9 +315,11 @@ func (s *Scheduler) RunNow(jobID string) error {
 	s.runningJobs[jobID] = true
 	s.mu.Unlock()
 
-	// Run job in goroutine
+	// Run job in goroutine with shutdown-aware context
+	s.runNowWg.Add(1)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer s.runNowWg.Done()
+		ctx, cancel := context.WithTimeout(s.runNowCtx, 30*time.Minute)
 		defer cancel()
 
 		s.executeJob(ctx, job)
@@ -480,10 +497,10 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 	// Publish job start event
 	if s.bus != nil {
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+jobID, map[string]any{
-			SchedulerKeyEvent:   "job_started",
-			SchedulerKeyJobID:  jobID,
-			"name":    job.Name(),
-			"type":    job.Type(),
+			SchedulerKeyEvent: "job_started",
+			SchedulerKeyJobID: jobID,
+			"name":            job.Name(),
+			"type":            job.Type(),
 		})
 		s.bus.Publish("scheduler.job.started", msg)
 	}
@@ -503,12 +520,12 @@ func (s *Scheduler) executeJob(ctx context.Context, job Job) {
 	// Publish completion event
 	if s.bus != nil {
 		result := map[string]any{
-			SchedulerKeyEvent:    "job_completed",
+			SchedulerKeyEvent:   "job_completed",
 			SchedulerKeyJobID:   jobID,
-			"name":     job.Name(),
-			"type":     job.Type(),
-			"duration": duration.String(),
-			SchedulerKeySuccess:  err == nil,
+			"name":              job.Name(),
+			"type":              job.Type(),
+			"duration":          duration.String(),
+			SchedulerKeySuccess: err == nil,
 		}
 		if err != nil {
 			result["error"] = err.Error()

@@ -1063,8 +1063,16 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 
 	// 3. Create new session
 	now := time.Now().UTC()
-	newID := "session-" + randomHex(8)
-	newConvID := "conv-" + randomHex(8)
+	newID, err := randomHex(8)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate session ID: %w", err)
+	}
+	newID = "session-" + newID
+	newConvID, err := randomHex(8)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate conversation ID: %w", err)
+	}
+	newConvID = "conv-" + newConvID
 	if newName == "" {
 		newName = "fork of " + source.Name
 	}
@@ -1106,15 +1114,15 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	defer rows.Close()
 
 	type sourceMsg struct {
-		oldID     int64
-		oldParent *int64
-		role      string
-		content   string
-		timestamp string
-		entryType sql.NullString
-		branchID  sql.NullString
-		model     sql.NullString
-		name      sql.NullString
+		oldID      int64
+		oldParent  *int64
+		role       string
+		content    string
+		timestamp  string
+		entryType  sql.NullString
+		branchID   sql.NullString
+		model      sql.NullString
+		name       sql.NullString
 		toolCallID sql.NullString
 	}
 	var sourceMsgs []sourceMsg
@@ -1333,7 +1341,7 @@ func (s *SQLiteStore) InsertCompaction(sessionID string, parentID int64, summary
 
 // CompactionContent represents the JSON content of a compaction entry.
 type CompactionContent struct {
-	Summary       string `json:"summary"`
+	Summary       string  `json:"summary"`
 	CompressedIDs []int64 `json:"compressed_ids"`
 }
 

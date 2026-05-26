@@ -207,7 +207,8 @@ func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int
 		}
 	} else {
 		// Fallback to LIKE-based search
-		likePattern := "%" + query + "%"
+		escapedQuery := escapeLikeWildcards(query)
+		likePattern := "%" + escapedQuery + "%"
 		if domain != "" {
 			rows, err = db.QueryContext(ctx, `
 				SELECT id, content, domain, metadata_json, created_at

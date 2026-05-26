@@ -207,7 +207,8 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 		`, safeQuery, limit)
 	} else {
 		// Fallback to LIKE-based search (slower but works without FTS5)
-		likePattern := "%" + query + "%"
+		escapedQuery := escapeLikeWildcards(query)
+		likePattern := "%" + escapedQuery + "%"
 		rows, err = db.QueryContext(ctx, `
 			SELECT id, content, category, metadata_json, created_at
 			FROM episodic_memories
@@ -269,14 +270,14 @@ func (e *EpisodicMemory) updateLastAccessed(ctx context.Context, results []Memor
 
 	//nolint:gosec // parameterized query
 	query := fmt.Sprintf("UPDATE episodic_memories SET last_accessed_at = ? WHERE id IN (%s)", strings.Join(placeholders, ","))
-	
+
 	pool := e.store.GetPool()
 	db, dbErr := pool.Get(ctx)
 	if dbErr != nil {
 		return dbErr
 	}
 	defer pool.Put(db)
-	
+
 	_, err := db.ExecContext(ctx, query, args...)
 	return err
 }

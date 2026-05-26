@@ -36,9 +36,9 @@ func TestClientChat(t *testing.T) {
 				},
 			},
 			Usage: struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
+				PromptTokens        int `json:"prompt_tokens"`
+				CompletionTokens    int `json:"completion_tokens"`
+				TotalTokens         int `json:"total_tokens"`
 				PromptTokensDetails struct {
 					CachedTokens int `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`
@@ -182,7 +182,7 @@ func TestClientChatRetry(t *testing.T) {
 		if attempts < 3 {
 			// Return 503 to trigger retry
 			w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte("Service unavailable"))
+			_, _ = w.Write([]byte("Service unavailable"))
 			return
 		}
 
@@ -233,7 +233,7 @@ func TestClientChatRetry(t *testing.T) {
 func TestClientChatAPIError(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-	_, _ = w.Write([]byte("Invalid request"))
+		_, _ = w.Write([]byte("Invalid request"))
 	})
 
 	server := httptest.NewServer(handler)
@@ -278,9 +278,9 @@ func TestClientWithBudget(t *testing.T) {
 				},
 			},
 			Usage: struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
+				PromptTokens        int `json:"prompt_tokens"`
+				CompletionTokens    int `json:"completion_tokens"`
+				TotalTokens         int `json:"total_tokens"`
 				PromptTokensDetails struct {
 					CachedTokens int `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`

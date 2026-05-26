@@ -466,7 +466,7 @@ func (c *L2Cache) recordEvictionMetric(count int64, reason string) {
 		return
 	}
 	c.metricsStore.Record("cache.eviction", float64(count), map[string]string{
-		KeyLevel:  "l2",
+		KeyLevel: "l2",
 		"reason": reason,
 	})
 }

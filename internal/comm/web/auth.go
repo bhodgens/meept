@@ -149,7 +149,8 @@ func (a *ChainAuth) Authenticate(r *http.Request) bool {
 
 // IPWhitelistAuth authenticates based on client IP.
 type IPWhitelistAuth struct {
-	allowed map[string]bool
+	allowed      map[string]bool
+	trustedProxy bool // If true, X-Forwarded-For and X-Real-IP headers are trusted.
 }
 
 // NewIPWhitelistAuth creates a new IPWhitelistAuth.
@@ -161,33 +162,50 @@ func NewIPWhitelistAuth(ips ...string) *IPWhitelistAuth {
 	return &IPWhitelistAuth{allowed: m}
 }
 
+// NewIPWhitelistAuthWithProxy creates a new IPWhitelistAuth that trusts
+// forwarded headers (use only when the server is behind a known trusted proxy).
+func NewIPWhitelistAuthWithProxy(ips ...string) *IPWhitelistAuth {
+	auth := NewIPWhitelistAuth(ips...)
+	auth.trustedProxy = true
+	return auth
+}
+
 // Authenticate checks if the client IP is whitelisted.
 func (a *IPWhitelistAuth) Authenticate(r *http.Request) bool {
-	// Check X-Forwarded-For header first
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			ip := strings.TrimSpace(ips[0])
-			if a.allowed[ip] {
-				return true
+	ip := a.extractIP(r)
+	return a.allowed[ip]
+}
+
+// extractIP returns the client IP. When trustedProxy is false (the default),
+// only r.RemoteAddr is used to prevent header spoofing. When trustedProxy is
+// true, X-Forwarded-For and X-Real-IP headers are consulted.
+func (a *IPWhitelistAuth) extractIP(r *http.Request) string {
+	if a.trustedProxy {
+		// Check X-Forwarded-For header first
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			ips := strings.Split(xff, ",")
+			if len(ips) > 0 {
+				ip := strings.TrimSpace(ips[0])
+				if a.allowed[ip] {
+					return ip
+				}
+			}
+		}
+
+		// Check X-Real-IP header
+		if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+			if a.allowed[realIP] {
+				return realIP
 			}
 		}
 	}
 
-	// Check X-Real-IP header
-	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-		if a.allowed[realIP] {
-			return true
-		}
-	}
-
-	// Check RemoteAddr
+	// Use RemoteAddr as the primary/authoritative source.
 	ip := r.RemoteAddr
 	if colonIdx := strings.LastIndex(ip, ":"); colonIdx != -1 {
 		ip = ip[:colonIdx]
 	}
 	// Remove brackets for IPv6
 	ip = strings.Trim(ip, "[]")
-
-	return a.allowed[ip]
+	return ip
 }

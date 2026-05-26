@@ -26,9 +26,10 @@ type Pool struct {
 	bus       *bus.MessageBus
 	logger    *slog.Logger
 
-	mu     sync.RWMutex
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	mu        sync.RWMutex
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	startOnce sync.Once
 
 	// Configuration
 	defaultCaps []string
@@ -73,40 +74,39 @@ func NewPool(cfg PoolConfig) (*Pool, error) {
 
 // Start initializes the worker pool with the specified number of workers.
 func (p *Pool) Start(ctx context.Context, workerCount int) error {
-	p.mu.Lock()
-	if p.cancel != nil {
-		p.mu.Unlock()
-		return fmt.Errorf("pool already running")
-	}
-	ctx, p.cancel = context.WithCancel(ctx)
-	p.mu.Unlock()
+	var startErr error
+	p.startOnce.Do(func() {
+		ctx, p.cancel = context.WithCancel(ctx)
 
-	// Start workers
-	for i := range workerCount {
-		if _, err := p.AddWorker(p.defaultCaps); err != nil {
-			p.logger.Error("Failed to add worker", "index", i, "error", err)
-		}
-	}
-
-	// Start the pool context with all workers
-	for _, worker := range p.workers {
-		p.wg.Add(1)
-		go func(w *Worker) {
-			defer p.wg.Done()
-			if err := w.Start(ctx); err != nil {
-				p.logger.Error("Worker failed to start", "id", w.ID, "error", err)
+		// Start workers
+		for i := range workerCount {
+			if _, err := p.AddWorker(p.defaultCaps); err != nil {
+				p.logger.Error("Failed to add worker", "index", i, "error", err)
 			}
-		}(worker)
-	}
+		}
 
-	// Start monitoring
-	go p.monitor(ctx)
+		// Start the pool context with all workers
+		for _, worker := range p.workers {
+			worker.wg = &p.wg
+			if err := worker.Start(ctx); err != nil {
+				p.logger.Error("Worker failed to start", "id", worker.ID, "error", err)
+			}
+		}
 
-	p.logger.Info("Worker pool started", "workers", workerCount)
-	p.publishEvent("worker.pool.started", map[string]any{
-		"worker_count": workerCount,
+		// Start monitoring
+		go p.monitor(ctx)
+
+		p.logger.Info("Worker pool started", "workers", workerCount)
+		p.publishEvent("worker.pool.started", map[string]any{
+			"worker_count": workerCount,
+		})
 	})
-
+	if startErr != nil {
+		return startErr
+	}
+	if p.cancel == nil {
+		return fmt.Errorf("pool already started")
+	}
 	return nil
 }
 
@@ -159,7 +159,7 @@ func (p *Pool) AddWorker(caps []string) (*Worker, error) {
 	p.logger.Info("Worker added to pool", "id", worker.ID)
 
 	p.publishEvent("worker.started", map[string]any{
-		"worker_id":    worker.ID,
+		"worker_id":     worker.ID,
 		KeyCapabilities: caps,
 	})
 
@@ -256,13 +256,10 @@ func (p *Pool) Scale(ctx context.Context, targetCount int) error {
 				return fmt.Errorf("failed to add worker: %w", err)
 			}
 
-			p.wg.Add(1)
-			go func(w *Worker) {
-				defer p.wg.Done()
-				if err := w.Start(ctx); err != nil {
-					p.logger.Error("Worker failed to start", "id", w.ID, "error", err)
-				}
-			}(worker)
+			worker.wg = &p.wg
+			if err := worker.Start(ctx); err != nil {
+				p.logger.Error("Worker failed to start", "id", worker.ID, "error", err)
+			}
 		}
 	} else {
 		// Remove workers (preferring idle ones)
@@ -458,9 +455,9 @@ func (h *Handler) handleAdd(_ context.Context, msg *models.BusMessage) (any, err
 	}
 
 	return map[string]any{
-		"worker_id":    worker.ID,
+		"worker_id":     worker.ID,
 		KeyCapabilities: worker.Capabilities,
-		"state":        string(worker.GetState()),
+		"state":         string(worker.GetState()),
 	}, nil
 }
 
@@ -488,7 +485,7 @@ func (h *Handler) handleList(_ context.Context, _ *models.BusMessage) (any, erro
 		workerList = append(workerList, map[string]any{
 			"id":             ws.ID,
 			"state":          string(ws.State),
-			KeyCapabilities:   ws.Capabilities,
+			KeyCapabilities:  ws.Capabilities,
 			"start_time":     ws.StartTime.Format(time.RFC3339),
 			"last_active":    ws.LastActive.Format(time.RFC3339),
 			"jobs_complete":  ws.JobsComplete,
@@ -517,7 +514,7 @@ func (h *Handler) handleStats(_ context.Context, _ *models.BusMessage) (any, err
 		workerStats = append(workerStats, map[string]any{
 			"id":             ws.ID,
 			"state":          string(ws.State),
-			KeyCapabilities:   ws.Capabilities,
+			KeyCapabilities:  ws.Capabilities,
 			"start_time":     ws.StartTime.Format(time.RFC3339),
 			"last_active":    ws.LastActive.Format(time.RFC3339),
 			"jobs_complete":  ws.JobsComplete,

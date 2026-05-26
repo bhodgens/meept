@@ -30,6 +30,7 @@ const (
 
 // Session represents an active conversation session that can be shared
 // by multiple clients.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Session struct {
 	ID              string    `json:"id"`
@@ -64,10 +65,12 @@ func NewMemoryStore(logger *slog.Logger) *MemoryStore {
 	}
 }
 
-func randomHex(n int) string {
+func randomHex(n int) (string, error) {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate random bytes: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // Create creates a new session.
@@ -75,11 +78,21 @@ func (s *MemoryStore) Create(name string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	id := "session-" + randomHex(8)
+	id, err := randomHex(8)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate session ID: %w", err)
+	}
+	id = "session-" + id
+
+	convID, err := randomHex(8)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate conversation ID: %w", err)
+	}
+
 	session := &Session{
 		ID:              id,
 		Name:            name,
-		ConversationID:  "conv-" + randomHex(8),
+		ConversationID:  "conv-" + convID,
 		CreatedAt:       time.Now(),
 		LastActivity:    time.Now(),
 		AttachedClients: []string{},
@@ -441,7 +454,7 @@ func (s *MemoryStore) GetMessageBranches(sessionID string) ([]Branch, error) {
 	}
 
 	// Collect unique branch IDs with per-branch max ID
-	branchMap := make(map[string]int)   // branchID -> count
+	branchMap := make(map[string]int)     // branchID -> count
 	branchMaxID := make(map[string]int64) // branchID -> max message ID
 	for _, msg := range msgs {
 		bid := msg.BranchID
@@ -1145,7 +1158,7 @@ func (h *Handler) handleGenerateDescription(msg *models.BusMessage) (any, error)
 		KeySessionID:  params.SessionID,
 		"name":        name,
 		"description": description,
-		KeyStatus:      "generated",
+		KeyStatus:     "generated",
 	}, nil
 }
 
@@ -1190,7 +1203,7 @@ func (h *Handler) handleStop(msg *models.BusMessage) (any, error) {
 	)
 
 	return map[string]any{
-		KeyStatus:          "stopped",
+		KeyStatus:         "stopped",
 		KeySessionID:      params.SessionID,
 		"workers_stopped": stoppedWorkers,
 	}, nil
@@ -1237,9 +1250,9 @@ func (h *Handler) handleBranchesListMsg(msg *models.BusMessage) (any, error) {
 // handleForkMsg handles a session fork request.
 func (h *Handler) handleForkMsg(msg *models.BusMessage) (any, error) {
 	var params struct {
-		SessionID    string `json:"session_id"`
+		SessionID     string `json:"session_id"`
 		FromMessageID int64  `json:"from_message_id"`
-		Name         string `json:"name"`
+		Name          string `json:"name"`
 	}
 	if err := json.Unmarshal(msg.Payload, &params); err != nil {
 		return nil, err
@@ -1257,7 +1270,7 @@ func (h *Handler) handleForkMsg(msg *models.BusMessage) (any, error) {
 	}
 
 	return map[string]any{
-		"session":      newSession,
+		"session":        newSession,
 		"new_session_id": newSession.ID,
 	}, nil
 }
