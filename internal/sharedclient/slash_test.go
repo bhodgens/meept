@@ -7,10 +7,10 @@ import (
 
 func TestParseSlash(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantCmd  *SlashCommand
-		wantNil  bool
+		name    string
+		input   string
+		wantCmd *SlashCommand
+		wantNil bool
 	}{
 		{"simple help", "/help", &SlashCommand{Name: "help", Args: nil}, false},
 		{"usage command", "/usage", &SlashCommand{Name: "usage", Args: nil}, false},
@@ -109,9 +109,9 @@ func TestBuiltinCommands(t *testing.T) {
 
 func TestIsBuiltin(t *testing.T) {
 	tests := []struct {
-		name  string
-		cmd   string
-		want  bool
+		name string
+		cmd  string
+		want bool
 	}{
 		{"help is builtin", "help", true},
 		{"clear is builtin", "clear", true},
@@ -154,7 +154,7 @@ func TestIsSlashCommand(t *testing.T) {
 
 func TestSortStrings(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input []string
 		want  []string
 	}{

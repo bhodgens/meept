@@ -20,18 +20,18 @@ type BusEvent struct {
 // EventStream manages real-time event streaming from the daemon's message bus.
 // It uses polling since the RPC layer doesn't support server-push.
 type EventStream struct {
-	rpc          *RPCClient
+	rpc            *RPCClient
 	subscriptionID string
-	topics       []string
-	events       chan BusEvent
-	done         chan struct{}
-	mu           sync.Mutex
-	running      bool
-	pollInterval time.Duration
-	lastPoll     time.Time
-	buffer       []BusEvent // Circular buffer for recent events
-	bufferSize   int
-	bufferIdx    int
+	topics         []string
+	events         chan BusEvent
+	done           chan struct{}
+	mu             sync.Mutex
+	running        bool
+	pollInterval   time.Duration
+	lastPoll       time.Time
+	buffer         []BusEvent // Circular buffer for recent events
+	bufferSize     int
+	bufferIdx      int
 }
 
 // EventStreamConfig configures the event stream.
@@ -268,12 +268,12 @@ func (es *EventStream) IsRunning() bool {
 
 // MetricsSnapshot represents a point-in-time metrics snapshot.
 type MetricsSnapshot struct {
-	Timestamp     time.Time
-	QueueDepth    int
-	WorkersBusy   int
-	WorkersIdle   int
-	MemoryOps     int
-	AgentsActive  int
+	Timestamp    time.Time
+	QueueDepth   int
+	WorkersBusy  int
+	WorkersIdle  int
+	MemoryOps    int
+	AgentsActive int
 }
 
 // MetricsCollector gathers metrics for sparklines.

@@ -182,20 +182,20 @@ func TestLearningPipeline_StoreAndRetrieve(t *testing.T) {
 	_ = lp.Initialize(ctx)
 
 	pattern := &LearnedPattern{
-		ID:          "pat-001",
-		Type:        PatternTypeStrategy,
-		Status:      PatternStatusActive,
-		Domain:      "code",
-		Description: "Test-driven development approach",
-		Pattern:     "Write tests first, then implement the feature, then refactor",
-		Tags:        []string{"tdd", "testing", "development"},
-		Confidence:  0.9,
-		SuccessRate: 0.85,
-		UseCount:    10,
+		ID:           "pat-001",
+		Type:         PatternTypeStrategy,
+		Status:       PatternStatusActive,
+		Domain:       "code",
+		Description:  "Test-driven development approach",
+		Pattern:      "Write tests first, then implement the feature, then refactor",
+		Tags:         []string{"tdd", "testing", "development"},
+		Confidence:   0.9,
+		SuccessRate:  0.85,
+		UseCount:     10,
 		SuccessCount: 8,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ContentHash: "test-hash",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		ContentHash:  "test-hash",
 	}
 
 	if err := lp.StorePattern(ctx, pattern); err != nil {
@@ -318,16 +318,16 @@ func TestLearningPipeline_RecordPatternUse(t *testing.T) {
 	_ = lp.Initialize(ctx)
 
 	pattern := &LearnedPattern{
-		ID:          "pat-001",
-		Status:      PatternStatusActive,
-		Domain:      "code",
-		Confidence:  0.8,
-		SuccessRate: 1.0,
-		UseCount:    1,
+		ID:           "pat-001",
+		Status:       PatternStatusActive,
+		Domain:       "code",
+		Confidence:   0.8,
+		SuccessRate:  1.0,
+		UseCount:     1,
 		SuccessCount: 1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ContentHash: "hash-001",
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		ContentHash:  "hash-001",
 	}
 
 	_ = lp.StorePattern(ctx, pattern)

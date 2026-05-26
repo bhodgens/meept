@@ -143,10 +143,10 @@ func TestKeywordClassifier_ReportIntents(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name       string
-		input      string
-		wantType   string
-		wantAgent  string
+		name      string
+		input     string
+		wantType  string
+		wantAgent string
 	}{
 		{
 			name:      "give me a report",

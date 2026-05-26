@@ -156,11 +156,11 @@ func TestFormatHashLines(t *testing.T) {
 
 func TestParseAnchor(t *testing.T) {
 	tests := []struct {
-		name      string
-		anchor    string
-		wantLine  int
-		wantHash  string
-		wantErr   bool
+		name     string
+		anchor   string
+		wantLine int
+		wantHash string
+		wantErr  bool
 	}{
 		{"valid anchor", "42:ab", 42, "ab", false},
 		{"valid anchor line 1", "1:zz", 1, "zz", false},

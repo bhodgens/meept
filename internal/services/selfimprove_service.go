@@ -18,10 +18,10 @@ func NewSelfImproveService(ctrl *selfimprove.Controller) *SelfImproveService {
 
 // StatusResponse contains self-improvement status.
 type StatusResponse struct {
-	Enabled      bool   `json:"enabled"`
-	LastCycle    string `json:"last_cycle,omitempty"`
-	SkillsLearned int   `json:"skills_learned"`
-	PendingTasks int   `json:"pending_tasks"`
+	Enabled       bool   `json:"enabled"`
+	LastCycle     string `json:"last_cycle,omitempty"`
+	SkillsLearned int    `json:"skills_learned"`
+	PendingTasks  int    `json:"pending_tasks"`
 }
 
 // Status returns self-improvement status.
@@ -147,4 +147,3 @@ func (s *SelfImproveService) Reject(ctx context.Context, req RejectImprovementRe
 	}
 	return wrapError("selfimprove", "Reject", s.controller.RejectFix(req.ImprovementID, req.Reason))
 }
-

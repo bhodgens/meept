@@ -146,14 +146,14 @@ func printStatusJSON(status *types.DaemonStatusResponse, pid int) {
 	out := map[string]any{
 		"status":             status.Status,
 		"pid":                pid,
-		"uptime_seconds":    status.UptimeSeconds,
-		"model":             status.Model,
-		"tokens_used":       status.TokensUsed,
-		"tokens_remaining":  status.TokensRemaining,
-		"budget_used":       status.BudgetUsed,
-		"budget_remaining":  status.BudgetRemaining,
+		"uptime_seconds":     status.UptimeSeconds,
+		"model":              status.Model,
+		"tokens_used":        status.TokensUsed,
+		"tokens_remaining":   status.TokensRemaining,
+		"budget_used":        status.BudgetUsed,
+		"budget_remaining":   status.BudgetRemaining,
 		"registered_methods": len(status.RegisteredMethods),
-		"bus_subscribers":   status.BusSubscribers,
+		"bus_subscribers":    status.BusSubscribers,
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

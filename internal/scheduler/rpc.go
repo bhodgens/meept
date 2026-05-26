@@ -129,7 +129,7 @@ func (h *RPCHandler) RemoveJob(ctx context.Context, params json.RawMessage) (any
 
 	return map[string]any{
 		SchedulerKeySuccess: true,
-		SchedulerKeyJobID:  p.JobID,
+		SchedulerKeyJobID:   p.JobID,
 	}, nil
 }
 
@@ -208,9 +208,9 @@ func (h *RPCHandler) RunJob(ctx context.Context, params json.RawMessage) (any, e
 	}
 
 	return map[string]any{
-		SchedulerKeySuccess:   true,
-		SchedulerKeyJobID:    p.JobID,
-		"triggered": time.Now().UTC(),
+		SchedulerKeySuccess: true,
+		SchedulerKeyJobID:   p.JobID,
+		"triggered":         time.Now().UTC(),
 	}, nil
 }
 
@@ -269,8 +269,8 @@ func (h *RPCHandler) PauseJob(ctx context.Context, params json.RawMessage) (any,
 
 	return map[string]any{
 		SchedulerKeySuccess: true,
-		SchedulerKeyJobID:  p.JobID,
-		"paused":  true,
+		SchedulerKeyJobID:   p.JobID,
+		"paused":            true,
 	}, nil
 }
 
@@ -298,10 +298,10 @@ func (h *RPCHandler) ResumeJob(ctx context.Context, params json.RawMessage) (any
 	nextRun, _ := h.scheduler.NextRun(p.JobID)
 
 	return map[string]any{
-		SchedulerKeySuccess:  true,
+		SchedulerKeySuccess: true,
 		SchedulerKeyJobID:   p.JobID,
-		"resumed":  true,
-		"next_run": nextRun,
+		"resumed":           true,
+		"next_run":          nextRun,
 	}, nil
 }
 

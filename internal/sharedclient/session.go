@@ -29,9 +29,9 @@ func (a *sessionAdapter) GetMostRecentSession() (*types.Session, error) {
 
 // SessionManager handles session operations for both meept-lite and meept TUI.
 type SessionManager struct {
-	client        SessionClient
+	client         SessionClient
 	currentSession *types.Session
-	defaultName   string
+	defaultName    string
 }
 
 // NewSessionManager creates a new session manager.

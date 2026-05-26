@@ -121,7 +121,7 @@ func (s *CompressionStats) Snapshot() CompressionStatsSnapshot {
 type ContextCompressor struct {
 	config     CompressionConfig
 	stats      CompressionStats
-	summarizer Chatter // Optional: when set, enables LLM-based summarization at stage 2
+	summarizer Chatter           // Optional: when set, enables LLM-based summarization at stage 2
 	compactor  *ContextCompactor // Optional: preferred over summarizer when set
 	logger     *slog.Logger
 	tokenizer  Tokenizer

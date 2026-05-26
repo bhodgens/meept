@@ -23,14 +23,14 @@ import (
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
-	loop               *AgentLoop
-	dispatcher         *Dispatcher // Optional: if set, routes through multi-agent dispatch
-	collaborativePlan  *CollaborativePlanner // Optional: if set, enables collaborative planning for programming tasks
-	bus                *bus.MessageBus
-	logger             *slog.Logger
-	metricsStore       *metrics.Store  // Optional: metrics store for duration estimates
-	stepStore          *task.StepStore // Optional: step store for fetching step summaries
-	taskStore          *task.Store     // Optional: task store for looking up linked sessions
+	loop              *AgentLoop
+	dispatcher        *Dispatcher           // Optional: if set, routes through multi-agent dispatch
+	collaborativePlan *CollaborativePlanner // Optional: if set, enables collaborative planning for programming tasks
+	bus               *bus.MessageBus
+	logger            *slog.Logger
+	metricsStore      *metrics.Store  // Optional: metrics store for duration estimates
+	stepStore         *task.StepStore // Optional: step store for fetching step summaries
+	taskStore         *task.Store     // Optional: task store for looking up linked sessions
 
 	// Budget tracking for async dispatch pre-check (Issue 0039)
 	budget *llm.Budget
@@ -81,12 +81,12 @@ func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, collaborativePlan *
 		logger = slog.Default()
 	}
 	return &ChatHandler{
-		loop:               loop,
-		dispatcher:         dispatcher,
-		collaborativePlan:  collaborativePlan,
-		bus:                msgBus,
-		logger:             logger,
-		workers:            make(map[string]*Worker),
+		loop:              loop,
+		dispatcher:        dispatcher,
+		collaborativePlan: collaborativePlan,
+		bus:               msgBus,
+		logger:            logger,
+		workers:           make(map[string]*Worker),
 	}
 }
 
@@ -551,63 +551,63 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	// If reply is already set (from collaborative planning), skip dispatcher/loop
 	if reply == "" && err == nil {
 		if h.dispatcher != nil {
-		// Multi-agent mode: classify and route through dispatcher
-		result, dispatchErr := h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
-		switch {
-		case dispatchErr != nil:
-			h.logger.Error("Dispatch failed", "error", dispatchErr)
-			err = dispatchErr
-		case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
-			// Issue 0039: budget pre-check before async dispatch.
-			// Block before creating a zombie task that can never complete.
-			if h.budget != nil && !h.budget.CheckBudget() {
-				// Cancel the task that ClassifyAndRoute just created
-				if h.taskStore != nil && result.Task != nil {
-					result.Task.SetState(task.StateFailed)
-					if updateErr := h.taskStore.Update(result.Task); updateErr != nil {
-						h.logger.Warn("Failed to cancel budget-blocked task",
-							"task_id", result.Task.ID, "error", updateErr)
+			// Multi-agent mode: classify and route through dispatcher
+			result, dispatchErr := h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
+			switch {
+			case dispatchErr != nil:
+				h.logger.Error("Dispatch failed", "error", dispatchErr)
+				err = dispatchErr
+			case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
+				// Issue 0039: budget pre-check before async dispatch.
+				// Block before creating a zombie task that can never complete.
+				if h.budget != nil && !h.budget.CheckBudget() {
+					// Cancel the task that ClassifyAndRoute just created
+					if h.taskStore != nil && result.Task != nil {
+						result.Task.SetState(task.StateFailed)
+						if updateErr := h.taskStore.Update(result.Task); updateErr != nil {
+							h.logger.Warn("Failed to cancel budget-blocked task",
+								"task_id", result.Task.ID, "error", updateErr)
+						}
 					}
+					err = &llm.BudgetExceededError{Message: llm.ErrBudgetExceeded}
+					break
 				}
-				err = &llm.BudgetExceededError{Message: llm.ErrBudgetExceeded}
-				break
-			}
 
-			if h.syncMode {
-				// Issue 0022: synchronous mode -- wait for task completion
-				h.logger.Info("Sync dispatch: publishing plan request and waiting for completion",
-					"task_id", result.Task.ID,
+				if h.syncMode {
+					// Issue 0022: synchronous mode -- wait for task completion
+					h.logger.Info("Sync dispatch: publishing plan request and waiting for completion",
+						"task_id", result.Task.ID,
+						"agent", result.AgentID,
+						"intent", result.Intent.Type,
+					)
+					h.publishPlanRequest(result, conversationID)
+					reply = h.waitForTaskCompletion(ctx, result.Task.ID)
+				} else {
+					// Async dispatch: send ack immediately, let orchestrator handle it
+					h.logger.Info("Async dispatch: sending ack and publishing plan request",
+						"task_id", result.Task.ID,
+						"agent", result.AgentID,
+						"intent", result.Intent.Type,
+					)
+					// Build human-readable acknowledgment
+					// Use dispatcher-provided steps, falling back to step store
+					steps := result.Steps
+					if len(steps) == 0 {
+						steps = h.fetchStepSummaries(result.Task.ID)
+					}
+					reply = h.FormatEnhancedAsyncTaskAck(result, steps, h.estimateDuration(result.Task.ID, len(steps)), h.getPlanReference(result.Task.ID))
+
+					// Publish plan request to orchestrator
+					h.publishPlanRequest(result, conversationID)
+				}
+			default:
+				h.logger.Debug("Dispatched to agent",
 					"agent", result.AgentID,
 					"intent", result.Intent.Type,
+					"confidence", result.Intent.Confidence,
 				)
-				h.publishPlanRequest(result, conversationID)
-				reply = h.waitForTaskCompletion(ctx, result.Task.ID)
-			} else {
-				// Async dispatch: send ack immediately, let orchestrator handle it
-				h.logger.Info("Async dispatch: sending ack and publishing plan request",
-					"task_id", result.Task.ID,
-					"agent", result.AgentID,
-					"intent", result.Intent.Type,
-				)
-				// Build human-readable acknowledgment
-				// Use dispatcher-provided steps, falling back to step store
-				steps := result.Steps
-				if len(steps) == 0 {
-					steps = h.fetchStepSummaries(result.Task.ID)
-				}
-				reply = h.FormatEnhancedAsyncTaskAck(result, steps, h.estimateDuration(result.Task.ID, len(steps)), h.getPlanReference(result.Task.ID))
-
-				// Publish plan request to orchestrator
-				h.publishPlanRequest(result, conversationID)
+				reply, err = h.dispatcher.RouteToAgent(ctx, result, conversationID)
 			}
-		default:
-			h.logger.Debug("Dispatched to agent",
-				"agent", result.AgentID,
-				"intent", result.Intent.Type,
-				"confidence", result.Intent.Confidence,
-			)
-			reply, err = h.dispatcher.RouteToAgent(ctx, result, conversationID)
-		}
 		} else {
 			// Direct mode: send to standalone agent loop
 			reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)

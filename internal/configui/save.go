@@ -16,12 +16,12 @@ import (
 // Loader functions are package-level variables so tests can override them
 // to inject configs from temp directories without modifying global state.
 var (
-	loadMainConfig       = config.LoadDefault
-	loadClientConfig     = tui.LoadClientConfig
-	loadProvidersConfig  = llm.LoadProvidersConfigDefault
-	loadMCPConfig        = config.LoadMCPConfigDefault
-	loadAgentsConfig     = config.LoadAgentDefinitionsDefault
-	loadPresetsConfig    = config.LoadPresetsConfigDefault
+	loadMainConfig      = config.LoadDefault
+	loadClientConfig    = tui.LoadClientConfig
+	loadProvidersConfig = llm.LoadProvidersConfigDefault
+	loadMCPConfig       = config.LoadMCPConfigDefault
+	loadAgentsConfig    = config.LoadAgentDefinitionsDefault
+	loadPresetsConfig   = config.LoadPresetsConfigDefault
 )
 
 // SaveSection writes modified fields back to the correct config file.

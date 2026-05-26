@@ -47,16 +47,16 @@ func (t *ScheduleListTool) Parameters() llm.FunctionParameters {
 
 // ScheduledJobInfo represents a scheduled job.
 type ScheduledJobInfo struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Type        string     `json:"type"`
-	Schedule    string     `json:"schedule"`
-	Enabled     bool       `json:"enabled"`
-	NextRun     *string    `json:"next_run,omitempty"`
-	LastRun     *string    `json:"last_run,omitempty"`
-	LastError   string     `json:"last_error,omitempty"`
-	RunCount    int64      `json:"run_count"`
-	IsRunning   bool       `json:"is_running"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Type      string  `json:"type"`
+	Schedule  string  `json:"schedule"`
+	Enabled   bool    `json:"enabled"`
+	NextRun   *string `json:"next_run,omitempty"`
+	LastRun   *string `json:"last_run,omitempty"`
+	LastError string  `json:"last_error,omitempty"`
+	RunCount  int64   `json:"run_count"`
+	IsRunning bool    `json:"is_running"`
 }
 
 // ScheduleListResult is the result of listing scheduled jobs.

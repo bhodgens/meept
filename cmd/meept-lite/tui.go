@@ -26,13 +26,17 @@ type TUI struct {
 	autocomplete *sharedclient.SlashAutocomplete
 
 	// Menus
-	sessionMenu  *menus.SessionMenu
-	tasksMenu    *menus.TasksMenu
-	queueMenu    *menus.QueueMenu
-	memoryMenu   *menus.MemoryMenu
-	chatMenu     *menus.ChatMenu
-	cmdPalette   *menus.CommandPalette
-	activeMenu   interface{ IsVisible() bool; Hide(); Render() }
+	sessionMenu *menus.SessionMenu
+	tasksMenu   *menus.TasksMenu
+	queueMenu   *menus.QueueMenu
+	memoryMenu  *menus.MemoryMenu
+	chatMenu    *menus.ChatMenu
+	cmdPalette  *menus.CommandPalette
+	activeMenu  interface {
+		IsVisible() bool
+		Hide()
+		Render()
+	}
 
 	// Input state
 	inputBuffer strings.Builder
@@ -43,14 +47,14 @@ type TUI struct {
 	scrollOffset int // 0 = at bottom, >0 = scrolled up
 
 	// Command mode state
-	commandMode   bool
-	commandKey    string // waiting for second key after ctrl+x
+	commandMode bool
+	commandKey  string // waiting for second key after ctrl+x
 
 	// Bracketed paste support
 	inPaste     bool
 	pasteBuffer strings.Builder
 	pasteSeq    strings.Builder // builds the bracket sequence [200~ or [201~
-	_pasteState int            // 0=idle, 1-5=parsing, 6=inside paste
+	_pasteState int             // 0=idle, 1-5=parsing, 6=inside paste
 
 	// Running state
 	quitting bool

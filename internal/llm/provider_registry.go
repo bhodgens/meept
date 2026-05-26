@@ -23,8 +23,8 @@ const (
 
 // Content type constants for API response parsing.
 const (
-	ContentTypeText    = "text"
-	ContentTypeToolUse = "tool_use"
+	ContentTypeText     = "text"
+	ContentTypeToolUse  = "tool_use"
 	ContentTypeThinking = "thinking"
 	ContentTypeFunction = "function"
 
@@ -104,13 +104,13 @@ var CanonicalProviders = []ProviderDef{
 		Supports:     []string{CapStreaming, CapTools, CapImages, "responses"},
 	},
 	{
-		ID:           ProviderIDOllama,
-		Name:         "Ollama",
-		Transport:    TransportOpenAIChat,
-		AuthType:     AuthEnvVar,
-		BaseURL:      "http://localhost:11434/v1",
-		DocURL:       "https://ollama.ai/docs",
-		Supports:     []string{CapStreaming, "local"},
+		ID:        ProviderIDOllama,
+		Name:      "Ollama",
+		Transport: TransportOpenAIChat,
+		AuthType:  AuthEnvVar,
+		BaseURL:   "http://localhost:11434/v1",
+		DocURL:    "https://ollama.ai/docs",
+		Supports:  []string{CapStreaming, "local"},
 	},
 	//nolint:gosec // field name, not a secret
 	{
@@ -178,13 +178,13 @@ var CanonicalProviders = []ProviderDef{
 		Supports:     []string{CapStreaming, "models"},
 	},
 	{
-		ID:           ProviderIDBedrock,
-		Name:         "AWS Bedrock",
-		Transport:    TransportBedrockConverse,
-		AuthType:     AuthEnvVar,
-		BaseURL:      "",
-		DocURL:       "https://docs.aws.amazon.com/bedrock",
-		Supports:     []string{CapStreaming, CapTools, "aws"},
+		ID:        ProviderIDBedrock,
+		Name:      "AWS Bedrock",
+		Transport: TransportBedrockConverse,
+		AuthType:  AuthEnvVar,
+		BaseURL:   "",
+		DocURL:    "https://docs.aws.amazon.com/bedrock",
+		Supports:  []string{CapStreaming, CapTools, "aws"},
 	},
 }
 

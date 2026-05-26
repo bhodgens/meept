@@ -73,7 +73,7 @@ func TestExtractReport(t *testing.T) {
 			wantNil:  true,
 		},
 		{
-			name: "invalid status",
+			name:     "invalid status",
 			response: "```json\n" + `{"status": "unknown", "accomplished": []}` + "\n```",
 			wantNil:  true,
 		},

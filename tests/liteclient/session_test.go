@@ -27,10 +27,10 @@ func newMockSessionServer(t *testing.T) (*httptest.Server, *mockSessionHandler) 
 
 // mockSessionHandler simulates session RPC responses over HTTP
 type mockSessionHandler struct {
-	sessions   []types.Session
-	nextID     int
-	createdDS  bool
-	lastDesc   string
+	sessions  []types.Session
+	nextID    int
+	createdDS bool
+	lastDesc  string
 }
 
 func (h *mockSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +39,7 @@ func (h *mockSessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	
+
 	var req struct {
 		Method string          `json:"method"`
 		Params json.RawMessage `json:"params"`
@@ -83,8 +83,8 @@ func (h *mockSessionHandler) handleCreate(w http.ResponseWriter, params json.Raw
 	json.Unmarshal(params, &p)
 	h.nextID++
 	sess := types.Session{
-		ID:     fmt.Sprintf("sess-%d", h.nextID),
-		Name:   p.Name,
+		ID:            fmt.Sprintf("sess-%d", h.nextID),
+		Name:          p.Name,
 		LeafMessageID: nil,
 	}
 	h.sessions = append(h.sessions, sess)

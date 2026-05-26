@@ -49,15 +49,15 @@ const (
 type JobType string
 
 const (
-	JobTypeOneOff      JobType = "one_off"       // Single execution job
-	JobTypeProjectTask JobType = "project_task"  // Part of a larger task
+	JobTypeOneOff      JobType = "one_off"      // Single execution job
+	JobTypeProjectTask JobType = "project_task" // Part of a larger task
 )
 
 // Job represents a unit of work in the queue.
 type Job struct {
 	ID           string          `json:"id"`
-	TaskID       string          `json:"task_id,omitempty"`   // Parent task (null for standalone)
-	AgentID      string          `json:"agent_id,omitempty"`  // Target agent (e.g., "coder", "planner")
+	TaskID       string          `json:"task_id,omitempty"`  // Parent task (null for standalone)
+	AgentID      string          `json:"agent_id,omitempty"` // Target agent (e.g., "coder", "planner")
 	Type         JobType         `json:"type"`
 	Priority     Priority        `json:"priority"`
 	State        JobState        `json:"state"`

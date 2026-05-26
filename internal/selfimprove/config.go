@@ -10,10 +10,10 @@ import (
 // Config holds the configuration for the self-improvement system.
 type Config struct {
 	// General settings
-	Enabled              bool          `json:"enabled"`
-	DataPath             string        `json:"data_path"`
-	MaxIterationsPerCycle int          `json:"max_iterations_per_cycle"`
-	MaxFixesPerCycle     int           `json:"max_fixes_per_cycle"`
+	Enabled               bool   `json:"enabled"`
+	DataPath              string `json:"data_path"`
+	MaxIterationsPerCycle int    `json:"max_iterations_per_cycle"`
+	MaxFixesPerCycle      int    `json:"max_fixes_per_cycle"`
 
 	// Detection settings
 	Detection DetectionConfig `json:"detection"`
@@ -133,14 +133,14 @@ func DefaultConfig() Config {
 				"memory_usage",
 			},
 			// FIX #0056 - Tool scanning defaults
-			ScanPytest:         true,
-			ScanLint:           true,
-			ScanTypeCheck:      true,
-			ScanRuntimeLogs:    true,
-			LogFile:            filepath.Join(homeDir, ".meept", "meept.log"),
-			LogLookbackHours:   24,
+			ScanPytest:           true,
+			ScanLint:             true,
+			ScanTypeCheck:        true,
+			ScanRuntimeLogs:      true,
+			LogFile:              filepath.Join(homeDir, ".meept", "meept.log"),
+			LogLookbackHours:     24,
 			MaxCodeIssuesPerFile: 20,
-			DeduplicateTODOs:   true,
+			DeduplicateTODOs:     true,
 		},
 		AIInfra: AIInfraConfig{
 			AnalysisModel:       "claude-sonnet-4-5-20250929",

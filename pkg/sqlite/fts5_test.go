@@ -191,11 +191,11 @@ func TestNormalizeRank(t *testing.T) {
 		expected float64
 	}{
 		{0.0, 0.0},
-		{1.0, 0.0},     // Positive ranks should return 0
-		{-1.0, 0.5},    //nolint:gocritic // test explanation: 1/(1+1)=0.5
-		{-4.0, 0.2},    //nolint:gocritic // test explanation: 1/(1+4)=0.2
-		{-9.0, 0.1},    //nolint:gocritic // test explanation: 1/(1+9)=0.1
-		{-0.5, 1.0/1.5}, // 1 / (1 + 0.5) = 0.666...
+		{1.0, 0.0},        // Positive ranks should return 0
+		{-1.0, 0.5},       //nolint:gocritic // test explanation: 1/(1+1)=0.5
+		{-4.0, 0.2},       //nolint:gocritic // test explanation: 1/(1+4)=0.2
+		{-9.0, 0.1},       //nolint:gocritic // test explanation: 1/(1+9)=0.1
+		{-0.5, 1.0 / 1.5}, // 1 / (1 + 0.5) = 0.666...
 	}
 
 	for _, tt := range tests {

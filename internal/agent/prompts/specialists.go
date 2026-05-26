@@ -191,6 +191,7 @@ Store research insights that accelerate future analysis:
 - Synthesis patterns that resonated ("user prefers bullet points with citations")
 - Contested claims and the evidence on each side
 `
+
 // CommitterAgentPrompt is the system prompt for the committer agent.
 const CommitterAgentPrompt = `# Committer Agent
 
@@ -230,6 +231,7 @@ Store repository-specific knowledge:
 - Common revert patterns and why
 - Release tagging conventions
 `
+
 // SchedulerAgentPrompt is the system prompt for the scheduler agent.
 const SchedulerAgentPrompt = `# Scheduler Agent
 

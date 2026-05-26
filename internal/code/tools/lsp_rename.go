@@ -120,10 +120,10 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 
 	if workspaceEdit == nil || len(workspaceEdit.Changes) == 0 {
 		return map[string]any{
-			SchemaPropFound:   false,
-			SchemaPropMessage: "No rename edits returned for this location",
-			SchemaPropFilePath: filePath,
-			SchemaPropLine:    line,
+			SchemaPropFound:     false,
+			SchemaPropMessage:   "No rename edits returned for this location",
+			SchemaPropFilePath:  filePath,
+			SchemaPropLine:      line,
 			SchemaPropCharacter: char,
 		}, nil
 	}
@@ -140,13 +140,13 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 				SchemaPropStartChar: edit.Range.Start.Character,
 				SchemaPropEndLine:   edit.Range.End.Line,
 				SchemaPropEndChar:   edit.Range.End.Character,
-				"new_text":   edit.NewText,
+				"new_text":          edit.NewText,
 			}
 		}
 		changes = append(changes, map[string]any{
 			SchemaPropFilePath: path,
-			"edits":     editList,
-			SchemaPropCount:   len(editList),
+			"edits":            editList,
+			SchemaPropCount:    len(editList),
 		})
 		totalEdits += len(edits)
 	}
@@ -163,11 +163,11 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 
 	return map[string]any{
 		SchemaPropFound: true,
-		"applied":   apply,
-		"new_name":  newName,
-		"changes":   changes,
-		"file_count": len(workspaceEdit.Changes),
-		"edit_count": totalEdits,
+		"applied":       apply,
+		"new_name":      newName,
+		"changes":       changes,
+		"file_count":    len(workspaceEdit.Changes),
+		"edit_count":    totalEdits,
 	}, nil
 }
 

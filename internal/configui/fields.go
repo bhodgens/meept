@@ -12,7 +12,7 @@ import (
 type FieldType int
 
 const (
-	FieldText       FieldType = iota
+	FieldText FieldType = iota
 	FieldToggle
 	FieldSelect
 	FieldMultiSelect
@@ -26,11 +26,11 @@ const (
 type Field interface {
 	Key() string
 	Label() string
-	Get() string            // current value as string
-	Set(string) error       // set value from string; may validate
-	Display() string        // value shown in the field list (may mask)
-	IsDirty() bool          // value changed since load?
-	Reset()                 // restore original value
+	Get() string      // current value as string
+	Set(string) error // set value from string; may validate
+	Display() string  // value shown in the field list (may mask)
+	IsDirty() bool    // value changed since load?
+	Reset()           // restore original value
 	Type() FieldType
 	Help() string
 	SetHelp(string)

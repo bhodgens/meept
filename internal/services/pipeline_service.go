@@ -20,18 +20,18 @@ type Pipeline struct {
 
 // PipelineStep represents a single step in a pipeline.
 type PipelineStep struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Error     string `json:"error,omitempty"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Status    string     `json:"status"`
+	Error     string     `json:"error,omitempty"`
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 
 // PipelineService handles pipeline operations.
 type PipelineService struct {
-	mu         sync.RWMutex
-	pipelines  map[string]*Pipeline
+	mu        sync.RWMutex
+	pipelines map[string]*Pipeline
 }
 
 // NewPipelineService creates a pipeline service.
@@ -48,12 +48,12 @@ type StatusRequest struct {
 
 // PipelineStatusResponse contains pipeline status.
 type PipelineStatusResponse struct {
-	PipelineID string         `json:"pipeline_id"`
-	Name       string         `json:"name"`
-	Status     string         `json:"status"`
+	PipelineID string               `json:"pipeline_id"`
+	Name       string               `json:"name"`
+	Status     string               `json:"status"`
 	Steps      []PipelineStepStatus `json:"steps"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	CreatedAt  time.Time            `json:"created_at"`
+	UpdatedAt  time.Time            `json:"updated_at"`
 }
 
 // PipelineStepStatus contains step status information.

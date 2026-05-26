@@ -293,7 +293,7 @@ func runBranchNavigate(sessionID string, targetMessageID int64) error {
 	}
 
 	params := map[string]any{
-		paramSessionID:        sessionID,
+		paramSessionID:      sessionID,
 		"target_message_id": targetMessageID,
 	}
 
@@ -343,9 +343,9 @@ func runBranchFork(sessionID string, fromMessageID int64, forkName string) error
 	}
 
 	params := map[string]any{
-		paramSessionID:      sessionID,
+		paramSessionID:    sessionID,
 		"from_message_id": fromMessageID,
-		paramName:            forkName,
+		paramName:         forkName,
 	}
 
 	result, err := client.Call("session.fork", params)

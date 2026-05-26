@@ -107,7 +107,7 @@ type CompactionConfig struct {
 	KeepRecentTokens  int     `json:"keep_recent_tokens"  toml:"keep_recent_tokens"`
 	MaxResponseTokens int     `json:"max_response_tokens" toml:"max_response_tokens"`
 	SummaryFormat     string  `json:"summary_format"      toml:"summary_format"`
-	Strategy          string  `json:"strategy"            toml:"strategy"`           // "structured" | "handoff" | "off"
+	Strategy          string  `json:"strategy"            toml:"strategy"` // "structured" | "handoff" | "off"
 	TriggerRatio      float64 `json:"trigger_ratio"       toml:"trigger_ratio"`
 	IterativeUpdates  bool    `json:"iterative_updates"   toml:"iterative_updates"`
 	TrackFileOps      bool    `json:"track_file_ops"      toml:"track_file_ops"`
@@ -209,19 +209,19 @@ type RPCTransportConfig struct {
 
 // HTTPTransportConfig configures the HTTP transport with modular endpoint support.
 type HTTPTransportConfig struct {
-	Enabled      bool     `json:"enabled"       toml:"enabled"`       // Enable HTTP server (default: false)
-	Addr         string   `json:"addr"          toml:"addr"`          // Listen address (default: ":8081")
-	RequireAuth  bool     `json:"require_auth"  toml:"require_auth"`  // Require API key authentication
-	APIKeys      []string `json:"api_keys"      toml:"api_keys"`      // Valid API keys for authentication
-	UseTLS       bool     `json:"use_tls"       toml:"use_tls"`       // Enable HTTPS (default: true)
-	AutoTLSCert  bool     `json:"auto_tls_cert" toml:"auto_tls_cert"` // Auto-generate self-signed cert
+	Enabled     bool     `json:"enabled"       toml:"enabled"`       // Enable HTTP server (default: false)
+	Addr        string   `json:"addr"          toml:"addr"`          // Listen address (default: ":8081")
+	RequireAuth bool     `json:"require_auth"  toml:"require_auth"`  // Require API key authentication
+	APIKeys     []string `json:"api_keys"      toml:"api_keys"`      // Valid API keys for authentication
+	UseTLS      bool     `json:"use_tls"       toml:"use_tls"`       // Enable HTTPS (default: true)
+	AutoTLSCert bool     `json:"auto_tls_cert" toml:"auto_tls_cert"` // Auto-generate self-signed cert
 
 	// Modular endpoints - enable/disable individual transport features
-	REST      bool   `json:"rest"       toml:"rest"`       // Enable REST API at /api/v1/* (default: true)
-	WebSocket bool   `json:"websocket"  toml:"websocket"`  // Enable WebSocket at /ws (default: false)
-	WSPath    string `json:"ws_path"    toml:"ws_path"`    // WebSocket endpoint path (default: "/ws")
-	MCP       bool   `json:"mcp"        toml:"mcp"`        // Enable MCP over HTTP+SSE at /mcp (default: false)
-	MCPPath   string `json:"mcp_path"   toml:"mcp_path"`   // MCP endpoint path (default: "/mcp")
+	REST      bool   `json:"rest"       toml:"rest"`      // Enable REST API at /api/v1/* (default: true)
+	WebSocket bool   `json:"websocket"  toml:"websocket"` // Enable WebSocket at /ws (default: false)
+	WSPath    string `json:"ws_path"    toml:"ws_path"`   // WebSocket endpoint path (default: "/ws")
+	MCP       bool   `json:"mcp"        toml:"mcp"`       // Enable MCP over HTTP+SSE at /mcp (default: false)
+	MCPPath   string `json:"mcp_path"   toml:"mcp_path"`  // MCP endpoint path (default: "/mcp")
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.
@@ -309,12 +309,12 @@ type LLMMetricsConfig struct {
 
 // BudgetConfig holds token budget settings.
 type BudgetConfig struct {
-	HourlyTokenLimit   int     `json:"hourly_token_limit" toml:"hourly_token_limit"`
-	DailyTokenLimit    int     `json:"daily_token_limit"  toml:"daily_token_limit"`
-	RateLimitRPM       int     `json:"rate_limit_rpm"     toml:"rate_limit_rpm"`
-	Aggressiveness     float64 `json:"aggressiveness"     toml:"aggressiveness"`
-	PerTaskTokenLimit  int     `json:"per_task_token_limit"  toml:"per_task_token_limit"`   // max tokens per single task (0 = no cap)
-	PerSessionTokenLimit int   `json:"per_session_token_limit" toml:"per_session_token_limit"` // max tokens per single session (0 = no cap)
+	HourlyTokenLimit     int     `json:"hourly_token_limit" toml:"hourly_token_limit"`
+	DailyTokenLimit      int     `json:"daily_token_limit"  toml:"daily_token_limit"`
+	RateLimitRPM         int     `json:"rate_limit_rpm"     toml:"rate_limit_rpm"`
+	Aggressiveness       float64 `json:"aggressiveness"     toml:"aggressiveness"`
+	PerTaskTokenLimit    int     `json:"per_task_token_limit"  toml:"per_task_token_limit"`      // max tokens per single task (0 = no cap)
+	PerSessionTokenLimit int     `json:"per_session_token_limit" toml:"per_session_token_limit"` // max tokens per single session (0 = no cap)
 }
 
 // MemoryBackend defines the storage backend for memory.
@@ -428,7 +428,7 @@ type PersonalityConfig struct {
 type EmbeddingConfig struct {
 	Enabled   bool   `json:"enabled"   toml:"enabled"`
 	Provider  string `json:"provider"  toml:"provider"` // "openai" or "ollama"
-	APIKey    string `json:"api_key"   toml:"api_key"`   //nolint:gosec // field name, not a secret
+	APIKey    string `json:"api_key"   toml:"api_key"`  //nolint:gosec // field name, not a secret
 	BaseURL   string `json:"base_url"  toml:"base_url"`
 	Model     string `json:"model"     toml:"model"`
 	Dimension int    `json:"dimension" toml:"dimension"`
@@ -785,7 +785,7 @@ type SelfImproveConfig struct {
 type AIInfraConfig struct {
 	Enabled         bool    `json:"enabled"          toml:"enabled"`
 	BaseURL         string  `json:"base_url"         toml:"base_url"`
-	APIKeyEnv       string  `json:"api_key_env"      toml:"api_key_env"`   //nolint:gosec // field name, not a secret
+	APIKeyEnv       string  `json:"api_key_env"      toml:"api_key_env"` //nolint:gosec // field name, not a secret
 	AnalysisModel   string  `json:"analysis_model"   toml:"analysis_model"`
 	GenerationModel string  `json:"generation_model" toml:"generation_model"`
 	ReviewModel     string  `json:"review_model"     toml:"review_model"`
@@ -977,10 +977,10 @@ func DefaultConfig() *Config {
 			HTTP: HTTPTransportConfig{
 				Enabled:   false,
 				Addr:      ":8081",
-				REST:      true,    // REST API enabled by default when HTTP is enabled
-				WebSocket: false,   // WebSocket disabled by default
+				REST:      true,  // REST API enabled by default when HTTP is enabled
+				WebSocket: false, // WebSocket disabled by default
 				WSPath:    "/ws",
-				MCP:       false,   // MCP disabled by default
+				MCP:       false, // MCP disabled by default
 				MCPPath:   "/mcp",
 			},
 		},
@@ -990,8 +990,8 @@ func DefaultConfig() *Config {
 				DailyTokenLimit:      1000000,
 				RateLimitRPM:         30,
 				Aggressiveness:       0.5,
-				PerTaskTokenLimit:    50000,    // 50% of hourly budget max per task
-				PerSessionTokenLimit: 100000,   // 100% of hourly budget max per session
+				PerTaskTokenLimit:    50000,  // 50% of hourly budget max per task
+				PerSessionTokenLimit: 100000, // 100% of hourly budget max per session
 			},
 			Broker: LLMBrokerConfig{
 				MaxErrorRate:    0.10,
@@ -1479,7 +1479,7 @@ const (
 
 // Capability and domain constants used in default configurations.
 const (
-	CapCode     = "code"
+	CapCode      = "code"
 	CapReasoning = "reasoning"
 	DomainCode   = "code"
 )

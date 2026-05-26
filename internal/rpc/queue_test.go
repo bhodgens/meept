@@ -251,7 +251,7 @@ func TestQueueHandler_FollowUp_QueueFull(t *testing.T) {
 	defer reg.Close()
 
 	q := agent.NewMessageQueue(agent.WithQueueConfig(agent.QueueConfig{
-		MaxFollowUp:   2,
+		MaxFollowUp:     2,
 		PersistFollowUp: false,
 	}))
 	reg.RegisterActiveQueue(convID, q)

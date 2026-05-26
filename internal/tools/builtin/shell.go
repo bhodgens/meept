@@ -516,6 +516,6 @@ func extractBaseCommand(command string) string {
 
 // Ensure ShellExecuteTool implements the Tool and StreamingTool interfaces
 var (
-	_ tools.Tool         = (*ShellExecuteTool)(nil)
+	_ tools.Tool          = (*ShellExecuteTool)(nil)
 	_ tools.StreamingTool = (*ShellExecuteTool)(nil)
 )

@@ -7,11 +7,12 @@ import (
 
 // Context section and role constants.
 const (
-	SectionAgent             = "agent"
+	SectionAgent                = "agent"
 	SectionArchitectureOverview = "Architecture Overview"
 )
 
 // ContextBuilder builds context from artifacts for agent prompts
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type ContextBuilder struct {
 	artifacts *Artifacts

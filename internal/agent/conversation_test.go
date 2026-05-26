@@ -951,10 +951,10 @@ func TestRemoveCompactedMessages(t *testing.T) {
 
 	t.Run("removes specified indices", func(t *testing.T) {
 		conv := NewConversation()
-		conv.AddUserMessage("user query")          // index 0
+		conv.AddUserMessage("user query")           // index 0
 		conv.AddAssistantMessage("reasoning step")  // index 1 (to remove)
-		conv.AddAssistantMessage("another thought")  // index 2 (to remove)
-		conv.AddAssistantMessage("final answer")     // index 3
+		conv.AddAssistantMessage("another thought") // index 2 (to remove)
+		conv.AddAssistantMessage("final answer")    // index 3
 
 		saved := conv.RemoveCompactedMessages([]int{1, 2})
 		if saved <= 0 {
@@ -977,8 +977,8 @@ func TestRemoveCompactedMessages(t *testing.T) {
 
 	t.Run("syncs messageTypes slice", func(t *testing.T) {
 		conv := NewConversation()
-		conv.AddUserMessage("query")          // MessageUserInput
-		conv.AddAssistantMessage("let me think") // MessageReasoningStep (to remove)
+		conv.AddUserMessage("query")                              // MessageUserInput
+		conv.AddAssistantMessage("let me think")                  // MessageReasoningStep (to remove)
 		conv.AddAssistantMessage("in conclusion, done. summary:") // MessageAssistantConclusion
 
 		conv.RemoveCompactedMessages([]int{1})

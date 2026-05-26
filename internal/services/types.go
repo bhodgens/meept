@@ -18,10 +18,10 @@ func DefaultListOptions() ListOptions {
 
 // PaginatedResponse wraps a paginated list response.
 type PaginatedResponse[T any] struct {
-	Items      []T `json:"items"`
-	Total      int `json:"total"`
+	Items      []T  `json:"items"`
+	Total      int  `json:"total"`
 	HasMore    bool `json:"has_more"`
-	NextOffset int `json:"next_offset,omitempty"`
+	NextOffset int  `json:"next_offset,omitempty"`
 }
 
 // NewPaginatedResponse creates a paginated response from items and options.

@@ -6,20 +6,20 @@ import (
 
 // SessionInfo represents a conversation session for API responses.
 type SessionInfo struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	CreatedAt    string    `json:"created_at"`
-	LastActivity string    `json:"last_activity"`
-	RequestCount int       `json:"request_count"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	CreatedAt    string `json:"created_at"`
+	LastActivity string `json:"last_activity"`
+	RequestCount int    `json:"request_count"`
 }
 
 // AgentEntry represents an agent for listing via the API.
 type AgentEntry struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Role        string   `json:"role"`
-	Description string   `json:"description"`
-	Enabled     bool     `json:"enabled"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Role         string   `json:"role"`
+	Description  string   `json:"description"`
+	Enabled      bool     `json:"enabled"`
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
@@ -110,4 +110,3 @@ type JobScheduler interface {
 	GetJob(ctx context.Context, id string) (map[string]any, error)
 	CancelJob(ctx context.Context, id string) error
 }
-

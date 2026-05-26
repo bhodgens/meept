@@ -42,7 +42,7 @@ const (
 // methodToTopics maps RPC method names to (requestTopic, responseTopic).
 var methodToTopics = map[string][2]string{
 	"chat":                         {"chat.request", "chat.response"},
-	KeyStatus:                     {"status.request", "status.response"},
+	KeyStatus:                      {"status.request", "status.response"},
 	"memory.query":                 {"memory.query", "memory.result"},
 	"memory.recent":                {"memory.recent", "memory.result"},
 	"memory.export":                {"memory.export", "memory.result"},

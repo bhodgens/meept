@@ -15,6 +15,7 @@ const (
 )
 
 // Skill represents a parsed skill definition from a SKILL.md file.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Skill struct {
 	// Name is the unique identifier for the skill (e.g., "code-review").
@@ -79,6 +80,7 @@ func (s *Skill) MatchesTags(tags []string) bool {
 }
 
 // SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type SkillMetadata struct {
 	Name          string   `yaml:"name"`
@@ -102,6 +104,7 @@ func DefaultMetadata() SkillMetadata {
 }
 
 // SkillExecutionResult holds the result of executing a skill.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type SkillExecutionResult struct {
 	// Content is the LLM response content.

@@ -23,6 +23,7 @@ type ValidationResult struct {
 }
 
 // Validator is the interface for validating tool execution evidence.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Validator interface {
 	// Validate checks evidence against ground truth.
@@ -186,4 +187,3 @@ func (v *StepValidator) validateClaim(_ context.Context, claim string, evidence 
 
 	return ValidationResult{Valid: true}
 }
-

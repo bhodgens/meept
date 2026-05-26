@@ -211,8 +211,8 @@ func TestTemplateInvokeTool_SessionInject(t *testing.T) {
 	tool := NewTemplateInvokeTool(reg)
 
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"name":           "always-french",
-		"inject":         true,
+		"name":            "always-french",
+		"inject":          true,
 		"conversation_id": "conv-123",
 	})
 	if err != nil {

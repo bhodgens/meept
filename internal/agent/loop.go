@@ -320,6 +320,7 @@ const (
 )
 
 // AgentMemoryConfig holds memory recall configuration for an agent.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentMemoryConfig struct {
 	RecallMode MemoryRecallMode `json:"recall_mode"`
@@ -330,6 +331,7 @@ type AgentMemoryConfig struct {
 }
 
 // AgentConfig holds configuration for the agent loop.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentConfig struct {
 	MaxIterations           int
@@ -360,7 +362,7 @@ type AgentConfig struct {
 	// SummaryLevelThreshold is the token count at which a summary is
 	// re-summarized at the next level (default 500).
 	SummaryLevelThreshold int
-	Compaction config.CompactionConfig
+	Compaction            config.CompactionConfig
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -380,6 +382,7 @@ func DefaultAgentConfig() AgentConfig {
 }
 
 // AgentLoop orchestrates LLM reasoning interleaved with tool execution.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentLoop struct {
 	mu sync.RWMutex
@@ -1028,12 +1031,12 @@ func (l *AgentLoop) FirewallStats() map[string]any {
 
 	stats := fw.Stats()
 	m := map[string]any{
-		"summarization_failures": stats.SummarizationFailures,
-		"dropped_messages":       stats.DroppedMessages,
-		"drop_events":            stats.DropEvents,
-		"compaction_events":      stats.CompactionEvents,
+		"summarization_failures":  stats.SummarizationFailures,
+		"dropped_messages":        stats.DroppedMessages,
+		"drop_events":             stats.DropEvents,
+		"compaction_events":       stats.CompactionEvents,
 		"compaction_tokens_saved": stats.CompactionTokensSaved,
-		"compaction_fallbacks":   stats.CompactionFallbacks,
+		"compaction_fallbacks":    stats.CompactionFallbacks,
 	}
 
 	// Include compression stats when proactive compression is enabled
@@ -2162,7 +2165,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 					if l.resolver != nil {
 						mc, resolveErr := l.resolver.ResolveForAlias(mod.ModelOverride)
 						if resolveErr == nil {
-							l.llmClient.SwitchModel(mc)
+							_ = l.llmClient.SwitchModel(mc)
 							l.logger.Debug("Model overridden by PrepareNextTurn hook",
 								"model", mc.ModelID,
 							)
@@ -2262,7 +2265,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			} else if l.llmClient != nil {
 				// Switch the LLM client to the resolved model
 				oldModel := l.llmClient.Config().ModelID
-				l.llmClient.SwitchModel(modelConfig)
+				_ = l.llmClient.SwitchModel(modelConfig)
 				l.logger.Info("Agent switched model",
 					"agent_id", l.agentID,
 					"from_model", oldModel,
@@ -2792,7 +2795,7 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 				return nil, err
 			}
 			if l.llmClient != nil {
-				l.llmClient.SwitchModel(modelConfig)
+				_ = l.llmClient.SwitchModel(modelConfig)
 			}
 		}
 
@@ -3365,7 +3368,7 @@ func containsAnyKeyword(text string, keywords []string) bool {
 // When recall mode is "disabled", these tools are gated and return an error.
 var memoryToolNames = map[string]bool{
 	"memory_store":               true,
-	ToolMemorySearch:              true,
+	ToolMemorySearch:             true,
 	ToolMemoryGetContext:         true,
 	"memory_get_version":         true,
 	"memory_get_version_history": true,
@@ -3820,6 +3823,7 @@ func (l *AgentLoop) Run(ctx context.Context, messages <-chan *AgentMessage, resp
 }
 
 // AgentMessage represents an incoming message to the agent.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentMessage struct {
 	ID             string `json:"id"`
@@ -3829,6 +3833,7 @@ type AgentMessage struct {
 }
 
 // AgentResponse represents the agent's response.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentResponse struct {
 	ConversationID string `json:"conversation_id"`
@@ -4107,10 +4112,10 @@ func (l *AgentLoop) handleDeferrableTool(ctx context.Context, tc llm.ToolCall, d
 
 	// Build a result describing the preview to send back to the LLM
 	previewResult := map[string]any{
-		"deferred":   true,
-		"tool_name":  preview.ToolName,
+		"deferred":    true,
+		"tool_name":   preview.ToolName,
 		"description": preview.Description,
-		"message":    "action previewed and awaiting resolution. use the 'resolve' tool with action='apply' to execute or action='discard' to cancel.",
+		"message":     "action previewed and awaiting resolution. use the 'resolve' tool with action='apply' to execute or action='discard' to cancel.",
 	}
 	if preview.Diff != "" {
 		previewResult["diff"] = preview.Diff

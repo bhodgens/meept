@@ -59,9 +59,9 @@ func TestClusterBySimilarity_SimilarMemories(t *testing.T) {
 
 	embedder := &mockEmbedder{
 		embeddings: map[string][]float32{
-			"rust programming":  base,
-			"go programming":    sim,
-			"web development":   orthogonalVector(base),
+			"rust programming": base,
+			"go programming":   sim,
+			"web development":  orthogonalVector(base),
 		},
 	}
 
@@ -253,10 +253,10 @@ func TestCosineSimilarity(t *testing.T) {
 		wantOne  bool
 	}{
 		{
-			name:     "identical vectors",
-			a:        []float32{1.0, 0.0, 0.0},
-			b:        []float32{1.0, 0.0, 0.0},
-			wantOne:  true,
+			name:    "identical vectors",
+			a:       []float32{1.0, 0.0, 0.0},
+			b:       []float32{1.0, 0.0, 0.0},
+			wantOne: true,
 		},
 		{
 			name:     "orthogonal vectors",

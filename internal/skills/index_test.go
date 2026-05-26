@@ -207,11 +207,11 @@ func TestSkillIndex_Match(t *testing.T) {
 		query    string
 		wantName string
 	}{
-		{"code-review", "code-review"},   // exact match
-		{"code", "code-review"},          // prefix match (or highest scoring)
-		{"review", "code-review"},        // contains match
-		{"format code", "code-format"},   // word match
-		{"nonexistent", ""},              // no match
+		{"code-review", "code-review"}, // exact match
+		{"code", "code-review"},        // prefix match (or highest scoring)
+		{"review", "code-review"},      // contains match
+		{"format code", "code-format"}, // word match
+		{"nonexistent", ""},            // no match
 	}
 
 	for _, tt := range tests {

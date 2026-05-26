@@ -53,12 +53,12 @@ const (
 
 // LaunchAgentController manages the launchd agent for the daemon.
 type LaunchAgentController struct {
-	meeptDir      string
-	plistPath     string
-	daemonPath    string
-	logPath       string
-	errLogPath    string
-	workingDir    string
+	meeptDir   string
+	plistPath  string
+	daemonPath string
+	logPath    string
+	errLogPath string
+	workingDir string
 }
 
 // NewLaunchAgentController creates a new LaunchAgentController.
@@ -265,11 +265,11 @@ func parseElapsedTime(s string) time.Duration {
 		return 0
 	}
 
-// CORE-8 FIX: Use explicit time.Duration arithmetic instead of
-// int(time.Hour) casting. The old pattern `int(time.Hour)` was
-// fragile because it casts a Duration type to int before multiplying,
-// which can be confusing. Now we use `time.Duration(days)*24*time.Hour`
-// which keeps everything in Duration types and reads more clearly.
+	// CORE-8 FIX: Use explicit time.Duration arithmetic instead of
+	// int(time.Hour) casting. The old pattern `int(time.Hour)` was
+	// fragile because it casts a Duration type to int before multiplying,
+	// which can be confusing. Now we use `time.Duration(days)*24*time.Hour`
+	// which keeps everything in Duration types and reads more clearly.
 	return time.Duration(days)*24*time.Hour +
 		time.Duration(hours)*time.Hour +
 		time.Duration(mins)*time.Minute +
@@ -388,6 +388,7 @@ func (c *LaunchAgentController) Uninstall() error {
 // DaemonController interface implementation for HTTP server
 
 // DaemonControl provides daemon control functionality.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type DaemonControl struct {
 	controller *LaunchAgentController

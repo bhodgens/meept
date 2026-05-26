@@ -77,8 +77,8 @@ func TestAdapterDetectNoMatch(t *testing.T) {
 
 func TestFindAdapterByName(t *testing.T) {
 	tests := []struct {
-		name     string
-		wantNil  bool
+		name    string
+		wantNil bool
 	}{
 		{"dlv", false},
 		{"gdb", false},

@@ -17,11 +17,11 @@ import (
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/code/lsp"
-	"github.com/caimlas/meept/internal/debug"
 	codetools "github.com/caimlas/meept/internal/code/tools"
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
@@ -83,9 +83,9 @@ type Components struct {
 	MemoryHandler *memory.Handler
 
 	// Memvid and multi-agent
-	MemvidClient  *memvid.Client
+	MemvidClient         *memvid.Client
 	AgentRegistry        *agent.AgentRegistry
-	Dispatcher         *agent.Dispatcher
+	Dispatcher           *agent.Dispatcher
 	CollaborativePlanner *agent.CollaborativePlanner
 
 	// Shadow training
@@ -2022,7 +2022,7 @@ func registerPlatformTools(
 	if statusHandler != nil {
 		statusFunc = func() map[string]any {
 			return map[string]any{
-				KeyStatus:         StateRunning,
+				KeyStatus:        StateRunning,
 				"uptime_seconds": time.Since(statusHandler.startTime).Seconds(),
 				"version":        "0.2.0-go",
 			}
@@ -2409,13 +2409,17 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 		lspNotifier := builtin.NewLSPWriteNotifier(c.LSPManager, cfg.CodeIntel.LSP, logger.With("component", "lsp-writethrough"))
 		if lspNotifier != nil {
 			if tool := c.ToolRegistry.Get("file_write"); tool != nil {
-				if wt, ok := tool.(interface{ SetLSPNotifier(builtin.LSPWriteNotifier) }); ok {
+				if wt, ok := tool.(interface {
+					SetLSPNotifier(builtin.LSPWriteNotifier)
+				}); ok {
 					wt.SetLSPNotifier(lspNotifier)
 					logger.Debug("Wired LSP writethrough into file_write tool")
 				}
 			}
 			if tool := c.ToolRegistry.Get("file_edit"); tool != nil {
-				if wt, ok := tool.(interface{ SetLSPNotifier(builtin.LSPWriteNotifier) }); ok {
+				if wt, ok := tool.(interface {
+					SetLSPNotifier(builtin.LSPWriteNotifier)
+				}); ok {
 					wt.SetLSPNotifier(lspNotifier)
 					logger.Debug("Wired LSP writethrough into file_edit tool")
 				}
@@ -2718,7 +2722,7 @@ func (h *StatusHandler) handleStatusRequest(msg *models.BusMessage) {
 	uptime := time.Since(h.startTime).Seconds()
 
 	response := map[string]any{
-		KeyStatus:          StateRunning,
+		KeyStatus:         StateRunning,
 		"uptime_seconds":  uptime,
 		"version":         "0.2.0-go",
 		"bus_subscribers": len(h.bus.Stats()),
@@ -2903,7 +2907,7 @@ func (p *AgentJobProcessor) Process(ctx context.Context, job *queue.Job) (any, e
 	result := map[string]any{
 		"job_id":   job.ID,
 		"response": response,
-		KeyStatus:   "completed",
+		KeyStatus:  "completed",
 	}
 	if isStepJob {
 		result["step_id"] = stepPayload.StepID
@@ -2936,7 +2940,7 @@ func (h *webHandlerAdapter) Chat(ctx context.Context, message string) (string, e
 // Status returns the daemon status via the web handler.
 func (h *webHandlerAdapter) Status(ctx context.Context) (map[string]any, error) {
 	status := map[string]any{
-		KeyStatus:  StateRunning,
+		KeyStatus: StateRunning,
 		"version": "0.3.0-go",
 	}
 

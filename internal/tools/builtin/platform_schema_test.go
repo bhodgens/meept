@@ -50,7 +50,7 @@ func TestDelegateTaskTool_WithOutputSchema(t *testing.T) {
 			"agent_id": "coder",
 			"message":  "generate a person",
 			"output_schema": map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []any{"name", "age"},
 				"properties": map[string]any{
 					"name": map[string]any{"type": "string"},
@@ -99,7 +99,7 @@ func TestDelegateTaskTool_WithOutputSchema(t *testing.T) {
 			"agent_id": "coder",
 			"message":  "get status",
 			"output_schema": map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []any{"status"},
 				"properties": map[string]any{
 					"status": map[string]any{"type": "string"},
@@ -130,7 +130,7 @@ func TestDelegateTaskTool_WithOutputSchema(t *testing.T) {
 			"agent_id": "coder",
 			"message":  "generate a person",
 			"output_schema": map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []any{"name"},
 				"properties": map[string]any{
 					"name": map[string]any{"type": "string"},
@@ -160,7 +160,7 @@ func TestDelegateTaskTool_WithOutputSchema(t *testing.T) {
 			"agent_id": "coder",
 			"message":  "generate a person",
 			"output_schema": map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []any{"name", "age"},
 				"properties": map[string]any{
 					"name": map[string]any{"type": "string"},

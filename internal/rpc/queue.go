@@ -69,7 +69,7 @@ func (h *QueueHandler) handleSteer(ctx context.Context, params json.RawMessage) 
 
 	return map[string]any{
 		RPCKeyStatus: "queued",
-		"queue":  "steer",
+		"queue":      "steer",
 	}, nil
 }
 
@@ -106,7 +106,7 @@ func (h *QueueHandler) handleFollowUp(ctx context.Context, params json.RawMessag
 
 	return map[string]any{
 		RPCKeyStatus: "queued",
-		"queue":  "followup",
+		"queue":      "followup",
 	}, nil
 }
 
@@ -130,10 +130,10 @@ func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage)
 	q, _ := reg.GetActiveQueue(req.ConversationID)
 	if q == nil {
 		return map[string]any{
-			"steering_depth":  0,
-			"followup_depth":  0,
-			"is_active":       false,
-			"generation":      uint64(0),
+			"steering_depth": 0,
+			"followup_depth": 0,
+			"is_active":      false,
+			"generation":     uint64(0),
 		}, nil
 	}
 

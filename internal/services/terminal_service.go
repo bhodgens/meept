@@ -13,23 +13,23 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
-	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/internal/tools/builtin"
+	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
 
 // CommandHistory represents a shell command execution record.
 type CommandHistory struct {
-	ID         string            `json:"id"`
-	Command    string            `json:"command"`
-	Output     string            `json:"output,omitempty"`
-	Stderr     string            `json:"stderr,omitempty"`
-	ExitCode   int               `json:"exit_code"`
-	Timestamp  time.Time         `json:"timestamp"`
-	WorkingDir string            `json:"working_dir"`
-	Duration   time.Duration     `json:"duration_ms"`
+	ID         string             `json:"id"`
+	Command    string             `json:"command"`
+	Output     string             `json:"output,omitempty"`
+	Stderr     string             `json:"stderr,omitempty"`
+	ExitCode   int                `json:"exit_code"`
+	Timestamp  time.Time          `json:"timestamp"`
+	WorkingDir string             `json:"working_dir"`
+	Duration   time.Duration      `json:"duration_ms"`
 	RiskLevel  security.RiskLevel `json:"risk_level"`
-	Success    bool              `json:"success"`
+	Success    bool               `json:"success"`
 }
 
 // TerminalService provides shell terminal functionality.
@@ -47,10 +47,10 @@ type TerminalService struct {
 
 // TerminalSession represents an active terminal session.
 type TerminalSession struct {
-	ID         string
-	WorkingDir string
-	CreatedAt  time.Time
-	LastUsed   time.Time
+	ID           string
+	WorkingDir   string
+	CreatedAt    time.Time
+	LastUsed     time.Time
 	CommandCount int
 }
 

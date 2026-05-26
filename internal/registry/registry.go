@@ -20,6 +20,7 @@ type Component interface {
 }
 
 // Registry manages component lifecycle and dependencies.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Registry struct {
 	mu         sync.RWMutex

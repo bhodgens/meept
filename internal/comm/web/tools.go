@@ -8,7 +8,7 @@ import (
 func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
 	if s.toolLister == nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{
-			"tools":   []any{},
+			"tools":    []any{},
 			KeyCount:   0,
 			KeyMessage: "tool listing not configured",
 		})
@@ -22,7 +22,7 @@ func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"tools": tools,
+		"tools":  tools,
 		KeyCount: len(tools),
 	})
 }

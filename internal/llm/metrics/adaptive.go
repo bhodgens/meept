@@ -60,10 +60,12 @@ func (c *Calculator) SetLogger(logger *slog.Logger) {
 // Calculate returns an adaptive timeout for a provider/model based on historical metrics.
 //
 // If StddevTokenRateTimeout is true (default):
-//   timeout = estimatedTokens * (mean_ms_per_token + N * stddev_ms_per_token)
+//
+//	timeout = estimatedTokens * (mean_ms_per_token + N * stddev_ms_per_token)
 //
 // If false (simple latency mode):
-//   timeout = mean_latency + N * stddev_latency
+//
+//	timeout = mean_latency + N * stddev_latency
 //
 // Returns staticDefault if:
 //   - Disabled

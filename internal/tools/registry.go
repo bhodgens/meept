@@ -167,12 +167,13 @@ func (r *Registry) GetDefinitions() []llm.ToolDefinition {
 }
 
 // ToolRetryPolicy defines retry semantics for a specific tool.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type ToolRetryPolicy struct {
-	MaxRetries     int           // Maximum number of retry attempts
-	RetryDelay     time.Duration // Base delay between retries
-	Exponential    bool          // Use exponential backoff (delay * 2^attempt)
-	Retryable      bool          // Whether retries are allowed
+	MaxRetries      int              // Maximum number of retry attempts
+	RetryDelay      time.Duration    // Base delay between retries
+	Exponential     bool             // Use exponential backoff (delay * 2^attempt)
+	Retryable       bool             // Whether retries are allowed
 	RetryableErrors []*regexp.Regexp // Patterns for retryable errors (nil = all errors retryable)
 }
 
@@ -186,12 +187,12 @@ var defaultRetryPolicies = map[string]ToolRetryPolicy{
 		Retryable:   true,
 	},
 	"file_write": {
-		MaxRetries:  0,
-		Retryable:   false, // Side effects - may cause duplication
+		MaxRetries: 0,
+		Retryable:  false, // Side effects - may cause duplication
 	},
 	"delete_file": {
-		MaxRetries:  0,
-		Retryable:   false, // Side effects
+		MaxRetries: 0,
+		Retryable:  false, // Side effects
 	},
 	"list_directory": {
 		MaxRetries:  1,
@@ -202,72 +203,72 @@ var defaultRetryPolicies = map[string]ToolRetryPolicy{
 
 	// Shell execution - not retryable due to side effects
 	"shell": {
-		MaxRetries:  0,
-		Retryable:   false,
+		MaxRetries: 0,
+		Retryable:  false,
 	},
 
 	// Web operations - highly retryable (network failures)
 	"web_fetch": {
-		MaxRetries:     2,
-		RetryDelay:     1 * time.Second,
-		Exponential:    true,
-		Retryable:      true,
+		MaxRetries:  2,
+		RetryDelay:  1 * time.Second,
+		Exponential: true,
+		Retryable:   true,
 	},
 	"web_search": {
-		MaxRetries:     2,
-		RetryDelay:     1 * time.Second,
-		Exponential:    true,
-		Retryable:      true,
+		MaxRetries:  2,
+		RetryDelay:  1 * time.Second,
+		Exponential: true,
+		Retryable:   true,
 	},
 
 	// Memory operations - retryable (transient DB locks)
 	"memory_read": {
-		MaxRetries:  1,
-		RetryDelay:  100 * time.Millisecond,
-		Retryable:   true,
+		MaxRetries: 1,
+		RetryDelay: 100 * time.Millisecond,
+		Retryable:  true,
 	},
 	"memory_write": {
-		MaxRetries:  1,
-		RetryDelay:  100 * time.Millisecond,
-		Retryable:   true,
+		MaxRetries: 1,
+		RetryDelay: 100 * time.Millisecond,
+		Retryable:  true,
 	},
 	"memory_search": {
-		MaxRetries:  1,
-		RetryDelay:  100 * time.Millisecond,
-		Retryable:   true,
+		MaxRetries: 1,
+		RetryDelay: 100 * time.Millisecond,
+		Retryable:  true,
 	},
 
 	// Task operations - not retryable (state changes)
 	"task_create": {
-		MaxRetries:  0,
-		Retryable:   false,
+		MaxRetries: 0,
+		Retryable:  false,
 	},
 	"task_update": {
-		MaxRetries:  0,
-		Retryable:   false,
+		MaxRetries: 0,
+		Retryable:  false,
 	},
 
 	// Platform operations - depends on operation
 	"platform_agents": {
-		MaxRetries:  1,
-		RetryDelay:  100 * time.Millisecond,
-		Retryable:   true,
+		MaxRetries: 1,
+		RetryDelay: 100 * time.Millisecond,
+		Retryable:  true,
 	},
 	"platform_tools": {
-		MaxRetries:  1,
-		RetryDelay:  100 * time.Millisecond,
-		Retryable:   true,
+		MaxRetries: 1,
+		RetryDelay: 100 * time.Millisecond,
+		Retryable:  true,
 	},
 	"platform_status": {
-		MaxRetries:  1,
-		RetryDelay:  100 * time.Millisecond,
-		Retryable:   true,
+		MaxRetries: 1,
+		RetryDelay: 100 * time.Millisecond,
+		Retryable:  true,
 	},
 
 	// Default - conservative retry for unknown tools
 	"default": {
-		MaxRetries:  0,
-		Retryable:   false,
+		MaxRetries: 0,
+		Retryable:  false,
 	},
 }
 

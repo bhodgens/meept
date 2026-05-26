@@ -11,6 +11,7 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 // AgentRole defines the role an agent plays in the system.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentRole string
 
@@ -24,6 +25,7 @@ const (
 )
 
 // AgentConstraints defines operational limits for an agent.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentConstraints struct {
 	// MaxIterations is the maximum number of reasoning cycles.
@@ -62,6 +64,7 @@ func DefaultConstraints() AgentConstraints {
 }
 
 // AgentSpec defines the specification for creating an agent.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentSpec struct {
 	// ID is the unique identifier for this agent specification.

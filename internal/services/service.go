@@ -16,61 +16,62 @@ import (
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/skills"
-	"github.com/caimlas/meept/internal/templates"
 	"github.com/caimlas/meept/internal/task"
+	"github.com/caimlas/meept/internal/templates"
 	"github.com/caimlas/meept/internal/worker"
 	"github.com/caimlas/meept/pkg/security"
 )
 
 // ServiceRegistry holds all service instances.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type ServiceRegistry struct {
-	Chat        *ChatService
-	Memory      *MemoryService
-	Task        *TaskService
-	Queue       *QueueService
-	Session     *SessionService
-	SessionStore session.Store  // Exposed for MCP handler access
-	Worker      *WorkerService
-	Pipeline    *PipelineService
-	Skills      *SkillsService
-	SelfImprove *SelfImproveService
-	Cache       *CacheService
-	Security    *SecurityService
-	Scheduler   *SchedulerService
-	Bus         *BusService
-	Templates   *TemplatesService
-	Daemon      *DaemonService
-	Model       *ModelService
-	Calendar    *CalendarService
-	Runtime     *RuntimeService
-	Terminal    *TerminalService
+	Chat         *ChatService
+	Memory       *MemoryService
+	Task         *TaskService
+	Queue        *QueueService
+	Session      *SessionService
+	SessionStore session.Store // Exposed for MCP handler access
+	Worker       *WorkerService
+	Pipeline     *PipelineService
+	Skills       *SkillsService
+	SelfImprove  *SelfImproveService
+	Cache        *CacheService
+	Security     *SecurityService
+	Scheduler    *SchedulerService
+	Bus          *BusService
+	Templates    *TemplatesService
+	Daemon       *DaemonService
+	Model        *ModelService
+	Calendar     *CalendarService
+	Runtime      *RuntimeService
+	Terminal     *TerminalService
 }
 
 // Config holds dependencies for service instantiation.
 // All fields are optional; services whose dependencies are nil will not be created.
 type Config struct {
-	Bus            *bus.MessageBus
-	AgentRegistry  *agent.AgentRegistry
-	Queue          queue.Queue
-	MemoryManager  *memory.Manager
-	TaskRegistry   *task.Registry
-	SessionStore   session.Store
-	WorkerPool     *worker.Pool
-	SkillRegistry   *skills.Registry
-	SkillExecutor   *skills.Executor
+	Bus              *bus.MessageBus
+	AgentRegistry    *agent.AgentRegistry
+	Queue            queue.Queue
+	MemoryManager    *memory.Manager
+	TaskRegistry     *task.Registry
+	SessionStore     session.Store
+	WorkerPool       *worker.Pool
+	SkillRegistry    *skills.Registry
+	SkillExecutor    *skills.Executor
 	TemplateRegistry *templates.Registry
-	SelfImprove    *selfimprove.Controller
-	TokenCache     *llm.TokenCacheCoordinator
-	SecurityChecker *security.PermissionChecker
-	Scheduler      *scheduler.Scheduler
-	CalendarClient *calendar.Client
+	SelfImprove      *selfimprove.Controller
+	TokenCache       *llm.TokenCacheCoordinator
+	SecurityChecker  *security.PermissionChecker
+	Scheduler        *scheduler.Scheduler
+	CalendarClient   *calendar.Client
 	DaemonController DaemonController
-	RuntimeManager *llm.RuntimeManager
-	WorkingDir     string
-	PidFile        string
-	StateDir       string
-	BinPath        string
+	RuntimeManager   *llm.RuntimeManager
+	WorkingDir       string
+	PidFile          string
+	StateDir         string
+	BinPath          string
 }
 
 // NewRegistry creates all services with their dependencies.

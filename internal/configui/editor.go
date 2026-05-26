@@ -6,12 +6,12 @@ import "fmt"
 // FieldEditor handles inline editing of a single Field value.
 // It stores the original value at creation time so Cancel can revert.
 type FieldEditor struct {
-	field            Field
-	input            string
-	selectIdx        int
-	multiSelect      map[int]bool
+	field             Field
+	input             string
+	selectIdx         int
+	multiSelect       map[int]bool
 	multiSelectCursor int
-	origValue        string
+	origValue         string
 }
 
 // NewFieldEditor creates a FieldEditor initialized from the field's current value.

@@ -18,11 +18,11 @@ func NewWorkerService(p *worker.Pool) *WorkerService {
 
 // WorkerStatsResponse returns worker pool statistics.
 type WorkerStatsResponse struct {
-	TotalWorkers  int                     `json:"total_workers"`
-	IdleWorkers   int                     `json:"idle_workers"`
-	BusyWorkers   int                     `json:"busy_workers"`
-	ErrorWorkers  int                     `json:"error_workers"`
-	WorkerStats   []worker.WorkerStats    `json:"worker_stats"`
+	TotalWorkers int                  `json:"total_workers"`
+	IdleWorkers  int                  `json:"idle_workers"`
+	BusyWorkers  int                  `json:"busy_workers"`
+	ErrorWorkers int                  `json:"error_workers"`
+	WorkerStats  []worker.WorkerStats `json:"worker_stats"`
 }
 
 // Stats returns worker pool statistics.
@@ -32,11 +32,11 @@ func (s *WorkerService) Stats(ctx context.Context) (*WorkerStatsResponse, error)
 	}
 	stats := s.pool.GetStats()
 	return &WorkerStatsResponse{
-		TotalWorkers:  stats.TotalWorkers,
-		IdleWorkers:   stats.IdleWorkers,
-		BusyWorkers:   stats.BusyWorkers,
-		ErrorWorkers:  stats.ErrorWorkers,
-		WorkerStats:   stats.WorkerStats,
+		TotalWorkers: stats.TotalWorkers,
+		IdleWorkers:  stats.IdleWorkers,
+		BusyWorkers:  stats.BusyWorkers,
+		ErrorWorkers: stats.ErrorWorkers,
+		WorkerStats:  stats.WorkerStats,
 	}, nil
 }
 

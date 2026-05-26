@@ -62,14 +62,15 @@ type AuditEntry struct {
 }
 
 // SecurityStats holds aggregate security statistics.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type SecurityStats struct {
-	TotalDecisions    int64             `json:"total_decisions"`
-	TotalAllows       int64             `json:"total_allows"`
-	TotalDenies       int64             `json:"total_denies"`
-	TotalEscalations  int64             `json:"total_escalations"`
-	ActiveOverrides   int64             `json:"active_overrides"`
-	TopDeniedActions  map[string]int64  `json:"top_denied_actions"`
+	TotalDecisions   int64            `json:"total_decisions"`
+	TotalAllows      int64            `json:"total_allows"`
+	TotalDenies      int64            `json:"total_denies"`
+	TotalEscalations int64            `json:"total_escalations"`
+	ActiveOverrides  int64            `json:"active_overrides"`
+	TopDeniedActions map[string]int64 `json:"top_denied_actions"`
 }
 
 // Override represents a creator permission override.

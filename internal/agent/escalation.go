@@ -55,12 +55,12 @@ type EscalationLevel struct {
 
 // EscalationManager handles task escalation and re-planning when tasks fail.
 type EscalationManager struct {
-	mu       sync.RWMutex
-	config   EscalationConfig
-	planner  *StrategicPlanner
+	mu        sync.RWMutex
+	config    EscalationConfig
+	planner   *StrategicPlanner
 	taskStore *task.Store
-	bus      *bus.MessageBus
-	logger   *slog.Logger
+	bus       *bus.MessageBus
+	logger    *slog.Logger
 
 	// Track escalation levels per task
 	escalations map[string]*EscalationLevel // taskID -> current level
@@ -261,13 +261,13 @@ func (em *EscalationManager) publishEscalationEvent(_ context.Context, failure F
 	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "escalation-manager", map[string]any{
-		KeyTaskID:   failure.TaskID,
-		KeyStepID:   failure.StepID,
-		KeyAgentID:  failure.AgentID,
-		"level":     level,
-		"action":    action,
-		string(MessageTypeError):     failure.Error,
-		"timestamp": time.Now().UTC(),
+		KeyTaskID:                failure.TaskID,
+		KeyStepID:                failure.StepID,
+		KeyAgentID:               failure.AgentID,
+		"level":                  level,
+		"action":                 action,
+		string(MessageTypeError): failure.Error,
+		"timestamp":              time.Now().UTC(),
 	})
 	if err != nil {
 		em.logger.Error("Failed to create escalation event", "error", err)

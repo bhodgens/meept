@@ -54,8 +54,8 @@ func (h *SelfImproveHandler) handleDetect(ctx context.Context, params json.RawMe
 		return nil, err
 	}
 	return map[string]any{
-		"issues": issues,
-		RPCKeyCount:  len(issues),
+		"issues":    issues,
+		RPCKeyCount: len(issues),
 	}, nil
 }
 
@@ -92,9 +92,9 @@ func (h *SelfImproveHandler) handleAnalyze(ctx context.Context, params json.RawM
 	}
 
 	return map[string]any{
-		"issues":       issues,
-		"analyses":     analyses,
-		"issues_count": len(issues),
+		"issues":         issues,
+		"analyses":       analyses,
+		"issues_count":   len(issues),
 		"analyses_count": len(analyses),
 	}, nil
 }
@@ -114,10 +114,10 @@ func (h *SelfImproveHandler) handleGenerate(ctx context.Context, params json.Raw
 	}
 	status := ctrl.GetStatus()
 	return map[string]any{
-		RPCKeyStatus:       status,
-		"fixes":          fixes,
-		"fixes_count":    len(fixes),
-		"pending":      status.PendingApprovals,
+		RPCKeyStatus:  status,
+		"fixes":       fixes,
+		"fixes_count": len(fixes),
+		"pending":     status.PendingApprovals,
 	}, nil
 }
 
@@ -136,9 +136,9 @@ func (h *SelfImproveHandler) handleValidate(ctx context.Context, params json.Raw
 	}
 	status := ctrl.GetStatus()
 	return map[string]any{
-		RPCKeyStatus:             status,
-		"validations":        validations,
-		"validations_count":  len(validations),
+		RPCKeyStatus:        status,
+		"validations":       validations,
+		"validations_count": len(validations),
 	}, nil
 }
 

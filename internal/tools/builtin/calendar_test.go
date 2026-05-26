@@ -54,7 +54,7 @@ func TestCalendarListTool_Execute(t *testing.T) {
 
 	client, server := newTestCalendarClient(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(eventsJSON))
+		_, _ = w.Write([]byte(eventsJSON))
 	})
 	defer server.Close()
 

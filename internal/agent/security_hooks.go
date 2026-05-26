@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/llm"
+	intsecurity "github.com/caimlas/meept/internal/security"
 )
 
 // SecurityBeforeToolCall implements BeforeToolCallHook.

@@ -40,12 +40,12 @@ type Branch struct {
 // compressed messages. The Content field holds the raw JSON and CompressedIDs
 // is parsed from that JSON for convenience.
 type CompactionEntry struct {
-	ID            int64   `json:"id"`
-	SessionID     string  `json:"session_id"`
-	ParentID      *int64  `json:"parent_id,omitempty"`
-	Content       string  `json:"content"`
+	ID            int64     `json:"id"`
+	SessionID     string    `json:"session_id"`
+	ParentID      *int64    `json:"parent_id,omitempty"`
+	Content       string    `json:"content"`
 	Timestamp     time.Time `json:"timestamp"`
-	CompressedIDs []int64 `json:"compressed_ids"`
+	CompressedIDs []int64   `json:"compressed_ids"`
 }
 
 // TreeNode represents a single node in the conversation tree for visualization.

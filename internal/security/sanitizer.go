@@ -51,9 +51,9 @@ type OutputScanResult struct {
 
 // injectionPattern holds a compiled pattern with metadata.
 type injectionPattern struct {
-	Pattern     *regexp.Regexp
-	Label       string
-	MinLevel    StrictnessLevel
+	Pattern  *regexp.Regexp
+	Label    string
+	MinLevel StrictnessLevel
 }
 
 // structuralToken holds a token to escape.
@@ -63,11 +63,11 @@ type structuralToken struct {
 }
 
 var (
-	injectionPatterns []injectionPattern
-	structuralTokens  []structuralToken
-	roleMarkerRE      *regexp.Regexp
+	injectionPatterns  []injectionPattern
+	structuralTokens   []structuralToken
+	roleMarkerRE       *regexp.Regexp
 	credentialPatterns []*credentialPattern
-	initOnce          sync.Once
+	initOnce           sync.Once
 )
 
 type credentialPattern struct {

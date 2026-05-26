@@ -422,9 +422,9 @@ type CacheInspectResponse struct {
 
 // QueueStatusResponse represents the steering/follow-up queue state for a conversation.
 type QueueStatusResponse struct {
-	SteeringDepth int   `json:"steering_depth"`
-	FollowUpDepth int   `json:"followup_depth"`
-	IsActive      bool  `json:"is_active"`
+	SteeringDepth int    `json:"steering_depth"`
+	FollowUpDepth int    `json:"followup_depth"`
+	IsActive      bool   `json:"is_active"`
 	Generation    uint64 `json:"generation"`
 }
 

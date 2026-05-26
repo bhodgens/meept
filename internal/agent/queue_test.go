@@ -24,10 +24,10 @@ func TestQueue_New(t *testing.T) {
 
 func TestQueue_NewWithConfig(t *testing.T) {
 	cfg := QueueConfig{
-		MaxFollowUp:       5,
-		MaxSteering:       1,
-		FollowUpDrain:     DrainOne,
-		PersistFollowUp:   false,
+		MaxFollowUp:     5,
+		MaxSteering:     1,
+		FollowUpDrain:   DrainOne,
+		PersistFollowUp: false,
 	}
 	q := NewMessageQueue(WithQueueConfig(cfg))
 	if q.config.MaxFollowUp != 5 {
@@ -105,9 +105,9 @@ func TestQueue_SteerAfterClose(t *testing.T) {
 
 func TestQueue_FollowUp(t *testing.T) {
 	cfg := QueueConfig{
-		MaxFollowUp:       3,
-		FollowUpDrain:     DrainAll,
-		PersistFollowUp:   false,
+		MaxFollowUp:     3,
+		FollowUpDrain:   DrainAll,
+		PersistFollowUp: false,
 	}
 	q := NewMessageQueue(WithQueueConfig(cfg))
 
@@ -133,9 +133,9 @@ func TestQueue_FollowUp(t *testing.T) {
 
 func TestQueue_FollowUpAppendDrainAll(t *testing.T) {
 	cfg := QueueConfig{
-		MaxFollowUp:       5,
-		FollowUpDrain:     DrainAll,
-		PersistFollowUp:   false,
+		MaxFollowUp:     5,
+		FollowUpDrain:   DrainAll,
+		PersistFollowUp: false,
 	}
 	q := NewMessageQueue(WithQueueConfig(cfg))
 
@@ -167,9 +167,9 @@ func TestQueue_FollowUpAppendDrainAll(t *testing.T) {
 
 func TestQueue_FollowUpDrainOne(t *testing.T) {
 	cfg := QueueConfig{
-		MaxFollowUp:       5,
-		FollowUpDrain:     DrainOne,
-		PersistFollowUp:   false,
+		MaxFollowUp:     5,
+		FollowUpDrain:   DrainOne,
+		PersistFollowUp: false,
 	}
 	q := NewMessageQueue(WithQueueConfig(cfg))
 
@@ -204,9 +204,9 @@ func TestQueue_FollowUpDrainOne(t *testing.T) {
 
 func TestQueue_FollowUpFull(t *testing.T) {
 	cfg := QueueConfig{
-		MaxFollowUp:       2,
-		FollowUpDrain:     DrainOne,
-		PersistFollowUp:   false,
+		MaxFollowUp:     2,
+		FollowUpDrain:   DrainOne,
+		PersistFollowUp: false,
 	}
 	q := NewMessageQueue(WithQueueConfig(cfg))
 

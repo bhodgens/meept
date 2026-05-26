@@ -51,9 +51,9 @@ const (
 	AgentEventSessionTree          AgentEventType = "session_tree"
 
 	// Provider interaction
-	AgentEventBeforeProviderRequest  AgentEventType = "before_provider_request"
-	AgentEventBeforeProviderPayload  AgentEventType = "before_provider_payload"
-	AgentEventAfterProviderResponse  AgentEventType = "after_provider_response"
+	AgentEventBeforeProviderRequest AgentEventType = "before_provider_request"
+	AgentEventBeforeProviderPayload AgentEventType = "before_provider_payload"
+	AgentEventAfterProviderResponse AgentEventType = "after_provider_response"
 
 	// Model selection
 	AgentEventModelSelect         AgentEventType = "model_select"
@@ -69,7 +69,7 @@ const (
 	AgentEventSettled   AgentEventType = "settled"
 
 	// Chat visibility events
-	AgentEventChatMessageReceived   AgentEventType = "chat_message_received"
+	AgentEventChatMessageReceived    AgentEventType = "chat_message_received"
 	AgentEventChatClientDisconnected AgentEventType = "chat_client_disconnected"
 )
 
@@ -263,10 +263,10 @@ func (SessionTreeData) agentEventData() {}
 
 // BeforeProviderRequestData is emitted before making an LLM provider request.
 type BeforeProviderRequestData struct {
-	ModelID    string             `json:"model_id"`
-	Messages   []llm.ChatMessage  `json:"messages"`
+	ModelID    string               `json:"model_id"`
+	Messages   []llm.ChatMessage    `json:"messages"`
 	Tools      []llm.ToolDefinition `json:"tools,omitempty"`
-	TokenCount int                `json:"token_count"`
+	TokenCount int                  `json:"token_count"`
 }
 
 func (BeforeProviderRequestData) agentEventData() {}

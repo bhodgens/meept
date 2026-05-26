@@ -19,11 +19,11 @@ const (
 
 // ChatMessage represents a single message in a chat conversation.
 type ChatMessage struct {
-	Role       Role        `json:"role"`
-	Content    string      `json:"content"`
-	Name       string      `json:"name,omitempty"`
-	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string      `json:"tool_call_id,omitempty"`
+	Role       Role       `json:"role"`
+	Content    string     `json:"content"`
+	Name       string     `json:"name,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 	// SummaryLevel tracks the hierarchical summarization depth for this
 	// message. 0 = original, 1 = first-level summary, 2 = summary of
 	// summaries, etc. Not serialized to external APIs.
@@ -100,11 +100,11 @@ type TokenUsage struct {
 
 // Response represents a parsed response from the LLM API.
 type Response struct {
-	Content      string      `json:"content,omitempty"`
-	ToolCalls    []ToolCall  `json:"tool_calls,omitempty"`
-	Usage        TokenUsage  `json:"usage"`
-	Model        string      `json:"model"`
-	FinishReason string      `json:"finish_reason"`
+	Content      string     `json:"content,omitempty"`
+	ToolCalls    []ToolCall `json:"tool_calls,omitempty"`
+	Usage        TokenUsage `json:"usage"`
+	Model        string     `json:"model"`
+	FinishReason string     `json:"finish_reason"`
 }
 
 // HasToolCalls returns true if the response contains tool calls.
@@ -159,30 +159,30 @@ type AliasEntry struct {
 
 // AliasHealth tracks the health and rotation state of an alias.
 type AliasHealth struct {
-	CurrentIndex       int       // Which model in the rotation is currently active
-	ConsecutiveFails   int       // Number of consecutive failures on the current model
-	LastFailure        time.Time // When the last failure occurred
-	CooldownUntil      time.Time // Don't use the current model until this time
+	CurrentIndex     int       // Which model in the rotation is currently active
+	ConsecutiveFails int       // Number of consecutive failures on the current model
+	LastFailure      time.Time // When the last failure occurred
+	CooldownUntil    time.Time // Don't use the current model until this time
 }
 
 // ToolDefinition defines a tool/function for the LLM.
 type ToolDefinition struct {
-	Type     string         `json:"type"`
-	Function FunctionDef    `json:"function"`
+	Type     string      `json:"type"`
+	Function FunctionDef `json:"function"`
 }
 
 // FunctionDef defines a function for tool use.
 type FunctionDef struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Parameters  FunctionParameters  `json:"parameters"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Parameters  FunctionParameters `json:"parameters"`
 }
 
 // FunctionParameters defines the parameters for a function.
 type FunctionParameters struct {
-	Type       string                        `json:"type"`
-	Properties map[string]ParameterProperty  `json:"properties"`
-	Required   []string                      `json:"required,omitempty"`
+	Type       string                       `json:"type"`
+	Properties map[string]ParameterProperty `json:"properties"`
+	Required   []string                     `json:"required,omitempty"`
 }
 
 // ParameterProperty defines a single parameter property.
@@ -257,7 +257,6 @@ func CountToolDefinitionsTokens(tools []ToolDefinition, tokenizer Tokenizer) int
 	return total
 }
 
-
 // ChatRequest represents a request to the chat completions endpoint.
 type ChatRequest struct {
 	Model            string           `json:"model"`
@@ -279,9 +278,9 @@ type ChatResponse struct {
 	Model   string   `json:"model"`
 	Choices []Choice `json:"choices"`
 	Usage   struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		TotalTokens         int `json:"total_tokens"`
 		PromptTokensDetails struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details"`
@@ -367,15 +366,15 @@ func (rtc *RawToolCall) ToToolCall() ToolCall {
 // concatenation, the summarizer produces this structured representation so
 // downstream consumers can query decisions, file paths, open questions, etc.
 type SummaryExtract struct {
-	Decisions           []string `json:"decisions"`    // Key decisions made
-	FilePaths           []string `json:"file_paths"`   // Files referenced/modified
-	UnresolvedQuestions []string `json:"unresolved"`   // Open questions remaining
-	TaskState           string   `json:"task_state"`   // Current task status
-	KeyFindings         []string `json:"findings"`     // Important discoveries
-	FileReads           []string `json:"file_reads"`   // Files read (compaction)
-	FileWrites          []string `json:"file_writes"`  // Files written (compaction)
-	FileEdits           []string `json:"file_edits"`   // Files edited (compaction)
-	ErrorsEncountered   []string `json:"errors"`       // Errors encountered (compaction)
+	Decisions           []string `json:"decisions"`   // Key decisions made
+	FilePaths           []string `json:"file_paths"`  // Files referenced/modified
+	UnresolvedQuestions []string `json:"unresolved"`  // Open questions remaining
+	TaskState           string   `json:"task_state"`  // Current task status
+	KeyFindings         []string `json:"findings"`    // Important discoveries
+	FileReads           []string `json:"file_reads"`  // Files read (compaction)
+	FileWrites          []string `json:"file_writes"` // Files written (compaction)
+	FileEdits           []string `json:"file_edits"`  // Files edited (compaction)
+	ErrorsEncountered   []string `json:"errors"`      // Errors encountered (compaction)
 }
 
 // Ptr returns a pointer to the given value.

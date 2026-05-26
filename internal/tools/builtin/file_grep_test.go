@@ -17,9 +17,9 @@ func TestFileGrep_ContentMode(t *testing.T) {
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"pattern":      "hello",
-		"path":         tmpDir,
-		"output_mode":  "content",
+		"pattern":     "hello",
+		"path":        tmpDir,
+		"output_mode": "content",
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -102,10 +102,10 @@ func TestFileGrep_WithGlobFilter(t *testing.T) {
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"pattern":      "hello",
-		"path":         tmpDir,
-		"output_mode":  "files_with_matches",
-		"glob":         "*.go",
+		"pattern":     "hello",
+		"path":        tmpDir,
+		"output_mode": "files_with_matches",
+		"glob":        "*.go",
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -155,10 +155,10 @@ func TestFileGrep_MaxResults(t *testing.T) {
 
 	tool := NewFileGrepTool(nil)
 	result, err := tool.Execute(context.Background(), map[string]any{
-		"pattern":      "match",
-		"path":         tmpDir,
-		"output_mode":  "content",
-		"max_results":  float64(2),
+		"pattern":     "match",
+		"path":        tmpDir,
+		"output_mode": "content",
+		"max_results": float64(2),
 	})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)

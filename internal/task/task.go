@@ -8,6 +8,7 @@ import (
 )
 
 // TaskState represents the current state of a task.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type TaskState string
 
@@ -31,6 +32,7 @@ func (s TaskState) IsTerminal() bool {
 }
 
 // Task represents a unit of work that may spawn multiple jobs.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Task struct {
 	ID           string          `json:"id"`
@@ -197,6 +199,7 @@ func (t *Task) ExecutionTime() time.Duration {
 }
 
 // TaskSummary provides a lightweight view of a task.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type TaskSummary struct {
 	ID             string    `json:"id"`

@@ -18,8 +18,8 @@ type SessionTracker struct {
 	maxAge                  time.Duration
 	memvidClient            *memvid.Client
 	sessionIdleTriggerHours int
-	stopCh                  chan struct{}        // Used to signal background goroutine to stop
-	stopOnce                sync.Once            // Ensures Stop is only called once
+	stopCh                  chan struct{} // Used to signal background goroutine to stop
+	stopOnce                sync.Once     // Ensures Stop is only called once
 	logger                  *slog.Logger
 }
 
@@ -36,13 +36,13 @@ type SessionState struct {
 
 // SessionMetrics holds session performance metrics.
 type SessionMetrics struct {
-	Duration       time.Duration
-	Iterations     int
-	TokenUsage     int
-	ToolCalls      int
-	AgentSwitches  int
-	Errors         int
-	Revisions      int
+	Duration      time.Duration
+	Iterations    int
+	TokenUsage    int
+	ToolCalls     int
+	AgentSwitches int
+	Errors        int
+	Revisions     int
 }
 
 // SessionTrackerConfig holds configuration for SessionTracker.
@@ -244,20 +244,20 @@ func (t *SessionTracker) PersistIdleSessions(ctx context.Context) error {
 func (t *SessionTracker) persistSession(ctx context.Context, state *SessionState) error {
 	// Create session metadata
 	metadata := map[string]any{
-		"session_id":     state.SessionID,
-		"start_time":     state.CreatedAt.Format(time.RFC3339),
-		"end_time":       state.LastActivityAt.Format(time.RFC3339),
+		"session_id":       state.SessionID,
+		"start_time":       state.CreatedAt.Format(time.RFC3339),
+		"end_time":         state.LastActivityAt.Format(time.RFC3339),
 		"duration_seconds": state.LastActivityAt.Sub(state.CreatedAt).Seconds(),
-		"total_requests": state.TotalRequests,
-		"intents":        t.extractIntents(state.IntentHistory),
-		KeyAgentID:       t.getLastAgentFromIntent(state.IntentHistory),
-		"outcome":        t.determineOutcome(state),
-		"iterations":     state.Metrics.Iterations,
-		KeyTokenUsage:    state.Metrics.TokenUsage,
-		"tool_calls":     state.Metrics.ToolCalls,
-		"agent_switches": state.Metrics.AgentSwitches,
-		"errors":         state.Metrics.Errors,
-		"revisions":      state.Metrics.Revisions,
+		"total_requests":   state.TotalRequests,
+		"intents":          t.extractIntents(state.IntentHistory),
+		KeyAgentID:         t.getLastAgentFromIntent(state.IntentHistory),
+		"outcome":          t.determineOutcome(state),
+		"iterations":       state.Metrics.Iterations,
+		KeyTokenUsage:      state.Metrics.TokenUsage,
+		"tool_calls":       state.Metrics.ToolCalls,
+		"agent_switches":   state.Metrics.AgentSwitches,
+		"errors":           state.Metrics.Errors,
+		"revisions":        state.Metrics.Revisions,
 	}
 
 	// Store session summary

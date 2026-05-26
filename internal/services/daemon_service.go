@@ -36,9 +36,9 @@ type DaemonStatus struct {
 
 // DaemonService handles daemon lifecycle operations.
 type DaemonService struct {
-	pidFile  string
-	stateDir string
-	binPath  string
+	pidFile    string
+	stateDir   string
+	binPath    string
 	controller DaemonController
 }
 

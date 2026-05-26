@@ -79,7 +79,7 @@ func (h *SubscriptionHandler) Stop() {
 func (h *SubscriptionHandler) handleTopic(ctx context.Context, sub *Subscriber, topic string) {
 	defer h.wg.Done()
 	// NOTE: Do NOT defer h.bus.Unsubscribe(sub) here.
-	// Stop() handles unsubscribe after wg.Wait() to avoid double-close.  
+	// Stop() handles unsubscribe after wg.Wait() to avoid double-close.
 
 	for {
 		select {

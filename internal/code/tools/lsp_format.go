@@ -81,8 +81,8 @@ func (t *LSPFormatTool) Execute(ctx context.Context, args map[string]any) (any, 
 
 	if edits == nil || len(edits) == 0 {
 		return map[string]any{
-			SchemaPropFound:   false,
-			SchemaPropMessage: "File is already formatted or formatter returned no changes",
+			SchemaPropFound:    false,
+			SchemaPropMessage:  "File is already formatted or formatter returned no changes",
 			SchemaPropFilePath: filePath,
 		}, nil
 	}
@@ -118,12 +118,12 @@ func (t *LSPFormatTool) Execute(ctx context.Context, args map[string]any) (any, 
 	}
 
 	return map[string]any{
-		SchemaPropFound:   true,
+		SchemaPropFound:    true,
 		SchemaPropFilePath: filePath,
-		"applied":    true,
-		"edit_count": len(edits),
-		"lines_changed": len(linesChanged),
-		"edits":      editSummary,
+		"applied":          true,
+		"edit_count":       len(edits),
+		"lines_changed":    len(linesChanged),
+		"edits":            editSummary,
 	}, nil
 }
 

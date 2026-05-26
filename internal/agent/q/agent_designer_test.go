@@ -334,10 +334,10 @@ func TestAgentDesignerRecommendModel(t *testing.T) {
 	designer := NewAgentDesigner(designerLogger, AgentDesignerConfig{})
 
 	tests := []struct {
-		name          string
-		difficulty    float64
-		toolNames     []string
-		wantModel     string
+		name       string
+		difficulty float64
+		toolNames  []string
+		wantModel  string
 	}{
 		{"high difficulty", 0.8, []string{"memory_search"}, ""},
 		{"has file tool", 0.3, []string{"file_read", "shell_execute"}, "coder"},
@@ -466,9 +466,9 @@ func TestAgentDesignerGenerateWorkflowSection(t *testing.T) {
 
 func TestAgentDesignerGenerateRoleAndPurpose(t *testing.T) {
 	tests := []struct {
-		patternType     string
-		affectedIntent  string
-		wantRole        string
+		patternType    string
+		affectedIntent string
+		wantRole       string
 	}{
 		{"wrong_agent_assignment", "debugging", "executor"},
 		{"high_rejection_rate", "code_review", "reviewer"},
@@ -480,8 +480,8 @@ func TestAgentDesignerGenerateRoleAndPurpose(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.patternType, func(t *testing.T) {
 			pattern := PatternReport{
-				PatternType:      tt.patternType,
-				AffectedIntent:   tt.affectedIntent,
+				PatternType:    tt.patternType,
+				AffectedIntent: tt.affectedIntent,
 			}
 
 			role, purpose := designer.determineRoleAndPurpose(pattern, []string{})
@@ -498,13 +498,13 @@ func TestAgentDesignerGenerateRoleAndPurpose(t *testing.T) {
 
 func TestAgentDesignerGenerateFullAgentFile(t *testing.T) {
 	design := &AgentDesign{
-		ID:      "debug_specialist",
-		Name:    "Debug Specialist Agent",
-		Role:    "executor",
-		Purpose: "You are a debug specialist agent.",
-		Model:   "coder",
+		ID:              "debug_specialist",
+		Name:            "Debug Specialist Agent",
+		Role:            "executor",
+		Purpose:         "You are a debug specialist agent.",
+		Model:           "coder",
 		AdditionalTools: []string{"file_read", "memory_search"},
-		Capabilities:      []string{"reasoning", "tool_use"},
+		Capabilities:    []string{"reasoning", "tool_use"},
 		Constraints: AgentConstraints{
 			MaxIterations:    20,
 			TimeoutSeconds:   300,
@@ -551,7 +551,7 @@ func TestAgentDesignerGenerateFullAgentFileNoModel(t *testing.T) {
 		Purpose: "fast agent",
 		Model:   "", // no model
 		Constraints: AgentConstraints{
-			MaxIterations: 10,
+			MaxIterations:  10,
 			TimeoutSeconds: 60,
 		},
 	}

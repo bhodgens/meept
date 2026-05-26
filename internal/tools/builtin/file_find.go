@@ -57,10 +57,10 @@ func (t *FileFindTool) Parameters() llm.FunctionParameters {
 
 // FindResult is the result of a file find operation.
 type FindResult struct {
-	Path      string       `json:"path"`
-	Results   []FindEntry  `json:"results"`
-	Count     int          `json:"count"`
-	Truncated bool         `json:"truncated"`
+	Path      string      `json:"path"`
+	Results   []FindEntry `json:"results"`
+	Count     int         `json:"count"`
+	Truncated bool        `json:"truncated"`
 }
 
 // FindEntry represents a single matched file or directory.

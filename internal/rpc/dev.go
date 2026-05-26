@@ -162,7 +162,7 @@ func (h *DevHandler) handleListModels(ctx context.Context, params json.RawMessag
 		models[i] = map[string]any{
 			"index":         m.Index,
 			"provider":      m.Provider,
-			RPCKeyModel:         m.Model,
+			RPCKeyModel:     m.Model,
 			"full_name":     m.FullName,
 			"base_url":      m.BaseURL,
 			"context_limit": m.ContextLimit,
@@ -175,7 +175,7 @@ func (h *DevHandler) handleListModels(ctx context.Context, params json.RawMessag
 	return map[string]any{
 		"models":        models,
 		"current_model": currentModel,
-		RPCKeyCount:         len(models),
+		RPCKeyCount:     len(models),
 	}, nil
 }
 
@@ -196,7 +196,7 @@ func (h *DevHandler) handleCurrentModel(ctx context.Context, params json.RawMess
 	return map[string]any{
 		"index":         m.Index,
 		"provider":      m.Provider,
-		RPCKeyModel:         m.Model,
+		RPCKeyModel:     m.Model,
 		"full_name":     m.FullName,
 		"base_url":      m.BaseURL,
 		"context_limit": m.ContextLimit,
@@ -256,10 +256,10 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 
 	m := h.modelsList[targetIdx]
 	return map[string]any{
-		RPCKeySuccess:  true,
-		RPCKeyModel:    m.Model,
-		"provider": m.Provider,
-		RPCKeyMessage:  fmt.Sprintf("switched to %s", m.FullName),
+		RPCKeySuccess: true,
+		RPCKeyModel:   m.Model,
+		"provider":    m.Provider,
+		RPCKeyMessage: fmt.Sprintf("switched to %s", m.FullName),
 	}, nil
 }
 
@@ -302,8 +302,8 @@ func (h *DevHandler) handleTestLLM(ctx context.Context, params json.RawMessage) 
 	duration := time.Since(start)
 
 	return map[string]any{
-		"response": resp.Content,
-		RPCKeyModel:    currentModel,
+		"response":  resp.Content,
+		RPCKeyModel: currentModel,
 		"tokens": map[string]int{
 			"prompt":     resp.Usage.PromptTokens,
 			"completion": resp.Usage.CompletionTokens,
@@ -328,7 +328,7 @@ func (h *DevHandler) handleConfig(ctx context.Context, params json.RawMessage) (
 		models := make(map[string]any)
 		for mName, m := range p.Models {
 			models[mName] = map[string]any{
-				RPCKeyName:          m.Name,
+				RPCKeyName:      m.Name,
 				"capabilities":  m.Capabilities,
 				"context_limit": m.ContextLimit,
 				"max_output":    m.MaxOutput,
@@ -353,12 +353,12 @@ func (h *DevHandler) handleReload(ctx context.Context, params json.RawMessage) (
 	if err := h.loadModels(); err != nil {
 		return map[string]any{
 			RPCKeySuccess: false,
-			"error":   err.Error(),
+			"error":       err.Error(),
 		}, err
 	}
 
 	return map[string]any{
-		RPCKeySuccess:      true,
+		RPCKeySuccess:  true,
 		"models_count": len(h.modelsList),
 	}, nil
 }

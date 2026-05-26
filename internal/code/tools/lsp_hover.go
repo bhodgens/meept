@@ -102,7 +102,7 @@ func (t *LSPHoverTool) Execute(ctx context.Context, args map[string]any) (any, e
 		return map[string]any{
 			SchemaPropFound:     false,
 			SchemaPropMessage:   "No hover information available at this location",
-			SchemaPropFilePath: filePath,
+			SchemaPropFilePath:  filePath,
 			SchemaPropLine:      line,
 			SchemaPropCharacter: char,
 		}, nil
@@ -112,8 +112,8 @@ func (t *LSPHoverTool) Execute(ctx context.Context, args map[string]any) (any, e
 	content := extractHoverContent(hover)
 
 	result := map[string]any{
-		SchemaPropFound:   true,
-		"content": content,
+		SchemaPropFound: true,
+		"content":       content,
 	}
 
 	// Add range if available

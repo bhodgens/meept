@@ -190,7 +190,7 @@ func (s *Server) handleMemoryQuery(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"memories": results,
-		KeyCount:    len(results),
+		KeyCount:   len(results),
 	})
 }
 
@@ -216,7 +216,7 @@ func (s *Server) handleMemoryRecent(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"memories": results,
-		KeyCount:    len(results),
+		KeyCount:   len(results),
 	})
 }
 
@@ -300,7 +300,7 @@ func (s *Server) handleQueueList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"jobs":  jobs,
+		"jobs":   jobs,
 		KeyCount: len(jobs),
 	})
 }
@@ -368,7 +368,7 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"tasks": tasks,
+		"tasks":  tasks,
 		KeyCount: len(tasks),
 	})
 }
@@ -493,7 +493,7 @@ func (s *Server) handleSessionList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"sessions": sessions,
-		KeyCount:    len(sessions),
+		KeyCount:   len(sessions),
 	})
 }
 
@@ -627,7 +627,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"skills": skills,
-		KeyCount:  len(skills),
+		KeyCount: len(skills),
 	})
 }
 
@@ -843,7 +843,7 @@ func (s *Server) handleSchedulerListJobs(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"jobs":  jobs,
+		"jobs":   jobs,
 		KeyCount: len(jobs),
 	})
 }
@@ -964,7 +964,6 @@ func (s *Server) handleSchedulerResumeJob(w http.ResponseWriter, r *http.Request
 
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "resumed"})
 }
-
 
 // ===== Model Endpoints =====
 
@@ -1089,7 +1088,7 @@ func (s *Server) handleModelsGetCredential(w http.ResponseWriter, r *http.Reques
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]string{
-		"provider": provider,
+		"provider":   provider,
 		"credential": cred,
 	})
 }
@@ -1143,6 +1142,7 @@ func (s *Server) handleModelsDeleteCredential(w http.ResponseWriter, r *http.Req
 
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
+
 // ===== Bus Endpoints =====
 
 // handleBusPublish handles POST /api/v1/bus/publish.
@@ -1375,7 +1375,7 @@ func (s *Server) handleTaskSteps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"steps": steps,
+		"steps":  steps,
 		KeyCount: len(steps),
 	})
 }
@@ -1531,7 +1531,7 @@ func (s *Server) handleSessionBranches(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"branches": branches,
-		KeyCount:    len(branches),
+		KeyCount:   len(branches),
 	})
 }
 
@@ -1594,7 +1594,7 @@ func (s *Server) handleSessionTree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"nodes": nodes,
+		"nodes":  nodes,
 		KeyCount: len(nodes),
 	})
 }
@@ -1864,7 +1864,7 @@ func (s *Server) handleChatSteerExplicit(w http.ResponseWriter, r *http.Request)
 
 	s.writeJSON(w, http.StatusOK, map[string]string{
 		KeyStatus: KeyQueued,
-		"mode":   "explicit",
+		"mode":    "explicit",
 	})
 }
 

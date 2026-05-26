@@ -28,9 +28,9 @@ type PlanRequest struct {
 
 // plannerStep is the JSON structure expected from the planner LLM output.
 type plannerStep struct {
-	Description string   `json:"description"`
-	ToolHint    string   `json:"tool_hint,omitempty"`
-	DependsOn   []int    `json:"depends_on,omitempty"` // 0-indexed sequence references
+	Description string `json:"description"`
+	ToolHint    string `json:"tool_hint,omitempty"`
+	DependsOn   []int  `json:"depends_on,omitempty"` // 0-indexed sequence references
 }
 
 // plannerOutput is the structured JSON output from the planner agent.

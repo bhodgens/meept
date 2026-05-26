@@ -253,9 +253,9 @@ func isDaemonRunning(pidFile string) (int, bool) {
 func findDaemonBinary() string {
 	// Check common locations
 	candidates := []string{
-		"meept-daemon",                               // In PATH
-		"./meept-daemon",                             // Current directory
-		"./bin/meept-daemon",                         // Local bin
+		"meept-daemon",       // In PATH
+		"./meept-daemon",     // Current directory
+		"./bin/meept-daemon", // Local bin
 		filepath.Join(stateDir, "bin", "meept-daemon"), // State directory
 	}
 

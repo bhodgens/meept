@@ -193,8 +193,8 @@ func TestReportRouterPartialNoRouting(t *testing.T) {
 	})
 
 	report := &AgentReport{
-		Status:   ReportStatusPartial,
-		NotDone:  []string{"unit tests", "documentation"},
+		Status:  ReportStatusPartial,
+		NotDone: []string{"unit tests", "documentation"},
 	}
 	action := DetermineRouteAction(report)
 

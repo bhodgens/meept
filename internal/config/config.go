@@ -168,8 +168,8 @@ func expandConfigPaths(cfg *Config) {
 type ModelsConfig struct {
 	Model             string              `json:"model"`
 	SmallModel        string              `json:"small_model"`
-	ClassifierModel   string              `json:"classifier_model"`   // Model for intent classification (empty = use model)
-	SummarizerModel   string              `json:"summarizer_model"`   // Model for session summarization (empty = use model)
+	ClassifierModel   string              `json:"classifier_model"` // Model for intent classification (empty = use model)
+	SummarizerModel   string              `json:"summarizer_model"` // Model for session summarization (empty = use model)
 	DisabledProviders []string            `json:"disabled_providers"`
 	DefaultTimeout    int                 `json:"default_timeout"` // Default timeout in seconds
 	Providers         map[string]Provider `json:"providers"`
@@ -177,9 +177,9 @@ type ModelsConfig struct {
 
 // Provider represents a provider configuration in models.json5.
 type Provider struct {
-	API     string             `json:"api"`
-	Options ProviderOptions    `json:"options"`
-	Models  map[string]Model   `json:"models"`
+	API     string           `json:"api"`
+	Options ProviderOptions  `json:"options"`
+	Models  map[string]Model `json:"models"`
 }
 
 // ProviderOptions holds provider-specific options.

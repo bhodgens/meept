@@ -2,10 +2,10 @@
 package main
 
 import (
-	_ "modernc.org/sqlite" // Ensure sqlite driver is registered for side effects
 	"context"
 	"fmt"
 	"log/slog"
+	_ "modernc.org/sqlite" // Ensure sqlite driver is registered for side effects
 	"os"
 	"path/filepath"
 
@@ -18,7 +18,6 @@ import (
 )
 
 var (
-	
 
 	// Flags
 	configPath string

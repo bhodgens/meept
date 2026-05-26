@@ -28,12 +28,12 @@ type TemplatesListRequest struct {
 
 // TemplateInfo contains template information for API responses.
 type TemplateInfo struct {
-	Name        string               `json:"name"`
-	Description string               `json:"description"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
 	Scope       templates.TemplateScope `json:"scope"`
-	Path        string               `json:"path,omitempty"`
-	Priority    int                  `json:"priority"`
-	Body        string               `json:"body,omitempty"`
+	Path        string                  `json:"path,omitempty"`
+	Priority    int                     `json:"priority"`
+	Body        string                  `json:"body,omitempty"`
 }
 
 // List returns available templates.

@@ -34,8 +34,8 @@ func TestExpandPath(t *testing.T) {
 			check: func(got string) bool { return got == "relative/path" },
 		},
 		{
-			name:  "tilde home dir expansion",
-			path:  "~/test/path",
+			name: "tilde home dir expansion",
+			path: "~/test/path",
 			check: func(got string) bool {
 				home, _ := os.UserHomeDir()
 				expected := filepath.Join(home, "test", "path")
@@ -43,8 +43,8 @@ func TestExpandPath(t *testing.T) {
 			},
 		},
 		{
-			name:  "tilde only",
-			path:  "~",
+			name: "tilde only",
+			path: "~",
 			check: func(got string) bool {
 				home, _ := os.UserHomeDir()
 				return got == home
@@ -245,8 +245,8 @@ func TestSaveArtifacts(t *testing.T) {
 
 	designs := []*AgentDesign{
 		{
-			ID:   "debug_specialist",
-			Name: "Debug Specialist",
+			ID:      "debug_specialist",
+			Name:    "Debug Specialist",
 			Purpose: "debug agent",
 			Constraints: AgentConstraints{
 				MaxIterations: 20,
@@ -290,9 +290,9 @@ func TestSaveArtifactsNoDesigns(t *testing.T) {
 	}
 
 	result := &AnalysisResult{
-		ID:       "test_001",
+		ID:         "test_001",
 		AnalyzedAt: time.Now(),
-		Status:   "completed",
+		Status:     "completed",
 	}
 
 	err = qa.saveArtifacts(result, nil)
@@ -347,9 +347,9 @@ func TestLogOutcome(t *testing.T) {
 func TestGetStatus(t *testing.T) {
 	qa := &QAgent{
 		config: config.QAgentConfig{
-			Enabled:       true,
-			AnalysisDir:   "~/.meept/q",
-			OutcomesLog:   "~/.meept/q_outcomes.jsonl",
+			Enabled:     true,
+			AnalysisDir: "~/.meept/q",
+			OutcomesLog: "~/.meept/q_outcomes.jsonl",
 		},
 	}
 

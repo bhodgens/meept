@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	googleAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleAuthURL = "https://accounts.google.com/o/oauth2/v2/auth"
 	//nolint:gosec // field name, not a secret
 	googleTokenURL = "https://oauth2.googleapis.com/token"
 )
@@ -44,9 +44,9 @@ func DefaultOAuth2Config(clientID, clientSecret, redirectURI string) OAuth2Confi
 
 // Token represents an OAuth2 token.
 type Token struct {
-	AccessToken  string    `json:"access_token"`  //nolint:gosec // field name, not a secret
+	AccessToken  string    `json:"access_token"` //nolint:gosec // field name, not a secret
 	TokenType    string    `json:"token_type"`
-	RefreshToken string    `json:"refresh_token,omitempty"` //nolint:gosec // field name, not a secret
+	RefreshToken string    `json:"refresh_token,omitempty"`   //nolint:gosec // field name, not a secret
 	Expiry       time.Time `json:"expiry,omitempty,omitzero"` //nolint:modernize // keep omitempty for backward compat
 }
 
@@ -124,7 +124,7 @@ func (a *OAuth2Authenticator) Exchange(ctx context.Context, code string) (*Token
 	}
 
 	var tokenResp struct {
-		AccessToken  string `json:"access_token"`  //nolint:gosec // field name, not a secret
+		AccessToken  string `json:"access_token"` //nolint:gosec // field name, not a secret
 		TokenType    string `json:"token_type"`
 		ExpiresIn    int    `json:"expires_in"`
 		RefreshToken string `json:"refresh_token"` //nolint:gosec // field name, not a secret

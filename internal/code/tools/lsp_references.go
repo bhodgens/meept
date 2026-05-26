@@ -111,7 +111,7 @@ func (t *LSPReferencesTool) Execute(ctx context.Context, args map[string]any) (a
 		return map[string]any{
 			SchemaPropFound:     false,
 			SchemaPropMessage:   "No references found for symbol at this location",
-			SchemaPropFilePath: filePath,
+			SchemaPropFilePath:  filePath,
 			SchemaPropLine:      line,
 			SchemaPropCharacter: char,
 		}, nil
@@ -134,17 +134,17 @@ func (t *LSPReferencesTool) Execute(ctx context.Context, args map[string]any) (a
 	references := make([]map[string]any, 0, len(byFile))
 	for path, refs := range byFile {
 		references = append(references, map[string]any{
-			SchemaPropFilePath:  path,
-			"references": refs,
-			SchemaPropCount:      len(refs),
+			SchemaPropFilePath: path,
+			"references":       refs,
+			SchemaPropCount:    len(refs),
 		})
 	}
 
 	return map[string]any{
-		SchemaPropFound:       true,
-		"files":       references,
-		"total_count": len(locations),
-		"file_count":  len(references),
+		SchemaPropFound: true,
+		"files":         references,
+		"total_count":   len(locations),
+		"file_count":    len(references),
 	}, nil
 }
 

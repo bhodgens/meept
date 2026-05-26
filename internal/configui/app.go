@@ -13,12 +13,12 @@ import (
 type Phase int
 
 const (
-	PhaseMenu    Phase = iota // main menu
-	PhaseSection              // editing a section's fields
-	PhaseEditor               // inline field editor
-	PhaseDrilldown            // drill-down into nested struct
-	PhaseConfirmSave          // save confirmation prompt
-	PhaseQuitting             // exiting
+	PhaseMenu        Phase = iota // main menu
+	PhaseSection                  // editing a section's fields
+	PhaseEditor                   // inline field editor
+	PhaseDrilldown                // drill-down into nested struct
+	PhaseConfirmSave              // save confirmation prompt
+	PhaseQuitting                 // exiting
 )
 
 // MenuItem represents a selectable section in the main menu.
@@ -118,17 +118,17 @@ func NewApp() *App {
 	all := append(primary, advanced...)
 
 	return &App{
-		phase:         PhaseMenu,
-		primaryItems:  primary,
-		allItems:      all,
-		menuItems:     primary,
-		showAdvanced:  false,
-		menuCursor:    0,
-		styles:        defaultStyles(),
+		phase:        PhaseMenu,
+		primaryItems: primary,
+		allItems:     all,
+		menuItems:    primary,
+		showAdvanced: false,
+		menuCursor:   0,
+		styles:       defaultStyles(),
 	}
 }
 
-func (a *App) Phase() Phase          { return a.phase }
+func (a *App) Phase() Phase           { return a.phase }
 func (a *App) Section() *SectionModel { return a.section }
 
 func (a *App) MenuItems() []MenuItem { return a.menuItems }

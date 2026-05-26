@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"strings"
 	"github.com/charmbracelet/x/ansi"
+	"strings"
 	"testing"
 
 	"github.com/caimlas/meept/internal/tui/types"

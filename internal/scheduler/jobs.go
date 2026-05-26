@@ -44,17 +44,17 @@ const (
 
 // JobConfig is the serializable configuration for a job.
 type JobConfig struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Type        JobType           `json:"type"`
-	Schedule    string            `json:"schedule"`
-	Enabled     bool              `json:"enabled"`
-	CreatedAt   time.Time         `json:"created_at"`
-	LastRunAt   *time.Time        `json:"last_run_at,omitempty"`
-	LastError   string            `json:"last_error,omitempty"`
-	RunCount    int64             `json:"run_count"`
-	Tags        []string          `json:"tags,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Type      JobType           `json:"type"`
+	Schedule  string            `json:"schedule"`
+	Enabled   bool              `json:"enabled"`
+	CreatedAt time.Time         `json:"created_at"`
+	LastRunAt *time.Time        `json:"last_run_at,omitempty"`
+	LastError string            `json:"last_error,omitempty"`
+	RunCount  int64             `json:"run_count"`
+	Tags      []string          `json:"tags,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 
 	// Type-specific configuration
 	AgentConfig        *AgentJobConfig        `json:"agent_config,omitempty"`
@@ -76,19 +76,19 @@ type AgentJobConfig struct {
 
 // ShellJobConfig holds configuration for shell jobs.
 type ShellJobConfig struct {
-	Command     string            `json:"command"`
-	Args        []string          `json:"args,omitempty"`
-	WorkDir     string            `json:"work_dir,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	Timeout     time.Duration     `json:"timeout,omitempty"`
-	CaptureOut  bool              `json:"capture_output"`
+	Command    string            `json:"command"`
+	Args       []string          `json:"args,omitempty"`
+	WorkDir    string            `json:"work_dir,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	Timeout    time.Duration     `json:"timeout,omitempty"`
+	CaptureOut bool              `json:"capture_output"`
 }
 
 // ReminderJobConfig holds configuration for reminder jobs.
 type ReminderJobConfig struct {
-	Message    string   `json:"message"`
-	Channels   []string `json:"channels,omitempty"` // e.g., ["telegram", "notification"]
-	Priority   string   `json:"priority,omitempty"` // low, normal, high, urgent
+	Message     string     `json:"message"`
+	Channels    []string   `json:"channels,omitempty"` // e.g., ["telegram", "notification"]
+	Priority    string     `json:"priority,omitempty"` // low, normal, high, urgent
 	RepeatUntil *time.Time `json:"repeat_until,omitempty"`
 }
 
@@ -109,16 +109,16 @@ type LearningJobConfig struct {
 
 // JobInfo contains information about a scheduled job.
 type JobInfo struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Type         JobType    `json:"type"`
-	Schedule     string     `json:"schedule"`
-	Enabled      bool       `json:"enabled"`
-	NextRun      *time.Time `json:"next_run,omitempty"`
-	LastRun      *time.Time `json:"last_run,omitempty"`
-	LastError    string     `json:"last_error,omitempty"`
-	RunCount     int64      `json:"run_count"`
-	IsRunning    bool       `json:"is_running"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Type      JobType    `json:"type"`
+	Schedule  string     `json:"schedule"`
+	Enabled   bool       `json:"enabled"`
+	NextRun   *time.Time `json:"next_run,omitempty"`
+	LastRun   *time.Time `json:"last_run,omitempty"`
+	LastError string     `json:"last_error,omitempty"`
+	RunCount  int64      `json:"run_count"`
+	IsRunning bool       `json:"is_running"`
 }
 
 // JobResult holds the result of a job execution.
@@ -141,10 +141,10 @@ type baseJob struct {
 	config   JobConfig
 }
 
-func (b *baseJob) ID() string       { return b.id }
-func (b *baseJob) Name() string     { return b.name }
-func (b *baseJob) Schedule() string { return b.schedule }
-func (b *baseJob) Type() JobType    { return b.jobType }
+func (b *baseJob) ID() string        { return b.id }
+func (b *baseJob) Name() string      { return b.name }
+func (b *baseJob) Schedule() string  { return b.schedule }
+func (b *baseJob) Type() JobType     { return b.jobType }
 func (b *baseJob) Config() JobConfig { return b.config }
 
 // AgentJob triggers a chat request with a prompt.
@@ -183,10 +183,10 @@ func NewAgentJob(cfg JobConfig, msgBus *bus.MessageBus) (*AgentJob, error) {
 // Execute sends a chat request to the agent via the message bus.
 func (j *AgentJob) Execute(ctx context.Context) error {
 	payload := map[string]any{
-		"prompt":     j.prompt,
-		"source":     "scheduler",
-		SchedulerKeyJobID:     j.id,
-		"job_name":   j.name,
+		"prompt":          j.prompt,
+		"source":          "scheduler",
+		SchedulerKeyJobID: j.id,
+		"job_name":        j.name,
 	}
 
 	if j.context != nil {
@@ -368,12 +368,12 @@ func NewReminderJob(cfg JobConfig, msgBus *bus.MessageBus) (*ReminderJob, error)
 // Execute sends the reminder to configured channels.
 func (j *ReminderJob) Execute(ctx context.Context) error {
 	payload := map[string]any{
-		"message":   j.message,
-		SchedulerKeyJobID:    j.id,
-		"job_name":  j.name,
-		"priority":  j.priority,
-		"channels":  j.channels,
-		"timestamp": time.Now().UTC(),
+		"message":         j.message,
+		SchedulerKeyJobID: j.id,
+		"job_name":        j.name,
+		"priority":        j.priority,
+		"channels":        j.channels,
+		"timestamp":       time.Now().UTC(),
 	}
 
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+j.id, payload)
@@ -420,8 +420,8 @@ type LearningConsolidator interface {
 
 // MemoryOptimizerAdapter wraps separate functions to satisfy MemoryOptimizer.
 type MemoryOptimizerAdapter struct {
-	UpdateMetricsFn  func(ctx context.Context) error
-	ConsolidateFn    func(ctx context.Context) error
+	UpdateMetricsFn func(ctx context.Context) error
+	ConsolidateFn   func(ctx context.Context) error
 }
 
 func (a *MemoryOptimizerAdapter) UpdateGraphMetrics(ctx context.Context) error {
@@ -566,10 +566,10 @@ func (j *SecurityJob) Execute(ctx context.Context) error {
 	// Publish scan results
 	if j.deps.Bus != nil {
 		payload := map[string]any{
-			SchedulerKeyJobID:      j.id,
-			"issues":      issues,
-			"issue_count": len(issues),
-			"scan_types":  j.scanTypes,
+			SchedulerKeyJobID: j.id,
+			"issues":          issues,
+			"issue_count":     len(issues),
+			"scan_types":      j.scanTypes,
 		}
 		msg, _ := models.NewBusMessage(models.MessageTypeEvent, "scheduler."+j.id, payload)
 		j.deps.Bus.Publish("scheduler.security.completed", msg)
@@ -720,8 +720,8 @@ func (c JobConfig) MarshalJSON() ([]byte, error) {
 	type Alias JobConfig
 	return json.Marshal(struct {
 		Alias
-		CreatedAt string     `json:"created_at"`
-		LastRunAt *string    `json:"last_run_at,omitempty"`
+		CreatedAt string  `json:"created_at"`
+		LastRunAt *string `json:"last_run_at,omitempty"`
 	}{
 		Alias:     Alias(c),
 		CreatedAt: c.CreatedAt.Format(time.RFC3339),

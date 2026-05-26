@@ -216,13 +216,13 @@ func TestTTSRRepeatOnce(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.rules = []*TTSRRule{
 		{
-			Name:         "once-rule",
-			Scope:        "text",
-			Condition:    "bad-pattern",
-			Repeat:       "once",
-			compiled:     mustCompileRegex("bad-pattern"),
-			hasInjected:  false,
-			Content:      "Do not do this.",
+			Name:        "once-rule",
+			Scope:       "text",
+			Condition:   "bad-pattern",
+			Repeat:      "once",
+			compiled:    mustCompileRegex("bad-pattern"),
+			hasInjected: false,
+			Content:     "Do not do this.",
 		},
 	}
 	mgr.mu.Unlock()
@@ -248,13 +248,13 @@ func TestTTSRRepeatAfterGap(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.rules = []*TTSRRule{
 		{
-			Name:         "gap-rule",
-			Scope:        "text",
-			Condition:    "off-script",
-			Repeat:       "after-gap:3",
-			compiled:     mustCompileRegex("off-script"),
-			hasInjected:  false,
-			Content:      "Stay on script.",
+			Name:        "gap-rule",
+			Scope:       "text",
+			Condition:   "off-script",
+			Repeat:      "after-gap:3",
+			compiled:    mustCompileRegex("off-script"),
+			hasInjected: false,
+			Content:     "Stay on script.",
 		},
 	}
 	mgr.mu.Unlock()
@@ -310,12 +310,12 @@ func TestTTSRMarkInjected(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.rules = []*TTSRRule{
 		{
-			Name:         "test-rule",
-			Scope:        "text",
-			Condition:    "test",
-			compiled:     mustCompileRegex("test"),
-			hasInjected:  false,
-			Content:      "Test rule.",
+			Name:        "test-rule",
+			Scope:       "text",
+			Condition:   "test",
+			compiled:    mustCompileRegex("test"),
+			hasInjected: false,
+			Content:     "Test rule.",
 		},
 	}
 	mgr.mu.Unlock()

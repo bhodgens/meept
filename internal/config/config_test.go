@@ -308,4 +308,3 @@ func TestParseLogLevel(t *testing.T) {
 		}
 	}
 }
-

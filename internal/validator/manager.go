@@ -10,6 +10,7 @@ import (
 )
 
 // ValidatorManager orchestrates validators for different tool types.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type ValidatorManager struct {
 	validators map[string]Validator // tool_hint -> validator
@@ -20,15 +21,15 @@ type ValidatorManager struct {
 func NewValidatorManager() *ValidatorManager {
 	return &ValidatorManager{
 		validators: map[string]Validator{
-			"code":        NewFilesystemValidator(),
-			"refactor":    NewFilesystemValidator(),
-			"file_write":  NewFilesystemValidator(),
-			"file_read":   NewFilesystemValidator(),
-			"shell":       NewShellValidator(),
-			"list_dir":    NewFilesystemValidator(),
-			"file_delete": NewFilesystemValidator(),
-			"web_fetch":   NewWebValidator(),
-			"web_search":  NewWebValidator(),
+			"code":               NewFilesystemValidator(),
+			"refactor":           NewFilesystemValidator(),
+			"file_write":         NewFilesystemValidator(),
+			"file_read":          NewFilesystemValidator(),
+			"shell":              NewShellValidator(),
+			"list_dir":           NewFilesystemValidator(),
+			"file_delete":        NewFilesystemValidator(),
+			"web_fetch":          NewWebValidator(),
+			"web_search":         NewWebValidator(),
 			"memory_search":      NewMemoryValidator(),
 			"memory_get_context": NewMemoryValidator(),
 			"memory_store":       NewMemoryValidator(),

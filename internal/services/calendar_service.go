@@ -19,15 +19,15 @@ func NewCalendarService(client *calendar.Client) *CalendarService {
 
 // CalendarEvent represents a calendar event for API responses.
 type CalendarEvent struct {
-	ID          string        `json:"id"`
-	Summary     string        `json:"summary"`
-	Description string        `json:"description,omitempty"`
-	Location    string        `json:"location,omitempty"`
-	Start       time.Time     `json:"start"`
-	End         time.Time     `json:"end"`
-	AllDay      bool          `json:"all_day"`
-	Status      string        `json:"status,omitempty"`
-	HTMLLink    string        `json:"html_link,omitempty"`
+	ID          string         `json:"id"`
+	Summary     string         `json:"summary"`
+	Description string         `json:"description,omitempty"`
+	Location    string         `json:"location,omitempty"`
+	Start       time.Time      `json:"start"`
+	End         time.Time      `json:"end"`
+	AllDay      bool           `json:"all_day"`
+	Status      string         `json:"status,omitempty"`
+	HTMLLink    string         `json:"html_link,omitempty"`
 	Attendees   []AttendeeInfo `json:"attendees,omitempty"`
 }
 
@@ -53,20 +53,20 @@ type ListEventsResponse struct {
 
 // CreateEventRequest contains create parameters.
 type CreateEventRequest struct {
-	Summary     string   `json:"summary"`
-	Description string   `json:"description,omitempty"`
-	Location    string   `json:"location,omitempty"`
+	Summary     string    `json:"summary"`
+	Description string    `json:"description,omitempty"`
+	Location    string    `json:"location,omitempty"`
 	Start       time.Time `json:"start"`
 	End         time.Time `json:"end"`
-	Attendees   []string `json:"attendees,omitempty"`
+	Attendees   []string  `json:"attendees,omitempty"`
 }
 
 // UpdateEventRequest contains update parameters.
 type UpdateEventRequest struct {
-	ID          string    `json:"id"`
-	Summary     string    `json:"summary,omitempty"`
-	Description string    `json:"description,omitempty"`
-	Location    string    `json:"location,omitempty"`
+	ID          string     `json:"id"`
+	Summary     string     `json:"summary,omitempty"`
+	Description string     `json:"description,omitempty"`
+	Location    string     `json:"location,omitempty"`
 	Start       *time.Time `json:"start,omitempty"`
 	End         *time.Time `json:"end,omitempty"`
 }

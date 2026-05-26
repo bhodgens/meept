@@ -19,10 +19,10 @@ import (
 // ToolActionMap maps tool names to permission action categories.
 var ToolActionMap = map[string]string{
 	// File operations
-	"shell":          ToolShellExecute,
-	ToolFileRead:     ToolFileRead,
-	ToolFileWrite:    ToolFileWrite,
-	ToolFileDelete:   ToolFileDelete,
+	"shell":           ToolShellExecute,
+	ToolFileRead:      ToolFileRead,
+	ToolFileWrite:     ToolFileWrite,
+	ToolFileDelete:    ToolFileDelete,
 	ToolListDirectory: ToolFileRead,
 
 	// Network operations
@@ -354,9 +354,9 @@ type Executor struct {
 	security    *security.PermissionChecker
 	logger      *slog.Logger
 	parallelism int
-	agentID     string           // Identifier for the agent/worker using this executor
-	cache       *ResultCache     // Tool result cache
-	bus         *bus.MessageBus  // Optional: for publishing streaming progress events
+	agentID     string          // Identifier for the agent/worker using this executor
+	cache       *ResultCache    // Tool result cache
+	bus         *bus.MessageBus // Optional: for publishing streaming progress events
 }
 
 // ExecutorOption is a functional option for configuring an Executor.

@@ -92,11 +92,11 @@ func newShadowStatusCmd() *cobra.Command {
 
 func newShadowExportCmd() *cobra.Command {
 	var (
-		format     string
-		minQuality float64
-		minMargin  float64
-		since      string
-		output     string
+		format       string
+		minQuality   float64
+		minMargin    float64
+		since        string
+		output       string
 		markExported bool
 	)
 
@@ -557,14 +557,14 @@ func newShadowAdaptersActivateCmd() *cobra.Command {
 
 func newShadowAdaptersTrainCmd() *cobra.Command {
 	var (
-		baseModel    string
-		adapterType  string
-		adapterName  string
-		exportFirst  bool
-		execute      bool
-		backend      string
-		outputDir    string
-		scriptOnly   bool
+		baseModel   string
+		adapterType string
+		adapterName string
+		exportFirst bool
+		execute     bool
+		backend     string
+		outputDir   string
+		scriptOnly  bool
 	)
 
 	cmd := &cobra.Command{

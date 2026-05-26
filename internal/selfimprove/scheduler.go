@@ -13,8 +13,8 @@ type Scheduler struct {
 	interval   time.Duration
 	logger     *slog.Logger
 
-	mu     sync.Mutex
-	stopCh chan struct{}
+	mu      sync.Mutex
+	stopCh  chan struct{}
 	running bool
 }
 

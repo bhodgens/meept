@@ -14,7 +14,7 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 		agents := defaultAgentList()
 		s.writeJSON(w, http.StatusOK, map[string]any{
 			"agents": agents,
-			KeyCount:  len(agents),
+			KeyCount: len(agents),
 		})
 		return
 	}
@@ -27,7 +27,7 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"agents": agents,
-		KeyCount:  len(agents),
+		KeyCount: len(agents),
 	})
 }
 

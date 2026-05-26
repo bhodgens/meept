@@ -18,8 +18,8 @@ func TestImpactEstimatorEstimateNewAgentImpact(t *testing.T) {
 	estimator := NewImpactEstimator(impactLogger, config)
 
 	pattern := PatternReport{
-		ID:       "p1",
-		Confidence: 0.8,
+		ID:           "p1",
+		Confidence:   0.8,
 		SessionCount: 20,
 		Evidence: []PatternEvidence{
 			{Metric: "duration", Value: 600.0}, // 10 min default
@@ -67,14 +67,14 @@ func TestImpactEstimatorEstimateSpecUpdateImpact(t *testing.T) {
 	})
 
 	pattern := PatternReport{
-		Confidence:   0.8,
-		SessionCount: 20,
+		Confidence:     0.8,
+		SessionCount:   20,
 		MetricObserved: 0.5, // 50% rejection rate
 	}
 
 	rec := Recommendation{
-		Type:    "update_spec",
-		Title:   "Update coder spec",
+		Type:     "update_spec",
+		Title:    "Update coder spec",
 		Priority: "high",
 	}
 
@@ -103,8 +103,8 @@ func TestImpactEstimatorEstimateModelReassignmentImpact(t *testing.T) {
 	estimator := NewImpactEstimator(impactLogger, ImpactEstimatorConfig{})
 
 	pattern := PatternReport{
-		Confidence:   0.7,
-		SessionCount: 10,
+		Confidence:     0.7,
+		SessionCount:   10,
 		MetricObserved: 4.0, // 4x variance
 		Evidence: []PatternEvidence{
 			{Metric: "duration", Value: 300.0}, // 5 min
@@ -112,8 +112,8 @@ func TestImpactEstimatorEstimateModelReassignmentImpact(t *testing.T) {
 	}
 
 	rec := Recommendation{
-		Type:    "reassign_model",
-		Title:   "Reassign model",
+		Type:     "reassign_model",
+		Title:    "Reassign model",
 		Priority: "medium",
 	}
 
@@ -139,14 +139,14 @@ func TestImpactEstimatorEstimateToolAdditionImpact(t *testing.T) {
 	estimator := NewImpactEstimator(impactLogger, ImpactEstimatorConfig{})
 
 	pattern := PatternReport{
-		Confidence:   0.85,
-		SessionCount: 10,
+		Confidence:     0.85,
+		SessionCount:   10,
 		MetricObserved: 0.5, // 50% tool failure rate
 	}
 
 	rec := Recommendation{
-		Type:    "add_tool",
-		Title:   "Fix shell_execute tool",
+		Type:     "add_tool",
+		Title:    "Fix shell_execute tool",
 		Priority: "high",
 	}
 
@@ -177,8 +177,8 @@ func TestImpactEstimatorEstimateGenericImpact(t *testing.T) {
 	}
 
 	rec := Recommendation{
-		Type:    "update_prompt",
-		Title:   "Generic improvement",
+		Type:     "update_prompt",
+		Title:    "Generic improvement",
 		Priority: "medium",
 	}
 
@@ -202,8 +202,8 @@ func TestImpactEstimatorEstimateImpactDispatch(t *testing.T) {
 	research := &ResearchReport{}
 
 	tests := []struct {
-		recType     string
-		wantMetric  string
+		recType    string
+		wantMetric string
 	}{
 		{"new_agent", "time_saved"},
 		{"update_spec", "revision_reduction"},
@@ -266,7 +266,7 @@ func TestImpactEstimatorAverageDurationFromEvidence(t *testing.T) {
 			want:     600.0, // default
 		},
 		{
-			name: "empty evidence",
+			name:     "empty evidence",
 			evidence: []PatternEvidence{},
 			want:     600.0,
 		},
@@ -302,10 +302,10 @@ func TestImpactEstimatorAggregateImpact(t *testing.T) {
 	estimator := NewImpactEstimator(impactLogger, ImpactEstimatorConfig{})
 
 	tests := []struct {
-		name        string
-		estimates   []*ImpactEstimate
-		wantNil     bool
-		wantCount   int
+		name      string
+		estimates []*ImpactEstimate
+		wantNil   bool
+		wantCount int
 	}{
 		{
 			name:      "nil estimates",
@@ -321,8 +321,8 @@ func TestImpactEstimatorAggregateImpact(t *testing.T) {
 			name: "single estimate",
 			estimates: []*ImpactEstimate{
 				{
-					WeeklyImpact:      "Save ~10 minutes/week",
-					Confidence:        0.8,
+					WeeklyImpact:       "Save ~10 minutes/week",
+					Confidence:         0.8,
 					ImprovementPercent: 50.0,
 				},
 			},
@@ -457,14 +457,14 @@ func TestImpactEstimatorSpecUpdateImprovementCapped(t *testing.T) {
 
 	// Set a very low rejection rate to test the 80% cap
 	pattern := PatternReport{
-		Confidence:   0.9,
-		SessionCount: 100,
+		Confidence:     0.9,
+		SessionCount:   100,
 		MetricObserved: 0.95, // 95% rejection
 	}
 
 	rec := Recommendation{
-		Type:    "update_spec",
-		Title:   "Update spec",
+		Type:     "update_spec",
+		Title:    "Update spec",
 		Priority: "high",
 	}
 
@@ -482,8 +482,8 @@ func TestImpactEstimatorModelReassignmentImprovementCapped(t *testing.T) {
 	estimator := NewImpactEstimator(impactLogger, ImpactEstimatorConfig{})
 
 	pattern := PatternReport{
-		Confidence:   0.9,
-		SessionCount: 50,
+		Confidence:     0.9,
+		SessionCount:   50,
 		MetricObserved: 10.0, // 10x variance
 		Evidence: []PatternEvidence{
 			{Metric: "duration", Value: 120.0},
@@ -491,8 +491,8 @@ func TestImpactEstimatorModelReassignmentImprovementCapped(t *testing.T) {
 	}
 
 	rec := Recommendation{
-		Type:    "reassign_model",
-		Title:   "Reassign model",
+		Type:  "reassign_model",
+		Title: "Reassign model",
 	}
 
 	research := &ResearchReport{}
@@ -508,14 +508,14 @@ func TestImpactEstimatorToolAdditionImprovementCapped(t *testing.T) {
 	estimator := NewImpactEstimator(impactLogger, ImpactEstimatorConfig{})
 
 	pattern := PatternReport{
-		Confidence:   0.9,
-		SessionCount: 50,
+		Confidence:     0.9,
+		SessionCount:   50,
 		MetricObserved: 0.95, // 95% failure
 	}
 
 	rec := Recommendation{
-		Type:    "add_tool",
-		Title:   "Fix tool",
+		Type:  "add_tool",
+		Title: "Fix tool",
 	}
 
 	research := &ResearchReport{}

@@ -122,18 +122,18 @@ func BenchmarkDaemonStartup(b *testing.B) {
 		ctx, cancel := context.WithCancel(context.Background())
 		ready := make(chan struct{})
 
-	go func() {
-		// Run daemon in a separate goroutine so socket polling can proceed
-		go func() { _ = d.Run(ctx) }()
-		// Wait for socket
-		for range 100 {
-			if _, err := os.Stat(cfg.SocketPath); err == nil {
-				close(ready)
-				return
+		go func() {
+			// Run daemon in a separate goroutine so socket polling can proceed
+			go func() { _ = d.Run(ctx) }()
+			// Wait for socket
+			for range 100 {
+				if _, err := os.Stat(cfg.SocketPath); err == nil {
+					close(ready)
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}()
+		}()
 
 		<-ready
 		b.StopTimer()

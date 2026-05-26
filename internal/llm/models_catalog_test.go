@@ -4,9 +4,9 @@ import "testing"
 
 func TestGetModelsForProvider(t *testing.T) {
 	tests := []struct {
-		providerID  string
-		wantFound   bool
-		wantMinLen  int
+		providerID string
+		wantFound  bool
+		wantMinLen int
 	}{
 		{"anthropic", true, 3},
 		{"openai", true, 2},

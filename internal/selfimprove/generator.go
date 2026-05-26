@@ -76,11 +76,11 @@ func NewPatchGenerator(aiCfg AIInfraConfig, safetyCfg SafetyConfig, llmClient *l
 	}
 
 	return &PatchGenerator{
-		config:                   aiCfg,
-		safety:                   safetyCfg,
-		llmClient:                llmClient,
-		projectRoot:              projectRoot,
-		logger:                   logger,
+		config:                    aiCfg,
+		safety:                    safetyCfg,
+		llmClient:                 llmClient,
+		projectRoot:               projectRoot,
+		logger:                    logger,
 		compiledProtectedPatterns: compiled,
 	}
 }

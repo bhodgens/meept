@@ -460,11 +460,11 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 					"max_retries", maxRetries,
 				)
 				ts.publishEvent("task.validation_retry", map[string]any{
-					KeyTaskID:     step.TaskID,
-					KeyStepID:     step.ID,
-					"retry_count": step.ValidationRetryCount,
-					"max_retries": maxRetries,
-					string(MessageTypeError):       validationErr.Error(),
+					KeyTaskID:                step.TaskID,
+					KeyStepID:                step.ID,
+					"retry_count":            step.ValidationRetryCount,
+					"max_retries":            maxRetries,
+					string(MessageTypeError): validationErr.Error(),
 				})
 				return nil // Don't proceed to completion; step will be retried
 			}
@@ -478,7 +478,7 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			if err := ts.stepStore.Update(step); err != nil {
 				ts.logger.Warn("failed to persist step", "step_id", step.ID, "error", err)
 			}
-			return validationErr      // Don't proceed to completion
+			return validationErr // Don't proceed to completion
 		}
 		step.Validated = true
 		step.ValidationError = ""
@@ -773,10 +773,10 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 
 	// Publish error to chat immediately (not silent)
 	ts.publishEvent("task.error", map[string]any{
-		KeyTaskID:      step.TaskID,
-		KeyStepID:      step.ID,
-		string(MessageTypeError):        jobErr,
-		KeyChatVisible: true, // Errors always visible
+		KeyTaskID:                step.TaskID,
+		KeyStepID:                step.ID,
+		string(MessageTypeError): jobErr,
+		KeyChatVisible:           true, // Errors always visible
 	})
 
 	// Check if this is a retryable error (rate limit or transient failure)
@@ -905,14 +905,14 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 		ts.cleanupValidationGateCounter(step.TaskID)
 
 		ts.publishEvent("task.failed", map[string]any{
-			KeyTaskID:         step.TaskID,
-			"name":            t.Name,
-			"failed_jobs":     t.FailedJobs,
-			KeyCompletedJobs:  t.CompletedJobs,
-			KeyTotalJobs:      t.TotalJobs,
-			"failed_step":     step.ID,
-			string(MessageTypeError):           jobErr,
-			"linked_sessions": t.LinkedSessions,
+			KeyTaskID:                step.TaskID,
+			"name":                   t.Name,
+			"failed_jobs":            t.FailedJobs,
+			KeyCompletedJobs:         t.CompletedJobs,
+			KeyTotalJobs:             t.TotalJobs,
+			"failed_step":            step.ID,
+			string(MessageTypeError): jobErr,
+			"linked_sessions":        t.LinkedSessions,
 		})
 
 		ts.logger.Info("Task failed - no remaining live steps",

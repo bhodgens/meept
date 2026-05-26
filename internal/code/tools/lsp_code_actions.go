@@ -119,7 +119,7 @@ func (t *LSPCodeActionsTool) Execute(ctx context.Context, args map[string]any) (
 		return map[string]any{
 			SchemaPropFound:     false,
 			SchemaPropMessage:   "No code actions available at this location",
-			SchemaPropFilePath: filePath,
+			SchemaPropFilePath:  filePath,
 			SchemaPropLine:      line,
 			SchemaPropCharacter: char,
 		}, nil
@@ -138,10 +138,10 @@ func (t *LSPCodeActionsTool) Execute(ctx context.Context, args map[string]any) (
 			return map[string]any{
 				SchemaPropFound:     false,
 				SchemaPropMessage:   fmt.Sprintf("No code actions matching '%s'", query),
-				SchemaPropFilePath: filePath,
+				SchemaPropFilePath:  filePath,
 				SchemaPropLine:      line,
 				SchemaPropCharacter: char,
-				"available_count":  len(actions),
+				"available_count":   len(actions),
 			}, nil
 		}
 	}
@@ -166,10 +166,10 @@ func (t *LSPCodeActionsTool) Execute(ctx context.Context, args map[string]any) (
 
 	result := map[string]any{
 		SchemaPropFound:     true,
-		SchemaPropFilePath: filePath,
+		SchemaPropFilePath:  filePath,
 		SchemaPropLine:      line,
 		SchemaPropCharacter: char,
-		"actions": actionResults,
+		"actions":           actionResults,
 		SchemaPropCount:     len(actionResults),
 	}
 

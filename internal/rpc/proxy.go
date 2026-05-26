@@ -22,14 +22,14 @@ type ProxyHandler struct {
 
 // busSubscription holds state for a bus subscription.
 type busSubscription struct {
-	ID           string
-	Topics       []string
-	Subscriber   *bus.Subscriber
-	TopicSubs    []*bus.Subscriber // per-topic subscribers
-	Events       []*busEventRecord
-	MaxEvents    int
-	mu           sync.Mutex
-	cancelFunc   context.CancelFunc // cancels goroutines when client disconnects
+	ID         string
+	Topics     []string
+	Subscriber *bus.Subscriber
+	TopicSubs  []*bus.Subscriber // per-topic subscribers
+	Events     []*busEventRecord
+	MaxEvents  int
+	mu         sync.Mutex
+	cancelFunc context.CancelFunc // cancels goroutines when client disconnects
 }
 
 // busEventRecord is an event captured for polling.
@@ -238,9 +238,9 @@ func (p *ProxyHandler) makeFireAndForget(topic string) Handler {
 		}
 		delivered := p.bus.Publish(topic, msg)
 		return map[string]any{
-			RPCKeyStatus:    "published",
-			"topic":     topic,
-			"delivered": delivered,
+			RPCKeyStatus: "published",
+			"topic":      topic,
+			"delivered":  delivered,
 		}, nil
 	}
 }

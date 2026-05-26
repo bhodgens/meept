@@ -16,6 +16,7 @@ import (
 )
 
 // QAgent is the main orchestrator for Q Agent analysis.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type QAgent struct {
 	logger          *slog.Logger
@@ -443,6 +444,7 @@ func (q *QAgent) GetStatus(ctx context.Context) (*QAgentStatus, error) {
 }
 
 // QAgentStatus represents the status of the Q Agent.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type QAgentStatus struct {
 	Enabled       bool

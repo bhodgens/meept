@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/caimlas/meept/internal/transport"
 	"github.com/caimlas/meept/internal/sharedclient"
+	"github.com/caimlas/meept/internal/transport"
 )
 
 var (

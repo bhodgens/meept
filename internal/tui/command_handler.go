@@ -731,8 +731,8 @@ func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 	// Build amendment request and send via RPC bus publish
 	amendmentReq := map[string]any{
 		ParamTaskID: taskID,
-		"type":    amendmentType,
-		"content": content,
+		"type":      amendmentType,
+		"content":   content,
 	}
 
 	result, err := h.rpc.Call("task.amend.submit", amendmentReq)
@@ -888,7 +888,7 @@ func (h *CommandHandler) executeModel(args []string) *CommandResult {
 	}
 	if err := json.Unmarshal(result, &resp); err != nil {
 		return &CommandResult{
-			Output:  fmt.Sprintf("model switched to: %s", modelName),
+			Output: fmt.Sprintf("model switched to: %s", modelName),
 		}
 	}
 

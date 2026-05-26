@@ -53,23 +53,41 @@ func NewFileOperationSet() *FileOperationSet {
 }
 
 func (f *FileOperationSet) Merge(other *FileOperationSet) {
-	if other == nil { return }
-	for k := range other.Read { f.Read[k] = true }
-	for k := range other.Written { f.Written[k] = true }
-	for k := range other.Edited { f.Edited[k] = true }
+	if other == nil {
+		return
+	}
+	for k := range other.Read {
+		f.Read[k] = true
+	}
+	for k := range other.Written {
+		f.Written[k] = true
+	}
+	for k := range other.Edited {
+		f.Edited[k] = true
+	}
 }
 
 func (f *FileOperationSet) FileCount() int {
-	if f == nil { return 0 }
+	if f == nil {
+		return 0
+	}
 	return len(f.Read) + len(f.Written) + len(f.Edited)
 }
 
 func (f *FileOperationSet) FormatCompact() string {
-	if f == nil || f.FileCount() == 0 { return "" }
+	if f == nil || f.FileCount() == 0 {
+		return ""
+	}
 	var sb strings.Builder
-	for p := range f.Read { fmt.Fprintf(&sb, "read: %s\n", p) }
-	for p := range f.Written { fmt.Fprintf(&sb, "write: %s\n", p) }
-	for p := range f.Edited { fmt.Fprintf(&sb, "edit: %s\n", p) }
+	for p := range f.Read {
+		fmt.Fprintf(&sb, "read: %s\n", p)
+	}
+	for p := range f.Written {
+		fmt.Fprintf(&sb, "write: %s\n", p)
+	}
+	for p := range f.Edited {
+		fmt.Fprintf(&sb, "edit: %s\n", p)
+	}
 	return sb.String()
 }
 
@@ -94,8 +112,12 @@ type ContextCompactor struct {
 }
 
 func NewContextCompactor(cfg CompactorConfig, summarizer Chatter, tokenizer Tokenizer, logger *slog.Logger) *ContextCompactor {
-	if logger == nil { logger = slog.Default() }
-	if tokenizer == nil { tokenizer = &HeuristicTokenizer{} }
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if tokenizer == nil {
+		tokenizer = &HeuristicTokenizer{}
+	}
 	return &ContextCompactor{config: cfg, summarizer: summarizer, tokenizer: tokenizer, logger: logger, fileOps: NewFileOperationSet()}
 }
 
@@ -115,15 +137,23 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 
 	tokensBefore := c.countTokens(messages)
 	result := CompactResult{TokensBefore: tokensBefore}
-	if c.summarizer == nil { result.Messages = messages; return result }
+	if c.summarizer == nil {
+		result.Messages = messages
+		return result
+	}
 
 	cut := c.findCutPoint(messages)
 	result.SplitTurn = cut.SplitTurn
 	conversationText := c.serializeMessages(cut.ToCompact)
-	if conversationText == "" { result.Messages = messages; return result }
+	if conversationText == "" {
+		result.Messages = messages
+		return result
+	}
 
 	timeout := time.Duration(c.config.TimeoutSeconds) * time.Second
-	if timeout <= 0 { timeout = 30 * time.Second }
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 
 	var summary string
 	if cut.SplitTurn && cut.SplitTurnIndex >= 0 && cut.SplitTurnIndex < len(cut.ToCompact) {
@@ -137,8 +167,15 @@ func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) 
 	if summary == "" {
 		var err error
 		summary, err = c.summarizeMessages(ctx, cut.ToCompact, timeout)
-		if err != nil { c.logger.Warn("compaction summarization failed", "error", err); result.Messages = messages; return result }
-		if summary == "" { result.Messages = messages; return result }
+		if err != nil {
+			c.logger.Warn("compaction summarization failed", "error", err)
+			result.Messages = messages
+			return result
+		}
+		if summary == "" {
+			result.Messages = messages
+			return result
+		}
 	}
 
 	extract := c.parseSummaryResponse(summary)
@@ -245,26 +282,39 @@ func (c *ContextCompactor) buildTurnPrefixPrompt(turnText string) string {
 	return fmt.Sprintf(turnPrefixPrompt, turnText)
 }
 
-func (c *ContextCompactor) LastSummary() string       { return c.lastSummary }
+func (c *ContextCompactor) LastSummary() string               { return c.lastSummary }
 func (c *ContextCompactor) FileOperations() *FileOperationSet { return c.fileOps }
 
 func (c *ContextCompactor) findCutPoint(messages []ChatMessage) CutResult {
 	keepBudget := c.config.KeepRecentTokens
-	if keepBudget <= 0 { keepBudget = 20000 }
+	if keepBudget <= 0 {
+		keepBudget = 20000
+	}
 	var systemMsgs, nonSystem []ChatMessage
 	for _, msg := range messages {
-		if msg.Role == RoleSystem { systemMsgs = append(systemMsgs, msg) } else { nonSystem = append(nonSystem, msg) }
+		if msg.Role == RoleSystem {
+			systemMsgs = append(systemMsgs, msg)
+		} else {
+			nonSystem = append(nonSystem, msg)
+		}
 	}
-	if len(nonSystem) == 0 { return CutResult{SystemMsgs: systemMsgs, ToKeep: nonSystem} }
+	if len(nonSystem) == 0 {
+		return CutResult{SystemMsgs: systemMsgs, ToKeep: nonSystem}
+	}
 
 	tokenCount := 0
 	cutIdx := len(nonSystem)
 	for i := range slices.Backward(nonSystem) {
 		msgTokens := c.countMessageTokens(nonSystem[i])
-		if tokenCount+msgTokens > keepBudget && i < len(nonSystem)-1 { cutIdx = i + 1; break }
+		if tokenCount+msgTokens > keepBudget && i < len(nonSystem)-1 {
+			cutIdx = i + 1
+			break
+		}
 		tokenCount += msgTokens
 	}
-	if cutIdx == 0 || cutIdx >= len(nonSystem) { return CutResult{SystemMsgs: systemMsgs, ToKeep: nonSystem} }
+	if cutIdx == 0 || cutIdx >= len(nonSystem) {
+		return CutResult{SystemMsgs: systemMsgs, ToKeep: nonSystem}
+	}
 
 	adjustedIdx := c.adjustCutPoint(nonSystem, cutIdx)
 	split, splitIdx := c.findSplitTurnBoundary(nonSystem[:adjustedIdx])
@@ -272,63 +322,99 @@ func (c *ContextCompactor) findCutPoint(messages []ChatMessage) CutResult {
 }
 
 func (c *ContextCompactor) adjustCutPoint(messages []ChatMessage, cutIdx int) int {
-	if cutIdx <= 0 || cutIdx >= len(messages) { return cutIdx }
+	if cutIdx <= 0 || cutIdx >= len(messages) {
+		return cutIdx
+	}
 	start := cutIdx
 	for start > 0 && messages[start-1].Role == RoleTool {
 		start--
 		//nolint:gosec // index bounded by upstream check
-		if start > 0 && messages[start-1].Role == RoleAssistant && len(messages[start-1].ToolCalls) > 0 { start-- }
+		if start > 0 && messages[start-1].Role == RoleAssistant && len(messages[start-1].ToolCalls) > 0 {
+			start--
+		}
 	}
-	if start < cutIdx { cutIdx = start }
-	for i := cutIdx; i < len(messages); i++ { if messages[i].Role == RoleUser { return i } }
+	if start < cutIdx {
+		cutIdx = start
+	}
+	for i := cutIdx; i < len(messages); i++ {
+		if messages[i].Role == RoleUser {
+			return i
+		}
+	}
 	return cutIdx
 }
 
 func (c *ContextCompactor) isSplitTurn(messages []ChatMessage, cutIdx int) bool {
-	if cutIdx <= 0 || cutIdx >= len(messages) { return false }
+	if cutIdx <= 0 || cutIdx >= len(messages) {
+		return false
+	}
 	if messages[cutIdx].Role == RoleTool {
 		for i := cutIdx - 1; i >= 0; i-- {
-			if messages[i].Role == RoleAssistant && len(messages[i].ToolCalls) > 0 { return true }
-			if messages[i].Role == RoleUser { return false }
+			if messages[i].Role == RoleAssistant && len(messages[i].ToolCalls) > 0 {
+				return true
+			}
+			if messages[i].Role == RoleUser {
+				return false
+			}
 		}
 	}
 	if messages[cutIdx].Role == RoleAssistant && len(messages[cutIdx].ToolCalls) > 0 {
 		for i := cutIdx + 1; i < len(messages); i++ {
-			if messages[i].Role == RoleTool { return true }
-			if messages[i].Role == RoleUser { return false }
+			if messages[i].Role == RoleTool {
+				return true
+			}
+			if messages[i].Role == RoleUser {
+				return false
+			}
 		}
 	}
 	return false
 }
 
 func (c *ContextCompactor) findSplitTurnBoundary(toCompact []ChatMessage) (_ bool, _ int) {
-	if len(toCompact) == 0 { return false, -1 }
+	if len(toCompact) == 0 {
+		return false, -1
+	}
 	for i := range slices.Backward(toCompact) {
 		msg := toCompact[i]
 		if msg.Role == RoleAssistant && len(msg.ToolCalls) > 0 {
 			hasResults := false
 			for j := i + 1; j < len(toCompact); j++ {
-				if toCompact[j].Role == RoleTool { hasResults = true; break }
-				if toCompact[j].Role == RoleUser { break }
+				if toCompact[j].Role == RoleTool {
+					hasResults = true
+					break
+				}
+				if toCompact[j].Role == RoleUser {
+					break
+				}
 			}
-			if !hasResults { return true, i }
+			if !hasResults {
+				return true, i
+			}
 		}
 	}
 	return false, -1
 }
 
 func (c *ContextCompactor) serializeMessages(messages []ChatMessage) string {
-	if len(messages) == 0 { return "" }
+	if len(messages) == 0 {
+		return ""
+	}
 	var sb strings.Builder
 	for _, msg := range messages {
 		switch msg.Role {
-		case RoleUser: fmt.Fprintf(&sb, "[User]: %s\n", msg.Content)
+		case RoleUser:
+			fmt.Fprintf(&sb, "[User]: %s\n", msg.Content)
 		case RoleAssistant:
 			fmt.Fprintf(&sb, "[Assistant]: %s\n", msg.Content)
-			for _, tc := range msg.ToolCalls { fmt.Fprintf(&sb, "  [Tool Call]: %s(%s)\n", tc.Function.Name, tc.Function.Arguments) }
+			for _, tc := range msg.ToolCalls {
+				fmt.Fprintf(&sb, "  [Tool Call]: %s(%s)\n", tc.Function.Name, tc.Function.Arguments)
+			}
 		case RoleTool:
 			content := msg.Content
-			if len(content) > 500 { content = content[:500] + "..." }
+			if len(content) > 500 {
+				content = content[:500] + "..."
+			}
 			fmt.Fprintf(&sb, "  [Tool Result]: %s\n", content)
 		}
 	}
@@ -493,9 +579,12 @@ func (c *ContextCompactor) parseSummaryResponse(raw string) SummaryExtract {
 		ext.KeyFindings = parseBulletItems(sections["Important Discoveries"])
 		for _, line := range parseBulletItems(sections["Files"]) {
 			switch {
-			case strings.HasPrefix(line, "read: "): ext.FileReads = append(ext.FileReads, strings.TrimPrefix(line, "read: "))
-			case strings.HasPrefix(line, "write: "): ext.FileWrites = append(ext.FileWrites, strings.TrimPrefix(line, "write: "))
-			case strings.HasPrefix(line, "edit: "): ext.FileEdits = append(ext.FileEdits, strings.TrimPrefix(line, "edit: "))
+			case strings.HasPrefix(line, "read: "):
+				ext.FileReads = append(ext.FileReads, strings.TrimPrefix(line, "read: "))
+			case strings.HasPrefix(line, "write: "):
+				ext.FileWrites = append(ext.FileWrites, strings.TrimPrefix(line, "write: "))
+			case strings.HasPrefix(line, "edit: "):
+				ext.FileEdits = append(ext.FileEdits, strings.TrimPrefix(line, "edit: "))
 			}
 		}
 		ext.ErrorsEncountered = parseBulletItems(sections["Errors Encountered"])
@@ -507,30 +596,46 @@ func (c *ContextCompactor) parseSummaryResponse(raw string) SummaryExtract {
 func splitCompactionSections(raw string) map[string]string {
 	result := make(map[string]string)
 	matches := compactionSectionRe.FindAllStringSubmatchIndex(raw, -1)
-	if len(matches) == 0 { return result }
+	if len(matches) == 0 {
+		return result
+	}
 	for i, m := range matches {
 		name := raw[m[2]:m[3]]
 		start := m[1]
 		end := len(raw)
-		if i+1 < len(matches) { end = matches[i+1][0] }
+		if i+1 < len(matches) {
+			end = matches[i+1][0]
+		}
 		result[name] = raw[start:end]
 	}
 	return result
 }
 
 func (c *ContextCompactor) updateFileOps(summary SummaryExtract) {
-	if !c.config.TrackFileOps || c.fileOps == nil { return }
+	if !c.config.TrackFileOps || c.fileOps == nil {
+		return
+	}
 	c.fileOpsMu.Lock()
 	defer c.fileOpsMu.Unlock()
-	for _, f := range summary.FileReads { c.fileOps.Read[f] = true }
-	for _, f := range summary.FileWrites { c.fileOps.Written[f] = true }
-	for _, f := range summary.FileEdits { c.fileOps.Edited[f] = true }
+	for _, f := range summary.FileReads {
+		c.fileOps.Read[f] = true
+	}
+	for _, f := range summary.FileWrites {
+		c.fileOps.Written[f] = true
+	}
+	for _, f := range summary.FileEdits {
+		c.fileOps.Edited[f] = true
+	}
 	for _, f := range summary.FilePaths {
 		switch {
-		case strings.HasPrefix(f, "read: "): c.fileOps.Read[strings.TrimPrefix(f, "read: ")] = true
-		case strings.HasPrefix(f, "write: "): c.fileOps.Written[strings.TrimPrefix(f, "write: ")] = true
-		case strings.HasPrefix(f, "edit: "): c.fileOps.Edited[strings.TrimPrefix(f, "edit: ")] = true
-		default: c.fileOps.Read[f] = true
+		case strings.HasPrefix(f, "read: "):
+			c.fileOps.Read[strings.TrimPrefix(f, "read: ")] = true
+		case strings.HasPrefix(f, "write: "):
+			c.fileOps.Written[strings.TrimPrefix(f, "write: ")] = true
+		case strings.HasPrefix(f, "edit: "):
+			c.fileOps.Edited[strings.TrimPrefix(f, "edit: ")] = true
+		default:
+			c.fileOps.Read[f] = true
 		}
 	}
 }

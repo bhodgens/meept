@@ -139,8 +139,8 @@ func (t *LSPDiagnosticsTool) Execute(ctx context.Context, args map[string]any) (
 	result := make([]map[string]any, 0, len(filtered))
 	for _, d := range filtered {
 		item := map[string]any{
-			SchemaPropMessage:    d.Message,
-			"severity":   severityToString(d.Severity),
+			SchemaPropMessage:   d.Message,
+			"severity":          severityToString(d.Severity),
 			SchemaPropStartLine: d.Range.Start.Line,
 			SchemaPropStartChar: d.Range.Start.Character,
 			SchemaPropEndLine:   d.Range.End.Line,
@@ -159,10 +159,10 @@ func (t *LSPDiagnosticsTool) Execute(ctx context.Context, args map[string]any) (
 	counts := countBySeverity(filtered)
 
 	return map[string]any{
-		SchemaPropFilePath:   filePath,
-		"diagnostics": result,
-		"total_count": len(result),
-		"counts":      counts,
+		SchemaPropFilePath: filePath,
+		"diagnostics":      result,
+		"total_count":      len(result),
+		"counts":           counts,
 	}, nil
 }
 

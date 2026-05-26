@@ -17,15 +17,15 @@ import (
 
 // mockDaemonController implements DaemonController for testing.
 type mockDaemonController struct {
-	running   bool
-	pid       int
-	uptime    time.Duration
+	running    bool
+	pid        int
+	uptime     time.Duration
 	restartErr error
 }
 
-func (m *mockDaemonController) IsRunning() bool            { return m.running }
-func (m *mockDaemonController) PID() int                   { return m.pid }
-func (m *mockDaemonController) Uptime() time.Duration      { return m.uptime }
+func (m *mockDaemonController) IsRunning() bool                   { return m.running }
+func (m *mockDaemonController) PID() int                          { return m.pid }
+func (m *mockDaemonController) Uptime() time.Duration             { return m.uptime }
 func (m *mockDaemonController) Restart(ctx context.Context) error { return m.restartErr }
 
 // mockMetricsService implements MetricsService for testing.

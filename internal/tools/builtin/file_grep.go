@@ -67,13 +67,13 @@ func (t *FileGrepTool) Parameters() llm.FunctionParameters {
 
 // GrepResult is the result of a file grep operation.
 type GrepResult struct {
-	Query    string       `json:"query"`
-	Path     string       `json:"path"`
-	Mode     string       `json:"mode"`
-	Output   string       `json:"output,omitempty"`
-	Files    []string     `json:"files,omitempty"`
-	Counts   []GrepCount  `json:"counts,omitempty"`
-	Matches  int          `json:"matches"`
+	Query     string      `json:"query"`
+	Path      string      `json:"path"`
+	Mode      string      `json:"mode"`
+	Output    string      `json:"output,omitempty"`
+	Files     []string    `json:"files,omitempty"`
+	Counts    []GrepCount `json:"counts,omitempty"`
+	Matches   int         `json:"matches"`
 	Truncated bool        `json:"truncated"`
 }
 

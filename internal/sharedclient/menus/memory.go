@@ -10,12 +10,12 @@ import (
 
 // MemoryMenu provides memory search/viewing menu functionality.
 type MemoryMenu struct {
-	modal      *Modal
-	client     transport.Client
-	memories   []types.MemoryItem
-	onSelect   func(*types.MemoryItem)
-	onSearch   func(string)
-	onDismiss  func()
+	modal     *Modal
+	client    transport.Client
+	memories  []types.MemoryItem
+	onSelect  func(*types.MemoryItem)
+	onSearch  func(string)
+	onDismiss func()
 }
 
 // NewMemoryMenu creates a new memory menu.

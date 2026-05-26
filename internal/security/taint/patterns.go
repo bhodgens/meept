@@ -32,10 +32,10 @@ type PatternMatcher struct {
 }
 
 type customPattern struct {
-	name     string
-	pattern  *regexp.Regexp
-	taint    TaintLabel
-	enabled  bool
+	name    string
+	pattern *regexp.Regexp
+	taint   TaintLabel
+	enabled bool
 }
 
 // NewPatternMatcher creates a new pattern matcher.

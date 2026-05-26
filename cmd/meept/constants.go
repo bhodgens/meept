@@ -8,6 +8,6 @@ const (
 
 // RPC parameter keys used in map[string]string / map[string]any calls.
 const (
-	paramName       = "name"
-	paramSessionID  = "session_id"
+	paramName      = "name"
+	paramSessionID = "session_id"
 )

@@ -46,12 +46,12 @@ const (
 
 // Classification keyword constants used across classifier, manager, and middleware.
 const (
-	KwFix       = "fix"
-	KwFunction  = "function"
-	KwAnalyze   = "analyze"
-	KwEvaluate  = "evaluate"
-	KwFirst     = "first"
-	KwThen      = "then"
+	KwFix      = "fix"
+	KwFunction = "function"
+	KwAnalyze  = "analyze"
+	KwEvaluate = "evaluate"
+	KwFirst    = "first"
+	KwThen     = "then"
 )
 
 // Message represents a chat message for storage.
@@ -61,6 +61,7 @@ type Message struct {
 }
 
 // ShadowRecord captures a student response and optional teacher response.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type ShadowRecord struct {
 	ID               string     `json:"id"`
@@ -275,6 +276,7 @@ func (r *TrainingRun) Complete(finalLoss, evalScore float64) {
 }
 
 // ShadowStats holds statistics about shadow training data.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type ShadowStats struct {
 	TotalRecords      int            `json:"total_records"`

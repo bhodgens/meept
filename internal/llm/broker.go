@@ -29,9 +29,9 @@ type BrokerConfig struct {
 
 // brokerEntry holds a Chatter and its health state.
 type brokerEntry struct {
-	model              *ModelConfig
-	chatter            Chatter
-	status             ProviderStatus
+	model               *ModelConfig
+	chatter             Chatter
+	status              ProviderStatus
 	lastStatusCheckTime time.Time
 }
 

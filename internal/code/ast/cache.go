@@ -16,11 +16,11 @@ type cacheEntry struct {
 // ParseCache caches parse results keyed by file path.
 // It validates entries against file modification time and TTL.
 type ParseCache struct {
-	mu       sync.RWMutex
-	entries  map[string]*cacheEntry
-	maxSize  int
-	ttl      time.Duration
-	order    []string // LRU order tracking
+	mu      sync.RWMutex
+	entries map[string]*cacheEntry
+	maxSize int
+	ttl     time.Duration
+	order   []string // LRU order tracking
 }
 
 // NewParseCache creates a new parse cache.

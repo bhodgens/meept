@@ -12,8 +12,8 @@ const (
 	DecisionBlock = "block"
 
 	// Rule sources.
-	RuleSourceImmutable   = "immutable"
-	RuleSourceFailClosed  = "fail_closed"
+	RuleSourceImmutable  = "immutable"
+	RuleSourceFailClosed = "fail_closed"
 
 	// Category names for pattern rules.
 	CategoryDestructive     = "destructive"
@@ -26,8 +26,8 @@ const (
 
 	// Detection labels.
 	LabelInstructionOverride = "instruction_override"
-	LabelSpecialTokenPhi    = "special_token_phi"
-	LabelSpecialToken       = "special_token"
+	LabelSpecialTokenPhi     = "special_token_phi"
+	LabelSpecialToken        = "special_token"
 
 	// Pattern type constants.
 	PatternTypeRegex = "regex"

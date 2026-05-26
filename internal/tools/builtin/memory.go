@@ -89,10 +89,10 @@ func (t *MemoryStoreTool) Execute(ctx context.Context, args map[string]any) (any
 	}
 
 	return map[string]any{
-		"success":   true,
+		"success":          true,
 		schemaPropMemoryID: id,
-		schemaPropType:      memTypeStr,
-		schemaPropCategory:  category,
+		schemaPropType:     memTypeStr,
+		schemaPropCategory: category,
 	}, nil
 }
 
@@ -184,19 +184,19 @@ func (t *MemorySearchTool) Execute(ctx context.Context, args map[string]any) (an
 	formatted := make([]map[string]any, 0, len(results))
 	for _, r := range results {
 		formatted = append(formatted, map[string]any{
-			"id":        r.Memory.ID,
-			schemaPropContent:   r.Memory.Content,
-			schemaPropType:      string(r.Memory.Type),
-			schemaPropCategory:  r.Memory.Category,
-			"relevance": r.RelevanceScore,
-			"source":    r.Source,
+			"id":               r.Memory.ID,
+			schemaPropContent:  r.Memory.Content,
+			schemaPropType:     string(r.Memory.Type),
+			schemaPropCategory: r.Memory.Category,
+			"relevance":        r.RelevanceScore,
+			"source":           r.Source,
 		})
 	}
 
 	return map[string]any{
-		"results": formatted,
-		schemaPropCount:   len(formatted),
-		schemaPropQuery:   query,
+		"results":       formatted,
+		schemaPropCount: len(formatted),
+		schemaPropQuery: query,
 	}, nil
 }
 
@@ -257,18 +257,18 @@ func (t *MemoryGetContextTool) Execute(ctx context.Context, args map[string]any)
 	formatted := make([]map[string]any, 0, len(results))
 	for _, r := range results {
 		formatted = append(formatted, map[string]any{
-			"id":        r.Memory.ID,
-			schemaPropContent:   r.Memory.Content,
-			schemaPropType:      string(r.Memory.Type),
-			schemaPropCategory:  r.Memory.Category,
-			"relevance": r.RelevanceScore,
+			"id":               r.Memory.ID,
+			schemaPropContent:  r.Memory.Content,
+			schemaPropType:     string(r.Memory.Type),
+			schemaPropCategory: r.Memory.Category,
+			"relevance":        r.RelevanceScore,
 		})
 	}
 
 	return map[string]any{
-		"context": formatted,
-		schemaPropCount:   len(formatted),
-		schemaPropQuery:   query,
+		"context":       formatted,
+		schemaPropCount: len(formatted),
+		schemaPropQuery: query,
 	}, nil
 }
 
@@ -340,11 +340,11 @@ func (t *MemoryGetVersionTool) Execute(ctx context.Context, args map[string]any)
 
 	// Build result with version metadata
 	result := map[string]any{
-		"id":         mem.ID,
-		schemaPropContent:    mem.Content,
-		schemaPropType:       string(mem.Type),
-		schemaPropCategory:   mem.Category,
-		"created_at": mem.CreatedAt,
+		"id":               mem.ID,
+		schemaPropContent:  mem.Content,
+		schemaPropType:     string(mem.Type),
+		schemaPropCategory: mem.Category,
+		"created_at":       mem.CreatedAt,
 	}
 
 	// Add version info if available in metadata
@@ -411,8 +411,8 @@ func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[stri
 	if len(memories) == 0 {
 		return map[string]any{
 			schemaPropMemoryID: memoryID,
-			"versions":  []any{},
-			schemaPropMessage:   "No version history found",
+			"versions":         []any{},
+			schemaPropMessage:  "No version history found",
 		}, nil
 	}
 
@@ -420,9 +420,9 @@ func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[stri
 	versions := make([]map[string]any, 0, len(memories))
 	for _, mem := range memories {
 		version := map[string]any{
-			"id":         mem.ID,
-			schemaPropContent:    mem.Content,
-			"created_at": mem.CreatedAt,
+			"id":              mem.ID,
+			schemaPropContent: mem.Content,
+			"created_at":      mem.CreatedAt,
 		}
 
 		// Add version metadata if available
@@ -445,10 +445,10 @@ func (t *MemoryGetVersionHistoryTool) Execute(ctx context.Context, args map[stri
 	}
 
 	return map[string]any{
-		schemaPropMemoryID:       memoryID,
-		"version_count":   len(versions),
-		"versions":        versions,
-		"current_version": getCurrentVersionFromList(versions),
+		schemaPropMemoryID: memoryID,
+		"version_count":    len(versions),
+		"versions":         versions,
+		"current_version":  getCurrentVersionFromList(versions),
 	}, nil
 }
 

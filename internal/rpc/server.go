@@ -80,14 +80,14 @@ func New(cfg *Config, msgBus *bus.MessageBus, logger *slog.Logger) *Server {
 		shutdown = DefaultShutdownTimeout
 	}
 	s := &Server{
-		socketPath:   cfg.SocketPath,
-		bus:          msgBus,
-		logger:       logger,
-		startTime:    time.Now(),
-		shutdown:     shutdown,
-		handlers:     make(map[string]Handler),
-		conns:        make(map[net.Conn]struct{}),
-		closeCh:      make(chan struct{}),
+		socketPath:      cfg.SocketPath,
+		bus:             msgBus,
+		logger:          logger,
+		startTime:       time.Now(),
+		shutdown:        shutdown,
+		handlers:        make(map[string]Handler),
+		conns:           make(map[net.Conn]struct{}),
+		closeCh:         make(chan struct{}),
 		requestHandlers: make([]func(), 0),
 	}
 	if cfg.ShutdownNotify != nil {
@@ -365,23 +365,23 @@ func (s *Server) registerBuiltinHandlers() {
 		s.mu.RUnlock()
 
 		result := map[string]any{
-			RPCKeyStatus:           "running",
-			"version":          "0.2.0-go",
-			"uptime_seconds":   time.Since(s.startTime).Seconds(),
-			RPCKeyModel:        s.defaultModel,
-			"default_model":    s.defaultModel,
-			"tokens_used":      0,
-			"tokens_remaining": 100000,
-			"budget_used":      0.0,
-			"budget_remaining": 10.0,
+			RPCKeyStatus:         "running",
+			"version":            "0.2.0-go",
+			"uptime_seconds":     time.Since(s.startTime).Seconds(),
+			RPCKeyModel:          s.defaultModel,
+			"default_model":      s.defaultModel,
+			"tokens_used":        0,
+			"tokens_remaining":   100000,
+			"budget_used":        0.0,
+			"budget_remaining":   10.0,
 			"registered_methods": methods,
-			"bus_subscribers":  busStats["_total"],
-			"rpm_current":      0,
-			"rpm_limit":        0,
-			"hourly_used":      0,
-			"hourly_remaining": 0,
-			"daily_used":       0,
-			"daily_remaining":  0,
+			"bus_subscribers":    busStats["_total"],
+			"rpm_current":        0,
+			"rpm_limit":          0,
+			"hourly_used":        0,
+			"hourly_remaining":   0,
+			"daily_used":         0,
+			"daily_remaining":    0,
 		}
 
 		// Include firewall stats if a getter is configured
@@ -459,9 +459,9 @@ func (s *Server) registerBuiltinHandlers() {
 
 		// Publish the amendment request on the bus for the orchestrator to handle
 		payload, err := json.Marshal(map[string]any{
-			"id":      amendmentID,
-			"task_id": req.TaskID,
-			"type":    req.Type,
+			"id":          amendmentID,
+			"task_id":     req.TaskID,
+			"type":        req.Type,
 			RPCKeyContent: req.Content,
 		})
 		if err != nil {
@@ -478,7 +478,7 @@ func (s *Server) registerBuiltinHandlers() {
 		s.bus.Publish("task.amend.request", msg)
 
 		return map[string]string{
-			"id":      amendmentID,
+			"id":          amendmentID,
 			RPCKeyStatus:  "submitted",
 			RPCKeyMessage: fmt.Sprintf("amendment %s submitted for task %s", req.Type, req.TaskID),
 		}, nil

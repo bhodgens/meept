@@ -31,10 +31,10 @@ func TestCompressCodeAtBoundaries_Go(t *testing.T) {
 	skipIfNoGrammar(t, LangGo)
 
 	tests := []struct {
-		name           string
-		source         string
-		maxChars       int
-		wantContains   []string
+		name            string
+		source          string
+		maxChars        int
+		wantContains    []string
 		wantNotContains []string
 	}{
 		{
@@ -46,9 +46,9 @@ func TestCompressCodeAtBoundaries_Go(t *testing.T) {
 			wantContains: []string{"package main", "func Hello()", "...[compressed]"},
 		},
 		{
-			name:           "short code returned as-is",
-			source:         "package main\n\nfunc hello() { return 42 }\n",
-			maxChars:       1000,
+			name:            "short code returned as-is",
+			source:          "package main\n\nfunc hello() { return 42 }\n",
+			maxChars:        1000,
 			wantNotContains: []string{"...[compressed]"},
 		},
 		{
@@ -68,8 +68,8 @@ func TestCompressCodeAtBoundaries_Go(t *testing.T) {
 			wantContains: []string{"Handler interface", "Handle(msg string)", "...[compressed]"},
 		},
 		{
-			name: "multiple functions all compressed",
-			source: "package main\n\nfunc a() { " + strings.Repeat("x", 200) + " }\nfunc b() { " + strings.Repeat("y", 200) + " }\nfunc c() { " + strings.Repeat("z", 200) + " }",
+			name:         "multiple functions all compressed",
+			source:       "package main\n\nfunc a() { " + strings.Repeat("x", 200) + " }\nfunc b() { " + strings.Repeat("y", 200) + " }\nfunc c() { " + strings.Repeat("z", 200) + " }",
 			maxChars:     200,
 			wantContains: []string{"func a()", "func b()", "func c()"},
 		},
@@ -724,6 +724,6 @@ func TestNewParserManager(t *testing.T) {
 
 func TestParserManager_CacheOperations(t *testing.T) {
 	pm := NewParserManager(ParserConfig{CacheEnabled: true, CacheMaxSize: 10, CacheTTL: 0})
-	pm.InvalidateCache("nonexistent.go")   // should not panic
-	pm.ClearCache()                        // should not panic
+	pm.InvalidateCache("nonexistent.go") // should not panic
+	pm.ClearCache()                      // should not panic
 }

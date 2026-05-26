@@ -191,8 +191,8 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 type SessionPickerModal struct {
 	*Modal
 	sessions     []types.Session
-	inputMode    bool        // true when entering new session name
-	inputBuffer  string      // buffer for new session name
+	inputMode    bool   // true when entering new session name
+	inputBuffer  string // buffer for new session name
 	rpc          *RPCClient
 	clientConfig *ClientConfig
 }
@@ -887,7 +887,6 @@ func (m *ConfirmModal) HandleKey(key string) tea.Cmd {
 	return nil
 }
 
-
 // FuzzyFinderModal is a modal for searching sessions and tasks.
 type FuzzyFinderModal struct {
 	*Modal
@@ -1006,7 +1005,10 @@ func (f *FuzzyFinderModal) getFilteredItems() []fuzzyFinderItem {
 	query := f.inputBuffer
 
 	// Build item list for the fuzzy matcher
-	searchItems := make([]struct{ Text string; Data any }, 0, len(f.sessions)+len(f.tasks))
+	searchItems := make([]struct {
+		Text string
+		Data any
+	}, 0, len(f.sessions)+len(f.tasks))
 	for i := range f.sessions {
 		sess := &f.sessions[i]
 		display := sess.Name
@@ -1014,7 +1016,10 @@ func (f *FuzzyFinderModal) getFilteredItems() []fuzzyFinderItem {
 			display += " - " + sess.Description
 		}
 		display += " [session]"
-		searchItems = append(searchItems, struct{ Text string; Data any }{Text: display, Data: sess})
+		searchItems = append(searchItems, struct {
+			Text string
+			Data any
+		}{Text: display, Data: sess})
 	}
 	for i := range f.tasks {
 		task := &f.tasks[i]
@@ -1023,7 +1028,10 @@ func (f *FuzzyFinderModal) getFilteredItems() []fuzzyFinderItem {
 			display += " - " + task.Description
 		}
 		display += " [task]"
-		searchItems = append(searchItems, struct{ Text string; Data any }{Text: display, Data: task})
+		searchItems = append(searchItems, struct {
+			Text string
+			Data any
+		}{Text: display, Data: task})
 	}
 
 	matcher := components.NewFuzzyMatcher(searchItems)
@@ -1075,8 +1083,8 @@ func (f *FuzzyFinderModal) View(screenW, screenH int) string {
 		Padding(0, 1).
 		Width(f.width - 10)
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Width(f.width-4).Render(
-		inputStyle.Render("search: "+f.inputBuffer+"█"),
+	b.WriteString(lipgloss.NewStyle().Width(f.width - 4).Render(
+		inputStyle.Render("search: " + f.inputBuffer + "█"),
 	))
 	b.WriteString("\n\n")
 
@@ -1213,10 +1221,10 @@ type BranchNavigateMsg struct {
 // NewBranchPickerModal creates a new branch picker modal.
 func NewBranchPickerModal(styles *Styles, rpc *RPCClient) *BranchPickerModal {
 	return &BranchPickerModal{
-		Modal:   NewModal("branches", styles),
-		styles:  styles,
-		rpc:     rpc,
-		width:   80,
+		Modal:  NewModal("branches", styles),
+		styles: styles,
+		rpc:    rpc,
+		width:  80,
 	}
 }
 

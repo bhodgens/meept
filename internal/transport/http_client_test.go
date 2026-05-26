@@ -136,7 +136,7 @@ func TestHTTPClient_Chat(t *testing.T) {
 func TestHTTPClient_Status(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"result": {
 				"status": "running",
 				"uptime_seconds": 3600,
@@ -169,7 +169,7 @@ func TestHTTPClient_Status(t *testing.T) {
 func TestHTTPClient_Call(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/bus/call" {
-				w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"result": {"key": "value"}}`))
 		} else {
 			w.WriteHeader(http.StatusNotFound)

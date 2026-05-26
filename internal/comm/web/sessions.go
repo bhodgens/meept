@@ -10,8 +10,8 @@ func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	if s.sessionManager == nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{
 			"sessions": []any{},
-			KeyCount:    0,
-			KeyMessage:  "session management not configured",
+			KeyCount:   0,
+			KeyMessage: "session management not configured",
 		})
 		return
 	}
@@ -24,7 +24,7 @@ func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"sessions": sessions,
-		KeyCount:    len(sessions),
+		KeyCount:   len(sessions),
 	})
 }
 

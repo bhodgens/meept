@@ -1,9 +1,9 @@
 package mcp
 
 import (
-	"io"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"

@@ -261,10 +261,10 @@ func TestCalculateKeywordConfidence(t *testing.T) {
 		wantGE   float64 // greater or equal
 		wantLE   float64 // less or equal
 	}{
-		{50, 50, 0.5, 1.0},   // High score, short input
-		{10, 100, 0.1, 0.3},  // Low score, medium input
-		{100, 50, 0.9, 1.0},  // Very high score (capped at 1.0)
-		{0, 50, 0.0, 0.0},    // Zero score = zero confidence
+		{50, 50, 0.5, 1.0},  // High score, short input
+		{10, 100, 0.1, 0.3}, // Low score, medium input
+		{100, 50, 0.9, 1.0}, // Very high score (capped at 1.0)
+		{0, 50, 0.0, 0.0},   // Zero score = zero confidence
 	}
 
 	for _, tt := range tests {

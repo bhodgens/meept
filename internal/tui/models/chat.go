@@ -92,9 +92,9 @@ type ChatModel struct {
 	progressState *ProgressState
 
 	// Per-session input history
-	history        *sharedclient.SessionHistory
-	historyIdx     int    // current position in history for display (>=0 = browsing, -1 = not browsing)
-	savedInput     string // saved current input when browsing history
+	history    *sharedclient.SessionHistory
+	historyIdx int    // current position in history for display (>=0 = browsing, -1 = not browsing)
+	savedInput string // saved current input when browsing history
 
 	// Message persistence - buffered writes
 	dirtyMessages map[string][]ChatMessage // unsaved messages per session
@@ -158,21 +158,21 @@ type ChatModel struct {
 	slashAutocompletePopup string
 
 	// Steering and follow-up queue state
-	agentActive   bool                     // true while agent is processing
-	queueStatus   *types.QueueStatusResponse // latest queue state (nil if agent idle)
-	steerMode     bool                     // when true, next message is a steer (ctrl+s toggle)
+	agentActive bool                       // true while agent is processing
+	queueStatus *types.QueueStatusResponse // latest queue state (nil if agent idle)
+	steerMode   bool                       // when true, next message is a steer (ctrl+s toggle)
 
 	// Styles
-	userStyle       lipgloss.Style
-	assistantStyle  lipgloss.Style
-	systemStyle     lipgloss.Style
-	pendingStyle    lipgloss.Style
-	separatorStyle  lipgloss.Style
-	focusedBorder   lipgloss.Style
-	unfocusedBorder lipgloss.Style
-	headerStyle     lipgloss.Style
-	steerBadgeStyle lipgloss.Style
-	followUpBadgeStyle lipgloss.Style
+	userStyle             lipgloss.Style
+	assistantStyle        lipgloss.Style
+	systemStyle           lipgloss.Style
+	pendingStyle          lipgloss.Style
+	separatorStyle        lipgloss.Style
+	focusedBorder         lipgloss.Style
+	unfocusedBorder       lipgloss.Style
+	headerStyle           lipgloss.Style
+	steerBadgeStyle       lipgloss.Style
+	followUpBadgeStyle    lipgloss.Style
 	agentActiveBadgeStyle lipgloss.Style
 }
 

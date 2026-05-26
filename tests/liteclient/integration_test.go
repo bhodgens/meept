@@ -27,7 +27,7 @@ func newIntegrationServer(handler func(method string, params json.RawMessage) (a
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		// Handle chat endpoint directly (POST with JSON body)
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/chat" {
 			var req struct {
@@ -49,7 +49,7 @@ func newIntegrationServer(handler func(method string, params json.RawMessage) (a
 			json.NewEncoder(w).Encode(result)
 			return
 		}
-		
+
 		var req struct {
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`

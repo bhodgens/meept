@@ -93,12 +93,12 @@ func (h *SkillsHandler) handleList(_ context.Context, msg *models.BusMessage) {
 				RPCKeyRequires:    s.Requires,
 				RPCKeyPath:        s.Path,
 				RPCKeyPriority:    s.Priority,
-				RPCKeyRiskLevel:  s.RiskLevel,
+				RPCKeyRiskLevel:   s.RiskLevel,
 			}
 		}
 		result = map[string]any{
-			"skills": skillsData,
-			RPCKeyCount:  len(skillsData),
+			"skills":    skillsData,
+			RPCKeyCount: len(skillsData),
 		}
 	}
 
@@ -128,17 +128,17 @@ func (h *SkillsHandler) handleGet(_ context.Context, msg *models.BusMessage) {
 	}
 
 	result := map[string]any{
-		RPCKeyName:           skill.Name,
-		RPCKeyDescription:    skill.Description,
-		RPCKeyTags:           skill.Tags,
-		RPCKeyRequires:       skill.Requires,
-		"examples":       skill.Examples,
-		"body":           skill.Body,
-		RPCKeyPath:           skill.Path,
-		RPCKeyPriority:       skill.Priority,
-		"allowed_tools":  skill.AllowedTools,
-		RPCKeyRiskLevel:     skill.RiskLevel,
-		"max_iterations": skill.MaxIterations,
+		RPCKeyName:        skill.Name,
+		RPCKeyDescription: skill.Description,
+		RPCKeyTags:        skill.Tags,
+		RPCKeyRequires:    skill.Requires,
+		"examples":        skill.Examples,
+		"body":            skill.Body,
+		RPCKeyPath:        skill.Path,
+		RPCKeyPriority:    skill.Priority,
+		"allowed_tools":   skill.AllowedTools,
+		RPCKeyRiskLevel:   skill.RiskLevel,
+		"max_iterations":  skill.MaxIterations,
 	}
 
 	h.sendResponse(msg.ID, result, nil)
@@ -180,8 +180,8 @@ func (h *SkillsHandler) handleExecute(ctx context.Context, msg *models.BusMessag
 	}
 
 	result := map[string]any{
-		RPCKeyContent:           execResult.Content,
-		RPCKeyModel:             execResult.Model,
+		RPCKeyContent:       execResult.Content,
+		RPCKeyModel:         execResult.Model,
 		"prompt_tokens":     execResult.PromptTokens,
 		"completion_tokens": execResult.CompletionTokens,
 		"total_tokens":      execResult.TotalTokens,
@@ -234,13 +234,13 @@ func RegisterSkillsHandlers(server *Server, registry *skills.Registry, executor 
 				RPCKeyRequires:    s.Requires,
 				RPCKeyPath:        s.Path,
 				RPCKeyPriority:    s.Priority,
-				RPCKeyRiskLevel:  s.RiskLevel,
+				RPCKeyRiskLevel:   s.RiskLevel,
 			}
 		}
 
 		return map[string]any{
-			"skills": skillsData,
-			RPCKeyCount:  len(skillsData),
+			"skills":    skillsData,
+			RPCKeyCount: len(skillsData),
 		}, nil
 	})
 
@@ -263,17 +263,17 @@ func RegisterSkillsHandlers(server *Server, registry *skills.Registry, executor 
 		}
 
 		return map[string]any{
-			RPCKeyName:           skill.Name,
-			RPCKeyDescription:    skill.Description,
-			RPCKeyTags:           skill.Tags,
-			RPCKeyRequires:       skill.Requires,
-			"examples":       skill.Examples,
-			"body":           skill.Body,
-			RPCKeyPath:           skill.Path,
-			RPCKeyPriority:       skill.Priority,
-			"allowed_tools":  skill.AllowedTools,
-			RPCKeyRiskLevel:     skill.RiskLevel,
-			"max_iterations": skill.MaxIterations,
+			RPCKeyName:        skill.Name,
+			RPCKeyDescription: skill.Description,
+			RPCKeyTags:        skill.Tags,
+			RPCKeyRequires:    skill.Requires,
+			"examples":        skill.Examples,
+			"body":            skill.Body,
+			RPCKeyPath:        skill.Path,
+			RPCKeyPriority:    skill.Priority,
+			"allowed_tools":   skill.AllowedTools,
+			RPCKeyRiskLevel:   skill.RiskLevel,
+			"max_iterations":  skill.MaxIterations,
 		}, nil
 	})
 
@@ -307,8 +307,8 @@ func RegisterSkillsHandlers(server *Server, registry *skills.Registry, executor 
 		}
 
 		return map[string]any{
-			RPCKeyContent:           result.Content,
-			RPCKeyModel:             result.Model,
+			RPCKeyContent:       result.Content,
+			RPCKeyModel:         result.Model,
 			"prompt_tokens":     result.PromptTokens,
 			"completion_tokens": result.CompletionTokens,
 			"total_tokens":      result.TotalTokens,

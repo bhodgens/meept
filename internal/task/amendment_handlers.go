@@ -255,5 +255,3 @@ func (h *AmendmentHandlers) handleChangeAgent(ctx context.Context, req *Amendmen
 		Message:   fmt.Sprintf("Step %s reassigned to %s", metadata.StepID, metadata.AgentID),
 	}, nil
 }
-
-

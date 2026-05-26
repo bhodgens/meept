@@ -638,11 +638,11 @@ func containsSubstring(s, substr string) bool {
 
 // mockStreamingTool is a mock tool that implements both Tool and StreamingTool.
 type mockStreamingTool struct {
-	name         string
-	description  string
-	result       any
-	err          error
-	updates      []tools.ProgressUpdate
+	name        string
+	description string
+	result      any
+	err         error
+	updates     []tools.ProgressUpdate
 }
 
 func newMockStreamingTool(name string, result any, err error, updates []tools.ProgressUpdate) *mockStreamingTool {

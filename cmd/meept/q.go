@@ -61,7 +61,6 @@ func newQStatusCmd() *cobra.Command {
 				fmt.Println("memvid: not available (session analysis requires memvid)")
 				return nil
 			}
-			
 
 			// Create Q Agent and get status
 			qAgent := q.NewQAgent(slog.Default(), cfg.QAgent, memvidClient)
@@ -93,7 +92,7 @@ func newQStatusCmd() *cobra.Command {
 
 func newQAnalyzeCmd() *cobra.Command {
 	var (
-		force    bool
+		force      bool
 		jsonOutput bool
 	)
 
@@ -127,7 +126,6 @@ Examples:
 			if memvidClient == nil {
 				return fmt.Errorf("memvid not available; Q Agent requires memvid for session storage")
 			}
-			
 
 			fmt.Println("starting Q Agent analysis...")
 			fmt.Printf("analyzing sessions idle for %d+ hours\n\n", cfg.QAgent.SessionIdleTriggerHours)

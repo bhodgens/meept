@@ -77,25 +77,25 @@ type JobsLister interface {
 
 // JobInfo is a simplified job information.
 type JobInfo struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Schedule    string `json:"schedule"`
-	NextRun     string `json:"next_run,omitempty"`
-	LastRun     string `json:"last_run,omitempty"`
-	Status      string `json:"status"`
-	Paused      bool   `json:"paused"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Schedule string `json:"schedule"`
+	NextRun  string `json:"next_run,omitempty"`
+	LastRun  string `json:"last_run,omitempty"`
+	Status   string `json:"status"`
+	Paused   bool   `json:"paused"`
 }
 
 // Server is the HTTP API server.
 type Server struct {
 	mu sync.RWMutex
 
-	config   ServerConfig
-	handler  Handler
-	auth     Authenticator
-	logger   *slog.Logger
-	server   *http.Server
-	running  bool
+	config  ServerConfig
+	handler Handler
+	auth    Authenticator
+	logger  *slog.Logger
+	server  *http.Server
+	running bool
 
 	// Optional service dependencies for API endpoints
 	memorySearcher MemorySearcher
@@ -313,7 +313,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// API routes
 	mux.HandleFunc("GET /api/v1/status", s.handleStatus)
 	mux.HandleFunc("POST /api/v1/chat", s.handleChat)
-	mux.HandleFunc("POST /api/v1/query", s.handleChat)         // Alias
+	mux.HandleFunc("POST /api/v1/query", s.handleChat)             // Alias
 	mux.HandleFunc("POST /api/v1/chat/stream", s.handleChatStream) // SSE streaming
 
 	// Sessions
@@ -451,8 +451,8 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 
 	if s.memorySearcher == nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{
-			"results": []any{},
-			"query":   query,
+			"results":  []any{},
+			"query":    query,
 			KeyMessage: "memory search not configured",
 		})
 		return
@@ -467,7 +467,7 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"results": results,
 		"query":   query,
-		KeyCount:   len(results),
+		KeyCount:  len(results),
 	})
 }
 
@@ -475,7 +475,7 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 	if s.skillsLister == nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{
-			"skills":  []any{},
+			"skills":   []any{},
 			KeyMessage: "skills listing not configured",
 		})
 		return
@@ -501,7 +501,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"skills": skills,
-		KeyCount:  len(skills),
+		KeyCount: len(skills),
 	})
 }
 
@@ -509,7 +509,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleJobsList(w http.ResponseWriter, r *http.Request) {
 	if s.jobsLister == nil {
 		s.writeJSON(w, http.StatusOK, map[string]any{
-			"jobs":    []any{},
+			"jobs":     []any{},
 			KeyMessage: "jobs listing not configured",
 		})
 		return
@@ -522,7 +522,7 @@ func (s *Server) handleJobsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"jobs":  jobs,
+		"jobs":   jobs,
 		KeyCount: len(jobs),
 	})
 }

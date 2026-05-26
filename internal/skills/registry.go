@@ -9,9 +9,9 @@ import (
 
 // Registry holds loaded skills with lookup by name, tag, and capability.
 type Registry struct {
-	mu       sync.RWMutex
-	skills   map[string]*Skill // normalized name -> skill
-	logger   *slog.Logger
+	mu     sync.RWMutex
+	skills map[string]*Skill // normalized name -> skill
+	logger *slog.Logger
 }
 
 // RegistryOption is a functional option for configuring Registry.
@@ -290,6 +290,7 @@ func (r *Registry) MatchAll(query string) []*SkillMatch {
 }
 
 // SkillMatch holds a skill with its match score.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type SkillMatch struct {
 	Skill *Skill

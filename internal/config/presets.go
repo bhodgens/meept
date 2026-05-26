@@ -25,18 +25,18 @@ type PresetConfig struct {
 
 // ModelPreset represents a model preset with parameters.
 type ModelPreset struct {
-	Label       string        `json:"label"`
-	Description string        `json:"description"`
-	Params      ModelParams   `json:"params"`
+	Label       string      `json:"label"`
+	Description string      `json:"description"`
+	Params      ModelParams `json:"params"`
 }
 
 // ModelParams holds model generation parameters.
 type ModelParams struct {
-	Temperature     float64 `json:"temperature,omitempty"`
-	TopP            float64 `json:"top_p,omitempty"`
+	Temperature      float64 `json:"temperature,omitempty"`
+	TopP             float64 `json:"top_p,omitempty"`
 	FrequencyPenalty float64 `json:"frequency_penalty,omitempty"`
-	PresencePenalty float64  `json:"presence_penalty,omitempty"`
-	MaxTokens       int     `json:"max_tokens,omitempty"`
+	PresencePenalty  float64 `json:"presence_penalty,omitempty"`
+	MaxTokens        int     `json:"max_tokens,omitempty"`
 }
 
 // LoadPresetsConfig loads model presets from a JSON5 file.
@@ -100,8 +100,8 @@ func DefaultPresetsConfig() *PresetConfig {
 				Label:       "Development",
 				Description: "Balanced for coding tasks",
 				Params: ModelParams{
-					Temperature:     0.3,
-					TopP:            0.9,
+					Temperature:      0.3,
+					TopP:             0.9,
 					FrequencyPenalty: 0.0,
 					PresencePenalty:  0.0,
 				},
@@ -110,8 +110,8 @@ func DefaultPresetsConfig() *PresetConfig {
 				Label:       "Debugging",
 				Description: "Methodical troubleshooting",
 				Params: ModelParams{
-					Temperature:     0.2,
-					TopP:            0.85,
+					Temperature:      0.2,
+					TopP:             0.85,
 					FrequencyPenalty: 0.0,
 					PresencePenalty:  0.0,
 				},
@@ -120,8 +120,8 @@ func DefaultPresetsConfig() *PresetConfig {
 				Label:       "Planning",
 				Description: "Structured thinking",
 				Params: ModelParams{
-					Temperature:     0.4,
-					TopP:            0.9,
+					Temperature:      0.4,
+					TopP:             0.9,
 					FrequencyPenalty: 0.0,
 					PresencePenalty:  0.0,
 				},
@@ -130,8 +130,8 @@ func DefaultPresetsConfig() *PresetConfig {
 				Label:       "Creative Writing",
 				Description: "High creativity mode",
 				Params: ModelParams{
-					Temperature:     0.9,
-					TopP:            0.95,
+					Temperature:      0.9,
+					TopP:             0.95,
 					FrequencyPenalty: 0.5,
 					PresencePenalty:  0.5,
 				},
@@ -140,8 +140,8 @@ func DefaultPresetsConfig() *PresetConfig {
 				Label:       "Research",
 				Description: "Analytical and thorough",
 				Params: ModelParams{
-					Temperature:     0.5,
-					TopP:            0.9,
+					Temperature:      0.5,
+					TopP:             0.9,
 					FrequencyPenalty: 0.0,
 					PresencePenalty:  0.0,
 				},

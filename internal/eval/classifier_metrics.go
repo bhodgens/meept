@@ -10,34 +10,34 @@ import (
 
 // TestResult represents the outcome of a single classification test.
 type TestResult struct {
-	Input       string    `json:"input"`
-	Expected    string    `json:"expected_intent"`
-	Predicted   string    `json:"predicted_intent"`
-	Confidence  float64   `json:"confidence"`
-	IsCorrect   bool      `json:"is_correct"`
-	Latency     time.Duration `json:"latency"`
-	Tokens      int       `json:"tokens,omitempty"`
-	Error       string    `json:"error,omitempty"`
-	Reasoning   string    `json:"reasoning,omitempty"`
-	Category    string    `json:"category"`
+	Input      string        `json:"input"`
+	Expected   string        `json:"expected_intent"`
+	Predicted  string        `json:"predicted_intent"`
+	Confidence float64       `json:"confidence"`
+	IsCorrect  bool          `json:"is_correct"`
+	Latency    time.Duration `json:"latency"`
+	Tokens     int           `json:"tokens,omitempty"`
+	Error      string        `json:"error,omitempty"`
+	Reasoning  string        `json:"reasoning,omitempty"`
+	Category   string        `json:"category"`
 }
 
 // CategoryMetrics holds aggregated metrics for a single intent category.
 type CategoryMetrics struct {
-	CategoryName     string  `json:"category"`
-	TestCount        int     `json:"test_count"`
-	Correct          int     `json:"correct"`
-	Incorrect        int     `json:"incorrect"`
-	Errors           int     `json:"errors"`
-	Accuracy         float64 `json:"accuracy"`
-	AvgConfidence    float64 `json:"avg_confidence"`
-	AvgLatency       float64 `json:"avg_latency_ms"`
-	TotalTokens      int     `json:"total_tokens"`
-	MinLatency       float64 `json:"min_latency_ms"`
-	MaxLatency       float64 `json:"max_latency_ms"`
-	TruePositives     int    `json:"-"`
-	FalsePositives    int    `json:"-"`
-	FalseNegatives    int    `json:"-"`
+	CategoryName   string  `json:"category"`
+	TestCount      int     `json:"test_count"`
+	Correct        int     `json:"correct"`
+	Incorrect      int     `json:"incorrect"`
+	Errors         int     `json:"errors"`
+	Accuracy       float64 `json:"accuracy"`
+	AvgConfidence  float64 `json:"avg_confidence"`
+	AvgLatency     float64 `json:"avg_latency_ms"`
+	TotalTokens    int     `json:"total_tokens"`
+	MinLatency     float64 `json:"min_latency_ms"`
+	MaxLatency     float64 `json:"max_latency_ms"`
+	TruePositives  int     `json:"-"`
+	FalsePositives int     `json:"-"`
+	FalseNegatives int     `json:"-"`
 }
 
 func (cm *CategoryMetrics) calculatePrecision() float64 {
@@ -65,17 +65,17 @@ func (cm *CategoryMetrics) calculateF1() float64 {
 
 // ModelMetrics holds overall metrics for a single model under evaluation.
 type ModelMetrics struct {
-	ModelName      string         `json:"model_name"`
-	TotalTests     int            `json:"total_tests"`
-	TotalCorrect   int            `json:"total_correct"`
-	TotalIncorrect int            `json:"total_incorrect"`
-	TotalErrors    int            `json:"total_errors"`
-	OverallAccuracy float64       `json:"overall_accuracy"`
-	AvgConfidence  float64        `json:"avg_confidence"`
-	AvgLatencyMs   float64        `json:"avg_latency_ms"`
-	TotalTokens    int            `json:"total_tokens"`
-	CategoryBreakdown []CategoryMetrics `json:"category_breakdown"`
-	PerIntent      map[string]PerIntentMetrics `json:"per_intent_metrics"`
+	ModelName         string                      `json:"model_name"`
+	TotalTests        int                         `json:"total_tests"`
+	TotalCorrect      int                         `json:"total_correct"`
+	TotalIncorrect    int                         `json:"total_incorrect"`
+	TotalErrors       int                         `json:"total_errors"`
+	OverallAccuracy   float64                     `json:"overall_accuracy"`
+	AvgConfidence     float64                     `json:"avg_confidence"`
+	AvgLatencyMs      float64                     `json:"avg_latency_ms"`
+	TotalTokens       int                         `json:"total_tokens"`
+	CategoryBreakdown []CategoryMetrics           `json:"category_breakdown"`
+	PerIntent         map[string]PerIntentMetrics `json:"per_intent_metrics"`
 }
 
 // PerIntentMetrics tracks confusion matrix counts for a single intent.

@@ -34,9 +34,9 @@ type ProviderInfo struct {
 
 // ModelService handles model configuration operations.
 type ModelService struct {
-	configPath      string
-	credStore       *llm.CredentialStore
-	stateDir        string
+	configPath string
+	credStore  *llm.CredentialStore
+	stateDir   string
 }
 
 // NewModelService creates a model service.
@@ -110,12 +110,12 @@ func (s *ModelService) Providers(ctx context.Context) ([]ProviderInfo, error) {
 		}
 
 		providers = append(providers, ProviderInfo{
-			ID:         providerID,
-			Name:       providerID,
-			API:        provider.API,
-			BaseURL:    provider.Options.BaseURL,
-			Models:     modelIDs,
-			HasCreds:   hasCreds,
+			ID:       providerID,
+			Name:     providerID,
+			API:      provider.API,
+			BaseURL:  provider.Options.BaseURL,
+			Models:   modelIDs,
+			HasCreds: hasCreds,
 		})
 	}
 

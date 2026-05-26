@@ -97,8 +97,8 @@ func (t *ASTSymbolsTool) Execute(ctx context.Context, args map[string]any) (any,
 
 	return map[string]any{
 		SchemaPropFilePath: filePath,
-		"symbols":   symbols,
-		SchemaPropCount:     len(symbols),
+		"symbols":          symbols,
+		SchemaPropCount:    len(symbols),
 	}, nil
 }
 

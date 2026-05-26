@@ -8,16 +8,16 @@ import (
 
 // Modal represents a popup modal menu.
 type Modal struct {
-	title       string
-	items       []ModalItem
-	selected    int
-	width       int
-	height      int
-	x           int
-	y           int
-	visible     bool
-	onSelect    func(int)
-	onDismiss   func()
+	title     string
+	items     []ModalItem
+	selected  int
+	width     int
+	height    int
+	x         int
+	y         int
+	visible   bool
+	onSelect  func(int)
+	onDismiss func()
 }
 
 // ModalItem represents a single item in a modal menu.

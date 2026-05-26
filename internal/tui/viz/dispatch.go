@@ -18,11 +18,11 @@ type VizTickMsg struct{} //nolint:revive // stutter with package name is intenti
 type AgentEventType string
 
 const (
-	AgentEventTurnStart          AgentEventType = "turn_start"
-	AgentEventTurnEnd            AgentEventType = "turn_end"
-	AgentEventToolExecutionStart AgentEventType = "tool_execution_start"
+	AgentEventTurnStart           AgentEventType = "turn_start"
+	AgentEventTurnEnd             AgentEventType = "turn_end"
+	AgentEventToolExecutionStart  AgentEventType = "tool_execution_start"
 	AgentEventToolExecutionUpdate AgentEventType = "tool_execution_update"
-	AgentEventToolExecutionEnd   AgentEventType = "tool_execution_end"
+	AgentEventToolExecutionEnd    AgentEventType = "tool_execution_end"
 )
 
 // AgentEventData is the interface all event payloads implement.

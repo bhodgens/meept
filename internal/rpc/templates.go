@@ -24,7 +24,7 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 			templatesData[i] = map[string]any{
 				RPCKeyName:        t.Name,
 				RPCKeyDescription: t.Description,
-				"scope":       string(t.Scope),
+				"scope":           string(t.Scope),
 				RPCKeyPath:        t.Path,
 				RPCKeyPriority:    t.Priority,
 			}
@@ -32,7 +32,7 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 
 		return map[string]any{
 			"templates": templatesData,
-			RPCKeyCount:     len(templatesData),
+			RPCKeyCount: len(templatesData),
 		}, nil
 	})
 
@@ -57,8 +57,8 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 		return map[string]any{
 			RPCKeyName:        tmpl.Name,
 			RPCKeyDescription: tmpl.Description,
-			"scope":       string(tmpl.Scope),
-			"body":        tmpl.Body,
+			"scope":           string(tmpl.Scope),
+			"body":            tmpl.Body,
 			RPCKeyPath:        tmpl.Path,
 			RPCKeyPriority:    tmpl.Priority,
 		}, nil
@@ -86,7 +86,7 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 		// If no executor, return the substituted prompt.
 		if executor == nil {
 			return map[string]any{
-				"prompt":  prompt,
+				"prompt":      prompt,
 				RPCKeySuccess: true,
 			}, nil
 		}
@@ -100,12 +100,12 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 
 		return map[string]any{
 			"prompt":            prompt,
-			RPCKeyContent:           result.Content,
-			RPCKeyModel:             result.Model,
+			RPCKeyContent:       result.Content,
+			RPCKeyModel:         result.Model,
 			"prompt_tokens":     result.PromptTokens,
 			"completion_tokens": result.CompletionTokens,
 			"total_tokens":      result.TotalTokens,
-			RPCKeySuccess:           true,
+			RPCKeySuccess:       true,
 		}, nil
 	})
 
@@ -137,8 +137,8 @@ func RegisterTemplateHandlers(server *Server, registry *templates.Registry, exec
 		}
 
 		return map[string]any{
-			"cleared": cleared,
-			RPCKeyCount:   len(cleared),
+			"cleared":   cleared,
+			RPCKeyCount: len(cleared),
 		}, nil
 	})
 }

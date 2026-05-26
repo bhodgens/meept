@@ -21,8 +21,8 @@ import (
 
 // stubHandler implements web.Handler for integration tests.
 type stubHandler struct {
-	chatFn    func(ctx context.Context, message string) (string, error)
-	statusFn  func(ctx context.Context) (map[string]any, error)
+	chatFn   func(ctx context.Context, message string) (string, error)
+	statusFn func(ctx context.Context) (map[string]any, error)
 }
 
 func (h *stubHandler) Chat(ctx context.Context, message string) (string, error) {

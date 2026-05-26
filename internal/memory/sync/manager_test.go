@@ -163,10 +163,10 @@ func TestEdgeCodec_CleanEdges(t *testing.T) {
 	codec := NewEdgeCodec()
 
 	metadata := map[string]any{
-		"category":            "test",
-		MetadataKeyEdgesOut:   []EdgeRef{{ID: "e1"}},
-		MetadataKeyEdgesIn:    []EdgeRef{{ID: "e2"}},
-		MetadataKeyDistilled:  true,
+		"category":           "test",
+		MetadataKeyEdgesOut:  []EdgeRef{{ID: "e1"}},
+		MetadataKeyEdgesIn:   []EdgeRef{{ID: "e2"}},
+		MetadataKeyDistilled: true,
 	}
 
 	cleaned := codec.CleanEdgesFromMetadata(metadata)
@@ -298,12 +298,12 @@ func TestDistillationResult_Fields(t *testing.T) {
 func TestSyncStatus_Fields(t *testing.T) {
 	now := time.Now()
 	status := SyncStatus{
-		Enabled:          true,
-		Mode:             "distributed",
-		MemvidAvailable:  true,
-		LastHydration:    &now,
-		PendingRetries:   3,
-		TotalHydrations:  100,
+		Enabled:            true,
+		Mode:               "distributed",
+		MemvidAvailable:    true,
+		LastHydration:      &now,
+		PendingRetries:     3,
+		TotalHydrations:    100,
 		TotalDistillations: 50,
 	}
 

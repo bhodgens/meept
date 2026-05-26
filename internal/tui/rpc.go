@@ -3,8 +3,8 @@ package tui
 
 import (
 	"bufio"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,9 +29,9 @@ type RPCClient struct {
 	conn       net.Conn
 	reader     *bufio.Reader
 	writer     io.Writer
-	connMu     sync.Mutex    // Protects conn, reader, writer during connect/disconnect
-	callMu     sync.Mutex    // Serializes RPC calls (prevents request/response interleaving)
-	connected  atomic.Bool   // Lock-free connection status for UI queries
+	connMu     sync.Mutex  // Protects conn, reader, writer during connect/disconnect
+	callMu     sync.Mutex  // Serializes RPC calls (prevents request/response interleaving)
+	connected  atomic.Bool // Lock-free connection status for UI queries
 	timeout    time.Duration
 	nextID     atomic.Int64 // Thread-safe ID generation
 
@@ -265,7 +265,7 @@ func (c *RPCClient) SetTimeout(d time.Duration) {
 // Chat sends a chat message and returns the response.
 func (c *RPCClient) Chat(message, conversationID string) (string, error) {
 	params := map[string]string{
-		ParamMessage:         message,
+		ParamMessage:        message,
 		ParamConversationID: conversationID,
 	}
 
@@ -322,7 +322,7 @@ func (c *RPCClient) ListJobs() (*types.JobListResponse, error) {
 // QueryMemory queries the memory store.
 func (c *RPCClient) QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error) {
 	params := map[string]any{
-		"query": query,
+		"query":    query,
 		ParamLimit: limit,
 	}
 
@@ -484,7 +484,7 @@ func (c *RPCClient) GetSessionMessages(sessionID string, offset, limit int) (*ty
 // UpdateSessionDescription updates a session's description.
 func (c *RPCClient) UpdateSessionDescription(sessionID, description string) error {
 	params := map[string]string{
-		ParamSessionID:  sessionID,
+		ParamSessionID:   sessionID,
 		ParamDescription: description,
 	}
 	_, err := c.Call("session.update_description", params)
@@ -494,9 +494,9 @@ func (c *RPCClient) UpdateSessionDescription(sessionID, description string) erro
 // GenerateSessionDescription uses LLM to generate a session description.
 func (c *RPCClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
 	params := map[string]string{
-		ParamSessionID:    sessionID,
-		"first_message":   firstMessage,
-		"project_name":    projectName,
+		ParamSessionID:  sessionID,
+		"first_message": firstMessage,
+		"project_name":  projectName,
 	}
 	result, err := c.Call("session.generate_description", params)
 	if err != nil {
@@ -823,9 +823,9 @@ func (c *RPCClient) CacheInspect(promptHash string) (*types.CacheInspectResponse
 // Steer sends a steering message to an active conversation.
 func (c *RPCClient) Steer(message, conversationID string) error {
 	req := map[string]string{
-		ParamMessage:         message,
+		ParamMessage:        message,
 		ParamConversationID: conversationID,
-		"source":             "tui",
+		"source":            "tui",
 	}
 	_, err := c.Call("chat.steer", req)
 	return err
@@ -834,9 +834,9 @@ func (c *RPCClient) Steer(message, conversationID string) error {
 // FollowUp sends a follow-up message to an active conversation.
 func (c *RPCClient) FollowUp(message, conversationID string) error {
 	req := map[string]string{
-		ParamMessage:         message,
+		ParamMessage:        message,
 		ParamConversationID: conversationID,
-		"source":             "tui",
+		"source":            "tui",
 	}
 	_, err := c.Call("chat.followup", req)
 	return err
@@ -872,7 +872,7 @@ func (c *RPCClient) RestorePendingFollowUps(conversationID string) error {
 // NavigateBranch navigates to a prior message in a session, creating a new branch.
 func (c *RPCClient) NavigateBranch(sessionID string, targetMessageID int64) error {
 	params := map[string]any{
-		ParamSessionID:        sessionID,
+		ParamSessionID:      sessionID,
 		"target_message_id": targetMessageID,
 	}
 	_, err := c.Call("session.branch.navigate", params)
@@ -903,9 +903,9 @@ func (c *RPCClient) ListBranches(sessionID string) ([]BranchInfo, error) {
 // ForkSession forks a session from a specific message, returning the new session ID.
 func (c *RPCClient) ForkSession(sessionID string, fromMessageID int64, name string) (string, error) {
 	params := map[string]any{
-		ParamSessionID:      sessionID,
+		ParamSessionID:    sessionID,
 		"from_message_id": fromMessageID,
-		ParamName:            name,
+		ParamName:         name,
 	}
 	result, err := c.Call("session.fork", params)
 	if err != nil {

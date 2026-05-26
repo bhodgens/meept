@@ -83,20 +83,20 @@ type TerminatedEventBody struct {
 
 // InitializeRequestArguments is the argument for the "initialize" request.
 type InitializeRequestArguments struct {
-	AdapterID    string `json:"adapterID"`
-	PathFormat   string `json:"pathFormat,omitempty"`   // "path" or "uri"
-	LinesStartAt1 *bool `json:"linesStartAt1,omitempty"`
-	ColumnsStartAt1 *bool `json:"columnsStartAt1,omitempty"`
+	AdapterID       string `json:"adapterID"`
+	PathFormat      string `json:"pathFormat,omitempty"` // "path" or "uri"
+	LinesStartAt1   *bool  `json:"linesStartAt1,omitempty"`
+	ColumnsStartAt1 *bool  `json:"columnsStartAt1,omitempty"`
 }
 
 // LaunchRequestArguments is the argument for the "launch" request.
 type LaunchRequestArguments struct {
-	Program       string            `json:"program"`
-	Args          []string          `json:"args,omitempty"`
-	Cwd           string            `json:"cwd,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
-	StopOnEntry   bool              `json:"stopOnEntry,omitempty"`
-	NoDebug       bool              `json:"noDebug,omitempty"`
+	Program     string            `json:"program"`
+	Args        []string          `json:"args,omitempty"`
+	Cwd         string            `json:"cwd,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	StopOnEntry bool              `json:"stopOnEntry,omitempty"`
+	NoDebug     bool              `json:"noDebug,omitempty"`
 }
 
 // AttachRequestArguments is the argument for the "attach" request.
@@ -123,14 +123,14 @@ type SourceBreakpoint struct {
 
 // SetBreakpointsArguments is the argument for "setBreakpoints".
 type SetBreakpointsArguments struct {
-	Source      Source             `json:"source"`
-	Breakpoints []SourceBreakpoint `json:"breakpoints,omitempty"`
-	SourceModified bool            `json:"sourceModified,omitempty"`
+	Source         Source             `json:"source"`
+	Breakpoints    []SourceBreakpoint `json:"breakpoints,omitempty"`
+	SourceModified bool               `json:"sourceModified,omitempty"`
 }
 
 // StackTraceArguments is the argument for "stackTrace".
 type StackTraceArguments struct {
-	ThreadID int `json:"threadId"`
+	ThreadID   int  `json:"threadId"`
 	StartFrame *int `json:"startFrame,omitempty"`
 	Levels     *int `json:"levels,omitempty"`
 }
@@ -394,9 +394,9 @@ func (c *Client) writeMessage(data []byte) error {
 // Initialize sends the DAP initialize request.
 func (c *Client) Initialize(ctx context.Context, adapterID string) error {
 	args := InitializeRequestArguments{
-		AdapterID:      adapterID,
-		PathFormat:     "path",
-		LinesStartAt1:  boolPtr(true),
+		AdapterID:       adapterID,
+		PathFormat:      "path",
+		LinesStartAt1:   boolPtr(true),
 		ColumnsStartAt1: boolPtr(true),
 	}
 

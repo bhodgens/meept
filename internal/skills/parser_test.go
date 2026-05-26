@@ -276,11 +276,11 @@ func TestParseSkillFile_NotFound(t *testing.T) {
 
 func TestSplitFrontmatter_Various(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         string
-		wantFront     string
-		wantBody      string
-		wantErr       error
+		name      string
+		input     string
+		wantFront string
+		wantBody  string
+		wantErr   error
 	}{
 		{
 			name: "standard",

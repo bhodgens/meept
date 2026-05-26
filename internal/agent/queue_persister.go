@@ -29,8 +29,8 @@ type QueuePersister struct {
 
 // QueuePersisterConfig holds configuration for QueuePersister.
 type QueuePersisterConfig struct {
-	FlushDelay   time.Duration
-	MaxPending   int
+	FlushDelay time.Duration
+	MaxPending int
 }
 
 // DefaultQueuePersisterConfig returns defaults.

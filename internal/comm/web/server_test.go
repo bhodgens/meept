@@ -141,10 +141,10 @@ func (m *mockSkillExecutor) ExecuteSkill(ctx context.Context, name, input string
 
 // mockJobScheduler implements JobScheduler.
 type mockJobScheduler struct {
-	jobID    string
+	jobID     string
 	createErr error
-	job      map[string]any
-	getErr   error
+	job       map[string]any
+	getErr    error
 	cancelErr error
 }
 

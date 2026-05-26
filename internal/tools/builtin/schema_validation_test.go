@@ -122,7 +122,7 @@ func TestValidateJSONSchema_TypeChecking(t *testing.T) {
 
 func TestValidateJSONSchema_RequiredFields(t *testing.T) {
 	schema := map[string]any{
-		"type": "object",
+		"type":     "object",
 		"required": []any{"name", "age"},
 		"properties": map[string]any{
 			"name": map[string]any{"type": "string"},
@@ -154,11 +154,11 @@ func TestValidateJSONSchema_RequiredFields(t *testing.T) {
 
 func TestValidateJSONSchema_NestedProperties(t *testing.T) {
 	schema := map[string]any{
-		"type": "object",
+		"type":     "object",
 		"required": []any{"user"},
 		"properties": map[string]any{
 			"user": map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []any{"name", "email"},
 				"properties": map[string]any{
 					"name":  map[string]any{"type": "string"},
@@ -258,7 +258,7 @@ func TestValidateJSONSchema_ArrayItems(t *testing.T) {
 		objSchema := map[string]any{
 			"type": "array",
 			"items": map[string]any{
-				"type": "object",
+				"type":     "object",
 				"required": []any{"id"},
 				"properties": map[string]any{
 					"id":   map[string]any{"type": "integer"},

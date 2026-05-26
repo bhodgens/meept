@@ -190,9 +190,9 @@ func TestTaskReportAggregator_FilterByPriority(t *testing.T) {
 
 func TestAggregatedTaskReport_Structure(t *testing.T) {
 	report := AggregatedTaskReport{
-		Summary:         "Test summary",
-		StepsCompleted:  5,
-		StepsTotal:      7,
+		Summary:        "Test summary",
+		StepsCompleted: 5,
+		StepsTotal:     7,
 		Recommendations: []CategorizedRecommendation{
 			{Category: "test", Priority: "low", Description: "Test rec"},
 		},

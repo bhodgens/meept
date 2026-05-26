@@ -8,12 +8,12 @@ import (
 
 // Sentinel errors for store operations.
 var (
-	ErrRecordNotFound      = errors.New("shadow record not found")
+	ErrRecordNotFound         = errors.New("shadow record not found")
 	ErrPreferencePairNotFound = errors.New("preference pair not found")
-	ErrExampleNotFound     = errors.New("few-shot example not found")
-	ErrAdapterNotFound     = errors.New("adapter not found")
-	ErrActiveAdapterNotFound = errors.New("no active adapter found")
-	ErrStoreNotInitialized = errors.New("store not initialized")
+	ErrExampleNotFound        = errors.New("few-shot example not found")
+	ErrAdapterNotFound        = errors.New("adapter not found")
+	ErrActiveAdapterNotFound  = errors.New("no active adapter found")
+	ErrStoreNotInitialized    = errors.New("store not initialized")
 )
 
 // TrainingStore provides access to shadow training data (training.db).
@@ -84,21 +84,21 @@ type AdaptersStore interface {
 
 // ListRecordsOptions specifies filters for listing shadow records.
 type ListRecordsOptions struct {
-	Domain        Domain
-	TaskType      TaskType
-	MinQuality    float64
+	Domain          Domain
+	TaskType        TaskType
+	MinQuality      float64
 	HighQualityOnly bool
-	Since         *time.Time
-	Until         *time.Time
-	Limit         int
-	Offset        int
+	Since           *time.Time
+	Until           *time.Time
+	Limit           int
+	Offset          int
 }
 
 // ListPairsOptions specifies filters for listing preference pairs.
 type ListPairsOptions struct {
-	MinMargin     float64
+	MinMargin      float64
 	UnexportedOnly bool
-	Since         *time.Time
-	Limit         int
-	Offset        int
+	Since          *time.Time
+	Limit          int
+	Offset         int
 }

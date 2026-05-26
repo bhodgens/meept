@@ -102,7 +102,7 @@ func (t *LSPDefinitionTool) Execute(ctx context.Context, args map[string]any) (a
 		return map[string]any{
 			SchemaPropFound:     false,
 			SchemaPropMessage:   "No definition found at this location",
-			SchemaPropFilePath: filePath,
+			SchemaPropFilePath:  filePath,
 			SchemaPropLine:      line,
 			SchemaPropCharacter: char,
 		}, nil
@@ -121,9 +121,9 @@ func (t *LSPDefinitionTool) Execute(ctx context.Context, args map[string]any) (a
 	}
 
 	return map[string]any{
-		SchemaPropFound:       true,
-		"definitions": definitions,
-		SchemaPropCount:       len(definitions),
+		SchemaPropFound: true,
+		"definitions":   definitions,
+		SchemaPropCount: len(definitions),
 	}, nil
 }
 

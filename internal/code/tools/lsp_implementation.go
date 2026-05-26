@@ -102,7 +102,7 @@ func (t *LSPImplementationTool) Execute(ctx context.Context, args map[string]any
 		return map[string]any{
 			SchemaPropFound:     false,
 			SchemaPropMessage:   "No implementations found for symbol at this location",
-			SchemaPropFilePath: filePath,
+			SchemaPropFilePath:  filePath,
 			SchemaPropLine:      line,
 			SchemaPropCharacter: char,
 		}, nil
@@ -126,16 +126,16 @@ func (t *LSPImplementationTool) Execute(ctx context.Context, args map[string]any
 	for path, impls := range byFile {
 		implementations = append(implementations, map[string]any{
 			SchemaPropFilePath: path,
-			"implementations": impls,
-			SchemaPropCount:   len(impls),
+			"implementations":  impls,
+			SchemaPropCount:    len(impls),
 		})
 	}
 
 	return map[string]any{
-		SchemaPropFound:  true,
-		"files":          implementations,
-		"total_count":    len(locations),
-		"file_count":     len(implementations),
+		SchemaPropFound: true,
+		"files":         implementations,
+		"total_count":   len(locations),
+		"file_count":    len(implementations),
 	}, nil
 }
 

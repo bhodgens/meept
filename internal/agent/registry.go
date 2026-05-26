@@ -26,6 +26,7 @@ type QueueEntry struct {
 }
 
 // AgentRegistry manages agent specifications and instantiated agent loops.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentRegistry struct {
 	mu sync.RWMutex
@@ -70,9 +71,9 @@ type AgentRegistry struct {
 	ttsrManager *TTSRManager
 
 	// Queue tracking for conversation-scoped queue management
-	activeQueues map[string]*QueueEntry
+	activeQueues   map[string]*QueueEntry
 	activeQueuesMu sync.RWMutex
-	nextGen      uint64
+	nextGen        uint64
 
 	// Queues config from config file (overrides code defaults)
 	queueConfig config.AgentQueuesConfig

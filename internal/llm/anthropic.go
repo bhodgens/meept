@@ -637,13 +637,13 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 			errType = metrics.ClassifyError(nil, resp.StatusCode)
 		}
 		record := metrics.RequestRecord{
-			Timestamp:   time.Now(),
-			ProviderID:  c.config.ProviderID,
-			ModelID:     c.config.ModelID,
-			LatencyMs:   latencyMs,
-			HTTPStatus:  0,
-			ErrorType:   errType,
-			Success:     false,
+			Timestamp:  time.Now(),
+			ProviderID: c.config.ProviderID,
+			ModelID:    c.config.ModelID,
+			LatencyMs:  latencyMs,
+			HTTPStatus: 0,
+			ErrorType:  errType,
+			Success:    false,
 		}
 		if resp != nil {
 			record.HTTPStatus = resp.StatusCode
@@ -773,12 +773,12 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 			errType = metrics.ClassifyError(nil, resp.StatusCode)
 		}
 		record := metrics.RequestRecord{
-			Timestamp:   time.Now(),
-			ProviderID:  c.config.ProviderID,
-			ModelID:     c.config.ModelID,
-			LatencyMs:   latencyMs,
-			ErrorType:   errType,
-			Success:     false,
+			Timestamp:  time.Now(),
+			ProviderID: c.config.ProviderID,
+			ModelID:    c.config.ModelID,
+			LatencyMs:  latencyMs,
+			ErrorType:  errType,
+			Success:    false,
 		}
 		if resp != nil {
 			record.HTTPStatus = resp.StatusCode

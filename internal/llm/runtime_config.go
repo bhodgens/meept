@@ -12,13 +12,13 @@ import (
 
 // RuntimeLifecycleConfig holds configuration for local LLM runtime management.
 type RuntimeLifecycleConfig struct {
-	Runtime        string          `json:"runtime"`          // "llama-cpp" or "mlx"
-	ModelPath      string          `json:"model_path"`       // Path to model file
-	AutoStart      bool            `json:"auto_start"`       // Auto-start on daemon startup
-	AutoStopOnExit bool            `json:"auto_stop_on_exit"` // Stop on daemon shutdown
-	PIDFile        string          `json:"pid_file"`         // Path to PID file
-	SpawnCommand   []string        `json:"spawn_command"`    // Command and args to spawn runtime
-	SpawnTimeout   int             `json:"spawn_timeout_seconds"`
+	Runtime        string              `json:"runtime"`           // "llama-cpp" or "mlx"
+	ModelPath      string              `json:"model_path"`        // Path to model file
+	AutoStart      bool                `json:"auto_start"`        // Auto-start on daemon startup
+	AutoStopOnExit bool                `json:"auto_stop_on_exit"` // Stop on daemon shutdown
+	PIDFile        string              `json:"pid_file"`          // Path to PID file
+	SpawnCommand   []string            `json:"spawn_command"`     // Command and args to spawn runtime
+	SpawnTimeout   int                 `json:"spawn_timeout_seconds"`
 	HealthCheck    HealthCheckConfig   `json:"health_check"`
 	RestartPolicy  RestartPolicyConfig `json:"restart_policy"`
 }
@@ -33,10 +33,10 @@ type HealthCheckConfig struct {
 
 // RestartPolicyConfig holds restart policy configuration.
 type RestartPolicyConfig struct {
-	Enabled           bool `json:"enabled"`               // Enable auto-restart on unhealthy
-	MaxAttempts       int  `json:"max_attempts"`          // Max restart attempts (default: 3)
-	CooldownSeconds   int  `json:"cooldown_seconds"`      // Seconds between restart attempts (default: 30)
-	ResetAfterSeconds int  `json:"reset_after_seconds"`   // Reset failure count after this many seconds of healthy (default: 300)
+	Enabled           bool `json:"enabled"`             // Enable auto-restart on unhealthy
+	MaxAttempts       int  `json:"max_attempts"`        // Max restart attempts (default: 3)
+	CooldownSeconds   int  `json:"cooldown_seconds"`    // Seconds between restart attempts (default: 30)
+	ResetAfterSeconds int  `json:"reset_after_seconds"` // Reset failure count after this many seconds of healthy (default: 300)
 }
 
 // RuntimeType represents a supported LLM runtime.
@@ -49,21 +49,21 @@ const (
 
 // RuntimeConfig holds validated runtime configuration.
 type RuntimeConfig struct {
-	Type            RuntimeType
-	ModelPath       string
-	PIDFile         string
-	AutoStart       bool
-	AutoStop        bool
-	SpawnCommand    []string
-	SpawnTimeout    time.Duration
-	HealthEndpoint    string
-	HealthInterval    time.Duration
-	HealthTimeout     time.Duration
-	HealthThreshold   int
-	RestartEnabled    bool
+	Type               RuntimeType
+	ModelPath          string
+	PIDFile            string
+	AutoStart          bool
+	AutoStop           bool
+	SpawnCommand       []string
+	SpawnTimeout       time.Duration
+	HealthEndpoint     string
+	HealthInterval     time.Duration
+	HealthTimeout      time.Duration
+	HealthThreshold    int
+	RestartEnabled     bool
 	RestartMaxAttempts int
-	RestartCooldown   time.Duration
-	RestartResetAfter time.Duration
+	RestartCooldown    time.Duration
+	RestartResetAfter  time.Duration
 }
 
 // ValidateAndNormalize validates the config and expands paths.
@@ -137,21 +137,21 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 	}
 
 	return &RuntimeConfig{
-		Type:              rt,
-		ModelPath:         modelPath,
-		PIDFile:           pidFile,
-		AutoStart:         cfg.AutoStart,
-		AutoStop:          cfg.AutoStopOnExit,
-		SpawnCommand:      spawnCmd,
-		SpawnTimeout:      spawnTimeout,
-		HealthEndpoint:    cfg.HealthCheck.Endpoint,
-		HealthInterval:    healthInterval,
-		HealthTimeout:     healthTimeout,
-		HealthThreshold:   healthThreshold,
-		RestartEnabled:    cfg.RestartPolicy.Enabled,
+		Type:               rt,
+		ModelPath:          modelPath,
+		PIDFile:            pidFile,
+		AutoStart:          cfg.AutoStart,
+		AutoStop:           cfg.AutoStopOnExit,
+		SpawnCommand:       spawnCmd,
+		SpawnTimeout:       spawnTimeout,
+		HealthEndpoint:     cfg.HealthCheck.Endpoint,
+		HealthInterval:     healthInterval,
+		HealthTimeout:      healthTimeout,
+		HealthThreshold:    healthThreshold,
+		RestartEnabled:     cfg.RestartPolicy.Enabled,
 		RestartMaxAttempts: restartMaxAttempts,
-		RestartCooldown:   restartCooldown,
-		RestartResetAfter: restartResetAfter,
+		RestartCooldown:    restartCooldown,
+		RestartResetAfter:  restartResetAfter,
 	}, nil
 }
 

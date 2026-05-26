@@ -66,11 +66,11 @@ var _ DaemonClient = (*RPCClient)(nil)
 
 // clientConnection holds resolved connection settings for a single CLI invocation.
 type clientConnection struct {
-	transport   string // "rpc", "http", or "auto"
-	address     string // socket path or "host:port"
-	timeout     time.Duration
-	maxRetries  int
-	retryDelay  time.Duration
+	transport  string // "rpc", "http", or "auto"
+	address    string // socket path or "host:port"
+	timeout    time.Duration
+	maxRetries int
+	retryDelay time.Duration
 }
 
 // resolveConnection reads client.json5 and returns connection settings.

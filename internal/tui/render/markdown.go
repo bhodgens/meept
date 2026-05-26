@@ -87,18 +87,18 @@ func (m *MarkdownRenderer) SetWidth(width int) error {
 // DetectMarkdown checks if content contains markdown formatting.
 func DetectMarkdown(content string) bool {
 	patterns := []string{
-		"```",     // Fenced code block
-		"\n# ",    // Heading
-		"\n## ",   // Heading
-		"\n### ",  // Heading
-		"\n- ",    // Unordered list
-		"\n* ",    // Unordered list
-		"\n1. ",   // Ordered list
-		"\n> ",    // Blockquote
-		"**",      // Bold
-		"__",      // Bold
-		"~~",      // Strikethrough
-		"[",       // Link start (basic check)
+		"```",    // Fenced code block
+		"\n# ",   // Heading
+		"\n## ",  // Heading
+		"\n### ", // Heading
+		"\n- ",   // Unordered list
+		"\n* ",   // Unordered list
+		"\n1. ",  // Ordered list
+		"\n> ",   // Blockquote
+		"**",     // Bold
+		"__",     // Bold
+		"~~",     // Strikethrough
+		"[",      // Link start (basic check)
 	}
 
 	// Check if starts with heading

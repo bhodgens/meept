@@ -266,7 +266,7 @@ func TestContextFirewallIntegration(t *testing.T) {
 		nil, // inner - nil for this test
 		model,
 		llm.ContextFirewallConfig{
-			Enabled:         true,
+			Enabled:          true,
 			SummarizeHistory: false,
 			ChunkLargeInputs: true,
 		},

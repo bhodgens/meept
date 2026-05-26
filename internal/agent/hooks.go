@@ -61,8 +61,8 @@ type StopDecision struct {
 
 // ContextTransform is returned by TransformContextHook.
 type ContextTransform struct {
-	Messages []llm.ChatMessage     // replacement messages
-	ToolDefs []llm.ToolDefinition  // replacement tool definitions (nil = keep original)
+	Messages []llm.ChatMessage    // replacement messages
+	ToolDefs []llm.ToolDefinition // replacement tool definitions (nil = keep original)
 	Modified bool
 	Reason   string
 }

@@ -89,7 +89,6 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	return r
 }
 
-
 // DefaultModel returns the default model configuration.
 func (r *Resolver) DefaultModel() *ModelConfig {
 	return r.defaultModel

@@ -16,25 +16,25 @@ import (
 type ProviderStatus string
 
 const (
-	ProviderStatusHealthy  ProviderStatus = "healthy"
-	ProviderStatusDegraded ProviderStatus = "degraded"
+	ProviderStatusHealthy   ProviderStatus = "healthy"
+	ProviderStatusDegraded  ProviderStatus = "degraded"
 	ProviderStatusUnhealthy ProviderStatus = "unhealthy"
-	ProviderStatusDisabled ProviderStatus = "disabled"
+	ProviderStatusDisabled  ProviderStatus = "disabled"
 )
 
 // ProviderHealth tracks health metrics for a provider.
 type ProviderHealth struct {
-	ProviderID     string         `json:"provider_id"`
-	Status         ProviderStatus `json:"status"`
-	LastSuccess    time.Time      `json:"last_success"`
-	LastFailure    time.Time      `json:"last_failure"`
-	SuccessCount   int64          `json:"success_count"`
-	FailureCount   int64          `json:"failure_count"`
-	ConsecutiveFails int          `json:"consecutive_fails"`
-	AvgLatencyMs   float64        `json:"avg_latency_ms"`
-	TotalCost      float64        `json:"total_cost"`
-	TotalTokens    int64          `json:"total_tokens"`
-	LastError      string         `json:"last_error,omitempty"`
+	ProviderID       string         `json:"provider_id"`
+	Status           ProviderStatus `json:"status"`
+	LastSuccess      time.Time      `json:"last_success"`
+	LastFailure      time.Time      `json:"last_failure"`
+	SuccessCount     int64          `json:"success_count"`
+	FailureCount     int64          `json:"failure_count"`
+	ConsecutiveFails int            `json:"consecutive_fails"`
+	AvgLatencyMs     float64        `json:"avg_latency_ms"`
+	TotalCost        float64        `json:"total_cost"`
+	TotalTokens      int64          `json:"total_tokens"`
+	LastError        string         `json:"last_error,omitempty"`
 }
 
 // ProviderEntry represents a configured provider with its health state.

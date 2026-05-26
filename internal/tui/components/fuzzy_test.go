@@ -6,7 +6,10 @@ import (
 )
 
 func TestFuzzyMatcher_ExactMatch(t *testing.T) {
-	fm := NewFuzzyMatcher([]struct{ Text string; Data any }{
+	fm := NewFuzzyMatcher([]struct {
+		Text string
+		Data any
+	}{
 		{Text: "Implement authentication", Data: "task1"},
 		{Text: "Fix database connection", Data: "task2"},
 		{Text: "Add user registration", Data: "task3"},
@@ -25,7 +28,10 @@ func TestFuzzyMatcher_ExactMatch(t *testing.T) {
 }
 
 func TestFuzzyMatcher_FuzzyMatch(t *testing.T) {
-	fm := NewFuzzyMatcher([]struct{ Text string; Data any }{
+	fm := NewFuzzyMatcher([]struct {
+		Text string
+		Data any
+	}{
 		{Text: "Implement authentication", Data: "task1"},
 		{Text: "Fix database connection", Data: "task2"},
 		{Text: "Add user registration", Data: "task3"},
@@ -42,7 +48,10 @@ func TestFuzzyMatcher_FuzzyMatch(t *testing.T) {
 }
 
 func TestFuzzyMatcher_EmptyQuery(t *testing.T) {
-	fm := NewFuzzyMatcher([]struct{ Text string; Data any }{
+	fm := NewFuzzyMatcher([]struct {
+		Text string
+		Data any
+	}{
 		{Text: "Task 1", Data: "t1"},
 		{Text: "Task 2", Data: "t2"},
 	})
@@ -54,7 +63,10 @@ func TestFuzzyMatcher_EmptyQuery(t *testing.T) {
 }
 
 func TestFuzzyMatcher_NoMatch(t *testing.T) {
-	fm := NewFuzzyMatcher([]struct{ Text string; Data any }{
+	fm := NewFuzzyMatcher([]struct {
+		Text string
+		Data any
+	}{
 		{Text: "Implement authentication", Data: "task1"},
 		{Text: "Fix database connection", Data: "task2"},
 	})
@@ -66,7 +78,10 @@ func TestFuzzyMatcher_NoMatch(t *testing.T) {
 }
 
 func TestFuzzyMatcher_ScoringOrder(t *testing.T) {
-	fm := NewFuzzyMatcher([]struct{ Text string; Data any }{
+	fm := NewFuzzyMatcher([]struct {
+		Text string
+		Data any
+	}{
 		{Text: "auth middleware", Data: "task1"},
 		{Text: "implement authentication handler", Data: "task2"},
 		{Text: "oauth callback", Data: "task3"},
@@ -85,7 +100,10 @@ func TestFuzzyMatcher_ScoringOrder(t *testing.T) {
 }
 
 func TestFuzzyMatcher_DataPayload(t *testing.T) {
-	fm := NewFuzzyMatcher([]struct{ Text string; Data any }{
+	fm := NewFuzzyMatcher([]struct {
+		Text string
+		Data any
+	}{
 		{Text: "Task one", Data: 42},
 		{Text: "Task two", Data: "hello"},
 	})
@@ -100,7 +118,10 @@ func TestFuzzyMatcher_DataPayload(t *testing.T) {
 }
 
 func TestFuzzyMatcher_Indices(t *testing.T) {
-	fm := NewFuzzyMatcher([]struct{ Text string; Data any }{
+	fm := NewFuzzyMatcher([]struct {
+		Text string
+		Data any
+	}{
 		{Text: "hello world", Data: nil},
 	})
 
@@ -159,7 +180,7 @@ func TestFuzzyMatchChars(t *testing.T) {
 		{"hello", "hlooo", false},
 		{"hello world", "hw", true},
 		{"hello", "", false}, // empty query returns nil (handled by caller)
-		{"", "a", false},    // can't match in empty text
+		{"", "a", false},     // can't match in empty text
 	}
 
 	for _, tt := range tests {
@@ -177,14 +198,14 @@ func TestIsWordBoundary(t *testing.T) {
 		idx      int
 		expected bool
 	}{
-		{"hello world", 5, true},  // space
-		{"hello_world", 5, true},  // underscore
-		{"hello-world", 5, true},  // hyphen
-		{"hello.world", 5, true},  // dot
-		{"hello/world", 5, true},  // slash
-		{"helloworld", 5, false},  // no boundary
-		{"hello", -1, true},       // out of bounds
-		{"hello", 5, true},        // out of bounds
+		{"hello world", 5, true}, // space
+		{"hello_world", 5, true}, // underscore
+		{"hello-world", 5, true}, // hyphen
+		{"hello.world", 5, true}, // dot
+		{"hello/world", 5, true}, // slash
+		{"helloworld", 5, false}, // no boundary
+		{"hello", -1, true},      // out of bounds
+		{"hello", 5, true},       // out of bounds
 	}
 
 	for _, tt := range tests {

@@ -202,7 +202,7 @@ func (r *Registry) LinkSession(ctx context.Context, taskID, sessionID string) er
 	}
 
 	r.publishEvent("task.link", map[string]any{
-		KeyTaskID:   taskID,
+		KeyTaskID:    taskID,
 		"session_id": sessionID,
 	})
 
@@ -223,7 +223,7 @@ func (r *Registry) UnlinkSession(ctx context.Context, taskID, sessionID string) 
 	}
 
 	r.publishEvent("task.unlink", map[string]any{
-		KeyTaskID:   taskID,
+		KeyTaskID:    taskID,
 		"session_id": sessionID,
 	})
 
@@ -558,6 +558,7 @@ func (h *Handler) handleList(ctx context.Context, msg *models.BusMessage) (any, 
 }
 
 // TaskExtendedResponse represents a task with all extended fields for TUI display.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type TaskExtendedResponse struct {
 	ID              string      `json:"id"`
@@ -705,8 +706,8 @@ func (h *Handler) handleCancel(ctx context.Context, msg *models.BusMessage) (any
 
 	return map[string]any{
 		KeyStatus: "cancelled",
-		"state":  string(task.State),
-		"reason": reason,
+		"state":   string(task.State),
+		"reason":  reason,
 	}, nil
 }
 

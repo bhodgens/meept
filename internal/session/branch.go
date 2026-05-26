@@ -228,7 +228,7 @@ func AssembleBranchForMessages(store Store, messages []Message) []llm.ChatMessag
 // handleBranchNavigate handles the session.branch.navigate bus topic.
 func handleBranchNavigate(bm *BranchManager, payload json.RawMessage) (any, error) {
 	var params struct {
-		SessionID      string `json:"session_id"`
+		SessionID       string `json:"session_id"`
 		TargetMessageID int64  `json:"target_message_id"`
 	}
 	if err := json.Unmarshal(payload, &params); err != nil {

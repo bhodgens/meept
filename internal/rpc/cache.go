@@ -41,15 +41,15 @@ func (h *CacheHandler) handleStats(ctx context.Context, params json.RawMessage) 
 	stats := h.cache.Stats()
 
 	return map[string]any{
-		"l1_entries":  stats.L1Entries,
-		"l1_hits":     stats.L1Hits,
-		"l1_misses":   stats.L1Misses,
-		"evictions":   stats.Evictions,
-		"l2_entries":  stats.L2Entries,
-		"l2_hits":     stats.L2Hits,
-		"l2_misses":   stats.L2Misses,
-		"total_hits":  stats.L1Hits + stats.L2Hits,
-		"hit_rate":    stats.HitRate,
+		"l1_entries": stats.L1Entries,
+		"l1_hits":    stats.L1Hits,
+		"l1_misses":  stats.L1Misses,
+		"evictions":  stats.Evictions,
+		"l2_entries": stats.L2Entries,
+		"l2_hits":    stats.L2Hits,
+		"l2_misses":  stats.L2Misses,
+		"total_hits": stats.L1Hits + stats.L2Hits,
+		"hit_rate":   stats.HitRate,
 	}, nil
 }
 
@@ -88,8 +88,8 @@ func (h *CacheHandler) handleInvalidate(ctx context.Context, params json.RawMess
 	h.logger.Info("cache entries invalidated", "file", req.FilePath)
 
 	return map[string]any{
-		RPCKeyStatus:   "invalidated",
-		"file":     req.FilePath,
+		RPCKeyStatus: "invalidated",
+		"file":       req.FilePath,
 	}, nil
 }
 
@@ -113,9 +113,9 @@ func (h *CacheHandler) handleInspect(ctx context.Context, params json.RawMessage
 	results := h.cache.Inspect(req.PromptHash)
 	if len(results) == 0 {
 		return map[string]any{
-			"found":  false,
-			RPCKeyCount:  0,
-			"entries": []any{},
+			"found":     false,
+			RPCKeyCount: 0,
+			"entries":   []any{},
 		}, nil
 	}
 
@@ -138,8 +138,8 @@ func (h *CacheHandler) handleInspect(ctx context.Context, params json.RawMessage
 	}
 
 	return map[string]any{
-		"found":   true,
-		RPCKeyCount:   len(entries),
-		"entries": entries,
+		"found":     true,
+		RPCKeyCount: len(entries),
+		"entries":   entries,
 	}, nil
 }

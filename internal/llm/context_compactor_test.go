@@ -1203,8 +1203,8 @@ func TestCountTokens(t *testing.T) {
 	c := NewContextCompactor(CompactorConfig{}, nil, nil, nil)
 
 	msgs := []ChatMessage{
-		{Role: RoleUser, Content: "hello world"},       // ~4 tokens (11 chars / 3)
-		{Role: RoleAssistant, Content: "hi there"},     // ~3 tokens (8 chars / 3)
+		{Role: RoleUser, Content: "hello world"},   // ~4 tokens (11 chars / 3)
+		{Role: RoleAssistant, Content: "hi there"}, // ~3 tokens (8 chars / 3)
 	}
 
 	count := c.countTokens(msgs)
@@ -2168,9 +2168,9 @@ none`},
 
 	// Build messages with a large old tool output that should be pruned
 	// and enough recent tool output to fill the protected budget.
-	largeOutput := makeLongString(50000)     // 50k tokens, way beyond protected budget
-	recentOutput := makeLongString(41000)     // fills protected budget
-	userPadding := makeLongString(50)         // padding to ensure cut point
+	largeOutput := makeLongString(50000)  // 50k tokens, way beyond protected budget
+	recentOutput := makeLongString(41000) // fills protected budget
+	userPadding := makeLongString(50)     // padding to ensure cut point
 
 	msgs := []ChatMessage{
 		{Role: RoleSystem, Content: "sys"},
@@ -2204,4 +2204,3 @@ none`},
 	// messages that were passed through (the ToKeep region may still have
 	// the recent output; the ToCompact region is summarized away).
 }
-

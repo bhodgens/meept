@@ -327,9 +327,9 @@ func TestGetCustomCommand(t *testing.T) {
 
 func TestCustomCommandNames(t *testing.T) {
 	SetCustomCommands(map[string]CustomCommand{
-		"zebra":   {Name: "zebra"},
-		"alpha":   {Name: "alpha"},
-		"middle":  {Name: "middle"},
+		"zebra":  {Name: "zebra"},
+		"alpha":  {Name: "alpha"},
+		"middle": {Name: "middle"},
 	})
 	defer SetCustomCommands(nil)
 

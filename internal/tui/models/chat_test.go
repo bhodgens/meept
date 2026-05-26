@@ -27,9 +27,9 @@ type MockChatRPCClient struct {
 	QueueStatusErr error
 
 	// Message persistence tracking
-	SavedMessages      map[string][]types.SessionMessage
-	GetMessagesResp    *types.SessionMessagesResponse
-	GetMessagesErr     error
+	SavedMessages       map[string][]types.SessionMessage
+	GetMessagesResp     *types.SessionMessagesResponse
+	GetMessagesErr      error
 	UpdatedDescriptions map[string]string
 }
 

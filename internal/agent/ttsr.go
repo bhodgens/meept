@@ -17,12 +17,12 @@ import (
 // violations and can inject corrective content when triggered.
 type TTSRRule struct {
 	Name      string   `yaml:"name" json:"name"`
-	Scope     string   `yaml:"scope" json:"scope"`           // "text", "thinking", "tool_call", "any"
-	Condition string   `yaml:"condition" json:"condition"`   // regex pattern
-	Interrupt bool     `yaml:"interrupt" json:"interrupt"`   // true = abort+retry, false = in-band reminder
-	Repeat    string   `yaml:"repeat" json:"repeat"`         // "once" or "after-gap:N"
-	Globs     []string `yaml:"globs" json:"globs"`           // file globs for scoped rules
-	Content   string   `yaml:"-" json:"-"`                   // rule body from markdown content
+	Scope     string   `yaml:"scope" json:"scope"`         // "text", "thinking", "tool_call", "any"
+	Condition string   `yaml:"condition" json:"condition"` // regex pattern
+	Interrupt bool     `yaml:"interrupt" json:"interrupt"` // true = abort+retry, false = in-band reminder
+	Repeat    string   `yaml:"repeat" json:"repeat"`       // "once" or "after-gap:N"
+	Globs     []string `yaml:"globs" json:"globs"`         // file globs for scoped rules
+	Content   string   `yaml:"-" json:"-"`                 // rule body from markdown content
 
 	compiled    *regexp.Regexp
 	injectedAt  int  // turn number when last injected

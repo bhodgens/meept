@@ -6,7 +6,7 @@ import "slices"
 type History struct {
 	entries   []string
 	maxSize   int
-	current   int // current position in history (for navigation)
+	current   int    // current position in history (for navigation)
 	temporary string // temporary storage for current input when navigating
 }
 

@@ -329,7 +329,7 @@ type WorkspaceEdit struct {
 
 // TextEdit represents a text edit operation.
 type TextEdit struct {
-	Range  Range  `json:"range"`
+	Range   Range  `json:"range"`
 	NewText string `json:"newText"`
 }
 
@@ -348,13 +348,13 @@ type CodeActionContext struct {
 
 // CodeAction represents a code action.
 type CodeAction struct {
-	Title       string      `json:"title"`
-	Kind        string      `json:"kind,omitempty"`
-	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
-	IsPreferred bool        `json:"isPreferred,omitempty"`
+	Title       string              `json:"title"`
+	Kind        string              `json:"kind,omitempty"`
+	Diagnostics []Diagnostic        `json:"diagnostics,omitempty"`
+	IsPreferred bool                `json:"isPreferred,omitempty"`
 	Disabled    *CodeActionDisabled `json:"disabled,omitempty"`
-	Edit        *WorkspaceEdit       `json:"edit,omitempty"`
-	Command     *Command             `json:"command,omitempty"`
+	Edit        *WorkspaceEdit      `json:"edit,omitempty"`
+	Command     *Command            `json:"command,omitempty"`
 }
 
 // CodeActionDisabled represents a disabled code action.

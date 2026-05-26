@@ -8,9 +8,9 @@ import (
 
 // Boundary marker constants
 const (
-	UserInputStart    = "<<<USER_INPUT>>>"
-	UserInputEnd      = "<<<END_USER_INPUT>>>"
-	ToolOutputEndTag  = "<<<END_TOOL_OUTPUT>>>"
+	UserInputStart   = "<<<USER_INPUT>>>"
+	UserInputEnd     = "<<<END_USER_INPUT>>>"
+	ToolOutputEndTag = "<<<END_TOOL_OUTPUT>>>"
 
 	DefaultReminderInterval = 15
 )
@@ -192,7 +192,7 @@ func IsWithinBoundary(fullText, target string) bool {
 	userStart := strings.Index(fullText, UserInputStart)
 	userEnd := strings.LastIndex(fullText, UserInputEnd)
 	if userStart != -1 && userEnd != -1 && userEnd > userStart {
-		section := fullText[userStart:userEnd+len(UserInputEnd)]
+		section := fullText[userStart : userEnd+len(UserInputEnd)]
 		if strings.Contains(section, target) {
 			return true
 		}

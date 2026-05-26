@@ -54,14 +54,13 @@ type InputConfig struct {
 	EnterBehavior string `json:"enter_behavior"`
 	AutoExpand    bool   `json:"auto_expand"`
 }
+
 // ChatConfig defines chat viewport behavior settings.
 type ChatConfig struct {
 	AutoCopyOnRelease bool   `json:"auto_copy_on_release"` // Auto-copy selected text on mouse release (default: false)
 	ScrollSpeed       int    `json:"scroll_speed"`         // Lines to scroll per mouse wheel event (default: 3)
 	Verbosity         string `json:"verbosity"`            // Progress verbosity: "quiet", "normal", "verbose" (default: "normal")
 }
-
-
 
 // SidebarConfig defines sidebar panel settings.
 type SidebarConfig struct {

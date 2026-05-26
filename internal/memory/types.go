@@ -8,6 +8,7 @@ import (
 )
 
 // MemoryType classifies memory storage subsystems.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type MemoryType string
 
@@ -21,6 +22,7 @@ const (
 )
 
 // Memory represents a stored memory item.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Memory struct {
 	// ID is the unique identifier (UUID hex string).
@@ -50,6 +52,7 @@ type Memory struct {
 }
 
 // MemoryResult is a memory item returned from a search with relevance info.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type MemoryResult struct {
 	// Memory is the underlying memory entry.
@@ -61,6 +64,7 @@ type MemoryResult struct {
 }
 
 // MemoryQuery describes a search request against the memory system.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type MemoryQuery struct {
 	// Query is the free-text search string.
@@ -78,6 +82,7 @@ type MemoryQuery struct {
 }
 
 // MemoryStats holds aggregate statistics about stored memories.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type MemoryStats struct {
 	// TotalCount is the total number of memory items across all subsystems.

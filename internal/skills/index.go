@@ -7,6 +7,7 @@ import (
 )
 
 // SkillIndexEntry holds skill metadata only (no body) for fast lookup.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type SkillIndexEntry struct {
 	// Name is the unique identifier for the skill.
@@ -50,6 +51,7 @@ func (e *SkillIndexEntry) HasTag(tag string) bool {
 }
 
 // SkillIndex provides fast lookup of skill metadata without bodies.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type SkillIndex struct {
 	mu      sync.RWMutex
@@ -352,6 +354,7 @@ func matchEntryScore(entry *SkillIndexEntry, query string) int {
 }
 
 // SkillIndexMatch holds an entry with its match score.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type SkillIndexMatch struct {
 	Entry *SkillIndexEntry

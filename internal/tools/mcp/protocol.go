@@ -79,15 +79,15 @@ const ProtocolVersion = "2024-11-05"
 
 // InitializeParams are the parameters for the initialize request.
 type InitializeParams struct {
-	ProtocolVersion string                `json:"protocolVersion"`
-	Capabilities    ClientCapabilities    `json:"capabilities"`
-	ClientInfo      ImplementationInfo    `json:"clientInfo"`
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ClientCapabilities `json:"capabilities"`
+	ClientInfo      ImplementationInfo `json:"clientInfo"`
 }
 
 // ClientCapabilities describes the capabilities supported by the client.
 type ClientCapabilities struct {
-	Roots     *RootsCapability   `json:"roots,omitempty"`
-	Sampling  map[string]any     `json:"sampling,omitempty"`
+	Roots    *RootsCapability `json:"roots,omitempty"`
+	Sampling map[string]any   `json:"sampling,omitempty"`
 }
 
 // RootsCapability describes roots capability.
@@ -103,15 +103,15 @@ type ImplementationInfo struct {
 
 // InitializeResult is the result of the initialize request.
 type InitializeResult struct {
-	ProtocolVersion string               `json:"protocolVersion"`
-	Capabilities    ServerCapabilities   `json:"capabilities"`
-	ServerInfo      ImplementationInfo   `json:"serverInfo"`
-	Instructions    string               `json:"instructions,omitempty"`
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ServerCapabilities `json:"capabilities"`
+	ServerInfo      ImplementationInfo `json:"serverInfo"`
+	Instructions    string             `json:"instructions,omitempty"`
 }
 
 // ServerCapabilities describes what the server supports.
 type ServerCapabilities struct {
-	Tools     *ToolsCapability   `json:"tools,omitempty"`
+	Tools     *ToolsCapability     `json:"tools,omitempty"`
 	Resources *ResourcesCapability `json:"resources,omitempty"`
 	Prompts   *PromptsCapability   `json:"prompts,omitempty"`
 	Logging   map[string]any       `json:"logging,omitempty"`
@@ -162,7 +162,7 @@ type CallToolResult struct {
 type ContentBlock struct {
 	Type     string         `json:"type"` // "text", "image", "resource"
 	Text     string         `json:"text,omitempty"`
-	Data     string         `json:"data,omitempty"`     // base64 encoded
+	Data     string         `json:"data,omitempty"` // base64 encoded
 	MimeType string         `json:"mimeType,omitempty"`
 	Resource *ResourceBlock `json:"resource,omitempty"`
 }

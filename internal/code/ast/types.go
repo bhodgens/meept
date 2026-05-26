@@ -176,14 +176,14 @@ type ParseResult struct {
 
 // QueryMatch represents a match from a tree-sitter query.
 type QueryMatch struct {
-	PatternIndex int             `json:"pattern_index"`
-	Captures     []QueryCapture  `json:"captures"`
+	PatternIndex int            `json:"pattern_index"`
+	Captures     []QueryCapture `json:"captures"`
 }
 
 // QueryCapture represents a captured node in a query match.
 type QueryCapture struct {
-	Name  string `json:"name"`
-	Node  Node   `json:"node"`
+	Name string `json:"name"`
+	Node Node   `json:"node"`
 }
 
 // QueryResult holds the result of running a tree-sitter query.

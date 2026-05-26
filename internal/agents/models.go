@@ -20,6 +20,7 @@ const (
 )
 
 // AgentMetadata holds the parsed YAML frontmatter from an AGENT.md file.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentMetadata struct {
 	// ID is the unique identifier for this agent (e.g., "coder").
@@ -69,6 +70,7 @@ type AgentMetadata struct {
 }
 
 // AgentDefinition represents a fully parsed agent definition from AGENT.md.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentDefinition struct {
 	// Metadata from YAML frontmatter.

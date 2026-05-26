@@ -9,12 +9,12 @@ import (
 
 // CommandPalette provides a unified command selection palette.
 type CommandPalette struct {
-	modal       *Modal
-	filter      string
-	commands    []ModalItem
-	filtered    []ModalItem
-	onSelect    func(string)
-	onDismiss   func()
+	modal     *Modal
+	filter    string
+	commands  []ModalItem
+	filtered  []ModalItem
+	onSelect  func(string)
+	onDismiss func()
 }
 
 // NewCommandPalette creates a new command palette.

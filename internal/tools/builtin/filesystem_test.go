@@ -286,9 +286,9 @@ func TestListDirectoryTool(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create test structure
-	_ = os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content"), 0o644) //nolint:gosec // test uses temp dir
-	_ = os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("content"), 0o644) //nolint:gosec // test uses temp dir
-	_ = os.Mkdir(filepath.Join(dir, "subdir"), 0o755)                            //nolint:gosec // test uses temp dir
+	_ = os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content"), 0o644)            //nolint:gosec // test uses temp dir
+	_ = os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("content"), 0o644)            //nolint:gosec // test uses temp dir
+	_ = os.Mkdir(filepath.Join(dir, "subdir"), 0o755)                                      //nolint:gosec // test uses temp dir
 	_ = os.WriteFile(filepath.Join(dir, "subdir", "nested.txt"), []byte("content"), 0o644) //nolint:gosec // test uses temp dir
 
 	tool := NewListDirectoryTool(nil)

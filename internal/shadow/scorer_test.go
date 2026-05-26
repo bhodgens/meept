@@ -200,7 +200,7 @@ func TestExtractKeyTerms(t *testing.T) {
 		expected int // minimum number of terms expected
 	}{
 		{"Write a function to calculate factorial", 2}, // "function", "calculate", "factorial"
-		{"the a an is", 0},                              // All stop words
+		{"the a an is", 0}, // All stop words
 		{"", 0},
 		{"Hello world programming code", 3}, // "hello", "world", "programming", "code"
 	}

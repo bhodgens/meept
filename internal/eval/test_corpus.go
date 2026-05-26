@@ -20,8 +20,8 @@ type TestCase struct {
 
 // TestCorpus represents the full test dataset.
 type TestCorpus struct {
-	Name       string            `json:"name"`
-	Version    string            `json:"version"`
+	Name       string                `json:"name"`
+	Version    string                `json:"version"`
 	Categories map[string][]TestCase `json:"categories"`
 }
 

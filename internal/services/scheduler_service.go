@@ -56,13 +56,13 @@ func (s *SchedulerService) ListJobs(ctx context.Context) ([]ListJobsResponse, er
 
 // AddJobRequest contains job creation parameters.
 type AddJobRequest struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	Schedule     string            `json:"schedule"`
-	Type         string            `json:"type"` // "agent" or "shell"
-	AgentConfig  *AgentJobConfig   `json:"agent_config,omitempty"`
-	ShellConfig  *ShellJobConfig   `json:"shell_config,omitempty"`
-	Enabled      bool              `json:"enabled,omitempty"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Schedule    string          `json:"schedule"`
+	Type        string          `json:"type"` // "agent" or "shell"
+	AgentConfig *AgentJobConfig `json:"agent_config,omitempty"`
+	ShellConfig *ShellJobConfig `json:"shell_config,omitempty"`
+	Enabled     bool            `json:"enabled,omitempty"`
 }
 
 // AgentJobConfig contains agent job configuration.

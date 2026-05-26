@@ -36,18 +36,19 @@ import (
 )
 
 // Daemon manages the meept daemon lifecycle.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Daemon struct {
-	config       *Config
-	fullConfig   *config.Config // Full configuration loaded from file
-	bus          *bus.MessageBus
-	registry     *registry.Registry
-	rpc          *rpc.Server
-	httpServer   *http.Server
-	components   *Components // Agent, tools, LLM, etc.
-	metricsStore    *metrics.Store
+	config           *Config
+	fullConfig       *config.Config // Full configuration loaded from file
+	bus              *bus.MessageBus
+	registry         *registry.Registry
+	rpc              *rpc.Server
+	httpServer       *http.Server
+	components       *Components // Agent, tools, LLM, etc.
+	metricsStore     *metrics.Store
 	metricsCollector *metrics.Collector
-	logger       *slog.Logger
+	logger           *slog.Logger
 
 	status    atomic.Value // stores models.DaemonStatus
 	startTime time.Time
@@ -289,19 +290,19 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 	// Create service registry with dependencies
 	svcRegistry, err := services.NewRegistry(services.Config{
-		Bus:             msgBus,
-		AgentRegistry:   nilSafeAgentRegistry(components),
-		Queue:           nilSafeQueue(components),
-		MemoryManager:   nilSafeMemoryManager(components),
-		TaskRegistry:    nilSafeTaskRegistry(components),
-		SessionStore:    nilSafeSessionStore(components),
-		WorkerPool:      nilSafeWorkerPool(components),
-		SkillRegistry:   nilSafeSkillRegistry(components),
-		SkillExecutor:   nilSafeSkillExecutor(components),
+		Bus:              msgBus,
+		AgentRegistry:    nilSafeAgentRegistry(components),
+		Queue:            nilSafeQueue(components),
+		MemoryManager:    nilSafeMemoryManager(components),
+		TaskRegistry:     nilSafeTaskRegistry(components),
+		SessionStore:     nilSafeSessionStore(components),
+		WorkerPool:       nilSafeWorkerPool(components),
+		SkillRegistry:    nilSafeSkillRegistry(components),
+		SkillExecutor:    nilSafeSkillExecutor(components),
 		TemplateRegistry: nilSafeTemplateRegistry(components),
-		SelfImprove:     nilSafeSelfImprove(components),
-		TokenCache:      nilSafeTokenCache(components),
-		SecurityChecker: nilSafeSecurityChecker(components),
+		SelfImprove:      nilSafeSelfImprove(components),
+		TokenCache:       nilSafeTokenCache(components),
+		SecurityChecker:  nilSafeSecurityChecker(components),
 		Scheduler:        nilSafeScheduler(components),
 		CalendarClient:   nil, // Calendar integration requires OAuth setup
 		RuntimeManager:   nilSafeRuntimeManager(components),
@@ -347,7 +348,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
 			// Build functional options based on config
 			var httpOpts []http.ServerOption
-			
+
 			// WebSocket support (if enabled)
 			if fullCfg.Transport.HTTP.WebSocket && msgBus != nil {
 				wsPath := fullCfg.Transport.HTTP.WSPath
@@ -357,7 +358,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				httpOpts = append(httpOpts, http.WithWebSocket(msgBus, wsPath))
 				logger.Info("WebSocket endpoint enabled", "path", wsPath)
 			}
-			
+
 			// MCP over HTTP+SSE support (if enabled)
 			if fullCfg.Transport.HTTP.MCP && svcRegistry != nil {
 				mcpPath := fullCfg.Transport.HTTP.MCPPath
@@ -367,7 +368,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				httpOpts = append(httpOpts, http.WithMCP(svcRegistry, mcpPath))
 				logger.Info("MCP over HTTP+SSE enabled", "path", mcpPath)
 			}
-			
+
 			var metricsService interface {
 				GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error)
 				GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error)

@@ -80,8 +80,8 @@ func (t *LSPDocumentSymbolsTool) Execute(ctx context.Context, args map[string]an
 
 	if len(symbols) == 0 {
 		return map[string]any{
-			SchemaPropFound:   false,
-			SchemaPropMessage: "No symbols found in this file",
+			SchemaPropFound:    false,
+			SchemaPropMessage:  "No symbols found in this file",
 			SchemaPropFilePath: filePath,
 		}, nil
 	}
@@ -90,10 +90,10 @@ func (t *LSPDocumentSymbolsTool) Execute(ctx context.Context, args map[string]an
 	result := convertDocumentSymbols(symbols)
 
 	return map[string]any{
-		SchemaPropFound:   true,
+		SchemaPropFound:    true,
 		SchemaPropFilePath: filePath,
-		"symbols": result,
-		SchemaPropCount:   len(result),
+		"symbols":          result,
+		SchemaPropCount:    len(result),
 	}, nil
 }
 

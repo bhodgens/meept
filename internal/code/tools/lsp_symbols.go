@@ -107,10 +107,10 @@ func (t *LSPSymbolsTool) documentSymbols(ctx context.Context, filePath string) (
 	result := convertDocumentSymbols(symbols)
 
 	return map[string]any{
-		"mode":      "document",
+		"mode":             "document",
 		SchemaPropFilePath: filePath,
-		"symbols":   result,
-		SchemaPropCount:     len(result),
+		"symbols":          result,
+		SchemaPropCount:    len(result),
 	}, nil
 }
 
@@ -132,8 +132,8 @@ func (t *LSPSymbolsTool) workspaceSymbols(ctx context.Context, query, language s
 	result := make([]map[string]any, len(symbols))
 	for i, sym := range symbols {
 		result[i] = map[string]any{
-			"name":       sym.Name,
-			"kind":       symbolKindToString(sym.Kind),
+			"name":              sym.Name,
+			"kind":              symbolKindToString(sym.Kind),
 			SchemaPropFilePath:  lsp.URIToPath(sym.Location.URI),
 			SchemaPropStartLine: sym.Location.Range.Start.Line,
 			SchemaPropStartChar: sym.Location.Range.Start.Character,
@@ -146,10 +146,10 @@ func (t *LSPSymbolsTool) workspaceSymbols(ctx context.Context, query, language s
 	}
 
 	return map[string]any{
-		"mode":     "workspace",
-		"query":    query,
+		"mode":             "workspace",
+		"query":            query,
 		SchemaPropLanguage: language,
-		"symbols":  result,
+		"symbols":          result,
 		SchemaPropCount:    len(result),
 	}, nil
 }
@@ -158,8 +158,8 @@ func convertDocumentSymbols(symbols []lsp.DocumentSymbol) []map[string]any {
 	result := make([]map[string]any, len(symbols))
 	for i, sym := range symbols {
 		item := map[string]any{
-			"name":       sym.Name,
-			"kind":       symbolKindToString(sym.Kind),
+			"name":              sym.Name,
+			"kind":              symbolKindToString(sym.Kind),
 			SchemaPropStartLine: sym.Range.Start.Line,
 			SchemaPropStartChar: sym.Range.Start.Character,
 			SchemaPropEndLine:   sym.Range.End.Line,

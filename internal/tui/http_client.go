@@ -69,7 +69,7 @@ func (c *HTTPClient) SetTimeout(d time.Duration) {
 // Chat sends a chat message via HTTP and returns the response.
 func (c *HTTPClient) Chat(message, conversationID string) (string, error) {
 	params := map[string]string{
-		ParamMessage:         message,
+		ParamMessage:        message,
 		ParamConversationID: conversationID,
 	}
 	body, err := json.Marshal(params)
@@ -295,7 +295,7 @@ func (c *HTTPClient) UpdateSessionDescription(sessionID, description string) err
 // GenerateSessionDescription generates a description.
 func (c *HTTPClient) GenerateSessionDescription(sessionID, firstMessage, projectName string) (*types.GenerateDescriptionResult, error) {
 	result, err := c.callAPI("session.generate_description", map[string]string{
-		ParamSessionID:    sessionID,
+		ParamSessionID:  sessionID,
 		"first_message": firstMessage,
 		"project_name":  projectName,
 	})

@@ -24,6 +24,7 @@ const (
 type IsTaskCancelledFunc func(taskID string) (bool, string)
 
 // Queue defines the interface for job queue operations.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type Queue interface {
 	// Enqueue adds a job to the queue.
@@ -218,7 +219,7 @@ func (q *PersistentQueue) Complete(ctx context.Context, jobID string, result any
 
 	q.publishEvent("queue.job.completed", map[string]any{
 		KeyJobID: jobID,
-		"result":  result,
+		"result": result,
 	})
 
 	return nil

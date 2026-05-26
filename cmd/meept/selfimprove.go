@@ -124,8 +124,8 @@ func newSelfImproveAnalyzeCmd() *cobra.Command {
 
 			var resp struct {
 				Analyses []struct {
-					IssueID    string `json:"issue_id"`
-					RootCause  string `json:"root_cause"`
+					IssueID    string  `json:"issue_id"`
+					RootCause  string  `json:"root_cause"`
 					Confidence float64 `json:"confidence"`
 				} `json:"analyses"`
 				Count int `json:"count"`
@@ -433,15 +433,15 @@ func newSelfImproveStatusCmd() *cobra.Command {
 			}
 
 			var status struct {
-				IssuesCount         int              `json:"issues_count"`
-				AnalysesCount       int              `json:"analyses_count"`
-				FixesCount          int              `json:"fixes_count"`
-				ValidationsCount    int              `json:"validations_count"`
-				AppliedCount        int              `json:"applied_count"`
-				ConsecutiveFailures int              `json:"consecutive_failures"`
-				CircuitBreakerTripped bool            `json:"circuit_breaker_tripped"`
-				PendingApprovals    []string         `json:"pending_approvals"`
-				CyclesCompleted     int              `json:"cycles_completed"`
+				IssuesCount           int      `json:"issues_count"`
+				AnalysesCount         int      `json:"analyses_count"`
+				FixesCount            int      `json:"fixes_count"`
+				ValidationsCount      int      `json:"validations_count"`
+				AppliedCount          int      `json:"applied_count"`
+				ConsecutiveFailures   int      `json:"consecutive_failures"`
+				CircuitBreakerTripped bool     `json:"circuit_breaker_tripped"`
+				PendingApprovals      []string `json:"pending_approvals"`
+				CyclesCompleted       int      `json:"cycles_completed"`
 			}
 			if err := json.Unmarshal(result, &status); err != nil {
 				return fmt.Errorf("failed to parse status: %w", err)

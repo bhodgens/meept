@@ -62,7 +62,7 @@ type LLMClassifier struct {
 	// unavailable tracks whether the classifier endpoint is known-to-be-down.
 	// When set, subsequent classification attempts are skipped for the
 	// cooldown duration, reducing per-request latency and log noise.
-	unavailable atomicBool
+	unavailable  atomicBool
 	unavailUntil time.Time
 	unavailMu    sync.RWMutex
 

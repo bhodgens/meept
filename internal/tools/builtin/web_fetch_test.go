@@ -17,7 +17,7 @@ func TestWebFetchTool_Execute(t *testing.T) {
 		switch r.URL.Path {
 		case "/plain":
 			w.Header().Set("Content-Type", "text/plain")
-		_, _ = w.Write([]byte("Hello, World!"))
+			_, _ = w.Write([]byte("Hello, World!"))
 		case "/html":
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write([]byte(`<!DOCTYPE html>

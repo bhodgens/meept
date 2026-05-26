@@ -114,9 +114,9 @@ func TestValidateAndNormalize_Defaults(t *testing.T) {
 	modelPath := createTempModelFile(t)
 	pidDir := filepath.Join(t.TempDir(), "pid")
 	cfg := llm.RuntimeLifecycleConfig{
-		Runtime: "mlx",
-		ModelPath: modelPath,
-		PIDFile:   filepath.Join(pidDir, "mlx.pid"),
+		Runtime:      "mlx",
+		ModelPath:    modelPath,
+		PIDFile:      filepath.Join(pidDir, "mlx.pid"),
 		SpawnCommand: []string{"./mlx-server", "--model", "$MODEL_PATH"},
 		HealthCheck: llm.HealthCheckConfig{
 			Endpoint: "http://localhost:8080/health",
@@ -155,10 +155,10 @@ func TestValidateAndNormalize_OSExpandVars(t *testing.T) {
 	defer os.Unsetenv("TEST_MEEPT_PORT")
 
 	cfg := llm.RuntimeLifecycleConfig{
-		Runtime:        "llama-cpp",
-		ModelPath:      modelPath,
-		PIDFile:        filepath.Join(pidDir, "llama.pid"),
-		SpawnCommand:   []string{"./llama-server", "--model", "$MODEL_PATH", "--port", "$TEST_MEEPT_PORT"},
+		Runtime:      "llama-cpp",
+		ModelPath:    modelPath,
+		PIDFile:      filepath.Join(pidDir, "llama.pid"),
+		SpawnCommand: []string{"./llama-server", "--model", "$MODEL_PATH", "--port", "$TEST_MEEPT_PORT"},
 	}
 
 	result, err := llm.ValidateAndNormalize(cfg)

@@ -30,7 +30,7 @@ func mockHTTPServer(t *testing.T, handler func(method string, params json.RawMes
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	// Chat endpoint (dedicated, not via bus/call)

@@ -72,11 +72,11 @@ func DefaultKeymap() *Keymap {
 // VimConfig holds vim configuration options.
 type VimConfig struct { //nolint:revive // stutter with package name is intentional for API clarity
 	Enabled        bool              `json:"enabled"`
-	EscapeInsert   string            `json:"escape_insert"`   // e.g., "jk" or "jj"
-	Leader         string            `json:"leader"`          // Default: " "
-	NormalBindings map[string]string `json:"normal"`          // Custom normal mode bindings
-	InsertBindings map[string]string `json:"insert"`          // Custom insert mode bindings
-	VisualBindings map[string]string `json:"visual"`          // Custom visual mode bindings
+	EscapeInsert   string            `json:"escape_insert"` // e.g., "jk" or "jj"
+	Leader         string            `json:"leader"`        // Default: " "
+	NormalBindings map[string]string `json:"normal"`        // Custom normal mode bindings
+	InsertBindings map[string]string `json:"insert"`        // Custom insert mode bindings
+	VisualBindings map[string]string `json:"visual"`        // Custom visual mode bindings
 }
 
 // DefaultVimConfig returns the default vim configuration.

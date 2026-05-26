@@ -95,8 +95,8 @@ func (t *TaskCreateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	return map[string]any{
-		"success":     true,
-		"task_id":     newTask.ID,
+		"success":             true,
+		"task_id":             newTask.ID,
 		schemaPropName:        newTask.Name,
 		schemaPropState:       string(newTask.State),
 		schemaPropDescription: newTask.Description,
@@ -151,21 +151,21 @@ func (t *TaskGetTool) Execute(ctx context.Context, args map[string]any) (any, er
 	}
 
 	return map[string]any{
-		"id":              taskObj.ID,
-		schemaPropName:            taskObj.Name,
-		schemaPropDescription:     taskObj.Description,
-		schemaPropState:           string(taskObj.State),
-		"project_dir":     taskObj.ProjectDir,
-		"total_jobs":      taskObj.TotalJobs,
-		"completed_jobs":  taskObj.CompletedJobs,
-		"failed_jobs":     taskObj.FailedJobs,
-		"progress":        taskObj.Progress(),
-		"linked_sessions": taskObj.LinkedSessions,
-		"memory_refs":     taskObj.MemoryRefs,
-		"context_query":   taskObj.ContextQuery,
-		"assigned_agent":  taskObj.AssignedAgent,
-		"created_at":      taskObj.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"updated_at":      taskObj.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		"id":                  taskObj.ID,
+		schemaPropName:        taskObj.Name,
+		schemaPropDescription: taskObj.Description,
+		schemaPropState:       string(taskObj.State),
+		"project_dir":         taskObj.ProjectDir,
+		"total_jobs":          taskObj.TotalJobs,
+		"completed_jobs":      taskObj.CompletedJobs,
+		"failed_jobs":         taskObj.FailedJobs,
+		"progress":            taskObj.Progress(),
+		"linked_sessions":     taskObj.LinkedSessions,
+		"memory_refs":         taskObj.MemoryRefs,
+		"context_query":       taskObj.ContextQuery,
+		"assigned_agent":      taskObj.AssignedAgent,
+		"created_at":          taskObj.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"updated_at":          taskObj.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}, nil
 }
 
@@ -239,16 +239,16 @@ func (t *TaskListTool) Execute(ctx context.Context, args map[string]any) (any, e
 	formatted := make([]map[string]any, 0, len(tasks))
 	for _, taskObj := range tasks {
 		formatted = append(formatted, map[string]any{
-			"id":         taskObj.ID,
-			schemaPropName:       taskObj.Name,
-			schemaPropState:      string(taskObj.State),
-			"progress":   taskObj.Progress(),
-			"updated_at": taskObj.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			"id":            taskObj.ID,
+			schemaPropName:  taskObj.Name,
+			schemaPropState: string(taskObj.State),
+			"progress":      taskObj.Progress(),
+			"updated_at":    taskObj.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
 
 	return map[string]any{
-		"tasks": formatted,
+		"tasks":         formatted,
 		schemaPropCount: len(formatted),
 	}, nil
 }
@@ -355,10 +355,10 @@ func (t *TaskUpdateTool) Execute(ctx context.Context, args map[string]any) (any,
 	}
 
 	return map[string]any{
-		"success": true,
-		"task_id": taskObj.ID,
-		schemaPropName:    taskObj.Name,
-		schemaPropState:   string(taskObj.State),
+		"success":       true,
+		"task_id":       taskObj.ID,
+		schemaPropName:  taskObj.Name,
+		schemaPropState: string(taskObj.State),
 	}, nil
 }
 

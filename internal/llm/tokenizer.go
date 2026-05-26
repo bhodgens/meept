@@ -43,6 +43,7 @@ type TiktokenTokenizer struct {
 //   - "p50k_base" (GPT-3, Codex)
 //   - "r50k_base" (GPT-2, GPT-3 text-davinci)
 //   - "o200k_base" (GPT-4o)
+//
 // If tiktoken fails to load the encoding, falls back to heuristic.
 func NewTiktokenTokenizer(encoding string) *TiktokenTokenizer {
 	t := &TiktokenTokenizer{

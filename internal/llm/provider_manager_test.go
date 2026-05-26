@@ -239,7 +239,7 @@ func TestProviderManager_Failover(t *testing.T) {
 		atomic.AddInt32(&primaryCalls, 1)
 		// Always fail
 		w.WriteHeader(http.StatusInternalServerError)
-	_, _ = w.Write([]byte(`{"error": "primary always fails"}`))
+		_, _ = w.Write([]byte(`{"error": "primary always fails"}`))
 	}))
 	defer primaryServer.Close()
 
@@ -247,7 +247,7 @@ func TestProviderManager_Failover(t *testing.T) {
 		atomic.AddInt32(&backupCalls, 1)
 		// Always succeed
 		w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "chatcmpl-123",
 			"choices": [{
 				"index": 0,
@@ -316,13 +316,13 @@ func TestProviderManager_AllProvidersFail(t *testing.T) {
 	// Create servers that always fail
 	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-	_, _ = w.Write([]byte(`{"error": "server1 fail"}`))
+		_, _ = w.Write([]byte(`{"error": "server1 fail"}`))
 	}))
 	defer server1.Close()
 
 	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-	_, _ = w.Write([]byte(`{"error": "server2 fail"}`))
+		_, _ = w.Write([]byte(`{"error": "server2 fail"}`))
 	}))
 	defer server2.Close()
 
@@ -350,7 +350,7 @@ func TestProviderManager_SuccessUpdatesHealth(t *testing.T) {
 	// Create a server that always succeeds
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "chatcmpl-123",
 			"choices": [{
 				"index": 0,
@@ -476,7 +476,7 @@ func TestProviderManager_SkipsUnhealthyProviders(t *testing.T) {
 	primaryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&primaryCalls, 1)
 		w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "chatcmpl-123",
 			"choices": [{"index": 0, "message": {"role": "assistant", "content": "Primary"}, "finish_reason": "stop"}],
 			"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
@@ -487,7 +487,7 @@ func TestProviderManager_SkipsUnhealthyProviders(t *testing.T) {
 	backupServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&backupCalls, 1)
 		w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"id": "chatcmpl-124",
 			"choices": [{"index": 0, "message": {"role": "assistant", "content": "Backup"}, "finish_reason": "stop"}],
 			"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}

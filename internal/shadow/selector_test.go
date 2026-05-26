@@ -145,10 +145,10 @@ func TestSelector_FormatForInjection(t *testing.T) {
 	selector := NewSelector(nil, cfg)
 
 	tests := []struct {
-		name          string
-		examples      []*FewShotExample
-		expectLen     int
-		expectNil     bool
+		name      string
+		examples  []*FewShotExample
+		expectLen int
+		expectNil bool
 	}{
 		{
 			name:      "empty",
@@ -227,11 +227,11 @@ func TestGetBigrams(t *testing.T) {
 		input    string
 		expected int
 	}{
-		{"hello world", 1},       // "hello world"
-		{"a b c", 2},             // "a b", "b c"
-		{"single", 0},            // Not enough words
-		{"", 0},                  // Empty
-		{"one two three", 2},     // "one two", "two three"
+		{"hello world", 1},   // "hello world"
+		{"a b c", 2},         // "a b", "b c"
+		{"single", 0},        // Not enough words
+		{"", 0},              // Empty
+		{"one two three", 2}, // "one two", "two three"
 	}
 
 	for _, tc := range tests {

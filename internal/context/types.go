@@ -19,18 +19,18 @@ type Artifacts struct {
 
 // CLAUDEDocument represents a parsed CLAUDE.md file
 type CLAUDEDocument struct {
-	Path           string
-	RawContent     string
-	WorkingDir     string
+	Path       string
+	RawContent string
+	WorkingDir string
 
 	// Parsed sections following Claude Code conventions
-	BuildCommands  []BuildCommand
-	Architecture   *ArchitectureSection
-	Components     []ComponentMapping
-	Agents         []AgentDefinition
-	SecurityLayers []SecurityLayer
-	Configuration  []ConfigReference
-	Conventions    *CodeConventions
+	BuildCommands    []BuildCommand
+	Architecture     *ArchitectureSection
+	Components       []ComponentMapping
+	Agents           []AgentDefinition
+	SecurityLayers   []SecurityLayer
+	Configuration    []ConfigReference
+	Conventions      *CodeConventions
 	ProjectStructure *ProjectTree
 
 	// Metadata
@@ -41,7 +41,7 @@ type CLAUDEDocument struct {
 type BuildCommand struct {
 	Description string
 	Command     string
-	Category    string // build, test, run, deploy, etc.
+	Category    string   // build, test, run, deploy, etc.
 	Context     []string // When this command is relevant
 	Requires    []string // Tools or setup needed
 }
@@ -102,9 +102,9 @@ type CodeConventions struct {
 
 // ProjectTree represents the project structure
 type ProjectTree struct {
-	Root     string
+	Root        string
 	Directories []string
-	Files     []string
+	Files       []string
 }
 
 // ClaudeDirectory represents the .claude/ directory structure

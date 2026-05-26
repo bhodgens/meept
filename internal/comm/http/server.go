@@ -10,17 +10,17 @@ import (
 
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/pem"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
-	"strings"
 	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,15 +82,15 @@ type MetricsService interface {
 type Server struct {
 	mu sync.RWMutex
 
-	config          ServerConfig
-	configService   *ConfigService
-	daemonCtrl      DaemonController
-	metricsService  MetricsService
-	services        *services.ServiceRegistry
-	logger          *slog.Logger
-	server          *http.Server
-	listener        net.Listener
-	running         bool
+	config         ServerConfig
+	configService  *ConfigService
+	daemonCtrl     DaemonController
+	metricsService MetricsService
+	services       *services.ServiceRegistry
+	logger         *slog.Logger
+	server         *http.Server
+	listener       net.Listener
+	running        bool
 	// FirewallStatsGetter is an optional callback that returns firewall stats.
 	FirewallStatsGetter func() map[string]any
 
@@ -106,6 +106,7 @@ type Server struct {
 	mcpPath     string
 	wsPath      string
 }
+
 // AgentInfo describes an agent for listing.
 type AgentInfo struct {
 	ID          string `json:"id"`
@@ -311,7 +312,6 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 	payload["type"] = eventType
 	return payload
 }
-
 
 // mcpEventRecord stores a buffered bus event for MCP polling.
 type mcpEventRecord struct {
@@ -815,7 +815,7 @@ func (s *Server) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"agents": agents,
-		KeyCount:  len(agents),
+		KeyCount: len(agents),
 	})
 }
 
@@ -1028,7 +1028,7 @@ func (s *Server) handleHistoricalMetrics(w http.ResponseWriter, r *http.Request)
 
 	s.writeJSON(w, http.StatusOK, map[string]any{
 		"points": points,
-		KeyCount:  len(points),
+		KeyCount: len(points),
 	})
 }
 
@@ -1042,7 +1042,7 @@ func (s *Server) handleMetricsStream(w http.ResponseWriter, r *http.Request) {
 	// WebSocket upgrade would be handled here
 	// For now, return a simple SSE-style response
 	s.writeJSON(w, http.StatusOK, map[string]string{
-		KeyStatus:  "websocket_not_implemented",
+		KeyStatus: "websocket_not_implemented",
 		"message": "use polling as fallback",
 	})
 }
@@ -1069,7 +1069,9 @@ func (s *Server) handleSaveMenubarConfig(w http.ResponseWriter, r *http.Request)
 		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
 		return
 	}
-	var body struct{ Content string `json:"content"` }
+	var body struct {
+		Content string `json:"content"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -1080,7 +1082,6 @@ func (s *Server) handleSaveMenubarConfig(w http.ResponseWriter, r *http.Request)
 	}
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeySaved})
 }
-
 
 // ensureTLSCert ensures TLS certificate and key files exist, generating self-signed if needed.
 func (s *Server) ensureTLSCert() error {
@@ -1270,7 +1271,6 @@ func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 
 	s.logger.Debug("ws client subscribed", "remote", conn.RemoteAddr(), "channel", channel, "session", sessionID)
 }
-
 
 // handleMCPPost handles POST /mcp - JSON-RPC requests over HTTP.
 func (s *Server) handleMCPPost(w http.ResponseWriter, r *http.Request) {
@@ -1556,6 +1556,7 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
 // mustMarshalMCP marshals a value to json.RawMessage for MCP responses.
 func mustMarshalMCP(v any) json.RawMessage {
 	data, _ := json.Marshal(v)
@@ -1620,9 +1621,9 @@ func (s *Server) mcpToolSend(args map[string]any) (any, error) {
 		Type:   "request",
 		Source: "mcp-http",
 		Payload: map[string]any{
-			"message":        message,
+			"message":         message,
 			"conversation_id": sessionID,
-			"source_client":  "mcp-http",
+			"source_client":   "mcp-http",
 		},
 	})
 	if err != nil {

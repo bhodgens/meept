@@ -33,7 +33,7 @@ type AmendmentRequest struct {
 	Status      AmendmentStatus `json:"status"`
 	CreatedAt   time.Time       `json:"created_at"`
 	ProcessedAt time.Time       `json:"processed_at,omitempty,omitzero"` //nolint:modernize // omitzero already applied
-	Result      string          `json:"result,omitempty"` // Result message after processing
+	Result      string          `json:"result,omitempty"`                // Result message after processing
 }
 
 // AmendmentStatus represents the status of an amendment.

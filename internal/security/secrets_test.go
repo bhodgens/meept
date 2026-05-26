@@ -13,7 +13,7 @@ func TestNewSecretObfuscator_EnvVars(t *testing.T) {
 	os.Setenv("MY_API_KEY", "sk-1234567890abcdef")
 	os.Setenv("MY_SECRET_TOKEN", "tok_deadbeef1234")
 	os.Setenv("MY_PASSWORD", "supersecretpassword")
-	os.Setenv("SHORT_PW", "short") // too short, should be ignored
+	os.Setenv("SHORT_PW", "short")              // too short, should be ignored
 	os.Setenv("MY_REGULAR_VAR", "somevalue123") // doesn't match pattern, ignored
 	defer func() {
 		os.Unsetenv("MY_API_KEY")

@@ -29,11 +29,11 @@ const (
 
 // Default QueueConfig values.
 const (
-	DefaultMaxSteering       = 1
-	DefaultMaxFollowUp       = 20
-	DefaultPersistFollowUp   = true
-	DefaultSteeringDrain     = DrainOne
-	DefaultFollowUpDrain     = DrainOne
+	DefaultMaxSteering     = 1
+	DefaultMaxFollowUp     = 20
+	DefaultPersistFollowUp = true
+	DefaultSteeringDrain   = DrainOne
+	DefaultFollowUpDrain   = DrainOne
 )
 
 // QueuedMessage represents a single message enqueued for the agent loop.
@@ -64,12 +64,12 @@ type QueueConfig struct {
 // DefaultQueueConfig returns a QueueConfig with sensible defaults.
 func DefaultQueueConfig() QueueConfig {
 	return QueueConfig{
-		SteeringDrain:     DrainOne,
-		FollowUpDrain:     DrainOne,
-		MaxSteering:       DefaultMaxSteering,
-		MaxFollowUp:       DefaultMaxFollowUp,
-		PersistFollowUp:   DefaultPersistFollowUp,
-		FlushDelayMs:      5000,
+		SteeringDrain:   DrainOne,
+		FollowUpDrain:   DrainOne,
+		MaxSteering:     DefaultMaxSteering,
+		MaxFollowUp:     DefaultMaxFollowUp,
+		PersistFollowUp: DefaultPersistFollowUp,
+		FlushDelayMs:    5000,
 	}
 }
 
@@ -85,10 +85,10 @@ func ParseDrainMode(s string) DrainMode {
 
 // QueueStatus is a snapshot of the queue's current state.
 type QueueStatus struct {
-	SteeringDepth int           `json:"steering_depth"`
-	FollowUpDepth int           `json:"follow_up_depth"`
-	IsActive      bool          `json:"is_active"`
-	Generation    uint64        `json:"generation"`
+	SteeringDepth int    `json:"steering_depth"`
+	FollowUpDepth int    `json:"follow_up_depth"`
+	IsActive      bool   `json:"is_active"`
+	Generation    uint64 `json:"generation"`
 }
 
 // QueueEventPayload is attached to bus events when messages are added.
@@ -104,14 +104,15 @@ type QueueEventPayload struct {
 // QueueInjectedPayload is attached to bus events when the agent loop injects
 // queued messages into a conversation.
 type QueueInjectedPayload struct {
-	ConversationID string      `json:"conversation_id"`
-	QueueType      QueueType   `json:"queue_type"`
-	Count          int         `json:"count"`
-	MessageIDs     []string    `json:"message_ids"`
-	Iteration      int         `json:"iteration"`
+	ConversationID string    `json:"conversation_id"`
+	QueueType      QueueType `json:"queue_type"`
+	Count          int       `json:"count"`
+	MessageIDs     []string  `json:"message_ids"`
+	Iteration      int       `json:"iteration"`
 }
 
 // AgentLifecyclePayload is attached to bus events for agent lifecycle tracking.
+//
 //nolint:revive // stutter with package name is intentional for API clarity
 type AgentLifecyclePayload struct {
 	ConversationID string `json:"conversation_id"`

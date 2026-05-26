@@ -21,14 +21,14 @@ var (
 // Styles provides a collection of reusable lipgloss styles.
 type Styles struct {
 	// Base styles
-	App        lipgloss.Style
-	Title      lipgloss.Style
-	Subtitle   lipgloss.Style
-	Paragraph  lipgloss.Style
-	Muted      lipgloss.Style
-	Error      lipgloss.Style
-	Success    lipgloss.Style
-	Warning    lipgloss.Style
+	App       lipgloss.Style
+	Title     lipgloss.Style
+	Subtitle  lipgloss.Style
+	Paragraph lipgloss.Style
+	Muted     lipgloss.Style
+	Error     lipgloss.Style
+	Success   lipgloss.Style
+	Warning   lipgloss.Style
 
 	// Chat styles
 	UserMessage      lipgloss.Style
@@ -79,10 +79,10 @@ type Styles struct {
 	TextSelection lipgloss.Style
 
 	// Queue indicators
-	SteerBadge         lipgloss.Style
-	FollowUpBadge      lipgloss.Style
-	QueueIndicator     lipgloss.Style
-	AgentActiveBadge   lipgloss.Style
+	SteerBadge       lipgloss.Style
+	FollowUpBadge    lipgloss.Style
+	QueueIndicator   lipgloss.Style
+	AgentActiveBadge lipgloss.Style
 }
 
 // DefaultStyles returns the default style set.
