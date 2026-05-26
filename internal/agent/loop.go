@@ -2292,6 +2292,19 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 		}
 
+		// Stabilize tool prefix ordering for prefix cache hit optimization.
+		// Sorts tools deterministically by name and computes a hash over the
+		// system prompt + tools so the provider can reuse cached prefix tokens.
+		if conv != nil && len(tools) > 0 {
+			tools = conv.StabilizeToolPrefix(tools)
+			if conv.PrefixChanged() {
+				l.logger.Debug("prefix cache invalidated",
+					"hash", conv.GetCachePrefixHash(),
+					"conversation", conversationID,
+				)
+			}
+		}
+
 		// Emit BeforeProviderRequest event
 		l.emitSafeWithFields(ctx, AgentEvent{
 			Type:           AgentEventBeforeProviderRequest,
