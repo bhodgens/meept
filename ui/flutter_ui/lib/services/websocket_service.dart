@@ -100,11 +100,16 @@ class WebSocketService {
       if (!kIsWeb && _apiKey != null && _apiKey!.isNotEmpty) {
         // Use dart:io WebSocket to pass custom headers (desktop/mobile)
         // web_socket_channel's connect() only supports protocols, not headers.
-        final ioWs = await IOWebSocketChannel.connect(
+        final channel = await IOWebSocketChannel.connect(
           uri.toString(),
           headers: {'Authorization': 'Bearer $_apiKey'},
         );
-        _channel = ioWs;
+        // Guard: disconnect() may have been called while we awaited
+        if (_isDisposed || _wasExplicitlyDisconnected) {
+          await channel.sink.close();
+          return;
+        }
+        _channel = channel;
       } else {
         _channel = WebSocketChannel.connect(uri);
       }

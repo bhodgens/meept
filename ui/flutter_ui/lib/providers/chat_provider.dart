@@ -75,10 +75,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // Update session scope so the existing subscription filters correctly
     _sessionId = sessionId;
 
+    // Cancel any existing WS subscription before the HTTP fetch to avoid the
+    // race where WS messages arrive during the fetch and are then overwritten.
     _wsChatSubscription?.cancel();
-    _wsChatSubscription = websocket.subscribeToChat(sessionId).listen((message) {
-      addStreamMessage(message);
-    });
+    _wsChatSubscription = null;
 
     // Fetch messages from the HTTP API
     try {
@@ -94,6 +94,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
         error: e.toString(),
       );
     }
+
+    // Set up WS subscription AFTER the HTTP fetch completes so that any
+    // messages arriving via WS are appended to (not replaced by) the fetch.
+    _wsChatSubscription = websocket.subscribeToChat(sessionId).listen((message) {
+      addStreamMessage(message);
+    });
   }
 
   /// Send a message and append it to the messages list
@@ -118,8 +124,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
       sessionId: sessionId,
     );
 
+    var newMessages = [...state.messages, userMessage];
+    if (newMessages.length > _maxMessages) {
+      newMessages = newMessages.sublist(newMessages.length - _maxMessages);
+    }
     state = ChatState(
-      messages: [...state.messages, userMessage],
+      messages: newMessages,
       isLoading: true,
       error: null,
     );
@@ -161,6 +171,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
         newMessages[existingIndex] = message;
       } else {
         newMessages = [...state.messages, message];
+      }
+
+      if (newMessages.length > _maxMessages) {
+        newMessages = newMessages.sublist(newMessages.length - _maxMessages);
       }
 
       state = ChatState(

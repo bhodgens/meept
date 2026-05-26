@@ -1,12 +1,18 @@
 import 'package:dio/dio.dart';
 import '../core/constants.dart';
 import '../models/api_models.dart';
+import 'storage_service.dart';
 
 /// API client for Meept HTTP backend
 class ApiClient {
   final Dio _dio;
   final String baseUrl;
 
+  /// Create an API client with explicit [host], [port], and [apiKey].
+  ///
+  /// This constructor exists to allow test subclasses to redirect API
+  /// calls without needing a live [StorageService].  Use the
+  /// [ApiClient.storage] factory for production code.
   ApiClient({
     String? host,
     int? port,
@@ -25,6 +31,30 @@ class ApiClient {
             },
           ),
         );
+
+  /// Create an API client, optionally loading persisted host/port/API key
+  /// from [StorageService].  If [storage] is null the client uses the
+  /// defaults for host/port and skips API key persistence.
+  ///
+  /// **Note:** The underlying storage must have been initialized (via
+  /// `StorageService.init()` in [main]) before constructing the client.
+  factory ApiClient.storage({StorageService? storage}) {
+    String? host = AppConstants.defaultApiHost;
+    int? port = AppConstants.defaultApiPort;
+    String? apiKey;
+
+    if (storage != null) {
+      host = storage.getApiHost() ?? host;
+      port = storage.getApiPort() ?? port;
+      apiKey = storage.getApiKey();
+    }
+
+    return ApiClient(
+      host: host,
+      port: port,
+      apiKey: apiKey,
+    );
+  }
 
   /// Generic GET request
   Future<T> get<T>(
@@ -137,15 +167,30 @@ class ApiClient {
 
   Future<List<Session>> listSessions() async {
     final data = await get<Map<String, dynamic>>('/sessions');
-    final sessions = (data['sessions'] as List)
+    final rawSessions = data['sessions'] as List?;
+    if (rawSessions == null) return [];
+    return rawSessions
         .map((s) => Session.fromJson(s as Map<String, dynamic>))
         .toList();
-    return sessions;
   }
 
   Future<Session> getSession(String id) async {
     final data = await get<Map<String, dynamic>>('/sessions/$id');
     return Session.fromJson(data);
+  }
+
+  Future<List<ChatMessage>> getMessages(String id,
+      {int offset = 0, int limit = 1000}) async {
+    final data = await get<Map<String, dynamic>>('/sessions/$id/messages',
+        queryParameters: {
+          'offset': offset,
+          'limit': limit,
+        });
+    final rawMessages = data['messages'] as List?;
+    if (rawMessages == null) return [];
+    return rawMessages
+        .map((m) => ChatMessage.fromBackendMessage(m as Map<String, dynamic>))
+        .toList();
   }
 
   Future<Session> createSession({
@@ -170,10 +215,11 @@ class ApiClient {
 
   Future<List<Agent>> listAgents() async {
     final data = await get<Map<String, dynamic>>('/config/agents');
-    final agents = (data['agents'] as List)
+    final rawAgents = data['agents'] as List?;
+    if (rawAgents == null) return [];
+    return rawAgents
         .map((a) => Agent.fromJson(a as Map<String, dynamic>))
         .toList();
-    return agents;
   }
 
   // ===== Task Endpoints =====
@@ -183,10 +229,11 @@ class ApiClient {
       '/tasks',
       queryParameters: sessionId != null ? {'session_id': sessionId} : null,
     );
-    final tasks = (data['tasks'] as List)
+    final rawTasks = data['tasks'] as List?;
+    if (rawTasks == null) return [];
+    return rawTasks
         .map((t) => Task.fromJson(t as Map<String, dynamic>))
         .toList();
-    return tasks;
   }
 
   Future<Task> getTask(String id) async {
@@ -217,10 +264,11 @@ class ApiClient {
       '/queue/jobs',
       queryParameters: agentId != null ? {'agent_id': agentId} : null,
     );
-    final jobs = (data['jobs'] as List)
+    final rawJobs = data['jobs'] as List?;
+    if (rawJobs == null) return [];
+    return rawJobs
         .map((j) => Job.fromJson(j as Map<String, dynamic>))
         .toList();
-    return jobs;
   }
 
   Future<Map<String, dynamic>> getQueueStats() async {
@@ -248,7 +296,9 @@ class ApiClient {
         if (category != null) 'category': category,
       },
     );
-    return (data['memories'] as List).cast<Map<String, dynamic>>();
+    final rawMemories = data['memories'] as List?;
+    if (rawMemories == null) return [];
+    return rawMemories.cast<Map<String, dynamic>>().toList();
   }
 
   Future<List<Map<String, dynamic>>> getRecentMemories({
@@ -258,7 +308,9 @@ class ApiClient {
       '/memory/recent',
       queryParameters: {'limit': limit},
     );
-    return (data['memories'] as List).cast<Map<String, dynamic>>();
+    final rawMemories = data['memories'] as List?;
+    if (rawMemories == null) return [];
+    return rawMemories.cast<Map<String, dynamic>>().toList();
   }
 
   // ===== Skills/Tools Endpoints =====
@@ -269,10 +321,11 @@ class ApiClient {
       queryParameters:
           category != null ? {'category': category} : null,
     );
-    final skills = (data['skills'] as List)
+    final rawSkills = data['skills'] as List?;
+    if (rawSkills == null) return [];
+    return rawSkills
         .map((s) => Skill.fromJson(s as Map<String, dynamic>))
         .toList();
-    return skills;
   }
 
   // ===== Health Endpoint =====

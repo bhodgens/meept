@@ -31,8 +31,8 @@ class CalendarEvent {
       summary: json['summary'] as String? ?? '',
       description: json['description'] as String?,
       location: json['location'] as String?,
-      start: DateTime.parse((startVal['dateTime'] as String?) ?? (startVal['date'] as String?) ?? ''),
-      end: DateTime.parse((endVal['dateTime'] as String?) ?? (endVal['date'] as String?) ?? ''),
+      start: DateTime.tryParse((startVal['dateTime'] as String?) ?? (startVal['date'] as String?) ?? '') ?? DateTime.now(),
+      end: DateTime.tryParse((endVal['dateTime'] as String?) ?? (endVal['date'] as String?) ?? '') ?? DateTime.now(),
     );
   }
 }
@@ -90,6 +90,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
   }
 
   Future<void> _createEvent(String summary, DateTime start, DateTime end, String? description) async {
+    Navigator.pop(context);
     try {
       final client = ref.read(apiClientProvider);
       await client.post('/calendar/events', data: {
@@ -99,7 +100,6 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
         if (description != null) 'description': description,
       });
       if (mounted) {
-        Navigator.pop(context);
         _loadEvents();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

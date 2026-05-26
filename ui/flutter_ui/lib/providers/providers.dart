@@ -25,7 +25,11 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 // WebSocket Service provider — reads persisted settings from storage
 final websocketProvider = Provider<WebSocketService>((ref) {
   final storage = ref.watch(storageProvider);
-  return WebSocketService.fromStorage(storage);
+  final ws = WebSocketService.fromStorage(storage);
+  ref.onDispose(() {
+    ws.dispose();
+  });
+  return ws;
 });
 
 // Session state provider (StateNotifier for CRUD + selection)
