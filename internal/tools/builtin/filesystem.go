@@ -71,6 +71,17 @@ func (t *ReadFileTool) Parameters() llm.FunctionParameters {
 }
 
 func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	return t.executeRead(args, nil)
+}
+
+// ExecuteStreaming implements tools.StreamingTool with progress updates during file reads.
+func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
+	return t.executeRead(args, onUpdate)
+}
+
+// executeRead is the shared core logic for Execute and ExecuteStreaming.
+// progress may be nil; all progress calls are guarded.
+func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.ProgressUpdate)) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
 	if rawPath == "" {
 		return nil, fmt.Errorf("no path specified")
@@ -98,6 +109,13 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 	}
 	if info.Size() > MaxReadSize {
 		return nil, fmt.Errorf("file too large (%d bytes, max %d)", info.Size(), MaxReadSize)
+	}
+
+	if progress != nil {
+		progress(tools.ProgressUpdate{
+			Message: fmt.Sprintf("reading %s (%d bytes)...", resolved, info.Size()),
+			Percent: 10,
+		})
 	}
 
 	content, err := os.ReadFile(resolved)
@@ -151,8 +169,6 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 			text = strings.Join(lines[contextStart:contextEnd], "\n")
 		}
 	}
-
-	// Store full file snapshot in read cache for edit recovery
 
 	// Store full file snapshot in read cache for edit recovery
 	if t.readCache != nil {
@@ -210,150 +226,10 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (any, e
 		t.Name(),
 	))
 
-	return tools.ToolResult{
-		Success:  true,
-		Result:   text,
-		Evidence: evidence,
-	}, nil
-}
-
-// ExecuteStreaming implements tools.StreamingTool with progress updates during file reads.
-func (t *ReadFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
-	rawPath, _ := args[schemaPropPath].(string)
-	if rawPath == "" {
-		return nil, fmt.Errorf("no path specified")
+	if progress != nil {
+		partialJSON, _ := json.Marshal(map[string]any{"path": resolved, "size": len(content)})
+		progress(tools.ProgressUpdate{Message: "read complete", Percent: 100, PartialResult: partialJSON})
 	}
-
-	resolved, err := resolvePath(rawPath)
-	if err != nil {
-		return nil, fmt.Errorf("invalid path: %w", err)
-	}
-
-	if t.checker != nil && !t.checker.CheckPath(resolved) {
-		return nil, fmt.Errorf("access denied: %s", resolved)
-	}
-
-	info, err := os.Stat(resolved)
-	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("file not found: %s", resolved)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("cannot stat file: %w", err)
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("path is a directory, not a file: %s", resolved)
-	}
-	if info.Size() > MaxReadSize {
-		return nil, fmt.Errorf("file too large (%d bytes, max %d)", info.Size(), MaxReadSize)
-	}
-
-	onUpdate(tools.ProgressUpdate{
-		Message: fmt.Sprintf("reading %s (%d bytes)...", resolved, info.Size()),
-		Percent: 10,
-	})
-
-	content, err := os.ReadFile(resolved)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
-	}
-
-	text := string(content)
-
-	offset, _ := args["offset"].(float64)
-	limit, _ := args["limit"].(float64)
-
-	// Split into lines for range selection and context expansion.
-	allFileLines := strings.Split(text, "\n")
-
-	// Determine raw mode early so context expansion only applies to hashline output.
-	raw, _ := args["raw"].(bool)
-
-	if offset > 0 || limit > 0 {
-		lines := allFileLines
-		start := 0
-		if offset > 0 {
-			start = max(int(offset)-1, 0)
-			if start >= len(lines) {
-				return "", nil
-			}
-		}
-		end := len(lines)
-		if limit > 0 {
-			end = min(start+int(limit), len(lines))
-		}
-
-		if raw {
-			// Raw mode: exact range, no context expansion.
-			text = strings.Join(lines[start:end], "\n")
-		} else {
-			// Hashline mode: expand range with context lines for better editing anchors.
-			contextStart := start
-			if offset > 1 && start > 0 {
-				contextStart = start - 1
-			}
-			contextEnd := end
-			if limit > 0 {
-				contextEnd = min(end+3, len(lines))
-			}
-			text = strings.Join(lines[contextStart:contextEnd], "\n")
-		}
-	}
-
-	// Store full file snapshot in read cache for edit recovery
-	if t.readCache != nil {
-		snapshotLines := allFileLines
-		if len(snapshotLines) > 0 && snapshotLines[len(snapshotLines)-1] == "" {
-			snapshotLines = snapshotLines[:len(snapshotLines)-1]
-		}
-		t.readCache.Store(resolved, snapshotLines)
-	}
-
-	// Apply hashline formatting unless raw mode
-	if !raw {
-		var linesToFormat []string
-		var startLineNum int
-		if offset > 0 || limit > 0 {
-			linesToFormat = strings.Split(text, "\n")
-			contextStart := 0
-			if offset > 0 {
-				contextStart = max(int(offset)-1, 0)
-				if offset > 1 && contextStart > 0 {
-					contextStart-- // 1 leading context line
-				}
-			}
-			startLineNum = contextStart + 1
-		} else {
-			linesToFormat = strings.Split(text, "\n")
-			if len(linesToFormat) > 0 && linesToFormat[len(linesToFormat)-1] == "" {
-				linesToFormat = linesToFormat[:len(linesToFormat)-1]
-			}
-			startLineNum = 1
-		}
-		text = FormatHashLines(linesToFormat, startLineNum)
-	}
-
-	evInfo, err := os.Stat(resolved)
-	var evidence []models.Evidence
-	if err == nil {
-		evidence = append(evidence, models.NewEvidence(
-			models.EvidenceFileExists,
-			resolved,
-			fmt.Sprintf("size=%d", evInfo.Size()),
-			t.Name(),
-		))
-	}
-
-	h := sha256.Sum256(content)
-	hash := hex.EncodeToString(h[:])
-	evidence = append(evidence, models.NewEvidence(
-		models.EvidenceFileHash,
-		resolved,
-		hash,
-		t.Name(),
-	))
-
-	partialJSON, _ := json.Marshal(map[string]any{"path": resolved, "size": len(content)})
-	onUpdate(tools.ProgressUpdate{Message: "read complete", Percent: 100, PartialResult: partialJSON})
 
 	return tools.ToolResult{
 		Success:  true,
@@ -409,6 +285,29 @@ func (t *WriteFileTool) Parameters() llm.FunctionParameters {
 }
 
 func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	return t.executeWrite(ctx, args, nil)
+}
+
+// ExecuteStreaming implements tools.StreamingTool with progress updates during file writes.
+func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
+	return t.executeWrite(ctx, args, onUpdate)
+}
+
+// lspNotifyWrite is a helper that calls the LSP notifier and appends results to the summary.
+func (t *WriteFileTool) lspNotifyWrite(ctx context.Context, resolved, content string) string {
+	if t.lspNotifier == nil {
+		return ""
+	}
+	result := t.lspNotifier.NotifyWrite(ctx, resolved, content)
+	if result == nil {
+		return ""
+	}
+	return result.String()
+}
+
+// executeWrite is the shared core logic for Execute and ExecuteStreaming.
+// progress may be nil; all progress calls are guarded.
+func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, progress func(tools.ProgressUpdate)) (any, error) {
 	rawPath, _ := args[schemaPropPath].(string)
 	content, _ := args["content"].(string)
 	appendMode, _ := args["append"].(bool)
@@ -432,6 +331,13 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 	// Permission check
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	if progress != nil {
+		progress(tools.ProgressUpdate{
+			Message: fmt.Sprintf("writing %s (%d bytes)...", resolved, len(content)),
+			Percent: 10,
+		})
 	}
 
 	// Create parent directories
@@ -501,125 +407,10 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (any, 
 		))
 	}
 
-	msg := fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content))
-	if lspSuffix != "" {
-		msg += lspSuffix
+	if progress != nil {
+		partialJSON, _ := json.Marshal(map[string]any{"path": resolved, "bytes": len(content)})
+		progress(tools.ProgressUpdate{Message: "write complete", Percent: 100, PartialResult: partialJSON})
 	}
-
-	return tools.ToolResult{
-		Success:  true,
-		Result:   msg,
-		Evidence: evidence,
-	}, nil
-}
-
-// lspNotifyWrite is a helper that calls the LSP notifier and appends results to the summary.
-func (t *WriteFileTool) lspNotifyWrite(ctx context.Context, resolved, content string) string {
-	if t.lspNotifier == nil {
-		return ""
-	}
-	result := t.lspNotifier.NotifyWrite(ctx, resolved, content)
-	if result == nil {
-		return ""
-	}
-	return result.String()
-}
-func (t *WriteFileTool) ExecuteStreaming(ctx context.Context, args map[string]any, onUpdate func(tools.ProgressUpdate)) (any, error) {
-	rawPath, _ := args[schemaPropPath].(string)
-	content, _ := args["content"].(string)
-	appendMode, _ := args["append"].(bool)
-
-	if rawPath == "" {
-		return nil, fmt.Errorf("no path specified")
-	}
-
-	// Defensively strip any accidental hashline prefixes from content.
-	content = stripHashlinePrefixes(content)
-
-	if len(content) > MaxWriteSize {
-		return nil, fmt.Errorf("content too large (max %d bytes)", MaxWriteSize)
-	}
-
-	resolved, err := resolvePath(rawPath)
-	if err != nil {
-		return nil, fmt.Errorf("invalid path: %w", err)
-	}
-
-	if t.checker != nil && !t.checker.CheckPath(resolved) {
-		return nil, fmt.Errorf("access denied: %s", resolved)
-	}
-
-	onUpdate(tools.ProgressUpdate{
-		Message: fmt.Sprintf("writing %s (%d bytes)...", resolved, len(content)),
-		Percent: 10,
-	})
-
-	dir := filepath.Dir(resolved)
-	//nolint:gosec // user config directory/file permissions
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	var flag int
-	if appendMode {
-		flag = os.O_WRONLY | os.O_CREATE | os.O_APPEND
-	} else {
-		flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	}
-
-	//nolint:gosec // user config directory/file permissions
-	f, err := os.OpenFile(resolved, flag, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := f.WriteString(content); err != nil {
-		return nil, fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// LSP writethrough notification
-	lspSuffix := t.lspNotifyWrite(ctx, resolved, content)
-
-	info, err := os.Stat(resolved)
-	if err != nil {
-		slog.Warn("WriteFileTool: failed to stat file for evidence", "path", resolved, "error", err)
-	}
-
-	var hash string
-	hashData, err := os.ReadFile(resolved)
-	if err != nil {
-		slog.Warn("WriteFileTool: failed to read file for hash", "path", resolved, "error", err)
-	} else {
-		h := sha256.Sum256(hashData)
-		hash = hex.EncodeToString(h[:])
-	}
-
-	action := "wrote"
-	if appendMode {
-		action = "appended to"
-	}
-
-	evidence := []models.Evidence{}
-	if err == nil {
-		evidence = append(evidence, models.NewEvidence(
-			models.EvidenceFileExists,
-			resolved,
-			fmt.Sprintf("size=%d", info.Size()),
-			t.Name(),
-		))
-	}
-	if hash != "" {
-		evidence = append(evidence, models.NewEvidence(
-			models.EvidenceFileHash,
-			resolved,
-			hash,
-			t.Name(),
-		))
-	}
-
-	partialJSON, _ := json.Marshal(map[string]any{"path": resolved, "bytes": len(content)})
-	onUpdate(tools.ProgressUpdate{Message: "write complete", Percent: 100, PartialResult: partialJSON})
 
 	msg := fmt.Sprintf("Successfully %s %s (%d bytes)", action, resolved, len(content))
 	if lspSuffix != "" {
