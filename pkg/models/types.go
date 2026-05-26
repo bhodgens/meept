@@ -2,6 +2,7 @@
 package models
 
 import (
+	crypto_rand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -111,9 +112,10 @@ func generateID() string {
 func randomHex(n int) string {
 	const hex = "0123456789abcdef"
 	b := make([]byte, n)
-	now := time.Now().UnixNano()
+	randBytes := make([]byte, n)
+	_, _ = crypto_rand.Read(randBytes)
 	for i := range b {
-		b[i] = hex[(now+int64(i))%16]
+		b[i] = hex[randBytes[i]%16]
 	}
 	return string(b)
 }

@@ -545,11 +545,12 @@ func (s *Store) SubscribeMetrics() (ch <-chan *LiveMetricsSnapshot, stop func())
 	s.subscribers[rawCh] = struct{}{}
 	s.subMu.Unlock()
 
+	var stopOnce sync.Once
 	stop = func() {
 		s.subMu.Lock()
 		delete(s.subscribers, rawCh)
 		s.subMu.Unlock()
-		close(rawCh)
+		stopOnce.Do(func() { close(rawCh) })
 	}
 
 	return ch, stop

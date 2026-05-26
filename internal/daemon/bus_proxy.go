@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/pkg/models"
 )
+
+// callCounter provides unique IDs for bus proxy calls.
+var callCounter uint64
 
 // BusProxyAdapter implements http.BusProxy using the message bus directly.
 // It maps RPC method names to bus topics the same way ProxyHandler does.
@@ -121,7 +125,7 @@ func (b *BusProxyAdapter) Call(method string, params json.RawMessage) (json.RawM
 		timeout = 20 * time.Second
 	}
 
-	msgID := fmt.Sprintf("http-%d", time.Now().UnixNano())
+	msgID := fmt.Sprintf("http-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&callCounter, 1))
 	msg := &models.BusMessage{
 		ID:      msgID,
 		Type:    models.MessageTypeRequest,

@@ -57,6 +57,27 @@ func (s *SessionService) GetSession(ctx context.Context, req GetSessionRequest) 
 	return sess, nil
 }
 
+// GetMessagesRequest contains get-messages parameters.
+type GetMessagesRequest struct {
+	ID     string `json:"id"`
+	Offset int    `json:"offset,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// GetMessages retrieves messages for a session with pagination.
+func (s *SessionService) GetMessages(ctx context.Context, req GetMessagesRequest) ([]session.Message, error) {
+	if req.ID == "" {
+		return nil, wrapError("session", "GetMessages", ErrInvalidInput)
+	}
+	if s.store == nil {
+		return nil, wrapError("session", "GetMessages", ErrUnavailable)
+	}
+	if req.Limit <= 0 {
+		req.Limit = 1000
+	}
+	return s.store.GetMessages(req.ID, req.Offset, req.Limit)
+}
+
 // DeleteSessionRequest contains delete parameters.
 type DeleteSessionRequest struct {
 	ID string `json:"id"`

@@ -72,7 +72,11 @@ func (t *TurnBudgetTracker) RecordUsage(tokensUsed int) {
 func (t *TurnBudgetTracker) RemainingBudget() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.totalBudget - t.usedBudget
+	remaining := t.totalBudget - t.usedBudget
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // AvailableBudgetForTurn returns the budget available for the current turn.
@@ -642,18 +646,23 @@ func (c *Conversation) TruncateByTokens(tokenBudget int) int {
 		keepMask[i] = true
 	}
 
-	// Build new message list
+	// Build new message list and synced types
 	newMessages := make([]llm.ChatMessage, 0, len(c.messages))
+	newTypes := make([]MessageClassification, 0, len(c.messageTypes))
 	removed := 0
 	for i, msg := range c.messages {
 		if keepMask[i] {
 			newMessages = append(newMessages, msg)
+			if i < len(c.messageTypes) {
+				newTypes = append(newTypes, c.messageTypes[i])
+			}
 		} else {
 			removed++
 		}
 	}
 
 	c.messages = newMessages
+	c.messageTypes = newTypes
 	return removed
 }
 

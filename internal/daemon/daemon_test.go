@@ -122,18 +122,18 @@ func BenchmarkDaemonStartup(b *testing.B) {
 		ctx, cancel := context.WithCancel(context.Background())
 		ready := make(chan struct{})
 
-		go func() {
-			// Run daemon briefly
-			_ = d.Run(ctx)
-			// Wait for socket
-			for range 100 {
-				if _, err := os.Stat(cfg.SocketPath); err == nil {
-					close(ready)
-					return
-				}
-				time.Sleep(5 * time.Millisecond)
+	go func() {
+		// Run daemon in a separate goroutine so socket polling can proceed
+		go func() { _ = d.Run(ctx) }()
+		// Wait for socket
+		for range 100 {
+			if _, err := os.Stat(cfg.SocketPath); err == nil {
+				close(ready)
+				return
 			}
-		}()
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
 
 		<-ready
 		b.StopTimer()
@@ -161,8 +161,7 @@ func BenchmarkRPCThroughput(b *testing.B) {
 	}
 
 	ctx := b.Context()
-
-	_ = d.Run(ctx)
+	go func() { _ = d.Run(ctx) }()
 
 	// Wait for socket
 	deadline := time.Now().Add(2 * time.Second)
@@ -173,7 +172,7 @@ func BenchmarkRPCThroughput(b *testing.B) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Connect
+	// Create connection
 	conn, err := net.Dial("unix", cfg.SocketPath)
 	if err != nil {
 		b.Fatalf("Failed to connect: %v", err)
@@ -224,8 +223,7 @@ func BenchmarkConcurrentRPC(b *testing.B) {
 	}
 
 	ctx := b.Context()
-
-	_ = d.Run(ctx)
+	go func() { _ = d.Run(ctx) }()
 
 	// Wait for socket
 	deadline := time.Now().Add(2 * time.Second)
@@ -312,8 +310,7 @@ func TestRPCLoadTest(t *testing.T) {
 	}
 
 	ctx := t.Context()
-
-	_ = d.Run(ctx)
+	go func() { _ = d.Run(ctx) }()
 
 	// Wait for socket
 	deadline := time.Now().Add(2 * time.Second)

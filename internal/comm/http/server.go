@@ -557,6 +557,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/sessions/{id}/branches", s.handleSessionBranches)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/fork", s.handleSessionFork)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/tree", s.handleSessionTree)
+	mux.HandleFunc("GET /api/v1/sessions/{id}/messages", s.handleSessionMessages)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", s.handleSessionCompact)
 
 	// Worker endpoints

@@ -202,8 +202,10 @@ func (mc *MetricsCollector) GenerateModelMetrics(modelName string) ModelMetrics 
 
 		if cm.TestCount > 0 {
 			cm.Accuracy = float64(cm.Correct) / float64(cm.TestCount)
-			cm.AvgConfidence /= float64(cm.TestCount)
-			cm.AvgLatency /= float64(cm.TestCount)
+		}
+		if cm.Correct > 0 {
+			cm.AvgConfidence /= float64(cm.Correct)
+			cm.AvgLatency /= float64(cm.Correct)
 		}
 
 		catBreakdown = append(catBreakdown, cm)

@@ -419,7 +419,9 @@ func (c *Controller) Detect(ctx context.Context) ([]Issue, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.mu.Lock()
 	c.issues = issues
+	c.mu.Unlock()
 	_ = c.saveState()
 	return issues, nil
 }
@@ -690,10 +692,12 @@ func (c *Controller) publishStatus(phase string, data any) {
 	if c.bus == nil {
 		return
 	}
+	c.mu.RLock()
 	cycleID := ""
 	if c.currentCycle != nil {
 		cycleID = c.currentCycle.ID
 	}
+	c.mu.RUnlock()
 	msg, err := models.NewBusMessage(
 		models.MessageTypeStatusUpdate,
 		"selfimprove."+cycleID,

@@ -16,12 +16,20 @@ class TasksList extends ConsumerStatefulWidget {
 }
 
 class _TasksListState extends ConsumerState<TasksList> {
+  final _textController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(taskProvider.notifier).loadTasks();
     });
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
   }
 
   @override
@@ -183,7 +191,7 @@ class _TasksListState extends ConsumerState<TasksList> {
   }
 
   void _showCreateTaskDialog() async {
-    final controller = TextEditingController();
+    _textController.clear();
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -193,7 +201,7 @@ class _TasksListState extends ConsumerState<TasksList> {
           style: CyberpunkTypography.headlineMedium,
         ),
         content: TextField(
-          controller: controller,
+          controller: _textController,
           style: CyberpunkTypography.bodyMedium,
           decoration: const InputDecoration(
             hintText: 'enter task title...',
@@ -209,7 +217,7 @@ class _TasksListState extends ConsumerState<TasksList> {
           ),
           FilledButton(
             onPressed: () {
-              final title = controller.text.trim();
+              final title = _textController.text.trim();
               if (title.isNotEmpty) {
                 ref.read(taskProvider.notifier).createTask(title: title);
                 Navigator.pop(context);
@@ -220,7 +228,6 @@ class _TasksListState extends ConsumerState<TasksList> {
         ],
       ),
     );
-    controller.dispose();
   }
 }
 

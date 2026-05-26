@@ -60,23 +60,26 @@ func (h *SubscriptionHandler) Start(parentCtx context.Context) {
 
 // Stop gracefully shuts down all subscription goroutines
 func (h *SubscriptionHandler) Stop() {
-	// CORE-6 FIX: Unsubscribe from all tracked subscribers to ensure
-	// the bus clean up its subscriber map and channel.
-	for _, sub := range h.subscribers {
-		h.bus.Unsubscribe(sub)
-	}
+	// Cancel context first so goroutines exit their select loops.
 	if h.cancel != nil {
 		h.cancel()
 	}
+	// Wait for all goroutines to finish before unsubscribing,
+	// otherwise the deferred Unsubscribe in handleTopic races
+	// with the explicit one here and causes a double-close panic.
 	h.wg.Wait()
+	// Now safe to unsubscribe: no goroutine holds a reference.
+	for _, sub := range h.subscribers {
+		h.bus.Unsubscribe(sub)
+	}
 	h.logger.Debug("Subscription handler stopped")
 }
 
 // handleTopic runs the subscription loop for a single topic
 func (h *SubscriptionHandler) handleTopic(ctx context.Context, sub *Subscriber, topic string) {
 	defer h.wg.Done()
-	// Ensure unsubscribe is called in all exit paths
-	defer h.bus.Unsubscribe(sub)
+	// NOTE: Do NOT defer h.bus.Unsubscribe(sub) here.
+	// Stop() handles unsubscribe after wg.Wait() to avoid double-close.  
 
 	for {
 		select {

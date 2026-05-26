@@ -375,12 +375,10 @@ func (c *LLMClassifier) parseResponse(content, originalInput string) (*Intent, e
 
 	cleanContent := strings.TrimSpace(content)
 
-	if resp.Intent == "" {
-		jsonStr := extractJSONFromLLM(cleanContent)
-		if jsonStr != "" {
-			if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil {
-				return nil, fmt.Errorf("failed to parse classification response: %w", err)
-			}
+	jsonStr := extractJSONFromLLM(cleanContent)
+	if jsonStr != "" {
+		if err := json.Unmarshal([]byte(jsonStr), &resp); err != nil {
+			return nil, fmt.Errorf("failed to parse classification response: %w", err)
 		}
 	}
 

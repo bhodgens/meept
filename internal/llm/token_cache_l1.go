@@ -307,9 +307,14 @@ func (c *L1Cache) Start() {
 	}()
 }
 
-// Stop stops the background cleanup.
+// Stop stops the background cleanup. Safe to call multiple times.
 func (c *L1Cache) Stop() {
-	close(c.stopCh)
+	select {
+	case <-c.stopCh:
+		// Already closed
+	default:
+		close(c.stopCh)
+	}
 }
 
 // SetMetricsStore sets the metrics store for recording eviction metrics.

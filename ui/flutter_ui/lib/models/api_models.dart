@@ -41,13 +41,38 @@ class ChatMessage extends Equatable {
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
-        id: json['id'] as String,
+        id: _toStringId(json['id']),
         role: json['role'] as String,
-        content: json['content'] as String,
-        timestamp: DateTime.parse(json['timestamp'] as String),
+        content: json['content'] as String? ?? '',
+        timestamp: json['timestamp'] is String
+            ? DateTime.parse(json['timestamp'] as String)
+            : DateTime.fromMillisecondsSinceEpoch(
+                (json['timestamp'] as num?)?.toInt() ?? 0),
         sessionId: json['session_id'] as String?,
         toolCalls: (json['tool_calls'] as List?)?.cast<String>(),
       );
+
+  /// Parse from a backend session.Message (int64 ID, RFC3339 timestamp).
+  factory ChatMessage.fromBackendMessage(Map<String, dynamic> json) {
+    final ts = json['timestamp'];
+    return ChatMessage(
+      id: json['id'].toString(),
+      role: json['role'] as String? ?? 'assistant',
+      content: json['content'] as String? ?? '',
+      timestamp: ts is String
+          ? DateTime.parse(ts)
+          : DateTime.fromMillisecondsSinceEpoch(
+              (ts as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch),
+      sessionId: json['session_id'] as String?,
+    );
+  }
+
+  static String _toStringId(dynamic id) {
+    if (id is String) return id;
+    if (id is int) return id.toString();
+    if (id is num) return id.toInt().toString();
+    return id?.toString() ?? '';
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,

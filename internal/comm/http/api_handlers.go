@@ -530,6 +530,49 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "deleted"})
 }
 
+// handleSessionMessages handles GET /api/v1/sessions/{id}/messages.
+func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if _, err := strconv.Atoi(o); err == nil {
+			offset, _ = strconv.Atoi(o)
+		}
+	}
+
+	limit := 1000
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if _, err := strconv.Atoi(l); err == nil {
+			limit, _ = strconv.Atoi(l)
+		}
+	}
+
+	messages, err := s.services.Session.GetMessages(r.Context(), services.GetMessagesRequest{
+		ID:     id,
+		Offset: offset,
+		Limit:  limit,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"messages": messages,
+		"total":    len(messages),
+	})
+}
+
 // ===== Worker Endpoints =====
 
 // handleWorkerStats handles GET /api/v1/workers/stats.

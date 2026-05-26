@@ -17,9 +17,7 @@ abstract class AppConstants {
   static const double metricsPanelHeight = 150.0;
   static const Duration animationDuration = Duration(milliseconds: 300);
 
-  // Storage keys
-  static const String settingsBox = 'settings';
-  static const String cacheBox = 'cache';
+  // Storage keys (SharedPreferences)
   static const String apiKeyPref = 'api_key';
   static const String themePref = 'theme';
 

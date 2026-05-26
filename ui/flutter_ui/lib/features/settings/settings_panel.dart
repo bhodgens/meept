@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../services/api_client.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
@@ -20,6 +21,9 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   String? _error;
   bool _hasChanges = false;
 
+  late final ApiClient _client;
+  late final TextEditingController _controller;
+
   final Map<String, String> _configLabels = {
     'client': 'client.json5',
     'models': 'models.json5',
@@ -29,7 +33,15 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   @override
   void initState() {
     super.initState();
+    _client = ref.read(apiClientProvider);
+    _controller = TextEditingController(text: _configContent);
     _loadConfig();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   Future<void> _loadConfig() async {
@@ -38,17 +50,16 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       _error = null;
     });
     try {
-      final client = ref.read(apiClientProvider);
       String content;
       switch (_selectedConfig) {
         case 'client':
-          content = await client.getClientConfig();
+          content = await _client.getClientConfig();
           break;
         case 'models':
-          content = await client.getModelsConfig();
+          content = await _client.getModelsConfig();
           break;
         case 'menubar':
-          content = await client.getMenubarConfig();
+          content = await _client.getMenubarConfig();
           break;
         default:
           content = '';
@@ -56,6 +67,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       if (mounted) {
         setState(() {
           _configContent = content;
+          _controller.text = content;
           _isLoading = false;
           _hasChanges = false;
         });
@@ -75,16 +87,15 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       _isSaving = true;
     });
     try {
-      final client = ref.read(apiClientProvider);
       switch (_selectedConfig) {
         case 'client':
-          await client.saveClientConfig(_configContent);
+          await _client.saveClientConfig(_configContent);
           break;
         case 'models':
-          await client.saveModelsConfig(_configContent);
+          await _client.saveModelsConfig(_configContent);
           break;
         case 'menubar':
-          await client.saveMenubarConfig(_configContent);
+          await _client.saveMenubarConfig(_configContent);
           break;
       }
       if (mounted) {
@@ -335,12 +346,14 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
                 onChanged: (value) {
-                  if (!_hasChanges) {
-                    setState(() => _hasChanges = true);
-                  }
-                  _configContent = value;
+                  setState(() {
+                    _configContent = value;
+                    if (!_hasChanges) {
+                      _hasChanges = true;
+                    }
+                  });
                 },
-                controller: TextEditingController(text: _configContent),
+                controller: _controller,
                 decoration: const InputDecoration(
                   hintText: '// edit configuration...',
                   hintStyle: TextStyle(

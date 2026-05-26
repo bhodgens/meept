@@ -147,7 +147,9 @@ func SanitizeQuery(raw string) string {
 // closeTag: HTML/text to insert after match
 func Highlight(tableName string, column int, openTag, closeTag string) string {
 	return fmt.Sprintf("highlight(%s, %d, '%s', '%s')",
-		tableName, column, openTag, closeTag)
+		tableName, column,
+		strings.ReplaceAll(openTag, "'", "''"),
+		strings.ReplaceAll(closeTag, "'", "''"))
 }
 
 // Snippet returns SQL for FTS5 snippet function.
@@ -159,7 +161,11 @@ func Highlight(tableName string, column int, openTag, closeTag string) string {
 // maxTokens: maximum tokens in snippet
 func Snippet(tableName string, column int, openTag, closeTag, ellipsis string, maxTokens int) string {
 	return fmt.Sprintf("snippet(%s, %d, '%s', '%s', '%s', %d)",
-		tableName, column, openTag, closeTag, ellipsis, maxTokens)
+		tableName, column,
+		strings.ReplaceAll(openTag, "'", "''"),
+		strings.ReplaceAll(closeTag, "'", "''"),
+		strings.ReplaceAll(ellipsis, "'", "''"),
+		maxTokens)
 }
 
 // BM25 returns SQL for FTS5 BM25 ranking function.

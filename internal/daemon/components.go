@@ -267,6 +267,16 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			"budget_per_session_limit", cfg.LLM.Budget.PerSessionTokenLimit,
 		)
 
+		// Create LLM resolver for skill model resolution (must be initialized
+		// before auxiliary clients so they can use alias-based model selection)
+		providersCfg, err := llm.LoadProvidersConfigDefault()
+		if err != nil {
+			logger.Warn("Failed to load providers config for resolver", "error", err)
+		} else {
+			c.LLMResolver = llm.NewResolver(providersCfg, logger.With("component", "resolver"))
+			logger.Debug("LLM resolver initialized")
+		}
+
 		// Create auxiliary LLM clients for classifier and summarizer
 		// Use resolver for alias-based model selection (enables fallback rotation)
 		classifierRef := c.ModelsConfig.ClassifierModel
@@ -311,15 +321,6 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 	// Create tool registry (builtin tools registered after all dependencies are available)
 	c.ToolRegistry = tools.NewRegistry(logger)
-
-	// Create LLM resolver for skill model resolution
-	providersCfg, err := llm.LoadProvidersConfigDefault()
-	if err != nil {
-		logger.Warn("Failed to load providers config for resolver", "error", err)
-	} else {
-		c.LLMResolver = llm.NewResolver(providersCfg, logger.With("component", "resolver"))
-		logger.Debug("LLM resolver initialized")
-	}
 
 	// Initialize skills system
 	if cfg.Skills.Enabled {

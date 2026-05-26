@@ -109,18 +109,18 @@ func (r *BenchmarkRunner) Run(ctx context.Context, corpus *TestCorpus, modelName
 
 			collector.AddResult(result)
 
-			// Progress indicator every 10 tests
-			current := i + 1
-			if current%10 == 0 || current == total {
-				correct := 0
-				for _, r := range collector.Results() {
-					if r.IsCorrect {
-						correct++
-					}
+		// Progress indicator every 10 tests (uses global count)
+		totalResults := len(collector.Results())
+		if totalResults%10 == 0 || totalResults == total {
+			correct := 0
+			for _, r := range collector.Results() {
+				if r.IsCorrect {
+					correct++
 				}
-				acc := float64(correct) / float64(current) * 100
-				logger.Info("progress", "model", modelName, "done", current, "total", total, "accuracy", fmt.Sprintf("%.1f", acc))
 			}
+			acc := float64(correct) / float64(totalResults) * 100
+			logger.Info("progress", "model", modelName, "done", totalResults, "total", total, "accuracy", fmt.Sprintf("%.1f", acc))
+		}
 		}
 	}
 

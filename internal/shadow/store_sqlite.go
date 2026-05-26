@@ -472,20 +472,20 @@ func (s *SQLiteTrainingStore) GetStats(ctx context.Context) (*ShadowStats, error
 	}
 
 	// Records by task type
-	rows, err = s.db.QueryContext(ctx, "SELECT task_type, COUNT(*) FROM shadow_records GROUP BY task_type")
+	taskRows, err := s.db.QueryContext(ctx, "SELECT task_type, COUNT(*) FROM shadow_records GROUP BY task_type")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
+	defer taskRows.Close()
+	for taskRows.Next() {
 		var taskType string
 		var count int
-		if err := rows.Scan(&taskType, &count); err != nil {
+		if err := taskRows.Scan(&taskType, &count); err != nil {
 			return nil, err
 		}
 		stats.RecordsByTaskType[taskType] = count
 	}
-	if err := rows.Err(); err != nil {
+	if err := taskRows.Err(); err != nil {
 		return nil, fmt.Errorf("rows.Err() scanning records by task type: %w", err)
 	}
 
