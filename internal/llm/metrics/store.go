@@ -34,6 +34,7 @@ type RequestRecord struct {
 	ModelID          string
 	PromptTokens     int
 	CompletionTokens int
+	CachedTokens     int
 	LatencyMs        int64
 	TTFBMs           int64 // Time to first byte; 0 for non-streaming
 	HTTPStatus       int
@@ -136,6 +137,7 @@ CREATE TABLE IF NOT EXISTS provider_requests (
     model_id          TEXT NOT NULL,
     prompt_tokens     INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
+    cached_tokens     INTEGER NOT NULL DEFAULT 0,
     latency_ms        INTEGER NOT NULL DEFAULT 0,
     ttfb_ms           INTEGER NOT NULL DEFAULT 0,
     http_status       INTEGER NOT NULL DEFAULT 0,
@@ -164,7 +166,12 @@ CREATE TABLE IF NOT EXISTS provider_stats (
 );
 `
 		_, err := db.ExecContext(ctx, schema)
-		return err
+		if err != nil {
+			return err
+		}
+		// Idempotent migration for existing databases
+		db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0")
+		return nil
 	})
 }
 
@@ -210,15 +217,15 @@ func (s *Store) recordWorker() {
 func (s *Store) recordSync(ctx context.Context, r RequestRecord) {
 	if err := s.pool.WithConn(ctx, func(db *sql.DB) error {
 		const q = `
-INSERT INTO provider_requests (ts, provider_id, model_id, prompt_tokens, completion_tokens, latency_ms, ttfb_ms, http_status, error_type, error_message, success)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO provider_requests (ts, provider_id, model_id, prompt_tokens, completion_tokens, cached_tokens, latency_ms, ttfb_ms, http_status, error_type, error_message, success)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 		ts := r.Timestamp.UnixMilli()
 		success := 0
 		if r.Success {
 			success = 1
 		}
-		_, err := db.ExecContext(ctx, q, ts, r.ProviderID, r.ModelID, r.PromptTokens, r.CompletionTokens, r.LatencyMs, r.TTFBMs, r.HTTPStatus, string(r.ErrorType), r.ErrorMessage, success)
+		_, err := db.ExecContext(ctx, q, ts, r.ProviderID, r.ModelID, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.LatencyMs, r.TTFBMs, r.HTTPStatus, string(r.ErrorType), r.ErrorMessage, success)
 		return err
 	}); err != nil {
 		s.logger.Debug("failed to record metric", "error", err)

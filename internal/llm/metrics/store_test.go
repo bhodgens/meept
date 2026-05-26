@@ -74,6 +74,62 @@ func TestStoreRecord(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+func TestStoreRecordCachedTokens(t *testing.T) {
+	tmpFile := t.TempDir() + "/test.db"
+	cfg := StoreConfig{
+		DBPath:           tmpFile,
+		RetentionDays:    7,
+		StatsWindowHours: 24,
+		RefreshInterval:  1 * time.Minute,
+	}
+
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	store.StartBackground(context.Background())
+
+	// Record a request with cached tokens
+	record := RequestRecord{
+		Timestamp:        time.Now(),
+		ProviderID:       "anthropic",
+		ModelID:          "claude-3-opus",
+		PromptTokens:     1000,
+		CompletionTokens: 200,
+		CachedTokens:     800,
+		LatencyMs:        1500,
+		HTTPStatus:       200,
+		ErrorType:        ErrorTypeNone,
+		Success:          true,
+	}
+
+	if err := store.Record(context.Background(), record); err != nil {
+		t.Fatalf("Record failed: %v", err)
+	}
+
+	// Give the async worker a moment to process
+	time.Sleep(100 * time.Millisecond)
+
+	// Refresh stats so the aggregated data is computed
+	if err := store.RefreshStats(context.Background()); err != nil {
+		t.Fatalf("RefreshStats failed: %v", err)
+	}
+
+	stats, err := store.GetStats(context.Background(), "anthropic", "claude-3-opus", 24)
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if stats.RequestCount != 1 {
+		t.Errorf("RequestCount = %d, want 1", stats.RequestCount)
+	}
+}
+
 func TestClassifyError(t *testing.T) {
 	tests := []struct {
 		err        error

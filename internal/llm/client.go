@@ -620,6 +620,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 				ModelID:          c.config.ModelID,
 				PromptTokens:     chatResp.Usage.PromptTokens,
 				CompletionTokens: chatResp.Usage.CompletionTokens,
+				CachedTokens:     chatResp.Usage.PromptTokensDetails.CachedTokens,
 				LatencyMs:        latencyMs,
 				HTTPStatus:       resp.StatusCode,
 				ErrorType:        metrics.ErrorTypeNone,

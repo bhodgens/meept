@@ -627,8 +627,9 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 	resp, err := c.httpClient.Do(httpReq)
 	latencyMs := time.Since(start).Milliseconds()
 
-	// Record metrics if a store is configured.
-	if c.metricsStore != nil {
+	// Record error metrics if request failed (non-200 responses and network errors).
+	// Successful request metrics are recorded after parsing the response body below.
+	if c.metricsStore != nil && (err != nil || (resp != nil && resp.StatusCode != http.StatusOK)) {
 		errType := metrics.ErrorTypeNone
 		if err != nil {
 			errType = metrics.ClassifyError(err, 0)
@@ -636,14 +637,13 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 			errType = metrics.ClassifyError(nil, resp.StatusCode)
 		}
 		record := metrics.RequestRecord{
-			Timestamp:        time.Now(),
-			ProviderID:       c.config.ProviderID,
-			ModelID:          c.config.ModelID,
-			LatencyMs:        latencyMs,
-			HTTPStatus:       0,
-			ErrorType:        errType,
-			Success:          err == nil && resp != nil && resp.StatusCode == http.StatusOK,
-			CompletionTokens: reqBody.MaxTokens / 2,
+			Timestamp:   time.Now(),
+			ProviderID:  c.config.ProviderID,
+			ModelID:     c.config.ModelID,
+			LatencyMs:   latencyMs,
+			HTTPStatus:  0,
+			ErrorType:   errType,
+			Success:     false,
 		}
 		if resp != nil {
 			record.HTTPStatus = resp.StatusCode
@@ -707,6 +707,29 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 		return nil, &ClientError{Message: "failed to parse response", Cause: err}
 	}
 
+	// Record successful request metrics with actual usage data
+	if c.metricsStore != nil {
+		record := metrics.RequestRecord{
+			Timestamp:        time.Now(),
+			ProviderID:       c.config.ProviderID,
+			ModelID:          c.config.ModelID,
+			PromptTokens:     apiResp.Usage.InputTokens,
+			CompletionTokens: apiResp.Usage.OutputTokens,
+			CachedTokens:     apiResp.Usage.CacheReadInputTokens,
+			LatencyMs:        latencyMs,
+			HTTPStatus:       resp.StatusCode,
+			ErrorType:        metrics.ErrorTypeNone,
+			Success:          true,
+		}
+		store := c.metricsStore
+		logger := c.logger
+		go func() {
+			if rerr := store.Record(context.Background(), record); rerr != nil {
+				logger.Debug("metrics record failed", "error", rerr)
+			}
+		}()
+	}
+
 	return c.parseResponse(&apiResp), nil
 }
 
@@ -737,7 +760,9 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	resp, err := c.httpClient.Do(httpReq)
 	latencyMs := time.Since(start).Milliseconds()
 
-	if c.metricsStore != nil {
+	// Record error metrics if request failed (non-200 responses and network errors).
+	// Successful request metrics are recorded after parsing the stream below.
+	if c.metricsStore != nil && (err != nil || (resp != nil && resp.StatusCode != http.StatusOK)) {
 		errType := metrics.ErrorTypeNone
 		if err != nil {
 			errType = metrics.ClassifyError(err, 0)
@@ -745,13 +770,12 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 			errType = metrics.ClassifyError(nil, resp.StatusCode)
 		}
 		record := metrics.RequestRecord{
-			Timestamp:        time.Now(),
-			ProviderID:       c.config.ProviderID,
-			ModelID:          c.config.ModelID,
-			LatencyMs:        latencyMs,
-			ErrorType:        errType,
-			Success:          err == nil && resp != nil && resp.StatusCode == http.StatusOK,
-			CompletionTokens: reqBody.MaxTokens / 2,
+			Timestamp:   time.Now(),
+			ProviderID:  c.config.ProviderID,
+			ModelID:     c.config.ModelID,
+			LatencyMs:   latencyMs,
+			ErrorType:   errType,
+			Success:     false,
 		}
 		if resp != nil {
 			record.HTTPStatus = resp.StatusCode
@@ -789,7 +813,32 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	}
 
 	// Parse the SSE stream
-	return c.parseStreamingResponse(resp.Body, progress)
+	parsedResp, parseErr := c.parseStreamingResponse(resp.Body, progress)
+
+	// Record successful request metrics with actual usage from the stream
+	if c.metricsStore != nil && parseErr == nil && parsedResp != nil {
+		record := metrics.RequestRecord{
+			Timestamp:        time.Now(),
+			ProviderID:       c.config.ProviderID,
+			ModelID:          c.config.ModelID,
+			PromptTokens:     parsedResp.Usage.PromptTokens,
+			CompletionTokens: parsedResp.Usage.CompletionTokens,
+			CachedTokens:     parsedResp.Usage.CachedTokens,
+			LatencyMs:        latencyMs,
+			HTTPStatus:       resp.StatusCode,
+			ErrorType:        metrics.ErrorTypeNone,
+			Success:          true,
+		}
+		store := c.metricsStore
+		logger := c.logger
+		go func() {
+			if rerr := store.Record(context.Background(), record); rerr != nil {
+				logger.Debug("metrics record failed", "error", rerr)
+			}
+		}()
+	}
+
+	return parsedResp, parseErr
 }
 
 // parseStreamingResponse parses server-sent events from Anthropic's streaming API.
