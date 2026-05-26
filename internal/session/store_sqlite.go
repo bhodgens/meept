@@ -1063,8 +1063,8 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 
 	// 3. Create new session
 	now := time.Now().UTC()
-	newID := fmt.Sprintf("session-%d", now.UnixNano())
-	newConvID := fmt.Sprintf("conv-%d", now.UnixNano())
+	newID := "session-" + randomHex(8)
+	newConvID := "conv-" + randomHex(8)
 	if newName == "" {
 		newName = "fork of " + source.Name
 	}

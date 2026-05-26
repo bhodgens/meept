@@ -585,11 +585,18 @@ func (pm *ProviderManager) StartHealthChecks(ctx context.Context) {
 func (pm *ProviderManager) runHealthCheck(ctx context.Context) {
 	pm.mu.Lock()
 	pm.lastHealthCheck = time.Now()
+
+	// Snapshot providers while holding the lock.
+	snapshots := make([]*ProviderEntry, len(pm.providers))
+	copy(snapshots, pm.providers)
 	pm.mu.Unlock()
 
 	// Health check: try a minimal request on unhealthy providers only
-	for _, entry := range pm.providers {
-		if entry.Health.Status != ProviderStatusUnhealthy {
+	for _, entry := range snapshots {
+		pm.mu.RLock()
+		status := entry.Health.Status
+		pm.mu.RUnlock()
+		if status != ProviderStatusUnhealthy {
 			continue
 		}
 		// Try a minimal request

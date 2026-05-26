@@ -990,6 +990,9 @@ func (c *Conversation) RemoveLast() *llm.ChatMessage {
 
 	msg := c.messages[len(c.messages)-1]
 	c.messages = c.messages[:len(c.messages)-1]
+	if len(c.messageTypes) > 0 {
+		c.messageTypes = c.messageTypes[:len(c.messageTypes)-1]
+	}
 	return &msg
 }
 
@@ -1098,8 +1101,12 @@ func (c *Conversation) StabilizeToolPrefix(tools []llm.ToolDefinition) []llm.Too
 	})
 
 	// Build deterministic serialization
+	c.mu.RLock()
+	prompt := c.systemPrompt
+	c.mu.RUnlock()
+
 	var buf strings.Builder
-	buf.WriteString(c.systemPrompt)
+	buf.WriteString(prompt)
 	buf.WriteByte(0) // separator
 
 	for _, tool := range sorted {
@@ -1179,11 +1186,15 @@ func (c *Conversation) InjectContextBounded(ctxStr string, maxTokens int) {
 
 	// Remove any previous context messages (marked with a specific pattern)
 	newMessages := make([]llm.ChatMessage, 0, len(c.messages))
-	for _, msg := range c.messages {
+	newTypes := make([]MessageClassification, 0, len(c.messageTypes))
+	for i, msg := range c.messages {
 		if msg.Role == llm.RoleSystem && isContextMessage(msg.Content) {
 			continue
 		}
 		newMessages = append(newMessages, msg)
+		if i < len(c.messageTypes) {
+			newTypes = append(newTypes, c.messageTypes[i])
+		}
 	}
 
 	// Estimate token count and truncate if necessary
@@ -1206,6 +1217,7 @@ func (c *Conversation) InjectContextBounded(ctxStr string, maxTokens int) {
 	}
 
 	c.messages = append([]llm.ChatMessage{contextMsg}, newMessages...)
+	c.messageTypes = append([]MessageClassification{MessageUnknown}, newTypes...)
 }
 
 // This is used for memory injection before LLM calls.
@@ -1215,11 +1227,15 @@ func (c *Conversation) InjectContext(ctxStr string) {
 
 	// Remove any previous context messages (marked with a specific pattern)
 	newMessages := make([]llm.ChatMessage, 0, len(c.messages))
-	for _, msg := range c.messages {
+	newTypes := make([]MessageClassification, 0, len(c.messageTypes))
+	for i, msg := range c.messages {
 		if msg.Role == llm.RoleSystem && isContextMessage(msg.Content) {
 			continue
 		}
 		newMessages = append(newMessages, msg)
+		if i < len(c.messageTypes) {
+			newTypes = append(newTypes, c.messageTypes[i])
+		}
 	}
 
 	// Insert new context at the beginning
@@ -1229,6 +1245,7 @@ func (c *Conversation) InjectContext(ctxStr string) {
 	}
 
 	c.messages = append([]llm.ChatMessage{contextMsg}, newMessages...)
+	c.messageTypes = append([]MessageClassification{MessageUnknown}, newTypes...)
 }
 
 // isContextMessage checks if a message is a memory context message.

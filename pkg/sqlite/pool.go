@@ -269,14 +269,13 @@ func (p *Pool) Query(ctx context.Context, query string, args ...any) (Rows, erro
 }
 
 // QueryRow executes a query that returns at most one row.
-func (p *Pool) QueryRow(ctx context.Context, query string, args ...any) *sql.Row {
+func (p *Pool) QueryRow(ctx context.Context, query string, args ...any) (*sql.Row, error) {
 	db, err := p.Get(ctx)
 	if err != nil {
-		// Return a row that will error on Scan
-		return nil
+		return nil, err
 	}
 	defer p.Put(db)
-	return db.QueryRowContext(ctx, query, args...)
+	return db.QueryRowContext(ctx, query, args...), nil
 }
 
 // pooledRows wraps sql.Rows to return the connection when closed.

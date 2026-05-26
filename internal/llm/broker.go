@@ -146,8 +146,6 @@ func (b *ModelBroker) newChatterFor(cfg *ModelConfig) Chatter {
 // If no healthy provider exists and fallback is enabled, uses the fallback model.
 func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
-
 	// Try to find a healthy provider (iterate in deterministic order)
 	var healthyEntry *brokerEntry
 	for _, key := range b.entryKeys {
@@ -157,6 +155,7 @@ func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...
 			break
 		}
 	}
+	b.mu.RUnlock()
 
 	// If no healthy provider and fallback enabled, use fallback
 	if healthyEntry == nil && b.config.FallbackEnabled && b.fallback != nil {
@@ -175,8 +174,6 @@ func (b *ModelBroker) Chat(ctx context.Context, messages []ChatMessage, opts ...
 // ChatWithProgress sends a request with progress reporting.
 func (b *ModelBroker) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
-
 	// Try to find a healthy provider (iterate in deterministic order)
 	var healthyEntry *brokerEntry
 	for _, key := range b.entryKeys {
@@ -186,6 +183,7 @@ func (b *ModelBroker) ChatWithProgress(ctx context.Context, messages []ChatMessa
 			break
 		}
 	}
+	b.mu.RUnlock()
 
 	if healthyEntry == nil && b.config.FallbackEnabled && b.fallback != nil {
 		b.logger.Warn("using fallback model due to degraded providers")

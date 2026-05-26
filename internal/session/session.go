@@ -3,6 +3,8 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -62,16 +64,22 @@ func NewMemoryStore(logger *slog.Logger) *MemoryStore {
 	}
 }
 
+func randomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 // Create creates a new session.
 func (s *MemoryStore) Create(name string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	id := fmt.Sprintf("session-%d", time.Now().UnixNano())
+	id := "session-" + randomHex(8)
 	session := &Session{
 		ID:              id,
 		Name:            name,
-		ConversationID:  fmt.Sprintf("conv-%d", time.Now().UnixNano()),
+		ConversationID:  "conv-" + randomHex(8),
 		CreatedAt:       time.Now(),
 		LastActivity:    time.Now(),
 		AttachedClients: []string{},

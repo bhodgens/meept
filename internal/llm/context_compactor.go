@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -87,6 +88,7 @@ type ContextCompactor struct {
 	summarizer  Chatter
 	tokenizer   Tokenizer
 	logger      *slog.Logger
+	fileOpsMu   sync.Mutex
 	fileOps     *FileOperationSet
 	lastSummary string
 }
@@ -518,6 +520,8 @@ func splitCompactionSections(raw string) map[string]string {
 
 func (c *ContextCompactor) updateFileOps(summary SummaryExtract) {
 	if !c.config.TrackFileOps || c.fileOps == nil { return }
+	c.fileOpsMu.Lock()
+	defer c.fileOpsMu.Unlock()
 	for _, f := range summary.FileReads { c.fileOps.Read[f] = true }
 	for _, f := range summary.FileWrites { c.fileOps.Written[f] = true }
 	for _, f := range summary.FileEdits { c.fileOps.Edited[f] = true }

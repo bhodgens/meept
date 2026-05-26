@@ -1902,7 +1902,11 @@ func (s *Server) handleChatQueueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conversationID := strings.TrimPrefix(r.URL.Path, "/api/v1/chat/queue/")
+	conversationID := r.PathValue("id")
+	if conversationID == "" {
+		// Fallback for routers that don't support PathValue
+		conversationID = strings.TrimPrefix(r.URL.Path, "/api/v1/chat/queue/")
+	}
 	if conversationID == "" {
 		s.writeError(w, http.StatusBadRequest, "conversation_id is required")
 		return
@@ -1973,7 +1977,11 @@ func (s *Server) handleQueueStatusRoute(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	conversationID := strings.TrimPrefix(r.URL.Path, "/api/v1/queue/status/")
+	conversationID := r.PathValue("id")
+	if conversationID == "" {
+		// Fallback for routers that don't support PathValue
+		conversationID = strings.TrimPrefix(r.URL.Path, "/api/v1/queue/status/")
+	}
 	if conversationID == "" {
 		s.writeError(w, http.StatusBadRequest, "conversation_id is required")
 		return

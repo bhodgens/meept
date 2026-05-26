@@ -204,14 +204,19 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 
 	var failedConns []*websocket.Conn
 
-	h.mu.Lock()
+	h.mu.RLock()
+	conns := make([]*websocket.Conn, 0, len(h.clients))
 	for conn := range h.clients {
+		conns = append(conns, conn)
+	}
+	h.mu.RUnlock()
+
+	for _, conn := range conns {
 		if _, err := conn.Write(payload); err != nil {
 			h.logger.Warn("ws write error, will remove client", "error", err)
 			failedConns = append(failedConns, conn)
 		}
 	}
-	h.mu.Unlock()
 
 	for _, conn := range failedConns {
 		h.Unregister(conn)
@@ -257,7 +262,11 @@ func (s *Server) handleWSEvent(msg *models.BusMessage) {
 	if frontendData == nil {
 		return // unrecognized topic, skip
 	}
-	s.wsHub.Broadcast(frontendData["type"].(string), frontendData)
+	eventType, ok := frontendData["type"].(string)
+	if !ok || eventType == "" {
+		return
+	}
+	s.wsHub.Broadcast(eventType, frontendData)
 }
 
 // transformBusEventToWS converts a bus event into a frontend-compatible flat map.
@@ -428,19 +437,19 @@ func (s *Server) Start(ctx context.Context) error {
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if !s.running {
+		s.mu.Unlock()
 		return nil
 	}
+	s.running = false
+	srv := s.server
+	s.mu.Unlock()
 
 	s.logger.Info("menubar HTTP server shutting down")
-	s.running = false
-
-	if s.server != nil {
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	if srv != nil {
+		shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		return s.server.Shutdown(ctx)
+		return srv.Shutdown(shutdownCtx)
 	}
 	return nil
 }
@@ -1487,6 +1496,7 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 
 	// Forward bus events to SSE channel and buffer for polling
 	go func() {
+		defer close(session.eventChan)
 		for msg := range sub.Channel {
 			event := &SSEEvent{
 				ID:   fmt.Sprintf("%d", time.Now().UnixNano()),

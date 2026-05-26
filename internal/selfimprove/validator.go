@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type FixValidator struct {
 	logger      *slog.Logger
 
 	// Active sandboxes
+	mu        sync.Mutex
 	sandboxes map[string]string // fix_id -> sandbox_path
 }
 
@@ -131,7 +133,9 @@ func (v *FixValidator) createSandbox(fixID string) (string, error) {
 	if err := os.MkdirAll(sandboxPath, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
 		return "", err
 	}
+	v.mu.Lock()
 	v.sandboxes[fixID] = sandboxPath
+	v.mu.Unlock()
 	return sandboxPath, nil
 }
 
@@ -241,6 +245,8 @@ func (v *FixValidator) runTests(ctx context.Context, sandboxPath string) (passed
 
 // cleanupSandbox removes the sandbox.
 func (v *FixValidator) cleanupSandbox(fixID string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	if path, ok := v.sandboxes[fixID]; ok {
 		os.RemoveAll(path)
 		delete(v.sandboxes, fixID)
@@ -249,8 +255,15 @@ func (v *FixValidator) cleanupSandbox(fixID string) {
 
 // Cleanup cleans up all sandboxes.
 func (v *FixValidator) Cleanup() error {
-	for fixID := range v.sandboxes {
-		v.cleanupSandbox(fixID)
+	v.mu.Lock()
+	ids := make([]string, 0, len(v.sandboxes))
+	for id := range v.sandboxes {
+		ids = append(ids, id)
+	}
+	v.mu.Unlock()
+
+	for _, id := range ids {
+		v.cleanupSandbox(id)
 	}
 	return nil
 }

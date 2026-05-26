@@ -658,10 +658,13 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 		}()
 	}
 
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+
 	if err != nil {
 		return nil, &ClientError{Message: "request failed", Cause: err}
 	}
-	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -790,10 +793,13 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 		}()
 	}
 
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+
 	if err != nil {
 		return nil, &ClientError{Message: "request failed", Cause: err}
 	}
-	defer resp.Body.Close()
 
 	// Check for error status before streaming
 	if resp.StatusCode != http.StatusOK {
