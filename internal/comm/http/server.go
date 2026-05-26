@@ -204,14 +204,14 @@ func (h *WebSocketHub) Broadcast(msgType string, data any) {
 
 	var failedConns []*websocket.Conn
 
-	h.mu.RLock()
+	h.mu.Lock()
 	for conn := range h.clients {
 		if _, err := conn.Write(payload); err != nil {
 			h.logger.Warn("ws write error, will remove client", "error", err)
 			failedConns = append(failedConns, conn)
 		}
 	}
-	h.mu.RUnlock()
+	h.mu.Unlock()
 
 	for _, conn := range failedConns {
 		h.Unregister(conn)
@@ -1253,9 +1253,10 @@ func (s *Server) handleWSSubscribe(conn *websocket.Conn, msg *WSMessage) {
 		channel = "all"
 	}
 
+	subscribeData, _ := json.Marshal(map[string]string{"channel": channel})
 	_ = websocket.JSON.Send(conn, WSMessage{
 		Type: "subscribed",
-		Data: json.RawMessage(fmt.Sprintf(`{"channel":"%s"}`, channel)),
+		Data: subscribeData,
 	})
 
 	s.logger.Debug("ws client subscribed", "remote", conn.RemoteAddr(), "channel", channel, "session", sessionID)
@@ -1519,9 +1520,10 @@ func (s *Server) handleMCPSSE(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Send initial session ID
+	// Send initial session id
+	sessionData, _ := json.Marshal(map[string]string{"session_id": session.sessionID})
 	fmt.Fprintf(w, "event: session\n")
-	fmt.Fprintf(w, "data: {\"session_id\":\"%s\"}\n", session.sessionID)
+	fmt.Fprintf(w, "data: %s\n", sessionData)
 	fmt.Fprintf(w, "\n")
 	flusher.Flush()
 

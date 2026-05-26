@@ -59,13 +59,17 @@ func (h *HealthChecker) run(ctx context.Context) {
 }
 
 func (h *HealthChecker) checkOnce() {
+	h.mu.RLock()
+	wasHealthy := h.healthy
+	h.mu.RUnlock()
+
+	// Perform HTTP check outside the lock to avoid blocking IsHealthy() calls.
+	url := h.baseURL + h.config.HealthEndpoint
+	resp, err := h.client.Get(url)
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	wasHealthy := h.healthy
-
-	url := h.baseURL + h.config.HealthEndpoint
-	resp, err := h.client.Get(url)
 	if err != nil {
 		h.unhealthyCount++
 		if h.unhealthyCount >= h.config.HealthThreshold {

@@ -68,7 +68,7 @@ func (p *RuntimeProcess) Start(ctx context.Context) error {
 // Stop gracefully terminates the runtime process.
 func (p *RuntimeProcess) Stop(ctx context.Context) error {
 	if p.cmd == nil || p.cmd.Process == nil {
-		// Try to read from PID file
+		// Try to recover from PID file
 		if pid, err := p.readPIDFile(); err == nil && pid > 0 {
 			proc, err := os.FindProcess(pid)
 			if err != nil {

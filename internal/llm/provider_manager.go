@@ -165,20 +165,24 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 		return nil, errors.New("provider manager not initialized or no providers configured")
 	}
 
-	// Get providers in order of preference
-	providers := pm.getOrderedProviders()
+	// Get providers in order of preference and snapshot health status while locked
+	orderedProviders := pm.getOrderedProviders()
+	healthSnapshot := make([]ProviderStatus, len(orderedProviders))
+	for i, e := range orderedProviders {
+		healthSnapshot[i] = e.Health.Status
+	}
 	pm.mu.RUnlock()
 
 	var lastErr error
 	var attempts int
 
-	for _, entry := range providers {
-		if entry.Health.Status == ProviderStatusDisabled {
+	for i, entry := range orderedProviders {
+		if healthSnapshot[i] == ProviderStatusDisabled {
 			continue
 		}
 
 		// Skip unhealthy providers unless it's the only option
-		if entry.Health.Status == ProviderStatusUnhealthy && len(providers) > 1 {
+		if healthSnapshot[i] == ProviderStatusUnhealthy && len(orderedProviders) > 1 {
 			if attempts == 0 {
 				// Only skip if we haven't tried anything yet
 				pm.logger.Debug("Skipping unhealthy provider",

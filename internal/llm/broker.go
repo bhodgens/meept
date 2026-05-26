@@ -287,7 +287,8 @@ func (b *ModelBroker) GetStatus() BrokerStatus {
 	defer b.mu.RUnlock()
 
 	var entries []ProviderStatusEntry
-	for key, be := range b.entries {
+	for _, key := range b.entryKeys {
+		be := b.entries[key]
 		parts := strings.SplitN(key, "/", 2)
 		if len(parts) != 2 {
 			continue

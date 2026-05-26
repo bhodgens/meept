@@ -243,7 +243,7 @@ func GetAllModels(cfg *ProvidersConfig) []*ModelConfig {
 			continue
 		}
 
-		for modelID, modelDef := range provider.Models {
+		for _, modelDef := range provider.Models {
 			caps := make(map[string]bool)
 			for _, capName := range modelDef.Capabilities {
 				caps[capName] = true
@@ -251,7 +251,7 @@ func GetAllModels(cfg *ProvidersConfig) []*ModelConfig {
 
 			models = append(models, &ModelConfig{
 				BaseURL:              provider.Options.BaseURL,
-				ModelID:              modelID,
+				ModelID:              modelDef.Name,
 				APIKey:               provider.Options.APIKey,
 				CostPerMillionInput:  modelDef.InputCost,
 				CostPerMillionOutput: modelDef.OutputCost,

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // Response payload key constants.
@@ -94,6 +95,15 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		defer completeUnsub()
 	}
 
+	// Extract channels for select, guarding against nil subscriptions
+	var agentCh, completeCh <-chan *models.BusMessage
+	if agentSub != nil {
+		agentCh = agentSub.Channel
+	}
+	if completeSub != nil {
+		completeCh = completeSub.Channel
+	}
+
 	// Send initial connection event
 	if err := sse.SendEvent("connected", map[string]string{KeyStatus: "ok"}); err != nil {
 		return
@@ -123,7 +133,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 				return // Client disconnected
 			}
 
-		case msg, ok := <-agentSub.Channel:
+		case msg, ok := <-agentCh:
 			if !ok {
 				return
 			}
@@ -136,7 +146,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-		case msg, ok := <-completeSub.Channel:
+		case msg, ok := <-completeCh:
 			if !ok {
 				return
 			}
