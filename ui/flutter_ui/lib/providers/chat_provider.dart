@@ -177,10 +177,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         newMessages = newMessages.sublist(newMessages.length - _maxMessages);
       }
 
-      state = ChatState(
-        messages: newMessages,
-        isLoading: false,
-      );
+      state = state.copyWith(messages: newMessages);
     } catch (e) {
       final errorMessage = ChatMessage(
         id: 'error_${DateTime.now().millisecondsSinceEpoch}',

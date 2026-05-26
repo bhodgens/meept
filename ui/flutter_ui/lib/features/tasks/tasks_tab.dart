@@ -26,7 +26,7 @@ class TasksTab extends ConsumerWidget {
             },
           ),
           if (selectedTask != null)
-            const TasksDetail(),
+            const Expanded(child: TasksDetail()),
           if (selectedTask == null)
             const Expanded(
               child: Center(

@@ -19,6 +19,7 @@ class ChatMessageList extends ConsumerStatefulWidget {
 class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   final ScrollController _scrollController = ScrollController();
   bool _isAtBottom = true;
+  int _previousMessageCount = 0;
 
   @override
   void initState() {
@@ -67,7 +68,8 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
     final chatState = ref.watch(chatProvider);
 
     // Auto-scroll when new messages arrive and user is at bottom
-    if (chatState.messages.isNotEmpty && _isAtBottom) {
+    if (chatState.messages.isNotEmpty && _isAtBottom && chatState.messages.length != _previousMessageCount) {
+      _previousMessageCount = chatState.messages.length;
       WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _scrollToBottom(); });
     }
 

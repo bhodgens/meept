@@ -24,7 +24,7 @@ class _MetricsPanelState extends ConsumerState<MetricsPanel> {
     super.initState();
     _loadMetrics();
     // Refresh every 10 seconds
-    _periodicRefresh = Timer.periodic(const Duration(seconds: 10), (_) => _loadMetrics());
+    _periodicRefresh = Timer.periodic(const Duration(seconds: 10), (_) { if (mounted) _loadMetrics(); });
   }
 
   @override

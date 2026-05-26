@@ -26,6 +26,7 @@ class WebSocketService {
 
   bool _isConnected = false;
   bool _isConnOpen = false;
+  bool _isConnecting = false;
   bool _wasExplicitlyDisconnected = false;
   Timer? _pingTimer;
   Timer? _reconnectTimer;
@@ -83,7 +84,8 @@ class WebSocketService {
 
   /// Connect to WebSocket
   Future<void> connect({String? path}) async {
-    if (_isDisposed || _isConnected || _isConnOpen || _wasExplicitlyDisconnected) return;
+    if (_isDisposed || _isConnected || _isConnOpen || _isConnecting || _wasExplicitlyDisconnected) return;
+    _isConnecting = true;
 
     try {
       _isConnOpen = false;
@@ -111,7 +113,11 @@ class WebSocketService {
         }
         _channel = channel;
       } else {
-        _channel = WebSocketChannel.connect(uri);
+        var webUri = uri;
+        if (_apiKey != null && _apiKey!.isNotEmpty) {
+          webUri = uri.replace(queryParameters: {...uri.queryParameters, 'token': _apiKey!});
+        }
+        _channel = WebSocketChannel.connect(webUri);
       }
 
       _wsSubscription = _channel!.stream.listen(
@@ -180,6 +186,8 @@ class WebSocketService {
         _errorController.add('Connection failed: $e');
       }
       _handleReconnect();
+    } finally {
+      _isConnecting = false;
     }
   }
 
@@ -328,6 +336,21 @@ class WebSocketService {
       final sid = m['session_id'] as String?;
       return type == 'chat_message' && sid == sessionId;
     });
+  }
+
+  /// Unsubscribe from a chat session.
+  ///
+  /// Removes the entry from [_chatSubscriptions] and sends an unsubscribe
+  /// message if currently connected.
+  void unsubscribeFromChat(String sessionId) {
+    _chatSubscriptions.remove(sessionId);
+    if (_isConnected) {
+      send({
+        'type': 'unsubscribe',
+        'channel': 'chat',
+        'session_id': sessionId,
+      });
+    }
   }
 
   /// Subscribe to job queue updates via WebSocket.
