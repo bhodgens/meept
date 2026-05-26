@@ -3,6 +3,8 @@ import '../models/api_models.dart';
 import '../services/api_client.dart';
 import 'providers.dart'; // Import apiClientProvider from providers.dart
 
+const _unset = Object();
+
 /// State tracked by TaskNotifier
 class TaskState {
   final List<Task> tasks;
@@ -18,12 +20,12 @@ class TaskState {
   TaskState copyWith({
     List<Task>? tasks,
     bool? isLoading,
-    String? error,
+    Object? error = _unset,
   }) {
     return TaskState(
       tasks: tasks ?? this.tasks,
       isLoading: isLoading ?? this.isLoading,
-      error: error ?? this.error,
+      error: identical(error, _unset) ? this.error : error as String?,
     );
   }
 }

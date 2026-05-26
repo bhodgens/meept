@@ -9,6 +9,8 @@ import 'providers.dart';
 /// Maximum number of messages to keep in memory
 const int _maxMessages = 500;
 
+const _unset = Object();
+
 /// State for the chat provider
 class ChatState {
   final List<ChatMessage> messages;
@@ -24,7 +26,7 @@ class ChatState {
   ChatState copyWith({
     List<ChatMessage>? messages,
     bool? isLoading,
-    String? error,
+    Object? error = _unset,
   }) {
     // Limit messages to prevent memory leaks
     List<ChatMessage> limitedMessages = messages ?? this.messages;
@@ -35,7 +37,7 @@ class ChatState {
     return ChatState(
       messages: limitedMessages,
       isLoading: isLoading ?? this.isLoading,
-      error: error ?? this.error,
+      error: identical(error, _unset) ? this.error : error as String?,
     );
   }
 }
@@ -50,17 +52,30 @@ class ChatNotifier extends StateNotifier<ChatState> {
   final ApiClient apiClient;
   final WebSocketService websocket;
   StreamSubscription<Map<String, dynamic>>? _chatSubscription;
+  String? _sessionId;
+
+  /// Prevents duplicate message sends from rapid button taps
+  bool _isSending = false;
 
   /// Initialize WebSocket connection and subscribe to chat messages
   void _initWebSocket() {
     websocket.connect();
 
     _chatSubscription = websocket.messageStream.listen((message) {
-      if (message['type'] == 'chat.message' ||
+      // Only process chat message events
+      final isChatMessage =
+          message['type'] == 'chat.message' ||
           message['type'] == 'chat_message' ||
-          message['role'] != null) {
-        addStreamMessage(message);
-      }
+          message['role'] != null;
+      if (!isChatMessage) return;
+
+      // Scope to the current session only.
+      // If _sessionId is null (no session loaded yet), fall through
+      // so legacy servers without session_id still work.
+      final messageSessionId = message['session_id'] as String?;
+      if (_sessionId != null && messageSessionId != _sessionId) return;
+
+      addStreamMessage(message);
     });
   }
 
@@ -73,17 +88,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
       error: null,
     );
 
-    // Cancel previous subscription before creating new one
-    _chatSubscription?.cancel();
-    _chatSubscription = null;
-
-    // Create new subscription for this session
-    _chatSubscription = websocket.messageStream.listen((message) {
-      if (message['type'] == 'chat_message' &&
-          message['session_id'] == sessionId) {
-        addStreamMessage(message);
-      }
-    });
+    // Update session scope so the existing subscription filters correctly
+    _sessionId = sessionId;
 
     // Send subscribe request if connected
     if (websocket.isConnected) {
@@ -94,14 +100,20 @@ class ChatNotifier extends StateNotifier<ChatState> {
       });
     }
 
-    // Fetch messages from server (this will populate messages via WebSocket)
+    // Fetch messages from the HTTP API
     try {
-      await apiClient.getSession(sessionId);
-    } catch (_) {
-      // Ignore errors, messages will come via WebSocket
+      final messages = await apiClient.getMessages(sessionId);
+      state = ChatState(
+        messages: messages,
+        isLoading: false,
+      );
+    } catch (e) {
+      state = ChatState(
+        messages: [],
+        isLoading: false,
+        error: e.toString(),
+      );
     }
-
-    state = state.copyWith(isLoading: false);
   }
 
   /// Send a message and append it to the messages list
@@ -110,6 +122,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
     required String text,
     String? agentId,
   }) async {
+    // Guard against duplicate sends from rapid taps
+    if (_isSending) {
+      return;
+    }
+
+    _isSending = true;
+
     // Append user message immediately
     final userMessage = ChatMessage(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -141,23 +160,15 @@ class ChatNotifier extends StateNotifier<ChatState> {
         isLoading: false,
         error: e.toString(),
       );
+    } finally {
+      _isSending = false;
     }
   }
 
   /// Add a chat message from websocket stream
   void addStreamMessage(Map<String, dynamic> data) {
     try {
-      final message = ChatMessage(
-        id: (data['id'] as String?) ??
-            DateTime.now().millisecondsSinceEpoch.toString(),
-        role: data['role'] as String? ?? 'assistant',
-        content: data['content'] as String? ?? '',
-        timestamp: data['timestamp'] != null
-            ? DateTime.parse(data['timestamp'] as String)
-            : DateTime.now(),
-        sessionId: data['session_id'] as String?,
-        toolCalls: (data['tool_calls'] as List?)?.cast<String>(),
-      );
+      final message = ChatMessage.fromBackendMessage(data);
 
       // Replace or update existing message by id if it exists
       final existingIndex = state.messages.indexWhere(
@@ -175,7 +186,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
       state = ChatState(
         messages: newMessages,
         isLoading: false,
-        error: null,
       );
     } catch (e) {
       final errorMessage = ChatMessage(
@@ -190,6 +200,14 @@ class ChatNotifier extends StateNotifier<ChatState> {
         error: e.toString(),
       );
     }
+  }
+
+  /// Clear error state without removing messages
+  void clearError() {
+    state = ChatState(
+      messages: state.messages,
+      isLoading: state.isLoading,
+    );
   }
 
   /// Clear all messages

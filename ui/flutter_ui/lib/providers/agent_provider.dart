@@ -3,6 +3,8 @@ import '../models/api_models.dart';
 import '../services/api_client.dart';
 import 'providers.dart';
 
+const _unset = Object();
+
 /// State tracked by AgentNotifier
 class AgentState {
   final List<Agent> agents;
@@ -18,12 +20,12 @@ class AgentState {
   AgentState copyWith({
     List<Agent>? agents,
     bool? isLoading,
-    String? error,
+    Object? error = _unset,
   }) {
     return AgentState(
       agents: agents ?? this.agents,
       isLoading: isLoading ?? this.isLoading,
-      error: error ?? this.error,
+      error: identical(error, _unset) ? this.error : error as String?,
     );
   }
 }

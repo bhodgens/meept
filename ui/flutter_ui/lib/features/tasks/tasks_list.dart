@@ -182,9 +182,9 @@ class _TasksListState extends ConsumerState<TasksList> {
     return '${diff.inDays}d ago';
   }
 
-  void _showCreateTaskDialog() {
+  void _showCreateTaskDialog() async {
     final controller = TextEditingController();
-    showDialog(
+    await showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
@@ -220,6 +220,7 @@ class _TasksListState extends ConsumerState<TasksList> {
         ],
       ),
     );
+    controller.dispose();
   }
 }
 

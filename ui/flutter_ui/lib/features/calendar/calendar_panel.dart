@@ -359,8 +359,9 @@ class _CreateEventDialogState extends State<_CreateEventDialog> {
                       );
                       if (picked != null) {
                         setState(() {
+                          final duration = _endDate.difference(_startDate);
                           _startDate = picked;
-                          _endDate = picked.add(_endDate.difference(_startDate));
+                          _endDate = picked.add(duration);
                         });
                       }
                     },

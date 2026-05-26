@@ -131,7 +131,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                 padding: const EdgeInsets.all(8),
                 child: ErrorBanner(
                   message: chatState.error!,
-                  onDismiss: () => ref.read(chatProvider.notifier).clearMessages(),
+                  onDismiss: () => ref.read(chatProvider.notifier).clearError(),
                 ),
               ),
             ),

@@ -22,9 +22,9 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     });
   }
 
-  void _showCreateSessionDialog() {
+  void _showCreateSessionDialog() async {
     final controller = TextEditingController();
-    showDialog(
+    await showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: CyberpunkColors.darkGray,
@@ -55,6 +55,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
         ],
       ),
     );
+    controller.dispose();
   }
 
   void _showDeleteConfirmation(String sessionId, String title) {

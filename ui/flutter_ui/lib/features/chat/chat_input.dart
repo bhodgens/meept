@@ -131,15 +131,17 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           ];
         }
 
-        // Always include the fallback hardcoded agent
+        // Include the fallback hardcoded agent only if the API doesn't already have it
+        final apiAgentIds = agents.agents.map((a) => a.id).toSet();
         final allAgents = <Agent>[
-          Agent(
-            id: _selectedAgent,
-            name: _selectedAgent,
-            description: '',
-            prompt: '',
-            enabled: true,
-          ),
+          if (!apiAgentIds.contains(_selectedAgent))
+            Agent(
+              id: _selectedAgent,
+              name: _selectedAgent,
+              description: '',
+              prompt: '',
+              enabled: true,
+            ),
           ...agents.agents,
         ];
 
@@ -234,17 +236,23 @@ class _ChatInputState extends ConsumerState<ChatInput> {
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: chatState.isLoading
-              ? CyberpunkColors.midGray
+              ? CyberpunkColors.orangeDark
               : CyberpunkColors.orangePrimary,
           borderRadius: BorderRadius.circular(4),
         ),
         child: chatState.isLoading
-            ? const SizedBox(
+            ? SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(CyberpunkColors.black),
+                child: AnimatedOpacity(
+                  opacity: chatState.isLoading ? 1.0 : 0.5,
+                  duration: const Duration(milliseconds: 400),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      CyberpunkColors.blackTransparent(0.8),
+                    ),
+                  ),
                 ),
               )
             : const Icon(

@@ -6,6 +6,8 @@ import '../services/api_client.dart';
 import 'providers.dart';
 import '../services/websocket_service.dart';
 
+const _unset = Object();
+
 /// Metrics state for the live metrics panel
 class MetricsState {
   final MetricsSnapshot? current;
@@ -21,12 +23,12 @@ class MetricsState {
   MetricsState copyWith({
     MetricsSnapshot? current,
     bool? isLoading,
-    String? error,
+    Object? error = _unset,
   }) {
     return MetricsState(
       current: current ?? this.current,
       isLoading: isLoading ?? this.isLoading,
-      error: error ?? this.error,
+      error: identical(error, _unset) ? this.error : error as String?,
     );
   }
 }
@@ -44,6 +46,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   final ApiClient apiClient;
   final WebSocketService websocket;
   StreamSubscription<Map<String, dynamic>>? _metricsSubscription;
+  StreamSubscription<bool>? _connectionSubscription;
   Timer? _pollTimer;
   bool _disposed = false;
 
@@ -70,7 +73,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
     }
 
     // Listen for WS connection state changes
-    websocket.connectionStream.listen((connected) {
+    _connectionSubscription = websocket.connectionStream.listen((connected) {
       if (connected) {
         _subscribeToMetrics();
       } else {
@@ -139,6 +142,8 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
   @override
   void dispose() {
     _disposed = true;
+    _connectionSubscription?.cancel();
+    _connectionSubscription = null;
     _metricsSubscription?.cancel();
     _metricsSubscription = null;
     _pollTimer?.cancel();

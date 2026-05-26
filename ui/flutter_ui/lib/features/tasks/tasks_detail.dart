@@ -108,7 +108,26 @@ class TasksDetail extends ConsumerWidget {
     BuildContext context, WidgetRef ref, Task task,
   ) {
     final colors = _allStatusColors();
-    final isTerminal = _canTransition(task.status);
+    final transitions = _validTransitions(task.status);
+    final statusColor = colors[task.status.toLowerCase()] ?? Colors.grey;
+
+    if (transitions.isEmpty) {
+      // Terminal state — show static text instead of a dropdown
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: statusColor.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Text(
+          task.status.toLowerCase(),
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: statusColor,
+            fontFamily: 'SourceCodePro',
+          ),
+        ),
+      );
+    }
 
     return DropdownButton<String>(
       value: task.status.toLowerCase(),
@@ -141,9 +160,7 @@ class TasksDetail extends ConsumerWidget {
           ),
         );
       }).toList(),
-      onChanged: isTerminal
-          ? null
-          : (value) async {
+      onChanged: (value) async {
               if (value == null || value == task.status.toLowerCase()) return;
               final result = await ref
                   .read(taskProvider.notifier)
@@ -185,6 +202,7 @@ class TasksDetail extends ConsumerWidget {
           ),
           TextButton(
             onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               Navigator.pop(context);
               final result = await ref
                   .read(taskProvider.notifier)
@@ -192,14 +210,14 @@ class TasksDetail extends ConsumerWidget {
               if (context.mounted) {
                 if (result) {
                   // The refreshed task list/provider should update automatically
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  messenger.showSnackBar(
                     const SnackBar(
                       content: Text('task cancelled'),
                       backgroundColor: CyberpunkColors.orangePrimary,
                     ),
                   );
                 } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  messenger.showSnackBar(
                     SnackBar(
                       content: const Text('failed to cancel task'),
                       backgroundColor: CyberpunkColors.redAlert,

@@ -9,14 +9,24 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/api_client.dart';
 import '../services/websocket_service.dart';
+import '../services/storage_service.dart';
 import '../services/session_notifier.dart';
 import '../models/api_models.dart';
 
-// API Client provider
-final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
+// Storage service — initialized in main() before runApp
+final storageProvider = Provider<StorageService>((ref) => StorageService.instance);
 
-// WebSocket Service provider
-final websocketProvider = Provider<WebSocketService>((ref) => WebSocketService());
+// API Client provider — loads persisted host/port and API key from storage
+final apiClientProvider = Provider<ApiClient>((ref) {
+  final storage = ref.watch(storageProvider);
+  return ApiClient.storage(storage: storage);
+});
+
+// WebSocket Service provider — reads persisted settings from storage
+final websocketProvider = Provider<WebSocketService>((ref) {
+  final storage = ref.watch(storageProvider);
+  return WebSocketService.fromStorage(storage);
+});
 
 // Session state provider (StateNotifier for CRUD + selection)
 final sessionProvider =
@@ -40,6 +50,7 @@ class ConnectionMonitor {
   final ApiClient _apiClient;
   final ProviderContainer _container;
   Timer? _timer;
+  StreamSubscription<bool>? _connectionSub;
 
   ConnectionMonitor({
     required WebSocketService websocket,
@@ -54,7 +65,7 @@ class ConnectionMonitor {
 
   void _listenToWebSocket() {
     // Wire WebSocket connection events to the connection state provider
-    _websocket.connectionStream.listen((connected) {
+    _connectionSub = _websocket.connectionStream.listen((connected) {
       _container.read(connectionStateProvider.notifier).state = connected;
     });
   }
@@ -75,6 +86,8 @@ class ConnectionMonitor {
   }
 
   void dispose() {
+    _connectionSub?.cancel();
+    _connectionSub = null;
     _timer?.cancel();
     _timer = null;
   }
@@ -84,9 +97,13 @@ class ConnectionMonitor {
 final connectionMonitorProvider = Provider<ConnectionMonitor>((ref) {
   final websocket = ref.watch(websocketProvider);
   final client = ref.watch(apiClientProvider);
-  return ConnectionMonitor(
+  final monitor = ConnectionMonitor(
     websocket: websocket,
     apiClient: client,
     container: ref.container,
   );
+  ref.onDispose(() {
+    monitor.dispose();
+  });
+  return monitor;
 });

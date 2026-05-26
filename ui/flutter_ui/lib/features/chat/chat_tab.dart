@@ -52,13 +52,7 @@ class _ChatTabState extends State<ChatTab> {
               child: _buildToolDetail(),
             ),
           // Right sidebar (tools panel) - collapsible
-          if (!_isSidebarCollapsed && _activeTool.isEmpty)
-            ToolsPanel(
-              isExpanded: !_isSidebarCollapsed,
-              onCollapseToggle: () =>
-                  setState(() => _isSidebarCollapsed = !_isSidebarCollapsed),
-            ),
-          if (!_isSidebarCollapsed && _activeTool.isNotEmpty)
+          if (!_isSidebarCollapsed)
             ToolsPanel(
               isExpanded: !_isSidebarCollapsed,
               onCollapseToggle: () =>

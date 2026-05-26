@@ -6,6 +6,8 @@ import '../services/api_client.dart';
 import 'providers.dart';
 import '../services/websocket_service.dart';
 
+const _unset = Object();
+
 /// Job update state - contains the latest job updates from the queue
 /// (Task 20: Job queue updates)
 class JobState {
@@ -24,13 +26,13 @@ class JobState {
   JobState copyWith({
     List<JobUpdate>? updates,
     bool? isLoading,
-    String? error,
+    Object? error = _unset,
     int? queueDepth,
   }) {
     return JobState(
       updates: updates ?? this.updates,
       isLoading: isLoading ?? this.isLoading,
-      error: error ?? this.error,
+      error: identical(error, _unset) ? this.error : error as String?,
       queueDepth: queueDepth ?? this.queueDepth,
     );
   }
@@ -53,13 +55,16 @@ class JobUpdate {
   });
 
   factory JobUpdate.fromJson(Map<String, dynamic> json) {
+    final ts = json['timestamp'];
     return JobUpdate(
       jobId: json['job_id'] as String? ?? json['id'] as String? ?? '',
       type: json['type'] as String? ?? '',
       status: json['status'] as String? ?? '',
       agentId: json['agent_id'] as String?,
-      timestamp: json['timestamp'] != null
-          ? DateTime.parse(json['timestamp'] as String)
+      timestamp: ts != null
+          ? (ts is String
+              ? DateTime.parse(ts)
+              : DateTime.fromMillisecondsSinceEpoch((ts as num).toInt()))
           : DateTime.now(),
     );
   }
@@ -78,6 +83,7 @@ class JobNotifier extends StateNotifier<JobState> {
   final ApiClient apiClient;
   final WebSocketService websocket;
   StreamSubscription<Map<String, dynamic>>? _jobsSubscription;
+  StreamSubscription<bool>? _connectionSubscription;
   Timer? _pollTimer;
 
   void _init() {
@@ -89,7 +95,7 @@ class JobNotifier extends StateNotifier<JobState> {
       _startPolling();
     }
 
-    websocket.connectionStream.listen((connected) {
+    _connectionSubscription = websocket.connectionStream.listen((connected) {
       if (connected) {
         _subscribeToJobs();
       } else {
@@ -107,9 +113,17 @@ class JobNotifier extends StateNotifier<JobState> {
       final depth = stats['queue_depth'] as int? ?? stats['depth'] as int? ?? 0;
 
       state = state.copyWith(
+        updates: jobs
+            .map((j) => JobUpdate(
+                  jobId: j.id,
+                  type: j.type,
+                  status: j.status,
+                  agentId: j.agentId,
+                  timestamp: j.createdAt,
+                ))
+            .toList(),
         queueDepth: depth,
         isLoading: false,
-        error: null,
       );
     } catch (e) {
       state = state.copyWith(
@@ -167,6 +181,8 @@ class JobNotifier extends StateNotifier<JobState> {
 
   @override
   void dispose() {
+    _connectionSubscription?.cancel();
+    _connectionSubscription = null;
     _jobsSubscription?.cancel();
     _jobsSubscription = null;
     _pollTimer?.cancel();
