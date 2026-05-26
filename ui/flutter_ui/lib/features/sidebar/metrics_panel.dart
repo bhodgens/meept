@@ -155,7 +155,7 @@ class _MetricsPanelState extends ConsumerState<MetricsPanel> {
 
   String _formatValue(dynamic value, {bool intType = false}) {
     if (value == '-') return '-';
-    if (value == null || value == 0) return '-';
+    if (value == null) return '-';
     if (intType) return value.toString();
     return value.toString();
   }

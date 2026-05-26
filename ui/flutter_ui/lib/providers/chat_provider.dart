@@ -54,6 +54,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
   StreamSubscription<Map<String, dynamic>>? _chatSubscription;
   StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
   String? _sessionId;
+  int _loadGeneration = 0;
 
   /// Prevents duplicate message sends from rapid button taps
   bool _isSending = false;
@@ -65,6 +66,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   /// Load chat history for a session and subscribe to updates
   Future<void> loadMessages(String sessionId) async {
+    final generation = ++_loadGeneration;
+
     // Clear previous messages when loading a new session
     state = ChatState(
       messages: [],
@@ -94,6 +97,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
         error: e.toString(),
       );
     }
+
+    if (generation != _loadGeneration) return;
 
     // Set up WS subscription AFTER the HTTP fetch completes so that any
     // messages arriving via WS are appended to (not replaced by) the fetch.

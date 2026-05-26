@@ -126,6 +126,7 @@ class JobNotifier extends StateNotifier<JobState> {
             .toList(),
         queueDepth: depth,
         isLoading: false,
+        error: null,
       );
     } catch (e) {
       state = state.copyWith(
