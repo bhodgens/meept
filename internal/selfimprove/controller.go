@@ -159,8 +159,10 @@ func (c *Controller) RunFullCycle(ctx context.Context, interactive bool) (*Impro
 
 	defer func() {
 		now := time.Now()
+		c.mu.Lock()
 		c.currentCycle.CompletedAt = &now
 		c.cycles = append(c.cycles, c.currentCycle)
+		c.mu.Unlock()
 		_ = c.saveState()
 	}()
 
@@ -606,7 +608,7 @@ func (c *Controller) GetStatus() *ControllerStatus {
 		ValidationsCount:      len(c.validations),
 		AppliedCount:          len(c.applied),
 		ConsecutiveFailures:   c.consecutiveFailures,
-		CircuitBreakerTripped: c.checkCircuitBreaker(),
+		CircuitBreakerTripped: c.consecutiveFailures >= c.config.Safety.MaxConsecutiveFailures,
 		FailedIssues:          c.failureCounts,
 		PendingApprovals:      pendingApprovals,
 		CyclesCompleted:       len(c.cycles),

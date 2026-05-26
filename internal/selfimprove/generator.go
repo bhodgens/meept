@@ -55,6 +55,8 @@ type PatchGenerator struct {
 	llmClient   *llm.Client
 	projectRoot string
 	logger      *slog.Logger
+
+	compiledProtectedPatterns []*regexp.Regexp
 }
 
 // NewPatchGenerator creates a new PatchGenerator.
@@ -62,12 +64,24 @@ func NewPatchGenerator(aiCfg AIInfraConfig, safetyCfg SafetyConfig, llmClient *l
 	if logger == nil {
 		logger = slog.Default()
 	}
+	// Pre-compile protected patterns to avoid recompilation on every call.
+	compiled := make([]*regexp.Regexp, 0, len(safetyCfg.ProtectedPatterns))
+	for _, p := range safetyCfg.ProtectedPatterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			logger.Warn("invalid protected pattern, skipping", "pattern", p, "error", err)
+			continue
+		}
+		compiled = append(compiled, re)
+	}
+
 	return &PatchGenerator{
-		config:      aiCfg,
-		safety:      safetyCfg,
-		llmClient:   llmClient,
-		projectRoot: projectRoot,
-		logger:      logger,
+		config:                   aiCfg,
+		safety:                   safetyCfg,
+		llmClient:                llmClient,
+		projectRoot:              projectRoot,
+		logger:                   logger,
+		compiledProtectedPatterns: compiled,
 	}
 }
 
@@ -173,8 +187,8 @@ func (g *PatchGenerator) readAffectedFiles(files []string) string {
 
 // isProtected checks if a file matches protected patterns.
 func (g *PatchGenerator) isProtected(file string) bool {
-	for _, pattern := range g.safety.ProtectedPatterns {
-		if matched, _ := regexp.MatchString(pattern, file); matched {
+	for _, re := range g.compiledProtectedPatterns {
+		if re.MatchString(file) {
 			return true
 		}
 	}

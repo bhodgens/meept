@@ -37,7 +37,8 @@ type Store struct {
 	flushInterval time.Duration
 	batch        []metricValue
 	lastFlush    time.Time
-	stopChan     chan struct{}
+	stopChan   chan struct{}
+	closeOnce  sync.Once
 
 	// Subscriber management for real-time updates
 	subMu       sync.RWMutex
@@ -450,13 +451,13 @@ type MetricPoint struct {
 	Tags      map[string]string `json:"tags,omitempty"`
 }
 
-// Close closes the metrics store.
+// Close closes the metrics store. Safe to call multiple times.
 func (s *Store) Close() error {
-	close(s.stopChan)
-
-	// Final flush
-	s.flush()
-
+	s.closeOnce.Do(func() {
+		close(s.stopChan)
+		// Final flush
+		s.flush()
+	})
 	return s.db.Close()
 }
 
