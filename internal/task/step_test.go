@@ -11,7 +11,7 @@ import (
 
 func newTestStepStore(t *testing.T) *StepStore {
 	t.Helper()
-	db, err := sql.Open("modernc.org/sqlite", ":memory:")
+	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
