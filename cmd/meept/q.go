@@ -190,7 +190,7 @@ Examples:
 				}
 			}
 
-			fmt.Println("\nFull report saved to:", filepath.Join(expandPath(cfg.QAgent.AnalysisDir), fmt.Sprintf("%s_analysis.json", result.ID)))
+			fmt.Println("\nFull report saved to:", filepath.Join(mustExpandPath(cfg.QAgent.AnalysisDir), fmt.Sprintf("%s_analysis.json", result.ID)))
 
 			return nil
 		},
@@ -216,12 +216,17 @@ func createMemvidClient(cfg *config.Config) *memvid.Client {
 	})
 }
 
-func expandPath(path string) string {
+func mustExpandPath(path string) string {
 	if path == "" || path[0] != '~' {
 		return path
 	}
 
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// Fall back to the raw path; the caller will get a file-not-found
+		// which is more actionable than a panic.
+		return path
+	}
 	if path == "~" {
 		return homeDir
 	}
