@@ -237,8 +237,12 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
 
   Widget _buildEventItem(CalendarEvent event) {
     final timeFormat = DateFormat('HH:mm');
-    final isAllDay = event.start.difference(event.end).inDays == 0 &&
-        event.start.hour == 0 && event.start.minute == 0;
+    final duration = event.end.difference(event.start);
+    final isAllDay = event.start.hour == 0 &&
+        event.start.minute == 0 &&
+        event.end.hour == 0 &&
+        event.end.minute == 0 &&
+        duration.inHours >= 23;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

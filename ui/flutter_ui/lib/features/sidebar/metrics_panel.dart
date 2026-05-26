@@ -87,7 +87,9 @@ class _MetricsPanelState extends ConsumerState<MetricsPanel> {
 
     return RefreshIndicator(
       onRefresh: _loadMetrics,
-      child: Container(
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: CyberpunkColors.darkGray.withValues(alpha: 0.5),
@@ -149,6 +151,7 @@ class _MetricsPanelState extends ConsumerState<MetricsPanel> {
               ),
           ],
         ),
+      ),
       ),
     );
   }

@@ -159,7 +159,7 @@ class JobNotifier extends StateNotifier<JobState> {
 
         // Update queue depth if present
         if (msg['queue_depth'] != null) {
-          final depth = msg['queue_depth'] as int;
+          final depth = (msg['queue_depth'] as num).toInt();
           state = state.copyWith(queueDepth: depth);
         }
       } catch (e) {

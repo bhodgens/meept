@@ -68,6 +68,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
   Future<void> loadMessages(String sessionId) async {
     final generation = ++_loadGeneration;
 
+    // Unsubscribe from previous session's WS channel to prevent accumulation
+    if (_sessionId != null && _sessionId != sessionId) {
+      websocket.unsubscribeFromChat(_sessionId!);
+    }
+
     // Clear previous messages when loading a new session
     state = ChatState(
       messages: [],
