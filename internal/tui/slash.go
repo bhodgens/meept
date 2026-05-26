@@ -28,13 +28,3 @@ var IsBuiltin = sharedclient.IsBuiltin
 var IsSlashCommand = sharedclient.IsSlashCommand
 
 // Note: CmdTasks is defined in constants.go for backward compatibility
-
-// sortStrings sorts a slice of strings in place using simple insertion sort.
-// This is kept for backward compatibility with slash_autocomplete.go
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
-}

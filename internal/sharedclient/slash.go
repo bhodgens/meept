@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -161,7 +162,7 @@ func BuiltinCommands() []string {
 		commands = append(commands, name)
 	}
 	// Sort for consistent ordering
-	sortStrings(commands)
+	slices.Sort(commands)
 	return commands
 }
 
@@ -205,7 +206,7 @@ func CustomCommandNames() []string {
 	for name := range customCommandCache {
 		names = append(names, name)
 	}
-	sortStrings(names)
+	slices.Sort(names)
 	return names
 }
 
@@ -334,19 +335,6 @@ func RenderTemplate(tmpl string, args []string) string {
 
 	return tmpl
 }
-
-// SortStrings sorts a slice of strings in place using simple insertion sort.
-// This avoids importing the sort package for a small slice.
-func SortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
-}
-
-// sortStrings is an alias for SortStrings, used internally.
-var sortStrings = SortStrings
 
 // IsSlashCommand checks if input starts with a slash command.
 func IsSlashCommand(input string) bool {

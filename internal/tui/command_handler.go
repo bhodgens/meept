@@ -3,7 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	s "strings"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -160,7 +160,7 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	}
 
 	// General help
-	var sb s.Builder
+	var sb strings.Builder
 	sb.WriteString("available commands:\n\n")
 	sb.WriteString("  /help [command]     show help for commands\n")
 	sb.WriteString("  /new, /clear        start fresh conversation\n")
@@ -414,7 +414,7 @@ func (h *CommandHandler) executeUsage() *CommandResult {
 		}
 	}
 
-	var sb s.Builder
+	var sb strings.Builder
 	sb.WriteString("usage statistics:\n\n")
 	sb.WriteString("daemon totals:\n")
 	fmt.Fprintf(&sb, "  tokens used:     %d\n", status.TokensUsed)
@@ -445,7 +445,7 @@ func (h *CommandHandler) executeStatus() *CommandResult {
 		}
 	}
 
-	var sb s.Builder
+	var sb strings.Builder
 
 	// Get daemon status
 	status, err := h.rpc.Status()
@@ -613,7 +613,7 @@ func (h *CommandHandler) executeTasks(args []string) *CommandResult {
 		return &CommandResult{Output: "no tasks"}
 	}
 
-	var sb s.Builder
+	var sb strings.Builder
 	sb.WriteString("tasks:\n\n")
 
 	// Filter by state if provided
@@ -625,7 +625,7 @@ func (h *CommandHandler) executeTasks(args []string) *CommandResult {
 	count := 0
 	for _, t := range tasks {
 		// Apply state filter if specified
-		if stateFilter != "" && !s.EqualFold(t.State, stateFilter) {
+		if stateFilter != "" && !strings.EqualFold(t.State, stateFilter) {
 			continue
 		}
 
@@ -670,7 +670,7 @@ func (h *CommandHandler) executeCancel(args []string) *CommandResult {
 
 	reason := ""
 	if len(args) > 1 {
-		reason = s.Join(args[1:], " ")
+		reason = strings.Join(args[1:], " ")
 	}
 
 	if err := h.rpc.CancelTask(taskID); err != nil {
@@ -710,7 +710,7 @@ func (h *CommandHandler) executeAmend(args []string) *CommandResult {
 	amendmentType := args[1]
 	content := ""
 	if len(args) > 2 {
-		content = s.Join(args[2:], " ")
+		content = strings.Join(args[2:], " ")
 	}
 
 	// Validate amendment type
@@ -787,7 +787,7 @@ func (h *CommandHandler) executeInterrupt(args []string) *CommandResult {
 	taskID := args[0]
 	reason := "user_requested"
 	if len(args) > 1 {
-		reason = s.Join(args[1:], " ")
+		reason = strings.Join(args[1:], " ")
 	}
 
 	// Interrupt is handled via task cancellation for now
@@ -870,7 +870,7 @@ func (h *CommandHandler) executeModel(args []string) *CommandResult {
 	}
 
 	// Switch model
-	modelName := s.Join(args, " ")
+	modelName := strings.Join(args, " ")
 	result, err := h.rpc.Call("config.set", map[string]any{
 		"key":   "llm.model",
 		"value": modelName,
@@ -1064,6 +1064,6 @@ func isTemplateNotFoundError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return s.Contains(msg, "template not found") ||
-		s.Contains(msg, "template substitution failed")
+	return strings.Contains(msg, "template not found") ||
+		strings.Contains(msg, "template substitution failed")
 }

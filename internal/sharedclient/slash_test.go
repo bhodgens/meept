@@ -1,6 +1,7 @@
 package sharedclient
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -166,10 +167,10 @@ func TestSortStrings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SortStrings(tt.input)
+			slices.Sort(tt.input)
 			for i, got := range tt.input {
 				if i < len(tt.want) && got != tt.want[i] {
-					t.Errorf("SortStrings() [%d] = %q, want %q", i, got, tt.want[i])
+					t.Errorf("slices.Sort() [%d] = %q, want %q", i, got, tt.want[i])
 				}
 			}
 		})

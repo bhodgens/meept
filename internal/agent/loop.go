@@ -476,10 +476,8 @@ type AgentLoop struct {
 	// TT-SR stream rule enforcement
 	ttsrManager *TTSRManager
 
-	// Deferrable tool interception: stores a pending preview from a tool
-	// that implements the Deferrable interface. When non-nil, the resolve
-	// tool is injected into the next LLM turn so the agent can apply or
-	// discard the deferred action.
+	// pendingPreview holds a deferred tool awaiting resolve("apply"/"discard").
+	// Access is single-threaded: only read/written within Run() goroutine.
 	pendingPreview *pendingDeferral
 }
 

@@ -132,7 +132,7 @@ func (s *SlashAutocomplete) UpdateCommands(commands []string) {
 		}
 	}
 
-	sortStrings(merged)
+	slices.Sort(merged)
 	s.commands = merged
 	s.updateFiltered()
 }
@@ -148,7 +148,7 @@ func (s *SlashAutocomplete) ReplaceCommands(commands []string) {
 			unique = append(unique, cmd)
 		}
 	}
-	sortStrings(unique)
+	slices.Sort(unique)
 	s.commands = unique
 	s.updateFiltered()
 }

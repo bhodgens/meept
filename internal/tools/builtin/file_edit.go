@@ -38,7 +38,7 @@ func (t *FileEditTool) SetLSPNotifier(notifier LSPWriteNotifier) {
 func (t *FileEditTool) Name() string { return "file_edit" }
 
 func (t *FileEditTool) Description() string {
-	return "Edit a file using hashline anchors. Each line from file_read is tagged as LINE:HASH|content. Reference those tags to replace, insert, or delete lines. All anchors must match the current file content."
+	return "Edit a file using hashline anchors. Each line from file_read is tagged as LINE:HASH|content. Reference those tags to replace, insert, or delete lines. All anchors must match the current file content. Note: consecutive blank lines produce identical hashes; use the line number to distinguish them."
 }
 
 func (t *FileEditTool) Parameters() llm.FunctionParameters {
