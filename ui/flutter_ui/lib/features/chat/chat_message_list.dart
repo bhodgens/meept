@@ -24,7 +24,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    _loadMessages();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadMessages());
   }
 
   @override
@@ -68,7 +68,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
 
     // Auto-scroll when new messages arrive and user is at bottom
     if (chatState.messages.isNotEmpty && _isAtBottom) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _scrollToBottom(); });
     }
 
     return NotificationListener<ScrollNotification>(

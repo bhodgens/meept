@@ -114,6 +114,7 @@ class _ToolsPanelState extends ConsumerState<ToolsPanel> {
     try {
       final skills =
           await ref.read(apiClientProvider).getSkills();
+      if (!mounted) return;
       setState(() {
         _tools = skills
             .where((s) => s.enabled)
@@ -130,6 +131,7 @@ class _ToolsPanelState extends ConsumerState<ToolsPanel> {
         }
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;

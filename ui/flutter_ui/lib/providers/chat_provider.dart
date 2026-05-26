@@ -52,6 +52,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
   final ApiClient apiClient;
   final WebSocketService websocket;
   StreamSubscription<Map<String, dynamic>>? _chatSubscription;
+  StreamSubscription<Map<String, dynamic>>? _wsChatSubscription;
   String? _sessionId;
 
   /// Prevents duplicate message sends from rapid button taps
@@ -60,23 +61,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
   /// Initialize WebSocket connection and subscribe to chat messages
   void _initWebSocket() {
     websocket.connect();
-
-    _chatSubscription = websocket.messageStream.listen((message) {
-      // Only process chat message events
-      final isChatMessage =
-          message['type'] == 'chat.message' ||
-          message['type'] == 'chat_message' ||
-          message['role'] != null;
-      if (!isChatMessage) return;
-
-      // Scope to the current session only.
-      // If _sessionId is null (no session loaded yet), fall through
-      // so legacy servers without session_id still work.
-      final messageSessionId = message['session_id'] as String?;
-      if (_sessionId != null && messageSessionId != _sessionId) return;
-
-      addStreamMessage(message);
-    });
   }
 
   /// Load chat history for a session and subscribe to updates
@@ -91,14 +75,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
     // Update session scope so the existing subscription filters correctly
     _sessionId = sessionId;
 
-    // Send subscribe request if connected
-    if (websocket.isConnected) {
-      websocket.send({
-        'type': 'subscribe',
-        'channel': 'chat',
-        'session_id': sessionId,
-      });
-    }
+    _wsChatSubscription?.cancel();
+    _wsChatSubscription = websocket.subscribeToChat(sessionId).listen((message) {
+      addStreamMessage(message);
+    });
 
     // Fetch messages from the HTTP API
     try {
@@ -219,6 +199,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
   void dispose() {
     _chatSubscription?.cancel();
     _chatSubscription = null;
+    _wsChatSubscription?.cancel();
+    _wsChatSubscription = null;
     super.dispose();
   }
 }

@@ -31,8 +31,8 @@ class CalendarEvent {
       summary: json['summary'] as String? ?? '',
       description: json['description'] as String?,
       location: json['location'] as String?,
-      start: DateTime.parse(startVal['dateTime'] as String? ?? startVal['date'] as String),
-      end: DateTime.parse(endVal['dateTime'] as String? ?? endVal['date'] as String),
+      start: DateTime.parse((startVal['dateTime'] as String?) ?? (startVal['date'] as String?) ?? ''),
+      end: DateTime.parse((endVal['dateTime'] as String?) ?? (endVal['date'] as String?) ?? ''),
     );
   }
 }

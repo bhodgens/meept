@@ -97,6 +97,8 @@ class JobNotifier extends StateNotifier<JobState> {
 
     _connectionSubscription = websocket.connectionStream.listen((connected) {
       if (connected) {
+        _pollTimer?.cancel();
+        _pollTimer = null;
         _subscribeToJobs();
       } else {
         _jobsSubscription?.cancel();

@@ -35,7 +35,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     chatNotifier.sendMessage(
       sessionId: widget.sessionId,
       text: text,
-      agentId: activeAgent?.id,
+      agentId: activeAgent?.id ?? _selectedAgent,
     );
 
     _controller.clear();

@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import 'api_client.dart';
 
+const _unset = Object();
+
 /// Session state tracked by SessionNotifier
 class SessionState {
   final List<Session> sessions;
@@ -17,12 +19,12 @@ class SessionState {
   SessionState copyWith({
     List<Session>? sessions,
     bool? isLoading,
-    String? error,
+    Object? error = _unset,
   }) {
     return SessionState(
       sessions: sessions ?? this.sessions,
       isLoading: isLoading ?? this.isLoading,
-      error: error ?? this.error,
+      error: identical(error, _unset) ? this.error : error as String?,
     );
   }
 }

@@ -29,6 +29,7 @@ class WebSocketService {
   bool _wasExplicitlyDisconnected = false;
   Timer? _pingTimer;
   Timer? _reconnectTimer;
+  StreamSubscription? _wsSubscription;
 
   // Channel subscription tracking
   final Map<String, SessionSubscription> _chatSubscriptions = {};
@@ -108,7 +109,7 @@ class WebSocketService {
         _channel = WebSocketChannel.connect(uri);
       }
 
-      _channel!.stream.listen(
+      _wsSubscription = _channel!.stream.listen(
         (data) {
           try {
             final message = jsonDecode(data as String) as Map<String, dynamic>;
@@ -240,6 +241,10 @@ class WebSocketService {
   /// Like [disconnect] but preserves subscription state and keeps the
   /// StreamControllers open so [connect] can re-establish the channel.
   void pause() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _wsSubscription?.cancel();
+    _wsSubscription = null;
     _pingTimer?.cancel();
     _pingTimer = null;
     _isConnected = false;
@@ -262,6 +267,8 @@ class WebSocketService {
     _chatSubscriptions.clear();
     _jobsSubscribed = false;
     _metricsSubscribed = false;
+    _wsSubscription?.cancel();
+    _wsSubscription = null;
     _channel?.sink.close();
     _channel = null;
     _isConnected = false;

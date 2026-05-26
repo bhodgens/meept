@@ -14,17 +14,14 @@ class TasksDetail extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final active = ref.watch(activeTaskProvider);
     if (active == null) {
-      return const Expanded(
-        child: Center(child: SizedBox.shrink()),
-      );
+      return const Center(child: SizedBox.shrink());
     }
 
     // Re-resolve task from the live provider so we always show fresh data
     final tasks = ref.watch(taskProvider).tasks;
     final task = tasks.where((t) => t.id == active.id).firstOrNull ?? active;
 
-    return Expanded(
-      child: Container(
+    return Container(
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,8 +97,7 @@ class TasksDetail extends ConsumerWidget {
             const Spacer(),
           ],
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildStatusDropdown(
@@ -140,7 +136,7 @@ class TasksDetail extends ConsumerWidget {
       dropdownColor: CyberpunkColors.darkGray,
       underline: const SizedBox(),
       iconEnabledColor: colors[task.status.toLowerCase()] ?? Colors.grey,
-      items: _validTransitions(task.status).map((status) {
+      items: [task.status.toLowerCase(), ..._validTransitions(task.status)].map((status) {
         final color = colors[status.toLowerCase()] ?? Colors.grey;
         return DropdownMenuItem<String>(
           value: status.toLowerCase(),
@@ -207,23 +203,21 @@ class TasksDetail extends ConsumerWidget {
               final result = await ref
                   .read(taskProvider.notifier)
                   .cancelTask(task.id);
-              if (context.mounted) {
-                if (result) {
-                  // The refreshed task list/provider should update automatically
-                  messenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('task cancelled'),
-                      backgroundColor: CyberpunkColors.orangePrimary,
-                    ),
-                  );
-                } else {
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: const Text('failed to cancel task'),
-                      backgroundColor: CyberpunkColors.redAlert,
-                    ),
-                  );
-                }
+              if (result) {
+                // The refreshed task list/provider should update automatically
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('task cancelled'),
+                    backgroundColor: CyberpunkColors.orangePrimary,
+                  ),
+                );
+              } else {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: const Text('failed to cancel task'),
+                    backgroundColor: CyberpunkColors.redAlert,
+                  ),
+                );
               }
             },
             child: const Text(

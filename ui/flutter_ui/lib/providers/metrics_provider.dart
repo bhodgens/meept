@@ -75,6 +75,8 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
     // Listen for WS connection state changes
     _connectionSubscription = websocket.connectionStream.listen((connected) {
       if (connected) {
+        _pollTimer?.cancel();
+        _pollTimer = null;
         _subscribeToMetrics();
       } else {
         _metricsSubscription?.cancel();
