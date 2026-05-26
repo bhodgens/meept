@@ -146,11 +146,12 @@ func (TurnStartData) agentEventData() {}
 
 // TurnEndData is emitted at the end of each loop iteration.
 type TurnEndData struct {
-	TurnNumber    int  `json:"turn_number"`
-	HadToolCalls  bool `json:"had_tool_calls"`
-	ToolCallCount int  `json:"tool_call_count"`
-	ResponseTokens int `json:"response_tokens"`
-	StoppedBy     string `json:"stopped_by"`
+	TurnNumber     int    `json:"turn_number"`
+	HadToolCalls   bool   `json:"had_tool_calls"`
+	ToolCallCount  int    `json:"tool_call_count"`
+	ResponseTokens int    `json:"response_tokens"`
+	CachedTokens   int    `json:"cached_tokens"`
+	StoppedBy      string `json:"stopped_by"`
 }
 
 func (TurnEndData) agentEventData() {}
@@ -284,6 +285,7 @@ type AfterProviderResponseData struct {
 	ModelID        string        `json:"model_id"`
 	StatusCode     int           `json:"status_code"`
 	ResponseTokens int           `json:"response_tokens"`
+	CachedTokens   int           `json:"cached_tokens"`
 	Latency        time.Duration `json:"latency"`
 	Cached         bool          `json:"cached"`
 	Error          string        `json:"error,omitempty"`

@@ -2339,6 +2339,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			Data: AfterProviderResponseData{
 				ModelID:        response.Model,
 				ResponseTokens: response.Usage.TotalTokens,
+				CachedTokens:   response.Usage.CachedTokens,
 			},
 		})
 
@@ -2508,7 +2509,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 
 			// Emit typed turn end event (tool execution turn)
-			l.emitTurnEnd(ctx, conversationID, iteration, true, len(response.ToolCalls), response.Usage.TotalTokens, turnStartTime)
+			l.emitTurnEnd(ctx, conversationID, iteration, true, len(response.ToolCalls), response.Usage.TotalTokens, response.Usage.CachedTokens, turnStartTime)
 
 			// Settle async event listeners at natural pause point
 			l.emitterWaitForIdle(ctx)
@@ -2700,7 +2701,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		l.publishIteration(conversationID, iteration)
 
 		// Emit typed turn end event (text response, no tools)
-		l.emitTurnEnd(ctx, conversationID, iteration, false, 0, response.Usage.TotalTokens, turnStartTime)
+		l.emitTurnEnd(ctx, conversationID, iteration, false, 0, response.Usage.TotalTokens, response.Usage.CachedTokens, turnStartTime)
 
 		// Settle async event listeners
 		l.emitterWaitForIdle(ctx)
@@ -3887,7 +3888,7 @@ func (l *AgentLoop) emitSafeWithFields(ctx context.Context, event AgentEvent) {
 }
 
 // emitTurnEnd emits a typed turn end event with standard fields.
-func (l *AgentLoop) emitTurnEnd(ctx context.Context, conversationID string, iteration int, hadToolCalls bool, toolCallCount, responseTokens int, _ time.Time) {
+func (l *AgentLoop) emitTurnEnd(ctx context.Context, conversationID string, iteration int, hadToolCalls bool, toolCallCount, responseTokens, cachedTokens int, _ time.Time) {
 	stoppedBy := ""
 	if iteration >= l.config.MaxIterations {
 		stoppedBy = "max_iterations"
@@ -3901,6 +3902,7 @@ func (l *AgentLoop) emitTurnEnd(ctx context.Context, conversationID string, iter
 			HadToolCalls:   hadToolCalls,
 			ToolCallCount:  toolCallCount,
 			ResponseTokens: responseTokens,
+			CachedTokens:   cachedTokens,
 			StoppedBy:      stoppedBy,
 		},
 	})
