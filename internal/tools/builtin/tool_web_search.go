@@ -115,10 +115,14 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]any) (any, 
 	sinceLastRequest := time.Since(t.lastRequestTime)
 	if sinceLastRequest < MinRequestInterval {
 		waitTime := MinRequestInterval - sinceLastRequest
+		t.lastRequestTime = time.Now().Add(waitTime) // reserve slot before waiting
 		t.mu.Unlock()
 		select {
 		case <-time.After(waitTime):
 		case <-ctx.Done():
+			t.mu.Lock()
+			t.lastRequestTime = time.Time{}
+			t.mu.Unlock()
 			return nil, ctx.Err()
 		}
 		t.mu.Lock()

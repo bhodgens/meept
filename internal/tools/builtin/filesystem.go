@@ -369,15 +369,15 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 	lspSuffix := t.lspNotifyWrite(ctx, resolved, content)
 
 	// Compute evidence: file stat and hash
-	info, err := os.Stat(resolved)
-	if err != nil {
-		slog.Warn("WriteFileTool: failed to stat file for evidence", "path", resolved, "error", err)
+	info, statErr := os.Stat(resolved)
+	if statErr != nil {
+		slog.Warn("WriteFileTool: failed to stat file for evidence", "path", resolved, "error", statErr)
 	}
 
 	var hash string
-	hashData, err := os.ReadFile(resolved)
-	if err != nil {
-		slog.Warn("WriteFileTool: failed to read file for hash", "path", resolved, "error", err)
+	hashData, hashErr := os.ReadFile(resolved)
+	if hashErr != nil {
+		slog.Warn("WriteFileTool: failed to read file for hash", "path", resolved, "error", hashErr)
 	} else {
 		h := sha256.Sum256(hashData)
 		hash = hex.EncodeToString(h[:])
@@ -390,7 +390,7 @@ func (t *WriteFileTool) executeWrite(ctx context.Context, args map[string]any, p
 
 	// Build evidence list
 	evidence := []models.Evidence{}
-	if err == nil {
+	if statErr == nil {
 		evidence = append(evidence, models.NewEvidence(
 			models.EvidenceFileExists,
 			resolved,

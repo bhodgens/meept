@@ -287,18 +287,18 @@ func (s *Scheduler) Unschedule(jobID string) error {
 
 // RunNow triggers immediate execution of a job.
 func (s *Scheduler) RunNow(jobID string) error {
-	s.mu.RLock()
+	s.mu.Lock()
 	job, ok := s.jobs[jobID]
-	isRunning := s.runningJobs[jobID]
-	s.mu.RUnlock()
-
 	if !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("job not found: %s", jobID)
 	}
-
-	if isRunning {
+	if s.runningJobs[jobID] {
+		s.mu.Unlock()
 		return fmt.Errorf("job already running: %s", jobID)
 	}
+	s.runningJobs[jobID] = true
+	s.mu.Unlock()
 
 	// Run job in goroutine
 	go func() {

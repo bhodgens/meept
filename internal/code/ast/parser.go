@@ -105,6 +105,7 @@ func (pm *ParserManager) Parse(ctx context.Context, source []byte, lang Language
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
+	defer tree.Close()
 
 	result := &ParseResult{
 		Language: lang,

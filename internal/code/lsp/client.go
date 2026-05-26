@@ -41,6 +41,7 @@ func NewClient(t transport.Transport) *Client {
 		handlers:  make(map[string]NotificationHandler),
 		done:      make(chan struct{}),
 	}
+	c.running.Store(true)
 	return c
 }
 
@@ -261,7 +262,9 @@ func (c *Client) Shutdown(ctx context.Context) error {
 
 // Close closes the client and transport.
 func (c *Client) Close() error {
-	c.running.Store(false)
+	if !c.running.CompareAndSwap(true, false) {
+		return nil // already closed
+	}
 	return c.transport.Close()
 }
 
