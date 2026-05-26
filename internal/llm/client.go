@@ -666,6 +666,7 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 			PromptTokens:     chatResp.Usage.PromptTokens,
 			CompletionTokens: chatResp.Usage.CompletionTokens,
 			TotalTokens:      chatResp.Usage.TotalTokens,
+			CachedTokens:     chatResp.Usage.PromptTokensDetails.CachedTokens,
 		},
 		Model:        model,
 		FinishReason: choice.FinishReason,

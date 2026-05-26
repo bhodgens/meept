@@ -39,6 +39,9 @@ func TestClientChat(t *testing.T) {
 				PromptTokens     int `json:"prompt_tokens"`
 				CompletionTokens int `json:"completion_tokens"`
 				TotalTokens      int `json:"total_tokens"`
+				PromptTokensDetails struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
 			}{
 				PromptTokens:     10,
 				CompletionTokens: 5,
@@ -278,6 +281,9 @@ func TestClientWithBudget(t *testing.T) {
 				PromptTokens     int `json:"prompt_tokens"`
 				CompletionTokens int `json:"completion_tokens"`
 				TotalTokens      int `json:"total_tokens"`
+				PromptTokensDetails struct {
+					CachedTokens int `json:"cached_tokens"`
+				} `json:"prompt_tokens_details"`
 			}{
 				PromptTokens:     10,
 				CompletionTokens: 5,
@@ -372,6 +378,44 @@ func TestContentString_ArrayBlocks(t *testing.T) {
 	got := msg.ContentString()
 	if got != "Hello\nWorld" {
 		t.Errorf("ContentString() = %q, want %q", got, "Hello\nWorld")
+	}
+}
+
+func TestParseResponse_CachedTokens(t *testing.T) {
+	raw := `{
+		"id": "chatcmpl-1",
+		"object": "chat.completion",
+		"created": 1234567890,
+		"model": "gpt-4",
+		"choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+		"usage": {
+			"prompt_tokens": 1000,
+			"completion_tokens": 10,
+			"total_tokens": 1010,
+			"prompt_tokens_details": {"cached_tokens": 800}
+		}
+	}`
+	var chatResp ChatResponse
+	if err := json.Unmarshal([]byte(raw), &chatResp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if chatResp.Usage.PromptTokensDetails.CachedTokens != 800 {
+		t.Errorf("CachedTokens = %d, want 800", chatResp.Usage.PromptTokensDetails.CachedTokens)
+	}
+
+	client := NewClient(&ModelConfig{
+		BaseURL: "http://localhost",
+		ModelID: "gpt-4",
+	})
+	resp, err := client.parseResponse(&chatResp)
+	if err != nil {
+		t.Fatalf("parseResponse: %v", err)
+	}
+	if resp.Usage.CachedTokens != 800 {
+		t.Errorf("resp.Usage.CachedTokens = %d, want 800", resp.Usage.CachedTokens)
+	}
+	if resp.Usage.PromptTokens != 1000 {
+		t.Errorf("resp.Usage.PromptTokens = %d, want 1000", resp.Usage.PromptTokens)
 	}
 }
 
