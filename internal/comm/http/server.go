@@ -608,6 +608,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/calendar/upcoming", s.handleCalendarUpcoming)
 	mux.HandleFunc("POST /api/v1/calendar/quickadd", s.handleCalendarQuickAdd)
 
+	// Terminal endpoints
+	mux.HandleFunc("GET /api/v1/terminal/history", s.handleTerminalHistory)
+	mux.HandleFunc("POST /api/v1/terminal/exec", s.handleTerminalExec)
+	mux.HandleFunc("GET /api/v1/terminal/sessions", s.handleTerminalSessions)
+	mux.HandleFunc("POST /api/v1/terminal/clear", s.handleTerminalClear)
+
 	// Bus endpoints
 	mux.HandleFunc("POST /api/v1/bus/publish", s.handleBusPublish)
 	mux.HandleFunc("GET /api/v1/bus/stats", s.handleBusStats)

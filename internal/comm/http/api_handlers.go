@@ -2186,3 +2186,84 @@ func (s *Server) handleCalendarQuickAdd(w http.ResponseWriter, r *http.Request) 
 
 	s.writeJSON(w, http.StatusCreated, event)
 }
+
+// ===== Terminal Endpoints =====
+
+// handleTerminalHistory handles GET /api/v1/terminal/history.
+func (s *Server) handleTerminalHistory(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Terminal == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "terminal service not available")
+		return
+	}
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	history := s.services.Terminal.GetHistory(limit)
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"history": history,
+		"count":   len(history),
+	})
+}
+
+// handleTerminalExec handles POST /api/v1/terminal/exec.
+func (s *Server) handleTerminalExec(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Terminal == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "terminal service not available")
+		return
+	}
+
+	var req struct {
+		Command    string `json:"command"`
+		WorkingDir string `json:"working_dir,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if strings.TrimSpace(req.Command) == "" {
+		s.writeError(w, http.StatusBadRequest, "command required")
+		return
+	}
+
+	result, err := s.services.Terminal.ExecuteCommand(r.Context(), req.Command, req.WorkingDir)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleTerminalSessions handles GET /api/v1/terminal/sessions.
+func (s *Server) handleTerminalSessions(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Terminal == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "terminal service not available")
+		return
+	}
+
+	sessions := s.services.Terminal.ListSessions()
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
+}
+
+// handleTerminalClear handles POST /api/v1/terminal/clear.
+func (s *Server) handleTerminalClear(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Terminal == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "terminal service not available")
+		return
+	}
+
+	s.services.Terminal.ClearHistory()
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "cleared"})
+}

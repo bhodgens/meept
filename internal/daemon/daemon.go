@@ -59,6 +59,7 @@ type Config struct {
 	SocketPath      string
 	PIDFile         string
 	StateDir        string
+	WorkingDir      string
 	ShutdownTimeout time.Duration
 	LogLevel        slog.Level
 
@@ -77,10 +78,12 @@ type Config struct {
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 	stateDir := filepath.Join(homeDir, ".meept")
+	workingDir, _ := os.Getwd()
 	return &Config{
 		SocketPath:      filepath.Join(stateDir, "meept.sock"),
 		PIDFile:         filepath.Join(stateDir, "meept.pid"),
 		StateDir:        stateDir,
+		WorkingDir:      workingDir,
 		ShutdownTimeout: 10 * time.Second,
 		LogLevel:        slog.LevelInfo,
 	}
@@ -302,6 +305,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		Scheduler:        nilSafeScheduler(components),
 		CalendarClient:   nil, // Calendar integration requires OAuth setup
 		RuntimeManager:   nilSafeRuntimeManager(components),
+		WorkingDir:       cfg.WorkingDir,
 		DaemonController: daemonControl,
 		PidFile:          cfg.PIDFile,
 		StateDir:         cfg.StateDir,
