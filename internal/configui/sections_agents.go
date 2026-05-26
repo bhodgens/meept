@@ -32,6 +32,9 @@ func buildAgentItems(agents map[string]*config.AgentDefinition) []DrilldownItem 
 			NewTextField("model", "model", a.Model),
 			NewToggleField("enabled", "enabled", a.Enabled),
 			NewToggleField("can_delegate", "can delegate", a.CanDelegate),
+			NewTextField("additional_tools", "additional tools", joinStrings(a.AdditionalTools)),
+			NewTextField("capabilities", "capabilities", joinStrings(a.Capabilities)),
+			NewTextField("prompt_components", "prompt components", joinStrings(a.PromptComponents)),
 		}
 		items = append(items, DrilldownItem{Name: a.ID, Fields: fields})
 	}

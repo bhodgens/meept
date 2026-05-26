@@ -28,6 +28,12 @@ func buildMCPServerItems(servers []mcp.ServerConfig) []DrilldownItem {
 			NewTextField("url", "url", s.URL),
 			NewTextField("command", "command", joinStrings(s.Command)),
 		}
+		if len(s.Env) > 0 {
+			fields = append(fields, NewMapStringStringDrilldownField("env", "env vars", "env", buildMapStringStringItems(s.Env)))
+		}
+		if len(s.Headers) > 0 {
+			fields = append(fields, NewMapStringStringDrilldownField("headers", "headers", "headers", buildMapStringStringItems(s.Headers)))
+		}
 		items = append(items, DrilldownItem{Name: s.Name, Fields: fields})
 	}
 	return items

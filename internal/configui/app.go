@@ -42,6 +42,7 @@ type App struct {
 	width, height int
 	styles        styles
 	errMsg        string
+	helpVisible   bool
 
 	// Drilldown state: active when phase == PhaseDrilldown.
 	drilldownField  *DrilldownField // the field we drilled into
@@ -211,6 +212,8 @@ func (a *App) handleMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.SelectSection(a.menuCursor)
 	case "a":
 		a.ToggleAdvanced()
+	case "?":
+		a.helpVisible = !a.helpVisible
 	}
 	return a, nil
 }
@@ -258,6 +261,13 @@ func (a *App) handleSectionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				f.Reset()
 			}
 		}
+	case "s":
+		if a.section != nil && a.section.IsDirty() {
+			a.phase = PhaseConfirmSave
+			return a, nil
+		}
+	case "?":
+		a.helpVisible = !a.helpVisible
 	}
 	return a, nil
 }
@@ -475,7 +485,15 @@ func (a *App) viewMenu() string {
 		}
 		s += cursor + style.Render(item.Title) + "  " + a.styles.label.Render(item.Description) + "\n"
 	}
-	s += "\n" + a.styles.help.Render("up/down navigate  enter select  a toggle advanced  q quit")
+	s += "\n" + a.styles.help.Render("up/down navigate  enter select  a toggle advanced  ? help  q quit")
+	if a.helpVisible {
+		s += "\n\n" + a.styles.title.Render("key bindings") + "\n"
+		s += "  up/down, j/k   navigate menu\n"
+		s += "  enter           select section\n"
+		s += "  a               toggle advanced sections\n"
+		s += "  q               quit\n"
+		s += "  ?               toggle this help\n"
+	}
 	return s
 }
 
@@ -497,7 +515,16 @@ func (a *App) viewSection() string {
 		}
 		s += cursor + style.Render(f.Label()) + "  " + a.styles.value.Render(f.Display()) + dirty + "\n"
 	}
-	s += "\n" + a.styles.help.Render("up/down navigate  enter edit  d reset  esc back  q back")
+	s += "\n" + a.styles.help.Render("up/down navigate  enter edit  s save  d reset  ? help  esc back  q back")
+	if a.helpVisible {
+		s += "\n\n" + a.styles.title.Render("key bindings") + "\n"
+		s += "  up/down, j/k   navigate fields\n"
+		s += "  enter           edit field / drill into sub-section\n"
+		s += "  s               save changes\n"
+		s += "  d               reset field to original value\n"
+		s += "  esc/q           back to menu (prompts to save if dirty)\n"
+		s += "  ?               toggle this help\n"
+	}
 	return s
 }
 

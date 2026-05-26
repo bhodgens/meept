@@ -441,6 +441,40 @@ func saveMCPServersConfig(sm *SectionModel) error {
 				}
 			}
 		}
+	} else if sm.IsMapStringStringDrilldown() {
+		// map[string]string drilldown for server env/headers.
+		// The section key is "mcp_servers", the map key path is like "servers.my_server.env"
+		// and we need to resolve it on the loaded config.
+		mapKey := sm.MapStringStringKey()
+		parts := strings.SplitN(mapKey, ".", 3)
+		if len(parts) >= 3 && parts[0] == "servers" {
+			serverName := parts[1]
+			fieldName := parts[2] // "env" or "headers"
+			idx := -1
+			for i, s := range cfg.Servers {
+				if s.Name == serverName {
+					idx = i
+					break
+				}
+			}
+			if idx == -1 {
+				return fmt.Errorf("server %q not found for map drilldown %q", serverName, mapKey)
+			}
+			// Rebuild the map from all drilldown items
+			allItems := sm.MapStringStringItems()
+			m := make(map[string]string, len(allItems))
+			for _, item := range allItems {
+				if len(item.Fields) > 0 {
+					m[item.Name] = item.Fields[0].Get()
+				}
+			}
+			switch fieldName {
+			case "env":
+				cfg.Servers[idx].Env = m
+			case "headers":
+				cfg.Servers[idx].Headers = m
+			}
+		}
 	} else {
 		for _, f := range sm.Fields() {
 			if f.IsDirty() {
@@ -481,8 +515,32 @@ func saveAgentsConfig(sm *SectionModel) error {
 				if !f.IsDirty() {
 					continue
 				}
-				if err := setStructField(agent, f.Key(), f.Get()); err != nil {
-					return fmt.Errorf("set agents.%s.%s: %w", agentID, f.Key(), err)
+				switch f.Key() {
+				case "additional_tools":
+					val := f.Get()
+					if val == "" {
+						agent.AdditionalTools = nil
+					} else {
+						agent.AdditionalTools = strings.Split(val, ", ")
+					}
+				case "capabilities":
+					val := f.Get()
+					if val == "" {
+						agent.Capabilities = nil
+					} else {
+						agent.Capabilities = strings.Split(val, ", ")
+					}
+				case "prompt_components":
+					val := f.Get()
+					if val == "" {
+						agent.PromptComponents = nil
+					} else {
+						agent.PromptComponents = strings.Split(val, ", ")
+					}
+				default:
+					if err := setStructField(agent, f.Key(), f.Get()); err != nil {
+						return fmt.Errorf("set agents.%s.%s: %w", agentID, f.Key(), err)
+					}
 				}
 			}
 			agents[agentID] = agent
