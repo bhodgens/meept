@@ -191,7 +191,7 @@ func runRuntimeStatusFormatted(ctx context.Context, provider, format string) err
 		return fmt.Errorf("failed to read PID file: %w", err)
 	}
 
-	pid, err := strconv.Atoi(string(data))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return fmt.Errorf("invalid PID in file: %w", err)
 	}
@@ -258,7 +258,7 @@ func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
 
 	// Check if already running
 	if data, err := os.ReadFile(pidFile); err == nil {
-		if pid, err := strconv.Atoi(string(data)); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
 			if checkProcessAlive(pid) {
 				return fmt.Errorf("runtime %s is already running (PID: %d)", provider, pid)
 			}
@@ -314,7 +314,7 @@ func runRuntimeStop(ctx context.Context, provider string) error {
 		return fmt.Errorf("failed to read PID file: %w", err)
 	}
 
-	pid, err := strconv.Atoi(string(data))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return fmt.Errorf("invalid PID in file: %w", err)
 	}

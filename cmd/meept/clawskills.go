@@ -320,6 +320,10 @@ func newClawSkillsUpdateCmd() *cobra.Command {
 			}
 			defer c.Close()
 
+			if all && len(args) > 0 {
+				return fmt.Errorf("cannot specify both --all and a slug")
+			}
+
 			if all {
 				// List all installed and update each
 				rawResult, err := c.Call("clawskills.list", nil)

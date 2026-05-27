@@ -124,8 +124,14 @@ func runDevModels(cmd *cobra.Command, args []string) error {
 			marker = "*"
 		}
 		caps := strings.Join(m.Capabilities, ", ")
-		fmt.Fprintf(w, "%s%d\t%s\t%s\t%dk\t%s\t\n",
-			marker, m.Index, m.Provider, m.Model, m.ContextLimit/1000, caps)
+		var ctxStr string
+		if m.ContextLimit >= 1000 {
+			ctxStr = fmt.Sprintf("%dk", m.ContextLimit/1000)
+		} else {
+			ctxStr = fmt.Sprintf("%d", m.ContextLimit)
+		}
+		fmt.Fprintf(w, "%s%d\t%s\t%s\t%s\t%s\t\n",
+			marker, m.Index, m.Provider, m.Model, ctxStr, caps)
 	}
 	w.Flush()
 

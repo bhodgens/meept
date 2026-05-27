@@ -395,8 +395,7 @@ func newSelfImproveFullCycleCmd() *cobra.Command {
 			}
 			if err := json.Unmarshal(result, &cycle); err != nil {
 				// Print raw result if parsing fails
-				fmt.Println(string(result))
-				return nil
+				return printJSON(result)
 			}
 
 			fmt.Printf("\ncycle %s completed:\n", cycle.ID)

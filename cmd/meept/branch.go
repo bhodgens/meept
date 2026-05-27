@@ -453,12 +453,10 @@ func runBranchTree(sessionID string) error {
 
 		children := childrenMap[node.ID]
 		childIndent := indent
-		if indent != "" {
-			if isLast {
-				childIndent += "   "
-			} else {
-				childIndent += "│  "
-			}
+		if isLast {
+			childIndent += "   "
+		} else {
+			childIndent += "│  "
 		}
 		for i, child := range children {
 			printNode(child, childIndent, i == len(children)-1)

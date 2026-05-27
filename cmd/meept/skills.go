@@ -256,7 +256,7 @@ func newSkillsRunCmd() *cobra.Command {
 
 Examples:
   meept skills run code-review "Review my Python script"
-  meept skills run summarize --input "Long text to summarize..."
+  meept skills run summarize "Long text to summarize..."
 `,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
