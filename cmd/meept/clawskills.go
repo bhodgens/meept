@@ -353,21 +353,21 @@ func newClawSkillsUpdateCmd() *cobra.Command {
 						continue
 					}
 
-				params := map[string]string{"slug": slug}
-				rawResult, err := c.Call("clawskills.update", params)
-				if err != nil {
-					fmt.Printf("  ✗ %s: %v\n", strings.TrimPrefix(slug, "claw:"), err)
-					continue
-				}
-				// Check for server-side errors in response body
-				var updateResult map[string]any
-				if json.Unmarshal(rawResult, &updateResult) == nil {
-					if errMsg, ok := updateResult["error"].(string); ok && errMsg != "" {
-						fmt.Printf("  ✗ %s: %s\n", strings.TrimPrefix(slug, "claw:"), errMsg)
+					params := map[string]string{"slug": slug}
+					rawResult, err := c.Call("clawskills.update", params)
+					if err != nil {
+						fmt.Printf("  ✗ %s: %v\n", strings.TrimPrefix(slug, "claw:"), err)
 						continue
 					}
-				}
-				fmt.Printf("  ✓ %s updated\n", strings.TrimPrefix(slug, "claw:"))
+					// Check for server-side errors in response body
+					var updateResult map[string]any
+					if json.Unmarshal(rawResult, &updateResult) == nil {
+						if errMsg, ok := updateResult["error"].(string); ok && errMsg != "" {
+							fmt.Printf("  ✗ %s: %s\n", strings.TrimPrefix(slug, "claw:"), errMsg)
+							continue
+						}
+					}
+					fmt.Printf("  ✓ %s updated\n", strings.TrimPrefix(slug, "claw:"))
 				}
 				return nil
 			}
