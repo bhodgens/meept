@@ -1127,6 +1127,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Handle vim toggle - mode was already toggled by the command handler.
 			_ = msg.Result.ToggleVimMode
 
+			// Handle project switch
+			if msg.Result.SetProjectID != "" {
+				if a.currentSession != nil {
+					err := a.rpc.SetProject(a.currentSession.ID, msg.Result.SetProjectID)
+					if err != nil {
+						a.statusMessage = fmt.Sprintf("failed to set project: %v", err)
+						a.statusMessageTime = time.Now()
+					}
+					// Refresh project info
+					_ = a.fetchCurrentProject()
+				}
+			}
+
 			// Clear status message after delay
 			return a, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 				return StatusMessageClearMsg{}

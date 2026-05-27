@@ -25,6 +25,8 @@ type CommandResult struct {
 	UndoLast bool
 	// ToggleVimMode indicates vim mode should be toggled.
 	ToggleVimMode bool
+	// SetProjectID requests the app to switch the current session's project.
+	SetProjectID string
 }
 
 // CommandResultMsg is a bubbletea message containing a command result.
@@ -182,7 +184,7 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /edit <path>        open file in system editor\n")
 	sb.WriteString("  /plan               enter planning mode\n")
 	sb.WriteString("  /review             review current changes\n")
-	sb.WriteString("  /project [subcmd]   manage projects (list, add, sync, status)\n")
+	sb.WriteString("  /project [subcmd]   manage projects (list, set, add, sync, status)\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -325,6 +327,7 @@ manage registered projects.
 subcommands:
   (none)              show current project info
   list                list all registered projects
+  set <name|id>       switch to a different project
   add <path|url>      register a new project
   sync                synchronize the current project (git pull)
   status              show git status of current project
@@ -332,6 +335,7 @@ subcommands:
 examples:
   /project                        show project info
   /project list                   list all projects
+  /project set myapp              switch to project named "myapp"
   /project add /home/user/myapp   add local project
   /project add https://github.com/org/repo.git
   /project sync                   sync current project
@@ -1095,6 +1099,7 @@ func isTemplateNotFoundError(err error) bool {
 //
 //	/project             - show current project info
 //	/project list        - list all registered projects
+//	/project set <name>  - switch to a different project
 //	/project add <path>  - register a new project
 //	/project sync        - sync current project
 //	/project status      - show current project status
@@ -1118,13 +1123,15 @@ func (h *CommandHandler) executeProject(args []string) *CommandResult {
 		return h.executeProjectList()
 	case "add", "register":
 		return h.executeProjectAdd(args[1:])
+	case "set":
+		return h.executeProjectSet(args[1:])
 	case "sync":
 		return h.executeProjectSync()
 	case "status":
 		return h.executeProjectStatus()
 	default:
 		return &CommandResult{
-			Output:  fmt.Sprintf("unknown project subcommand: %s\nuse: /project [list|add|sync|status]", subcmd),
+			Output:  fmt.Sprintf("unknown project subcommand: %s\nuse: /project [list|set|add|sync|status]", subcmd),
 			IsError: true,
 		}
 	}
@@ -1201,6 +1208,48 @@ func (h *CommandHandler) executeProjectList() *CommandResult {
 	}
 	sb.WriteString(fmt.Sprintf("\n  total: %d projects", projects.Count))
 	return &CommandResult{Output: sb.String()}
+}
+
+// executeProjectSet switches the current session to a different project.
+func (h *CommandHandler) executeProjectSet(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+
+	if len(args) == 0 || args[0] == "" {
+		return &CommandResult{
+			Output:  "usage: /project set <name|id>",
+			IsError: true,
+		}
+	}
+
+	query := args[0]
+
+	projects, err := h.rpc.ListProjects()
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to list projects: %v", err),
+			IsError: true,
+		}
+	}
+
+	// Search for matching project by name (case-insensitive) or ID (exact)
+	for _, p := range projects.Projects {
+		if strings.EqualFold(p.Name, query) || p.ID == query {
+			return &CommandResult{
+				Output:       fmt.Sprintf("switching to project '%s'...", p.Name),
+				SetProjectID: p.ID,
+			}
+		}
+	}
+
+	return &CommandResult{
+		Output:  fmt.Sprintf("project '%s' not found", query),
+		IsError: true,
+	}
 }
 
 // executeProjectAdd registers a new project.

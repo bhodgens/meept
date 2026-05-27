@@ -1,7 +1,11 @@
 // internal/configui/sections_projects.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
+import (
+	"strings"
+
+	"github.com/caimlas/meept/internal/config"
+)
 
 func buildProjectsFields() []Field {
 	cfg, _ := config.LoadDefault()
@@ -15,6 +19,7 @@ func buildProjectsFields() []Field {
 		NewNumberField("max_worktrees_per_project", "max worktrees per project", s.MaxWorktreesPerProject),
 		NewToggleField("cleanup_orphaned_worktrees", "cleanup orphaned worktrees", s.CleanupOrphanedWorktrees),
 		NewToggleField("fence_enabled", "fence enabled", s.FenceEnabled),
+		NewTextField("allow_read_system_paths", "allowed read paths", strings.Join(s.AllowReadSystemPaths, ", ")),
 		NewTextField("default_branch", "default branch", s.DefaultBranch),
 		NewToggleField("auto_sync_on_attach", "auto sync on attach", s.AutoSyncOnAttach),
 	}
