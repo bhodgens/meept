@@ -638,6 +638,15 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 
 	// Firewall stats endpoint
 	mux.HandleFunc("GET /api/v1/metrics/firewall", s.handleFirewallStats)
+
+	// Project endpoints
+	mux.HandleFunc("GET /api/v1/projects", s.handleProjectList)
+	mux.HandleFunc("GET /api/v1/projects/{id}", s.handleProjectGet)
+	mux.HandleFunc("POST /api/v1/projects", s.handleProjectRegister)
+	mux.HandleFunc("DELETE /api/v1/projects/{id}", s.handleProjectUnregister)
+	mux.HandleFunc("POST /api/v1/projects/{id}/sync", s.handleProjectSync)
+	mux.HandleFunc("GET /api/v1/projects/{id}/status", s.handleProjectStatus)
+	mux.HandleFunc("POST /api/v1/projects/detect", s.handleProjectDetect)
 }
 
 // middleware applies common middleware (CORS, logging, auth).

@@ -164,4 +164,7 @@ type Store interface {
 	// GetToolCallsForMessages batch-retrieves tool calls for multiple messages.
 	// Returns a map from message ID to the slice of tool calls for that message.
 	GetToolCallsForMessages(messageIDs []int64) (map[int64][]ToolCall, error)
+
+	// SetProject updates the project association for a session.
+	SetProject(sessionID, projectID, projectPath string) error
 }

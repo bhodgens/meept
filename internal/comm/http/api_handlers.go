@@ -2328,3 +2328,156 @@ func (s *Server) handleTerminalClear(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "cleared"})
 }
+
+// ===== Project Endpoints =====
+
+// handleProjectList handles GET /api/v1/projects.
+func (s *Server) handleProjectList(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	projects, err := s.services.Project.ListProjects(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"projects": projects,
+		KeyCount:   len(projects),
+	})
+}
+
+// handleProjectGet handles GET /api/v1/projects/{id}.
+func (s *Server) handleProjectGet(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+
+	project, err := s.services.Project.GetProject(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, project)
+}
+
+// handleProjectRegister handles POST /api/v1/projects.
+func (s *Server) handleProjectRegister(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	var req services.RegisterProjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	project, err := s.services.Project.RegisterProject(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusCreated, project)
+}
+
+// handleProjectUnregister handles DELETE /api/v1/projects/{id}.
+func (s *Server) handleProjectUnregister(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+
+	if err := s.services.Project.UnregisterProject(r.Context(), id); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "unregistered"})
+}
+
+// handleProjectSync handles POST /api/v1/projects/{id}/sync.
+func (s *Server) handleProjectSync(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+
+	if err := s.services.Project.SyncProject(r.Context(), id); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "synced"})
+}
+
+// handleProjectStatus handles GET /api/v1/projects/{id}/status.
+func (s *Server) handleProjectStatus(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+
+	status, err := s.services.Project.GetProjectStatus(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, status)
+}
+
+// handleProjectDetect handles POST /api/v1/projects/detect.
+func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	project, err := s.services.Project.DetectProject(r.Context(), req.Path)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, project)
+}

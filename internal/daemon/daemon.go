@@ -20,6 +20,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/registry"
 	"github.com/caimlas/meept/internal/rpc"
@@ -310,6 +311,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		DaemonController: daemonControl,
 		PidFile:          cfg.PIDFile,
 		StateDir:         cfg.StateDir,
+		ProjectManager:   nilSafeProjectManager(components),
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
@@ -333,6 +335,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			runtimeHandler := NewRuntimeRPCHandler(svcRegistry.Runtime)
 			runtimeHandler.RegisterRuntimeMethods(rpcServer)
 			logger.Info("Runtime RPC handlers registered")
+		}
+
+		// Project management handlers
+		if components.ProjectManager != nil {
+			projectHandler := rpc.NewProjectHandler(components.ProjectManager, nilSafeSessionStore(components))
+			projectHandler.RegisterProjectMethods(rpcServer)
+			logger.Info("Project RPC handlers registered")
 		}
 	}
 
@@ -918,4 +927,11 @@ func nilSafeRuntimeManager(c *Components) *llm.RuntimeManager {
 		return nil
 	}
 	return c.RuntimeManager
+}
+
+func nilSafeProjectManager(c *Components) *project.ProjectManager {
+	if c == nil {
+		return nil
+	}
+	return c.ProjectManager
 }
