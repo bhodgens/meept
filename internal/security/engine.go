@@ -64,6 +64,10 @@ func NewEngine(dbPath string, cfg *config.SecurityConfig, logger *slog.Logger) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+	// SQLite only supports one writer at a time. Constraining the pool to a
+	// single connection prevents SQLITE_BUSY from concurrent writes routed
+	// through different C-level sqlite3 connections in the pool.
+	db.SetMaxOpenConns(1)
 
 	// Get home directory for path expansion
 	homeDir := ""
@@ -574,9 +578,12 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 
 // checkOverrides checks for creator permission overrides.
 // SEC-6 FIX: Uses atomic UPDATE...WHERE to prevent TOCTOU race on usage_count.
+// SQLITE-FIX: Two-phase approach — drain the read cursor into memory first, close it,
+// then perform writes. Prevents SQLITE_BUSY from open cursor blocking writes.
 func (e *Engine) checkOverrides(action string, details map[string]string) *Decision {
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Phase 1: Collect matching overrides into memory.
 	rows, err := e.db.Query(`
 		SELECT id, pattern, decision, reason, usage_count, max_uses, expires_at
 		FROM permission_overrides
@@ -585,7 +592,13 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 	if err != nil {
 		return nil
 	}
-	defer rows.Close()
+
+	type overrideCandidate struct {
+		id          int64
+		decisionStr string
+		reason      string
+	}
+	var candidates []overrideCandidate
 
 	for rows.Next() {
 		var id int64
@@ -663,27 +676,32 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			}
 		}
 
+		candidates = append(candidates, overrideCandidate{
+			id:          id,
+			decisionStr: decisionStr,
+			reason:      reason,
+		})
+	}
+	rows.Close()
+
+	if err := rows.Err(); err != nil {
+		e.logger.Error("Error iterating permission overrides", "error", err)
+	}
+
+	// Phase 2: Cursor is now closed. Attempt atomic usage count increment
+	// for each candidate. The UPDATE is safe because no read cursor is open.
+	for _, c := range candidates {
 		// SEC-6 FIX: Atomic usage count increment with max_uses check.
 		// Only increment if usage_count < max_uses (or max_uses is 0/unlimited).
 		// If no rows affected, the override was already exhausted by another concurrent request.
-		var result sql.Result
-		var uerr error
-		for retry := 0; retry < 3; retry++ {
-			result, uerr = e.db.Exec(`
-				UPDATE permission_overrides
-				SET usage_count = usage_count + 1,
-				    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-				WHERE id = ? AND (max_uses = 0 OR usage_count < max_uses)`, id)
-			if uerr == nil {
-				break
-			}
-			e.logger.Warn("failed to update permission_overrides usage_count, retrying",
-				"override_id", id, "retry", retry+1, "error", uerr)
-			time.Sleep(50 * time.Millisecond)
-		}
+		result, uerr := e.db.Exec(`
+			UPDATE permission_overrides
+			SET usage_count = usage_count + 1,
+			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+			WHERE id = ? AND (max_uses = 0 OR usage_count < max_uses)`, c.id)
 		if uerr != nil {
-			e.logger.Warn("failed to update permission_overrides usage_count after retries",
-				"override_id", id, "error", uerr)
+			e.logger.Warn("failed to update permission_overrides usage_count",
+				"override_id", c.id, "error", uerr)
 			continue
 		}
 
@@ -693,10 +711,10 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			continue
 		}
 
-		if decisionStr == DecisionAllow {
+		if c.decisionStr == DecisionAllow {
 			reasonStr := "Creator pre-approved"
-			if reason != "" {
-				reasonStr = "Creator override: " + reason
+			if c.reason != "" {
+				reasonStr = "Creator override: " + c.reason
 			}
 			return &Decision{
 				Allowed:         true,
@@ -704,12 +722,12 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 				RiskLevel:       RiskMedium,
 				RuleSource:      "override",
 				OverrideApplied: true,
-				OverrideID:      &id,
+				OverrideID:      &c.id,
 			}
 		}
 		reasonStr := "Creator denied"
-		if reason != "" {
-			reasonStr = "Creator override (deny): " + reason
+		if c.reason != "" {
+			reasonStr = "Creator override (deny): " + c.reason
 		}
 		return &Decision{
 			Allowed:         false,
@@ -717,11 +735,8 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			RiskLevel:       RiskHigh,
 			RuleSource:      "override",
 			OverrideApplied: true,
-			OverrideID:      &id,
+			OverrideID:      &c.id,
 		}
-	}
-	if err := rows.Err(); err != nil {
-		e.logger.Error("Error iterating permission overrides", "error", err)
 	}
 
 	return nil

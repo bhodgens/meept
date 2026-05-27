@@ -190,17 +190,14 @@ func (p *QueuePersister) flushLockedHeld() {
 	p.mu.Lock()
 }
 
-// flushPending writes messages to SQLite, re-enqueuing failures.
+// flushPending writes messages to SQLite in a single transaction, re-enqueuing failures.
 func (p *QueuePersister) flushPending(pending []QueuedMessage) {
-	for _, msg := range pending {
-		if err := p.PersistSync(msg); err == nil {
-			continue
-		}
-		// Re-enqueue on failure so it gets retried on next flush.
+	tx, err := p.db.Begin()
+	if err != nil {
+		p.logger.Warn("queue persister: failed to begin flush transaction", "err", err)
+		// Re-enqueue everything
 		p.mu.Lock()
-		p.pending = append(p.pending, msg)
-
-		// Restart the timer for a retry (inside the lock).
+		p.pending = append(p.pending, pending...)
 		if !p.flushTimer.Stop() {
 			select {
 			case <-p.flushTimer.C:
@@ -209,7 +206,61 @@ func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 		}
 		p.flushTimer.Reset(p.flushDelay)
 		p.mu.Unlock()
-		break
+		return
+	}
+
+	var failed []QueuedMessage
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, msg := range pending {
+		_, err := tx.Exec(`
+			INSERT OR REPLACE INTO queued_followups
+				(conversation_id, message_id, content, queue_type, source, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`,
+			p.conversationID,
+			msg.ID,
+			msg.Content,
+			string(msg.QueueType),
+			msg.Source,
+			now,
+			now,
+		)
+		if err != nil {
+			p.logger.Warn("queue persister: failed to persist follow-up in batch", "id", msg.ID, "err", err)
+			failed = append(failed, msg)
+		} else {
+			p.publishPersistedEvent(msg)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		p.logger.Warn("queue persister: failed to commit flush transaction", "err", err)
+		// All messages may or may not have been written; re-enqueue everything
+		p.mu.Lock()
+		p.pending = append(p.pending, pending...)
+		if !p.flushTimer.Stop() {
+			select {
+			case <-p.flushTimer.C:
+			default:
+			}
+		}
+		p.flushTimer.Reset(p.flushDelay)
+		p.mu.Unlock()
+		return
+	}
+
+	// Re-enqueue only the individual failures
+	if len(failed) > 0 {
+		p.mu.Lock()
+		p.pending = append(p.pending, failed...)
+		if !p.flushTimer.Stop() {
+			select {
+			case <-p.flushTimer.C:
+			default:
+			}
+		}
+		p.flushTimer.Reset(p.flushDelay)
+		p.mu.Unlock()
 	}
 }
 

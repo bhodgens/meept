@@ -35,6 +35,8 @@ func newTestDBFile(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
+	// Single connection prevents SQLITE_BUSY from pool-multiplexed writes.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() {
 		db.Close()
 		os.Remove(dbPath)
@@ -700,19 +702,23 @@ func TestQueuePersister_ConcurrentAccess(t *testing.T) {
 
 	// Concurrent Flush calls.
 	for range 5 {
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			p.Flush()
-		})
+		}()
 	}
 
 	// Concurrent LoadPending calls.
 	for range 5 {
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			_, err := p.LoadPending()
 			if err != nil {
 				errCount.Add(1)
 			}
-		})
+		}()
 	}
 
 	wg.Wait()
