@@ -62,8 +62,9 @@ func NewMiddleware(client ChatterWithConfig, manager *Manager, config *Config, o
 		opt(m)
 	}
 
-	// Start background workers for async mode
-	if config.Shadowing.Mode == ModeAsync {
+	// Start background workers for async and selective modes.
+	// ModeSelective enqueues to shadowQueue via Chat(), so it needs workers to drain it.
+	if config.Shadowing.Mode == ModeAsync || config.Shadowing.Mode == ModeSelective {
 		m.startWorkers(config.Shadowing.WorkerCount)
 	}
 

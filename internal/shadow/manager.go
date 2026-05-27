@@ -233,6 +233,9 @@ func (m *Manager) CaptureInteraction(ctx context.Context, conversationID string,
 	if !m.IsEnabled() || m.trainingStore == nil {
 		return
 	}
+	if response == nil {
+		return
+	}
 
 	// Convert llm.ChatMessage to shadow.Message
 	shadowMessages := make([]Message, len(messages))
@@ -543,6 +546,9 @@ func (m *Manager) ResetMetrics() {
 // This is called when the LLM returns tool calls, capturing the intermediate step.
 func (m *Manager) CaptureToolInteraction(ctx context.Context, conversationID string, messages []llm.ChatMessage, response *llm.Response, modelID string) {
 	if !m.IsEnabled() || m.trainingStore == nil {
+		return
+	}
+	if response == nil {
 		return
 	}
 

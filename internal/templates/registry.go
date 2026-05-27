@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Registry holds loaded templates with lookup by name.
@@ -176,6 +177,7 @@ func (r *Registry) ActivateSessionTemplate(conversationID, templateName string, 
 		Name:            tmpl.Name,
 		SubstitutedBody: substituted,
 		CharCount:       len(substituted),
+		ActivatedAt:     time.Now(),
 	}
 
 	return r.sessions.Activate(conversationID, active)

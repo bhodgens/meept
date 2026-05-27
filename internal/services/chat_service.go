@@ -46,6 +46,9 @@ func NewChatService(msgBus *bus.MessageBus, agentReg *agent.AgentRegistry, logge
 
 // Chat sends a message and waits for a response.
 func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if s.bus == nil {
+		return nil, wrapError("chat", "Chat", ErrUnavailable)
+	}
 	if req.Message == "" {
 		return nil, wrapError("chat", "Chat", ErrInvalidInput)
 	}

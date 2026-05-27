@@ -140,7 +140,7 @@ func (s *SlashAutocomplete) UpdateCommands(commands []string) {
 // ReplaceCommands replaces the complete command list.
 // Duplicates are removed and the list is sorted.
 func (s *SlashAutocomplete) ReplaceCommands(commands []string) {
-	unique := commands[:0]
+	unique := make([]string, 0, len(commands))
 	seen := make(map[string]struct{}, len(commands))
 	for _, cmd := range commands {
 		if _, ok := seen[cmd]; !ok {

@@ -4,7 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
+
+// writeSSEData writes a properly-framed SSE data event. Per the SSE spec,
+// multi-line data must use separate "data:" lines.
+func writeSSEData(w http.ResponseWriter, data string) {
+	for _, line := range strings.Split(data, "\n") {
+		fmt.Fprintf(w, "data: %s\n", line)
+	}
+	fmt.Fprintf(w, "\n")
+}
 
 // handleChatStream handles POST /api/v1/chat/stream with Server-Sent Events.
 func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
@@ -34,10 +44,11 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		}
 		response, err := s.handler.Chat(r.Context(), req.Message)
 		if err != nil {
-			fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+			writeSSEData(w, "event: error")
+			writeSSEData(w, err.Error())
 			return
 		}
-		fmt.Fprintf(w, "data: %s\n\n", response)
+		writeSSEData(w, response)
 		fmt.Fprintf(w, "event: done\ndata: \n\n")
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -60,13 +71,14 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 				chunks = nil
 				continue
 			}
-			fmt.Fprintf(w, "data: %s\n\n", chunk)
+			writeSSEData(w, chunk)
 			if f, ok := w.(http.Flusher); ok {
 				f.Flush()
 			}
 		case err := <-done:
 			if err != nil {
-				fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+				fmt.Fprintf(w, "event: error\n")
+				writeSSEData(w, err.Error())
 			}
 			fmt.Fprintf(w, "event: done\ndata: \n\n")
 			if f, ok := w.(http.Flusher); ok {

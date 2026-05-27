@@ -1,8 +1,11 @@
 package debug
 
+import "sync"
+
 // RingBuffer is a fixed-size ring buffer for debug output.
 // It overwrites old data when full and provides thread-safe read/write.
 type RingBuffer struct {
+	mu   sync.Mutex
 	data []byte
 	size int
 	pos  int
@@ -23,6 +26,9 @@ func NewRingBuffer(size int) *RingBuffer {
 // Write appends bytes to the ring buffer, overwriting old data when full.
 // It always returns len(p), nil and never errors.
 func (r *RingBuffer) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	n := len(p)
 	for _, b := range p {
 		r.data[r.pos] = b
@@ -37,6 +43,9 @@ func (r *RingBuffer) Write(p []byte) (int, error) {
 // Read returns the contents of the ring buffer in chronological order.
 // The returned slice is a copy; callers may modify it freely.
 func (r *RingBuffer) Read() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if r.full {
 		buf := make([]byte, r.size)
 		copy(buf, r.data[r.pos:])
@@ -53,6 +62,8 @@ func (r *RingBuffer) Read() []byte {
 
 // Len returns the number of bytes currently stored in the buffer.
 func (r *RingBuffer) Len() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.full {
 		return r.size
 	}
@@ -61,6 +72,8 @@ func (r *RingBuffer) Len() int {
 
 // Reset clears the ring buffer.
 func (r *RingBuffer) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.pos = 0
 	r.full = false
 }

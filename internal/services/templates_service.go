@@ -128,7 +128,11 @@ func (s *TemplatesService) Invoke(ctx context.Context, req TemplatesInvokeReques
 	// Execute via the skill executor by constructing a minimal skill.
 	// The executor handles model resolution and LLM invocation.
 	// We create a lightweight skill from the template for execution.
-	result, err := s.executor.Execute(ctx, templateToSkill(s.registry.Get(req.Name)), prompt)
+	tmpl := s.registry.Get(req.Name)
+	if tmpl == nil {
+		return nil, wrapError("templates", "Invoke", ErrNotFound)
+	}
+	result, err := s.executor.Execute(ctx, templateToSkill(tmpl), prompt)
 	if err != nil {
 		return &TemplatesInvokeResult{
 			Prompt:  prompt,

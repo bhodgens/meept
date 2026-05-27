@@ -237,8 +237,8 @@ func NewArtifactCache(ttl time.Duration) *ArtifactCache {
 
 // Get retrieves artifacts from cache
 func (ac *ArtifactCache) Get(dir string) (*Artifacts, bool) {
-	ac.mu.RLock()
-	defer ac.mu.RUnlock()
+	ac.mu.Lock()
+	defer ac.mu.Unlock()
 
 	entry, exists := ac.entries[dir]
 	if !exists {

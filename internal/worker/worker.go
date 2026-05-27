@@ -97,6 +97,9 @@ func (w *Worker) Start(ctx context.Context) error {
 
 	w.logger.Info("Worker started", "id", w.ID, "capabilities", w.Capabilities)
 
+	if w.wg != nil {
+		w.wg.Add(1)
+	}
 	go w.run(ctx)
 	return nil
 }
@@ -158,9 +161,6 @@ func (w *Worker) StateChanges() <-chan StateTransition {
 }
 
 func (w *Worker) run(ctx context.Context) {
-	if w.wg != nil {
-		w.wg.Add(1)
-	}
 	defer func() {
 		w.mu.Lock()
 		w.setState(StateStopped)
