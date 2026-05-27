@@ -119,6 +119,12 @@ type App struct {
 	// Current session
 	currentSession *types.Session
 
+	// Current project
+	currentProjectID   string
+	currentProjectName string
+	currentProjectMode string
+	currentProjectDirty bool
+
 	// SessionManager is the shared session manager used by both TUI and meept-lite
 	sessionMgr *sharedclient.SessionManager
 
@@ -338,6 +344,48 @@ func (a *App) fetchTemplateNames() tea.Msg {
 	}
 
 	return TemplateNamesLoadedMsg{Names: names}
+}
+
+// fetchCurrentProject fetches the current project info from the daemon and
+// updates the project indicator fields on the App.
+func (a *App) fetchCurrentProject() tea.Msg {
+	if a.rpc == nil || !a.rpc.IsConnected() {
+		return ProjectInfoUpdatedMsg{}
+	}
+
+	projects, err := a.rpc.ListProjects()
+	if err != nil {
+		return ProjectInfoUpdatedMsg{}
+	}
+
+	// Find the first active project
+	for _, p := range projects.Projects {
+		if p.Status == "active" {
+			dirty := false
+			if p.Mode == "git" {
+				status, err := a.rpc.ProjectStatus(p.ID)
+				if err == nil {
+					dirty = status.Dirty
+				}
+			}
+			return ProjectInfoUpdatedMsg{
+				ProjectID:   p.ID,
+				ProjectName: p.Name,
+				ProjectMode: string(p.Mode),
+				Dirty:       dirty,
+			}
+		}
+	}
+
+	return ProjectInfoUpdatedMsg{}
+}
+
+// ProjectInfoUpdatedMsg carries updated project info to the App model.
+type ProjectInfoUpdatedMsg struct {
+	ProjectID   string
+	ProjectName string
+	ProjectMode string
+	Dirty       bool
 }
 
 // Update handles messages and updates the model.
@@ -594,7 +642,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ConnectSuccessMsg:
 		a.err = nil
 		// Initialize the current view, sidebar, load session, and fetch templates
-		return a, tea.Batch(a.initCurrentView(), a.sidebar.Init(), a.loadSession, a.fetchTemplateNames)
+		return a, tea.Batch(a.initCurrentView(), a.sidebar.Init(), a.loadSession, a.fetchTemplateNames, a.fetchCurrentProject)
 
 	case SessionLoadedMsg:
 		if msg.Err != nil {
@@ -1210,6 +1258,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.slashAutocomplete.MergeCommands(msg.Names)
 		}
 		return a, nil
+
+	case ProjectInfoUpdatedMsg:
+		a.currentProjectID = msg.ProjectID
+		a.currentProjectName = msg.ProjectName
+		a.currentProjectMode = msg.ProjectMode
+		a.currentProjectDirty = msg.Dirty
+		return a, nil
 	}
 
 	// Handle slash autocomplete filter updates when typing
@@ -1688,6 +1743,13 @@ func (a *App) renderStatusBar() string {
 		// Add context-sensitive quick actions
 		quickActions := a.getQuickActions()
 		parts = append(parts, quickActions...)
+
+		// Add project indicator
+		if a.currentProjectName != "" {
+			projectIndicator := a.renderProjectIndicator()
+			parts = append(parts, projectIndicator)
+		}
+
 		parts = append(parts, a.styles.Muted.Render(projectDisplay))
 	}
 
@@ -1779,6 +1841,40 @@ func (a *App) getQuickActions() []string {
 	}
 
 	return actions
+}
+
+// renderProjectIndicator returns a styled string showing the current project.
+// For git projects: [name branch*] where * means dirty
+// For local: [local:path]
+func (a *App) renderProjectIndicator() string {
+	if a.currentProjectName == "" {
+		return ""
+	}
+
+	name := a.currentProjectName
+	maxNameLen := 16
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen-3] + "..."
+	}
+
+	switch a.currentProjectMode {
+	case "git":
+		// Fetch branch from project status (we already have dirty cached)
+		branch := ""
+		if a.currentProjectID != "" {
+			status, err := a.rpc.ProjectStatus(a.currentProjectID)
+			if err == nil && status.Branch != "" {
+				branch = " " + status.Branch
+			}
+		}
+		dirty := ""
+		if a.currentProjectDirty {
+			dirty = "*"
+		}
+		return a.styles.HelpKey.Render(fmt.Sprintf("[%s%s%s]", name, branch, dirty))
+	default:
+		return a.styles.Muted.Render(fmt.Sprintf("[local:%s]", name))
+	}
 }
 
 func (a *App) renderError() string {

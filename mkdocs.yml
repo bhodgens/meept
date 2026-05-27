@@ -109,6 +109,7 @@ nav:
       - Shadow Training: workflows/shadow-training.md
       - Multi-Participant Communication: workflows/multi-participant-comms.md
       - Agent Lateral Interrogation Howto: workflows/agent-lateral-interrogation-howto.md
+      - Project Context: workflows/project-context.md
   - Reference:
       - reference/index.md
       - CLI Commands: reference/cli.md

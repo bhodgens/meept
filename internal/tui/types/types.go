@@ -447,3 +447,30 @@ type TreeNodeInfo struct {
 	Timestamp string `json:"timestamp"`
 	IsLeaf    bool   `json:"is_leaf"`
 }
+
+// ProjectInfo represents a registered project for TUI display.
+type ProjectInfo struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Mode     string `json:"mode"`
+	Branch   string `json:"branch"`
+	GitURL   string `json:"git_url,omitempty"`
+	LocalPath string `json:"local_path"`
+	Status   string `json:"status"`
+	Dirty    bool   `json:"dirty"`
+}
+
+// ProjectListResponse represents the response from project.list RPC.
+type ProjectListResponse struct {
+	Projects []ProjectInfo `json:"projects"`
+	Count    int           `json:"count"`
+}
+
+// ProjectStatusResponse represents the response from project.status RPC.
+type ProjectStatusResponse struct {
+	Branch        string `json:"branch"`
+	Dirty         bool   `json:"dirty"`
+	Ahead         int    `json:"ahead"`
+	Behind        int    `json:"behind"`
+	ModifiedFiles int    `json:"modified_files"`
+}

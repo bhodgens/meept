@@ -80,6 +80,15 @@ make menubar-clean             # Clean menubar build artifacts
 ./bin/meept q analyze                  # Analyze sessions for improvement opportunities
 ./bin/meept q analyze --force          # Force analysis even if disabled
 ./bin/meept q analyze --json           # Output results as JSON
+
+# Project context commands
+./bin/meept projects                    # List registered projects
+./bin/meept projects add <path|url>     # Register project
+./bin/meept projects remove <name>      # Unregister
+./bin/meept projects sync <name>        # Pull latest
+./bin/meept projects status <name>      # Show git status
+./bin/meept chat --project <name>       # Chat bound to specific project
+./bin/meept chat --nofence              # Disable path fencing for this session
 ```
 
 ## Architecture Overview
@@ -108,7 +117,8 @@ User Input (CLI/Telegram/Web/MenuBar)
 |-------|-------------|
 | **Server Core** | `cmd/meept-daemon`, `internal/daemon`, `internal/rpc`, `internal/bus` |
 | **Agent** | `internal/agent` (loop, orchestrator, planner, collaborative, workspace) |
-| **Security** | `internal/security` (engine, sanitizer, tirith, tls) |
+| **Project** | `internal/project` (manager, store, worktree) |
+| **Security** | `internal/security` (engine, sanitizer, tirith, tls, fence) |
 | **LLM** | `internal/llm` (client, resolver, budget, providers, token cache, context compactor, context firewall) |
 | **Skills** | `internal/skills` (discovery, registry, parser, models) |
 | **Memory** | `internal/memory` (manager, episodic, task, consolidation, ftstore) |
@@ -362,6 +372,7 @@ internal/
   llm/             # LLM client and resolution
   memory/          # Memory management (SQLite+FTS5)
   metrics/         # Metrics storage and collection (NEW)
+  project/         # Project context: registry, worktrees, fencing (NEW)
   registry/        # Service registry
   rpc/             # JSON-RPC server
   scheduler/       # Job scheduling

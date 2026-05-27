@@ -144,6 +144,8 @@ func (h *CommandHandler) executeBuiltin(cmd *SlashCommand) *CommandResult {
 		return h.executePlan()
 	case "review":
 		return h.executeReview()
+	case "project":
+		return h.executeProject(cmd.Args)
 	default:
 		return &CommandResult{
 			Output:  fmt.Sprintf("unknown command: %s", cmd.Name),
@@ -180,6 +182,7 @@ func (h *CommandHandler) executeHelp(args []string) *CommandResult {
 	sb.WriteString("  /edit <path>        open file in system editor\n")
 	sb.WriteString("  /plan               enter planning mode\n")
 	sb.WriteString("  /review             review current changes\n")
+	sb.WriteString("  /project [subcmd]   manage projects (list, add, sync, status)\n")
 
 	return &CommandResult{Output: sb.String()}
 }
@@ -314,6 +317,25 @@ before executing.`,
 
 review current changes in the working directory. shows a summary of
 staged and unstaged git changes with file statistics.`,
+
+		"project": `usage: /project [subcommand]
+
+manage registered projects.
+
+subcommands:
+  (none)              show current project info
+  list                list all registered projects
+  add <path|url>      register a new project
+  sync                synchronize the current project (git pull)
+  status              show git status of current project
+
+examples:
+  /project                        show project info
+  /project list                   list all projects
+  /project add /home/user/myapp   add local project
+  /project add https://github.com/org/repo.git
+  /project sync                   sync current project
+  /project status                 show project git status`,
 	}
 
 	if text, ok := helpTexts[name]; ok {
@@ -1066,4 +1088,250 @@ func isTemplateNotFoundError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "template not found") ||
 		strings.Contains(msg, "template substitution failed")
+}
+
+// executeProject handles /project slash commands.
+// Subcommands:
+//
+//	/project             - show current project info
+//	/project list        - list all registered projects
+//	/project add <path>  - register a new project
+//	/project sync        - sync current project
+//	/project status      - show current project status
+func (h *CommandHandler) executeProject(args []string) *CommandResult {
+	if h.rpc == nil || !h.rpc.IsConnected() {
+		return &CommandResult{
+			Output:  ErrNotConnected,
+			IsError: true,
+		}
+	}
+
+	subcmd := ""
+	if len(args) > 0 {
+		subcmd = args[0]
+	}
+
+	switch subcmd {
+	case "", "info":
+		return h.executeProjectInfo()
+	case "list", "ls":
+		return h.executeProjectList()
+	case "add", "register":
+		return h.executeProjectAdd(args[1:])
+	case "sync":
+		return h.executeProjectSync()
+	case "status":
+		return h.executeProjectStatus()
+	default:
+		return &CommandResult{
+			Output:  fmt.Sprintf("unknown project subcommand: %s\nuse: /project [list|add|sync|status]", subcmd),
+			IsError: true,
+		}
+	}
+}
+
+// executeProjectInfo shows the current project info.
+func (h *CommandHandler) executeProjectInfo() *CommandResult {
+	// List projects and show summary
+	projects, err := h.rpc.ListProjects()
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to get projects: %v", err),
+			IsError: true,
+		}
+	}
+
+	if len(projects.Projects) == 0 {
+		return &CommandResult{Output: "no projects registered\nuse /project add <path|url> to add one"}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("registered projects:\n\n")
+	for _, p := range projects.Projects {
+		dirty := ""
+		if p.Mode == "git" {
+			// Try to get status for git projects
+			status, err := h.rpc.ProjectStatus(p.ID)
+			if err == nil && status.Dirty {
+				dirty = " (dirty)"
+			}
+		}
+		branch := ""
+		if p.Branch != "" {
+			branch = fmt.Sprintf(" branch:%s", p.Branch)
+		}
+		sb.WriteString(fmt.Sprintf("  %s  [%s]%s%s\n", p.Name, p.Mode, branch, dirty))
+		if p.LocalPath != "" {
+			sb.WriteString(fmt.Sprintf("    path: %s\n", p.LocalPath))
+		}
+		if p.GitURL != "" {
+			sb.WriteString(fmt.Sprintf("    url:  %s\n", p.GitURL))
+		}
+	}
+	return &CommandResult{Output: sb.String()}
+}
+
+// executeProjectList lists all registered projects.
+func (h *CommandHandler) executeProjectList() *CommandResult {
+	projects, err := h.rpc.ListProjects()
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to list projects: %v", err),
+			IsError: true,
+		}
+	}
+
+	if len(projects.Projects) == 0 {
+		return &CommandResult{Output: "no projects registered"}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("projects:\n\n")
+	sb.WriteString(fmt.Sprintf("  %-20s %-8s %-16s %-10s %s\n", "NAME", "MODE", "BRANCH", "STATUS", "PATH"))
+	for _, p := range projects.Projects {
+		path := p.LocalPath
+		if len(path) > 40 {
+			path = "..." + path[len(path)-37:]
+		}
+		branch := p.Branch
+		if branch == "" {
+			branch = "-"
+		}
+		sb.WriteString(fmt.Sprintf("  %-20s %-8s %-16s %-10s %s\n", p.Name, p.Mode, branch, p.Status, path))
+	}
+	sb.WriteString(fmt.Sprintf("\n  total: %d projects", projects.Count))
+	return &CommandResult{Output: sb.String()}
+}
+
+// executeProjectAdd registers a new project.
+func (h *CommandHandler) executeProjectAdd(args []string) *CommandResult {
+	if len(args) == 0 {
+		return &CommandResult{
+			Output:  "usage: /project add <path|url>",
+			IsError: true,
+		}
+	}
+
+	source := args[0]
+	name := ""
+	if len(args) > 1 {
+		name = args[1]
+	}
+
+	// Derive name from source if not provided
+	if name == "" {
+		parts := strings.Split(strings.TrimRight(source, "/"), "/")
+		name = parts[len(parts)-1]
+		name = strings.TrimSuffix(name, ".git")
+	}
+
+	// Determine if source is a git URL or local path
+	var gitURL, localPath string
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "git@") || strings.HasPrefix(source, "ssh://") {
+		gitURL = source
+	} else {
+		localPath = source
+	}
+
+	project, err := h.rpc.RegisterProject(name, gitURL, localPath)
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to register project: %v", err),
+			IsError: true,
+		}
+	}
+
+	return &CommandResult{Output: fmt.Sprintf("registered project: %s (id: %s, mode: %s)", project.Name, project.ID, project.Mode)}
+}
+
+// executeProjectSync syncs the current project.
+func (h *CommandHandler) executeProjectSync() *CommandResult {
+	// Get projects list to find the current one
+	projects, err := h.rpc.ListProjects()
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to get projects: %v", err),
+			IsError: true,
+		}
+	}
+
+	if len(projects.Projects) == 0 {
+		return &CommandResult{Output: "no projects registered"}
+	}
+
+	// Sync the first active project (or all if multiple)
+	var synced []string
+	for _, p := range projects.Projects {
+		if p.Mode == "git" && p.Status == "active" {
+			if err := h.rpc.SyncProject(p.ID); err != nil {
+				return &CommandResult{
+					Output:  fmt.Sprintf("failed to sync project %s: %v", p.Name, err),
+					IsError: true,
+				}
+			}
+			synced = append(synced, p.Name)
+		}
+	}
+
+	if len(synced) == 0 {
+		return &CommandResult{Output: "no git projects to sync"}
+	}
+
+	return &CommandResult{Output: fmt.Sprintf("synced: %s", strings.Join(synced, ", "))}
+}
+
+// executeProjectStatus shows status of the current project.
+func (h *CommandHandler) executeProjectStatus() *CommandResult {
+	projects, err := h.rpc.ListProjects()
+	if err != nil {
+		return &CommandResult{
+			Output:  fmt.Sprintf("failed to get projects: %v", err),
+			IsError: true,
+		}
+	}
+
+	if len(projects.Projects) == 0 {
+		return &CommandResult{Output: "no projects registered"}
+	}
+
+	var sb strings.Builder
+	for _, p := range projects.Projects {
+		if p.Status != "active" {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("project: %s (%s)\n", p.Name, p.Mode))
+		sb.WriteString(fmt.Sprintf("  id:     %s\n", p.ID))
+		if p.LocalPath != "" {
+			sb.WriteString(fmt.Sprintf("  path:   %s\n", p.LocalPath))
+		}
+		if p.GitURL != "" {
+			sb.WriteString(fmt.Sprintf("  url:    %s\n", p.GitURL))
+		}
+
+		if p.Mode == "git" {
+			status, err := h.rpc.ProjectStatus(p.ID)
+			if err != nil {
+				sb.WriteString(fmt.Sprintf("  status: error: %v\n", err))
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("  branch: %s\n", status.Branch))
+			sb.WriteString(fmt.Sprintf("  dirty:  %v\n", status.Dirty))
+			if status.Ahead > 0 {
+				sb.WriteString(fmt.Sprintf("  ahead:  %d commits\n", status.Ahead))
+			}
+			if status.Behind > 0 {
+				sb.WriteString(fmt.Sprintf("  behind: %d commits\n", status.Behind))
+			}
+			if status.ModifiedFiles > 0 {
+				sb.WriteString(fmt.Sprintf("  modified files: %d\n", status.ModifiedFiles))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	if sb.Len() == 0 {
+		return &CommandResult{Output: "no active projects"}
+	}
+
+	return &CommandResult{Output: strings.TrimSpace(sb.String())}
 }

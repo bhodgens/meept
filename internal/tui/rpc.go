@@ -1004,3 +1004,119 @@ func (c *RPCClient) InvokeTemplate(name string, args []string) (string, error) {
 	// Otherwise return the substituted prompt text.
 	return resp.Prompt, nil
 }
+
+// ============================================================================
+// Project Methods
+// ============================================================================
+
+// ListProjects fetches all registered projects from the daemon.
+func (c *RPCClient) ListProjects() (*types.ProjectListResponse, error) {
+	result, err := c.Call("project.list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.ProjectListResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse projects response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// GetProject fetches a single project by ID.
+func (c *RPCClient) GetProject(id string) (*types.ProjectInfo, error) {
+	params := map[string]string{"id": id}
+	result, err := c.Call("project.get", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.ProjectInfo
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse project response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// RegisterProject registers a new project with the daemon.
+func (c *RPCClient) RegisterProject(name, gitURL, localPath string) (*types.ProjectInfo, error) {
+	params := map[string]string{
+		ParamName: name,
+	}
+	if gitURL != "" {
+		params["git_url"] = gitURL
+	}
+	if localPath != "" {
+		params["local_path"] = localPath
+	}
+
+	result, err := c.Call("project.register", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.ProjectInfo
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse project register response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// UnregisterProject removes a project registration from the daemon.
+func (c *RPCClient) UnregisterProject(id string) error {
+	params := map[string]string{"id": id}
+	_, err := c.Call("project.unregister", params)
+	return err
+}
+
+// SetProject binds a project to a session.
+func (c *RPCClient) SetProject(sessionID, projectID string) error {
+	params := map[string]string{
+		ParamSessionID: sessionID,
+		"project_id":   projectID,
+	}
+	_, err := c.Call("project.set", params)
+	return err
+}
+
+// SyncProject synchronizes a project (pulls latest for git projects).
+func (c *RPCClient) SyncProject(id string) error {
+	params := map[string]string{"id": id}
+	_, err := c.Call("project.sync", params)
+	return err
+}
+
+// ProjectStatus gets the runtime status of a project (branch, dirty, etc.).
+func (c *RPCClient) ProjectStatus(id string) (*types.ProjectStatusResponse, error) {
+	params := map[string]string{"id": id}
+	result, err := c.Call("project.status", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.ProjectStatusResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse project status response: %w", err)
+	}
+
+	return &resp, nil
+}
+
+// DetectProject attempts to detect a project from a filesystem path.
+func (c *RPCClient) DetectProject(path string) (*types.ProjectInfo, error) {
+	params := map[string]string{"path": path}
+	result, err := c.Call("project.detect", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp types.ProjectInfo
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse project detect response: %w", err)
+	}
+
+	return &resp, nil
+}
