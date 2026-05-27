@@ -340,15 +340,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	var httpSrv *http.Server
 	if fullCfg.Transport.HTTP.Enabled {
 		if configService != nil && daemonControl != nil {
-		httpCfg := http.DefaultServerConfig()
-		httpCfg.Addr = fullCfg.Transport.HTTP.Addr
-		httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
-		httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
-		httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
-		httpCfg.AutoTLSCert = fullCfg.Transport.HTTP.AutoTLSCert
-		httpCfg.TLSCertFile = fullCfg.Transport.HTTP.TLSCertFile
-		httpCfg.TLSKeyFile = fullCfg.Transport.HTTP.TLSKeyFile
-		httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
+			httpCfg := http.DefaultServerConfig()
+			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
+			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
+			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
+			httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
+			httpCfg.AutoTLSCert = fullCfg.Transport.HTTP.AutoTLSCert
+			httpCfg.TLSCertFile = fullCfg.Transport.HTTP.TLSCertFile
+			httpCfg.TLSKeyFile = fullCfg.Transport.HTTP.TLSKeyFile
+			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
 			// Build functional options based on config
 			var httpOpts []http.ServerOption
 
@@ -472,12 +472,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 		)
 	}
 
-	// Start local LLM runtimes
+	// Start local LLM runtimes in the background so the daemon reaches
+	// "running" status without blocking on potentially slow model loading.
 	if d.components != nil && d.components.RuntimeManager != nil {
-		if err := d.components.RuntimeManager.StartAll(ctx); err != nil {
-			d.logger.Error("Failed to start LLM runtimes", "error", err)
-			return err
-		}
+		go func() {
+			if err := d.components.RuntimeManager.StartAll(ctx); err != nil {
+				d.logger.Error("Failed to start LLM runtimes", "error", err)
+			}
+		}()
 	}
 
 	// Metrics collector is started automatically by NewCollector

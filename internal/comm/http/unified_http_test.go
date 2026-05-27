@@ -24,6 +24,8 @@ func startTestServer(t *testing.T, opts ...http.ServerOption) (baseURL string, c
 	t.Helper()
 	cfg := http.DefaultServerConfig()
 	cfg.Addr = ":0"
+	cfg.UseTLS = false      // Disable TLS for test servers (plain HTTP)
+	cfg.RequireAuth = false // Disable auth for test servers (no API keys)
 
 	srv := http.NewServer(cfg, nil, nil, nil, nil, nil, opts...)
 	if srv == nil {
@@ -106,7 +108,9 @@ func TestUnifiedHTTPServer_BothOptions(t *testing.T) {
 // TestUnifiedHTTPServer_ContextCancellation tests graceful shutdown.
 func TestUnifiedHTTPServer_ContextCancellation(t *testing.T) {
 	cfg := http.DefaultServerConfig()
-	cfg.Addr = ":0" // Let OS choose available port
+	cfg.Addr = ":0"         // Let OS choose available port
+	cfg.UseTLS = false      // Disable TLS for test server
+	cfg.RequireAuth = false // Disable auth for test server
 
 	srv := http.NewServer(cfg, nil, nil, nil, nil, nil)
 	if srv == nil {

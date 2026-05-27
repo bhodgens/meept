@@ -766,7 +766,7 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SocketPath != "~/.meept/meept.sock" {
 		t.Errorf("default socket path = %s", cfg.SocketPath)
 	}
-	if cfg.HTTPBaseURL != "http://localhost:8081" {
+	if cfg.HTTPBaseURL != "https://localhost:8081" {
 		t.Errorf("default HTTP URL = %s", cfg.HTTPBaseURL)
 	}
 	if cfg.Timeout != 120*time.Second {

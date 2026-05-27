@@ -74,11 +74,11 @@ type Client interface {
 
 // Config holds client-side transport configuration.
 type Config struct {
-	Transport         string        // "rpc" or "http"
-	SocketPath        string        // For RPC transport
-	HTTPBaseURL       string        // For HTTP transport (e.g. "https://localhost:8081")
-	InsecureSkipVerify bool         // Skip TLS certificate verification (for self-signed certs)
-	Timeout           time.Duration // Per-call timeout
+	Transport          string        // "rpc" or "http"
+	SocketPath         string        // For RPC transport
+	HTTPBaseURL        string        // For HTTP transport (e.g. "https://localhost:8081")
+	InsecureSkipVerify bool          // Skip TLS certificate verification (for self-signed certs)
+	Timeout            time.Duration // Per-call timeout
 }
 
 // DefaultConfig returns the default client transport config.
