@@ -1083,6 +1083,18 @@ func (l *AgentLoop) resolveWorkingDir(conversationID string) string {
 	return l.workingDir
 }
 
+// invalidateProjectArtifacts clears cached artifacts when a session's project changes.
+// This is a convenience wrapper used by the agent loop for direct invalidation when
+// the primary invalidation path through the RPC handler is not available.
+func (l *AgentLoop) invalidateProjectArtifacts(oldPath string) {
+	if l.artifactManager != nil && oldPath != "" {
+		l.artifactManager.InvalidateCache(oldPath)
+		l.logger.Debug("invalidated artifact cache for project switch",
+			"old_path", oldPath,
+		)
+	}
+}
+
 // getOrCreateConversation retrieves or creates a conversation for the given ID.
 // If session persistence is enabled and the conversation is not in the ConversationStore,
 // it attempts to restore from SQLite. Otherwise, it creates a new empty conversation.

@@ -527,3 +527,189 @@ func TestIsPathUnderDir(t *testing.T) {
 		}
 	}
 }
+
+// --- Fence integration tests ---
+
+func newEngineWithFence(t *testing.T, fenceCfg *FenceConfig) *Engine {
+	t.Helper()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "security.db")
+
+	cfg := &config.SecurityConfig{
+		RequireConfirmationHigh:     true,
+		RequireConfirmationCritical: true,
+	}
+
+	engine, err := NewEngine(dbPath, cfg, nil)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	t.Cleanup(func() { engine.Close() })
+
+	// Add a broad allow path rule so the path-rule stage does not deny
+	// test paths before the fence check runs.  The "/" pattern matches
+	// everything via isPathUnderDir.  In production the session root is
+	// typically under ~ which is already allowed by seed rules.
+	_, err = engine.db.Exec(`
+		INSERT INTO path_rules (pattern, rule_type, risk_level, description, immutable, enabled)
+		VALUES ('/', 'allow', 0, 'test allow-all', 0, 1)`)
+	if err != nil {
+		t.Fatalf("failed to insert test allow rule: %v", err)
+	}
+
+	if fenceCfg != nil {
+		engine.SetFenceChecker(NewFenceChecker(*fenceCfg))
+	}
+	return engine
+}
+
+func TestFenceChecker_BlocksWritesOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	engine := newEngineWithFence(t, &FenceConfig{
+		Enabled:  true,
+		RootPath: root,
+	})
+
+	// Write to a path outside the root
+	outsidePath := filepath.Join(t.TempDir(), "outside.txt")
+	decision := engine.Check(ActionFileWrite, "file_write", map[string]string{
+		"path": outsidePath,
+	}, "")
+
+	if decision.Allowed {
+		t.Errorf("fence should block write outside root, got allowed=true")
+	}
+	if decision.RuleSource != "fence" {
+		t.Errorf("expected rule_source=fence, got %q", decision.RuleSource)
+	}
+}
+
+func TestFenceChecker_AllowsWritesInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	engine := newEngineWithFence(t, &FenceConfig{
+		Enabled:  true,
+		RootPath: root,
+	})
+
+	insidePath := filepath.Join(root, "inside.txt")
+	decision := engine.Check(ActionFileWrite, "file_write", map[string]string{
+		"path": insidePath,
+	}, "")
+
+	// file_write is safe by default so should be permitted (no confirmation gate)
+	if !decision.Allowed {
+		t.Errorf("fence should allow write inside root, got: allowed=false, reason=%q", decision.Reason)
+	}
+}
+
+func TestFenceChecker_AllowsReadsToSystemPaths(t *testing.T) {
+	root := t.TempDir()
+	systemPath := t.TempDir()
+	engine := newEngineWithFence(t, &FenceConfig{
+		Enabled:   true,
+		RootPath:  root,
+		AllowRead: []string{systemPath},
+	})
+
+	readPath := filepath.Join(systemPath, "somefile.txt")
+	decision := engine.Check(ActionFileRead, "file_read", map[string]string{
+		"path": readPath,
+	}, "")
+
+	if !decision.Allowed {
+		t.Errorf("fence should allow read to allowed system path, got: allowed=false, reason=%q", decision.Reason)
+	}
+}
+
+func TestFenceChecker_BlocksReadsOutsideRootAndAllowRead(t *testing.T) {
+	root := t.TempDir()
+	engine := newEngineWithFence(t, &FenceConfig{
+		Enabled:  true,
+		RootPath: root,
+	})
+
+	outsidePath := filepath.Join(t.TempDir(), "forbidden.txt")
+	decision := engine.Check(ActionFileRead, "file_read", map[string]string{
+		"path": outsidePath,
+	}, "")
+
+	if decision.Allowed {
+		t.Errorf("fence should block read outside root with no allow-read, got allowed=true")
+	}
+	if decision.RuleSource != "fence" {
+		t.Errorf("expected rule_source=fence, got %q", decision.RuleSource)
+	}
+}
+
+func TestFenceChecker_NoFenceCheckerMeansNoEnforcement(t *testing.T) {
+	engine := newEngineWithFence(t, nil) // nil FenceConfig = no fence checker
+
+	// Path is irrelevant since no fence checker is set
+	outsidePath := filepath.Join(t.TempDir(), "anything.txt")
+	decision := engine.Check(ActionFileWrite, "file_write", map[string]string{
+		"path": outsidePath,
+	}, "")
+
+	// Should proceed past fence stage (may be blocked by other rules,
+	// but NOT by fence). file_write is safe so should be allowed.
+	if !decision.Allowed && decision.RuleSource == "fence" {
+		t.Errorf("no fence checker should mean no fence enforcement, got fence denial")
+	}
+}
+
+func TestFenceChecker_NoFenceModeBypassesCheck(t *testing.T) {
+	root := t.TempDir()
+	engine := newEngineWithFence(t, &FenceConfig{
+		Enabled:  true,
+		RootPath: root,
+		NoFence:  true, // per-session override
+	})
+
+	outsidePath := filepath.Join(t.TempDir(), "outside.txt")
+	decision := engine.Check(ActionFileWrite, "file_write", map[string]string{
+		"path": outsidePath,
+	}, "")
+
+	// NoFence should bypass the fence check entirely
+	if !decision.Allowed && decision.RuleSource == "fence" {
+		t.Errorf("nofence mode should bypass fence check, got fence denial")
+	}
+}
+
+func TestFenceChecker_BlocksShellExecOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	engine := newEngineWithFence(t, &FenceConfig{
+		Enabled:  true,
+		RootPath: root,
+	})
+
+	outsideDir := t.TempDir()
+	decision := engine.Check(ActionShellExecute, "shell", map[string]string{
+		"command": "ls -la",
+		"workdir": outsideDir,
+	}, "")
+
+	if decision.Allowed {
+		t.Errorf("fence should block shell_execute with workdir outside root, got allowed=true")
+	}
+	if decision.RuleSource != "fence" {
+		t.Errorf("expected rule_source=fence, got %q", decision.RuleSource)
+	}
+}
+
+func TestFenceChecker_AllowsShellExecInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	engine := newEngineWithFence(t, &FenceConfig{
+		Enabled:  true,
+		RootPath: root,
+	})
+
+	decision := engine.Check(ActionShellExecute, "shell", map[string]string{
+		"command": "ls -la",
+		"workdir": root,
+	}, "")
+
+	if !decision.Allowed {
+		t.Errorf("fence should allow shell_execute with workdir inside root, got: allowed=false, reason=%q", decision.Reason)
+	}
+}

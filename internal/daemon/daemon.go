@@ -340,6 +340,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		// Project management handlers
 		if components.ProjectManager != nil {
 			projectHandler := rpc.NewProjectHandler(components.ProjectManager, nilSafeSessionStore(components))
+			if components.ArtifactManager != nil {
+				projectHandler.SetArtifactInvalidator(components.ArtifactManager)
+			}
 			projectHandler.RegisterProjectMethods(rpcServer)
 			logger.Info("Project RPC handlers registered")
 		}

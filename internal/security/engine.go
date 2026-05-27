@@ -37,6 +37,7 @@ type Engine struct {
 	compiledCommands  []compiledPattern
 	compiledFinancial []*regexp.Regexp
 	logger            *slog.Logger
+	fenceChecker      *FenceChecker
 }
 
 // NewEngine creates a new security engine with the given database path.
@@ -106,6 +107,19 @@ func (e *Engine) initialize() error {
 
 	e.logger.Info("SecurityEngine initialized", "db", e.db)
 	return nil
+}
+
+// SetFenceChecker sets the fence checker for path boundary enforcement.
+// Pass nil to disable fencing for this session. The typed-nil guard
+// prevents accidental interface-nil assignment.
+func (e *Engine) SetFenceChecker(fc *FenceChecker) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if fc != nil {
+		e.fenceChecker = fc
+	} else {
+		e.fenceChecker = nil
+	}
 }
 
 // createSchema creates the database tables.
@@ -294,6 +308,43 @@ func (e *Engine) Check(action, toolName string, details map[string]string, conve
 				e.logDecision(*decision, action, toolName, details, conversationID)
 				return *decision
 			}
+		}
+	}
+
+	// Fence check: enforce project worktree boundary
+	if e.fenceChecker != nil {
+		fc := e.fenceChecker
+		var fenceErr error
+
+		switch action {
+		case ActionFileRead, ActionFileWrite, ActionFileDelete:
+			if path := details["path"]; path != "" {
+				fenceOp := "read"
+				switch action {
+				case ActionFileWrite:
+					fenceOp = "write"
+				case ActionFileDelete:
+					fenceOp = "delete"
+				}
+				fenceErr = fc.CheckPath(path, fenceOp)
+			}
+		case ActionShellExecute:
+			workDir := details["workdir"]
+			if workDir == "" {
+				workDir = "."
+			}
+			fenceErr = fc.CheckCommand(details["command"], workDir)
+		}
+
+		if fenceErr != nil {
+			decision := Decision{
+				Allowed:    false,
+				Reason:     fenceErr.Error(),
+				RiskLevel:  RiskHigh,
+				RuleSource: "fence",
+			}
+			e.logDecision(decision, action, toolName, details, conversationID)
+			return decision
 		}
 	}
 

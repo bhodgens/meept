@@ -9,15 +9,27 @@ import (
 	"github.com/caimlas/meept/internal/session"
 )
 
+// ArtifactInvalidator is called when a session's project binding changes.
+// Implementations should invalidate cached artifacts for the old project path.
+type ArtifactInvalidator interface {
+	InvalidateCache(dir string)
+}
+
 // ProjectHandler provides native RPC methods for project management.
 type ProjectHandler struct {
-	pm          *project.ProjectManager
+	pm           *project.ProjectManager
 	sessionStore session.Store
+	artifactInv  ArtifactInvalidator
 }
 
 // NewProjectHandler creates a new project handler.
 func NewProjectHandler(pm *project.ProjectManager, store session.Store) *ProjectHandler {
 	return &ProjectHandler{pm: pm, sessionStore: store}
+}
+
+// SetArtifactInvalidator sets the artifact invalidator called when a session's project changes.
+func (h *ProjectHandler) SetArtifactInvalidator(inv ArtifactInvalidator) {
+	h.artifactInv = inv
 }
 
 // pm returns the ProjectManager or an error if not available.
@@ -171,8 +183,20 @@ func (h *ProjectHandler) handleSet(ctx context.Context, params json.RawMessage) 
 	if h.sessionStore == nil {
 		return nil, fmt.Errorf("session store not available")
 	}
+
+	// Capture old project path before update so we can invalidate its artifact cache.
+	var oldProjectPath string
+	if existing := h.sessionStore.Get(req.SessionID); existing != nil {
+		oldProjectPath = existing.ProjectPath
+	}
+
 	if err := h.sessionStore.SetProject(req.SessionID, req.ProjectID, p.LocalPath); err != nil {
 		return nil, fmt.Errorf("set project: %w", err)
+	}
+
+	// Invalidate cached artifacts for the old project path.
+	if h.artifactInv != nil && oldProjectPath != "" && oldProjectPath != p.LocalPath {
+		h.artifactInv.InvalidateCache(oldProjectPath)
 	}
 
 	return map[string]any{
