@@ -506,7 +506,7 @@ func (h *Handler) handleUpdate(ctx context.Context, msg *models.BusMessage) (any
 		task.Description = params.Description
 	}
 	if params.State != "" {
-		task.State = TaskState(params.State)
+		task.SetState(TaskState(params.State))
 	}
 	if params.ProjectDir != "" {
 		task.ProjectDir = params.ProjectDir

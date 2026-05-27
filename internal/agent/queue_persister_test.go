@@ -17,7 +17,7 @@ import (
 // newTestDB creates an in-memory SQLite database for testing.
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("modernc.org/sqlite", ":memory:")
+	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
@@ -31,7 +31,7 @@ func newTestDBFile(t *testing.T) *sql.DB {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	db, err := sql.Open("modernc.org/sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}

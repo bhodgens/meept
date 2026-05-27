@@ -223,6 +223,12 @@ func (h *DevHandler) handleSwitchModel(ctx context.Context, params json.RawMessa
 	// Switch by index or name
 	switch {
 	case req.Index != nil:
+		if len(h.modelsList) == 0 {
+			return map[string]any{
+				RPCKeySuccess: false,
+				RPCKeyMessage: "no models configured",
+			}, nil
+		}
 		if *req.Index < 0 || *req.Index >= len(h.modelsList) {
 			return map[string]any{
 				RPCKeySuccess: false,

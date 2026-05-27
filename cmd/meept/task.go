@@ -84,7 +84,7 @@ func newTaskListCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&state, "state", "", "", "Filter by state (pending, executing, completed, etc.)")
+	cmd.Flags().StringVar(&state, "state", "", "Filter by state (pending, executing, completed, etc.)")
 	cmd.Flags().IntVarP(&limit, "limit", "n", 50, "Maximum number of tasks to return")
 
 	return cmd

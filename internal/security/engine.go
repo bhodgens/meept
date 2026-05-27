@@ -666,13 +666,23 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 		// SEC-6 FIX: Atomic usage count increment with max_uses check.
 		// Only increment if usage_count < max_uses (or max_uses is 0/unlimited).
 		// If no rows affected, the override was already exhausted by another concurrent request.
-		result, uerr := e.db.Exec(`
-			UPDATE permission_overrides
-			SET usage_count = usage_count + 1,
-			    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-			WHERE id = ? AND (max_uses = 0 OR usage_count < max_uses)`, id)
+		var result sql.Result
+		var uerr error
+		for retry := 0; retry < 3; retry++ {
+			result, uerr = e.db.Exec(`
+				UPDATE permission_overrides
+				SET usage_count = usage_count + 1,
+				    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+				WHERE id = ? AND (max_uses = 0 OR usage_count < max_uses)`, id)
+			if uerr == nil {
+				break
+			}
+			e.logger.Warn("failed to update permission_overrides usage_count, retrying",
+				"override_id", id, "retry", retry+1, "error", uerr)
+			time.Sleep(50 * time.Millisecond)
+		}
 		if uerr != nil {
-			e.logger.Warn("failed to update permission_overrides usage_count",
+			e.logger.Warn("failed to update permission_overrides usage_count after retries",
 				"override_id", id, "error", uerr)
 			continue
 		}

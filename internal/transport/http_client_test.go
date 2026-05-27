@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewHTTPClient(t *testing.T) {
-	client := NewHTTPClient("http://localhost:9999", 5*time.Second)
+	client := NewHTTPClient("https://localhost:9999", 5*time.Second)
 	if client == nil {
 		t.Fatal("NewHTTPClient returned nil")
 	}
@@ -17,9 +17,17 @@ func TestNewHTTPClient(t *testing.T) {
 
 func TestNewHTTPClient_ZeroTimeout(t *testing.T) {
 	// Zero timeout should use the default of 120s
-	client := NewHTTPClient("http://localhost:9999", 0)
+	client := NewHTTPClient("https://localhost:9999", 0)
 	if client == nil {
 		t.Fatal("NewHTTPClient with zero timeout returned nil")
+	}
+	client.Close()
+}
+
+func TestNewHTTPClient_WithInsecureSkipVerify(t *testing.T) {
+	client := NewHTTPClient("https://localhost:9999", 5*time.Second, WithInsecureSkipVerify(true))
+	if client == nil {
+		t.Fatal("NewHTTPClient with InsecureSkipVerify returned nil")
 	}
 	client.Close()
 }
@@ -44,7 +52,7 @@ func TestHTTPClient_Connect(t *testing.T) {
 }
 
 func TestHTTPClient_Connect_NotRunning(t *testing.T) {
-	client := NewHTTPClient("http://localhost:1", 1*time.Second)
+	client := NewHTTPClient("https://localhost:1", 1*time.Second, WithInsecureSkipVerify(true))
 	defer client.Close()
 
 	err := client.Connect()
@@ -83,7 +91,7 @@ func TestHTTPClient_IsConnected(t *testing.T) {
 }
 
 func TestHTTPClient_IsConnected_False(t *testing.T) {
-	client := NewHTTPClient("http://localhost:1", 1*time.Second)
+	client := NewHTTPClient("https://localhost:1", 1*time.Second, WithInsecureSkipVerify(true))
 	defer client.Close()
 
 	if client.IsConnected() {
@@ -92,7 +100,7 @@ func TestHTTPClient_IsConnected_False(t *testing.T) {
 }
 
 func TestHTTPClient_Close(t *testing.T) {
-	client := NewHTTPClient("http://localhost:9999", 5*time.Second)
+	client := NewHTTPClient("https://localhost:9999", 5*time.Second)
 	err := client.Close()
 	if err != nil {
 		t.Errorf("Close() returned error: %v", err)
@@ -100,7 +108,7 @@ func TestHTTPClient_Close(t *testing.T) {
 }
 
 func TestHTTPClient_SetTimeout(t *testing.T) {
-	client := NewHTTPClient("http://localhost:9999", 5*time.Second)
+	client := NewHTTPClient("https://localhost:9999", 5*time.Second)
 	defer client.Close()
 
 	// SetTimeout should not panic

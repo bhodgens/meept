@@ -267,7 +267,7 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		t.Name(),
 	))
 
-	return tools.ToolResult{
+	return &tools.ToolResult{
 		Success: returnCode == 0,
 		Result: ShellResult{
 			Stdout:     stdoutStr,
@@ -414,7 +414,7 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 		t.Name(),
 	))
 
-	return tools.ToolResult{
+	return &tools.ToolResult{
 		Success: returnCode == 0,
 		Result: ShellResult{
 			Stdout:     stdoutStr,

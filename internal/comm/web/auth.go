@@ -5,6 +5,8 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Authenticator is the interface for request authentication.
@@ -53,13 +55,35 @@ func (a *BearerAuth) Authenticate(r *http.Request) bool {
 }
 
 // BasicAuth authenticates using HTTP Basic Auth.
+// Passwords are stored as bcrypt hashes.
 type BasicAuth struct {
-	users map[string]string // username -> password
+	users map[string]string // username -> bcrypt hash
 }
 
-// NewBasicAuth creates a new BasicAuth with the given credentials.
+// NewBasicAuth creates a new BasicAuth with the given plaintext credentials.
+// Passwords are automatically hashed with bcrypt.
 func NewBasicAuth(users map[string]string) *BasicAuth {
-	return &BasicAuth{users: users}
+	hashed := make(map[string]string, len(users))
+	for username, password := range users {
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			// If bcrypt fails, skip this user (should not happen with valid input)
+			continue
+		}
+		hashed[username] = string(hash)
+	}
+	return &BasicAuth{users: hashed}
+}
+
+// SetCredentials sets or updates credentials for a user.
+// The password is hashed with bcrypt before storage.
+func (a *BasicAuth) SetCredentials(username, password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	a.users[username] = string(hash)
+	return nil
 }
 
 // Authenticate checks the Authorization header for valid Basic credentials.
@@ -69,13 +93,13 @@ func (a *BasicAuth) Authenticate(r *http.Request) bool {
 		return false
 	}
 
-	expectedPassword, exists := a.users[username]
+	hashedPassword, exists := a.users[username]
 	if !exists {
 		return false
 	}
 
-	// Use constant-time comparison to prevent timing attacks
-	return subtle.ConstantTimeCompare([]byte(password), []byte(expectedPassword)) == 1
+	// bcrypt comparison is inherently constant-time
+	return bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)) == nil
 }
 
 // APIKeyAuth authenticates using an API key header or query parameter.

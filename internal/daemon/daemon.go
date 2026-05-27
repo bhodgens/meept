@@ -340,12 +340,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	var httpSrv *http.Server
 	if fullCfg.Transport.HTTP.Enabled {
 		if configService != nil && daemonControl != nil {
-			httpCfg := http.DefaultServerConfig()
-			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
-			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
-			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
-			httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
-			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
+		httpCfg := http.DefaultServerConfig()
+		httpCfg.Addr = fullCfg.Transport.HTTP.Addr
+		httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
+		httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
+		httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
+		httpCfg.AutoTLSCert = fullCfg.Transport.HTTP.AutoTLSCert
+		httpCfg.TLSCertFile = fullCfg.Transport.HTTP.TLSCertFile
+		httpCfg.TLSKeyFile = fullCfg.Transport.HTTP.TLSKeyFile
+		httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
 			// Build functional options based on config
 			var httpOpts []http.ServerOption
 
@@ -398,6 +401,16 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				}
 			}
 			logger.Info("HTTP server created", "addr", httpCfg.Addr)
+			if httpCfg.UseTLS {
+				logger.Info("TLS enabled for HTTP server", "auto_cert", httpCfg.AutoTLSCert, "cert", httpCfg.TLSCertFile)
+			} else {
+				logger.Warn("TLS disabled for HTTP server - connections are unencrypted")
+			}
+			if httpCfg.RequireAuth {
+				logger.Info("Authentication required for HTTP server", "api_keys_configured", len(httpCfg.APIKeys))
+			} else {
+				logger.Warn("Authentication disabled for HTTP server - no API key required")
+			}
 		}
 	} else {
 		logger.Info("HTTP transport disabled")

@@ -83,7 +83,11 @@ func (c *Calculator) Calculate(ctx context.Context, providerID, modelID string, 
 		return staticDefault
 	}
 	if stats == nil || stats.RequestCount < int64(c.config.WarmupRequests) {
-		c.logger.Debug("calculate timeout: in warmup", "provider", providerID, "model", modelID, "request_count", stats.RequestCount, "warmup", c.config.WarmupRequests)
+		reqCount := int64(0)
+		if stats != nil {
+			reqCount = stats.RequestCount
+		}
+		c.logger.Debug("calculate timeout: in warmup", "provider", providerID, "model", modelID, "request_count", reqCount, "warmup", c.config.WarmupRequests)
 		return staticDefault
 	}
 

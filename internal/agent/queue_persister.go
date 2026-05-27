@@ -119,9 +119,9 @@ func (p *QueuePersister) EnqueueAsync(msg QueuedMessage) {
 	}
 
 	p.pending = append(p.pending, msg)
-	p.mu.Unlock()
 
-	// Reset the flush timer (debounce).
+	// Reset the flush timer (debounce) — must be inside the lock to prevent
+	// concurrent manipulation from the timer goroutine in flushPending.
 	if !p.flushTimer.Stop() {
 		select {
 		case <-p.flushTimer.C:
@@ -129,6 +129,8 @@ func (p *QueuePersister) EnqueueAsync(msg QueuedMessage) {
 		}
 	}
 	p.flushTimer.Reset(p.flushDelay)
+
+	p.mu.Unlock()
 }
 
 // PersistSync immediately inserts a message into SQLite.
@@ -197,9 +199,8 @@ func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 		// Re-enqueue on failure so it gets retried on next flush.
 		p.mu.Lock()
 		p.pending = append(p.pending, msg)
-		p.mu.Unlock()
 
-		// Restart the timer for a retry.
+		// Restart the timer for a retry (inside the lock).
 		if !p.flushTimer.Stop() {
 			select {
 			case <-p.flushTimer.C:
@@ -207,6 +208,7 @@ func (p *QueuePersister) flushPending(pending []QueuedMessage) {
 			}
 		}
 		p.flushTimer.Reset(p.flushDelay)
+		p.mu.Unlock()
 		break
 	}
 }

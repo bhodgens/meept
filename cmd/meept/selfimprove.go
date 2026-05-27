@@ -40,7 +40,7 @@ func printJSON(data []byte) error {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(&parsed)
+	return enc.Encode(parsed)
 }
 
 func dialRPC() (transport.Client, error) {

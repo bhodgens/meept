@@ -56,7 +56,7 @@ func newClawSkillsSearchCmd() *cobra.Command {
 				return fmt.Errorf("failed to parse response: %w", err)
 			}
 
-			if errMsg, ok := resultMap["error"].(string); ok {
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
 			}
 
@@ -144,7 +144,7 @@ func newClawSkillsInstallCmd() *cobra.Command {
 				return fmt.Errorf("failed to parse response: %w", err)
 			}
 
-			if errMsg, ok := resultMap["error"].(string); ok {
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
 			}
 
@@ -190,7 +190,7 @@ func newClawSkillsListCmd() *cobra.Command {
 				return fmt.Errorf("failed to parse response: %w", err)
 			}
 
-			if errMsg, ok := resultMap["error"].(string); ok {
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
 			}
 
@@ -285,7 +285,7 @@ func newClawSkillsUninstallCmd() *cobra.Command {
 				return fmt.Errorf("failed to parse response: %w", err)
 			}
 
-			if errMsg, ok := resultMap["error"].(string); ok {
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
 			}
 
@@ -343,13 +343,21 @@ func newClawSkillsUpdateCmd() *cobra.Command {
 						continue
 					}
 
-					params := map[string]string{"slug": slug}
-					_, err := c.Call("clawskills.update", params)
-					if err != nil {
-						fmt.Printf("  ✗ %s: %v\n", strings.TrimPrefix(slug, "claw:"), err)
-					} else {
-						fmt.Printf("  ✓ %s updated\n", strings.TrimPrefix(slug, "claw:"))
+				params := map[string]string{"slug": slug}
+				rawResult, err := c.Call("clawskills.update", params)
+				if err != nil {
+					fmt.Printf("  ✗ %s: %v\n", strings.TrimPrefix(slug, "claw:"), err)
+					continue
+				}
+				// Check for server-side errors in response body
+				var updateResult map[string]any
+				if json.Unmarshal(rawResult, &updateResult) == nil {
+					if errMsg, ok := updateResult["error"].(string); ok && errMsg != "" {
+						fmt.Printf("  ✗ %s: %s\n", strings.TrimPrefix(slug, "claw:"), errMsg)
+						continue
 					}
+				}
+				fmt.Printf("  ✓ %s updated\n", strings.TrimPrefix(slug, "claw:"))
 				}
 				return nil
 			}
@@ -376,7 +384,7 @@ func newClawSkillsUpdateCmd() *cobra.Command {
 				return fmt.Errorf("failed to parse response: %w", err)
 			}
 
-			if errMsg, ok := resultMap["error"].(string); ok {
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
 			}
 

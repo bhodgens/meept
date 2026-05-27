@@ -211,7 +211,9 @@ func GetProviderByEnvVar(envVar string) (*ProviderDef, bool) {
 // ListProviders returns all providers, optionally filtered by transport type.
 func ListProviders(transport ProviderTransport) []ProviderDef {
 	if transport == "" {
-		return CanonicalProviders
+		result := make([]ProviderDef, len(CanonicalProviders))
+		copy(result, CanonicalProviders)
+		return result
 	}
 	var result []ProviderDef
 	for _, p := range CanonicalProviders {

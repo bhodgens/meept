@@ -130,7 +130,14 @@ func (h *AmendmentHandlers) handleAddStep(ctx context.Context, req *AmendmentReq
 	}
 
 	// Get existing steps to determine sequence
-	steps, _ := h.stepStore.ListByTaskID(req.TaskID)
+	steps, err := h.stepStore.ListByTaskID(req.TaskID)
+	if err != nil {
+		return &AmendmentReply{
+			RequestID: req.ID,
+			Success:   false,
+			Message:   fmt.Sprintf("failed to list steps: %v", err),
+		}, nil
+	}
 	sequence := len(steps) + 1
 
 	step := NewTaskStep(req.TaskID, metadata.Description, sequence)

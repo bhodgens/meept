@@ -15,6 +15,9 @@ const (
 	DefaultReminderInterval = 15
 )
 
+// Pre-compiled regex for tool output boundary markers.
+var toolOutputStartRE = regexp.MustCompile(`<<<TOOL_OUTPUT:[^>]+>>>`)
+
 // ToolOutputStartTag returns the start tag for a tool output.
 func ToolOutputStartTag(name string) string {
 	return fmt.Sprintf("<<<TOOL_OUTPUT:%s>>>", name)
@@ -199,8 +202,7 @@ func IsWithinBoundary(fullText, target string) bool {
 	}
 
 	// Check if target appears between TOOL_OUTPUT markers
-	toolStartRE := regexp.MustCompile(`<<<TOOL_OUTPUT:[^>]+>>>`)
-	toolStarts := toolStartRE.FindAllStringIndex(fullText, -1)
+	toolStarts := toolOutputStartRE.FindAllStringIndex(fullText, -1)
 	for _, start := range toolStarts {
 		toolEnd := strings.Index(fullText[start[1]:], ToolOutputEndTag)
 		if toolEnd != -1 {
@@ -248,8 +250,7 @@ func StripBoundaryMarkers(text string) string {
 	text = strings.ReplaceAll(text, UserInputEnd, "")
 
 	// Remove tool output markers
-	toolStartRE := regexp.MustCompile(`<<<TOOL_OUTPUT:[^>]+>>>`)
-	text = toolStartRE.ReplaceAllString(text, "")
+	text = toolOutputStartRE.ReplaceAllString(text, "")
 	text = strings.ReplaceAll(text, ToolOutputEndTag, "")
 
 	return text

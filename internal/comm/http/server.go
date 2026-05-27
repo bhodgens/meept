@@ -51,14 +51,22 @@ type ServerConfig struct {
 
 // DefaultServerConfig returns sensible defaults for the menubar HTTP server.
 func DefaultServerConfig() ServerConfig {
+	homeDir, _ := os.UserHomeDir()
+	defaultCertFile := filepath.Join(homeDir, ".meept", "tls", "cert.pem")
+	defaultKeyFile := filepath.Join(homeDir, ".meept", "tls", "key.pem")
+
 	return ServerConfig{
 		Addr:           ":8081", // Different from existing web server (:8080)
 		ReadTimeout:    30 * time.Second,
 		WriteTimeout:   30 * time.Second,
 		MaxHeaderBytes: 1 << 20, // 1 MB
 		EnableCORS:     true,    // Enable CORS for local menubar app
-		RequireAuth:    false,   // Disabled by default for local development
+		RequireAuth:    true,    // Enabled by default for security
 		APIKeys:        []string{},
+		UseTLS:         true, // TLS on by default
+		AutoTLSCert:    true, // Auto-generate self-signed cert
+		TLSCertFile:    defaultCertFile,
+		TLSKeyFile:     defaultKeyFile,
 		RESTEnabled:    true, // REST API enabled by default
 	}
 }

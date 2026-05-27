@@ -156,6 +156,9 @@ func startDaemon(foreground bool) error {
 	// Close log file in parent process - the child inherits the fd
 	f.Close()
 
+	// Reap the child process in the background to prevent zombies.
+	go func() { _ = daemonCmd.Wait() }()
+
 	// Wait briefly to check if it started successfully
 	time.Sleep(200 * time.Millisecond)
 

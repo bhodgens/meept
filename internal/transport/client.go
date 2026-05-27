@@ -74,19 +74,21 @@ type Client interface {
 
 // Config holds client-side transport configuration.
 type Config struct {
-	Transport   string        // "rpc" or "http"
-	SocketPath  string        // For RPC transport
-	HTTPBaseURL string        // For HTTP transport (e.g. "http://localhost:8081")
-	Timeout     time.Duration // Per-call timeout
+	Transport         string        // "rpc" or "http"
+	SocketPath        string        // For RPC transport
+	HTTPBaseURL       string        // For HTTP transport (e.g. "https://localhost:8081")
+	InsecureSkipVerify bool         // Skip TLS certificate verification (for self-signed certs)
+	Timeout           time.Duration // Per-call timeout
 }
 
 // DefaultConfig returns the default client transport config.
 func DefaultConfig() *Config {
 	return &Config{
-		Transport:   "rpc",
-		SocketPath:  "~/.meept/meept.sock",
-		HTTPBaseURL: "http://localhost:8081",
-		Timeout:     120 * time.Second,
+		Transport:          "rpc",
+		SocketPath:         "~/.meept/meept.sock",
+		HTTPBaseURL:        "https://localhost:8081",
+		InsecureSkipVerify: true, // Default true for self-signed local certs
+		Timeout:            120 * time.Second,
 	}
 }
 
@@ -98,7 +100,7 @@ func New(cfg *Config) (Client, error) {
 
 	switch cfg.Transport {
 	case "http":
-		return NewHTTPClient(cfg.HTTPBaseURL, cfg.Timeout), nil
+		return NewHTTPClient(cfg.HTTPBaseURL, cfg.Timeout, WithInsecureSkipVerify(cfg.InsecureSkipVerify)), nil
 	case "rpc", "unix", "socket":
 		return NewRPCClient(cfg.SocketPath, cfg.Timeout), nil
 	default:

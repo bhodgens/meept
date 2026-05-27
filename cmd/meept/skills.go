@@ -53,7 +53,7 @@ func newSkillsListCmd() *cobra.Command {
 			}
 
 			// Check for error in response
-			if errMsg, ok := resultMap["error"].(string); ok {
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
 			}
 
@@ -80,6 +80,7 @@ func newSkillsListCmd() *cobra.Command {
 					}
 				}
 				skillsList = filtered
+				resultMap["skills"] = skillsList
 			}
 
 			if outputJSON {
@@ -170,7 +171,7 @@ func newSkillsShowCmd() *cobra.Command {
 			}
 
 			// Check for error in response
-			if errMsg, ok := resultMap["error"].(string); ok {
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
 			}
 
@@ -282,7 +283,7 @@ Examples:
 			}
 
 			// Check for error in response
-			if errMsg, ok := resultMap["error"].(string); ok {
+			if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 				return fmt.Errorf("%s", errMsg)
 			}
 

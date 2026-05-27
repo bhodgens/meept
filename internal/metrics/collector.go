@@ -517,7 +517,12 @@ func (c *Collector) RegisterEventListeners(emitter TypedEventEmitter) {
 
 // Shutdown stops the collector.
 func (c *Collector) Shutdown() {
-	close(c.stopChan)
+	select {
+	case <-c.stopChan:
+		// Already closed
+	default:
+		close(c.stopChan)
+	}
 	c.wg.Wait()
 }
 
@@ -561,6 +566,11 @@ func NewPeriodicCollector(ctx context.Context, fn CollectFunc, interval time.Dur
 
 // Shutdown stops the periodic collector.
 func (c *PeriodicCollector) Shutdown() {
-	close(c.stopChan)
+	select {
+	case <-c.stopChan:
+		// Already closed
+	default:
+		close(c.stopChan)
+	}
 	c.wg.Wait()
 }

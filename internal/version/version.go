@@ -2,6 +2,8 @@
 // The variables below are populated at build time via ldflags.
 package version
 
+import "fmt"
+
 var (
 	// Version is the git-derived version string (e.g., "v20260228" or "v1.2.3")
 	Version = "dev"
@@ -15,8 +17,5 @@ var (
 
 // String returns the version string for display.
 func String() string {
-	if Version == "dev" {
-		return Version
-	}
-	return Version
+	return fmt.Sprintf("%s (commit: %s, built: %s)", Version, Commit, BuildTime)
 }

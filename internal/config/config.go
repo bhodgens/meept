@@ -152,6 +152,10 @@ func expandConfigPaths(cfg *Config) {
 	cfg.Shadow.Export.OutputDir = expandPath(cfg.Shadow.Export.OutputDir)
 	cfg.Shadow.Adapters.AdapterDir = expandPath(cfg.Shadow.Adapters.AdapterDir)
 
+	// Expand TLS cert/key paths
+	cfg.Transport.HTTP.TLSCertFile = expandPath(cfg.Transport.HTTP.TLSCertFile)
+	cfg.Transport.HTTP.TLSKeyFile = expandPath(cfg.Transport.HTTP.TLSKeyFile)
+
 	// Expand allowed/blocked paths
 	for i, p := range cfg.Security.AllowedPaths {
 		cfg.Security.AllowedPaths[i] = expandPath(p)

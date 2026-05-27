@@ -127,13 +127,13 @@ func (h *QueueHandler) handleStatus(ctx context.Context, params json.RawMessage)
 		return nil, fmt.Errorf("conversation_id is required")
 	}
 
-	q, _ := reg.GetActiveQueue(req.ConversationID)
+	q, gen := reg.GetActiveQueue(req.ConversationID)
 	if q == nil {
 		return map[string]any{
 			"steering_depth": 0,
 			"followup_depth": 0,
 			"is_active":      false,
-			"generation":     uint64(0),
+			"generation":     gen,
 		}, nil
 	}
 

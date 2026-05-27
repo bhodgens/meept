@@ -211,10 +211,12 @@ type RPCTransportConfig struct {
 type HTTPTransportConfig struct {
 	Enabled     bool     `json:"enabled"       toml:"enabled"`       // Enable HTTP server (default: false)
 	Addr        string   `json:"addr"          toml:"addr"`          // Listen address (default: ":8081")
-	RequireAuth bool     `json:"require_auth"  toml:"require_auth"`  // Require API key authentication
+	RequireAuth bool     `json:"require_auth"  toml:"require_auth"`  // Require API key authentication (default: true)
 	APIKeys     []string `json:"api_keys"      toml:"api_keys"`      // Valid API keys for authentication
 	UseTLS      bool     `json:"use_tls"       toml:"use_tls"`       // Enable HTTPS (default: true)
-	AutoTLSCert bool     `json:"auto_tls_cert" toml:"auto_tls_cert"` // Auto-generate self-signed cert
+	AutoTLSCert bool     `json:"auto_tls_cert" toml:"auto_tls_cert"` // Auto-generate self-signed cert (default: true)
+	TLSCertFile string   `json:"tls_cert_file" toml:"tls_cert_file"` // TLS certificate file path (default: ~/.meept/tls/cert.pem)
+	TLSKeyFile  string   `json:"tls_key_file"  toml:"tls_key_file"`  // TLS private key file path (default: ~/.meept/tls/key.pem)
 
 	// Modular endpoints - enable/disable individual transport features
 	REST      bool   `json:"rest"       toml:"rest"`      // Enable REST API at /api/v1/* (default: true)
@@ -975,13 +977,18 @@ func DefaultConfig() *Config {
 				SocketPath: "~/.meept/meept.sock",
 			},
 			HTTP: HTTPTransportConfig{
-				Enabled:   false,
-				Addr:      ":8081",
-				REST:      true,  // REST API enabled by default when HTTP is enabled
-				WebSocket: false, // WebSocket disabled by default
-				WSPath:    "/ws",
-				MCP:       false, // MCP disabled by default
-				MCPPath:   "/mcp",
+				Enabled:     false,
+				Addr:        ":8081",
+				RequireAuth: true,
+				UseTLS:      true,
+				AutoTLSCert: true,
+				TLSCertFile: "~/.meept/tls/cert.pem",
+				TLSKeyFile:  "~/.meept/tls/key.pem",
+				REST:        true,  // REST API enabled by default when HTTP is enabled
+				WebSocket:   false, // WebSocket disabled by default
+				WSPath:      "/ws",
+				MCP:         false, // MCP disabled by default
+				MCPPath:     "/mcp",
 			},
 		},
 		LLM: LLMConfig{

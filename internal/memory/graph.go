@@ -1040,7 +1040,9 @@ func (g *KnowledgeGraph) GetStats(ctx context.Context) (*GraphStats, error) {
 	if stats.NodeCount > 0 {
 		stats.AvgDegree = float64(stats.EdgeCount*2) / float64(stats.NodeCount)
 	}
+	g.mu.RLock()
 	stats.LastUpdated = g.cacheLastUpdated
+	g.mu.RUnlock()
 
 	return stats, nil
 }

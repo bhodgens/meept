@@ -454,6 +454,21 @@ func TestDefaultServerConfig(t *testing.T) {
 	if !cfg.EnableCORS {
 		t.Error("EnableCORS should be true by default")
 	}
+	if !cfg.RequireAuth {
+		t.Error("RequireAuth should be true by default")
+	}
+	if !cfg.UseTLS {
+		t.Error("UseTLS should be true by default")
+	}
+	if !cfg.AutoTLSCert {
+		t.Error("AutoTLSCert should be true by default")
+	}
+	if cfg.TLSCertFile == "" {
+		t.Error("TLSCertFile should not be empty by default")
+	}
+	if cfg.TLSKeyFile == "" {
+		t.Error("TLSKeyFile should not be empty by default")
+	}
 }
 
 func TestHandleListAgents_NoConfigService(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -38,7 +39,7 @@ Shows:
 
 func runStatus(jsonOutput bool) error {
 	// First check if daemon is running via PID file
-	pidFile := stateDir + "/meept.pid"
+	pidFile := filepath.Join(stateDir, "meept.pid")
 	pidData, err := os.ReadFile(pidFile)
 	if os.IsNotExist(err) {
 		fmt.Println("Daemon is not running")
@@ -76,8 +77,7 @@ func runStatus(jsonOutput bool) error {
 	}
 
 	if jsonOutput {
-		printStatusJSON(status, pid)
-		return nil
+		return printStatusJSON(status, pid)
 	}
 
 	printStatusText(status, pid)
@@ -142,7 +142,7 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 	fmt.Printf("  Bus Subs:   %d\n", status.BusSubscribers)
 }
 
-func printStatusJSON(status *types.DaemonStatusResponse, pid int) {
+func printStatusJSON(status *types.DaemonStatusResponse, pid int) error {
 	out := map[string]any{
 		"status":             status.Status,
 		"pid":                pid,
@@ -157,5 +157,5 @@ func printStatusJSON(status *types.DaemonStatusResponse, pid int) {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	enc.Encode(out)
+	return enc.Encode(out)
 }

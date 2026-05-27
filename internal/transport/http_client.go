@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,25 @@ const (
 	KeySessionID = "session_id"
 )
 
+// HTTPClientOption is a functional option for configuring an HTTP transport client.
+type HTTPClientOption func(*httpClient)
+
+// WithInsecureSkipVerify configures the client to skip TLS certificate verification.
+// This is useful for connecting to servers with self-signed certificates.
+func WithInsecureSkipVerify(skip bool) HTTPClientOption {
+	return func(c *httpClient) {
+		if skip {
+			transport := &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true, //nolint:gosec // intentional for self-signed local certs
+					MinVersion:         tls.VersionTLS12,
+				},
+			}
+			c.client.Transport = transport
+		}
+	}
+}
+
 // httpClient implements transport.Client over HTTP REST.
 // All RPC-style methods are proxied through the /api/v1/bus/call endpoint,
 // which mirrors the JSON-RPC interface over HTTP.
@@ -27,14 +47,18 @@ type httpClient struct {
 }
 
 // NewHTTPClient creates an HTTP-backed transport client.
-func NewHTTPClient(baseURL string, timeout time.Duration) Client {
+func NewHTTPClient(baseURL string, timeout time.Duration, opts ...HTTPClientOption) Client {
 	if timeout == 0 {
 		timeout = 120 * time.Second
 	}
-	return &httpClient{
+	c := &httpClient{
 		baseURL: baseURL,
 		client:  &http.Client{Timeout: timeout},
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 func (c *httpClient) Connect() error {

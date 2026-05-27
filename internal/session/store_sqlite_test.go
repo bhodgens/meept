@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // testHelper creates a temporary SQLiteStore for testing.
@@ -30,7 +32,7 @@ func TestSQLiteStore_MigrationFromExistingSchema(t *testing.T) {
 	defer store.Close()
 
 	// Open a raw connection to verify columns exist
-	db, err := sql.Open("modernc.org/sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
@@ -106,7 +108,7 @@ func TestSQLiteStore_MigrationFromOldDatabase(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "old_sessions.db")
 
 	// Create old-style database
-	db, err := sql.Open("modernc.org/sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("failed to create old db: %v", err)
 	}
@@ -1125,7 +1127,7 @@ func TestBackfillParentID(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "backfill.db")
 
 	// Create a database with the old schema (no parent_id column).
-	db, err := sql.Open("modernc.org/sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("failed to create db: %v", err)
 	}
@@ -1244,7 +1246,7 @@ func TestBackfillParentID_WithExistingValues(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "backfill_existing.db")
 
-	db, err := sql.Open("modernc.org/sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("failed to create db: %v", err)
 	}

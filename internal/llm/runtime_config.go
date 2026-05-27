@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/pathutil"
@@ -332,7 +331,7 @@ func FormatPIDFilePath(pidFile string) (string, error) {
 // ContainsSupportedRuntime checks if any runtime in the list is supported.
 func ContainsSupportedRuntime(runtimes []string) bool {
 	for _, rt := range runtimes {
-		if strings.Contains(rt, "llama-cpp") || strings.Contains(rt, "mlx") {
+		if rt == "llama-cpp" || rt == "mlx" {
 			return true
 		}
 	}

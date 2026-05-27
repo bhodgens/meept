@@ -413,7 +413,10 @@ func newShadowAdaptersListCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				data, _ := json.MarshalIndent(adapters, "", "  ")
+				data, err := json.MarshalIndent(adapters, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal result: %w", err)
+				}
 				fmt.Println(string(data))
 				return nil
 			}

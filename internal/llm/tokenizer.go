@@ -105,7 +105,9 @@ func (c *TokenCache) CountTokens(text string) int {
 
 	// Try cache first
 	if cached, ok := c.cache.Load(text); ok {
-		return cached.(int)
+		if count, ok := cached.(int); ok {
+			return count
+		}
 	}
 
 	// Compute and cache

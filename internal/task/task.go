@@ -3,7 +3,9 @@ package task
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
+	"sync/atomic"
 	"time"
 )
 
@@ -280,6 +282,9 @@ func (t *Task) AddTokenUsage(tokens int) {
 	t.UpdatedAt = time.Now().UTC()
 }
 
+var taskIDCounter uint64
+
 func generateTaskID() string {
-	return "task-" + time.Now().UTC().Format("20060102150405.000000000")
+	seq := atomic.AddUint64(&taskIDCounter, 1)
+	return fmt.Sprintf("task-%s-%04d", time.Now().UTC().Format("20060102150405.000000000"), seq)
 }

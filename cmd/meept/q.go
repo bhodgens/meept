@@ -138,7 +138,10 @@ Examples:
 			}
 
 			if jsonOutput {
-				data, _ := json.MarshalIndent(result, "", "  ")
+				data, err := json.MarshalIndent(result, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal result: %w", err)
+				}
 				fmt.Println(string(data))
 				return nil
 			}
