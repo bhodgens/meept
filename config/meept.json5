@@ -349,6 +349,24 @@
     "cleanup_completed": false,
   },
 
+  // Project context configuration
+  // Projects bind sessions to codebases, enable path fencing, and provide
+  // worktree isolation for concurrent agent sessions.
+  // See: docs/workflows/project-context.md
+  "projects": {
+    "enabled": true,
+    "base_dir": "~/.meept/projects",         // Root for git clones
+    "auto_detect": true,                      // Auto-register from CWD git root
+    "worktree_per_plan": "auto",              // "auto" | "always" | "never"
+    "worktree_isolation_threshold": 5,        // Files touched before auto-isolating a plan
+    "max_worktrees_per_project": 10,          // Max concurrent worktrees per project
+    "cleanup_orphaned_worktrees": true,       // Remove orphaned worktrees on startup
+    "fence_enabled": true,                    // Restrict tools to project worktree path
+    "allow_read_system_paths": ["/usr", "/etc", "/tmp"],
+    "auto_sync_on_attach": false,             // Pull on session attach
+    "default_branch": "main",                 // Default branch for new checkouts
+  },
+
   // Skills configuration
   "skills": {
     "enabled": false,
