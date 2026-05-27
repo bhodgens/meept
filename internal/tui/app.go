@@ -1267,6 +1267,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentProjectMode = msg.ProjectMode
 		a.currentProjectDirty = msg.Dirty
 		return a, nil
+
+	case ProjectListMsg:
+		// Update project picker with project list
+		if msg.Err == nil {
+			a.projectPicker.SetProjects(msg.Projects)
+		}
+		return a, nil
+
+	case ProjectSelectMsg:
+		// Bind selected project to current session
+		if a.currentSession != nil && msg.ProjectID != "" {
+			err := a.rpc.SetProject(a.currentSession.ID, msg.ProjectID)
+			if err != nil {
+				a.statusMessage = fmt.Sprintf("Failed to set project: %v", err)
+				a.statusMessageTime = time.Now()
+				return a, tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+					return StatusMessageClearMsg{}
+				})
+			}
+			// Refresh project info to update the indicator
+			a.statusMessage = fmt.Sprintf("Project set: %s", msg.ProjectID)
+			a.statusMessageTime = time.Now()
+			clearCmd := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg {
+				return StatusMessageClearMsg{}
+			})
+			return a, tea.Batch(clearCmd, a.fetchCurrentProject)
+		}
+		return a, nil
 	}
 
 	// Handle slash autocomplete filter updates when typing
@@ -1361,6 +1389,10 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.sessionRename.Show(a.currentSession.ID, currentName)
 			}
 			return a, nil
+		case keys.Projects:
+			a.activeModal = ModalProjectPicker
+			a.projectPicker.Show()
+			return a, a.projectPicker.RefreshProjects()
 		}
 		return a, nil
 
@@ -1420,6 +1452,13 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ModalBranchPicker:
 		cmd := a.branchPicker.HandleKey(keyStr)
 		if !a.branchPicker.IsVisible() {
+			a.activeModal = ModalNone
+		}
+		return a, cmd
+
+	case ModalProjectPicker:
+		cmd := a.projectPicker.HandleKey(keyStr)
+		if !a.projectPicker.IsVisible() {
 			a.activeModal = ModalNone
 		}
 		return a, cmd
@@ -1576,6 +1615,8 @@ func (a *App) renderModalOverlay() string {
 		return a.fuzzyFinder.View(a.width, a.height)
 	case ModalBranchPicker:
 		return a.branchPicker.View(a.width, a.height)
+	case ModalProjectPicker:
+		return a.projectPicker.View(a.width, a.height)
 	}
 	return ""
 }
