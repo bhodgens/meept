@@ -90,6 +90,11 @@ func (s *SQLiteStore) migrate() error {
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN name TEXT DEFAULT ''", "name")
 	s.migrationAddColumn("ALTER TABLE session_messages ADD COLUMN tool_call_id TEXT DEFAULT ''", "tool_call_id")
 
+	// Add project association columns to sessions
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_id TEXT DEFAULT ''", "project_id")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN project_path TEXT DEFAULT ''", "project_path")
+	s.migrationAddColumn("ALTER TABLE sessions ADD COLUMN no_fence BOOLEAN DEFAULT 0", "no_fence")
+
 	// Create session_tool_calls table
 	toolCallsSchema := `
 	CREATE TABLE IF NOT EXISTS session_tool_calls (
@@ -295,8 +300,8 @@ func (s *SQLiteStore) Create(name string) (*Session, error) {
 	workersJSON, _ := json.Marshal(session.WorkerIDs)
 
 	_, err := s.db.Exec(`
-		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '', '', false)`,
 		session.ID,
 		session.Name,
 		session.ConversationID,
@@ -304,7 +309,7 @@ func (s *SQLiteStore) Create(name string) (*Session, error) {
 		session.LastActivity.Format(time.RFC3339),
 		string(attachedJSON),
 		string(workersJSON),
-		"",
+		session.Description,
 	)
 
 	if err != nil {
@@ -338,7 +343,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 	defer s.mu.RUnlock()
 
 	row := s.db.QueryRow(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
 		FROM sessions
 		ORDER BY last_activity DESC
 		LIMIT 1`)
@@ -349,7 +354,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 func (s *SQLiteStore) getByColumn(column, value string) *Session {
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -364,9 +369,11 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		attachedJSON, workersJSON string
 		description               sql.NullString
 		leafMessageID             sql.NullInt64
+		projectID, projectPath    sql.NullString
+		noFence                   bool
 	)
 
-	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID)
+	err := row.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			s.logger.Error("Failed to scan session", "error", err)
@@ -378,6 +385,7 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 		ID:             id,
 		Name:           name,
 		ConversationID: convID,
+		NoFence:        noFence,
 	}
 
 	if description.Valid {
@@ -385,6 +393,12 @@ func (s *SQLiteStore) scanSession(row *sql.Row) *Session {
 	}
 	if leafMessageID.Valid {
 		session.LeafMessageID = &leafMessageID.Int64
+	}
+	if projectID.Valid {
+		session.ProjectID = projectID.String
+	}
+	if projectPath.Valid {
+		session.ProjectPath = projectPath.String
 	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -410,7 +424,7 @@ func (s *SQLiteStore) List() ([]*Session, error) {
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(`
-		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id
+		SELECT s.id, s.name, s.conversation_id, s.created_at, s.last_activity, s.attached_clients, s.worker_ids, s.description, s.leaf_message_id, s.project_id, s.project_path, s.no_fence
 		FROM sessions s
 		WHERE EXISTS (
 			SELECT 1 FROM session_messages sm
@@ -439,9 +453,11 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 			attachedJSON, workersJSON string
 			description               sql.NullString
 			leafMessageID             sql.NullInt64
+			projectID, projectPath    sql.NullString
+			noFence                   bool
 		)
 
-		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID); err != nil {
+		if err := rows.Scan(&id, &name, &convID, &createdAt, &lastActivity, &attachedJSON, &workersJSON, &description, &leafMessageID, &projectID, &projectPath, &noFence); err != nil {
 			s.logger.Error("Failed to scan session row", "error", err)
 			continue
 		}
@@ -450,6 +466,7 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 			ID:             id,
 			Name:           name,
 			ConversationID: convID,
+			NoFence:        noFence,
 		}
 
 		if description.Valid {
@@ -457,6 +474,12 @@ func (s *SQLiteStore) scanSessionRows(rows *sql.Rows) []*Session {
 		}
 		if leafMessageID.Valid {
 			session.LeafMessageID = &leafMessageID.Int64
+		}
+		if projectID.Valid {
+			session.ProjectID = projectID.String
+		}
+		if projectPath.Valid {
+			session.ProjectPath = projectPath.String
 		}
 
 		if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
@@ -765,7 +788,7 @@ func (s *SQLiteStore) Close() error {
 func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
-		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id
+		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
 		FROM sessions
 		WHERE %s = ?`, column)
 
@@ -782,7 +805,7 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 
 	result, err := s.db.Exec(`
 		UPDATE sessions
-		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?, leaf_message_id = ?
+		SET name = ?, attached_clients = ?, worker_ids = ?, last_activity = ?, description = ?, leaf_message_id = ?, project_id = ?, project_path = ?, no_fence = ?
 		WHERE id = ?`,
 		session.Name,
 		string(attachedJSON),
@@ -790,6 +813,9 @@ func (s *SQLiteStore) updateSession(session *Session) error {
 		now,
 		session.Description,
 		session.LeafMessageID,
+		session.ProjectID,
+		session.ProjectPath,
+		session.NoFence,
 		session.ID,
 	)
 
@@ -837,6 +863,25 @@ func (s *SQLiteStore) SetLeafMessageID(sessionID string, messageID int64) error 
 	result, err := s.db.Exec(`UPDATE sessions SET leaf_message_id = ? WHERE id = ?`, messageID, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to set leaf message id: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	return nil
+}
+
+// SetProject updates the project association for a session.
+func (s *SQLiteStore) SetProject(sessionID, projectID, projectPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result, err := s.db.Exec(
+		`UPDATE sessions SET project_id = ?, project_path = ?, last_activity = ? WHERE id = ?`,
+		projectID, projectPath, time.Now().UTC().Format(time.RFC3339), sessionID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to set project for session: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
@@ -1081,8 +1126,8 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 	workersJSON, _ := json.Marshal([]string{})
 
 	_, err = tx.Exec(`
-		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, '', NULL)`,
+		INSERT INTO sessions (id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '', NULL, '', '', false)`,
 		newID, newName, newConvID,
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 		string(attachedJSON), string(workersJSON),

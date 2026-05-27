@@ -42,6 +42,9 @@ type Session struct {
 	AttachedClients []string  `json:"attached_clients"`
 	WorkerIDs       []string  `json:"worker_ids,omitempty"`
 	LeafMessageID   *int64    `json:"leaf_message_id,omitempty"`
+	ProjectID       string    `json:"project_id,omitempty"`
+	ProjectPath     string    `json:"project_path,omitempty"`
+	NoFence         bool      `json:"no_fence,omitempty"`
 }
 
 // MemoryStore manages sessions with thread-safe operations (in-memory, non-persistent).
@@ -387,6 +390,21 @@ func (s *MemoryStore) SetLeafMessageID(sessionID string, messageID int64) error 
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.LeafMessageID = &messageID
+	return nil
+}
+
+// SetProject updates the project association for a session.
+func (s *MemoryStore) SetProject(sessionID, projectID, projectPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.ProjectID = projectID
+	session.ProjectPath = projectPath
+	session.LastActivity = time.Now()
 	return nil
 }
 
