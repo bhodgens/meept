@@ -42,6 +42,7 @@ type Config struct {
 	Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
 	Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
 	Session           SessionConfig           `json:"session"            toml:"session"`
+	Projects          ProjectsConfig          `json:"projects"           toml:"projects"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -136,6 +137,32 @@ type SessionConfig struct {
 	AutoFork string `json:"auto_fork" toml:"auto_fork"`
 	// LegacyTruncation reverts to old message deletion behavior instead of compaction (default: false)
 	LegacyTruncation bool `json:"legacy_truncation" toml:"legacy_truncation"`
+}
+
+// ProjectsConfig holds project management and worktree settings.
+type ProjectsConfig struct {
+	// Enabled turns on project management features (default: true)
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// BaseDir is the root directory for project data (default: "~/.meept/projects")
+	BaseDir string `json:"base_dir" toml:"base_dir"`
+	// AutoDetect enables automatic project detection from the working directory (default: true)
+	AutoDetect bool `json:"auto_detect" toml:"auto_detect"`
+	// WorktreePerPlan controls when a git worktree is created per plan: "auto", "always", or "never" (default: "auto")
+	WorktreePerPlan string `json:"worktree_per_plan" toml:"worktree_per_plan"`
+	// WorktreeIsolationThreshold is the minimum number of changed files before auto-creating a worktree (default: 5)
+	WorktreeIsolationThreshold int `json:"worktree_isolation_threshold" toml:"worktree_isolation_threshold"`
+	// MaxWorktreesPerProject limits concurrent worktrees per project (default: 10)
+	MaxWorktreesPerProject int `json:"max_worktrees_per_project" toml:"max_worktrees_per_project"`
+	// CleanupOrphanedWorktrees removes worktrees left behind after plan completion (default: true)
+	CleanupOrphanedWorktrees bool `json:"cleanup_orphaned_worktrees" toml:"cleanup_orphaned_worktrees"`
+	// FenceEnabled enables the project fence that restricts file access to the project root (default: true)
+	FenceEnabled bool `json:"fence_enabled" toml:"fence_enabled"`
+	// AllowReadSystemPaths lists system paths that may be read even when the fence is active (default: ["/usr", "/etc", "/tmp"])
+	AllowReadSystemPaths []string `json:"allow_read_system_paths" toml:"allow_read_system_paths"`
+	// AutoSyncOnAttach syncs the project state when attaching to an existing session (default: false)
+	AutoSyncOnAttach bool `json:"auto_sync_on_attach" toml:"auto_sync_on_attach"`
+	// DefaultBranch is the default git branch name for new projects (default: "main")
+	DefaultBranch string `json:"default_branch" toml:"default_branch"`
 }
 
 // ASTConfig holds AST parsing settings.
@@ -1470,6 +1497,19 @@ func DefaultConfig() *Config {
 			CompactionTargetRatio:  0.6,
 			AutoFork:               "ask",
 			LegacyTruncation:       false,
+		},
+		Projects: ProjectsConfig{
+			Enabled:                    true,
+			BaseDir:                    "~/.meept/projects",
+			AutoDetect:                 true,
+			WorktreePerPlan:            "auto",
+			WorktreeIsolationThreshold: 5,
+			MaxWorktreesPerProject:     10,
+			CleanupOrphanedWorktrees:   true,
+			FenceEnabled:               true,
+			AllowReadSystemPaths:       []string{"/usr", "/etc", "/tmp"},
+			AutoSyncOnAttach:           false,
+			DefaultBranch:              "main",
 		},
 	}
 }
