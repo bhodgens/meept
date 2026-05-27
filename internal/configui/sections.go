@@ -72,6 +72,8 @@ func BuildSectionFields(keyPath string) []Field {
 		return buildMemvidFields()
 	case "presets":
 		return buildPresetsFields()
+	case "projects":
+		return buildProjectsFields()
 	default:
 		return []Field{
 			NewTextField("_stub", "(section not yet implemented)", ""),
