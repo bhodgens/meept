@@ -156,6 +156,10 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 	if tr, ok := result.(*ToolResult); ok {
 		return tr, nil
 	}
+	// Also handle value-type ToolResult (some tools return value not pointer)
+	if tr, ok := result.(ToolResult); ok {
+		return &tr, nil
+	}
 
 	return NewSuccessResult(result), nil
 }
