@@ -24,6 +24,7 @@ const (
 	ModalConfirm
 	ModalFuzzyFinder
 	ModalBranchPicker
+	ModalProjectPicker
 )
 
 // ModalItem represents an item in a modal menu.
@@ -179,6 +180,7 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 		{Key: keys.ViewMemory, Label: "memory", Description: "switch to memory view"},
 		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
 		{Key: keys.Sessions, Label: "sessions...", Description: "manage sessions"},
+		{Key: keys.Projects, Label: "projects...", Description: "manage projects"},
 		{Key: keys.NewSession, Label: "new session", Description: "create a new session"},
 		{Key: keys.RenameSession, Label: "edit description", Description: "edit session description"},
 		{Key: "f", Label: "find...", Description: "search sessions and tasks"},
@@ -1461,6 +1463,288 @@ func (b *BranchPickerModal) HandleMouse(msg tea.MouseMsg, screenW, screenH int) 
 				return BranchNavigateMsg{Branch: br}
 			}
 		}
+	}
+
+	return nil
+}
+
+// ============================================================================
+// Project Picker Modal
+// ============================================================================
+
+// ProjectListMsg carries the project list response for the picker.
+type ProjectListMsg struct {
+	Projects []types.ProjectInfo
+	Err      error
+}
+
+// ProjectSelectMsg indicates a project was selected from the picker.
+type ProjectSelectMsg struct {
+	ProjectID string
+}
+
+// ProjectPickerModal is a modal for selecting and managing projects.
+type ProjectPickerModal struct {
+	*Modal
+	projects     []types.ProjectInfo
+	rpc          *RPCClient
+	styles       *Styles
+	scrollOffset int
+}
+
+// NewProjectPickerModal creates a new project picker modal.
+func NewProjectPickerModal(styles *Styles, rpc *RPCClient) *ProjectPickerModal {
+	m := NewModal("projects", styles)
+	m.width = 90
+
+	return &ProjectPickerModal{
+		Modal:    m,
+		projects: []types.ProjectInfo{},
+		rpc:      rpc,
+		styles:   styles,
+	}
+}
+
+// RefreshProjects fetches the project list from the daemon.
+func (p *ProjectPickerModal) RefreshProjects() tea.Cmd {
+	return func() tea.Msg {
+		if p.rpc == nil || !p.rpc.IsConnected() {
+			return ProjectListMsg{Projects: nil, Err: fmt.Errorf("not connected")}
+		}
+
+		resp, err := p.rpc.ListProjects()
+		if err != nil {
+			return ProjectListMsg{Projects: nil, Err: err}
+		}
+
+		return ProjectListMsg{Projects: resp.Projects, Err: nil}
+	}
+}
+
+// SetProjects updates the project list and resets selection.
+func (p *ProjectPickerModal) SetProjects(projects []types.ProjectInfo) {
+	p.projects = projects
+	p.selected = 0
+	p.scrollOffset = 0
+}
+
+// View renders the project picker modal.
+func (p *ProjectPickerModal) View(screenW, screenH int) string {
+	if !p.visible {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	boxStyle := p.styles.ModalBox.Width(p.width)
+
+	// Title
+	titleStyle := p.styles.ModalTitle.Width(p.width - 4)
+	sb.WriteString(titleStyle.Render("projects"))
+	sb.WriteString("\n")
+
+	// Separator
+	sb.WriteString(p.styles.Muted.Render(strings.Repeat("─", p.width-4)))
+	sb.WriteString("\n")
+
+	if len(p.projects) == 0 {
+		sb.WriteString(p.styles.Muted.Render("no projects registered"))
+		sb.WriteString("\n\n")
+		sb.WriteString(p.styles.HelpKey.Render("[a]"))
+		sb.WriteString(p.styles.HelpValue.Render(" add new project"))
+	} else {
+		// Column widths
+		nameColWidth := 18
+		modeColWidth := 6
+		branchColWidth := 14
+		statusColWidth := 8
+		pathColWidth := p.width - nameColWidth - modeColWidth - branchColWidth - statusColWidth - 14
+
+		// Header
+		header := fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %s",
+			nameColWidth, "name",
+			modeColWidth, "mode",
+			branchColWidth, "branch",
+			statusColWidth, "status",
+			"path")
+		sb.WriteString(p.styles.Muted.Render(header))
+		sb.WriteString("\n")
+		sb.WriteString(p.styles.Muted.Render(strings.Repeat("─", p.width-4)))
+		sb.WriteString("\n")
+
+		// Calculate visible range
+		maxVisible := min(len(p.projects), 15)
+		if p.scrollOffset > len(p.projects)-maxVisible {
+			p.scrollOffset = max(0, len(p.projects)-maxVisible)
+		}
+		end := min(p.scrollOffset+maxVisible, len(p.projects))
+
+		for i := p.scrollOffset; i < end; i++ {
+			proj := p.projects[i]
+			style := p.styles.ModalItem
+			if i == p.selected {
+				style = p.styles.ModalItemSelected
+			}
+
+			pointer := "  "
+			if i == p.selected {
+				pointer = "▸ "
+			}
+
+			activeIndicator := " "
+			if proj.Status == "active" {
+				activeIndicator = "*"
+			}
+
+			name := proj.Name
+			if len(name) > nameColWidth {
+				name = name[:nameColWidth-3] + "..."
+			} else {
+				name = fmt.Sprintf("%-*s", nameColWidth, name)
+			}
+
+			mode := fmt.Sprintf("%-*s", modeColWidth, proj.Mode)
+
+			branch := proj.Branch
+			if branch == "" {
+				branch = "-"
+			}
+			if len(branch) > branchColWidth {
+				branch = branch[:branchColWidth-3] + "..."
+			} else {
+				branch = fmt.Sprintf("%-*s", branchColWidth, branch)
+			}
+
+			status := proj.Status
+			if len(status) > statusColWidth {
+				status = status[:statusColWidth-3] + "..."
+			} else {
+				status = fmt.Sprintf("%-*s", statusColWidth, status)
+			}
+
+			path := proj.LocalPath
+			if len(path) > pathColWidth {
+				path = "..." + path[len(path)-pathColWidth+3:]
+			}
+
+			activeStyle := p.styles.Muted
+			if i == p.selected {
+				activeStyle = p.styles.ModalItemSelected
+			}
+			activeStr := activeStyle.Render(activeIndicator)
+
+			line := fmt.Sprintf("%s%s %s %s %s %s  %s", pointer, activeStr, name, mode, branch, status, path)
+			sb.WriteString(style.Render(line))
+			sb.WriteString("\n")
+		}
+
+		if len(p.projects) > maxVisible {
+			sb.WriteString(p.styles.Muted.Render(fmt.Sprintf("  showing %d-%d of %d", p.scrollOffset+1, end, len(p.projects))))
+			sb.WriteString("\n")
+		}
+	}
+
+	// Footer with actions
+	sb.WriteString("\n")
+	sb.WriteString(p.styles.Muted.Render(strings.Repeat("─", p.width-4)))
+	sb.WriteString("\n")
+	actions := []string{
+		p.styles.HelpKey.Render("[enter]") + p.styles.HelpValue.Render(" select"),
+		p.styles.HelpKey.Render("[a]") + p.styles.HelpValue.Render(" add"),
+		p.styles.HelpKey.Render("[s]") + p.styles.HelpValue.Render(" sync"),
+		p.styles.HelpKey.Render("[d]") + p.styles.HelpValue.Render(" remove"),
+		p.styles.HelpKey.Render("[esc]") + p.styles.HelpValue.Render(" cancel"),
+	}
+	sb.WriteString(strings.Join(actions, "  "))
+
+	content := boxStyle.Render(sb.String())
+	return lipgloss.Place(screenW, screenH, lipgloss.Center, lipgloss.Center, content)
+}
+
+// HandleKey processes key input for the project picker.
+func (p *ProjectPickerModal) HandleKey(keyStr string) tea.Cmd {
+	if len(p.projects) == 0 {
+		switch keyStr {
+		case "a":
+			return nil
+		case KeyEsc, "q":
+			p.Hide()
+		}
+		return nil
+	}
+
+	maxVisible := min(len(p.projects), 15)
+
+	switch keyStr {
+	case "up", "k":
+		if p.selected > 0 {
+			p.selected--
+			if p.selected < p.scrollOffset {
+				p.scrollOffset = p.selected
+			}
+		}
+	case KeyDown, "j":
+		if p.selected < len(p.projects)-1 {
+			p.selected++
+			if p.selected >= p.scrollOffset+maxVisible {
+				p.scrollOffset = p.selected - maxVisible + 1
+			}
+		}
+	case KeyEnter:
+		if p.selected >= 0 && p.selected < len(p.projects) {
+			proj := p.projects[p.selected]
+			p.Hide()
+			return func() tea.Msg {
+				return ProjectSelectMsg{ProjectID: proj.ID}
+			}
+		}
+	case "a":
+		return nil
+	case "s":
+		if p.selected >= 0 && p.selected < len(p.projects) {
+			proj := p.projects[p.selected]
+			projID := proj.ID
+			projName := proj.Name
+			return func() tea.Msg {
+				if p.rpc == nil {
+					return nil
+				}
+				err := p.rpc.SyncProject(projID)
+				if err != nil {
+					return CommandResultMsg{Result: &CommandResult{
+						Output:  fmt.Sprintf("failed to sync project %s: %v", projName, err),
+						IsError: true,
+					}}
+				}
+				return CommandResultMsg{Result: &CommandResult{
+					Output: fmt.Sprintf("synced project: %s", projName),
+				}}
+			}
+		}
+	case "d":
+		if p.selected >= 0 && p.selected < len(p.projects) {
+			proj := p.projects[p.selected]
+			projID := proj.ID
+			projName := proj.Name
+			p.Hide()
+			return func() tea.Msg {
+				if p.rpc == nil {
+					return nil
+				}
+				err := p.rpc.UnregisterProject(projID)
+				if err != nil {
+					return CommandResultMsg{Result: &CommandResult{
+						Output:  fmt.Sprintf("failed to remove project %s: %v", projName, err),
+						IsError: true,
+					}}
+				}
+				return CommandResultMsg{Result: &CommandResult{
+					Output: fmt.Sprintf("removed project: %s", projName),
+				}}
+			}
+		}
+	case KeyEsc, "q":
+		p.Hide()
 	}
 
 	return nil

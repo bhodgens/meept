@@ -89,6 +89,7 @@ type CommandPaletteKeys struct {
 	Sessions      string `json:"sessions"`       // Open session picker (default: "s")
 	NewSession    string `json:"new_session"`    // Create new session (default: "n")
 	RenameSession string `json:"rename_session"` // Rename current session (default: "r")
+	Projects      string `json:"projects"`       // Open projects dialog (default: "p")
 }
 
 // SessionConfig defines session behavior settings.
@@ -110,9 +111,10 @@ func DefaultClientConfig() *ClientConfig {
 				ViewQueue:     "q",
 				ViewMemory:    "m",
 				Sidebar:       "y",
-				Sessions:      "s",
-				NewSession:    "n",
-				RenameSession: "r",
+			Sessions:      "s",
+			NewSession:    "n",
+			RenameSession: "r",
+			Projects:      "p",
 			},
 		},
 		Session: SessionConfig{

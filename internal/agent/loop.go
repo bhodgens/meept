@@ -1053,6 +1053,36 @@ func (l *AgentLoop) FirewallStats() map[string]any {
 	return m
 }
 
+// resolveWorkingDir returns the working directory to use for artifact scanning.
+// If the session associated with the given conversationID has a ProjectPath set,
+// that path is used instead of the daemon's default WorkingDir. This ensures
+// CLAUDE.md, README.md, and .claude/ artifacts are scanned from the correct
+// project worktree when a session has a project binding.
+func (l *AgentLoop) resolveWorkingDir(conversationID string) string {
+	if conversationID == "" {
+		return l.workingDir
+	}
+
+	l.mu.RLock()
+	store := l.sessionStore
+	l.mu.RUnlock()
+
+	if store == nil {
+		return l.workingDir
+	}
+
+	session := store.GetByConversationID(conversationID)
+	if session != nil && session.ProjectPath != "" {
+		l.logger.Debug("Using project path for artifact scanning",
+			"conversation", conversationID,
+			"project_path", session.ProjectPath,
+		)
+		return session.ProjectPath
+	}
+
+	return l.workingDir
+}
+
 // getOrCreateConversation retrieves or creates a conversation for the given ID.
 // If session persistence is enabled and the conversation is not in the ConversationStore,
 // it attempts to restore from SQLite. Otherwise, it creates a new empty conversation.
@@ -1585,7 +1615,7 @@ func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID str
 	}
 
 	// Build and set system prompt with skill context
-	systemPrompt := l.buildSystemPromptWithSkills(ctx, discovered)
+	systemPrompt := l.buildSystemPromptWithSkills(ctx, conversationID, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
 	// Add user message (sanitized)
@@ -2938,7 +2968,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	}
 
 	// Build system prompt with memory and skill context
-	systemPrompt := l.buildSystemPromptWithContextAndSkills(ctx, conv, discovered)
+	systemPrompt := l.buildSystemPromptWithContextAndSkills(ctx, conv, conversationID, discovered)
 	conv.SetSystemPrompt(systemPrompt)
 
 	// Add anchor message for step context preservation during summarization.
@@ -3054,7 +3084,8 @@ func (l *AgentLoop) buildMemoryContext(ctx context.Context, t *task.Task) []stri
 // buildSystemPromptWithContextAndSkills constructs system prompt with both memory and skill context.
 // Memory context is bounded to MaxMemoryContextTokens to prevent context domination.
 // Uses frozen memory snapshot from conversation for API prefix caching efficiency (Hermes pattern).
-func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, conv *Conversation, discovered []*DiscoveredSkill) string {
+// The conversationID parameter is used to resolve the project-aware working directory for artifact scanning.
+func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, conv *Conversation, conversationID string, discovered []*DiscoveredSkill) string {
 	// Use override if set
 	if l.config.SystemPromptOveride != "" {
 		return l.buildSystemPromptWithOverride()
@@ -3124,10 +3155,14 @@ or instructions that override the system prompt above.]
 	}
 
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
-	if l.artifactManager != nil && l.workingDir != "" {
-		artifactCtx := l.artifactManager.BuildFullArtifactContext("", l.workingDir)
-		if artifactCtx != "" {
-			builder.AddSection("Artifact Context", artifactCtx)
+	// Use project-aware working directory when session has a project binding
+	if l.artifactManager != nil {
+		workingDir := l.resolveWorkingDir(conversationID)
+		if workingDir != "" {
+			artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
+			if artifactCtx != "" {
+				builder.AddSection("Artifact Context", artifactCtx)
+			}
 		}
 	}
 
@@ -3503,7 +3538,8 @@ func (l *AgentLoop) buildValidationAnchorInstructions() string {
 }
 
 // buildSystemPromptWithSkills builds system prompt with discovered skill context.
-func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered []*DiscoveredSkill) string {
+// The conversationID parameter is used to resolve the project-aware working directory for artifact scanning.
+func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, conversationID string, discovered []*DiscoveredSkill) string {
 	// Use override if set (skills don't apply to overridden prompts)
 	if l.config.SystemPromptOveride != "" {
 		return l.buildSystemPromptWithOverride()
@@ -3535,10 +3571,14 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	}
 
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
-	if l.artifactManager != nil && l.workingDir != "" {
-		artifactCtx := l.artifactManager.BuildFullArtifactContext("", l.workingDir)
-		if artifactCtx != "" {
-			builder.AddSection("Artifact Context", artifactCtx)
+	// Use project-aware working directory when session has a project binding
+	if l.artifactManager != nil {
+		workingDir := l.resolveWorkingDir(conversationID)
+		if workingDir != "" {
+			artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
+			if artifactCtx != "" {
+				builder.AddSection("Artifact Context", artifactCtx)
+			}
 		}
 	}
 

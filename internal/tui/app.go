@@ -115,6 +115,7 @@ type App struct {
 	confirmModal   *ConfirmModal
 	fuzzyFinder    *FuzzyFinderModal
 	branchPicker   *BranchPickerModal
+	projectPicker  *ProjectPickerModal
 
 	// Current session
 	currentSession *types.Session
@@ -241,6 +242,7 @@ func NewApp(socketPath string) *App {
 	app.sessionRename = NewSessionRenameModal(styles)
 	app.fuzzyFinder = NewFuzzyFinderModal(styles, rpc)
 	app.branchPicker = NewBranchPickerModal(styles, rpc)
+	app.projectPicker = NewProjectPickerModal(styles, rpc)
 
 	// Initialize slash autocomplete
 	app.slashAutocomplete = NewSlashAutocomplete(styles)
