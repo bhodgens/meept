@@ -59,7 +59,10 @@ func newSessionListCmd() *cobra.Command {
 			}
 
 			if outputJSON {
-				output, _ := json.MarshalIndent(resultMap, "", "  ")
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
 				fmt.Println(string(output))
 				return nil
 			}
@@ -210,10 +213,12 @@ func newSessionGetCmd() *cobra.Command {
 			fmt.Printf("Updated:     %s\n", getStringOr(session, "updated_at", ""))
 
 			if tasks, ok := session["tasks"].([]any); ok && len(tasks) > 0 {
-				taskIDs := make([]string, len(tasks))
-				for i, t := range tasks {
+				taskIDs := make([]string, 0, len(tasks))
+				for _, t := range tasks {
 					if tmap, ok := t.(map[string]any); ok {
-						taskIDs[i] = getStringOr(tmap, "id", "")
+						if id := getStringOr(tmap, "id", ""); id != "" {
+							taskIDs = append(taskIDs, id)
+						}
 					}
 				}
 				fmt.Printf("Tasks:       %s\n", strings.Join(taskIDs, ", "))
@@ -415,7 +420,10 @@ func newSessionMessagesCmd() *cobra.Command {
 			}
 
 			if outputJSON {
-				output, _ := json.MarshalIndent(resultMap, "", "  ")
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
 				fmt.Println(string(output))
 				return nil
 			}

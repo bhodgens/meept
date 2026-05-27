@@ -220,7 +220,7 @@ func loadCalendarConfig() (*config.CalendarConfig, error) {
 	if err != nil {
 		// Fall back to defaults
 		def := config.DefaultConfig()
-		return &def.Calendar, err
+		return &def.Calendar, nil
 	}
 
 	return &cfg.Calendar, nil

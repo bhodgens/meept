@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 )
@@ -87,9 +88,10 @@ func newTemplatesListCmd() *cobra.Command {
 				desc := getStringOr(tmpl, "description", "")
 				scope := getStringOr(tmpl, "scope", "turn")
 
-				// Truncate description
-				if len(desc) > 60 {
-					desc = desc[:57] + "..."
+				// Truncate description (rune-aware for multi-byte UTF-8)
+				if utf8.RuneCountInString(desc) > 60 {
+					runes := []rune(desc)
+					desc = string(runes[:57]) + "..."
 				}
 
 				fmt.Fprintf(w, "%s\t%s\t%s\n", name, desc, scope)
@@ -301,10 +303,10 @@ Examples:
 			}
 
 			if cleared, ok := resultMap["cleared"].([]any); ok && len(cleared) > 0 {
-				names := make([]string, len(cleared))
-				for i, n := range cleared {
-					if s, ok := n.(string); ok {
-						names[i] = s
+				names := make([]string, 0, len(cleared))
+				for _, n := range cleared {
+					if s, ok := n.(string); ok && s != "" {
+						names = append(names, s)
 					}
 				}
 				fmt.Printf("Cleared %d template(s): %s\n", len(names), strings.Join(names, ", "))

@@ -61,7 +61,10 @@ func newClawSkillsSearchCmd() *cobra.Command {
 			}
 
 			if outputJSON {
-				output, _ := json.MarshalIndent(resultMap, "", "  ")
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
 				fmt.Println(string(output))
 				return nil
 			}
@@ -195,7 +198,10 @@ func newClawSkillsListCmd() *cobra.Command {
 			}
 
 			if outputJSON {
-				output, _ := json.MarshalIndent(resultMap, "", "  ")
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
 				fmt.Println(string(output))
 				return nil
 			}

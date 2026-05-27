@@ -36,12 +36,11 @@ func newConfigListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "list config file paths and status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			home, _ := os.UserHomeDir()
 			files := []struct {
 				Name string
 				Path string
 			}{
-				{"meept.json5", home + "/.meept/meept.json5"},
+				{"meept.json5", configui.ConfigFilePath("meept.json5")},
 				{"models.json5", configui.ConfigFilePath("models.json5")},
 				{"mcp_servers.json5", configui.ConfigFilePath("mcp_servers.json5")},
 				{"client.json5", configui.ConfigFilePath("client.json5")},

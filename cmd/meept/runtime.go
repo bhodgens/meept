@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -158,7 +159,7 @@ func readPID(path string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(string(data))
+	return strconv.Atoi(strings.TrimSpace(string(data)))
 }
 
 // runRuntimeStatusFormatted shows the current runtime status in the requested format.

@@ -84,7 +84,10 @@ func newSkillsListCmd() *cobra.Command {
 			}
 
 			if outputJSON {
-				output, _ := json.MarshalIndent(resultMap, "", "  ")
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
 				fmt.Println(string(output))
 				return nil
 			}
@@ -176,7 +179,10 @@ func newSkillsShowCmd() *cobra.Command {
 			}
 
 			if outputJSON {
-				output, _ := json.MarshalIndent(resultMap, "", "  ")
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
 				fmt.Println(string(output))
 				return nil
 			}
@@ -288,7 +294,10 @@ Examples:
 			}
 
 			if outputJSON {
-				output, _ := json.MarshalIndent(resultMap, "", "  ")
+				output, err := json.MarshalIndent(resultMap, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal JSON: %w", err)
+				}
 				fmt.Println(string(output))
 				return nil
 			}

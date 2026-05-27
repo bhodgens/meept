@@ -231,5 +231,5 @@ func mustExpandPath(path string) string {
 	if path == "~" {
 		return homeDir
 	}
-	return filepath.Join(homeDir, path[2:])
+	return filepath.Join(homeDir, path[1:])
 }
