@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/caimlas/meept/internal/tui"
+)
+
+var (
+	// chat command flags
+	chatProject string
+	chatNoFence bool
 )
 
 func newChatCmd() *cobra.Command {
@@ -24,10 +31,15 @@ With a message argument, sends a single message and prints the response.
 Examples:
   meept chat                           # Interactive TUI
   meept chat "What time is it?"        # Single message
-  echo "Hello" | meept chat -          # Read from stdin`,
+  echo "Hello" | meept chat -          # Read from stdin
+  meept chat --project myapp           # Bind session to project
+  meept chat --nofence                 # Disable path fencing`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: runChat,
 	}
+
+	cmd.Flags().StringVar(&chatProject, "project", "", "bind session to named project")
+	cmd.Flags().BoolVar(&chatNoFence, "nofence", false, "disable path fencing for this session")
 
 	return cmd
 }
@@ -71,6 +83,40 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 	// Generate a conversation ID for this single message
 	conversationID := fmt.Sprintf("cli-%d", os.Getpid())
+
+	// If --project or --nofence are set, create a managed session and bind project
+	if chatProject != "" || chatNoFence {
+		sessParams := map[string]any{
+			"name":    "cli-single",
+			"no_fence": chatNoFence,
+		}
+		if chatProject != "" {
+			sessParams["project_id"] = chatProject
+		} else {
+			// No project specified; let daemon auto-detect from cwd
+			cwd, _ := os.Getwd()
+			sessParams["detect_path"] = cwd
+		}
+
+		rawResult, err := client.Call("session.create", sessParams)
+		if err != nil {
+			return fmt.Errorf("failed to create session: %w", err)
+		}
+
+		var sessResult map[string]any
+		if err := json.Unmarshal(rawResult, &sessResult); err != nil {
+			return fmt.Errorf("failed to parse session response: %w", err)
+		}
+
+		if errMsg, ok := sessResult["error"].(string); ok && errMsg != "" {
+			return fmt.Errorf("session create error: %s", errMsg)
+		}
+
+		// Use the created session's conversation ID
+		if sid, ok := sessResult["id"].(string); ok && sid != "" {
+			conversationID = sid
+		}
+	}
 
 	reply, err := client.Chat(message, conversationID)
 	if err != nil {
