@@ -26,6 +26,7 @@ import (
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
+	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/scheduler"
 	intsecurity "github.com/caimlas/meept/internal/security"
@@ -154,6 +155,9 @@ type Components struct {
 	// Calendar integration
 	CalendarClient   *calendar.Client
 	CalendarReminder *calendar.ReminderWatcher
+
+	// Project management
+	ProjectManager *project.ProjectManager
 
 	Logger *slog.Logger
 }
@@ -789,6 +793,31 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	if c.AgentLoop != nil && cfg.Session.Persistence && cfg.Session.Branching && branchMgr != nil {
 		c.AgentLoop.SetBranchManager(branchMgr)
 		logger.Info("Branch navigation wired to agent loop")
+	}
+
+	// Create project manager if projects feature is enabled
+	if cfg.Projects.Enabled {
+		projDBPath := filepath.Join(cfg.Daemon.DataDir, "projects.db")
+		projStore, projErr := project.NewStore(projDBPath, logger.With("component", "project-store"))
+		if projErr != nil {
+			logger.Warn("Failed to create project store", "error", projErr)
+		} else {
+			pm := project.NewProjectManager(projStore, cfg.Projects, logger.With("component", "project-manager"))
+			c.ProjectManager = pm
+			logger.Info("Project manager initialized",
+				"base_dir", cfg.Projects.BaseDir,
+				"auto_detect", cfg.Projects.AutoDetect,
+			)
+
+			// Clean up orphaned worktrees from previous runs
+			if cfg.Projects.CleanupOrphanedWorktrees {
+				if cleaned, cleanErr := projStore.CleanupOrphanedWorktrees(context.Background()); cleanErr != nil {
+					logger.Warn("Failed to cleanup orphaned worktrees", "error", cleanErr)
+				} else if cleaned > 0 {
+					logger.Info("Cleaned up orphaned worktrees", "count", cleaned)
+				}
+			}
+		}
 	}
 
 	// Create job queue
