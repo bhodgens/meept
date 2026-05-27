@@ -21,8 +21,8 @@ func newTestManager(t *testing.T) (*ProjectManager, *Store) {
 	t.Cleanup(func() { store.Close() })
 
 	cfg := config.ProjectsConfig{
-		BaseDir:        filepath.Join(dir, "projects"),
-		DefaultBranch:  "main",
+		BaseDir:         filepath.Join(dir, "projects"),
+		DefaultBranch:   "main",
 		WorktreePerPlan: "auto",
 	}
 	os.MkdirAll(cfg.BaseDir, 0o755)

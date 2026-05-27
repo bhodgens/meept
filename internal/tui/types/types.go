@@ -450,14 +450,14 @@ type TreeNodeInfo struct {
 
 // ProjectInfo represents a registered project for TUI display.
 type ProjectInfo struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Mode     string `json:"mode"`
-	Branch   string `json:"branch"`
-	GitURL   string `json:"git_url,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Mode      string `json:"mode"`
+	Branch    string `json:"branch"`
+	GitURL    string `json:"git_url,omitempty"`
 	LocalPath string `json:"local_path"`
-	Status   string `json:"status"`
-	Dirty    bool   `json:"dirty"`
+	Status    string `json:"status"`
+	Dirty     bool   `json:"dirty"`
 }
 
 // ProjectListResponse represents the response from project.list RPC.

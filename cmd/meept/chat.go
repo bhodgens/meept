@@ -87,7 +87,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 	// If --project or --nofence are set, create a managed session and bind project
 	if chatProject != "" || chatNoFence {
 		sessParams := map[string]any{
-			"name":    "cli-single",
+			"name":     "cli-single",
 			"no_fence": chatNoFence,
 		}
 		if chatProject != "" {

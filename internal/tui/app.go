@@ -121,9 +121,9 @@ type App struct {
 	currentSession *types.Session
 
 	// Current project
-	currentProjectID   string
-	currentProjectName string
-	currentProjectMode string
+	currentProjectID    string
+	currentProjectName  string
+	currentProjectMode  string
 	currentProjectDirty bool
 
 	// SessionManager is the shared session manager used by both TUI and meept-lite
