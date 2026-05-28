@@ -564,7 +564,10 @@ func percentile(sorted []float64, p int) float64 {
 	return sorted[lower]*(1-fraction) + sorted[upper]*fraction
 }
 
-// PruneOld removes records older than the retention period.
+// PruneOld removes raw request records older than the retention period.
+// Note: model_cost_daily rows are intentionally NOT pruned — cost data
+// persists indefinitely for historical reporting. Only provider_requests
+// (high-volume per-request detail rows) are subject to retention.
 func (s *Store) PruneOld(ctx context.Context) error {
 	return s.pool.WithConn(ctx, func(db *sql.DB) error {
 		cutoffTime := time.Now().Add(-time.Duration(s.config.RetentionDays*24) * time.Hour).UnixMilli()
