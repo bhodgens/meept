@@ -104,6 +104,9 @@ type Components struct {
 	// Token cache for LLM responses
 	TokenCache *llm.TokenCacheCoordinator
 
+	// Pricing syncer for dynamic model pricing
+	PricingSyncer *llm.PricingSyncer
+
 	// Local LLM runtime lifecycle manager
 	RuntimeManager *llm.RuntimeManager
 
@@ -215,6 +218,8 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		budgetTracker = llm.NewBudget(llm.BudgetConfig{
 			HourlyLimit:      cfg.LLM.Budget.HourlyTokenLimit,
 			DailyLimit:       cfg.LLM.Budget.DailyTokenLimit,
+			DailyCostLimit:   cfg.LLM.Budget.DailyCostLimit,
+			HourlyCostLimit:  cfg.LLM.Budget.HourlyCostLimit,
 			RateLimitRPM:     cfg.LLM.Budget.RateLimitRPM,
 			Aggressiveness:   cfg.LLM.Budget.Aggressiveness,
 			PerTaskBudget:    cfg.LLM.Budget.PerTaskTokenLimit,
@@ -279,6 +284,14 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			c.LLMResolver = llm.NewResolver(providersCfg, logger.With("component", "resolver"))
 			logger.Debug("LLM resolver initialized")
 		}
+
+		// Create pricing syncer for dynamic model pricing
+		pricingSyncer := llm.NewPricingSyncer(llm.PricingSyncerConfig{
+			OpenRouterURL: "https://openrouter.ai/api/v1/models",
+			SyncInterval:  6 * time.Hour,
+			Logger:        logger.With("component", "pricing-sync"),
+		})
+		c.PricingSyncer = pricingSyncer
 
 		// Create auxiliary LLM clients for classifier and summarizer
 		// Use resolver for alias-based model selection (enables fallback rotation)
@@ -1380,6 +1393,16 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.CalendarReminder != nil {
 		go c.CalendarReminder.Start(ctx)
 		c.Logger.Info("Calendar reminder watcher started")
+	}
+
+	// Start periodic pricing sync (if configured)
+	if c.PricingSyncer != nil {
+		go func() {
+			stop := c.PricingSyncer.StartPeriodicSync(ctx)
+			defer close(stop)
+			<-ctx.Done()
+		}()
+		c.Logger.Info("Pricing syncer started")
 	}
 
 	// Start sync manager and handler

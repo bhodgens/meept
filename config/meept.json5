@@ -46,6 +46,8 @@
     "budget": {
       "hourly_token_limit": 100000,
       "daily_token_limit": 1000000,
+      "daily_cost_limit": 0,     // max USD per UTC day (0 = unlimited)
+      "hourly_cost_limit": 0,    // max USD per sliding hour (0 = unlimited)
       "rate_limit_rpm": 30,
       "aggressiveness": 0.5,  // 0.0 = very conservative, 1.0 = use full budget
     },

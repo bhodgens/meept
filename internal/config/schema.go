@@ -378,6 +378,8 @@ type LLMMetricsConfig struct {
 type BudgetConfig struct {
 	HourlyTokenLimit     int     `json:"hourly_token_limit" toml:"hourly_token_limit"`
 	DailyTokenLimit      int     `json:"daily_token_limit"  toml:"daily_token_limit"`
+	DailyCostLimit       float64 `json:"daily_cost_limit"   toml:"daily_cost_limit"`    // Max USD per UTC day (0 = no limit)
+	HourlyCostLimit      float64 `json:"hourly_cost_limit"  toml:"hourly_cost_limit"`   // Max USD per sliding hour (0 = no limit)
 	RateLimitRPM         int     `json:"rate_limit_rpm"     toml:"rate_limit_rpm"`
 	Aggressiveness       float64 `json:"aggressiveness"     toml:"aggressiveness"`
 	PerTaskTokenLimit    int     `json:"per_task_token_limit"  toml:"per_task_token_limit"`      // max tokens per single task (0 = no cap)
