@@ -19,6 +19,10 @@ type DaemonStatusResponse struct {
 	TokensRemaining   int      `json:"tokens_remaining"`
 	BudgetUsed        float64  `json:"budget_used"`
 	BudgetRemaining   float64  `json:"budget_remaining"`
+	DailyCostUsed     float64  `json:"daily_cost_used"`
+	DailyCostLimit    float64  `json:"daily_cost_limit"`
+	HourlyCostUsed    float64  `json:"hourly_cost_used"`
+	HourlyCostLimit   float64  `json:"hourly_cost_limit"`
 }
 
 // JobListResponse represents the job list RPC response.

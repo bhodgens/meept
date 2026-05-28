@@ -103,8 +103,8 @@ type Server struct {
 	FirewallStatsGetter func() map[string]any
 
 	// BudgetStatusGetter is an optional callback that returns budget stats.
-	// Used by the status handler to report actual token usage (FIX #0031/#0035).
-	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int)
+	// Used by the status handler to report actual token and cost usage.
+	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64)
 
 	wsHub *WebSocketHub
 

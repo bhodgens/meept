@@ -46,8 +46,8 @@ type Server struct {
 	FirewallStatsGetter func() map[string]any
 
 	// BudgetStatusGetter is an optional callback that returns budget status.
-	// Used by the status handler to report actual token usage (FIX #0031/#0035).
-	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int)
+	// Used by the status handler to report actual token and cost usage (FIX #0031/#0035).
+	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64)
 
 	// Connection tracking
 	connMu   sync.Mutex
@@ -393,13 +393,19 @@ func (s *Server) registerBuiltinHandlers() {
 
 		// Include budget stats if a getter is configured (FIX #0031/#0035)
 		if s.BudgetStatusGetter != nil {
-			hu, hr, du, dr, rc, rl := s.BudgetStatusGetter()
+			hu, hr, du, dr, rc, rl, dcu, dcl, hcu, hcl := s.BudgetStatusGetter()
 			result["tokens_used"] = hu
 			result["tokens_remaining"] = hr
 			result["daily_used"] = du
 			result["daily_remaining"] = dr
 			result["rpm_current"] = rc
 			result["rpm_limit"] = rl
+			result["daily_cost_used"] = dcu
+			result["daily_cost_limit"] = dcl
+			result["hourly_cost_used"] = hcu
+			result["hourly_cost_limit"] = hcl
+			result["budget_used"] = dcu
+			result["budget_remaining"] = max(dcl-dcu, 0)
 		}
 
 		return result, nil

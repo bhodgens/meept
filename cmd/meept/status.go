@@ -133,6 +133,21 @@ func printStatusText(status *types.DaemonStatusResponse, pid int) {
 		fmt.Printf("  Cost:       $%.4f / $%.4f (%.1f%%)\n", budgetUsed, totalBudget, budgetPercent)
 	}
 
+	// Dollar cost budget
+	if status.DailyCostLimit > 0 || status.HourlyCostLimit > 0 {
+		fmt.Println()
+		fmt.Printf("Cost Budget\n")
+		fmt.Printf("-----------\n")
+		if status.DailyCostLimit > 0 {
+			dailyPercent := status.DailyCostUsed / status.DailyCostLimit * 100
+			fmt.Printf("  Daily:     $%.4f / $%.4f (%.1f%%)\n", status.DailyCostUsed, status.DailyCostLimit, dailyPercent)
+		}
+		if status.HourlyCostLimit > 0 {
+			hourlyPercent := status.HourlyCostUsed / status.HourlyCostLimit * 100
+			fmt.Printf("  Hourly:    $%.4f / $%.4f (%.1f%%)\n", status.HourlyCostUsed, status.HourlyCostLimit, hourlyPercent)
+		}
+	}
+
 	fmt.Println()
 
 	// RPC info
@@ -152,6 +167,10 @@ func printStatusJSON(status *types.DaemonStatusResponse, pid int) error {
 		"tokens_remaining":   status.TokensRemaining,
 		"budget_used":        status.BudgetUsed,
 		"budget_remaining":   status.BudgetRemaining,
+		"daily_cost_used":    status.DailyCostUsed,
+		"daily_cost_limit":   status.DailyCostLimit,
+		"hourly_cost_used":   status.HourlyCostUsed,
+		"hourly_cost_limit":  status.HourlyCostLimit,
 		"registered_methods": len(status.RegisteredMethods),
 		"bus_subscribers":    status.BusSubscribers,
 	}

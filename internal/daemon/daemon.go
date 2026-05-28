@@ -229,11 +229,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		if rpcServer != nil && components.LLMClient != nil {
 			budget := components.LLMClient.Budget()
 			if budget != nil {
-				rpcServer.BudgetStatusGetter = func() (int, int, int, int, int, int) {
+				rpcServer.BudgetStatusGetter = func() (int, int, int, int, int, int, float64, float64, float64, float64) {
 					bs := budget.GetStatus()
-					return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit
+					return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit
 				}
-				logger.Info("Budget stats RPC getter registered")
 			}
 		}
 	}
@@ -452,9 +451,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			if components.LLMClient != nil {
 				budget := components.LLMClient.Budget()
 				if budget != nil {
-					httpSrv.BudgetStatusGetter = func() (int, int, int, int, int, int) {
+					httpSrv.BudgetStatusGetter = func() (int, int, int, int, int, int, float64, float64, float64, float64) {
 						bs := budget.GetStatus()
-						return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit
+						return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit
 					}
 					logger.Info("Budget stats HTTP getter registered")
 				}
