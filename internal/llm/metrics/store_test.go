@@ -2,7 +2,9 @@ package metrics
 
 import (
 	"context"
+	"math"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -151,5 +153,74 @@ func TestClassifyError(t *testing.T) {
 				t.Errorf("ClassifyError(%v, %d) = %v, want %v", tt.err, tt.status, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestStore_RecordWithCost(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	store, err := NewStore(StoreConfig{
+		DBPath:        dbPath,
+		RetentionDays: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	if err := store.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Start background worker so Record() processes
+	store.StartBackground(ctx)
+
+	record := RequestRecord{
+		Timestamp:        time.Now(),
+		ProviderID:       "anthropic",
+		ModelID:          "claude-sonnet-4-6",
+		PromptTokens:     1000,
+		CompletionTokens: 500,
+		CachedTokens:     200,
+		CostUSD:          0.0105,
+		LatencyMs:        1200,
+		Success:          true,
+	}
+
+	if err := store.Record(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for async worker
+	time.Sleep(200 * time.Millisecond)
+
+	costs, err := store.GetDailyCosts(ctx, time.Now().Add(-24*time.Hour), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(costs) != 1 {
+		t.Fatalf("expected 1 cost entry, got %d", len(costs))
+	}
+	if costs[0].ProviderID != "anthropic" {
+		t.Errorf("expected provider anthropic, got %s", costs[0].ProviderID)
+	}
+	if costs[0].ModelID != "claude-sonnet-4-6" {
+		t.Errorf("expected model claude-sonnet-4-6, got %s", costs[0].ModelID)
+	}
+
+	const tolerance = 0.0001
+	if math.Abs(costs[0].TotalCost-record.CostUSD) > tolerance {
+		t.Errorf("expected cost ~%.4f, got %.4f", record.CostUSD, costs[0].TotalCost)
+	}
+
+	// Test GetTotalCost
+	total, err := store.GetTotalCost(ctx, time.Now().Add(-24*time.Hour), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(total-record.CostUSD) > tolerance {
+		t.Errorf("expected total cost ~%.4f, got %.4f", record.CostUSD, total)
 	}
 }

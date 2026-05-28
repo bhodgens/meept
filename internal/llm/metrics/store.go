@@ -35,6 +35,7 @@ type RequestRecord struct {
 	PromptTokens     int
 	CompletionTokens int
 	CachedTokens     int
+	CostUSD          float64 // Computed dollar cost for this request
 	LatencyMs        int64
 	TTFBMs           int64 // Time to first byte; 0 for non-streaming
 	HTTPStatus       int
@@ -169,8 +170,30 @@ CREATE TABLE IF NOT EXISTS provider_stats (
 		if err != nil {
 			return err
 		}
-		// Idempotent migration for existing databases
+		// Idempotent migrations for existing databases
 		db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0")
+		db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0.0")
+
+		// Create model_cost_daily for persistent per-model cost tracking
+		const dailyCostSchema = `
+CREATE TABLE IF NOT EXISTS model_cost_daily (
+    date         TEXT NOT NULL,
+    provider_id  TEXT NOT NULL,
+    model_id     TEXT NOT NULL,
+    total_cost   REAL NOT NULL DEFAULT 0.0,
+    total_prompt_tokens   INTEGER NOT NULL DEFAULT 0,
+    total_completion_tokens INTEGER NOT NULL DEFAULT 0,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    updated_at   INTEGER NOT NULL,
+    PRIMARY KEY (date, provider_id, model_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcd_date ON model_cost_daily(date);
+`
+		if _, err := db.ExecContext(ctx, dailyCostSchema); err != nil {
+			return err
+		}
+
 		return nil
 	})
 }
@@ -217,16 +240,38 @@ func (s *Store) recordWorker() {
 func (s *Store) recordSync(ctx context.Context, r RequestRecord) {
 	if err := s.pool.WithConn(ctx, func(db *sql.DB) error {
 		const q = `
-INSERT INTO provider_requests (ts, provider_id, model_id, prompt_tokens, completion_tokens, cached_tokens, latency_ms, ttfb_ms, http_status, error_type, error_message, success)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO provider_requests (ts, provider_id, model_id, prompt_tokens, completion_tokens, cached_tokens, cost_usd, latency_ms, ttfb_ms, http_status, error_type, error_message, success)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 		ts := r.Timestamp.UnixMilli()
 		success := 0
 		if r.Success {
 			success = 1
 		}
-		_, err := db.ExecContext(ctx, q, ts, r.ProviderID, r.ModelID, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.LatencyMs, r.TTFBMs, r.HTTPStatus, string(r.ErrorType), r.ErrorMessage, success)
-		return err
+		_, err := db.ExecContext(ctx, q, ts, r.ProviderID, r.ModelID, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.CostUSD, r.LatencyMs, r.TTFBMs, r.HTTPStatus, string(r.ErrorType), r.ErrorMessage, success)
+		if err != nil {
+			return err
+		}
+
+		// Upsert into model_cost_daily for persistent per-model cost tracking
+		if r.Success && r.CostUSD > 0 {
+			dateStr := r.Timestamp.UTC().Format("2006-01-02")
+			const upsertDaily = `
+INSERT INTO model_cost_daily (date, provider_id, model_id, total_cost, total_prompt_tokens, total_completion_tokens, request_count, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+ON CONFLICT(date, provider_id, model_id) DO UPDATE SET
+    total_cost = total_cost + excluded.total_cost,
+    total_prompt_tokens = total_prompt_tokens + excluded.total_prompt_tokens,
+    total_completion_tokens = total_completion_tokens + excluded.total_completion_tokens,
+    request_count = request_count + 1,
+    updated_at = excluded.updated_at
+`
+			if _, err := db.ExecContext(ctx, upsertDaily, dateStr, r.ProviderID, r.ModelID, r.CostUSD, r.PromptTokens, r.CompletionTokens, time.Now().UnixMilli()); err != nil {
+				s.logger.Debug("failed to upsert daily cost", "error", err)
+			}
+		}
+
+		return nil
 	}); err != nil {
 		s.logger.Debug("failed to record metric", "error", err)
 	}
@@ -593,6 +638,60 @@ func (s *Store) Close() error {
 
 	s.logger.Debug("metrics store closed")
 	return s.pool.Close()
+}
+
+// DailyCostEntry holds aggregated cost for a provider/model on a given date.
+type DailyCostEntry struct {
+	Date                  string
+	ProviderID            string
+	ModelID               string
+	TotalCost             float64
+	TotalPromptTokens     int64
+	TotalCompletionTokens int64
+	RequestCount          int64
+}
+
+// GetDailyCosts returns cost entries within a date range.
+func (s *Store) GetDailyCosts(ctx context.Context, from, to time.Time) ([]DailyCostEntry, error) {
+	var entries []DailyCostEntry
+	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
+		fromStr := from.UTC().Format("2006-01-02")
+		toStr := to.UTC().Format("2006-01-02")
+		const q = `
+SELECT date, provider_id, model_id, total_cost, total_prompt_tokens, total_completion_tokens, request_count
+FROM model_cost_daily
+WHERE date >= ? AND date <= ?
+ORDER BY date DESC, total_cost DESC
+`
+		rows, err := db.QueryContext(ctx, q, fromStr, toStr)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var e DailyCostEntry
+			if err := rows.Scan(&e.Date, &e.ProviderID, &e.ModelID, &e.TotalCost, &e.TotalPromptTokens, &e.TotalCompletionTokens, &e.RequestCount); err != nil {
+				return err
+			}
+			entries = append(entries, e)
+		}
+		return rows.Err()
+	})
+	return entries, err
+}
+
+// GetTotalCost returns the total dollar cost across all providers within a date range.
+func (s *Store) GetTotalCost(ctx context.Context, from, to time.Time) (float64, error) {
+	var total float64
+	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
+		fromStr := from.UTC().Format("2006-01-02")
+		toStr := to.UTC().Format("2006-01-02")
+		const q = `SELECT COALESCE(SUM(total_cost), 0) FROM model_cost_daily WHERE date >= ? AND date <= ?`
+		row := db.QueryRowContext(ctx, q, fromStr, toStr)
+		return row.Scan(&total)
+	})
+	return total, err
 }
 
 // ClassifyError categorizes an error based on type and HTTP status.
