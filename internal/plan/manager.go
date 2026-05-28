@@ -304,6 +304,10 @@ func (m *PlanManager) CancelPlan(ctx context.Context, planID, reason string) err
 // Synthesize creates the task hierarchy from the plan: a parent task with child
 // tasks for each phase, and TaskSteps for each parsed step within a phase.
 func (m *PlanManager) Synthesize(ctx context.Context, planID string) error {
+	if m.taskCreator == nil {
+		return fmt.Errorf("synthesize plan %s: no task creator configured", planID)
+	}
+
 	plan, err := m.store.GetPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
