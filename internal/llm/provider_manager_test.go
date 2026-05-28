@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -531,5 +533,42 @@ func TestProviderManager_SkipsUnhealthyProviders(t *testing.T) {
 
 	if atomic.LoadInt32(&backupCalls) != 1 {
 		t.Errorf("expected 1 backup call, got %d", backupCalls)
+	}
+}
+
+func TestProviderManager_RecordsDollarCost(t *testing.T) {
+	budget := NewBudget(BudgetConfig{
+		DailyCostLimit: 100.0,
+	}, slog.Default())
+
+	cfg := &ModelConfig{
+		BaseURL:              "http://localhost:1",
+		ModelID:              "test-model",
+		ProviderID:           "test",
+		CostPerMillionInput:  3.0,
+		CostPerMillionOutput: 15.0,
+	}
+
+	pm := NewProviderManager(ProviderManagerConfig{
+		Providers: []*ModelConfig{cfg},
+		Budget:    budget,
+	})
+	defer pm.Stop()
+
+	resp := &Response{
+		Usage: TokenUsage{
+			PromptTokens:     10000,
+			CompletionTokens: 5000,
+			TotalTokens:      15000,
+		},
+	}
+
+	entry := pm.GetPrimaryProvider()
+	pm.recordSuccess(entry, resp, 100*time.Millisecond)
+
+	status := budget.GetStatus()
+	expectedCost := 10000*3.0/1_000_000 + 5000*15.0/1_000_000 // $0.03 + $0.075 = $0.105
+	if math.Abs(status.DailyCostUsed-expectedCost) > 0.0001 {
+		t.Errorf("expected daily cost used %.6f, got %.6f", expectedCost, status.DailyCostUsed)
 	}
 }

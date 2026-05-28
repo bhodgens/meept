@@ -328,6 +328,16 @@ func (pm *ProviderManager) recordSuccess(entry *ProviderEntry, resp *Response, l
 	cost += float64(resp.Usage.CompletionTokens) * entry.Config.CostPerMillionOutput / 1_000_000
 	h.TotalCost += cost
 
+	// Track dollar cost in budget for enforcement
+	if pm.config.Budget != nil {
+		pm.config.Budget.RecordCost(CostRecord{
+			Timestamp:        time.Now(),
+			CostUSD:          cost,
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+		})
+	}
+
 	// Update status
 	if h.Status == ProviderStatusUnhealthy || h.Status == ProviderStatusDegraded {
 		// Check if we should recover
