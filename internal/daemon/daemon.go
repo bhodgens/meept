@@ -20,6 +20,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/metrics"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/registry"
@@ -50,6 +51,11 @@ type Daemon struct {
 	metricsStore     *metrics.Store
 	metricsCollector *metrics.Collector
 	logger           *slog.Logger
+
+	// Plan system
+	planStore   *plan.SQLiteStore
+	planManager *plan.PlanManager
+	planHandler *plan.PlanHandler
 
 	status    atomic.Value // stores models.DaemonStatus
 	startTime time.Time
@@ -289,6 +295,45 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		coll = metrics.NewCollector(metricsStore, msgBus, nil)
 	}
 
+	// --- Plan system initialization ---
+
+	// Create plan store (SQLite-backed)
+	var planStoreInst *plan.SQLiteStore
+	var planStoreIF plan.PlanStore
+	var planManagerInst *plan.PlanManager
+	var planHandlerInst *plan.PlanHandler
+
+	planStoreInst, err = plan.NewSQLiteStore(filepath.Join(cfg.StateDir, "plans.db"), logger)
+	if err != nil {
+		logger.Warn("Failed to create plan store, plan system disabled", "error", err)
+	} else {
+		planStoreIF = planStoreInst
+
+		// Create TaskCreator adapter wrapping task.Registry
+		var taskCreator plan.TaskCreator
+		if components != nil && components.TaskRegistry != nil {
+			taskCreator = newTaskCreatorAdapter(components.TaskRegistry)
+		}
+
+		// Create PlanManager
+		planManagerInst = plan.NewPlanManager(planStoreIF, msgBus, fullCfg.Plans, taskCreator, logger)
+
+		// Create PlanHandler (subscribes to task events for progress tracking)
+		planHandlerInst = plan.NewPlanHandler(planManagerInst, msgBus, logger)
+
+		logger.Info("Plan system initialized",
+			"mode", fullCfg.Plans.Mode,
+			"task_creator_available", taskCreator != nil,
+		)
+	}
+
+	// Register plan RPC handlers (direct Go handlers override bus proxy)
+	if rpcServer != nil && planManagerInst != nil {
+		planRPCHandler := rpc.NewPlanHandler(planManagerInst, planStoreIF)
+		planRPCHandler.RegisterPlanMethods(rpcServer)
+		logger.Info("Plan RPC handlers registered")
+	}
+
 	// Create service registry with dependencies
 	svcRegistry, err := services.NewRegistry(services.Config{
 		Bus:              msgBus,
@@ -312,6 +357,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		PidFile:          cfg.PIDFile,
 		StateDir:         cfg.StateDir,
 		ProjectManager:   nilSafeProjectManager(components),
+		PlanManager:      planManagerInst,
+		PlanStore:        planStoreIF,
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service registry: %w", err)
@@ -444,6 +491,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components:       components,
 		metricsStore:     metricsStore,
 		metricsCollector: coll,
+		planStore:        planStoreInst,
+		planManager:      planManagerInst,
+		planHandler:      planHandlerInst,
 		logger:           logger,
 		pidFile:          cfg.PIDFile,
 	}
@@ -495,6 +545,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	// Metrics collector is started automatically by NewCollector
+
+	// Start plan handler (subscribes to task events for plan progress tracking)
+	if d.planHandler != nil {
+		if err := d.planHandler.Start(ctx); err != nil {
+			d.logger.Error("Failed to start plan handler", "error", err)
+		}
+	}
 
 	// Recover pending follow-ups from queue persistence.
 	// This scans queued_followups for conversations that had messages pending
@@ -597,6 +654,16 @@ func (d *Daemon) shutdown() error {
 	}
 	if d.metricsStore != nil {
 		d.metricsStore.Close()
+	}
+
+	// Stop plan handler and close plan store
+	if d.planHandler != nil {
+		d.planHandler.Stop()
+	}
+	if d.planStore != nil {
+		if err := d.planStore.Close(); err != nil {
+			d.logger.Error("Plan store close error", "error", err)
+		}
 	}
 
 	// Stop local LLM runtimes
@@ -937,4 +1004,31 @@ func nilSafeProjectManager(c *Components) *project.ProjectManager {
 		return nil
 	}
 	return c.ProjectManager
+}
+
+// taskCreatorAdapter adapts task.Registry to implement plan.TaskCreator.
+// It bridges the plan system's task creation needs with the existing task
+// subsystem, allowing plans to synthesize tasks during approval.
+type taskCreatorAdapter struct {
+	registry *task.Registry
+}
+
+func newTaskCreatorAdapter(registry *task.Registry) *taskCreatorAdapter {
+	return &taskCreatorAdapter{registry: registry}
+}
+
+func (a *taskCreatorAdapter) CreateTask(ctx context.Context, name, description string) (*task.Task, error) {
+	return a.registry.Create(ctx, name, description)
+}
+
+func (a *taskCreatorAdapter) CreateTaskStep(ctx context.Context, taskID, description string, sequence int) (*task.TaskStep, error) {
+	step := task.NewTaskStep(taskID, description, sequence)
+	if err := a.registry.StepStore().Create(step); err != nil {
+		return nil, err
+	}
+	return step, nil
+}
+
+func (a *taskCreatorAdapter) LinkSession(ctx context.Context, taskID, sessionID string) error {
+	return a.registry.LinkSession(ctx, taskID, sessionID)
 }
