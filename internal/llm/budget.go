@@ -13,6 +13,12 @@ type usageRecord struct {
 	tokens    int
 }
 
+// costRecord is a timestamped dollar cost entry.
+type costRecord struct {
+	timestamp time.Time
+	costUSD   float64
+}
+
 // Budget tracks and enforces token consumption budgets.
 type Budget struct {
 	mu sync.Mutex
@@ -42,6 +48,16 @@ type Budget struct {
 	// RPM tracking (sliding window of request timestamps)
 	requestTimestamps []time.Time
 
+	// Dollar cost tracking
+	dailyCostLimit  float64
+	hourlyCostLimit float64
+
+	// Hourly cost sliding window
+	hourlyCostWindow []costRecord
+
+	// Daily cost tracking — reset at midnight UTC
+	dailyCostUsed float64
+
 	logger *slog.Logger
 }
 
@@ -49,6 +65,8 @@ type Budget struct {
 type BudgetConfig struct {
 	HourlyLimit      int
 	DailyLimit       int
+	DailyCostLimit   float64 // Max dollar cost per UTC day (0 = no limit)
+	HourlyCostLimit  float64 // Max dollar cost per sliding hour (0 = no limit)
 	RateLimitRPM     int
 	Aggressiveness   float64
 	PerTaskBudget    int // max tokens per single task (0 = no cap)
@@ -81,6 +99,9 @@ func NewBudget(cfg BudgetConfig, logger *slog.Logger) *Budget {
 		dailyUsed:         0,
 		currentDay:        dayOrdinal(now),
 		requestTimestamps: make([]time.Time, 0),
+		dailyCostLimit:    cfg.DailyCostLimit,
+		hourlyCostLimit:   cfg.HourlyCostLimit,
+		hourlyCostWindow:  make([]costRecord, 0),
 		tasks:             make(map[string]int),
 		sessions:          make(map[string]int),
 		logger:            logger,
@@ -149,8 +170,65 @@ func (b *Budget) maybeResetDaily() {
 	if today != b.currentDay {
 		b.logger.Info("Daily token budget reset (new UTC day)")
 		b.dailyUsed = 0
+		b.dailyCostUsed = 0
+		b.hourlyCostWindow = b.hourlyCostWindow[:0]
 		b.currentDay = today
 	}
+}
+
+// effectiveCostLimit applies the aggressiveness factor to a dollar limit.
+func (b *Budget) effectiveCostLimit(base float64) float64 {
+	factor := 0.5 + 0.5*b.aggressiveness
+	return base * factor
+}
+
+// hourlyCostUsed returns total dollar cost in the current sliding hour.
+func (b *Budget) hourlyCostUsed() float64 {
+	cutoff := time.Now().Add(-time.Hour)
+	total := 0.0
+	for i := len(b.hourlyCostWindow) - 1; i >= 0; i-- {
+		if b.hourlyCostWindow[i].timestamp.Before(cutoff) {
+			break
+		}
+		total += b.hourlyCostWindow[i].costUSD
+	}
+	return total
+}
+
+// CostRecord captures a dollar cost event for budget tracking.
+type CostRecord struct {
+	Timestamp        time.Time
+	CostUSD          float64
+	PromptTokens     int
+	CompletionTokens int
+}
+
+// RecordCost records a dollar cost against the budget.
+func (b *Budget) RecordCost(r CostRecord) {
+	if r.CostUSD <= 0 {
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.maybeResetDaily()
+
+	if r.Timestamp.IsZero() {
+		r.Timestamp = time.Now()
+	}
+
+	b.hourlyCostWindow = append(b.hourlyCostWindow, costRecord{
+		timestamp: r.Timestamp,
+		costUSD:   r.CostUSD,
+	})
+	b.dailyCostUsed += r.CostUSD
+
+	b.logger.Debug("Recorded dollar cost",
+		"cost_usd", r.CostUSD,
+		"hourly_cost", b.hourlyCostUsed(),
+		"daily_cost", b.dailyCostUsed,
+	)
 }
 
 // hourlyUsed returns total tokens used in the current sliding hour.
@@ -234,8 +312,8 @@ func (b *Budget) CheckBudget() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Allow all requests when both budget limits are unconfigured (zero)
-	if b.hourlyLimit == 0 && b.dailyLimit == 0 {
+	// Allow all requests when both token and cost budget limits are unconfigured (zero)
+	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 {
 		return true
 	}
 
@@ -254,7 +332,17 @@ func (b *Budget) CheckBudget() bool {
 	} else {
 		dailyOK = true
 	}
-	return hourlyOK && dailyOK
+
+	// Dollar cost limits
+	costOK := true
+	if b.dailyCostLimit > 0 && b.dailyCostUsed >= b.effectiveCostLimit(b.dailyCostLimit) {
+		costOK = false
+	}
+	if b.hourlyCostLimit > 0 && b.hourlyCostUsed() >= b.effectiveCostLimit(b.hourlyCostLimit) {
+		costOK = false
+	}
+
+	return hourlyOK && dailyOK && costOK
 }
 
 // CheckBudgetWithScope validates budgets including per-task and per-session caps.
@@ -264,7 +352,7 @@ func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) bool {
 	defer b.mu.Unlock()
 
 	// Allow all requests when budget is unconfigured (limits = 0)
-	if b.hourlyLimit == 0 && b.dailyLimit == 0 {
+	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 {
 		return true
 	}
 
@@ -302,7 +390,16 @@ func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) bool {
 		dailyOK = true
 	}
 
-	return hourlyOK && dailyOK
+	// Dollar cost limits
+	costOK := true
+	if b.dailyCostLimit > 0 && b.dailyCostUsed >= b.effectiveCostLimit(b.dailyCostLimit) {
+		costOK = false
+	}
+	if b.hourlyCostLimit > 0 && b.hourlyCostUsed() >= b.effectiveCostLimit(b.hourlyCostLimit) {
+		costOK = false
+	}
+
+	return hourlyOK && dailyOK && costOK
 }
 
 // RecordTaskUsage tracks tokens consumed by a specific task.
@@ -427,6 +524,12 @@ type Status struct {
 	WithinBudget           bool    `json:"within_budget"`
 	TaskBudgetExhausted    bool    `json:"task_budget_exhausted"`
 	SessionBudgetExhausted bool    `json:"session_budget_exhausted"`
+	DailyCostUsed          float64 `json:"daily_cost_used"`
+	DailyCostLimit         float64 `json:"daily_cost_limit"`
+	DailyCostRemaining     float64 `json:"daily_cost_remaining"`
+	HourlyCostUsed         float64 `json:"hourly_cost_used"`
+	HourlyCostLimit        float64 `json:"hourly_cost_limit"`
+	WithinCostBudget       bool    `json:"within_cost_budget"`
 }
 
 // GetStatus returns a snapshot of current budget status.
@@ -475,6 +578,16 @@ func (b *Budget) GetStatus() Status {
 		}
 	}
 
+	effDailyCost := b.effectiveCostLimit(b.dailyCostLimit)
+	effHourlyCost := b.effectiveCostLimit(b.hourlyCostLimit)
+	withinCostBudget := true
+	if b.dailyCostLimit > 0 {
+		withinCostBudget = b.dailyCostUsed < effDailyCost
+	}
+	if b.hourlyCostLimit > 0 {
+		withinCostBudget = withinCostBudget && b.hourlyCostUsed() < effHourlyCost
+	}
+
 	return Status{
 		HourlyUsed:             hourlyUsed,
 		HourlyLimit:            effHourly,
@@ -492,6 +605,12 @@ func (b *Budget) GetStatus() Status {
 		WithinBudget:           hourlyUsed < effHourly && b.dailyUsed < effDaily,
 		TaskBudgetExhausted:    taskBudgetExhausted,
 		SessionBudgetExhausted: sessionBudgetExhausted,
+		DailyCostUsed:          b.dailyCostUsed,
+		DailyCostLimit:         effDailyCost,
+		DailyCostRemaining:     max(effDailyCost-b.dailyCostUsed, 0),
+		HourlyCostUsed:         b.hourlyCostUsed(),
+		HourlyCostLimit:        effHourlyCost,
+		WithinCostBudget:       withinCostBudget,
 	}
 }
 
