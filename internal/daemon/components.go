@@ -293,6 +293,11 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		})
 		c.PricingSyncer = pricingSyncer
 
+		// Wire pricing syncer into resolver for live cost enrichment
+		if c.LLMResolver != nil {
+			c.LLMResolver.SetPricingSyncer(pricingSyncer)
+		}
+
 		// Create auxiliary LLM clients for classifier and summarizer
 		// Use resolver for alias-based model selection (enables fallback rotation)
 		classifierRef := c.ModelsConfig.ClassifierModel

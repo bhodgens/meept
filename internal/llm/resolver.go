@@ -26,14 +26,15 @@ type SkillRequirements struct {
 
 // Resolver resolves model selection based on capability matching.
 type Resolver struct {
-	config       *ProvidersConfig
-	defaultModel *ModelConfig
-	smallModel   *ModelConfig
-	allModels    []*ModelConfig
-	aliases      map[string]*AliasEntry
-	health       map[string]*AliasHealth
-	mu           sync.Mutex
-	logger       *slog.Logger
+	config        *ProvidersConfig
+	defaultModel  *ModelConfig
+	smallModel    *ModelConfig
+	allModels     []*ModelConfig
+	aliases       map[string]*AliasEntry
+	health        map[string]*AliasHealth
+	pricingSyncer *PricingSyncer
+	mu            sync.Mutex
+	logger        *slog.Logger
 }
 
 // NewResolver creates a new model resolver.
@@ -45,19 +46,30 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	}
 
 	r := &Resolver{
-		config:    cfg,
-		allModels: GetAllModels(cfg),
-		aliases:   make(map[string]*AliasEntry),
-		health:    make(map[string]*AliasHealth),
-		logger:    logger,
+		config:  cfg,
+		health:  make(map[string]*AliasHealth),
+		logger:  logger,
 	}
+
+	r.allModels = GetAllModels(cfg)
+	for _, m := range r.allModels {
+		r.enrichCostFromSyncer(m)
+	}
+
+	r.aliases = make(map[string]*AliasEntry)
 
 	// Resolve default and small models
 	if cfg.Model != "" {
 		r.defaultModel = ResolveModelRef(cfg.Model, cfg)
+		if r.defaultModel != nil {
+			r.enrichCostFromSyncer(r.defaultModel)
+		}
 	}
 	if cfg.SmallModel != "" {
 		r.smallModel = ResolveModelRef(cfg.SmallModel, cfg)
+		if r.smallModel != nil {
+			r.enrichCostFromSyncer(r.smallModel)
+		}
 	}
 
 	// Load model aliases
@@ -66,6 +78,7 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 		for _, modelRef := range aliasEntry.Models {
 			mc := ResolveModelRef(modelRef, cfg)
 			if mc != nil {
+				r.enrichCostFromSyncer(mc)
 				models = append(models, mc)
 			}
 		}
@@ -87,6 +100,25 @@ func NewResolver(cfg *ProvidersConfig, logger *slog.Logger) *Resolver {
 	}
 
 	return r
+}
+
+// SetPricingSyncer sets the pricing syncer for live cost enrichment.
+func (r *Resolver) SetPricingSyncer(ps *PricingSyncer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pricingSyncer = ps
+}
+
+// enrichCostFromSyncer updates model costs from live pricing data if available.
+func (r *Resolver) enrichCostFromSyncer(cfg *ModelConfig) {
+	if r.pricingSyncer == nil {
+		return
+	}
+	key := cfg.ProviderID + "/" + cfg.ModelID
+	if live := r.pricingSyncer.GetPrice(key); live != nil && live.InputCost > 0 {
+		cfg.CostPerMillionInput = live.InputCost
+		cfg.CostPerMillionOutput = live.OutputCost
+	}
 }
 
 // DefaultModel returns the default model configuration.
@@ -169,7 +201,11 @@ func (r *Resolver) ResolveForSkill(skill *SkillRequirements, currentModel *Model
 
 // ResolveRef resolves a "provider/model-id" reference.
 func (r *Resolver) ResolveRef(ref string) *ModelConfig {
-	return ResolveModelRef(ref, r.config)
+	mc := ResolveModelRef(ref, r.config)
+	if mc != nil {
+		r.enrichCostFromSyncer(mc)
+	}
+	return mc
 }
 
 // FindByCapabilities finds all models with the specified capabilities.
