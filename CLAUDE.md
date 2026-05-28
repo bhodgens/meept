@@ -140,6 +140,7 @@ User Input (CLI/Telegram/Web/MenuBar)
 | **CLI** | `cmd/meept` (chat, status, config, jobs, memory, clawskills, selfimprove) |
 | **MenuBar** | `menubar/` (SwiftUI app), `internal/comm/http` (REST API) |
 | **Metrics** | `internal/metrics` (store, collector) |
+| **Plans** | `internal/plan` (plan, store, manager, parser, writer, handler) |
 
 ### Skill/Model Resolution
 

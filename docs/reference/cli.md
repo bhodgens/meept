@@ -204,6 +204,44 @@ meept agents
 - Available tools
 - Model assignments
 
+### `meept plans` - Plan Management
+
+Manage plans through their lifecycle: creation, approval, execution tracking, and sign-off.
+
+```bash
+# List all plans
+meept plans list
+
+# Filter by state
+meept plans list --state pending_approval
+
+# Filter by project
+meept plans list --project my-app
+
+# Show plan details
+meept plans show plan-a1b2c3d4
+meept plans show plan-a1b2c3d4 --verbose
+
+# Approve a pending plan
+meept plans approve plan-a1b2c3d4
+meept plans approve plan-a1b2c3d4 --comment "Looks good, proceed"
+
+# Reject a pending plan
+meept plans reject plan-a1b2c3d4
+meept plans reject plan-a1b2c3d4 --comment "Needs more detail on phase 2"
+
+# Confirm sign-off on a completed plan
+meept plans confirm plan-a1b2c3d4
+meept plans confirm plan-a1b2c3d4 --comment "All deliverables verified"
+```
+
+**Subcommands:**
+- `list` - List plans, optionally filtered by `--state` or `--project`
+- `show <id>` - Display plan details with phases and progress
+- `approve <id>` - Approve a pending plan (triggers task synthesis)
+- `reject <id>` - Reject a pending plan with optional `--comment`
+- `confirm <id>` - Confirm sign-off on a completed plan
+
 ### `meept tools` - Tool Management
 
 List registered tools.

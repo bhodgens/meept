@@ -36,6 +36,12 @@ flowchart TB
         Workspace["Workspace Manager<br/>internal/agent"]
     end
 
+    subgraph Plans["Plan System"]
+        PlanMgr["Plan Manager<br/>internal/plan"]
+        PlanStore["Plan Store<br/>SQLite"]
+        PlanParser["Plan Parser/Writer<br/>plan.md"]
+    end
+
     subgraph LLM["LLM Layer"]
         LLMClient["LLM Client<br/>internal/llm"]
         Resolver["Model Resolver<br/>internal/llm"]
@@ -86,6 +92,9 @@ flowchart TB
     AgentLoop --> Executor
     AgentLoop --> Conversation
     AgentLoop --> LLMClient
+    AgentLoop --> PlanMgr
+    PlanMgr --> PlanStore
+    PlanMgr --> PlanParser
     Executor --> ToolReg
     Executor --> SecEngine
     ToolReg --> BuiltinTools
@@ -147,6 +156,7 @@ flowchart TB
 | Component | Package | Description |
 |-----------|---------|-------------|
 | LLM Client | `internal/llm` | Multi-provider LLM integration |
+| Plan System | `internal/plan` | Plan lifecycle, synthesis into tasks, progress tracking |
 | Context Compactor | `internal/llm` | LLM-based context compaction (knowledge-preserving summarization) |
 | Context Firewall | `internal/llm` | Three-layer context management (compaction, compression, hard limit) |
 | Token Cache | `internal/llm` | L1+L2 response caching with file-aware invalidation |

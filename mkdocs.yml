@@ -78,6 +78,7 @@ nav:
       - Context Management: concepts/context-management.md
       - Skills: concepts/skills.md
       - Token Caching: concepts/token-caching.md
+      - Plans: concepts/plans.md
   - Configuration:
       - configuration/index.md
       - Daemon: configuration/daemon.md
@@ -110,6 +111,7 @@ nav:
       - Multi-Participant Communication: workflows/multi-participant-comms.md
       - Agent Lateral Interrogation Howto: workflows/agent-lateral-interrogation-howto.md
       - Project Context: workflows/project-context.md
+      - Plans: workflows/plans.md
   - Reference:
       - reference/index.md
       - CLI Commands: reference/cli.md
