@@ -2929,6 +2929,36 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		return "", ErrNoLLMClient
 	}
 
+	// Check for model override in task metadata
+	if l.resolver != nil && len(t.Metadata) > 0 {
+		var meta map[string]any
+		if err := json.Unmarshal(t.Metadata, &meta); err == nil {
+			if modelOverride, ok := meta["model_override"].(string); ok && modelOverride != "" {
+				l.logger.Info("Task has model override",
+					"task", t.ID,
+					"model_override", modelOverride,
+				)
+				// Resolve and switch model
+				if l.llmClient != nil {
+					mc := l.resolver.ResolveRef(modelOverride)
+					if mc != nil {
+						l.llmClient.SwitchModel(mc)
+						l.logger.Info("Switched to model override",
+							"task", t.ID,
+							"model", mc.ModelID,
+							"provider", mc.ProviderID,
+						)
+					} else {
+						l.logger.Warn("Failed to resolve model override",
+							"task", t.ID,
+							"model_override", modelOverride,
+						)
+					}
+				}
+			}
+		}
+	}
+
 	// Use first linked session or task ID as conversation ID
 	conversationID := t.ID
 	if len(t.LinkedSessions) > 0 {
