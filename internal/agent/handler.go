@@ -23,10 +23,9 @@ import (
 // ChatHandler bridges the message bus to the AgentLoop.
 // It subscribes to chat.request and publishes responses to chat.response.
 type ChatHandler struct {
-	loop              *AgentLoop
-	dispatcher        *Dispatcher           // Optional: if set, routes through multi-agent dispatch
-	collaborativePlan *CollaborativePlanner // Optional: if set, enables collaborative planning for programming tasks
-	bus               *bus.MessageBus
+	loop       *AgentLoop
+	dispatcher *Dispatcher // Optional: if set, routes through multi-agent dispatch
+	bus        *bus.MessageBus
 	logger            *slog.Logger
 	metricsStore      *metrics.Store  // Optional: metrics store for duration estimates
 	stepStore         *task.StepStore // Optional: step store for fetching step summaries
@@ -75,18 +74,16 @@ type ChatResponse struct {
 
 // NewChatHandler creates a new ChatHandler.
 // The dispatcher parameter is optional; if nil, requests go directly to the loop.
-// The collaborativePlan parameter enables collaborative planning for programming tasks.
-func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, collaborativePlan *CollaborativePlanner, msgBus *bus.MessageBus, logger *slog.Logger) *ChatHandler {
+func NewChatHandler(loop *AgentLoop, dispatcher *Dispatcher, msgBus *bus.MessageBus, logger *slog.Logger) *ChatHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &ChatHandler{
-		loop:              loop,
-		dispatcher:        dispatcher,
-		collaborativePlan: collaborativePlan,
-		bus:               msgBus,
-		logger:            logger,
-		workers:           make(map[string]*Worker),
+		loop:       loop,
+		dispatcher: dispatcher,
+		bus:        msgBus,
+		logger:     logger,
+		workers:    make(map[string]*Worker),
 	}
 }
 
@@ -111,7 +108,10 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// Subscribe to review events to push review feedback to linked sessions
 	reviewCompletedSub := h.bus.Subscribe(SourceChatHandler, "task.review_completed")
 
-	h.wg.Add(6)
+	// Subscribe to pair result events to push results back to chat sessions
+	pairResultSub := h.bus.Subscribe(SourceChatHandler, TopicPairResult)
+
+	h.wg.Add(7)
 
 	// Chat request handler
 	go func() {
@@ -211,6 +211,23 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 					return
 				}
 				h.handleReviewCompleted(msg)
+			}
+		}
+	}()
+
+	// Pair result handler - push pair session results back to chat
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(pairResultSub)
+				return
+			case msg, ok := <-pairResultSub.Channel:
+				if !ok {
+					return
+				}
+				h.handlePairResult(msg)
 			}
 		}
 	}()
@@ -480,83 +497,20 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	var reply string
 	var err error
 
-	// Collaborative planning: check if this is a programming task requiring review
-	if h.collaborativePlan != nil {
-		// Check if there's a pending review for this conversation
-		if h.collaborativePlan.HasPendingReview(conversationID) {
-			// User is responding to a pending plan - classify as approve/reject/revise
-			classification := h.collaborativePlan.ClassifyResponse(req.Message)
-			h.logger.Info("Collaborative plan response classified",
-				"conversation", conversationID,
-				"classification", classification,
-			)
-
-			switch classification {
-			case "approve":
-				plan, approveErr := h.collaborativePlan.Approve(ctx, conversationID)
-				if approveErr != nil {
-					err = approveErr
-					break
-				}
-				h.logger.Info("Plan approved, executing",
-					"task_id", plan.ID,
-					"steps", len(plan.Steps),
-				)
-				// After approval, fall through to normal execution
-				// The plan is now committed and we proceed with the agent loop
-				reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)
-			case "reject":
-				rejectErr := h.collaborativePlan.Reject(ctx, conversationID, req.Message)
-				if rejectErr != nil {
-					err = rejectErr
-					break
-				}
-				h.logger.Info("Plan rejected", "conversation", conversationID)
-				reply = "Plan cancelled. What would you like to do instead?"
-			case "revise":
-				review, reviseErr := h.collaborativePlan.Revise(ctx, conversationID, req.Message)
-				if reviseErr != nil {
-					err = reviseErr
-					break
-				}
-				h.logger.Info("Plan revised",
-					"conversation", conversationID,
-					"task_id", review.TaskID,
-				)
-				reply = review.FormattedSummary
-			default:
-				err = fmt.Errorf("unrecognized response to plan (reply 'approve', 'reject', or provide feedback to revise)")
-			}
-		} else if h.collaborativePlan.IsProgrammingTask(req.Message) {
-			// This is a programming task - create plan for review instead of executing
-			h.logger.Info("Programming task detected, creating collaborative plan",
-				"conversation", conversationID,
-				"message_length", len(req.Message),
-			)
-			review, planErr := h.collaborativePlan.PlanAndReview(ctx, req.Message, conversationID)
-			if planErr != nil {
-				h.logger.Error("Failed to create collaborative plan", "error", planErr)
-				err = planErr
-			} else {
-				h.logger.Info("Plan created, awaiting user approval",
-					"task_id", review.TaskID,
-					"steps", len(review.Plan.Steps),
-				)
-				// Return the plan summary for user review
-				reply = review.FormattedSummary
-			}
-		}
-	}
-
-	// If reply is already set (from collaborative planning), skip dispatcher/loop
-	if reply == "" && err == nil {
-		if h.dispatcher != nil {
+	if h.dispatcher != nil {
 			// Multi-agent mode: classify and route through dispatcher
 			result, dispatchErr := h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
 			switch {
 			case dispatchErr != nil:
 				h.logger.Error("Dispatch failed", "error", dispatchErr)
 				err = dispatchErr
+			case h.dispatcher.ShouldRouteToPair(result):
+				// Route to pair-channel mode for dual-agent conversation
+				h.logger.Info("Routing to pair-channel mode",
+					"session", conversationID,
+					"actor", result.AgentID,
+				)
+				reply = h.startPairSession(result, conversationID)
 			case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
 				// Issue 0039: budget pre-check before async dispatch.
 				// Block before creating a zombie task that can never complete.
@@ -612,7 +566,6 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			// Direct mode: send to standalone agent loop
 			reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)
 		}
-	}
 
 	// Update worker state
 	worker.LastActivity = time.Now()
@@ -787,6 +740,7 @@ type TaskStepSummary struct {
 	State              string `json:"state"`
 	Result             string `json:"result,omitempty"`
 	AgentID            string `json:"agent_id,omitempty"`
+	ModelOverride      string `json:"model_override,omitempty"`
 	AccumulatedContext string `json:"accumulated_context,omitempty"`
 }
 
@@ -1128,6 +1082,105 @@ func (h *ChatHandler) waitForTaskCompletion(ctx context.Context, taskID string) 
 			}
 		}
 	}
+}
+
+// startPairSession initiates a pair-channel session and returns an acknowledgment.
+func (h *ChatHandler) startPairSession(result *DispatchResult, conversationID string) string {
+	// Determine actor and reviewer from the dispatch result
+	actorID := result.AgentID
+	if actorID == "" {
+		actorID = "analyst"
+	}
+	reviewerID := h.pairReviewerForActor(actorID)
+
+	req := PairStartRequest{
+		SessionID:     conversationID,
+		ActorID:       actorID,
+		ReviewerID:    reviewerID,
+		InitialPrompt: result.Intent.Summary,
+		MaxTurns:      5,
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		h.logger.Error("Failed to marshal pair start request", "error", err)
+		return "Failed to start pair session."
+	}
+
+	msg := &models.BusMessage{
+		ID:        generateMessageID(),
+		Type:      models.MessageTypeRequest,
+		Topic:     TopicPairStart,
+		Source:    SourceChatHandler,
+		Timestamp: time.Now().UTC(),
+		Payload:   payload,
+	}
+
+	delivered := h.bus.Publish(TopicPairStart, msg)
+	if delivered == 0 {
+		h.logger.Warn("Pair start published with no subscribers")
+		return "Pair session requested but no orchestrator is listening."
+	}
+
+	return fmt.Sprintf("## pair session started\n\n**actor:** %s\n**reviewer:** %s\n\nagents are collaborating. you will see updates as turns complete.", actorID, reviewerID)
+}
+
+// pairReviewerForActor selects an appropriate reviewer agent for the given actor.
+func (h *ChatHandler) pairReviewerForActor(actorID string) string {
+	switch actorID {
+	case "coder":
+		return "planner"
+	case "analyst":
+		return "planner"
+	case "debugger":
+		return "coder"
+	case "planner":
+		return "analyst"
+	default:
+		return "planner"
+	}
+}
+
+// handlePairResult pushes pair session results back to chat.
+func (h *ChatHandler) handlePairResult(msg *models.BusMessage) {
+	var result PairResult
+	if err := json.Unmarshal(msg.Payload, &result); err != nil {
+		h.logger.Error("Failed to parse pair result", "error", err)
+		return
+	}
+
+	h.logger.Info("Pair session completed",
+		"session_id", result.SessionID,
+		"total_turns", result.TotalTurns,
+		"verdict", result.FinalVerdict,
+	)
+
+	reply := h.formatPairResult(result)
+
+	response := ChatResponse{
+		ConversationID: result.SessionID,
+		Reply:          reply,
+	}
+	h.sendResponse("pair-result-"+result.SessionID, response)
+}
+
+// formatPairResult builds a human-readable pair session result.
+func (h *ChatHandler) formatPairResult(result PairResult) string {
+	var sb strings.Builder
+	sb.WriteString("## pair session completed\n\n")
+
+	verdictLabel := string(result.FinalVerdict)
+	if verdictLabel == "" {
+		verdictLabel = "concluded"
+	}
+	fmt.Fprintf(&sb, "**verdict:** %s\n", verdictLabel)
+	fmt.Fprintf(&sb, "**turns:** %d\n\n", result.TotalTurns)
+
+	if result.FinalOutput != "" {
+		fmt.Fprintf(&sb, "**final output:**\n%s\n", truncateString(result.FinalOutput, 500))
+	}
+
+	return sb.String()
 }
 
 // generateWorkerID creates a unique worker ID.
