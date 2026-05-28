@@ -39,9 +39,9 @@ planning → draft → pending_approval → approved → executing → completed
   Any state → cancelled
 ```
 
-- `planning` — planner agent is actively generating the plan.md
-- `draft` — plan.md written to disk, not yet submitted for review
-- `pending_approval` — plan submitted, awaiting user review
+- `planning` — planner agent is actively generating the plan.md (file may not exist yet or is in-progress)
+- `draft` — plan.md written to disk and parsed, ready for user to review and submit (auto-submits unless approval workflow is disabled)
+- `pending_approval` — plan submitted for user approval, awaiting explicit approve/reject/revise action
 - `approved` — user approved, synthesizing into tasks
 - `executing` — tasks created, TacticalScheduler running steps
 - `completed` — all steps finished, awaiting human sign-off
