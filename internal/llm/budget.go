@@ -182,17 +182,41 @@ func (b *Budget) effectiveCostLimit(base float64) float64 {
 	return base * factor
 }
 
-// hourlyCostUsed returns total dollar cost in the current sliding hour.
-func (b *Budget) hourlyCostUsed() float64 {
+// pruneHourlyCostWindow removes cost entries older than 1 hour.
+func (b *Budget) pruneHourlyCostWindow() {
 	cutoff := time.Now().Add(-time.Hour)
-	total := 0.0
-	for i := len(b.hourlyCostWindow) - 1; i >= 0; i-- {
-		if b.hourlyCostWindow[i].timestamp.Before(cutoff) {
+	idx := 0
+	for i, rec := range b.hourlyCostWindow {
+		if rec.timestamp.After(cutoff) {
+			idx = i
 			break
 		}
-		total += b.hourlyCostWindow[i].costUSD
+		idx = len(b.hourlyCostWindow)
+	}
+	if idx > 0 {
+		b.hourlyCostWindow = b.hourlyCostWindow[idx:]
+	}
+}
+
+// hourlyCostUsed returns total dollar cost in the current sliding hour.
+func (b *Budget) hourlyCostUsed() float64 {
+	b.pruneHourlyCostWindow()
+	total := 0.0
+	for _, rec := range b.hourlyCostWindow {
+		total += rec.costUSD
 	}
 	return total
+}
+
+// checkCostLimits returns false if any configured cost limit is exceeded.
+func (b *Budget) checkCostLimits() bool {
+	if b.dailyCostLimit > 0 && b.dailyCostUsed >= b.effectiveCostLimit(b.dailyCostLimit) {
+		return false
+	}
+	if b.hourlyCostLimit > 0 && b.hourlyCostUsed() >= b.effectiveCostLimit(b.hourlyCostLimit) {
+		return false
+	}
+	return true
 }
 
 // CostRecord captures a dollar cost event for budget tracking.
@@ -333,16 +357,7 @@ func (b *Budget) CheckBudget() bool {
 		dailyOK = true
 	}
 
-	// Dollar cost limits
-	costOK := true
-	if b.dailyCostLimit > 0 && b.dailyCostUsed >= b.effectiveCostLimit(b.dailyCostLimit) {
-		costOK = false
-	}
-	if b.hourlyCostLimit > 0 && b.hourlyCostUsed() >= b.effectiveCostLimit(b.hourlyCostLimit) {
-		costOK = false
-	}
-
-	return hourlyOK && dailyOK && costOK
+	return hourlyOK && dailyOK && b.checkCostLimits()
 }
 
 // CheckBudgetWithScope validates budgets including per-task and per-session caps.
@@ -390,16 +405,7 @@ func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) bool {
 		dailyOK = true
 	}
 
-	// Dollar cost limits
-	costOK := true
-	if b.dailyCostLimit > 0 && b.dailyCostUsed >= b.effectiveCostLimit(b.dailyCostLimit) {
-		costOK = false
-	}
-	if b.hourlyCostLimit > 0 && b.hourlyCostUsed() >= b.effectiveCostLimit(b.hourlyCostLimit) {
-		costOK = false
-	}
-
-	return hourlyOK && dailyOK && costOK
+	return hourlyOK && dailyOK && b.checkCostLimits()
 }
 
 // RecordTaskUsage tracks tokens consumed by a specific task.
@@ -602,7 +608,7 @@ func (b *Budget) GetStatus() Status {
 		RPMCurrent:             len(b.requestTimestamps),
 		RPMLimit:               b.rateLimitRPM,
 		Aggressiveness:         b.aggressiveness,
-		WithinBudget:           hourlyUsed < effHourly && b.dailyUsed < effDaily,
+		WithinBudget:           hourlyUsed < effHourly && b.dailyUsed < effDaily && withinCostBudget,
 		TaskBudgetExhausted:    taskBudgetExhausted,
 		SessionBudgetExhausted: sessionBudgetExhausted,
 		DailyCostUsed:          b.dailyCostUsed,
