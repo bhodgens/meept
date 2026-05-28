@@ -43,6 +43,7 @@ type Config struct {
 	Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
 	Session           SessionConfig           `json:"session"            toml:"session"`
 	Projects          ProjectsConfig          `json:"projects"           toml:"projects"`
+	Plans             PlansConfig             `json:"plans"              toml:"plans"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -163,6 +164,43 @@ type ProjectsConfig struct {
 	AutoSyncOnAttach bool `json:"auto_sync_on_attach" toml:"auto_sync_on_attach"`
 	// DefaultBranch is the default git branch name for new projects (default: "main")
 	DefaultBranch string `json:"default_branch" toml:"default_branch"`
+}
+
+// PlansConfig configures the plan system.
+type PlansConfig struct {
+	Mode         string                  `json:"mode"          toml:"mode"`
+	Threshold    PlansThresholdConfig    `json:"threshold"     toml:"threshold"`
+	Storage      PlansStorageConfig      `json:"storage"       toml:"storage"`
+	Approval     PlansApprovalConfig     `json:"approval"      toml:"approval"`
+	Confirmation PlansConfirmationConfig `json:"confirmation"  toml:"confirmation"`
+}
+
+// PlansThresholdConfig holds plan creation threshold settings.
+type PlansThresholdConfig struct {
+	MinSteps           int      `json:"min_steps"            toml:"min_steps"`
+	ComplexityKeywords []string `json:"complexity_keywords"  toml:"complexity_keywords"`
+	AlwaysPlanIntents  []string `json:"always_plan_intents"  toml:"always_plan_intents"`
+}
+
+// PlansStorageConfig holds plan storage path settings.
+type PlansStorageConfig struct {
+	DefaultPath      string `json:"default_path"       toml:"default_path"`
+	ExternalPath     string `json:"external_path"      toml:"external_path"`
+	FilenameTemplate string `json:"filename_template"  toml:"filename_template"`
+}
+
+// PlansApprovalConfig holds plan approval workflow settings.
+type PlansApprovalConfig struct {
+	RequireApproval   bool `json:"require_approval"    toml:"require_approval"`
+	AutoApproveSimple bool `json:"auto_approve_simple" toml:"auto_approve_simple"`
+	AllowRevision     bool `json:"allow_revision"      toml:"allow_revision"`
+	MaxRevisions      int  `json:"max_revisions"       toml:"max_revisions"`
+}
+
+// PlansConfirmationConfig holds plan confirmation and signoff settings.
+type PlansConfirmationConfig struct {
+	RequireSignoff    bool `json:"require_signoff"     toml:"require_signoff"`
+	AutoConfirmPhases bool `json:"auto_confirm_phases" toml:"auto_confirm_phases"`
 }
 
 // ASTConfig holds AST parsing settings.
@@ -1510,6 +1548,29 @@ func DefaultConfig() *Config {
 			AllowReadSystemPaths:       []string{"/usr", "/etc", "/tmp"},
 			AutoSyncOnAttach:           false,
 			DefaultBranch:              "main",
+		},
+		Plans: PlansConfig{
+			Mode: "threshold",
+			Threshold: PlansThresholdConfig{
+				MinSteps: 3,
+				ComplexityKeywords: []string{
+					"refactor", "migrate", "implement", "redesign",
+					"rewrite", "integrate", "architect",
+				},
+				AlwaysPlanIntents: []string{"plan", "implement", "build"},
+			},
+			Storage: PlansStorageConfig{
+				DefaultPath:      "docs/plans",
+				FilenameTemplate: "{{slug}}.md",
+			},
+			Approval: PlansApprovalConfig{
+				RequireApproval: true,
+				AllowRevision:   true,
+				MaxRevisions:    3,
+			},
+			Confirmation: PlansConfirmationConfig{
+				RequireSignoff: true,
+			},
 		},
 	}
 }

@@ -367,6 +367,51 @@
     "default_branch": "main",                 // Default branch for new checkouts
   },
 
+  // Plan system configuration
+  "plans": {
+    // Plan creation mode: "threshold" (default), "always", "off"
+    "mode": "threshold",
+
+    "threshold": {
+      // Minimum steps from LLM decomposition to trigger plan creation
+      "min_steps": 3,
+      // Keywords that signal complexity
+      "complexity_keywords": [
+        "refactor", "migrate", "implement", "redesign",
+        "rewrite", "integrate", "architect",
+      ],
+      // Intent types that always trigger plan creation
+      "always_plan_intents": ["plan", "implement", "build"],
+    },
+
+    "storage": {
+      // Default plan directory (relative to project root)
+      "default_path": "docs/plans",
+      // Override to store plans outside project (e.g., "~/.meept/plans")
+      "external_path": "",
+      // Filename template: {{slug}}, {{date}}, {{id}}
+      "filename_template": "{{slug}}.md",
+    },
+
+    "approval": {
+      // Require explicit approval before plan execution
+      "require_approval": true,
+      // Auto-approve plans with <= 3 steps
+      "auto_approve_simple": false,
+      // Allow revise/re-submit cycle
+      "allow_revision": true,
+      // Max revision rounds before auto-reject
+      "max_revisions": 3,
+    },
+
+    "confirmation": {
+      // Require human sign-off after all steps complete
+      "require_signoff": true,
+      // Auto-confirm individual phases
+      "auto_confirm_phases": false,
+    },
+  },
+
   // Skills configuration
   "skills": {
     "enabled": false,
