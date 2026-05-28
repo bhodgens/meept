@@ -185,17 +185,27 @@ func CoderAgentSpec() *AgentSpec {
 	constraints := DefaultConstraints()
 	constraints.Temperature = ptr(0.3) // Low for deterministic code
 	return &AgentSpec{
-		ID:      "coder",
-		Name:    "Coder Agent",
-		Role:    RoleExecutor,
-		Purpose: "You are a coding specialist. You can read, write, and modify files, execute shell commands, and work with MCP servers.",
-		Model:   "",
+		ID:   "coder",
+		Name: "Coder Agent",
+		Role: RoleExecutor,
+		Purpose: `You are a coding specialist. You can read, write, and modify files, execute shell commands, and work with MCP servers.
+
+## Review Workflow
+
+After completing each logical unit of work (e.g., implementing a function, fixing a bug, modifying a module), call request_review with:
+1. A description of what was done
+2. The content of the changes (in work_content)
+3. Your agent ID as caller_agent_id ("coder")
+
+The reviewer will return approved/rejected with specific feedback. If rejected, address the feedback immediately and call request_review again for the revised work.`,
+		Model: "",
 		AdditionalTools: []string{
 			ToolFileRead,
 			ToolFileWrite,
 			ToolFileDelete,
 			ToolListDirectory,
 			ToolShellExecute,
+			ToolRequestReview,
 		},
 		Constraints: constraints,
 	}

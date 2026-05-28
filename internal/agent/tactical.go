@@ -36,6 +36,7 @@ type TacticalScheduler struct {
 	queue                  queue.Queue
 	registry               *AgentRegistry
 	bus                    *bus.MessageBus
+	pairManager            *PairManager
 	reviewManager          *ReviewManager
 	validatorManager       *validator.ValidatorManager
 	escalationManager      *EscalationManager
@@ -55,6 +56,7 @@ type TacticalSchedulerConfig struct {
 	Queue                  queue.Queue
 	Registry               *AgentRegistry
 	Bus                    *bus.MessageBus
+	PairManager            *PairManager
 	ReviewManager          *ReviewManager
 	ValidatorManager       *validator.ValidatorManager
 	EscalationManager      *EscalationManager
@@ -101,6 +103,7 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		queue:                  cfg.Queue,
 		registry:               cfg.Registry,
 		bus:                    cfg.Bus,
+		pairManager:            cfg.PairManager,
 		reviewManager:          cfg.ReviewManager,
 		validatorManager:       cfg.ValidatorManager,
 		escalationManager:      cfg.EscalationManager,
@@ -137,6 +140,17 @@ func (ts *TacticalScheduler) ScheduleReadySteps(ctx context.Context, taskID stri
 	semaphoreBlockedCount := 0
 
 	for _, step := range readySteps {
+		// Skip steps managed by a pair session -- the PairManager drives them
+		if ts.pairManager != nil {
+			if _, isPair := ts.pairManager.GetSessionByStep(step.ID); isPair {
+				ts.logger.Debug("Skipping pair-managed step in tactical scheduling",
+					"step_id", step.ID,
+					KeyTaskID, taskID,
+				)
+				continue
+			}
+		}
+
 		if err := ts.scheduleStep(ctx, step); err != nil {
 			// Check if this was a semaphore block (expected, not an error)
 			if strings.Contains(err.Error(), "no available execution slot") {
@@ -360,6 +374,39 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 		return nil // Not a step-backed job, ignore
 	}
 
+	// Check if this step belongs to a pair session
+	if ts.pairManager != nil {
+		if session, isPair := ts.pairManager.GetSessionByStep(step.ID); isPair {
+			ts.logger.Info("Pair-managed step completed, delegating to PairManager",
+				"step_id", step.ID,
+				KeyTaskID, step.TaskID,
+				"session_id", session.ID,
+			)
+
+			// Release semaphore slots
+			ts.releaseSlots(step.AgentID)
+
+			// Store result
+			resultStr := ""
+			if result != nil {
+				resultStr = string(result)
+			}
+			if err := ts.stepStore.SetResult(step.ID, resultStr); err != nil {
+				ts.logger.Error("Failed to set pair step result", "step_id", step.ID, "error", err)
+			}
+
+			// Mark step completed
+			if err := ts.stepStore.SetState(step.ID, task.StepCompleted); err != nil {
+				ts.logger.Error("Failed to set pair step completed", "step_id", step.ID, "error", err)
+			}
+
+			// Run next pair round asynchronously
+			go ts.pairManager.RunRound(context.Background(), session.ID)
+
+			return nil
+		}
+	}
+
 	// Release semaphore slots for this completed job
 	defer ts.releaseSlots(step.AgentID)
 
@@ -517,8 +564,16 @@ func (ts *TacticalScheduler) OnJobCompleted(ctx context.Context, jobID string, r
 			KeyAgentID:  step.AgentID,
 		})
 
+		// Load task to extract spec for spec-driven review
+		var reviewSpec *TaskSpec
+		if ts.taskStore != nil {
+			if t, err := ts.taskStore.GetByID(step.TaskID); err == nil && t != nil {
+				reviewSpec = ExtractSpecFromTask(t)
+			}
+		}
+
 		// Perform review (synchronously for now)
-		reviewResult, err := ts.reviewManager.ReviewStep(ctx, step)
+		reviewResult, err := ts.reviewManager.ReviewStep(ctx, step, reviewSpec)
 		if err != nil {
 			ts.logger.Error("Review failed", "step_id", step.ID, "error", err)
 			// Continue without review - mark as completed
@@ -714,7 +769,15 @@ func (ts *TacticalScheduler) handleReviewResult(ctx context.Context, step *task.
 		return fmt.Errorf("tactical scheduler has no ReviewManager")
 	}
 
-	revisions, err := ts.reviewManager.HandleReviewResult(ctx, step.ID, result)
+	// Load spec from task for feedback propagation
+	var spec *TaskSpec
+	if ts.taskStore != nil {
+		if t, tErr := ts.taskStore.GetByID(step.TaskID); tErr == nil && t != nil {
+			spec = ExtractSpecFromTask(t)
+		}
+	}
+
+	revisions, err := ts.reviewManager.HandleReviewResult(ctx, step.ID, result, spec)
 	if err != nil {
 		return err
 	}
@@ -766,6 +829,32 @@ func (ts *TacticalScheduler) OnJobFailed(ctx context.Context, jobID, jobErr stri
 	}
 	if step == nil {
 		return nil // Not a step-backed job
+	}
+
+	// Check if this step belongs to a pair session
+	if ts.pairManager != nil {
+		if session, isPair := ts.pairManager.GetSessionByStep(step.ID); isPair {
+			ts.logger.Warn("Pair-managed step failed",
+				"step_id", step.ID,
+				KeyTaskID, step.TaskID,
+				"session_id", session.ID,
+				"error", jobErr,
+			)
+
+			// Release semaphore slots
+			ts.releaseSlots(step.AgentID)
+
+			// Mark step failed and session failed
+			if err := ts.stepStore.SetResult(step.ID, jobErr); err != nil {
+				ts.logger.Error("Failed to set pair step error", "step_id", step.ID, "error", err)
+			}
+			if err := ts.stepStore.SetState(step.ID, task.StepFailed); err != nil {
+				ts.logger.Error("Failed to set pair step failed", "step_id", step.ID, "error", err)
+			}
+			session.MarkFailed()
+
+			return nil
+		}
 	}
 
 	// Release semaphore slots for this failed job

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/config"
 )
 
 func TestExtractJSON_DirectJSON(t *testing.T) {
@@ -365,5 +367,150 @@ func TestStrategicPlanner_PublishesEvents(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Timeout waiting for orchestrator.schedule event")
+	}
+}
+
+func TestShouldUsePairSession(t *testing.T) {
+	pm := NewPairManager(PairManagerConfig{Logger: slog.Default()})
+	sp := &StrategicPlanner{pairManager: pm, logger: slog.Default()}
+
+	tests := []struct {
+		name string
+		req  PlanRequest
+		want bool
+	}{
+		{
+			name: "compound intent always pairs",
+			req:  PlanRequest{Intent: string(IntentCompound), Input: "do stuff"},
+			want: true,
+		},
+		{
+			name: "short code input no pair",
+			req:  PlanRequest{Intent: string(IntentCode), Input: "fix typo in readme"},
+			want: false,
+		},
+		{
+			name: "long code input pairs",
+			req:  PlanRequest{Intent: string(IntentCode), Input: strings.Repeat("implement the full authentication system with OAuth2 support ", 5)},
+			want: true,
+		},
+		{
+			name: "security keyword triggers pair",
+			req:  PlanRequest{Intent: string(IntentCode), Input: "add security headers to API responses"},
+			want: true,
+		},
+		{
+			name: "chat intent no pair",
+			req:  PlanRequest{Intent: string(IntentChat), Input: "how are you"},
+			want: false,
+		},
+		{
+			name: "nil pair manager no pair",
+			req:  PlanRequest{Intent: string(IntentCompound), Input: "complex task"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "nil pair manager no pair" {
+				spNoPM := &StrategicPlanner{pairManager: nil, logger: slog.Default()}
+				got := spNoPM.shouldUsePairSession(tt.req)
+				if got != tt.want {
+					t.Errorf("shouldUsePairSession() = %v, want %v", got, tt.want)
+				}
+				return
+			}
+			got := sp.shouldUsePairSession(tt.req)
+			if got != tt.want {
+				t.Errorf("shouldUsePairSession() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractCriteria(t *testing.T) {
+	sp := &StrategicPlanner{logger: slog.Default()}
+
+	tests := []struct {
+		name    string
+		input   string
+		wantMin int
+	}{
+		{
+			name:    "single sentence",
+			input:   "Implement the authentication module with JWT tokens",
+			wantMin: 1,
+		},
+		{
+			name:    "multi sentence",
+			input:   "Write the parser. Add error handling. Include tests.",
+			wantMin: 3,
+		},
+		{
+			name:    "with headers",
+			input:   "# Task\nWrite the code\n# Notes\nBe careful",
+			wantMin: 1,
+		},
+		{
+			name:    "short input uses whole input",
+			input:   "fix bug",
+			wantMin: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sp.extractCriteria(tt.input)
+			if len(got) < tt.wantMin {
+				t.Errorf("extractCriteria() returned %d criteria, want at least %d", len(got), tt.wantMin)
+			}
+		})
+	}
+}
+
+func TestSelectActorAgent(t *testing.T) {
+	sp := &StrategicPlanner{logger: slog.Default()}
+
+	tests := []struct {
+		intent string
+		want   string
+	}{
+		{string(IntentCode), config.AgentIDCoder},
+		{string(IntentCompound), config.AgentIDCoder},
+		{string(IntentDebug), config.AgentIDDebugger},
+		{"unknown", config.AgentIDCoder},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.intent, func(t *testing.T) {
+			got := sp.selectActorAgent(tt.intent)
+			if got != tt.want {
+				t.Errorf("selectActorAgent(%q) = %q, want %q", tt.intent, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectReviewerAgent(t *testing.T) {
+	sp := &StrategicPlanner{logger: slog.Default()}
+
+	tests := []struct {
+		intent string
+		want   string
+	}{
+		{string(IntentCode), config.AgentIDPlanner},
+		{string(IntentCompound), config.AgentIDPlanner},
+		{string(IntentDebug), config.AgentIDAnalyst},
+		{"unknown", config.AgentIDPlanner},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.intent, func(t *testing.T) {
+			got := sp.selectReviewerAgent(tt.intent)
+			if got != tt.want {
+				t.Errorf("selectReviewerAgent(%q) = %q, want %q", tt.intent, got, tt.want)
+			}
+		})
 	}
 }

@@ -89,6 +89,13 @@ make menubar-clean             # Clean menubar build artifacts
 ./bin/meept projects status <name>      # Show git status
 ./bin/meept chat --project <name>       # Chat bound to specific project
 ./bin/meept chat --nofence              # Disable path fencing for this session
+
+# Plan commands
+./bin/meept plans list                    # List all plans
+./bin/meept plans show <id>               # Show plan details
+./bin/meept plans approve <id>            # Approve a pending plan
+./bin/meept plans reject <id>             # Reject a pending plan
+./bin/meept plans confirm <id>            # Confirm a completed plan
 ```
 
 ## Architecture Overview
@@ -102,6 +109,8 @@ User Input (CLI/Telegram/Web/MenuBar)
     → CommServer (Unix socket JSON-RPC) OR HTTP REST API
     → MessageBus (pub/sub)
     → AgentLoop
+        → Dispatcher.ClassifyAndRoute()
+            → IntentPair → PairOrchestrator (bus-channel pairing)
         → Planner.Decompose() → TaskSteps
         → CollaborativePlanner (review/approval workflow)
         → WorkspaceManager (git-backed task tracking)
@@ -135,6 +144,24 @@ User Input (CLI/Telegram/Web/MenuBar)
 ### Skill/Model Resolution
 
 Skills declare `requires: [code, reasoning]` in YAML frontmatter; models declare `capabilities: [code, tool_use]` in `config/models.json5`. The resolver (`internal/llm/resolver.go`) finds the cheapest model satisfying requirements.
+
+### Model Reassignment
+
+Users can override default agent model assignments via natural language instructions:
+
+```bash
+# Use specific model for a task type
+meept chat "Research best practices, then use glm-4.7 for synthesis"
+
+# Use provider-specific models
+meept chat "Use local models for research, GLM for coding"
+
+# Interactive clarification (if ambiguous)
+meept chat "Use GLM models for this"
+# Dispatcher will ask: "Which GLM model? glm-4.7 or glm-4.5-air?"
+```
+
+The dispatcher parses model reassignment instructions, asks clarifying questions if ambiguous, and attaches model overrides to matching task steps. See [Multi-Agent System - Model Reassignment](docs/concepts/multi-agent.md#model-reassignment) for details.
 
 ### Memory Storage Architecture
 
@@ -309,6 +336,14 @@ Jobs can be targeted to specific agents via `agent_id`:
 - If `agent_id` is set, only that agent can claim the job
 - If `agent_id` is empty, any agent with matching capabilities can claim
 - Jobs are prioritized by: targeted agent match > priority > creation time
+
+### Channel-Based Pairing (Option C)
+
+Two agents share a named bus topic and take turns for free-form collaborative tasks (research debates, brainstorming, exploratory debugging). The `PairOrchestrator` manages the actor-reviewer loop via the message bus.
+
+Bus topics: `pair.start`, `pair.{sessionID}.turn`, `pair.result`, `pair.error`
+
+Triggered by `IntentPair` intent type. Default actor/reviewer mapping: analyst/planner, coder/planner, debugger/coder, planner/analyst.
 
 ## Code Conventions
 

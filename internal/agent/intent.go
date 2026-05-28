@@ -33,6 +33,9 @@ const (
 	IntentSecurity IntentType = "security"
 	IntentToolUse  IntentType = "tooluse"
 
+	// Pair channel (dual-agent conversation)
+	IntentPair IntentType = "pair"
+
 	// Skill invocation
 	IntentSkill IntentType = "skill"
 
@@ -54,7 +57,7 @@ func (t IntentType) Category() IntentCategory {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
 		IntentAnalyze, IntentSearch, IntentResearch:
 		return CategoryInline
-	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule:
+	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule, IntentPair:
 		return CategoryDefer
 	case IntentCompound:
 		return CategoryDefer
@@ -79,6 +82,8 @@ func (t IntentType) DefaultAgent() string {
 	case IntentPlan:
 		return config.AgentIDPlanner
 	case IntentAnalyze, IntentSearch, IntentResearch:
+		return config.AgentIDAnalyst
+	case IntentPair:
 		return config.AgentIDAnalyst
 	case IntentGit:
 		return config.AgentIDCommitter
@@ -112,6 +117,8 @@ func (t IntentType) ShouldCreateTask() bool {
 	switch t {
 	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound:
 		return true
+	case IntentPair:
+		return false // pair sessions don't create step-based tasks
 	default:
 		return false
 	}
@@ -120,7 +127,7 @@ func (t IntentType) ShouldCreateTask() bool {
 // ShouldDispatchAsync returns true if the intent should be dispatched asynchronously.
 func (t IntentType) ShouldDispatchAsync(requiresPlanning bool) bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound:
+	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound, IntentPair:
 		return true
 	case IntentSchedule:
 		// Only dispatch async for schedule if it requires planning
@@ -136,7 +143,7 @@ func IsValidIntentType(s string) bool {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
-		IntentSecurity, IntentToolUse, IntentSkill, IntentCompound:
+		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCompound:
 		return true
 	}
 	return false
@@ -177,6 +184,8 @@ func (t IntentType) Keywords() []string {
 		return []string{"use tool", "execute", "run command"}
 	case IntentSkill:
 		return []string{"/skill", "invoke", "run skill"}
+	case IntentPair:
+		return []string{"debate", "brainstorm", "explore", "discuss", "pair", "collaborate"}
 	case IntentCompound:
 		return []string{"and also", "as well as", "plus"}
 	default:

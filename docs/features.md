@@ -801,6 +801,61 @@ resp, err := client.ChatWithProgress(ctx, messages, func(stage llm.ProgressStage
 
 ---
 
+### Model Reassignment
+
+Users can override default agent model assignments via natural language instructions during chat. The dispatcher parses model reassignment directives, asks clarifying questions when ambiguous, and applies model overrides to specific tasks or task steps.
+
+**Usage Examples:**
+```bash
+# Use specific model for a task type
+meept chat "Research best practices, then use glm-4.7 for synthesis"
+
+# Provider-specific models for different phases
+meept chat "Use local models for research, GLM for coding"
+
+# Interactive clarification (if ambiguous)
+meept chat "Use GLM models for this"
+# Dispatcher asks: "Which GLM model? glm-4.7 or glm-4.5-air?"
+```
+
+**Supported Patterns:**
+| Pattern | Example | Result |
+|---------|---------|--------|
+| "use X for Y" | "use GLM for coding" | Model override for coding tasks |
+| "X models for Y" | "GLM models for planning" | Model override for planning |
+| "synthesize using X" | "synthesize using claude-opus" | Model override for synthesis |
+| "code with X" | "code with qwen-coder" | Model override for coding |
+| "I want X to handle Y" | "I want GLM to handle research" | Model override for research |
+
+**Scope Keywords:**
+| Scope | Intent Type | Agent |
+|-------|-------------|-------|
+| synthesis, planning, plan, design | `IntentPlan` | planner |
+| coding, code, implementation | `IntentCode` | coder |
+| research, analysis, analyze | `IntentResearch` | analyst |
+| debugging, debug, fix | `IntentDebug` | debugger |
+
+**Model Aliases:**
+| Alias | Resolves To |
+|-------|-------------|
+| `opus`, `claude-opus` | `anthropic/claude-3-opus` |
+| `sonnet` | `anthropic/claude-3-sonnet` |
+| `glm`, `glm-4.7` | `zai/glm-4.7` |
+| `qwen`, `qwen-coder` | `ollama/qwen2.5-coder` |
+| `llama`, `llama3.2` | `ollama/llama3.2` |
+
+**Implementation Details:**
+- Parser: `internal/agent/model_parser.go` with regex pattern matching
+- Directive: `ModelReassignmentDirective` captures parsed instructions
+- Task metadata: Model overrides stored in `task.Metadata` for single-intent tasks
+- Step overrides: `TaskStep.ModelOverride` for compound multi-step tasks
+- AgentLoop: Reads model override from task metadata and switches models via `SwitchModel()`
+- Clarification: Dispatcher asks clarifying questions for ambiguous references (e.g., "GLM models" without specific model)
+
+**Learn more:** [Multi-Agent System - Model Reassignment](concepts/multi-agent.md#model-reassignment)
+
+---
+
 ### Tools
 
 Meept provides built-in tools and supports MCP (Model Context Protocol) for external tools.
@@ -1371,6 +1426,77 @@ execResult := executor.Execute(ctx, toolCall)
 
 // Tactical scheduler persists to TaskStep
 // Validator checks claims against evidence
+```
+
+---
+
+## Agentic Pairs
+
+Meept supports four pairing modalities for agent collaboration. The orchestrator selects the appropriate modality based on task characteristics.
+
+### Pairing Modalities
+
+| Modality | Use Case | Mechanism |
+|----------|----------|-----------|
+| **Spec-Driven Review** | Code/debug tasks with acceptance criteria | Reviewer checks step output against spec generated during planning; rejection creates revision steps with structured feedback |
+| **Pair Session** | Complex multi-round tasks, security-sensitive changes | Two agents iterate on a full task with shared working memory and convergence tracking |
+| **Bus Channel** | Research debates, brainstorming, exploratory debugging | Two agents share a named bus topic and take turns via PairOrchestrator |
+| **Inline Review** | Lightweight self-review during development | Actor agent calls `request_review` tool within its own execution loop |
+
+### Spec-Driven Review (Default)
+
+When the strategic planner creates a plan, it generates acceptance criteria stored in task metadata:
+
+```
+Plan() → GenerateSpecFromSteps() → TaskSpec stored in task metadata
+    ↓
+Step completes → ReviewStep(spec) → reviewer checks against criteria
+    ↓ (rejected)
+BuildRevisionContext() → revision step carries feedback + spec to coder
+    ↓ (max revisions exceeded)
+Escalate to human with spec-aware feedback message
+```
+
+### Pair Session
+
+For compound or security-sensitive tasks, two agents share context across multiple rounds:
+
+```
+StrategicPlanner detects complex task → creates PairSession
+    ↓
+Round N: actor executes → reviewer reviews → shared context updated
+    ↓ (criteria remaining)
+Round N+1: actor sees full history + remaining criteria
+    ↓ (all criteria satisfied or max rounds reached)
+Converged → task completed, or Exhausted → task failed
+```
+
+### Channel-Based Pairing
+
+Two agents communicate via the message bus for free-form collaboration:
+
+```
+IntentPair detected → PairOrchestrator subscribes to pair.start
+    ↓
+Actor publishes output → reviewer evaluates → verdict classified
+    ↓ (rejected)
+Revision prompt constructed → actor runs again
+    ↓ (approved)
+Result published to pair.result → ChatHandler relays to user
+```
+
+### Inline Review Tool
+
+The `request_review` tool lets any agent request synchronous review within its own loop:
+
+```go
+// Coder agent calls during execution:
+request_review(
+    message: "Implemented the auth handler",
+    work_content: "<code>",
+    caller_agent_id: "coder"
+)
+// Returns: InlineReviewResult{status: "approved/rejected", issues: [...]}
 ```
 
 ---

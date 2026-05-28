@@ -28,6 +28,7 @@ const (
 	ToolWebSearch        = "web_search"
 	ToolWebFetch         = "web_fetch"
 	ToolCodeRead         = "code_read"
+	ToolRequestReview    = "request_review"
 )
 
 // Map key constants used in structured log/event payloads throughout the agent package.

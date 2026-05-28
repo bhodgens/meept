@@ -66,11 +66,12 @@ Request to decompose:
 
 // StrategicPlanner decomposes tasks into steps using an LLM planner agent.
 type StrategicPlanner struct {
-	registry  *AgentRegistry
-	taskStore *task.Store
-	stepStore *task.StepStore
-	bus       *bus.MessageBus
-	logger    *slog.Logger
+	registry    *AgentRegistry
+	taskStore   *task.Store
+	stepStore   *task.StepStore
+	bus         *bus.MessageBus
+	logger      *slog.Logger
+	pairManager *PairManager
 
 	maxPlanSteps   int
 	plannerTimeout time.Duration
@@ -83,6 +84,7 @@ type StrategicPlannerConfig struct {
 	StepStore      *task.StepStore
 	Bus            *bus.MessageBus
 	Logger         *slog.Logger
+	PairManager    *PairManager
 	MaxPlanSteps   int
 	PlannerTimeout time.Duration
 }
@@ -105,6 +107,7 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 		stepStore:      cfg.StepStore,
 		bus:            cfg.Bus,
 		logger:         cfg.Logger,
+		pairManager:    cfg.PairManager,
 		maxPlanSteps:   cfg.MaxPlanSteps,
 		plannerTimeout: cfg.PlannerTimeout,
 	}
@@ -130,6 +133,56 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 
 	// Copy parent MemoryRefs for context inheritance
 	parentMemoryRefs := t.MemoryRefs
+
+	// Check if this task should use pair sessions instead of normal steps
+	if sp.shouldUsePairSession(req) {
+		sp.logger.Info("Using pair session for task",
+			"task_id", req.TaskID,
+			"intent", req.Intent,
+		)
+		pairSteps, pairErr := sp.createPairSessionPlan(ctx, req, parentMemoryRefs)
+		if pairErr != nil {
+			sp.logger.Error("Failed to create pair session plan, falling back",
+				"task_id", req.TaskID,
+				"error", pairErr,
+			)
+			// Fall through to normal planning
+		} else {
+			// Persist steps
+			for _, step := range pairSteps {
+				if err := sp.stepStore.Create(step); err != nil {
+					sp.logger.Error("Failed to persist step", "step_id", step.ID, "error", err)
+					return fmt.Errorf("failed to persist steps: %w", err)
+				}
+			}
+
+			t.TotalJobs = len(pairSteps)
+			t.SetState(task.StateExecuting)
+			if err := sp.taskStore.Update(t); err != nil {
+				sp.logger.Error("Failed to update task after pair planning", "error", err)
+			}
+
+			// Promote actor step to ready (reviewer depends on it)
+			promoted, err := sp.stepStore.PromoteReadySteps(req.TaskID)
+			if err != nil {
+				sp.logger.Error("Failed to promote pair steps", "error", err)
+			}
+
+			sp.publishEvent("task.planned", map[string]any{
+				KeyTaskID:      req.TaskID,
+				"session_id":   req.SessionID,
+				"total_steps":  len(pairSteps),
+				"ready_steps":  len(promoted),
+				"pair_session": true,
+			})
+
+			sp.publishEvent("orchestrator.schedule", map[string]any{
+				KeyTaskID: req.TaskID,
+			})
+
+			return nil
+		}
+	}
 
 	var steps []*task.TaskStep
 
@@ -171,6 +224,14 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 			return fmt.Errorf("failed to persist steps: %w", err)
 		}
 	}
+
+	// Generate specification from planned steps and store in task metadata
+	spec := GenerateSpecFromSteps(steps)
+	StoreSpecInTask(t, spec)
+	sp.logger.Info("Generated task spec",
+		"task_id", req.TaskID,
+		"criteria_count", len(spec.Criteria),
+	)
 
 	// Update task job count
 	t.TotalJobs = len(steps)
@@ -331,6 +392,155 @@ func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
 
 	// Longer requests may benefit from decomposition
 	return true
+}
+
+// shouldUsePairSession returns true when a task should use the pair session
+// model instead of independent step scheduling.
+//
+// Criteria:
+//   - Intent is "code" or "debug" AND the input is complex (>200 chars or
+//     contains complexity indicators)
+//   - Intent is "compound" (multi-intent tasks always benefit from pairing)
+//   - The task name/description contains security-sensitive keywords
+func (sp *StrategicPlanner) shouldUsePairSession(req PlanRequest) bool {
+	if sp.pairManager == nil {
+		return false
+	}
+
+	// Compound tasks always use pair sessions
+	if req.Intent == string(IntentCompound) {
+		return true
+	}
+
+	// Code and debug intents with complex descriptions
+	switch req.Intent {
+	case string(IntentCode), string(IntentDebug):
+		if len(req.Input) > 200 {
+			return true
+		}
+		lower := strings.ToLower(req.Input)
+		securityIndicators := []string{
+			"security", "authentication", "authorization",
+			"encryption", "credential", "password", "token",
+			"vulnerable", "vulnerability", "cve",
+		}
+		for _, indicator := range securityIndicators {
+			if strings.Contains(lower, indicator) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// createPairSessionPlan creates a pair session for the task instead of
+// independent steps. It creates two placeholder steps (actor + reviewer)
+// and publishes a pair session creation event.
+func (sp *StrategicPlanner) createPairSessionPlan(ctx context.Context, req PlanRequest, parentMemoryRefs []string) ([]*task.TaskStep, error) {
+	session := sp.pairManager.CreateSession(
+		req.TaskID,
+		req.Input,
+		sp.selectActorAgent(req.Intent),
+		sp.selectReviewerAgent(req.Intent),
+		DefaultPairMaxRounds,
+	)
+
+	// Extract criteria from the input (simple heuristic: split on sentences)
+	criteria := sp.extractCriteria(req.Input)
+	session.SetCriteria(criteria)
+
+	// Create actor step (first round)
+	actorStep := task.NewTaskStep(req.TaskID, fmt.Sprintf("[pair:actor] %s", req.Input), 0)
+	actorStep.ToolHint = req.Intent
+	actorStep.AgentID = session.ActorAgentID
+	for _, ref := range parentMemoryRefs {
+		actorStep.AddMemoryRef(ref)
+	}
+	session.AddStepID(actorStep.ID)
+
+	// Create reviewer step (depends on actor)
+	reviewerStep := task.NewTaskStep(req.TaskID, fmt.Sprintf("[pair:reviewer] review %s", req.Input), 1)
+	reviewerStep.ToolHint = string(IntentReview)
+	reviewerStep.AgentID = session.ReviewerAgentID
+	reviewerStep.DependsOn = []string{actorStep.ID}
+	for _, ref := range parentMemoryRefs {
+		reviewerStep.AddMemoryRef(ref)
+	}
+	session.AddStepID(reviewerStep.ID)
+
+	sp.logger.Info("Created pair session plan",
+		"task_id", req.TaskID,
+		"session_id", session.ID,
+		"actor", session.ActorAgentID,
+		"reviewer", session.ReviewerAgentID,
+		"criteria", len(criteria),
+	)
+
+	// Publish pair session created event
+	sp.publishEvent("pair.session_created", map[string]any{
+		KeyTaskID:    req.TaskID,
+		"session_id": session.ID,
+		"actor":      session.ActorAgentID,
+		"reviewer":   session.ReviewerAgentID,
+		"max_rounds": session.MaxRounds,
+		"criteria":   criteria,
+	})
+
+	return []*task.TaskStep{actorStep, reviewerStep}, nil
+}
+
+// selectActorAgent chooses the actor agent for a pair session based on intent.
+func (sp *StrategicPlanner) selectActorAgent(intent string) string {
+	switch intent {
+	case string(IntentCode), string(IntentCompound):
+		return config.AgentIDCoder
+	case string(IntentDebug):
+		return config.AgentIDDebugger
+	default:
+		return config.AgentIDCoder
+	}
+}
+
+// selectReviewerAgent chooses the reviewer agent for a pair session based on intent.
+func (sp *StrategicPlanner) selectReviewerAgent(intent string) string {
+	switch intent {
+	case string(IntentCode), string(IntentCompound):
+		return config.AgentIDPlanner
+	case string(IntentDebug):
+		return config.AgentIDAnalyst
+	default:
+		return config.AgentIDPlanner
+	}
+}
+
+// extractCriteria extracts simple criteria from a task description.
+// Splits on sentence boundaries and filters trivially short items.
+func (sp *StrategicPlanner) extractCriteria(input string) []string {
+	// Split on common sentence delimiters
+	replacements := []string{". ", "|", "\n"}
+	working := input
+	for _, r := range replacements {
+		working = strings.ReplaceAll(working, r, "\n")
+	}
+
+	lines := strings.Split(working, "\n")
+	var criteria []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip headers, empty lines, and trivially short items
+		if len(trimmed) < 10 || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		criteria = append(criteria, trimmed)
+	}
+
+	// If no criteria extracted, use the whole input as one criterion
+	if len(criteria) == 0 {
+		criteria = []string{input}
+	}
+
+	return criteria
 }
 
 // ReplanFailedTask re-plans a failed task into smaller steps for retry.

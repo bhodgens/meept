@@ -47,7 +47,8 @@ var ToolActionMap = map[string]string{
 	"task_update": "task_write",
 
 	// Agent delegation
-	"delegate_task": "agent_delegate",
+	"delegate_task":    "agent_delegate",
+	ToolRequestReview: "agent_delegate",
 
 	// Code intelligence - AST (read-only, safe)
 	"ast_parse":   ToolCodeRead,

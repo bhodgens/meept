@@ -77,7 +77,7 @@ func NewReviewManager(cfg ReviewManagerConfig) *ReviewManager {
 }
 
 // ReviewStep initiates review of a completed step.
-func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep) (*ReviewResult, error) {
+func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep, spec *TaskSpec) (*ReviewResult, error) {
 	startTime := time.Now()
 
 	rm.logger.Info("Starting review",
@@ -120,9 +120,18 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep) (*
 			"step_id", step.ID,
 			"revision_count", step.RevisionCount,
 		)
+		feedback := fmt.Sprintf("Maximum revision cycles (%d) exceeded. Human intervention required.", rm.policy.MaxRevisionCycles)
+		if spec != nil {
+			for _, c := range spec.Criteria {
+				if c.StepSequence == step.Sequence {
+					feedback += fmt.Sprintf(" Original acceptance criteria: %s", c.AcceptanceCriteria)
+					break
+				}
+			}
+		}
 		return &ReviewResult{
 			Status:     ReviewNeedsInfo,
-			Feedback:   fmt.Sprintf("Maximum revision cycles (%d) exceeded. Human intervention required.", rm.policy.MaxRevisionCycles),
+			Feedback:   feedback,
 			Confidence: 1.0,
 		}, nil
 	}
@@ -175,7 +184,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep) (*
 	)
 
 	// Build review prompt
-	prompt := rm.buildReviewPrompt(step)
+	prompt := rm.buildReviewPrompt(step, spec)
 
 	// Get reviewer agent loop
 	reviewerLoop, err := rm.registry.Get(reviewerID)
@@ -215,7 +224,7 @@ func (rm *ReviewManager) ReviewStep(ctx context.Context, step *task.TaskStep) (*
 }
 
 // buildReviewPrompt creates a review prompt for a step.
-func (rm *ReviewManager) buildReviewPrompt(step *task.TaskStep) string {
+func (rm *ReviewManager) buildReviewPrompt(step *task.TaskStep, spec *TaskSpec) string {
 	var sb strings.Builder
 
 	sb.WriteString("REVIEW TASK STEP\n\n")
@@ -238,6 +247,18 @@ func (rm *ReviewManager) buildReviewPrompt(step *task.TaskStep) string {
 	sb.WriteString(`"confidence": 0.0-1.0}\n\n`)
 
 	sb.WriteString("If approving, keep feedback brief. If rejecting, provide specific actionable feedback.\n")
+
+	// Include acceptance criteria from spec if available
+	if spec != nil {
+		for _, c := range spec.Criteria {
+			if c.StepSequence == step.Sequence {
+				sb.WriteString("\nACCEPTANCE CRITERIA (you MUST check these):\n")
+				sb.WriteString(c.AcceptanceCriteria)
+				sb.WriteString("\n\nEvaluate the work specifically against these criteria.\n")
+				break
+			}
+		}
+	}
 
 	return sb.String()
 }
@@ -422,7 +443,7 @@ func (rm *ReviewManager) analyzeReviewText(output string) (result ReviewStatus, 
 // HandleReviewResult processes a review result and updates step state.
 // Returns any newly-created revision step(s) so that callers with scheduling
 // responsibilities (e.g. TacticalScheduler) can enqueue them.
-func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, result *ReviewResult) ([]*task.TaskStep, error) {
+func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, result *ReviewResult, spec *TaskSpec) ([]*task.TaskStep, error) {
 	step, err := rm.stepStore.GetByID(stepID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get step: %w", err)
@@ -472,8 +493,9 @@ func (rm *ReviewManager) HandleReviewResult(ctx context.Context, stepID string, 
 			return nil, fmt.Errorf("failed to increment revision count: %w", err)
 		}
 
-		// Create revision step
-		revision := task.CreateRevision(step, result.Feedback)
+		// Create revision step with feedback context
+		revisionContext := BuildRevisionContext(result, spec)
+		revision := task.CreateRevisionWithContext(step, result.Feedback, revisionContext)
 		if err := rm.stepStore.Create(revision); err != nil {
 			rm.logger.Error("Failed to create revision step", "error", err)
 		} else {

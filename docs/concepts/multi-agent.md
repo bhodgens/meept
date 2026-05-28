@@ -166,3 +166,167 @@ Jobs can target specific agents via `agent_id`:
 - Priority levels: low, normal, high, urgent
 
 See [Multi-Agent Orchestration](../workflows/agent-orchestration.md) for the full workflow specification.
+
+## Channel-Based Pairing (Option C)
+
+Channel-based pairing enables two agents to have a free-form collaborative conversation via the message bus, bypassing the job queue for real-time interaction. This modality is suited for tasks that don't fit the step model: research debates, exploratory debugging, brainstorming sessions, and collaborative analysis.
+
+### When to Use It
+
+- Research debates where two perspectives improve output quality
+- Exploratory debugging that benefits from back-and-forth reasoning
+- Brainstorming sessions requiring divergent thinking
+- Tasks where the output boundary is not well-defined upfront
+
+### Message Flow
+
+```
+User Message
+    --> Dispatcher (classifies as IntentPair)
+    --> ChatHandler (publishes pair.start)
+    --> PairOrchestrator (subscribes to pair.start)
+        --> Actor agent (first turn)
+        --> publishes turn to pair.{sessionID}.turn
+        --> Reviewer agent (reviews actor output)
+        --> publishes turn to pair.{sessionID}.turn
+        --> [loop until approved or max turns]
+    --> publishes pair.result
+    --> ChatHandler (pushes result to user session)
+```
+
+### Bus Topics
+
+| Topic | Direction | Payload |
+|-------|-----------|---------|
+| `pair.start` | ChatHandler -> PairOrchestrator | `PairStartRequest` |
+| `pair.{sessionID}.turn` | PairOrchestrator -> observers | `PairTurn` |
+| `pair.result` | PairOrchestrator -> ChatHandler | `PairResult` |
+| `pair.error` | PairOrchestrator -> observers | `{session_id, error}` |
+
+### Intent Classification
+
+The `IntentPair` intent type triggers channel-based pairing. Keywords include: "debate", "brainstorm", "explore", "discuss", "pair", "collaborate".
+
+### Default Actor/Reviewer Mapping
+
+| Actor | Reviewer |
+|-------|----------|
+| analyst | planner |
+| coder | planner |
+| debugger | coder |
+| planner | analyst |
+
+### Configuration
+
+- Default max turns: 5 (configurable per request via `PairStartRequest.MaxTurns`)
+- Verdict classification uses prefix markers: `APPROVED:`, `REJECTED:`, `NEEDS_MORE:`
+- Default verdict (no prefix): approved
+
+## Model Reassignment
+
+The dispatcher supports natural language model reassignment, allowing users to override default agent model assignments with instructions like "use GLM models for coding" or "research with local models, synthesize with glm-4.7".
+
+### How It Works
+
+1. **Parsing**: The dispatcher parses model reassignment instructions from user input
+2. **Clarification**: If the instruction is ambiguous, the dispatcher asks clarifying questions
+3. **Resolution**: Model references are resolved to specific model configurations
+4. **Application**: Model overrides are attached to task steps based on scope matching
+
+### Supported Patterns
+
+| Pattern | Example | Result |
+|---------|---------|--------|
+| "use X for Y" | "use GLM for coding" | Model override for coding tasks |
+| "X models for Y" | "GLM models for planning" | Model override for planning tasks |
+| "use X models" | "use local models" | Ambiguous - needs clarification |
+| "synthesize using X" | "synthesize using claude-opus" | Model override for synthesis |
+| "code with X" | "code with qwen-coder" | Model override for coding |
+| "I want X to handle Y" | "I want GLM to handle research" | Model override for research |
+
+### Scope Keywords
+
+Model reassignment supports these scope keywords mapped to intent types:
+
+| Scope | Intent Type | Agent |
+|-------|-------------|-------|
+| synthesis, planning, plan, design | `IntentPlan` | planner |
+| coding, code, implementation, refactor | `IntentCode` | coder |
+| research, analysis, analyze | `IntentResearch` / `IntentAnalyze` | analyst |
+| debugging, debug, fix | `IntentDebug` | debugger |
+
+### Model Aliases
+
+Common model aliases are recognized:
+
+| Alias | Resolves To |
+|-------|-------------|
+| `opus`, `claude-opus` | `anthropic/claude-3-opus` |
+| `sonnet` | `anthropic/claude-3-sonnet` |
+| `glm`, `glm-4.7` | `zai/glm-4.7` |
+| `glm-4.5`, `glm-air` | `zai/glm-4.5-air` |
+| `qwen`, `qwen-coder` | `ollama/qwen2.5-coder` |
+| `llama`, `llama3.2` | `ollama/llama3.2` |
+| `gpt-4o` | `openai/gpt-4o` |
+| `lfm-code` | `local/lfm-code` |
+
+### Clarification Dialogs
+
+When instructions are ambiguous, the dispatcher asks clarifying questions:
+
+**Provider-level reference:**
+> User: "Use GLM models for coding"
+> 
+> Dispatcher: "I can use zai models for coding. Which would you prefer?
+> - glm-4.7 (most capable, 128K context)
+> - glm-4.5-air (faster, 32K context)"
+
+**Missing scope:**
+> User: "Use claude-opus"
+> 
+> Dispatcher: "I can use claude-opus for your task. What should this model handle?
+> - coding/implementation
+> - research/analysis
+> - planning/synthesis
+> - debugging
+> - the entire task"
+
+**Unknown model:**
+> User: "Use gpt-3.5 for this"
+> 
+> Dispatcher: "Model 'gpt-3.5' is not in the configured models. Available models:
+> - zai/glm-4.7, zai/glm-4.5-air
+> - local/lfm-code, local/lfm-24b
+> - ollama/llama3.2, ollama/qwen2.5-coder"
+
+### Implementation Details
+
+Model reassignment is implemented via:
+- `ModelReassignmentParser` (`internal/agent/model_parser.go`) - parses natural language
+- `ModelReassignmentDirective` (`internal/agent/dispatcher.go`) - captures parsed directive
+- `TaskStep.ModelOverride` (`internal/task/step.go`) - step-level model override field
+- `TurnModification.ModelOverride` (`internal/agent/hooks.go`) - hook-based model switching
+
+### Usage Examples
+
+```bash
+# Single instruction with model override
+meept chat "Research best practices for Go error handling, then use glm-4.7 for synthesis"
+
+# Multi-step with partial overrides
+meept chat "Use local models for research, glm-4.7 for the implementation"
+
+# Interactive mode with clarification
+meept chat
+> Use GLM for coding
+[I can use GLM models for coding. Which would you prefer?]
+> glm-4.7
+[Proceeds with glm-4.7 for coding tasks]
+```
+
+### Limitations
+
+- Model overrides apply per-task-step, not per-conversation
+- Scope matching uses keyword detection in step descriptions
+- Provider-level references (e.g., "local models") require clarification
+- Step-level integration requires planner/orchestrator modifications

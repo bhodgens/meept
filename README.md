@@ -56,7 +56,8 @@ Instead of massive context due to plan files and SKILLS.md, everything gets load
 | **Cursor** | IDE-integrated copilot | **Background operation** - runs independently, works across any editor or no editor at all |
 | **General agents** | Trust LLM claims | **Evidence-based validation** - every claim is checked against verifiable tool output |
 | **Most agents** | Token-heavy first response | **Classification routing** - utilizes a fast first-pass local classifer agent | 
-| **Most agents** | written in Python | **Golang** - faster and smaller, with a proper thread (goroutine) model for modern CPUs | 
+| **Most agents** | written in Python | **Golang** - faster and smaller, with a proper thread (goroutine) model for modern CPUs |
+| **Most agents** | Single agent or naive delegation | **Agentic pairs** - 4 collaboration modalities: spec-driven review, shared-context pair sessions, bus-channel debates, and inline review tools |
 
 I've also borrowed  ideas implemented in agentic harnesses like the venerable [oh-my-pi](https://github.com/can1357/oh-my-pi) and [Hermes Agent](https://github.com/nousresearch/hermes-agent), as well as other projects, when I find a feature which I think would improve things. 
 
@@ -133,7 +134,7 @@ Learn more: [Memory System](docs/workflows/memory.md)
 
 ### 4. Multi-Agent Collaboration
 
-Eight specialist agents (`dispatcher`, `chat`, `coder`, `debugger`, `planner`, `analyst`, `committer`, `scheduler`) discover each other via platform tools and delegate work:
+Eight specialist agents (`dispatcher`, `chat`, `coder`, `debugger`, `planner`, `analyst`, `committer`, `scheduler`) discover each other via platform tools and delegate work. The dispatcher supports **model reassignment** via natural language instructions like "use GLM models for coding" or "research with local models, synthesize with glm-4.7".
 
 ```
  User: "Fix the auth bug and deploy it"
@@ -225,6 +226,7 @@ For complete feature details, see [Features](docs/features.md).
 |---------|--------|-------|
 | Daemon core | ✅ Stable | Lifecycle, RPC, config, HTTP REST |
 | **Agent loop** | ✅ Working | Full safety stack (watchdog, cycle/convergence detection, budget) |
+| **Model reassignment** | ✅ Complete | Natural language model override ("use GLM for coding"), clarification dialogs, task/step-level overrides |
 | **Context firewall** | ✅ Working | Hierarchical compression, structured summarization |
 | **Evidence pipeline** | ✅ Working | Tool evidence &rarr; validator &rarr; claim checking |
 | Multi-agent system | ✅ Working | 8 agents, routing, delegation via platform tools |
@@ -245,6 +247,7 @@ For complete feature details, see [Features](docs/features.md).
 # Interaction
 ./bin/meept chat                           # Interactive TUI
 ./bin/meept chat "refactor auth.go"        # Single message
+./bin/meept chat "use GLM for coding"      # With model reassignment
 ./bin/meept status                         # Daemon health
 
 # Agent inspection

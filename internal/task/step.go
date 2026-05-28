@@ -94,6 +94,8 @@ type TaskStep struct {
 	ValidationRetryCount int       `json:"validation_retry_count,omitempty"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
+	// ModelOverride specifies a model to use for this step (overrides agent default)
+	ModelOverride string `json:"model_override,omitempty"`
 }
 
 // NewTaskStep creates a new task step.
@@ -156,6 +158,17 @@ func (s *TaskStep) AppendToContext(content string) {
 // IncrementRevision increments the revision count.
 func (s *TaskStep) IncrementRevision() {
 	s.RevisionCount++
+}
+
+// CreateRevisionWithContext creates a revision step with additional context
+// from the review feedback. The revisionContext is prepended to the step's
+// AccumulatedContext so the coder agent sees prior rejection feedback.
+func CreateRevisionWithContext(original *TaskStep, feedback string, revisionContext string) *TaskStep {
+	revision := CreateRevision(original, feedback)
+	if revisionContext != "" {
+		revision.AccumulatedContext = revisionContext
+	}
+	return revision
 }
 
 // CreateRevision creates a new revision step based on this step.
