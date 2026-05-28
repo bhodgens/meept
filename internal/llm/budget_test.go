@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -371,5 +372,74 @@ func TestBudgetScopeRecordsUsage(t *testing.T) {
 	}
 	if status.PerSessionUsed != 5000 {
 		t.Errorf("PerSessionUsed = %d, want 5000", status.PerSessionUsed)
+	}
+}
+
+func TestBudget_DollarTracking(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		DailyCostLimit: 1.00,
+		Aggressiveness: 1.0,
+	}, slog.Default())
+
+	b.RecordCost(CostRecord{
+		Timestamp: time.Now(),
+		CostUSD:   0.50,
+	})
+
+	status := b.GetStatus()
+	if status.DailyCostUsed != 0.50 {
+		t.Errorf("expected daily cost used 0.50, got %.4f", status.DailyCostUsed)
+	}
+	if !status.WithinCostBudget {
+		t.Error("expected within cost budget")
+	}
+
+	b.RecordCost(CostRecord{
+		Timestamp: time.Now(),
+		CostUSD:   0.60,
+	})
+
+	status = b.GetStatus()
+	if status.WithinCostBudget {
+		t.Error("expected cost budget to be exceeded (0.50 + 0.60 > 1.00)")
+	}
+}
+
+func TestBudget_DollarCheckBudget(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		DailyCostLimit: 0.50,
+		Aggressiveness: 1.0,
+	}, slog.Default())
+
+	if !b.CheckBudget() {
+		t.Error("expected budget to be available initially")
+	}
+
+	b.RecordCost(CostRecord{
+		Timestamp: time.Now(),
+		CostUSD:   0.60,
+	})
+
+	if b.CheckBudget() {
+		t.Error("expected budget exceeded after $0.60 on $0.50 limit")
+	}
+}
+
+func TestBudget_ZeroCostLimitNoRestriction(t *testing.T) {
+	b := NewBudget(BudgetConfig{
+		// No cost limits configured
+	}, slog.Default())
+
+	b.RecordCost(CostRecord{
+		Timestamp: time.Now(),
+		CostUSD:   100.0,
+	})
+
+	if !b.CheckBudget() {
+		t.Error("zero cost limit should not restrict")
+	}
+	status := b.GetStatus()
+	if !status.WithinCostBudget {
+		t.Error("zero cost limit should report within budget")
 	}
 }
