@@ -644,6 +644,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 			HTTPStatus: 0,
 			ErrorType:  errType,
 			Success:    false,
+			CostUSD:    0, // no usage data on error path
 		}
 		if resp != nil {
 			record.HTTPStatus = resp.StatusCode
@@ -712,6 +713,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	// Record successful request metrics with actual usage data
 	if c.metricsStore != nil {
+		costUSD := float64(apiResp.Usage.InputTokens)*c.config.CostPerMillionInput/1_000_000 + float64(apiResp.Usage.OutputTokens)*c.config.CostPerMillionOutput/1_000_000
 		record := metrics.RequestRecord{
 			Timestamp:        time.Now(),
 			ProviderID:       c.config.ProviderID,
@@ -723,6 +725,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 			HTTPStatus:       resp.StatusCode,
 			ErrorType:        metrics.ErrorTypeNone,
 			Success:          true,
+			CostUSD:          costUSD,
 		}
 		store := c.metricsStore
 		logger := c.logger
@@ -779,6 +782,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 			LatencyMs:  latencyMs,
 			ErrorType:  errType,
 			Success:    false,
+			CostUSD:    0, // no usage data on error path
 		}
 		if resp != nil {
 			record.HTTPStatus = resp.StatusCode
@@ -823,6 +827,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 
 	// Record successful request metrics with actual usage from the stream
 	if c.metricsStore != nil && parseErr == nil && parsedResp != nil {
+		costUSD := float64(parsedResp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(parsedResp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
 		record := metrics.RequestRecord{
 			Timestamp:        time.Now(),
 			ProviderID:       c.config.ProviderID,
@@ -834,6 +839,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 			HTTPStatus:       resp.StatusCode,
 			ErrorType:        metrics.ErrorTypeNone,
 			Success:          true,
+			CostUSD:          costUSD,
 		}
 		store := c.metricsStore
 		logger := c.logger

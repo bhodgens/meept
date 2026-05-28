@@ -551,6 +551,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 				HTTPStatus: httpStatus,
 				ErrorType:  errType,
 				Success:    false,
+				CostUSD:    0, // no usage data on error path
 			}
 			if rerr := c.metricsStore.Record(context.Background(), record); rerr != nil {
 				c.logger.Debug("metrics record failed", "error", rerr)
@@ -627,6 +628,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	// Update metrics with actual token counts if available
 	if c.metricsStore != nil && parsedResp != nil {
+		costUSD := float64(chatResp.Usage.PromptTokens)*c.config.CostPerMillionInput/1_000_000 + float64(chatResp.Usage.CompletionTokens)*c.config.CostPerMillionOutput/1_000_000
 		//nolint:gosec // goroutine outlives request context
 		go func() {
 			record := metrics.RequestRecord{
@@ -640,6 +642,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 				HTTPStatus:       resp.StatusCode,
 				ErrorType:        metrics.ErrorTypeNone,
 				Success:          true,
+				CostUSD:          costUSD,
 			}
 			if rerr := c.metricsStore.Record(context.Background(), record); rerr != nil {
 				c.logger.Debug("metrics record failed", "error", rerr)
