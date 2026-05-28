@@ -2481,3 +2481,242 @@ func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, project)
 }
+
+// ===== Plan Endpoints =====
+
+// handlePlanList handles GET /api/v1/plans.
+func (s *Server) handlePlanList(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	projectID := r.URL.Query().Get("project_id")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil {
+			limit = v
+		}
+	}
+
+	plans, err := s.services.Plan.List(r.Context(), projectID, limit)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"plans":  plans,
+		KeyCount: len(plans),
+	})
+}
+
+// handlePlanCreate handles POST /api/v1/plans.
+func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	var req services.CreatePlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	plan, err := s.services.Plan.Create(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusCreated, plan)
+}
+
+// handlePlanGet handles GET /api/v1/plans/{id}.
+func (s *Server) handlePlanGet(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	plan, err := s.services.Plan.Get(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, plan)
+}
+
+// handlePlanApprove handles POST /api/v1/plans/{id}/approve.
+func (s *Server) handlePlanApprove(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+		By        string `json:"by"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	plan, err := s.services.Plan.Approve(r.Context(), services.ApprovePlanRequest{
+		PlanID:    id,
+		SessionID: req.SessionID,
+		By:        req.By,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, plan)
+}
+
+// handlePlanReject handles POST /api/v1/plans/{id}/reject.
+func (s *Server) handlePlanReject(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+		By        string `json:"by"`
+		Reason    string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	plan, err := s.services.Plan.Reject(r.Context(), services.RejectPlanRequest{
+		PlanID:    id,
+		SessionID: req.SessionID,
+		By:        req.By,
+		Reason:    req.Reason,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, plan)
+}
+
+// handlePlanConfirm handles POST /api/v1/plans/{id}/confirm.
+func (s *Server) handlePlanConfirm(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+		By        string `json:"by"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	plan, err := s.services.Plan.Confirm(r.Context(), services.ConfirmPlanRequest{
+		PlanID:    id,
+		SessionID: req.SessionID,
+		By:        req.By,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, plan)
+}
+
+// handlePlanRevise handles POST /api/v1/plans/{id}/revise.
+func (s *Server) handlePlanRevise(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "plan id is required")
+		return
+	}
+
+	var req struct {
+		SessionID string `json:"session_id"`
+		Feedback  string `json:"feedback"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	plan, err := s.services.Plan.Revise(r.Context(), services.RevisePlanRequest{
+		PlanID:    id,
+		SessionID: req.SessionID,
+		Feedback:  req.Feedback,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, plan)
+}
+
+// handleSessionPlans handles GET /api/v1/sessions/{id}/plans.
+func (s *Server) handleSessionPlans(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Plan == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "plan service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "session id is required")
+		return
+	}
+
+	plans, err := s.services.Plan.ListBySession(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"plans": plans,
+	})
+}
