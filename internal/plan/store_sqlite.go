@@ -46,6 +46,11 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) migrate() error {
+	// Enable foreign key enforcement so ON DELETE CASCADE works.
+	if _, err := s.db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		return fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+
 	schema := `
 	CREATE TABLE IF NOT EXISTS plans (
 		id TEXT PRIMARY KEY,
