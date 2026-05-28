@@ -424,6 +424,11 @@ func (s *SessionPickerModal) View(screenW, screenH int) string {
 			// Format: pointer + name (fixed width) + description + time (right-aligned)
 			namePart := fmt.Sprintf("%-*s", maxNameLen, name)
 			descPart := s.styles.Muted.Render(fmt.Sprintf("%-*s", maxDescLen, desc))
+			// TODO: Plan count indicators per session — requires async data fetching
+			// planCount := s.getPlanCount(sess.ID)
+			// if planCount > 0 {
+			// 	descPart += s.styles.PlanStatePlanning.Render(fmt.Sprintf(" (%d plans)", planCount))
+			// }
 			timePart := s.styles.Muted.Render(fmt.Sprintf("%*s", timeColWidth, lastActivity))
 
 			line := fmt.Sprintf("%s%s  %s  %s", pointer, namePart, descPart, timePart)

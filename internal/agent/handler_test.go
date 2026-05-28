@@ -219,7 +219,7 @@ func TestChatHandler_PublishPlanRequest(t *testing.T) {
 	sub := msgBus.Subscribe("test", "orchestrator.plan")
 	defer msgBus.Unsubscribe(sub)
 
-	handler := NewChatHandler(nil, nil, nil, msgBus, slogDiscardLogger())
+	handler := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
 
 	result := &DispatchResult{
 		Task: &task.Task{
@@ -267,7 +267,7 @@ func TestChatHandler_PublishPlanRequest_Compound(t *testing.T) {
 	sub := msgBus.Subscribe("test", "orchestrator.plan")
 	defer msgBus.Unsubscribe(sub)
 
-	handler := NewChatHandler(nil, nil, nil, msgBus, slogDiscardLogger())
+	handler := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
 
 	meta, _ := json.Marshal(map[string]any{
 		"compound_type": "sequential",
@@ -307,7 +307,7 @@ func TestChatHandler_PublishPlanRequest_WarnsOnNoSubscribers(t *testing.T) {
 	// Create a bus with no subscribers
 	msgBus := bus.New(nil, slogDiscardLogger())
 
-	handler := NewChatHandler(nil, nil, nil, msgBus, slogDiscardLogger())
+	handler := NewChatHandler(nil, nil, msgBus, slogDiscardLogger())
 
 	result := &DispatchResult{
 		Task: &task.Task{
@@ -326,7 +326,7 @@ func TestChatHandler_PublishPlanRequest_WarnsOnNoSubscribers(t *testing.T) {
 }
 
 func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
-	h := NewChatHandler(nil, nil, nil, nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	steps := []TaskStepSummary{
 		{Description: "Create database migrations", AgentID: "committer"},
@@ -365,7 +365,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck(t *testing.T) {
 }
 
 func TestChatHandler_FormatEnhancedAsyncTaskAck_NoSteps(t *testing.T) {
-	h := NewChatHandler(nil, nil, nil, nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	result := &DispatchResult{
 		Task: &task.Task{
@@ -386,7 +386,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_NoSteps(t *testing.T) {
 }
 
 func TestChatHandler_FormatEnhancedAsyncTaskAck_Truncation(t *testing.T) {
-	h := NewChatHandler(nil, nil, nil, nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	steps := []TaskStepSummary{
 		{
@@ -424,7 +424,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_Truncation(t *testing.T) {
 }
 
 func TestChatHandler_FormatEnhancedAsyncTaskAck_MultiAgent(t *testing.T) {
-	h := NewChatHandler(nil, nil, nil, nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	steps := []TaskStepSummary{
 		{Description: "step 1", AgentID: "coder"},
@@ -453,7 +453,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_MultiAgent(t *testing.T) {
 }
 
 func TestChatHandler_FormatEnhancedAsyncTaskAck_SingleAgent(t *testing.T) {
-	h := NewChatHandler(nil, nil, nil, nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	steps := []TaskStepSummary{
 		{Description: "step 1", AgentID: "coder"},
@@ -477,7 +477,7 @@ func TestChatHandler_FormatEnhancedAsyncTaskAck_SingleAgent(t *testing.T) {
 
 func TestCompoundTaskAck_FullFlow(t *testing.T) {
 	// Simulate a compound task with 4 subtasks across multiple agents
-	h := NewChatHandler(nil, nil, nil, nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	steps := []TaskStepSummary{
 		{Description: "Create database migrations", AgentID: "committer"},
@@ -545,7 +545,7 @@ func TestCompoundTaskAck_FullFlow(t *testing.T) {
 
 func TestCompoundTaskAck_TruncationOverflow(t *testing.T) {
 	// Test with more than 5 steps (should truncate with overflow message)
-	h := NewChatHandler(nil, nil, nil, nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	steps := []TaskStepSummary{
 		{Description: "Step 1", AgentID: "coder"},
@@ -604,7 +604,7 @@ func TestCompoundTaskAck_TruncationOverflow(t *testing.T) {
 
 func TestCompoundTaskAck_MinimalTask(t *testing.T) {
 	// Test simplest case: no steps, no duration
-	h := NewChatHandler(nil, nil, nil, nil, slogDiscardLogger())
+	h := NewChatHandler(nil, nil, nil, slogDiscardLogger())
 
 	result := &DispatchResult{
 		Task: &task.Task{
@@ -726,7 +726,7 @@ func TestChatClientDisconnectedData(t *testing.T) {
 func TestHandleRequestBroadcastsMessageReceived(t *testing.T) {
 	msgBus := bus.New(nil, slogDiscardLogger())
 	loop := NewAgentLoop()
-	handler := NewChatHandler(loop, nil, nil, msgBus, slogDiscardLogger())
+	handler := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
 
 	// Subscribe to chat.message.received to verify broadcast
 	sub := msgBus.Subscribe("test-handler", "chat.message.received")
@@ -776,7 +776,7 @@ func TestHandleRequestBroadcastsMessageReceived(t *testing.T) {
 func TestHandleRequestNoBroadcastWithoutSourceClient(t *testing.T) {
 	msgBus := bus.New(nil, slogDiscardLogger())
 	loop := NewAgentLoop()
-	handler := NewChatHandler(loop, nil, nil, msgBus, slogDiscardLogger())
+	handler := NewChatHandler(loop, nil, msgBus, slogDiscardLogger())
 
 	// Subscribe to chat.message.received
 	sub := msgBus.Subscribe("test-handler", "chat.message.received")

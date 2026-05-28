@@ -35,6 +35,7 @@ const (
 	ViewTasks
 	ViewQueue
 	ViewMemory
+	ViewPlans
 )
 
 // VerbosityLevel controls how much progress detail to show in the TUI.
@@ -94,6 +95,7 @@ type App struct {
 	tasks  *models.TasksModel
 	queue  *models.QueueModel
 	memory *models.MemoryModel
+	plans  *models.PlansModel
 
 	// Sidebar
 	sidebar *SidebarModel
@@ -227,6 +229,7 @@ func NewApp(socketPath string) *App {
 		tasks:          models.NewTasksModel(rpc),
 		queue:          models.NewQueueModel(rpc),
 		memory:         models.NewMemoryModel(rpc),
+		plans:          models.NewPlansModel(rpc),
 		sidebar:        NewSidebarModel(rpc, eventRPC, styles, clientConfig.Rendering.SidebarAnimation),
 		keys:           DefaultKeyMap(),
 		clientConfig:   clientConfig,
@@ -429,6 +432,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.tasks.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)
+		a.plans.SetSize(mainWidth, msg.Height-chromeHeight)
 
 		return a, nil
 
@@ -654,6 +658,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentSession = msg.Session
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
+			// Wire up session ID for plans filtering
+			a.plans.SetSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
 			if msg.IsNew {
 				a.statusMessage = fmt.Sprintf("Created session: %s", msg.Session.Name)
@@ -689,6 +695,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.sessionMgr.SetSession(msg.Session)
 			// Wire up session ID for tasks FilterMine feature
 			a.tasks.SetCurrentSession(msg.Session.ID)
+			// Wire up session ID for plans filtering
+			a.plans.SetSession(msg.Session.ID)
 			sessionCmd := a.chat.SetSession(msg.Session)
 			a.statusMessage = fmt.Sprintf("Switched to: %s", msg.Session.Name)
 			a.statusMessageTime = time.Now()
@@ -1048,6 +1056,51 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.chat.AddSystemMessage(message)
 					}
 				}
+
+			// Plan lifecycle events - inline chat notifications
+			case "plan.submitting", "plan.completed", "plan.confirmed", "plan.rejected":
+				if payloadMap, ok := e.Payload.(map[string]any); ok {
+					planMsg := models.PlanNotificationMsg{
+						Timestamp: e.Timestamp,
+					}
+					if v, ok := payloadMap["plan_id"].(string); ok {
+						planMsg.PlanID = v
+					}
+					if v, ok := payloadMap["title"].(string); ok {
+						planMsg.Title = v
+					}
+					if v, ok := payloadMap["phase_count"].(float64); ok {
+						planMsg.PhaseCount = int(v)
+					}
+					if v, ok := payloadMap["step_count"].(float64); ok {
+						planMsg.StepCount = int(v)
+					}
+					if v, ok := payloadMap["by"].(string); ok {
+						planMsg.By = v
+					}
+					if v, ok := payloadMap["reason"].(string); ok {
+						planMsg.Reason = v
+					}
+					// Derive state from topic
+					switch e.Topic {
+					case "plan.submitting":
+						planMsg.State = "submitting"
+					case "plan.completed":
+						planMsg.State = "completed"
+					case "plan.confirmed":
+						planMsg.State = "confirmed"
+					case "plan.rejected":
+						planMsg.State = "rejected"
+					}
+					if cmd := a.chat.Update(planMsg); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					// Flash the Plans tab indicator if not currently viewing plans
+					if a.currentView != ViewPlans {
+						a.tabFlash[ViewPlans] = true
+						a.tabFlashTime = time.Now()
+					}
+				}
 			}
 		}
 		// Also forward to sidebar for activity feed updates
@@ -1340,6 +1393,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = a.queue.Update(msg)
 	case ViewMemory:
 		cmd = a.memory.Update(msg)
+	case ViewPlans:
+		cmd = a.plans.Update(msg)
 	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
@@ -1376,6 +1431,10 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		case keys.ViewMemory:
 			a.currentView = ViewMemory
+			cmd := a.initCurrentView()
+			return a, cmd
+		case keys.ViewPlans:
+			a.currentView = ViewPlans
 			cmd := a.initCurrentView()
 			return a, cmd
 		case keys.Sidebar:
@@ -1444,6 +1503,7 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.currentSession = sess
 				a.sessionMgr.SetSession(sess)
 				a.tasks.SetCurrentSession(sess.ID)
+				a.plans.SetSession(sess.ID)
 				sessionCmd := a.chat.SetSession(sess)
 				a.statusMessage = fmt.Sprintf("Switched to: %s", sess.Name)
 				a.statusMessageTime = time.Now()
@@ -1538,6 +1598,8 @@ func (a *App) initCurrentView() tea.Cmd {
 		return a.queue.Init()
 	case ViewMemory:
 		return a.memory.Init()
+	case ViewPlans:
+		return a.plans.Init()
 	}
 	return nil
 }
@@ -1579,6 +1641,8 @@ func (a *App) View() tea.View {
 			mainView = a.queue.View()
 		case ViewMemory:
 			mainView = a.memory.View()
+		case ViewPlans:
+			mainView = a.plans.View()
 		}
 	}
 
@@ -1689,6 +1753,9 @@ func (a *App) renderHeader() string {
 		content = content[:width]
 	}
 
+	// Plan badges line (to be populated from session plan counts)
+	// plansLine := a.renderPlanBadges()
+
 	// Orange background, black text - render to exact width
 	return a.styles.HeaderBar.
 		Width(width).
@@ -1738,6 +1805,7 @@ func (a *App) renderTabs() string {
 		{"Tasks", ViewTasks},
 		{"Queue", ViewQueue},
 		{"Memory", ViewMemory},
+		{"Plans", ViewPlans},
 	}
 
 	renderedTabs := make([]string, 0, len(tabs))
@@ -1888,6 +1956,14 @@ func (a *App) getQuickActions() []string {
 			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
 			a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("search"),
 			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
+		)
+
+	case ViewPlans:
+		actions = append(actions,
+			a.styles.HelpKey.Render("j/k")+" "+a.styles.HelpValue.Render("navigate"),
+			a.styles.HelpKey.Render(KeyEnter)+" "+a.styles.HelpValue.Render("details"),
+			a.styles.HelpKey.Render("r")+" "+a.styles.HelpValue.Render("refresh"),
+			a.styles.HelpKey.Render("/")+" "+a.styles.HelpValue.Render("filter"),
 		)
 	}
 

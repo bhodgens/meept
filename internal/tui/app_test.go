@@ -40,6 +40,7 @@ func createTestApp() *App {
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
+	app.plans = models.NewPlansModel(rpc)
 	// Create modals
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
@@ -50,6 +51,7 @@ func createTestApp() *App {
 	app.tasks.SetSize(app.width-2, app.height-4)
 	app.queue.SetSize(app.width-2, app.height-4)
 	app.memory.SetSize(app.width-2, app.height-4)
+	app.plans.SetSize(app.width-2, app.height-4)
 	return app
 }
 
@@ -163,7 +165,7 @@ func TestApp_RenderTabs(t *testing.T) {
 	tabs := ansi.Strip(app.renderTabs())
 
 	// Check that all tabs are present
-	expectedTabs := []string{"Chat", "Tasks", "Queue", "Memory"}
+	expectedTabs := []string{"Chat", "Tasks", "Queue", "Memory", "Plans"}
 	for _, tab := range expectedTabs {
 		if !strings.Contains(tabs, tab) {
 			t.Errorf("expected tabs to contain %q", tab)
@@ -456,6 +458,7 @@ func TestApp_Program_BasicRender(t *testing.T) {
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
+	app.plans = models.NewPlansModel(rpc)
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	app.notifications = components.NewNotificationManager()
@@ -512,6 +515,7 @@ func TestApp_Program_CommandPalette(t *testing.T) {
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
+	app.plans = models.NewPlansModel(rpc)
 	app.commandPalette = CommandPaletteModal(styles, clientConfig)
 	app.sessionPicker = NewSessionPickerModal(styles, rpc, clientConfig)
 	app.notifications = components.NewNotificationManager()

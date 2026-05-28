@@ -83,6 +83,17 @@ type Styles struct {
 	FollowUpBadge    lipgloss.Style
 	QueueIndicator   lipgloss.Style
 	AgentActiveBadge lipgloss.Style
+
+	// Plan state styles
+	PlanStatePlanning  lipgloss.Style
+	PlanStateDraft     lipgloss.Style
+	PlanStatePending   lipgloss.Style
+	PlanStateApproved  lipgloss.Style
+	PlanStateExecuting lipgloss.Style
+	PlanStateCompleted lipgloss.Style
+	PlanStateConfirmed lipgloss.Style
+	PlanStateFailed    lipgloss.Style
+	PlanStateCancelled lipgloss.Style
 }
 
 // DefaultStyles returns the default style set.
@@ -275,6 +286,35 @@ func DefaultStyles() *Styles {
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Padding(0, 1).
 		Bold(true)
+
+	// Plan state styles
+	s.PlanStatePlanning = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#3B82F6")) // Blue
+
+	s.PlanStateDraft = lipgloss.NewStyle().
+		Foreground(ColorMuted) // Gray
+
+	s.PlanStatePending = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#3B82F6")) // Blue
+
+	s.PlanStateApproved = lipgloss.NewStyle().
+		Foreground(ColorSuccess) // Green
+
+	s.PlanStateExecuting = lipgloss.NewStyle().
+		Foreground(ColorAccent) // Amber/Yellow
+
+	s.PlanStateCompleted = lipgloss.NewStyle().
+		Foreground(ColorSuccess) // Green
+
+	s.PlanStateConfirmed = lipgloss.NewStyle().
+		Foreground(ColorSuccess). // Green
+		Bold(true)
+
+	s.PlanStateFailed = lipgloss.NewStyle().
+		Foreground(ColorError) // Red
+
+	s.PlanStateCancelled = lipgloss.NewStyle().
+		Foreground(ColorMuted) // Gray
 
 	return s
 }

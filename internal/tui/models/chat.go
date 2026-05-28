@@ -450,6 +450,18 @@ type AgentLifecycleMsg struct {
 	ConversationID string
 }
 
+// PlanNotificationMsg carries plan lifecycle notifications for inline chat display.
+type PlanNotificationMsg struct {
+	PlanID     string
+	Title      string
+	State      string // "submitting", "completed", "confirmed", "rejected"
+	PhaseCount int
+	StepCount  int
+	By         string // who confirmed/rejected
+	Reason     string // rejection reason
+	Timestamp  time.Time
+}
+
 // SteeringInjectedMsg signals that a steering message was injected into the queue.
 type SteeringInjectedMsg struct{}
 
@@ -1147,6 +1159,11 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 	case FollowUpRestoredMsg:
 		m.AddSystemMessage(fmt.Sprintf("[follow-up] restored %d pending follow-up message(s)", msg.Count))
+		return nil
+
+	case PlanNotificationMsg:
+		content := m.renderPlanNotification(msg)
+		m.addMessage(RoleSystem, content)
 		return nil
 	}
 
@@ -2310,6 +2327,78 @@ func parseTaskResult(reply string) *taskResultInfo {
 		Total:     result.Total,
 		Result:    result.Result,
 		Error:     result.Error,
+	}
+}
+
+// renderPlanNotification renders a styled inline notification for plan lifecycle events.
+func (m *ChatModel) renderPlanNotification(msg PlanNotificationMsg) string {
+	title := msg.Title
+	if title == "" {
+		title = msg.PlanID
+	}
+	title = types.TruncateString(title, 42)
+
+	switch msg.State {
+	case "submitting":
+		phaseStr := fmt.Sprintf("%d phase", msg.PhaseCount)
+		if msg.PhaseCount != 1 {
+			phaseStr += "s"
+		}
+		stepStr := fmt.Sprintf("%d step", msg.StepCount)
+		if msg.StepCount != 1 {
+			stepStr += "s"
+		}
+		return fmt.Sprintf("┌ plan ready for review ──────────────────────────┐\n"+
+			"│ Plan: \"%s\"\n"+
+			"│ %s · %s\n"+
+			"│ [5] plans tab to review  ·  /plan approve %s\n"+
+			"└─────────────────────────────────────────────────┘",
+			title, phaseStr, stepStr,
+			types.TruncateString(msg.PlanID, 16))
+
+	case "completed":
+		phaseStr := fmt.Sprintf("%d phase", msg.PhaseCount)
+		if msg.PhaseCount != 1 {
+			phaseStr += "s"
+		}
+		stepStr := fmt.Sprintf("%d step", msg.StepCount)
+		if msg.StepCount != 1 {
+			stepStr += "s"
+		}
+		return fmt.Sprintf("┌ plan completed ─────────────────────────────────┐\n"+
+			"│ Plan: \"%s\"\n"+
+			"│ %s · %s · awaiting confirmation\n"+
+			"│ [5] plans tab to confirm\n"+
+			"└─────────────────────────────────────────────────┘",
+			title, phaseStr, stepStr)
+
+	case "confirmed":
+		confirmedBy := msg.By
+		if confirmedBy == "" {
+			confirmedBy = "user"
+		}
+		return fmt.Sprintf("┌ plan confirmed ─────────────────────────────────┐\n"+
+			"│ Plan: \"%s\"\n"+
+			"│ Confirmed by %s\n"+
+			"└─────────────────────────────────────────────────┘",
+			title, confirmedBy)
+
+	case "rejected":
+		reason := msg.Reason
+		if reason == "" {
+			reason = "no reason given"
+		}
+		return fmt.Sprintf("┌ plan rejected ──────────────────────────────────┐\n"+
+			"│ Plan: \"%s\"\n"+
+			"│ Reason: %s\n"+
+			"└─────────────────────────────────────────────────┘",
+			title, types.TruncateString(reason, 45))
+
+	default:
+		return fmt.Sprintf("┌ plan %s ────────────────────────────────────┐\n"+
+			"│ Plan: \"%s\"\n"+
+			"└─────────────────────────────────────────────────┘",
+			msg.State, title)
 	}
 }
 

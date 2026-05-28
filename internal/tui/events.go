@@ -55,6 +55,7 @@ func DefaultEventStreamConfig() *EventStreamConfig {
 			"llm.*",
 			"chat.*",
 			"conversation.*",
+			"plan.*",
 		},
 		BufferSize:   50,
 		PollInterval: 500 * time.Millisecond,

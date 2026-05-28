@@ -111,8 +111,16 @@ func (m *PlanManager) SubmitPlan(ctx context.Context, planID string) error {
 		return fmt.Errorf("set plan state: %w", err)
 	}
 
+	phases, _ := m.store.GetPhases(ctx, planID)
+	totalSteps := 0
+	for _, ph := range phases {
+		totalSteps += ph.TotalSteps
+	}
 	m.publishEvent("plan.submitting", map[string]any{
-		"plan_id": planID,
+		"plan_id":     planID,
+		"title":       plan.Title,
+		"phase_count": len(phases),
+		"step_count":  totalSteps,
 	})
 
 	// Auto-approve if approval is not required.
@@ -190,6 +198,7 @@ func (m *PlanManager) RejectPlan(ctx context.Context, planID, sessionID, by, rea
 
 	m.publishEvent("plan.rejected", map[string]any{
 		"plan_id": planID,
+		"title":   plan.Title,
 		"by":      by,
 		"reason":  reason,
 	})
@@ -275,6 +284,7 @@ func (m *PlanManager) ConfirmPlan(ctx context.Context, planID, sessionID, by str
 
 	m.publishEvent("plan.confirmed", map[string]any{
 		"plan_id": planID,
+		"title":   plan.Title,
 		"by":      by,
 	})
 
@@ -508,9 +518,16 @@ func (m *PlanManager) OnTaskCompleted(ctx context.Context, taskID string) error 
 		m.logger.Warn("failed to update plan.md on completion", "error", err)
 	}
 
+	totalSteps := 0
+	for _, ph := range phases {
+		totalSteps += ph.TotalSteps
+	}
 	m.publishEvent("plan.completed", map[string]any{
-		"plan_id": plan.ID,
-		"task_id": taskID,
+		"plan_id":     plan.ID,
+		"title":       plan.Title,
+		"task_id":     taskID,
+		"phase_count": len(phases),
+		"step_count":  totalSteps,
 	})
 
 	m.logger.Info("plan completed", "plan_id", plan.ID)

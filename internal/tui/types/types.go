@@ -474,3 +474,52 @@ type ProjectStatusResponse struct {
 	Behind        int    `json:"behind"`
 	ModifiedFiles int    `json:"modified_files"`
 }
+
+// PlanExtended represents a plan with phase details for TUI display.
+type PlanExtended struct {
+	ID             string          `json:"id"`
+	Title          string          `json:"title"`
+	Description    string          `json:"description,omitempty"`
+	FilePath       string          `json:"file_path"`
+	ProjectID      string          `json:"project_id,omitempty"`
+	State          string          `json:"state"`
+	CreatedAt      string          `json:"created_at"`
+	UpdatedAt      string          `json:"updated_at"`
+	SourceSession  string          `json:"source_session,omitempty"`
+	TaskID         string          `json:"task_id,omitempty"`
+	RevisionCount  int             `json:"revision_count,omitempty"`
+	Phases         []PlanPhaseView `json:"phases,omitempty"`
+	TotalSteps     int             `json:"total_steps"`
+	CompletedSteps int             `json:"completed_steps"`
+	FailedSteps    int             `json:"failed_steps"`
+}
+
+// PlanPhaseView represents a single phase within a plan for TUI display.
+type PlanPhaseView struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Sequence       int    `json:"sequence"`
+	TotalSteps     int    `json:"total_steps"`
+	CompletedSteps int    `json:"completed_steps"`
+	FailedSteps    int    `json:"failed_steps"`
+	State          string `json:"state"`
+}
+
+// PlanListResponse represents the plan list RPC response.
+type PlanListResponse struct {
+	Plans []PlanExtended `json:"plans"`
+	Err   string         `json:"err,omitempty"`
+}
+
+// PlanStateCounts holds counts of plans by state.
+type PlanStateCounts struct {
+	Planning        int `json:"planning"`
+	Draft           int `json:"draft"`
+	PendingApproval int `json:"pending_approval"`
+	Approved        int `json:"approved"`
+	Executing       int `json:"executing"`
+	Completed       int `json:"completed"`
+	Confirmed       int `json:"confirmed"`
+	Failed          int `json:"failed"`
+	Cancelled       int `json:"cancelled"`
+}

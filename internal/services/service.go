@@ -11,6 +11,7 @@ import (
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/scheduler"
@@ -48,6 +49,7 @@ type ServiceRegistry struct {
 	Runtime      *RuntimeService
 	Terminal     *TerminalService
 	Project      *ProjectService
+	Plan         *PlanService
 }
 
 // Config holds dependencies for service instantiation.
@@ -75,6 +77,8 @@ type Config struct {
 	StateDir         string
 	BinPath          string
 	ProjectManager   *project.ProjectManager
+	PlanManager      *plan.PlanManager
+	PlanStore        plan.PlanStore
 }
 
 // NewRegistry creates all services with their dependencies.
@@ -151,6 +155,11 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	// ProjectService is available if ProjectManager is configured
 	if cfg.ProjectManager != nil {
 		reg.Project = NewProjectService(cfg.ProjectManager, cfg.SessionStore)
+	}
+
+	// PlanService is available if PlanManager and PlanStore are configured
+	if cfg.PlanManager != nil && cfg.PlanStore != nil {
+		reg.Plan = NewPlanService(cfg.PlanManager, cfg.PlanStore)
 	}
 
 	return reg, nil
