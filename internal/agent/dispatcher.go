@@ -16,6 +16,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/internal/templates"
@@ -48,6 +49,7 @@ var SteeringHeuristicTable = map[IntentType]bool{
 	IntentAnalyze:  false, // Analysis extends naturally
 	IntentSearch:   false, // Search queries are not urgent
 	IntentSkill:    false, // Skill operations can wait
+	IntentPair:     false, // Pair tasks are not urgent
 	IntentCompound: false, // Compound intents default to follow-up
 	IntentUnknown:  false,
 }
@@ -93,6 +95,32 @@ type MemoryContext struct {
 	IntentCounts map[string]int        `json:"intent_counts,omitempty"`
 }
 
+// ModelReassignmentDirective captures a user's model reassignment instruction.
+type ModelReassignmentDirective struct {
+	// Instruction is the raw user instruction text (e.g., "use GLM models for coding")
+	Instruction string `json:"instruction"`
+
+	// TargetScope - which intent type this applies to
+	// Examples: "synthesis"→IntentPlan, "coding"→IntentCode, "research"→IntentResearch
+	TargetScope string `json:"target_scope,omitempty"`
+
+	// TargetIntent - resolved intent type from scope keyword
+	TargetIntent *IntentType `json:"target_intent,omitempty"`
+
+	// ModelReferences - one or more model specs from user input
+	// Can be: "zai/glm-4.7", "glm-*", "provider:zai", "opus"
+	ModelReferences []string `json:"model_references"`
+
+	// ResolvedModels - after resolver processes references
+	ResolvedModels []*llm.ModelConfig `json:"resolved_models,omitempty"`
+
+	// ClarificationNeeded - set true if instruction is ambiguous
+	ClarificationNeeded bool `json:"clarification_needed,omitempty"`
+
+	// ClarificationQuestions - questions to ask user if ambiguous
+	ClarificationQuestions []string `json:"clarification_questions,omitempty"`
+}
+
 // DispatchResult is the result of dispatching a request.
 type DispatchResult struct {
 	// Task is the created task if any.
@@ -109,6 +137,15 @@ type DispatchResult struct {
 	Steps []TaskStepSummary `json:"steps,omitempty"`
 	// ExplicitSteerMode indicates the user pressed ctrl+s to force steering.
 	ExplicitSteerMode bool `json:"explicit_steer_mode,omitempty"`
+
+	// ModelDirective is the model reassignment directive if user specified one
+	ModelDirective *ModelReassignmentDirective `json:"model_directive,omitempty"`
+	// ClarificationReply is the clarification question if directive is ambiguous
+	ClarificationReply string `json:"clarification_reply,omitempty"`
+	// ClarificationNeeded indicates the directive needs user clarification
+	ClarificationNeeded bool `json:"clarification_needed,omitempty"`
+	// Plan is the created plan if plan routing was triggered.
+	Plan *plan.Plan `json:"plan,omitempty"`
 }
 
 // Dispatcher handles intake classification and routing of requests.
@@ -130,6 +167,8 @@ type Dispatcher struct {
 	sessionTracker    *SessionTracker
 	stats             *DispatcherStats
 	router            *ReportRouter
+	modelParser       *ModelReassignmentParser
+	planManager       *plan.PlanManager
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -156,6 +195,7 @@ type DispatcherConfig struct {
 	CapabilityMatcher *CapabilityMatcher
 	EmbeddingClient   EmbeddingClient
 	SessionMaxAge     time.Duration
+	PlanManager       *plan.PlanManager
 }
 
 // NewDispatcher creates a new dispatcher.
@@ -176,7 +216,11 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 		templateRegistry:  cfg.TemplateRegistry,
 		logger:            cfg.Logger,
 		capabilityMatcher: cfg.CapabilityMatcher,
+		planManager:       cfg.PlanManager,
 	}
+
+	// Initialize model reassignment parser
+	d.modelParser = NewModelReassignmentParser()
 
 	// Add keyword-based classifier
 	d.keywordClassifier = &KeywordClassifier{}
@@ -239,6 +283,22 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// Check for explicit skill invocation (/skill-name)
 	if strings.HasPrefix(input, "/") {
+		// Handle /plan command — force plan creation
+		if strings.HasPrefix(input, "/plan") && d.planManager != nil {
+			desc := strings.TrimPrefix(input, "/plan")
+			desc = strings.TrimSpace(desc)
+			if desc == "" {
+				desc = input
+			}
+			// Build a minimal intent for plan routing
+			planIntent := &Intent{
+				Type:       string(IntentPlan),
+				Confidence: 1.0,
+				AgentType:  config.AgentIDPlanner,
+				Summary:    extractSummary(desc),
+			}
+			return d.routeToPlan(ctx, desc, planIntent, sessionID)
+		}
 		skillName, skillInput := d.parseSkillInvocation(input)
 		if skill := d.getSkill(skillName); skill != nil {
 			d.logger.Info("Skill invocation detected",
@@ -263,7 +323,20 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		// Not a valid skill or template, fall through to normal routing
 	}
 
-	// 1. Build memory context with session history
+	// 1. Parse model reassignment directive (if user specified model preferences)
+	parseResult := d.modelParser.Parse(input)
+	
+	// 2. Handle clarification if needed
+	if parseResult.Found && parseResult.Directive.ClarificationNeeded {
+		return &DispatchResult{
+			ModelDirective:       parseResult.Directive,
+			ClarificationReply:   d.buildClarificationQuestion(parseResult.Directive),
+			ClarificationNeeded:  true,
+			AgentID:              config.AgentIDChat, // Use chat agent for clarification dialog
+		}, nil
+	}
+
+	// 3. Build memory context with session history
 	memCtx := d.buildMemoryContext(ctx, input, sessionID)
 
 	// 2. Resolve anaphora (context references)
@@ -272,7 +345,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 3. Check for compound (multi-intent) requests
 	multiIntent := d.classifyMultiIntent(ctx, resolvedInput, memCtx)
 	if multiIntent.IsCompound {
-		return d.routeCompound(ctx, multiIntent, input, sessionID)
+		return d.routeCompoundWithModel(ctx, multiIntent, input, sessionID, parseResult.Directive)
 	}
 
 	// 4. Classify primary intent
@@ -280,6 +353,11 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 5. Extract memory refs for context continuity
 	intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
+
+	// 5.5. Check if plan creation is warranted (before task creation)
+	if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
+		return d.routeToPlan(ctx, input, intent, sessionID)
+	}
 
 	// 6. Create task if needed (for trackable work)
 	var createdTask *task.Task
@@ -289,10 +367,54 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 
 	// 7. Determine routing
 	result := &DispatchResult{
-		Task:          createdTask,
-		AgentID:       intent.AgentType,
-		Intent:        intent,
-		MemoryContext: memCtx.Results,
+		Task:           createdTask,
+		AgentID:        intent.AgentType,
+		Intent:         intent,
+		MemoryContext:  memCtx.Results,
+		ModelDirective: parseResult.Directive,
+	}
+
+	// Attach model override to task metadata if task was created
+	if createdTask != nil && parseResult.Found && parseResult.Directive != nil {
+		// Store model override in task metadata for AgentLoop to use
+		modelRef := ""
+		if len(parseResult.Directive.ResolvedModels) > 0 {
+			mc := parseResult.Directive.ResolvedModels[0]
+			modelRef = fmt.Sprintf("%s/%s", mc.ProviderID, mc.ModelID)
+		} else if len(parseResult.Directive.ModelReferences) > 0 {
+			modelRef = parseResult.Directive.ModelReferences[0]
+		}
+		
+		if modelRef != "" {
+			meta := map[string]any{
+				"model_override":      modelRef,
+				"model_scope":         parseResult.Directive.TargetScope,
+				"model_target_intent": "",
+			}
+			if parseResult.Directive.TargetIntent != nil {
+				meta["model_target_intent"] = string(*parseResult.Directive.TargetIntent)
+			}
+			
+			metaJSON, err := json.Marshal(meta)
+			if err == nil {
+				// Merge with existing metadata
+				if len(createdTask.Metadata) > 0 {
+					var existing map[string]any
+					if json.Unmarshal(createdTask.Metadata, &existing) == nil {
+						for k, v := range meta {
+							existing[k] = v
+						}
+						metaJSON, _ = json.Marshal(existing)
+					}
+				}
+				createdTask.Metadata = json.RawMessage(metaJSON)
+				if d.taskStore != nil {
+					if err := d.taskStore.Update(createdTask); err != nil {
+						d.logger.Warn("Failed to update task model metadata", "error", err)
+					}
+				}
+			}
+		}
 	}
 
 	d.logger.Info("Dispatched request",
@@ -301,6 +423,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		"confidence", intent.Confidence,
 		"memory_refs", len(intent.MemoryRefs),
 		"has_task", createdTask != nil,
+		"has_model_override", parseResult.Found,
 	)
 
 	// Record intent in session tracker
@@ -515,6 +638,35 @@ func (d *Dispatcher) extractMemoryRefs(results []memory.MemoryResult) []string {
 	return refs
 }
 
+// routeToPlan creates a plan via the PlanManager and returns a DispatchResult
+// with the created plan. This is used for plan-eligible requests that should
+// go through the planning workflow instead of direct task creation.
+func (d *Dispatcher) routeToPlan(ctx context.Context, input string, intent *Intent, sessionID string) (*DispatchResult, error) {
+	summary := intent.Summary
+	if summary == "" {
+		summary = truncateString(input, 100)
+	}
+
+	p, err := d.planManager.CreatePlan(ctx, summary, input, "", "", sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create plan: %w", err)
+	}
+
+	d.logger.Info("Routed request to plan",
+		"plan_id", p.ID,
+		"title", p.Title,
+		"state", p.State,
+		"session", sessionID,
+	)
+
+	return &DispatchResult{
+		AgentID: config.AgentIDPlanner,
+		Intent:  intent,
+		Response: fmt.Sprintf("plan created: %s (status: %s)", p.Title, p.State),
+		Plan:    p,
+	}, nil
+}
+
 // shouldCreateTask determines if a task should be created.
 func (d *Dispatcher) shouldCreateTask(intent *Intent) bool {
 	it := IntentType(intent.Type)
@@ -609,7 +761,12 @@ func (m *MultiIntent) DetectCompound() bool {
 }
 
 // routeCompound handles compound (multi-intent) request routing.
-func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, _, sessionID string) (*DispatchResult, error) {
+func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, input, sessionID string) (*DispatchResult, error) {
+	return d.routeCompoundWithModel(ctx, multi, input, sessionID, nil)
+}
+
+// routeCompoundWithModel handles compound routing with model override support.
+func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiIntent, input, sessionID string, modelDirective *ModelReassignmentDirective) (*DispatchResult, error) {
 	// Cap intents at 5 for safety
 	if len(multi.Intents) > 5 {
 		multi.Intents = multi.Intents[:5]
@@ -652,13 +809,33 @@ func (d *Dispatcher) routeCompound(ctx context.Context, multi *MultiIntent, _, s
 	// Record compound stats
 	d.recordCompoundDispatch(len(multi.Intents))
 
-	// Build step summaries from compound intents
+	// Build step summaries from compound intents with model overrides
 	steps := make([]TaskStepSummary, 0, len(multi.Intents))
 	for _, intent := range multi.Intents {
-		steps = append(steps, TaskStepSummary{
+		step := TaskStepSummary{
 			Description: intent.Summary,
 			AgentID:     intent.AgentType,
-		})
+		}
+		
+		// Attach model override if directive matches this step's intent
+		if modelDirective != nil && modelDirective.TargetIntent != nil {
+			intentType := IntentType(intent.Type)
+			if *modelDirective.TargetIntent == intentType {
+				// Use first resolved model or first reference
+				if len(modelDirective.ResolvedModels) > 0 {
+					mc := modelDirective.ResolvedModels[0]
+					step.ModelOverride = fmt.Sprintf("%s/%s", mc.ProviderID, mc.ModelID)
+				} else if len(modelDirective.ModelReferences) > 0 {
+					step.ModelOverride = modelDirective.ModelReferences[0]
+				}
+				d.logger.Debug("Attached model override to step",
+					"step", intent.Summary,
+					"model", step.ModelOverride,
+				)
+			}
+		}
+		
+		steps = append(steps, step)
 	}
 
 	return &DispatchResult{
@@ -1421,6 +1598,15 @@ func (d *Dispatcher) ShouldDispatchAsync(result *DispatchResult) bool {
 	return result.Intent.RequiresPlanning
 }
 
+// ShouldRouteToPair returns true if the dispatch result should use channel-based
+// pairing instead of the step-based orchestrator.
+func (d *Dispatcher) ShouldRouteToPair(result *DispatchResult) bool {
+	if result == nil || result.Intent == nil {
+		return false
+	}
+	return IntentType(result.Intent.Type) == IntentPair
+}
+
 // RoutingValidation checks if a task was routed correctly.
 type RoutingValidation struct {
 	TaskID         string `json:"task_id"`
@@ -1850,4 +2036,89 @@ func hasCodeVerb(lower string) bool {
 		}
 	}
 	return false
+}
+
+// buildClarificationQuestion generates a clarification dialog for ambiguous model directives.
+func (d *Dispatcher) buildClarificationQuestion(directive *ModelReassignmentDirective) string {
+	// Check for specific ambiguity types
+	if len(directive.ModelReferences) == 0 {
+		// No models parsed - list available options
+		return d.buildModelListQuestion(directive.TargetScope)
+	}
+
+	if directive.TargetScope == "" {
+		// No scope parsed - ask what the models should handle
+		return d.buildScopeQuestion(directive.ModelReferences)
+	}
+
+	// Check for provider-level references that need specific model selection
+	var providerRefs []string
+	for _, ref := range directive.ModelReferences {
+		if strings.HasPrefix(ref, "provider:") {
+			providerRefs = append(providerRefs, strings.TrimPrefix(ref, "provider:"))
+		}
+	}
+
+	if len(providerRefs) > 0 {
+		return d.buildProviderClarification(providerRefs, directive.TargetScope)
+	}
+
+	// Generic fallback
+	return fmt.Sprintf(
+		"I want to make sure I use the right model. You mentioned '%s' - could you clarify which model and what it should handle?",
+		directive.Instruction,
+	)
+}
+
+// buildModelListQuestion asks the user to specify which model when none were parsed.
+func (d *Dispatcher) buildModelListQuestion(scope string) string {
+	if scope != "" {
+		return fmt.Sprintf(
+			"I can use specific models for %s. Which model would you prefer? You can specify:\n"+
+			"- A specific model (e.g., 'glm-4.7', 'claude-opus', 'qwen-coder')\n"+
+			"- A provider (e.g., 'zai', 'anthropic', 'ollama', 'local')",
+			scope,
+		)
+	}
+	return "I couldn't identify specific model names. Which model would you like to use? " +
+		"You can specify a model name (e.g., 'glm-4.7', 'claude-opus') or a provider (e.g., 'zai', 'local')."
+}
+
+// buildScopeQuestion asks the user to specify what scope the models should handle.
+func (d *Dispatcher) buildScopeQuestion(modelRefs []string) string {
+	models := strings.Join(modelRefs, ", ")
+	return fmt.Sprintf(
+		"I can use %s for your task. What should these models handle?\n"+
+		"- coding/implementation\n"+
+		"- research/analysis\n"+
+		"- planning/synthesis\n"+
+		"- debugging\n"+
+		"- the entire task",
+		models,
+	)
+}
+
+// buildProviderClarification asks the user to specify which model from a provider.
+func (d *Dispatcher) buildProviderClarification(providers []string, scope string) string {
+	if len(providers) == 1 {
+		provider := providers[0]
+		providerModels := map[string][]string{
+			"zai":       {"glm-4.7 (most capable)", "glm-4.5-air (faster)"},
+			"anthropic": {"claude-3-opus (most capable)", "claude-3-sonnet (balanced)", "claude-3-haiku (fastest)"},
+			"ollama":    {"llama3.2", "qwen2.5-coder"},
+			"local":     {"lfm-code (1.2B, code-optimized)", "lfm-24b (largest)", "lfm-thinking-claude (reasoning)"},
+		}
+
+		if models, ok := providerModels[provider]; ok {
+			return fmt.Sprintf(
+				"I can use %s models for %s. Which would you prefer?\n%s",
+				provider, scope, strings.Join(models, "\n"),
+			)
+		}
+	}
+
+	return fmt.Sprintf(
+		"You mentioned %s models for %s. Could you specify which exact model(s) you'd like to use?",
+		strings.Join(providers, ", "), scope,
+	)
 }
