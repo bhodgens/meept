@@ -7,15 +7,19 @@ import (
 	"sync"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/pkg/models"
 )
 
 // Orchestrator coordinates the strategic and tactical layers via bus subscriptions.
 type Orchestrator struct {
-	strategic *StrategicPlanner
-	tactical  *TacticalScheduler
-	bus       *bus.MessageBus
-	logger    *slog.Logger
+	strategic           *StrategicPlanner
+	tactical            *TacticalScheduler
+	pairManager         *PairManager
+	busPairOrchestrator *PairOrchestrator    // bus-channel-based agent pairing (Option C)
+	planManager         *plan.PlanManager    // plan system integration for progress tracking
+	bus                 *bus.MessageBus
+	logger              *slog.Logger
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -23,10 +27,13 @@ type Orchestrator struct {
 
 // OrchestratorDeps holds dependencies for the orchestrator.
 type OrchestratorDeps struct {
-	Strategic *StrategicPlanner
-	Tactical  *TacticalScheduler
-	Bus       *bus.MessageBus
-	Logger    *slog.Logger
+	Strategic           *StrategicPlanner
+	Tactical            *TacticalScheduler
+	PairManager         *PairManager
+	BusPairOrchestrator *PairOrchestrator    // optional: enables channel-based pairing (Option C)
+	PlanManager         *plan.PlanManager    // optional: plan system integration
+	Bus                 *bus.MessageBus
+	Logger              *slog.Logger
 }
 
 // NewOrchestrator creates a new orchestrator.
@@ -36,10 +43,13 @@ func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
 	}
 
 	return &Orchestrator{
-		strategic: deps.Strategic,
-		tactical:  deps.Tactical,
-		bus:       deps.Bus,
-		logger:    deps.Logger,
+		strategic:           deps.Strategic,
+		tactical:            deps.Tactical,
+		pairManager:         deps.PairManager,
+		busPairOrchestrator: deps.BusPairOrchestrator,
+		planManager:         deps.PlanManager,
+		bus:                 deps.Bus,
+		logger:              deps.Logger,
 	}
 }
 
@@ -54,6 +64,10 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"queue.job.failed":      o.handleJobFailed,
 		"task.amend.applied":    o.handleAmendmentApplied,
 		"task.amend.rejected":   o.handleAmendmentRejected,
+		"pair.session_created":  o.handlePairSessionCreated,
+		"pair.converged":        o.handlePairConverged,
+		"pair.exhausted":        o.handlePairExhausted,
+		"pair.round_failed":     o.handlePairRoundFailed,
 	}
 
 	for topic, handler := range topics {
@@ -65,6 +79,16 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	o.logger.Info("Orchestrator started",
 		"subscriptions", len(topics),
 	)
+
+	// Start bus pair orchestrator if configured
+	if o.busPairOrchestrator != nil {
+		if err := o.busPairOrchestrator.Start(ctx); err != nil {
+			o.logger.Error("Failed to start bus pair orchestrator", "error", err)
+		} else {
+			o.logger.Info("Bus pair orchestrator started")
+		}
+	}
+
 	return nil
 }
 
@@ -72,6 +96,13 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 func (o *Orchestrator) Stop(ctx context.Context) error {
 	if o.cancel != nil {
 		o.cancel()
+	}
+
+	// Stop bus pair orchestrator if running
+	if o.busPairOrchestrator != nil {
+		if err := o.busPairOrchestrator.Stop(ctx); err != nil {
+			o.logger.Warn("Bus pair orchestrator stop error", "error", err)
+		}
 	}
 
 	done := make(chan struct{})
@@ -92,6 +123,20 @@ func (o *Orchestrator) Stop(ctx context.Context) error {
 // Name returns the component name.
 func (o *Orchestrator) Name() string {
 	return "orchestrator"
+}
+
+// SetPlanManager sets the plan manager for plan system integration.
+// This is called by the daemon after the PlanManager is created, since the
+// plan system is initialized after the agent components.
+func (o *Orchestrator) SetPlanManager(pm *plan.PlanManager) {
+	if pm != nil {
+		o.planManager = pm
+	}
+}
+
+// PlanManager returns the plan manager, if configured.
+func (o *Orchestrator) PlanManager() *plan.PlanManager {
+	return o.planManager
 }
 
 func (o *Orchestrator) runSubscription(ctx context.Context, sub *bus.Subscriber, handler func(context.Context, *models.BusMessage)) {
@@ -242,5 +287,94 @@ func (o *Orchestrator) handleAmendmentRejected(_ context.Context, msg *models.Bu
 		"task_id", req.TaskID,
 		"type", req.Type,
 		"reason", req.Reason,
+	)
+}
+
+// handlePairSessionCreated is called when a new pair session is created.
+// It logs the event and prepares for the pair-driven scheduling loop.
+func (o *Orchestrator) handlePairSessionCreated(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		TaskID    string   `json:"task_id"`
+		SessionID string   `json:"session_id"`
+		Actor     string   `json:"actor"`
+		Reviewer  string   `json:"reviewer"`
+		MaxRounds int      `json:"max_rounds"`
+		Criteria  []string `json:"criteria"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse pair session created event", "error", err)
+		return
+	}
+
+	o.logger.Info("Pair session created",
+		KeyTaskID, event.TaskID,
+		"session_id", event.SessionID,
+		"actor", event.Actor,
+		"reviewer", event.Reviewer,
+		"max_rounds", event.MaxRounds,
+		"criteria_count", len(event.Criteria),
+	)
+}
+
+// handlePairConverged is called when a pair session converges (all criteria satisfied).
+func (o *Orchestrator) handlePairConverged(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID string `json:"session_id"`
+		TaskID    string `json:"task_id"`
+		Rounds    int    `json:"rounds"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse pair converged event", "error", err)
+		return
+	}
+
+	o.logger.Info("Pair session converged",
+		"session_id", event.SessionID,
+		KeyTaskID, event.TaskID,
+		"rounds", event.Rounds,
+	)
+}
+
+// handlePairExhausted is called when a pair session reaches max rounds without convergence.
+func (o *Orchestrator) handlePairExhausted(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID string `json:"session_id"`
+		TaskID    string `json:"task_id"`
+		Rounds    int    `json:"rounds"`
+		MaxRounds int    `json:"max_rounds"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse pair exhausted event", "error", err)
+		return
+	}
+
+	o.logger.Warn("Pair session exhausted without convergence",
+		"session_id", event.SessionID,
+		KeyTaskID, event.TaskID,
+		"rounds", event.Rounds,
+		"max_rounds", event.MaxRounds,
+	)
+}
+
+// handlePairRoundFailed is called when a pair session round fails.
+func (o *Orchestrator) handlePairRoundFailed(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID string `json:"session_id"`
+		TaskID    string `json:"task_id"`
+		Round     int    `json:"round"`
+		Phase     string `json:"phase"`
+		Error     string `json:"error"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse pair round failed event", "error", err)
+		return
+	}
+
+	o.logger.Error("Pair session round failed",
+		"session_id", event.SessionID,
+		KeyTaskID, event.TaskID,
+		"round", event.Round,
+		"phase", event.Phase,
+		"error", event.Error,
 	)
 }

@@ -498,6 +498,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		pidFile:          cfg.PIDFile,
 	}
 	d.status.Store(models.StatusStopped)
+
+	// Wire PlanManager into Orchestrator for plan system integration.
+	// The PlanHandler subscribes to task events independently via the bus,
+	// so event routing is already handled. This reference enables the
+	// Orchestrator to make direct plan queries when needed.
+	if components != nil && components.Orchestrator != nil && planManagerInst != nil {
+		components.Orchestrator.SetPlanManager(planManagerInst)
+	}
+
 	return d, nil
 }
 
