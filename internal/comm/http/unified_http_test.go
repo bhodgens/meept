@@ -12,6 +12,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/comm/http"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/services"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/models"
@@ -1110,5 +1111,74 @@ func TestUnifiedHTTPServer_MCPInvalidParamsJSON(t *testing.T) {
 	}
 	if mcpResp.Error.Code != -32602 {
 		t.Errorf("expected error code -32602, got %d", mcpResp.Error.Code)
+	}
+}
+
+// TestUnifiedHTTPServer_RuntimeStatus_NoRuntime verifies runtime status returns 503 without runtime service.
+func TestUnifiedHTTPServer_RuntimeStatus_NoRuntime(t *testing.T) {
+	// Server without runtime service — should return 503
+	baseURL, cancel := startTestServer(t)
+	defer cancel()
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(baseURL + "/api/v1/runtime/status")
+	if err != nil {
+		t.Fatalf("runtime status request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != gohttp.StatusServiceUnavailable {
+		t.Errorf("expected 503 without runtime service, got %d", resp.StatusCode)
+	}
+}
+
+// TestUnifiedHTTPServer_RuntimeStatus_WithManager verifies runtime status returns 200 with runtime service.
+func TestUnifiedHTTPServer_RuntimeStatus_WithManager(t *testing.T) {
+	msgBus := bus.New(nil, nil)
+	mgr := llm.NewRuntimeManager(nil)
+
+	svcRegistry := &services.ServiceRegistry{
+		Bus:     services.NewBusService(msgBus),
+		Runtime: services.NewRuntimeService(mgr),
+	}
+
+	cfg := http.DefaultServerConfig()
+	cfg.Addr = ":0"
+	srv := http.NewServer(cfg, nil, nil, nil, svcRegistry, nil)
+	if srv == nil {
+		t.Fatal("failed to create server")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.Start(ctx)
+
+	// Wait for server to be ready
+	for i := 0; i < 50; i++ {
+		time.Sleep(20 * time.Millisecond)
+		conn, err := net.DialTimeout("tcp", "127.0.0.1"+srv.Addr(), time.Second)
+		if err == nil {
+			conn.Close()
+			break
+		}
+	}
+
+	addr := srv.Addr()
+	host, port, _ := net.SplitHostPort(addr)
+	if host == "" || host == "::" {
+		host = "127.0.0.1"
+	}
+	baseURL := "http://" + host + ":" + port
+
+	client := &gohttp.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(baseURL + "/api/v1/runtime/status")
+	if err != nil {
+		t.Fatalf("runtime status request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != gohttp.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Errorf("expected 200, got %d: %s", resp.StatusCode, string(body))
 	}
 }
