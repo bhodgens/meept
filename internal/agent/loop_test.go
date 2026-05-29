@@ -566,6 +566,52 @@ func TestBuildSkillContextSection(t *testing.T) {
 	}
 }
 
+func TestBuildMCPContextSection(t *testing.T) {
+	// No lister configured
+	loop := NewAgentLoop()
+	result := loop.buildMCPContextSection()
+	if result != "" {
+		t.Error("expected empty string when no MCP server lister configured")
+	}
+
+	// Empty server list
+	loop = NewAgentLoop(
+		WithMCPServerLister(func() []MCPServerInfo {
+			return []MCPServerInfo{}
+		}),
+	)
+	result = loop.buildMCPContextSection()
+	if result != "" {
+		t.Error("expected empty string for empty server list")
+	}
+
+	// With servers
+	loop = NewAgentLoop(
+		WithMCPServerLister(func() []MCPServerInfo {
+			return []MCPServerInfo{
+				{Name: "my-server", ToolCount: 5, Connected: true},
+				{Name: "other-server", ToolCount: 3, Connected: true},
+			}
+		}),
+	)
+	result = loop.buildMCPContextSection()
+	if !strings.Contains(result, "my-server") {
+		t.Error("expected MCP context to contain server name")
+	}
+	if !strings.Contains(result, "5 tool(s)") {
+		t.Error("expected MCP context to contain tool count")
+	}
+	if !strings.Contains(result, "8 tool(s)") {
+		t.Error("expected MCP context to contain total tool count")
+	}
+	if !strings.Contains(result, "platform_tools") {
+		t.Error("expected MCP context to reference platform_tools")
+	}
+	if !strings.Contains(result, "mcp_servers") {
+		t.Error("expected MCP context to reference mcp_servers tool")
+	}
+}
+
 func TestFormatSkillForPrompt(t *testing.T) {
 	skill := &skills.Skill{
 		Name:        "test-skill",

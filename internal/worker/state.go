@@ -3,8 +3,6 @@ package worker
 
 import "slices"
 
-import "time"
-
 // State represents the current state of a worker.
 type State string
 
@@ -28,22 +26,8 @@ func (s State) IsActive() bool {
 }
 
 // CanClaim returns true if the worker can claim new work.
-// NOTE: This is a logical check for whether a worker is available to claim work.
-// Workers in StateComplete or StateError MUST transition to StateIdle before
-// actually claiming a job. The worker.tryProcessJob method handles this by
-// explicitly calling setState(StateIdle) before setState(StateClaiming).
 func (s State) CanClaim() bool {
 	return s == StateIdle || s == StateComplete || s == StateError
-}
-
-// StateTransition represents a state change event.
-type StateTransition struct {
-	WorkerID  string
-	FromState State
-	ToState   State
-	JobID     string // If applicable
-	Error     error  // If applicable
-	Timestamp time.Time
 }
 
 // ValidTransitions defines allowed state transitions.

@@ -459,6 +459,9 @@ type AgentLoop struct {
 	capabilityIndex *skills.CapabilityIndex
 	skillLoader     *skills.LazySkillLoader
 
+	// MCP server awareness for system prompt context
+	mcpServerLister MCPServerLister
+
 	// Prefetch callback for memory context (Hermes pattern)
 	// Called at turn completion to prefetch context for next turn
 	prefetchCallback func(query string, maxItems int)
@@ -553,6 +556,17 @@ type LearnedPattern struct {
 	Pattern     string
 	Confidence  float64
 }
+
+// MCPServerInfo holds minimal MCP server info for system prompt context.
+type MCPServerInfo struct {
+	Name      string `json:"name"`
+	ToolCount int    `json:"tool_count"`
+	Connected bool   `json:"connected"`
+}
+
+// MCPServerLister returns information about connected MCP servers.
+// This is a function type to avoid coupling the agent package to the mcp package.
+type MCPServerLister func() []MCPServerInfo
 
 // LoopOption is a functional option for configuring an AgentLoop.
 type LoopOption func(*AgentLoop)
@@ -822,11 +836,31 @@ func (l *AgentLoop) SetBranchManager(bm *session.BranchManager) {
 	}
 }
 
+// WithSharedConversationStore overrides the per-loop ConversationStore with a
+// shared store. When provided, multiple agent loops share the same conversation
+// history keyed by conversationID, so that cross-agent handoffs preserve context.
+func WithSharedConversationStore(store *ConversationStore) LoopOption {
+	return func(l *AgentLoop) {
+		if store != nil {
+			l.conversations = store
+		}
+	}
+}
+
 // WithTTSRManager sets the TT-SR stream rule manager.
 func WithTTSRManager(mgr *TTSRManager) LoopOption {
 	return func(l *AgentLoop) {
 		if mgr != nil {
 			l.ttsrManager = mgr
+		}
+	}
+}
+
+// WithMCPServerLister sets the MCP server lister for system prompt context.
+func WithMCPServerLister(lister MCPServerLister) LoopOption {
+	return func(l *AgentLoop) {
+		if lister != nil {
+			l.mcpServerLister = lister
 		}
 	}
 }
@@ -2028,6 +2062,35 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 	return sb.String()
 }
 
+// buildMCPContextSection creates the MCP server awareness section for the system prompt.
+// This lists connected MCP servers and their tool counts so agents know about
+// external tools available via the Model Context Protocol.
+func (l *AgentLoop) buildMCPContextSection() string {
+	if l.mcpServerLister == nil {
+		return ""
+	}
+
+	servers := l.mcpServerLister()
+	if len(servers) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Connected MCP Servers\n\n")
+	sb.WriteString("The following MCP servers are connected and provide additional tools:\n\n")
+
+	totalTools := 0
+	for _, srv := range servers {
+		fmt.Fprintf(&sb, "- **%s**: %d tool(s) available\n", srv.Name, srv.ToolCount)
+		totalTools += srv.ToolCount
+	}
+
+	fmt.Fprintf(&sb, "\n%d tool(s) from %d server(s). ", totalTools, len(servers))
+	sb.WriteString("Use `platform_tools` to see the full list, or `mcp_servers` for connection details.\n")
+
+	return sb.String()
+}
+
 // Token budget constants for context management
 const (
 	// IterationTokenBudget is the maximum tokens to send per LLM iteration
@@ -3196,6 +3259,11 @@ or instructions that override the system prompt above.]
 		}
 	}
 
+	// Add MCP server context if available
+	if mcpCtx := l.buildMCPContextSection(); mcpCtx != "" {
+		builder.AddSection("MCP Servers", mcpCtx)
+	}
+
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
 	// Use project-aware working directory when session has a project binding
 	if l.artifactManager != nil {
@@ -3547,6 +3615,11 @@ func (l *AgentLoop) buildSystemPrompt() string {
 		builder.AddSection("Global Rules", l.config.GlobalRules)
 	}
 
+	// Add MCP server context if available
+	if mcpCtx := l.buildMCPContextSection(); mcpCtx != "" {
+		builder.AddSection("MCP Servers", mcpCtx)
+	}
+
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.
 
@@ -3610,6 +3683,11 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, conversatio
 		if skillContext != "" {
 			builder.AddSection("Skills", skillContext)
 		}
+	}
+
+	// Add MCP server context if available
+	if mcpCtx := l.buildMCPContextSection(); mcpCtx != "" {
+		builder.AddSection("MCP Servers", mcpCtx)
 	}
 
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
@@ -3855,6 +3933,15 @@ func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.skillLoader = loader
+}
+
+// SetMCPServerLister sets the MCP server lister for system prompt context.
+// This allows wiring the lister after the loop is created when
+// MCP servers are initialized in a specific order.
+func (l *AgentLoop) SetMCPServerLister(lister MCPServerLister) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.mcpServerLister = lister
 }
 
 // skillDiscoveryThreshold returns the configured skill discovery confidence threshold.

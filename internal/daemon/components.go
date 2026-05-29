@@ -947,6 +947,25 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			"cache_size", c.SkillLoader.CacheSize(),
 		)
 	}
+	// Wire MCP server awareness for system prompt context
+	if c.MCPManager != nil {
+		c.AgentLoop.SetMCPServerLister(func() []agent.MCPServerInfo {
+			serverNames := c.MCPManager.ListServers()
+			infos := make([]agent.MCPServerInfo, 0, len(serverNames))
+			for _, name := range serverNames {
+				info := agent.MCPServerInfo{
+					Name:      name,
+					Connected: c.MCPManager.IsServerConnected(name),
+				}
+				if client := c.MCPManager.GetClient(name); client != nil {
+					info.ToolCount = len(client.ListTools())
+				}
+				infos = append(infos, info)
+			}
+			return infos
+		})
+		logger.Info("Agent loop configured with MCP server awareness")
+	}
 
 	// Create agent registry if multi-agent is enabled
 	if cfg.MultiAgent.Enabled {
@@ -1038,7 +1057,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
 		// Register platform tools now that agent registry is available
-		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, logger)
+		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, logger)
 
 		// Register template tools if template registry is available
 		registerTemplateTools(c.ToolRegistry, c.TemplateRegistry, logger)
@@ -2056,6 +2075,7 @@ func registerPlatformTools(
 	registry *tools.Registry,
 	agentRegistry *agent.AgentRegistry,
 	statusHandler *StatusHandler,
+	mcpManager *mcp.Manager,
 	logger *slog.Logger,
 ) {
 	// Platform status tool - uses StatusHandler.getStatus
@@ -2082,6 +2102,25 @@ func registerPlatformTools(
 
 	// Request review tool (inline review during agent execution)
 	registry.Register(builtin.NewRequestReviewTool(agentRegistry, nil))
+
+	// MCP servers tool - lists connected MCP servers
+	if mcpManager != nil {
+		registry.Register(builtin.NewMCPServersTool(func() []builtin.MCPServerInfo {
+			serverNames := mcpManager.ListServers()
+			infos := make([]builtin.MCPServerInfo, 0, len(serverNames))
+			for _, name := range serverNames {
+				info := builtin.MCPServerInfo{
+					Name:      name,
+					Connected: mcpManager.IsServerConnected(name),
+				}
+				if client := mcpManager.GetClient(name); client != nil {
+					info.ToolCount = len(client.ListTools())
+				}
+				infos = append(infos, info)
+			}
+			return infos
+		}))
+	}
 
 	logger.Debug("Registered platform tools")
 }

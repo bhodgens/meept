@@ -649,3 +649,172 @@ func searchString(s, sub string) bool {
 	}
 	return false
 }
+
+// --- Section cache tests ---
+
+func TestSectionCachePreservesDirtySection(t *testing.T) {
+	app := NewApp()
+	// Select the first section (daemon, index 0)
+	app.SelectSection(0)
+	sec := app.Section()
+	if sec == nil {
+		t.Fatal("expected non-nil section after select")
+	}
+
+	// Dirty a text field (data_dir at index 1) by editing it
+	f := sec.Fields()[1]
+	if err := f.Set("modified_value_for_cache_test"); err != nil {
+		t.Fatalf("failed to set field: %v", err)
+	}
+	if !sec.IsDirty() {
+		t.Fatal("expected section to be dirty after field change")
+	}
+
+	// Go back to menu — should stash dirty section in cache
+	app.BackToMenu()
+	if app.section != nil {
+		t.Error("expected section to be nil after BackToMenu")
+	}
+
+	// Cache should contain the dirty section
+	cached, ok := app.sectionCache["daemon"]
+	if !ok {
+		t.Fatal("expected dirty section to be cached by section key")
+	}
+	if !cached.IsDirty() {
+		t.Error("cached section should still be dirty")
+	}
+
+	// Navigate back to the same section — should get the cached version
+	app.SelectSection(0)
+	restored := app.Section()
+	if restored == nil {
+		t.Fatal("expected non-nil section after re-select")
+	}
+	if restored != cached {
+		t.Error("expected the restored section to be the same cached instance")
+	}
+	if restored.Fields()[1].Get() != "modified_value_for_cache_test" {
+		t.Errorf("expected dirty value to be preserved, got %q", restored.Fields()[1].Get())
+	}
+}
+
+func TestSectionCacheCleanNotCached(t *testing.T) {
+	app := NewApp()
+	// Select a section without dirtying anything
+	app.SelectSection(0)
+	app.BackToMenu()
+
+	// Cache should NOT contain the clean section
+	_, ok := app.sectionCache["daemon"]
+	if ok {
+		t.Error("expected clean section to NOT be cached")
+	}
+}
+
+func TestSectionCacheClearedOnSave(t *testing.T) {
+	app := NewApp()
+	app.SelectSection(0)
+	// Dirty a text field (data_dir at index 1)
+	f := app.Section().Fields()[1]
+	if err := f.Set("will_be_saved"); err != nil {
+		t.Fatalf("failed to set field: %v", err)
+	}
+
+	// Stash the dirty section (simulates what happens when entering confirm save
+	// from a clean menu navigation or when the user presses 's' and then navigates)
+	app.stashCurrentSection()
+
+	// Verify the section IS in cache
+	_, ok := app.sectionCache["daemon"]
+	if !ok {
+		t.Fatal("expected dirty section to be cached before save confirm")
+	}
+
+	// Simulate the save path: delete from cache (as handleConfirmKey does on "y")
+	if app.section != nil {
+		delete(app.sectionCache, app.section.SectionKey())
+	}
+	_, ok = app.sectionCache["daemon"]
+	if ok {
+		t.Error("expected section to be removed from cache after save")
+	}
+}
+
+func TestSectionCacheClearedOnDiscard(t *testing.T) {
+	app := NewApp()
+	app.SelectSection(0)
+	// Dirty a text field (data_dir at index 1)
+	f := app.Section().Fields()[1]
+	if err := f.Set("will_be_discarded"); err != nil {
+		t.Fatalf("failed to set field: %v", err)
+	}
+
+	// Simulate stash (normally done by BackToMenu or SelectSection)
+	app.stashCurrentSection()
+	_, ok := app.sectionCache["daemon"]
+	if !ok {
+		t.Fatal("expected dirty section to be cached")
+	}
+
+	// Now simulate the discard path: reset fields and delete from cache
+	if app.section != nil {
+		for _, field := range app.section.Fields() {
+			field.Reset()
+		}
+		delete(app.sectionCache, app.section.SectionKey())
+	}
+	_, ok = app.sectionCache["daemon"]
+	if ok {
+		t.Error("expected section to be removed from cache after discard")
+	}
+}
+
+func TestSectionCachePreservesAcrossSwitch(t *testing.T) {
+	app := NewApp()
+
+	// Select daemon (index 0), dirty a text field (data_dir at index 1)
+	app.SelectSection(0)
+	if err := app.Section().Fields()[1].Set("daemon_dirty"); err != nil {
+		t.Fatalf("failed to set field: %v", err)
+	}
+
+	// Switch to a different section (transport, index 1) — daemon should be stashed
+	app.SelectSection(1)
+	_, ok := app.sectionCache["daemon"]
+	if !ok {
+		t.Fatal("expected dirty daemon section to be cached when switching away")
+	}
+
+	// Transport section should be fresh from disk (not cached)
+	if app.Section().IsDirty() {
+		t.Error("transport section should be clean (loaded fresh)")
+	}
+
+	// Switch back to daemon — should restore cached dirty state
+	app.SelectSection(0)
+	if !app.Section().IsDirty() {
+		t.Error("restored daemon section should be dirty")
+	}
+	if app.Section().Fields()[1].Get() != "daemon_dirty" {
+		t.Errorf("expected preserved value 'daemon_dirty', got %q", app.Section().Fields()[1].Get())
+	}
+}
+
+func TestSectionCacheDrilldownNotCached(t *testing.T) {
+	app := NewApp()
+	// Drilldown sub-sections should NOT be cached (they have drilldownPrefix set)
+	// Create a drilldown sub-section manually
+	sec := NewDrilldownSectionModel("test > sub", "test", "test.json5", "test.sub", []Field{
+		NewTextField("k", "K", "modified"),
+	})
+	app.section = sec
+	app.phase = PhaseSection
+
+	// Stash should NOT cache drilldown sections
+	app.stashCurrentSection()
+	_, ok := app.sectionCache["test"]
+	if ok {
+		t.Error("expected drilldown sub-section to NOT be cached")
+	}
+}

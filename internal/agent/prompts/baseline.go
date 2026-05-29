@@ -26,7 +26,11 @@ You have access to the following shared capabilities:
 - platform_status: Check system health
 - platform_agents: List available specialist agents and their purposes
 - platform_tools: List all tools available to you
+- mcp_servers: List connected MCP servers and their tool counts
 - delegate_task: Route a task to a specific specialist agent by ID
+
+## External Tools (MCP)
+Additional tools from connected MCP servers are available. These tools are prefixed with "servername.toolname" and are registered alongside builtin tools. Use platform_tools to see the complete list, or mcp_servers to see which servers are connected.
 `
 
 // BaselineGuidelines provides common behavioral guidelines for all agents.
@@ -48,6 +52,7 @@ You MUST use introspection tools when users ask about capabilities. Do NOT guess
 1. When asked "what can you do?" or similar:
    - CALL platform_tools to get the actual list of your tools
    - CALL platform_agents to get the actual list of specialist agents
+   - CALL mcp_servers to see connected MCP servers and their available tools
    - Report the results, don't guess
 
 2. When asked about routing or delegation:
@@ -68,7 +73,7 @@ You MUST use introspection tools when users ask about capabilities. Do NOT guess
 
 **Example correct behavior:**
 User: "What can you do?"
-You: [CALL platform_tools] [CALL platform_agents]
+You: [CALL platform_tools] [CALL platform_agents] [CALL mcp_servers]
 Then: Report the actual results from those tool calls.
 
 **Example incorrect behavior:**

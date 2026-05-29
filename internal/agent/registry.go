@@ -80,6 +80,10 @@ type AgentRegistry struct {
 
 	// db is the SQLite connection for queue persistence (may be nil).
 	db *sql.DB
+
+	// sharedConvStore is a single ConversationStore shared across all agent
+	// loops so that cross-agent handoffs preserve conversation history.
+	sharedConvStore *ConversationStore
 }
 
 // RegistryConfig holds configuration for creating an AgentRegistry.
@@ -143,6 +147,7 @@ func NewAgentRegistry(cfg RegistryConfig) *AgentRegistry {
 		ttsrManager:           cfg.TTSRManager,
 		queueConfig:           cfg.Queues,
 		db:                    cfg.DB,
+		sharedConvStore:       NewConversationStore(100),
 	}
 
 	// Load global rules
@@ -350,6 +355,11 @@ func (r *AgentRegistry) createLoop(spec *AgentSpec) *AgentLoop {
 
 	// Wire the registry so the loop can register/unregister its queue
 	opts = append(opts, WithAgentRegistry(r))
+
+	// Share a single ConversationStore across all agent loops so that
+	// cross-agent handoffs (dispatcher -> coder -> debugger, etc.) share
+	// the same conversation history keyed by conversationID.
+	opts = append(opts, WithSharedConversationStore(r.sharedConvStore))
 
 	return NewAgentLoop(opts...)
 }

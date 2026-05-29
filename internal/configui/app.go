@@ -51,6 +51,11 @@ type App struct {
 
 	// Navigation tracking for multi-level back navigation
 	parentSection *SectionModel // parent section when in drilldown sub-section
+
+	// sectionCache preserves dirty SectionModels across navigation so that
+	// unsaved changes are not lost when the user moves between sections.
+	// Only dirty sections are cached; saved or clean sections are not.
+	sectionCache map[string]*SectionModel // keyed by SectionKey (e.g. "daemon")
 }
 
 type styles struct {
@@ -129,6 +134,7 @@ func NewApp() *App {
 		showAdvanced: false,
 		menuCursor:   0,
 		styles:       defaultStyles(),
+		sectionCache: make(map[string]*SectionModel),
 	}
 }
 
@@ -155,15 +161,37 @@ func (a *App) SelectSection(idx int) {
 		return
 	}
 	item := a.menuItems[idx]
+
+	// Stash the current section if it has unsaved changes
+	a.stashCurrentSection()
+
+	// Check cache first — restore previously dirty section
+	if cached, ok := a.sectionCache[item.KeyPath]; ok {
+		a.section = cached
+		a.phase = PhaseSection
+		return
+	}
+
+	// Build fresh from disk
 	fields := BuildSectionFields(item.KeyPath)
 	a.section = NewSectionModel(item.Title, item.KeyPath, item.ConfigFile, fields)
 	a.phase = PhaseSection
 }
 
 func (a *App) BackToMenu() {
+	// Stash the current section if it has unsaved changes
+	a.stashCurrentSection()
 	a.section = nil
 	a.editor = nil
 	a.phase = PhaseMenu
+}
+
+// stashCurrentSection saves the current section into the cache if it has unsaved
+// changes. Clean sections are not cached since they can be rebuilt from disk.
+func (a *App) stashCurrentSection() {
+	if a.section != nil && a.section.IsDirty() && !a.section.IsDrilldown() {
+		a.sectionCache[a.section.SectionKey()] = a.section
+	}
 }
 
 // --- bubbletea.Model interface ---
@@ -464,6 +492,8 @@ func (a *App) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				a.errMsg = err.Error()
 				return a, nil
 			}
+			// Remove from cache after successful save (section is now clean)
+			delete(a.sectionCache, a.section.SectionKey())
 		}
 		a.errMsg = ""
 		a.BackToMenu()
@@ -473,6 +503,8 @@ func (a *App) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			for _, f := range a.section.Fields() {
 				f.Reset()
 			}
+			// Remove from cache after discard (section is now clean)
+			delete(a.sectionCache, a.section.SectionKey())
 		}
 		a.errMsg = ""
 		a.BackToMenu()

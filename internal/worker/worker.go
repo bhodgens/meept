@@ -41,9 +41,6 @@ type Worker struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	wg     *sync.WaitGroup // optional: pool WaitGroup for tracking actual goroutine lifecycle
-
-	// State change notifications
-	stateChanges chan StateTransition
 }
 
 // Config holds worker configuration.
@@ -79,7 +76,6 @@ func NewWorker(cfg Config) (*Worker, error) {
 		processor:    cfg.Processor,
 		logger:       cfg.Logger,
 		done:         make(chan struct{}),
-		stateChanges: make(chan StateTransition, 256),
 	}, nil
 }
 
@@ -155,11 +151,6 @@ func (w *Worker) GetStats() WorkerStats {
 	}
 }
 
-// StateChanges returns a channel that receives state change notifications.
-func (w *Worker) StateChanges() <-chan StateTransition {
-	return w.stateChanges
-}
-
 func (w *Worker) run(ctx context.Context) {
 	defer func() {
 		w.mu.Lock()
@@ -173,6 +164,8 @@ func (w *Worker) run(ctx context.Context) {
 
 	pollInterval := 1 * time.Second
 	backoff := pollInterval
+	idleBackoff := 1 * time.Second
+	maxIdleBackoff := 15 * time.Second
 
 	for {
 		select {
@@ -190,13 +183,16 @@ func (w *Worker) run(ctx context.Context) {
 		} else if processed {
 			// Reset backoff on successful processing
 			backoff = pollInterval
+			idleBackoff = 1 * time.Second
+		} else {
+			// No jobs available - exponential backoff for idle polling
+			idleBackoff = min(idleBackoff*2, maxIdleBackoff)
 		}
 
 		// Wait before next poll
 		waitTime := backoff
 		if !processed {
-			// Longer wait if no work was found
-			waitTime = pollInterval
+			waitTime = idleBackoff
 		}
 
 		select {
@@ -208,26 +204,26 @@ func (w *Worker) run(ctx context.Context) {
 }
 
 func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
-	// Transition to claiming state
+	// Check if the worker is available to claim work.
+	// Don't transition to claiming yet -- only do so after a job is found.
 	w.mu.Lock()
 	if !w.State.CanClaim() {
 		w.mu.Unlock()
 		return false, nil
 	}
-
-	// Force transition to Idle first if in Complete or Error state.
-	// This ensures we follow the valid state transition path:
-	// Complete/Error -> Idle -> Claiming
+	// Reset complete/error to idle if needed so we're in a valid state
+	// for the claiming transition later.
 	if w.State == StateComplete || w.State == StateError {
 		w.setState(StateIdle)
 	}
-
-	w.setState(StateClaiming)
 	w.mu.Unlock()
 
-	// Try to claim a job
+	// Try to claim a job -- this is the actual work check
 	job, err := w.queue.Claim(ctx, w.ID, w.Capabilities)
-	if err != nil && !errors.Is(err, queue.ErrNoJobAvailable) {
+	if err != nil {
+		if errors.Is(err, queue.ErrNoJobAvailable) {
+			return false, nil // Stay idle, no transition needed
+		}
 		w.mu.Lock()
 		w.setStateWithError(StateError, "", err)
 		w.mu.Unlock()
@@ -235,15 +231,12 @@ func (w *Worker) tryProcessJob(ctx context.Context) (bool, error) {
 	}
 
 	if job == nil {
-		// No jobs available
-		w.mu.Lock()
-		w.setState(StateIdle)
-		w.mu.Unlock()
-		return false, nil
+		return false, nil // Stay idle, no transition needed
 	}
 
-	// Process the job
+	// Only now transition to claiming -- a job was actually found
 	w.mu.Lock()
+	w.setState(StateClaiming)
 	w.CurrentJob = job
 	w.setStateWithJob(StateProcessing, job.ID)
 	w.mu.Unlock()
@@ -341,7 +334,6 @@ func (w *Worker) setState(state State) {
 		w.logger.Warn("Invalid state transition", "worker", w.ID, "from", w.State, "to", state)
 		return
 	}
-	w.emitTransition(w.State, state, "", nil)
 	w.State = state
 }
 
@@ -350,7 +342,6 @@ func (w *Worker) setStateWithJob(state State, jobID string) {
 		w.logger.Warn("Invalid state transition", "worker", w.ID, "from", w.State, "to", state, "job", jobID)
 		return
 	}
-	w.emitTransition(w.State, state, jobID, nil)
 	w.State = state
 }
 
@@ -359,26 +350,7 @@ func (w *Worker) setStateWithError(state State, jobID string, err error) {
 		w.logger.Warn("Invalid state transition", "worker", w.ID, "from", w.State, "to", state, "job", jobID)
 		return
 	}
-	w.emitTransition(w.State, state, jobID, err)
 	w.State = state
-}
-
-func (w *Worker) emitTransition(from, to State, jobID string, err error) {
-	transition := StateTransition{
-		WorkerID:  w.ID,
-		FromState: from,
-		ToState:   to,
-		JobID:     jobID,
-		Error:     err,
-		Timestamp: time.Now(),
-	}
-
-	select {
-	case w.stateChanges <- transition:
-	default:
-		w.logger.Warn("State transition channel full, dropping notification",
-			"worker", w.ID, "from", from, "to", to, "job", jobID)
-	}
 }
 
 func (w *Worker) getCurrentJobID() string {

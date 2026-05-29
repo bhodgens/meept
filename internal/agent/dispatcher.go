@@ -138,6 +138,10 @@ type DispatchResult struct {
 	// ExplicitSteerMode indicates the user pressed ctrl+s to force steering.
 	ExplicitSteerMode bool `json:"explicit_steer_mode,omitempty"`
 
+	// OriginalInput is the full, untruncated user input. Preserved so that
+	// agents receive the complete message rather than a ~100-char summary.
+	OriginalInput string `json:"original_input,omitempty"`
+
 	// ModelDirective is the model reassignment directive if user specified one
 	ModelDirective *ModelReassignmentDirective `json:"model_directive,omitempty"`
 	// ClarificationReply is the clarification question if directive is ambiguous
@@ -372,6 +376,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 		Intent:         intent,
 		MemoryContext:  memCtx.Results,
 		ModelDirective: parseResult.Directive,
+		OriginalInput:  input,
 	}
 
 	// Attach model override to task metadata if task was created
@@ -845,6 +850,7 @@ func (d *Dispatcher) routeCompoundWithModel(ctx context.Context, multi *MultiInt
 			Type:    string(IntentCompound),
 			Summary: multi.Summary,
 		},
+		OriginalInput: input,
 		Steps: steps,
 	}, nil
 }
@@ -1002,8 +1008,9 @@ func (d *Dispatcher) RouteToAgent(ctx context.Context, result *DispatchResult, c
 		// Build accumulated context from previous agent's work
 		accumulatedContext := d.buildAccumulatedContext(report, displayResponse)
 		nextResult := &DispatchResult{
-			AgentID: nextAgentID,
-			Intent:  result.Intent,
+			AgentID:       nextAgentID,
+			Intent:        result.Intent,
+			OriginalInput: result.OriginalInput,
 		}
 		_ = accumulatedContext // used for context enrichment in recursive call
 		// Recursively route to the next agent
@@ -1094,6 +1101,8 @@ func (d *Dispatcher) handleStatsQuery(_ context.Context) (string, error) {
 }
 
 // buildContextMessage builds a message with memory context injected.
+// The primary content is the full original user input (result.OriginalInput);
+// a brief summary is prepended only when it differs from the full input.
 func (d *Dispatcher) buildContextMessage(result *DispatchResult) string {
 	var parts []string
 
@@ -1114,8 +1123,13 @@ func (d *Dispatcher) buildContextMessage(result *DispatchResult) string {
 		parts = append(parts, fmt.Sprintf("Task ID: %s\n", result.Task.ID))
 	}
 
-	// Add the original input
-	parts = append(parts, result.Intent.Summary)
+	// Use the full original user input, falling back to the intent summary
+	// when OriginalInput is not populated (e.g. programmatic dispatch results).
+	content := result.OriginalInput
+	if content == "" {
+		content = result.Intent.Summary
+	}
+	parts = append(parts, content)
 
 	return strings.Join(parts, "")
 }
