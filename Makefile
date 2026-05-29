@@ -195,22 +195,22 @@ install: build
 # Testing
 # =============================================================================
 
-	est:
+test:
 	@echo "Running tests (short mode)..."
 	go test ./... -short
 
-	est-verbose:
+test-verbose:
 	@echo "Running tests (verbose)..."
 	go test ./... -v
 
-	est-cover:
+test-cover:
 	@echo "Running tests with coverage..."
 	@mkdir -p coverage
 	go test ./... -coverprofile=coverage/coverage.out
 	go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 	@echo "Coverage report: coverage/coverage.html"
 
-	est-race:
+test-race:
 	@echo "Running tests with race detector..."
 	go test ./... -race
 
