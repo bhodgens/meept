@@ -30,6 +30,99 @@ Response
 
 ## Core Architecture
 
+### Input Queuing & Steering System
+
+When a user sends input while an agent is actively processing, Meept uses a dual-queue system to manage the incoming message based on urgency and intent.
+
+#### Dual-Queue Architecture
+
+| Queue | Capacity | Behavior | Use Case |
+|-------|----------|----------|----------|
+| **Steering Queue** | 1 (latest wins) | Interrupts active agent immediately | Urgent redirects, corrections |
+| **Follow-up Queue** | 20 (FIFO) | Waits for natural stopping point | General chat, non-urgent input |
+
+#### Activation Modes
+
+| Mode | Trigger | Destination |
+|------|---------|-------------|
+| **Steer Mode** | ctrl+s in TUI | Steering Queue |
+| **Normal** | Regular enter key | Follow-up Queue (if agent active) |
+| **Idle** | No agent running | Direct processing |
+
+#### Intent-Based Steering Classification
+
+Even without ctrl+s, the dispatcher classifies input urgency based on intent type:
+
+**High Urgency (Auto-Steer):**
+- `IntentCode` - Redirecting coding approach
+- `IntentDebug` - Bug spotted mid-execution
+- `IntentSecurity` - Security concern
+- `IntentToolUse` - Explicit tool redirection
+- `IntentGit` - Git operations
+- `IntentPlan` - Plan changes
+
+**Low Urgency (Follow-up):**
+- `IntentChat`, `IntentRecall`, `IntentResearch`
+- `IntentReport`, `IntentPlatform`, `IntentStatus`
+
+#### Message Flow
+
+```
+User presses ENTER
+    │
+    ▼
+┌─────────────────────┐
+│ Is agent active?    │
+├─────────────────────┤
+│ NO → Direct to RPC  │
+│ YES → Queue mode    │
+└─────────────────────┘
+    │
+    ▼
+┌─────────────────────┐
+│ Steer mode (ctrl+s)?│
+├─────────────────────┤
+│ YES → steeringQueue │ (replaces existing, max 1)
+│ NO  → followUpQueue │ (FIFO, max 20)
+└─────────────────────┘
+    │
+    ▼
+┌─────────────────────┐
+│ Dispatcher          │
+│ shouldSteer()?      │
+├─────────────────────┤
+│ YES → Interrupt now │
+│ NO  → Wait for stop │
+└─────────────────────┘
+```
+
+#### TUI Commands
+
+| Command | Description |
+|---------|-------------|
+| Normal enter | Send message (queues if agent active) |
+| ctrl+s + enter | Force steering mode (urgent interrupt) |
+
+#### Configuration
+
+```json5
+// Queue configuration (internal/agent/queue.go)
+{
+  max_steering: 1,      // Always 1 (latest wins)
+  max_follow_up: 20,    // Configurable
+  steering_drain: "one",
+  follow_up_drain: "one", // or "all" to drain entire queue
+}
+```
+
+**Key Files:**
+- Queue implementation: `internal/agent/queue.go`
+- Steering decision: `internal/agent/dispatcher.go:shouldSteer()`
+- Steering heuristic table: `internal/agent/dispatcher.go:28-46`
+- TUI input handling: `internal/tui/models/chat.go:doSendMessage()`
+
+---
+
 ### Task Interrupt & Amendment System
 
 Meept supports real-time task interruption and dynamic plan amendment during execution.

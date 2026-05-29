@@ -146,6 +146,38 @@ flowchart TB
     Match -->|complex| Planner
 ```
 
+## Steering & Interrupt Handling
+
+When a message arrives while an agent is actively processing, the dispatcher uses an intent-based heuristic to determine whether to interrupt immediately (steer) or wait for a natural stopping point (follow-up).
+
+### Steering Heuristic Table
+
+| Intent Type | Steer? | Rationale |
+|-------------|--------|-----------|
+| `IntentCode` | **Yes** | User is redirecting coding approach |
+| `IntentDebug` | **Yes** | User spotted a bug mid-execution |
+| `IntentSecurity` | **Yes** | Security concern needs immediate attention |
+| `IntentToolUse` | **Yes** | Explicit tool redirection |
+| `IntentGit` | **Yes** | Git operations are action-oriented |
+| `IntentPlan` | **Yes** | Plan changes redirect execution |
+| `IntentChat` | No | General chat can wait |
+| `IntentRecall` | No | Memory recall is not urgent |
+| `IntentResearch` | No | Research extensions follow naturally |
+| `IntentReport` | No | Reporting status/information |
+| `IntentPlatform` | No | Platform events are informational |
+| `IntentStatus` | No | Status inquiries |
+
+**Explicit Override:** Users can force steering mode by pressing **ctrl+s** in the TUI, which bypasses the heuristic and always interrupts.
+
+### Queue Behavior
+
+| Queue Type | Capacity | Behavior |
+|------------|----------|----------|
+| Steering Queue | 1 (latest wins) | Replaces any existing steering message |
+| Follow-up Queue | 20 (FIFO) | Messages processed in order |
+
+See [Input Queuing & Steering System](../features.md#input-queuing--steering-system) for implementation details.
+
 ## Dispatcher Feedback Loop
 
 After an executor finishes, the dispatcher evaluates the structured report:

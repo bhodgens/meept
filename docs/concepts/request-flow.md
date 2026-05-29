@@ -2,9 +2,47 @@
 
 How a message travels through the Meept system from user input to response.
 
+## Input Queuing (Agent Active)
+
+When a user sends input while an agent is actively processing, the message is queued rather than starting a new agent loop.
+
+```mermaid
+flowchart TD
+    User[User presses ENTER] --> Check{Agent active?}
+    Check -->|NO| RPC[Send via RPC to daemon]
+    Check -->|YES| SteerCheck{Steer mode ctrl+s?}
+    SteerCheck -->|YES| SQ[Steering Queue max 1, latest wins]
+    SteerCheck -->|NO| FQ[Follow-up Queue max 20, FIFO]
+    SQ --> Disp{Dispatcher shouldSteer?}
+    FQ --> Disp
+    Disp -->|YES - High Urgency| Interrupt[Interrupt agent immediately]
+    Disp -->|NO - Low Urgency| Wait[Wait for natural stopping point]
+```
+
+### Steering vs Follow-up Classification
+
+The dispatcher determines urgency based on intent type:
+
+| High Urgency (Steer) | Low Urgency (Follow-up) |
+|---------------------|------------------------|
+| `IntentCode` | `IntentChat` |
+| `IntentDebug` | `IntentRecall` |
+| `IntentSecurity` | `IntentResearch` |
+| `IntentToolUse` | `IntentReport` |
+| `IntentGit` | `IntentPlatform` |
+| `IntentPlan` | `IntentStatus` |
+
+**TUI Activation:**
+- Normal enter → Follow-up queue (waits)
+- ctrl+s + enter → Steering queue (interrupts immediately)
+
+See [Input Queuing & Steering System](../features.md#input-queuing--steering-system) for detailed configuration.
+
+---
+
 ## Synchronous Flow (Chat)
 
-The most common path: user sends a message through the CLI/TUI.
+The most common path: user sends a message through the CLI/TUI (agent is idle).
 
 ```mermaid
 sequenceDiagram
