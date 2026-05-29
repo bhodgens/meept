@@ -75,17 +75,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   final List<String> _tabLabels = ['chat', 'sessions', 'plans', 'tasks', 'agents'];
 
+  bool _initialLoadDone = false;
+
   @override
   void initState() {
     super.initState();
-    // Initialize all providers and start WebSocket on app start
+    // Initialize connection monitor (triggers WebSocket connect) and watch
+    // for the first successful connection to load data.
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Trigger WebSocket connection via chat provider
+      ref.read(chatProvider);
+      // Start listening for connection state changes
+      _onConnectionChanged(ref.read(connectionStateProvider));
+    });
+  }
+
+  void _onConnectionChanged(bool connected) {
+    if (connected && !_initialLoadDone) {
+      _initialLoadDone = true;
       ref.read(sessionProvider.notifier).loadSessions();
       ref.read(taskProvider.notifier).loadTasks();
       ref.read(agentProvider.notifier).loadAgents();
-      // Initialize chat provider (triggers WebSocket connect + subscription)
-      ref.read(chatProvider);
-    });
+    }
   }
 
   @override
@@ -132,6 +143,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget _buildTabContent() {
     // Watch active session to pass to chat tab
     final activeSession = ref.watch(activeSessionProvider);
+    // Watch connection state to trigger initial load when daemon connects
+    final connected = ref.watch(connectionStateProvider);
+    _onConnectionChanged(connected);
     return TabContent(
       selectedTab: _selectedTab,
       activeSession: activeSession,

@@ -64,18 +64,15 @@ String _skillToStatus(Skill skill) {
   return parts.join(' · ');
 }
 
-/// Fallback hardcoded tool items used when the API is unavailable
-List<ToolItem> _fallbackTools() => [
-      const ToolItem(
-          icon: Icons.memory,
-          label: 'memory',
-          status: 'service unavailable',
-          route: 'memory'),
-      const ToolItem(
-          icon: Icons.extension,
-          label: 'skills',
-          status: 'service unavailable',
-          route: 'skills'),
+/// Fallback hardcoded tool items — static navigation that doesn't depend on
+/// the API.  These are always available regardless of connection state.
+List<ToolItem> _staticTools() => const [
+      ToolItem(icon: Icons.memory, label: 'memory', status: 'ready', route: 'memory'),
+      ToolItem(icon: Icons.folder, label: 'files', status: 'beta', route: 'files'),
+      ToolItem(icon: Icons.terminal, label: 'terminal', status: 'ready', route: 'terminal'),
+      ToolItem(icon: Icons.calendar_today, label: 'calendar', status: 'ready', route: 'calendar'),
+      ToolItem(icon: Icons.insights, label: 'metrics', status: 'ready', route: 'metrics'),
+      ToolItem(icon: Icons.settings, label: 'settings', status: 'ready', route: 'settings'),
     ];
 
 class ToolsPanel extends ConsumerStatefulWidget {
@@ -127,7 +124,7 @@ class _ToolsPanelState extends ConsumerState<ToolsPanel> {
             .toList();
         _loading = false;
         if (_tools.isEmpty) {
-          _tools = _fallbackTools();
+          _tools = _staticTools();
         }
       });
     } catch (e) {
@@ -135,7 +132,7 @@ class _ToolsPanelState extends ConsumerState<ToolsPanel> {
       setState(() {
         _error = e.toString();
         _loading = false;
-        _tools = _fallbackTools();
+        _tools = _staticTools();
       });
     }
   }
