@@ -44,6 +44,8 @@ tags:
     description: Daemon lifecycle control
   - name: Metrics
     description: Metrics and monitoring
+  - name: Plans
+    description: Plan lifecycle management
 
 components:
   securitySchemes:
@@ -276,6 +278,77 @@ components:
         state:
           type: string
           enum: [offline, idle, working, error]
+
+    # Plans
+    Plan:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        file_path:
+          type: string
+        project_id:
+          type: string
+        state:
+          type: string
+          enum: [planning, draft, pending_approval, approved, executing, completed, confirmed, cancelled, failed]
+        task_id:
+          type: string
+        source_session:
+          type: string
+        approved_at:
+          type: string
+          format: date-time
+        confirmed_at:
+          type: string
+          format: date-time
+        approved_by:
+          type: string
+        confirmed_by:
+          type: string
+        revision_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PlanPhase:
+      type: object
+      properties:
+        id:
+          type: string
+        plan_id:
+          type: string
+        name:
+          type: string
+        sequence:
+          type: integer
+        total_steps:
+          type: integer
+        completed_steps:
+          type: integer
+        failed_steps:
+          type: integer
+        state:
+          type: string
+          enum: [pending, in_progress, completed, confirmed, failed]
+
+    PlanListResponse:
+      type: object
+      properties:
+        plans:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plan'
+        count:
+          type: integer
 
 paths:
   /health:
@@ -1269,3 +1342,226 @@ paths:
       responses:
         '200':
           description: Agent deleted
+
+  # Plans Endpoints
+  /api/v1/plans:
+    get:
+      summary: List plans
+      tags: [Plans]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: project_id
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of plans
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanListResponse'
+    post:
+      summary: Create a plan
+      tags: [Plans]
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                project_id:
+                  type: string
+                project_path:
+                  type: string
+                session_id:
+                  type: string
+      responses:
+        '201':
+          description: Plan created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+
+  /api/v1/plans/{id}:
+    get:
+      summary: Get plan by ID
+      tags: [Plans]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plan details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/plans/{id}/approve:
+    post:
+      summary: Approve a plan
+      tags: [Plans]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                by:
+                  type: string
+      responses:
+        '200':
+          description: Plan approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+
+  /api/v1/plans/{id}/reject:
+    post:
+      summary: Reject a plan
+      tags: [Plans]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                by:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Plan rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+
+  /api/v1/plans/{id}/confirm:
+    post:
+      summary: Confirm a completed plan
+      tags: [Plans]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                by:
+                  type: string
+      responses:
+        '200':
+          description: Plan confirmed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+
+  /api/v1/plans/{id}/revise:
+    post:
+      summary: Revise a plan
+      tags: [Plans]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                feedback:
+                  type: string
+      responses:
+        '200':
+          description: Plan revised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+
+  /api/v1/sessions/{id}/plans:
+    get:
+      summary: List plans for a session
+      tags: [Plans, Sessions]
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of plans for the session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanListResponse'

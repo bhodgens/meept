@@ -33,7 +33,7 @@ func (h *PlanHandler) Start(ctx context.Context) error {
 	ctx, h.cancel = context.WithCancel(ctx)
 
 	topics := map[string]func(context.Context, *models.BusMessage){
-		"task.step.completed": h.handleStepCompleted,
+		"task.step_completed": h.handleStepCompleted,
 		"task.completed":      h.handleTaskCompleted,
 	}
 

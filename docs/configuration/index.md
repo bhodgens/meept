@@ -60,6 +60,7 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 - **Skills** - Local skill discovery and management
 - **ClawSkills** - Third-party skill registry integration
 - **Self-Improve** - Automated code improvement system
+- **Plans** - Plan lifecycle, approval workflow, and task synthesis
 - **Scheduler** - Background job scheduling
 - **Workspace** - Git-backed task tracking
 

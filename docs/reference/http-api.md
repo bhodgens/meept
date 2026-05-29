@@ -178,6 +178,25 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 | POST | `/api/v1/config/agents/{id}` | Save agent |
 | DELETE | `/api/v1/config/agents/{id}` | Delete agent |
 
+### Plans
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/plans` | List plans (query params: `project_id`, `limit`) |
+| POST | `/api/v1/plans` | Create plan |
+| GET | `/api/v1/plans/{id}` | Get plan by ID |
+| POST | `/api/v1/plans/{id}/approve` | Approve plan |
+| POST | `/api/v1/plans/{id}/reject` | Reject plan |
+| POST | `/api/v1/plans/{id}/confirm` | Confirm plan sign-off |
+| POST | `/api/v1/plans/{id}/revise` | Revise plan |
+| GET | `/api/v1/sessions/{id}/plans` | List plans for a session |
+
+**Example:**
+```bash
+curl -X POST http://localhost:8081/api/v1/plans \
+  -H "Content-Type: application/json" \
+  -d '{"title": "refactor auth module", "description": "break auth into separate services", "project_id": "my-project"}'
+```
 
 ### WebSocket
 
