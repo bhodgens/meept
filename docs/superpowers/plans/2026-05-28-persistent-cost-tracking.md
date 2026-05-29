@@ -34,7 +34,7 @@
 - Modify: `internal/llm/metrics/store.go:31-44,132-176,217-233`
 - Modify: `internal/llm/metrics/store_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add a test in `internal/llm/metrics/store_test.go` that creates a `RequestRecord` with `CostUSD`, stores it, and queries it back.
 
@@ -99,12 +99,12 @@ func TestStore_RecordWithCost(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/llm/metrics/... -run TestStore_RecordWithCost -v`
 Expected: FAIL — `CostUSD` field does not exist on `RequestRecord`, `GetDailyCosts` does not exist.
 
-- [ ] **Step 3: Add `CostUSD` to `RequestRecord`**
+- [x] **Step 3: Add `CostUSD` to `RequestRecord`**
 
 In `internal/llm/metrics/store.go`, add the field:
 
@@ -126,7 +126,7 @@ type RequestRecord struct {
 }
 ```
 
-- [ ] **Step 4: Update schema and INSERT to include `cost_usd`**
+- [x] **Step 4: Update schema and INSERT to include `cost_usd`**
 
 In `Initialize()`, add the migration after the existing `cached_tokens` migration:
 
@@ -188,7 +188,7 @@ ON CONFLICT(date, provider_id, model_id) DO UPDATE SET
 }
 ```
 
-- [ ] **Step 5: Add `DailyCostEntry` struct and `GetDailyCosts` query method**
+- [x] **Step 5: Add `DailyCostEntry` struct and `GetDailyCosts` query method**
 
 ```go
 // DailyCostEntry holds aggregated cost for a provider/model on a given date.
@@ -250,17 +250,17 @@ func (s *Store) GetTotalCost(ctx context.Context, from, to time.Time) (float64, 
 }
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `go test ./internal/llm/metrics/... -run TestStore_RecordWithCost -v`
 Expected: PASS
 
-- [ ] **Step 7: Run all existing metrics tests to verify no regressions**
+- [x] **Step 7: Run all existing metrics tests to verify no regressions**
 
 Run: `go test ./internal/llm/metrics/... -v`
 Expected: All PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/llm/metrics/store.go internal/llm/metrics/store_test.go
@@ -275,7 +275,7 @@ git commit -m "feat(llm/metrics): add cost_usd column and model_cost_daily table
 - Modify: `internal/llm/budget.go`
 - Modify: `internal/llm/budget_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 func TestBudget_DollarTracking(t *testing.T) {
@@ -333,12 +333,12 @@ func TestBudget_DollarCheckBudget(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/llm/... -run TestBudget_Dollar -v`
 Expected: FAIL — `CostRecord` type and `RecordCost` method don't exist.
 
-- [ ] **Step 3: Add `CostRecord` type and dollar fields to Budget**
+- [x] **Step 3: Add `CostRecord` type and dollar fields to Budget**
 
 In `internal/llm/budget.go`, add the new type after `usageRecord`:
 
@@ -390,7 +390,7 @@ HourlyCostLimit    float64 `json:"hourly_cost_limit"`
 WithinCostBudget   bool    `json:"within_cost_budget"`
 ```
 
-- [ ] **Step 4: Add `RecordCost` method and cost-aware budget checking**
+- [x] **Step 4: Add `RecordCost` method and cost-aware budget checking**
 
 ```go
 // CostRecord captures a dollar cost event for budget tracking.
@@ -518,17 +518,17 @@ func (b *Budget) maybeResetDaily() {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `go test ./internal/llm/... -run TestBudget_Dollar -v`
 Expected: PASS
 
-- [ ] **Step 6: Run all existing budget tests**
+- [x] **Step 6: Run all existing budget tests**
 
 Run: `go test ./internal/llm/... -run TestBudget -v`
 Expected: All PASS (cost limits are 0 by default, so existing token-only tests are unaffected)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/llm/budget.go internal/llm/budget_test.go
@@ -543,7 +543,7 @@ git commit -m "feat(llm): add dollar-denominated cost tracking to Budget"
 - Modify: `internal/llm/provider_manager.go:307-349`
 - Modify: `internal/llm/provider_manager.go:49-73`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add a test that verifies `ProviderManager` calls `Budget.RecordCost` with the correct dollar amount when a request succeeds.
 
@@ -591,12 +591,12 @@ func TestProviderManager_RecordsDollarCost(t *testing.T) {
 
 Note: since `recordSuccess` is unexported, this test must live in the `llm` package.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/llm/... -run TestProviderManager_RecordsDollarCost -v`
 Expected: FAIL — `DailyCostUsed` not being populated because `recordSuccess` doesn't call `RecordCost`.
 
-- [ ] **Step 3: Add `RecordCost` call in `recordSuccess()`**
+- [x] **Step 3: Add `RecordCost` call in `recordSuccess()`**
 
 In `internal/llm/provider_manager.go`, update `recordSuccess()` — after the existing cost computation (lines 327-329), add:
 
@@ -612,17 +612,17 @@ if pm.config.Budget != nil {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/llm/... -run TestProviderManager_RecordsDollarCost -v`
 Expected: PASS
 
-- [ ] **Step 5: Run all provider manager tests**
+- [x] **Step 5: Run all provider manager tests**
 
 Run: `go test ./internal/llm/... -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/llm/provider_manager.go
@@ -636,11 +636,11 @@ git commit -m "feat(llm): wire dollar cost recording into ProviderManager.record
 **Files:**
 - Modify: `internal/llm/provider_manager.go` (or the call site that records to metrics)
 
-- [ ] **Step 1: Find where metrics store `Record()` is called**
+- [x] **Step 1: Find where metrics store `Record()` is called**
 
 Search for `metricsStore.Record` or `metrics.Record` in the codebase to find the call site where `RequestRecord` is created. This is where we need to compute and set `CostUSD`.
 
-- [ ] **Step 2: Add cost computation at the metrics recording call site**
+- [x] **Step 2: Add cost computation at the metrics recording call site**
 
 At the call site that creates a `RequestRecord`, compute the cost from the `ModelConfig` cost rates:
 
@@ -654,12 +654,12 @@ record := metrics.RequestRecord{
 }
 ```
 
-- [ ] **Step 3: Run all tests**
+- [x] **Step 3: Run all tests**
 
 Run: `go test ./internal/llm/... -v`
 Expected: All PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/llm/provider_manager.go
@@ -674,7 +674,7 @@ git commit -m "feat(llm): compute and persist cost_usd in metrics store records"
 - Create: `internal/llm/pricing_sync.go`
 - Create: `internal/llm/pricing_sync_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 func TestPricingSyncer_FetchOpenRouter(t *testing.T) {
@@ -759,12 +759,12 @@ func TestPricingSyncer_MergeWithCatalog(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/llm/... -run TestPricingSyncer -v`
 Expected: FAIL — `PricingSyncer`, `NewPricingSyncer`, `LivePrice` don't exist.
 
-- [ ] **Step 3: Implement PricingSyncer**
+- [x] **Step 3: Implement PricingSyncer**
 
 Create `internal/llm/pricing_sync.go`:
 
@@ -1015,12 +1015,12 @@ func parseFloat(s string) float64 {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/llm/... -run TestPricingSyncer -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/llm/pricing_sync.go internal/llm/pricing_sync_test.go
@@ -1036,7 +1036,7 @@ git commit -m "feat(llm): add PricingSyncer for dynamic pricing from OpenRouter/
 - Modify: `internal/daemon/components.go:210-272`
 - Modify: `config/meept.json5`
 
-- [ ] **Step 1: Add cost limit fields to BudgetConfig**
+- [x] **Step 1: Add cost limit fields to BudgetConfig**
 
 In `internal/config/schema.go`, update `BudgetConfig`:
 
@@ -1053,7 +1053,7 @@ type BudgetConfig struct {
 }
 ```
 
-- [ ] **Step 2: Update daemon wiring to pass cost limits**
+- [x] **Step 2: Update daemon wiring to pass cost limits**
 
 In `internal/daemon/components.go`, update the budget creation:
 
@@ -1070,7 +1070,7 @@ budgetTracker = llm.NewBudget(llm.BudgetConfig{
 }, logger.With("component", "budget"))
 ```
 
-- [ ] **Step 3: Add config template entries**
+- [x] **Step 3: Add config template entries**
 
 In `config/meept.json5`, in the budget section, add:
 
@@ -1085,12 +1085,12 @@ budget: {
 }
 ```
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `go test ./internal/config/... ./internal/daemon/... -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/config/schema.go internal/daemon/components.go config/meept.json5
@@ -1104,7 +1104,7 @@ git commit -m "feat(config): add daily/hourly cost limit config for dollar-denom
 **Files:**
 - Modify: `internal/daemon/components.go`
 
-- [ ] **Step 1: Add PricingSyncer to daemon Components struct**
+- [x] **Step 1: Add PricingSyncer to daemon Components struct**
 
 Find the `Components` struct in `internal/daemon/components.go` (or `daemon.go`) and add:
 
@@ -1112,7 +1112,7 @@ Find the `Components` struct in `internal/daemon/components.go` (or `daemon.go`)
 PricingSyncer *llm.PricingSyncer
 ```
 
-- [ ] **Step 2: Initialize PricingSyncer in daemon startup**
+- [x] **Step 2: Initialize PricingSyncer in daemon startup**
 
 In the same section where the budget and LLM client are initialized, add:
 
@@ -1126,7 +1126,7 @@ pricingSyncer := llm.NewPricingSyncer(llm.PricingSyncerConfig{
 c.PricingSyncer = pricingSyncer
 ```
 
-- [ ] **Step 3: Start periodic sync in daemon start lifecycle**
+- [x] **Step 3: Start periodic sync in daemon start lifecycle**
 
 In the daemon start method (where other background workers are started), add:
 
@@ -1138,12 +1138,12 @@ if c.PricingSyncer != nil {
 
 Ensure `pricingSyncStop` channel is closed in daemon shutdown.
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 Run: `go build ./... && go test ./internal/daemon/... -v`
 Expected: Build succeeds, tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/daemon/components.go
@@ -1157,7 +1157,7 @@ git commit -m "feat(daemon): wire PricingSyncer into daemon lifecycle with perio
 **Files:**
 - Modify: `internal/llm/providers.go:188-229`
 
-- [ ] **Step 1: Add PricingSyncer-aware cost enrichment to ResolveModelRef**
+- [x] **Step 1: Add PricingSyncer-aware cost enrichment to ResolveModelRef**
 
 In `ResolveModelRef()`, after building the `ModelConfig`, check the PricingSyncer for live prices:
 
@@ -1177,7 +1177,7 @@ func enrichCostFromSyncer(cfg *ModelConfig, syncer *PricingSyncer) {
 
 Call this at the end of `ResolveModelRef()` and `GetAllModels()`.
 
-- [ ] **Step 2: Write test**
+- [x] **Step 2: Write test**
 
 ```go
 func TestEnrichCostFromSyncer(t *testing.T) {
@@ -1224,12 +1224,12 @@ func TestEnrichCostFromSyncer(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run all tests**
+- [x] **Step 3: Run all tests**
 
 Run: `go test ./internal/llm/... -v`
 Expected: All PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/llm/providers.go
@@ -1243,11 +1243,11 @@ git commit -m "feat(llm): enrich model costs from live pricing data during resol
 **Files:**
 - Modify: `cmd/meept/status.go` (or wherever status output is rendered)
 
-- [ ] **Step 1: Find the status output handler**
+- [x] **Step 1: Find the status output handler**
 
 Search for where `GetProviderStatus()` and `GetStatus()` output is formatted for the CLI.
 
-- [ ] **Step 2: Add cost display to status output**
+- [x] **Step 2: Add cost display to status output**
 
 Add daily cost and cost budget information to the status display, e.g.:
 
@@ -1258,12 +1258,12 @@ budget:
   hourly: $0.0120 / $0.50
 ```
 
-- [ ] **Step 3: Test manually**
+- [x] **Step 3: Test manually**
 
 Run: `./bin/meept status`
 Expected: Shows cost information alongside token information
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add cmd/meept/

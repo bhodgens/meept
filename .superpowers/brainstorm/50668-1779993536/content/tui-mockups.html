@@ -1,0 +1,86 @@
+<h2>Plan-Session TUI Mockups</h2>
+<p class="subtitle">Three locations where plans appear: header, session picker, plans tab</p>
+
+<div class="split">
+  <!-- HEADER BADGES -->
+  <div class="mockup">
+    <div class="mockup-header">1. Header Bar — Plan Badges</div>
+    <div class="mockup-body">
+      <pre style="background:#1a1a1a;color:#e0e0e0;padding:12px;border-radius:4px;font-family:monospace;font-size:13px;line-height:1.6;overflow-x:auto;">
+<span style="color:#ff8c00;background:#333;"> auth-overhaul | Implementing OAuth2 refresh flow                    </span>  <span style="color:#666;">[my-app main*]</span>
+<span style="color:#888;">  plans:</span> <span style="color:#2ea043;">1 confirmed</span> <span style="color:#d29922;">1 executing (4/8 steps)</span> <span style="color:#58a6ff;">1 pending approval</span>
+<span style="color:#888;">[0] chat  [1] tasks  </span><span style="color:#ff8c00;text-decoration:underline;font-weight:bold;">[2] plans</span><span style="color:#888;">  [3] queue  [4] memory</span>
+      </pre>
+      <p style="color:#888;font-size:12px;margin-top:8px;">Plan badges appear below the session name, color-coded by state. Count + progress for executing plans.</p>
+    </div>
+  </div>
+
+  <!-- SESSION PICKER -->
+  <div class="mockup">
+    <div class="mockup-header">2. Session Picker — Plan Indicators</div>
+    <div class="mockup-body">
+      <pre style="background:#1a1a1a;color:#e0e0e0;padding:12px;border-radius:4px;font-family:monospace;font-size:13px;line-height:1.6;overflow-x:auto;">
+<span style="color:#888;"> switch session</span>
+
+<span style="color:#ff8c00;">></span> <span style="color:#e0e0e0;">auth-overhaul    </span> <span style="color:#d29922;">■ 2 plans: 1 exec 1 pending</span>  <span style="color:#666;">5m ago</span>
+<span style="color:#666;"> </span> <span style="color:#999;">bugfix-session   </span> <span style="color:#2ea043;">■ 1 plan: confirmed</span>           <span style="color:#666;">2h ago</span>
+<span style="color:#666;"> </span> <span style="color:#999;">quick-chat       </span> <span style="color:#666;">no plans</span>                       <span style="color:#666;">1d ago</span>
+<span style="color:#666;"> </span> <span style="color:#999;">refactor-api     </span> <span style="color:#2ea043;">■</span><span style="color:#da3633;">■</span> <span style="color:#999;">3 plans: 1 done 1 failed 1 exec</span> <span style="color:#666;">3d ago</span>
+
+<span style="color:#666;">[enter] switch | [n] new | [p] plans | [esc] cancel</span>
+      </pre>
+      <p style="color:#888;font-size:12px;margin-top:8px;">Each session shows plan count with state-colored indicators. [p] opens plan detail for selected session.</p>
+    </div>
+  </div>
+</div>
+
+<div class="mockup" style="margin-top:16px;">
+  <div class="mockup-header">3. Plans Tab — Full Plan List + Detail</div>
+  <div class="mockup-body">
+    <pre style="background:#1a1a1a;color:#e0e0e0;padding:12px;border-radius:4px;font-family:monospace;font-size:13px;line-height:1.6;overflow-x:auto;">
+<span style="color:#ff8c00;"> plans for: auth-overhaul</span>                                 <span style="color:#666;">filter: [all] active completed pending</span>
+
+ <span style="color:#d29922;">●</span> <span style="color:#e0e0e0;font-weight:bold;">Add OAuth2 Token Refresh</span>                    <span style="color:#d29922;">executing</span>
+   <span style="color:#888;">plan-a1b2 · docs/plans/oauth2-refresh.md · my-app</span>
+   <span style="color:#888;">Phase 1: Design</span>     <span style="color:#2ea043;">██████████</span> <span style="color:#2ea043;">3/3 confirmed</span>
+   <span style="color:#888;">Phase 2: Impl</span>       <span style="color:#d29922;">██████░░░░</span> <span style="color:#d29922;">2/4 executing</span>
+   <span style="color:#888;">Phase 3: Testing</span>    <span style="color:#666;">░░░░░░░░░░</span> <span style="color:#666;">0/3 pending</span>
+   <span style="color:#666;">   4/8 steps · 1.2k tokens · agent: coder</span>
+
+ <span style="color:#58a6ff;">●</span> <span style="color:#e0e0e0;font-weight:bold;">Rate Limit Middleware</span>                       <span style="color:#58a6ff;">pending approval</span>
+   <span style="color:#888;">plan-b2c3 · docs/plans/rate-limit.md · my-app</span>
+   <span style="color:#888;">3 phases · 11 steps · awaiting review</span>
+   <span style="color:#58a6ff;">   [a] approve  [r] reject  [v] revise  [enter] view plan.md</span>
+
+ <span style="color:#2ea043;">●</span> <span style="color:#999;">Fix Auth Header Parsing</span>                      <span style="color:#2ea043;">confirmed</span>
+   <span style="color:#888;">plan-c3d4 · docs/plans/auth-header-fix.md · my-app</span>
+   <span style="color:#888;">2 phases · 5/5 steps · confirmed by caimlas 2h ago</span>
+
+<span style="color:#666;">──────────────────────────────────────────────────────────────────</span>
+<span style="color:#666;">[/] filter · [enter] detail · [e] edit plan.md · [a] approve · [c] confirm · [n] new plan</span>
+    </pre>
+    <p style="color:#888;font-size:12px;margin-top:8px;">
+      Each plan shows phases with progress bars. Pending plans show action shortcuts.
+      Executing plans show current agent. Confirmed plans are dimmed.
+    </p>
+  </div>
+</div>
+
+<h3 style="margin-top:24px;">State Color Coding</h3>
+<div class="options">
+  <div class="option" data-choice="colors" onclick="toggleSelect(this)">
+    <div class="content">
+      <p style="font-family:monospace;">
+        <span style="color:#58a6ff;">● planning</span> &nbsp;
+        <span style="color:#8b949e;">● draft</span> &nbsp;
+        <span style="color:#58a6ff;">● pending_approval</span> &nbsp;
+        <span style="color:#2ea043;">● approved</span> &nbsp;
+        <span style="color:#d29922;">● executing</span> &nbsp;
+        <span style="color:#2ea043;">● completed</span> &nbsp;
+        <span style="color:#2ea043;font-weight:bold;">● confirmed</span> &nbsp;
+        <span style="color:#da3633;">● failed</span> &nbsp;
+        <span style="color:#8b949e;">○ cancelled</span>
+      </p>
+    </div>
+  </div>
+</div>

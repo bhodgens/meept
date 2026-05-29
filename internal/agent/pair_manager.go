@@ -167,6 +167,26 @@ func (pm *PairManager) RunRound(ctx context.Context, sessionID string) (*Attempt
 		return nil, fmt.Errorf("actor failed in round %d: %w", round, err)
 	}
 
+	// Check for context cancellation between actor and reviewer phases
+	select {
+	case <-ctx.Done():
+		pm.logger.Warn("Context cancelled between actor and reviewer phases",
+			"session_id", sessionID,
+			"round", round,
+		)
+		session.MarkFailed()
+		pm.publishEvent("pair.round_failed", map[string]any{
+			"session_id": sessionID,
+			KeyTaskID:    session.TaskID,
+			"round":      round,
+			"phase":      "context_cancelled",
+			"error":      ctx.Err().Error(),
+		})
+		return nil, fmt.Errorf("context cancelled after actor phase in round %d: %w", round, ctx.Err())
+	default:
+		// Context still valid, continue to reviewer phase
+	}
+
 	// --- Reviewer phase ---
 	reviewerPrompt := session.Context.ReviewerPrompt(actorOutput)
 	reviewerConvID := fmt.Sprintf("%s-%s-r%d-%d", reviewerConvPrefix, session.TaskID, round, time.Now().UnixNano())

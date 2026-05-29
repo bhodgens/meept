@@ -318,6 +318,33 @@ func TestPairManager_RunRound_NoRegistry(t *testing.T) {
 	}
 }
 
+func TestPairManager_RunRound_ContextCancelled(t *testing.T) {
+	busInstance := bus.New(nil, slogDiscardLogger())
+	defer busInstance.Close()
+
+	pm := NewPairManager(PairManagerConfig{
+		Bus:    busInstance,
+		Logger: slog.Default(),
+	})
+
+	session := pm.CreateSession("task-1", "spec", "coder", "planner", 1)
+
+	// Create a context that is already cancelled
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// RunRound should detect the cancelled context and return an error
+	_, err := pm.RunRound(ctx, session.ID)
+	if err == nil {
+		t.Error("expected error when context is cancelled")
+	}
+
+	// Verify session is marked as failed
+	if session.State != PairSessionFailed {
+		t.Errorf("expected session state failed, got %q", session.State)
+	}
+}
+
 func TestPairManager_RunAllRounds_SessionNotFound(t *testing.T) {
 	pm := NewPairManager(PairManagerConfig{
 		Logger: slog.Default(),
