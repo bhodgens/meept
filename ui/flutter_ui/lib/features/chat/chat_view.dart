@@ -74,7 +74,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
           ),
           const Spacer(),
           Text(
-            'session: ${widget.sessionId.length >= 8 ? widget.sessionId.substring(0, 8) : widget.sessionId}',
+            widget.sessionId == 'default' ? 'new session' : 'session: ${widget.sessionId.length >= 8 ? widget.sessionId.substring(0, 8) : widget.sessionId}',
             style: CyberpunkTypography.bodySmall,
           ),
         ],

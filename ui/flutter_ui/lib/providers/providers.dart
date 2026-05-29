@@ -3,6 +3,7 @@ export 'task_provider.dart';
 export 'agent_provider.dart';
 export 'metrics_provider.dart';
 export 'job_provider.dart';
+export 'plan_provider.dart';
 
 import 'dart:async';
 
@@ -48,13 +49,26 @@ final activeAgentProvider = StateProvider<Agent?>((ref) => null);
 // Connection state
 final connectionStateProvider = StateProvider<bool>((ref) => false);
 
-/// Monitors WebSocket + HTTP health and updates connectionStateProvider
+/// Monitors WebSocket + HTTP health and updates connectionStateProvider.
+///
+/// Connection state changes are debounced: the provider is only updated
+/// after two consecutive readings agree (within a short window).  This
+/// prevents the UI indicator from flickering during reconnect cycles when
+/// the WebSocket emits rapid connected/disconnected events.
 class ConnectionMonitor {
   final WebSocketService _websocket;
   final ApiClient _apiClient;
   final ProviderContainer _container;
   Timer? _timer;
+  Timer? _debounceTimer;
   StreamSubscription<bool>? _connectionSub;
+
+  /// The last raw value received from WebSocket or health check.
+  bool? _pendingState;
+
+  /// Whether [_pendingState] has been confirmed by a second consecutive
+  /// reading of the same value.
+  bool _confirmed = false;
 
   ConnectionMonitor({
     required WebSocketService websocket,
@@ -68,10 +82,56 @@ class ConnectionMonitor {
   }
 
   void _listenToWebSocket() {
-    // Wire WebSocket connection events to the connection state provider
     _connectionSub = _websocket.connectionStream.listen((connected) {
-      _container.read(connectionStateProvider.notifier).state = connected;
+      _proposeState(connected);
     });
+  }
+
+  /// Propose a new connection state.  The provider is updated immediately
+  /// when the value matches the previous confirmed state (e.g. still
+  /// disconnected).  When the value differs, a second consecutive reading
+  /// of the same value is required before the provider is updated.
+  void _proposeState(bool connected) {
+    _debounceTimer?.cancel();
+
+    final prevState = _pendingState;
+
+    if (prevState == null) {
+      // First reading -- stash and wait for confirmation.
+      _pendingState = connected;
+      _confirmed = false;
+      _debounceTimer = Timer(const Duration(seconds: 1), () {
+        // Timeout without a second reading: accept the lone value.
+        _applyState(connected);
+      });
+      return;
+    }
+
+    if (prevState == connected && _confirmed) {
+      // Same value already confirmed -- no-op.
+      return;
+    }
+
+    if (prevState == connected && !_confirmed) {
+      // Second consecutive reading of the same new value -- confirm.
+      _confirmed = true;
+      _applyState(connected);
+      return;
+    }
+
+    // Value changed -- reset and wait for confirmation of the new value.
+    _pendingState = connected;
+    _confirmed = false;
+    _debounceTimer = Timer(const Duration(seconds: 1), () {
+      // Timeout without confirmation: accept the new value.
+      _applyState(connected);
+    });
+  }
+
+  void _applyState(bool connected) {
+    _pendingState = connected;
+    _confirmed = true;
+    _container.read(connectionStateProvider.notifier).state = connected;
   }
 
   void _startHealthChecks() {
@@ -81,9 +141,9 @@ class ConnectionMonitor {
       if (!_websocket.isConnected) {
         try {
           await _apiClient.get<Map<String, dynamic>>('/daemon/status');
-          _container.read(connectionStateProvider.notifier).state = true;
+          _proposeState(true);
         } catch (_) {
-          _container.read(connectionStateProvider.notifier).state = false;
+          _proposeState(false);
         }
       }
     });
@@ -94,6 +154,8 @@ class ConnectionMonitor {
     _connectionSub = null;
     _timer?.cancel();
     _timer = null;
+    _debounceTimer?.cancel();
+    _debounceTimer = null;
   }
 }
 

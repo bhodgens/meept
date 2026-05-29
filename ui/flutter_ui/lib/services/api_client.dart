@@ -359,6 +359,82 @@ class ApiClient {
     return post<Map<String, dynamic>>('/tasks/$id/cancel');
   }
 
+  // ===== Plan Endpoints =====
+
+  Future<List<Plan>> listPlans({String? projectID, int limit = 50}) async {
+    final data = await get<Map<String, dynamic>>(
+      '/plans',
+      queryParameters: {
+        if (projectID != null) 'project_id': projectID,
+        'limit': limit,
+      },
+    );
+    final rawPlans = data['plans'] as List?;
+    if (rawPlans == null) return [];
+    return rawPlans
+        .map((p) => Plan.fromJson(p as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Plan> getPlan(String id) async {
+    final data = await get<Map<String, dynamic>>('/plans/$id');
+    return Plan.fromJson(data);
+  }
+
+  Future<List<Plan>> listPlansBySession(String sessionID) async {
+    final data = await get<Map<String, dynamic>>('/sessions/$sessionID/plans');
+    final rawPlans = data['plans'] as List?;
+    if (rawPlans == null) return [];
+    return rawPlans
+        .map((p) => Plan.fromJson(p as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Plan> approvePlan(String id, {String? sessionID, String? by}) async {
+    final data = await post<Map<String, dynamic>>(
+      '/plans/$id/approve',
+      data: {
+        if (sessionID != null) 'session_id': sessionID,
+        if (by != null) 'by': by,
+      },
+    );
+    return Plan.fromJson(data);
+  }
+
+  Future<Plan> rejectPlan(String id, {String? sessionID, String? by, String? reason}) async {
+    final data = await post<Map<String, dynamic>>(
+      '/plans/$id/reject',
+      data: {
+        if (sessionID != null) 'session_id': sessionID,
+        if (by != null) 'by': by,
+        if (reason != null) 'reason': reason,
+      },
+    );
+    return Plan.fromJson(data);
+  }
+
+  Future<Plan> confirmPlan(String id, {String? sessionID, String? by}) async {
+    final data = await post<Map<String, dynamic>>(
+      '/plans/$id/confirm',
+      data: {
+        if (sessionID != null) 'session_id': sessionID,
+        if (by != null) 'by': by,
+      },
+    );
+    return Plan.fromJson(data);
+  }
+
+  Future<Plan> revisePlan(String id, {String? sessionID, String? feedback}) async {
+    final data = await post<Map<String, dynamic>>(
+      '/plans/$id/revise',
+      data: {
+        if (sessionID != null) 'session_id': sessionID,
+        if (feedback != null) 'feedback': feedback,
+      },
+    );
+    return Plan.fromJson(data);
+  }
+
   // ===== Daemon Endpoints =====
 
   Future<Map<String, dynamic>> getDaemonStatus() async {

@@ -452,3 +452,108 @@ class MetricsSnapshot extends Equatable {
         version,
       ];
 }
+
+// ===== Plan Models =====
+
+class Plan extends Equatable {
+  final String id;
+  final String title;
+  final String description;
+  final String filePath;
+  final String? projectID;
+  final String state; // planning, draft, pending_approval, approved, executing, completed, confirmed, cancelled, failed
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? approvedAt;
+  final DateTime? confirmedAt;
+  final String? approvedBy;
+  final String? confirmedBy;
+  final String? taskID;
+  final String? sourceSession;
+  final int revisionCount;
+  final List<PlanPhase> phases;
+
+  const Plan({
+    required this.id,
+    required this.title,
+    this.description = '',
+    this.filePath = '',
+    this.projectID,
+    required this.state,
+    required this.createdAt,
+    required this.updatedAt,
+    this.approvedAt,
+    this.confirmedAt,
+    this.approvedBy,
+    this.confirmedBy,
+    this.taskID,
+    this.sourceSession,
+    this.revisionCount = 0,
+    this.phases = const [],
+  });
+
+  factory Plan.fromJson(Map<String, dynamic> json) => Plan(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        description: json['description'] as String? ?? '',
+        filePath: json['file_path'] as String? ?? '',
+        projectID: json['project_id'] as String?,
+        state: json['state'] as String,
+        createdAt: DateTime.parse(json['created_at'] as String),
+        updatedAt: DateTime.parse(json['updated_at'] as String),
+        approvedAt: json['approved_at'] != null
+            ? DateTime.parse(json['approved_at'] as String)
+            : null,
+        confirmedAt: json['confirmed_at'] != null
+            ? DateTime.parse(json['confirmed_at'] as String)
+            : null,
+        approvedBy: json['approved_by'] as String?,
+        confirmedBy: json['confirmed_by'] as String?,
+        taskID: json['task_id'] as String?,
+        sourceSession: json['source_session'] as String?,
+        revisionCount: json['revision_count'] as int? ?? 0,
+        phases: (json['phases'] as List?)
+                ?.map((p) => PlanPhase.fromJson(p as Map<String, dynamic>))
+                .toList() ??
+            [],
+      );
+
+  @override
+  List<Object?> get props => [id, title, state, sourceSession];
+}
+
+class PlanPhase extends Equatable {
+  final String id;
+  final String planID;
+  final String name;
+  final int sequence;
+  final int totalSteps;
+  final int completedSteps;
+  final int failedSteps;
+  final String state; // pending, in_progress, completed, confirmed, failed
+
+  const PlanPhase({
+    required this.id,
+    required this.planID,
+    required this.name,
+    required this.sequence,
+    this.totalSteps = 0,
+    this.completedSteps = 0,
+    this.failedSteps = 0,
+    required this.state,
+  });
+
+  factory PlanPhase.fromJson(Map<String, dynamic> json) => PlanPhase(
+        id: json['id'] as String,
+        planID: json['plan_id'] as String,
+        name: json['name'] as String,
+        sequence: json['sequence'] as int? ?? 0,
+        totalSteps: json['total_steps'] as int? ?? 0,
+        completedSteps: json['completed_steps'] as int? ?? 0,
+        failedSteps: json['failed_steps'] as int? ?? 0,
+        state: json['state'] as String,
+      );
+
+  @override
+  List<Object?> get props => [id, planID, name, sequence, state];
+}

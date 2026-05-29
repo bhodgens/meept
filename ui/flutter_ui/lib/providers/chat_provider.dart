@@ -96,11 +96,16 @@ class ChatNotifier extends StateNotifier<ChatState> {
         isLoading: false,
       );
     } catch (e) {
-      state = ChatState(
-        messages: [],
-        isLoading: false,
-        error: e.toString(),
-      );
+      // Don't show error for default session (no session selected)
+      if (sessionId == 'default') {
+        state = const ChatState(messages: [], isLoading: false);
+      } else {
+        state = ChatState(
+          messages: [],
+          isLoading: false,
+          error: e.toString(),
+        );
+      }
     }
 
     if (generation != _loadGeneration) return;

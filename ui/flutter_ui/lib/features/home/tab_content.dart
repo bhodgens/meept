@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'home_screen.dart';
 import '../chat/chat_tab.dart';
 import '../sessions/sessions_overview_tab.dart';
+import '../plans/plans_tab.dart';
 import '../tasks/tasks_tab.dart';
 import '../agents/agents_tab.dart';
 import '../../providers/providers.dart';
@@ -28,6 +29,8 @@ class TabContent extends ConsumerWidget {
         return ChatTab(sessionId: sessionId);
       case HomeTab.sessions:
         return const SessionsOverviewTab();
+      case HomeTab.plans:
+        return const PlansTab();
       case HomeTab.tasks:
         return const TasksTab();
       case HomeTab.agents:

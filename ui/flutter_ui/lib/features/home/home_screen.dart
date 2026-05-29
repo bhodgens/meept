@@ -7,8 +7,8 @@ import '../../widgets/tab_bar.dart';
 import '../../providers/providers.dart';
 import 'tab_content.dart';
 
-/// Home tab enum - 4 tabs as specified
-enum HomeTab { chat, sessions, tasks, agents }
+/// Home tab enum - 5 tabs
+enum HomeTab { chat, sessions, plans, tasks, agents }
 
 /// Connection status indicator - visible pill showing daemon connectivity
 class ConnectionStatusIndicator extends ConsumerWidget {
@@ -73,7 +73,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   HomeTab _selectedTab = HomeTab.chat;
 
-  final List<String> _tabLabels = ['chat', 'sessions', 'tasks', 'agents'];
+  final List<String> _tabLabels = ['chat', 'sessions', 'plans', 'tasks', 'agents'];
 
   @override
   void initState() {
