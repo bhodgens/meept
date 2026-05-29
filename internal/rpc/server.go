@@ -402,10 +402,13 @@ func (s *Server) registerBuiltinHandlers() {
 			result["rpm_limit"] = rl
 			result["daily_cost_used"] = dcu
 			result["daily_cost_limit"] = dcl
+			result["daily_cost_remaining"] = max(dcl-dcu, 0)
 			result["hourly_cost_used"] = hcu
 			result["hourly_cost_limit"] = hcl
+			result["hourly_cost_remaining"] = max(hcl-hcu, 0)
 			result["budget_used"] = dcu
 			result["budget_remaining"] = max(dcl-dcu, 0)
+			result["within_cost_budget"] = dcu < dcl && hcu < hcl
 		}
 
 		return result, nil
