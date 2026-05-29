@@ -9,20 +9,23 @@ import (
 
 // DaemonStatusResponse represents the status RPC response.
 type DaemonStatusResponse struct {
-	Status            string   `json:"status"`
-	UptimeSeconds     float64  `json:"uptime_seconds"`
-	Model             string   `json:"model"`
-	DefaultModel      string   `json:"default_model"`
-	RegisteredMethods []string `json:"registered_methods"`
-	BusSubscribers    int      `json:"bus_subscribers"`
-	TokensUsed        int      `json:"tokens_used"`
-	TokensRemaining   int      `json:"tokens_remaining"`
-	BudgetUsed        float64  `json:"budget_used"`
-	BudgetRemaining   float64  `json:"budget_remaining"`
-	DailyCostUsed     float64  `json:"daily_cost_used"`
-	DailyCostLimit    float64  `json:"daily_cost_limit"`
-	HourlyCostUsed    float64  `json:"hourly_cost_used"`
-	HourlyCostLimit   float64  `json:"hourly_cost_limit"`
+	Status              string   `json:"status"`
+	UptimeSeconds       float64  `json:"uptime_seconds"`
+	Model               string   `json:"model"`
+	DefaultModel        string   `json:"default_model"`
+	RegisteredMethods   []string `json:"registered_methods"`
+	BusSubscribers      int      `json:"bus_subscribers"`
+	TokensUsed          int      `json:"tokens_used"`
+	TokensRemaining     int      `json:"tokens_remaining"`
+	BudgetUsed          float64  `json:"budget_used"`
+	BudgetRemaining     float64  `json:"budget_remaining"`
+	DailyCostUsed       float64  `json:"daily_cost_used"`
+	DailyCostLimit      float64  `json:"daily_cost_limit"`
+	DailyCostRemaining  float64  `json:"daily_cost_remaining"`
+	HourlyCostUsed      float64  `json:"hourly_cost_used"`
+	HourlyCostLimit     float64  `json:"hourly_cost_limit"`
+	HourlyCostRemaining float64  `json:"hourly_cost_remaining"`
+	WithinCostBudget    bool     `json:"within_cost_budget"`
 }
 
 // JobListResponse represents the job list RPC response.

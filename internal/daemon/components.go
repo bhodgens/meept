@@ -378,6 +378,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		if len(providerConfigs) > 1 {
 			pmCfg := llm.ProviderManagerConfig{
 				Providers: providerConfigs,
+				Budget:    budgetTracker,
 				Logger:    logger.With("component", "provider-manager"),
 			}
 			c.LLMProvider = llm.NewProviderManager(pmCfg)

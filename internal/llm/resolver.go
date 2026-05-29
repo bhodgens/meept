@@ -107,6 +107,23 @@ func (r *Resolver) SetPricingSyncer(ps *PricingSyncer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pricingSyncer = ps
+
+	// Re-enrich all models now that syncer is available
+	for _, m := range r.allModels {
+		r.enrichCostFromSyncer(m)
+	}
+	if r.defaultModel != nil {
+		r.enrichCostFromSyncer(r.defaultModel)
+	}
+	if r.smallModel != nil {
+		r.enrichCostFromSyncer(r.smallModel)
+	}
+	// Re-enrich alias models
+	for _, alias := range r.aliases {
+		for _, m := range alias.Models {
+			r.enrichCostFromSyncer(m)
+		}
+	}
 }
 
 // enrichCostFromSyncer updates model costs from live pricing data if available.

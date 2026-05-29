@@ -324,3 +324,122 @@ func TestResolver_ExponentialBackoff(t *testing.T) {
 		t.Errorf("Expected exponential backoff: cooldown1=%v, cooldown2=%v", cooldown1, cooldown2)
 	}
 }
+
+func TestResolver_EnrichCostFromSyncer(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	resolver := NewResolver(cfg, logger)
+
+	// Create a mock PricingSyncer with test prices
+	syncer := NewPricingSyncer(PricingSyncerConfig{
+		Logger: logger,
+	})
+	syncer.UpdatePrices(map[string]*LivePrice{
+		"zai/glm-4.7": {
+			ProviderID: "zai",
+			ModelID:    "glm-4.7",
+			InputCost:  5.0,
+			OutputCost: 25.0,
+			Source:     "catalog",
+		},
+		"zai/glm-4.5-air": {
+			ProviderID: "zai",
+			ModelID:    "glm-4.5-air",
+			InputCost:  1.0,
+			OutputCost: 5.0,
+			Source:     "catalog",
+		},
+	})
+
+	// Verify models have catalog costs before syncer is set
+	defaultModel := resolver.DefaultModel()
+	if defaultModel.CostPerMillionInput != 0.0 {
+		t.Logf("Initial input cost: %.2f (expected 0.0 from catalog)", defaultModel.CostPerMillionInput)
+	}
+
+	// Set the pricing syncer - this should re-enrich all models
+	resolver.SetPricingSyncer(syncer)
+
+	// Verify default model was enriched
+	defaultModel = resolver.DefaultModel()
+	if defaultModel.CostPerMillionInput != 5.0 {
+		t.Errorf("expected input cost 5.0 after syncer enrichment, got %.2f", defaultModel.CostPerMillionInput)
+	}
+	if defaultModel.CostPerMillionOutput != 25.0 {
+		t.Errorf("expected output cost 25.0 after syncer enrichment, got %.2f", defaultModel.CostPerMillionOutput)
+	}
+
+	// Verify small model was enriched
+	smallModel := resolver.SmallModel()
+	if smallModel.CostPerMillionInput != 1.0 {
+		t.Errorf("expected small model input cost 1.0, got %.2f", smallModel.CostPerMillionInput)
+	}
+	if smallModel.CostPerMillionOutput != 5.0 {
+		t.Errorf("expected small model output cost 5.0, got %.2f", smallModel.CostPerMillionOutput)
+	}
+
+	// Verify alias models were enriched
+	coderModels, ok := resolver.GetAllModelsForAlias("coder")
+	if !ok {
+		t.Fatal("expected coder alias to exist")
+	}
+	for _, m := range coderModels {
+		if m.ModelID == "glm-4.7" {
+			if m.CostPerMillionInput != 5.0 {
+				t.Errorf("expected coder/glm-4.7 input cost 5.0, got %.2f", m.CostPerMillionInput)
+			}
+		}
+	}
+
+	// Verify nil syncer is safe (no panic, no modification)
+	originalCost := defaultModel.CostPerMillionInput
+	resolver.SetPricingSyncer(nil)
+	if defaultModel.CostPerMillionInput != originalCost {
+		t.Error("setting nil syncer should not modify costs")
+	}
+}
+
+func TestResolver_FindCheapest_UsesLivePricing(t *testing.T) {
+	cfg := createTestConfig()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	resolver := NewResolver(cfg, logger)
+
+	// Set up syncer with different pricing than catalog
+	syncer := NewPricingSyncer(PricingSyncerConfig{Logger: logger})
+	syncer.UpdatePrices(map[string]*LivePrice{
+		"zai/glm-4.7": {
+			ProviderID: "zai",
+			ModelID:    "glm-4.7",
+			InputCost:  100.0, // Expensive
+			OutputCost: 500.0,
+			Source:     "test",
+		},
+		"zai/glm-4.5-air": {
+			ProviderID: "zai",
+			ModelID:    "glm-4.5-air",
+			InputCost:  1.0, // Cheap
+			OutputCost: 5.0,
+			Source:     "test",
+		},
+		"ollama/llama3.2": {
+			ProviderID: "ollama",
+			ModelID:    "llama3.2",
+			InputCost:  50.0, // More expensive than glm-4.5-air
+			OutputCost: 200.0,
+			Source:     "test",
+		},
+	})
+	resolver.SetPricingSyncer(syncer)
+
+	// Find cheapest model with "code" capability
+	cheapest := resolver.FindCheapest([]string{"code"})
+	if cheapest == nil {
+		t.Fatal("expected cheapest model to be found")
+	}
+	// glm-4.5-air should be cheapest due to live pricing
+	if cheapest.ModelID != "glm-4.5-air" {
+		t.Errorf("expected glm-4.5-air as cheapest with live pricing, got %s", cheapest.ModelID)
+	}
+}
