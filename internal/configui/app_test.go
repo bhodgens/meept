@@ -631,7 +631,7 @@ func TestDrilldownViewBreadcrumb(t *testing.T) {
 	if !contains(rendered, "item1") {
 		t.Error("view should contain item name")
 	}
-	if !contains(rendered, "enter edit") {
+	if !contains(rendered, "enter view details") {
 		t.Error("view should contain help text for enter")
 	}
 }

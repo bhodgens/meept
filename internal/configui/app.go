@@ -48,6 +48,9 @@ type App struct {
 	drilldownField  *DrilldownField // the field we drilled into
 	drilldownItems  []DrilldownItem
 	drilldownCursor int
+
+	// Navigation tracking for multi-level back navigation
+	parentSection *SectionModel // parent section when in drilldown sub-section
 }
 
 type styles struct {
@@ -84,6 +87,7 @@ func NewApp() *App {
 		{Title: "agents", Description: "agent definitions, tools, prompts", KeyPath: "agents", ConfigFile: "agents.json5"},
 		{Title: "memory", Description: "backend, episodic/task/personality, embeddings, limits", KeyPath: "memory", ConfigFile: "meept.json5"},
 		{Title: "security", Description: "sanitization, path restrictions, tirith, audit", KeyPath: "security", ConfigFile: "meept.json5"},
+		{Title: "projects", Description: "path fencing, worktrees, project registration", KeyPath: "projects", ConfigFile: "meept.json5"},
 		{Title: "mcp servers", Description: "MCP server definitions (stdio/http)", KeyPath: "mcp_servers", ConfigFile: "mcp_servers.json5"},
 		{Title: "client / tui", Description: "connection, keybindings, vim, rendering, chat", KeyPath: "client", ConfigFile: "client.json5"},
 		{Title: "scheduler", Description: "timezone", KeyPath: "scheduler", ConfigFile: "meept.json5"},
@@ -221,6 +225,14 @@ func (a *App) handleMenuKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (a *App) handleSectionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc":
+		// If we have a parent section (came from drilldown), go back to it
+		if a.parentSection != nil {
+			a.section = a.parentSection
+			a.parentSection = nil
+			a.phase = PhaseDrilldown
+			return a, nil
+		}
+		// Otherwise, check if we need to save before going back to menu
 		if a.section != nil && a.section.IsDirty() {
 			a.phase = PhaseConfirmSave
 			return a, nil
@@ -348,9 +360,20 @@ func (a *App) handleEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (a *App) handleDrilldownKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc":
+		// Sync the modified drilldown field back to the section's field list
+		// so that IsDirty() detects changes made in the drilldown view
+		if a.section != nil && a.drilldownField != nil {
+			for i, f := range a.section.fields {
+				if f.Type() == FieldDrilldown && f.Key() == a.drilldownField.Key() {
+					a.section.fields[i] = a.drilldownField
+					break
+				}
+			}
+		}
 		a.drilldownField = nil
 		a.drilldownItems = nil
 		a.drilldownCursor = 0
+		a.parentSection = nil // Clear parent when going back from drilldown to section
 		a.phase = PhaseSection
 	case "up", "k":
 		if a.drilldownCursor > 0 {
@@ -382,6 +405,9 @@ func (a *App) handleDrilldownKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				prefix = a.drilldownField.Key()
 			}
 			title := a.section.Title() + " > " + a.drilldownField.Label() + " > " + item.Name
+
+			// Save the parent section for back navigation
+			a.parentSection = a.section
 
 			if sliceKeypath := detectStringSliceDrilldown(a.drilldownField, a.section.SectionKey()); sliceKeypath != "" {
 				// String slice drilldown: pass all items and the slice keypath
@@ -501,7 +527,12 @@ func (a *App) viewSection() string {
 	if a.section == nil {
 		return ""
 	}
-	s := a.styles.breadcrumb.Render("meept config > ") + a.styles.title.Render(a.section.Title()) + "\n\n"
+	// Add unsaved indicator to breadcrumb
+	unsavedMarker := ""
+	if a.section.IsDirty() {
+		unsavedMarker = " " + a.styles.dirtyMarker.Render("(unsaved)")
+	}
+	s := a.styles.breadcrumb.Render("meept config > ") + a.styles.title.Render(a.section.Title()) + unsavedMarker + "\n\n"
 	for i, f := range a.section.Fields() {
 		cursor := "  "
 		style := a.styles.unselected
@@ -515,14 +546,19 @@ func (a *App) viewSection() string {
 		}
 		s += cursor + style.Render(f.Label()) + "  " + a.styles.value.Render(f.Display()) + dirty + "\n"
 	}
-	s += "\n" + a.styles.help.Render("up/down navigate  enter edit  s save  d reset  ? help  esc back  q back")
+	// Context-aware help text for drilldown sub-sections vs top-level sections
+	if a.section.IsDrilldown() {
+		s += "\n" + a.styles.help.Render("up/down navigate  enter edit  s save  d reset  esc to drilldown list  ? help")
+	} else {
+		s += "\n" + a.styles.help.Render("up/down navigate  enter edit  s save  d reset  ? help  esc back  q back")
+	}
 	if a.helpVisible {
 		s += "\n\n" + a.styles.title.Render("key bindings") + "\n"
 		s += "  up/down, j/k   navigate fields\n"
 		s += "  enter           edit field / drill into sub-section\n"
 		s += "  s               save changes\n"
 		s += "  d               reset field to original value\n"
-		s += "  esc/q           back to menu (prompts to save if dirty)\n"
+		s += "  esc/q           back to parent menu (prompts to save if dirty)\n"
 		s += "  ?               toggle this help\n"
 	}
 	return s
@@ -600,7 +636,7 @@ func (a *App) viewDrilldown() string {
 		}
 	}
 
-	s += "\n" + a.styles.help.Render("up/down navigate  enter edit  n new  d delete  esc back")
+	s += "\n" + a.styles.help.Render("up/down navigate  enter view details  n new  d delete  esc back")
 	return s
 }
 

@@ -278,7 +278,8 @@ type DrilldownItem struct {
 
 type DrilldownField struct {
 	baseField
-	Items []DrilldownItem
+	Items          []DrilldownItem
+	originalItems  []DrilldownItem // snapshot of items at load time for dirty tracking
 
 	// StringSliceKey, when non-empty, indicates this drilldown represents a
 	// []string at the given keypath in the config (e.g. "security.allowed_paths").
@@ -296,9 +297,21 @@ type DrilldownField struct {
 
 // NewDrilldownField creates a drilldown field with explicit items.
 func NewDrilldownField(key, label string, items []DrilldownItem) *DrilldownField {
+	// Make a deep copy of items for originalItems snapshot
+	originalItems := make([]DrilldownItem, len(items))
+	for i, item := range items {
+		// Copy the fields slice as well
+		fieldsCopy := make([]Field, len(item.Fields))
+		copy(fieldsCopy, item.Fields)
+		originalItems[i] = DrilldownItem{
+			Name:   item.Name,
+			Fields: fieldsCopy,
+		}
+	}
 	return &DrilldownField{
-		baseField: baseField{key: key, label: label},
-		Items:     items,
+		baseField:     baseField{key: key, label: label},
+		Items:         items,
+		originalItems: originalItems,
 	}
 }
 
@@ -307,9 +320,19 @@ func NewDrilldownField(key, label string, items []DrilldownItem) *DrilldownField
 // "security.allowed_paths") used to persist the reconstructed slice.
 // Each DrilldownItem should have exactly one text field holding the string value.
 func NewStringSliceDrilldownField(key, label, sliceKeypath string, items []DrilldownItem) *DrilldownField {
+	originalItems := make([]DrilldownItem, len(items))
+	for i, item := range items {
+		fieldsCopy := make([]Field, len(item.Fields))
+		copy(fieldsCopy, item.Fields)
+		originalItems[i] = DrilldownItem{
+			Name:   item.Name,
+			Fields: fieldsCopy,
+		}
+	}
 	return &DrilldownField{
 		baseField:      baseField{key: key, label: label},
 		Items:          items,
+		originalItems:  originalItems,
 		StringSliceKey: sliceKeypath,
 	}
 }
@@ -319,9 +342,19 @@ func NewStringSliceDrilldownField(key, label, sliceKeypath string, items []Drill
 // "vim.normal") used to persist the map. Each DrilldownItem.Name is the map
 // key and has exactly one text field holding the value.
 func NewMapStringStringDrilldownField(key, label, mapKeypath string, items []DrilldownItem) *DrilldownField {
+	originalItems := make([]DrilldownItem, len(items))
+	for i, item := range items {
+		fieldsCopy := make([]Field, len(item.Fields))
+		copy(fieldsCopy, item.Fields)
+		originalItems[i] = DrilldownItem{
+			Name:   item.Name,
+			Fields: fieldsCopy,
+		}
+	}
 	return &DrilldownField{
 		baseField:          baseField{key: key, label: label},
 		Items:              items,
+		originalItems:      originalItems,
 		MapStringStringKey: mapKeypath,
 	}
 }
@@ -345,7 +378,52 @@ func (f *DrilldownField) Set(v string) error {
 	return errors.New("drilldown fields cannot be set directly")
 }
 
-func (f *DrilldownField) Reset() {}
+func (f *DrilldownField) Reset() {
+	// Restore items to their original state
+	f.Items = make([]DrilldownItem, len(f.originalItems))
+	for i, item := range f.originalItems {
+		fieldsCopy := make([]Field, len(item.Fields))
+		copy(fieldsCopy, item.Fields)
+		f.Items[i] = DrilldownItem{
+			Name:   item.Name,
+			Fields: fieldsCopy,
+		}
+	}
+}
+
+// IsDirty returns true if the drilldown items have been modified.
+// This includes: item count changes, item name changes, or any sub-field changes.
+func (f *DrilldownField) IsDirty() bool {
+	// Different number of items = dirty
+	if len(f.Items) != len(f.originalItems) {
+		return true
+	}
+	// Compare each item
+	for i, item := range f.Items {
+		if i >= len(f.originalItems) {
+			return true
+		}
+		origItem := f.originalItems[i]
+		// Different item name = dirty
+		if item.Name != origItem.Name {
+			return true
+		}
+		// Different number of sub-fields = dirty
+		if len(item.Fields) != len(origItem.Fields) {
+			return true
+		}
+		// Check each sub-field
+		for j, field := range item.Fields {
+			if j >= len(origItem.Fields) {
+				return true
+			}
+			if field.IsDirty() {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // --- helpers ---
 
