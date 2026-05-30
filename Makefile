@@ -341,6 +341,24 @@ uninstall:
 			rm -f ~/.config/systemd/user/meept.service; \
 			;; \
 	esac
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		echo "Removing Spotlight registrations..."; \
+		for app in ~/Applications/MeeptMenuBar.app \
+		           $$(go env GOPATH)/bin/meept_gui.app \
+		           $$(go env GOPATH)/bin/meept_ui.app \
+		           $(BIN_DIR)/meept_gui.app; do \
+			if [ -d "$$app" ]; then \
+				mdutil -i off "$$app" 2>/dev/null || true; \
+			fi; \
+		done; \
+		rm -rf ~/Applications/MeeptMenuBar.app \
+		       $$(go env GOPATH)/bin/meept_gui.app \
+		       $$(go env GOPATH)/bin/meept_ui.app \
+		       $(BIN_DIR)/meept_gui.app \
+		       $(MENUBAR_DIR)/MeeptMenuBar.app \
+		       $(MENUBAR_DIR)/.build; \
+		mdimport -r /System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mdimporter 2>/dev/null || true; \
+	fi
 	@echo "Service uninstalled (data preserved at $(MEEPT_HOME))"
 
 # =============================================================================
