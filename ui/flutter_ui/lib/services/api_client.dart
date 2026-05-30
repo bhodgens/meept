@@ -53,9 +53,7 @@ class ApiClient {
   ///
   /// **Note:** The underlying storage must have been initialized (via
   /// `StorageService.init()` in [main]) before constructing the client.
-  ///
-  /// **Note:** This is async because API key is read from macOS Keychain.
-  static Future<ApiClient> storage({StorageService? storage}) async {
+  factory ApiClient.storage({StorageService? storage}) {
     String? host = AppConstants.defaultApiHost;
     int? port = AppConstants.defaultApiPort;
     String? apiKey;
@@ -64,8 +62,9 @@ class ApiClient {
     if (storage != null) {
       host = storage.getApiHost() ?? host;
       port = storage.getApiPort() ?? port;
-      // getApiKey() is async due to keychain support
-      apiKey = await storage.getApiKey();
+      // getApiKey() reads from SharedPreferences (sync) after init()
+      // Key writes go to keychain + prefs, so prefs always have the latest
+      apiKey = storage.getApiKey();
       useTls = storage.getUseTls();
     }
 

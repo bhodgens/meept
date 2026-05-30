@@ -55,12 +55,12 @@ class WebSocketService {
   /// Create a WebSocketService using persisted host/port/API key from
   /// [storage].
   ///
-  /// Note: This is async because API key is read from macOS Keychain.
-  static Future<WebSocketService> fromStorage(StorageService storage) async {
+  /// Note: Storage must be initialized before calling this.
+  factory WebSocketService.fromStorage(StorageService storage) {
     return WebSocketService(
       host: storage.getApiHost(),
       port: storage.getApiPort(),
-      apiKey: await storage.getApiKey(),
+      apiKey: storage.getApiKey(), // Sync read from SharedPreferences
       useTls: storage.getUseTls() ?? true, // Default to TLS for production
     );
   }

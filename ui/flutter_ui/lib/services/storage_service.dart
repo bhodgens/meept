@@ -46,9 +46,18 @@ class StorageService {
 
   // ------ API Key (secure storage) ------
 
-  /// Read API key from keychain (async).
-  /// Falls back to SharedPreferences for backward compatibility.
-  Future<String?> getApiKey() async {
+  /// Read API key from SharedPreferences synchronously.
+  /// Keychain is written to but not read from synchronously.
+  /// For keychain read, use getApiKeyAsync().
+  String? getApiKey() {
+    // After init(), prefs are available synchronously
+    // Key writes go to keychain + prefs, so prefs always have the latest for sync read
+    return _prefs?.getString(AppConstants.apiKeyPref);
+  }
+
+  /// Read API key from keychain (async) for full security.
+  /// Falls back to SharedPreferences if keychain unavailable.
+  Future<String?> getApiKeyAsync() async {
     // Try keychain first
     final keychainKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
     if (keychainKey != null) return keychainKey;
@@ -61,7 +70,7 @@ class StorageService {
   Future<void> setApiKey(String key) async {
     // Write to keychain (primary)
     await _secureStorage?.write(key: AppConstants.apiKeyPref, value: key);
-    // Also write to SharedPreferences for backward compatibility
+    // Also write to SharedPreferences for backward compatibility and sync reads
     await _prefs?.setString(AppConstants.apiKeyPref, key);
   }
 
