@@ -1,4 +1,4 @@
-.PHONY: help build build-all uninstall-all build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
+.PHONY: help build build-all uninstall-all uninstall-gui build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
 
 help:
 	@echo "Usage: make [target]"
@@ -147,25 +147,23 @@ build-release: GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 build-release: build-all
 	@echo "Release build with version $(VERSION)"
 
-install: build menubar-app
+install: build menubar-app build-gui
 	@echo "Installing binaries to GOPATH/bin..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
 	@echo "Installing meept-lite..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-lite
+	@echo "Installing GUI app to ~/Applications (single location to avoid Spotlight duplicates)..."
+	mkdir -p ~/Applications
 	@if [ -d $(BIN_DIR)/meept_gui.app ]; then \
-		cp -r $(BIN_DIR)/meept_gui.app $$(go env GOPATH)/bin/meept_gui.app; \
-		touch $$(go env GOPATH)/bin/meept_gui.app/.metadata_never_index; \
-		echo "Installed meept_gui.app to $$(go env GOPATH)/bin/meept_gui.app"; \
-	elif [ -f $(GUI_BIN) ]; then \
-		cp $(GUI_BIN) $$(go env GOPATH)/bin/meept-gui; \
-		chmod +x $$(go env GOPATH)/bin/meept-gui; \
-		echo "Installed meept-gui to $$(go env GOPATH)/bin/meept-gui"; \
+		rm -rf ~/Applications/meept_gui.app; \
+		cp -r $(BIN_DIR)/meept_gui.app ~/Applications/; \
+		touch ~/Applications/meept_gui.app/.metadata_never_index; \
+		echo "Installed: ~/Applications/meept_gui.app"; \
 	else \
-		echo "Skipping meept-gui (not built — run 'make build-gui' first)"; \
+		echo "Skipping meept_gui.app (not built — run 'make build-gui' first)"; \
 	fi
 	@echo "Installing menubar app bundle to ~/Applications..."
-	mkdir -p ~/Applications
 	rm -rf ~/Applications/MeeptMenuBar.app
 	cp -r $(MENUBAR_APP) ~/Applications/
 	@touch ~/Applications/MeeptMenuBar.app/.metadata_never_index
@@ -329,7 +327,7 @@ install-service:
 			;; \
 	esac
 
-uninstall:
+uninstall: uninstall-gui
 	@case "$$(uname)" in \
 		Darwin) \
 			launchctl unload ~/Library/LaunchAgents/com.meept.daemon.plist 2>/dev/null || true; \
@@ -341,25 +339,27 @@ uninstall:
 			rm -f ~/.config/systemd/user/meept.service; \
 			;; \
 	esac
+	@echo "Service uninstalled (data preserved at $(MEEPT_HOME))"
+
+uninstall-gui:
 	@if [ "$$(uname)" = "Darwin" ]; then \
-		echo "Removing Spotlight registrations..."; \
-		for app in ~/Applications/MeeptMenuBar.app \
+		echo "Removing GUI apps and Spotlight registrations..."; \
+		for app in ~/Applications/meept_gui.app \
+		           ~/Applications/MeeptMenuBar.app \
 		           $$(go env GOPATH)/bin/meept_gui.app \
 		           $$(go env GOPATH)/bin/meept_ui.app \
 		           $(BIN_DIR)/meept_gui.app; do \
 			if [ -d "$$app" ]; then \
+				echo "  Removing Spotlight index for $$app"; \
 				mdutil -i off "$$app" 2>/dev/null || true; \
+				rm -rf "$$app"; \
 			fi; \
 		done; \
-		rm -rf ~/Applications/MeeptMenuBar.app \
-		       $$(go env GOPATH)/bin/meept_gui.app \
-		       $$(go env GOPATH)/bin/meept_ui.app \
-		       $(BIN_DIR)/meept_gui.app \
-		       $(MENUBAR_DIR)/MeeptMenuBar.app \
-		       $(MENUBAR_DIR)/.build; \
-		mdimport -r /System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mdimporter 2>/dev/null || true; \
+		rm -rf $(MENUBAR_DIR)/MeeptMenuBar.app $(MENUBAR_DIR)/.build; \
+		echo "Flushing Spotlight cache..."; \
+		mdimport -r /System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mdimporter 2>/dev/null || mdimport ~/Applications 2>/dev/null || true; \
+		echo "GUI apps removed. Spotlight may take a few minutes to update."; \
 	fi
-	@echo "Service uninstalled (data preserved at $(MEEPT_HOME))"
 
 # =============================================================================
 # Documentation
@@ -607,7 +607,7 @@ gui-dev-server:
 # Full Uninstall - Remove all binaries, apps, and configurations
 # =============================================================================
 
-uninstall-all: uninstall
+uninstall-all: uninstall uninstall-gui
 	@echo "Uninstalling all Meept components..."
 	@echo ""
 	@echo "Removing Go binaries from GOPATH/bin..."
@@ -615,11 +615,6 @@ uninstall-all: uninstall
 	rm -f $$(go env GOPATH)/bin/meept-daemon
 	rm -f $$(go env GOPATH)/bin/meept-lite
 	rm -f $$(go env GOPATH)/bin/meept-gui
-	@echo "Removing Flutter GUI app..."
-	rm -rf $$(go env GOPATH)/bin/meept_gui.app
-	rm -rf $$(go env GOPATH)/bin/meept_ui.app
-	@echo "Removing menubar app..."
-	rm -rf ~/Applications/MeeptMenuBar.app
 	@echo "Removing local build artifacts..."
 	rm -rf $(BIN_DIR)/meept
 	rm -rf $(BIN_DIR)/meept-daemon
