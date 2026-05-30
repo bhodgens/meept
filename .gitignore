@@ -43,6 +43,9 @@ menubar/node_modules/
 bin/
 *.exe
 
+# Flutter build artifacts
+ui/flutter_ui/build/
+
 .claude
 docs/.claude/
 site/

@@ -155,6 +155,7 @@ install: build menubar-app
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-lite
 	@if [ -d $(BIN_DIR)/meept_gui.app ]; then \
 		cp -r $(BIN_DIR)/meept_gui.app $$(go env GOPATH)/bin/meept_gui.app; \
+		touch $$(go env GOPATH)/bin/meept_gui.app/.metadata_never_index; \
 		echo "Installed meept_gui.app to $$(go env GOPATH)/bin/meept_gui.app"; \
 	elif [ -f $(GUI_BIN) ]; then \
 		cp $(GUI_BIN) $$(go env GOPATH)/bin/meept-gui; \
@@ -167,6 +168,8 @@ install: build menubar-app
 	mkdir -p ~/Applications
 	rm -rf ~/Applications/MeeptMenuBar.app
 	cp -r $(MENUBAR_APP) ~/Applications/
+	@touch ~/Applications/MeeptMenuBar.app/.metadata_never_index
+	@rm -rf $(MENUBAR_DIR)/.build
 	@echo "Installed: ~/Applications/MeeptMenuBar.app"
 	@echo "Installing config files..."
 	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
@@ -251,6 +254,8 @@ status: build-cli
 
 clean:
 	rm -rf $(BIN_DIR)/meept_gui.app $(BIN_DIR)/meept-gui-* coverage/
+	rm -rf $(MENUBAR_DIR)/MeeptMenuBar.app $(MENUBAR_DIR)/.build
+	rm -rf $$(go env GOPATH)/bin/meept_gui.app $$(go env GOPATH)/bin/meept_ui.app
 	@cd $(FLUTTER_UI_DIR) && flutter clean 2>/dev/null || true
 	go clean -cache -testcache
 
@@ -452,6 +457,7 @@ menubar-app: menubar
     <string>NSApplication</string>\n\
 </dict>\n\
 </plist>\n' > $(MENUBAR_APP)/Contents/Info.plist
+	@touch $(MENUBAR_APP)/.metadata_never_index
 	@echo "Created $(MENUBAR_APP)"
 
 menubar-clean:
@@ -468,6 +474,8 @@ menubar-install-app-bundle: menubar-app
 	@echo "Installing .app bundle to ~/Applications..."
 	rm -rf ~/Applications/MeeptMenuBar.app
 	cp -r $(MENUBAR_APP) ~/Applications/
+	@touch ~/Applications/MeeptMenuBar.app/.metadata_never_index
+	@rm -rf $(MENUBAR_DIR)/.build
 	@echo "Installed: ~/Applications/MeeptMenuBar.app"
 
 # =============================================================================
@@ -505,6 +513,8 @@ build-gui: gui-deps
 ifeq ($(GUI_PLATFORM),macos)
 	cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app" $(BIN_DIR)/meept_gui.app
 	@echo "Built $(BIN_DIR)/meept_gui.app ($$(du -h $(BIN_DIR)/meept_gui.app | cut -f1))"
+	@touch $(BIN_DIR)/meept_gui.app/.metadata_never_index
+	@rm -rf $(FLUTTER_UI_DIR)/build/macos/Build/Products/Release
 else ifeq ($(GUI_PLATFORM),linux)
 	cp $(FLUTTER_UI_DIR)/build/linux/x64/release/bundle/meept_ui $(GUI_BIN)
 	@echo "Built $(GUI_BIN) ($$(du -h $(GUI_BIN) | cut -f1))"
