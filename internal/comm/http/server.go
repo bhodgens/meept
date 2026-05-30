@@ -1229,6 +1229,33 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate API token if auth is required
+	if s.config.RequireAuth {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			// Also check query param for web clients that can't set headers
+			token := r.URL.Query().Get("token")
+			if token == "" {
+				s.writeError(w, http.StatusUnauthorized, "unauthorized: missing API token")
+				return
+			}
+			authHeader = "Bearer " + token
+		}
+
+		// Validate token against configured API keys
+		valid := false
+		for _, key := range s.config.APIKeys {
+			if strings.HasPrefix(authHeader, "Bearer "+key) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			s.writeError(w, http.StatusUnauthorized, "unauthorized: invalid API token")
+			return
+		}
+	}
+
 	// Use websocket.Server with custom handshake to skip origin checking
 	// (needed for desktop clients like Flutter that may not send Origin header)
 	wsServer := &websocket.Server{

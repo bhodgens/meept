@@ -1,44 +1,83 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/constants.dart';
 
-/// Centralized persistent storage backed by [SharedPreferences].
+/// Centralized persistent storage backed by [SharedPreferences] and
+/// macOS Keychain (via [FlutterSecureStorage]) for sensitive data.
 ///
-/// Provides typed get/set methods for API key, theme, daemon host, etc.
 /// The service is a singleton that must be initialized via [init] in
-/// [main] before any synchronous reads are performed.  Once [init] has
+/// [main] before any synchronous reads are performed. Once [init] has
 /// completed, all subsequent getter calls are synchronous.
 class StorageService {
   static final StorageService _instance = StorageService._();
 
   StorageService._();
 
-  /// Global singleton accessor.  Call [init] once at app startup.
+  /// Global singleton accessor. Call [init] once at app startup.
   static StorageService get instance => _instance;
 
   SharedPreferences? _prefs;
+  FlutterSecureStorage? _secureStorage;
 
   /// Whether [init] has been called and [_prefs] is populated.
   bool get isInitialized => _prefs != null;
 
-  /// Initialize the underlying [SharedPreferences] instance.
+  /// Initialize the underlying storage instances.
   /// Must be called (awaits) before any synchronous reads.
   Future<void> init() async {
     if (_prefs == null) {
       _prefs = await SharedPreferences.getInstance();
     }
+    if (_secureStorage == null) {
+      // Configure for macOS keychain
+      _secureStorage = const FlutterSecureStorage(
+        aOptions: AndroidOptions(
+          encryptedSharedPreferences: true,
+        ),
+        iOptions: IOSOptions(
+          accessibility: KeychainAccessibility.first_unlock_this_device,
+        ),
+        mOptions: MacOsOptions(
+          accessibility: KeychainAccessibility.first_unlock_this_device,
+        ),
+      );
+    }
   }
 
-  // ------ API Key ------
+  // ------ API Key (secure storage) ------
 
-  /// Synchronous read — ensure [init] has completed first.
-  String? getApiKey() => _prefs?.getString(AppConstants.apiKeyPref);
+  /// Read API key from keychain (async).
+  /// Falls back to SharedPreferences for backward compatibility.
+  Future<String?> getApiKey() async {
+    // Try keychain first
+    final keychainKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
+    if (keychainKey != null) return keychainKey;
+    // Fallback to SharedPreferences for backward compatibility
+    return _prefs?.getString(AppConstants.apiKeyPref);
+  }
 
+  /// Write API key to both keychain and SharedPreferences.
+  /// Keychain is primary; SharedPreferences is for backward compatibility.
   Future<void> setApiKey(String key) async {
+    // Write to keychain (primary)
+    await _secureStorage?.write(key: AppConstants.apiKeyPref, value: key);
+    // Also write to SharedPreferences for backward compatibility
     await _prefs?.setString(AppConstants.apiKeyPref, key);
   }
 
+  /// Remove API key from both storage backends.
   Future<void> clearApiKey() async {
+    await _secureStorage?.delete(key: AppConstants.apiKeyPref);
     await _prefs?.remove(AppConstants.apiKeyPref);
+  }
+
+  // ------ TLS Configuration ------
+
+  /// Whether to use TLS (HTTPS/WSS) for connections.
+  bool? getUseTls() => _prefs?.getBool(AppConstants.useTlsPref);
+
+  Future<void> setUseTls(bool useTls) async {
+    await _prefs?.setBool(AppConstants.useTlsPref, useTls);
   }
 
   // ------ Theme ------
@@ -66,6 +105,7 @@ class StorageService {
   // ------ General helpers ------
 
   Future<bool> clearAll() async {
+    await _secureStorage?.deleteAll();
     return await _prefs?.clear() ?? false;
   }
 

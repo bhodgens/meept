@@ -204,10 +204,13 @@ The daemon supports two transports (can be enabled independently):
     },
     http: {
       enabled: false,               // REST API for menubar (enable if using menubar app)
-      addr: ":8081",
-      require_auth: false,          // Require API key authentication
-      api_keys: [],                 // List of valid API keys
-      
+      addr": ":8081",
+      // Production security: TLS + auth enabled by default
+      use_tls: true,                // Enable HTTPS (self-signed cert for localhost)
+      auto_tls_cert: true,          // Auto-generate self-signed cert on first run
+      require_auth: true,           // Require API key authentication
+      api_keys: [],                 // List of valid API keys (use `meept token generate`)
+
       // Modular endpoint configuration (unified HTTP server)
       rest: true,                   // REST API at /api/v1/* (default: true)
       websocket: false,             // WebSocket at /ws for Flutter UI (default: false)

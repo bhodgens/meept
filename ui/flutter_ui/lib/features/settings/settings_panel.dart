@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../services/api_client.dart';
+import '../../services/storage_service.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 
-/// Settings panel - edit configuration files
+/// Settings panel - edit configuration files and connection settings
 class SettingsPanel extends ConsumerStatefulWidget {
   const SettingsPanel({super.key});
 
@@ -21,6 +22,11 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   String? _error;
   bool _hasChanges = false;
 
+  // API Token state
+  final _apiKeyController = TextEditingController();
+  bool _apiKeyObscured = true;
+  String? _apiKeyStatus;
+
   late final ApiClient _client;
   late final TextEditingController _controller;
 
@@ -35,13 +41,47 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
     super.initState();
     _client = ref.read(apiClientProvider);
     _controller = TextEditingController(text: _configContent);
+    _loadApiKey();
     _loadConfig();
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _apiKeyController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadApiKey() async {
+    final apiKey = await StorageService.instance.getApiKey();
+    if (mounted && apiKey != null) {
+      setState(() {
+        _apiKeyController.text = apiKey;
+        _apiKeyStatus = 'token configured';
+      });
+    } else if (mounted) {
+      setState(() {
+        _apiKeyController.text = '';
+        _apiKeyStatus = 'no token configured';
+      });
+    }
+  }
+
+  Future<void> _saveApiKey() async {
+    final apiKey = _apiKeyController.text.trim();
+    await StorageService.instance.setApiKey(apiKey);
+    if (mounted) {
+      setState(() {
+        _apiKeyStatus = apiKey.isNotEmpty ? 'token configured' : 'no token configured';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('API token saved to keychain'),
+          backgroundColor: CyberpunkColors.greenSuccess,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   Future<void> _loadConfig() async {
@@ -133,8 +173,115 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
       child: Column(
         children: [
           _buildHeader(),
+          _buildApiTokenSection(),
           if (_error != null) _buildErrorBanner(),
           Expanded(child: _buildEditor()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildApiTokenSection() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: const BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.lock_outline,
+                color: CyberpunkColors.greenSuccess,
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'API token (stored in macos keychain)',
+                style: CyberpunkTypography.label.copyWith(
+                  color: CyberpunkColors.greenSuccess,
+                ),
+              ),
+              const Spacer(),
+              if (_apiKeyStatus != null)
+                Text(
+                  _apiKeyStatus!,
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.lightGray,
+                    fontSize: 9,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: CyberpunkColors.black,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: CyberpunkColors.midGray),
+                  ),
+                  child: TextField(
+                    controller: _apiKeyController,
+                    obscureText: _apiKeyObscured,
+                    style: CyberpunkTypography.bodySmall.copyWith(
+                      fontFamily: 'SourceCodePro',
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'enter API token...',
+                      hintStyle: TextStyle(
+                        color: CyberpunkColors.midGray,
+                        fontFamily: 'SourceCodePro',
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: Icon(
+                  _apiKeyObscured ? Icons.visibility : Icons.visibility_off,
+                  color: CyberpunkColors.orangePrimary,
+                  size: 18,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _apiKeyObscured = !_apiKeyObscured;
+                  });
+                },
+                tooltip: _apiKeyObscured ? 'show token' : 'hide token',
+              ),
+              ElevatedButton(
+                onPressed: _saveApiKey,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: CyberpunkColors.orangePrimary,
+                  foregroundColor: CyberpunkColors.black,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                ),
+                child: const Text('save token'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'run `meept token generate --save` in terminal to create a token',
+            style: CyberpunkTypography.bodySmall.copyWith(
+              color: CyberpunkColors.midGray,
+              fontSize: 9,
+            ),
+          ),
         ],
       ),
     );

@@ -1,4 +1,6 @@
+import 'dart:io' show HttpClient, X509Certificate;
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import '../core/constants.dart';
 import '../models/api_models.dart';
 import 'storage_service.dart';
@@ -8,7 +10,7 @@ class ApiClient {
   final Dio _dio;
   final String baseUrl;
 
-  /// Create an API client with explicit [host], [port], and [apiKey].
+  /// Create an API client with explicit [host], [port], [apiKey], and [useTls].
   ///
   /// This constructor exists to allow test subclasses to redirect API
   /// calls without needing a live [StorageService].  Use the
@@ -17,12 +19,13 @@ class ApiClient {
     String? host,
     int? port,
     String? apiKey,
+    bool? useTls,
   })  : baseUrl =
-            'http://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}',
+            '${(useTls ?? true) ? 'https' : 'http'}://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}',
         _dio = Dio(
           BaseOptions(
             baseUrl:
-                'http://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}',
+                '${(useTls ?? true) ? 'https' : 'http'}://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}',
             connectTimeout: AppConstants.connectionTimeout,
             receiveTimeout: AppConstants.receiveTimeout,
             headers: {
@@ -30,7 +33,19 @@ class ApiClient {
               if (apiKey != null) 'Authorization': 'Bearer $apiKey',
             },
           ),
-        );
+        ) {
+    // Configure Dio to accept self-signed certificates for localhost
+    // This is safe for production since we're only connecting to localhost
+    _dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient();
+        // Accept self-signed certificates for localhost connections
+        client.badCertificateCallback =
+            (X509Certificate cert, String host, int port) => host == 'localhost' || host == '127.0.0.1';
+        return client;
+      },
+    );
+  }
 
   /// Create an API client, optionally loading persisted host/port/API key
   /// from [StorageService].  If [storage] is null the client uses the
@@ -38,21 +53,27 @@ class ApiClient {
   ///
   /// **Note:** The underlying storage must have been initialized (via
   /// `StorageService.init()` in [main]) before constructing the client.
-  factory ApiClient.storage({StorageService? storage}) {
+  ///
+  /// **Note:** This is async because API key is read from macOS Keychain.
+  static Future<ApiClient> storage({StorageService? storage}) async {
     String? host = AppConstants.defaultApiHost;
     int? port = AppConstants.defaultApiPort;
     String? apiKey;
+    bool? useTls;
 
     if (storage != null) {
       host = storage.getApiHost() ?? host;
       port = storage.getApiPort() ?? port;
-      apiKey = storage.getApiKey();
+      // getApiKey() is async due to keychain support
+      apiKey = await storage.getApiKey();
+      useTls = storage.getUseTls();
     }
 
     return ApiClient(
       host: host,
       port: port,
       apiKey: apiKey,
+      useTls: useTls ?? true, // Default to TLS for production
     );
   }
 

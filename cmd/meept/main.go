@@ -133,6 +133,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newPlansCmd())
 	rootCmd.SetHelpCommand(newHelpCmd(rootCmd))
 	rootCmd.AddCommand(newMCPChatServerCmd())
+	rootCmd.AddCommand(newTokenCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -20,6 +20,7 @@ abstract class AppConstants {
   // Storage keys (SharedPreferences)
   static const String apiKeyPref = 'api_key';
   static const String themePref = 'theme';
+  static const String useTlsPref = 'use_tls';
 
   // Agent IDs (must match backend)
   static const String agentDispatcher = 'dispatcher';
