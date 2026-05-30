@@ -45,6 +45,18 @@ bin/
 
 # Flutter build artifacts
 ui/flutter_ui/build/
+ui/flutter_ui/.dart_tool/
+ui/flutter_ui/.flutter-plugins
+ui/flutter_ui/.flutter-plugins-dependencies
+ui/flutter_ui/linux/flutter/generated_plugin_registrant.cc
+ui/flutter_ui/linux/flutter/generated_plugins.cmake
+ui/flutter_ui/macos/Flutter/GeneratedPluginRegistrant.swift
+ui/flutter_ui/macos/Podfile.lock
+ui/flutter_ui/macos/Runner.xcodeproj/project.pbxproj
+ui/flutter_ui/pubspec.lock
+ui/flutter_ui/windows/flutter/generated_plugin_registrant.cc
+ui/flutter_ui/windows/flutter/generated_plugins.cmake
+menubar/.metadata_never_index
 
 .claude
 docs/.claude/
