@@ -85,6 +85,7 @@ nav:
       - Agents: configuration/agents.md
       - LLM & Models: configuration/llm.md
       - Runtime Lifecycle: configuration/llm-lifecycle.md
+      - Production Security: configuration/production-security.md
       - Examples:
           - configuration/examples/index.md
           - Minimal: configuration/examples/minimal.md
