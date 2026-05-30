@@ -132,18 +132,28 @@ class Session extends Equatable {
     this.attachedClients,
   });
 
-  factory Session.fromJson(Map<String, dynamic> json) => Session(
-        id: json['id'] as String,
-        title: json['name'] as String? ?? json['title'] as String? ?? 'Untitled',
-        description: json['description'] as String?,
-        conversationId: json['conversation_id'] as String?,
-        createdAt: DateTime.parse(json['created_at'] as String),
-        lastActivity: json['last_activity'] != null
-            ? DateTime.parse(json['last_activity'] as String)
-            : null,
-        attachedClients: (json['attached_clients'] as List?)
-            ?.cast<String>(),
-      );
+  factory Session.fromJson(Map<String, dynamic> json) {
+    // Use description as display title when available (it contains the full summary),
+    // otherwise fall back to name/title
+    final name = json['name'] as String? ?? json['title'] as String? ?? 'Untitled';
+    final description = json['description'] as String?;
+    // Use description for display if it exists and name is generic ("default") or truncated
+    final displayTitle = (description != null && description.isNotEmpty && (name == 'default' || name.length < description.length))
+        ? description
+        : name;
+    return Session(
+      id: json['id'] as String,
+      title: displayTitle,
+      description: description,
+      conversationId: json['conversation_id'] as String?,
+      createdAt: DateTime.parse(json['created_at'] as String),
+      lastActivity: json['last_activity'] != null
+          ? DateTime.parse(json['last_activity'] as String)
+          : null,
+      attachedClients: (json['attached_clients'] as List?)
+          ?.cast<String>(),
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,

@@ -239,7 +239,7 @@ func fallbackBranchSummary(req SummarizeBranchRequest) string {
 func extractSimpleResult(text string) *SummarizeResult {
 	words := strings.Fields(text)
 
-	// Name: first significant word
+	// Name: first significant word (or first 2 words if they form a clear action)
 	name := "chat"
 	if len(words) > 0 {
 		name = strings.ToLower(words[0])
@@ -247,10 +247,14 @@ func extractSimpleResult(text string) *SummarizeResult {
 		if len(name) < 3 && len(words) > 1 {
 			name = strings.ToLower(words[1])
 		}
+		// Use first 2 words if they form a clear action phrase (e.g., "review project")
+		if len(words) >= 2 && len(words[0]) >= 3 && len(words[0]) <= 10 {
+			name = strings.ToLower(strings.Join(words[:2], " "))
+		}
 	}
 
-	// Description: first few words
-	maxWords := min(len(words), 6)
+	// Description: first 15 words for better context (was 6)
+	maxWords := min(len(words), 15)
 	desc := "new conversation"
 	if maxWords > 0 {
 		desc = strings.Join(words[:maxWords], " ")

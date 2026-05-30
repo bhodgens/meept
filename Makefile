@@ -1,4 +1,4 @@
-.PHONY: help build build-all build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
+.PHONY: help build build-all uninstall-all build-daemon build-cli build-gui test test-verbose test-cover test-race bench bench-all daemon daemon-debug status clean lint fmt vet mod-tidy deps update-deps install setup hooks build-linux build-darwin build-cross docs-serve docs-build docs-generate menubar menubar-clean menubar-install menubar-xcode menubar-install-app gui-deps gui-clean gui-web gui-web-run gui-dev-server
 
 help:
 	@echo "Usage: make [target]"
@@ -57,6 +57,7 @@ help:
 	@echo "Service:"
 	@echo "  install-service  Install as a system service (launchd/systemd)"
 	@echo "  uninstall        Remove the system service"
+	@echo "  uninstall-all    Remove ALL binaries, apps, config, and databases"
 	@echo ""
 	@echo "Documentation:"
 	@echo "  docs-serve       Start local docs dev server"
@@ -146,15 +147,15 @@ build-release: GO_BUILD_FLAGS := -ldflags "$(GO_LDFLAGS) $(GO_LDFLAGS_VERSION)"
 build-release: build-all
 	@echo "Release build with version $(VERSION)"
 
-install: build
+install: build menubar-app
 	@echo "Installing binaries to GOPATH/bin..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-daemon
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
 	@echo "Installing meept-lite..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-lite
-	@if [ -d $(BIN_DIR)/meept_ui.app ]; then \
-		cp -r $(BIN_DIR)/meept_ui.app $$(go env GOPATH)/bin/meept_ui.app; \
-		echo "Installed meept_ui.app to $$(go env GOPATH)/bin/meept_ui.app"; \
+	@if [ -d $(BIN_DIR)/meept_gui.app ]; then \
+		cp -r $(BIN_DIR)/meept_gui.app $$(go env GOPATH)/bin/meept_gui.app; \
+		echo "Installed meept_gui.app to $$(go env GOPATH)/bin/meept_gui.app"; \
 	elif [ -f $(GUI_BIN) ]; then \
 		cp $(GUI_BIN) $$(go env GOPATH)/bin/meept-gui; \
 		chmod +x $$(go env GOPATH)/bin/meept-gui; \
@@ -162,6 +163,11 @@ install: build
 	else \
 		echo "Skipping meept-gui (not built — run 'make build-gui' first)"; \
 	fi
+	@echo "Installing menubar app bundle to ~/Applications..."
+	mkdir -p ~/Applications
+	rm -rf ~/Applications/MeeptMenuBar.app
+	cp -r $(MENUBAR_APP) ~/Applications/
+	@echo "Installed: ~/Applications/MeeptMenuBar.app"
 	@echo "Installing config files..."
 	@mkdir -p $(MEEPT_HOME)/agents $(MEEPT_HOME)/prompts $(MEEPT_HOME)/plugins $(MEEPT_HOME)/memory $(MEEPT_HOME)/workspaces
 	@echo "Copying config templates (if not present)..."
@@ -244,7 +250,7 @@ status: build-cli
 # =============================================================================
 
 clean:
-	rm -rf $(BIN_DIR)/meept_ui.app $(BIN_DIR)/meept-gui-* coverage/
+	rm -rf $(BIN_DIR)/meept_gui.app $(BIN_DIR)/meept-gui-* coverage/
 	@cd $(FLUTTER_UI_DIR) && flutter clean 2>/dev/null || true
 	go clean -cache -testcache
 
@@ -497,8 +503,8 @@ build-gui: gui-deps
 	@echo "Building meept-gui for $(GUI_PLATFORM)..."
 	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release
 ifeq ($(GUI_PLATFORM),macos)
-	cp -r $(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/meept_ui.app $(BIN_DIR)/meept_ui.app
-	@echo "Built $(BIN_DIR)/meept_ui.app ($$(du -h $(BIN_DIR)/meept_ui.app | cut -f1))"
+	cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app" $(BIN_DIR)/meept_gui.app
+	@echo "Built $(BIN_DIR)/meept_gui.app ($$(du -h $(BIN_DIR)/meept_gui.app | cut -f1))"
 else ifeq ($(GUI_PLATFORM),linux)
 	cp $(FLUTTER_UI_DIR)/build/linux/x64/release/bundle/meept_ui $(GUI_BIN)
 	@echo "Built $(GUI_BIN) ($$(du -h $(GUI_BIN) | cut -f1))"
@@ -568,3 +574,46 @@ gui-dev-server:
 	@echo "Starting Flutter web dev server (web-server target)..."
 	@echo "Open http://localhost:59714 in your browser"
 	cd $(FLUTTER_UI_DIR) && flutter run -d web-server --web-port=59714 
+
+# =============================================================================
+# Full Uninstall - Remove all binaries, apps, and configurations
+# =============================================================================
+
+uninstall-all: uninstall
+	@echo "Uninstalling all Meept components..."
+	@echo ""
+	@echo "Removing Go binaries from GOPATH/bin..."
+	rm -f $$(go env GOPATH)/bin/meept
+	rm -f $$(go env GOPATH)/bin/meept-daemon
+	rm -f $$(go env GOPATH)/bin/meept-lite
+	rm -f $$(go env GOPATH)/bin/meept-gui
+	@echo "Removing Flutter GUI app..."
+	rm -rf $$(go env GOPATH)/bin/meept_gui.app
+	rm -rf $$(go env GOPATH)/bin/meept_ui.app
+	@echo "Removing menubar app..."
+	rm -rf ~/Applications/MeeptMenuBar.app
+	@echo "Removing local build artifacts..."
+	rm -rf $(BIN_DIR)/meept
+	rm -rf $(BIN_DIR)/meept-daemon
+	rm -rf $(BIN_DIR)/meept-lite
+	rm -rf $(BIN_DIR)/meept_gui.app
+	rm -rf $(BIN_DIR)/meept_ui.app
+	@echo "Removing configuration directory ($(MEEPT_HOME))..."
+	rm -rf $(MEEPT_HOME)
+	@echo "Removing session/task databases..."
+	rm -f ~/.meept/sessions.db
+	rm -f ~/.meept/tasks.db
+	rm -f ~/.meept/queue.db
+	rm -f ~/.meept/plans.db
+	rm -f ~/.meept/metrics.db
+	rm -f ~/.meept/projects.db
+	@echo "Removing memory databases..."
+	rm -rf ~/.meept/memory/
+	@echo "Removing cached skills and plugins..."
+	rm -rf ~/.meept/skills/
+	rm -rf ~/.meept/plugins/
+	@echo "Removing workspaces..."
+	rm -rf ~/.meept/workspaces/
+	@echo ""
+	@echo "Full uninstall complete."
+	@echo "Note: Flutter build cache not removed. Run 'cd ui/flutter_ui && flutter clean' if needed."
