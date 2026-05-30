@@ -1229,20 +1229,29 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wsHandler := websocket.Handler(func(conn *websocket.Conn) {
-		s.wsHub.Register(conn)
-		defer s.wsHub.Unregister(conn)
+	// Use websocket.Server with custom handshake to skip origin checking
+	// (needed for desktop clients like Flutter that may not send Origin header)
+	wsServer := &websocket.Server{
+		Handler: websocket.Handler(func(conn *websocket.Conn) {
+			s.wsHub.Register(conn)
+			defer s.wsHub.Unregister(conn)
 
-		for {
-			var msg WSMessage
-			if err := websocket.JSON.Receive(conn, &msg); err != nil {
-				return
+			for {
+				var msg WSMessage
+				if err := websocket.JSON.Receive(conn, &msg); err != nil {
+					return
+				}
+				s.handleWSMessage(conn, &msg)
 			}
-			s.handleWSMessage(conn, &msg)
-		}
-	})
+		}),
+		Handshake: func(config *websocket.Config, request *http.Request) error {
+			// Skip origin checking - accept all WebSocket connections
+			// This is safe for localhost-only daemon
+			return nil
+		},
+	}
 
-	wsHandler.ServeHTTP(w, r)
+	wsServer.ServeHTTP(w, r)
 }
 
 // WSMessage represents a message sent/received over WebSocket.
