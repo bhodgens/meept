@@ -129,6 +129,8 @@ func (t *ShellExecuteTool) SetKnownSafeCommands(cmds []string) {
 
 func (t *ShellExecuteTool) Name() string { return schemaJobTypeShell }
 
+func (t *ShellExecuteTool) Category() string { return "shell" }
+
 func (t *ShellExecuteTool) Description() string {
 	return "Execute a shell command and return its stdout and stderr. Use for running system commands, scripts, and CLI tools. Commands run in a sandboxed subprocess with a timeout."
 }

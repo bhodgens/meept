@@ -2062,6 +2062,83 @@ func (l *AgentLoop) buildSkillContextSection(ctx context.Context, discovered []*
 	return sb.String()
 }
 
+// buildToolCapabilitiesSection generates a categorized tool listing from the
+// registry. This ensures capabilities always reflect the daemon's actual tool
+// set without requiring prompt updates when tools are added or removed.
+func (l *AgentLoop) buildToolCapabilitiesSection() string {
+	if l.registry == nil {
+		return ""
+	}
+
+	// Check if the registry has CategorizedTools (tools.Registry method).
+	type categorized interface {
+		CategorizedTools() []tools.CategoryTools
+	}
+
+	reg, ok := l.registry.(categorized)
+	if !ok {
+		return ""
+	}
+
+	cats := reg.CategorizedTools()
+	if len(cats) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("# Platform Capabilities\n\n")
+	b.WriteString("You have access to the following tools, grouped by category:\n\n")
+	for _, cat := range cats {
+		fmt.Fprintf(&b, "### %s\n", categoryDisplayName(cat.Category))
+		for _, tool := range cat.Tools {
+			fmt.Fprintf(&b, "- `%s`: %s\n", tool.Name, tool.Description)
+		}
+		b.WriteByte('\n')
+	}
+
+	return b.String()
+}
+
+// categoryDisplayName converts a category key to a display-friendly heading.
+func categoryDisplayName(cat string) string {
+	switch cat {
+	case "web":
+		return "Web"
+	case "filesystem":
+		return "Filesystem"
+	case "shell":
+		return "Shell"
+	case "memory":
+		return "Memory"
+	case "tasks":
+		return "Task Management"
+	case "scheduling":
+		return "Scheduling"
+	case "code":
+		return "Code Intelligence"
+	case "platform":
+		return "Platform Introspection"
+	case "templates":
+		return "Templates"
+	case "calendar":
+		return "Calendar"
+	case "debug":
+		return "Debugging"
+	case "mcp":
+		return "MCP Tools"
+	case "knowledge_graph":
+		return "Knowledge Graph"
+	case "general":
+		return "General"
+	default:
+		// Capitalize first letter for unknown categories.
+		if len(cat) > 0 {
+			return strings.ToUpper(cat[:1]) + cat[1:]
+		}
+		return cat
+	}
+}
+
 // buildMCPContextSection creates the MCP server awareness section for the system prompt.
 // This lists connected MCP servers and their tool counts so agents know about
 // external tools available via the Model Context Protocol.
@@ -3204,8 +3281,15 @@ func (l *AgentLoop) buildSystemPromptWithContextAndSkills(ctx context.Context, c
 		Personality:  l.config.Personality,
 	})
 
-	// Add baseline capabilities and platform introspection guidelines
-	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	// Add baseline capabilities and platform introspection guidelines.
+	// Prefer the dynamic registry-driven section; fall back to the static constant
+	// for test environments that use PlaceholderToolRegistry.
+	toolCaps := l.buildToolCapabilitiesSection()
+	if toolCaps != "" {
+		builder.AddSection("Platform Capabilities", toolCaps)
+	} else {
+		builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	}
 	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
 
 	// Add global rules if configured
@@ -3606,8 +3690,15 @@ func (l *AgentLoop) buildSystemPrompt() string {
 		Personality:  l.config.Personality,
 	})
 
-	// Add baseline capabilities and platform introspection guidelines
-	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	// Add baseline capabilities and platform introspection guidelines.
+	// Prefer the dynamic registry-driven section; fall back to the static constant
+	// for test environments that use PlaceholderToolRegistry.
+	toolCaps := l.buildToolCapabilitiesSection()
+	if toolCaps != "" {
+		builder.AddSection("Platform Capabilities", toolCaps)
+	} else {
+		builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	}
 	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
 
 	// Add global rules if configured
@@ -3668,8 +3759,15 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, conversatio
 		Personality:  l.config.Personality,
 	})
 
-	// Add baseline capabilities and platform introspection guidelines
-	builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	// Add baseline capabilities and platform introspection guidelines.
+	// Prefer the dynamic registry-driven section; fall back to the static constant
+	// for test environments that use PlaceholderToolRegistry.
+	toolCaps := l.buildToolCapabilitiesSection()
+	if toolCaps != "" {
+		builder.AddSection("Platform Capabilities", toolCaps)
+	} else {
+		builder.AddSection("Platform Capabilities", prompts.BaselineCapabilities)
+	}
 	builder.AddSection("Platform Guidelines", prompts.BaselineGuidelines)
 
 	// Add global rules if configured

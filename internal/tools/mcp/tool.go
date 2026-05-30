@@ -67,5 +67,8 @@ func (t *MCPTool) Server() string {
 	return t.server
 }
 
+// Category returns the tool category. MCP tools are categorized as "mcp".
+func (t *MCPTool) Category() string { return "mcp" }
+
 // Tool is an alias to avoid import cycles.
 // MCPTool implements the tools.Tool interface from internal/tools.

@@ -25,6 +25,8 @@ func NewLSPDefinitionTool(manager *lsp.Manager) (*LSPDefinitionTool, error) {
 
 func (t *LSPDefinitionTool) Name() string { return "lsp_goto_definition" }
 
+func (t *LSPDefinitionTool) Category() string { return "code" }
+
 func (t *LSPDefinitionTool) Description() string {
 	return `Find the definition of a symbol at a specific location in code.
 Returns the file path, line, and column where the symbol is defined.

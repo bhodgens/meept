@@ -23,6 +23,8 @@ func NewScheduleCreateTool(sched *scheduler.Scheduler) *ScheduleCreateTool {
 
 func (t *ScheduleCreateTool) Name() string { return "schedule_create" }
 
+func (t *ScheduleCreateTool) Category() string { return "scheduling" }
+
 func (t *ScheduleCreateTool) Description() string {
 	return "Create a new scheduled job. Jobs run on a cron-like schedule and can trigger agent tasks, shell commands, reminders, or other recurring operations."
 }

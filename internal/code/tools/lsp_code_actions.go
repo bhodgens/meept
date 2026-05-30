@@ -27,6 +27,8 @@ func NewLSPCodeActionsTool(manager *lsp.Manager) (*LSPCodeActionsTool, error) {
 
 func (t *LSPCodeActionsTool) Name() string { return "lsp_code_actions" }
 
+func (t *LSPCodeActionsTool) Category() string { return "code" }
+
 func (t *LSPCodeActionsTool) Description() string {
 	return `Get available code actions (quick fixes, refactors, source actions) for a specific location.
 Returns a list of actions with titles. If apply is true, applies the first matching action.

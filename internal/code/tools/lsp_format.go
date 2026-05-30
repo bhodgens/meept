@@ -26,6 +26,8 @@ func NewLSPFormatTool(manager *lsp.Manager) (*LSPFormatTool, error) {
 
 func (t *LSPFormatTool) Name() string { return "lsp_format" }
 
+func (t *LSPFormatTool) Category() string { return "code" }
+
 func (t *LSPFormatTool) Description() string {
 	return `Format a source file using the configured LSP server's formatter.
 Applies formatting edits to the file and returns a summary of changes.

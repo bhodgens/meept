@@ -26,6 +26,8 @@ func NewASTQueryTool(parser *ast.ParserManager) (*ASTQueryTool, error) {
 
 func (t *ASTQueryTool) Name() string { return "ast_query" }
 
+func (t *ASTQueryTool) Category() string { return "code" }
+
 func (t *ASTQueryTool) Description() string {
 	return `Run tree-sitter S-expression queries to find specific patterns in source code.
 Use for advanced code analysis like finding all function calls, matching specific patterns, etc.

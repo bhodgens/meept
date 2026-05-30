@@ -1,4 +1,4 @@
-// Package http provides the HTTP REST API server for the Meept menubar application.
+// Package http provides the unified HTTP server for the Meept daemon (REST API, WebSocket, MCP).
 package http
 
 import (
@@ -49,7 +49,7 @@ type ServerConfig struct {
 	RESTEnabled    bool          // Enable REST API at /api/v1/* (default: true)
 }
 
-// DefaultServerConfig returns sensible defaults for the menubar HTTP server.
+// DefaultServerConfig returns sensible defaults for the unified HTTP server.
 func DefaultServerConfig() ServerConfig {
 	homeDir, _ := os.UserHomeDir()
 	defaultCertFile := filepath.Join(homeDir, ".meept", "tls", "cert.pem")
@@ -60,7 +60,7 @@ func DefaultServerConfig() ServerConfig {
 		ReadTimeout:    30 * time.Second,
 		WriteTimeout:   30 * time.Second,
 		MaxHeaderBytes: 1 << 20, // 1 MB
-		EnableCORS:     true,    // Enable CORS for local menubar app
+		EnableCORS:     true,    // Enable CORS for local HTTP clients
 		RequireAuth:    true,    // Enabled by default for security
 		APIKeys:        []string{},
 		UseTLS:         true, // TLS on by default
@@ -86,7 +86,7 @@ type MetricsService interface {
 	SubscribeMetrics() (<-chan *metrics.LiveMetricsSnapshot, func())
 }
 
-// Server is the HTTP API server for the menubar app.
+// Server is the unified HTTP API server for the Meept daemon.
 type Server struct {
 	mu sync.RWMutex
 
@@ -407,9 +407,9 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 
 	if s.config.UseTLS {
-		s.logger.Info("menubar HTTPS server starting", "addr", s.config.Addr, "tls", true)
+		s.logger.Info("unified HTTP server starting (TLS)", "addr", s.config.Addr, "tls", true)
 	} else {
-		s.logger.Warn("⚠️  menubar HTTP server starting (NO TLS)", "addr", s.config.Addr)
+		s.logger.Warn("⚠️  unified HTTP server starting (NO TLS)", "addr", s.config.Addr)
 	}
 
 	errCh := make(chan error, 1)
@@ -453,7 +453,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	srv := s.server
 	s.mu.Unlock()
 
-	s.logger.Info("menubar HTTP server shutting down")
+	s.logger.Info("unified HTTP server shutting down")
 	if srv != nil {
 		shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()

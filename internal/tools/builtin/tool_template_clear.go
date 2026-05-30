@@ -20,6 +20,8 @@ func NewTemplateClearTool(registry *templates.Registry) *TemplateClearTool {
 
 func (t *TemplateClearTool) Name() string { return "template_clear" }
 
+func (t *TemplateClearTool) Category() string { return "templates" }
+
 func (t *TemplateClearTool) Description() string {
 	return "Deactivate session-scoped prompt templates for a conversation. " +
 		"Provide a template name to deactivate a specific template, or omit to clear all active session-scoped templates."

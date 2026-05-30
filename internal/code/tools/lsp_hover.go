@@ -25,6 +25,8 @@ func NewLSPHoverTool(manager *lsp.Manager) (*LSPHoverTool, error) {
 
 func (t *LSPHoverTool) Name() string { return "lsp_hover" }
 
+func (t *LSPHoverTool) Category() string { return "code" }
+
 func (t *LSPHoverTool) Description() string {
 	return `Get type information and documentation for a symbol at a specific location.
 Returns the symbol's type signature and any associated documentation.

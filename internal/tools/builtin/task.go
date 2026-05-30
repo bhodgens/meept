@@ -22,6 +22,8 @@ func NewTaskCreateTool(store *task.Store) *TaskCreateTool {
 
 func (t *TaskCreateTool) Name() string { return "task_create" }
 
+func (t *TaskCreateTool) Category() string { return "tasks" }
+
 func (t *TaskCreateTool) Description() string {
 	return "Create a new task for tracking work. Tasks are used for multi-step workflows, coordinating between agents, and maintaining context across conversations."
 }
@@ -115,6 +117,8 @@ func NewTaskGetTool(store *task.Store) *TaskGetTool {
 
 func (t *TaskGetTool) Name() string { return "task_get" }
 
+func (t *TaskGetTool) Category() string { return "tasks" }
+
 func (t *TaskGetTool) Description() string {
 	return "Get detailed information about a specific task by its ID."
 }
@@ -180,6 +184,8 @@ func NewTaskListTool(store *task.Store) *TaskListTool {
 }
 
 func (t *TaskListTool) Name() string { return "task_list" }
+
+func (t *TaskListTool) Category() string { return "tasks" }
 
 func (t *TaskListTool) Description() string {
 	return "List tasks, optionally filtered by state. Returns task summaries ordered by most recently updated."
@@ -264,6 +270,8 @@ func NewTaskUpdateTool(store *task.Store) *TaskUpdateTool {
 }
 
 func (t *TaskUpdateTool) Name() string { return "task_update" }
+
+func (t *TaskUpdateTool) Category() string { return "tasks" }
 
 func (t *TaskUpdateTool) Description() string {
 	return "Update fields of an existing task. Use this to change task state, description, or add memory references."

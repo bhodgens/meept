@@ -33,6 +33,8 @@ func NewLSPDiagnosticsTool(manager *lsp.Manager) (*LSPDiagnosticsTool, error) {
 
 func (t *LSPDiagnosticsTool) Name() string { return "lsp_diagnostics" }
 
+func (t *LSPDiagnosticsTool) Category() string { return "code" }
+
 func (t *LSPDiagnosticsTool) Description() string {
 	return `Get diagnostics (errors, warnings, hints) for a source file.
 Opens the file in the LSP server and waits for diagnostic results.

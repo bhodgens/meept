@@ -25,6 +25,8 @@ func NewLSPDocumentSymbolsTool(manager *lsp.Manager) (*LSPDocumentSymbolsTool, e
 
 func (t *LSPDocumentSymbolsTool) Name() string { return "lsp_document_symbols" }
 
+func (t *LSPDocumentSymbolsTool) Category() string { return "code" }
+
 func (t *LSPDocumentSymbolsTool) Description() string {
 	return `Get all symbols defined in a source file, organized hierarchically.
 Returns functions, types, variables, and other symbols with their locations.

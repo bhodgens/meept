@@ -25,6 +25,8 @@ func NewLSPReferencesTool(manager *lsp.Manager) (*LSPReferencesTool, error) {
 
 func (t *LSPReferencesTool) Name() string { return "lsp_find_references" }
 
+func (t *LSPReferencesTool) Category() string { return "code" }
+
 func (t *LSPReferencesTool) Description() string {
 	return `Find all references to a symbol at a specific location in code.
 Returns all locations where the symbol is used throughout the codebase.

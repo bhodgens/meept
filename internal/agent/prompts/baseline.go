@@ -7,30 +7,11 @@ import (
 )
 
 // BaselineCapabilities is the shared capabilities section for all agents.
+// In production this is replaced by a dynamic section built from the tool
+// registry. The static text serves as a fallback for test environments.
 const BaselineCapabilities = `# Platform Capabilities
 
-You have access to the following shared capabilities:
-
-## Memory
-- memory_store: Save information for future reference
-- memory_search: Find relevant past context
-- memory_get_context: Get contextually relevant memories
-
-## Tasks
-- task_create: Create tasks for tracking work
-- task_get: Get task details by ID
-- task_list: List tasks by state
-- task_update: Update task progress and state
-
-## Platform Introspection
-- platform_status: Check system health
-- platform_agents: List available specialist agents and their purposes
-- platform_tools: List all tools available to you
-- mcp_servers: List connected MCP servers and their tool counts
-- delegate_task: Route a task to a specific specialist agent by ID
-
-## External Tools (MCP)
-Additional tools from connected MCP servers are available. These tools are prefixed with "servername.toolname" and are registered alongside builtin tools. Use platform_tools to see the complete list, or mcp_servers to see which servers are connected.
+Your tools are listed below, grouped by category. Additional tools may be available from MCP servers, templates, and conditional features. Call platform_tools to see the complete real-time list.
 `
 
 // BaselineGuidelines provides common behavioral guidelines for all agents.

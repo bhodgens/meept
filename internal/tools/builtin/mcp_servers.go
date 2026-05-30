@@ -33,6 +33,8 @@ func NewMCPServersTool(listServers func() []MCPServerInfo) *MCPServersTool {
 
 func (t *MCPServersTool) Name() string { return "mcp_servers" }
 
+func (t *MCPServersTool) Category() string { return "platform" }
+
 func (t *MCPServersTool) Description() string {
 	return "List connected MCP (Model Context Protocol) servers with their connection status and available tool counts."
 }

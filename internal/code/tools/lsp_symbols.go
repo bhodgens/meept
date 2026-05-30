@@ -25,6 +25,8 @@ func NewLSPSymbolsTool(manager *lsp.Manager) (*LSPSymbolsTool, error) {
 
 func (t *LSPSymbolsTool) Name() string { return "lsp_workspace_symbols" }
 
+func (t *LSPSymbolsTool) Category() string { return "code" }
+
 func (t *LSPSymbolsTool) Description() string {
 	return `Search for symbols across the workspace or in a specific document.
 For workspace search, provide a query string to search globally.

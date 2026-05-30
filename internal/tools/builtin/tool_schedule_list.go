@@ -23,6 +23,8 @@ func NewScheduleListTool(sched *scheduler.Scheduler) *ScheduleListTool {
 
 func (t *ScheduleListTool) Name() string { return "schedule_list" }
 
+func (t *ScheduleListTool) Category() string { return "scheduling" }
+
 func (t *ScheduleListTool) Description() string {
 	return "List all scheduled jobs with their schedules, next run times, and status. Optionally filter by job type."
 }
@@ -131,6 +133,8 @@ func NewScheduleGetTool(sched *scheduler.Scheduler) *ScheduleGetTool {
 }
 
 func (t *ScheduleGetTool) Name() string { return "schedule_get" }
+
+func (t *ScheduleGetTool) Category() string { return "scheduling" }
 
 func (t *ScheduleGetTool) Description() string {
 	return "Get detailed information about a specific scheduled job by its ID."

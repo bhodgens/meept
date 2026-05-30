@@ -21,6 +21,8 @@ func NewTemplateListTool(registry *templates.Registry) *TemplateListTool {
 
 func (t *TemplateListTool) Name() string { return "template_list" }
 
+func (t *TemplateListTool) Category() string { return "templates" }
+
 func (t *TemplateListTool) Description() string {
 	return "List available prompt templates or currently active session-scoped templates. " +
 		"Use active=true with a conversation_id to see which templates are currently influencing a conversation."

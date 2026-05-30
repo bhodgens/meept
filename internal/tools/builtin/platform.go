@@ -25,6 +25,8 @@ func NewPlatformStatusTool(getStatus func() map[string]any) *PlatformStatusTool 
 
 func (t *PlatformStatusTool) Name() string { return "platform_status" }
 
+func (t *PlatformStatusTool) Category() string { return "platform" }
+
 func (t *PlatformStatusTool) Description() string {
 	return "Get current meept platform status including uptime and component health."
 }
@@ -55,6 +57,8 @@ func NewPlatformAgentsTool(registry *agent.AgentRegistry) *PlatformAgentsTool {
 }
 
 func (t *PlatformAgentsTool) Name() string { return "platform_agents" }
+
+func (t *PlatformAgentsTool) Category() string { return "platform" }
 
 func (t *PlatformAgentsTool) Description() string {
 	return "List available agent specifications with their IDs, names, roles, and purposes."
@@ -119,6 +123,8 @@ func NewPlatformToolsTool(registry *tools.Registry) *PlatformToolsTool {
 }
 
 func (t *PlatformToolsTool) Name() string { return "platform_tools" }
+
+func (t *PlatformToolsTool) Category() string { return "platform" }
 
 func (t *PlatformToolsTool) Description() string {
 	return "List all registered tools with their names and descriptions."
@@ -187,6 +193,8 @@ func NewDelegateTaskTool(registry *agent.AgentRegistry) *DelegateTaskTool {
 }
 
 func (t *DelegateTaskTool) Name() string { return "delegate_task" }
+
+func (t *DelegateTaskTool) Category() string { return "platform" }
 
 func (t *DelegateTaskTool) Description() string {
 	return "Delegate a task to a specific specialist agent by ID. Returns the agent's response. Use platform_agents first to discover available agents."
@@ -394,6 +402,8 @@ func NewSessionHistoryTool(
 }
 
 func (t *SessionHistoryTool) Name() string { return "session_history" }
+
+func (t *SessionHistoryTool) Category() string { return "platform" }
 
 func (t *SessionHistoryTool) Description() string {
 	return "Query recent session activity including completed tasks, work summary, and conversation history. Use this to provide reports about what was accomplished."

@@ -25,6 +25,8 @@ func NewASTParseTool(parser *ast.ParserManager) (*ASTParseTool, error) {
 
 func (t *ASTParseTool) Name() string { return "ast_parse" }
 
+func (t *ASTParseTool) Category() string { return "code" }
+
 func (t *ASTParseTool) Description() string {
 	return `Parse source code into an abstract syntax tree. Can parse from a file path or inline source code.
 Supports: Go, Python, TypeScript, JavaScript, Rust, C, C++, Java, Ruby, YAML, TOML, Bash, and more.`

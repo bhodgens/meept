@@ -170,6 +170,72 @@ func (r *Registry) GetDefinitions() []llm.ToolDefinition {
 	return r.ToLLMDefinitions()
 }
 
+// ToolInfo holds basic tool metadata for listing/reporting.
+type ToolInfo struct {
+	Name        string
+	Description string
+}
+
+// CategoryTools groups tools by their category.
+type CategoryTools struct {
+	Category string
+	Tools    []ToolInfo
+}
+
+// ToolsByCategory returns all registered tools grouped by their category.
+// Tools that don't implement Categorizer are placed in the "general" category.
+// Returns a map of category name -> sorted list of tool names.
+func (r *Registry) ToolsByCategory() map[string][]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[string][]string)
+	for _, tool := range r.tools {
+		cat := GetCategory(tool)
+		result[cat] = append(result[cat], tool.Name())
+	}
+
+	// Sort tool names within each category
+	for cat := range result {
+		sort.Strings(result[cat])
+	}
+
+	return result
+}
+
+// CategorizedTools returns all registered tools grouped by category with their descriptions.
+// Returns a sorted slice of CategoryTools, ordered by category name.
+func (r *Registry) CategorizedTools() []CategoryTools {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	catMap := make(map[string][]ToolInfo)
+	for _, tool := range r.tools {
+		cat := GetCategory(tool)
+		catMap[cat] = append(catMap[cat], ToolInfo{
+			Name:        tool.Name(),
+			Description: tool.Description(),
+		})
+	}
+
+	result := make([]CategoryTools, 0, len(catMap))
+	for cat, tools := range catMap {
+		sort.Slice(tools, func(i, j int) bool {
+			return tools[i].Name < tools[j].Name
+		})
+		result = append(result, CategoryTools{
+			Category: cat,
+			Tools:    tools,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Category < result[j].Category
+	})
+
+	return result
+}
+
 // ToolRetryPolicy defines retry semantics for a specific tool.
 //
 //nolint:revive // stutter with package name is intentional for API clarity

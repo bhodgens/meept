@@ -21,6 +21,8 @@ func NewScheduleDeleteTool(sched *scheduler.Scheduler) *ScheduleDeleteTool {
 
 func (t *ScheduleDeleteTool) Name() string { return "schedule_delete" }
 
+func (t *ScheduleDeleteTool) Category() string { return "scheduling" }
+
 func (t *ScheduleDeleteTool) Description() string {
 	return "Delete a scheduled job by its ID. This removes the job from the scheduler permanently."
 }
@@ -87,6 +89,8 @@ func NewSchedulePauseTool(sched *scheduler.Scheduler) *SchedulePauseTool {
 }
 
 func (t *SchedulePauseTool) Name() string { return "schedule_pause" }
+
+func (t *SchedulePauseTool) Category() string { return "scheduling" }
 
 func (t *SchedulePauseTool) Description() string {
 	return "Pause a scheduled job. The job remains configured but won't run until resumed."
@@ -155,6 +159,8 @@ func NewScheduleResumeTool(sched *scheduler.Scheduler) *ScheduleResumeTool {
 
 func (t *ScheduleResumeTool) Name() string { return "schedule_resume" }
 
+func (t *ScheduleResumeTool) Category() string { return "scheduling" }
+
 func (t *ScheduleResumeTool) Description() string {
 	return "Resume a previously paused scheduled job."
 }
@@ -221,6 +227,8 @@ func NewScheduleRunNowTool(sched *scheduler.Scheduler) *ScheduleRunNowTool {
 }
 
 func (t *ScheduleRunNowTool) Name() string { return "schedule_run_now" }
+
+func (t *ScheduleRunNowTool) Category() string { return "scheduling" }
 
 func (t *ScheduleRunNowTool) Description() string {
 	return "Trigger immediate execution of a scheduled job, independent of its schedule."

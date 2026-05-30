@@ -76,6 +76,8 @@ func NewWebSearchTool(timeout time.Duration) *WebSearchTool {
 
 func (t *WebSearchTool) Name() string { return "web_search" }
 
+func (t *WebSearchTool) Category() string { return "web" }
+
 func (t *WebSearchTool) Description() string {
 	return "Search the web using DuckDuckGo and return results with titles, URLs, and snippets. Useful for finding current information, researching topics, and discovering relevant web pages."
 }

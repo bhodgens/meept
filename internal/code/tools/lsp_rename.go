@@ -27,6 +27,8 @@ func NewLSPRenameTool(manager *lsp.Manager) (*LSPRenameTool, error) {
 
 func (t *LSPRenameTool) Name() string { return "lsp_rename" }
 
+func (t *LSPRenameTool) Category() string { return "code" }
+
 func (t *LSPRenameTool) Description() string {
 	return `Rename a symbol at a specific location and update all references across the workspace.
 If apply is true, the changes are written to disk. If false, returns the planned changes without modifying files.

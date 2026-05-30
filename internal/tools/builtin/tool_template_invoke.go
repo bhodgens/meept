@@ -40,6 +40,8 @@ func NewTemplateInvokeTool(registry *templates.Registry) *TemplateInvokeTool {
 
 func (t *TemplateInvokeTool) Name() string { return "template_invoke" }
 
+func (t *TemplateInvokeTool) Category() string { return "templates" }
+
 func (t *TemplateInvokeTool) Description() string {
 	return "Invoke a prompt template by name with optional arguments. " +
 		"Use template_list to discover available templates. " +

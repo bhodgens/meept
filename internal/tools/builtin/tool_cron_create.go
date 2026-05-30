@@ -25,6 +25,8 @@ func NewCronCreateTool(sched *scheduler.Scheduler) *CronCreateTool {
 
 func (t *CronCreateTool) Name() string { return "cron_create" }
 
+func (t *CronCreateTool) Category() string { return "scheduling" }
+
 func (t *CronCreateTool) Description() string {
 	return "Create a cron-style recurring job with human-readable scheduling options. Supports common intervals like 'daily', 'hourly', 'weekly', or custom cron expressions."
 }

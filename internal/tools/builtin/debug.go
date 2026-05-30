@@ -28,6 +28,8 @@ func NewDebugTool(manager *debug.Manager, checker *security.PermissionChecker) *
 
 func (t *DebugTool) Name() string { return "debug" }
 
+func (t *DebugTool) Category() string { return "debug" }
+
 func (t *DebugTool) Description() string {
 	return "Debug a program using the Debug Adapter Protocol (DAP). " +
 		"Supports launching programs, setting breakpoints, stepping through code, " +

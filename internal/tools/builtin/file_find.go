@@ -26,6 +26,8 @@ func NewFileFindTool(checker *security.PermissionChecker) *FileFindTool {
 
 func (t *FileFindTool) Name() string { return "file_find" }
 
+func (t *FileFindTool) Category() string { return "filesystem" }
+
 func (t *FileFindTool) Description() string {
 	return "Search for files and directories matching a glob pattern. Walks the directory tree recursively. Skips .git directories."
 }

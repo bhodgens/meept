@@ -26,6 +26,8 @@ func NewASTSymbolsTool(parser *ast.ParserManager) (*ASTSymbolsTool, error) {
 
 func (t *ASTSymbolsTool) Name() string { return "ast_symbols" }
 
+func (t *ASTSymbolsTool) Category() string { return "code" }
+
 func (t *ASTSymbolsTool) Description() string {
 	return `Extract code symbols (functions, classes, methods, interfaces, etc.) from source files.
 Returns symbol names, kinds, locations, and signatures. Useful for understanding code structure.`

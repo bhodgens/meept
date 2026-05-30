@@ -41,6 +41,8 @@ func NewReadFileTool(checker *security.PermissionChecker, readCache *ReadCache) 
 
 func (t *ReadFileTool) Name() string { return "file_read" }
 
+func (t *ReadFileTool) Category() string { return "filesystem" }
+
 func (t *ReadFileTool) Description() string {
 	return "Read the contents of a file at the given path. Returns the text content. Optionally read a specific line range."
 }
@@ -259,6 +261,8 @@ func (t *WriteFileTool) SetLSPNotifier(notifier LSPWriteNotifier) {
 
 func (t *WriteFileTool) Name() string { return "file_write" }
 
+func (t *WriteFileTool) Category() string { return "filesystem" }
+
 func (t *WriteFileTool) Description() string {
 	return "Write text content to a file. Creates the file if it does not exist, overwrites if it does. Parent directories are created automatically."
 }
@@ -436,6 +440,8 @@ func NewDeleteFileTool(checker *security.PermissionChecker) *DeleteFileTool {
 
 func (t *DeleteFileTool) Name() string { return "file_delete" }
 
+func (t *DeleteFileTool) Category() string { return "filesystem" }
+
 func (t *DeleteFileTool) Description() string {
 	return "Delete a file at the given path. This is a destructive operation and cannot be undone."
 }
@@ -520,6 +526,8 @@ func NewListDirectoryTool(checker *security.PermissionChecker) *ListDirectoryToo
 }
 
 func (t *ListDirectoryTool) Name() string { return "list_directory" }
+
+func (t *ListDirectoryTool) Category() string { return "filesystem" }
 
 func (t *ListDirectoryTool) Description() string {
 	return "List files and directories at the given path. Returns names, types, and sizes."

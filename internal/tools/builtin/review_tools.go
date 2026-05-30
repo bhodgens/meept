@@ -51,6 +51,8 @@ func DefaultReviewerMapping() map[string]string {
 
 func (t *RequestReviewTool) Name() string { return "request_review" }
 
+func (t *RequestReviewTool) Category() string { return "platform" }
+
 func (t *RequestReviewTool) Description() string {
 	return "Request an inline code review from a reviewer agent. Call this after completing a logical unit of work (e.g., after writing a file, after a set of changes). Returns structured feedback: approved/rejected with specific issues. If rejected, address the feedback and continue."
 }

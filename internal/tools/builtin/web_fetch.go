@@ -77,6 +77,8 @@ func NewWebFetchTool(timeout time.Duration, maxLength int) *WebFetchTool {
 
 func (t *WebFetchTool) Name() string { return "web_fetch" }
 
+func (t *WebFetchTool) Category() string { return "web" }
+
 func (t *WebFetchTool) Description() string {
 	return "Fetch the content of a URL and return it as plain text. HTML is automatically stripped. Useful for reading web pages, API responses, and documentation."
 }

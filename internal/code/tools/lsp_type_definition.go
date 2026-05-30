@@ -25,6 +25,8 @@ func NewLSPTypeDefinitionTool(manager *lsp.Manager) (*LSPTypeDefinitionTool, err
 
 func (t *LSPTypeDefinitionTool) Name() string { return "lsp_type_definition" }
 
+func (t *LSPTypeDefinitionTool) Category() string { return "code" }
+
 func (t *LSPTypeDefinitionTool) Description() string {
 	return `Find the type definition of a symbol at a specific location in code.
 Returns the file path, line, and column where the symbol's type is defined.

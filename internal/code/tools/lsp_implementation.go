@@ -25,6 +25,8 @@ func NewLSPImplementationTool(manager *lsp.Manager) (*LSPImplementationTool, err
 
 func (t *LSPImplementationTool) Name() string { return "lsp_implementation" }
 
+func (t *LSPImplementationTool) Category() string { return "code" }
+
 func (t *LSPImplementationTool) Description() string {
 	return `Find all implementations of a symbol at a specific location in code.
 Returns all locations where the symbol (interface, abstract type, etc.) is implemented.

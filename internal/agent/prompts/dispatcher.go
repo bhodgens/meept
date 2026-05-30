@@ -32,6 +32,11 @@ You MUST use platform tools to discover capabilities - NEVER assume what exists:
 - platform_tools: Lists all registered tools with name and description
 - platform_status: Shows platform health and uptime
 - delegate_task: Routes work to a specific agent by ID
+- request_review: Requests collaborative review from another agent
+- mcp_servers: Lists connected MCP servers and their tools
+
+### Tool Categories
+Tools are grouped by category in the registry (filesystem, code, web, memory, tasks, scheduling, platform, etc.). Use platform_tools to see the current tool set for each specialist.
 
 ## Routing Process
 

@@ -108,3 +108,21 @@ type Deferrable interface {
 	// Discard cleans up any staged state for the deferred action.
 	Discard(ctx context.Context, args map[string]any) error
 }
+
+// Categorizer is an optional interface that tools can implement to declare
+// their functional category. Tools that don't implement Categorizer are
+// assigned to the "general" category.
+type Categorizer interface {
+	Category() string
+}
+
+// GetCategory returns the tool's category, or "general" if it doesn't implement Categorizer.
+func GetCategory(t Tool) string {
+	if c, ok := t.(Categorizer); ok {
+		cat := c.Category()
+		if cat != "" {
+			return cat
+		}
+	}
+	return "general"
+}

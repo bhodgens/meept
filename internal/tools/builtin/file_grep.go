@@ -28,6 +28,8 @@ func NewFileGrepTool(checker *security.PermissionChecker) *FileGrepTool {
 
 func (t *FileGrepTool) Name() string { return "file_grep" }
 
+func (t *FileGrepTool) Category() string { return "filesystem" }
+
 func (t *FileGrepTool) Description() string {
 	return "Search for a regex pattern in files. Supports content output with line numbers, file listing, and per-file count modes. Skips binary files and .git directories."
 }

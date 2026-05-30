@@ -24,6 +24,8 @@ func NewEntityCreateTool(graph *memory.KnowledgeGraph) *EntityCreateTool {
 
 func (t *EntityCreateTool) Name() string { return "entity_create" }
 
+func (t *EntityCreateTool) Category() string { return "knowledge_graph" }
+
 func (t *EntityCreateTool) Description() string {
 	return "Create a knowledge graph entity (node) representing a concept, person, or relationship. Entities are automatically created when storing memories, but this tool can explicitly ensure an entity exists before linking it."
 }
@@ -115,6 +117,8 @@ func NewEntityLinkTool(graph *memory.KnowledgeGraph) *EntityLinkTool {
 }
 
 func (t *EntityLinkTool) Name() string { return "entity_link" }
+
+func (t *EntityLinkTool) Category() string { return "knowledge_graph" }
 
 func (t *EntityLinkTool) Description() string {
 	return "Create a relationship (edge) between two entities in the knowledge graph. This establishes how concepts, people, or memories are connected."
@@ -261,6 +265,8 @@ func NewEntityQueryTool(graph *memory.KnowledgeGraph) *EntityQueryTool {
 }
 
 func (t *EntityQueryTool) Name() string { return "entity_query" }
+
+func (t *EntityQueryTool) Category() string { return "knowledge_graph" }
 
 func (t *EntityQueryTool) Description() string {
 	return "Query the knowledge graph to find related entities. Returns connected memories/entities with their relationship types and PageRank importance scores."
@@ -418,6 +424,8 @@ func NewGraphStatsTool(graph *memory.KnowledgeGraph) *GraphStatsTool {
 
 func (t *GraphStatsTool) Name() string { return "graph_stats" }
 
+func (t *GraphStatsTool) Category() string { return "knowledge_graph" }
+
 func (t *GraphStatsTool) Description() string {
 	return "Get statistics about the knowledge graph including node count, edge count, average degree, and community information. Useful for understanding the structure and connectivity of stored memories."
 }
@@ -483,6 +491,8 @@ func NewComputePageRankTool(graph *memory.KnowledgeGraph) *ComputePageRankTool {
 
 func (t *ComputePageRankTool) Name() string { return "compute_pagerank" }
 
+func (t *ComputePageRankTool) Category() string { return "knowledge_graph" }
+
 func (t *ComputePageRankTool) Description() string {
 	return "Recompute PageRank scores for all entities in the knowledge graph. PageRank measures importance based on connectivity. Run this after adding many edges to update importance scores."
 }
@@ -533,6 +543,8 @@ func NewDetectCommunitiesTool(graph *memory.KnowledgeGraph) *DetectCommunitiesTo
 }
 
 func (t *DetectCommunitiesTool) Name() string { return "detect_communities" }
+
+func (t *DetectCommunitiesTool) Category() string { return "knowledge_graph" }
 
 func (t *DetectCommunitiesTool) Description() string {
 	return "Run community detection on the knowledge graph to find clusters of related entities. Communities represent groups of tightly connected memories/concepts."
@@ -614,6 +626,8 @@ func NewGetCommunitySiblingsTool(graph *memory.KnowledgeGraph) *GetCommunitySibl
 }
 
 func (t *GetCommunitySiblingsTool) Name() string { return "community_siblings" }
+
+func (t *GetCommunitySiblingsTool) Category() string { return "knowledge_graph" }
 
 func (t *GetCommunitySiblingsTool) Description() string {
 	return "Find other entities that belong to the same community as the given entity. Useful for discovering related memories that are clustered together by the graph structure."

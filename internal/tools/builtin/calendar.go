@@ -23,6 +23,8 @@ func NewCalendarListTool(client *calendar.Client) *CalendarListTool {
 
 func (t *CalendarListTool) Name() string { return "calendar_list" }
 
+func (t *CalendarListTool) Category() string { return "calendar" }
+
 func (t *CalendarListTool) Description() string {
 	return "List calendar events within a time range. Requires start and end times in RFC3339 format."
 }
@@ -85,6 +87,8 @@ func NewCalendarCreateTool(client *calendar.Client) *CalendarCreateTool {
 }
 
 func (t *CalendarCreateTool) Name() string { return "calendar_create" }
+
+func (t *CalendarCreateTool) Category() string { return "calendar" }
 
 func (t *CalendarCreateTool) Description() string {
 	return "Create a new calendar event with a summary, start time, and end time."
@@ -167,6 +171,8 @@ func NewCalendarQuickAddTool(client *calendar.Client) *CalendarQuickAddTool {
 
 func (t *CalendarQuickAddTool) Name() string { return "calendar_quick_add" }
 
+func (t *CalendarQuickAddTool) Category() string { return "calendar" }
+
 func (t *CalendarQuickAddTool) Description() string {
 	return "Create a calendar event using natural language (e.g., 'Meeting with John tomorrow at 3pm')."
 }
@@ -209,6 +215,8 @@ func NewCalendarTodayTool(client *calendar.Client) *CalendarTodayTool {
 }
 
 func (t *CalendarTodayTool) Name() string { return "calendar_today" }
+
+func (t *CalendarTodayTool) Category() string { return "calendar" }
 
 func (t *CalendarTodayTool) Description() string {
 	return "Get all calendar events scheduled for today."

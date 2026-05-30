@@ -24,6 +24,8 @@ func NewMemoryStoreTool(manager *memory.Manager) *MemoryStoreTool {
 
 func (t *MemoryStoreTool) Name() string { return "memory_store" }
 
+func (t *MemoryStoreTool) Category() string { return "memory" }
+
 func (t *MemoryStoreTool) Description() string {
 	return "Store information in long-term memory for future reference. Use this to save important facts, decisions, learnings, or context that should be remembered across conversations."
 }
@@ -107,6 +109,8 @@ func NewMemorySearchTool(manager *memory.Manager) *MemorySearchTool {
 }
 
 func (t *MemorySearchTool) Name() string { return "memory_search" }
+
+func (t *MemorySearchTool) Category() string { return "memory" }
 
 func (t *MemorySearchTool) Description() string {
 	return "Search memories for relevant past context. Use this to find information that was previously stored, such as past conversations, decisions, or learnings."
@@ -212,6 +216,8 @@ func NewMemoryGetContextTool(manager *memory.Manager) *MemoryGetContextTool {
 
 func (t *MemoryGetContextTool) Name() string { return "memory_get_context" }
 
+func (t *MemoryGetContextTool) Category() string { return "memory" }
+
 func (t *MemoryGetContextTool) Description() string {
 	return "Get contextually relevant memories for a query. This performs a smart search across all memory types to gather the most helpful context for understanding or responding to a topic."
 }
@@ -298,6 +304,8 @@ func NewMemoryGetVersionTool(manager *memory.Manager) *MemoryGetVersionTool {
 
 func (t *MemoryGetVersionTool) Name() string { return "memory_get_version" }
 
+func (t *MemoryGetVersionTool) Category() string { return "memory" }
+
 func (t *MemoryGetVersionTool) Description() string {
 	return "Retrieve a specific version of a memory by its ID. Use this to view the history of changes to a memory or to recover a previous version. If version is not specified, returns the current version."
 }
@@ -374,6 +382,8 @@ func NewMemoryGetVersionHistoryTool(manager *memory.Manager) *MemoryGetVersionHi
 }
 
 func (t *MemoryGetVersionHistoryTool) Name() string { return "memory_get_version_history" }
+
+func (t *MemoryGetVersionHistoryTool) Category() string { return "memory" }
 
 func (t *MemoryGetVersionHistoryTool) Description() string {
 	return "Retrieve the version history of a memory by its ID. Returns all versions of the memory in chronological order, showing how it evolved over time. Each version includes its content, timestamp, and version metadata."
