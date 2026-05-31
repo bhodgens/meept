@@ -511,6 +511,8 @@ gui-deps:
 		exit 1; \
 	fi
 	@echo "Flutter version: $$(flutter --version --machine 2>/dev/null | head -1 || flutter --version)"
+	@echo "Resolving Flutter packages..."
+	cd $(FLUTTER_UI_DIR) && flutter pub get
 ifeq ($(GUI_PLATFORM),macos)
 	@if ! command -v pod >/dev/null 2>&1; then \
 		echo "CocoaPods not found. Installing..."; \
