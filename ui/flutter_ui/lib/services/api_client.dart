@@ -43,7 +43,7 @@ class ApiClient {
         final client = HttpClient();
         // Accept self-signed certificates for localhost connections
         client.badCertificateCallback =
-            (X509Certificate cert, String host, int port) => host == 'localhost' || host == '127.0.0.1';
+            (X509Certificate cert, String host, int port) => host == 'localhost' || host == '127.0.0.1' || host == '::1';
         return client;
       },
     );
@@ -172,7 +172,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> sendChatMessage({
     required String message,
-    String? conversationId,
+    required String conversationId,
     String? agentId,
   }) async {
     return post<Map<String, dynamic>>(
@@ -222,7 +222,7 @@ class ApiClient {
     final data = await post<Map<String, dynamic>>(
       '/sessions',
       data: {
-        'title': title,
+        'name': title,
         if (agentId != null) 'agent_id': agentId,
       },
     );
@@ -353,7 +353,10 @@ class ApiClient {
   // ===== Health Endpoint =====
 
   Future<Map<String, dynamic>> healthCheck() async {
-    return get<Map<String, dynamic>>('/health');
+    // Health is at root /health, not under /api/v1
+    final rootUrl = baseUrl.substring(0, baseUrl.indexOf('/api/'));
+    final response = await _dio.get('$rootUrl/health');
+    return response.data as Map<String, dynamic>;
   }
 
   // ===== Task Endpoints (write) =====

@@ -155,9 +155,15 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 		if _, err := rand.Read(key); err == nil {
 			generatedKey := base64.URLEncoding.EncodeToString(key)
 			cfg.APIKeys = []string{generatedKey}
-			logger.Info("auto-generated API key for first-run",
-				"key", generatedKey,
-				"hint", "save this key to your client configuration")
+			// Log only a prefix for identification; the full key must never
+			// appear in logs (it persists in log files/aggregation systems).
+			keyPrefix := generatedKey
+			if len(keyPrefix) > 8 {
+				keyPrefix = keyPrefix[:8] + "..."
+			}
+			logger.Warn("auto-generated API key for first-run",
+				"key_prefix", keyPrefix,
+				"hint", "retrieve the full key via `meept token generate` or store it securely")
 		}
 	}
 
@@ -710,7 +716,8 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusOK)

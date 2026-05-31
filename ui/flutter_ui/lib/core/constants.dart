@@ -10,7 +10,7 @@ abstract class AppConstants {
 
   // Connection
   static const Duration connectionTimeout = Duration(seconds: 30);
-  static const Duration receiveTimeout = Duration(seconds: 30);
+  static const Duration receiveTimeout = Duration(minutes: 5);
   static const Duration pingInterval = Duration(seconds: 30);
   static const int maxRetries = 3;
 

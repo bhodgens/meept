@@ -89,26 +89,26 @@ class ChatMessage extends Equatable {
 
 class ChatRequest extends Equatable {
   final String message;
-  final String? sessionId;
+  final String? conversationId;
   final String? agentId;
   final List<ChatMessage>? history;
 
   const ChatRequest({
     required this.message,
-    this.sessionId,
+    this.conversationId,
     this.agentId,
     this.history,
   });
 
   Map<String, dynamic> toJson() => {
         'message': message,
-        if (sessionId != null) 'session_id': sessionId,
+        if (conversationId != null) 'conversation_id': conversationId,
         if (agentId != null) 'agent_id': agentId,
         if (history != null) 'history': history!.map((m) => m.toJson()).toList(),
       };
 
   @override
-  List<Object?> get props => [message, sessionId, agentId, history];
+  List<Object?> get props => [message, conversationId, agentId, history];
 }
 
 // ===== Session Models =====
@@ -209,7 +209,7 @@ class Task extends Equatable {
         title: json['name'] as String? ?? json['title'] as String? ?? '',
         description: json['description'] as String? ?? '',
         status: json['state'] as String? ?? json['status'] as String? ?? 'pending',
-        agentId: json['agent_id'] as String?,
+        agentId: json['agent_id'] as String? ?? json['assigned_agent'] as String?,
         sessionId: json['session_id'] as String?,
         createdAt: DateTime.parse(json['created_at'] as String),
         updatedAt: json['updated_at'] != null
@@ -360,7 +360,7 @@ class Job extends Equatable {
   factory Job.fromJson(Map<String, dynamic> json) => Job(
         id: json['id'] as String,
         type: json['type'] as String,
-        status: json['status'] as String,
+        status: json['state'] as String? ?? json['status'] as String? ?? 'pending',
         agentId: json['agent_id'] as String?,
         payload: json['payload'] as Map<String, dynamic>?,
         createdAt: DateTime.parse(json['created_at'] as String),

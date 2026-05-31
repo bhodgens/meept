@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart' show IOWebSocketChannel;
 import '../core/constants.dart';
@@ -40,6 +40,8 @@ class WebSocketService {
 
   // Reconnect tracking
   int _retryCount = 0;
+  bool _disposed = false;
+  Timer? _pongTimeoutTimer;
 
   /// Whether to use TLS (WSS protocol). Defaults to true for production.
   final bool useTls;
@@ -84,7 +86,8 @@ class WebSocketService {
 
   /// Connect to WebSocket
   Future<void> connect({String? path}) async {
-    if (_isDisposed || _isConnected || _isConnOpen || _isConnecting || _wasExplicitlyDisconnected) return;
+    _wasExplicitlyDisconnected = false;
+    if (_isDisposed || _isConnected || _isConnOpen || _isConnecting) return;
     _isConnecting = true;
 
     try {
@@ -142,13 +145,20 @@ class WebSocketService {
             // message['job_id'], message['role'] etc. directly.
             final flatMessage = _flattenWSMessage(message);
 
-            if (flatMessage['type'] == 'error') {
+            final type = flatMessage['type'] as String?;
+
+            if (type == 'error') {
               if (!_errorController.isClosed) {
                 _errorController.add(flatMessage['message'] ?? 'Server error');
               }
             }
 
-            if (flatMessage['type'] == 'subscribed') {
+            if (type == 'pong') {
+              _pongTimeoutTimer?.cancel();
+              _pongTimeoutTimer = null;
+            }
+
+            if (type == 'subscribed') {
               debugPrint('WebSocket subscribed: ${flatMessage['channel']}');
             }
 
@@ -158,19 +168,13 @@ class WebSocketService {
 
             if (!_isConnOpen) {
               _isConnOpen = true;
-              final type = flatMessage['type'] as String?;
-              // Mark connected on handshake messages (ping/pong/status)
-              if (type == 'ping' || type == 'pong' || type == 'status') {
-                _isConnected = true;
-                if (!_connectionController.isClosed) {
-                  _connectionController.add(true);
-                }
-                _startPingTimer();
-                _retryCount = 0;
-                // Flush any subscriptions that were requested before
-                // the connection was established.
-                _flushPendingSubscriptions();
+              _isConnected = true;
+              if (!_connectionController.isClosed) {
+                _connectionController.add(true);
               }
+              _startPingTimer();
+              _retryCount = 0;
+              _flushPendingSubscriptions();
             }
           } catch (e) {
             if (!_errorController.isClosed) {
@@ -294,6 +298,8 @@ class WebSocketService {
 
   /// Disconnect from WebSocket and dispose resources.
   void disconnect() {
+    if (_disposed) return;
+    _disposed = true;
     _wasExplicitlyDisconnected = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
@@ -331,8 +337,19 @@ class WebSocketService {
 
   void _startPingTimer() {
     _pingTimer?.cancel();
+    _pongTimeoutTimer?.cancel();
     _pingTimer = Timer.periodic(AppConstants.pingInterval, (_) {
       send({'type': 'ping', 'timestamp': DateTime.now().toIso8601String()});
+      _pongTimeoutTimer = Timer(const Duration(seconds: 10), () {
+        if (_isConnected) {
+          _isConnected = false;
+          _isConnOpen = false;
+          if (!_connectionController.isClosed) {
+            _connectionController.add(false);
+          }
+          _handleReconnect();
+        }
+      });
     });
   }
 
@@ -345,13 +362,13 @@ class WebSocketService {
     // Track the subscription even if not connected yet; it will be
     // flushed once the connection is established.
     _chatSubscriptions[sessionId] = SessionSubscription(sessionId);
-    // Attempt to send immediately; if not connected, _flushPendingSubscriptions
-    // will resend on connect.
-    send({
-      'type': 'subscribe',
-      'channel': 'chat',
-      'session_id': sessionId,
-    });
+    if (_isConnected) {
+      send({
+        'type': 'subscribe',
+        'channel': 'chat',
+        'session_id': sessionId,
+      });
+    }
 
     return _messageController.stream.where((m) {
       final type = m['type'] as String?;

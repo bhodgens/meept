@@ -60,14 +60,17 @@ class _AppLifecycleWrapper extends ConsumerStatefulWidget {
 class _AppLifecycleWrapperState
     extends ConsumerState<_AppLifecycleWrapper>
     with WidgetsBindingObserver {
-  late final WebSocketService _websocket;
   Timer? _reconnectDelay;
+
+  /// Always returns the current WebSocketService instance from the provider.
+  WebSocketService get _websocket => ref.read(websocketProvider);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _websocket = ref.read(websocketProvider);
+    // Eagerly start the connection monitor so health checks run.
+    ref.read(connectionMonitorProvider);
   }
 
   @override
@@ -75,7 +78,7 @@ class _AppLifecycleWrapperState
     _reconnectDelay?.cancel();
     _reconnectDelay = null;
     WidgetsBinding.instance.removeObserver(this);
-    _websocket.disconnect();
+    _websocket.pause();
     super.dispose();
   }
 

@@ -31,8 +31,8 @@ func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, services.ErrUnauthorized):
 		s.writeError(w, http.StatusUnauthorized, err.Error())
 	default:
-		s.logger.Debug("service error", "error", err)
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+		s.logger.Error("service error", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "internal server error")
 	}
 }
 
