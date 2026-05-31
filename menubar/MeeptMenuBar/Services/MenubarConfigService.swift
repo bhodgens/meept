@@ -12,9 +12,11 @@ struct MenubarConfig: Codable {
 
     struct DaemonConfig: Codable {
         var httpURL: String
+        var apiToken: String?
 
         enum CodingKeys: String, CodingKey {
             case httpURL = "http_url"
+            case apiToken = "api_token"
         }
     }
 
@@ -38,7 +40,7 @@ struct MenubarConfig: Codable {
 
 extension MenubarConfig {
     static let `default` = MenubarConfig(
-        daemon: DaemonConfig(httpURL: "http://localhost:8081"),
+        daemon: DaemonConfig(httpURL: "https://localhost:8081", apiToken: nil),
         ui: UIConfig(showInMenuBar: true, startAtLogin: false, iconStyle: "icon"),
         notifications: NotificationsConfig(enabled: true, level: "errors_only")
     )
@@ -56,6 +58,10 @@ class MenubarConfigService {
 
     var daemonBaseURL: String {
         return config.daemon.httpURL
+    }
+
+    var apiToken: String? {
+        return config.daemon.apiToken
     }
 
     var showInMenuBar: Bool {
@@ -116,11 +122,20 @@ class MenubarConfigService {
             }
 
             // Remove // comments
+            var cleanLine: String
             if let slashIndex = line.range(of: "//") {
-                result += String(line[..<slashIndex.lowerBound]) + "\n"
+                cleanLine = String(line[..<slashIndex.lowerBound])
             } else {
-                result += line + "\n"
+                cleanLine = line
             }
+
+            // Strip trailing commas (last property before } or ])
+            cleanLine = cleanLine.trimmingCharacters(in: .whitespaces)
+            if cleanLine.hasSuffix(",") && !cleanLine.contains("{") && !cleanLine.contains("[") {
+                cleanLine = String(cleanLine.dropLast()).trimmingCharacters(in: .whitespaces)
+            }
+
+            result += cleanLine + "\n"
         }
 
         return result

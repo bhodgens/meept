@@ -9,7 +9,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var dashboardWindow: NSWindow?
 
     private let menubarConfig = MenubarConfigService()
-    private lazy var apiClient = APIClient(baseURL: menubarConfig.daemonBaseURL)
+    private lazy var apiClient = APIClient(
+        baseURL: menubarConfig.daemonBaseURL,
+        apiToken: menubarConfig.apiToken
+    )
     private let daemonController = DaemonController()
     private var daemonStatus = DaemonStatus()
     private var isUpdating = false

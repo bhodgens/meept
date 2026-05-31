@@ -5,12 +5,17 @@ import '../core/constants.dart';
 import '../models/api_models.dart';
 import 'storage_service.dart';
 
-/// API client for Meept HTTP backend
+/// Build the base URL from host and port. HTTPS is mandatory.
+String _buildBaseUrl(String? host, int? port) {
+  return 'https://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}';
+}
+
+/// API client for Meept HTTP backend (always uses HTTPS).
 class ApiClient {
   final Dio _dio;
   final String baseUrl;
 
-  /// Create an API client with explicit [host], [port], [apiKey], and [useTls].
+  /// Create an API client with explicit [host], [port], and [apiKey].
   ///
   /// This constructor exists to allow test subclasses to redirect API
   /// calls without needing a live [StorageService].  Use the
@@ -19,13 +24,10 @@ class ApiClient {
     String? host,
     int? port,
     String? apiKey,
-    bool? useTls,
-  })  : baseUrl =
-            '${(useTls ?? true) ? 'https' : 'http'}://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}',
+  })  : baseUrl = _buildBaseUrl(host, port),
         _dio = Dio(
           BaseOptions(
-            baseUrl:
-                '${(useTls ?? true) ? 'https' : 'http'}://${host ?? AppConstants.defaultApiHost}:${port ?? AppConstants.defaultApiPort}/api/${AppConstants.apiVersion}',
+            baseUrl: _buildBaseUrl(host, port),
             connectTimeout: AppConstants.connectionTimeout,
             receiveTimeout: AppConstants.receiveTimeout,
             headers: {
@@ -41,7 +43,6 @@ class ApiClient {
     _dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
         final client = HttpClient();
-        // Accept self-signed certificates for localhost connections
         client.badCertificateCallback =
             (X509Certificate cert, String host, int port) => host == 'localhost' || host == '127.0.0.1' || host == '::1';
         return client;
@@ -59,7 +60,6 @@ class ApiClient {
     String? host = AppConstants.defaultApiHost;
     int? port = AppConstants.defaultApiPort;
     String? apiKey;
-    bool? useTls;
 
     if (storage != null) {
       host = storage.getApiHost() ?? host;
@@ -67,14 +67,12 @@ class ApiClient {
       // getApiKey() reads from SharedPreferences (sync) after init()
       // Key writes go to keychain + prefs, so prefs always have the latest
       apiKey = storage.getApiKey();
-      useTls = storage.getUseTls();
     }
 
     return ApiClient(
       host: host,
       port: port,
       apiKey: apiKey,
-      useTls: useTls ?? true, // Default to TLS for production
     );
   }
 
@@ -141,6 +139,13 @@ class ApiClient {
   }
 
   ApiClientException _handleError(DioException e) {
+    final statusCode = e.response?.statusCode;
+    final responseData = e.response?.data;
+    String? serverMessage;
+    if (responseData is Map) {
+      serverMessage = responseData['message'] as String? ?? responseData['error'] as String?;
+    }
+
     String message;
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
@@ -150,7 +155,19 @@ class ApiClient {
         message = 'Cannot connect to daemon at $baseUrl';
         break;
       case DioExceptionType.badResponse:
-        message = 'Server error: ${e.response?.statusCode}';
+        switch (statusCode) {
+          case 401:
+            message = serverMessage ?? 'Missing API token — configure in settings';
+            break;
+          case 418:
+            message = serverMessage ?? 'Invalid API token (HTTP 418)';
+            break;
+          case 426:
+            message = serverMessage ?? 'Use HTTPS for this endpoint (HTTP 426)';
+            break;
+          default:
+            message = serverMessage ?? 'Server error: $statusCode';
+        }
         break;
       case DioExceptionType.cancel:
         message = 'Request cancelled';
@@ -163,8 +180,8 @@ class ApiClient {
     }
     return ApiClientException(
       message: message,
-      statusCode: e.response?.statusCode ?? 0,
-      response: e.response?.data,
+      statusCode: statusCode ?? 0,
+      response: responseData,
     );
   }
 

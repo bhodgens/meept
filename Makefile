@@ -531,7 +531,20 @@ build-gui: gui-deps
 	@echo "Building meept-gui for $(GUI_PLATFORM)..."
 	cd $(FLUTTER_UI_DIR) && flutter build $(GUI_PLATFORM) --release
 ifeq ($(GUI_PLATFORM),macos)
-	cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app" $(BIN_DIR)/meept_gui.app
+	@echo "Setting version $(VERSION) in macOS Info.plist..."
+	@# Inject version into the built app bundle's Info.plist so the
+	@# menubar title and Finder name display the correct version.
+	@plutil -replace CFBundleName -string "Meept GUI Client v$(VERSION)" \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app/Contents/Info.plist"
+	@plutil -replace CFBundleShortVersionString -string "$(VERSION)" \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app/Contents/Info.plist"
+	@mv "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app" \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client v$(VERSION).app"
+	@# Re-sign ad-hoc after modifying Info.plist so macOS Gatekeeper is happy
+	@codesign --force --deep --sign - \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client v$(VERSION).app" >/dev/null 2>&1 || true
+	@rm -rf $(BIN_DIR)/meept_gui.app
+	@cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client v$(VERSION).app" $(BIN_DIR)/meept_gui.app
 	@echo "Built $(BIN_DIR)/meept_gui.app ($$(du -h $(BIN_DIR)/meept_gui.app | cut -f1))"
 	@touch $(BIN_DIR)/meept_gui.app/.metadata_never_index
 	@rm -rf $(FLUTTER_UI_DIR)/build/macos/Build/Products/Release

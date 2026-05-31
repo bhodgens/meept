@@ -1,8 +1,9 @@
 // Menubar app configuration
 {
-  // Connection to meept daemon (menubar always uses HTTP)
+  // Connection to meept daemon (always uses HTTPS)
   "daemon": {
     "http_url": "https://localhost:8081",
+    "api_token": "meept_ViIoYx1EjcjQmOTHHYnO9oeAq2JMi3bQ_Rk2hvnTJYk="
   },
 
   // UI preferences

@@ -86,15 +86,6 @@ class StorageService {
     await _prefs?.remove(AppConstants.apiKeyPref);
   }
 
-  // ------ TLS Configuration ------
-
-  /// Whether to use TLS (HTTPS/WSS) for connections.
-  bool? getUseTls() => _prefs?.getBool(AppConstants.useTlsPref);
-
-  Future<void> setUseTls(bool useTls) async {
-    await _prefs?.setBool(AppConstants.useTlsPref, useTls);
-  }
-
   // ------ Theme ------
 
   String? getTheme() => _prefs?.getString(AppConstants.themePref);

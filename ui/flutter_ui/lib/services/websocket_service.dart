@@ -43,14 +43,10 @@ class WebSocketService {
   bool _disposed = false;
   Timer? _pongTimeoutTimer;
 
-  /// Whether to use TLS (WSS protocol). Defaults to true for production.
-  final bool useTls;
-
   WebSocketService({
     String? host,
     int? port,
     String? apiKey,
-    this.useTls = true, // Default to WSS for production security
   })  : _host = host ?? AppConstants.defaultApiHost,
         _port = port ?? AppConstants.defaultApiPort,
         _apiKey = apiKey;
@@ -64,7 +60,6 @@ class WebSocketService {
       host: storage.getApiHost(),
       port: storage.getApiPort(),
       apiKey: storage.getApiKey(), // Sync read from SharedPreferences
-      useTls: storage.getUseTls() ?? true, // Default to TLS for production
     );
   }
 
@@ -94,9 +89,8 @@ class WebSocketService {
       _isConnOpen = false;
 
       final wsPath = path ?? '/ws';
-      // Use wss:// for secure WebSocket connections (default for production)
-      final protocol = useTls ? 'wss' : 'ws';
-      final uri = Uri.parse('$protocol://$_host:$_port$wsPath');
+      // Always use wss:// — HTTPS is mandatory
+      final uri = Uri.parse('wss://$_host:$_port$wsPath');
 
       // Use Authorization header for WebSocket authentication on
       // desktop/mobile platforms.  Flutter Web's underlying browser
