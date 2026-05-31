@@ -712,6 +712,15 @@ func TestUnifiedHTTPServer_WebSocketConnectionAndBroadcast(t *testing.T) {
 	}
 	defer conn.Close()
 
+	// Consume the welcome status message sent on connect.
+	var welcome map[string]any
+	if err := websocket.JSON.Receive(conn, &welcome); err != nil {
+		t.Fatalf("failed to read welcome message: %v", err)
+	}
+	if welcome["type"] != "status" {
+		t.Fatalf("expected welcome type 'status', got %v", welcome["type"])
+	}
+
 	// Publish a message on the bus — the WS forwarding goroutine should broadcast it.
 	// Note: use a single-segment topic because the bus subscribes with "*" which
 	// only matches single-segment topics in segment-based wildcard matching.
@@ -765,12 +774,23 @@ func TestUnifiedHTTPServer_WebSocketClientCount(t *testing.T) {
 	}
 	defer conn2.Close()
 
+	// Consume welcome status messages from both connections.
+	var welcome1, welcome2 map[string]any
+	conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := websocket.JSON.Receive(conn1, &welcome1); err != nil {
+		t.Fatalf("failed to read conn1 welcome: %v", err)
+	}
+	if err := websocket.JSON.Receive(conn2, &welcome2); err != nil {
+		t.Fatalf("failed to read conn2 welcome: %v", err)
+	}
+
 	// Give a moment for registration
 	time.Sleep(50 * time.Millisecond)
 
 	// Both clients connected — publish a message to verify they're alive.
-	// Use a single-segment topic to match the "*" wildcard subscription.
-	msgBus.Publish("taskstatus", &models.BusMessage{
+	// Use a multi-segment topic matching "task.*" to trigger "job_update".
+	msgBus.Publish("task.status", &models.BusMessage{
 		ID:      "ws-count-1",
 		Type:    models.MessageTypeEvent,
 		Source:  "test",
@@ -778,7 +798,7 @@ func TestUnifiedHTTPServer_WebSocketClientCount(t *testing.T) {
 	})
 
 	// Read from both connections to verify they're alive.
-	// The WS event transformer converts "task.status" -> type "job_update"
+	// The WS event transformer converts "task.*" -> type "job_update"
 	var msg1, msg2 map[string]any
 	conn1.SetReadDeadline(time.Now().Add(2 * time.Second))
 	conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
@@ -1144,6 +1164,8 @@ func TestUnifiedHTTPServer_RuntimeStatus_WithManager(t *testing.T) {
 
 	cfg := http.DefaultServerConfig()
 	cfg.Addr = ":0"
+	cfg.UseTLS = false
+	cfg.RequireAuth = false
 	srv := http.NewServer(cfg, nil, nil, nil, svcRegistry, nil)
 	if srv == nil {
 		t.Fatal("failed to create server")

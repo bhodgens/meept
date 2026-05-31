@@ -34,8 +34,10 @@ class ApiClient {
             },
           ),
         ) {
-    // Configure Dio to accept self-signed certificates for localhost
-    // This is safe for production since we're only connecting to localhost
+    // Configure Dio to accept self-signed certificates for localhost.
+    // TODO: pin the specific certificate fingerprint instead of blanket
+    // hostname acceptance. Accepting any self-signed cert for localhost
+    // exposes the connection to active local MITM attacks.
     _dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () {
         final client = HttpClient();

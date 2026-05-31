@@ -22,7 +22,6 @@ func NewSSEWriter(w http.ResponseWriter) (*SSEWriter, error) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
 
 	return &SSEWriter{w: w, flusher: flusher}, nil

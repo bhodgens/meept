@@ -46,8 +46,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.ChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -177,8 +176,7 @@ func (s *Server) handleMemoryQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.MemoryQueryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -231,8 +229,7 @@ func (s *Server) handleMemoryExport(w http.ResponseWriter, r *http.Request) {
 		Format   string `json:"format"`
 		Category string `json:"category"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -261,8 +258,7 @@ func (s *Server) handleQueueEnqueue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.EnqueueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -331,8 +327,7 @@ func (s *Server) handleTaskCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.CreateTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -359,8 +354,11 @@ func (s *Server) handleTaskList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	sessionID := r.URL.Query().Get("session_id")
+
 	tasks, err := s.services.Task.List(r.Context(), services.TaskListRequest{
-		Limit: limit,
+		Limit:     limit,
+		SessionID: sessionID,
 	})
 	if err != nil {
 		s.handleServiceError(w, err)
@@ -409,8 +407,7 @@ func (s *Server) handleTaskUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.UpdateTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 	req.ID = id
@@ -455,8 +452,7 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.CreateSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -667,8 +663,7 @@ func (s *Server) handleSkillsExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.ExecuteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 	req.Slug = slug
@@ -708,8 +703,7 @@ func (s *Server) handleSelfImproveTrigger(w http.ResponseWriter, r *http.Request
 	}
 
 	var req services.TriggerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -747,8 +741,7 @@ func (s *Server) handleCacheClear(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.ClearCacheRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -768,8 +761,7 @@ func (s *Server) handleCacheInvalidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.InvalidateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -813,8 +805,7 @@ func (s *Server) handleSecurityCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.CheckRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -856,8 +847,7 @@ func (s *Server) handleSchedulerAddJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.AddJobRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -907,8 +897,7 @@ func (s *Server) handleSchedulerEnableJob(w http.ResponseWriter, r *http.Request
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1032,8 +1021,7 @@ func (s *Server) handleModelsSetDefault(w http.ResponseWriter, r *http.Request) 
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1109,8 +1097,7 @@ func (s *Server) handleModelsSetCredential(w http.ResponseWriter, r *http.Reques
 	var req struct {
 		APIKey string `json:"api_key"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1153,8 +1140,7 @@ func (s *Server) handleBusPublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.PublishRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1231,8 +1217,7 @@ func (s *Server) handleQueueClaim(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.ClaimRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1261,8 +1246,7 @@ func (s *Server) handleQueueComplete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Result any `json:"result"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1293,8 +1277,7 @@ func (s *Server) handleQueueFail(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Error string `json:"error"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1398,8 +1381,7 @@ func (s *Server) handleSessionAttach(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AgentID string `json:"agent_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1431,8 +1413,7 @@ func (s *Server) handleSessionDetach(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AgentID string `json:"agent_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1490,8 +1471,7 @@ func (s *Server) handleSessionBranch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TargetMessageID int64 `json:"target_message_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1553,8 +1533,7 @@ func (s *Server) handleSessionFork(w http.ResponseWriter, r *http.Request) {
 		FromMessageID int64  `json:"from_message_id"`
 		Name          string `json:"name,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1637,8 +1616,7 @@ func (s *Server) handleWorkerAdd(w http.ResponseWriter, r *http.Request) {
 		ID           string   `json:"id"`
 		Capabilities []string `json:"capabilities"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1685,8 +1663,7 @@ func (s *Server) handleWorkerScale(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DesiredCount int `json:"desired_count"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1727,8 +1704,7 @@ func (s *Server) handleSelfImproveGenerate(w http.ResponseWriter, r *http.Reques
 	var req struct {
 		ImprovementID string `json:"improvement_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1752,8 +1728,7 @@ func (s *Server) handleSelfImproveValidate(w http.ResponseWriter, r *http.Reques
 	var req struct {
 		ImprovementID string `json:"improvement_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1778,8 +1753,7 @@ func (s *Server) handleSelfImproveApply(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		ImprovementID string `json:"improvement_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1804,8 +1778,7 @@ func (s *Server) handleSelfImproveReject(w http.ResponseWriter, r *http.Request)
 		ImprovementID string `json:"improvement_id"`
 		Reason        string `json:"reason"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1830,8 +1803,7 @@ func (s *Server) handleChatSteer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.SteerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1852,8 +1824,7 @@ func (s *Server) handleChatSteerExplicit(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req services.SteerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1876,8 +1847,7 @@ func (s *Server) handleChatFollowUp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.FollowUpRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1934,8 +1904,7 @@ func (s *Server) handleQueueSteerRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.SteerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -1956,8 +1925,7 @@ func (s *Server) handleQueueFollowUpRoute(w http.ResponseWriter, r *http.Request
 	}
 
 	var req services.FollowUpRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2011,8 +1979,7 @@ func (s *Server) handleChatWithAgent(w http.ResponseWriter, r *http.Request) {
 		ConversationID string `json:"conversation_id"`
 		Source         string `json:"source,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2109,8 +2076,7 @@ func (s *Server) handleCalendarCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.CreateEventRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2137,8 +2103,7 @@ func (s *Server) handleCalendarUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.UpdateEventRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 	req.ID = eventID
@@ -2229,8 +2194,7 @@ func (s *Server) handleCalendarQuickAdd(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Text string `json:"text"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2283,8 +2247,7 @@ func (s *Server) handleTerminalExec(w http.ResponseWriter, r *http.Request) {
 		Command    string `json:"command"`
 		WorkingDir string `json:"working_dir,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2380,8 +2343,7 @@ func (s *Server) handleProjectRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.RegisterProjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2468,8 +2430,7 @@ func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path string `json:"path"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2519,8 +2480,7 @@ func (s *Server) handlePlanCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req services.CreatePlanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2572,8 +2532,7 @@ func (s *Server) handlePlanApprove(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"session_id"`
 		By        string `json:"by"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2608,8 +2567,7 @@ func (s *Server) handlePlanReject(w http.ResponseWriter, r *http.Request) {
 		By        string `json:"by"`
 		Reason    string `json:"reason"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2644,8 +2602,7 @@ func (s *Server) handlePlanConfirm(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"session_id"`
 		By        string `json:"by"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 
@@ -2679,8 +2636,7 @@ func (s *Server) handlePlanRevise(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"session_id"`
 		Feedback  string `json:"feedback"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &req) {
 		return
 	}
 

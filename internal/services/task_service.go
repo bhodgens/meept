@@ -20,6 +20,7 @@ func NewTaskService(reg *task.Registry) *TaskService {
 type CreateTaskRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
 }
 
 // Create creates a new task.
@@ -33,6 +34,10 @@ func (s *TaskService) Create(ctx context.Context, req CreateTaskRequest) (*task.
 	t, err := s.registry.Create(ctx, req.Name, req.Description)
 	if err != nil {
 		return nil, wrapError("task", "Create", err)
+	}
+	if req.SessionID != "" {
+		// Link session to task; error is non-fatal — task already exists
+		_ = s.registry.LinkSession(ctx, t.ID, req.SessionID)
 	}
 	return t, nil
 }
@@ -62,7 +67,8 @@ func (s *TaskService) Get(ctx context.Context, req GetTaskRequest) (*task.Task, 
 
 // TaskListRequest contains list parameters.
 type TaskListRequest struct {
-	Limit int `json:"limit,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // List returns tasks.
@@ -75,6 +81,10 @@ func (s *TaskService) List(ctx context.Context, req TaskListRequest) ([]*task.Ta
 	if limit <= 0 {
 		limit = 50
 	}
+	// Filter by session if provided
+	if req.SessionID != "" {
+		return s.registry.GetTasksForSession(ctx, req.SessionID)
+	}
 	tasks, err := s.registry.List(ctx, nil, limit)
 	if err != nil {
 		return nil, wrapError("task", "List", err)
@@ -86,6 +96,7 @@ func (s *TaskService) List(ctx context.Context, req TaskListRequest) ([]*task.Ta
 type UpdateTaskRequest struct {
 	ID    string `json:"id"`
 	State string `json:"state,omitempty"`
+	Name  string `json:"name,omitempty"`
 }
 
 // Update updates a task.
@@ -103,12 +114,20 @@ func (s *TaskService) Update(ctx context.Context, req UpdateTaskRequest) (*task.
 	if t == nil {
 		return nil, wrapError("task", "Update", ErrNotFound)
 	}
+	// Update name if provided
+	if req.Name != "" {
+		t.Name = req.Name
+	}
 	// Update state if provided
 	if req.State != "" {
-		if err := s.registry.UpdateState(ctx, req.ID, task.TaskState(req.State)); err != nil {
+		t.SetState(task.TaskState(req.State))
+	}
+	// Persist changes if either field was modified
+	if req.Name != "" || req.State != "" {
+		if err := s.registry.Update(ctx, t); err != nil {
 			return nil, wrapError("task", "Update", err)
 		}
-		// Reload task to get updated state
+		// Reload task to get fresh view
 		t, err = s.registry.Get(ctx, req.ID)
 		if err != nil {
 			return nil, wrapError("task", "Update", err)

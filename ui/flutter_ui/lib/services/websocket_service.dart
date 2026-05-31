@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' as io;
 import 'dart:math';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -101,15 +102,16 @@ class WebSocketService {
       // accepts the header from its auth middleware, but the browser
       // handshake on web only supports query-string credentials).
       if (!kIsWeb && _apiKey != null && _apiKey!.isNotEmpty) {
-        // Use dart:io WebSocket to pass custom headers (desktop/mobile)
-        // web_socket_channel's connect() only supports protocols, not headers.
-        // For WSS connections, accept self-signed certificates on localhost.
-        final channel = IOWebSocketChannel.connect(
-          uri,
+        // Use dart:io WebSocket.connect to pass custom headers and
+        // accept self-signed certificates for localhost WSS connections.
+        // IOWebSocketChannel.connect doesn't expose SecurityContext,
+        // so we create the raw WebSocket first, then wrap it.
+        final ws = await io.WebSocket.connect(
+          uri.toString(),
           headers: {'Authorization': 'Bearer $_apiKey'},
-          // Allow self-signed certificates for localhost WSS connections
-          // This is safe since we're only connecting to localhost
+          customClient: _createHttpClient(),
         );
+        final channel = IOWebSocketChannel(ws);
         // Guard: disconnect() may have been called while we awaited
         if (_isDisposed || _wasExplicitlyDisconnected) {
           await channel.sink.close();
@@ -139,6 +141,17 @@ class WebSocketService {
             // This allows consumers to access message['session_id'],
             // message['job_id'], message['role'] etc. directly.
             final flatMessage = _flattenWSMessage(message);
+
+            if (flatMessage['type'] == 'error') {
+              if (!_errorController.isClosed) {
+                _errorController.add(flatMessage['message'] ?? 'Server error');
+              }
+            }
+
+            if (flatMessage['type'] == 'subscribed') {
+              debugPrint('WebSocket subscribed: ${flatMessage['channel']}');
+            }
+
             if (!_messageController.isClosed) {
               _messageController.add(flatMessage);
             }
@@ -146,8 +159,8 @@ class WebSocketService {
             if (!_isConnOpen) {
               _isConnOpen = true;
               final type = flatMessage['type'] as String?;
-              // Only mark connected on handshake messages (ping/status)
-              if (type == 'ping' || type == 'status') {
+              // Mark connected on handshake messages (ping/pong/status)
+              if (type == 'ping' || type == 'pong' || type == 'status') {
                 _isConnected = true;
                 if (!_connectionController.isClosed) {
                   _connectionController.add(true);
@@ -391,6 +404,19 @@ class WebSocketService {
   /// Dispose all resources
   void dispose() {
     disconnect();
+  }
+
+  /// Create an HttpClient that accepts self-signed TLS certificates
+  /// for localhost connections.
+  /// TODO: pin the specific certificate fingerprint instead of blanket
+  /// hostname acceptance. Accepting any self-signed cert for localhost
+  /// exposes the connection to active local MITM attacks.
+  io.HttpClient _createHttpClient() {
+    final client = io.HttpClient();
+    client.badCertificateCallback =
+        (io.X509Certificate cert, String host, int port) =>
+            host == 'localhost' || host == '127.0.0.1' || host == '::1';
+    return client;
   }
 }
 

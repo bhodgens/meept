@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'services/storage_service.dart';
 import 'services/websocket_service.dart';
 import 'theme/cyberpunk_theme.dart';
+import 'core/constants.dart';
 import 'features/home/home_screen.dart';
 import 'providers/providers.dart';
 
@@ -33,7 +34,7 @@ class CyberpunkApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Meept Cyberpunk UI',
+      title: 'Meept GUI Client v${AppConstants.appVersion}',
       debugShowCheckedModeBanner: false,
       theme: CyberpunkTheme.darkTheme,
       home: const _AppLifecycleWrapper(child: HomeScreen()),

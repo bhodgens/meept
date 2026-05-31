@@ -7,9 +7,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-
+	"crypto/subtle"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,20 +36,25 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+const maxRequestBodySize = 1 << 20 // 1 MB
+
+var defaultWSOrigins = []string{"localhost", "127.0.0.1", "::1", "null", ""}
+
 // ServerConfig holds configuration for the HTTP server.
 type ServerConfig struct {
-	Addr           string        // Listen address (default: :8081)
-	ReadTimeout    time.Duration // Read timeout
-	WriteTimeout   time.Duration // Write timeout
-	MaxHeaderBytes int           // Max header size
-	EnableCORS     bool          // Enable CORS headers
-	APIKeys        []string      // Valid API keys for authentication
-	RequireAuth    bool          // Require API key authentication
-	UseTLS         bool          // Enable HTTPS (default: true)
-	TLSCertFile    string        // TLS certificate file path
-	TLSKeyFile     string        // TLS key file path
-	AutoTLSCert    bool          // Auto-generate self-signed cert if not exists
-	RESTEnabled    bool          // Enable REST API at /api/v1/* (default: true)
+	Addr                    string        // Listen address (default: :8081)
+	ReadTimeout             time.Duration // Read timeout
+	WriteTimeout            time.Duration // Write timeout
+	MaxHeaderBytes          int           // Max header size
+	EnableCORS              bool          // Enable CORS headers
+	APIKeys                 []string      // Valid API keys for authentication
+	RequireAuth             bool          // Require API key authentication
+	UseTLS                  bool          // Enable HTTPS (default: true)
+	TLSCertFile             string        // TLS certificate file path
+	TLSKeyFile              string        // TLS key file path
+	AutoTLSCert             bool          // Auto-generate self-signed cert if not exists
+	RESTEnabled             bool          // Enable REST API at /api/v1/* (default: true)
+	WebSocketAllowedOrigins []string      // Allowed origins for WebSocket (default: localhost, 127.0.0.1, ::1, null, "")
 }
 
 // DefaultServerConfig returns sensible defaults for the unified HTTP server.
@@ -140,6 +148,17 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 	}
 	if logger == nil {
 		logger = slog.Default()
+	}
+
+	if cfg.RequireAuth && len(cfg.APIKeys) == 0 {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err == nil {
+			generatedKey := base64.URLEncoding.EncodeToString(key)
+			cfg.APIKeys = []string{generatedKey}
+			logger.Info("auto-generated API key for first-run",
+				"key", generatedKey,
+				"hint", "save this key to your client configuration")
+		}
 	}
 
 	s := &Server{
@@ -297,12 +316,13 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 	case strings.HasPrefix(topic, "chat.") || topic == "chat_message":
 		// All chat-related events → chat_message
 		eventType = "chat_message"
-
-	default:
-		// Single-segment topics and other unrecognized multi-segment topics are
-		// treated as job_update to ensure the WS passthrough path keeps working
-		// for any topic not otherwise handled.
+	case strings.HasPrefix(topic, "metrics."):
+		eventType = "metrics_update"
+	case strings.HasPrefix(topic, "task.") || strings.HasPrefix(topic, "step.") || strings.HasPrefix(topic, "job."):
 		eventType = "job_update"
+	default:
+		// Generic fallback instead of mislabeling as job_update
+		eventType = "event"
 	}
 
 	if payload == nil {
@@ -405,6 +425,11 @@ func (s *Server) Start(ctx context.Context) error {
 		WriteTimeout:   s.config.WriteTimeout,
 		MaxHeaderBytes: s.config.MaxHeaderBytes,
 	}
+	// Disable HTTP/2 — the golang.org/x/net/websocket handler does not
+	// support HTTP/2 and Flutter's dart:io WebSocket expects HTTP/1.1
+	// upgrade.  Without this, TLS-enabled servers get PROTOCOL_ERROR on
+	// every request because Go enables HTTP/2 automatically with TLS.
+	s.server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 
 	if s.config.UseTLS {
 		s.logger.Info("unified HTTP server starting (TLS)", "addr", s.config.Addr, "tls", true)
@@ -672,7 +697,18 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		// CORS headers
 		if s.config.EnableCORS {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			origin := r.Header.Get("Origin")
+			if s.config.RequireAuth {
+				// Authenticated endpoints: never wildcard. Echo localhost origins only.
+				if origin == "" || isLocalOrigin(origin) {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					if origin != "" {
+						w.Header().Set("Access-Control-Allow-Credentials", "true")
+					}
+				}
+			} else {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -740,6 +776,34 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	s.writeJSON(w, status, map[string]string{"error": message})
 }
 
+// isLocalOrigin checks whether an Origin header is a safe local origin.
+func isLocalOrigin(origin string) bool {
+	if origin == "" || origin == "null" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	for _, allowed := range defaultWSOrigins {
+		if host == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// readJSON reads and decodes a JSON request body with a size limit.
+func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	return true
+}
+
 // handleHealth handles health check requests.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "ok"})
@@ -758,9 +822,7 @@ func (s *Server) handleGetClientConfig(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json5")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(content))
+	s.writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }
 
 // handleSaveClientConfig handles POST /api/v1/config/client.
@@ -773,8 +835,7 @@ func (s *Server) handleSaveClientConfig(w http.ResponseWriter, r *http.Request) 
 	var body struct {
 		Content string `json:"content"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &body) {
 		return
 	}
 
@@ -799,9 +860,7 @@ func (s *Server) handleGetModelsConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json5")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(content))
+	s.writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }
 
 // handleSaveModelsConfig handles POST /api/v1/config/models.
@@ -814,8 +873,7 @@ func (s *Server) handleSaveModelsConfig(w http.ResponseWriter, r *http.Request) 
 	var body struct {
 		Content string `json:"content"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &body) {
 		return
 	}
 
@@ -882,8 +940,7 @@ func (s *Server) handleSaveAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var agent Agent
-	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &agent) {
 		return
 	}
 
@@ -1085,9 +1142,7 @@ func (s *Server) handleGetMenubarConfig(w http.ResponseWriter, r *http.Request) 
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json5")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(content))
+	s.writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }
 
 // handleSaveMenubarConfig handles POST /api/v1/config/menubar.
@@ -1099,8 +1154,7 @@ func (s *Server) handleSaveMenubarConfig(w http.ResponseWriter, r *http.Request)
 	var body struct {
 		Content string `json:"content"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.writeError(w, http.StatusBadRequest, "invalid request body")
+	if !s.readJSON(w, r, &body) {
 		return
 	}
 	if err := s.configService.SaveMenubarConfig(body.Content); err != nil {
@@ -1153,7 +1207,7 @@ func (s *Server) ensureTLSCert() error {
 		},
 		NotBefore: notBefore,
 		NotAfter:  notAfter,
-		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage: []x509.ExtKeyUsage{
 			x509.ExtKeyUsageServerAuth,
 		},
@@ -1240,12 +1294,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			authHeader = "Bearer " + token
+		} else {
+			authHeader = strings.TrimPrefix(authHeader, "Bearer ")
 		}
 
-		// Validate token against configured API keys
+		// Validate token against configured API keys using constant-time compare
 		valid := false
 		for _, key := range s.config.APIKeys {
-			if strings.HasPrefix(authHeader, "Bearer "+key) {
+			if subtle.ConstantTimeCompare([]byte(authHeader), []byte(key)) == 1 {
 				valid = true
 				break
 			}
@@ -1256,11 +1312,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Use websocket.Server with custom handshake to skip origin checking
-	// (needed for desktop clients like Flutter that may not send Origin header)
+	allowedOrigins := s.config.WebSocketAllowedOrigins
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = defaultWSOrigins
+	}
+
 	wsServer := &websocket.Server{
 		Handler: websocket.Handler(func(conn *websocket.Conn) {
 			s.wsHub.Register(conn)
+			welcome := WSMessage{Type: "status", Data: []byte(`{"connected":true}`)}
+			_ = websocket.JSON.Send(conn, welcome)
 			defer s.wsHub.Unregister(conn)
 
 			for {
@@ -1272,8 +1333,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}),
 		Handshake: func(config *websocket.Config, request *http.Request) error {
-			// Skip origin checking - accept all WebSocket connections
-			// This is safe for localhost-only daemon
+			if !isLocalOrigin(request.Header.Get("Origin")) {
+				return fmt.Errorf("origin not allowed: %s", request.Header.Get("Origin"))
+			}
 			return nil
 		},
 	}

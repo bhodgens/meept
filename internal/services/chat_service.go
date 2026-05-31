@@ -23,6 +23,7 @@ type ChatService struct {
 type ChatRequest struct {
 	Message        string `json:"message"`
 	ConversationID string `json:"conversation_id"`
+	AgentID        string `json:"agent_id,omitempty"`
 }
 
 // ChatResponse contains chat output.
@@ -57,13 +58,24 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 	}
 
 	// Create request message
+	// Log agent ID if provided by client
+	if req.AgentID != "" {
+		s.logger.Info("Chat request with agent override", "agent_id", req.AgentID, "conversation_id", req.ConversationID)
+	}
+
 	msgID := fmt.Sprintf("svc-chat-%d", time.Now().UnixNano())
+	payload := map[string]any{
+		"message":         req.Message,
+		"conversation_id": req.ConversationID,
+		"agent_id":        req.AgentID,
+	}
+	payloadBytes, _ := json.Marshal(payload)
 	msg := &models.BusMessage{
 		ID:      msgID,
 		Type:    models.MessageTypeRequest,
 		Topic:   "chat.request",
 		Source:  "svc.chat",
-		Payload: []byte(req.Message),
+		Payload: payloadBytes,
 		ReplyTo: "chat.response",
 	}
 

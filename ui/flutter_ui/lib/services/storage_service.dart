@@ -18,6 +18,7 @@ class StorageService {
 
   SharedPreferences? _prefs;
   FlutterSecureStorage? _secureStorage;
+  String? _cachedApiKey;
 
   /// Whether [init] has been called and [_prefs] is populated.
   bool get isInitialized => _prefs != null;
@@ -42,16 +43,18 @@ class StorageService {
         ),
       );
     }
+
+    // Cache API key from keychain so synchronous reads use secure storage
+    _cachedApiKey = await _secureStorage?.read(key: AppConstants.apiKeyPref);
   }
 
   // ------ API Key (secure storage) ------
 
-  /// Read API key from SharedPreferences synchronously.
-  /// Keychain is written to but not read from synchronously.
-  /// For keychain read, use getApiKeyAsync().
+  /// Read API key synchronously.
+  /// Returns the cached keychain value if [init] has been awaited,
+  /// otherwise falls back to SharedPreferences for backward compatibility.
   String? getApiKey() {
-    // After init(), prefs are available synchronously
-    // Key writes go to keychain + prefs, so prefs always have the latest for sync read
+    if (_cachedApiKey != null) return _cachedApiKey;
     return _prefs?.getString(AppConstants.apiKeyPref);
   }
 
@@ -68,14 +71,17 @@ class StorageService {
   /// Write API key to both keychain and SharedPreferences.
   /// Keychain is primary; SharedPreferences is for backward compatibility.
   Future<void> setApiKey(String key) async {
+    _cachedApiKey = key;
     // Write to keychain (primary)
     await _secureStorage?.write(key: AppConstants.apiKeyPref, value: key);
     // Also write to SharedPreferences for backward compatibility and sync reads
+    // TODO: remove SharedPreferences fallback in a future version
     await _prefs?.setString(AppConstants.apiKeyPref, key);
   }
 
   /// Remove API key from both storage backends.
   Future<void> clearApiKey() async {
+    _cachedApiKey = null;
     await _secureStorage?.delete(key: AppConstants.apiKeyPref);
     await _prefs?.remove(AppConstants.apiKeyPref);
   }
