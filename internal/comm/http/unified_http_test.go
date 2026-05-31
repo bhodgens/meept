@@ -1,11 +1,13 @@
 package http_test
 
 import (
+	"crypto/tls"
 	"context"
 	"encoding/json"
 	"io"
 	"net"
 	gohttp "net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,14 +21,26 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+// insecureHTTPClient returns an *http.Client that skips TLS verification.
+func insecureHTTPClient() *gohttp.Client {
+	return &gohttp.Client{
+		Transport: &gohttp.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only
+		},
+		Timeout: 30 * time.Second,
+	}
+}
+
 // startTestServer creates and starts a server on a random port, returning the
 // base URL and a cancel function. The caller must defer cancel().
 func startTestServer(t *testing.T, opts ...http.ServerOption) (baseURL string, cancel context.CancelFunc) {
 	t.Helper()
 	cfg := http.DefaultServerConfig()
 	cfg.Addr = ":0"
-	cfg.UseTLS = false      // Disable TLS for test servers (plain HTTP)
-	cfg.RequireAuth = false // Disable auth for test servers (no API keys)
+	// Use temp paths so self-signed certs are generated in temp dirs
+	cfg.TLSCertFile = filepath.Join(t.TempDir(), "cert.pem")
+	cfg.TLSKeyFile = filepath.Join(t.TempDir(), "key.pem")
+	cfg.RequireAuth = false   // Disable auth for test servers (no API keys)
 
 	srv := http.NewServer(cfg, nil, nil, nil, nil, nil, opts...)
 	if srv == nil {
@@ -58,7 +72,7 @@ func startTestServer(t *testing.T, opts ...http.ServerOption) (baseURL string, c
 	if host == "" || host == "::" {
 		host = "127.0.0.1"
 	}
-	baseURL = "http://" + host + ":" + port
+	baseURL = "https://" + host + ":" + port
 	return baseURL, cancel
 }
 
@@ -108,9 +122,11 @@ func TestUnifiedHTTPServer_BothOptions(t *testing.T) {
 
 // TestUnifiedHTTPServer_ContextCancellation tests graceful shutdown.
 func TestUnifiedHTTPServer_ContextCancellation(t *testing.T) {
+	dir := t.TempDir()
 	cfg := http.DefaultServerConfig()
 	cfg.Addr = ":0"         // Let OS choose available port
-	cfg.UseTLS = false      // Disable TLS for test server
+	cfg.TLSCertFile = dir + "/cert.pem"
+	cfg.TLSKeyFile = dir + "/key.pem"
 	cfg.RequireAuth = false // Disable auth for test server
 
 	srv := http.NewServer(cfg, nil, nil, nil, nil, nil)
@@ -153,7 +169,7 @@ func TestUnifiedHTTPServer_MCPRouteRegistration(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	// POST /mcp should respond (not 404)
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize"}`
@@ -202,7 +218,7 @@ func TestUnifiedHTTPServer_CustomWSPath(t *testing.T) {
 	)
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	// GET /custom-ws should respond (not 404) — regular HTTP GET won't upgrade but shouldn't 404
 	wsCtx, wsCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -289,7 +305,7 @@ func TestUnifiedHTTPServer_MCPToolsInitialize(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	resp := mcpPost(t, client, baseURL, "initialize", nil)
 	if resp.Error != nil {
@@ -319,7 +335,7 @@ func TestUnifiedHTTPServer_MCPToolsSend(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
 		"name": "meept_send",
@@ -364,7 +380,7 @@ func TestUnifiedHTTPServer_MCPToolStatus(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
 		"name":      "meept_status",
@@ -386,7 +402,7 @@ func TestUnifiedHTTPServer_MCPToolsList(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	resp := mcpPost(t, client, baseURL, "tools/list", nil)
 	if resp.Error != nil {
@@ -432,7 +448,7 @@ func TestUnifiedHTTPServer_MCPInvalidJSON(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp, err := client.Post(baseURL+"/mcp", "application/json", strings.NewReader("not json"))
 	if err != nil {
 		t.Fatalf("MCP POST with invalid JSON failed: %v", err)
@@ -455,7 +471,7 @@ func TestUnifiedHTTPServer_MCPWrongContentType(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp, err := client.Post(baseURL+"/mcp", "text/plain", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
 	if err != nil {
 		t.Fatalf("MCP POST with wrong content type failed: %v", err)
@@ -478,7 +494,7 @@ func TestUnifiedHTTPServer_MCPUnknownMethod(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp := mcpPost(t, client, baseURL, "nonexistent/method", nil)
 	if resp.Error == nil {
 		t.Fatal("expected error for unknown method, got nil")
@@ -499,7 +515,7 @@ func TestUnifiedHTTPServer_MCPNotificationInitialized(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	body := `{"jsonrpc":"2.0","method":"notifications/initialized"}`
 	resp, err := client.Post(baseURL+"/mcp", "application/json", strings.NewReader(body))
 	if err != nil {
@@ -523,7 +539,7 @@ func TestUnifiedHTTPServer_MCPMissingToolName(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
 		"params": map[string]any{},
 	})
@@ -546,7 +562,7 @@ func TestUnifiedHTTPServer_MCPUnknownTool(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
 		"name": "nonexistent_tool",
 	})
@@ -569,7 +585,7 @@ func TestUnifiedHTTPServer_MCPSessionsTool(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
 		"name": "meept_sessions",
@@ -594,7 +610,7 @@ func TestUnifiedHTTPServer_MCPSessionHistoryTool(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
 		"name": "meept_session_history",
@@ -619,7 +635,7 @@ func TestUnifiedHTTPServer_MCPEventsTool(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	// Call without subscription_id — should return error in content
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
@@ -652,7 +668,7 @@ func TestUnifiedHTTPServer_SSEHeaders(t *testing.T) {
 		t.Fatalf("failed to create SSE request: %v", err)
 	}
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil && !strings.Contains(err.Error(), "context deadline") {
 		t.Logf("SSE request error: %v", err)
@@ -678,7 +694,7 @@ func TestUnifiedHTTPServer_MCPNotEnabled(t *testing.T) {
 	baseURL, cancel := startTestServer(t)
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	body := `{"jsonrpc":"2.0","id":1,"method":"initialize"}`
 	resp, err := client.Post(baseURL+"/mcp", "application/json", strings.NewReader(body))
 	if err != nil {
@@ -699,13 +715,14 @@ func TestUnifiedHTTPServer_WebSocketConnectionAndBroadcast(t *testing.T) {
 	defer cancel()
 
 	// Replace http:// with ws:// for WebSocket URL
-	wsURL := "ws://" + strings.TrimPrefix(baseURL, "http://") + "/ws"
+	wsURL := "wss://" + strings.TrimPrefix(baseURL, "https://") + "/ws"
 
 	// Connect a WebSocket client
 	config, err := websocket.NewConfig(wsURL, baseURL)
 	if err != nil {
 		t.Fatalf("failed to create WS config: %v", err)
 	}
+	config.TlsConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test-only
 	conn, err := websocket.DialConfig(config)
 	if err != nil {
 		t.Fatalf("failed to connect WebSocket: %v", err)
@@ -754,11 +771,12 @@ func TestUnifiedHTTPServer_WebSocketClientCount(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithWebSocket(msgBus, "/ws"))
 	defer cancel()
 
-	wsURL := "ws://" + strings.TrimPrefix(baseURL, "http://") + "/ws"
+	wsURL := "wss://" + strings.TrimPrefix(baseURL, "https://") + "/ws"
 	config, err := websocket.NewConfig(wsURL, baseURL)
 	if err != nil {
 		t.Fatalf("failed to create WS config: %v", err)
 	}
+	config.TlsConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // test-only
 
 	// Connect first client
 	conn1, err := websocket.DialConfig(config)
@@ -832,7 +850,7 @@ func TestUnifiedHTTPServer_SSESessionEvent(t *testing.T) {
 		t.Fatalf("failed to create SSE request: %v", err)
 	}
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil && !strings.Contains(err.Error(), "context deadline") {
 		t.Fatalf("SSE request failed: %v", err)
@@ -878,7 +896,7 @@ func TestUnifiedHTTPServer_SSEBusEventForwarding(t *testing.T) {
 		t.Fatalf("failed to create SSE request: %v", err)
 	}
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil && !strings.Contains(err.Error(), "context deadline") {
 		t.Fatalf("SSE request failed: %v", err)
@@ -959,7 +977,7 @@ func TestUnifiedHTTPServer_MCPToolSendMissingParams(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	// Missing session_id
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
@@ -1018,7 +1036,7 @@ func TestUnifiedHTTPServer_MCPToolSessionsUnknownAction(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
 		"name":      "meept_sessions",
@@ -1053,7 +1071,7 @@ func TestUnifiedHTTPServer_MCPToolEventsMissingSubscription(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
 		"name":      "meept_events",
@@ -1088,7 +1106,7 @@ func TestUnifiedHTTPServer_MCPToolSessionHistoryMissingSession(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	// Call with a session_id that doesn't exist — should return empty/nil, not crash
 	resp := mcpPost(t, client, baseURL, "tools/call", map[string]any{
@@ -1112,7 +1130,7 @@ func TestUnifiedHTTPServer_MCPInvalidParamsJSON(t *testing.T) {
 	baseURL, cancel := startTestServer(t, http.WithMCP(svcRegistry, "/mcp"))
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 
 	// Send tools/call with params as a string instead of object
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":"not-an-object"}`
@@ -1140,7 +1158,7 @@ func TestUnifiedHTTPServer_RuntimeStatus_NoRuntime(t *testing.T) {
 	baseURL, cancel := startTestServer(t)
 	defer cancel()
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp, err := client.Get(baseURL + "/api/v1/runtime/status")
 	if err != nil {
 		t.Fatalf("runtime status request failed: %v", err)
@@ -1162,9 +1180,11 @@ func TestUnifiedHTTPServer_RuntimeStatus_WithManager(t *testing.T) {
 		Runtime: services.NewRuntimeService(mgr),
 	}
 
+	dir := t.TempDir()
 	cfg := http.DefaultServerConfig()
 	cfg.Addr = ":0"
-	cfg.UseTLS = false
+	cfg.TLSCertFile = dir + "/cert.pem"
+	cfg.TLSKeyFile = dir + "/key.pem"
 	cfg.RequireAuth = false
 	srv := http.NewServer(cfg, nil, nil, nil, svcRegistry, nil)
 	if srv == nil {
@@ -1190,9 +1210,9 @@ func TestUnifiedHTTPServer_RuntimeStatus_WithManager(t *testing.T) {
 	if host == "" || host == "::" {
 		host = "127.0.0.1"
 	}
-	baseURL := "http://" + host + ":" + port
+	baseURL := "https://" + host + ":" + port
 
-	client := &gohttp.Client{Timeout: 5 * time.Second}
+	client := insecureHTTPClient()
 	resp, err := client.Get(baseURL + "/api/v1/runtime/status")
 	if err != nil {
 		t.Fatalf("runtime status request failed: %v", err)

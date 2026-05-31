@@ -20,7 +20,7 @@ var (
 	stateDir      string
 	debugFile     string // Empty = no debug, "-" = stderr, "filename" = file
 	transportFlag string // "rpc" or "http"
-	httpURLFlag   string // HTTP base URL (e.g. "http://localhost:8081")
+	httpURLFlag   string // HTTP base URL (e.g. "https://localhost:8081")
 )
 
 // debugEnabled returns whether debug mode is active.
@@ -103,7 +103,7 @@ Memory & Skills:
 	rootCmd.PersistentFlags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
 	rootCmd.PersistentFlags().StringVar(&debugFile, "debug", "", "Enable debug output (--debug or --debug=file, use '-' for stderr)")
 	rootCmd.PersistentFlags().StringVar(&transportFlag, "transport", "rpc", "Transport: rpc or http")
-	rootCmd.PersistentFlags().StringVar(&httpURLFlag, "http-url", "", "HTTP base URL for daemon (default: http://localhost:8081)")
+	rootCmd.PersistentFlags().StringVar(&httpURLFlag, "http-url", "https://localhost:8081", "HTTP base URL for daemon")
 	rootCmd.PersistentFlags().Lookup("debug").NoOptDefVal = "debug.log"
 
 	// Add subcommands

@@ -273,13 +273,12 @@ type RPCTransportConfig struct {
 }
 
 // HTTPTransportConfig configures the HTTP transport with modular endpoint support.
+// TLS is always enabled; there are no flags to disable HTTPS.
 type HTTPTransportConfig struct {
 	Enabled     bool     `json:"enabled"       toml:"enabled"`       // Enable HTTP server (default: false)
 	Addr        string   `json:"addr"          toml:"addr"`          // Listen address (default: ":8081")
 	RequireAuth bool     `json:"require_auth"  toml:"require_auth"`  // Require API key authentication (default: true)
 	APIKeys     []string `json:"api_keys"      toml:"api_keys"`      // Valid API keys for authentication
-	UseTLS      bool     `json:"use_tls"       toml:"use_tls"`       // Enable HTTPS (default: true)
-	AutoTLSCert bool     `json:"auto_tls_cert" toml:"auto_tls_cert"` // Auto-generate self-signed cert (default: true)
 	TLSCertFile string   `json:"tls_cert_file" toml:"tls_cert_file"` // TLS certificate file path (default: ~/.meept/tls/cert.pem)
 	TLSKeyFile  string   `json:"tls_key_file"  toml:"tls_key_file"`  // TLS private key file path (default: ~/.meept/tls/key.pem)
 
@@ -1047,8 +1046,6 @@ func DefaultConfig() *Config {
 				Enabled:     false,
 				Addr:        ":8081",
 				RequireAuth: true,
-				UseTLS:      true,
-				AutoTLSCert: true,
 				TLSCertFile: "~/.meept/tls/cert.pem",
 				TLSKeyFile:  "~/.meept/tls/key.pem",
 				REST:        true,  // REST API enabled by default when HTTP is enabled

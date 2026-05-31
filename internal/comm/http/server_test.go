@@ -457,12 +457,6 @@ func TestDefaultServerConfig(t *testing.T) {
 	if !cfg.RequireAuth {
 		t.Error("RequireAuth should be true by default")
 	}
-	if !cfg.UseTLS {
-		t.Error("UseTLS should be true by default")
-	}
-	if !cfg.AutoTLSCert {
-		t.Error("AutoTLSCert should be true by default")
-	}
 	if cfg.TLSCertFile == "" {
 		t.Error("TLSCertFile should not be empty by default")
 	}

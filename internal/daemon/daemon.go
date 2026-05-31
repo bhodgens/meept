@@ -402,8 +402,6 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.Addr = fullCfg.Transport.HTTP.Addr
 			httpCfg.RequireAuth = fullCfg.Transport.HTTP.RequireAuth
 			httpCfg.APIKeys = fullCfg.Transport.HTTP.APIKeys
-			httpCfg.UseTLS = fullCfg.Transport.HTTP.UseTLS
-			httpCfg.AutoTLSCert = fullCfg.Transport.HTTP.AutoTLSCert
 			httpCfg.TLSCertFile = fullCfg.Transport.HTTP.TLSCertFile
 			httpCfg.TLSKeyFile = fullCfg.Transport.HTTP.TLSKeyFile
 			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
@@ -458,12 +456,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 					logger.Info("Budget stats HTTP getter registered")
 				}
 			}
-			logger.Info("HTTP server created", "addr", httpCfg.Addr)
-			if httpCfg.UseTLS {
-				logger.Info("TLS enabled for HTTP server", "auto_cert", httpCfg.AutoTLSCert, "cert", httpCfg.TLSCertFile)
-			} else {
-				logger.Warn("TLS disabled for HTTP server - connections are unencrypted")
-			}
+			logger.Info("HTTP server created", "addr", httpCfg.Addr, "tls", "mandatory")
+			logger.Info("TLS always enabled for HTTP server", "cert", httpCfg.TLSCertFile)
 			if httpCfg.RequireAuth {
 				logger.Info("Authentication required for HTTP server", "api_keys_configured", len(httpCfg.APIKeys))
 			} else {

@@ -2,7 +2,7 @@
 {
   // Connection to meept daemon (menubar always uses HTTP)
   "daemon": {
-    "http_url": "http://localhost:8081",
+    "http_url": "https://localhost:8081",
   },
 
   // UI preferences

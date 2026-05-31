@@ -23,7 +23,7 @@ type HTTPClient struct {
 // NewHTTPClient creates an HTTP client for the daemon REST API.
 func NewHTTPClient(baseURL string) *HTTPClient {
 	if baseURL == "" {
-		baseURL = "http://localhost:8081"
+		baseURL = "https://localhost:8081"
 	}
 	return &HTTPClient{
 		baseURL: baseURL,

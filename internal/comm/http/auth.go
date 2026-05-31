@@ -4,6 +4,7 @@ package http
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -39,7 +40,12 @@ func (a *APIKeyAuth) Middleware(next http.Handler) http.Handler {
 
 		key := a.extractKey(r)
 		if key == "" {
-			http.Error(w, `{"error": "missing authorization"}`, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error":   "missing authorization",
+				"message": "provide API key via Authorization: Bearer <key> header",
+			})
 			return
 		}
 
@@ -52,7 +58,12 @@ func (a *APIKeyAuth) Middleware(next http.Handler) http.Handler {
 			}
 		}
 		if !valid {
-			http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTeapot) // 418 - distinctive error for bad API key
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error":   "unauthorized",
+				"message": "invalid API key",
+			})
 			return
 		}
 

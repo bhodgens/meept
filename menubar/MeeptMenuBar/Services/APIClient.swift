@@ -9,7 +9,7 @@ class APIClient {
     private let baseURL: URL
     private let session: URLSession
 
-    init(baseURL: String = "http://localhost:8081") {
+    init(baseURL: String = "https://localhost:8081") {
         self.baseURL = URL(string: baseURL)!
         self.session = URLSession(configuration: .ephemeral)
     }

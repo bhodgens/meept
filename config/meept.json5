@@ -18,12 +18,10 @@
     "http": {
       "enabled": true,
       "addr": ":8081",
-      // TLS configuration - enabled by default for production security
-      "use_tls": true,           // Enable HTTPS (self-signed cert for localhost)
-      "auto_tls_cert": true,     // Auto-generate self-signed cert on first run
-      "tls_cert_file": "~/.meept/tls/cert.pem",  // TLS certificate path
-      "tls_key_file": "~/.meept/tls/key.pem",     // TLS private key path
-      // Authentication
+      // TLS is always enabled. Self-signed cert auto-generated on first run.
+      // To use custom certificates, set tls_cert_file and tls_key_file.
+      "tls_cert_file": "~/.meept/tls/cert.pem",
+      "tls_key_file": "~/.meept/tls/key.pem",
       "require_auth": true,      // Require API key authentication
       "api_keys": [],            // List of valid API keys (use `meept token generate`)
       // Modular endpoints - enable/disable individual transport features

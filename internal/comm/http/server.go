@@ -41,6 +41,7 @@ const maxRequestBodySize = 1 << 20 // 1 MB
 var defaultWSOrigins = []string{"localhost", "127.0.0.1", "::1", "null", ""}
 
 // ServerConfig holds configuration for the HTTP server.
+// TLS is always enabled; there is no option to disable HTTPS.
 type ServerConfig struct {
 	Addr                    string        // Listen address (default: :8081)
 	ReadTimeout             time.Duration // Read timeout
@@ -48,16 +49,15 @@ type ServerConfig struct {
 	MaxHeaderBytes          int           // Max header size
 	EnableCORS              bool          // Enable CORS headers
 	APIKeys                 []string      // Valid API keys for authentication
-	RequireAuth             bool          // Require API key authentication
-	UseTLS                  bool          // Enable HTTPS (default: true)
+	RequireAuth             bool          // Require API key authentication (default: true)
 	TLSCertFile             string        // TLS certificate file path
 	TLSKeyFile              string        // TLS key file path
-	AutoTLSCert             bool          // Auto-generate self-signed cert if not exists
 	RESTEnabled             bool          // Enable REST API at /api/v1/* (default: true)
 	WebSocketAllowedOrigins []string      // Allowed origins for WebSocket (default: localhost, 127.0.0.1, ::1, null, "")
 }
 
 // DefaultServerConfig returns sensible defaults for the unified HTTP server.
+// TLS is always enabled; a self-signed cert is auto-generated if needed.
 func DefaultServerConfig() ServerConfig {
 	homeDir, _ := os.UserHomeDir()
 	defaultCertFile := filepath.Join(homeDir, ".meept", "tls", "cert.pem")
@@ -71,8 +71,6 @@ func DefaultServerConfig() ServerConfig {
 		EnableCORS:     true,    // Enable CORS for local HTTP clients
 		RequireAuth:    true,    // Enabled by default for security
 		APIKeys:        []string{},
-		UseTLS:         true, // TLS on by default
-		AutoTLSCert:    true, // Auto-generate self-signed cert
 		TLSCertFile:    defaultCertFile,
 		TLSKeyFile:     defaultKeyFile,
 		RESTEnabled:    true, // REST API enabled by default
@@ -415,13 +413,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	handler := s.middleware(mux)
 
-	// Generate TLS cert if needed
-	if s.config.UseTLS && s.config.AutoTLSCert {
-		if err := s.ensureTLSCert(); err != nil {
-			s.logger.Error("Failed to generate TLS certificate", "error", err)
-			s.logger.Warn("⚠️  Running WITHOUT HTTPS! Set auto_tls_cert: false to disable TLS.")
-			s.config.UseTLS = false
-		}
+	// Generate TLS cert if needed — TLS is mandatory, fail hard if we can't create one
+	if err := s.ensureTLSCert(); err != nil {
+		return fmt.Errorf("failed to ensure TLS certificate: %w", err)
 	}
 
 	s.server = &http.Server{
@@ -437,30 +431,23 @@ func (s *Server) Start(ctx context.Context) error {
 	// every request because Go enables HTTP/2 automatically with TLS.
 	s.server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 
-	if s.config.UseTLS {
-		s.logger.Info("unified HTTP server starting (TLS)", "addr", s.config.Addr, "tls", true)
-	} else {
-		s.logger.Warn("⚠️  unified HTTP server starting (NO TLS)", "addr", s.config.Addr)
-	}
+	s.logger.Info("unified HTTP server starting with TLS", "addr", s.config.Addr, "cert_file", s.config.TLSCertFile)
 
 	errCh := make(chan error, 1)
 	go func() {
-		var err error
 		ln, listenErr := net.Listen("tcp", s.config.Addr)
 		if listenErr != nil {
+			s.logger.Error("failed to listen on TCP", "addr", s.config.Addr, "error", listenErr)
 			errCh <- listenErr
 			return
 		}
 		s.mu.Lock()
-		s.listener = ln
+		// Wrap the listener to detect plain HTTP and return 426
+		s.listener = &tlsDetectListener{Listener: ln, logger: s.logger}
 		s.mu.Unlock()
 
-		if s.config.UseTLS {
-			err = s.server.ServeTLS(ln, s.config.TLSCertFile, s.config.TLSKeyFile)
-		} else {
-			err = s.server.Serve(ln)
-		}
-		if err != nil && err != http.ErrServerClosed {
+		if err := s.server.ServeTLS(s.listener, s.config.TLSCertFile, s.config.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+			s.logger.Error("HTTP server TLS error", "error", err, "addr", s.config.Addr, "cert_file", s.config.TLSCertFile)
 			errCh <- err
 		}
 	}()
@@ -471,6 +458,72 @@ func (s *Server) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		return s.Shutdown(context.Background())
 	}
+}
+
+// tlsDetectListener wraps a net.Listener to detect plain HTTP connections.
+// When a connection starts with an ASCII letter (likely an HTTP method name),
+// it returns 426 Upgrade Required and closes the connection.
+type tlsDetectListener struct {
+	net.Listener
+	logger *slog.Logger
+}
+
+func (l *tlsDetectListener) Accept() (net.Conn, error) {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		// Peek at the first byte with a short timeout
+		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			conn.Close()
+			continue
+		}
+		var first [1]byte
+		n, readErr := conn.Read(first[:])
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			conn.Close()
+			continue
+		}
+		if readErr != nil || n == 0 {
+			conn.Close()
+			continue
+		}
+		// HTTP methods start with a letter (G, P, D, H, O, T, C, ...).
+		// TLS ClientHello starts with 0x16; SSL 2.0 starts with 0x80.
+		b := first[0]
+		if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') {
+			l.logger.Warn("plain HTTP detected on TLS port",
+				"remote", conn.RemoteAddr(),
+				"first_byte", string(rune(b)),
+				"hint", "client must use HTTPS")
+			resp := []byte("HTTP/1.1 426 Upgrade Required\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 77\r\n\r\n{\"error\":\"upgrade required\",\"message\":\"use HTTPS for this endpoint\"}")
+			conn.Write(resp)
+			conn.Close()
+			continue
+		}
+		// Restore the peeked byte so the TLS stack sees the full ClientHello.
+		return &peekConn{Conn: conn, peeked: first[:n]}, nil
+	}
+}
+
+// peekConn wraps a net.Conn, prepending peeked bytes before normal reads.
+type peekConn struct {
+	net.Conn
+	peeked []byte
+}
+
+func (c *peekConn) Read(b []byte) (int, error) {
+	if len(c.peeked) > 0 {
+		n := copy(b, c.peeked)
+		c.peeked = c.peeked[n:]
+		if n == len(b) || len(c.peeked) > 0 {
+			return n, nil
+		}
+		m, err := c.Conn.Read(b[n:])
+		return n + m, err
+	}
+	return c.Conn.Read(b)
 }
 
 // Shutdown gracefully shuts down the server.

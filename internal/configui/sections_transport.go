@@ -15,8 +15,6 @@ func buildTransportFields() []Field {
 		NewTextField("transport.http.addr", "http addr", h.Addr),
 		NewToggleField("transport.http.require_auth", "require auth", h.RequireAuth),
 		NewDrilldownField("transport.http.api_keys", "api keys", buildStringSliceItems("key", h.APIKeys)),
-		NewToggleField("transport.http.use_tls", "use tls", h.UseTLS),
-		NewToggleField("transport.http.auto_tls_cert", "auto tls cert", h.AutoTLSCert),
 		NewToggleField("transport.http.rest", "rest", h.REST),
 		NewToggleField("transport.http.websocket", "websocket", h.WebSocket),
 		NewTextField("transport.http.ws_path", "ws path", h.WSPath),
