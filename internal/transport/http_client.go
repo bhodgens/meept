@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/tui/types"
+	"github.com/caimlas/meept/pkg/tlsutil"
 )
 
 // Map key constants for HTTP API calls.
@@ -38,11 +39,38 @@ func WithInsecureSkipVerify(skip bool) HTTPClientOption {
 	}
 }
 
+// WithAPIKey sets the API key for authentication.
+func WithAPIKey(key string) HTTPClientOption {
+	return func(c *httpClient) {
+		c.apiKey = key
+	}
+}
+
+// WithPinnedFingerprint configures the client to verify the server certificate
+// by fingerprint instead of CA chain. Use for pinning self-signed certs.
+func WithPinnedFingerprint(certFP, spkiFP string) HTTPClientOption {
+	return func(c *httpClient) {
+		if certFP == "" && spkiFP == "" {
+			return
+		}
+		pv := &tlsutil.PinningVerifier{
+			ExpectedCertFP: certFP,
+			ExpectedSPKIFP: spkiFP,
+		}
+		if c.client.Transport == nil {
+			c.client.Transport = pv.PinTransport(http.DefaultTransport)
+		} else {
+			c.client.Transport = pv.PinTransport(c.client.Transport)
+		}
+	}
+}
+
 // httpClient implements transport.Client over HTTP REST.
 // All RPC-style methods are proxied through the /api/v1/bus/call endpoint,
 // which mirrors the JSON-RPC interface over HTTP.
 type httpClient struct {
 	baseURL string
+	apiKey  string
 	client  *http.Client
 }
 
@@ -53,6 +81,7 @@ func NewHTTPClient(baseURL string, timeout time.Duration, opts ...HTTPClientOpti
 	}
 	c := &httpClient{
 		baseURL: baseURL,
+		apiKey:  "",
 		client:  &http.Client{Timeout: timeout},
 	}
 	for _, opt := range opts {
@@ -62,7 +91,11 @@ func NewHTTPClient(baseURL string, timeout time.Duration, opts ...HTTPClientOpti
 }
 
 func (c *httpClient) Connect() error {
-	resp, err := c.client.Get(c.baseURL + "/api/v1/health")
+	req, err := c.newRequest(http.MethodGet, c.baseURL+"/api/v1/health", nil)
+	if err != nil {
+		return fmt.Errorf("daemon not reachable: %w", err)
+	}
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("daemon not reachable: %w", err)
 	}
@@ -78,13 +111,38 @@ func (c *httpClient) Close() error { return nil }
 func (c *httpClient) IsConnected() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/health", http.NoBody)
+	req, err := c.newRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/health", nil)
+	if err != nil {
+		return false
+	}
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return false
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+func (c *httpClient) newRequest(method, urlStr string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, urlStr, body)
+	if err != nil {
+		return nil, err
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	return req, nil
+}
+
+func (c *httpClient) newRequestWithContext(ctx context.Context, method, urlStr string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
+	if err != nil {
+		return nil, err
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	return req, nil
 }
 
 func (c *httpClient) SetTimeout(d time.Duration) {
@@ -101,11 +159,12 @@ func (c *httpClient) callAPI(method string, params any) (json.RawMessage, error)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.client.Post(
-		c.baseURL+"/api/v1/bus/call",
-		"application/json",
-		bytes.NewReader(body),
-	)
+	req, err := c.newRequest(http.MethodPost, c.baseURL+"/api/v1/bus/call", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -148,11 +207,12 @@ func (c *httpClient) Chat(message, conversationID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.client.Post(
-		c.baseURL+"/api/v1/chat",
-		"application/json",
-		bytes.NewReader(body),
-	)
+	req, err := c.newRequest(http.MethodPost, c.baseURL+"/api/v1/chat", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", err
 	}

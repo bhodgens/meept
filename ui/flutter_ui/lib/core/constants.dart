@@ -25,6 +25,11 @@ abstract class AppConstants {
   static const String themePref = 'theme';
   // NOTE: use_tls was removed — HTTPS is mandatory and not configurable
 
+  // Default development API key (matches pkg/constants/api_key.go).
+  // Used as a fallback so the Flutter UI works out of the box with a
+  // default-configured daemon. Replace via settings for production.
+  static const String defaultApiKey = 'meept_dev_default_key_CHANGE_ME';
+
   // Agent IDs (must match backend)
   static const String agentDispatcher = 'dispatcher';
   static const String agentChat = 'chat';

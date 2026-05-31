@@ -3,9 +3,13 @@ package transport
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/caimlas/meept/internal/tui/types"
+	"github.com/caimlas/meept/pkg/constants"
+	"github.com/caimlas/meept/pkg/tlsutil"
 )
 
 // Client is the unified interface for talking to the daemon.
@@ -100,10 +104,32 @@ func New(cfg *Config) (Client, error) {
 
 	switch cfg.Transport {
 	case "http":
-		return NewHTTPClient(cfg.HTTPBaseURL, cfg.Timeout, WithInsecureSkipVerify(cfg.InsecureSkipVerify)), nil
+		opts := []HTTPClientOption{WithInsecureSkipVerify(cfg.InsecureSkipVerify)}
+		// Try to auto-discover and pin the server's certificate fingerprint
+		if certFP, spkiFP := loadFingerprint(); certFP != "" || spkiFP != "" {
+			opts = append(opts, WithPinnedFingerprint(certFP, spkiFP))
+		}
+		// Use default dev key so HTTP transport works out of the box
+		opts = append(opts, WithAPIKey(constants.DefaultDevAPIKey))
+		return NewHTTPClient(cfg.HTTPBaseURL, cfg.Timeout, opts...), nil
 	case "rpc", "unix", "socket":
 		return NewRPCClient(cfg.SocketPath, cfg.Timeout), nil
 	default:
 		return nil, fmt.Errorf("unknown transport: %s", cfg.Transport)
 	}
+}
+
+// loadFingerprint attempts to read the server cert fingerprint from the
+// default location (~/.meept/tls/fingerprint.txt).
+func loadFingerprint() (certFP, spkiFP string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", ""
+	}
+	fpPath := filepath.Join(homeDir, ".meept", "tls", "fingerprint.txt")
+	certFP, spkiFP, err = tlsutil.LoadExpectedFingerprint(fpPath)
+	if err != nil {
+		return "", ""
+	}
+	return certFP, spkiFP
 }

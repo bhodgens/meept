@@ -23,7 +23,9 @@
       "tls_cert_file": "~/.meept/tls/cert.pem",
       "tls_key_file": "~/.meept/tls/key.pem",
       "require_auth": true,      // Require API key authentication
-      "api_keys": [],            // List of valid API keys (use `meept token generate`)
+      "api_keys": [],            // Valid API keys. Empty = use default dev key (see docs).
+                                 // Use `meept token generate --save` to create a production key.
+      "tls_min_version": "tls1.2", // "tls1.2" or "tls1.3" (1.2 default for WebSocket compat)
       // Modular endpoints - enable/disable individual transport features
       "rest": true,       // REST API at /api/v1/*
       "websocket": true,  // WebSocket at /ws (for Flutter UI)

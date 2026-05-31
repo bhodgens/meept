@@ -11,7 +11,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -31,6 +30,7 @@ import (
 	"github.com/caimlas/meept/internal/mcp"
 	"github.com/caimlas/meept/internal/metrics"
 	"github.com/caimlas/meept/internal/services"
+	"github.com/caimlas/meept/pkg/constants"
 	"github.com/caimlas/meept/pkg/models"
 
 	"golang.org/x/net/websocket"
@@ -52,8 +52,12 @@ type ServerConfig struct {
 	RequireAuth             bool          // Require API key authentication (default: true)
 	TLSCertFile             string        // TLS certificate file path
 	TLSKeyFile              string        // TLS key file path
-	RESTEnabled             bool          // Enable REST API at /api/v1/* (default: true)
-	WebSocketAllowedOrigins []string      // Allowed origins for WebSocket (default: localhost, 127.0.0.1, ::1, null, "")
+	RESTEnabled             bool                  // Enable REST API at /api/v1/* (default: true)
+	WebSocketAllowedOrigins []string              // Allowed origins for WebSocket (default: localhost, 127.0.0.1, ::1, null, "")
+	SecurityHeaders         SecurityHeadersConfig // HSTS, CSP, X-Frame-Options, etc.
+	TLSMinVersion           uint16                // Default: tls.VersionTLS12
+	TLSClientAuth           tls.ClientAuthType    // Default: tls.NoClientCert
+	FingerprintFile         string                // Path to write cert fingerprint for client discovery
 }
 
 // DefaultServerConfig returns sensible defaults for the unified HTTP server.
@@ -74,6 +78,10 @@ func DefaultServerConfig() ServerConfig {
 		TLSCertFile:    defaultCertFile,
 		TLSKeyFile:     defaultKeyFile,
 		RESTEnabled:    true, // REST API enabled by default
+		SecurityHeaders: DefaultSecurityHeaders(),
+		TLSMinVersion:   tls.VersionTLS12,
+		TLSClientAuth:   tls.NoClientCert,
+		FingerprintFile: filepath.Join(homeDir, ".meept", "tls", "fingerprint.txt"),
 	}
 }
 
@@ -149,20 +157,10 @@ func NewServer(cfg ServerConfig, configSvc *ConfigService, daemonCtrl DaemonCont
 	}
 
 	if cfg.RequireAuth && len(cfg.APIKeys) == 0 {
-		key := make([]byte, 32)
-		if _, err := rand.Read(key); err == nil {
-			generatedKey := base64.URLEncoding.EncodeToString(key)
-			cfg.APIKeys = []string{generatedKey}
-			// Log only a prefix for identification; the full key must never
-			// appear in logs (it persists in log files/aggregation systems).
-			keyPrefix := generatedKey
-			if len(keyPrefix) > 8 {
-				keyPrefix = keyPrefix[:8] + "..."
-			}
-			logger.Warn("auto-generated API key for first-run",
-				"key_prefix", keyPrefix,
-				"hint", "retrieve the full key via `meept token generate` or store it securely")
-		}
+		cfg.APIKeys = []string{constants.DefaultDevAPIKey}
+		logger.Warn("using default development API key",
+			"hint", "replace with a generated key via `meept token generate --save` for production",
+			"default_key_visible", false) // key is never logged
 	}
 
 	s := &Server{
@@ -411,12 +409,21 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	s.setupRoutes(mux)
 
-	handler := s.middleware(mux)
+	// Chain middleware: security headers first (always applied), then auth/CORS/logging
+	handler := s.middleware(SecurityHeadersMiddleware(s.config.SecurityHeaders)(mux))
 
 	// Generate TLS cert if needed — TLS is mandatory, fail hard if we can't create one
 	if err := s.ensureTLSCert(); err != nil {
 		return fmt.Errorf("failed to ensure TLS certificate: %w", err)
 	}
+
+	// Compute and persist fingerprint so clients can pin this certificate
+	if err := s.ensureFingerprint(); err != nil {
+		s.logger.Warn("failed to write certificate fingerprint", "error", err)
+	}
+
+	// Build hardened TLS config
+	tlsConfig := BuildTLSConfig(s.config.TLSMinVersion, s.config.TLSClientAuth)
 
 	s.server = &http.Server{
 		Addr:           s.config.Addr,
@@ -424,6 +431,7 @@ func (s *Server) Start(ctx context.Context) error {
 		ReadTimeout:    s.config.ReadTimeout,
 		WriteTimeout:   s.config.WriteTimeout,
 		MaxHeaderBytes: s.config.MaxHeaderBytes,
+		TLSConfig:      tlsConfig,
 	}
 	// Disable HTTP/2 — the golang.org/x/net/websocket handler does not
 	// support HTTP/2 and Flutter's dart:io WebSocket expects HTTP/1.1
@@ -431,7 +439,12 @@ func (s *Server) Start(ctx context.Context) error {
 	// every request because Go enables HTTP/2 automatically with TLS.
 	s.server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 
-	s.logger.Info("unified HTTP server starting with TLS", "addr", s.config.Addr, "cert_file", s.config.TLSCertFile)
+	s.logger.Info("unified HTTP server starting with TLS",
+		"addr", s.config.Addr,
+		"cert_file", s.config.TLSCertFile,
+		"tls_min_version", s.config.TLSMinVersion,
+		"client_auth", s.config.TLSClientAuth,
+	)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1334,6 +1347,22 @@ func (s *Server) ensureTLSCert() error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ensureFingerprint computes the server certificate fingerprint and writes it
+// to disk so clients can discover and pin it.
+func (s *Server) ensureFingerprint() error {
+	if s.config.FingerprintFile == "" {
+		return nil
+	}
+	if !fileExists(s.config.TLSCertFile) {
+		return nil
+	}
+	certFP, spkiFP, err := LoadCertFingerprint(s.config.TLSCertFile)
+	if err != nil {
+		return err
+	}
+	return SaveFingerprint(s.config.FingerprintFile, certFP, spkiFP)
 }
 
 // handleWebSocket handles GET /ws WebSocket connections.

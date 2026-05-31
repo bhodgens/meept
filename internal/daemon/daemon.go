@@ -3,6 +3,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
@@ -405,6 +406,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			httpCfg.TLSCertFile = fullCfg.Transport.HTTP.TLSCertFile
 			httpCfg.TLSKeyFile = fullCfg.Transport.HTTP.TLSKeyFile
 			httpCfg.RESTEnabled = fullCfg.Transport.HTTP.REST
+			// Map TLS version string to Go constant
+			switch fullCfg.Transport.HTTP.TLSMinVersion {
+			case "tls1.3":
+				httpCfg.TLSMinVersion = tls.VersionTLS13
+			default:
+				httpCfg.TLSMinVersion = tls.VersionTLS12
+			}
 			// Build functional options based on config
 			var httpOpts []http.ServerOption
 

@@ -3,7 +3,8 @@
   // Connection to meept daemon (always uses HTTPS)
   "daemon": {
     "http_url": "https://localhost:8081",
-    "api_token": "meept_ViIoYx1EjcjQmOTHHYnO9oeAq2JMi3bQ_Rk2hvnTJYk="
+    // Default dev API key (matches daemon). For production, generate a new key.
+    "api_token": "meept_dev_default_key_CHANGE_ME"
   },
 
   // UI preferences

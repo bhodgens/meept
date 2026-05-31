@@ -288,6 +288,9 @@ type HTTPTransportConfig struct {
 	WSPath    string `json:"ws_path"    toml:"ws_path"`   // WebSocket endpoint path (default: "/ws")
 	MCP       bool   `json:"mcp"        toml:"mcp"`       // Enable MCP over HTTP+SSE at /mcp (default: false)
 	MCPPath   string `json:"mcp_path"   toml:"mcp_path"`  // MCP endpoint path (default: "/mcp")
+
+	// TLS hardening
+	TLSMinVersion string `json:"tls_min_version" toml:"tls_min_version"` // "tls1.2" or "tls1.3" (default: "tls1.2")
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.

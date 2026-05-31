@@ -5,6 +5,10 @@
 
 import Foundation
 
+/// Default development API key shared with the daemon and other clients.
+/// In production, replace via `meept token generate --save`.
+let DefaultDevAPIKey = "meept_dev_default_key_CHANGE_ME"
+
 struct MenubarConfig: Codable {
     var daemon: DaemonConfig
     var ui: UIConfig
@@ -61,7 +65,7 @@ class MenubarConfigService {
     }
 
     var apiToken: String? {
-        return config.daemon.apiToken
+        return config.daemon.apiToken ?? DefaultDevAPIKey
     }
 
     var showInMenuBar: Bool {
