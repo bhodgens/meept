@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/constants.dart';
 import '../../theme/colors.dart';
 import '../../theme/effects.dart';
 import '../../theme/typography.dart';
@@ -117,14 +118,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 onTabSelected: (index) =>
                     setState(() => _selectedTab = HomeTab.values[index]),
               ),
-              // Connection status bar
+              // Status bar: version + connection indicator
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 color: CyberpunkColors.blackTransparent(0.7),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    ConnectionStatusIndicator(),
+                    Text(
+                      'meept gui client v${AppConstants.appVersion}',
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: CyberpunkColors.midGray,
+                        fontFamily: 'SourceCodePro',
+                      ),
+                    ),
+                    const ConnectionStatusIndicator(),
                   ],
                 ),
               ),
