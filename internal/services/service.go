@@ -92,7 +92,7 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	reg := &ServiceRegistry{
 		// ChatService is always created if Bus is available;
 		// it gracefully handles nil AgentRegistry (Steer/FollowUp return ErrUnavailable).
-		Chat:     NewChatService(cfg.Bus, cfg.AgentRegistry, logger),
+		Chat:     NewChatService(cfg.Bus, cfg.AgentRegistry, logger, WithSessionStore(cfg.SessionStore)),
 		Pipeline: NewPipelineService(),
 		Bus:      NewBusService(cfg.Bus),
 	}

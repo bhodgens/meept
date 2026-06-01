@@ -9,6 +9,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -16,6 +17,7 @@ import (
 type ChatService struct {
 	bus           *bus.MessageBus
 	agentRegistry *agent.AgentRegistry
+	sessionStore  session.Store
 	logger        *slog.Logger
 }
 
@@ -34,14 +36,28 @@ type ChatResponse struct {
 }
 
 // NewChatService creates a chat service.
-func NewChatService(msgBus *bus.MessageBus, agentReg *agent.AgentRegistry, logger *slog.Logger) *ChatService {
+func NewChatService(msgBus *bus.MessageBus, agentReg *agent.AgentRegistry, logger *slog.Logger, opts ...ChatServiceOption) *ChatService {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ChatService{
+	s := &ChatService{
 		bus:           msgBus,
 		agentRegistry: agentReg,
 		logger:        logger,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// ChatServiceOption configures a ChatService.
+type ChatServiceOption func(*ChatService)
+
+// WithSessionStore sets the session store for conversation ID resolution.
+func WithSessionStore(store session.Store) ChatServiceOption {
+	return func(s *ChatService) {
+		s.sessionStore = store
 	}
 }
 
@@ -57,16 +73,31 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 		return nil, wrapError("chat", "Chat", ErrInvalidInput)
 	}
 
+	conversationID := req.ConversationID
+
+	// Resolve session ID to the session's internal conversation ID so that
+	// agent-side persistence (persistConversation) writes to the same
+	// session the client is viewing.
+	if s.sessionStore != nil {
+		if sess := s.sessionStore.Get(req.ConversationID); sess != nil && sess.ConversationID != "" {
+			conversationID = sess.ConversationID
+			s.logger.Debug("resolved conversation_id from session store",
+				"session_id", req.ConversationID,
+				"conversation_id", conversationID,
+			)
+		}
+	}
+
 	// Create request message
 	// Log agent ID if provided by client
 	if req.AgentID != "" {
-		s.logger.Info("Chat request with agent override", "agent_id", req.AgentID, "conversation_id", req.ConversationID)
+		s.logger.Info("Chat request with agent override", "agent_id", req.AgentID, "conversation_id", conversationID)
 	}
 
 	msgID := fmt.Sprintf("svc-chat-%d", time.Now().UnixNano())
 	payload := map[string]any{
 		"message":         req.Message,
-		"conversation_id": req.ConversationID,
+		"conversation_id": conversationID,
 		"agent_id":        req.AgentID,
 	}
 	payloadBytes, _ := json.Marshal(payload)
@@ -81,7 +112,8 @@ func (s *ChatService) Chat(ctx context.Context, req ChatRequest) (*ChatResponse,
 
 	// Create response channel
 	respChan := make(chan *models.BusMessage, 1)
-	replyTopic := "chat.res." + msgID
+	// FIX: subscribe to the same topic the ChatHandler publishes on
+	replyTopic := "chat.response"
 	sub := s.bus.Subscribe(msgID, replyTopic)
 	defer s.bus.Unsubscribe(sub)
 
