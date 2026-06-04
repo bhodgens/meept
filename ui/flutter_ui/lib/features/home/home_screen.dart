@@ -100,6 +100,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    ref.listen<bool>(connectionStateProvider, (prev, connected) {
+      _onConnectionChanged(connected);
+    });
+  }
+
+  @override
   void dispose() {
     _leaderController.dispose();
     super.dispose();
@@ -308,8 +316,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildTabContent() {
     final activeSession = ref.watch(activeSessionProvider);
-    final connected = ref.watch(connectionStateProvider);
-    _onConnectionChanged(connected);
     return TabContent(
       selectedTab: _selectedTab,
       activeSession: activeSession,

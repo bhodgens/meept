@@ -44,6 +44,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   // Slash autocomplete state
   bool _showSlashAutocomplete = false;
   String _slashQuery = '';
+  int _slashSelectedIndex = 0;
 
   // Ghost text for single slash match
   String? _ghostText;
@@ -156,12 +157,14 @@ class _ChatInputState extends ConsumerState<ChatInput> {
       setState(() {
         _showSlashAutocomplete = true;
         _slashQuery = query;
+        _slashSelectedIndex = 0;
       });
     } else {
       if (_showSlashAutocomplete) {
         setState(() {
           _showSlashAutocomplete = false;
           _slashQuery = '';
+          _slashSelectedIndex = 0;
         });
       }
     }
@@ -182,6 +185,8 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   /// Detect paste operations by checking for large line count jumps
   void _detectPaste(String currentText) {
     if (currentText.length < _previousText.length) return;
+    // Only detect pure appends — skip if previous text is not a prefix
+    if (!currentText.startsWith(_previousText)) return;
 
     final added = currentText.substring(_previousText.length);
     final addedLines = '\n'.allMatches(added).length + 1;
@@ -278,9 +283,14 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           return KeyEventResult.handled;
         }
 
-        // If slash autocomplete is showing, let it handle Enter
+        // If slash autocomplete is showing, accept the selected match
         if (_showSlashAutocomplete) {
-          return KeyEventResult.ignored;
+          final matches = _slashRegistry.match(_slashQuery);
+          if (matches.isNotEmpty) {
+            final idx = _slashSelectedIndex.clamp(0, matches.length - 1);
+            _onSlashSelected(matches[idx]);
+          }
+          return KeyEventResult.handled;
         }
 
         final now = DateTime.now();
@@ -314,6 +324,26 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           },
         );
         return KeyEventResult.handled;
+      }
+
+      // Arrow up/down navigates slash autocomplete when visible
+      if (_showSlashAutocomplete) {
+        final matches = _slashRegistry.match(_slashQuery);
+        final maxIdx = (matches.length > 8 ? 8 : matches.length) - 1;
+        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          setState(() {
+            _slashSelectedIndex =
+                (_slashSelectedIndex + 1).clamp(0, maxIdx < 0 ? 0 : maxIdx);
+          });
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          setState(() {
+            _slashSelectedIndex =
+                (_slashSelectedIndex - 1).clamp(0, maxIdx < 0 ? 0 : maxIdx);
+          });
+          return KeyEventResult.handled;
+        }
       }
 
       if (event.logicalKey == LogicalKeyboardKey.escape) {
