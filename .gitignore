@@ -62,6 +62,9 @@ menubar/.metadata_never_index
 docs/.claude/
 site/
 
+# Brainstorming
+.superpowers/
+
 # Worktrees
 .worktrees/
 worktrees/

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/user"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/tailscale/hujson"
 )
 
 // envVarPattern matches ${VAR_NAME} or $VAR_NAME patterns.
@@ -210,24 +210,10 @@ type Model struct {
 }
 
 // LoadModelsConfig loads models configuration from a JSON5 file.
-// Note: This uses standard JSON parsing; comments must be stripped manually.
 func LoadModelsConfig(path string) (*ModelsConfig, error) {
-	path = expandPath(path)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read models config: %w", err)
-	}
-
-	// Expand environment variables
-	content := expandEnvVars(string(data))
-
-	// Strip JSON5 comments (// and /* */)
-	content = stripJSON5Comments(content)
-
 	var cfg ModelsConfig
-	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse models config: %w", err)
+	if err := LoadJSON5(path, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to load models config: %w", err)
 	}
 
 	// Apply default timeout to providers that don't specify one
@@ -265,65 +251,19 @@ func LoadModelsConfigDefault() (*ModelsConfig, error) {
 	return nil, fmt.Errorf("models.json5 not found in ~/.meept/ or config/")
 }
 
-// StripJSON5Comments removes // and /* */ comments from JSON5 content.
+// StripJSON5Comments converts JSON5 to strict JSON, handling comments,
+// trailing commas, and unquoted keys. It delegates to hujson.Standardize
+// for full JSON5 spec compliance.
 func StripJSON5Comments(s string) string {
-	var result strings.Builder
-	inString := false
-	inSingleLineComment := false
-	inMultiLineComment := false
-	i := 0
-
-	for i < len(s) {
-		// Check for string boundaries
-		if !inSingleLineComment && !inMultiLineComment {
-			if s[i] == '"' && (i == 0 || s[i-1] != '\\') {
-				inString = !inString
-			}
-		}
-
-		// Skip comments when not in a string
-		if !inString {
-			// Check for single-line comment start
-			if !inMultiLineComment && i+1 < len(s) && s[i:i+2] == "//" {
-				inSingleLineComment = true
-				i += 2
-				continue
-			}
-
-			// Check for single-line comment end
-			if inSingleLineComment && s[i] == '\n' {
-				inSingleLineComment = false
-				result.WriteByte('\n')
-				i++
-				continue
-			}
-
-			// Check for multi-line comment start
-			if !inSingleLineComment && i+1 < len(s) && s[i:i+2] == "/*" {
-				inMultiLineComment = true
-				i += 2
-				continue
-			}
-
-			// Check for multi-line comment end
-			if inMultiLineComment && i+1 < len(s) && s[i:i+2] == "*/" {
-				inMultiLineComment = false
-				i += 2
-				continue
-			}
-		}
-
-		// Write non-comment characters
-		if !inSingleLineComment && !inMultiLineComment {
-			result.WriteByte(s[i])
-		}
-		i++
+	stdJSON, err := hujson.Standardize([]byte(s))
+	if err != nil {
+		// Fallback: return input unchanged on parse error
+		return s
 	}
-
-	return result.String()
+	return string(stdJSON)
 }
 
-// stripJSON5Comments removes // and /* */ comments from JSON5 content.
+// stripJSON5Comments is an alias for StripJSON5Comments.
 func stripJSON5Comments(s string) string {
 	return StripJSON5Comments(s)
 }
