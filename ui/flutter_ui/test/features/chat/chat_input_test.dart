@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/chat/chat_input.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/providers.dart';
-import 'package:meept_ui/providers/async_state.dart';
 import 'package:meept_ui/services/api_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
@@ -82,11 +81,11 @@ Widget _buildTestApp({
       ),
       agentProvider.overrideWith(
         (ref) => AgentNotifier(apiClient: _StubApiClient())
-          ..state = agentsLoading
-              ? const AsyncState.loading()
-              : agentsError != null
-                  ? AsyncState.error(Exception(agentsError), StackTrace.current)
-                  : AsyncState.data(agents ?? const []),
+          ..state = AgentState(
+            agents: agents ?? const [],
+            isLoading: agentsLoading,
+            error: agentsError,
+          ),
       ),
       activeAgentProvider.overrideWith(
         (_) => activeAgent,
@@ -106,9 +105,9 @@ Widget _buildTestApp({
 
 void main() {
   const testAgents = [
-    Agent(id: 'coder', name: 'coder', description: '', enabled: true),
-    Agent(id: 'debugger', name: 'debugger', description: '', enabled: true),
-    Agent(id: 'planner', name: 'planner', description: '', enabled: true),
+    Agent(id: 'coder', name: 'coder', description: '', prompt: '', enabled: true),
+    Agent(id: 'debugger', name: 'debugger', description: '', prompt: '', enabled: true),
+    Agent(id: 'planner', name: 'planner', description: '', prompt: '', enabled: true),
   ];
 
   group('ChatInput - Agent Selector', () {
@@ -230,6 +229,7 @@ void main() {
           id: 'planner',
           name: 'planner',
           description: '',
+          prompt: '',
           enabled: true,
         ),
       ));
@@ -260,7 +260,7 @@ void main() {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatInput(sessionId: 'test-session'),
         agents: const [
-          Agent(id: 'coder', name: 'coder', description: '', enabled: true),
+          Agent(id: 'coder', name: 'coder', description: '', prompt: '', enabled: true),
         ],
       ));
       await tester.pumpAndSettle();
@@ -277,6 +277,7 @@ void main() {
           id: 'debugger',
           name: 'debugger',
           description: '',
+          prompt: '',
           enabled: true,
         ),
       ));

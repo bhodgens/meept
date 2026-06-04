@@ -18,8 +18,7 @@ class TasksDetail extends ConsumerWidget {
     }
 
     // Re-resolve task from the live provider so we always show fresh data
-    final taskState = ref.watch(taskProvider);
-    final tasks = taskState.whenOrNull(data: (t) => t) ?? [];
+    final tasks = ref.watch(taskProvider).tasks;
     final task = tasks.where((t) => t.id == active.id).firstOrNull ?? active;
 
     return Container(

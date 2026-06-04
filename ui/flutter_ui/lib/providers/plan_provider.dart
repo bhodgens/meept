@@ -1,76 +1,98 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
-import 'async_state.dart';
 import 'providers.dart';
 
-class PlanNotifier extends StateNotifier<AsyncState<List<Plan>>> {
-  PlanNotifier({required this.apiClient}) : super(const AsyncState.initial());
+const _unset = Object();
+
+class PlanState {
+  final List<Plan> plans;
+  final bool isLoading;
+  final String? error;
+
+  const PlanState({
+    this.plans = const [],
+    this.isLoading = false,
+    this.error,
+  });
+
+  PlanState copyWith({
+    List<Plan>? plans,
+    bool? isLoading,
+    Object? error = _unset,
+  }) {
+    return PlanState(
+      plans: plans ?? this.plans,
+      isLoading: isLoading ?? this.isLoading,
+      error: identical(error, _unset) ? this.error : error as String?,
+    );
+  }
+}
+
+class PlanNotifier extends StateNotifier<PlanState> {
+  PlanNotifier({required this.apiClient}) : super(const PlanState());
 
   final ApiClient apiClient;
 
   Future<void> loadPlans({String? sessionID, String? projectID}) async {
-    state = const AsyncState.loading();
+    state = state.copyWith(isLoading: true, error: null);
     try {
       final plans = sessionID != null
           ? await apiClient.listPlansBySession(sessionID)
           : await apiClient.listPlans(projectID: projectID);
-      state = AsyncState.data(plans);
-    } catch (e, st) {
-      state = AsyncState.error(e, st);
+      state = state.copyWith(plans: plans, isLoading: false);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 
   Future<void> approvePlan(String planID, {String? sessionID}) async {
-    final currentPlans = state.whenOrNull(data: (p) => p) ?? [];
     try {
       final updated = await apiClient.approvePlan(planID, sessionID: sessionID, by: 'flutter_ui');
-      state = AsyncState.data(_updatePlanInList(currentPlans, updated));
-    } catch (e, st) {
-      state = AsyncState.error(e, st);
+      _updatePlanInList(updated);
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
     }
   }
 
   Future<void> rejectPlan(String planID, {String? sessionID, String? reason}) async {
-    final currentPlans = state.whenOrNull(data: (p) => p) ?? [];
     try {
       final updated = await apiClient.rejectPlan(planID, sessionID: sessionID, by: 'flutter_ui', reason: reason);
-      state = AsyncState.data(_updatePlanInList(currentPlans, updated));
-    } catch (e, st) {
-      state = AsyncState.error(e, st);
+      _updatePlanInList(updated);
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
     }
   }
 
   Future<void> confirmPlan(String planID, {String? sessionID}) async {
-    final currentPlans = state.whenOrNull(data: (p) => p) ?? [];
     try {
       final updated = await apiClient.confirmPlan(planID, sessionID: sessionID, by: 'flutter_ui');
-      state = AsyncState.data(_updatePlanInList(currentPlans, updated));
-    } catch (e, st) {
-      state = AsyncState.error(e, st);
+      _updatePlanInList(updated);
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
     }
   }
 
   Future<void> revisePlan(String planID, {String? sessionID, String? feedback}) async {
-    final currentPlans = state.whenOrNull(data: (p) => p) ?? [];
     try {
       final updated = await apiClient.revisePlan(planID, sessionID: sessionID, feedback: feedback);
-      state = AsyncState.data(_updatePlanInList(currentPlans, updated));
-    } catch (e, st) {
-      state = AsyncState.error(e, st);
+      _updatePlanInList(updated);
+    } catch (e) {
+      state = state.copyWith(error: e.toString());
     }
   }
 
-  List<Plan> _updatePlanInList(List<Plan> plans, Plan updated) {
-    return plans.map((p) => p.id == updated.id ? updated : p).toList();
+  void _updatePlanInList(Plan updated) {
+    final newPlans = state.plans.map((p) => p.id == updated.id ? updated : p).toList();
+    state = state.copyWith(plans: newPlans);
   }
 
   void clearError() {
-    state = const AsyncState.initial();
+    state = state.copyWith();
   }
 }
 
-final planProvider = StateNotifierProvider<PlanNotifier, AsyncState<List<Plan>>>((ref) {
+final planProvider = StateNotifierProvider<PlanNotifier, PlanState>((ref) {
   final client = ref.watch(apiClientProvider);
   return PlanNotifier(apiClient: client);
 });

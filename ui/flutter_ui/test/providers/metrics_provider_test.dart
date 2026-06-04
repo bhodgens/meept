@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/providers/metrics_provider.dart';
-import 'package:meept_ui/providers/async_state.dart';
 import 'package:meept_ui/providers/providers.dart';
 import 'package:meept_ui/services/api_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
@@ -88,13 +87,13 @@ class _TestWebSocket extends WebSocketService {
 
 void main() {
   group('MetricsNotifier', () {
-    test('initially is loading', () {
+    test('initially isLoading', () {
       final ws = _TestWebSocket();
       final notifier = MetricsNotifier(
         apiClient: _StubApiClient(),
         websocket: ws,
       );
-      expect(notifier.state.whenOrNull(loading: () => true), isTrue);
+      expect(notifier.state.isLoading, isTrue);
     });
 
     test('sets error when fetch fails', () async {
@@ -109,7 +108,7 @@ void main() {
       // Wait for async fetch to complete
       await Future.delayed(const Duration(milliseconds: 100));
 
-      expect(notifier.state.whenOrNull(error: (_, __) => true), isNotNull);
+      expect(notifier.state.error, isNotNull);
     });
 
     test('disposes subscriptions', () {

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:timeago/timeago.dart' as timeago;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
@@ -47,97 +46,68 @@ class _TasksListState extends ConsumerState<TasksList> {
           ),
         ),
       ),
-      child: taskState.when(
-        initial: () => _buildContent(
-          tasks: const [],
-          isLoading: false,
-          error: null,
-        ),
-        loading: () => _buildContent(
-          tasks: const [],
-          isLoading: true,
-          error: null,
-        ),
-        error: (error, _) => _buildContent(
-          tasks: const [],
-          isLoading: false,
-          error: error.toString(),
-        ),
-        data: (tasks) => _buildContent(
-          tasks: tasks,
-          isLoading: false,
-          error: null,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildContent({
-    required List<Task> tasks,
-    required bool isLoading,
-    required String? error,
-  }) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Text(
-                'tasks',
-                style: CyberpunkTypography.headlineMedium.copyWith(
-                  color: CyberpunkColors.orangePrimary,
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.add, size: 18),
-                color: CyberpunkColors.orangePrimary,
-                onPressed: _showCreateTaskDialog,
-              ),
-            ],
-          ),
-        ),
-        if (isLoading)
-          const Expanded(
-            child: Center(
-              child: CircularProgressIndicator(),
-            ),
-          )
-        else if (error != null)
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
               children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: _TaskErrorBanner(message: error),
+                Text(
+                  'tasks',
+                  style: CyberpunkTypography.headlineMedium.copyWith(
+                    color: CyberpunkColors.orangePrimary,
+                  ),
                 ),
-                const SizedBox(height: 12),
-                FilledButton.tonal(
-                  onPressed: () => ref.read(taskProvider.notifier).loadTasks(),
-                  child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.add, size: 18),
+                  color: CyberpunkColors.orangePrimary,
+                  onPressed: _showCreateTaskDialog,
                 ),
               ],
             ),
-          )
-        else if (tasks.isEmpty)
-          const Expanded(
-            child: Center(
-              child: Text('no tasks'),
-            ),
-          )
-        else
-          Expanded(
-            child: ListView.builder(
-              itemCount: tasks.length,
-              itemBuilder: (context, index) {
-                final task = tasks[index];
-                return _buildTaskTile(task);
-              },
-            ),
           ),
-      ],
+          if (taskState.isLoading)
+            const Expanded(
+              child: Center(
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (taskState.error != null)
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: _TaskErrorBanner(message: taskState.error!),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: () => ref.read(taskProvider.notifier).loadTasks(),
+                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                  ),
+                ],
+              ),
+            )
+          else if (taskState.tasks.isEmpty)
+            const Expanded(
+              child: Center(
+                child: Text('no tasks'),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
+                itemCount: taskState.tasks.length,
+                itemBuilder: (context, index) {
+                  final task = taskState.tasks[index];
+                  return _buildTaskTile(task);
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -185,7 +155,7 @@ class _TasksListState extends ConsumerState<TasksList> {
                 ),
                 const Spacer(),
                 Text(
-                  timeago.format(task.createdAt),
+                  _formatAge(task.createdAt),
                   style: CyberpunkTypography.bodySmall,
                 ),
               ],
@@ -209,6 +179,15 @@ class _TasksListState extends ConsumerState<TasksList> {
       default:
         return CyberpunkColors.midGray;
     }
+  }
+
+  String _formatAge(DateTime date) {
+    final now = DateTime.now();
+    final diff = now.difference(date);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 
   void _showCreateTaskDialog() async {

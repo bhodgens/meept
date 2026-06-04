@@ -67,86 +67,79 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
-    final isSending = ref.read(chatProvider.notifier).isSending;
 
-    return chatState.when(
-      initial: () => const MessagePlaceholder(),
-      loading: () => const Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(
-            CyberpunkColors.orangePrimary,
-          ),
-        ),
-      ),
-      error: (error, _) => _ChatError(
-        message: error.toString(),
-        onDismiss: () => ref.read(chatProvider.notifier).clearError(),
-      ),
-      data: (messages) {
-        // Auto-scroll when new messages arrive and user is at bottom
-        if (messages.isNotEmpty &&
-            _isAtBottom &&
-            messages.length != _previousMessageCount) {
-          _previousMessageCount = messages.length;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _scrollToBottom();
-          });
+    // Auto-scroll when new messages arrive and user is at bottom
+    if (chatState.messages.isNotEmpty && _isAtBottom && chatState.messages.length != _previousMessageCount) {
+      _previousMessageCount = chatState.messages.length;
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _scrollToBottom(); });
+    }
+
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification) {
+          final metrics = notification.metrics;
+          _isAtBottom = metrics.pixels >= metrics.maxScrollExtent - 100;
         }
-
-        return NotificationListener<ScrollNotification>(
-          onNotification: (notification) {
-            if (notification is ScrollEndNotification) {
-              final metrics = notification.metrics;
-              _isAtBottom = metrics.pixels >= metrics.maxScrollExtent - 100;
-            }
-            return false;
-          },
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: messages.isEmpty
-                    ? const MessagePlaceholder()
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.all(16),
-                        reverse: false,
-                        itemCount: messages.length + (isSending ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (index < messages.length) {
-                            final message = messages[index];
-                            return ChatMessageBubble(message: message);
-                          } else {
-                            // Loading indicator for pending message
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        CyberpunkColors.orangePrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'thinking...',
-                                    style: CyberpunkTypography.bodySmall,
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-                        },
-                      ),
-              ),
-            ],
-          ),
-        );
+        return false;
       },
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: chatState.messages.isEmpty
+                ? const MessagePlaceholder()
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(16),
+                    reverse: false,
+                    itemCount:
+                        chatState.messages.length + (chatState.isLoading ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index < chatState.messages.length) {
+                        final message = chatState.messages[index];
+                        return ChatMessageBubble(message: message);
+                      } else {
+                        // Loading indicator for pending message
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    CyberpunkColors.orangePrimary,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'thinking...',
+                                style: CyberpunkTypography.bodySmall,
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                    },
+                  ),
+          ),
+          if (chatState.error != null)
+            Positioned(
+              bottom: 70, // Just above the chat input
+              left: 0,
+              right: 0,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: ErrorBanner(
+                  message: chatState.error!,
+                  onDismiss: () => ref.read(chatProvider.notifier).clearError(),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -181,33 +174,6 @@ class MessagePlaceholder extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ChatError extends StatelessWidget {
-  final String message;
-  final VoidCallback onDismiss;
-
-  const _ChatError({required this.message, required this.onDismiss});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ErrorBanner(message: message, onDismiss: onDismiss),
-            const SizedBox(height: 12),
-            FilledButton.tonal(
-              onPressed: onDismiss,
-              child: const Text('dismiss', style: CyberpunkTypography.bodySmall),
-            ),
-          ],
-        ),
       ),
     );
   }

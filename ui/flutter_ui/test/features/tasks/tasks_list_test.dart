@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/features/tasks/tasks_list.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/task_provider.dart';
-import 'package:meept_ui/providers/async_state.dart';
 import 'package:meept_ui/services/api_client.dart';
 
 // ===== Task model helper =====
@@ -400,9 +399,11 @@ void main() {
   // ===== Unit tests: TaskNotifier =====
 
   group('TaskNotifier', () {
-    test('state starts as initial', () {
+    test('state starts empty', () {
       final notifier = TaskNotifier(apiClient: _TestApiClient([]));
-      expect(notifier.state.whenOrNull(initial: () => true), isTrue);
+      expect(notifier.state.tasks, isEmpty);
+      expect(notifier.state.isLoading, isFalse);
+      expect(notifier.state.error, isNull);
     });
 
     test('loadTasks populates tasks', () async {
@@ -410,39 +411,37 @@ void main() {
       final notifier = TaskNotifier(apiClient: client);
       await notifier.loadTasks();
 
-      final tasks = notifier.state.whenOrNull(data: (t) => t);
-      expect(tasks, isNotNull);
-      expect(tasks!.length, 2);
-      expect(notifier.state.whenOrNull(error: (_, __) => true), isNull);
+      expect(notifier.state.tasks, hasLength(2));
+      expect(notifier.state.isLoading, isFalse);
+      expect(notifier.state.error, isNull);
     });
 
     test('loadTasks sets error on failure', () async {
       final notifier = TaskNotifier(apiClient: _ThrowingClient());
       await notifier.loadTasks();
 
-      final tasks = notifier.state.whenOrNull(data: (t) => t);
-      expect(tasks ?? [], isEmpty);
-      expect(notifier.state.whenOrNull(error: (_, __) => true), isNotNull);
+      expect(notifier.state.tasks, isEmpty);
+      expect(notifier.state.isLoading, isFalse);
+      expect(notifier.state.error, isNotNull);
     });
 
     test('createTask appends new task', () async {
       final client = _TestApiClient([]);
       final notifier = TaskNotifier(apiClient: client);
-      expect(notifier.state.whenOrNull(data: (t) => t) ?? [], isEmpty);
+      expect(notifier.state.tasks, isEmpty);
 
       final newTask = await notifier.createTask(title: 'Created Task');
       expect(newTask, isNotNull);
-      final tasks = notifier.state.whenOrNull(data: (t) => t)!;
-      expect(tasks.length, 1);
-      expect(tasks[0].title, 'Created Task');
-      expect(tasks[0].status, 'pending');
+      expect(notifier.state.tasks, hasLength(1));
+      expect(notifier.state.tasks[0].title, 'Created Task');
+      expect(notifier.state.tasks[0].status, 'pending');
     });
 
     test('createTask sets error on failure', () async {
       final notifier = TaskNotifier(apiClient: _ThrowingClient());
       final result = await notifier.createTask(title: 'fails');
       expect(result, isNull);
-      expect(notifier.state.whenOrNull(error: (_, __) => true), isNotNull);
+      expect(notifier.state.error, isNotNull);
     });
 
     test('createTask preserves existing tasks in state', () async {
@@ -451,9 +450,8 @@ void main() {
       await notifier.loadTasks();
 
       await notifier.createTask(title: 'new task');
-      final tasks = notifier.state.whenOrNull(data: (t) => t)!;
-      expect(tasks.length, 2);
-      expect(tasks[0].id, 'existing');
+      expect(notifier.state.tasks, hasLength(2));
+      expect(notifier.state.tasks[0].id, 'existing');
     });
   });
 }
