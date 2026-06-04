@@ -181,7 +181,7 @@ func TestStripHTML(t *testing.T) {
 		{
 			name:  "block tags to newlines",
 			input: "<p>Para 1</p><p>Para 2</p>",
-			want:  "Para 1\nPara 2",
+			want:  "Para 1\n\nPara 2",
 		},
 	}
 

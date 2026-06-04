@@ -6,6 +6,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/text"
+)
+
+var (
+	gmParser = goldmark.New(
+		goldmark.WithExtensions(extension.Table),
+	)
 )
 
 // ParseCLAUDEMD parses a CLAUDE.md file
@@ -175,16 +186,48 @@ func inferCommandCategory(command string) string {
 func extractCodeBlocks(content string, languages ...string) []string {
 	var blocks []string
 
-	// Pattern for code blocks
+	src := []byte(content)
+	doc := gmParser.Parser().Parse(text.NewReader(src))
+	err := ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		cb, ok := n.(*ast.FencedCodeBlock)
+		if !ok {
+			return ast.WalkContinue, nil
+		}
+		lang := string(cb.Language(src))
+		for _, want := range languages {
+			if (want == "" && lang == "") || (want != "" && lang == want) {
+				var raw strings.Builder
+				for i := 0; i < cb.Lines().Len(); i++ {
+					line := cb.Lines().At(i)
+					raw.Write(line.Value(src))
+				}
+				blocks = append(blocks, strings.TrimSpace(raw.String()))
+				break
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	if err != nil {
+		// Fallback to regex on parse failure
+		return extractCodeBlocksRegex(content, languages...)
+	}
+	return blocks
+}
+
+// extractCodeBlocksRegex is the legacy regex-based fallback for code-block
+// extraction, kept only to avoid behaviour changes if goldmark fails.
+func extractCodeBlocksRegex(content string, languages ...string) []string {
+	var blocks []string
 	pattern := regexp.MustCompile("```(" + strings.Join(languages, "|") + ")\n([^`]+)\n```")
 	matches := pattern.FindAllStringSubmatch(content, -1)
-
 	for _, match := range matches {
 		if len(match) > 2 {
 			blocks = append(blocks, strings.TrimSpace(match[2]))
 		}
 	}
-
 	return blocks
 }
 

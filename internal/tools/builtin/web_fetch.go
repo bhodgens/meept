@@ -13,6 +13,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
+	"golang.org/x/net/html"
 )
 
 const (
@@ -25,22 +26,7 @@ const (
 )
 
 var (
-	// HTML entity replacements
-	htmlEntityMap = map[string]string{
-		"&amp;":  "&",
-		"&lt;":   "<",
-		"&gt;":   ">",
-		"&quot;": "\"",
-		"&#39;":  "'",
-		"&apos;": "'",
-		"&nbsp;": " ",
-	}
-
-	// Regex patterns for HTML stripping
-	scriptRE          = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
-	styleRE           = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
-	blockTagRE        = regexp.MustCompile(`(?i)<(br|p|div|h[1-6]|li|tr)[^>]*>`)
-	tagRE             = regexp.MustCompile(`<[^>]+>`)
+	// multiWhitespaceRE collapses runs of 3+ newlines to exactly two.
 	multiWhitespaceRE = regexp.MustCompile(`\n{3,}`)
 )
 
@@ -195,27 +181,60 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (any, e
 	}, nil
 }
 
-// stripHTML converts HTML to plain text.
-func stripHTML(html string) string {
-	// Remove script and style blocks
-	text := scriptRE.ReplaceAllString(html, "")
-	text = styleRE.ReplaceAllString(text, "")
-
-	// Replace block-level tags with newlines
-	text = blockTagRE.ReplaceAllString(text, "\n")
-
-	// Strip remaining tags
-	text = tagRE.ReplaceAllString(text, "")
-
-	// Decode common HTML entities
-	for entity, char := range htmlEntityMap {
-		text = strings.ReplaceAll(text, entity, char)
+// stripHTML converts HTML to plain text using a proper HTML parser.
+func stripHTML(s string) string {
+	doc, err := html.Parse(strings.NewReader(s))
+	if err != nil {
+		// Should never happen with valid html.Parse, but return raw on error
+		return s
 	}
 
-	// Collapse excessive whitespace
-	text = multiWhitespaceRE.ReplaceAllString(text, "\n\n")
+	var b strings.Builder
+	renderText(&b, doc)
 
+	text := b.String()
+	text = multiWhitespaceRE.ReplaceAllString(text, "\n\n")
 	return strings.TrimSpace(text)
+}
+
+// renderText recursively walks the HTML node tree and writes text content.
+// It skips <script> and <style> blocks entirely and adds whitespace
+// around block-level elements.
+func renderText(b *strings.Builder, n *html.Node) {
+	switch n.Type {
+	case html.TextNode:
+		b.WriteString(n.Data)
+	case html.ElementNode:
+		switch n.Data {
+		case "script", "style", "noscript":
+			// Skip these subtrees entirely
+			return
+		case "br":
+			b.WriteByte('\n')
+		case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6":
+			if n.FirstChild != nil {
+				b.WriteByte('\n')
+			}
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				renderText(b, c)
+			}
+			b.WriteByte('\n')
+			return
+		case "li":
+			b.WriteString("- ")
+		case "tr":
+			if n.FirstChild != nil {
+				b.WriteByte('\n')
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			renderText(b, c)
+		}
+	case html.DocumentNode, html.DoctypeNode:
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			renderText(b, c)
+		}
+	}
 }
 
 // Ensure WebFetchTool implements the Tool interface
