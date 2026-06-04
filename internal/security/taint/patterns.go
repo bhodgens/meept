@@ -2,6 +2,7 @@
 package taint
 
 import (
+	"math"
 	"regexp"
 	"strings"
 )
@@ -438,26 +439,10 @@ func EstimateEntropy(value string) float64 {
 	length := float64(len(value))
 	for _, count := range freq {
 		p := count / length
-		entropy -= p * log2(p)
+		entropy -= p * math.Log2(p)
 	}
 
 	return entropy
-}
-
-// log2 is base-2 logarithm.
-func log2(x float64) float64 {
-	// Simple implementation avoiding math import for minimal dependencies
-	if x <= 0 {
-		return 0
-	}
-	// This is a simplified approximation
-	// For production, use math.Log2(x)
-	n := 0.0
-	for x > 1 {
-		x /= 2
-		n++
-	}
-	return n
 }
 
 // IsHighEntropy returns true if the value has high entropy (likely encoded content).

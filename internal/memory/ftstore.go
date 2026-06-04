@@ -262,7 +262,7 @@ func (s *SQLiteFTSStore) DeleteByIDs(ctx context.Context, tableName string, ids 
 		args[i] = id
 	}
 
-	query := fmt.Sprintf("DELETE FROM %s WHERE id IN (%s)", tableName, joinStrings(placeholders, ",")) //nolint:gosec // table name from FTSConfig, not user input
+	query := fmt.Sprintf("DELETE FROM %s WHERE id IN (%s)", tableName, strings.Join(placeholders, ",")) //nolint:gosec // table name from FTSConfig, not user input
 	result, err := s.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete items: %w", err)
@@ -362,39 +362,6 @@ func (s *SQLiteFTSStore) Close() error {
 
 // Ensure SQLiteFTSStore implements io.Closer
 var _ io.Closer = (*SQLiteFTSStore)(nil)
-
-// joinStrings joins strings with a separator.
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	var result strings.Builder
-	result.WriteString(strs[0])
-	for i := 1; i < len(strs); i++ {
-		result.WriteString(sep + strs[i])
-	}
-	return result.String()
-}
-
-// splitString splits a string by separator.
-func splitString(s string, sep rune) []string {
-	var result []string
-	current := ""
-	for _, r := range s {
-		if r == sep {
-			if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		} else {
-			current += string(r)
-		}
-	}
-	if current != "" {
-		result = append(result, current)
-	}
-	return result
-}
 
 // escapeLikeWildcards escapes SQLite LIKE wildcard characters (% and _)
 // in user-supplied query strings to prevent unintended pattern matching.

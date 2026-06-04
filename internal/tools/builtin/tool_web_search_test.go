@@ -352,9 +352,7 @@ func TestWebSearchTool_DecodeHTMLEntities(t *testing.T) {
 	}
 }
 
-func TestWebSearchTool_StripHTMLTags(t *testing.T) {
-	tool := NewWebSearchTool(0)
-
+func TestWebSearchTool_StripHTML(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -383,7 +381,7 @@ func TestWebSearchTool_StripHTMLTags(t *testing.T) {
 		{
 			name:  "self-closing tag",
 			input: "Hello<br/>World",
-			want:  "HelloWorld",
+			want:  "Hello\nWorld",
 		},
 		{
 			name:  "attributes",
@@ -394,9 +392,9 @@ func TestWebSearchTool_StripHTMLTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tool.stripHTMLTags(tt.input)
+			got := stripHTML(tt.input)
 			if got != tt.want {
-				t.Errorf("stripHTMLTags(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("stripHTML(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
