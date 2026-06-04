@@ -83,7 +83,8 @@ func LoadJSON5Config(path string) (*Config, error) {
 }
 
 // ExpandEnvVars expands environment variables in a string.
-// Supports both ${VAR_NAME} and $VAR_NAME syntax.
+// Uses a regex rather than os.ExpandEnv because configs use both $VAR and
+// ${VAR} syntax (os.ExpandEnv only supports the former).
 func ExpandEnvVars(s string) string {
 	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
 		var varName string
