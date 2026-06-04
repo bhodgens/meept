@@ -257,10 +257,15 @@ clean:
 	@cd $(FLUTTER_UI_DIR) && flutter clean 2>/dev/null || true
 	go clean -cache -testcache
 
-lint:
+lint: gosec
 	@echo "Running linter..."
 	@which golangci-lint > /dev/null 2>&1 || (echo "Install: brew install golangci-lint" && exit 1)
 	golangci-lint run ./...
+
+gosec:
+	@echo "Running gosec security scan (G201, G202)..."
+	@which gosec > /dev/null 2>&1 || (echo "Install: go install github.com/securego/gosec/v2/cmd/gosec@latest" && exit 1)
+	gosec -include=G201,G202 ./...
 
 fmt:
 	@echo "Formatting code..."

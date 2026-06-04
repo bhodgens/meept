@@ -11,30 +11,15 @@ import (
 // RiskLevel represents the severity of an action.
 type RiskLevel int
 
-const (
-	RiskSafe RiskLevel = iota
-	RiskLow
-	RiskMedium
-	RiskHigh
-	RiskCritical
-)
+//go:generate go run golang.org/x/tools/cmd/stringer -type=RiskLevel -linecomment
 
-func (r RiskLevel) String() string {
-	switch r {
-	case RiskSafe:
-		return "SAFE"
-	case RiskLow:
-		return "LOW"
-	case RiskMedium:
-		return "MEDIUM"
-	case RiskHigh:
-		return "HIGH"
-	case RiskCritical:
-		return "CRITICAL"
-	default:
-		return "UNKNOWN"
-	}
-}
+const (
+	RiskSafe RiskLevel = iota   // SAFE
+	RiskLow                       // LOW
+	RiskMedium                    // MEDIUM
+	RiskHigh                      // HIGH
+	RiskCritical                  // CRITICAL
+)
 
 // ActionRule describes permissions for an action type.
 type ActionRule struct {

@@ -11,27 +11,14 @@ import (
 // Priority levels for jobs.
 type Priority int
 
-const (
-	PriorityLow    Priority = 1
-	PriorityNormal Priority = 2
-	PriorityHigh   Priority = 3
-	PriorityUrgent Priority = 4
-)
+//go:generate go run golang.org/x/tools/cmd/stringer -type=Priority -linecomment
 
-func (p Priority) String() string {
-	switch p {
-	case PriorityLow:
-		return "low"
-	case PriorityNormal:
-		return "normal"
-	case PriorityHigh:
-		return "high"
-	case PriorityUrgent:
-		return "urgent"
-	default:
-		return "unknown"
-	}
-}
+const (
+	PriorityLow    Priority = 1   // low
+	PriorityNormal Priority = 2   // normal
+	PriorityHigh   Priority = 3   // high
+	PriorityUrgent Priority = 4   // urgent
+)
 
 // JobState represents the current state of a job.
 type JobState string

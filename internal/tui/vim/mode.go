@@ -11,28 +11,14 @@ import (
 // Mode represents a vim editing mode.
 type Mode int
 
-const (
-	ModeNormal Mode = iota
-	ModeInsert
-	ModeVisual
-	ModeCommand
-)
+//go:generate go run golang.org/x/tools/cmd/stringer -type=Mode -linecomment
 
-// String returns the mode name.
-func (m Mode) String() string {
-	switch m {
-	case ModeNormal:
-		return "NORMAL"
-	case ModeInsert:
-		return "INSERT"
-	case ModeVisual:
-		return "VISUAL"
-	case ModeCommand:
-		return "COMMAND"
-	default:
-		return "UNKNOWN"
-	}
-}
+const (
+	ModeNormal Mode = iota   // NORMAL
+	ModeInsert                // INSERT
+	ModeVisual                // VISUAL
+	ModeCommand               // COMMAND
+)
 
 // State holds the vim editing state.
 type State struct {

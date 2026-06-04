@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -494,26 +493,6 @@ func (t *ShellExecuteTool) GetRiskLevel(command string) security.RiskLevel {
 	default:
 		return security.RiskMedium
 	}
-}
-
-// extractBaseCommand extracts the base command from a shell command string.
-func extractBaseCommand(command string) string {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return ""
-	}
-
-	// Skip environment variable assignments (FOO=bar cmd ...)
-	parts := strings.FieldsSeq(command)
-	for part := range parts {
-		if strings.Contains(part, "=") && !strings.HasPrefix(part, "-") {
-			continue
-		}
-		// Return basename only
-		return filepath.Base(part)
-	}
-
-	return ""
 }
 
 // Ensure ShellExecuteTool implements the Tool and StreamingTool interfaces

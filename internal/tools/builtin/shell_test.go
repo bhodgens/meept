@@ -161,6 +161,14 @@ func TestExtractBaseCommand(t *testing.T) {
 		{"FOO=bar BAR=baz ls -la", "ls"},
 		{"", ""},
 		{"   ", ""},
+		// Quoted strings
+		{"cmd 'arg with space'", "cmd"},
+		{"cmd \"double quoted\"", "cmd"},
+		{"FOO='bar baz' make build", "make"},
+		{"echo 'nested \"quotes\"'", "echo"},
+		{"ENV_VAR=value ./my-tool --flag", "my-tool"},
+		{"/usr/bin/python3 script.py", "python3"},
+		{"sudo apt-get install", "sudo"}, // classifyRisk handles sudo specially anyway
 	}
 
 	for _, tt := range tests {

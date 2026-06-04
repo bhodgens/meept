@@ -80,27 +80,14 @@ type DidChangeTextDocumentParams struct {
 // DiagnosticSeverity represents the severity of a diagnostic.
 type DiagnosticSeverity int
 
-const (
-	DiagnosticSeverityError       DiagnosticSeverity = 1
-	DiagnosticSeverityWarning     DiagnosticSeverity = 2
-	DiagnosticSeverityInformation DiagnosticSeverity = 3
-	DiagnosticSeverityHint        DiagnosticSeverity = 4
-)
+//go:generate go run golang.org/x/tools/cmd/stringer -type=DiagnosticSeverity -linecomment
 
-func (s DiagnosticSeverity) String() string {
-	switch s {
-	case DiagnosticSeverityError:
-		return "error"
-	case DiagnosticSeverityWarning:
-		return "warning"
-	case DiagnosticSeverityInformation:
-		return "information"
-	case DiagnosticSeverityHint:
-		return "hint"
-	default:
-		return "unknown"
-	}
-}
+const (
+	DiagnosticSeverityError       DiagnosticSeverity = 1   // error
+	DiagnosticSeverityWarning     DiagnosticSeverity = 2   // warning
+	DiagnosticSeverityInformation DiagnosticSeverity = 3   // information
+	DiagnosticSeverityHint        DiagnosticSeverity = 4   // hint
+)
 
 // Diagnostic represents a diagnostic, such as a compiler error.
 type Diagnostic struct {

@@ -10,6 +10,8 @@ import (
 // and user preferences. This enum is shared across all agentic pair options.
 type PairModality int
 
+//go:generate go run golang.org/x/tools/cmd/stringer -type=PairModality -linecomment
+
 const (
 	// PairModalityNone means no agentic pairing; single-agent execution.
 	PairModalityNone PairModality = iota
@@ -28,28 +30,12 @@ const (
 	PairModalityInline
 )
 
-var pairModalityNames = map[PairModality]string{
-	PairModalityNone:        "none",
-	PairModalitySpecReview:  "spec_review",
-	PairModalityPairSession: "pair_session",
-	PairModalityDebate:      "debate",
-	PairModalityInline:      "inline",
-}
-
 var pairModalityLookup = map[string]PairModality{
 	"none":         PairModalityNone,
 	"spec_review":  PairModalitySpecReview,
 	"pair_session": PairModalityPairSession,
 	"debate":       PairModalityDebate,
 	"inline":       PairModalityInline,
-}
-
-// String returns the human-readable name of the pair modality.
-func (m PairModality) String() string {
-	if name, ok := pairModalityNames[m]; ok {
-		return name
-	}
-	return "unknown"
 }
 
 // IsActive returns true if the modality represents an active pairing (not none).
