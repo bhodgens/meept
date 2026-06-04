@@ -29,6 +29,7 @@ const (
 )
 
 // ShellCommandRisk represents the risk level of a shell command.
+//go:generate go run golang.org/x/tools/cmd/stringer -type=ShellCommandRisk
 type ShellCommandRisk int
 
 const (
@@ -36,19 +37,6 @@ const (
 	RiskHigh
 	RiskCritical
 )
-
-func (r ShellCommandRisk) String() string {
-	switch r {
-	case RiskMedium:
-		return "MEDIUM"
-	case RiskHigh:
-		return "HIGH"
-	case RiskCritical:
-		return "CRITICAL"
-	default:
-		return "UNKNOWN"
-	}
-}
 
 // readOnlyCommands are considered low-risk read operations.
 var readOnlyCommands = map[string]bool{
