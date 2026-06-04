@@ -109,7 +109,9 @@ func LoadProvidersConfigDefault() (*ProvidersConfig, error) {
 }
 
 // expandEnvVars expands environment variables in a string.
-// Skips known placeholder variables that are expanded later (e.g., MODEL_PATH).
+// Uses a regex rather than os.ExpandEnv because configs use both $VAR and
+// ${VAR} syntax (os.ExpandEnv only supports the former) and because it skips
+// known placeholder variables that are expanded later (e.g. MODEL_PATH).
 func expandEnvVars(s string) string {
 	// Placeholder variables that should NOT be expanded here
 	// They are expanded later by ValidateAndNormalize in runtime_config.go
