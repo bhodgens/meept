@@ -50,8 +50,9 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
       widget.onDismiss?.call();
       return;
     }
-    // Clamp selected index
-    _selectedIndex = _selectedIndex.clamp(0, _matches.length - 1);
+    // Clamp selected index to visible range (max 8 items)
+    final visibleCount = _matches.length > 8 ? 8 : _matches.length;
+    _selectedIndex = _selectedIndex.clamp(0, visibleCount - 1);
     setState(() {});
   }
 
@@ -61,8 +62,10 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
   }
 
   void _moveSelection(int delta) {
+    final visibleCount = _matches.length > 8 ? 8 : _matches.length;
     setState(() {
-      _selectedIndex = (_selectedIndex + delta).clamp(0, _matches.length - 1);
+      _selectedIndex =
+          (_selectedIndex + delta).clamp(0, visibleCount - 1);
     });
   }
 
@@ -175,29 +178,6 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Inline ghost text widget for single-command autocomplete.
-///
-/// Shows the remaining characters of a single matching slash command
-/// as faded text after the cursor, placed as a suffix in InputDecoration.
-class SlashGhostText extends StatelessWidget {
-  final String ghostText;
-
-  const SlashGhostText({super.key, required this.ghostText});
-
-  @override
-  Widget build(BuildContext context) {
-    if (ghostText.isEmpty) return const SizedBox.shrink();
-
-    return Text(
-      ghostText,
-      style: CyberpunkTypography.bodyMedium.copyWith(
-        color: CyberpunkColors.midGray,
-        fontFamily: 'SourceCodePro',
       ),
     );
   }
