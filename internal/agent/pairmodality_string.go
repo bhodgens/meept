@@ -2,8 +2,6 @@
 
 package agent
 
-import "strconv"
-
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
 	// Re-run the stringer command to generate them again.
@@ -15,14 +13,14 @@ func _() {
 	_ = x[PairModalityInline-4]
 }
 
-const _PairModality_name = "PairModalityNonePairModalitySpecReviewPairModalityPairSessionPairModalityDebatePairModalityInline"
+const _PairModality_name = "nonespec_reviewpair_sessiondebateinline"
 
-var _PairModality_index = [...]uint8{0, 16, 38, 61, 79, 97}
+var _PairModality_index = [...]uint8{0, 4, 15, 27, 33, 39}
 
 func (i PairModality) String() string {
 	idx := int(i) - 0
 	if i < 0 || idx >= len(_PairModality_index)-1 {
-		return "PairModality(" + strconv.FormatInt(int64(i), 10) + ")"
+		return "unknown"
 	}
 	return _PairModality_name[_PairModality_index[idx]:_PairModality_index[idx+1]]
 }

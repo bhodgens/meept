@@ -2,8 +2,6 @@
 
 package lsp
 
-import "strconv"
-
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
 	// Re-run the stringer command to generate them again.
@@ -21,7 +19,7 @@ var _DiagnosticSeverity_index = [...]uint8{0, 5, 12, 23, 27}
 func (i DiagnosticSeverity) String() string {
 	idx := int(i) - 1
 	if i < 1 || idx >= len(_DiagnosticSeverity_index)-1 {
-		return "DiagnosticSeverity(" + strconv.FormatInt(int64(i), 10) + ")"
+		return "unknown"
 	}
 	return _DiagnosticSeverity_name[_DiagnosticSeverity_index[idx]:_DiagnosticSeverity_index[idx+1]]
 }

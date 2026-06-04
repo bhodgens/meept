@@ -2,8 +2,6 @@
 
 package queue
 
-import "strconv"
-
 func _() {
 	// An "invalid array index" compiler error signifies that the constant values have changed.
 	// Re-run the stringer command to generate them again.
@@ -21,7 +19,7 @@ var _Priority_index = [...]uint8{0, 3, 9, 13, 19}
 func (i Priority) String() string {
 	idx := int(i) - 1
 	if i < 1 || idx >= len(_Priority_index)-1 {
-		return "Priority(" + strconv.FormatInt(int64(i), 10) + ")"
+		return "unknown"
 	}
 	return _Priority_name[_Priority_index[idx]:_Priority_index[idx+1]]
 }

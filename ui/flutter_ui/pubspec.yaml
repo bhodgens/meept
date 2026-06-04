@@ -28,6 +28,7 @@ dependencies:
   uuid: ^4.2.2
   collection: ^1.18.0
   equatable: ^2.0.5
+  timeago: ^3.6.1
 
 dev_dependencies:
   flutter_test:

@@ -14,20 +14,20 @@ type PairModality int
 
 const (
 	// PairModalityNone means no agentic pairing; single-agent execution.
-	PairModalityNone PairModality = iota
+	PairModalityNone PairModality = iota // none
 	// PairModalitySpecReview is Option A: specification-driven review loop
 	// where acceptance criteria are generated during planning and the reviewer
 	// checks against them.
-	PairModalitySpecReview
+	PairModalitySpecReview // spec_review
 	// PairModalityPairSession is Option B: shared-context pair session where
 	// two agents iterate on a full task with accumulated review history.
-	PairModalityPairSession
+	PairModalityPairSession // pair_session
 	// PairModalityDebate is Option C: bus-channel-based dual-agent conversation
 	// where agents take turns via a shared topic.
-	PairModalityDebate
+	PairModalityDebate // debate
 	// PairModalityInline is Option D: tool-based inline review where the actor
 	// calls request_review within its own execution loop.
-	PairModalityInline
+	PairModalityInline // inline
 )
 
 var pairModalityLookup = map[string]PairModality{
