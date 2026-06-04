@@ -62,28 +62,6 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Listen for focus-input requests from the shortcut system
-    ref.listen<bool>(
-      focusInputRequestProvider,
-      (previous, next) {
-        if (next) {
-          _focusNode.requestFocus();
-          // Prefill '/' if input is empty
-          if (_controller.text.isEmpty) {
-            _controller.text = '/';
-            _controller.selection = TextSelection.collapsed(
-              offset: 1,
-            );
-          }
-          ref.read(focusInputRequestProvider.notifier).state = false;
-        }
-      },
-    );
-  }
-
-  @override
   void dispose() {
     _enterDebounceTimer?.cancel();
     _controller.removeListener(_onTextChanged);
@@ -390,6 +368,20 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
+    // Listen for focus-input requests from the shortcut system
+    ref.listen<bool>(
+      focusInputRequestProvider,
+      (previous, next) {
+        if (next) {
+          _focusNode.requestFocus();
+          if (_controller.text.isEmpty) {
+            _controller.text = '/';
+            _controller.selection = TextSelection.collapsed(offset: 1);
+          }
+          ref.read(focusInputRequestProvider.notifier).state = false;
+        }
+      },
+    );
 
     return Focus(
       onKeyEvent: _handleKeyEvent,
