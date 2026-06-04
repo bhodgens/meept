@@ -253,7 +253,9 @@ func (s *SQLiteTrainingStore) ListRecords(ctx context.Context, opts ListRecordsO
 		FROM shadow_records
 	`
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ") //nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
+		// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
+		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
+	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY created_at DESC"
 
@@ -371,7 +373,9 @@ func (s *SQLiteTrainingStore) ListPreferencePairs(ctx context.Context, opts List
 		FROM preference_pairs
 	`
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ") //nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
+		// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
+		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
+	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY margin DESC"
 
@@ -416,6 +420,7 @@ func (s *SQLiteTrainingStore) MarkExported(ctx context.Context, ids []string) er
 		args[i+1] = id
 	}
 
+	// #nosec G201 -- all values use ? placeholders; IN clause is safe
 	//nolint:gosec // parameterized query
 	query := fmt.Sprintf(
 		"UPDATE preference_pairs SET exported_at = ? WHERE id IN (%s)",
@@ -825,7 +830,9 @@ func (s *SQLiteExamplesStore) ListExamples(ctx context.Context, domain Domain, t
 		FROM fewshot_examples
 	`
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ") //nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
+		// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
+		query += " WHERE " + strings.Join(conditions, " AND ") // #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
+	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	}
 	query += " ORDER BY quality_score DESC, created_at DESC"
 
@@ -897,6 +904,7 @@ func (s *SQLiteExamplesStore) SearchSimilar(ctx context.Context, query string, d
 		args = append(args, string(taskType))
 	}
 
+	// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
 	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	sqlQuery := `
 		SELECT id, source_record_id, domain, task_type,
@@ -944,6 +952,7 @@ func (s *SQLiteExamplesStore) fallbackSearch(ctx context.Context, query string, 
 		args = append(args, string(taskType))
 	}
 
+	// #nosec G202 -- conditions use parameterized ? placeholders; dynamic WHERE is safe
 	//nolint:gosec // conditions use parameterized ? placeholders; dynamic WHERE is safe
 	sqlQuery := `
 		SELECT id, source_record_id, domain, task_type,

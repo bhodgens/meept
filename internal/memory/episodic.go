@@ -268,6 +268,7 @@ func (e *EpisodicMemory) updateLastAccessed(ctx context.Context, results []Memor
 		args[i+1] = id
 	}
 
+	// #nosec G201 -- all values use ? placeholders; IN clause is safe
 	//nolint:gosec // parameterized query
 	query := fmt.Sprintf("UPDATE episodic_memories SET last_accessed_at = ? WHERE id IN (%s)", strings.Join(placeholders, ","))
 

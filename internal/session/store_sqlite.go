@@ -352,6 +352,7 @@ func (s *SQLiteStore) GetMostRecent() *Session {
 }
 
 func (s *SQLiteStore) getByColumn(column, value string) *Session {
+	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
 		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
@@ -786,6 +787,7 @@ func (s *SQLiteStore) Close() error {
 
 //nolint:unparam // column is intentionally generic for reuse across different query types
 func (s *SQLiteStore) getByColumnUnsafe(column, value string) *Session {
+	// #nosec G201 -- column name is hardcoded at call sites, not user input
 	//nolint:gosec // column name is hardcoded at call sites, not user input
 	query := fmt.Sprintf(`
 		SELECT id, name, conversation_id, created_at, last_activity, attached_clients, worker_ids, description, leaf_message_id, project_id, project_path, no_fence
@@ -1263,6 +1265,7 @@ func (s *SQLiteStore) ForkSession(sourceSessionID string, fromMessageID int64, n
 			args[i] = id
 		}
 
+		// #nosec G201 -- placeholders are all "?"; IN clause args are parameterized
 		//nolint:gosec // placeholders are all "?"; IN clause args are parameterized
 		tcQuery := fmt.Sprintf(`
 			SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq
@@ -1557,7 +1560,8 @@ func (s *SQLiteStore) GetToolCallsForMessages(messageIDs []int64) (map[int64][]T
 		args[i] = id
 	}
 
-	//nolint:gosec // placeholders are all "?"; IN clause args are parameterized
+	// #nosec G201 -- placeholders are all "?"; IN clause args are parameterized
+		//nolint:gosec // placeholders are all "?"; IN clause args are parameterized
 	query := fmt.Sprintf(`
 		SELECT id, message_id, tool_name, tool_call_id, arguments, result, seq
 		FROM session_tool_calls

@@ -325,6 +325,7 @@ func (s *SQLiteStore) IncrementPhaseProgress(ctx context.Context, phaseID string
 	if field != "completed_steps" && field != "failed_steps" {
 		return fmt.Errorf("invalid progress field: %s", field)
 	}
+	// #nosec G202 -- field is whitelisted above against known column names
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE plan_phases SET `+field+` = `+field+` + ? WHERE id = ?`, delta, phaseID)
 	if err != nil {
