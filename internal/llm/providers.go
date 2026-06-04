@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/caimlas/meept/internal/pathutil"
+	"github.com/tailscale/hujson"
 )
 
 // ProviderConfig represents a provider configuration from models.json5.
@@ -71,11 +72,14 @@ func LoadProvidersConfig(path string) (*ProvidersConfig, error) {
 	// Expand environment variables
 	content := expandEnvVars(string(data))
 
-	// Strip JSON5 comments
-	content = stripJSON5Comments(content)
+	// Standardize JSON5 to strict JSON (comments, trailing commas, unquoted keys)
+	stdJSON, err := hujson.Standardize([]byte(content))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JSON5: %w", err)
+	}
 
 	var cfg ProvidersConfig
-	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
+	if err := json.Unmarshal(stdJSON, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse providers config: %w", err)
 	}
 
@@ -131,57 +135,6 @@ func expandEnvVars(s string) string {
 		}
 		return ""
 	})
-}
-
-// stripJSON5Comments removes // and /* */ comments from JSON5 content.
-func stripJSON5Comments(s string) string {
-	var result strings.Builder
-	inString := false
-	inSingleLineComment := false
-	inMultiLineComment := false
-	i := 0
-
-	for i < len(s) {
-		if !inSingleLineComment && !inMultiLineComment {
-			if s[i] == '"' && (i == 0 || s[i-1] != '\\') {
-				inString = !inString
-			}
-		}
-
-		if !inString {
-			if !inMultiLineComment && i+1 < len(s) && s[i:i+2] == "//" {
-				inSingleLineComment = true
-				i += 2
-				continue
-			}
-
-			if inSingleLineComment && s[i] == '\n' {
-				inSingleLineComment = false
-				result.WriteByte('\n')
-				i++
-				continue
-			}
-
-			if !inSingleLineComment && i+1 < len(s) && s[i:i+2] == "/*" {
-				inMultiLineComment = true
-				i += 2
-				continue
-			}
-
-			if inMultiLineComment && i+1 < len(s) && s[i:i+2] == "*/" {
-				inMultiLineComment = false
-				i += 2
-				continue
-			}
-		}
-
-		if !inSingleLineComment && !inMultiLineComment {
-			result.WriteByte(s[i])
-		}
-		i++
-	}
-
-	return result.String()
 }
 
 // ResolveModelRef resolves a "provider/model-id" reference to a ModelConfig.

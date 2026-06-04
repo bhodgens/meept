@@ -2,7 +2,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,26 +40,12 @@ type ModelParams struct {
 
 // LoadPresetsConfig loads model presets from a JSON5 file.
 func LoadPresetsConfig(path string) (*PresetConfig, error) {
-	path = expandPath(path)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		// If file doesn't exist, load default presets
+	var cfg PresetConfig
+	if err := LoadJSON5(path, &cfg); err != nil {
 		if os.IsNotExist(err) {
 			return DefaultPresetsConfig(), nil
 		}
-		return nil, fmt.Errorf("failed to read presets config: %w", err)
-	}
-
-	// Expand environment variables
-	content := ExpandEnvVars(string(data))
-
-	// Strip JSON5 comments
-	content = StripJSON5Comments(content)
-
-	var cfg PresetConfig
-	if err := json.Unmarshal([]byte(content), &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse presets config: %w", err)
+		return nil, fmt.Errorf("failed to load presets config: %w", err)
 	}
 
 	// Set default preset if not specified

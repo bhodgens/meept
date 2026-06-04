@@ -94,8 +94,8 @@ class MenubarConfigService {
             let data = try Data(contentsOf: fileURL)
             guard let content = String(data: data, encoding: .utf8) else { return }
 
-            // Strip JSON5 comments for simple Codable parsing
-            let cleanJSON = stripJSON5Comments(content)
+            // Convert JSON5 → strict JSON so JSONDecoder can parse it
+            let cleanJSON = try JSON5Normalizer.normalize(content)
             guard let cleanData = cleanJSON.data(using: .utf8) else { return }
 
             let decoder = JSONDecoder()
@@ -104,44 +104,5 @@ class MenubarConfigService {
             // On parse error, keep defaults
             print("Failed to load menubar config: \(error)")
         }
-    }
-
-    private func stripJSON5Comments(_ content: String) -> String {
-        var result = ""
-        var inBlockComment = false
-
-        for line in content.components(separatedBy: "\n") {
-            if inBlockComment {
-                if line.contains("*/") {
-                    inBlockComment = false
-                }
-                continue
-            }
-
-            if line.contains("/*") {
-                if !line.contains("*/") {
-                    inBlockComment = true
-                }
-                continue
-            }
-
-            // Remove // comments
-            var cleanLine: String
-            if let slashIndex = line.range(of: "//") {
-                cleanLine = String(line[..<slashIndex.lowerBound])
-            } else {
-                cleanLine = line
-            }
-
-            // Strip trailing commas (last property before } or ])
-            cleanLine = cleanLine.trimmingCharacters(in: .whitespaces)
-            if cleanLine.hasSuffix(",") && !cleanLine.contains("{") && !cleanLine.contains("[") {
-                cleanLine = String(cleanLine.dropLast()).trimmingCharacters(in: .whitespaces)
-            }
-
-            result += cleanLine + "\n"
-        }
-
-        return result
     }
 }
