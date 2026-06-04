@@ -100,14 +100,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    ref.listen<bool>(connectionStateProvider, (prev, connected) {
-      _onConnectionChanged(connected);
-    });
-  }
-
-  @override
   void dispose() {
     _leaderController.dispose();
     super.dispose();
@@ -219,6 +211,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final drawerOpen = ref.watch(drawerOpenProvider);
+    ref.listen<bool>(connectionStateProvider, (prev, connected) {
+      _onConnectionChanged(connected);
+    });
 
     return AppShortcuts(
       controller: _leaderController,
