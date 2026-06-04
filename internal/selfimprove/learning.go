@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/util/markdown"
 )
 
 // PatternType represents the type of learned pattern.
@@ -346,18 +347,10 @@ func (lp *LearningPipeline) buildJudgmentPrompt(trajectory Trajectory) string {
 }
 
 func (lp *LearningPipeline) parseJudgmentResponse(content, trajectoryID string) (*JudgmentResult, error) {
-	// Strip markdown code fences if present
-	content = strings.TrimSpace(content)
-	if strings.HasPrefix(content, "```") {
-		lines := strings.SplitN(content, "\n", 2)
-		if len(lines) > 1 {
-			content = lines[1]
-		}
+	jsonData := markdown.ExtractJSON(content)
+	if jsonData == nil {
+		return nil, fmt.Errorf("no valid JSON found in response")
 	}
-	if before, ok := strings.CutSuffix(content, "```"); ok {
-		content = before
-	}
-	content = strings.TrimSpace(content)
 
 	var parsed struct {
 		Quality          float64 `json:"quality"`
@@ -368,7 +361,7 @@ func (lp *LearningPipeline) parseJudgmentResponse(content, trajectoryID string) 
 		Reason           string  `json:"reason"`
 	}
 
-	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+	if err := json.Unmarshal(jsonData, &parsed); err != nil {
 		return nil, err
 	}
 
@@ -481,18 +474,10 @@ func (lp *LearningPipeline) buildDistillPrompt(trajectory Trajectory, judgment *
 }
 
 func (lp *LearningPipeline) parseDistillResponse(content, domain string, judgment *JudgmentResult) ([]*LearnedPattern, error) {
-	// Strip markdown code fences
-	content = strings.TrimSpace(content)
-	if strings.HasPrefix(content, "```") {
-		lines := strings.SplitN(content, "\n", 2)
-		if len(lines) > 1 {
-			content = lines[1]
-		}
+	jsonData := markdown.ExtractJSONArray(content)
+	if jsonData == nil {
+		return nil, fmt.Errorf("no valid JSON array found in response")
 	}
-	if before, ok := strings.CutSuffix(content, "```"); ok {
-		content = before
-	}
-	content = strings.TrimSpace(content)
 
 	var parsed []struct {
 		Type        string   `json:"type"`
@@ -501,7 +486,7 @@ func (lp *LearningPipeline) parseDistillResponse(content, domain string, judgmen
 		Tags        []string `json:"tags"`
 	}
 
-	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+	if err := json.Unmarshal(jsonData, &parsed); err != nil {
 		return nil, err
 	}
 
