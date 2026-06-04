@@ -289,85 +289,20 @@ func (t *CronCreateTool) buildCronExpression(args map[string]any) (string, error
 // parseTime parses a time string like "9:00am", "14:30", "9am" into hour and minute.
 func parseTime(timeStr string) (hour, minute int, err error) {
 	timeStr = strings.ToLower(strings.TrimSpace(timeStr))
+	if timeStr == "" {
+		return 0, 0, fmt.Errorf("empty time string")
+	}
 
-	// Parse hour:minute format
-	var hourStr, minStr string
-	if strings.Contains(timeStr, ":") {
-		parts := strings.Split(timeStr, ":")
-		if len(parts) != 2 {
-			return 0, 0, fmt.Errorf("invalid time format: %s", timeStr)
+	// Try multiple standard time formats in order of specificity.
+	formats := []string{"3:04pm", "3pm", "15:04", "15"}
+	for _, format := range formats {
+		if t, perr := time.Parse(format, timeStr); perr == nil {
+			return t.Hour(), t.Minute(), nil
 		}
-		hourStr = parts[0]
-		minPart := parts[1]
-
-		// Minute part might have am/pm attached (e.g., "30am")
-		if strings.Contains(minPart, "am") || strings.Contains(minPart, "pm") {
-			// Parse minute number before am/pm
-			var minNum strings.Builder
-			for _, ch := range minPart {
-				if ch >= '0' && ch <= '9' {
-					minNum.WriteString(string(ch))
-				} else {
-					break
-				}
-			}
-			minStr = minNum.String()
-		} else {
-			minStr = minPart
-		}
-	} else {
-		// No colon, just hour with possible am/pm (e.g., "9am")
-		hourStr = timeStr
-		minStr = "0"
 	}
-
-	// Parse hour
-	h, err := parseInt(hourStr)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid hour: %s", hourStr)
-	}
-
-	// Parse minute
-	m, err := parseInt(minStr)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid minute: %s", minStr)
-	}
-
-	// Handle am/pm for hour-only formats
-	if strings.Contains(timeStr, "pm") && !strings.Contains(timeStr, ":") && h != 12 {
-		h += 12
-	}
-	if strings.Contains(timeStr, "am") && h == 12 {
-		h = 0
-	}
-
-	return h, m, nil
+	return 0, 0, fmt.Errorf("invalid time format: %s", timeStr)
 }
 
-// parseInt parses an integer from a string with support for trailing non-digits.
-// Returns an error if no digits are found at the start of the string.
-func parseInt(s string) (int, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, fmt.Errorf("empty string")
-	}
-
-	var result int
-	var foundDigit bool
-	for _, ch := range s {
-		if ch >= '0' && ch <= '9' {
-			result = result*10 + int(ch-'0')
-			foundDigit = true
-		} else {
-			break
-		}
-	}
-
-	if !foundDigit {
-		return 0, fmt.Errorf("no numeric digits found in %q", s)
-	}
-	return result, nil
-}
 
 // dayOfWeekToNumber converts a day name to cron dow number (0-6, Sunday=0).
 func dayOfWeekToNumber(day string) (int, error) {

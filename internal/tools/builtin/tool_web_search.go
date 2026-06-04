@@ -231,7 +231,7 @@ func (t *WebSearchTool) parseDuckDuckGoHTML(html string, limit int) ([]SearchRes
 
 		// Decode HTML entities in title
 		title := t.decodeHTMLEntities(rawTitle)
-		title = t.stripHTMLTags(title)
+		title = stripHTML(title)
 		title = strings.TrimSpace(title)
 
 		// Extract snippet
@@ -241,7 +241,7 @@ func (t *WebSearchTool) parseDuckDuckGoHTML(html string, limit int) ([]SearchRes
 			if len(snippetMatch) >= 2 {
 				rawSnippet := snippetMatch[1]
 				snippet = t.decodeHTMLEntities(rawSnippet)
-				snippet = t.stripHTMLTags(snippet)
+				snippet = stripHTML(snippet)
 				snippet = strings.TrimSpace(snippet)
 				// Clean up multiple spaces and newlines
 				snippet = strings.Join(strings.Fields(snippet), " ")
@@ -351,13 +351,6 @@ func (t *WebSearchTool) decodeHTMLEntities(s string) string {
 	})
 
 	return s
-}
-
-// stripHTMLTags removes all HTML tags from a string.
-func (t *WebSearchTool) stripHTMLTags(s string) string {
-	// Remove any HTML tags
-	tagRE := regexp.MustCompile(`<[^>]+>`)
-	return tagRE.ReplaceAllString(s, "")
 }
 
 // Ensure WebSearchTool implements the Tool interface

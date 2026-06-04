@@ -607,33 +607,33 @@ func TestJoinStrings(t *testing.T) {
 		{[]string{"a", "b", "c"}, "|", "a|b|c"},
 	}
 	for _, tt := range tests {
-		got := joinStrings(tt.input, tt.sep)
+		got := strings.Join(tt.input, tt.sep)
 		if got != tt.want {
-			t.Errorf("joinStrings(%v, %q) = %q, want %q", tt.input, tt.sep, got, tt.want)
+			t.Errorf("strings.Join(%v, %q) = %q, want %q", tt.input, tt.sep, got, tt.want)
 		}
 	}
 }
 
-func TestSplitString(t *testing.T) {
+func TestStringsSplit(t *testing.T) {
 	tests := []struct {
 		input string
-		sep   rune
+		sep   string
 		want  []string
 	}{
-		{"", ',', nil},
-		{"a", ',', []string{"a"}},
-		{"a,b,c", ',', []string{"a", "b", "c"}},
-		{"a,,b", ',', []string{"a", "b"}},
+		{"", ",", []string{""}},
+		{"a", ",", []string{"a"}},
+		{"a,b,c", ",", []string{"a", "b", "c"}},
+		{"a,,b", ",", []string{"a", "", "b"}},
 	}
 	for _, tt := range tests {
-		got := splitString(tt.input, tt.sep)
+		got := strings.Split(tt.input, tt.sep)
 		if len(got) != len(tt.want) {
-			t.Errorf("splitString(%q, %q) = %v, want %v", tt.input, tt.sep, got, tt.want)
+			t.Errorf("strings.Split(%q, %q) = %v, want %v", tt.input, tt.sep, got, tt.want)
 			continue
 		}
 		for i := range got {
 			if got[i] != tt.want[i] {
-				t.Errorf("splitString(%q, %q)[%d] = %q, want %q", tt.input, tt.sep, i, got[i], tt.want[i])
+				t.Errorf("strings.Split(%q, %q)[%d] = %q, want %q", tt.input, tt.sep, i, got[i], tt.want[i])
 			}
 		}
 	}
