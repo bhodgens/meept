@@ -3,6 +3,7 @@ package configui
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -824,7 +825,7 @@ func RunWithSection(section string) error {
 	app := NewApp()
 	if section != "" {
 		if !app.JumpToSection(section) {
-			fmt.Printf("unknown section %q; opening main menu\n", section)
+			slog.Warn("unknown config section; opening main menu", "section", section)
 		}
 	}
 	p := tea.NewProgram(app)

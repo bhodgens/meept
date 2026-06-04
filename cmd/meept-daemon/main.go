@@ -66,7 +66,7 @@ func main() {
 }
 
 func runDaemon(cmd *cobra.Command, args []string) error {
-	fmt.Println(version.String())
+	slog.Info("daemon starting", "version", version.String())
 
 	// Load configuration from TOML file
 	var appCfg *config.Config

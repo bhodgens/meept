@@ -7,6 +7,7 @@ import (
 )
 
 // RiskLevel represents the severity of an action.
+//go:generate go run golang.org/x/tools/cmd/stringer -type=RiskLevel
 type RiskLevel int
 
 const (
@@ -16,24 +17,6 @@ const (
 	RiskHigh
 	RiskCritical
 )
-
-// String returns the human-readable name of the risk level.
-func (r RiskLevel) String() string {
-	switch r {
-	case RiskSafe:
-		return "SAFE"
-	case RiskLow:
-		return "LOW"
-	case RiskMedium:
-		return "MEDIUM"
-	case RiskHigh:
-		return "HIGH"
-	case RiskCritical:
-		return "CRITICAL"
-	default:
-		return "UNKNOWN"
-	}
-}
 
 // Decision represents the result of a permission check.
 type Decision struct {
