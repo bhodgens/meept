@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/providers.dart';
@@ -15,49 +13,21 @@ class AgentActivityPanel extends ConsumerStatefulWidget {
 }
 
 class _AgentActivityPanelState extends ConsumerState<AgentActivityPanel> {
-  Timer? _refreshTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted) ref.read(agentProvider.notifier).loadAgents();
-    });
-  }
-
-  @override
-  void dispose() {
-    _refreshTimer?.cancel();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final agentState = ref.watch(agentProvider);
+    final agents = ref.watch(agentProvider);
 
-    return agentState.when(
-      initial: () => _buildAgentList(const []),
-      loading: () => const Center(
+    if (agents.isLoading) {
+      return const Center(
         child: SizedBox(
           width: 24,
           height: 24,
           child: CircularProgressIndicator(strokeWidth: 2),
         ),
-      ),
-      error: (error, _) => Center(
-        child: Text(
-          'error: ${error.toString()}',
-          style: CyberpunkTypography.bodySmall.copyWith(
-            color: CyberpunkColors.midGray,
-          ),
-        ),
-      ),
-      data: (agents) => _buildAgentList(agents),
-    );
-  }
+      );
+    }
 
-  Widget _buildAgentList(List<dynamic> agents) {
-    if (agents.isEmpty) {
+    if (agents.agents.isEmpty) {
       return Center(
         child: Text(
           'no agents',
@@ -70,9 +40,9 @@ class _AgentActivityPanelState extends ConsumerState<AgentActivityPanel> {
 
     return ListView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: agents.length,
+      itemCount: agents.agents.length,
       itemBuilder: (context, index) {
-        final agent = agents[index];
+        final agent = agents.agents[index];
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(12),

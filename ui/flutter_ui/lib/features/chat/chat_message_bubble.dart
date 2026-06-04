@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../theme/markdown_style.dart';
+import '../../theme/syntax_highlighter.dart';
 import '../../models/api_models.dart';
 
 class ChatMessageBubble extends StatelessWidget {
@@ -42,12 +45,20 @@ class ChatMessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              message.content,
-              style: CyberpunkTypography.bodyMedium.copyWith(
-                color: CyberpunkColors.orangeGlow,
+            if (isUser)
+              Text(
+                message.content,
+                style: CyberpunkTypography.bodyMedium.copyWith(
+                  color: CyberpunkColors.orangeGlow,
+                ),
+              )
+            else
+              MarkdownBody(
+                data: message.content,
+                styleSheet: buildCyberpunkMarkdownStyle(context),
+                selectable: true,
+                syntaxHighlighter: CyberpunkSyntaxHighlighter(),
               ),
-            ),
             const SizedBox(height: 4),
             Text(
               _formatTime(message.timestamp),

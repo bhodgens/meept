@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 /// Application-wide constants
 abstract class AppConstants {
   // Version (keep in sync with pubspec.yaml)
@@ -39,4 +41,28 @@ abstract class AppConstants {
   static const String agentAnalyst = 'analyst';
   static const String agentCommitter = 'committer';
   static const String agentScheduler = 'scheduler';
+}
+
+/// Returns the appropriate Material icon for a given agent ID.
+IconData getAgentIcon(String agentId) {
+  switch (agentId.toLowerCase()) {
+    case 'coder':
+      return Icons.code;
+    case 'debugger':
+      return Icons.bug_report;
+    case 'planner':
+      return Icons.account_tree;
+    case 'analyst':
+      return Icons.analytics;
+    case 'chat':
+      return Icons.chat;
+    case 'committer':
+      return Icons.source;
+    case 'scheduler':
+      return Icons.schedule;
+    case 'dispatcher':
+      return Icons.route;
+    default:
+      return Icons.smart_toy;
+  }
 }

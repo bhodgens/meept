@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
+import '../../providers/providers.dart';
 import 'chat_view.dart';
-import '../sidebar/tools_panel.dart';
 import '../memory/memory_panel.dart';
 import '../settings/settings_panel.dart';
 import '../files/files_panel.dart';
@@ -10,103 +11,59 @@ import '../calendar/calendar_panel.dart';
 import '../metrics/metrics_panel.dart';
 import '../terminal/terminal_panel.dart';
 
-/// Chat tab - 3-pane layout with message list, main view, and collapsible sidebar
-class ChatTab extends StatefulWidget {
+/// Chat tab - full-width layout with main chat area only.
+/// Tools open in the main content area (replaces chat view).
+class ChatTab extends ConsumerStatefulWidget {
   final String sessionId;
 
   const ChatTab({super.key, required this.sessionId});
 
   @override
-  State<ChatTab> createState() => _ChatTabState();
+  ConsumerState<ChatTab> createState() => _ChatTabState();
 }
 
-class _ChatTabState extends State<ChatTab> {
-  bool _isSidebarCollapsed = false;
-  String _activeTool = '';
-
+class _ChatTabState extends ConsumerState<ChatTab> {
   @override
   Widget build(BuildContext context) {
+    final activeTool = ref.watch(activeToolProvider);
+
     return Container(
       color: CyberpunkColors.black,
-      child: Row(
-        children: [
-          // Main chat pane (transcript + input)
-          Expanded(
-            flex: _activeTool.isEmpty ? 3 : 2,
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border(
-                  right: BorderSide(
-                    color: CyberpunkColors.orangeDark.withValues(alpha: 0.3),
-                    width: 1,
-                  ),
-                ),
-              ),
-              child: _buildMainContent(),
-            ),
-          ),
-          // Tool detail pane (when a tool is selected)
-          if (_activeTool.isNotEmpty && _activeTool != 'memory' && _activeTool != 'settings')
-            Expanded(
-              flex: 1,
-              child: _buildToolDetail(),
-            ),
-          // Right sidebar (tools panel) - collapsible
-          if (!_isSidebarCollapsed)
-            ToolsPanel(
-              isExpanded: !_isSidebarCollapsed,
-              onCollapseToggle: () =>
-                  setState(() => _isSidebarCollapsed = !_isSidebarCollapsed),
-              onToolSelected: (route) => setState(() => _activeTool = route),
-            ),
-        ],
-      ),
+      child: activeTool.isNotEmpty ? _buildToolView(activeTool) : ChatView(sessionId: widget.sessionId),
     );
   }
 
-  Widget _buildMainContent() {
-    if (_activeTool.isNotEmpty) {
-      return _buildToolView();
-    }
-    return ChatView(sessionId: widget.sessionId);
-  }
-
-  Widget _buildToolView() {
-    // Fully implemented panels
-    if (_activeTool == 'memory') {
-      return const MemoryPanel();
-    }
-    if (_activeTool == 'settings') {
-      return const SettingsPanel();
-    }
-    if (_activeTool == 'files') {
-      return const FilesPanel();
-    }
-    if (_activeTool == 'calendar') {
-      return const CalendarPanel();
-    }
-    if (_activeTool == 'metrics') {
-      return const MetricsPanel();
-    }
-    if (_activeTool == 'terminal') {
-      return const TerminalPanel();
+  Widget _buildToolView(String activeTool) {
+    switch (activeTool) {
+      case 'memory':
+        return const MemoryPanel();
+      case 'settings':
+        return const SettingsPanel();
+      case 'files':
+        return const FilesPanel();
+      case 'calendar':
+        return const CalendarPanel();
+      case 'metrics':
+        return const MetricsPanel();
+      case 'terminal':
+        return const TerminalPanel();
     }
 
-    // Other tools show placeholder
+    // Unknown tool: placeholder
     return Container(
       color: CyberpunkColors.darkGray,
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              _toolIconFor(_activeTool),
+            const Icon(
+              Icons.tune,
               size: 48,
               color: CyberpunkColors.orangeBright,
             ),
             const SizedBox(height: 16),
             Text(
-              '${_activeTool.toLowerCase()} view',
+              '${activeTool.toLowerCase()} view',
               style: CyberpunkTypography.bodyMedium.copyWith(
                 color: CyberpunkColors.orangePrimary,
               ),
@@ -123,35 +80,4 @@ class _ChatTabState extends State<ChatTab> {
       ),
     );
   }
-
-  Widget _buildToolDetail() {
-    return Container(
-      color: CyberpunkColors.darkGray,
-      child: Center(
-        child: Text(
-          'tool details: ${_activeTool.toLowerCase()}',
-          style: CyberpunkTypography.bodySmall.copyWith(
-            color: CyberpunkColors.orangeDark,
-          ),
-        ),
-      ),
-    );
-  }
-
-  IconData _toolIconFor(String route) {
-    final item = _tools.firstWhere(
-      (t) => t.route == route,
-      orElse: () => const ToolItem(icon: Icons.help, label: '', status: '', route: ''),
-    );
-    return item.icon;
-  }
-
-  final List<ToolItem> _tools = [
-    const ToolItem(icon: Icons.memory, label: 'memory', status: 'ready', route: 'memory'),
-    const ToolItem(icon: Icons.folder, label: 'files', status: 'beta', route: 'files'),
-    const ToolItem(icon: Icons.terminal, label: 'terminal', status: 'ready', route: 'terminal'),
-    const ToolItem(icon: Icons.calendar_today, label: 'calendar', status: 'ready', route: 'calendar'),
-    const ToolItem(icon: Icons.insights, label: 'metrics', status: 'ready', route: 'metrics'),
-    const ToolItem(icon: Icons.settings, label: 'settings', status: 'ready', route: 'settings'),
-  ];
 }

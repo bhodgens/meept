@@ -1,4 +1,3 @@
-export 'async_state.dart';
 export 'chat_provider.dart';
 export 'task_provider.dart';
 export 'agent_provider.dart';
@@ -14,7 +13,6 @@ import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
 import '../services/session_notifier.dart';
 import '../models/api_models.dart';
-import 'async_state.dart';
 
 // Storage service — initialized in main() before runApp
 final storageProvider = Provider<StorageService>((ref) => StorageService.instance);
@@ -33,7 +31,7 @@ final websocketProvider = Provider<WebSocketService>((ref) {
 
 // Session state provider (StateNotifier for CRUD + selection)
 final sessionProvider =
-    StateNotifierProvider<SessionNotifier, AsyncState<List<Session>>>((ref) {
+    StateNotifierProvider<SessionNotifier, SessionState>((ref) {
   final client = ref.watch(apiClientProvider);
   return SessionNotifier(apiClient: client);
 });
@@ -46,6 +44,18 @@ final activeAgentProvider = StateProvider<Agent?>((ref) => null);
 
 // Connection state
 final connectionStateProvider = StateProvider<bool>((ref) => false);
+
+// Active tool panel route (empty string = no tool active)
+final activeToolProvider = StateProvider<String>((ref) => '');
+
+// Drawer overlay visibility (true = open)
+final drawerOpenProvider = StateProvider<bool>((ref) => false);
+
+// Keyboard shortcut help dialog visibility
+final shortcutHelpProvider = StateProvider<bool>((ref) => false);
+
+// Focus input with slash prefix request (toggled true to trigger, ChatInput resets)
+final focusInputRequestProvider = StateProvider<bool>((ref) => false);
 
 /// Monitors WebSocket + HTTP health and updates connectionStateProvider.
 ///

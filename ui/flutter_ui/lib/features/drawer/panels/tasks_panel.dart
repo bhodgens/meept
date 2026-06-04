@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../providers/providers.dart';
@@ -15,48 +13,22 @@ class TasksPanel extends ConsumerStatefulWidget {
 }
 
 class _TasksPanelState extends ConsumerState<TasksPanel> {
-  Timer? _refreshTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (mounted) ref.read(taskProvider.notifier).loadTasks();
-    });
-  }
-
-  @override
-  void dispose() {
-    _refreshTimer?.cancel();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final taskState = ref.watch(taskProvider);
 
-    return taskState.when(
-      initial: () => _buildTaskList(const []),
-      loading: () => const Center(
+    if (taskState.isLoading) {
+      return const Center(
         child: SizedBox(
           width: 24,
           height: 24,
           child: CircularProgressIndicator(strokeWidth: 2),
         ),
-      ),
-      error: (error, _) => Center(
-        child: Text(
-          'error: ${error.toString()}',
-          style: CyberpunkTypography.bodySmall.copyWith(
-            color: CyberpunkColors.midGray,
-          ),
-        ),
-      ),
-      data: (tasks) => _buildTaskList(tasks.take(4).toList()),
-    );
-  }
+      );
+    }
 
-  Widget _buildTaskList(List<dynamic> tasks) {
+    final tasks = taskState.tasks.take(4).toList();
+
     if (tasks.isEmpty) {
       return Center(
         child: Text(

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/constants.dart';
@@ -111,6 +113,31 @@ class StorageService {
     await _prefs?.setInt(_portPref, port);
   }
 
+  // ------ Keybindings ------
+
+  /// Leader key preference: "cmd+x" (macOS) or "ctrl+x" (linux/win).
+  /// Defaults to platform-appropriate value when not set.
+  String getLeaderKey() {
+    final stored = _prefs?.getString(_leaderKeyPref);
+    if (stored != null) return stored;
+    // Platform default
+    if (Platform.isMacOS) return 'cmd+x';
+    return 'ctrl+x';
+  }
+
+  Future<void> setLeaderKey(String value) async {
+    await _prefs?.setString(_leaderKeyPref, value);
+  }
+
+  /// Double-enter behavior: "steer", "interrupt", or "preempt".
+  String getDoubleEnter() {
+    return _prefs?.getString(_doubleEnterPref) ?? 'steer';
+  }
+
+  Future<void> setDoubleEnter(String value) async {
+    await _prefs?.setString(_doubleEnterPref, value);
+  }
+
   // ------ General helpers ------
 
   Future<bool> clearAll() async {
@@ -124,4 +151,6 @@ class StorageService {
 
   static const String _hostPref = 'api_host';
   static const String _portPref = 'api_port';
+  static const String _leaderKeyPref = 'leader_key';
+  static const String _doubleEnterPref = 'double_enter';
 }

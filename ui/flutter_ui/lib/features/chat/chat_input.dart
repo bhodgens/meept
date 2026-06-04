@@ -44,7 +44,6 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   // Slash autocomplete state
   bool _showSlashAutocomplete = false;
   String _slashQuery = '';
-  int _slashSelectedIndex = 0;
 
   // Ghost text for single slash match
   String? _ghostText;
@@ -59,6 +58,28 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Listen for focus-input requests from the shortcut system
+    ref.listen<bool>(
+      focusInputRequestProvider,
+      (previous, next) {
+        if (next) {
+          _focusNode.requestFocus();
+          // Prefill '/' if input is empty
+          if (_controller.text.isEmpty) {
+            _controller.text = '/';
+            _controller.selection = TextSelection.collapsed(
+              offset: 1,
+            );
+          }
+          ref.read(focusInputRequestProvider.notifier).state = false;
+        }
+      },
+    );
   }
 
   @override
@@ -135,14 +156,12 @@ class _ChatInputState extends ConsumerState<ChatInput> {
       setState(() {
         _showSlashAutocomplete = true;
         _slashQuery = query;
-        _slashSelectedIndex = 0;
       });
     } else {
       if (_showSlashAutocomplete) {
         setState(() {
           _showSlashAutocomplete = false;
           _slashQuery = '';
-          _slashSelectedIndex = 0;
         });
       }
     }
@@ -163,8 +182,6 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   /// Detect paste operations by checking for large line count jumps
   void _detectPaste(String currentText) {
     if (currentText.length < _previousText.length) return;
-    // Only detect pure appends — skip if previous text is not a prefix
-    if (!currentText.startsWith(_previousText)) return;
 
     final added = currentText.substring(_previousText.length);
     final addedLines = '\n'.allMatches(added).length + 1;
@@ -261,14 +278,9 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           return KeyEventResult.handled;
         }
 
-        // If slash autocomplete is showing, accept the selected match
+        // If slash autocomplete is showing, let it handle Enter
         if (_showSlashAutocomplete) {
-          final matches = _slashRegistry.match(_slashQuery);
-          if (matches.isNotEmpty) {
-            final idx = _slashSelectedIndex.clamp(0, matches.length - 1);
-            _onSlashSelected(matches[idx]);
-          }
-          return KeyEventResult.handled;
+          return KeyEventResult.ignored;
         }
 
         final now = DateTime.now();
@@ -302,26 +314,6 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           },
         );
         return KeyEventResult.handled;
-      }
-
-      // Arrow up/down navigates slash autocomplete when visible
-      if (_showSlashAutocomplete) {
-        final matches = _slashRegistry.match(_slashQuery);
-        final maxIdx = (matches.length > 8 ? 8 : matches.length) - 1;
-        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-          setState(() {
-            _slashSelectedIndex =
-                (_slashSelectedIndex + 1).clamp(0, maxIdx < 0 ? 0 : maxIdx);
-          });
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-          setState(() {
-            _slashSelectedIndex =
-                (_slashSelectedIndex - 1).clamp(0, maxIdx < 0 ? 0 : maxIdx);
-          });
-          return KeyEventResult.handled;
-        }
       }
 
       if (event.logicalKey == LogicalKeyboardKey.escape) {
@@ -367,21 +359,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
 
   @override
   Widget build(BuildContext context) {
-    final isSending = ref.read(chatProvider.notifier).isSending;
-    // Listen for focus-input requests from the shortcut system
-    ref.listen<bool>(
-      focusInputRequestProvider,
-      (previous, next) {
-        if (next) {
-          _focusNode.requestFocus();
-          if (_controller.text.isEmpty) {
-            _controller.text = '/';
-            _controller.selection = TextSelection.collapsed(offset: 1);
-          }
-          ref.read(focusInputRequestProvider.notifier).state = false;
-        }
-      },
-    );
+    final chatState = ref.watch(chatProvider);
 
     return Focus(
       onKeyEvent: _handleKeyEvent,
@@ -432,14 +410,14 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                         TextField(
                           controller: _controller,
                           focusNode: _focusNode,
-                          enabled: !isSending,
+                          enabled: !chatState.isLoading,
                           style: CyberpunkTypography.bodyMedium.copyWith(
                             color: CyberpunkColors.greenSuccess,
                             fontFamily: 'SourceCodePro',
                           ),
                           cursorColor: CyberpunkColors.orangePrimary,
                           decoration: InputDecoration(
-                            hintText: isSending
+                            hintText: chatState.isLoading
                                 ? 'sending...'
                                 : 'enter command...',
                             hintStyle: CyberpunkTypography.bodySmall,
@@ -487,13 +465,13 @@ class _ChatInputState extends ConsumerState<ChatInput> {
 
     return PopupMenuButton<String>(
       onSelected: (String agentId) {
-        final agentList = agents.whenOrNull(data: (a) => a) ?? [];
-        final agent = agentList.firstWhere(
+        final agent = agents.agents.firstWhere(
           (a) => a.id == agentId,
           orElse: () => Agent(
             id: agentId,
             name: agentId,
             description: '',
+            prompt: '',
             enabled: true,
           ),
         );
@@ -503,8 +481,8 @@ class _ChatInputState extends ConsumerState<ChatInput> {
         });
       },
       itemBuilder: (BuildContext context) {
-        return agents.when(
-          initial: () => [
+        if (agents.isLoading) {
+          return [
             const PopupMenuItem<String>(
               enabled: false,
               value: '__loading__',
@@ -513,65 +491,48 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                 child: LinearProgressIndicator(),
               ),
             ),
-          ],
-          loading: () => [
-            const PopupMenuItem<String>(
-              enabled: false,
-              value: '__loading__',
-              child: SizedBox(
-                width: 120,
-                child: LinearProgressIndicator(),
-              ),
-            ),
-          ],
-          error: (_, __) => [
-            const PopupMenuItem<String>(
-              enabled: false,
-              value: '__error__',
-              child: Text('error loading agents'),
-            ),
-          ],
-          data: (agentList) {
-            final apiAgentIds = agentList.map((a) => a.id).toSet();
-            final allAgents = <Agent>[
-              if (!apiAgentIds.contains(_selectedAgent))
-                Agent(
-                  id: _selectedAgent,
-                  name: _selectedAgent,
-                  description: '',
-                  enabled: true,
-                ),
-              ...agentList,
-            ];
+          ];
+        }
 
-            return allAgents.map((Agent agent) {
-              return PopupMenuItem<String>(
-                value: agent.id,
-                child: Row(
-                  children: [
-                    Icon(
-                      getAgentIcon(agent.id),
-                      size: 16,
-                      color: agent.id == selectedAgentId
-                          ? CyberpunkColors.orangePrimary
-                          : CyberpunkColors.greenSuccess,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      agent.name,
-                      style: CyberpunkTypography.bodySmall.copyWith(
-                        fontFamily: 'SourceCodePro',
-                        color: agent.id == selectedAgentId
-                            ? CyberpunkColors.orangePrimary
-                            : null,
-                      ),
-                    ),
-                  ],
+        final apiAgentIds = agents.agents.map((a) => a.id).toSet();
+        final allAgents = <Agent>[
+          if (!apiAgentIds.contains(_selectedAgent))
+            Agent(
+              id: _selectedAgent,
+              name: _selectedAgent,
+              description: '',
+              prompt: '',
+              enabled: true,
+            ),
+          ...agents.agents,
+        ];
+
+        return allAgents.map((Agent agent) {
+          return PopupMenuItem<String>(
+            value: agent.id,
+            child: Row(
+              children: [
+                Icon(
+                  getAgentIcon(agent.id),
+                  size: 16,
+                  color: agent.id == selectedAgentId
+                      ? CyberpunkColors.orangePrimary
+                      : CyberpunkColors.greenSuccess,
                 ),
-              );
-            }).toList();
-          },
-        );
+                const SizedBox(width: 8),
+                Text(
+                  agent.name,
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    fontFamily: 'SourceCodePro',
+                    color: agent.id == selectedAgentId
+                        ? CyberpunkColors.orangePrimary
+                        : null,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList();
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -608,23 +569,23 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   }
 
   Widget _buildSendButton() {
-    final isSending = ref.read(chatProvider.notifier).isSending;
+    final chatState = ref.watch(chatProvider);
     return GestureDetector(
-      onTap: isSending ? null : () => _sendNormal(_controller.text),
+      onTap: chatState.isLoading ? null : () => _sendNormal(_controller.text),
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isSending
+          color: chatState.isLoading
               ? CyberpunkColors.orangeDark
               : CyberpunkColors.orangePrimary,
           borderRadius: BorderRadius.circular(4),
         ),
-        child: isSending
+        child: chatState.isLoading
             ? SizedBox(
                 width: 18,
                 height: 18,
                 child: AnimatedOpacity(
-                  opacity: isSending ? 1.0 : 0.5,
+                  opacity: chatState.isLoading ? 1.0 : 0.5,
                   duration: const Duration(milliseconds: 400),
                   child: CircularProgressIndicator(
                     strokeWidth: 2,

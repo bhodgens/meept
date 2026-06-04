@@ -202,6 +202,38 @@ class ApiClient {
     );
   }
 
+  /// Send a steering message to the active agent conversation queue.
+  Future<Map<String, dynamic>> sendSteerMessage({
+    required String message,
+    required String conversationId,
+    String? source,
+  }) async {
+    return post<Map<String, dynamic>>(
+      '/chat/steer',
+      data: {
+        'message': message,
+        'conversation_id': conversationId,
+        if (source != null) 'source': source,
+      },
+    );
+  }
+
+  /// Send a follow-up message to the active agent conversation queue.
+  Future<Map<String, dynamic>> sendFollowUpMessage({
+    required String message,
+    required String conversationId,
+    String? source,
+  }) async {
+    return post<Map<String, dynamic>>(
+      '/chat/followup',
+      data: {
+        'message': message,
+        'conversation_id': conversationId,
+        if (source != null) 'source': source,
+      },
+    );
+  }
+
   // ===== Session Endpoints =====
 
   Future<List<Session>> listSessions() async {

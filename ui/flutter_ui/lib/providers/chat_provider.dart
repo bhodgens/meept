@@ -4,19 +4,51 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
 import '../services/websocket_service.dart';
-import 'async_state.dart';
 import 'providers.dart';
 
 /// Maximum number of messages to keep in memory
 const int _maxMessages = 500;
 
+const _unset = Object();
+
 /// Send endpoint type — distinct route for normal, steer, and follow-up messages.
 enum _SendEndpoint { normal, steer, followUp }
 
+/// State for the chat provider
+class ChatState {
+  final List<ChatMessage> messages;
+  final bool isLoading;
+  final String? error;
+
+  const ChatState({
+    this.messages = const [],
+    this.isLoading = false,
+    this.error,
+  });
+
+  ChatState copyWith({
+    List<ChatMessage>? messages,
+    bool? isLoading,
+    Object? error = _unset,
+  }) {
+    // Limit messages to prevent memory leaks
+    List<ChatMessage> limitedMessages = messages ?? this.messages;
+    if (limitedMessages.length > _maxMessages) {
+      // Keep only the most recent messages
+      limitedMessages = limitedMessages.sublist(limitedMessages.length - _maxMessages);
+    }
+    return ChatState(
+      messages: limitedMessages,
+      isLoading: isLoading ?? this.isLoading,
+      error: identical(error, _unset) ? this.error : error as String?,
+    );
+  }
+}
+
 /// StateNotifier that manages chat messages for a session
-class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
+class ChatNotifier extends StateNotifier<ChatState> {
   ChatNotifier({required this.apiClient, required this.websocket})
-      : super(const AsyncState.initial()) {
+      : super(const ChatState()) {
     _initWebSocket();
   }
 
@@ -27,8 +59,7 @@ class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
   String? _sessionId;
   int _loadGeneration = 0;
 
-  /// Tracks whether a message is currently being sent.
-  bool get isSending => _isSending;
+  /// Prevents duplicate message sends from rapid button taps
   bool _isSending = false;
 
   /// Initialize WebSocket connection and subscribe to chat messages
@@ -46,7 +77,11 @@ class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
     }
 
     // Clear previous messages when loading a new session
-    state = const AsyncState.loading();
+    state = ChatState(
+      messages: [],
+      isLoading: true,
+      error: null,
+    );
 
     // Update session scope so the existing subscription filters correctly
     _sessionId = sessionId;
@@ -59,13 +94,20 @@ class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
     // Fetch messages from the HTTP API
     try {
       final messages = await apiClient.getMessages(sessionId);
-      state = AsyncState.data(messages);
-    } catch (e, st) {
+      state = ChatState(
+        messages: messages,
+        isLoading: false,
+      );
+    } catch (e) {
       // Don't show error for default session (no session selected)
       if (sessionId == 'default') {
-        state = const AsyncState.data([]);
+        state = const ChatState(messages: [], isLoading: false);
       } else {
-        state = AsyncState.error(e, st);
+        state = ChatState(
+          messages: [],
+          isLoading: false,
+          error: e.toString(),
+        );
       }
     }
 
@@ -123,7 +165,9 @@ class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
     required _SendEndpoint endpoint,
   }) async {
     // Guard against duplicate sends from rapid taps
-    if (_isSending) return;
+    if (_isSending) {
+      return;
+    }
 
     _isSending = true;
 
@@ -136,12 +180,15 @@ class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
       sessionId: sessionId,
     );
 
-    final currentMessages = state.whenOrNull(data: (msgs) => msgs) ?? [];
-    var newMessages = [...currentMessages, userMessage];
+    var newMessages = [...state.messages, userMessage];
     if (newMessages.length > _maxMessages) {
       newMessages = newMessages.sublist(newMessages.length - _maxMessages);
     }
-    state = AsyncState.data(newMessages);
+    state = ChatState(
+      messages: newMessages,
+      isLoading: true,
+      error: null,
+    );
 
     try {
       switch (endpoint) {
@@ -164,11 +211,18 @@ class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
             source: 'flutter_ui',
           );
       }
+      state = ChatState(
+        messages: state.messages,
+        isLoading: false,
+      );
+    } catch (e) {
+      state = ChatState(
+        messages: state.messages,
+        isLoading: false,
+        error: e.toString(),
+      );
+    } finally {
       _isSending = false;
-      state = AsyncState.data(newMessages);
-    } catch (e, st) {
-      _isSending = false;
-      state = AsyncState.error(e, st);
     }
   }
 
@@ -177,47 +231,50 @@ class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
     try {
       final message = ChatMessage.fromBackendMessage(data);
 
-      final currentMessages = state.whenOrNull(data: (msgs) => msgs) ?? [];
-
       // Replace or update existing message by id if it exists
-      final existingIndex = currentMessages.indexWhere(
+      final existingIndex = state.messages.indexWhere(
         (m) => m.id == message.id,
       );
 
-      List<ChatMessage> updatedMessages;
+      List<ChatMessage> newMessages;
       if (existingIndex >= 0) {
-        updatedMessages = [...currentMessages];
-        updatedMessages[existingIndex] = message;
+        newMessages = [...state.messages];
+        newMessages[existingIndex] = message;
       } else {
-        updatedMessages = [...currentMessages, message];
+        newMessages = [...state.messages, message];
       }
 
-      if (updatedMessages.length > _maxMessages) {
-        updatedMessages = updatedMessages.sublist(
-            updatedMessages.length - _maxMessages);
+      if (newMessages.length > _maxMessages) {
+        newMessages = newMessages.sublist(newMessages.length - _maxMessages);
       }
 
-      state = AsyncState.data(updatedMessages);
-    } catch (e, st) {
+      state = state.copyWith(messages: newMessages);
+    } catch (e) {
       final errorMessage = ChatMessage(
         id: 'error_${DateTime.now().millisecondsSinceEpoch}',
         role: 'system',
         content: 'Failed to process message: $e',
         timestamp: DateTime.now(),
       );
-      final currentMessages = state.whenOrNull(data: (msgs) => msgs) ?? [];
-      state = AsyncState.data([...currentMessages, errorMessage]);
+      state = ChatState(
+        messages: [...state.messages, errorMessage],
+        isLoading: false,
+        error: e.toString(),
+      );
     }
   }
 
   /// Clear error state without removing messages
   void clearError() {
-    state = const AsyncState.initial();
+    state = ChatState(
+      messages: state.messages,
+      isLoading: state.isLoading,
+    );
   }
 
   /// Clear all messages
   void clearMessages() {
-    state = const AsyncState.initial();
+    state = const ChatState();
   }
 
   @override
@@ -232,7 +289,7 @@ class ChatNotifier extends StateNotifier<AsyncState<List<ChatMessage>>> {
 
 /// Chat provider
 final chatProvider =
-    StateNotifierProvider<ChatNotifier, AsyncState<List<ChatMessage>>>((ref) {
+    StateNotifierProvider<ChatNotifier, ChatState>((ref) {
   final client = ref.watch(apiClientProvider);
   final websocket = ref.watch(websocketProvider);
   return ChatNotifier(apiClient: client, websocket: websocket);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/constants.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
@@ -27,30 +28,6 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     final agentState = ref.watch(agentProvider);
     final activeAgent = ref.watch(activeAgentProvider);
 
-    return agentState.when(
-      initial: () => const Center(child: Text('no agents available')),
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, _) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 280,
-              child: _AgentErrorBanner(message: error.toString()),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.tonal(
-              onPressed: () => ref.read(agentProvider.notifier).loadAgents(),
-              child: const Text('retry', style: CyberpunkTypography.bodySmall),
-            ),
-          ],
-        ),
-      ),
-      data: (agents) => _buildAgentList(agents, activeAgent),
-    );
-  }
-
-  Widget _buildAgentList(List<Agent> agents, Agent? activeAgent) {
     return Container(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -75,7 +52,27 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             ],
           ),
           const SizedBox(height: 16),
-          if (agents.isEmpty)
+          if (agentState.isLoading)
+            const Center(
+              child: CircularProgressIndicator(),
+            )
+          else if (agentState.error != null)
+            Center(
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: 280,
+                    child: _AgentErrorBanner(message: agentState.error!),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: () => ref.read(agentProvider.notifier).loadAgents(),
+                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                  ),
+                ],
+              ),
+            )
+          else if (agentState.agents.isEmpty)
             const Center(
               child: Text('no agents available'),
             )
@@ -88,9 +85,9 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                   mainAxisSpacing: 16,
                   childAspectRatio: 1.5,
                 ),
-                itemCount: agents.length,
+                itemCount: agentState.agents.length,
                 itemBuilder: (context, index) {
-                  final agent = agents[index];
+                  final agent = agentState.agents[index];
                   final isSelected = activeAgent?.id == agent.id;
                   return _buildAgentCard(agent, isSelected);
                 },
@@ -126,7 +123,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             Row(
               children: [
                 Icon(
-                  _getAgentIcon(agent.id),
+                  getAgentIcon(agent.id),
                   color: isSelected
                       ? CyberpunkColors.orangePrimary
                       : CyberpunkColors.greenSuccess,
@@ -162,28 +159,6 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
     );
   }
 
-  IconData _getAgentIcon(String agentId) {
-    switch (agentId.toLowerCase()) {
-      case 'coder':
-        return Icons.code;
-      case 'debugger':
-        return Icons.bug_report;
-      case 'planner':
-        return Icons.account_tree;
-      case 'analyst':
-        return Icons.analytics;
-      case 'chat':
-        return Icons.chat;
-      case 'committer':
-        return Icons.cloud_upload;
-      case 'scheduler':
-        return Icons.event_note;
-      case 'dispatcher':
-        return Icons.forward_to_inbox;
-      default:
-        return Icons.smart_toy;
-    }
-  }
 }
 
 /// Inline error banner for agent list errors

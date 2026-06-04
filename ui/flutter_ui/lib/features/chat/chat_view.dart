@@ -6,7 +6,7 @@ import '../../providers/providers.dart';
 import 'chat_message_list.dart';
 import 'chat_input.dart';
 
-/// Chat view - main chat pane with header, message list, and input
+/// Chat view - main chat pane with orange header bar, message list, and input
 class ChatView extends ConsumerStatefulWidget {
   final String sessionId;
 
@@ -19,12 +19,58 @@ class ChatView extends ConsumerStatefulWidget {
 class _ChatViewState extends ConsumerState<ChatView> {
   @override
   Widget build(BuildContext context) {
+    final session = ref.watch(activeSessionProvider);
+
+    // Build header text matching TUI logic:
+    // - Both name and description: SessionName │ Description...
+    // - Name only (non-default): session-name
+    // - Description only: description text...
+    // - Nothing: meept
+    String headerText;
+    final name = session?.title;
+    final description = session?.description;
+
+    if (name != null &&
+        name.isNotEmpty &&
+        name != 'default' &&
+        description != null &&
+        description.isNotEmpty) {
+      final truncated = description.length > 60
+          ? '${description.substring(0, 57)}...'
+          : description;
+      headerText = '$name \u2502 $truncated';
+    } else if (name != null && name.isNotEmpty && name != 'default') {
+      headerText = name;
+    } else if (description != null && description.isNotEmpty) {
+      final truncated = description.length > 80
+          ? '${description.substring(0, 77)}...'
+          : description;
+      headerText = truncated;
+    } else {
+      headerText = 'meept';
+    }
+
     return Container(
       color: CyberpunkColors.black,
       child: Column(
         children: [
-          // Chat header
-          _buildHeader(),
+          // Orange header bar
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: const Color(0xFFF97316),
+            child: Text(
+              headerText.toLowerCase(),
+              style: CyberpunkTypography.bodyMedium.copyWith(
+                color: CyberpunkColors.black,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'SourceCodePro',
+                fontSize: 13,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
           const Divider(height: 1, color: CyberpunkColors.midGray),
           // Message list
           Expanded(
@@ -32,51 +78,6 @@ class _ChatViewState extends ConsumerState<ChatView> {
           ),
           // Input area
           ChatInput(sessionId: widget.sessionId),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      color: CyberpunkColors.darkGray,
-      child: Row(
-        children: [
-          Consumer(
-            builder: (context, ref, _) {
-              final connected = ref.watch(connectionStateProvider);
-              return Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: connected
-                      ? CyberpunkColors.greenSuccess
-                      : CyberpunkColors.redAlert,
-                  shape: BoxShape.circle,
-                ),
-              );
-            },
-          ),
-          const SizedBox(width: 8),
-          Consumer(
-            builder: (context, ref, _) {
-              final connected = ref.watch(connectionStateProvider);
-              return Text(
-                connected ? 'chat active' : 'daemon disconnected',
-                style: CyberpunkTypography.label.copyWith(
-                  color: connected
-                      ? CyberpunkColors.greenSuccess
-                      : CyberpunkColors.redAlert,
-                ),
-              );
-            },
-          ),
-          const Spacer(),
-          Text(
-            widget.sessionId == 'default' ? 'new session' : 'session: ${widget.sessionId.length >= 8 ? widget.sessionId.substring(0, 8) : widget.sessionId}',
-            style: CyberpunkTypography.bodySmall,
-          ),
         ],
       ),
     );

@@ -1,69 +1,57 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
+import '../../core/shortcuts.dart';
 import '../../theme/colors.dart';
 import '../../theme/effects.dart';
 import '../../theme/typography.dart';
 import '../../widgets/tab_bar.dart';
 import '../../providers/providers.dart';
+import '../drawer/drawer_overlay.dart';
 import 'tab_content.dart';
+import 'tools_dropdown.dart';
 
 /// Home tab enum - 5 tabs
 enum HomeTab { chat, sessions, plans, tasks, agents }
 
-/// Connection status indicator - visible pill showing daemon connectivity
-class ConnectionStatusIndicator extends ConsumerWidget {
-  const ConnectionStatusIndicator({super.key});
+/// Connection status dot - small indicator in toolbar
+class _ConnectionDot extends ConsumerWidget {
+  const _ConnectionDot();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connected = ref.watch(connectionStateProvider);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: (connected
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: connected
                 ? CyberpunkColors.greenSuccess
-                : CyberpunkColors.redAlert)
-            .withValues(alpha: 0.15),
-        border: Border.all(
-          color: connected
-              ? CyberpunkColors.greenSuccess
-              : CyberpunkColors.redAlert,
-          width: 1,
+                : CyberpunkColors.redAlert,
+            shape: BoxShape.circle,
+          ),
         ),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: connected
-                  ? CyberpunkColors.greenSuccess
-                  : CyberpunkColors.redAlert,
-              shape: BoxShape.circle,
-            ),
+        const SizedBox(width: 6),
+        Text(
+          connected ? 'connected' : 'disconnected',
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: connected
+                ? CyberpunkColors.greenSuccess
+                : CyberpunkColors.redAlert,
+            fontFamily: 'SourceCodePro',
+            fontSize: 10,
           ),
-          const SizedBox(width: 6),
-          Text(
-            connected ? 'connected' : 'disconnected',
-            style: CyberpunkTypography.bodySmall.copyWith(
-              color: connected
-                  ? CyberpunkColors.greenSuccess
-                  : CyberpunkColors.redAlert,
-              fontFamily: 'SourceCodePro',
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-/// Home screen - main app screen with top tab navigation
+/// Home screen - main app screen with top tab navigation and toolbar
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -77,18 +65,44 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final List<String> _tabLabels = ['chat', 'sessions', 'plans', 'tasks', 'agents'];
 
   bool _initialLoadDone = false;
+  late final LeaderKeyController _leaderController;
 
   @override
   void initState() {
     super.initState();
-    // Initialize connection monitor (triggers WebSocket connect) and watch
-    // for the first successful connection to load data.
+    _leaderController = LeaderKeyController();
+    _leaderController.onTabSelected = (index) {
+      if (index >= 0 && index < HomeTab.values.length) {
+        setState(() => _selectedTab = HomeTab.values[index]);
+      }
+    };
+    _leaderController.onToggleDrawer = () {
+      final isOpen = ref.read(drawerOpenProvider);
+      ref.read(drawerOpenProvider.notifier).state = !isOpen;
+    };
+    _leaderController.onShowHelp = _showHelpDialog;
+    _leaderController.onFocusInput = ({slashPrefix = false}) {
+      if (_selectedTab != HomeTab.chat) {
+        setState(() => _selectedTab = HomeTab.chat);
+      }
+      ref.read(focusInputRequestProvider.notifier).state = true;
+    };
+    _leaderController.onFind = () {
+      _showSnack('search: not yet implemented');
+    };
+    _leaderController.onBranches = () {
+      _showSnack('branches: not yet implemented');
+    };
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Trigger WebSocket connection via chat provider
       ref.read(chatProvider);
-      // Start listening for connection state changes
       _onConnectionChanged(ref.read(connectionStateProvider));
     });
+  }
+
+  @override
+  void dispose() {
+    _leaderController.dispose();
+    super.dispose();
   }
 
   void _onConnectionChanged(bool connected) {
@@ -100,48 +114,192 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: CyberpunkColors.black,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: CyberpunkEffects.angularGradient,
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: CyberpunkColors.orangePrimary,
+            fontFamily: 'SourceCodePro',
+          ),
         ),
-        child: SafeArea(
+        backgroundColor: CyberpunkColors.darkGray,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: CyberpunkColors.darkGray,
+        title: Text(
+          'keyboard shortcuts',
+          style: CyberpunkTypography.bodyMedium.copyWith(
+            color: CyberpunkColors.orangePrimary,
+          ),
+        ),
+        content: SingleChildScrollView(
           child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top tab bar
-              OrangeVoidTabBar(
-                tabs: _tabLabels,
-                selectedIndex: _selectedTab.index,
-                onTabSelected: (index) =>
-                    setState(() => _selectedTab = HomeTab.values[index]),
-              ),
-              // Status bar: version + connection indicator
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                color: CyberpunkColors.blackTransparent(0.7),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'meept gui client v${AppConstants.appVersion}',
-                      style: CyberpunkTypography.bodySmall.copyWith(
-                        color: CyberpunkColors.midGray,
-                        fontFamily: 'SourceCodePro',
-                      ),
-                    ),
-                    const ConnectionStatusIndicator(),
-                  ],
+              _buildHelpRow('leader s', 'sessions tab'),
+              _buildHelpRow('leader c', 'chat tab'),
+              _buildHelpRow('leader d', 'toggle drawer'),
+              _buildHelpRow('leader p', 'find / search'),
+              _buildHelpRow('leader b', 'branches'),
+              _buildHelpRow('leader ?', 'this help'),
+              _buildHelpRow('cmd+k', 'focus input (/)'),
+              _buildHelpRow('esc', 'close / dismiss / blur'),
+              const SizedBox(height: 8),
+              Text(
+                'leader = cmd+x (mac) / ctrl+x (linux/win)',
+                style: CyberpunkTypography.bodySmall.copyWith(
+                  color: CyberpunkColors.midGray,
+                  fontSize: 10,
                 ),
               ),
-              const Divider(height: 1, color: CyberpunkColors.midGray),
-              // Main content area
-              Expanded(
-                child: _buildTabContent(),
-              ),
             ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'close',
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.orangePrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHelpRow(String key, String description) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              key,
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.orangePrimary,
+                fontFamily: 'SourceCodePro',
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              description,
+              style: CyberpunkTypography.bodySmall.copyWith(
+                color: CyberpunkColors.lightGray,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final drawerOpen = ref.watch(drawerOpenProvider);
+
+    return AppShortcuts(
+      controller: _leaderController,
+      child: Scaffold(
+        backgroundColor: CyberpunkColors.black,
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: CyberpunkEffects.angularGradient,
+          ),
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Column(
+                  children: [
+                    // Top tab bar
+                    OrangeVoidTabBar(
+                      tabs: _tabLabels,
+                      selectedIndex: _selectedTab.index,
+                      onTabSelected: (index) =>
+                          setState(() => _selectedTab = HomeTab.values[index]),
+                    ),
+                    // Toolbar with drawer toggle, tools dropdown + connection indicator
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      color: CyberpunkColors.blackTransparent(0.7),
+                      child: Row(
+                        children: [
+                          GestureDetector(
+                            onTap: () {
+                              ref.read(drawerOpenProvider.notifier).state = true;
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: CyberpunkColors.darkGray,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Icon(
+                                Icons.menu,
+                                size: 16,
+                                color: CyberpunkColors.orangePrimary,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          ToolsDropdown(
+                            onToolSelected: (route) {
+                              ref.read(activeToolProvider.notifier).state = route;
+                              if (_selectedTab != HomeTab.chat) {
+                                setState(() => _selectedTab = HomeTab.chat);
+                              }
+                            },
+                          ),
+                          const SizedBox(width: 12),
+                          const _ConnectionDot(),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1, color: CyberpunkColors.midGray),
+                    // Main content area
+                    Expanded(
+                      child: _buildTabContent(),
+                    ),
+                  ],
+                ),
+                // Drawer overlay
+                if (drawerOpen) const DrawerOverlay(),
+                // Leader key waiting indicator
+                if (_leaderController.isWaiting)
+                  Positioned(
+                    top: 80,
+                    left: 16,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: CyberpunkColors.orangePrimary.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'leader key — waiting...',
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.black,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -149,9 +307,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildTabContent() {
-    // Watch active session to pass to chat tab
     final activeSession = ref.watch(activeSessionProvider);
-    // Watch connection state to trigger initial load when daemon connects
     final connected = ref.watch(connectionStateProvider);
     _onConnectionChanged(connected);
     return TabContent(
