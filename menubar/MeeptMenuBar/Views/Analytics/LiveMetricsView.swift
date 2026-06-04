@@ -9,9 +9,11 @@ struct LiveMetricsView: View {
     @State private var metrics: LiveMetrics?
     @State private var isLoading = false
     @State private var lastUpdated: Date?
-    
+    @State private var metricsTimer: Timer?
+
     private let dashboardService = DashboardService()
     private let updateInterval: TimeInterval = 5.0
+    private let relativeFormatter = RelativeDateTimeFormatter()
     
     var body: some View {
         VStack(spacing: 16) {
@@ -85,13 +87,15 @@ struct LiveMetricsView: View {
     
     private func startPolling() {
         fetchMetrics()
-        Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { _ in
+        metricsTimer?.invalidate()
+        metricsTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { _ in
             fetchMetrics()
         }
     }
-    
+
     private func stopPolling() {
-        // Timers will stop when run loop ends
+        metricsTimer?.invalidate()
+        metricsTimer = nil
     }
     
     private func fetchMetrics() {
@@ -111,11 +115,8 @@ struct LiveMetricsView: View {
     }
     
     private func timeAgo(from date: Date) -> String {
-        let interval = Date().timeIntervalSince(date)
-        if interval < 1 { return "just now" }
-        if interval < 60 { return "\(Int(interval))s ago" }
-        if interval < 3600 { return "\(Int(interval/60))m ago" }
-        return "\(Int(interval/3600))h ago"
+        relativeFormatter.dateTimeStyle = .named
+        return relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

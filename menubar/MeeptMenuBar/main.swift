@@ -16,6 +16,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let daemonController = DaemonController()
     private var daemonStatus = DaemonStatus()
     private var isUpdating = false
+    private var statusTimer: Timer?
     private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "Main")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -45,6 +46,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updatePopoverContent()
 
         startStatusPolling()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        statusTimer?.invalidate()
+        statusTimer = nil
     }
 
     private func createStatusImage() -> NSImage? {
@@ -139,7 +145,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startStatusPolling() {
-        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+        statusTimer?.invalidate()
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.fetchDaemonStatus()
         }
         fetchDaemonStatus()
