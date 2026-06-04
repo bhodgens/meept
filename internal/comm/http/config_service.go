@@ -7,6 +7,8 @@ import (
 	"os/user"
 	"path/filepath"
 	"strings"
+
+	"github.com/tailscale/hujson"
 )
 
 // ConfigService handles configuration file operations.
@@ -58,6 +60,16 @@ func (s *ConfigService) getAgentsDir() string {
 // getMenubarConfigPath returns the path to menubar.json5.
 func (s *ConfigService) getMenubarConfigPath() string {
 	return filepath.Join(s.meeptDir, "menubar.json5")
+}
+
+// NormalizeJSON5 converts JSON5 text (with comments, trailing commas, unquoted keys)
+// to strict JSON using hujson.Standardize.
+func (s *ConfigService) NormalizeJSON5(content string) (string, error) {
+	standardized, err := hujson.Standardize([]byte(content))
+	if err != nil {
+		return "", fmt.Errorf("failed to standardize JSON5: %w", err)
+	}
+	return string(standardized), nil
 }
 
 // LoadMenubarConfig loads the menubar.json5 content.

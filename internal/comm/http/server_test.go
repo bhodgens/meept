@@ -159,6 +159,103 @@ func TestHandleDaemonStatus_NoDaemonController(t *testing.T) {
 	}
 }
 
+func TestHandleNormalizeConfig_Success(t *testing.T) {
+	// Create a ConfigService with a temp meept dir
+	cs := &ConfigService{meeptDir: t.TempDir()}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	json5Content := "{\n\t\t// This is a comment\n\t\t\"key\": \"value\",\n\t\t\"trailing\": \"comma\",\n\t}"
+	reqBody, _ := json.Marshal(map[string]string{"content": json5Content})
+	body := string(reqBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/normalize", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleNormalizeConfig(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	normalized := result["normalized"]
+	// Comments are replaced with whitespace by hujson.Standardize, so "//" may still be present
+	// in the whitespace padding. Instead, verify the structure.
+	// Trailing commas should be removed.
+	if strings.Contains(normalized, `",\n\t}`) {
+		t.Error("normalized output should not contain trailing commas")
+	}
+
+	// Verify it's valid strict JSON by parsing it
+	var strict any
+	if err := json.Unmarshal([]byte(normalized), &strict); err != nil {
+		t.Errorf("normalized output is not valid strict JSON: %v\noutput: %s", err, normalized)
+	}
+
+	// Verify the key is present
+	m, ok := strict.(map[string]any)
+	if !ok {
+		t.Fatal("expected top-level object")
+	}
+	if m["key"] != "value" {
+		t.Errorf("key = %v, want value", m["key"])
+	}
+	if m["trailing"] != "comma" {
+		t.Errorf("trailing = %v, want comma", m["trailing"])
+	}
+}
+
+func TestHandleNormalizeConfig_NoConfigService(t *testing.T) {
+	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/normalize", strings.NewReader(`{"content":"{}"}`))
+	w := httptest.NewRecorder()
+
+	server.handleNormalizeConfig(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+func TestHandleNormalizeConfig_InvalidJSON5(t *testing.T) {
+	cs := &ConfigService{meeptDir: t.TempDir()}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	// Invalid JSON5
+	body := `{"content":"{ invalid json5 }"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/normalize", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	server.handleNormalizeConfig(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestHandleNormalizeConfig_InvalidBody(t *testing.T) {
+	cs := &ConfigService{meeptDir: t.TempDir()}
+	server := NewServer(ServerConfig{}, cs, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/config/normalize", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+
+	server.handleNormalizeConfig(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
 func TestHandleGetClientConfig_NoConfigService(t *testing.T) {
 	server := NewServer(ServerConfig{}, nil, nil, nil, nil, nil)
 

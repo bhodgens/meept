@@ -591,6 +591,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/config/models", s.handleSaveModelsConfig)
 	mux.HandleFunc("GET /api/v1/config/menubar", s.handleGetMenubarConfig)
 	mux.HandleFunc("POST /api/v1/config/menubar", s.handleSaveMenubarConfig)
+	mux.HandleFunc("POST /api/v1/config/normalize", s.handleNormalizeConfig)
 	mux.HandleFunc("GET /api/v1/config/agents", s.handleListAgents)
 	mux.HandleFunc("GET /api/v1/config/agents/{id}", s.handleGetAgent)
 	mux.HandleFunc("POST /api/v1/config/agents/{id}", s.handleSaveAgent)
@@ -1235,6 +1236,29 @@ func (s *Server) handleSaveMenubarConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: KeySaved})
+}
+
+// handleNormalizeConfig handles POST /api/v1/config/normalize.
+func (s *Server) handleNormalizeConfig(w http.ResponseWriter, r *http.Request) {
+	if s.configService == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "config service not available")
+		return
+	}
+
+	var body struct {
+		Content string `json:"content"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+
+	normalized, err := s.configService.NormalizeJSON5(body.Content)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"normalized": normalized})
 }
 
 // ensureTLSCert ensures TLS certificate and key files exist, generating self-signed if needed.
