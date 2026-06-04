@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ErrNoFrontmatter is returned (alongside a valid Skill) when a SKILL.md
@@ -104,108 +106,39 @@ func extractYAMLFrontmatter(content string) (frontmatter, body string, err error
 	return "", "", fmt.Errorf("no closing --- found in frontmatter")
 }
 
-// parseSkillFrontmatter parses the YAML frontmatter into a Skill
+// skillFrontmatter represents the YAML frontmatter for a skill.
+type skillFrontmatter struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Version     string   `yaml:"version"`
+	Requires    []string `yaml:"requires"`
+}
+
+// parseSkillFrontmatter parses the YAML frontmatter into a Skill.
 func parseSkillFrontmatter(frontmatter string, skill *Skill) error {
-	// Parse name
-	if name := parseYAMLField(frontmatter, "name"); name != "" {
-		skill.Name = name
-	} else {
+	var fm skillFrontmatter
+	if err := yaml.Unmarshal([]byte(frontmatter), &fm); err != nil {
+		return fmt.Errorf("failed to parse frontmatter: %w", err)
+	}
+	if fm.Name == "" {
 		return fmt.Errorf("missing required field: name")
 	}
-
-	// Parse description
-	if desc := parseYAMLField(frontmatter, "description"); desc != "" {
-		skill.Description = desc
-	} else {
+	if fm.Description == "" {
 		return fmt.Errorf("missing required field: description")
 	}
-
-	// Parse version (optional)
-	if version := parseYAMLField(frontmatter, "version"); version != "" {
-		skill.Version = version
+	skill.Name = fm.Name
+	skill.Description = fm.Description
+	if fm.Version != "" {
+		skill.Version = fm.Version
 	} else {
 		skill.Version = "0.1.0"
 	}
-
-	// Parse requires (optional)
-	if requires := parseYAMLArray(frontmatter, "requires"); len(requires) > 0 {
-		skill.Requires = requires
-	}
-
-	// Extract triggers from description
+	skill.Requires = fm.Requires
 	skill.Triggers = extractTriggersFromDescription(skill.Description)
-
-	// Infer category from slug or path
 	skill.Category = inferSkillCategory(skill.Slug, skill.Path)
-
 	return nil
 }
 
-// parseYAMLField extracts a simple YAML field value
-func parseYAMLField(yaml, field string) string {
-	// Pattern for key: value
-	pattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(field) + `:\s*(.+)$`)
-	match := pattern.FindStringSubmatch(yaml)
-	if len(match) > 1 {
-		// Remove quotes if present
-		value := strings.TrimSpace(match[1])
-		value = strings.Trim(value, `"`)
-		value = strings.Trim(value, `'`)
-		return value
-	}
-	return ""
-}
-
-// parseYAMLArray extracts a YAML array
-func parseYAMLArray(yaml, field string) []string {
-	var items []string
-
-	// Pattern for key: [item1, item2, ...] or key: - item1
-	inlinePattern := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(field) + `:\s*\[(.+)\]`)
-	inlineMatch := inlinePattern.FindStringSubmatch(yaml)
-	if len(inlineMatch) > 1 {
-		// Parse inline array
-		values := strings.SplitSeq(inlineMatch[1], ",")
-		for v := range values {
-			item := strings.TrimSpace(v)
-			item = strings.Trim(item, `"`)
-			item = strings.Trim(item, `'`)
-			if item != "" {
-				items = append(items, item)
-			}
-		}
-		return items
-	}
-
-	// Parse list items
-	lines := strings.Split(yaml, "\n")
-	inField := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, field+":") {
-			inField = true
-			continue
-		}
-
-		if inField {
-			if strings.HasPrefix(trimmed, "- ") {
-				item := strings.TrimSpace(trimmed[2:])
-				item = strings.Trim(item, `"`)
-				item = strings.Trim(item, `'`)
-				if item != "" {
-					items = append(items, item)
-				}
-			} else if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-				// New field or end of list
-				break
-			}
-		}
-	}
-
-	return items
-}
-
-// extractTriggersFromDescription extracts trigger phrases from description
 func extractTriggersFromDescription(description string) []string {
 	var triggers []string
 
@@ -280,43 +213,43 @@ func ParseAgentFile(path string) ([]*AgentDefinition, error) {
 	return agents, nil
 }
 
-// parseAgentFrontmatter parses agent frontmatter
-func parseAgentFrontmatter(frontmatter, body string) (*AgentDefinition, error) {
-	agent := &AgentDefinition{}
+// agentFrontmatter represents the YAML frontmatter for an agent.
+type agentFrontmatter struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Model       string   `yaml:"model"`
+	Color       string   `yaml:"color"`
+	Tools       []string `yaml:"tools"`
+}
 
-	// Parse name (required)
-	if name := parseYAMLField(frontmatter, "name"); name != "" {
-		agent.ID = name
-		agent.Name = name
-	} else {
+// parseAgentFrontmatter parses agent frontmatter.
+func parseAgentFrontmatter(frontmatter, body string) (*AgentDefinition, error) {
+	var fm agentFrontmatter
+	if err := yaml.Unmarshal([]byte(frontmatter), &fm); err != nil {
+		return nil, fmt.Errorf("failed to parse agent frontmatter: %w", err)
+	}
+	if fm.Name == "" {
 		return nil, fmt.Errorf("missing required field: name")
 	}
-
-	// Parse description to extract role and purpose
-	if description := parseYAMLField(frontmatter, "description"); description != "" {
-		agent.Purpose = description
-		agent.Role = inferAgentRole(description, body)
+	agent := &AgentDefinition{
+		ID:   fm.Name,
+		Name: fm.Name,
 	}
-
-	// Parse model (optional)
-	if model := parseYAMLField(frontmatter, "model"); model != "" {
-		agent.Model = model
+	if fm.Description != "" {
+		agent.Purpose = fm.Description
+		agent.Role = inferAgentRole(fm.Description, body)
+	}
+	if fm.Model != "" {
+		agent.Model = fm.Model
 	} else {
 		agent.Model = "inherit"
 	}
-
-	// Parse color (optional)
-	if color := parseYAMLField(frontmatter, "color"); color != "" {
-		agent.Color = color
+	if fm.Color != "" {
+		agent.Color = fm.Color
 	} else {
 		agent.Color = "blue"
 	}
-
-	// Parse tools (optional)
-	if tools := parseYAMLArray(frontmatter, "tools"); len(tools) > 0 {
-		agent.Capabilities = tools
-	}
-
+	agent.Capabilities = fm.Tools
 	return agent, nil
 }
 

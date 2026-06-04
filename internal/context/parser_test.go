@@ -403,77 +403,106 @@ func TestExtractYAMLFrontmatter(t *testing.T) {
 	}
 }
 
-func TestParseYAMLField(t *testing.T) {
-	yaml := strings.Join([]string{
-		"name: test skill",
-		"version: \"1.0.0\"",
-		"description: \"A skill for testing\"",
-		"empty_field:",
-	}, "\n")
-
+func TestParseSkillFrontmatter_EdgeCases(t *testing.T) {
 	tests := []struct {
-		name  string
-		field string
-		want  string
-	}{
-		{"name", "name", "test skill"},
-		{"version", "version", "1.0.0"},
-		{"description", "description", "A skill for testing"},
-		{"nonexistent", "nonexistent", ""},
-		{"empty", "empty_field", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := parseYAMLField(yaml, tt.field); got != tt.want {
-				t.Errorf("parseYAMLField() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseYAMLArray(t *testing.T) {
-	tests := []struct {
-		name  string
-		yaml  string
-		field string
-		want  []string
+		name          string
+		frontmatter   string
+		wantName      string
+		wantDesc      string
+		wantVersion   string
+		wantRequires  []string
+		wantErr       bool
 	}{
 		{
-			name:  "inline array",
-			yaml:  "requires: [code, reasoning, analysis]",
-			field: "requires",
-			want:  []string{"code", "reasoning", "analysis"},
-		},
-		{
-			name: "list array",
-			yaml: strings.Join([]string{
-				"triggers:",
-				"  - create agent",
-				"  - write code",
-				"  - design system",
+			name: "basic fields",
+			frontmatter: strings.Join([]string{
+				"name: Test Skill",
+				"description: A test skill",
+				"version: 1.0.0",
+				"requires: [code, reasoning]",
 			}, "\n"),
-			field: "triggers",
-			want:  []string{"create agent", "write code", "design system"},
+			wantName:     "Test Skill",
+			wantDesc:     "A test skill",
+			wantVersion:  "1.0.0",
+			wantRequires: []string{"code", "reasoning"},
 		},
 		{
-			name:  "nonexistent field",
-			yaml:  "name: test",
-			field: "requires",
-			want:  nil,
+			name: "description with colon inside quotes",
+			frontmatter: strings.Join([]string{
+				"name: Colon Skill",
+				`description: "Use this skill when: foo, bar"`,
+				"version: \"1.2.3\"",
+			}, "\n"),
+			wantName:    "Colon Skill",
+			wantDesc:    "Use this skill when: foo, bar",
+			wantVersion: "1.2.3",
+		},
+		{
+			name: "list-style requires",
+			frontmatter: strings.Join([]string{
+				"name: List Skill",
+				"description: A skill with list",
+				"requires:",
+				"  - code",
+				"  - reasoning",
+				"  - analysis",
+			}, "\n"),
+			wantName:     "List Skill",
+			wantDesc:     "A skill with list",
+			wantVersion:  "0.1.0",
+			wantRequires: []string{"code", "reasoning", "analysis"},
+		},
+		{
+			name: "empty version defaults",
+			frontmatter: strings.Join([]string{
+				"name: No Version",
+				"description: No version here",
+			}, "\n"),
+			wantName:    "No Version",
+			wantDesc:    "No version here",
+			wantVersion: "0.1.0",
+		},
+		{
+			name: "missing name errors",
+			frontmatter: strings.Join([]string{
+				"description: Missing name",
+			}, "\n"),
+			wantErr: true,
+		},
+		{
+			name: "missing description errors",
+			frontmatter: strings.Join([]string{
+				"name: No Description",
+			}, "\n"),
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseYAMLArray(tt.yaml, tt.field)
-			if len(got) != len(tt.want) {
-				t.Errorf("parseYAMLArray() = %v, want %v", got, tt.want)
-			}
-			for i, item := range got {
-				if item != tt.want[i] {
-					t.Errorf("parseYAMLArray()[%d] = %v, want %v", i, item, tt.want[i])
+			skill := &Skill{Slug: "test"}
+			err := parseSkillFrontmatter(tt.frontmatter, skill)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got none")
 				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if skill.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", skill.Name, tt.wantName)
+			}
+			if skill.Description != tt.wantDesc {
+				t.Errorf("Description = %q, want %q", skill.Description, tt.wantDesc)
+			}
+			if skill.Version != tt.wantVersion {
+				t.Errorf("Version = %q, want %q", skill.Version, tt.wantVersion)
+			}
+			if len(skill.Requires) != len(tt.wantRequires) {
+				t.Errorf("Requires = %v, want %v", skill.Requires, tt.wantRequires)
 			}
 		})
 	}
