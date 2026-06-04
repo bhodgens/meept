@@ -11,11 +11,11 @@ import (
 type RiskLevel int
 
 const (
-	RiskSafe RiskLevel = iota
-	RiskLow
-	RiskMedium
-	RiskHigh
-	RiskCritical
+	RiskSafe RiskLevel = iota // SAFE
+	RiskLow                   // LOW
+	RiskMedium                // MEDIUM
+	RiskHigh                  // HIGH
+	RiskCritical              // CRITICAL
 )
 
 // Decision represents the result of a permission check.

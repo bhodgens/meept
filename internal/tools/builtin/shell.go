@@ -33,9 +33,9 @@ const (
 type ShellCommandRisk int
 
 const (
-	RiskMedium ShellCommandRisk = iota
-	RiskHigh
-	RiskCritical
+	RiskMedium ShellCommandRisk = iota // MEDIUM
+	RiskHigh                           // HIGH
+	RiskCritical                       // CRITICAL
 )
 
 // readOnlyCommands are considered low-risk read operations.

@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseCLAUDEMD(t *testing.T) {
@@ -483,27 +486,14 @@ func TestParseSkillFrontmatter_EdgeCases(t *testing.T) {
 			skill := &Skill{Slug: "test"}
 			err := parseSkillFrontmatter(tt.frontmatter, skill)
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got none")
-				}
+				require.Error(t, err, "expected error")
 				return
 			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-				return
-			}
-			if skill.Name != tt.wantName {
-				t.Errorf("Name = %q, want %q", skill.Name, tt.wantName)
-			}
-			if skill.Description != tt.wantDesc {
-				t.Errorf("Description = %q, want %q", skill.Description, tt.wantDesc)
-			}
-			if skill.Version != tt.wantVersion {
-				t.Errorf("Version = %q, want %q", skill.Version, tt.wantVersion)
-			}
-			if len(skill.Requires) != len(tt.wantRequires) {
-				t.Errorf("Requires = %v, want %v", skill.Requires, tt.wantRequires)
-			}
+			require.NoError(t, err, "unexpected error")
+			assert.Equal(t, tt.wantName, skill.Name, "Name mismatch")
+			assert.Equal(t, tt.wantDesc, skill.Description, "Description mismatch")
+			assert.Equal(t, tt.wantVersion, skill.Version, "Version mismatch")
+			assert.Equal(t, tt.wantRequires, skill.Requires, "Requires mismatch")
 		})
 	}
 }
