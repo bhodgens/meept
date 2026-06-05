@@ -11,6 +11,7 @@ struct SettingsWindow: View {
     @State private var modelsConfig = "// Loading..."
     @State private var isSaving = false
     @State private var showSaveError = false
+    @State private var showNormalizeError = false
 
     private let configService = ConfigService()
 
@@ -21,13 +22,21 @@ struct SettingsWindow: View {
                 isSaving: isSaving,
                 onSave: { content in
                     isSaving = true
-                    configService.saveClientConfig(content: content) { result in
-                        isSaving = false
+                    configService.normalizeJSON5(content: content) { result in
                         switch result {
-                        case .success:
-                            break
+                        case .success(let normalized):
+                            configService.saveClientConfig(content: normalized) { saveResult in
+                                isSaving = false
+                                switch saveResult {
+                                case .success:
+                                    clientConfig = normalized
+                                case .failure:
+                                    showSaveError = true
+                                }
+                            }
                         case .failure:
-                            showSaveError = true
+                            isSaving = false
+                            showNormalizeError = true
                         }
                     }
                 }
@@ -42,13 +51,21 @@ struct SettingsWindow: View {
                 isSaving: isSaving,
                 onSave: { content in
                     isSaving = true
-                    configService.saveModelsConfig(content: content) { result in
-                        isSaving = false
+                    configService.normalizeJSON5(content: content) { result in
                         switch result {
-                        case .success:
-                            break
+                        case .success(let normalized):
+                            configService.saveModelsConfig(content: normalized) { saveResult in
+                                isSaving = false
+                                switch saveResult {
+                                case .success:
+                                    modelsConfig = normalized
+                                case .failure:
+                                    showSaveError = true
+                                }
+                            }
                         case .failure:
-                            showSaveError = true
+                            isSaving = false
+                            showNormalizeError = true
                         }
                     }
                 }
@@ -66,10 +83,15 @@ struct SettingsWindow: View {
         }
         .frame(width: 600, height: 450)
         .padding()
-        .alert("Save Error", isPresented: $showSaveError) {
-            Button("OK", role: .cancel) { }
+        .alert("save error", isPresented: $showSaveError) {
+            Button("ok", role: .cancel) { }
         } message: {
             Text("Failed to save configuration. Please try again.")
+        }
+        .alert("normalization error", isPresented: $showNormalizeError) {
+            Button("ok", role: .cancel) { }
+        } message: {
+            Text("Failed to normalize JSON5. Please check your syntax.")
         }
         .onAppear {
             loadConfigs()
