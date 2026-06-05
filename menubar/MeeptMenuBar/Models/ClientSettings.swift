@@ -30,32 +30,4 @@ extension ClientSettings {
         menubar: MenubarSettings(showStatus: true, refreshInterval: 5)
     )
 
-    init(from data: Data) throws {
-        let decoder = JSONDecoder()
-        // Handle JSON5-like comments by stripping them
-        var content = String(data: data, encoding: .utf8) ?? ""
-        content = Self.stripComments(content)
-        guard let cleanData = content.data(using: .utf8) else {
-            throw DecodingError.dataCorrupted(
-                DecodingError.Context(codingPath: [], debugDescription: "Invalid string encoding")
-            )
-        }
-        self = try decoder.decode(ClientSettings.self, from: cleanData)
-    }
-
-    private static func stripComments(_ content: String) -> String {
-        var result = ""
-        for line in content.components(separatedBy: "\n") {
-            // Remove // comments but preserve the rest of the line
-            if let commentIndex = line.firstIndex(of: "/") {
-                let nextIndex = line.index(after: commentIndex)
-                if nextIndex < line.endIndex && line[nextIndex] == "/" {
-                    result += String(line[..<commentIndex]) + "\n"
-                    continue
-                }
-            }
-            result += line + "\n"
-        }
-        return result
-    }
 }
