@@ -86,6 +86,22 @@ class ConfigService {
         performVoid(request: request, completion: completion)
     }
 
+    // MARK: - JSON5 Normalization
+
+    func normalizeJSON5(content: String, completion: @escaping (Result<String, Error>) -> Void) {
+        var request = makeRequest(path: "/api/v1/config/normalize", method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: String] = ["content": content]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        perform(request: request, completion: completion) { data in
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: String]
+            guard let normalized = json?["normalized"] else {
+                throw APIError.decodingError("missing 'normalized' field in response")
+            }
+            return normalized
+        }
+    }
+
     // MARK: - Private helpers
 
     private func makeRequest(path: String, method: String) -> URLRequest {
