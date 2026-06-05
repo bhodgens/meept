@@ -175,12 +175,14 @@ func CommandPaletteModal(styles *Styles, config *ClientConfig) *Modal {
 
 	m.SetItems([]ModalItem{
 		{Key: keys.ViewChat, Label: "chat", Description: "switch to chat view"},
+		{Key: keys.ViewSessions, Label: "sessions", Description: "switch to sessions view"},
 		{Key: keys.ViewTasks, Label: CmdTasks, Description: "switch to tasks view"},
 		{Key: keys.ViewQueue, Label: "queue", Description: "switch to queue view"},
 		{Key: keys.ViewMemory, Label: "memory", Description: "switch to memory view"},
+		{Key: keys.ViewPlans, Label: "plans", Description: "switch to plans view"},
 		{Key: keys.Sidebar, Label: "toggle sidebar", Description: "show/hide sidebar"},
-		{Key: keys.Sessions, Label: "sessions...", Description: "manage sessions"},
-		{Key: keys.Projects, Label: "projects...", Description: "manage projects"},
+		{Key: keys.Sessions, Label: "sessions picker", Description: "quick session switch"},
+		{Key: keys.Projects, Label: "projects", Description: "manage projects"},
 		{Key: keys.NewSession, Label: "new session", Description: "create a new session"},
 		{Key: keys.RenameSession, Label: "edit description", Description: "edit session description"},
 		{Key: "f", Label: "find...", Description: "search sessions and tasks"},

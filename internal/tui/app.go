@@ -32,6 +32,7 @@ type ViewType int
 
 const (
 	ViewChat ViewType = iota
+	ViewSessions
 	ViewTasks
 	ViewQueue
 	ViewMemory
@@ -91,11 +92,12 @@ type App struct {
 	currentView  ViewType
 
 	// Sub-models for each view
-	chat   *models.ChatModel
-	tasks  *models.TasksModel
-	queue  *models.QueueModel
-	memory *models.MemoryModel
-	plans  *models.PlansModel
+	chat     *models.ChatModel
+	sessions *models.SessionsModel
+	tasks    *models.TasksModel
+	queue    *models.QueueModel
+	memory   *models.MemoryModel
+	plans    *models.PlansModel
 
 	// Sidebar
 	sidebar *SidebarModel
@@ -227,6 +229,7 @@ func NewApp(socketPath string) *App {
 			ScrollSpeed:       clientConfig.Chat.ScrollSpeed,
 		}),
 		tasks:          models.NewTasksModel(rpc),
+		sessions:       models.NewSessionsModel(rpc),
 		queue:          models.NewQueueModel(rpc),
 		memory:         models.NewMemoryModel(rpc),
 		plans:          models.NewPlansModel(rpc),
@@ -429,6 +432,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mainWidth := msg.Width - a.sidebarWidth
 		a.chat.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.chat.SetScreenYOffset(headerOffset)
+		a.sessions.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.tasks.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.queue.SetSize(mainWidth, msg.Height-chromeHeight)
 		a.memory.SetSize(mainWidth, msg.Height-chromeHeight)
@@ -1387,6 +1391,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch a.currentView {
 	case ViewChat:
 		cmd = a.chat.Update(msg)
+	case ViewSessions:
+		cmd = a.sessions.Update(msg)
 	case ViewTasks:
 		cmd = a.tasks.Update(msg)
 	case ViewQueue:
@@ -1419,6 +1425,10 @@ func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch action {
 		case keys.ViewChat:
 			a.currentView = ViewChat
+			cmd := a.initCurrentView()
+			return a, cmd
+		case keys.ViewSessions:
+			a.currentView = ViewSessions
 			cmd := a.initCurrentView()
 			return a, cmd
 		case keys.ViewTasks:
@@ -1592,6 +1602,8 @@ func (a *App) initCurrentView() tea.Cmd {
 	switch a.currentView {
 	case ViewChat:
 		return a.chat.Init()
+	case ViewSessions:
+		return a.sessions.Init()
 	case ViewTasks:
 		return a.tasks.Init()
 	case ViewQueue:
@@ -1635,6 +1647,8 @@ func (a *App) View() tea.View {
 		switch a.currentView {
 		case ViewChat:
 			mainView = a.chat.View()
+		case ViewSessions:
+			mainView = a.sessions.View()
 		case ViewTasks:
 			mainView = a.tasks.View()
 		case ViewQueue:
@@ -1802,6 +1816,7 @@ func (a *App) renderTabs() string {
 		view ViewType
 	}{
 		{"Chat", ViewChat},
+		{"Sessions", ViewSessions},
 		{"Tasks", ViewTasks},
 		{"Queue", ViewQueue},
 		{"Memory", ViewMemory},

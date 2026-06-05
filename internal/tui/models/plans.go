@@ -832,10 +832,15 @@ func (m *PlansModel) renderError() string {
 		Padding(1, 2).
 		Width(m.width - 4)
 
+	errMsg := "unknown error"
+	if m.err != nil {
+		errMsg = fmt.Sprintf("%v", m.err)
+	}
+
 	return style.Render(
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("error")+
 			"\n\n"+
-			fmt.Sprintf("%v", m.err)+
+			errMsg+
 			"\n\n"+
 			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("press 'r' to refresh"),
 	)

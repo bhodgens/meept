@@ -37,6 +37,7 @@ func createTestApp() *App {
 	}
 	// Initialize sub-models
 	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
+	app.sessions = models.NewSessionsModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
@@ -48,6 +49,7 @@ func createTestApp() *App {
 	app.notifications = components.NewNotificationManager()
 	// Set sizes on sub-models
 	app.chat.SetSize(app.width-2, app.height-4)
+	app.sessions.SetSize(app.width-2, app.height-4)
 	app.tasks.SetSize(app.width-2, app.height-4)
 	app.queue.SetSize(app.width-2, app.height-4)
 	app.memory.SetSize(app.width-2, app.height-4)
@@ -71,6 +73,7 @@ func TestApp_ViewSwitching_Modal(t *testing.T) {
 		expectedView ViewType
 	}{
 		{"switch to chat", "c", ViewChat},
+		{"switch to sessions", "s", ViewSessions},
 		{"switch to tasks", "t", ViewTasks},
 		{"switch to queue", "q", ViewQueue},
 		{"switch to memory", "m", ViewMemory},
@@ -165,7 +168,7 @@ func TestApp_RenderTabs(t *testing.T) {
 	tabs := ansi.Strip(app.renderTabs())
 
 	// Check that all tabs are present
-	expectedTabs := []string{"Chat", "Tasks", "Queue", "Memory", "Plans"}
+	expectedTabs := []string{"Chat", "Sessions", "Tasks", "Queue", "Memory", "Plans"}
 	for _, tab := range expectedTabs {
 		if !strings.Contains(tabs, tab) {
 			t.Errorf("expected tabs to contain %q", tab)
@@ -411,8 +414,8 @@ func TestApp_SessionPickerModal(t *testing.T) {
 	app.activeModal = ModalCommandPalette
 	app.commandPalette.Show()
 
-	// Press 's' to open session picker
-	msg := tea.KeyPressMsg{Code: 's', Text: "s"}
+	// Press 'S' (shift+s) to open session picker
+	msg := tea.KeyPressMsg{Code: 'S', Text: "S"}
 	newModel, _ := app.Update(msg)
 	newApp := newModel.(*App)
 
@@ -455,6 +458,7 @@ func TestApp_Program_BasicRender(t *testing.T) {
 		activeModal:  ModalNone,
 	}
 	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
+	app.sessions = models.NewSessionsModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)
@@ -512,6 +516,7 @@ func TestApp_Program_CommandPalette(t *testing.T) {
 		activeModal:  ModalNone,
 	}
 	app.chat = models.NewChatModel(rpc, styles.UserMessage, styles.AssistantMessage, styles.SystemMessage, "once")
+	app.sessions = models.NewSessionsModel(rpc)
 	app.tasks = models.NewTasksModel(rpc)
 	app.queue = models.NewQueueModel(rpc)
 	app.memory = models.NewMemoryModel(rpc)

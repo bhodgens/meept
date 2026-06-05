@@ -82,15 +82,16 @@ type KeybindingsConfig struct {
 // CommandPaletteKeys defines keys for command palette actions.
 type CommandPaletteKeys struct {
 	ViewChat      string `json:"view_chat"`      // Switch to chat view (default: "c")
+	ViewSessions  string `json:"view_sessions"`  // Switch to sessions view (default: "s")
 	ViewTasks     string `json:"view_tasks"`     // Switch to tasks view (default: "t")
 	ViewQueue     string `json:"view_queue"`     // Switch to queue view (default: "q")
 	ViewMemory    string `json:"view_memory"`    // Switch to memory view (default: "m")
 	ViewPlans     string `json:"view_plans"`     // Switch to plans view (default: "p")
 	Sidebar       string `json:"sidebar"`        // Toggle sidebar (default: "y")
-	Sessions      string `json:"sessions"`       // Open session picker (default: "s")
+	Sessions      string `json:"sessions"`       // Open session picker (default: "shift+s")
 	NewSession    string `json:"new_session"`    // Create new session (default: "n")
 	RenameSession string `json:"rename_session"` // Rename current session (default: "r")
-	Projects      string `json:"projects"`       // Open projects dialog (default: "p")
+	Projects      string `json:"projects"`       // Open projects dialog (default: "o")
 }
 
 // SessionConfig defines session behavior settings.
@@ -108,15 +109,16 @@ func DefaultClientConfig() *ClientConfig {
 			EscapeBehavior: "once",
 			CommandPalette: CommandPaletteKeys{
 				ViewChat:      "c",
+				ViewSessions:  "s",
 				ViewTasks:     "t",
 				ViewQueue:     "q",
 				ViewMemory:    "m",
 				ViewPlans:     "p",
 				Sidebar:       "y",
-				Sessions:      "s",
+				Sessions:      "S",
 				NewSession:    "n",
 				RenameSession: "r",
-				Projects:      "p",
+				Projects:      "o",
 			},
 		},
 		Session: SessionConfig{

@@ -912,10 +912,15 @@ func (m *TasksModel) renderError() string {
 		Padding(1, 2).
 		Width(m.width - 4)
 
+	errMsg := "unknown error"
+	if m.err != nil {
+		errMsg = fmt.Sprintf("%v", m.err)
+	}
+
 	return style.Render(
 		lipgloss.NewStyle().Foreground(lipgloss.Color(ColorRed)).Bold(true).Render("Error") +
 			"\n\n" +
-			fmt.Sprintf("%v", m.err) +
+			errMsg +
 			"\n\n" +
 			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Render("Press 'r' to refresh"),
 	)
@@ -1349,7 +1354,18 @@ func (m *TasksModel) renderLineageView() string {
 		if m.loading {
 			return m.renderLoading()
 		}
-		return m.renderError()
+		if m.err != nil {
+			return m.renderError()
+		}
+		// No tasks and no error — show empty state
+		emptyStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#374151")).
+			Padding(1, 2).
+			Width(m.width - 4)
+		return emptyStyle.Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(ColorGray)).Italic(true).Render("no tasks with lineage information"),
+		)
 	}
 
 	var b strings.Builder
