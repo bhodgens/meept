@@ -4,61 +4,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// App-wide intent types for keyboard shortcuts.
-abstract class AppIntent extends Intent {
-  const AppIntent();
-}
-
-/// Leader key trigger — waits for a follow-up character.
-class LeaderIntent extends AppIntent {
-  const LeaderIntent();
-}
-
-/// Switch to Sessions tab.
-class SessionsTabIntent extends AppIntent {
-  const SessionsTabIntent();
-}
-
-/// Switch to Chat tab.
-class ChatTabIntent extends AppIntent {
-  const ChatTabIntent();
-}
-
-/// Toggle drawer overlay.
-class ToggleDrawerIntent extends AppIntent {
-  const ToggleDrawerIntent();
-}
-
-/// Focus input with '/' prefix.
-class FocusInputIntent extends AppIntent {
-  const FocusInputIntent();
-}
-
-/// Show keyboard shortcut help.
-class ShowHelpIntent extends AppIntent {
-  const ShowHelpIntent();
-}
-
-/// Escape — close drawer / dismiss / blur.
-class EscapeIntent extends AppIntent {
-  const EscapeIntent();
-}
-
-/// Project / branches context.
-class BranchesIntent extends AppIntent {
-  const BranchesIntent();
-}
-
-/// Focus search / find.
-class FindIntent extends AppIntent {
-  const FindIntent();
-}
-
 /// Leader key state machine.
 ///
 /// Two-stage input: on leader key, enter "waiting" state. Next
 /// character dispatches the corresponding action. Times out after
-/// 1.5s if no follow-up key is pressed.
+/// 500ms if no follow-up key is pressed.
 class LeaderKeyController extends ChangeNotifier {
   static bool get _isMacOS => Platform.isMacOS;
 
@@ -75,8 +25,14 @@ class LeaderKeyController extends ChangeNotifier {
   /// Set this callback to toggle the drawer.
   VoidCallback? onToggleDrawer;
 
-  /// Set this callback to focus the chat input, optionally with '/' prefix.
-  void Function({bool slashPrefix})? onFocusInput;
+  /// Set this callback to focus the chat input.
+  VoidCallback? onFocusInput;
+
+  /// Whether the next focus should include '/' prefix.
+  bool _slashPrefix = false;
+
+  /// Whether to use slash prefix on next focus.
+  bool get slashPrefix => _slashPrefix;
 
   /// Set this callback to show help.
   VoidCallback? onShowHelp;
@@ -87,20 +43,7 @@ class LeaderKeyController extends ChangeNotifier {
   /// Set this callback to handle find/search.
   VoidCallback? onFind;
 
-  static LogicalKeySet get leaderKeySet {
-    return _isMacOS
-        ? LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyX)
-        : LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyX);
-  }
-
-  static LogicalKeySet get focusInputKeySet {
-    return _isMacOS
-        ? LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyK)
-        : LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyK);
-  }
-
-  /// Handle a raw key event directly (used when not using Flutter's
-  /// Actions system, e.g. for sequential leader keys).
+  /// Handle a raw key event for leader triggers and direct shortcuts.
   KeyEventResult handleKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
@@ -114,7 +57,8 @@ class LeaderKeyController extends ChangeNotifier {
 
     // --- Direct shortcuts ---
     if (_isFocusInputTrigger(event)) {
-      onFocusInput?.call(slashPrefix: true);
+      _slashPrefix = true;
+      onFocusInput?.call();
       return KeyEventResult.handled;
     }
 
@@ -218,10 +162,11 @@ class LeaderKeyController extends ChangeNotifier {
   }
 }
 
-/// Wraps a child with app-wide shortcuts using Flutter's Shortcuts + Actions.
+/// Wraps a child with app-wide shortcuts using raw Focus key events.
 ///
-/// The leader key is handled natively through a Focus node with raw
-/// key events (required because leader sequences are multi-keystroke).
+/// All shortcuts are handled natively through a Focus node with raw
+/// key events. No Flutter Shortcuts/Actions system is used, which
+/// avoids system beeps on macOS when intercepting cmd+x / ctrl+x.
 class AppShortcuts extends StatefulWidget {
   final Widget child;
   final LeaderKeyController controller;
@@ -239,43 +184,10 @@ class AppShortcuts extends StatefulWidget {
 class _AppShortcutsState extends State<AppShortcuts> {
   @override
   Widget build(BuildContext context) {
-    return Shortcuts(
-      shortcuts: <LogicalKeySet, Intent>{
-        // These shortcuts are registered but the actual dispatch is handled
-        // by the Focus widget below for leader sequences.
-        LeaderKeyController.leaderKeySet: const LeaderIntent(),
-        LeaderKeyController.focusInputKeySet: const FocusInputIntent(),
-      },
-      child: Actions(
-        actions: <Type, Action<Intent>>{
-          LeaderIntent: CallbackAction<LeaderIntent>(
-            onInvoke: (_) {
-              widget.controller._enterLeaderMode();
-              return null;
-            },
-          ),
-          FocusInputIntent: CallbackAction<FocusInputIntent>(
-            onInvoke: (_) {
-              widget.controller.onFocusInput?.call(slashPrefix: true);
-              return null;
-            },
-          ),
-          EscapeIntent: CallbackAction<EscapeIntent>(
-            onInvoke: (_) {
-              if (widget.controller.isWaiting) {
-                widget.controller._exitLeaderMode();
-                return null;
-              }
-              return null;
-            },
-          ),
-        },
-        child: Focus(
-          autofocus: true,
-          onKeyEvent: _handleKeyEvent,
-          child: widget.child,
-        ),
-      ),
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: widget.child,
     );
   }
 
@@ -287,6 +199,20 @@ class _AppShortcutsState extends State<AppShortcuts> {
       return ctrl.handleLeaderSequence(event);
     }
 
-    return ctrl.handleKeyEvent(event);
+    final result = ctrl.handleKeyEvent(event);
+    if (result == KeyEventResult.handled) return result;
+
+    // Auto-focus chat input on typing when no text field has focus
+    if (event is KeyDownEvent &&
+        event.character != null &&
+        event.character!.isNotEmpty &&
+        event.character!.trim().isNotEmpty &&
+        FocusManager.instance.primaryFocus == node) {
+      ctrl._slashPrefix = false;
+      ctrl.onFocusInput?.call();
+      return KeyEventResult.ignored;
+    }
+
+    return result;
   }
 }

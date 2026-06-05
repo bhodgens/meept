@@ -54,8 +54,14 @@ final drawerOpenProvider = StateProvider<bool>((ref) => false);
 // Keyboard shortcut help dialog visibility
 final shortcutHelpProvider = StateProvider<bool>((ref) => false);
 
-// Focus input with slash prefix request (toggled true to trigger, ChatInput resets)
+// Focus input request (toggled true to trigger, ChatInput resets)
 final focusInputRequestProvider = StateProvider<bool>((ref) => false);
+
+// Whether focus input should prefix with '/' (true for cmd+k, false for auto-focus on typing)
+final focusInputSlashPrefixProvider = StateProvider<bool>((ref) => false);
+
+// Selected home tab index (0 = chat, 1 = sessions, etc.) - used for cross-widget tab switching
+final selectedTabIndexProvider = StateProvider<int>((ref) => 0);
 
 /// Monitors WebSocket + HTTP health and updates connectionStateProvider.
 ///

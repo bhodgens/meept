@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/constants.dart';
 import '../../core/shortcuts.dart';
 import '../../theme/colors.dart';
 import '../../theme/effects.dart';
@@ -9,7 +8,6 @@ import '../../widgets/tab_bar.dart';
 import '../../providers/providers.dart';
 import '../drawer/drawer_overlay.dart';
 import 'tab_content.dart';
-import 'tools_dropdown.dart';
 
 /// Home tab enum - 5 tabs
 enum HomeTab { chat, sessions, plans, tasks, agents }
@@ -60,8 +58,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  HomeTab _selectedTab = HomeTab.chat;
-
   final List<String> _tabLabels = ['chat', 'sessions', 'plans', 'tasks', 'agents'];
 
   bool _initialLoadDone = false;
@@ -73,7 +69,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController = LeaderKeyController();
     _leaderController.onTabSelected = (index) {
       if (index >= 0 && index < HomeTab.values.length) {
-        setState(() => _selectedTab = HomeTab.values[index]);
+        ref.read(selectedTabIndexProvider.notifier).state = index;
       }
     };
     _leaderController.onToggleDrawer = () {
@@ -81,10 +77,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.read(drawerOpenProvider.notifier).state = !isOpen;
     };
     _leaderController.onShowHelp = _showHelpDialog;
-    _leaderController.onFocusInput = ({slashPrefix = false}) {
-      if (_selectedTab != HomeTab.chat) {
-        setState(() => _selectedTab = HomeTab.chat);
-      }
+    _leaderController.onFocusInput = () {
+      ref.read(selectedTabIndexProvider.notifier).state = 0;
+      ref.read(focusInputSlashPrefixProvider.notifier).state =
+          _leaderController.slashPrefix;
       ref.read(focusInputRequestProvider.notifier).state = true;
     };
     _leaderController.onFind = () {
@@ -211,6 +207,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final drawerOpen = ref.watch(drawerOpenProvider);
+    final selectedTabIndex = ref.watch(selectedTabIndexProvider);
+    final selectedTab = HomeTab.values[selectedTabIndex.clamp(0, HomeTab.values.length - 1)];
+
     ref.listen<bool>(connectionStateProvider, (prev, connected) {
       _onConnectionChanged(connected);
     });
@@ -231,11 +230,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     // Top tab bar
                     OrangeVoidTabBar(
                       tabs: _tabLabels,
-                      selectedIndex: _selectedTab.index,
+                      selectedIndex: selectedTabIndex,
                       onTabSelected: (index) =>
-                          setState(() => _selectedTab = HomeTab.values[index]),
+                          ref.read(selectedTabIndexProvider.notifier).state = index,
                     ),
-                    // Toolbar with drawer toggle, tools dropdown + connection indicator
+                    // Toolbar with drawer toggle, session name, connection indicator
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       color: CyberpunkColors.blackTransparent(0.7),
@@ -258,16 +257,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               ),
                             ),
                           ),
-                          const Spacer(),
-                          ToolsDropdown(
-                            onToolSelected: (route) {
-                              ref.read(activeToolProvider.notifier).state = route;
-                              if (_selectedTab != HomeTab.chat) {
-                                setState(() => _selectedTab = HomeTab.chat);
-                              }
+                          const SizedBox(width: 16),
+                          // Session name in toolbar (same bar as status/tools)
+                          Consumer(
+                            builder: (context, ref, child) {
+                              final session = ref.watch(activeSessionProvider);
+                              final displayName = session?.title ?? 'meept';
+                              return Text(
+                                displayName.toLowerCase(),
+                                style: CyberpunkTypography.bodyMedium.copyWith(
+                                  color: CyberpunkColors.orangePrimary,
+                                  fontFamily: 'SourceCodePro',
+                                  fontSize: 13,
+                                ),
+                              );
                             },
                           ),
-                          const SizedBox(width: 12),
+                          const Spacer(),
                           const _ConnectionDot(),
                         ],
                       ),
@@ -275,7 +281,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     const Divider(height: 1, color: CyberpunkColors.midGray),
                     // Main content area
                     Expanded(
-                      child: _buildTabContent(),
+                      child: TabContent(
+                        selectedTab: selectedTab,
+                        activeSession: ref.watch(activeSessionProvider),
+                      ),
                     ),
                   ],
                 ),
@@ -306,14 +315,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildTabContent() {
-    final activeSession = ref.watch(activeSessionProvider);
-    return TabContent(
-      selectedTab: _selectedTab,
-      activeSession: activeSession,
     );
   }
 }

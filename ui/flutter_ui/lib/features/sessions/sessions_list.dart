@@ -24,6 +24,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
 
   void _showCreateSessionDialog() async {
     final controller = TextEditingController();
+    final notifier = ref.read(sessionProvider.notifier);
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -42,12 +43,15 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             child: const Text('cancel', style: CyberpunkTypography.bodyMedium),
           ),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               if (controller.text.isNotEmpty) {
-                ref
-                    .read(sessionProvider.notifier)
-                    .createSession(controller.text);
+                final session = await notifier.createSession(controller.text);
                 Navigator.pop(context);
+                // Auto-switch to new session and chat tab
+                if (session != null && context.mounted) {
+                  ref.read(activeSessionProvider.notifier).state = session;
+                  ref.read(selectedTabIndexProvider.notifier).state = 0;
+                }
               }
             },
             child: const Text('create', style: CyberpunkTypography.bodyMedium),
@@ -169,8 +173,11 @@ class _SessionsListState extends ConsumerState<SessionsList> {
 
   Widget _buildSessionTile(Session session, bool isSelected) {
     return InkWell(
-      onTap: () =>
-          ref.read(activeSessionProvider.notifier).state = session,
+      onTap: () => ref.read(activeSessionProvider.notifier).state = session,
+      onDoubleTap: () {
+        ref.read(activeSessionProvider.notifier).state = session;
+        ref.read(selectedTabIndexProvider.notifier).state = 0;
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(

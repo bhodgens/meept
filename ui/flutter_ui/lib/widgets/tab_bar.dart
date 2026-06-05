@@ -34,7 +34,7 @@ class OrangeVoidTabBar extends StatelessWidget {
             child: InkWell(
               onTap: () => onTabSelected(index),
               child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 16),
+                padding: const EdgeInsets.symmetric(vertical: 6),
                 decoration: BoxDecoration(
                   border: Border(
                     bottom: BorderSide(

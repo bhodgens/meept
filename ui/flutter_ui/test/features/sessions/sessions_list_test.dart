@@ -121,6 +121,8 @@ void main() {
 
       // Tap on the session tile text to select it
       await tester.tap(find.text('test session'));
+      // InkWell delays onTap when onDoubleTap is present; pump past the double-tap window
+      await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
 
       // Now shows session id '1'
@@ -177,6 +179,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(Icons.delete_outline));
+      // InkWell delays onTap when onDoubleTap is present; pump past the double-tap window
+      await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
 
       expect(find.byType(AlertDialog), findsOneWidget);
