@@ -3,43 +3,17 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
+import 'async_state.dart';
 import 'providers.dart';
 import '../services/websocket_service.dart';
 
-const _unset = Object();
-
-/// Metrics state for the live metrics panel
-class MetricsState {
-  final MetricsSnapshot? current;
-  final bool isLoading;
-  final String? error;
-
-  const MetricsState({
-    this.current,
-    this.isLoading = false,
-    this.error,
-  });
-
-  MetricsState copyWith({
-    MetricsSnapshot? current,
-    bool? isLoading,
-    Object? error = _unset,
-  }) {
-    return MetricsState(
-      current: current ?? this.current,
-      isLoading: isLoading ?? this.isLoading,
-      error: identical(error, _unset) ? this.error : error as String?,
-    );
-  }
-}
-
 /// StateNotifier that manages metrics from both HTTP polling and
 /// WebSocket updates for live metrics display (Task 19).
-class MetricsNotifier extends StateNotifier<MetricsState> {
+class MetricsNotifier extends StateNotifier<AsyncState<MetricsSnapshot>> {
   MetricsNotifier({
     required this.apiClient,
     required this.websocket,
-  }) : super(const MetricsState(isLoading: true)) {
+  }) : super(const AsyncState.loading()) {
     _init();
   }
 
@@ -91,21 +65,12 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
       _checkMounted();
       final data = await apiClient.getLiveMetrics();
       if (_disposed) return;
-      // Try to parse as MetricsSnapshot from the raw response
-      // The backend /metrics/live returns a map with metric fields
       final snapshotData = Map<String, dynamic>.from(data);
       if (_disposed) return;
-      state = state.copyWith(
-        current: MetricsSnapshot.fromJson(snapshotData),
-        isLoading: false,
-        error: null,
-      );
-    } catch (e) {
+      state = AsyncState.data(MetricsSnapshot.fromJson(snapshotData));
+    } catch (e, st) {
       if (_disposed) return;
-      state = state.copyWith(
-        error: 'Failed to load metrics: ${e.toString()}',
-        isLoading: false,
-      );
+      state = AsyncState.error(e, st);
     }
   }
 
@@ -113,17 +78,10 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
     if (_metricsSubscription != null) return;
 
     _metricsSubscription = websocket.subscribeToMetrics().listen((msg) {
-      // The websocket subscription filters for type == 'metrics_update'
-      // and the message is already flattened by WebSocketService
       try {
-        state = state.copyWith(
-          current: MetricsSnapshot.fromJson(msg),
-          error: null,
-        );
-      } catch (e) {
-        state = state.copyWith(
-          error: 'Failed to parse metrics: ${e.toString()}',
-        );
+        state = AsyncState.data(MetricsSnapshot.fromJson(msg));
+      } catch (e, st) {
+        state = AsyncState.error(e, st);
       }
     });
   }
@@ -137,7 +95,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
 
   /// Refresh metrics manually
   Future<void> refresh() async {
-    state = state.copyWith(isLoading: true);
+    state = const AsyncState.loading();
     await _fetchMetrics();
   }
 
@@ -156,7 +114,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
 
 /// Metrics provider
 final metricsProvider =
-    StateNotifierProvider<MetricsNotifier, MetricsState>((ref) {
+    StateNotifierProvider<MetricsNotifier, AsyncState<MetricsSnapshot>>((ref) {
   final client = ref.watch(apiClientProvider);
   final websocket = ref.watch(websocketProvider);
   return MetricsNotifier(apiClient: client, websocket: websocket);

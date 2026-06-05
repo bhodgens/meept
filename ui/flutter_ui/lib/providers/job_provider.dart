@@ -3,40 +3,9 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
+import 'async_state.dart';
 import 'providers.dart';
 import '../services/websocket_service.dart';
-
-const _unset = Object();
-
-/// Job update state - contains the latest job updates from the queue
-/// (Task 20: Job queue updates)
-class JobState {
-  final List<JobUpdate> updates;
-  final bool isLoading;
-  final String? error;
-  final int? queueDepth;
-
-  const JobState({
-    this.updates = const [],
-    this.isLoading = false,
-    this.error,
-    this.queueDepth,
-  });
-
-  JobState copyWith({
-    List<JobUpdate>? updates,
-    bool? isLoading,
-    Object? error = _unset,
-    int? queueDepth,
-  }) {
-    return JobState(
-      updates: updates ?? this.updates,
-      isLoading: isLoading ?? this.isLoading,
-      error: identical(error, _unset) ? this.error : error as String?,
-      queueDepth: queueDepth ?? this.queueDepth,
-    );
-  }
-}
 
 /// Represents a real-time job update from the WebSocket stream
 class JobUpdate {
@@ -72,11 +41,11 @@ class JobUpdate {
 
 /// StateNotifier that manages job queue state via HTTP polling and
 /// WebSocket real-time updates (Task 20).
-class JobNotifier extends StateNotifier<JobState> {
+class JobNotifier extends StateNotifier<AsyncState<List<Job>>> {
   JobNotifier({
     required this.apiClient,
     required this.websocket,
-  }) : super(const JobState(isLoading: true)) {
+  }) : super(const AsyncState.loading()) {
     _init();
   }
 
@@ -111,28 +80,9 @@ class JobNotifier extends StateNotifier<JobState> {
   Future<void> _fetchJobs() async {
     try {
       final jobs = await apiClient.listJobs();
-      final stats = await apiClient.getQueueStats();
-      final depth = stats['queue_depth'] as int? ?? stats['depth'] as int? ?? 0;
-
-      state = state.copyWith(
-        updates: jobs
-            .map((j) => JobUpdate(
-                  jobId: j.id,
-                  type: j.type,
-                  status: j.status,
-                  agentId: j.agentId,
-                  timestamp: j.createdAt,
-                ))
-            .toList(),
-        queueDepth: depth,
-        isLoading: false,
-        error: null,
-      );
-    } catch (e) {
-      state = state.copyWith(
-        error: 'Failed to load jobs: ${e.toString()}',
-        isLoading: false,
-      );
+      state = AsyncState.data(jobs);
+    } catch (e, st) {
+      state = AsyncState.error(e, st);
     }
   }
 
@@ -143,29 +93,40 @@ class JobNotifier extends StateNotifier<JobState> {
       try {
         final update = JobUpdate.fromJson(msg);
 
-        // Prepend new update to the front of the list, keeping max 50
-        final newUpdates = [update, ...state.updates];
-        if (newUpdates.length > 50) {
-          state = state.copyWith(
-            updates: newUpdates.sublist(0, 50),
-            error: null,
+        final currentJobs = state.whenOrNull(data: (j) => j) ?? [];
+
+        // Update existing job or prepend new one
+        final existingIndex =
+            currentJobs.indexWhere((j) => j.id == update.jobId);
+
+        List<Job> updatedJobs;
+        if (existingIndex >= 0) {
+          updatedJobs = [...currentJobs];
+          updatedJobs[existingIndex] = currentJobs[existingIndex].copyWith(
+            status: update.status,
           );
         } else {
-          state = state.copyWith(
-            updates: newUpdates,
-            error: null,
-          );
+          // Create a minimal Job from the update for display purposes
+          updatedJobs = [
+            Job(
+              id: update.jobId,
+              type: update.type,
+              status: update.status,
+              agentId: update.agentId,
+              createdAt: update.timestamp,
+            ),
+            ...currentJobs,
+          ];
         }
 
-        // Update queue depth if present
-        if (msg['queue_depth'] != null) {
-          final depth = (msg['queue_depth'] as num).toInt();
-          state = state.copyWith(queueDepth: depth);
+        // Keep max 50
+        if (updatedJobs.length > 50) {
+          updatedJobs = updatedJobs.sublist(0, 50);
         }
-      } catch (e) {
-        state = state.copyWith(
-          error: 'Failed to parse job update: ${e.toString()}',
-        );
+
+        state = AsyncState.data(updatedJobs);
+      } catch (e, st) {
+        state = AsyncState.error(e, st);
       }
     });
   }
@@ -178,7 +139,7 @@ class JobNotifier extends StateNotifier<JobState> {
   }
 
   Future<void> refresh() async {
-    state = state.copyWith(isLoading: true);
+    state = const AsyncState.loading();
     await _fetchJobs();
   }
 
@@ -196,7 +157,7 @@ class JobNotifier extends StateNotifier<JobState> {
 
 /// Job queue provider
 final jobProvider =
-    StateNotifierProvider<JobNotifier, JobState>((ref) {
+    StateNotifierProvider<JobNotifier, AsyncState<List<Job>>>((ref) {
   final client = ref.watch(apiClientProvider);
   final websocket = ref.watch(websocketProvider);
   return JobNotifier(apiClient: client, websocket: websocket);

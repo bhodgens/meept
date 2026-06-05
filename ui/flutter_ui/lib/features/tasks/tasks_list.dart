@@ -47,68 +47,97 @@ class _TasksListState extends ConsumerState<TasksList> {
           ),
         ),
       ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Text(
-                  'tasks',
-                  style: CyberpunkTypography.headlineMedium.copyWith(
-                    color: CyberpunkColors.orangePrimary,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.add, size: 18),
+      child: taskState.when(
+        initial: () => _buildContent(
+          tasks: const [],
+          isLoading: false,
+          error: null,
+        ),
+        loading: () => _buildContent(
+          tasks: const [],
+          isLoading: true,
+          error: null,
+        ),
+        error: (error, _) => _buildContent(
+          tasks: const [],
+          isLoading: false,
+          error: error.toString(),
+        ),
+        data: (tasks) => _buildContent(
+          tasks: tasks,
+          isLoading: false,
+          error: null,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent({
+    required List<Task> tasks,
+    required bool isLoading,
+    required String? error,
+  }) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Text(
+                'tasks',
+                style: CyberpunkTypography.headlineMedium.copyWith(
                   color: CyberpunkColors.orangePrimary,
-                  onPressed: _showCreateTaskDialog,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.add, size: 18),
+                color: CyberpunkColors.orangePrimary,
+                onPressed: _showCreateTaskDialog,
+              ),
+            ],
+          ),
+        ),
+        if (isLoading)
+          const Expanded(
+            child: Center(
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (error != null)
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: _TaskErrorBanner(message: error),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonal(
+                  onPressed: () => ref.read(taskProvider.notifier).loadTasks(),
+                  child: const Text('retry', style: CyberpunkTypography.bodySmall),
                 ),
               ],
             ),
-          ),
-          if (taskState.isLoading)
-            const Expanded(
-              child: Center(
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (taskState.error != null)
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: _TaskErrorBanner(message: taskState.error!),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.tonal(
-                    onPressed: () => ref.read(taskProvider.notifier).loadTasks(),
-                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
-                  ),
-                ],
-              ),
-            )
-          else if (taskState.tasks.isEmpty)
-            const Expanded(
-              child: Center(
-                child: Text('no tasks'),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.builder(
-                itemCount: taskState.tasks.length,
-                itemBuilder: (context, index) {
-                  final task = taskState.tasks[index];
-                  return _buildTaskTile(task);
-                },
-              ),
+          )
+        else if (tasks.isEmpty)
+          const Expanded(
+            child: Center(
+              child: Text('no tasks'),
             ),
-        ],
-      ),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              itemCount: tasks.length,
+              itemBuilder: (context, index) {
+                final task = tasks[index];
+                return _buildTaskTile(task);
+              },
+            ),
+          ),
+      ],
     );
   }
 

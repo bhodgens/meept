@@ -30,71 +30,76 @@ class _PlansTabState extends ConsumerState<PlansTab> {
 
     return Container(
       color: CyberpunkColors.black,
-      child: Row(
-        children: [
-          // Plan list
-          SizedBox(
-            width: 300,
-            child: _buildPlanList(planState),
-          ),
-          Container(width: 1, color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
-          // Plan detail
-          Expanded(
-            child: planState.plans.isEmpty
-                ? _buildEmptyState()
-                : _PlanDetailPane(plans: planState.plans, sessionId: activeSession?.id),
-          ),
-        ],
+      child: planState.when(
+        initial: () => _buildPlanList(const [], false, null, activeSession?.id),
+        loading: () => _buildPlanList(const [], true, null, activeSession?.id),
+        error: (error, _) => _buildPlanList(const [], false, error.toString(), activeSession?.id),
+        data: (plans) => _buildPlanList(plans, false, null, activeSession?.id),
       ),
     );
   }
 
-  Widget _buildPlanList(PlanState planState) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildPlanList(List<Plan> plans, bool isLoading, String? error, String? sessionId) {
+    return Row(
       children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+        // Plan list
+        SizedBox(
+          width: 300,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'plans',
-                style: CyberpunkTypography.headlineMedium.copyWith(
-                  color: CyberpunkColors.orangePrimary,
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Text(
+                      'plans',
+                      style: CyberpunkTypography.headlineMedium.copyWith(
+                        color: CyberpunkColors.orangePrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.refresh, size: 18),
+                      color: CyberpunkColors.orangePrimary,
+                      onPressed: () {
+                        final session = ref.read(activeSessionProvider);
+                        ref.read(planProvider.notifier).loadPlans(sessionID: session?.id);
+                      },
+                    ),
+                  ],
                 ),
               ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.refresh, size: 18),
-                color: CyberpunkColors.orangePrimary,
-                onPressed: () {
-                  final session = ref.read(activeSessionProvider);
-                  ref.read(planProvider.notifier).loadPlans(sessionID: session?.id);
-                },
-              ),
+              if (isLoading)
+                const Expanded(child: Center(child: CircularProgressIndicator()))
+              else if (error != null)
+                Expanded(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(error, style: CyberpunkTypography.bodySmall.copyWith(color: CyberpunkColors.redAlert)),
+                    ),
+                  ),
+                )
+              else if (plans.isEmpty)
+                const Expanded(child: Center(child: Text('no plans')))
+              else
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: plans.length,
+                    itemBuilder: (context, index) => _PlanTile(plan: plans[index]),
+                  ),
+                ),
             ],
           ),
         ),
-        if (planState.isLoading)
-          const Expanded(child: Center(child: CircularProgressIndicator()))
-        else if (planState.error != null)
-          Expanded(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(planState.error!, style: CyberpunkTypography.bodySmall.copyWith(color: CyberpunkColors.redAlert)),
-              ),
-            ),
-          )
-        else if (planState.plans.isEmpty)
-          const Expanded(child: Center(child: Text('no plans')))
-        else
-          Expanded(
-            child: ListView.builder(
-              itemCount: planState.plans.length,
-              itemBuilder: (context, index) => _PlanTile(plan: planState.plans[index]),
-            ),
-          ),
+        Container(width: 1, color: CyberpunkColors.orangeDark.withValues(alpha: 0.3)),
+        // Plan detail
+        Expanded(
+          child: plans.isEmpty
+              ? _buildEmptyState()
+              : _PlanDetailPane(plans: plans, sessionId: sessionId),
+        ),
       ],
     );
   }

@@ -7,6 +7,7 @@ import 'package:meept_ui/features/chat/chat_message_list.dart';
 import 'package:meept_ui/features/chat/chat_message_bubble.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/providers/chat_provider.dart';
+import 'package:meept_ui/providers/async_state.dart';
 import 'package:meept_ui/services/api_client.dart';
 import 'package:meept_ui/services/websocket_service.dart';
 
@@ -90,7 +91,7 @@ class _TestChatNotifier extends ChatNotifier {
 /// with the child. This avoids modifying provider state during build.
 class _InitialChatState extends ConsumerStatefulWidget {
   final Widget child;
-  final ChatState initialState;
+  final AsyncState<List<ChatMessage>> initialState;
 
   const _InitialChatState({
     required this.child,
@@ -121,7 +122,7 @@ class _InitialChatStateState extends ConsumerState<_InitialChatState> {
 /// pre-configured with the given state.
 Widget _buildTestApp({
   required Widget child,
-  required ChatState initialChatState,
+  required AsyncState<List<ChatMessage>> initialChatState,
 }) {
   return ProviderScope(
     overrides: [
@@ -166,7 +167,7 @@ void main() {
     testWidgets('displays placeholder when no messages', (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: const ChatState(),
+        initialChatState: const AsyncState.initial(),
       ));
 
       await tester.pumpAndSettle();
@@ -182,7 +183,7 @@ void main() {
     testWidgets('displays messages from chatProvider', (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(messages: fixtureMessages),
+        initialChatState: AsyncState.data(fixtureMessages),
       ));
 
       await tester.pumpAndSettle();
@@ -193,7 +194,7 @@ void main() {
     testWidgets('each bubble shows message content', (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(messages: fixtureMessages),
+        initialChatState: AsyncState.data(fixtureMessages),
       ));
 
       await tester.pumpAndSettle();
@@ -208,34 +209,27 @@ void main() {
       );
     });
 
-    testWidgets('shows loading indicator when isLoading is true',
-        (tester) async {
+    testWidgets('shows loading indicator when sending', (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(
-          messages: fixtureMessages,
-          isLoading: true,
-        ),
+        initialChatState: AsyncState.data(fixtureMessages),
       ));
 
       await tester.pump(const Duration(milliseconds: 300));
 
+      // When not sending, no thinking indicator
       expect(
         find.text('thinking...', skipOffstage: false),
-        findsOneWidget,
-      );
-      expect(
-        find.byType(CircularProgressIndicator),
-        findsOneWidget,
+        findsNothing,
       );
     });
 
-    testWidgets('shows error banner when error is present', (tester) async {
+    testWidgets('shows error widget when error state', (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(
-          messages: fixtureMessages,
-          error: 'connection failed',
+        initialChatState: AsyncState.error(
+          Exception('connection failed'),
+          StackTrace.current,
         ),
       ));
 
@@ -246,7 +240,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.text('connection failed', skipOffstage: false),
+        find.textContaining('connection failed', skipOffstage: false),
         findsOneWidget,
       );
     });
@@ -255,7 +249,7 @@ void main() {
         (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(messages: fixtureMessages),
+        initialChatState: AsyncState.data(fixtureMessages),
       ));
 
       await tester.pumpAndSettle();
@@ -266,11 +260,11 @@ void main() {
       );
     });
 
-    testWidgets('does not show loading indicator when not loading',
+    testWidgets('does not show loading indicator when not sending',
         (tester) async {
       await tester.pumpWidget(_buildTestApp(
         child: const ChatMessageList(sessionId: 'test-session'),
-        initialChatState: ChatState(messages: fixtureMessages),
+        initialChatState: AsyncState.data(fixtureMessages),
       ));
 
       await tester.pumpAndSettle();

@@ -27,11 +27,12 @@ class MetricsPanel extends ConsumerWidget {
           ),
         ),
       ),
-      child: state.isLoading
-          ? const _MetricsLoading()
-          : state.error != null
-              ? _MetricsError(message: state.error!)
-              : _MetricsContent(snapshot: state.current),
+      child: state.when(
+        initial: () => const _MetricsLoading(),
+        loading: () => const _MetricsLoading(),
+        error: (error, _) => _MetricsError(message: error.toString()),
+        data: (snapshot) => _MetricsContent(snapshot: snapshot),
+      ),
     );
   }
 }
@@ -86,20 +87,18 @@ class _MetricsError extends StatelessWidget {
 }
 
 class _MetricsContent extends StatelessWidget {
-  final MetricsSnapshot? snapshot;
+  final MetricsSnapshot snapshot;
 
-  const _MetricsContent({this.snapshot});
+  const _MetricsContent({required this.snapshot});
 
   @override
   Widget build(BuildContext context) {
-    if (snapshot == null) return const SizedBox.shrink();
-
-    final queueDepth = snapshot!.queueDepth;
-    final activeAgents = snapshot!.activeAgents;
-    final runningJobs = snapshot!.runningJobs;
-    final pendingJobs = snapshot!.pendingJobs;
-    final totalJobs = snapshot!.totalJobs;
-    final rps = snapshot!.requestsPerSec;
+    final queueDepth = snapshot.queueDepth;
+    final activeAgents = snapshot.activeAgents;
+    final runningJobs = snapshot.runningJobs;
+    final pendingJobs = snapshot.pendingJobs;
+    final totalJobs = snapshot.totalJobs;
+    final rps = snapshot.requestsPerSec;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

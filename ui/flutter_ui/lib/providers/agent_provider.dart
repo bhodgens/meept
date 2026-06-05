@@ -1,59 +1,30 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
+import 'async_state.dart';
 import 'providers.dart';
 
-const _unset = Object();
-
-/// State tracked by AgentNotifier
-class AgentState {
-  final List<Agent> agents;
-  final bool isLoading;
-  final String? error;
-
-  const AgentState({
-    this.agents = const [],
-    this.isLoading = false,
-    this.error,
-  });
-
-  AgentState copyWith({
-    List<Agent>? agents,
-    bool? isLoading,
-    Object? error = _unset,
-  }) {
-    return AgentState(
-      agents: agents ?? this.agents,
-      isLoading: isLoading ?? this.isLoading,
-      error: identical(error, _unset) ? this.error : error as String?,
-    );
-  }
-}
-
 /// StateNotifier that manages agent loading from the daemon
-class AgentNotifier extends StateNotifier<AgentState> {
-  AgentNotifier({required this.apiClient}) : super(const AgentState());
+class AgentNotifier extends StateNotifier<AsyncState<List<Agent>>> {
+  AgentNotifier({required this.apiClient}) : super(const AsyncState.initial());
 
   final ApiClient apiClient;
 
   /// Fetch all agents from the daemon configuration
   Future<void> loadAgents() async {
-    state = state.copyWith(isLoading: true, error: null);
+    state = const AsyncState.loading();
     try {
       final agents = await apiClient.listAgents();
-      state = state.copyWith(agents: agents, isLoading: false);
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = AsyncState.data(agents);
+    } catch (e, st) {
+      state = AsyncState.error(e, st);
     }
   }
 }
 
 /// Agent state provider
 final agentProvider =
-    StateNotifierProvider<AgentNotifier, AgentState>((ref) {
+    StateNotifierProvider<AgentNotifier, AsyncState<List<Agent>>>((ref) {
   final client = ref.read(apiClientProvider);
   return AgentNotifier(apiClient: client);
 });

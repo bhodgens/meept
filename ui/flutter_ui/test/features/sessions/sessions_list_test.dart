@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meept_ui/features/sessions/sessions_list.dart';
 import 'package:meept_ui/providers/providers.dart';
+import 'package:meept_ui/providers/async_state.dart';
 import 'package:meept_ui/services/session_notifier.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/services/api_client.dart';
@@ -24,11 +25,10 @@ void main() {
       );
 
       // initState callback fires after addPostFrameCallback (first pump)
-      // _SlowLoadClient has a 50ms initial delay, so we pump once to trigger load
       await tester.pump();
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
-      // Advance past the 50ms delay + settle
+      // Advance past the delay + settle
       await tester.pumpAndSettle();
     });
 
@@ -185,29 +185,29 @@ void main() {
   });
 
   group('SessionNotifier', () {
-    test('state starts empty', () {
+    test('state starts as initial', () {
       final notifier = SessionNotifier(apiClient: _TestApiClient([]));
-      expect(notifier.state.sessions, isEmpty);
-      expect(notifier.state.isLoading, isFalse);
-      expect(notifier.state.error, isNull);
+      expect(notifier.state.whenOrNull(initial: () => true), isTrue);
+      expect(notifier.state.whenOrNull(loading: () => true), isNull);
+      expect(notifier.state.whenOrNull(error: (_, __) => true), isNull);
     });
 
     test('loadSessions populates sessions', () async {
       final notifier = SessionNotifier(apiClient: _TestApiClient(_testSessions));
       await notifier.loadSessions();
 
-      expect(notifier.state.sessions, hasLength(_testSessions.length));
-      expect(notifier.state.isLoading, isFalse);
-      expect(notifier.state.error, isNull);
+      final sessions = notifier.state.whenOrNull(data: (s) => s);
+      expect(sessions, isNotNull);
+      expect(sessions!.length, _testSessions.length);
+      expect(notifier.state.whenOrNull(error: (_, __) => true), isNull);
     });
 
     test('loadSessions sets error on failure', () async {
       final notifier = SessionNotifier(apiClient: _ThrowingClient());
       await notifier.loadSessions();
 
-      expect(notifier.state.sessions, isEmpty);
-      expect(notifier.state.isLoading, isFalse);
-      expect(notifier.state.error, isNotNull);
+      expect(notifier.state.whenOrNull(data: (s) => s) ?? [], isEmpty);
+      expect(notifier.state.whenOrNull(error: (_, __) => true), isNotNull);
     });
 
     test('createSession appends new session', () async {
@@ -215,9 +215,10 @@ void main() {
       final notifier = SessionNotifier(apiClient: client);
       await notifier.loadSessions();
 
-      final count = notifier.state.sessions.length;
+      final count = notifier.state.whenOrNull(data: (s) => s)!.length;
       await notifier.createSession('New Session');
-      expect(notifier.state.sessions.length, count + 1);
+      final sessions = notifier.state.whenOrNull(data: (s) => s)!;
+      expect(sessions.length, count + 1);
     });
 
     test('deleteSession removes session', () async {
@@ -227,7 +228,8 @@ void main() {
 
       final firstId = _testSessions[0].id;
       await notifier.deleteSession(firstId);
-      expect(notifier.state.sessions, hasLength(_testSessions.length - 1));
+      final sessions = notifier.state.whenOrNull(data: (s) => s)!;
+      expect(sessions.length, _testSessions.length - 1);
     });
   });
 }

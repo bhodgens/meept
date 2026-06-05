@@ -1,53 +1,24 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
-import 'providers.dart'; // Import apiClientProvider from providers.dart
-
-const _unset = Object();
-
-/// State tracked by TaskNotifier
-class TaskState {
-  final List<Task> tasks;
-  final bool isLoading;
-  final String? error;
-
-  const TaskState({
-    this.tasks = const [],
-    this.isLoading = false,
-    this.error,
-  });
-
-  TaskState copyWith({
-    List<Task>? tasks,
-    bool? isLoading,
-    Object? error = _unset,
-  }) {
-    return TaskState(
-      tasks: tasks ?? this.tasks,
-      isLoading: isLoading ?? this.isLoading,
-      error: identical(error, _unset) ? this.error : error as String?,
-    );
-  }
-}
+import 'async_state.dart';
+import 'providers.dart';
 
 /// StateNotifier that manages task loading
-class TaskNotifier extends StateNotifier<TaskState> {
+class TaskNotifier extends StateNotifier<AsyncState<List<Task>>> {
   TaskNotifier({required this.apiClient})
-      : super(const TaskState());
+      : super(const AsyncState.initial());
 
   final ApiClient apiClient;
 
   /// Fetch all tasks for the active session from the server
   Future<void> loadTasks() async {
-    state = state.copyWith(isLoading: true, error: null);
+    state = const AsyncState.loading();
     try {
       final tasks = await apiClient.listTasks();
-      state = state.copyWith(tasks: tasks, isLoading: false);
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+      state = AsyncState.data(tasks);
+    } catch (e, st) {
+      state = AsyncState.error(e, st);
     }
   }
 
@@ -56,52 +27,44 @@ class TaskNotifier extends StateNotifier<TaskState> {
     required String title,
     String? sessionId,
   }) async {
-    state = state.copyWith(isLoading: true, error: null);
+    final currentTasks = state.whenOrNull(data: (t) => t) ?? [];
+    state = const AsyncState.loading();
     try {
       final task = await apiClient.createTask(
         title: title,
         sessionId: sessionId,
       );
-      state = state.copyWith(tasks: [...state.tasks, task], isLoading: false);
+      state = AsyncState.data([...currentTasks, task]);
       return task;
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+    } catch (e, st) {
+      state = AsyncState.error(e, st);
       return null;
     }
   }
 
   /// Update the state of a single task and refresh the list
   Future<bool?> updateTaskStatus(String id, String newStatus) async {
-    state = state.copyWith(isLoading: true, error: null);
+    state = const AsyncState.loading();
     try {
       await apiClient.updateTask(id, state: newStatus);
       // Refresh the full list from server
       await loadTasks();
       return true;
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+    } catch (e, st) {
+      state = AsyncState.error(e, st);
       return false;
     }
   }
 
   /// Cancel a task and refresh the list
   Future<bool> cancelTask(String id) async {
-    state = state.copyWith(isLoading: true, error: null);
+    state = const AsyncState.loading();
     try {
       await apiClient.cancelTask(id);
       await loadTasks();
       return true;
-    } catch (e) {
-      state = state.copyWith(
-        isLoading: false,
-        error: e.toString(),
-      );
+    } catch (e, st) {
+      state = AsyncState.error(e, st);
       return false;
     }
   }
@@ -109,7 +72,7 @@ class TaskNotifier extends StateNotifier<TaskState> {
 
 /// Task state provider
 final taskProvider =
-    StateNotifierProvider<TaskNotifier, TaskState>((ref) {
+    StateNotifierProvider<TaskNotifier, AsyncState<List<Task>>>((ref) {
   final client = ref.watch(apiClientProvider);
   return TaskNotifier(apiClient: client);
 });

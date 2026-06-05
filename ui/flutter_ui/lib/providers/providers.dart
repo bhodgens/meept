@@ -1,3 +1,4 @@
+export 'async_state.dart';
 export 'chat_provider.dart';
 export 'task_provider.dart';
 export 'agent_provider.dart';
@@ -13,6 +14,7 @@ import '../services/websocket_service.dart';
 import '../services/storage_service.dart';
 import '../services/session_notifier.dart';
 import '../models/api_models.dart';
+import 'async_state.dart';
 
 // Storage service — initialized in main() before runApp
 final storageProvider = Provider<StorageService>((ref) => StorageService.instance);
@@ -31,7 +33,7 @@ final websocketProvider = Provider<WebSocketService>((ref) {
 
 // Session state provider (StateNotifier for CRUD + selection)
 final sessionProvider =
-    StateNotifierProvider<SessionNotifier, SessionState>((ref) {
+    StateNotifierProvider<SessionNotifier, AsyncState<List<Session>>>((ref) {
   final client = ref.watch(apiClientProvider);
   return SessionNotifier(apiClient: client);
 });

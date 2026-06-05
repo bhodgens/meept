@@ -45,9 +45,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
           FilledButton(
             onPressed: () {
               if (controller.text.isNotEmpty) {
-                ref
-                    .read(sessionProvider.notifier)
-                    .createSession(controller.text);
+                ref.read(sessionProvider.notifier).createSession(controller.text);
                 Navigator.pop(context);
               }
             },
@@ -75,9 +73,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             style: FilledButton.styleFrom(
                 backgroundColor: CyberpunkColors.redAlert),
             onPressed: () {
-              ref
-                  .read(sessionProvider.notifier)
-                  .deleteSession(sessionId);
+              ref.read(sessionProvider.notifier).deleteSession(sessionId);
               Navigator.pop(context);
             },
             child: const Text('delete', style: CyberpunkTypography.bodyMedium),
@@ -102,69 +98,109 @@ class _SessionsListState extends ConsumerState<SessionsList> {
           ),
         ),
       ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Text(
-                  'sessions',
-                  style: CyberpunkTypography.headlineMedium.copyWith(
-                    color: CyberpunkColors.orangePrimary,
-                  ),
+      child: sessionState.when(
+        initial: () => _buildContent(
+          sessions: const [],
+          activeSession: activeSession,
+          isLoading: false,
+          error: null,
+          showAddButton: true,
+        ),
+        loading: () => _buildContent(
+          sessions: const [],
+          activeSession: activeSession,
+          isLoading: true,
+          error: null,
+          showAddButton: false,
+        ),
+        error: (error, _) => _buildContent(
+          sessions: const [],
+          activeSession: activeSession,
+          isLoading: false,
+          error: error.toString(),
+          showAddButton: true,
+        ),
+        data: (sessions) => _buildContent(
+          sessions: sessions,
+          activeSession: activeSession,
+          isLoading: false,
+          error: null,
+          showAddButton: true,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent({
+    required List<Session> sessions,
+    required Session? activeSession,
+    required bool isLoading,
+    required String? error,
+    required bool showAddButton,
+  }) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Text(
+                'sessions',
+                style: CyberpunkTypography.headlineMedium.copyWith(
+                  color: CyberpunkColors.orangePrimary,
                 ),
-                const Spacer(),
+              ),
+              const Spacer(),
+              if (showAddButton)
                 IconButton(
                   icon: const Icon(Icons.add, size: 18),
                   color: CyberpunkColors.orangePrimary,
                   onPressed: _showCreateSessionDialog,
                 ),
+            ],
+          ),
+        ),
+        if (isLoading)
+          const Expanded(
+            child: Center(
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (error != null)
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: _SessionErrorBanner(message: error),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonal(
+                  onPressed: () => ref.read(sessionProvider.notifier).loadSessions(),
+                  child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                ),
               ],
             ),
-          ),
-          if (sessionState.isLoading)
-            const Expanded(
-              child: Center(
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (sessionState.error != null)
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: double.infinity,
-                    child: _SessionErrorBanner(message: sessionState.error!),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.tonal(
-                    onPressed: () => ref.read(sessionProvider.notifier).loadSessions(),
-                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
-                  ),
-                ],
-              ),
-            )
-          else if (sessionState.sessions.isEmpty)
-            const Expanded(
-              child: Center(
-                child: Text('no sessions'),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.builder(
-                itemCount: sessionState.sessions.length,
-                itemBuilder: (context, index) {
-                  final session = sessionState.sessions[index];
-                  final isSelected = activeSession?.id == session.id;
-                  return _buildSessionTile(session, isSelected);
-                },
-              ),
+          )
+        else if (sessions.isEmpty)
+          const Expanded(
+            child: Center(
+              child: Text('no sessions'),
             ),
-        ],
-      ),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              itemCount: sessions.length,
+              itemBuilder: (context, index) {
+                final session = sessions[index];
+                final isSelected = activeSession?.id == session.id;
+                return _buildSessionTile(session, isSelected);
+              },
+            ),
+          ),
+      ],
     );
   }
 
@@ -220,7 +256,6 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       ),
     );
   }
-
 }
 
 /// Inline error banner for session list errors
