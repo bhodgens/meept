@@ -271,8 +271,10 @@ func TestChatModel_SendWhileLoading(t *testing.T) {
 	msg := tea.KeyPressMsg{Code: tea.KeyEnter}
 	model.Update(msg)
 
-	if len(model.messages) != initialCount {
-		t.Error("expected no message to be added while loading")
+	// During loading, messages are queued as follow-ups rather than blocked.
+	// The UI should show a system message acknowledging the queue.
+	if len(model.messages) <= initialCount {
+		t.Error("expected a system message to be added while loading (follow-up queued)")
 	}
 }
 

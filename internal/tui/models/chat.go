@@ -837,9 +837,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 
 		case KeyEnter:
 			// Enter sends message when focused on input.
-			// When agent is active (loading), messages are queued as follow-ups
-			// or steering messages rather than starting a new request.
-			if m.focused != FocusInput || (m.loading && !m.agentActive) {
+			if m.focused != FocusInput {
 				return nil
 			}
 			return m.doSendMessage()
@@ -1357,9 +1355,10 @@ func (m *ChatModel) doSendMessage() tea.Cmd {
 	m.compressedPastes = make(map[int]string)
 	m.pasteCounter = 0
 
-	// Route based on agent state
-	if m.agentActive {
-		// Agent is running - queue the message
+	// Route based on agent state. When loading is true (kickoff in flight) or
+	// agentActive is true (agent is processing), queue as a follow-up. This
+	// keeps the input field usable during the response window.
+	if m.agentActive || m.loading {
 		m.addToHistory(text)
 
 		if m.steerMode {
