@@ -24,12 +24,14 @@ struct SettingsWindow: View {
                     isSaving = true
                     configService.normalizeJSON5(content: content) { result in
                         switch result {
-                        case .success(let normalized):
-                            configService.saveClientConfig(content: normalized) { saveResult in
+                        case .success:
+                            // Validated via normalize; save the user's original
+                            // text to preserve comments and formatting.
+                            configService.saveClientConfig(content: content) { saveResult in
                                 isSaving = false
                                 switch saveResult {
                                 case .success:
-                                    clientConfig = normalized
+                                    break
                                 case .failure:
                                     showSaveError = true
                                 }
@@ -53,12 +55,14 @@ struct SettingsWindow: View {
                     isSaving = true
                     configService.normalizeJSON5(content: content) { result in
                         switch result {
-                        case .success(let normalized):
-                            configService.saveModelsConfig(content: normalized) { saveResult in
+                        case .success:
+                            // Validated via normalize; save the user's original
+                            // text to preserve comments and formatting.
+                            configService.saveModelsConfig(content: content) { saveResult in
                                 isSaving = false
                                 switch saveResult {
                                 case .success:
-                                    modelsConfig = normalized
+                                    break
                                 case .failure:
                                     showSaveError = true
                                 }
