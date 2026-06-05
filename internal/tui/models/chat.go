@@ -17,6 +17,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/caimlas/meept/internal/sharedclient"
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tui/render"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
@@ -969,7 +970,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 		m.pendingMsgIdx = -1
 
 		if msg.Err != nil {
-			m.addMessage(RoleSystem, fmt.Sprintf("Error: %v", msg.Err))
+			m.addMessage(RoleSystem, llm.UserMessage(msg.Err))
 		} else {
 			// Check if the reply is an async task ack
 			if isAsyncAck, taskID, taskMessage := parseAsyncAck(msg.Reply); isAsyncAck {

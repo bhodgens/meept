@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tui"
 )
 
@@ -120,7 +121,7 @@ func runChat(cmd *cobra.Command, args []string) error {
 
 	reply, err := client.Chat(message, conversationID)
 	if err != nil {
-		return fmt.Errorf("chat error: %w", err)
+		return fmt.Errorf("%s", llm.UserMessage(err))
 	}
 
 	fmt.Println(reply)

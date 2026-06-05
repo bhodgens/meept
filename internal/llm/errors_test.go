@@ -684,3 +684,196 @@ func TestRateLimitError_Unwrap(t *testing.T) {
 		t.Errorf("Unwrap() = %v, want %v", unwrapped, cause)
 	}
 }
+
+// --- Tests for UserMessage() (Phase 4: user-facing error messages) ---
+
+func TestRateLimitError_UserMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *RateLimitError
+		want string
+	}{
+		{
+			name: "all fields populated",
+			err: &RateLimitError{
+				ModelID:    "claude-opus-4-6",
+				LimitType:  "tpm_uncached",
+				RetryAfter: 30 * time.Second,
+			},
+			want: "rate limit hit on claude-opus-4-6 (tpm_uncached limit) — retrying in 30s",
+		},
+		{
+			name: "model only",
+			err: &RateLimitError{
+				ModelID: "gpt-4",
+			},
+			want: "rate limit hit on gpt-4",
+		},
+		{
+			name: "limit type only",
+			err: &RateLimitError{
+				LimitType: "rpm",
+			},
+			want: "rate limit hit (rpm limit)",
+		},
+		{
+			name: "retry only",
+			err: &RateLimitError{
+				RetryAfter: 5 * time.Second,
+			},
+			want: "rate limit hit — retrying in 5s",
+		},
+		{
+			name: "minimal",
+			err:  &RateLimitError{},
+			want: "rate limit hit",
+		},
+		{
+			name: "model and retry, no limit type",
+			err: &RateLimitError{
+				ModelID:    "kimi-k2.6",
+				RetryAfter: 2 * time.Second,
+			},
+			want: "rate limit hit on kimi-k2.6 — retrying in 2s",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.UserMessage(); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAPIError_UserMessage(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		want       string
+	}{
+		{"401 unauthorized", 401, "authentication failed — check your API key"},
+		{"403 forbidden", 403, "access denied — check your API key permissions"},
+		{"404 not found", 404, "model not found — check your model configuration"},
+		{"429 rate limit", 429, "rate limit exceeded — please wait and try again"},
+		{"500 internal", 500, "provider is experiencing issues — will retry"},
+		{"502 bad gateway", 502, "provider is experiencing issues — will retry"},
+		{"503 unavailable", 503, "provider is experiencing issues — will retry"},
+		{"unknown status", 418, "API error (status 418)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &APIError{StatusCode: tt.statusCode, Detail: "detail doesn't matter"}
+			if got := e.UserMessage(); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClientError_UserMessage(t *testing.T) {
+	e := &ClientError{Message: "all 3 attempts failed", Cause: errors.New("inner")}
+	if got := e.UserMessage(); got != "all 3 attempts failed" {
+		t.Errorf("got %q, want %q", got, "all 3 attempts failed")
+	}
+
+	// Without cause
+	e2 := &ClientError{Message: "request failed"}
+	if got := e2.UserMessage(); got != "request failed" {
+		t.Errorf("got %q, want %q", got, "request failed")
+	}
+}
+
+func TestUserMessage_Helper(t *testing.T) {
+	t.Run("nil", func(t *testing.T) {
+		if got := UserMessage(nil); got != "" {
+			t.Errorf("expected empty string for nil, got %q", got)
+		}
+	})
+
+	t.Run("RateLimitError", func(t *testing.T) {
+		err := &RateLimitError{ModelID: "test-model", RetryAfter: 5 * time.Second}
+		if got := UserMessage(err); got != "rate limit hit on test-model — retrying in 5s" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("BudgetExceededError", func(t *testing.T) {
+		err := &BudgetExceededError{
+			Message: "daily token budget exceeded",
+			Reason:  BudgetLimitDailyTokens,
+			Used:    5000000,
+			Limit:   5000000,
+		}
+		got := UserMessage(err)
+		if !strings.Contains(got, "daily token budget reached") {
+			t.Errorf("got %q, want to contain 'daily token budget reached'", got)
+		}
+	})
+
+	t.Run("APIError 401", func(t *testing.T) {
+		err := &APIError{StatusCode: 401, Detail: "Unauthorized"}
+		if got := UserMessage(err); got != "authentication failed — check your API key" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("APIError 500", func(t *testing.T) {
+		err := &APIError{StatusCode: 500, Detail: "Internal Server Error"}
+		if got := UserMessage(err); got != "provider is experiencing issues — will retry" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("ClientError", func(t *testing.T) {
+		err := &ClientError{Message: "request failed"}
+		if got := UserMessage(err); got != "request failed" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("wrapped RateLimitError", func(t *testing.T) {
+		inner := &RateLimitError{ModelID: "gpt-4", LimitType: "rpm"}
+		wrapped := fmt.Errorf("outer: %w", inner)
+		if got := UserMessage(wrapped); got != "rate limit hit on gpt-4 (rpm limit)" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("wrapped APIError", func(t *testing.T) {
+		inner := &APIError{StatusCode: 403, Detail: "Forbidden"}
+		wrapped := fmt.Errorf("context: %w", inner)
+		if got := UserMessage(wrapped); got != "access denied — check your API key permissions" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("wrapped ClientError", func(t *testing.T) {
+		inner := &ClientError{Message: "all attempts failed"}
+		wrapped := fmt.Errorf("retry: %w", inner)
+		if got := UserMessage(wrapped); got != "all attempts failed" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("wrapped BudgetExceededError", func(t *testing.T) {
+		inner := &BudgetExceededError{
+			Message: "hourly token budget exceeded: 500000 / 500000 tokens",
+			Reason:  BudgetLimitHourlyTokens,
+			Used:    500000,
+			Limit:   500000,
+		}
+		wrapped := fmt.Errorf("budget check: %w", inner)
+		got := UserMessage(wrapped)
+		if !strings.Contains(got, "hourly token budget reached") {
+			t.Errorf("got %q, want to contain 'hourly token budget reached'", got)
+		}
+	})
+
+	t.Run("unknown error fallback", func(t *testing.T) {
+		err := errors.New("something completely different")
+		if got := UserMessage(err); got != "something completely different" {
+			t.Errorf("got %q", got)
+		}
+	})
+}

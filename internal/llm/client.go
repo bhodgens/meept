@@ -43,6 +43,23 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Detail)
 }
 
+func (e *APIError) UserMessage() string {
+	switch e.StatusCode {
+	case 401:
+		return "authentication failed — check your API key"
+	case 403:
+		return "access denied — check your API key permissions"
+	case 404:
+		return "model not found — check your model configuration"
+	case 429:
+		return "rate limit exceeded — please wait and try again"
+	case 500, 502, 503:
+		return "provider is experiencing issues — will retry"
+	default:
+		return fmt.Sprintf("API error (status %d)", e.StatusCode)
+	}
+}
+
 // ClientError is the base error for LLM client errors.
 type ClientError struct {
 	Message string
@@ -58,6 +75,10 @@ func (e *ClientError) Error() string {
 
 func (e *ClientError) Unwrap() error {
 	return e.Cause
+}
+
+func (e *ClientError) UserMessage() string {
+	return e.Message
 }
 
 // Client is an HTTP client for OpenAI-compatible chat completions endpoints.

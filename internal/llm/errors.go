@@ -74,6 +74,20 @@ func (e *RateLimitError) Unwrap() error {
 	return e.Cause
 }
 
+func (e *RateLimitError) UserMessage() string {
+	parts := []string{"rate limit hit"}
+	if e.ModelID != "" {
+		parts = append(parts, fmt.Sprintf("on %s", e.ModelID))
+	}
+	if e.LimitType != "" {
+		parts = append(parts, fmt.Sprintf("(%s limit)", e.LimitType))
+	}
+	if e.RetryAfter > 0 {
+		parts = append(parts, fmt.Sprintf("— retrying in %s", e.RetryAfter.Round(time.Second)))
+	}
+	return strings.Join(parts, " ")
+}
+
 func IsRateLimitError(err error) bool {
 	if err == nil {
 		return false
@@ -112,6 +126,36 @@ func AsRateLimitError(err error, providerID, modelID string) (*RateLimitError, b
 		}, true
 	}
 	return nil, false
+}
+
+// UserMessage returns a human-readable error message from any LLM error type.
+// It unwraps the error chain and tries each known type.
+func UserMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	// Try RateLimitError first (most specific)
+	var rlErr *RateLimitError
+	if errors.As(err, &rlErr) {
+		return rlErr.UserMessage()
+	}
+	// Try BudgetExceededError
+	var budgetErr *BudgetExceededError
+	if errors.As(err, &budgetErr) {
+		return budgetErr.UserMessage()
+	}
+	// Try APIError
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.UserMessage()
+	}
+	// Try ClientError
+	var clientErr *ClientError
+	if errors.As(err, &clientErr) {
+		return clientErr.UserMessage()
+	}
+	// Fallback
+	return err.Error()
 }
 
 func IsRateLimitErrorMessage(errMsg string) bool {
