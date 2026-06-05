@@ -688,39 +688,7 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	// Handle rate limit (429) specifically with Retry-After and structured error
 	if resp.StatusCode == http.StatusTooManyRequests {
-		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-
-		detail := &ProviderErrorDetail{}
-		// Try to parse Anthropic's JSON error body
-		var anthErr anthropicErrorResponse
-		if err := json.Unmarshal(respBody, &anthErr); err == nil && anthErr.Error.Type != "" {
-			detail.Type = anthErr.Error.Type
-			detail.Message = anthErr.Error.Message
-		}
-
-		apiErr := &APIError{StatusCode: resp.StatusCode, Detail: detail.Error()}
-		if detail.Message == "" {
-			bodyStr := string(respBody)
-			if len(bodyStr) > 500 {
-				bodyStr = bodyStr[:500]
-			}
-			apiErr.Detail = bodyStr
-		}
-
-		rlErr := &RateLimitError{
-			ProviderID:   c.config.ProviderID,
-			ModelID:      c.config.ModelID,
-			RetryAfter:   retryAfter,
-			LimitType:    detail.Type,
-			Cause:        apiErr,
-		}
-		if detail.RetryStrategy != nil {
-			rlErr.RetryStrategy = detail.RetryStrategy
-		}
-		if detail.LimitBudget != nil {
-			rlErr.LimitBudget = detail.LimitBudget
-		}
-		return nil, rlErr
+		return nil, c.buildRateLimitError(respBody, resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 
 	// Check for other retryable status codes (500, 502, 503, 504, 529)
@@ -860,38 +828,7 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 
 		// Handle rate limit (429) specifically with Retry-After and structured error
 		if resp.StatusCode == http.StatusTooManyRequests {
-			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-
-			detail := &ProviderErrorDetail{}
-			var anthErr anthropicErrorResponse
-			if err := json.Unmarshal(respBody, &anthErr); err == nil && anthErr.Error.Type != "" {
-				detail.Type = anthErr.Error.Type
-				detail.Message = anthErr.Error.Message
-			}
-
-			apiErr := &APIError{StatusCode: resp.StatusCode, Detail: detail.Error()}
-			if detail.Message == "" {
-				bodyStr := string(respBody)
-				if len(bodyStr) > 500 {
-					bodyStr = bodyStr[:500]
-				}
-				apiErr.Detail = bodyStr
-			}
-
-			rlErr := &RateLimitError{
-				ProviderID:   c.config.ProviderID,
-				ModelID:      c.config.ModelID,
-				RetryAfter:   retryAfter,
-				LimitType:    detail.Type,
-				Cause:        apiErr,
-			}
-			if detail.RetryStrategy != nil {
-				rlErr.RetryStrategy = detail.RetryStrategy
-			}
-			if detail.LimitBudget != nil {
-				rlErr.LimitBudget = detail.LimitBudget
-			}
-			return nil, rlErr
+			return nil, c.buildRateLimitError(respBody, resp.StatusCode, resp.Header.Get("Retry-After"))
 		}
 
 		if anthropicRetryableStatusCodes[resp.StatusCode] {
@@ -937,6 +874,43 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	}
 
 	return parsedResp, parseErr
+}
+
+// buildRateLimitError constructs a *RateLimitError from a 429 response,
+// parsing the Retry-After header and Anthropic's structured JSON error body.
+func (c *AnthropicClient) buildRateLimitError(respBody []byte, statusCode int, retryAfterHeader string) *RateLimitError {
+	retryAfter := parseRetryAfter(retryAfterHeader)
+
+	detail := &ProviderErrorDetail{}
+	var anthErr anthropicErrorResponse
+	if err := json.Unmarshal(respBody, &anthErr); err == nil && anthErr.Error.Type != "" {
+		detail.Type = anthErr.Error.Type
+		detail.Message = anthErr.Error.Message
+	}
+
+	apiErr := &APIError{StatusCode: statusCode, Detail: detail.Error()}
+	if detail.Message == "" {
+		bodyStr := string(respBody)
+		if len(bodyStr) > 500 {
+			bodyStr = bodyStr[:500]
+		}
+		apiErr.Detail = bodyStr
+	}
+
+	rlErr := &RateLimitError{
+		ProviderID: c.config.ProviderID,
+		ModelID:    c.config.ModelID,
+		RetryAfter: retryAfter,
+		LimitType:  detail.Type,
+		Cause:      apiErr,
+	}
+	if detail.RetryStrategy != nil {
+		rlErr.RetryStrategy = detail.RetryStrategy
+	}
+	if detail.LimitBudget != nil {
+		rlErr.LimitBudget = detail.LimitBudget
+	}
+	return rlErr
 }
 
 // parseStreamingResponse parses server-sent events from Anthropic's streaming API.

@@ -210,7 +210,6 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 		latency := time.Since(start)
 
 		if err != nil {
-			pm.recordFailure(entry, err, latency)
 			lastErr = err
 
 			// Check if context was cancelled (user cancelled, not timeout)
@@ -223,6 +222,7 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 			switch {
 			case IsRateLimitError(err):
 				// Rate limit is provider-specific — rotate immediately.
+				// Don't record as a health failure since rate limits are transient.
 				pm.logger.Warn("Rate limit hit, rotating to next provider",
 					"provider", entry.Config.ProviderID,
 					"error", err,
@@ -233,6 +233,7 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 			case isAuthError(err):
 				// Auth errors mean the provider is misconfigured or the key is
 				// bad — mark unhealthy so we skip it on future attempts.
+				pm.recordFailure(entry, err, latency)
 				pm.logger.Warn("Auth error, marking provider unhealthy and rotating",
 					"provider", entry.Config.ProviderID,
 					"error", err,
@@ -256,6 +257,7 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 
 			default:
 				// Server errors (5xx), network errors, etc. — rotate normally.
+				pm.recordFailure(entry, err, latency)
 				pm.logger.Warn("Provider call failed, trying next",
 					"provider", entry.Config.ProviderID,
 					"error", err,
