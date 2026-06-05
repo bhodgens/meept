@@ -390,11 +390,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     return Focus(
       onKeyEvent: _handleKeyEvent,
       child: Container(
-        decoration: const BoxDecoration(
-          border: Border(
-            top: BorderSide(color: CyberpunkColors.orangePrimary, width: 1),
-          ),
-        ),
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -420,13 +416,12 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Container(
-                    margin: const EdgeInsets.all(4),
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
+                      horizontal: 12,
+                      vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: CyberpunkColors.black,
+                      color: CyberpunkColors.darkGray,
                       border: Border.all(
                         color: CyberpunkColors.midGray,
                         width: 1,

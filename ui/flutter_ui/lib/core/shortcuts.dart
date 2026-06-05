@@ -135,7 +135,8 @@ class LeaderKeyController extends ChangeNotifier {
     if (event is! KeyDownEvent) return false;
     if (event.logicalKey != LogicalKeyboardKey.keyX) return false;
     if (_isMacOS) {
-      return HardwareKeyboard.instance.isMetaPressed;
+      return HardwareKeyboard.instance.isControlPressed ||
+          HardwareKeyboard.instance.isMetaPressed;
     }
     return HardwareKeyboard.instance.isControlPressed;
   }
@@ -144,7 +145,8 @@ class LeaderKeyController extends ChangeNotifier {
     if (event is! KeyDownEvent) return false;
     if (event.logicalKey != LogicalKeyboardKey.keyK) return false;
     if (_isMacOS) {
-      return HardwareKeyboard.instance.isMetaPressed;
+      return HardwareKeyboard.instance.isControlPressed ||
+          HardwareKeyboard.instance.isMetaPressed;
     }
     return HardwareKeyboard.instance.isControlPressed;
   }
