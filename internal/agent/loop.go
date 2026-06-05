@@ -2941,7 +2941,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 // 3. After max attempts, return the error.
 func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
 	const maxAttempts = 5
-	const maxBackoff = 30 * time.Second
+	maxBackoff := 30 * time.Second
 	baseBackoff := 2 * time.Second
 
 	attempt := 0
@@ -2991,9 +2991,21 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 			return response, nil
 		}
 
-		// Check if it's a rate limit error
-		var rateLimitErr *llm.RateLimitError
-		if errors.As(err, &rateLimitErr) {
+		// Check if it's a rate limit error (covers direct *RateLimitError,
+		// wrapped *RateLimitError, and bare APIError{StatusCode: 429})
+		if llm.IsRateLimitError(err) {
+			var rateLimitErr *llm.RateLimitError
+			_ = errors.As(err, &rateLimitErr)
+			// rateLimitErr may be nil if the chain only has a bare APIError{429};
+			// construct a synthetic RateLimitError so downstream code can use
+			// RetryStrategy / RetryAfter fields without nil checks.
+			if rateLimitErr == nil {
+				rateLimitErr = &llm.RateLimitError{
+					ProviderID: "unknown",
+					ModelID:    "unknown",
+					Cause:      err,
+				}
+			}
 			l.logger.Warn("Rate limit hit, handling with backoff",
 				"provider", rateLimitErr.ProviderID,
 				"model", rateLimitErr.ModelID,
@@ -3028,10 +3040,39 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 				return nil, fmt.Errorf("max retry attempts (%d) reached for rate limit: %w", maxAttempts, err)
 			}
 
-			// Use Retry-After header if available, otherwise use computed backoff
+			// Calculate backoff using provider RetryStrategy if available,
+			// falling back to default exponential backoff.
 			waitTime := currentBackoff
-			if rateLimitErr.RetryAfter > 0 && rateLimitErr.RetryAfter < maxBackoff {
-				waitTime = rateLimitErr.RetryAfter
+			if rateLimitErr.RetryStrategy != nil {
+				strategy := rateLimitErr.RetryStrategy
+				if strategy.InitialDelay > 0 {
+					waitTime = strategy.InitialDelay
+				}
+				if strategy.MaxDelay > 0 {
+					maxBackoff = strategy.MaxDelay
+				}
+				backoffBase := strategy.BackoffBase
+				if backoffBase <= 1.0 {
+					backoffBase = 2.0
+				}
+				// Apply exponential growth for this attempt
+				currentBackoff = time.Duration(float64(waitTime) * backoffBase)
+				waitTime = llm.BackoffWithJitter(waitTime, maxBackoff, strategy.UseJitter)
+
+				l.logger.Info("Using provider retry strategy",
+					"strategy_type", strategy.Type,
+					"backoff", strategy.Backoff,
+					"initial_delay", strategy.InitialDelay,
+					"max_delay", strategy.MaxDelay,
+					"use_jitter", strategy.UseJitter,
+					"computed_wait", waitTime,
+					"attempt", attempt,
+				)
+			} else {
+				// Default: use Retry-After header if available
+				if rateLimitErr.RetryAfter > 0 && rateLimitErr.RetryAfter < maxBackoff {
+					waitTime = rateLimitErr.RetryAfter
+				}
 			}
 
 			l.logger.Info("Waiting before retry due to rate limit",
@@ -3042,8 +3083,10 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 			select {
 			case <-time.After(waitTime):
 				// Increase backoff for next attempt
-				currentBackoff = time.Duration(float64(currentBackoff) * 2)
-				currentBackoff = min(currentBackoff, maxBackoff)
+				if rateLimitErr.RetryStrategy == nil {
+					currentBackoff = time.Duration(float64(currentBackoff) * 2)
+					currentBackoff = min(currentBackoff, maxBackoff)
+				}
 				continue
 			case <-ctx.Done():
 				return nil, ctx.Err()

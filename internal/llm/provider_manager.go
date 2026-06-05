@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -212,18 +213,56 @@ func (pm *ProviderManager) Chat(ctx context.Context, messages []ChatMessage, opt
 			pm.recordFailure(entry, err, latency)
 			lastErr = err
 
-			pm.logger.Warn("Provider call failed, trying next",
-				"provider", entry.Config.ProviderID,
-				"error", err,
-				"latency", latency,
-			)
-
 			// Check if context was cancelled (user cancelled, not timeout)
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 
-			continue
+			// Error-type-aware failover: differentiate error types for
+			// smarter routing decisions.
+			switch {
+			case IsRateLimitError(err):
+				// Rate limit is provider-specific — rotate immediately.
+				pm.logger.Warn("Rate limit hit, rotating to next provider",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+					"latency", latency,
+				)
+				continue
+
+			case isAuthError(err):
+				// Auth errors mean the provider is misconfigured or the key is
+				// bad — mark unhealthy so we skip it on future attempts.
+				pm.logger.Warn("Auth error, marking provider unhealthy and rotating",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+					"latency", latency,
+				)
+				pm.mu.Lock()
+				entry.Health.Status = ProviderStatusUnhealthy
+				entry.Health.LastError = err.Error()
+				pm.mu.Unlock()
+				continue
+
+			case isClientError(err):
+				// Client errors (400) are request-level, not provider-specific.
+				// Don't rotate — the same error will happen on any provider.
+				pm.logger.Warn("Client error, not rotating (request-level issue)",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+					"latency", latency,
+				)
+				return nil, err
+
+			default:
+				// Server errors (5xx), network errors, etc. — rotate normally.
+				pm.logger.Warn("Provider call failed, trying next",
+					"provider", entry.Config.ProviderID,
+					"error", err,
+					"latency", latency,
+				)
+				continue
+			}
 		}
 
 		// Success
@@ -679,4 +718,33 @@ func (pm *ProviderManager) HealthyProviderCount() int {
 		}
 	}
 	return count
+}
+
+// isAuthError returns true if err is (or wraps) an APIError with a 401 or 403 status.
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden
+	}
+	return false
+}
+
+// isClientError returns true if err is (or wraps) an APIError with a 400-level status
+// that is not 401, 403, or 429 (those are handled separately).
+func isClientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		status := apiErr.StatusCode
+		return status >= 400 && status < 500 &&
+			status != http.StatusUnauthorized &&
+			status != http.StatusForbidden &&
+			status != http.StatusTooManyRequests
+	}
+	return false
 }

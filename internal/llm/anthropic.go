@@ -686,7 +686,44 @@ func (c *AnthropicClient) doRequest(ctx context.Context, reqBody *anthropicReque
 
 	c.logger.Debug("Anthropic response received", "status", resp.StatusCode)
 
-	// Check for retryable status codes
+	// Handle rate limit (429) specifically with Retry-After and structured error
+	if resp.StatusCode == http.StatusTooManyRequests {
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+
+		detail := &ProviderErrorDetail{}
+		// Try to parse Anthropic's JSON error body
+		var anthErr anthropicErrorResponse
+		if err := json.Unmarshal(respBody, &anthErr); err == nil && anthErr.Error.Type != "" {
+			detail.Type = anthErr.Error.Type
+			detail.Message = anthErr.Error.Message
+		}
+
+		apiErr := &APIError{StatusCode: resp.StatusCode, Detail: detail.Error()}
+		if detail.Message == "" {
+			bodyStr := string(respBody)
+			if len(bodyStr) > 500 {
+				bodyStr = bodyStr[:500]
+			}
+			apiErr.Detail = bodyStr
+		}
+
+		rlErr := &RateLimitError{
+			ProviderID:   c.config.ProviderID,
+			ModelID:      c.config.ModelID,
+			RetryAfter:   retryAfter,
+			LimitType:    detail.Type,
+			Cause:        apiErr,
+		}
+		if detail.RetryStrategy != nil {
+			rlErr.RetryStrategy = detail.RetryStrategy
+		}
+		if detail.LimitBudget != nil {
+			rlErr.LimitBudget = detail.LimitBudget
+		}
+		return nil, rlErr
+	}
+
+	// Check for other retryable status codes (500, 502, 503, 504, 529)
 	if anthropicRetryableStatusCodes[resp.StatusCode] {
 		detail := string(respBody)
 		if len(detail) > 500 {
@@ -820,6 +857,43 @@ func (c *AnthropicClient) doStreamingRequest(ctx context.Context, reqBody *anthr
 	// Check for error status before streaming
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+
+		// Handle rate limit (429) specifically with Retry-After and structured error
+		if resp.StatusCode == http.StatusTooManyRequests {
+			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+
+			detail := &ProviderErrorDetail{}
+			var anthErr anthropicErrorResponse
+			if err := json.Unmarshal(respBody, &anthErr); err == nil && anthErr.Error.Type != "" {
+				detail.Type = anthErr.Error.Type
+				detail.Message = anthErr.Error.Message
+			}
+
+			apiErr := &APIError{StatusCode: resp.StatusCode, Detail: detail.Error()}
+			if detail.Message == "" {
+				bodyStr := string(respBody)
+				if len(bodyStr) > 500 {
+					bodyStr = bodyStr[:500]
+				}
+				apiErr.Detail = bodyStr
+			}
+
+			rlErr := &RateLimitError{
+				ProviderID:   c.config.ProviderID,
+				ModelID:      c.config.ModelID,
+				RetryAfter:   retryAfter,
+				LimitType:    detail.Type,
+				Cause:        apiErr,
+			}
+			if detail.RetryStrategy != nil {
+				rlErr.RetryStrategy = detail.RetryStrategy
+			}
+			if detail.LimitBudget != nil {
+				rlErr.LimitBudget = detail.LimitBudget
+			}
+			return nil, rlErr
+		}
+
 		if anthropicRetryableStatusCodes[resp.StatusCode] {
 			detail := string(respBody)
 			if len(detail) > 500 {

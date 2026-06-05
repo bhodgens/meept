@@ -716,10 +716,9 @@ func TestHandleChatSteer_Success(t *testing.T) {
 	server.handleChatSteer(w, req)
 
 	resp := w.Result()
-	// Steer returns ErrUnavailable (nil agentRegistry) -> handleServiceError -> 500.
-	// The handler correctly decoded the valid JSON and reached the service call.
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+	// Steer returns ErrUnavailable (nil agentRegistry) -> handleServiceError -> 503.
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 
@@ -785,10 +784,9 @@ func TestHandleChatFollowUp_Success(t *testing.T) {
 	server.handleChatFollowUp(w, req)
 
 	resp := w.Result()
-	// FollowUp returns ErrUnavailable (nil agentRegistry) -> handleServiceError -> 500.
-	// The handler correctly decoded the valid JSON and reached the service call.
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+	// FollowUp returns ErrUnavailable (nil agentRegistry) -> handleServiceError -> 503.
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 	}
 }
 

@@ -26,10 +26,19 @@ func (s *Server) handleServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, services.ErrNotFound):
 		s.writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, services.ErrAlreadyExists):
+		s.writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, services.ErrInvalidInput):
 		s.writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, services.ErrUnauthorized):
 		s.writeError(w, http.StatusUnauthorized, err.Error())
+	case errors.Is(err, services.ErrTimeout):
+		s.writeError(w, http.StatusGatewayTimeout, err.Error())
+	case errors.Is(err, services.ErrUnavailable):
+		s.writeError(w, http.StatusServiceUnavailable, err.Error())
+	case errors.Is(err, services.ErrInternal):
+		s.logger.Error("service error", "error", err)
+		s.writeError(w, http.StatusInternalServerError, "internal server error")
 	default:
 		s.logger.Error("service error", "error", err)
 		s.writeError(w, http.StatusInternalServerError, "internal server error")
