@@ -594,12 +594,31 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 			detail = detail[:500]
 		}
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-		return nil, &RateLimitError{
+
+		// Try to parse structured error metadata from the response body.
+		var providerDetail *ProviderErrorDetail
+		if len(respBody) > 0 {
+			providerDetail = ParseRateLimitBody(respBody)
+		}
+
+		rlErr := &RateLimitError{
 			ProviderID: providerID,
 			ModelID:    modelID,
 			RetryAfter: retryAfter,
 			Cause:      &APIError{StatusCode: resp.StatusCode, Detail: detail},
 		}
+
+		if providerDetail != nil {
+			// Use provider-suggested retry-after if header was absent
+			if retryAfter == 0 && providerDetail.RetryAfter > 0 {
+				rlErr.RetryAfter = providerDetail.RetryAfter
+			}
+			rlErr.LimitType = providerDetail.Type
+			rlErr.RetryStrategy = providerDetail.RetryStrategy
+			rlErr.LimitBudget = providerDetail.LimitBudget
+		}
+
+		return nil, rlErr
 	}
 
 	// Check for other retryable status codes
