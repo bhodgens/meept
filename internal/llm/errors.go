@@ -315,8 +315,8 @@ func ParseOpenRouterError(body []byte) *ProviderErrorDetail {
 			Limit:  inner.Error.Context.TPMLimit,
 			Window: inner.Error.Context.LimitType,
 		}
-		// Use context limit_type for LimitType if available
-		if inner.Error.Context.LimitType != "" {
+		// Use context limit_type for strategy type if retry_strategy was also parsed
+		if inner.Error.Context.LimitType != "" && detail.RetryStrategy != nil {
 			detail.RetryStrategy.Type = inner.Error.Context.LimitType
 		}
 	}

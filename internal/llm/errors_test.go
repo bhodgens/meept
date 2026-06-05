@@ -351,6 +351,27 @@ func TestParseOpenRouterError_MissingRetryStrategy(t *testing.T) {
 	}
 }
 
+func TestParseOpenRouterError_ContextWithoutRetryStrategy(t *testing.T) {
+	// Context present but no retry_strategy — must not panic (nil dereference guard)
+	innerJSON := `{"error":{"type":"rate_limit_error","code":"tpm_exceeded","message":"TPM limit","retriable":true,"context":{"limit_type":"tpm_uncached","tpm_window_tokens":100,"tpm_limit":200}}}`
+	outerMsg := fmt.Sprintf("Error from provider(x,y: 429): %s", innerJSON)
+	body := []byte(fmt.Sprintf(`{"error":{"message":%q,"code":429}}`, outerMsg))
+
+	detail := ParseOpenRouterError(body)
+	if detail == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if detail.LimitBudget == nil {
+		t.Fatal("expected non-nil LimitBudget from context")
+	}
+	if detail.LimitBudget.Window != "tpm_uncached" {
+		t.Errorf("LimitBudget.Window = %q, want %q", detail.LimitBudget.Window, "tpm_uncached")
+	}
+	if detail.RetryStrategy != nil {
+		t.Errorf("expected nil RetryStrategy, got %+v", detail.RetryStrategy)
+	}
+}
+
 func TestParseOpenRouterError_RetryStrategyWithoutContext(t *testing.T) {
 	// Has retry_strategy but no context
 	innerJSON := `{"error":{"type":"rate_limit_error","code":"rpm_exceeded","message":"RPM limit","retry_after":5.0,"retry_strategy":{"type":"rpm","suggested_initial_delay_s":5.0,"max_delay_s":120.0,"backoff":"linear","backoff_base":1.5,"jitter":false},"retriable":true}}`

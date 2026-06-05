@@ -613,7 +613,11 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 			if retryAfter == 0 && providerDetail.RetryAfter > 0 {
 				rlErr.RetryAfter = providerDetail.RetryAfter
 			}
-			rlErr.LimitType = providerDetail.Type
+			if providerDetail.RetryStrategy != nil && providerDetail.RetryStrategy.Type != "" {
+				rlErr.LimitType = providerDetail.RetryStrategy.Type
+			} else if providerDetail.LimitBudget != nil {
+				rlErr.LimitType = providerDetail.LimitBudget.Window
+			}
 			rlErr.RetryStrategy = providerDetail.RetryStrategy
 			rlErr.LimitBudget = providerDetail.LimitBudget
 		}
