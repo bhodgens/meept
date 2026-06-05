@@ -153,15 +153,16 @@ install: build menubar-app build-gui
 	go install $(GO_BUILD_FLAGS) ./cmd/meept
 	@echo "Installing meept-lite..."
 	go install $(GO_BUILD_FLAGS) ./cmd/meept-lite
-	@echo "Installing GUI app to ~/Applications (single location to avoid Spotlight duplicates)..."
+	@echo "Installing GUI app to ~/Applications..."
 	mkdir -p ~/Applications
 	@if [ -d $(BIN_DIR)/meept_gui.app ]; then \
-		rm -rf ~/Applications/meept_gui.app; \
-		cp -r $(BIN_DIR)/meept_gui.app ~/Applications/; \
-		touch ~/Applications/meept_gui.app/.metadata_never_index; \
-		echo "Installed: ~/Applications/meept_gui.app"; \
+		rm -rf ~/Applications/Meept\ Client\ GUI.app; \
+		cp -r $(BIN_DIR)/meept_gui.app ~/Applications/Meept\ Client\ GUI.app; \
+		touch ~/Applications/Meept\ Client\ GUI.app/.metadata_never_index; \
+		rm -rf $(BIN_DIR)/meept_gui.app; \
+		echo "Installed: ~/Applications/Meept Client GUI.app"; \
 	else \
-		echo "Skipping meept_gui.app (not built — run 'make build-gui' first)"; \
+		echo "Skipping GUI app (not built — run 'make build-gui' first)"; \
 	fi
 	@echo "Installing menubar app bundle to ~/Applications..."
 	rm -rf ~/Applications/MeeptMenuBar.app
@@ -349,7 +350,8 @@ uninstall: uninstall-gui
 uninstall-gui:
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		echo "Removing GUI apps and Spotlight registrations..."; \
-		for app in ~/Applications/meept_gui.app \
+		for app in ~/Applications/Meept\ Client\ GUI.app \
+		           ~/Applications/meept_gui.app \
 		           ~/Applications/MeeptMenuBar.app \
 		           $$(go env GOPATH)/bin/meept_gui.app \
 		           $$(go env GOPATH)/bin/meept_ui.app \
@@ -538,18 +540,20 @@ build-gui: gui-deps
 ifeq ($(GUI_PLATFORM),macos)
 	@echo "Setting version $(VERSION) in macOS Info.plist..."
 	@# Inject version into the built app bundle's Info.plist so the
-	@# menubar title and Finder name display the correct version.
-	@plutil -replace CFBundleName -string "Meept GUI Client v$(VERSION)" \
+	@# Finder and Spotlight display the correct name.
+	@plutil -replace CFBundleName -string "Meept Client GUI" \
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app/Contents/Info.plist"
+	@plutil -replace CFBundleDisplayName -string "Meept Client GUI" \
 	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app/Contents/Info.plist"
 	@plutil -replace CFBundleShortVersionString -string "$(VERSION)" \
 	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app/Contents/Info.plist"
 	@mv "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client.app" \
-	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client v$(VERSION).app"
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept Client GUI.app"
 	@# Re-sign ad-hoc after modifying Info.plist so macOS Gatekeeper is happy
 	@codesign --force --deep --sign - \
-	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client v$(VERSION).app" >/dev/null 2>&1 || true
+	    "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept Client GUI.app" >/dev/null 2>&1 || true
 	@rm -rf $(BIN_DIR)/meept_gui.app
-	@cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept GUI Client v$(VERSION).app" $(BIN_DIR)/meept_gui.app
+	@cp -r "$(FLUTTER_UI_DIR)/build/macos/Build/Products/Release/Meept Client GUI.app" $(BIN_DIR)/meept_gui.app
 	@echo "Built $(BIN_DIR)/meept_gui.app ($$(du -h $(BIN_DIR)/meept_gui.app | cut -f1))"
 	@touch $(BIN_DIR)/meept_gui.app/.metadata_never_index
 	@rm -rf $(FLUTTER_UI_DIR)/build/macos/Build/Products/Release
