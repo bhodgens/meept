@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,19 +19,19 @@ func TestBudgetCheckBudget(t *testing.T) {
 	}, nil)
 
 	// Initially within budget
-	if !b.CheckBudget() {
+	if b.CheckBudget().Exceeded {
 		t.Error("Should be within budget initially")
 	}
 
 	// Record usage
 	b.RecordUsage(TokenUsage{TotalTokens: 500})
-	if !b.CheckBudget() {
+	if b.CheckBudget().Exceeded {
 		t.Error("Should still be within budget after 500 tokens")
 	}
 
 	// Exceed hourly limit
 	b.RecordUsage(TokenUsage{TotalTokens: 600})
-	if b.CheckBudget() {
+	if !b.CheckBudget().Exceeded {
 		t.Error("Should exceed hourly budget after 1100 tokens")
 	}
 }
@@ -46,12 +47,12 @@ func TestBudgetAggressiveness(t *testing.T) {
 
 	// Effective limit is 500 (50% of 1000)
 	b.RecordUsage(TokenUsage{TotalTokens: 400})
-	if !b.CheckBudget() {
+	if b.CheckBudget().Exceeded {
 		t.Error("Should be within conservative budget after 400 tokens")
 	}
 
 	b.RecordUsage(TokenUsage{TotalTokens: 150})
-	if b.CheckBudget() {
+	if !b.CheckBudget().Exceeded {
 		t.Error("Should exceed conservative budget after 550 tokens (limit 500)")
 	}
 }
@@ -167,6 +168,81 @@ func TestBudgetExceededError(t *testing.T) {
 	}
 }
 
+func TestBudgetExceededError_ReasonPropagation(t *testing.T) {
+	// Verify CheckBudget returns the correct reason
+	b := NewBudget(BudgetConfig{
+		HourlyLimit:    1000,
+		Aggressiveness: 1.0,
+	}, nil)
+
+	b.RecordUsage(TokenUsage{TotalTokens: 1100})
+	result := b.CheckBudget()
+	if !result.Exceeded {
+		t.Fatal("expected budget to be exceeded")
+	}
+	if result.Reason != BudgetLimitHourlyTokens {
+		t.Errorf("Reason = %q, want %q", result.Reason, BudgetLimitHourlyTokens)
+	}
+	if result.Used != 1100 {
+		t.Errorf("Used = %.0f, want 1100", result.Used)
+	}
+	if result.Limit != 1000 {
+		t.Errorf("Limit = %.0f, want 1000", result.Limit)
+	}
+}
+
+func TestBudgetExceededError_UserMessage(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     *BudgetExceededError
+		wantHas string
+	}{
+		{
+			name:    "hourly tokens",
+			err:     &BudgetExceededError{Reason: BudgetLimitHourlyTokens, Used: 5000, Limit: 1000},
+			wantHas: "meept hourly token budget reached",
+		},
+		{
+			name:    "daily tokens",
+			err:     &BudgetExceededError{Reason: BudgetLimitDailyTokens, Used: 10000, Limit: 5000},
+			wantHas: "meept daily token budget reached",
+		},
+		{
+			name:    "hourly cost",
+			err:     &BudgetExceededError{Reason: BudgetLimitHourlyCost, Used: 2.5, Limit: 1.0},
+			wantHas: "meept hourly cost budget reached",
+		},
+		{
+			name:    "daily cost",
+			err:     &BudgetExceededError{Reason: BudgetLimitDailyCost, Used: 5.0, Limit: 3.0},
+			wantHas: "meept daily cost budget reached",
+		},
+		{
+			name:    "per task",
+			err:     &BudgetExceededError{Reason: BudgetLimitPerTask, Used: 5000, Limit: 3000},
+			wantHas: "meept per-task token budget reached",
+		},
+		{
+			name:    "per session",
+			err:     &BudgetExceededError{Reason: BudgetLimitPerSession, Used: 8000, Limit: 5000},
+			wantHas: "meept per-session token budget reached",
+		},
+		{
+			name:    "unknown reason fallback",
+			err:     &BudgetExceededError{Reason: "unknown", Used: 100, Limit: 50},
+			wantHas: "meept budget limit reached",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.err.UserMessage()
+			if !strings.Contains(got, tt.wantHas) {
+				t.Errorf("UserMessage() = %q, want to contain %q", got, tt.wantHas)
+			}
+		})
+	}
+}
+
 func TestIsNonRetryable(t *testing.T) {
 	tests := []struct {
 		name string
@@ -219,13 +295,13 @@ func TestBudgetZeroLimitsAllowAll(t *testing.T) {
 	}, nil)
 
 	// Should be allowed even without recording any usage
-	if !b.CheckBudget() {
+	if b.CheckBudget().Exceeded {
 		t.Error("Zero limits should allow all requests (unconfigured budget)")
 	}
 
 	// Record a huge amount of usage and still allow
 	b.RecordUsage(TokenUsage{TotalTokens: 999999999})
-	if !b.CheckBudget() {
+	if b.CheckBudget().Exceeded {
 		t.Error("Zero limits should allow all requests even after massive usage")
 	}
 }
@@ -241,12 +317,12 @@ func TestBudgetPartialZeroLimits(t *testing.T) {
 
 	// Daily is unconfigured, but hourly should still be enforced
 	b.RecordUsage(TokenUsage{TotalTokens: 500})
-	if !b.CheckBudget() {
+	if b.CheckBudget().Exceeded {
 		t.Error("Should be within budget after 500 tokens")
 	}
 
 	b.RecordUsage(TokenUsage{TotalTokens: 600})
-	if b.CheckBudget() {
+	if !b.CheckBudget().Exceeded {
 		t.Error("Should exceed hourly budget after 1100 tokens (limit 1000)")
 	}
 
@@ -260,12 +336,12 @@ func TestBudgetPartialZeroLimits(t *testing.T) {
 
 	// Should allow because daily has a limit (hourly=0 doesn't force block anymore)
 	b2.RecordUsage(TokenUsage{TotalTokens: 500})
-	if !b2.CheckBudget() {
+	if b2.CheckBudget().Exceeded {
 		t.Error("Should be within daily budget after 500 tokens")
 	}
 
 	b2.RecordUsage(TokenUsage{TotalTokens: 600})
-	if b2.CheckBudget() {
+	if !b2.CheckBudget().Exceeded {
 		t.Error("Should exceed daily budget after 1100 tokens")
 	}
 }
@@ -284,12 +360,12 @@ func TestBudgetPerTaskExhaustion(t *testing.T) {
 	b.RecordUsage(TokenUsage{TotalTokens: 2500})
 	b.RecordTaskUsage("task1", 2500) // total 5500 > 5000
 
-	if b.CheckBudgetWithScope("task1", "session1") {
+	if !b.CheckBudgetWithScope("task1", "session1").Exceeded {
 		t.Error("Should block exhausted task")
 	}
 
 	// Another task should still be fine
-	if !b.CheckBudgetWithScope("task2", "session1") {
+	if b.CheckBudgetWithScope("task2", "session1").Exceeded {
 		t.Error("Should allow new task even if task1 is exhausted")
 	}
 }
@@ -309,12 +385,12 @@ func TestBudgetPerSessionExhaustion(t *testing.T) {
 	b.RecordUsage(TokenUsage{TotalTokens: 4000})
 	b.RecordSessionUsage("session1", 4000) // total 9000 > 8000
 
-	if b.CheckBudgetWithScope("task1", "session1") {
+	if !b.CheckBudgetWithScope("task1", "session1").Exceeded {
 		t.Error("Should block exhausted session")
 	}
 
 	// Another session should still work
-	if !b.CheckBudgetWithScope("task1", "session2") {
+	if b.CheckBudgetWithScope("task1", "session2").Exceeded {
 		t.Error("Should allow new session even if session1 is exhausted")
 	}
 }
@@ -411,7 +487,7 @@ func TestBudget_DollarCheckBudget(t *testing.T) {
 		Aggressiveness: 1.0,
 	}, slog.Default())
 
-	if !b.CheckBudget() {
+	if b.CheckBudget().Exceeded {
 		t.Error("expected budget to be available initially")
 	}
 
@@ -420,7 +496,7 @@ func TestBudget_DollarCheckBudget(t *testing.T) {
 		CostUSD:   0.60,
 	})
 
-	if b.CheckBudget() {
+	if !b.CheckBudget().Exceeded {
 		t.Error("expected budget exceeded after $0.60 on $0.50 limit")
 	}
 }
@@ -435,7 +511,7 @@ func TestBudget_ZeroCostLimitNoRestriction(t *testing.T) {
 		CostUSD:   100.0,
 	})
 
-	if !b.CheckBudget() {
+	if b.CheckBudget().Exceeded {
 		t.Error("zero cost limit should not restrict")
 	}
 	status := b.GetStatus()

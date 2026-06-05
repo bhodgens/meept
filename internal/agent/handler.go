@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -514,17 +515,24 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
 				// Issue 0039: budget pre-check before async dispatch.
 				// Block before creating a zombie task that can never complete.
-				if h.budget != nil && !h.budget.CheckBudget() {
-					// Cancel the task that ClassifyAndRoute just created
-					if h.taskStore != nil && result.Task != nil {
-						result.Task.SetState(task.StateFailed)
-						if updateErr := h.taskStore.Update(result.Task); updateErr != nil {
-							h.logger.Warn("Failed to cancel budget-blocked task",
-								"task_id", result.Task.ID, "error", updateErr)
+				if h.budget != nil {
+					if budgetResult := h.budget.CheckBudget(); budgetResult.Exceeded {
+						// Cancel the task that ClassifyAndRoute just created
+						if h.taskStore != nil && result.Task != nil {
+							result.Task.SetState(task.StateFailed)
+							if updateErr := h.taskStore.Update(result.Task); updateErr != nil {
+								h.logger.Warn("Failed to cancel budget-blocked task",
+									"task_id", result.Task.ID, "error", updateErr)
+							}
 						}
+						err = &llm.BudgetExceededError{
+							Message: budgetResult.Reason.Message(budgetResult.Used, budgetResult.Limit),
+							Reason:  budgetResult.Reason,
+							Used:    budgetResult.Used,
+							Limit:   budgetResult.Limit,
+						}
+						break
 					}
-					err = &llm.BudgetExceededError{Message: llm.ErrBudgetExceeded}
-					break
 				}
 
 				if h.syncMode {
@@ -587,8 +595,15 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 	}
 
 	if err != nil {
-		response.Error = err.Error()
-		response.Reply = reply // AgentLoop returns a user-friendly message even on error
+		// Check for BudgetExceededError to provide user-friendly message
+		var budgetErr *llm.BudgetExceededError
+		if errors.As(err, &budgetErr) {
+			response.Error = budgetErr.UserMessage()
+			response.Reply = budgetErr.UserMessage()
+		} else {
+			response.Error = err.Error()
+			response.Reply = reply // AgentLoop returns a user-friendly message even on error
+		}
 	} else {
 		response.Reply = reply
 	}

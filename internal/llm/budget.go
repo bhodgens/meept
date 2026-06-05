@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -208,17 +209,6 @@ func (b *Budget) hourlyCostUsed() float64 {
 	return total
 }
 
-// checkCostLimits returns false if any configured cost limit is exceeded.
-func (b *Budget) checkCostLimits() bool {
-	if b.dailyCostLimit > 0 && b.dailyCostUsed >= b.effectiveCostLimit(b.dailyCostLimit) {
-		return false
-	}
-	if b.hourlyCostLimit > 0 && b.hourlyCostUsed() >= b.effectiveCostLimit(b.hourlyCostLimit) {
-		return false
-	}
-	return true
-}
-
 // CostRecord captures a dollar cost event for budget tracking.
 type CostRecord struct {
 	Timestamp        time.Time
@@ -330,45 +320,67 @@ func (b *Budget) RecordUsageWithScope(usage TokenUsage, taskID, sessionID string
 	)
 }
 
-// CheckBudget returns true if the current usage is within all budget limits.
-// When both hourlyLimit and dailyLimit are 0 (unconfigured), all requests are allowed.
-func (b *Budget) CheckBudget() bool {
+// CheckBudget returns a BudgetCheckResult indicating whether the current usage
+// is within all budget limits. When both hourlyLimit and dailyLimit are 0
+// (unconfigured), all requests are allowed.
+func (b *Budget) CheckBudget() BudgetCheckResult {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Allow all requests when both token and cost budget limits are unconfigured (zero)
 	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 {
-		return true
+		return BudgetCheckResult{Exceeded: false}
 	}
 
 	b.maybeResetDaily()
 	b.pruneHourlyWindow()
 
-	// Only enforce limits that are configured (non-zero)
-	var hourlyOK, dailyOK bool
+	// Check hourly token limit
 	if b.hourlyLimit > 0 {
-		hourlyOK = b.hourlyUsed() < b.effectiveLimit(b.hourlyLimit)
-	} else {
-		hourlyOK = true
-	}
-	if b.dailyLimit > 0 {
-		dailyOK = b.dailyUsed < b.effectiveLimit(b.dailyLimit)
-	} else {
-		dailyOK = true
+		effLimit := b.effectiveLimit(b.hourlyLimit)
+		used := b.hourlyUsed()
+		if used >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyTokens, Used: float64(used), Limit: float64(effLimit)}
+		}
 	}
 
-	return hourlyOK && dailyOK && b.checkCostLimits()
+	// Check daily token limit
+	if b.dailyLimit > 0 {
+		effLimit := b.effectiveLimit(b.dailyLimit)
+		if b.dailyUsed >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyTokens, Used: float64(b.dailyUsed), Limit: float64(effLimit)}
+		}
+	}
+
+	// Check daily cost limit
+	if b.dailyCostLimit > 0 {
+		effLimit := b.effectiveCostLimit(b.dailyCostLimit)
+		if b.dailyCostUsed >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyCost, Used: b.dailyCostUsed, Limit: effLimit}
+		}
+	}
+
+	// Check hourly cost limit
+	if b.hourlyCostLimit > 0 {
+		effLimit := b.effectiveCostLimit(b.hourlyCostLimit)
+		used := b.hourlyCostUsed()
+		if used >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyCost, Used: used, Limit: effLimit}
+		}
+	}
+
+	return BudgetCheckResult{Exceeded: false}
 }
 
 // CheckBudgetWithScope validates budgets including per-task and per-session caps.
 // taskID and sessionID can be empty strings if per-task/per-session caps are not configured.
-func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) bool {
+func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) BudgetCheckResult {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Allow all requests when budget is unconfigured (limits = 0)
 	if b.hourlyLimit == 0 && b.dailyLimit == 0 && b.dailyCostLimit == 0 && b.hourlyCostLimit == 0 {
-		return true
+		return BudgetCheckResult{Exceeded: false}
 	}
 
 	b.maybeResetDaily()
@@ -378,7 +390,7 @@ func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) bool {
 	if b.perTaskBudget > 0 && len(taskID) > 0 {
 		if taskUsed, exists := b.tasks[taskID]; exists {
 			if taskUsed >= b.perTaskBudget {
-				return false
+				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerTask, Used: float64(taskUsed), Limit: float64(b.perTaskBudget)}
 			}
 		}
 	}
@@ -387,25 +399,46 @@ func (b *Budget) CheckBudgetWithScope(taskID, sessionID string) bool {
 	if b.perSessionBudget > 0 && len(sessionID) > 0 {
 		if sessionUsed, exists := b.sessions[sessionID]; exists {
 			if sessionUsed >= b.perSessionBudget {
-				return false
+				return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitPerSession, Used: float64(sessionUsed), Limit: float64(b.perSessionBudget)}
 			}
 		}
 	}
 
-	// Only enforce limits that are configured (non-zero)
-	var hourlyOK, dailyOK bool
+	// Check hourly token limit
 	if b.hourlyLimit > 0 {
-		hourlyOK = b.hourlyUsed() < b.effectiveLimit(b.hourlyLimit)
-	} else {
-		hourlyOK = true
-	}
-	if b.dailyLimit > 0 {
-		dailyOK = b.dailyUsed < b.effectiveLimit(b.dailyLimit)
-	} else {
-		dailyOK = true
+		effLimit := b.effectiveLimit(b.hourlyLimit)
+		used := b.hourlyUsed()
+		if used >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyTokens, Used: float64(used), Limit: float64(effLimit)}
+		}
 	}
 
-	return hourlyOK && dailyOK && b.checkCostLimits()
+	// Check daily token limit
+	if b.dailyLimit > 0 {
+		effLimit := b.effectiveLimit(b.dailyLimit)
+		if b.dailyUsed >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyTokens, Used: float64(b.dailyUsed), Limit: float64(effLimit)}
+		}
+	}
+
+	// Check daily cost limit
+	if b.dailyCostLimit > 0 {
+		effLimit := b.effectiveCostLimit(b.dailyCostLimit)
+		if b.dailyCostUsed >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitDailyCost, Used: b.dailyCostUsed, Limit: effLimit}
+		}
+	}
+
+	// Check hourly cost limit
+	if b.hourlyCostLimit > 0 {
+		effLimit := b.effectiveCostLimit(b.hourlyCostLimit)
+		used := b.hourlyCostUsed()
+		if used >= effLimit {
+			return BudgetCheckResult{Exceeded: true, Reason: BudgetLimitHourlyCost, Used: used, Limit: effLimit}
+		}
+	}
+
+	return BudgetCheckResult{Exceeded: false}
 }
 
 // RecordTaskUsage tracks tokens consumed by a specific task.
@@ -657,11 +690,55 @@ func (b *Budget) WaitForRateLimit(ctx context.Context) error {
 	}
 }
 
+// BudgetLimit identifies which budget limit was exceeded.
+type BudgetLimit string
+
+const (
+	BudgetLimitHourlyTokens BudgetLimit = "hourly_token"
+	BudgetLimitDailyTokens  BudgetLimit = "daily_token"
+	BudgetLimitHourlyCost   BudgetLimit = "hourly_cost"
+	BudgetLimitDailyCost    BudgetLimit = "daily_cost"
+	BudgetLimitPerTask      BudgetLimit = "per_task"
+	BudgetLimitPerSession   BudgetLimit = "per_session"
+)
+
+// Message returns an internal log message for this budget limit reason.
+func (r BudgetLimit) Message(used, limit float64) string {
+	switch r {
+	case BudgetLimitHourlyTokens:
+		return fmt.Sprintf("hourly token budget exceeded: %.0f / %.0f tokens", used, limit)
+	case BudgetLimitDailyTokens:
+		return fmt.Sprintf("daily token budget exceeded: %.0f / %.0f tokens", used, limit)
+	case BudgetLimitHourlyCost:
+		return fmt.Sprintf("hourly cost budget exceeded: $%.4f / $%.4f", used, limit)
+	case BudgetLimitDailyCost:
+		return fmt.Sprintf("daily cost budget exceeded: $%.4f / $%.4f", used, limit)
+	case BudgetLimitPerTask:
+		return fmt.Sprintf("per-task token budget exceeded: %.0f / %.0f tokens", used, limit)
+	case BudgetLimitPerSession:
+		return fmt.Sprintf("per-session token budget exceeded: %.0f / %.0f tokens", used, limit)
+	default:
+		return "budget limit exceeded"
+	}
+}
+
+// BudgetCheckResult describes the outcome of a budget check.
+// If Exceeded is true, Reason and the Used/Limit fields are populated.
+type BudgetCheckResult struct {
+	Exceeded bool
+	Reason   BudgetLimit
+	Used     float64
+	Limit    float64
+}
+
 // BudgetExceededError is returned when a request would exceed the token budget.
 // It implements NonRetryableError because budget exhaustion cannot be resolved
 // by retrying the same request.
 type BudgetExceededError struct {
 	Message string
+	Reason  BudgetLimit // Which specific limit was hit
+	Used    float64     // Current usage (tokens or USD)
+	Limit   float64     // Configured limit (tokens or USD, after aggressiveness)
 }
 
 func (e *BudgetExceededError) Error() string {
@@ -671,6 +748,29 @@ func (e *BudgetExceededError) Error() string {
 // NonRetryable returns true because budget exhaustion cannot be resolved by retry.
 func (e *BudgetExceededError) NonRetryable() bool {
 	return true
+}
+
+// UserMessage returns a human-readable message suitable for displaying to the client.
+func (e *BudgetExceededError) UserMessage() string {
+	switch e.Reason {
+	case BudgetLimitHourlyTokens:
+		return fmt.Sprintf("meept hourly token budget reached: %.0f / %.0f tokens used (config: llm.budget.hourly_token_limit)", e.Used, e.Limit)
+	case BudgetLimitDailyTokens:
+		return fmt.Sprintf("meept daily token budget reached: %.0f / %.0f tokens used (config: llm.budget.daily_token_limit)", e.Used, e.Limit)
+	case BudgetLimitHourlyCost:
+		return fmt.Sprintf("meept hourly cost budget reached: $%.4f / $%.4f used (config: llm.budget.hourly_cost_limit)", e.Used, e.Limit)
+	case BudgetLimitDailyCost:
+		return fmt.Sprintf("meept daily cost budget reached: $%.4f / $%.4f used (config: llm.budget.daily_cost_limit)", e.Used, e.Limit)
+	case BudgetLimitPerTask:
+		return fmt.Sprintf("meept per-task token budget reached: %.0f / %.0f tokens used (config: llm.budget.per_task_token_limit)", e.Used, e.Limit)
+	case BudgetLimitPerSession:
+		return fmt.Sprintf("meept per-session token budget reached: %.0f / %.0f tokens used (config: llm.budget.per_session_token_limit)", e.Used, e.Limit)
+	default:
+		if e.Used > 0 || e.Limit > 0 {
+			return fmt.Sprintf("meept budget limit reached: %.0f / %.0f", e.Used, e.Limit)
+		}
+		return "meept budget limit reached"
+	}
 }
 
 // Ensure BudgetExceededError implements NonRetryableError

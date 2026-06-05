@@ -38,9 +38,6 @@ const (
 	CapCompletion = "completion"
 	CapTools      = "tools"
 
-	// Budget exceeded error message.
-	ErrBudgetExceeded = "Token budget exceeded - request blocked"
-
 	// Metrics dimension keys.
 	KeyLevel = "level"
 )
