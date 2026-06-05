@@ -331,6 +331,23 @@ func transformBusEventToWS(msg *models.BusMessage) map[string]any {
 		payload = make(map[string]any)
 	}
 
+	// Normalize chat response fields so Flutter's WebSocketService can
+	// route by session_id and display content as a chat message.
+	if eventType == "chat_message" {
+		if convID, ok := payload["conversation_id"].(string); ok && convID != "" {
+			payload["session_id"] = convID
+		}
+		if reply, ok := payload["reply"].(string); ok {
+			payload["content"] = reply
+		}
+		if _, ok := payload["role"]; !ok {
+			payload["role"] = "assistant"
+		}
+		if _, ok := payload["id"]; !ok {
+			payload["id"] = msg.ID
+		}
+	}
+
 	// Add the source topic as metadata
 	payload["source_topic"] = topic
 
