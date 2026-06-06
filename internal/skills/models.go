@@ -57,6 +57,9 @@ type Skill struct {
 
 	// MaxTokens is an optional LLM max_tokens override for this skill.
 	MaxTokens *int `json:"max_tokens,omitempty"`
+
+	// MCPServers lists MCP servers that should be started when this skill is activated.
+	MCPServers []MCPServerConfig `json:"mcp_servers,omitempty"`
 }
 
 // HasCapability checks if the skill requires a specific capability.
@@ -79,20 +82,33 @@ func (s *Skill) MatchesTags(tags []string) bool {
 	return true
 }
 
+// MCPServerConfig describes an MCP server embedded in a skill.
+type MCPServerConfig struct {
+	// Name is a unique identifier for this MCP server within the skill.
+	Name string `yaml:"name"`
+	// Command is the executable to launch for the MCP server.
+	Command string `yaml:"command"`
+	// Args are arguments passed to the command.
+	Args []string `yaml:"args"`
+	// Env are optional environment variables set for the server process.
+	Env map[string]string `yaml:"env,omitempty"`
+}
+
 // SkillMetadata holds the parsed YAML frontmatter from a SKILL.md file.
 //
 //nolint:revive // stutter with package name is intentional for API clarity
 type SkillMetadata struct {
-	Name          string   `yaml:"name"`
-	Description   string   `yaml:"description"`
-	Requires      []string `yaml:"requires"`
-	Tags          []string `yaml:"tags"`
-	Examples      []string `yaml:"examples"`
-	AllowedTools  []string `yaml:"allowed-tools"`
-	RiskLevel     string   `yaml:"risk-level"`
-	MaxIterations int      `yaml:"max-iterations"`
-	Temperature   *float64 `yaml:"temperature"`
-	MaxTokens     *int     `yaml:"max-tokens"`
+	Name          string            `yaml:"name"`
+	Description   string            `yaml:"description"`
+	Requires      []string          `yaml:"requires"`
+	Tags          []string          `yaml:"tags"`
+	Examples      []string          `yaml:"examples"`
+	AllowedTools  []string          `yaml:"allowed-tools"`
+	RiskLevel     string            `yaml:"risk-level"`
+	MaxIterations int               `yaml:"max-iterations"`
+	Temperature   *float64          `yaml:"temperature"`
+	MaxTokens     *int              `yaml:"max-tokens"`
+	MCPServers    []MCPServerConfig `yaml:"mcp-servers"`
 }
 
 // DefaultMetadata returns a SkillMetadata with sensible defaults.

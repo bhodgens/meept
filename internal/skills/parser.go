@@ -166,6 +166,7 @@ func ParseSkillText(text string) (*Skill, error) {
 		MaxIterations: meta.MaxIterations,
 		Temperature:   meta.Temperature,
 		MaxTokens:     meta.MaxTokens,
+		MCPServers:    meta.MCPServers,
 	}
 
 	// Apply defaults
