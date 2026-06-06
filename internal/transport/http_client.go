@@ -11,31 +11,27 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/tui/types"
-	"github.com/caimlas/meept/pkg/tlsutil"
 )
 
-// Map key constants for HTTP API calls.
-const (
-	KeyLimit     = "limit"
-	KeySessionID = "session_id"
-)
-
-// HTTPClientOption is a functional option for configuring an HTTP transport client.
+// HTTPClientOption configures an HTTP transport client.
 type HTTPClientOption func(*httpClient)
 
-// WithInsecureSkipVerify configures the client to skip TLS certificate verification.
-// This is useful for connecting to servers with self-signed certificates.
+// WithInsecureSkipVerify disables TLS certificate verification.
 func WithInsecureSkipVerify(skip bool) HTTPClientOption {
 	return func(c *httpClient) {
-		if skip {
-			transport := &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, //nolint:gosec // intentional for self-signed local certs
-					MinVersion:         tls.VersionTLS12,
-				},
+		if transport, ok := c.client.Transport.(*http.Transport); ok {
+			if transport.TLSClientConfig != nil {
+				transport.TLSClientConfig.InsecureSkipVerify = skip
 			}
-			c.client.Transport = transport
 		}
+	}
+}
+
+// WithPinnedFingerprint pins a TLS certificate fingerprint.
+func WithPinnedFingerprint(certFP, spkiFP string) HTTPClientOption {
+	return func(c *httpClient) {
+		c.certFingerprint = certFP
+		c.spkiFingerprint = spkiFP
 	}
 }
 
@@ -46,32 +42,15 @@ func WithAPIKey(key string) HTTPClientOption {
 	}
 }
 
-// WithPinnedFingerprint configures the client to verify the server certificate
-// by fingerprint instead of CA chain. Use for pinning self-signed certs.
-func WithPinnedFingerprint(certFP, spkiFP string) HTTPClientOption {
-	return func(c *httpClient) {
-		if certFP == "" && spkiFP == "" {
-			return
-		}
-		pv := &tlsutil.PinningVerifier{
-			ExpectedCertFP: certFP,
-			ExpectedSPKIFP: spkiFP,
-		}
-		if c.client.Transport == nil {
-			c.client.Transport = pv.PinTransport(http.DefaultTransport)
-		} else {
-			c.client.Transport = pv.PinTransport(c.client.Transport)
-		}
-	}
-}
-
 // httpClient implements transport.Client over HTTP REST.
 // All RPC-style methods are proxied through the /api/v1/bus/call endpoint,
 // which mirrors the JSON-RPC interface over HTTP.
 type httpClient struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
+	baseURL         string
+	client          *http.Client
+	apiKey          string
+	certFingerprint string
+	spkiFingerprint string
 }
 
 // NewHTTPClient creates an HTTP-backed transport client.
@@ -81,8 +60,7 @@ func NewHTTPClient(baseURL string, timeout time.Duration, opts ...HTTPClientOpti
 	}
 	c := &httpClient{
 		baseURL: baseURL,
-		apiKey:  "",
-		client:  &http.Client{Timeout: timeout},
+		client:  &http.Client{Timeout: timeout, Transport: &http.Transport{TLSClientConfig: &tls.Config{}}},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -91,11 +69,7 @@ func NewHTTPClient(baseURL string, timeout time.Duration, opts ...HTTPClientOpti
 }
 
 func (c *httpClient) Connect() error {
-	req, err := c.newRequest(http.MethodGet, c.baseURL+"/api/v1/health", nil)
-	if err != nil {
-		return fmt.Errorf("daemon not reachable: %w", err)
-	}
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Get(c.baseURL + "/api/v1/health")
 	if err != nil {
 		return fmt.Errorf("daemon not reachable: %w", err)
 	}
@@ -111,38 +85,13 @@ func (c *httpClient) Close() error { return nil }
 func (c *httpClient) IsConnected() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, err := c.newRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/health", nil)
-	if err != nil {
-		return false
-	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/health", http.NoBody)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return false
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
-}
-
-func (c *httpClient) newRequest(method, urlStr string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, urlStr, body)
-	if err != nil {
-		return nil, err
-	}
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-	return req, nil
-}
-
-func (c *httpClient) newRequestWithContext(ctx context.Context, method, urlStr string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, method, urlStr, body)
-	if err != nil {
-		return nil, err
-	}
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-	return req, nil
 }
 
 func (c *httpClient) SetTimeout(d time.Duration) {
@@ -159,12 +108,11 @@ func (c *httpClient) callAPI(method string, params any) (json.RawMessage, error)
 	if err != nil {
 		return nil, err
 	}
-	req, err := c.newRequest(http.MethodPost, c.baseURL+"/api/v1/bus/call", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Post(
+		c.baseURL+"/api/v1/bus/call",
+		"application/json",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -207,12 +155,11 @@ func (c *httpClient) Chat(message, conversationID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req, err := c.newRequest(http.MethodPost, c.baseURL+"/api/v1/chat", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Post(
+		c.baseURL+"/api/v1/chat",
+		"application/json",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return "", err
 	}
@@ -226,13 +173,9 @@ func (c *httpClient) Chat(message, conversationID string) (string, error) {
 	}
 	var result struct {
 		Reply string `json:"reply"`
-		Error string `json:"error"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return "", err
-	}
-	if result.Error != "" {
-		return result.Reply, fmt.Errorf("%s", result.Error)
 	}
 	return result.Reply, nil
 }
@@ -265,7 +208,7 @@ func (c *httpClient) ListJobs() (*types.JobListResponse, error) {
 
 // QueryMemory queries the memory store.
 func (c *httpClient) QueryMemory(query string, limit int) (*types.MemoryQueryResponse, error) {
-	result, err := c.callAPI("memory.query", map[string]any{"query": query, KeyLimit: limit})
+	result, err := c.callAPI("memory.query", map[string]any{"query": query, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +221,7 @@ func (c *httpClient) QueryMemory(query string, limit int) (*types.MemoryQueryRes
 
 // GetRecentMemories retrieves recent memories.
 func (c *httpClient) GetRecentMemories(limit int) (*types.MemoryQueryResponse, error) {
-	result, err := c.callAPI("memory.recent", map[string]any{KeyLimit: limit})
+	result, err := c.callAPI("memory.recent", map[string]any{"limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +260,7 @@ func (c *httpClient) GetQueueStats() (*types.QueueStatsResponse, error) {
 
 // ListQueueJobs lists queue jobs.
 func (c *httpClient) ListQueueJobs(state string, limit int) (*types.QueueJobListResponse, error) {
-	result, err := c.callAPI("queue.list", map[string]any{"state": state, KeyLimit: limit})
+	result, err := c.callAPI("queue.list", map[string]any{"state": state, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +273,7 @@ func (c *httpClient) ListQueueJobs(state string, limit int) (*types.QueueJobList
 
 // ListTasks lists tasks.
 func (c *httpClient) ListTasks(state string, limit int) (*types.TaskListResponse, error) {
-	result, err := c.callAPI("task.list", map[string]any{"state": state, KeyLimit: limit})
+	result, err := c.callAPI("task.list", map[string]any{"state": state, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -435,13 +378,13 @@ func (c *httpClient) CreateSession(name string) (*types.Session, error) {
 
 // AttachSession attaches a client to a session.
 func (c *httpClient) AttachSession(sessionID, clientID string) error {
-	_, err := c.callAPI("session.attach", map[string]string{KeySessionID: sessionID, "client_id": clientID})
+	_, err := c.callAPI("session.attach", map[string]string{"session_id": sessionID, "client_id": clientID})
 	return err
 }
 
 // DetachSession detaches a client from a session.
 func (c *httpClient) DetachSession(sessionID, clientID string) error {
-	_, err := c.callAPI("session.detach", map[string]string{KeySessionID: sessionID, "client_id": clientID})
+	_, err := c.callAPI("session.detach", map[string]string{"session_id": sessionID, "client_id": clientID})
 	return err
 }
 
@@ -460,7 +403,7 @@ func (c *httpClient) GetMostRecentSession() (*types.Session, error) {
 
 // GetSessionMessages retrieves session messages.
 func (c *httpClient) GetSessionMessages(sessionID string, offset, limit int) (*types.SessionMessagesResponse, error) {
-	result, err := c.callAPI("session.messages.get", map[string]any{KeySessionID: sessionID, "offset": offset, KeyLimit: limit})
+	result, err := c.callAPI("session.messages.get", map[string]any{"session_id": sessionID, "offset": offset, "limit": limit})
 	if err != nil {
 		return nil, err
 	}
@@ -473,13 +416,13 @@ func (c *httpClient) GetSessionMessages(sessionID string, offset, limit int) (*t
 
 // SaveSessionMessages saves messages to a session.
 func (c *httpClient) SaveSessionMessages(sessionID string, messages []types.SessionMessage) error {
-	_, err := c.callAPI("session.messages.save", map[string]any{KeySessionID: sessionID, "messages": messages})
+	_, err := c.callAPI("session.messages.save", map[string]any{"session_id": sessionID, "messages": messages})
 	return err
 }
 
 // UpdateSessionDescription updates a session description.
 func (c *httpClient) UpdateSessionDescription(sessionID, description string) error {
-	_, err := c.callAPI("session.update_description", map[string]string{KeySessionID: sessionID, "description": description})
+	_, err := c.callAPI("session.update_description", map[string]string{"session_id": sessionID, "description": description})
 	return err
 }
 
@@ -508,7 +451,7 @@ func (c *httpClient) DeleteSession(sessionID string) error {
 
 // StopSession stops a session.
 func (c *httpClient) StopSession(sessionID string) (*types.StopSessionResponse, error) {
-	result, err := c.callAPI("session.stop", map[string]string{KeySessionID: sessionID})
+	result, err := c.callAPI("session.stop", map[string]string{"session_id": sessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +464,7 @@ func (c *httpClient) StopSession(sessionID string) (*types.StopSessionResponse, 
 
 // GetSessionChildTasks returns child task IDs for a session.
 func (c *httpClient) GetSessionChildTasks(sessionID string) ([]string, error) {
-	result, err := c.callAPI("session.get_child_tasks", map[string]string{KeySessionID: sessionID})
+	result, err := c.callAPI("session.get_child_tasks", map[string]string{"session_id": sessionID})
 	if err != nil {
 		return nil, err
 	}
@@ -576,13 +519,13 @@ func (c *httpClient) CancelTask(taskID string) error {
 
 // LinkTaskSession links a session to a task.
 func (c *httpClient) LinkTaskSession(taskID, sessionID string) error {
-	_, err := c.callAPI("task.link", map[string]string{"task_id": taskID, KeySessionID: sessionID})
+	_, err := c.callAPI("task.link", map[string]string{"task_id": taskID, "session_id": sessionID})
 	return err
 }
 
 // UnlinkTaskSession removes a session link from a task.
 func (c *httpClient) UnlinkTaskSession(taskID, sessionID string) error {
-	_, err := c.callAPI("task.unlink", map[string]string{"task_id": taskID, KeySessionID: sessionID})
+	_, err := c.callAPI("task.unlink", map[string]string{"task_id": taskID, "session_id": sessionID})
 	return err
 }
 
