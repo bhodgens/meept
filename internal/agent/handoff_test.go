@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -374,11 +376,13 @@ func TestTacticalScheduler_HandleHandoff_ToolHintDerivedFromAgent(t *testing.T) 
 	}
 
 	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
-		StepStore: stepStore,
-		TaskStore: taskStore,
-		Queue:     &mockQueue{},
-		Bus:       msgBus,
-		Logger:    slogDiscardLogger(),
+		StepStore:        stepStore,
+		TaskStore:        taskStore,
+		Queue:            &mockQueue{},
+		Bus:              msgBus,
+		Logger:           slogDiscardLogger(),
+		MaxHandoffSteps:  0, // disable rate limiting for this test
+		HandoffUseAmendment: false,
 	})
 
 	tests := []struct {
@@ -670,5 +674,294 @@ func TestTacticalScheduler_HandleHandoff_NoRewireWhenNotInjectAfter(t *testing.T
 			}
 			break
 		}
+	}
+}
+
+// mockAmendmentManager implements AmendmentSubmitter for testing.
+type mockAmendmentManager struct {
+	submitFn  func(ctx context.Context, req *task.AmendmentRequest) error
+	processFn func(ctx context.Context, requestID string) (*task.AmendmentReply, error)
+}
+
+func (m *mockAmendmentManager) Submit(ctx context.Context, req *task.AmendmentRequest) error {
+	if m.submitFn != nil {
+		return m.submitFn(ctx, req)
+	}
+	return nil
+}
+
+func (m *mockAmendmentManager) Process(ctx context.Context, requestID string) (*task.AmendmentReply, error) {
+	if m.processFn != nil {
+		return m.processFn(ctx, requestID)
+	}
+	return &task.AmendmentReply{
+		Success:  true,
+		Metadata: json.RawMessage(`{"step_id":"step-mock-1"}`),
+	}, nil
+}
+
+func TestTacticalScheduler_HandleHandoff_RateLimitReached(t *testing.T) {
+	taskStore, stepStore := newTestTaskAndStepStore(t)
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	// Create a task
+	tk := task.NewTask("task-ratelimit-1", "rate limit test")
+	tk.TotalJobs = 3
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	// Create the from step (completed so handoff steps can be promoted)
+	fromStep := task.NewTaskStep(tk.ID, "initial step", 1)
+	fromStep.State = task.StepCompleted
+	if err := stepStore.Create(fromStep); err != nil {
+		t.Fatalf("failed to create from step: %v", err)
+	}
+
+	// Create 5 handoff steps (max) to hit the rate limit
+	for i := 0; i < 5; i++ {
+		handoffStep := task.NewTaskStep(tk.ID, fmt.Sprintf("handoff step %d", i), 100+i)
+		handoffStep.State = task.StepPending
+		handoffStep.AccumulatedContext = fmt.Sprintf("[Handoff from coder]: partial result %d", i)
+		if err := stepStore.Create(handoffStep); err != nil {
+			t.Fatalf("failed to create handoff step %d: %v", i, err)
+		}
+	}
+
+	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
+		StepStore:        stepStore,
+		TaskStore:        taskStore,
+		Queue:            &mockQueue{},
+		Bus:              msgBus,
+		Logger:           slogDiscardLogger(),
+		MaxHandoffSteps:  5,
+		HandoffUseAmendment: false, // direct path for simplicity
+	})
+
+	req := HandoffRequest{
+		TaskID:        tk.ID,
+		FromStepID:    fromStep.ID,
+		FromAgentID:   config.AgentIDCoder,
+		ToAgentID:     config.AgentIDDebugger,
+		Description:   "This should be rejected",
+		Reason:        "exceeds rate limit",
+		PartialResult: "too many handoffs",
+		InjectAfter:    true,
+	}
+
+	msg := handoffBusMsg(req)
+	err := scheduler.HandleHandoff(context.Background(), msg)
+	if err == nil {
+		t.Fatal("expected error for rate limit, got nil")
+	}
+	if !strings.Contains(err.Error(), "handoff rate limit reached") {
+		t.Errorf("expected rate limit error, got: %v", err)
+	}
+}
+
+func TestTacticalScheduler_HandleHandoff_AmendmentPath(t *testing.T) {
+	taskStore, stepStore := newTestTaskAndStepStore(t)
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	// Create a task
+	tk := task.NewTask("task-amend-1", "amendment path test")
+	tk.TotalJobs = 1
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	fromStep := task.NewTaskStep(tk.ID, "initial step", 1)
+	fromStep.State = task.StepCompleted
+	if err := stepStore.Create(fromStep); err != nil {
+		t.Fatalf("failed to create from step: %v", err)
+	}
+
+	var submittedReq *task.AmendmentRequest
+	var processedID string
+	mockAmend := &mockAmendmentManager{
+		submitFn: func(ctx context.Context, req *task.AmendmentRequest) error {
+			submittedReq = req
+			return nil
+		},
+		processFn: func(ctx context.Context, requestID string) (*task.AmendmentReply, error) {
+			processedID = requestID
+
+			// Create the step that the amendment handler would create
+			steps, _ := stepStore.ListByTaskID(tk.ID)
+			sequence := len(steps) + 1
+			newStep := task.NewTaskStep(tk.ID, "Debug the failing test", sequence)
+			newStep.ToolHint = "debug"
+			newStep.DependsOn = []string{fromStep.ID}
+			if err := stepStore.Create(newStep); err != nil {
+				t.Logf("failed to create step in mock: %v", err)
+			}
+
+			meta, _ := json.Marshal(map[string]string{"step_id": newStep.ID})
+			return &task.AmendmentReply{
+				Success:  true,
+				Message:  fmt.Sprintf("Step %s added", newStep.ID),
+				Metadata: meta,
+			}, nil
+		},
+	}
+
+	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
+		StepStore:           stepStore,
+		TaskStore:           taskStore,
+		Queue:               &mockQueue{},
+		Bus:                 msgBus,
+		Logger:              slogDiscardLogger(),
+		MaxHandoffSteps:     5,
+		HandoffUseAmendment: true,
+		AmendmentManager:    mockAmend,
+	})
+
+	req := HandoffRequest{
+		TaskID:        tk.ID,
+		FromStepID:    fromStep.ID,
+		FromAgentID:   config.AgentIDCoder,
+		ToAgentID:     config.AgentIDDebugger,
+		Description:   "Debug the failing test",
+		Reason:        "Tests are failing",
+		PartialResult: "Implemented feature X",
+		InjectAfter:    true,
+	}
+
+	msg := handoffBusMsg(req)
+	err := scheduler.HandleHandoff(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("HandleHandoff failed: %v", err)
+	}
+
+	// Verify Submit was called with correct metadata
+	if submittedReq == nil {
+		t.Fatal("expected amendment to be submitted")
+	}
+	if submittedReq.Type != task.AmendmentAddStep {
+		t.Errorf("expected amendment type %s, got %s", task.AmendmentAddStep, submittedReq.Type)
+	}
+	if submittedReq.TaskID != tk.ID {
+		t.Errorf("expected task ID %s, got %s", tk.ID, submittedReq.TaskID)
+	}
+
+	// Verify metadata contains expected fields
+	var meta map[string]any
+	if err := json.Unmarshal(submittedReq.Metadata, &meta); err != nil {
+		t.Fatalf("failed to unmarshal amendment metadata: %v", err)
+	}
+	if meta["description"] != "Debug the failing test" {
+		t.Errorf("expected description in metadata, got: %v", meta["description"])
+	}
+	if meta["tool_hint"] != "debug" {
+		t.Errorf("expected tool_hint in metadata, got: %v", meta["tool_hint"])
+	}
+	if meta["agent_id"] != config.AgentIDDebugger {
+		t.Errorf("expected agent_id %s in metadata, got: %v", config.AgentIDDebugger, meta["agent_id"])
+	}
+
+	// Verify Process was called
+	if processedID == "" {
+		t.Fatal("expected amendment to be processed")
+	}
+	if processedID != submittedReq.ID {
+		t.Errorf("expected Process to be called with submit ID %s, got %s", submittedReq.ID, processedID)
+	}
+
+	// Verify accumulated context was set on the created step
+	steps, err := stepStore.ListByTaskID(tk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+
+	var createdStep *task.TaskStep
+	for _, s := range steps {
+		if s.Description == "Debug the failing test" {
+			createdStep = s
+			break
+		}
+	}
+	if createdStep == nil {
+		t.Fatal("created step not found")
+	}
+	if createdStep.AccumulatedContext == "" {
+		t.Error("expected accumulated context to be set on amendment-created step")
+	}
+	if !strings.Contains(createdStep.AccumulatedContext, "[Handoff from") {
+		t.Errorf("expected accumulated context to contain handoff marker, got: %s", createdStep.AccumulatedContext)
+	}
+}
+
+func TestTacticalScheduler_HandleHandoff_AmendmentPathRejected(t *testing.T) {
+	taskStore, stepStore := newTestTaskAndStepStore(t)
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tk := task.NewTask("task-amend-rej-1", "amendment rejection test")
+	tk.TotalJobs = 1
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	fromStep := task.NewTaskStep(tk.ID, "initial step", 1)
+	fromStep.State = task.StepCompleted
+	if err := stepStore.Create(fromStep); err != nil {
+		t.Fatalf("failed to create from step: %v", err)
+	}
+
+	mockAmend := &mockAmendmentManager{
+		submitFn: func(ctx context.Context, req *task.AmendmentRequest) error {
+			return nil
+		},
+		processFn: func(ctx context.Context, requestID string) (*task.AmendmentReply, error) {
+			return &task.AmendmentReply{
+				Success: false,
+				Message: "handoff exceeds task capacity",
+			}, nil
+		},
+	}
+
+	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
+		StepStore:           stepStore,
+		TaskStore:           taskStore,
+		Queue:               &mockQueue{},
+		Bus:                 msgBus,
+		Logger:              slogDiscardLogger(),
+		MaxHandoffSteps:     5,
+		HandoffUseAmendment: true,
+		AmendmentManager:    mockAmend,
+	})
+
+	req := HandoffRequest{
+		TaskID:        tk.ID,
+		FromStepID:    fromStep.ID,
+		FromAgentID:   config.AgentIDCoder,
+		ToAgentID:     config.AgentIDDebugger,
+		Description:   "This should be rejected",
+		Reason:        "exceeds capacity",
+		PartialResult: "partial",
+		InjectAfter:    true,
+	}
+
+	msg := handoffBusMsg(req)
+	err := scheduler.HandleHandoff(context.Background(), msg)
+	if err == nil {
+		t.Fatal("expected error for rejected amendment, got nil")
+	}
+	if !strings.Contains(err.Error(), "handoff amendment rejected") {
+		t.Errorf("expected amendment rejection error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "exceeds task capacity") {
+		t.Errorf("expected rejection message in error, got: %v", err)
+	}
+
+	// Verify no new step was created
+	steps, err := stepStore.ListByTaskID(tk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+	if len(steps) != 1 {
+		t.Errorf("expected 1 step (from step only), got %d", len(steps))
 	}
 }

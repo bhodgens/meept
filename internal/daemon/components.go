@@ -1132,14 +1132,17 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			logger.Info("Escalation manager initialized")
 
 			tacticalScheduler := agent.NewTacticalScheduler(agent.TacticalSchedulerConfig{
-				StepStore:         stepStore,
-				TaskStore:         orchTaskStore,
-				Queue:             c.Queue,
-				Registry:          c.AgentRegistry,
-				Bus:               msgBus,
-				Logger:            logger.With("component", "tactical"),
-				ReviewManager:     reviewManager,
-				EscalationManager: c.EscalationManager,
+				StepStore:           stepStore,
+				TaskStore:           orchTaskStore,
+				Queue:               c.Queue,
+				Registry:            c.AgentRegistry,
+				Bus:                 msgBus,
+				Logger:              logger.With("component", "tactical"),
+				ReviewManager:       reviewManager,
+				EscalationManager:   c.EscalationManager,
+				MaxHandoffSteps:     cfg.Orchestrator.MaxHandoffSteps,
+				HandoffUseAmendment: cfg.Orchestrator.HandoffUseAmendment,
+				AmendmentManager:    c.AmendmentMgr,
 			})
 
 			// Create bus pair orchestrator for channel-based agent pairing (Option C)

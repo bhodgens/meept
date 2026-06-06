@@ -906,10 +906,12 @@ type DetectionConfig struct {
 
 // OrchestratorConfig holds hierarchical orchestrator settings.
 type OrchestratorConfig struct {
-	MaxPlanSteps     int `json:"max_plan_steps"     toml:"max_plan_steps"`
-	MaxResearchSteps int `json:"max_research_steps" toml:"max_research_steps"`
-	PlannerTimeout   int `json:"planner_timeout"    toml:"planner_timeout"`
-	TokenBudgetAlert int `json:"token_budget_alert" toml:"token_budget_alert"`
+	MaxPlanSteps       int  `json:"max_plan_steps"        toml:"max_plan_steps"`
+	MaxResearchSteps   int  `json:"max_research_steps"    toml:"max_research_steps"`
+	PlannerTimeout     int  `json:"planner_timeout"       toml:"planner_timeout"`
+	TokenBudgetAlert   int  `json:"token_budget_alert"    toml:"token_budget_alert"`
+	MaxHandoffSteps    int  `json:"max_handoff_steps"     toml:"max_handoff_steps"`
+	HandoffUseAmendment bool `json:"handoff_use_amendment" toml:"handoff_use_amendment"`
 }
 
 // ShadowConfig holds shadow training settings.
@@ -1359,10 +1361,12 @@ func DefaultConfig() *Config {
 			},
 		},
 		Orchestrator: OrchestratorConfig{
-			MaxPlanSteps:     10,
-			MaxResearchSteps: 3,
-			PlannerTimeout:   120,
-			TokenBudgetAlert: 5000,
+			MaxPlanSteps:        10,
+			MaxResearchSteps:    3,
+			PlannerTimeout:      120,
+			TokenBudgetAlert:    5000,
+			MaxHandoffSteps:     5,
+			HandoffUseAmendment: true,
 		},
 		Shadow: ShadowConfig{
 			Enabled: false,

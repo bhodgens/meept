@@ -47,6 +47,16 @@ type TacticalScheduler struct {
 	validationGateInterval int                      // Run validation gate every N steps
 	validationGateCounter  map[string]int           // Per-task validation gate counter
 	validationGateMu       sync.Mutex               // Protects validationGateCounter
+	maxHandoffSteps        int                      // Max handoff steps per task (0 = unlimited)
+	handoffUseAmendment    bool                     // Route handoffs through amendment system
+	amendmentMgr           AmendmentSubmitter        // Optional: enables amendment-based step creation
+}
+
+// AmendmentSubmitter is the interface for submitting amendment requests.
+// Implemented by *task.AmendmentManager.
+type AmendmentSubmitter interface {
+	Submit(ctx context.Context, req *task.AmendmentRequest) error
+	Process(ctx context.Context, requestID string) (*task.AmendmentReply, error)
 }
 
 // TacticalSchedulerConfig holds configuration for the tactical scheduler.
@@ -64,6 +74,9 @@ type TacticalSchedulerConfig struct {
 	MaxConcurrentJobs      int // Global concurrent job limit (default: 10)
 	MaxConcurrentPerAgent  int // Per-agent concurrent job limit (default: 3)
 	ValidationGateInterval int // Run validation gate every N steps (default: 3, 0 to disable)
+	MaxHandoffSteps        int                    // Max handoff steps per task (0 = unlimited, default: 5)
+	HandoffUseAmendment    bool                   // Route handoffs through amendment system (default: true)
+	AmendmentManager       AmendmentSubmitter      // Optional: enables amendment-based step creation
 }
 
 // NewTacticalScheduler creates a new tactical scheduler.
@@ -114,6 +127,9 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 		validationGateInterval: validationGateInterval,
 		validationGateCounter:  make(map[string]int),
 		validationGateMu:       sync.Mutex{},
+		maxHandoffSteps:        cfg.MaxHandoffSteps,
+		handoffUseAmendment:    cfg.HandoffUseAmendment,
+		amendmentMgr:           cfg.AmendmentManager,
 	}
 }
 
@@ -1319,7 +1335,29 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 		return fmt.Errorf("task %s not found: %w", req.TaskID, err)
 	}
 
-	// 3. Validate originating step exists (warn but continue if not found)
+	// 3. Rate limit: check how many handoff steps already exist for this task
+	if ts.maxHandoffSteps > 0 {
+		steps, err := ts.stepStore.ListByTaskID(req.TaskID)
+		if err != nil {
+			return fmt.Errorf("failed to list steps for rate limit check: %w", err)
+		}
+		handoffCount := 0
+		for _, s := range steps {
+			if s.AccumulatedContext != "" && strings.Contains(s.AccumulatedContext, "[Handoff from") {
+				handoffCount++
+			}
+		}
+		if handoffCount >= ts.maxHandoffSteps {
+			ts.logger.Warn("Handoff rate limit reached",
+				KeyTaskID, req.TaskID,
+				"handoff_count", handoffCount,
+				"max", ts.maxHandoffSteps,
+			)
+			return fmt.Errorf("handoff rate limit reached: task %s already has %d handoff steps (max: %d)", req.TaskID, handoffCount, ts.maxHandoffSteps)
+		}
+	}
+
+	// 4. Validate originating step exists (warn but continue if not found)
 	fromStep, err := ts.stepStore.GetByID(req.FromStepID)
 	if err != nil {
 		ts.logger.Warn("Originating step not found for handoff, continuing",
@@ -1328,13 +1366,13 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 		)
 	}
 
-	// 4. Derive tool_hint from target agent if not provided
+	// 5. Derive tool_hint from target agent if not provided
 	toolHint := req.ToolHint
 	if toolHint == "" {
 		toolHint = agentIDToToolHint(req.ToAgentID)
 	}
 
-	// 5. Build accumulated context from handoff request
+	// 6. Build accumulated context from handoff request
 	var contextParts []string
 	if req.FromAgentID != "" || req.PartialResult != "" {
 		fromLabel := req.FromAgentID
@@ -1352,38 +1390,95 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 	}
 	accumulatedContext := strings.Join(contextParts, "\n")
 
-	// 6. Create new task step
-	// Use a high sequence number so the step sorts after existing steps
-	sequence := int(9000 + time.Now().UnixNano()%1000)
-	newStep := task.NewTaskStep(req.TaskID, req.Description, sequence)
-	newStep.ToolHint = toolHint
-	newStep.AccumulatedContext = accumulatedContext
+	var newStepID string
 
-	// Set dependency on from step if inject_after and step exists
-	if req.InjectAfter && fromStep != nil {
-		newStep.DependsOn = []string{req.FromStepID}
-	}
+	if ts.handoffUseAmendment && ts.amendmentMgr != nil {
+		// 7a. Route through amendment system for audit trail
+		metadata := map[string]any{
+			"description": req.Description,
+			"tool_hint":   toolHint,
+		}
+		if req.InjectAfter && fromStep != nil {
+			metadata["depends_on"] = []string{req.FromStepID}
+		}
+		metadata["agent_id"] = req.ToAgentID
 
-	// 7. Persist
-	if err := ts.stepStore.Create(newStep); err != nil {
-		return fmt.Errorf("failed to create handoff step: %w", err)
-	}
+		metadataJSON, _ := json.Marshal(metadata)
+		amendReq := task.NewAmendmentRequest(req.TaskID, task.AmendmentAddStep, fmt.Sprintf("Handoff from %s to %s", req.FromAgentID, req.ToAgentID))
+		amendReq.Metadata = metadataJSON
 
-	// 8. Update task's TotalJobs count
-	t.TotalJobs++
-	if err := ts.taskStore.Update(t); err != nil {
-		ts.logger.Error("Failed to update task TotalJobs after handoff",
-			KeyTaskID, req.TaskID,
-			"error", err,
-		)
+		if err := ts.amendmentMgr.Submit(ctx, amendReq); err != nil {
+			return fmt.Errorf("failed to submit handoff amendment: %w", err)
+		}
+
+		reply, err := ts.amendmentMgr.Process(ctx, amendReq.ID)
+		if err != nil {
+			return fmt.Errorf("failed to process handoff amendment: %w", err)
+		}
+		if !reply.Success {
+			return fmt.Errorf("handoff amendment rejected: %s", reply.Message)
+		}
+
+		// Extract created step ID from reply metadata
+		var replyMeta struct {
+			StepID string `json:"step_id"`
+		}
+		if err := json.Unmarshal(reply.Metadata, &replyMeta); err == nil && replyMeta.StepID != "" {
+			newStepID = replyMeta.StepID
+		}
+
+		// Set accumulated context on the created step (amendment handler doesn't do this)
+		if newStepID != "" && accumulatedContext != "" {
+			createdStep, err := ts.stepStore.GetByID(newStepID)
+			if err == nil && createdStep != nil {
+				createdStep.AccumulatedContext = accumulatedContext
+				if err := ts.stepStore.Update(createdStep); err != nil {
+					ts.logger.Error("Failed to set accumulated context on handoff step",
+						KeyStepID, newStepID,
+						KeyTaskID, req.TaskID,
+						"error", err,
+					)
+				}
+			}
+		}
+
+		// The amendment handler already updates TotalJobs, so skip step 8.
+		// But if we need rewiring (inject_after), do it with the fromStep.
+		// Note: the amendment handler sets DependsOn on the step, so rewiring
+		// still needs to shift downstream dependencies from fromStep to newStepID.
+	} else {
+		// 7b. Direct step creation (no amendment system)
+		sequence := int(9000 + time.Now().UnixNano()%1000)
+		newStep := task.NewTaskStep(req.TaskID, req.Description, sequence)
+		newStep.ToolHint = toolHint
+		newStep.AccumulatedContext = accumulatedContext
+
+		if req.InjectAfter && fromStep != nil {
+			newStep.DependsOn = []string{req.FromStepID}
+		}
+
+		if err := ts.stepStore.Create(newStep); err != nil {
+			return fmt.Errorf("failed to create handoff step: %w", err)
+		}
+
+		newStepID = newStep.ID
+
+		// 8. Update task's TotalJobs count
+		t.TotalJobs++
+		if err := ts.taskStore.Update(t); err != nil {
+			ts.logger.Error("Failed to update task TotalJobs after handoff",
+				KeyTaskID, req.TaskID,
+				"error", err,
+			)
+		}
 	}
 
 	// 9. Rewire downstream dependencies (Task 5)
-	if fromStep != nil && req.InjectAfter {
-		if err := ts.rewireDownstreamDeps(req.TaskID, req.FromStepID, newStep.ID); err != nil {
+	if fromStep != nil && req.InjectAfter && newStepID != "" {
+		if err := ts.rewireDownstreamDeps(req.TaskID, req.FromStepID, newStepID); err != nil {
 			ts.logger.Error("Failed to rewire downstream dependencies",
 				KeyTaskID, req.TaskID,
-				KeyStepID, newStep.ID,
+				KeyStepID, newStepID,
 				"error", err,
 			)
 		}
@@ -1411,14 +1506,14 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 	// 12. Publish event
 	ts.publishEvent("task.handoff_created", map[string]any{
 		KeyTaskID:    req.TaskID,
-		KeyStepID:    newStep.ID,
+		KeyStepID:    newStepID,
 		KeyAgentID:   req.ToAgentID,
 		"from_agent": req.FromAgentID,
 	})
 
 	ts.logger.Info("Handoff step created",
 		KeyTaskID,     req.TaskID,
-		KeyStepID,     newStep.ID,
+		KeyStepID,     newStepID,
 		KeyAgentID,    req.ToAgentID,
 		"from_step",   req.FromStepID,
 		"description", req.Description,

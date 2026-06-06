@@ -475,6 +475,9 @@
     "max_research_steps": 3,
     "planner_timeout": 120,
     "token_budget_alert": 5000,
+    // Handoff configuration
+    "max_handoff_steps": 5,           // Max handoff-injected steps per task (0 = unlimited)
+    "handoff_use_amendment": true,    // Route handoffs through amendment system for audit trail
   },
 
   // Shadow training system (response shadowing for model improvement)
