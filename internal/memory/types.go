@@ -49,6 +49,8 @@ type Memory struct {
 	SessionID string `json:"session_id,omitempty"`
 	// TaskID is the task this memory was created during.
 	TaskID string `json:"task_id,omitempty"`
+	// BotID identifies the bot that created this memory (for bot namespace isolation).
+	BotID string `json:"bot_id,omitempty"`
 }
 
 // MemoryResult is a memory item returned from a search with relevance info.
