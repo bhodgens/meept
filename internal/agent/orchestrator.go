@@ -63,6 +63,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	topics := map[string]func(context.Context, *models.BusMessage){
 		"orchestrator.plan":     o.handlePlanRequest,
 		"orchestrator.schedule": o.handleScheduleRequest,
+		"orchestrator.handoff":  o.handleHandoff,
 		"queue.job.completed":   o.handleJobCompleted,
 		"queue.job.failed":      o.handleJobFailed,
 		"task.amend.applied":    o.handleAmendmentApplied,
@@ -199,6 +200,12 @@ func (o *Orchestrator) handleScheduleRequest(ctx context.Context, msg *models.Bu
 			"task_id", req.TaskID,
 			"error", err,
 		)
+	}
+}
+
+func (o *Orchestrator) handleHandoff(ctx context.Context, msg *models.BusMessage) {
+	if err := o.tactical.HandleHandoff(ctx, msg); err != nil {
+		o.logger.Error("Failed to handle handoff request", "error", err)
 	}
 }
 
