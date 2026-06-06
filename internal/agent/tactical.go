@@ -1290,3 +1290,201 @@ func (ts *TacticalScheduler) cleanupValidationGateCounter(taskID string) {
 	defer ts.validationGateMu.Unlock()
 	delete(ts.validationGateCounter, taskID)
 }
+
+// HandoffRequest represents a handoff request payload from the request_handoff tool.
+type HandoffRequest struct {
+	TaskID        string `json:"task_id"`
+	FromStepID    string `json:"from_step_id"`
+	FromAgentID   string `json:"from_agent_id"`
+	ToAgentID     string `json:"to_agent_id"`
+	Description   string `json:"description"`
+	ToolHint      string `json:"tool_hint,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	PartialResult string `json:"partial_result,omitempty"`
+	InjectAfter   bool   `json:"inject_after"`
+}
+
+// HandleHandoff processes a handoff request: creates a new task step for the target
+// agent, optionally rewires downstream dependencies, and publishes a bus event.
+func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusMessage) error {
+	// 1. Parse payload
+	var req HandoffRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return fmt.Errorf("failed to parse handoff request: %w", err)
+	}
+
+	// 2. Validate task exists
+	t, err := ts.taskStore.GetByID(req.TaskID)
+	if err != nil || t == nil {
+		return fmt.Errorf("task %s not found: %w", req.TaskID, err)
+	}
+
+	// 3. Validate originating step exists (warn but continue if not found)
+	fromStep, err := ts.stepStore.GetByID(req.FromStepID)
+	if err != nil {
+		ts.logger.Warn("Originating step not found for handoff, continuing",
+			KeyStepID, req.FromStepID,
+			KeyTaskID, req.TaskID,
+		)
+	}
+
+	// 4. Derive tool_hint from target agent if not provided
+	toolHint := req.ToolHint
+	if toolHint == "" {
+		toolHint = agentIDToToolHint(req.ToAgentID)
+	}
+
+	// 5. Build accumulated context from handoff request
+	accumulatedContext := fmt.Sprintf("[Handoff from %s]: %s\nReason: %s",
+		req.FromAgentID, req.PartialResult, req.Reason)
+
+	// 6. Create new task step
+	// Use a high sequence number so the step sorts after existing steps
+	sequence := int(9000 + time.Now().UnixNano()%1000)
+	newStep := task.NewTaskStep(req.TaskID, req.Description, sequence)
+	newStep.ToolHint = toolHint
+	newStep.AccumulatedContext = accumulatedContext
+
+	// Set dependency on from step if inject_after and step exists
+	if req.InjectAfter && fromStep != nil {
+		newStep.DependsOn = []string{req.FromStepID}
+	}
+
+	// 7. Persist
+	if err := ts.stepStore.Create(newStep); err != nil {
+		return fmt.Errorf("failed to create handoff step: %w", err)
+	}
+
+	// 8. Update task's TotalJobs count
+	t.TotalJobs++
+	if err := ts.taskStore.Update(t); err != nil {
+		ts.logger.Error("Failed to update task TotalJobs after handoff",
+			KeyTaskID, req.TaskID,
+			"error", err,
+		)
+	}
+
+	// 9. Rewire downstream dependencies (Task 5)
+	if fromStep != nil && req.InjectAfter {
+		if err := ts.rewireDownstreamDeps(req.TaskID, req.FromStepID, newStep.ID); err != nil {
+			ts.logger.Error("Failed to rewire downstream dependencies",
+				KeyTaskID, req.TaskID,
+				KeyStepID, newStep.ID,
+				"error", err,
+			)
+		}
+	}
+
+	// 10. Promote ready steps
+	promoted, err := ts.stepStore.PromoteReadySteps(req.TaskID)
+	if err != nil {
+		ts.logger.Error("Failed to promote ready steps after handoff",
+			KeyTaskID, req.TaskID,
+			"error", err,
+		)
+	}
+
+	// 11. Schedule if steps were promoted
+	if len(promoted) > 0 {
+		if err := ts.ScheduleReadySteps(ctx, req.TaskID); err != nil {
+			ts.logger.Error("Failed to schedule ready steps after handoff",
+				KeyTaskID, req.TaskID,
+				"error", err,
+			)
+		}
+	}
+
+	// 12. Publish event
+	ts.publishEvent("task.handoff_created", map[string]any{
+		KeyTaskID:    req.TaskID,
+		KeyStepID:    newStep.ID,
+		KeyAgentID:   req.ToAgentID,
+		"from_agent": req.FromAgentID,
+	})
+
+	ts.logger.Info("Handoff step created",
+		KeyTaskID,     req.TaskID,
+		KeyStepID,     newStep.ID,
+		KeyAgentID,    req.ToAgentID,
+		"from_step",   req.FromStepID,
+		"description", req.Description,
+	)
+
+	return nil
+}
+
+// rewireDownstreamDeps replaces the fromStepID dependency with newStepID in all
+// downstream steps. This ensures that steps that previously depended on the
+// from step now depend on the injected step instead.
+func (ts *TacticalScheduler) rewireDownstreamDeps(taskID, fromStepID, newStepID string) error {
+	allSteps, err := ts.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		return fmt.Errorf("failed to list steps for rewiring: %w", err)
+	}
+
+	rewired := 0
+	for _, ds := range allSteps {
+		// Skip the new step and the from step
+		if ds.ID == newStepID || ds.ID == fromStepID {
+			continue
+		}
+
+		// Check if this step depends on the from step
+		found := false
+		for i, dep := range ds.DependsOn {
+			if dep == fromStepID {
+				ds.DependsOn[i] = newStepID
+				found = true
+				break
+			}
+		}
+
+		if found {
+			if err := ts.stepStore.Update(ds); err != nil {
+				ts.logger.Error("Failed to update downstream step dependency",
+					KeyStepID, ds.ID,
+					"error", err,
+				)
+				continue
+			}
+			rewired++
+			ts.logger.Info("Rewired downstream dependency",
+				KeyStepID,    ds.ID,
+				"old_dep",    fromStepID,
+				"new_dep",    newStepID,
+				"task_id",    taskID,
+			)
+		}
+	}
+
+	if rewired > 0 {
+		ts.logger.Info("Rewired downstream dependencies",
+			KeyTaskID,    taskID,
+			"count",      rewired,
+			"from_step",  fromStepID,
+			"new_step",   newStepID,
+		)
+	}
+
+	return nil
+}
+
+// agentIDToToolHint maps an agent ID to the corresponding tool hint/intent type.
+func agentIDToToolHint(agentID string) string {
+	switch agentID {
+	case config.AgentIDCoder:
+		return string(IntentCode)
+	case config.AgentIDDebugger:
+		return string(IntentDebug)
+	case config.AgentIDAnalyst:
+		return string(IntentAnalyze)
+	case config.AgentIDCommitter:
+		return string(IntentGit)
+	case config.AgentIDScheduler:
+		return string(IntentSchedule)
+	case config.AgentIDPlanner:
+		return string(IntentPlan)
+	default:
+		return "chat"
+	}
+}

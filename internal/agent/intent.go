@@ -36,6 +36,9 @@ const (
 	// Pair channel (dual-agent conversation)
 	IntentPair IntentType = "pair"
 
+	// Collaboration (peer/differential modes)
+	IntentCollaborate IntentType = "collaborate"
+
 	// Skill invocation
 	IntentSkill IntentType = "skill"
 
@@ -57,7 +60,7 @@ func (t IntentType) Category() IntentCategory {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
 		IntentAnalyze, IntentSearch, IntentResearch:
 		return CategoryInline
-	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule, IntentPair:
+	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule, IntentPair, IntentCollaborate:
 		return CategoryDefer
 	case IntentCompound:
 		return CategoryDefer
@@ -83,7 +86,7 @@ func (t IntentType) DefaultAgent() string {
 		return config.AgentIDPlanner
 	case IntentAnalyze, IntentSearch, IntentResearch:
 		return config.AgentIDAnalyst
-	case IntentPair:
+	case IntentPair, IntentCollaborate:
 		return config.AgentIDAnalyst
 	case IntentGit:
 		return config.AgentIDCommitter
@@ -115,7 +118,7 @@ func (t IntentType) RequiresPlanning() bool {
 // ShouldCreateTask returns true if the intent should create a trackable task.
 func (t IntentType) ShouldCreateTask() bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound:
+	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound, IntentCollaborate:
 		return true
 	case IntentPair:
 		return false // pair sessions don't create step-based tasks
@@ -127,7 +130,7 @@ func (t IntentType) ShouldCreateTask() bool {
 // ShouldDispatchAsync returns true if the intent should be dispatched asynchronously.
 func (t IntentType) ShouldDispatchAsync(requiresPlanning bool) bool {
 	switch t {
-	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound, IntentPair:
+	case IntentCode, IntentDebug, IntentPlan, IntentGit, IntentCompound, IntentPair, IntentCollaborate:
 		return true
 	case IntentSchedule:
 		// Only dispatch async for schedule if it requires planning
@@ -143,7 +146,7 @@ func IsValidIntentType(s string) bool {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
-		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCompound:
+		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound:
 		return true
 	}
 	return false
@@ -186,6 +189,8 @@ func (t IntentType) Keywords() []string {
 		return []string{"/skill", "invoke", "run skill"}
 	case IntentPair:
 		return []string{"debate", "brainstorm", "explore", "discuss", "pair", "collaborate"}
+	case IntentCollaborate:
+		return []string{"collaborate", "pair program", "debate", "a/b test", "differential", "compare approaches"}
 	case IntentCompound:
 		return []string{"and also", "as well as", "plus"}
 	default:
