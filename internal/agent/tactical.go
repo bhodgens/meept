@@ -1335,8 +1335,22 @@ func (ts *TacticalScheduler) HandleHandoff(ctx context.Context, msg *models.BusM
 	}
 
 	// 5. Build accumulated context from handoff request
-	accumulatedContext := fmt.Sprintf("[Handoff from %s]: %s\nReason: %s",
-		req.FromAgentID, req.PartialResult, req.Reason)
+	var contextParts []string
+	if req.FromAgentID != "" || req.PartialResult != "" {
+		fromLabel := req.FromAgentID
+		if fromLabel == "" {
+			fromLabel = "unknown agent"
+		}
+		if req.PartialResult != "" {
+			contextParts = append(contextParts, fmt.Sprintf("[Handoff from %s]: %s", fromLabel, req.PartialResult))
+		} else {
+			contextParts = append(contextParts, fmt.Sprintf("[Handoff from %s]", fromLabel))
+		}
+	}
+	if req.Reason != "" {
+		contextParts = append(contextParts, fmt.Sprintf("Reason: %s", req.Reason))
+	}
+	accumulatedContext := strings.Join(contextParts, "\n")
 
 	// 6. Create new task step
 	// Use a high sequence number so the step sorts after existing steps

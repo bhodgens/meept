@@ -423,19 +423,18 @@ func TestRequestHandoffTool_Execute_NonStringArgs(t *testing.T) {
 	}
 }
 
-// --- SetFromAgentID ---
+// --- from_agent_id parameter ---
 
-func TestRequestHandoffTool_SetFromAgentID(t *testing.T) {
+func TestRequestHandoffTool_FromAgentIDParam(t *testing.T) {
 	bus := &mockHandoffBus{}
 	tool := NewRequestHandoffTool(bus, func(id string) bool { return id == "coder" })
 
-	tool.SetFromAgentID("analyst")
-
 	args := map[string]any{
-		"task_id":      "task-abc",
-		"from_step_id": "step-1",
-		"to_agent_id":  "coder",
-		"description":  "handoff with from agent",
+		"task_id":       "task-abc",
+		"from_step_id":  "step-1",
+		"from_agent_id": "analyst",
+		"to_agent_id":   "coder",
+		"description":   "handoff with from agent",
 	}
 
 	result, err := tool.Execute(context.Background(), args)

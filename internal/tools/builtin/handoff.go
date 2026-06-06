@@ -43,7 +43,6 @@ type HandoffResult struct {
 type RequestHandoffTool struct {
 	bus         handoffBus
 	agentExists func(agentID string) bool
-	fromAgentID string // optional: set via option to identify the calling agent
 }
 
 // NewRequestHandoffTool creates a new request_handoff tool.
@@ -55,11 +54,6 @@ func NewRequestHandoffTool(bus handoffBus, agentExist func(agentID string) bool)
 }
 
 func (t *RequestHandoffTool) Name() string { return "request_handoff" }
-
-// SetFromAgentID sets the agent ID that this tool will use in handoff payloads.
-func (t *RequestHandoffTool) SetFromAgentID(id string) {
-	t.fromAgentID = id
-}
 
 func (t *RequestHandoffTool) Category() string { return "platform" }
 
@@ -78,6 +72,10 @@ func (t *RequestHandoffTool) Parameters() llm.FunctionParameters {
 			"from_step_id": {
 				Type:        schemaTypeString,
 				Description: "The ID of the current step where the handoff originates.",
+			},
+			"from_agent_id": {
+				Type:        schemaTypeString,
+				Description: "Your agent ID (the agent requesting the handoff).",
 			},
 			"to_agent_id": {
 				Type:        schemaTypeString,
@@ -164,6 +162,7 @@ func (t *RequestHandoffTool) Execute(ctx context.Context, args map[string]any) (
 	}
 
 	// Extract optional fields
+	fromAgentID, _ := args["from_agent_id"].(string)
 	toolHint, _ := args["tool_hint"].(string)
 	reason, _ := args["reason"].(string)
 	partialResult, _ := args["partial_result"].(string)
@@ -173,7 +172,7 @@ func (t *RequestHandoffTool) Execute(ctx context.Context, args map[string]any) (
 	payload := HandoffPayload{
 		TaskID:        taskID,
 		FromStepID:    fromStepID,
-		FromAgentID:   t.fromAgentID,
+		FromAgentID:   fromAgentID,
 		ToAgentID:     toAgentID,
 		Description:   description,
 		ToolHint:      toolHint,
