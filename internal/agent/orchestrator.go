@@ -77,6 +77,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"collaboration.divergence": o.handleCollabDivergence,
 		"collaboration.result": o.handleCollabResult,
 		"collaboration.error": o.handleCollabError,
+		"collaboration.requested": o.handleCollabRequested,
 	}
 
 	for topic, handler := range topics {
@@ -480,5 +481,26 @@ func (o *Orchestrator) handleCollabError(_ context.Context, msg *models.BusMessa
 		"session_id", event.SessionID,
 		"phase", event.Phase,
 		"error", event.Error,
+	)
+}
+
+// handleCollabRequested handles agent-initiated collaboration request events.
+func (o *Orchestrator) handleCollabRequested(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		ParentSessionID string   `json:"parent_session_id"`
+		SessionID       string   `json:"session_id"`
+		Mode            string   `json:"mode"`
+		TaskDescription string   `json:"task_description"`
+		PreferredAgents []string `json:"preferred_agents"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse collaboration requested event", "error", err)
+		return
+	}
+	o.logger.Info("Collaboration requested by agent",
+		"parent_session_id", event.ParentSessionID,
+		"session_id", event.SessionID,
+		"mode", event.Mode,
+		"preferred_agents", event.PreferredAgents,
 	)
 }

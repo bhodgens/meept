@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 const (
@@ -19,7 +22,7 @@ type DifferentialDriver struct {
 	registry  *AgentRegistry
 	workspace *WorkspaceManager
 	pairMgr   *PairManager
-	bus       interface{}
+	bus       *bus.MessageBus
 	logger    *slog.Logger
 }
 
@@ -28,7 +31,7 @@ type DifferentialDriverDeps struct {
 	Registry    *AgentRegistry
 	Workspace   *WorkspaceManager
 	PairManager *PairManager
-	Bus         interface{}
+	Bus         *bus.MessageBus
 	Logger      *slog.Logger
 }
 
@@ -66,6 +69,13 @@ func (d *DifferentialDriver) Run(ctx context.Context, sess *CollaborationSession
 		"participants", sess.Participants,
 	)
 
+	d.publishEvent(sess.ID, TopicCollabSessionCreated, map[string]any{
+		"session_id":   sess.ID,
+		"mode":         "differential",
+		"participants": sess.Participants,
+		"task_id":      sess.TaskID,
+	})
+
 	startTime := time.Now()
 
 	// Phase 1: Fork
@@ -73,13 +83,22 @@ func (d *DifferentialDriver) Run(ctx context.Context, sess *CollaborationSession
 		sess.MarkFailed()
 		return nil, fmt.Errorf("phase 1 (fork) failed: %w", err)
 	}
+	d.publishEvent(sess.ID, TopicCollabPhaseCompleted, map[string]any{
+		"session_id": sess.ID, "phase": "fork", "workspace": sess.Workspace,
+	})
 
 	// Phase 2: Implement & Review
 	branchAOK, branchBOK, err := d.phaseImplement(ctx, sess)
 	if err != nil {
 		sess.MarkFailed()
+		d.publishEvent(sess.ID, TopicCollabError, map[string]any{
+			"session_id": sess.ID, "error": err.Error(), "phase": "implement",
+		})
 		return nil, fmt.Errorf("phase 2 (implement) failed: %w", err)
 	}
+	d.publishEvent(sess.ID, TopicCollabPhaseCompleted, map[string]any{
+		"session_id": sess.ID, "phase": "implement", "branch_a_ok": branchAOK, "branch_b_ok": branchBOK,
+	})
 
 	// Phase 3: Validate Checkpoint
 	checkpointResult, err := d.phaseValidate(ctx, sess, branchAOK, branchBOK)
@@ -90,6 +109,9 @@ func (d *DifferentialDriver) Run(ctx context.Context, sess *CollaborationSession
 
 	if !checkpointResult.AnyOK {
 		sess.MarkFailed()
+		d.publishEvent(sess.ID, TopicCollabDivergence, map[string]any{
+			"session_id": sess.ID, "reason": "both branches failed",
+		})
 		return &CollaborationResult{
 			SessionID: sess.ID,
 			State:     SessionFailed,
@@ -99,16 +121,41 @@ func (d *DifferentialDriver) Run(ctx context.Context, sess *CollaborationSession
 		}, nil
 	}
 
+	if checkpointResult.FallbackToA || checkpointResult.FallbackToB {
+		d.publishEvent(sess.ID, TopicCollabDivergence, map[string]any{
+			"session_id":    sess.ID,
+			"fallback_to_a": checkpointResult.FallbackToA,
+			"fallback_to_b": checkpointResult.FallbackToB,
+		})
+	}
+
+	d.publishEvent(sess.ID, TopicCollabPhaseCompleted, map[string]any{
+		"session_id": sess.ID, "phase": "validate",
+		"any_ok": checkpointResult.AnyOK,
+	})
+
 	// Phase 4: Differentiate & Synthesize
 	result, err := d.phaseDifferentiate(ctx, sess, checkpointResult)
 	if err != nil {
 		sess.MarkFailed()
+		d.publishEvent(sess.ID, TopicCollabError, map[string]any{
+			"session_id": sess.ID, "error": err.Error(), "phase": "differentiate",
+		})
 		return nil, fmt.Errorf("phase 4 (differentiate) failed: %w", err)
 	}
 
 	sess.MarkConverged()
 	result.Duration = time.Since(startTime)
 	result.State = SessionConverged
+
+	d.publishEvent(sess.ID, TopicCollabResult, map[string]any{
+		"session_id":  sess.ID,
+		"state":       string(SessionConverged),
+		"turn_count":  result.TurnCount,
+		"workspace":   sess.Workspace,
+		"duration_ms": result.Duration.Milliseconds(),
+	})
+
 	return result, nil
 }
 
@@ -296,4 +343,18 @@ func (d *DifferentialDriver) buildDifferentiatorPrompt(sess *CollaborationSessio
 	prompt += "- Test coverage: Which has better coverage?\n"
 
 	return prompt
+}
+
+// publishEvent publishes a collaboration event to the message bus.
+func (d *DifferentialDriver) publishEvent(sessionID, topic string, data map[string]any) {
+	if d.bus == nil {
+		return
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "differential-driver", data)
+	if err != nil {
+		d.logger.Error("Failed to create differential bus message", "error", err)
+		return
+	}
+	msg.Topic = topic
+	d.bus.Publish(topic, msg)
 }

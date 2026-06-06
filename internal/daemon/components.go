@@ -73,6 +73,9 @@ type Components struct {
 	Orchestrator  *agent.Orchestrator
 	ReviewManager *agent.ReviewManager
 
+	// Collaboration engine for pair programming and differential modes
+	CollaborationEngine *agent.CollaborationEngine
+
 	// Agent validation watchdog
 	Watchdog              *agent.Watchdog
 	HallucinationDetector *agent.HallucinationDetector
@@ -1152,15 +1155,53 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 				Logger:   logger.With("component", "bus-pair-orchestrator"),
 			})
 
+			// Create collaboration engine with pair programming and differential drivers
+			collabPairMgr := agent.NewPairManager(agent.PairManagerConfig{
+				Registry:  c.AgentRegistry,
+				TaskStore: orchTaskStore,
+				StepStore: stepStore,
+				Bus:       msgBus,
+				Logger:    logger.With("component", "collab-pair-manager"),
+			})
+
+			collabWorkspace := agent.NewWorkspaceManager(agent.DefaultWorkspaceConfig(), logger.With("component", "collab-workspace"))
+
+			collabEngine := agent.NewCollaborationEngine(agent.CollaborationEngineDeps{
+				Bus:         msgBus,
+				Registry:    c.AgentRegistry,
+				Workspaces:  collabWorkspace,
+				PairManager: collabPairMgr,
+				Logger:      logger.With("component", "collaboration-engine"),
+			})
+			collabEngine.RegisterMode("pair_programming", agent.NewPairProgrammingDriver(agent.PairProgrammingDriverDeps{
+				Registry:  c.AgentRegistry,
+				Workspace: collabWorkspace,
+				Bus:       msgBus,
+				Logger:    logger.With("component", "pair-programming-driver"),
+			}))
+			collabEngine.RegisterMode("differential", agent.NewDifferentialDriver(agent.DifferentialDriverDeps{
+				Registry:    c.AgentRegistry,
+				Workspace:   collabWorkspace,
+				PairManager: collabPairMgr,
+				Bus:         msgBus,
+				Logger:      logger.With("component", "differential-driver"),
+			}))
+			c.CollaborationEngine = collabEngine
+			logger.Info("Collaboration engine initialized", "modes", "pair_programming,differential")
+
 			c.Orchestrator = agent.NewOrchestrator(agent.OrchestratorDeps{
 				Strategic:           strategicPlanner,
 				Tactical:            tacticalScheduler,
 				BusPairOrchestrator: busPairOrchestrator,
+				CollaborationEngine: collabEngine,
 				Bus:                 msgBus,
 				Logger:              logger.With("component", "orchestrator"),
 			})
 
 			logger.Info("Orchestrator initialized with strategic and tactical layers")
+
+			// Register collaboration tools (workspace_yield and initiate_collaboration)
+			registerCollaborationTools(c.ToolRegistry, collabEngine, logger)
 		}
 	} else {
 		// Create chat handler without dispatcher (single-agent mode)
@@ -2155,6 +2196,36 @@ func registerTemplateTools(
 	registry.Register(builtin.NewTemplateClearTool(templateRegistry))
 
 	logger.Debug("Registered template tools", "template_count", templateRegistry.Count())
+}
+
+// registerCollaborationTools registers workspace_yield and initiate_collaboration tools,
+// wiring their callbacks into the CollaborationEngine.
+func registerCollaborationTools(
+	registry *tools.Registry,
+	collabEngine *agent.CollaborationEngine,
+	logger *slog.Logger,
+) {
+	if collabEngine == nil {
+		logger.Debug("Collaboration tools not registered: no collaboration engine")
+		return
+	}
+
+	// Workspace yield tool for pair programming turn management
+	yieldTool := builtin.NewWorkspaceYieldTool()
+	yieldTool.SetCallback(func(ctx context.Context, action, feedback string) error {
+		// The yield callback is a no-op at the tool level; the PairProgrammingDriver
+		// manages turn state directly via its own TurnManager. The callback exists
+		// so the driver can intercept yields when wired through the engine.
+		return nil
+	})
+	registry.Register(yieldTool)
+
+	// Initiate collaboration tool for agent-initiated sessions
+	collabTool := builtin.NewInitiateCollaborationTool()
+	collabTool.SetCallback(collabEngine.HandleInitiatedCollaboration)
+	registry.Register(collabTool)
+
+	logger.Debug("Registered collaboration tools", "tools", "workspace_yield,initiate_collaboration")
 }
 
 // registerMCPTools registers all tools from MCP servers with the tool registry.
