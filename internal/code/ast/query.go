@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
@@ -100,6 +101,106 @@ func (q *QueryExecutor) RunQueryWithLanguage(ctx context.Context, filePath strin
 	}
 
 	return q.RunQuery(ctx, source, lang, queryPattern)
+}
+
+// RunQueryWithRule executes a query using an ast-grep style YAML rule.
+func (q *QueryExecutor) RunQueryWithRule(ctx context.Context, source []byte, lang Language, rule *QueryRule) (*QueryResult, error) {
+	result, err := q.RunQuery(ctx, source, lang, rule.Pattern)
+	if err != nil {
+		return nil, err
+	}
+	result.RuleID = rule.ID
+
+	if len(rule.Constraints) == 0 && len(rule.Transform) == 0 {
+		return result, nil
+	}
+
+	// Apply constraints and transforms
+	filtered := make([]QueryMatch, 0, len(result.Matches))
+	for _, match := range result.Matches {
+		checks := make([]MatchCheck, 0, len(match.Captures))
+		for _, capture := range match.Captures {
+			checks = append(checks, MatchCheck{
+				Name:     capture.Name,
+				Text:     capture.Node.Text,
+				NodeType: capture.Node.Type,
+			})
+		}
+
+		if !rule.ApplyConstraints(checks) {
+			continue
+		}
+
+		// Apply transforms to captured node text
+		if len(rule.Transform) > 0 {
+			transforms := rule.ApplyTransforms(checks)
+			for i := range match.Captures {
+				name := match.Captures[i].Name
+				if transformed, ok := transforms[name]; ok {
+					match.Captures[i].Node.Text = transformed
+				}
+			}
+		}
+
+		filtered = append(filtered, match)
+	}
+
+	result.Matches = filtered
+	result.Count = len(filtered)
+	return result, nil
+}
+
+// RunQueryWithContext executes a query and returns matches with surrounding context.
+func (q *QueryExecutor) RunQueryWithContext(ctx context.Context, source []byte, lang Language, queryPattern string, contextLines int) ([]ContextMatch, error) {
+	result, err := q.RunQuery(ctx, source, lang, queryPattern)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(source), "\n")
+	var matches []ContextMatch
+
+	for _, m := range result.Matches {
+		if len(m.Captures) == 0 {
+			continue
+		}
+
+		// Get the overall range of the match
+		startLine := m.Captures[0].Node.Range.StartLine
+		endLine := m.Captures[0].Node.Range.EndLine
+		for _, c := range m.Captures[1:] {
+			if c.Node.Range.StartLine < startLine {
+				startLine = c.Node.Range.StartLine
+			}
+			if c.Node.Range.EndLine > endLine {
+				endLine = c.Node.Range.EndLine
+			}
+		}
+
+		beforeStart := max(0, startLine-contextLines)
+		afterEnd := min(len(lines), endLine+contextLines+1)
+
+		cm := ContextMatch{
+			Match:         m,
+			BeforeContext: make([]string, 0),
+			AfterContext:  make([]string, 0),
+			MatchedLines:  make([]string, 0),
+		}
+
+		for i := beforeStart; i < startLine; i++ {
+			cm.BeforeContext = append(cm.BeforeContext, lines[i])
+		}
+		for i := startLine; i <= endLine && i < len(lines); i++ {
+			cm.MatchedLines = append(cm.MatchedLines, lines[i])
+		}
+		for i := endLine + 1; i < afterEnd && i < len(lines); i++ {
+			cm.AfterContext = append(cm.AfterContext, lines[i])
+		}
+
+		matches = append(matches, cm)
+	}
+
+	return matches, nil
 }
 
 // CommonQueries provides pre-built queries for common use cases.
