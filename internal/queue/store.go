@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
@@ -49,68 +50,130 @@ func NewStore(dbPath string, logger *slog.Logger) (*Store, error) {
 	return store, nil
 }
 
+// baseSchema creates the core job queue tables.
+const baseSchema = `
+CREATE TABLE IF NOT EXISTS jobs (
+	id            TEXT PRIMARY KEY,
+	task_id       TEXT,
+	agent_id      TEXT,
+	type          TEXT NOT NULL,
+	priority      INTEGER DEFAULT 2,
+	state         TEXT DEFAULT 'pending',
+	payload       TEXT NOT NULL,
+	required_caps TEXT DEFAULT '[]',
+	max_retries   INTEGER DEFAULT 3,
+	retry_count   INTEGER DEFAULT 0,
+	claimed_by    TEXT,
+	result        TEXT,
+	error         TEXT,
+	created_at    TEXT NOT NULL,
+	updated_at    TEXT NOT NULL,
+	due_at        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_state_priority ON jobs(state, priority DESC, created_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_task_id ON jobs(task_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_claimed_by ON jobs(claimed_by);
+CREATE INDEX IF NOT EXISTS idx_jobs_agent_id ON jobs(agent_id);
+
+CREATE TABLE IF NOT EXISTS dead_letter (
+	id            TEXT PRIMARY KEY,
+	task_id       TEXT,
+	agent_id      TEXT,
+	type          TEXT NOT NULL,
+	priority      INTEGER,
+	payload       TEXT NOT NULL,
+	required_caps TEXT,
+	max_retries   INTEGER,
+	retry_count   INTEGER,
+	error         TEXT,
+	created_at    TEXT NOT NULL,
+	died_at       TEXT NOT NULL
+);
+
+-- queued_followups table for persisted follow-up messages (Phase 4).
+CREATE TABLE IF NOT EXISTS queued_followups (
+	conversation_id TEXT NOT NULL,
+	message_id      TEXT PRIMARY KEY,
+	content         TEXT NOT NULL,
+	queue_type      TEXT NOT NULL,
+	source          TEXT NOT NULL,
+	created_at      TEXT DEFAULT (datetime('now')),
+	updated_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_queued_followups_conversation
+	ON queued_followups(conversation_id);
+`
+
+// clusterSchema extends the base schema with cluster support.
+// ALTER TABLE statements are wrapped to tolerate duplicate-column errors
+// so that applying this schema multiple times is safe.
+const clusterSchema = `
+-- Add cluster fields to jobs table
+ALTER TABLE jobs ADD COLUMN cluster_task_id TEXT;
+ALTER TABLE jobs ADD COLUMN managing_node TEXT;
+ALTER TABLE jobs ADD COLUMN claimed_by_node TEXT;
+ALTER TABLE jobs ADD COLUMN timeout_at TIMESTAMP;
+ALTER TABLE jobs ADD COLUMN last_heartbeat_at TIMESTAMP;
+ALTER TABLE jobs ADD COLUMN payload_full BLOB;
+ALTER TABLE jobs ADD COLUMN is_replica INTEGER DEFAULT 0;
+
+-- Create cluster_events table for gossip replication
+CREATE TABLE IF NOT EXISTS cluster_events (
+	event_id TEXT PRIMARY KEY,
+	node_id TEXT NOT NULL,
+	event_type TEXT NOT NULL,
+	timestamp INTEGER NOT NULL,
+	vector_clock TEXT NOT NULL,
+	payload BLOB NOT NULL,
+	signature BLOB NOT NULL,
+	received_at INTEGER NOT NULL,
+	synced INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_type ON cluster_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_node ON cluster_events(node_id);
+CREATE INDEX IF NOT EXISTS idx_events_time ON cluster_events(timestamp);
+
+-- Create cluster_members cache table (populated from git sync)
+CREATE TABLE IF NOT EXISTS cluster_members (
+	node_id TEXT PRIMARY KEY,
+	node_name TEXT,
+	wireguard_pub TEXT NOT NULL,
+	signing_pub BLOB NOT NULL,
+	endpoint TEXT NOT NULL,
+	capabilities TEXT,
+	cluster_ip TEXT,
+	joined_at INTEGER NOT NULL,
+	last_heartbeat INTEGER NOT NULL,
+	status TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_members_status ON cluster_members(status);
+`
+
+// clusterColumnNames lists the cluster-specific ALTER TABLE columns
+// in the same order as they appear in clusterSchema, for idempotency checks.
+var clusterColumnNames = []string{
+	"cluster_task_id", "managing_node", "claimed_by_node",
+	"timeout_at", "last_heartbeat_at", "payload_full", "is_replica",
+}
+
 func (s *Store) migrate() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS jobs (
-		id            TEXT PRIMARY KEY,
-		task_id       TEXT,
-		agent_id      TEXT,
-		type          TEXT NOT NULL,
-		priority      INTEGER DEFAULT 2,
-		state         TEXT DEFAULT 'pending',
-		payload       TEXT NOT NULL,
-		required_caps TEXT DEFAULT '[]',
-		max_retries   INTEGER DEFAULT 3,
-		retry_count   INTEGER DEFAULT 0,
-		claimed_by    TEXT,
-		result        TEXT,
-		error         TEXT,
-		created_at    TEXT NOT NULL,
-		updated_at    TEXT NOT NULL,
-		due_at        TEXT
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_jobs_state_priority ON jobs(state, priority DESC, created_at);
-	CREATE INDEX IF NOT EXISTS idx_jobs_task_id ON jobs(task_id);
-	CREATE INDEX IF NOT EXISTS idx_jobs_claimed_by ON jobs(claimed_by);
-	CREATE INDEX IF NOT EXISTS idx_jobs_agent_id ON jobs(agent_id);
-
-	CREATE TABLE IF NOT EXISTS dead_letter (
-		id            TEXT PRIMARY KEY,
-		task_id       TEXT,
-		agent_id      TEXT,
-		type          TEXT NOT NULL,
-		priority      INTEGER,
-		payload       TEXT NOT NULL,
-		required_caps TEXT,
-		max_retries   INTEGER,
-		retry_count   INTEGER,
-		error         TEXT,
-		created_at    TEXT NOT NULL,
-		died_at       TEXT NOT NULL
-	);
-
-	-- queued_followups table for persisted follow-up messages (Phase 4).
-	CREATE TABLE IF NOT EXISTS queued_followups (
-		conversation_id TEXT NOT NULL,
-		message_id      TEXT PRIMARY KEY,
-		content         TEXT NOT NULL,
-		queue_type      TEXT NOT NULL,
-		source          TEXT NOT NULL,
-		created_at      TEXT DEFAULT (datetime('now')),
-		updated_at      TEXT DEFAULT (datetime('now'))
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_queued_followups_conversation
-		ON queued_followups(conversation_id);
-	`
-
-	_, err := s.db.Exec(schema)
-	if err != nil {
-		return err
+	// Apply base schema
+	if _, err := s.db.Exec(baseSchema); err != nil {
+		return fmt.Errorf("failed to apply base schema: %w", err)
 	}
 
-	// Add columns if they don't exist (for migrations from older schemas)
+	// Apply cluster schema: run individual ALTER statements and ignore
+	// duplicate-column errors so repeated migrations are safe.
+	if err := s.applyClusterSchema(); err != nil {
+		s.logger.Warn("Cluster schema migration had errors (may be partial)", "error", err)
+		// Don't fail the store -- non-cluster usage must still work.
+	}
+
+	// Legacy migrations: add columns if they don't exist (for older database files)
 	migrations := []string{
 		"ALTER TABLE jobs ADD COLUMN agent_id TEXT",
 		"ALTER TABLE dead_letter ADD COLUMN agent_id TEXT",
@@ -119,12 +182,104 @@ func (s *Store) migrate() error {
 
 	for _, m := range migrations {
 		if _, err := s.db.Exec(m); err != nil {
-			s.logger.Warn("Migration step failed (column may already exist)",
+			s.logger.Warn("Legacy migration step failed (column may already exist)",
 				"migration", m, "error", err)
 		}
 	}
 
 	return nil
+}
+
+// applyClusterSchema applies the cluster portion of clusterSchema one
+// statement at a time, skipping duplicate-column errors and running
+// the CREATE TABLE / CREATE INDEX statements via Exec as-is (they use
+// IF NOT EXISTS so they are naturally idempotent).
+func (s *Store) applyClusterSchema() error {
+	// First, check which cluster columns already exist.
+	var existingCols []string
+	rows, err := s.db.Query(`PRAGMA table_info(jobs)`)
+	if err == nil {
+		for rows.Next() {
+			var (
+				cid        int
+				name       string
+				ctype      string
+				notnull    int
+				dfltValue  sql.NullString
+				pk         int
+			)
+			if err2 := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err2 == nil {
+				existingCols = append(existingCols, name)
+			}
+		}
+		rows.Close()
+	}
+
+	// Filter out existing columns from ALTER statements.
+	altered := strings.Builder{}
+	for _, col := range clusterColumnNames {
+		if has(existingCols, col) {
+			continue
+		}
+		altered.WriteString(fmt.Sprintf("ALTER TABLE jobs ADD COLUMN %s;\n", col))
+	}
+
+	// Run the filtered ALTER statements.
+	if altered.Len() > 0 {
+		if _, err := s.db.Exec(altered.String()); err != nil {
+			// Return the error for logging; callers can decide.
+			return err
+		}
+	}
+
+	// Run CREATE TABLE / CREATE INDEX statements (they use IF NOT EXISTS).
+	createStmts := []string{
+		`CREATE TABLE IF NOT EXISTS cluster_events (
+			event_id TEXT PRIMARY KEY,
+			node_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			timestamp INTEGER NOT NULL,
+			vector_clock TEXT NOT NULL,
+			payload BLOB NOT NULL,
+			signature BLOB NOT NULL,
+			received_at INTEGER NOT NULL,
+			synced INTEGER DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_type ON cluster_events(event_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_node ON cluster_events(node_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_time ON cluster_events(timestamp)`,
+		`CREATE TABLE IF NOT EXISTS cluster_members (
+			node_id TEXT PRIMARY KEY,
+			node_name TEXT,
+			wireguard_pub TEXT NOT NULL,
+			signing_pub BLOB NOT NULL,
+			endpoint TEXT NOT NULL,
+			capabilities TEXT,
+			cluster_ip TEXT,
+			joined_at INTEGER NOT NULL,
+			last_heartbeat INTEGER NOT NULL,
+			status TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_members_status ON cluster_members(status)`,
+	}
+
+	for _, stmt := range createStmts {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// has reports whether slice contains the given element.
+func has(slice []string, elem string) bool {
+	for _, s := range slice {
+		if s == elem {
+			return true
+		}
+	}
+	return false
 }
 
 // Insert adds a new job to the queue.
