@@ -361,6 +361,41 @@ Body.
 	}
 }
 
+func TestDiscovery_FourTiers(t *testing.T) {
+	tiers := DefaultTiers()
+	if len(tiers) != 4 {
+		t.Errorf("DefaultTiers returned %d tiers, want 4", len(tiers))
+	}
+
+	if !DefaultTiersContainsClaude() {
+		t.Error("DefaultTiers should contain a Claude skills tier")
+	}
+
+	// Verify the Claude tier has the correct priority and path suffix.
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Cannot determine home directory")
+	}
+
+	expectedPath := filepath.Join(homeDir, ".claude", "skills")
+	found := false
+	for _, tier := range tiers {
+		if tier.Priority == PriorityClaude {
+			if tier.Path != expectedPath {
+				t.Errorf("Claude tier path = %q, want %q", tier.Path, expectedPath)
+			}
+			if tier.Priority != 2 {
+				t.Errorf("Claude tier priority = %d, want 2", tier.Priority)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("No tier with PriorityClaude found in DefaultTiers")
+	}
+}
+
 func TestIsSkillFile(t *testing.T) {
 	tests := []struct {
 		name string

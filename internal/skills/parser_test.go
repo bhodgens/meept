@@ -139,6 +139,93 @@ Body here.
 	}
 }
 
+func TestParseSkillText_CamelCaseFieldNames(t *testing.T) {
+	text := `---
+name: claude-skill
+description: Skill with camelCase field names
+allowedTools: [shell, file]
+riskLevel: high
+maxIterations: 3
+maxTokens: 500
+---
+
+Instructions for a Claude-format skill.
+`
+
+	skill, err := ParseSkillText(text)
+	if err != nil {
+		t.Fatalf("ParseSkillText failed: %v", err)
+	}
+
+	if skill.Name != "claude-skill" {
+		t.Errorf("Name = %q, want claude-skill", skill.Name)
+	}
+
+	if skill.RiskLevel != "high" {
+		t.Errorf("RiskLevel = %q, want high", skill.RiskLevel)
+	}
+
+	if skill.MaxIterations != 3 {
+		t.Errorf("MaxIterations = %d, want 3", skill.MaxIterations)
+	}
+
+	if skill.MaxTokens == nil || *skill.MaxTokens != 500 {
+		t.Errorf("MaxTokens = %v, want 500", skill.MaxTokens)
+	}
+
+	if len(skill.AllowedTools) != 2 {
+		t.Errorf("AllowedTools length = %d, want 2", len(skill.AllowedTools))
+	} else if skill.AllowedTools[0] != "shell" || skill.AllowedTools[1] != "file" {
+		t.Errorf("AllowedTools = %v, want [shell, file]", skill.AllowedTools)
+	}
+}
+
+func TestParseSkillText_TriggerFieldMappedToTags(t *testing.T) {
+	text := `---
+name: triggered-skill
+description: Skill with a trigger
+trigger: /graphify
+---
+
+When triggered, do graph things.
+`
+
+	skill, err := ParseSkillText(text)
+	if err != nil {
+		t.Fatalf("ParseSkillText failed: %v", err)
+	}
+
+	if skill.Name != "triggered-skill" {
+		t.Errorf("Name = %q, want triggered-skill", skill.Name)
+	}
+
+	if !skill.HasTag("/graphify") {
+		t.Error("Trigger field should be mapped to Tags; expected tag '/graphify'")
+	}
+}
+
+func TestParseSkillText_TriggerFieldNotDuplicated(t *testing.T) {
+	text := `---
+name: triggered-skill
+description: Skill with trigger already in tags
+trigger: /graphify
+tags: [/graphify, another-tag]
+---
+
+Instructions.
+`
+
+	skill, err := ParseSkillText(text)
+	if err != nil {
+		t.Fatalf("ParseSkillText failed: %v", err)
+	}
+
+	// Should have 2 tags: /graphify and another-tag (trigger not duplicated).
+	if len(skill.Tags) != 2 {
+		t.Errorf("Tags length = %d, want 2 (trigger should not be duplicated)", len(skill.Tags))
+	}
+}
+
 func TestParseSkillText_NoFrontmatter(t *testing.T) {
 	text := `# Just a regular markdown file
 

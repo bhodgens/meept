@@ -278,6 +278,47 @@ func parseMetadata(frontmatter string) (*SkillMetadata, error) {
 		meta.MaxTokens = altMeta.MaxTokens
 	}
 
+	// Handle Claude Code camelCase field names (allowedTools, riskLevel,
+	// maxIterations, maxTokens). The hyphen/underscore forms are already
+	// handled above; this covers the camelCase variant used by some Claude
+	// skill authors.
+	var camelMeta struct {
+		AllowedTools  []string `yaml:"allowedTools"`
+		RiskLevel     string   `yaml:"riskLevel"`
+		MaxIterations int      `yaml:"maxIterations"`
+		MaxTokens     *int     `yaml:"maxTokens"`
+	}
+	if err := yaml.Unmarshal([]byte(frontmatter), &camelMeta); err != nil {
+		return nil, fmt.Errorf("parse camel skill metadata: %w", err)
+	}
+
+	if len(meta.AllowedTools) == 0 && len(camelMeta.AllowedTools) > 0 {
+		meta.AllowedTools = camelMeta.AllowedTools
+	}
+	if meta.RiskLevel == "" && camelMeta.RiskLevel != "" {
+		meta.RiskLevel = camelMeta.RiskLevel
+	}
+	if meta.MaxIterations == 0 && camelMeta.MaxIterations != 0 {
+		meta.MaxIterations = camelMeta.MaxIterations
+	}
+	if meta.MaxTokens == nil && camelMeta.MaxTokens != nil {
+		meta.MaxTokens = camelMeta.MaxTokens
+	}
+
+	// Map Claude's "trigger" field into Tags if present and not already there.
+	if meta.Trigger != "" {
+		for _, tag := range meta.Tags {
+			if tag == meta.Trigger {
+				meta.Trigger = "" // already present, nothing to do
+				break
+			}
+		}
+		if meta.Trigger != "" {
+			meta.Tags = append(meta.Tags, meta.Trigger)
+		}
+		meta.Trigger = ""
+	}
+
 	return &meta, nil
 }
 

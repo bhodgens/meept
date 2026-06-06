@@ -11,6 +11,7 @@ import "slices"
 const (
 	PriorityProject = 0 // .meept/skills/ (project-local)
 	PriorityUser    = 1 // ~/.meept/skills/ (user-global)
+	PriorityClaude  = 2 // ~/.claude/skills/ (Claude Code skills)
 	PrioritySystem  = 2 // ~/.config/meept/skills/ (system-wide)
 )
 
@@ -109,6 +110,9 @@ type SkillMetadata struct {
 	Temperature   *float64          `yaml:"temperature"`
 	MaxTokens     *int              `yaml:"max-tokens"`
 	MCPServers    []MCPServerConfig `yaml:"mcp-servers"`
+
+	// Claude-specific fields (parsed separately, merged into Tags).
+	Trigger string `yaml:"trigger"`
 }
 
 // DefaultMetadata returns a SkillMetadata with sensible defaults.
