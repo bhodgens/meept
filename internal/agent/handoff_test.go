@@ -965,3 +965,78 @@ func TestTacticalScheduler_HandleHandoff_AmendmentPathRejected(t *testing.T) {
 		t.Errorf("expected 1 step (from step only), got %d", len(steps))
 	}
 }
+
+func TestTacticalScheduler_HandleHandoff_AmendmentFallbackToDirect(t *testing.T) {
+	// When handoffUseAmendment is true but amendmentMgr is nil,
+	// it should fall through to the direct creation path without error.
+	taskStore, stepStore := newTestTaskAndStepStore(t)
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tk := task.NewTask("task-fallback-1", "amendment fallback test")
+	tk.TotalJobs = 1
+	if err := taskStore.Create(tk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	fromStep := task.NewTaskStep(tk.ID, "initial step", 1)
+	fromStep.State = task.StepCompleted
+	if err := stepStore.Create(fromStep); err != nil {
+		t.Fatalf("failed to create from step: %v", err)
+	}
+
+	// Amendment enabled but no manager — should fall through to direct path
+	scheduler := NewTacticalScheduler(TacticalSchedulerConfig{
+		StepStore:           stepStore,
+		TaskStore:           taskStore,
+		Queue:               &mockQueue{},
+		Bus:                 msgBus,
+		Logger:              slogDiscardLogger(),
+		MaxHandoffSteps:     5,
+		HandoffUseAmendment: true,
+		AmendmentManager:    nil, // nil manager triggers fallback
+	})
+
+	req := HandoffRequest{
+		TaskID:       tk.ID,
+		FromStepID:   fromStep.ID,
+		FromAgentID:  config.AgentIDCoder,
+		ToAgentID:    config.AgentIDDebugger,
+		Description:  "Fallback to direct creation",
+		Reason:       "amendment manager unavailable",
+		InjectAfter:   true,
+	}
+
+	msg := handoffBusMsg(req)
+	err := scheduler.HandleHandoff(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected fallback to direct path, got error: %v", err)
+	}
+
+	// Verify step was created via direct path
+	steps, err := stepStore.ListByTaskID(tk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("expected 2 steps (from + created), got %d", len(steps))
+	}
+
+	// Find the new step
+	var created *task.TaskStep
+	for _, s := range steps {
+		if s.ID != fromStep.ID {
+			created = s
+			break
+		}
+	}
+	if created == nil {
+		t.Fatal("created step not found")
+	}
+	if created.Description != "Fallback to direct creation" {
+		t.Errorf("unexpected description: %q", created.Description)
+	}
+	if created.AccumulatedContext == "" {
+		t.Error("expected accumulated context to be set")
+	}
+}
