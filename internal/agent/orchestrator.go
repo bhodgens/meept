@@ -18,8 +18,9 @@ type Orchestrator struct {
 	pairManager         *PairManager
 	busPairOrchestrator *PairOrchestrator    // bus-channel-based agent pairing (Option C)
 	planManager         *plan.PlanManager    // plan system integration for progress tracking
-	bus                 *bus.MessageBus
-	logger              *slog.Logger
+	bus                  *bus.MessageBus
+	logger               *slog.Logger
+	collaborationEngine  *CollaborationEngine     // optional: enables agent collaboration modes
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -32,6 +33,7 @@ type OrchestratorDeps struct {
 	PairManager         *PairManager
 	BusPairOrchestrator *PairOrchestrator    // optional: enables channel-based pairing (Option C)
 	PlanManager         *plan.PlanManager    // optional: plan system integration
+	CollaborationEngine *CollaborationEngine     // optional: enables agent collaboration modes
 	Bus                 *bus.MessageBus
 	Logger              *slog.Logger
 }
@@ -48,6 +50,7 @@ func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
 		pairManager:         deps.PairManager,
 		busPairOrchestrator: deps.BusPairOrchestrator,
 		planManager:         deps.PlanManager,
+		collaborationEngine: deps.CollaborationEngine,
 		bus:                 deps.Bus,
 		logger:              deps.Logger,
 	}
@@ -68,6 +71,11 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"pair.converged":        o.handlePairConverged,
 		"pair.exhausted":        o.handlePairExhausted,
 		"pair.round_failed":     o.handlePairRoundFailed,
+		"collaboration.session_created": o.handleCollabSessionCreated,
+		"collaboration.consensus_reached": o.handleCollabConsensus,
+		"collaboration.divergence": o.handleCollabDivergence,
+		"collaboration.result": o.handleCollabResult,
+		"collaboration.error": o.handleCollabError,
 	}
 
 	for topic, handler := range topics {
@@ -374,6 +382,95 @@ func (o *Orchestrator) handlePairRoundFailed(_ context.Context, msg *models.BusM
 		"session_id", event.SessionID,
 		KeyTaskID, event.TaskID,
 		"round", event.Round,
+		"phase", event.Phase,
+		"error", event.Error,
+	)
+}
+
+// handleCollabSessionCreated handles collaboration session creation events.
+func (o *Orchestrator) handleCollabSessionCreated(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID    string   `json:"session_id"`
+		Mode         string   `json:"mode"`
+		Participants []string `json:"participants"`
+		TaskID       string   `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse collaboration session created event", "error", err)
+		return
+	}
+	if o.collaborationEngine != nil {
+		o.logger.Info("Collaboration session created",
+			"session_id", event.SessionID,
+			"mode", event.Mode,
+			"participants", event.Participants,
+			KeyTaskID, event.TaskID,
+		)
+	}
+}
+
+// handleCollabConsensus handles collaboration consensus reached events.
+func (o *Orchestrator) handleCollabConsensus(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID string `json:"session_id"`
+		Turns     int    `json:"turns"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse collaboration consensus event", "error", err)
+		return
+	}
+	o.logger.Info("Collaboration consensus reached",
+		"session_id", event.SessionID,
+		"turns", event.Turns,
+	)
+}
+
+// handleCollabDivergence handles collaboration divergence events.
+func (o *Orchestrator) handleCollabDivergence(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse collaboration divergence event", "error", err)
+		return
+	}
+	o.logger.Warn("Collaboration divergence detected",
+		"session_id", event.SessionID,
+	)
+}
+
+// handleCollabResult handles collaboration result events.
+func (o *Orchestrator) handleCollabResult(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID string `json:"session_id"`
+		State     string `json:"state"`
+		TurnCount int    `json:"turn_count"`
+		Workspace string `json:"workspace,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse collaboration result event", "error", err)
+		return
+	}
+	o.logger.Info("Collaboration result",
+		"session_id", event.SessionID,
+		"state", event.State,
+		"turns", event.TurnCount,
+	)
+}
+
+// handleCollabError handles collaboration error events.
+func (o *Orchestrator) handleCollabError(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID string `json:"session_id"`
+		Error     string `json:"error"`
+		Phase     string `json:"phase,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse collaboration error event", "error", err)
+		return
+	}
+	o.logger.Error("Collaboration error",
+		"session_id", event.SessionID,
 		"phase", event.Phase,
 		"error", event.Error,
 	)
