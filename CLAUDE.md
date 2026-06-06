@@ -332,7 +332,8 @@ Agents discover and delegate to each other using platform tools:
 - `platform_agents`: List available agents and their capabilities
 - `platform_status`: Get platform health status
 - `platform_tools`: List registered tools
-- `delegate_task`: Route a task to a specific agent
+- `delegate_task`: Route a task to a specific agent (synchronous, blocking)
+- `request_handoff`: Dynamically inject a new step into the running task DAG and route to another agent (async, non-blocking, with dependency rewiring)
 
 ### Job Queue Routing
 

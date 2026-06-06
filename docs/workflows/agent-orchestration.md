@@ -31,10 +31,11 @@ Single-agent systems struggle with complex tasks requiring different expertise. 
 4. **Agent Discovery**: Available specialists identified via `platform_agents`
 5. **Delegation**: Task routed via `delegate_task`
 6. **Execution**: Specialist agent performs work with evidence collection
-7. **Validation**: Evidence verified against claims (Deterministic Execution)
-8. **Review**: Optional collaborative review workflow
-9. **Report Routing**: `ReportRouter` determines next action (close, handoff, notify user, or error)
-10. **Completion**: Results returned to user
+7. **Dynamic Handoff**: Agent may call `request_handoff` to inject a new step for another specialist mid-task
+8. **Validation**: Evidence verified against claims (Deterministic Execution)
+9. **Review**: Optional collaborative review workflow
+10. **Report Routing**: `ReportRouter` determines next action (close, handoff, notify user, or error)
+11. **Completion**: Results returned to user
 
 ### Report Router (Multi-Agent Handoff)
 
@@ -63,7 +64,32 @@ When an agent completes, the `ReportRouter` examines its structured report and d
 Agents discover each other dynamically:
 - `platform_agents`: List available agents and capabilities
 - `platform_tools`: List registered tools
-- `delegate_task`: Route tasks to specific agents
+- `delegate_task`: Route tasks to specific agents (synchronous, blocking)
+- `request_handoff`: Dynamically inject a new step and route to another agent (async, non-blocking)
+
+### Dynamic Agent Handoff
+
+When an agent discovers mid-execution that it needs expertise from another specialist, it can use `request_handoff` to dynamically inject a new step into the running task's DAG without going through the dispatcher.
+
+**How it works:**
+1. Agent calls `request_handoff` with target agent ID, description, reason, and partial results
+2. Tool publishes `orchestrator.handoff` bus event via `models.NewBusMessage()`
+3. `Orchestrator.handleHandoff()` receives the event and delegates to `TacticalScheduler.HandleHandoff()`
+4. `HandleHandoff` creates a new `TaskStep` with dependency on the originating step
+5. Downstream steps are rewired to depend on the injected step (when `inject_after` is true)
+6. New step is promoted and scheduled via the existing step lifecycle
+
+**Amendment integration:**
+When `HandoffUseAmendment` is enabled and an `AmendmentSubmitter` is configured, handoff requests route through the amendment system for review/approval before step creation. If the amendment is rejected, the handoff fails. If `HandoffUseAmendment` is true but no `AmendmentSubmitter` is available, it falls through to direct creation.
+
+**Rate limiting:**
+`MaxHandoffSteps` (default 5) limits the number of handoff steps per task to prevent runaway handoff chains.
+
+**Implementation:**
+- Tool: `internal/tools/builtin/handoff.go` — `RequestHandoffTool` struct
+- Handler: `internal/agent/tactical.go` — `HandleHandoff()`, `rewireDownstreamDeps()`, `agentIDToToolHint()`
+- Wiring: `internal/agent/orchestrator.go` — subscribes to `orchestrator.handoff`
+- Registration: `internal/daemon/components.go` — registers tool with bus and agent existence check
 
 ## Configuration
 

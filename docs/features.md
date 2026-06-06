@@ -395,7 +395,27 @@ Meept uses a specialist-agent architecture where different agents handle differe
 - `platform_agents`: List available agents and their capabilities
 - `platform_status`: Get platform health status
 - `platform_tools`: List registered tools
-- `delegate_task`: Route a task to a specific agent
+- `delegate_task`: Route a task to a specific agent (synchronous, blocking)
+- `request_handoff`: Dynamically inject a new step into the running task DAG and route it to another agent (async, non-blocking)
+
+#### Dynamic Agent Handoff
+
+Agents executing within the orchestrator pipeline can dynamically re-route to other agents mid-task using the `request_handoff` tool. This is distinct from `delegate_task` (synchronous blocking delegation) — handoff creates a real step in the task DAG with proper dependency wiring.
+
+**Flow:**
+1. Agent discovers mid-execution it needs different expertise (e.g., coder finds a runtime bug)
+2. Agent calls `request_handoff` with target agent, description, and partial results
+3. Tool publishes `orchestrator.handoff` bus event and returns immediately (agent continues)
+4. TacticalScheduler processes the event: creates a new step, sets dependencies, rewires downstream
+5. New step is scheduled via the existing amendment/step promotion system
+
+**Key properties:**
+- **Async**: Calling agent's step continues to completion normally
+- **DAG integration**: Creates a real `TaskStep` with dependency wiring
+- **Dependency rewiring**: Steps that depended on the originating step are rewired to depend on the injected step (maintains execution order)
+- **Rate limiting**: `MaxHandoffSteps` (default 5 per task) prevents runaway chains
+- **Amendment path**: When `HandoffUseAmendment` is enabled, handoffs route through the amendment system for review/approval before step creation
+- **Context propagation**: The receiving agent gets the calling agent's partial results in `AccumulatedContext`
 
 #### Steering and Follow-Up Queues
 
@@ -956,7 +976,7 @@ Meept provides built-in tools and supports MCP (Model Context Protocol) for exte
 #### Built-in Tools
 - File operations: `file_read`, `file_write`, `list_directory`
 - Memory: `memory_store`, `memory_search`, `memory_get_context`
-- Platform: `platform_agents`, `platform_status`, `platform_tools`, `delegate_task`
+- Platform: `platform_agents`, `platform_status`, `platform_tools`, `delegate_task`, `request_handoff`
 - Git: `git_commit`, `git_diff`, `git_status`
 
 #### Knowledge Graph Tools

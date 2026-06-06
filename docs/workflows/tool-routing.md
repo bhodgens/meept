@@ -32,6 +32,14 @@ Agent Request → Tool Registry → Security Check → Tool Execution → Result
 - Agents declare required capabilities
 - Tools declare provided capabilities
 - Registry finds optimal tool-agent matches
+- Each agent gets a `FilteredToolRegistry` wrapping the global registry, exposing only tools in its `BaselineTools` + `AdditionalTools` lists
+
+### Dynamic Tool Categories
+- **Platform tools**: `platform_agents`, `platform_status`, `platform_tools`, `delegate_task`, `request_handoff` — available to all agents via baseline
+- **File tools**: `file_read`, `file_write`, `file_delete`, `list_directory` — coder, debugger
+- **Shell tools**: `shell_execute` — coder, debugger, committer
+- **Memory tools**: `memory_store`, `memory_search`, `memory_get_context` — all agents
+- **Collaboration tools**: `workspace_yield`, `initiate_collaboration` — pair/collab sessions
 
 ## Configuration
 

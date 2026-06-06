@@ -17,10 +17,10 @@ Meept uses a multi-agent architecture where specialist agents handle different t
 | Agent ID | Purpose | Additional Tools |
 |----------|---------|------------------|
 | `chat` | General conversation | `web_fetch`, `web_search` |
-| `coder` | File ops, shell, coding | `file_read`, `file_write`, `file_delete`, `list_directory`, `shell_execute` |
-| `debugger` | Troubleshooting, bug fixing | `file_read`, `file_write`, `shell_execute` |
+| `coder` | File ops, shell, coding | `file_read`, `file_write`, `file_delete`, `list_directory`, `shell_execute`, `request_handoff` |
+| `debugger` | Troubleshooting, bug fixing | `file_read`, `file_write`, `shell_execute`, `request_handoff` |
 | `planner` | Task decomposition, planning | (baseline only) |
-| `analyst` | Research, data analysis | `web_fetch`, `web_search` |
+| `analyst` | Research, data analysis | `web_fetch`, `web_search`, `request_handoff` |
 | `committer` | Git operations | `shell_execute` |
 | `scheduler` | Job scheduling | `schedule_create`, `schedule_list`, `schedule_delete` |
 
@@ -128,7 +128,34 @@ Agents discover each other using platform tools:
 - `platform_agents` — List all registered agents with capabilities
 - `platform_status` — Get platform health and uptime
 - `platform_tools` — List all registered tools
-- `delegate_task` — Route a task to a specific agent
+- `delegate_task` — Route a task to a specific agent (synchronous, blocking)
+- `request_handoff` — Dynamically inject a new step into the running task DAG and route to another agent (async, non-blocking)
+
+### Dynamic Agent Handoff
+
+The `request_handoff` tool allows an agent executing within the orchestrator pipeline to dynamically inject a new step and re-route to another agent mid-task, without going through the dispatcher or waiting for the full DAG to complete.
+
+| | `delegate_task` | `request_handoff` |
+|---|---|---|
+| Execution | Synchronous (caller waits) | Async (caller continues) |
+| DAG integration | None | Creates real step with dependencies |
+| Validation/review | Bypassed | Subject to existing gates |
+| Audit trail | None | Step + amendment record |
+| Context | Ad-hoc string | Full AccumulatedContext propagation |
+| Retry/escalation | None | Inherited from TacticalScheduler |
+
+**Handoff flow:**
+```
+Agent calls request_handoff → orchestrator.handoff bus event → TacticalScheduler.HandleHandoff
+    → Create new TaskStep with dependencies
+    → Rewire downstream dependencies (if inject_after)
+    → PromoteReadySteps + ScheduleReadySteps
+    → Publish task.handoff_created audit event
+```
+
+**Configuration:**
+- `MaxHandoffSteps` (default 5) — rate limit per task
+- `HandoffUseAmendment` — route through amendment system for review/approval
 
 ## Task Routing
 
