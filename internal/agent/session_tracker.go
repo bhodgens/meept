@@ -14,7 +14,7 @@ import (
 // SessionTracker tracks conversation patterns per session.
 type SessionTracker struct {
 	mu                      sync.RWMutex
-	sessions                map[string]*SessionState
+	sessions                map[string]*TrackerSessionState
 	maxAge                  time.Duration
 	memvidClient            *memvid.Client
 	sessionIdleTriggerHours int
@@ -23,8 +23,8 @@ type SessionTracker struct {
 	logger                  *slog.Logger
 }
 
-// SessionState holds state for a single conversation session.
-type SessionState struct {
+// TrackerSessionState holds state for a single conversation session.
+type TrackerSessionState struct {
 	SessionID      string
 	CreatedAt      time.Time
 	LastActivityAt time.Time
@@ -55,7 +55,7 @@ type SessionTrackerConfig struct {
 // NewSessionTracker creates a new session tracker.
 func NewSessionTracker(maxAge time.Duration) *SessionTracker {
 	return &SessionTracker{
-		sessions: make(map[string]*SessionState),
+		sessions: make(map[string]*TrackerSessionState),
 		maxAge:   maxAge,
 		stopCh:   make(chan struct{}),
 		logger:   slog.Default(),
@@ -65,7 +65,7 @@ func NewSessionTracker(maxAge time.Duration) *SessionTracker {
 // NewSessionTrackerWithConfig creates a new session tracker with memvid persistence.
 func NewSessionTrackerWithConfig(cfg SessionTrackerConfig) *SessionTracker {
 	return &SessionTracker{
-		sessions:                make(map[string]*SessionState),
+		sessions:                make(map[string]*TrackerSessionState),
 		maxAge:                  cfg.MaxAge,
 		memvidClient:            cfg.MemvidClient,
 		sessionIdleTriggerHours: cfg.SessionIdleTriggerHours,
@@ -90,7 +90,7 @@ func (t *SessionTracker) RecordIntent(sessionID string, intent *Intent, agentID 
 }
 
 // GetSession returns session state (read-only lookup, no cleanup).
-func (t *SessionTracker) GetSession(sessionID string) *SessionState {
+func (t *SessionTracker) GetSession(sessionID string) *TrackerSessionState {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.sessions[sessionID]
@@ -179,11 +179,11 @@ func (t *SessionTracker) GetIntentCounts(sessionID string) map[string]int {
 	return counts
 }
 
-func (t *SessionTracker) getOrCreateSession(sessionID string) *SessionState {
+func (t *SessionTracker) getOrCreateSession(sessionID string) *TrackerSessionState {
 	if state, ok := t.sessions[sessionID]; ok {
 		return state
 	}
-	state := &SessionState{
+	state := &TrackerSessionState{
 		SessionID:      sessionID,
 		CreatedAt:      time.Now(),
 		LastActivityAt: time.Now(),
@@ -241,7 +241,7 @@ func (t *SessionTracker) PersistIdleSessions(ctx context.Context) error {
 }
 
 // persistSession persists a single session to memvid.
-func (t *SessionTracker) persistSession(ctx context.Context, state *SessionState) error {
+func (t *SessionTracker) persistSession(ctx context.Context, state *TrackerSessionState) error {
 	// Create session metadata
 	metadata := map[string]any{
 		"session_id":       state.SessionID,
@@ -290,7 +290,7 @@ func (t *SessionTracker) getLastAgentFromIntent(intents []*Intent) string {
 }
 
 // determineOutcome determines the session outcome.
-func (t *SessionTracker) determineOutcome(state *SessionState) string {
+func (t *SessionTracker) determineOutcome(state *TrackerSessionState) string {
 	if state.Metrics.Errors > 3 {
 		return "failed"
 	}
@@ -301,7 +301,7 @@ func (t *SessionTracker) determineOutcome(state *SessionState) string {
 }
 
 // generateSessionSummary generates a text summary of the session.
-func (t *SessionTracker) generateSessionSummary(state *SessionState) string {
+func (t *SessionTracker) generateSessionSummary(state *TrackerSessionState) string {
 	data, _ := json.Marshal(map[string]any{
 		"session_id": state.SessionID,
 		"duration":   state.LastActivityAt.Sub(state.CreatedAt).String(),
@@ -322,12 +322,12 @@ func (t *SessionTracker) RecordMetrics(sessionID string, metrics SessionMetrics)
 }
 
 // GetIdleSessions returns sessions that have been idle for the specified duration.
-func (t *SessionTracker) GetIdleSessions(idleDuration time.Duration) []*SessionState {
+func (t *SessionTracker) GetIdleSessions(idleDuration time.Duration) []*TrackerSessionState {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	now := time.Now()
-	var idle []*SessionState
+	var idle []*TrackerSessionState
 
 	for _, state := range t.sessions {
 		if now.Sub(state.LastActivityAt) > idleDuration {
