@@ -186,6 +186,9 @@ func (s *FileSource) loadSkillFile(path string, priority int, skills map[string]
 	}
 
 	skill.Priority = priority
+	if skill.Source == "" {
+		skill.Source = "meept"
+	}
 
 	key := normalizeName(skill.Name)
 	existing, exists := skills[key]

@@ -118,6 +118,26 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 		"requires", skill.Requires,
 	)
 
+	// Start MCP runtime if skill declares MCP servers.
+	var mcpRuntime *MCPRuntime
+	if len(skill.MCPServers) > 0 {
+		mcpRuntime = NewMCPRuntime(skill.MCPServers, e.logger)
+		if err := mcpRuntime.Start(ctx); err != nil {
+			e.logger.Warn("MCP runtime start had errors, continuing with available servers",
+				"skill", skill.Name,
+				"error", err,
+			)
+		}
+		defer func() {
+			if err := mcpRuntime.Shutdown(); err != nil {
+				e.logger.Warn("MCP runtime shutdown error",
+					"skill", skill.Name,
+					"error", err,
+				)
+			}
+		}()
+	}
+
 	// Resolve model based on skill requirements
 	modelConfig, err := e.resolveModel(skill)
 	if err != nil {
@@ -186,13 +206,20 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 		"tokens", resp.Usage.TotalTokens,
 	)
 
-	return &SkillExecutionResult{
+	result := &SkillExecutionResult{
 		Content:          resp.Content,
 		Model:            resp.Model,
 		PromptTokens:     resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,
 		TotalTokens:      resp.Usage.TotalTokens,
-	}, nil
+	}
+
+	if mcpRuntime != nil && mcpRuntime.Started() {
+		result.MCPTools = mcpRuntime.Tools()
+		result.MCPServersStarted = true
+	}
+
+	return result, nil
 }
 
 // resolveModel finds an appropriate model for the skill's requirements.
@@ -240,6 +267,26 @@ func (e *Executor) ExecuteWithMessages(
 	}
 	if e.resolver == nil {
 		return nil, ErrNoResolver
+	}
+
+	// Start MCP runtime if skill declares MCP servers.
+	var mcpRuntime *MCPRuntime
+	if len(skill.MCPServers) > 0 {
+		mcpRuntime = NewMCPRuntime(skill.MCPServers, e.logger)
+		if err := mcpRuntime.Start(ctx); err != nil {
+			e.logger.Warn("MCP runtime start had errors, continuing with available servers",
+				"skill", skill.Name,
+				"error", err,
+			)
+		}
+		defer func() {
+			if err := mcpRuntime.Shutdown(); err != nil {
+				e.logger.Warn("MCP runtime shutdown error",
+					"skill", skill.Name,
+					"error", err,
+				)
+			}
+		}()
 	}
 
 	// Resolve model
@@ -292,13 +339,20 @@ func (e *Executor) ExecuteWithMessages(
 		}
 	}
 
-	return &SkillExecutionResult{
+	result := &SkillExecutionResult{
 		Content:          resp.Content,
 		Model:            resp.Model,
 		PromptTokens:     resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,
 		TotalTokens:      resp.Usage.TotalTokens,
-	}, nil
+	}
+
+	if mcpRuntime != nil && mcpRuntime.Started() {
+		result.MCPTools = mcpRuntime.Tools()
+		result.MCPServersStarted = true
+	}
+
+	return result, nil
 }
 
 // CanExecute checks if the executor can execute a skill.

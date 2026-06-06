@@ -237,3 +237,138 @@ func TestSkillExecutionResult(t *testing.T) {
 		t.Errorf("TotalTokens = %d, want 150", result.TotalTokens)
 	}
 }
+
+// mockChatter is a test double for llm.Chatter that returns canned responses.
+type mockChatter struct {
+	response *llm.Response
+	err      error
+	called   bool
+}
+
+func (m *mockChatter) Chat(_ context.Context, _ []llm.ChatMessage, _ ...llm.ChatOption) (*llm.Response, error) {
+	m.called = true
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.response, nil
+}
+
+func (m *mockChatter) ChatWithProgress(_ context.Context, _ []llm.ChatMessage, _ llm.ProgressCallback, _ ...llm.ChatOption) (*llm.Response, error) {
+	return m.Chat(context.Background(), nil)
+}
+
+func (m *mockChatter) Config() *llm.ModelConfig {
+	return &llm.ModelConfig{
+		ModelID:    "model-b",
+		ProviderID: "provider1",
+	}
+}
+
+func TestExecutor_ExecuteWithMCPServers_SkillHasNoServers(t *testing.T) {
+	resolver := testResolver()
+	mock := &mockChatter{
+		response: &llm.Response{
+			Content: "ok",
+			Model:   "provider1/model-a",
+			Usage:   llm.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		},
+	}
+	exec := NewExecutor(resolver, WithClient(mock))
+
+	skill := &Skill{
+		Name:     "no-mcp-skill",
+		Requires: []string{"code"},
+		Body:     "Do something.",
+	}
+
+	result, err := exec.Execute(context.Background(), skill, "test")
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if !mock.called {
+		t.Error("expected LLM Chat to be called")
+	}
+	if result.MCPServersStarted {
+		t.Error("MCPServersStarted should be false when skill has no MCP servers")
+	}
+	if len(result.MCPTools) != 0 {
+		t.Errorf("MCPTools should be empty, got %d tools", len(result.MCPTools))
+	}
+}
+
+func TestExecutor_ExecuteWithMCPServers_StartupError(t *testing.T) {
+	resolver := testResolver()
+	mock := &mockChatter{
+		response: &llm.Response{
+			Content: "ok",
+			Model:   "provider1/model-a",
+			Usage:   llm.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+		},
+	}
+	exec := NewExecutor(resolver, WithClient(mock))
+
+	// Skill with an MCP server that uses a nonexistent command, so Start will fail.
+	skill := &Skill{
+		Name:     "bad-mcp-skill",
+		Requires: []string{"code"},
+		Body:     "Do something.",
+		MCPServers: []MCPServerConfig{
+			{
+				Name:    "nonexistent",
+				Command: "/nonexistent/binary/that/does/not/exist",
+			},
+		},
+	}
+
+	// Execution should NOT return an error -- MCP failures are logged and
+	// execution continues with whatever servers managed to start (none here).
+	result, err := exec.Execute(context.Background(), skill, "test")
+	if err != nil {
+		t.Fatalf("Execute should not fail on MCP startup error, got: %v", err)
+	}
+	if !mock.called {
+		t.Error("expected LLM Chat to still be called despite MCP failure")
+	}
+	// MCPRuntime.Start() was called but the server failed.
+	// The result should reflect the actual state: no tools if all servers failed.
+	if result.MCPServersStarted && len(result.MCPTools) > 0 {
+		t.Error("MCPTools should be empty when all servers failed to start")
+	}
+}
+
+func TestSkillExecutionResult_MCPFields(t *testing.T) {
+	result := &SkillExecutionResult{
+		Content:           "response",
+		Model:             "model-a",
+		PromptTokens:      10,
+		CompletionTokens:  5,
+		TotalTokens:       15,
+		MCPTools: []ToolDef{
+			{Name: "myserver.tool_a", Description: "A tool", ServerName: "myserver"},
+			{Name: "myserver.tool_b", Description: "B tool", ServerName: "myserver"},
+		},
+		MCPServersStarted: true,
+	}
+
+	if !result.MCPServersStarted {
+		t.Error("MCPServersStarted should be true")
+	}
+	if len(result.MCPTools) != 2 {
+		t.Fatalf("expected 2 MCP tools, got %d", len(result.MCPTools))
+	}
+	if result.MCPTools[0].Name != "myserver.tool_a" {
+		t.Errorf("MCPTools[0].Name = %q, want %q", result.MCPTools[0].Name, "myserver.tool_a")
+	}
+	if result.MCPTools[1].ServerName != "myserver" {
+		t.Errorf("MCPTools[1].ServerName = %q, want %q", result.MCPTools[1].ServerName, "myserver")
+	}
+
+	// Verify zero-value defaults
+	empty := &SkillExecutionResult{}
+	if empty.MCPServersStarted {
+		t.Error("zero-value MCPServersStarted should be false")
+	}
+	if len(empty.MCPTools) != 0 {
+		t.Errorf("zero-value MCPTools should be nil/empty, got %v", empty.MCPTools)
+	}
+}
