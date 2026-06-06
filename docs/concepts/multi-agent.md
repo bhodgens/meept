@@ -281,6 +281,51 @@ The `IntentPair` intent type triggers channel-based pairing. Keywords include: "
 - Verdict classification uses prefix markers: `APPROVED:`, `REJECTED:`, `NEEDS_MORE:`
 - Default verdict (no prefix): approved
 
+## Collaboration Engine
+
+The CollaborationEngine provides structured multi-agent collaboration with pluggable modes, session lifecycle management, budget enforcement, and agent-initiated sessions. It complements the channel-based PairOrchestrator with two additional modes:
+
+### Collaboration Modes
+
+| Mode | Driver | Use Case |
+|------|--------|----------|
+| **Pair Programming** | `PairProgrammingDriver` | Two agents share a workspace with symmetric turn-taking. Observer signals actions via structured JSON. Converges on approval, exhausts on max turns. |
+| **Differential** | `DifferentialDriver` | Four-phase A/B pipeline: fork, implement+review (via PairManager or direct), validate with fallback, differentiate+synthesize. Produces combined output from best parts of each branch. |
+
+### Intent Classification
+
+The `IntentCollaborate` intent type triggers collaboration engine routing. It routes to the `analyst` agent. Keywords: "collaborate", "pair program", "debate", "a/b test", "differential", "compare approaches".
+
+This is distinct from `IntentPair` (channel-based pairing via PairOrchestrator). IntentCollaborate uses the CollaborationEngine with structured sessions, turn management, and budget enforcement.
+
+### Agent-Initiated Sessions
+
+Agents can request collaboration via the `initiate_collaboration` tool. The engine creates a nested session with a depth guard (max depth 1) to prevent runaway chains. Each mode has a `CanInitiate(agentID, reason)` gate.
+
+### Collaboration Bus Topics
+
+| Topic | Payload |
+|-------|---------|
+| `collaboration.session_created` | `{session_id, mode, participants, task_id}` |
+| `collaboration.turn_completed` | `{session_id, agent_id, turn_number, action}` |
+| `collaboration.phase_completed` | `{session_id, phase, ...}` |
+| `collaboration.consensus_reached` | `{session_id, turns, participants}` |
+| `collaboration.divergence` | `{session_id, reason}` |
+| `collaboration.result` | `{session_id, state, turn_count, workspace, duration_ms}` |
+| `collaboration.error` | `{session_id, error, phase}` |
+| `collaboration.requested` | `{parent_session_id, session_id, mode, preferred_agents}` |
+
+All collaboration topics are subscribed by the Orchestrator for event logging and monitoring.
+
+### Default Participant Resolution
+
+| Mode | Default Participants |
+|------|---------------------|
+| `pair_programming` | coder, planner |
+| `differential` | coder, planner, analyst |
+
+When `preferred_agents` provides 2+ agents, those are used instead of defaults.
+
 ## Model Reassignment
 
 The dispatcher supports natural language model reassignment, allowing users to override default agent model assignments with instructions like "use GLM models for coding" or "research with local models, synthesize with glm-4.7".

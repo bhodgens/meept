@@ -1614,6 +1614,103 @@ request_review(
 
 ---
 
+## Collaboration Engine
+
+The CollaborationEngine provides first-class multi-agent collaboration with pluggable modes, session lifecycle management, and budget enforcement. It lives alongside the existing `PairManager`/`PairOrchestrator` and is wired into the daemon's orchestrator and tool registry.
+
+### Collaboration Modes
+
+| Mode | Driver | Description |
+|------|--------|-------------|
+| **Pair Programming** | `PairProgrammingDriver` | Two agents share a workspace with symmetric turn-taking via editor token. Driver writes code, observer reviews via structured JSON responses. Converges on observer approval, exhausts on max turns, or fails on error. |
+| **Differential** | `DifferentialDriver` | Four-phase A/B pipeline: fork (create branch workspaces), implement (independent agent execution per branch with PairManager review loops), validate (checkpoint with fallback to best branch), differentiate (third agent synthesizes combined output). |
+
+### Session Lifecycle
+
+```
+CreateSession → SessionCreated
+    ↓
+RunSession → Mode.Run(ctx, sess)
+    ↓ (mode executes turns/phases)
+MarkConverged | MarkExhausted | MarkFailed
+    ↓
+CollaborationResult published to bus
+```
+
+### Budget Enforcement
+
+Every session enforces two budgets:
+- **Token budget**: Accumulated `TokensUsed` across all turns is checked against `sess.TokenBudget` before each turn. Exceeding it returns `ErrBudgetExceeded`.
+- **Time budget**: `sess.TimeBudget` is applied as a `context.WithTimeout` around the entire session. Context cancellation returns a timeout collaboration error.
+
+### Agent-Initiated Collaboration
+
+Agents can request collaboration via the `initiate_collaboration` tool:
+
+```
+Agent discovers need for collaboration → calls initiate_collaboration
+    ↓ (mode, task_description, reason, preferred_agents)
+CollaborationEngine.HandleInitiatedCollaboration
+    ↓ CreateNestedSession (depth guard: max 1 level)
+    ↓ RunSession
+    ↓ SessionID returned to agent
+```
+
+**Guardrails:**
+- Maximum nesting depth: 1 (prevents runaway collaboration chains)
+- `CanInitiate(agentID, reason)` per-mode gate (e.g., differential only allows coder/planner/analyst)
+
+### Turn Management
+
+The `TurnManager` provides editor token tracking with round-robin and request-based transfer:
+
+| Operation | Description |
+|-----------|-------------|
+| `Yield()` | Current holder passes token to next participant |
+| `RequestToken(agentID)` | Non-holder requests the editor token |
+| `ForceYield()` | System-forced yield (timeout/token limit exceeded) |
+| `IsExhausted()` | Returns true when max turns reached |
+
+### Bus Topics
+
+| Topic | When Published |
+|-------|---------------|
+| `collaboration.session_created` | New session created |
+| `collaboration.turn_completed` | A turn finishes in pair programming |
+| `collaboration.phase_completed` | A phase finishes in differential mode |
+| `collaboration.consensus_reached` | Both agents approve in pair programming |
+| `collaboration.divergence` | Branches disagree in differential mode |
+| `collaboration.result` | Session completes with final result |
+| `collaboration.error` | Session encounters an error |
+| `collaboration.requested` | Agent-initiated collaboration requested |
+
+### Intent Classification
+
+The `IntentCollaborate` intent type routes to the `analyst` agent. Keywords: "collaborate", "pair program", "debate", "a/b test", "differential", "compare approaches".
+
+### Collaboration Tools
+
+| Tool | Purpose |
+|------|---------|
+| `workspace_yield` | Pair programming: signal turn end with action (approve/request_changes/request_token) and feedback |
+| `initiate_collaboration` | Agent-initiated: request a new collaboration session with mode, task description, reason, and preferred agents |
+
+### Error Codes
+
+Structured `CollaborationError` type with machine-readable codes:
+
+| Code | Meaning |
+|------|---------|
+| `budget_exceeded` | Token budget exceeded during session |
+| `depth_exceeded` | Collaboration nesting depth exceeded |
+| `agent_failed` | Agent execution error (driver, observer, or differentiator) |
+| `workspace_error` | Workspace creation or write failure |
+| `timeout` | Session or turn timed out |
+| `invalid_mode` | Invalid mode or insufficient participants |
+| `session_not_found` | Session ID not found in engine |
+
+---
+
 ## See Also
 
 - **CLAUDE.md**: Development guidelines and architecture
