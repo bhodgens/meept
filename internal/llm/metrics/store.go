@@ -697,6 +697,96 @@ func (s *Store) GetTotalCost(ctx context.Context, from, to time.Time) (float64, 
 	return total, err
 }
 
+// RateLimitEntry represents a single rate limit event from the metrics store.
+type RateLimitEntry struct {
+	Timestamp  time.Time
+	ProviderID string
+	ModelID    string
+	HTTPStatus int
+	ErrorMsg   string
+	LatencyMs  int64
+}
+
+// RateLimitSummary holds aggregated rate limit statistics.
+type RateLimitSummary struct {
+	Total24h      int                         // Total rate limit errors in last 24h
+	ByProvider    map[string]int              // Count by provider_id
+	ByModel       map[string]int              // Count by model_id
+	RecentEntries []RateLimitEntry            // Last N rate limit events (limit with query param)
+}
+
+// GetRateLimitSummary returns aggregated rate limit error statistics.
+// It queries the provider_requests table for records where error_type = 'rate_limit'.
+func (s *Store) GetRateLimitSummary(ctx context.Context, recentLimit int) (*RateLimitSummary, error) {
+	if recentLimit <= 0 {
+		recentLimit = 20
+	}
+
+	summary := &RateLimitSummary{
+		ByProvider: make(map[string]int),
+		ByModel:    make(map[string]int),
+	}
+
+	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
+		cutoffTime := time.Now().Add(-24 * time.Hour).UnixMilli()
+
+		// Query 1: Count total in last 24h, grouped by provider and model
+		const qAgg = `
+SELECT provider_id, model_id, COUNT(*)
+FROM provider_requests
+WHERE error_type = 'rate_limit' AND ts >= ?
+GROUP BY provider_id, model_id
+`
+		rows, err := db.QueryContext(ctx, qAgg, cutoffTime)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var providerID, modelID string
+			var count int
+			if err := rows.Scan(&providerID, &modelID, &count); err != nil {
+				rows.Close()
+				return err
+			}
+			summary.ByProvider[providerID] += count
+			summary.ByModel[modelID] += count
+			summary.Total24h += count
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		// Query 2: Get the most recent N entries
+		const qRecent = `
+SELECT ts, provider_id, model_id, http_status, error_message, latency_ms
+FROM provider_requests
+WHERE error_type = 'rate_limit'
+ORDER BY ts DESC
+LIMIT ?
+`
+		recentRows, err := db.QueryContext(ctx, qRecent, recentLimit)
+		if err != nil {
+			return err
+		}
+		for recentRows.Next() {
+			var e RateLimitEntry
+			var tsUnix int64
+			if err := recentRows.Scan(&tsUnix, &e.ProviderID, &e.ModelID, &e.HTTPStatus, &e.ErrorMsg, &e.LatencyMs); err != nil {
+				recentRows.Close()
+				return err
+			}
+			e.Timestamp = time.UnixMilli(tsUnix)
+			summary.RecentEntries = append(summary.RecentEntries, e)
+		}
+		return recentRows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return summary, nil
+}
+
 // ClassifyError categorizes an error based on type and HTTP status.
 // Used by both Client and AnthropicClient to populate ErrorType in RequestRecord.
 func ClassifyError(err error, httpStatus int) ErrorType {

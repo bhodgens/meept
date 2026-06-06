@@ -1192,6 +1192,30 @@ func (s *Server) handleFirewallStats(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, stats)
 }
 
+// handleRateLimitSummary handles GET /api/v1/metrics/rate-limits.
+func (s *Server) handleRateLimitSummary(w http.ResponseWriter, r *http.Request) {
+	if s.RateLimitSummaryGetter == nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"rate_limits": nil})
+		return
+	}
+
+	limitStr := r.URL.Query().Get("limit")
+	limit := 20
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	summary, err := s.RateLimitSummaryGetter(r.Context(), limit)
+	if err != nil {
+		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{"rate_limits": summary})
+}
+
 // ===== Additional Queue Endpoints =====
 // ===== Additional Queue Endpoints =====
 

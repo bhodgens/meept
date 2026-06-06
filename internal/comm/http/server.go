@@ -116,6 +116,9 @@ type Server struct {
 	// FirewallStatsGetter is an optional callback that returns firewall stats.
 	FirewallStatsGetter func() map[string]any
 
+	// RateLimitSummaryGetter is an optional callback that returns rate limit summary.
+	RateLimitSummaryGetter func(ctx context.Context, recentLimit int) (map[string]any, error)
+
 	// BudgetStatusGetter is an optional callback that returns budget stats.
 	// Used by the status handler to report actual token and cost usage.
 	BudgetStatusGetter func() (hourlyUsed int, hourlyRemaining int, dailyUsed int, dailyRemaining int, rpmCurrent int, rpmLimit int, dailyCostUsed float64, dailyCostLimit float64, hourlyCostUsed float64, hourlyCostLimit float64)
@@ -635,6 +638,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/metrics/live", s.handleLiveMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/historical", s.handleHistoricalMetrics)
 	mux.HandleFunc("GET /api/v1/metrics/stream", s.handleMetricsStream)
+	mux.HandleFunc("GET /api/v1/metrics/rate-limits", s.handleRateLimitSummary)
 
 	// Runtime management endpoints
 	mux.HandleFunc("GET /api/v1/runtime/status", s.handleRuntimeStatus)
