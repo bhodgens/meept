@@ -22,9 +22,9 @@ func TestNewWireGuardManager(t *testing.T) {
 }
 
 func TestGenerateConfig_Basic(t *testing.T) {
-	mgr := &WireGuardManager{
-		configPath: "/tmp/wg0.conf",
-		iface:      "wg0",
+	mgr, err := NewWireGuardManager("/tmp/wg0.conf", "wg0")
+	if err != nil {
+		t.Fatalf("NewWireGuardManager failed: %v", err)
 	}
 
 	cfg := &WireGuardConfig{
@@ -84,9 +84,9 @@ func TestGenerateConfig_Basic(t *testing.T) {
 }
 
 func TestGenerateConfig_NoEndpoint(t *testing.T) {
-	mgr := &WireGuardManager{
-		configPath: "/tmp/wg0.conf",
-		iface:      "wg0",
+	mgr, err := NewWireGuardManager("/tmp/wg0.conf", "wg0")
+	if err != nil {
+		t.Fatalf("NewWireGuardManager failed: %v", err)
 	}
 
 	cfg := &WireGuardConfig{
@@ -117,9 +117,9 @@ func TestGenerateConfig_NoEndpoint(t *testing.T) {
 }
 
 func TestGenerateConfig_NoPeers(t *testing.T) {
-	mgr := &WireGuardManager{
-		configPath: "/tmp/wg0.conf",
-		iface:      "wg0",
+	mgr, err := NewWireGuardManager("/tmp/wg0.conf", "wg0")
+	if err != nil {
+		t.Fatalf("NewWireGuardManager failed: %v", err)
 	}
 
 	cfg := &WireGuardConfig{
@@ -145,9 +145,9 @@ func TestWriteConfig_CreatesDirAndFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "subdir", "wg0.conf")
 
-	mgr := &WireGuardManager{
-		configPath: configPath,
-		iface:      "wg0",
+	mgr, err := NewWireGuardManager(configPath, "wg0")
+	if err != nil {
+		t.Fatalf("NewWireGuardManager failed: %v", err)
 	}
 
 	cfg := &WireGuardConfig{
@@ -190,9 +190,9 @@ func TestWriteConfig_CreatesDirAndFile(t *testing.T) {
 }
 
 func TestWriteConfig_InvalidDir(t *testing.T) {
-	mgr := &WireGuardManager{
-		configPath: "/proc/nonexistent/wg0.conf",
-		iface:      "wg0",
+	mgr, err := NewWireGuardManager("/proc/nonexistent/wg0.conf", "wg0")
+	if err != nil {
+		t.Fatalf("NewWireGuardManager failed: %v", err)
 	}
 
 	cfg := &WireGuardConfig{
@@ -203,18 +203,13 @@ func TestWriteConfig_InvalidDir(t *testing.T) {
 		Peers:      []Member{},
 	}
 
-	err := mgr.WriteConfig(cfg)
+	err = mgr.WriteConfig(cfg)
 	if err == nil {
 		t.Error("expected error for invalid directory, got nil")
 	}
 }
 
 func TestAddPeer_AppendsPeer(t *testing.T) {
-	mgr := &WireGuardManager{
-		configPath: "/tmp/wg0.conf",
-		iface:      "wg0",
-	}
-
 	cfg := &WireGuardConfig{
 		PrivateKey: "testkey==",
 		ClusterIP:  "10.200.0.1",
@@ -305,9 +300,9 @@ func TestUpdatePeers_ReplacesAll(t *testing.T) {
 }
 
 func TestGenerateConfig_MultiplePeers(t *testing.T) {
-	mgr := &WireGuardManager{
-		configPath: "/tmp/wg0.conf",
-		iface:      "wg0",
+	mgr, err := NewWireGuardManager("/tmp/wg0.conf", "wg0")
+	if err != nil {
+		t.Fatalf("NewWireGuardManager failed: %v", err)
 	}
 
 	cfg := &WireGuardConfig{

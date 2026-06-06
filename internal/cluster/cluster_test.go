@@ -99,22 +99,22 @@ func TestLoadClusterConfig_Defaults(t *testing.T) {
 		t.Fatalf("load failed: %v", err)
 	}
 
-	if cfg.Gossip.HeartbeatInterval != 30*time.Second {
+	if cfg.Gossip.HeartbeatInterval != Duration(30*time.Second) {
 		t.Errorf("default HeartbeatInterval = %v, want 30s", cfg.Gossip.HeartbeatInterval)
 	}
-	if cfg.Gossip.PeerTimeout != 2*time.Minute {
+	if cfg.Gossip.PeerTimeout != Duration(2*time.Minute) {
 		t.Errorf("default PeerTimeout = %v, want 2m", cfg.Gossip.PeerTimeout)
 	}
 	if cfg.Gossip.MaxRetryAttempts != 3 {
 		t.Errorf("default MaxRetryAttempts = %d, want 3", cfg.Gossip.MaxRetryAttempts)
 	}
-	if cfg.Queue.DefaultClaimTimeout != 5*time.Minute {
+	if cfg.Queue.DefaultClaimTimeout != Duration(5*time.Minute) {
 		t.Errorf("default DefaultClaimTimeout = %v, want 5m", cfg.Queue.DefaultClaimTimeout)
 	}
-	if cfg.Queue.NodeReachabilityTimeout != 2*time.Minute {
+	if cfg.Queue.NodeReachabilityTimeout != Duration(2*time.Minute) {
 		t.Errorf("default NodeReachabilityTimeout = %v, want 2m", cfg.Queue.NodeReachabilityTimeout)
 	}
-	if cfg.Git.SyncInterval != 5*time.Minute {
+	if cfg.Git.SyncInterval != Duration(5*time.Minute) {
 		t.Errorf("default SyncInterval = %v, want 5m", cfg.Git.SyncInterval)
 	}
 	if cfg.Security.Ed25519KeyRotationDays != 90 {
@@ -135,7 +135,7 @@ func TestSaveClusterConfig(t *testing.T) {
 			Interface:       "wg1",
 		},
 		Gossip: GossipConfig{
-			HeartbeatInterval: 60 * time.Second,
+			HeartbeatInterval: Duration(60 * time.Second),
 		},
 	}
 

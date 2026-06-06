@@ -44,6 +44,117 @@ type Config struct {
 	Session           SessionConfig           `json:"session"            toml:"session"`
 	Projects          ProjectsConfig          `json:"projects"           toml:"projects"`
 	Plans             PlansConfig             `json:"plans"              toml:"plans"`
+	Cluster           ClusterConfig           `json:"cluster"            toml:"cluster"`
+}
+
+// ClusterConfig holds distributed cluster settings.
+type ClusterConfig struct {
+	// Enabled turns on cluster mode
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// ClusterID is the unique identifier for this cluster
+	ClusterID string `json:"cluster_id" toml:"cluster_id"`
+	// ClusterName is the human-readable name for the cluster
+	ClusterName string `json:"cluster_name" toml:"cluster_name"`
+	// NodeID is this node's unique identifier
+	NodeID string `json:"node_id" toml:"node_id"`
+	// NodeName is this node's human-readable name
+	NodeName string `json:"node_name" toml:"node_name"`
+	// Network holds WireGuard network settings
+	Network ClusterNetworkConfig `json:"network" toml:"network"`
+	// Gossip holds gossip protocol settings
+	Gossip ClusterGossipConfig `json:"gossip" toml:"gossip"`
+	// Queue holds cluster queue settings
+	Queue ClusterQueueConfig `json:"queue" toml:"queue"`
+	// Git holds git sync settings
+	Git ClusterGitConfig `json:"git" toml:"git"`
+	// Security holds cluster security settings
+	Security ClusterSecurityConfig `json:"security" toml:"security"`
+}
+
+// ClusterNetworkConfig holds WireGuard network settings.
+type ClusterNetworkConfig struct {
+	// WireGuardSubnet is the subnet for the mesh network
+	WireGuardSubnet string `json:"wireguard_subnet" toml:"wireguard_subnet"`
+	// WireGuardPort is the WireGuard listening port
+	WireGuardPort int `json:"wireguard_port" toml:"wireguard_port"`
+	// Interface is the WireGuard interface name
+	Interface string `json:"interface" toml:"interface"`
+}
+
+// ClusterGossipConfig holds gossip protocol settings.
+type ClusterGossipConfig struct {
+	// HeartbeatInterval is how often to send heartbeats
+	HeartbeatInterval time.Duration `json:"heartbeat_interval" toml:"heartbeat_interval"`
+	// PeerTimeout is how long before a peer is considered unreachable
+	PeerTimeout time.Duration `json:"peer_timeout" toml:"peer_timeout"`
+	// EventRetention is how long to keep events
+	EventRetention time.Duration `json:"event_retention" toml:"event_retention"`
+	// MaxRetryAttempts is the maximum number of retry attempts for failed sends
+	MaxRetryAttempts int `json:"max_retry_attempts" toml:"max_retry_attempts"`
+}
+
+// ClusterQueueConfig holds cluster queue settings.
+type ClusterQueueConfig struct {
+	// DefaultClaimTimeout is the default timeout for claimed jobs
+	DefaultClaimTimeout time.Duration `json:"default_claim_timeout" toml:"default_claim_timeout"`
+	// NodeReachabilityTimeout is how long before a node is considered unreachable
+	NodeReachabilityTimeout time.Duration `json:"node_reachability_timeout" toml:"node_reachability_timeout"`
+	// FullPayloadReplication enables full payload replication
+	FullPayloadReplication bool `json:"full_payload_replication" toml:"full_payload_replication"`
+}
+
+// ClusterGitConfig holds git sync settings.
+type ClusterGitConfig struct {
+	// SyncInterval is how often to sync with the remote
+	SyncInterval time.Duration `json:"sync_interval" toml:"sync_interval"`
+	// HeartbeatCommit enables periodic heartbeat commits
+	HeartbeatCommit bool `json:"heartbeat_commit" toml:"heartbeat_commit"`
+	// RemoteURL is the git remote URL for the cluster registry
+	RemoteURL string `json:"remote_url" toml:"remote_url"`
+}
+
+// ClusterSecurityConfig holds cluster security settings.
+type ClusterSecurityConfig struct {
+	// RequireNodeSignatures requires all node messages to be signed
+	RequireNodeSignatures bool `json:"require_node_signatures" toml:"require_node_signatures"`
+	// Ed25519KeyRotationDays is how often to rotate signing keys
+	Ed25519KeyRotationDays int `json:"ed25519_key_rotation_days" toml:"ed25519_key_rotation_days"`
+}
+
+// DefaultClusterConfig returns default cluster configuration.
+func DefaultClusterConfig() ClusterConfig {
+	return ClusterConfig{
+		Enabled:     false,
+		ClusterID:   "",
+		ClusterName: "",
+		NodeID:      "",
+		NodeName:    "",
+		Network: ClusterNetworkConfig{
+			WireGuardSubnet: "10.200.0.0/24",
+			WireGuardPort:   51820,
+			Interface:       "wg0",
+		},
+		Gossip: ClusterGossipConfig{
+			HeartbeatInterval: 30 * time.Second,
+			PeerTimeout:       2 * time.Minute,
+			EventRetention:    1 * time.Hour,
+			MaxRetryAttempts:  3,
+		},
+		Queue: ClusterQueueConfig{
+			DefaultClaimTimeout:     5 * time.Minute,
+			NodeReachabilityTimeout: 2 * time.Minute,
+			FullPayloadReplication:  false,
+		},
+		Git: ClusterGitConfig{
+			SyncInterval:    5 * time.Minute,
+			HeartbeatCommit: true,
+			RemoteURL:       "",
+		},
+		Security: ClusterSecurityConfig{
+			RequireNodeSignatures:  true,
+			Ed25519KeyRotationDays: 90,
+		},
+	}
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -1578,6 +1689,7 @@ func DefaultConfig() *Config {
 				RequireSignoff: true,
 			},
 		},
+		Cluster: DefaultClusterConfig(),
 	}
 }
 
