@@ -336,6 +336,109 @@ func TestCall_WriteError(t *testing.T) {
 // Multiple sequential calls
 // ---------------------------------------------------------------------------
 
+func TestRename_DocumentChanges(t *testing.T) {
+	transport := newMockTransport()
+	client := NewClient(transport)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	client.Start(ctx)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.injectResponse(&JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      float64(1),
+			Result: json.RawMessage(`{
+				"documentChanges": [
+					{
+						"textDocument": {"uri": "file:///tmp/barrel.ts", "version": 2},
+						"edits": [
+							{
+								"range": {"start": {"line": 0, "character": 7}, "end": {"line": 0, "character": 10}},
+								"newText": "newName"
+							}
+						]
+					}
+				]
+			}`),
+		})
+	}()
+
+	edit, err := client.Rename(ctx, "file:///tmp/barrel.ts", 0, 8, "newName")
+	if err != nil {
+		t.Fatalf("Rename failed: %v", err)
+	}
+
+	if edit == nil {
+		t.Fatal("expected non-nil edit")
+	}
+	if len(edit.Changes) != 0 {
+		t.Errorf("expected Changes to be empty, got %d entries", len(edit.Changes))
+	}
+	if len(edit.DocumentChanges) != 1 {
+		t.Fatalf("expected 1 DocumentChange, got %d", len(edit.DocumentChanges))
+	}
+
+	dc := edit.DocumentChanges[0]
+	if dc.TextDocument.URI != "file:///tmp/barrel.ts" {
+		t.Errorf("expected URI %q, got %q", "file:///tmp/barrel.ts", dc.TextDocument.URI)
+	}
+	if dc.TextDocument.Version != 2 {
+		t.Errorf("expected version 2, got %d", dc.TextDocument.Version)
+	}
+	if len(dc.Edits) != 1 {
+		t.Fatalf("expected 1 edit, got %d", len(dc.Edits))
+	}
+	if dc.Edits[0].NewText != "newName" {
+		t.Errorf("expected newText %q, got %q", "newName", dc.Edits[0].NewText)
+	}
+}
+
+func TestRename_MixedChangesAndDocumentChanges(t *testing.T) {
+	transport := newMockTransport()
+	client := NewClient(transport)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	client.Start(ctx)
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		transport.injectResponse(&JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      float64(1),
+			Result: json.RawMessage(`{
+				"changes": {
+					"file:///tmp/a.ts": [
+						{"range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 3}}, "newText": "aaa"}
+					]
+				},
+				"documentChanges": [
+					{
+						"textDocument": {"uri": "file:///tmp/b.ts", "version": 1},
+						"edits": [
+							{"range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 3}}, "newText": "bbb"}
+						]
+					}
+				]
+			}`),
+		})
+	}()
+
+	edit, err := client.Rename(ctx, "file:///tmp/a.ts", 0, 1, "aaa")
+	if err != nil {
+		t.Fatalf("Rename failed: %v", err)
+	}
+
+	if len(edit.Changes) != 1 {
+		t.Errorf("expected 1 Change entry, got %d", len(edit.Changes))
+	}
+	if len(edit.DocumentChanges) != 1 {
+		t.Errorf("expected 1 DocumentChange, got %d", len(edit.DocumentChanges))
+	}
+}
+
 func TestCall_SequentialIDs(t *testing.T) {
 	transport := newMockTransport()
 	client := NewClient(transport)
