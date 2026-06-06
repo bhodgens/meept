@@ -34,3 +34,13 @@ func LoadJSON5WithDefault(path string, v any) error {
 	}
 	return nil
 }
+
+// UnmarshalJSON5 parses JSON5-encoded data into v. It standardizes the
+// JSON5 to standard JSON before unmarshaling.
+func UnmarshalJSON5(data []byte, v any) error {
+	stdJSON, err := hujson.Standardize(data)
+	if err != nil {
+		return fmt.Errorf("failed to parse JSON5: %w", err)
+	}
+	return json.Unmarshal(stdJSON, v)
+}

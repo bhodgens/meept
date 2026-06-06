@@ -22,7 +22,7 @@ DNS = {{ .DNS }}
 [Peer]
 PublicKey = {{ .WireGuardPub }}
 AllowedIPs = {{ .ClusterIP }}/32
-PersistentKeepalive = {{ .PersistentKeepalive }}
+PersistentKeepalive = {{ $.PersistentKeepalive }}
 {{- if .Endpoint }}
 Endpoint = {{ .Endpoint }}
 {{- end }}
@@ -39,7 +39,7 @@ Address = {{ .ClusterIP }}/32
 [Peer]
 PublicKey = {{ .WireGuardPub }}
 AllowedIPs = {{ .ClusterIP }}/32
-PersistentKeepalive = {{ .PersistentKeepalive }}
+PersistentKeepalive = {{ $.PersistentKeepalive }}
 {{- if .Endpoint }}
 Endpoint = {{ .Endpoint }}
 {{- end }}
