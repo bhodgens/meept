@@ -1057,7 +1057,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		logger.Info("Dispatcher initialized", "has_capability_matcher", capMatcher != nil)
 
 		// Register platform tools now that agent registry is available
-		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, logger)
+		registerPlatformTools(c.ToolRegistry, c.AgentRegistry, c.StatusHandler, c.MCPManager, msgBus, logger)
 
 		// Register template tools if template registry is available
 		registerTemplateTools(c.ToolRegistry, c.TemplateRegistry, logger)
@@ -2076,6 +2076,7 @@ func registerPlatformTools(
 	agentRegistry *agent.AgentRegistry,
 	statusHandler *StatusHandler,
 	mcpManager *mcp.Manager,
+	msgBus *bus.MessageBus,
 	logger *slog.Logger,
 ) {
 	// Platform status tool - uses StatusHandler.getStatus
@@ -2099,6 +2100,14 @@ func registerPlatformTools(
 
 	// Delegate task tool (for multi-agent routing)
 	registry.Register(builtin.NewDelegateTaskTool(agentRegistry))
+
+	// Request handoff tool (dynamic mid-task agent re-routing)
+	agentExistFn := func(agentID string) bool {
+		_, ok := agentRegistry.GetSpec(agentID)
+		return ok
+	}
+	handoffTool := builtin.NewRequestHandoffTool(msgBus, agentExistFn)
+	registry.Register(handoffTool)
 
 	// Request review tool (inline review during agent execution)
 	registry.Register(builtin.NewRequestReviewTool(agentRegistry, nil))
