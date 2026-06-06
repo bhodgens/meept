@@ -170,3 +170,17 @@ func (tm *TurnManager) MaxTurns() int {
 	defer tm.mu.RUnlock()
 	return tm.maxTurns
 }
+
+// MaxTokens returns the per-turn token limit.
+func (tm *TurnManager) MaxTokens() int64 {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.maxTokens
+}
+
+// TurnTimeout returns the per-turn timeout duration.
+func (tm *TurnManager) TurnTimeout() time.Duration {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.turnTimeout
+}

@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	defaultDiffMaxTurns    = 10
 	defaultReviewMaxRounds = 3
 )
 
@@ -299,7 +298,9 @@ func (d *DifferentialDriver) phaseDifferentiate(ctx context.Context, sess *Colla
 
 	if sess.Workspace != "" {
 		combinedPath := filepath.Join(sess.Workspace, "combined", "result.md")
-		_ = os.WriteFile(combinedPath, []byte(diffOutput), 0644) //nolint:gosec
+		if err := os.WriteFile(combinedPath, []byte(diffOutput), 0644); err != nil {
+			d.logger.Warn("Failed to write combined result", "path", combinedPath, "error", err)
+		}
 	}
 
 	d.logger.Info("Phase 4: Differentiate complete", "session_id", sess.ID)

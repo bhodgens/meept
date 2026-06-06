@@ -13,10 +13,6 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
-const (
-	defaultPPDriverMaxTurns = 10
-)
-
 // PairProgrammingDriver runs a symmetric peer collaboration session where two agents
 // share a workspace and take turns holding the editor token.
 type PairProgrammingDriver struct {
@@ -32,9 +28,7 @@ type PairProgrammingDriver struct {
 // PPConversation holds the shared state for a pair programming session.
 type PPConversation struct {
 	SessionID   string
-	TaskSpec    string
 	Workspace   string
-	GitStatus   string
 	LastDiff    string
 	TurnManager *TurnManager
 	Converged   bool

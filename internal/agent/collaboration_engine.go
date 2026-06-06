@@ -167,6 +167,7 @@ func (e *CollaborationEngine) HandleInitiatedCollaboration(ctx context.Context, 
 		"session_id", sess.ID,
 		"state", result.State,
 		"turns", result.TurnCount,
+		"reason", reason,
 	)
 
 	return sess.ID, nil
@@ -189,7 +190,7 @@ func (e *CollaborationEngine) resolveParticipants(mode string, preferred []strin
 	case "pair_programming":
 		return append(preferred, "coder", "planner")
 	case "differential":
-		return append(preferred, "coder", "coder", "analyst")
+		return append(preferred, "coder", "planner", "analyst")
 	default:
 		return append(preferred, "coder", "planner")
 	}
