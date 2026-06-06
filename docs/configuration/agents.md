@@ -66,10 +66,9 @@ temperature: 0.3
 
 Agents are discovered through a 4-tier priority system:
 
-1. **Project-local** (highest priority): `.meept/skills/`
-2. **User-global**: `~/.meept/skills/`
-3. **System-wide**: `~/.config/meept/skills/`
-4. **Third-party**: `~/.meept/clawskills/` (claw: prefix)
+1. **Project-local** (highest priority): `.meept/agents/`
+2. **User-global**: `~/.meept/agents/`
+3. **System-wide**: `config/agents/`
 
 Later directories override earlier ones in case of conflicts.
 

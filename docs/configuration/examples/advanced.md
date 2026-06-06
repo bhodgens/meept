@@ -178,16 +178,6 @@ search_paths = ["~/.meept/skills", "~/projects/*/.meept/skills"]
 auto_reload = true
 max_cached_skills = 100
 
-[clawskills]
-enabled = true
-registry_url = "https://clawhub.ai"
-install_dir = "~/.meept/clawskills"
-auto_update = true
-max_installed = 100
-default_risk_level = "high"
-max_iterations = 15
-blocked_slugs = ["financial", "crypto", "hacking"]
-
 [selfimprove]
 enabled = true
 data_dir = "~/.meept/selfimprove"

@@ -11,8 +11,6 @@ Skills are discovered from a three-tier hierarchy with priority shadowing:
 | 1 (highest) | `.meept/skills/` | Project-local skills |
 | 2 | `~/.meept/skills/` | User-global skills |
 | 3 | `~/.config/meept/skills/` | System-wide skills |
-| 4 | `~/.meept/clawskills/` | Third-party ClawSkills (claw: prefix) |
-
 When multiple skills have the same name, the highest-priority version wins.
 
 ## SKILL.md Format
@@ -88,35 +86,4 @@ The agent detects the trigger keyword or explicit `/skill-name` invocation and l
 ./bin/meept skills run deploy-checklist "production"
 ```
 
-## ClawSkills Marketplace
-
-Third-party skills from the ClawSkills registry:
-
-```toml
-[clawskills]
-enabled = false
-registry_url = "https://clawhub.ai"
-install_dir = "~/.meept/clawskills"
-auto_update = false
-max_installed = 50
-default_risk_level = "high"
-max_iterations = 10
-blocked_slugs = []
-```
-
-### CLI Commands
-
-```bash
-./bin/meept clawskills search "deployment"
-./bin/meept clawskills install deploy-verify
-./bin/meept clawskills list
-```
-
-### Security
-
-- All ClawSkills are treated as HIGH risk by default
-- Security scanning runs before installation
-- Skills can be blocked by slug
-- Max iterations cap agent loops for ClawSkills
-
-See [Skill System](../workflows/skills.md) for the full feature specification and [ClawSkills Marketplace](../workflows/clawskills.md) for third-party skill details.
+See [Skill System](../workflows/skills.md) for the full feature specification.

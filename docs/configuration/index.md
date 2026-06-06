@@ -58,7 +58,6 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 - **Memory** - Episodic, task, and personality memory settings
 - **Security** - Input sanitization, command scanning, and permissions
 - **Skills** - Local skill discovery and management
-- **ClawSkills** - Third-party skill registry integration
 - **Self-Improve** - Automated code improvement system
 - **Plans** - Plan lifecycle, approval workflow, and task synthesis
 - **Scheduler** - Background job scheduling

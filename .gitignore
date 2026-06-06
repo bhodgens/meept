@@ -61,6 +61,7 @@ menubar/.metadata_never_index
 .claude
 docs/.claude/
 site/
+mkdocs/
 
 # Brainstorming
 .superpowers/

@@ -16,7 +16,7 @@ Hardcoded functionality limits adaptability and requires code changes for new ca
 1. **Project-local**: `.meept/skills/` (highest priority)
 2. **User-global**: `~/.meept/skills/`
 3. **System-wide**: `~/.config/meept/skills/`
-4. **Third-party**: `~/.meept/clawskills/` (claw: prefix)
+When multiple skills have the same name, the highest-priority version wins.
 
 ### SKILL.md Format
 ```markdown
@@ -58,13 +58,6 @@ enabled = true
 search_paths = []
 auto_reload = false
 
-[clawskills]
-enabled = false
-registry_url = "https://clawhub.ai"
-install_dir = "~/.meept/clawskills"
-auto_update = false
-max_installed = 50
-default_risk_level = "high"
 ```
 
 ## Observability

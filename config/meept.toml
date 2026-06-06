@@ -187,16 +187,6 @@ auto_reload = false   # Watch for skill file changes (not yet implemented)
 # Show skill details: meept skills show <name>
 # Run a skill: meept skills run <name> <input>
 
-[clawskills]
-enabled = false
-registry_url = "https://clawhub.ai"
-install_dir = "~/.meept/clawskills"
-auto_update = false                # Automatically update skills on daemon start
-max_installed = 50                 # Maximum number of installed clawskills
-default_risk_level = "high"        # All clawskills are treated as HIGH risk (cannot go lower)
-max_iterations = 10                # Cap agent-loop iterations for clawskills
-blocked_slugs = []                 # Slugs that will never be loaded by the daemon
-
 [selfimprove]
 enabled = false
 data_dir = "~/.meept/selfimprove"

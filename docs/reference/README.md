@@ -7,7 +7,7 @@ This directory contains comprehensive reference documentation for the Meept plat
 ### [CLI Reference](cli.md)
 Complete command-line interface reference covering all commands, flags, and usage patterns.
 
-- **Commands**: `chat`, `status`, `sessions`, `jobs`, `memory`, `tasks`, `clawskills`, `selfimprove`, `agents`, `tools`, `daemon`, `queue`, `workers`, `version`, `help`
+- **Commands**: `chat`, `status`, `sessions`, `jobs`, `memory`, `tasks`, `selfimprove`, `agents`, `tools`, `daemon`, `queue`, `workers`, `version`, `help`
 - **Global Flags**: `--socket`, `--state-dir`, `--debug`
 - **Examples**: Interactive sessions, scheduled tasks, memory operations
 - **Configuration**: File locations and key settings

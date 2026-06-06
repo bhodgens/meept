@@ -21,7 +21,6 @@ Feature specifications describing how each Meept subsystem works, with configura
 |---------|-------------|
 | [Code Intelligence](code-intelligence.md) | AST parsing and LSP client tools |
 | [Job Scheduling](job-scheduling.md) | Cron jobs, reminders, and task scheduling |
-| [ClawSkills Marketplace](clawskills.md) | Third-party skill registry and security scanning |
 | [External Integrations](external-integrations.md) | Telegram, web API, and Google Calendar |
 | [Collaborative Planning](collaborative-planning.md) | Review/approval workflow for agent work |
 | [Deterministic Execution](deterministic-execution.md) | Evidence-based validation, concurrency control, retry logic |

@@ -59,7 +59,20 @@ Instead of massive context due to plan files and SKILLS.md, everything gets load
 | **Most agents** | written in Python | **Golang** - faster and smaller, with a proper thread (goroutine) model for modern CPUs |
 | **Most agents** | Single agent or naive delegation | **Agentic pairs** - 4 collaboration modalities: spec-driven review, shared-context pair sessions, bus-channel debates, and inline review tools |
 
-I've also borrowed  ideas implemented in agentic harnesses like the venerable [oh-my-pi](https://github.com/can1357/oh-my-pi) and [Hermes Agent](https://github.com/nousresearch/hermes-agent), as well as other projects, when I find a feature which I think would improve things. 
+I've also borrowed  ideas implemented in agentic harnesses like the venerable [oh-my-pi](https://github.com/can1357/oh-my-pi) and [Hermes Agent](https://github.com/nousresearch/hermes-agent), as well as other projects, when I find a feature which I think would improve things.
+
+## Where Meept is Clearly Better
+
+| Capability | Meept | Other Harnesses |
+|---|---|---|
+| **Architecture** | Go daemon with HTTP/RPC/WebSocket/MCP transports | TypeScript in-process harnesses |
+| **Security** | Tirith, InputSanitizer, SecurityEngine, TLS, path fencing | Minimal security layers |
+| **Observability** | Metrics store, historical charts, REST API | Basic |
+| **Context management** | ContextFirewall with compaction, summarization, token tracking | Basic truncation |
+| **Scheduling** | Cron-based job scheduler with worker pool | None |
+| **Self-improvement** | Q Agent analyzing sessions for optimization | None |
+| **Cross-platform** | Go binary + Flutter GUI + SwiftUI macOS MenuBar + MCP | Terminal-only or IDE-bound |
+| **Model resolution** | Capability-based cheapest-match resolver | Manual or category-based |
 
 ## Other Key Differentiators
 #### Autonomous Agent Workcycle 
@@ -262,9 +275,6 @@ For complete feature details, see [Features](docs/features.md).
 ./bin/meept q status                       # Q Agent state
 ./bin/meept q analyze                      # Analyze sessions
 
-# Skills
-./bin/meept clawskills list                # Installed skills
-./bin/meept clawskills search "kubernetes" # Search marketplace
 ```
 
 Complete reference: [CLI Reference](docs/reference/cli.md)

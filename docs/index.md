@@ -10,7 +10,7 @@ Meept is a Go-based daemon that runs AI agents as background processes. It suppo
 |---------|-------------|
 | **Multi-Agent Orchestration** | 8 specialist agents + reviewers with automatic task routing |
 | **Hybrid Memory** | Episodic, task, personality, knowledge graph, and vector memory |
-| **Skill System** | Three-tier skill discovery with ClawSkills marketplace |
+| **Skill System** | Three-tier skill discovery with capability-based model resolution |
 | **Security Layers** | Input sanitization, taint tracking, shell scanning, audit logging |
 | **Code Intelligence** | Tree-sitter AST parsing and LSP client tools |
 | **Learning Pipeline** | Shadow training, trajectory learning, automated code fixing |

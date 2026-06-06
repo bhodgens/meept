@@ -100,9 +100,6 @@ enabled = false
 [skills]
 enabled = false
 
-[clawskills]
-enabled = false
-
 [selfimprove]
 enabled = false
 ```
@@ -220,7 +217,6 @@ To keep the configuration minimal, these features are disabled:
 - ❌ **Web interface** (`web.enabled = false`)
 - ❌ **MCP servers** (`mcp.enabled = false`)
 - ❌ **Skills system** (`skills.enabled = false`)
-- ❌ **ClawSkills** (`clawskills.enabled = false`)
 - ❌ **Self-improvement** (`selfimprove.enabled = false`)
 
 ## Next Steps

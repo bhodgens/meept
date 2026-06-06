@@ -51,9 +51,6 @@ auto_commit = true
 [skills]
 enabled = false
 
-[clawskills]
-enabled = false
-
 [selfimprove]
 enabled = true
 data_dir = "~/.meept/tester/selfimprove"

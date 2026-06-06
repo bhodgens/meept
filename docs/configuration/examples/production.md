@@ -120,16 +120,6 @@ enabled = true
 search_paths = ["~/.meept/skills"]
 auto_reload = false
 
-[clawskills]
-enabled = true
-registry_url = "https://clawhub.ai"
-install_dir = "~/.meept/clawskills"
-auto_update = true
-max_installed = 25
-default_risk_level = "high"
-max_iterations = 8
-blocked_slugs = ["financial", "crypto"]
-
 [selfimprove]
 enabled = true
 data_dir = "~/.meept/selfimprove"
@@ -370,7 +360,7 @@ auto_approve_patterns = ["*.md", "LICENSE", "*.txt", "*.json"]
 - **Self-improvement system** for automated bug fixes
 - **Audit logging** for security monitoring
 - **Memory consolidation** every 12 hours
-- **Auto-update for ClawSkills**
+- **Auto-update for installed skills**
 
 ## Environment Variables
 

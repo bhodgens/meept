@@ -119,24 +119,6 @@ meept tasks get <task-id>
 meept tasks update <task-id> --status completed
 ```
 
-### `meept clawskills` - ClawSkills Management
-
-Manage third-party skills from the marketplace.
-
-```bash
-# Search skills
-meept clawskills search "web scraping"
-
-# Install skill
-meept clawskills install claw:web-scraper
-
-# List installed skills
-meept clawskills list
-
-# Update skills
-meept clawskills update
-```
-
 ### `meept selfimprove` - Self-Improvement System
 
 Run automated code improvement cycles.

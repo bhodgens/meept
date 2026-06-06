@@ -1165,15 +1165,14 @@ config_dirs = ["~/.meept/agents", "config/agents"]
 
 ---
 
-### Skills & ClawSkills
+### Skills
 
-Meept supports a three-tier skill discovery system and a third-party marketplace.
+Meept supports a three-tier skill discovery system.
 
 #### Skill Discovery (Priority)
 1. `.meept/skills/` - Project-local (highest priority)
 2. `~/.meept/skills/` - User-global
 3. `~/.config/meept/skills/` - System-wide
-4. `~/.meept/clawskills/` - Third-party (claw: prefix)
 
 #### Runtime Skill Discovery
 - **CapabilityIndex**: Metadata-driven matching without loading full skill bodies
@@ -1181,26 +1180,12 @@ Meept supports a three-tier skill discovery system and a third-party marketplace
 - **Tool Filtering**: When a skill declares `allowed-tools`, the registry is filtered for that execution
 - **Confidence Threshold**: Minimum confidence for skill matching (default 0.5)
 
-#### ClawSkills Marketplace
-- Registry-based third-party skills
-- Security scanning before installation
-- Risk level assessment
-- Automatic updates
-
 **Configuration:**
 ```toml
 [skills]
 enabled = true
 search_paths = []
 auto_reload = false
-
-[clawskills]
-enabled = false
-registry_url = "https://clawhub.ai"
-install_dir = "~/.meept/clawskills"
-auto_update = false
-max_installed = 50
-default_risk_level = "high"
 ```
 
 ---
@@ -1312,7 +1297,6 @@ scan_type_check = true
 | **Global Rules & Reporting** | Platform-wide rules with structured JSON reports |
 | **Q Agent** | Meta-agent for session analysis and optimization design |
 | **Learning Pipeline** | Shadow training, trajectory learning, and automated fixing |
-| **ClawSkills Marketplace** | Third-party skill marketplace with security scanning |
 | **Self-Improvement System** | Automated detection, fixing, and validation of code issues |
 | **Advanced Knowledge Graph** | PageRank scoring, community detection, hybrid search |
 | **Multi-Tier Memory** | Episodic, task, knowledge graph, distributed, and semantic memory |
@@ -1466,10 +1450,6 @@ enable_checkpoints = true
 # Q Agent
 ./bin/meept q status               # Q Agent status
 ./bin/meept q analyze              # Analyze sessions
-
-# ClawSkills
-./bin/meept clawskills list        # List installed skills
-./bin/meept clawskills install <slug>  # Install skill
 
 # Self-Improve
 ./bin/meept selfimprove detect     # Detect issues

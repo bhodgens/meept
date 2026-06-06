@@ -53,8 +53,5 @@ auto_commit = true
 [skills]
 enabled = true
 
-[clawskills]
-enabled = false
-
 [selfimprove]
 enabled = false  # Subject doesn't self-improve, that's the tester's job

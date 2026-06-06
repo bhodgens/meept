@@ -32,7 +32,6 @@ Root configuration structure containing all subsystem configurations.
 | Plugins | PluginsConfig |  |  |
 | Workspace | WorkspaceConfig |  |  |
 | Skills | SkillsConfig |  |  |
-| ClawSkills | ClawSkillsConfig |  |  |
 | SelfImprove | SelfImproveConfig |  |  |
 | Orchestrator | OrchestratorConfig |  |  |
 | Shadow | ShadowConfig |  |  |
