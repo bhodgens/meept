@@ -21,6 +21,7 @@ import (
 	"github.com/caimlas/meept/internal/comm/telegram"
 	"github.com/caimlas/meept/internal/comm/web"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/debug"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -163,6 +164,12 @@ type Components struct {
 
 	// Project management
 	ProjectManager *project.ProjectManager
+
+	// Distributed cluster support
+	ClusterEngine  *cluster.GossipEngine
+	ClusterGitSync *cluster.GitSync
+	ClusterQueue   *queue.ClusterQueue
+	ClusterConfig  *cluster.Config
 
 	Logger *slog.Logger
 }
@@ -1506,6 +1513,27 @@ func (c *Components) Start(ctx context.Context) error {
 		}()
 	}
 
+	// Start gossip engine (cluster mode)
+	if c.ClusterEngine != nil {
+		if err := c.ClusterEngine.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start gossip engine", "error", err)
+		} else {
+			c.Logger.Info("Gossip engine started",
+				"cluster_id", c.ClusterConfig.ClusterID,
+				"node_id", c.ClusterConfig.NodeID,
+			)
+		}
+	}
+
+	// Start git sync loop (cluster mode)
+	if c.ClusterGitSync != nil {
+		if err := c.ClusterGitSync.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start git sync", "error", err)
+		} else {
+			c.Logger.Info("Git sync loop started")
+		}
+	}
+
 	return nil
 }
 
@@ -1691,6 +1719,26 @@ func (c *Components) Stop(ctx context.Context) error {
 	if c.DebugManager != nil {
 		if err := c.DebugManager.Close(); err != nil {
 			c.Logger.Error("Failed to stop debug manager", "error", err)
+			lastErr = err
+		}
+	}
+
+	// Stop cluster components (gossip engine, git sync, cluster queue)
+	if c.ClusterEngine != nil {
+		if err := c.ClusterEngine.Stop(); err != nil {
+			c.Logger.Error("Failed to stop gossip engine", "error", err)
+			lastErr = err
+		}
+	}
+	if c.ClusterGitSync != nil {
+		if err := c.ClusterGitSync.Stop(); err != nil {
+			c.Logger.Error("Failed to stop git sync", "error", err)
+			lastErr = err
+		}
+	}
+	if c.ClusterQueue != nil {
+		if err := c.ClusterQueue.Close(); err != nil {
+			c.Logger.Error("Failed to stop cluster queue", "error", err)
 			lastErr = err
 		}
 	}

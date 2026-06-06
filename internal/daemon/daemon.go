@@ -16,6 +16,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/comm/http"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -235,6 +236,77 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 					return bs.HourlyUsed, bs.HourlyRemaining, bs.DailyUsed, bs.DailyRemaining, bs.RPMCurrent, bs.RPMLimit, bs.DailyCostUsed, bs.DailyCostLimit, bs.HourlyCostUsed, bs.HourlyCostLimit
 				}
 			}
+		}
+	}
+
+	// Initialize cluster components (if config exists)
+	var clusterCfg *cluster.Config
+	var clusterEngine *cluster.GossipEngine
+	var clusterGitSync *cluster.GitSync
+	var clusterMQ *queue.ClusterQueue
+
+	cfgPath := cluster.DefaultClusterConfigPath()
+	if loadedCfg, err := cluster.LoadClusterConfig(cfgPath); err == nil && loadedCfg != nil {
+		clusterCfg = loadedCfg
+		logger.Info("cluster config loaded",
+			"path", cfgPath,
+			"cluster_id", clusterCfg.ClusterID,
+			"node_id", clusterCfg.NodeID,
+		)
+
+		// Create gossip engine if we have a message bus
+		if msgBus != nil {
+			localNodeID := clusterCfg.NodeID
+			if localNodeID == "" {
+				localNodeID = "local"
+			}
+			clusterEngine = cluster.NewGossipEngine(clusterCfg, localNodeID, msgBus, logger)
+		}
+
+		// Create cluster-aware queue wrapping the existing queue
+		if components != nil && components.Queue != nil {
+			// Check if we have a store to use
+			localNodeID := clusterCfg.NodeID
+			if localNodeID == "" {
+				localNodeID = "local"
+			}
+			cqConfig := queue.ClusterQueueConfig{
+				DefaultClaimTimeout:     clusterCfg.Gossip.HeartbeatInterval,
+				NodeReachabilityTimeout: clusterCfg.Gossip.PeerTimeout,
+				FullPayloadReplication:  false,
+			}
+			clusterMQ = queue.NewClusterQueue(components.Queue, nil, localNodeID, logger, cqConfig)
+		}
+	} else if err != nil {
+		logger.Debug("cluster config not found, cluster features disabled", "path", cfgPath, "error", err)
+	}
+
+	// Register cluster RPC handlers if RPC server is available
+	if rpcServer != nil && (clusterEngine != nil || clusterCfg != nil) {
+		clusterHandler := rpc.NewClusterHandler(clusterEngine, clusterGitSync, clusterCfg)
+		clusterHandler.SetClusterQueue(clusterMQ)
+		clusterHandler.RegisterClusterMethods(rpcServer)
+		logger.Info("cluster RPC handlers registered")
+	}
+
+	// Wire cluster queue into components
+	if clusterMQ != nil {
+		if components != nil {
+			components.ClusterQueue = clusterMQ
+		}
+	}
+
+	// Wire cluster engine into components
+	if clusterEngine != nil {
+		if components != nil {
+			components.ClusterEngine = clusterEngine
+		}
+	}
+
+	// Wire cluster config into components
+	if clusterCfg != nil {
+		if components != nil {
+			components.ClusterConfig = clusterCfg
 		}
 	}
 
@@ -541,6 +613,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.logger.Info("daemon: agent components started",
 			"tools", d.components.ToolRegistry.Count(),
 			"llm_configured", d.components.LLMClient != nil,
+			"cluster_enabled", d.components.ClusterEngine != nil,
 		)
 	}
 
@@ -680,6 +753,23 @@ func (d *Daemon) shutdown() error {
 	if d.components != nil && d.components.RuntimeManager != nil {
 		if err := d.components.RuntimeManager.StopAll(ctx); err != nil {
 			d.logger.Error("Failed to stop LLM runtimes", "error", err)
+		}
+	}
+
+	// Stop cluster components (gossip engine, git sync, cluster queue)
+	if d.components != nil && d.components.ClusterEngine != nil {
+		if err := d.components.ClusterEngine.Stop(); err != nil {
+			d.logger.Error("Failed to stop gossip engine", "error", err)
+		}
+	}
+	if d.components != nil && d.components.ClusterGitSync != nil {
+		if err := d.components.ClusterGitSync.Stop(); err != nil {
+			d.logger.Error("Failed to stop git sync", "error", err)
+		}
+	}
+	if d.components != nil && d.components.ClusterQueue != nil {
+		if err := d.components.ClusterQueue.Close(); err != nil {
+			d.logger.Error("Failed to stop cluster queue", "error", err)
 		}
 	}
 
