@@ -134,6 +134,7 @@ Memory & Skills:
 	rootCmd.SetHelpCommand(newHelpCmd(rootCmd))
 	rootCmd.AddCommand(newMCPChatServerCmd())
 	rootCmd.AddCommand(newTokenCmd())
+	rootCmd.AddCommand(newClusterCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
