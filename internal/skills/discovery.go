@@ -49,12 +49,11 @@ type Discovery struct {
 // DiscoveryOption is a functional option for configuring Discovery.
 type DiscoveryOption func(*Discovery)
 
-// WithTiers sets custom discovery tiers. This creates a FileSource internally.
+// WithTiers sets custom discovery tiers. This creates a FileSource internally
+// and appends it to the source list.
 func WithTiers(tiers []DiscoveryTier) DiscoveryOption {
 	return func(d *Discovery) {
-		d.sources = []SkillSource{
-			NewFileSource(tiers, d.logger),
-		}
+		d.sources = append(d.sources, NewFileSource(tiers, d.logger))
 	}
 }
 

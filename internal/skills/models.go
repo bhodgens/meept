@@ -41,8 +41,12 @@ type Skill struct {
 	// Path is the filesystem path the skill was loaded from.
 	Path string `json:"path"`
 
-	// Priority indicates the discovery tier (0=project, 1=user, 2=system).
+	// Priority indicates the discovery tier (0=project, 1=user, 2=claude, 3=system).
 	Priority int `json:"priority"`
+
+	// Source identifies where the skill was discovered from.
+	// Values: "meept" (default), "claude" (from Claude tier).
+	Source string `json:"source,omitempty"`
 
 	// AllowedTools is a subset of tool names this skill may use. Empty means all.
 	AllowedTools []string `json:"allowed_tools,omitempty"`
@@ -141,4 +145,12 @@ type SkillExecutionResult struct {
 
 	// TotalTokens is the total tokens used.
 	TotalTokens int `json:"total_tokens"`
+
+	// MCPTools lists the tools discovered from MCP servers that were
+	// running during this execution. Empty if no MCP servers were started.
+	MCPTools []ToolDef `json:"mcp_tools,omitempty"`
+
+	// MCPServersStarted is true when at least one MCP server was
+	// successfully started for this execution.
+	MCPServersStarted bool `json:"mcp_servers_started"`
 }

@@ -89,5 +89,3 @@ func IsClaudeSkillPath(path string) bool {
 
 	return false
 }
-
-

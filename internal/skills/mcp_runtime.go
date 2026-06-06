@@ -3,7 +3,6 @@ package skills
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -74,13 +73,16 @@ func (r *MCPRuntime) HasServers() bool {
 // fails to start or initialize, the error is logged and remaining servers
 // continue. Returns the first error encountered (non-fatal; other servers
 // may still be running).
+//
+// The mutex is released during per-server I/O to avoid blocking Tools(),
+// Shutdown(), and ClientTools() while waiting for a slow server to connect.
 func (r *MCPRuntime) Start(ctx context.Context) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.started {
+		r.mu.Unlock()
 		return nil
 	}
+	r.mu.Unlock()
 
 	var firstErr error
 
@@ -98,7 +100,9 @@ func (r *MCPRuntime) Start(ctx context.Context) error {
 		srv.started = true
 	}
 
+	r.mu.Lock()
 	r.started = true
+	r.mu.Unlock()
 
 	// If all servers failed, return the error.
 	if firstErr != nil {
@@ -180,9 +184,9 @@ func (r *MCPRuntime) Tools() []ToolDef {
 }
 
 // Shutdown gracefully terminates all running MCP servers. It sends a shutdown
-// notification to each server, waits up to 5 seconds for graceful exit, then
-// kills any remaining processes. Returns nil even if individual servers fail
-// to shut down (errors are logged).
+// notification to each server, then closes the client (which closes the
+// transport with a 5-second graceful period followed by process kill).
+// Returns nil even if individual servers fail to shut down (errors are logged).
 func (r *MCPRuntime) Shutdown() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -223,8 +227,6 @@ func (r *MCPRuntime) Shutdown() error {
 
 // sendShutdown sends a JSON-RPC shutdown notification to the server.
 func (r *MCPRuntime) sendShutdown(srv *mcpServerProc) error {
-	// Build a raw shutdown notification. We use the mcp package types
-	// to ensure correct JSON-RPC 2.0 format.
 	notif := mcp.NewNotification("shutdown", nil)
 	data, err := json.Marshal(notif)
 	if err != nil {
@@ -245,28 +247,35 @@ func (r *MCPRuntime) Started() bool {
 	return r.started
 }
 
+// ClientToolPair holds a tool definition and its owning MCP client.
+type ClientToolPair struct {
+	Def    ToolDef
+	Client *mcp.Client
+}
+
+// ClientTools returns pairs of ToolDef and their associated MCP client.
+// This enables callers to create SkillMCPTool instances with direct client access.
+func (r *MCPRuntime) ClientTools() []ClientToolPair {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var pairs []ClientToolPair
+	for _, srv := range r.servers {
+		if !srv.started || srv.client == nil {
+			continue
+		}
+		for _, tool := range srv.tools {
+			pairs = append(pairs, ClientToolPair{
+				Def:    tool,
+				Client: srv.client,
+			})
+		}
+	}
+	return pairs
+}
+
 // Ensure MCPRuntime is usable as nil (zero-value HasServers returns false).
 var _ interface {
 	HasServers() bool
 	Shutdown() error
 } = (*MCPRuntime)(nil)
-
-// compile-time interface satisfaction check
-var _ error = (*startError)(nil)
-
-// startError wraps an error from a specific MCP server start failure.
-type startError struct {
-	serverName string
-	err        error
-}
-
-func (e *startError) Error() string {
-	return fmt.Sprintf("MCP server %q: %v", e.serverName, e.err)
-}
-
-func (e *startError) Unwrap() error {
-	return e.err
-}
-
-// ErrAllServersFailed is returned when all configured MCP servers fail to start.
-var ErrAllServersFailed = errors.New("all MCP servers failed to start")
