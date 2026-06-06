@@ -22,8 +22,6 @@ go test ./... -v
 
 # Run specific package tests
 go test ./internal/agent/... -v
-go test ./internal/clawskills/... -v
-
 # Run tests with coverage
 go test ./... -coverprofile=coverage.out
 go tool cover -html=coverage.out
@@ -64,11 +62,6 @@ make menubar-clean             # Clean menubar build artifacts
 # Sections: daemon, transport, llm, models, agents, memory, security,
 #           mcp, client/tui, scheduler, plus ~20 advanced sections
 # Use `meept config models` for model management (replaces `meept models`)
-
-# ClawSkills commands
-./bin/meept clawskills search "query"
-./bin/meept clawskills install <slug>
-./bin/meept clawskills list
 
 # Self-improvement commands
 ./bin/meept selfimprove detect
@@ -133,11 +126,10 @@ User Input (CLI/Telegram/Web/MenuBar)
 | **Memory** | `internal/memory` (manager, episodic, task, consolidation, ftstore) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp) |
 | **Code Intel** | `internal/code/ast` (tree-sitter parser + symbol extraction), `internal/code/lsp` (LSP client/manager), `internal/code/tools` (ast_* and lsp_* agent tools) |
-| **ClawSkills** | `internal/clawskills` (client, installer, security, index) |
 | **Self-Improve** | `internal/selfimprove` (controller, detector, analyzer, generator, validator, applier) |
 | **Scheduler** | `internal/scheduler` (scheduler, jobs) |
 | **External** | `internal/comm/telegram`, `internal/comm/web`, `internal/calendar` |
-| **CLI** | `cmd/meept` (chat, status, config, jobs, memory, clawskills, selfimprove) |
+| **CLI** | `cmd/meept` (chat, status, config, jobs, memory, selfimprove) |
 | **MenuBar** | `menubar/` (SwiftUI app), `internal/comm/http` (REST API) |
 | **Metrics** | `internal/metrics` (store, collector) |
 | **Plans** | `internal/plan` (plan, store, manager, parser, writer, handler) |
@@ -308,7 +300,6 @@ Three-tier with priority shadowing:
 .meept/skills/              # Project-local (highest)
 ~/.meept/skills/            # User-global
 ~/.config/meept/skills/     # System-wide
-~/.meept/clawskills/        # Third-party (claw: prefix)
 ```
 
 ## Multi-Agent Architecture
@@ -402,7 +393,6 @@ internal/
   agent/           # Agent loop, planner, workspace, collaborative
   bus/             # Message bus (pub/sub)
   calendar/        # Google Calendar integration
-  clawskills/      # Third-party skill registry
   comm/
     telegram/      # Telegram bot
     web/           # HTTP API server
