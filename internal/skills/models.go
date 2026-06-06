@@ -12,7 +12,7 @@ const (
 	PriorityProject = 0 // .meept/skills/ (project-local)
 	PriorityUser    = 1 // ~/.meept/skills/ (user-global)
 	PriorityClaude  = 2 // ~/.claude/skills/ (Claude Code skills)
-	PrioritySystem  = 2 // ~/.config/meept/skills/ (system-wide)
+	PrioritySystem  = 3 // ~/.config/meept/skills/ (system-wide)
 )
 
 // Skill represents a parsed skill definition from a SKILL.md file.
