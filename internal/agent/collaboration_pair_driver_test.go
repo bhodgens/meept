@@ -43,20 +43,29 @@ func TestPairProgrammingDriver_getOtherParticipant(t *testing.T) {
 func TestPairProgrammingDriver_parseObserverResponse(t *testing.T) {
 	d := NewPairProgrammingDriver(PairProgrammingDriverDeps{Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))})
 	tests := []struct {
-		input          string
-		wantAction     string
-		wantHasRequest bool
+		name       string
+		input      string
+		wantAction string
 	}{
-		{"This looks good to me. Approve.", "approve", false},
-		{"I want to take over as driver. request_token", "request_token", true},
-		{"There's a bug in line 42. Fix the off-by-one.", "request_changes", false},
-		{"LGTM", "approve", false},
+		// Structured JSON responses
+		{"structured approve", `{"action": "approve", "feedback": "code is clean"}`, "approve"},
+		{"structured request_changes", `{"action": "request_changes", "feedback": "fix nil check"}`, "request_changes"},
+		{"structured request_token", `{"action": "request_token", "feedback": "let me drive"}`, "request_token"},
+		{"structured in text", "Review complete. {\"action\": \"approve\", \"feedback\": \"LGTM\"}", "approve"},
+
+		// Fallback keyword matching
+		{"keyword approve", "This looks good to me. Approve.", "approve"},
+		{"keyword lgtm", "LGTM", "approve"},
+		{"keyword request_token", "I want to take over as driver. request_token", "request_token"},
+		{"keyword default", "There's a bug in line 42. Fix the off-by-one.", "request_changes"},
 	}
 	for _, tc := range tests {
-		action, _ := d.parseObserverResponse(tc.input)
-		if action != tc.wantAction {
-			t.Errorf("parse(%q) action = %q, want %q", tc.input, action, tc.wantAction)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			action, _ := d.parseObserverResponse(tc.input)
+			if action != tc.wantAction {
+				t.Errorf("parse(%q) action = %q, want %q", tc.input, action, tc.wantAction)
+			}
+		})
 	}
 }
 

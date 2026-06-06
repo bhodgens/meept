@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,7 +78,7 @@ func (d *PairProgrammingDriver) Run(ctx context.Context, sess *CollaborationSess
 
 	workspacePath, err := d.createWorkspace(ctx, sess)
 	if err != nil {
-		return nil, err
+		return nil, NewCollaborationError(ErrCodeWorkspace, sess.ID, "init", fmt.Sprintf("workspace creation failed: %v", err))
 	}
 	sess.Workspace = workspacePath
 
@@ -99,8 +101,16 @@ func (d *PairProgrammingDriver) Run(ctx context.Context, sess *CollaborationSess
 		"task_id":      sess.TaskID,
 	})
 
+	// Enforce time budget via derived context
+	runCtx := ctx
+	if sess.TimeBudget > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, sess.TimeBudget)
+		defer cancel()
+	}
+
 	startTime := time.Now()
-	result, err := d.runTurnLoop(ctx, sess, conv, tm)
+	result, err := d.runTurnLoop(runCtx, sess, conv, tm)
 	duration := time.Since(startTime)
 
 	if err != nil {
@@ -132,7 +142,7 @@ func (d *PairProgrammingDriver) createWorkspace(ctx context.Context, sess *Colla
 	baseDir := getCollabWorkspaceBase()
 	wsPath := filepath.Join(baseDir, sess.ID)
 	if err := os.MkdirAll(wsPath, 0755); err != nil {
-		return "", fmt.Errorf("failed to create workspace: %w", err)
+		return "", NewCollaborationError(ErrCodeWorkspace, sess.ID, "init", fmt.Sprintf("failed to create workspace: %v", err))
 	}
 	return wsPath, nil
 }
@@ -144,11 +154,24 @@ func getCollabWorkspaceBase() string {
 
 func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *CollaborationSession, conv *PPConversation, tm *TurnManager) (*CollaborationResult, error) {
 	for !tm.IsExhausted() {
+		// Check context cancellation (covers time budget timeout)
 		select {
 		case <-ctx.Done():
 			sess.MarkFailed()
-			return nil, ctx.Err()
+			return nil, NewCollaborationError(ErrCodeCollabTimeout, sess.ID, "turn_loop", ctx.Err().Error())
 		default:
+		}
+
+		// Check token budget
+		if sess.TokenBudget > 0 {
+			var totalTokens int64
+			for _, turn := range sess.TurnLog {
+				totalTokens += turn.TokensUsed
+			}
+			if totalTokens >= sess.TokenBudget {
+				sess.MarkExhausted()
+				return nil, ErrBudgetExceeded
+			}
 		}
 
 		driverID := tm.TokenHolder()
@@ -158,7 +181,7 @@ func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *Collabora
 		output, err := d.runAgent(ctx, driverID, driverPrompt, fmt.Sprintf("pp-%s-%s-driven", sess.ID, driverID))
 		if err != nil {
 			sess.MarkFailed()
-			return nil, fmt.Errorf("driver %s failed: %w", driverID, err)
+			return nil, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "turn_loop", fmt.Sprintf("driver %s failed: %v", driverID, err))
 		}
 
 		sess.AddTurn(TurnEntry{
@@ -182,7 +205,7 @@ func (d *PairProgrammingDriver) runTurnLoop(ctx context.Context, sess *Collabora
 		observerOutput, err := d.runAgent(ctx, observerID, observerPrompt, fmt.Sprintf("pp-%s-%s-observed", sess.ID, observerID))
 		if err != nil {
 			sess.MarkFailed()
-			return nil, fmt.Errorf("observer %s failed: %w", observerID, err)
+				return nil, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "turn_loop", fmt.Sprintf("observer %s failed: %v", observerID, err))
 		}
 
 		action, feedback := d.parseObserverResponse(observerOutput)
@@ -298,16 +321,22 @@ func (d *PairProgrammingDriver) buildObserverPrompt(sess *CollaborationSession, 
 
 	prompt += "## Instructions\n"
 	prompt += "- Review the driver's work.\n"
-	prompt += "- Options:\n"
+	prompt += "- Respond with a JSON block containing your action and feedback:\n"
+	prompt += "  ```json\n  {\"action\": \"approve\", \"feedback\": \"your review notes\"}\n  ```\n"
+	prompt += "- Valid actions:\n"
 	prompt += "  **approve**: Looks good, pass turn back to driver.\n"
 	prompt += "  **request_changes**: Point out issues for the driver to fix.\n"
 	prompt += "  **request_token**: Ask to become the driver yourself.\n"
-	prompt += "- Call `workspace_yield` with your chosen action and feedback.\n"
 
 	return prompt
 }
 
 func (d *PairProgrammingDriver) parseObserverResponse(output string) (action, feedback string) {
+	// Try structured JSON parsing first
+	if action, feedback, ok := parseStructuredObserverResponse(output); ok {
+		return action, feedback
+	}
+	// Fallback to keyword matching
 	lower := toLower(output)
 	if containsAny(lower, []string{"request_token", "let me drive", "i want to be driver"}) {
 		return "request_token", output
@@ -318,9 +347,46 @@ func (d *PairProgrammingDriver) parseObserverResponse(output string) (action, fe
 	return "request_changes", output
 }
 
+// parseStructuredObserverResponse attempts to extract structured action/feedback from LLM output.
+// The observer is prompted to include a JSON block like: {"action":"approve","feedback":"looks good"}
+// Returns (action, feedback, true) if structured output found, ("", "", false) otherwise.
+func parseStructuredObserverResponse(output string) (string, string, bool) {
+	actionIdx := strings.LastIndex(output, `"action"`)
+	if actionIdx == -1 {
+		return "", "", false
+	}
+
+	jsonStart := strings.LastIndex(output[:actionIdx], "{")
+	jsonEnd := strings.Index(output[actionIdx:], "}")
+	if jsonStart == -1 || jsonEnd == -1 {
+		return "", "", false
+	}
+	jsonEnd += actionIdx + 1
+
+	jsonStr := output[jsonStart:jsonEnd]
+
+	var parsed struct {
+		Action   string `json:"action"`
+		Feedback string `json:"feedback"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		return "", "", false
+	}
+
+	switch parsed.Action {
+	case "approve", "request_changes", "request_token":
+		if parsed.Feedback == "" {
+			parsed.Feedback = output
+		}
+		return parsed.Action, parsed.Feedback, true
+	default:
+		return "", "", false
+	}
+}
+
 func (d *PairProgrammingDriver) runAgent(ctx context.Context, agentID, message, conversationID string) (string, error) {
 	if d.registry == nil {
-		return "", fmt.Errorf("agent registry not configured")
+		return "", NewCollaborationError(ErrCodeAgentFailed, "", "run_agent", "agent registry not configured")
 	}
 	return d.registry.RunAgent(ctx, agentID, message, conversationID)
 }

@@ -28,6 +28,7 @@ const (
 	ErrCodeDepthExceeded   = "depth_exceeded"
 	ErrCodeAgentFailed     = "agent_failed"
 	ErrCodeWorkspace       = "workspace_error"
+	ErrCodeCollabTimeout   = "timeout"
 	ErrCodeInvalidMode     = "invalid_mode"
 	ErrCodeSessionNotFound = "session_not_found"
 )

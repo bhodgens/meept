@@ -77,33 +77,41 @@ func (d *DifferentialDriver) Run(ctx context.Context, sess *CollaborationSession
 
 	startTime := time.Now()
 
+	// Enforce time budget via derived context
+	runCtx := ctx
+	if sess.TimeBudget > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, sess.TimeBudget)
+		defer cancel()
+	}
+
 	// Phase 1: Fork
-	if err := d.phaseFork(ctx, sess); err != nil {
+	if err := d.phaseFork(runCtx, sess); err != nil {
 		sess.MarkFailed()
-		return nil, fmt.Errorf("phase 1 (fork) failed: %w", err)
+		return nil, err // phaseFork returns CollaborationError with ErrCodeWorkspace
 	}
 	d.publishEvent(sess.ID, TopicCollabPhaseCompleted, map[string]any{
 		"session_id": sess.ID, "phase": "fork", "workspace": sess.Workspace,
 	})
 
 	// Phase 2: Implement & Review
-	branchAOK, branchBOK, err := d.phaseImplement(ctx, sess)
+	branchAOK, branchBOK, err := d.phaseImplement(runCtx, sess)
 	if err != nil {
 		sess.MarkFailed()
 		d.publishEvent(sess.ID, TopicCollabError, map[string]any{
 			"session_id": sess.ID, "error": err.Error(), "phase": "implement",
 		})
-		return nil, fmt.Errorf("phase 2 (implement) failed: %w", err)
+		return nil, err
 	}
 	d.publishEvent(sess.ID, TopicCollabPhaseCompleted, map[string]any{
 		"session_id": sess.ID, "phase": "implement", "branch_a_ok": branchAOK, "branch_b_ok": branchBOK,
 	})
 
 	// Phase 3: Validate Checkpoint
-	checkpointResult, err := d.phaseValidate(ctx, sess, branchAOK, branchBOK)
+	checkpointResult, err := d.phaseValidate(runCtx, sess, branchAOK, branchBOK)
 	if err != nil {
 		sess.MarkFailed()
-		return nil, fmt.Errorf("phase 3 (validate) failed: %w", err)
+		return nil, err
 	}
 
 	if !checkpointResult.AnyOK {
@@ -134,7 +142,7 @@ func (d *DifferentialDriver) Run(ctx context.Context, sess *CollaborationSession
 	})
 
 	// Phase 4: Differentiate & Synthesize
-	result, err := d.phaseDifferentiate(ctx, sess, checkpointResult)
+	result, err := d.phaseDifferentiate(runCtx, sess, checkpointResult)
 	if err != nil {
 		sess.MarkFailed()
 		d.publishEvent(sess.ID, TopicCollabError, map[string]any{
@@ -171,14 +179,14 @@ func (d *DifferentialDriver) phaseFork(ctx context.Context, sess *CollaborationS
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+			return NewCollaborationError(ErrCodeWorkspace, sess.ID, "fork", fmt.Sprintf("failed to create directory %s: %v", dir, err))
 		}
 	}
 
 	planPath := filepath.Join(wsPath, "meta", "plan.md")
 	content := fmt.Sprintf("# Task Plan\n\n**Session:** %s\n**Task:** %s\n\n", sess.ID, sess.TaskID)
 	if err := os.WriteFile(planPath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write plan: %w", err)
+		return NewCollaborationError(ErrCodeWorkspace, sess.ID, "fork", fmt.Sprintf("failed to write plan: %v", err))
 	}
 
 	sess.Workspace = wsPath
@@ -215,16 +223,26 @@ func (d *DifferentialDriver) phaseImplement(ctx context.Context, sess *Collabora
 // phaseImplementDirect runs agents directly without PairManager.
 func (d *DifferentialDriver) phaseImplementDirect(ctx context.Context, sess *CollaborationSession) (branchAOK, branchBOK bool, err error) {
 	if d.registry == nil {
-		return false, false, fmt.Errorf("registry not available")
+		return false, false, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "implement_direct", "registry not available")
 	}
 
 	taskSpec := fmt.Sprintf("Implement the following task: %s", sess.TaskID)
 
 	_, errA := d.registry.RunAgent(ctx, sess.Participants[0], taskSpec, fmt.Sprintf("diff-%s-branch-a", sess.ID))
+	if errA != nil {
+		d.logger.Warn("Branch A agent failed", "session_id", sess.ID, "error", errA)
+	}
 	branchAOK = errA == nil
 
 	_, errB := d.registry.RunAgent(ctx, sess.Participants[1], taskSpec, fmt.Sprintf("diff-%s-branch-b", sess.ID))
+	if errB != nil {
+		d.logger.Warn("Branch B agent failed", "session_id", sess.ID, "error", errB)
+	}
 	branchBOK = errB == nil
+
+	if !branchAOK && !branchBOK {
+		return false, false, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "implement_direct", fmt.Sprintf("both branches failed: a=%v, b=%v", errA, errB))
+	}
 
 	return branchAOK, branchBOK, nil
 }
@@ -293,7 +311,7 @@ func (d *DifferentialDriver) phaseDifferentiate(ctx context.Context, sess *Colla
 
 	diffOutput, err := d.registry.RunAgent(ctx, differentiatorID, prompt, fmt.Sprintf("diff-%s-differentiator", sess.ID))
 	if err != nil {
-		return nil, fmt.Errorf("differentiator agent failed: %w", err)
+		return nil, NewCollaborationError(ErrCodeAgentFailed, sess.ID, "differentiate", fmt.Sprintf("differentiator agent failed: %v", err))
 	}
 
 	if sess.Workspace != "" {
