@@ -34,9 +34,38 @@ func (a *ClaudeSkillAdapter) AdaptSkill(skill *Skill) *Skill {
 		return nil
 	}
 
-	// The parser already handles trigger→tags mapping and camelCase fields.
-	// The adapter exists as an extension point for future Claude-specific
-	// normalizations. For now, return the skill as-is.
+	// Mark the skill as coming from the Claude tier.
+	skill.Source = "claude"
+
+	// If description is empty, derive it from the first non-heading,
+	// non-empty line of the body.
+	if skill.Description == "" && skill.Body != "" {
+		for _, line := range strings.Split(skill.Body, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			if len(trimmed) > 200 {
+				trimmed = trimmed[:200]
+			}
+			skill.Description = trimmed
+			break
+		}
+	}
+
+	// If Tags is empty and the skill was loaded from a directory-based
+	// Claude skill path, derive a tag from the parent directory name.
+	if len(skill.Tags) == 0 && skill.Path != "" {
+		dir := filepath.Dir(skill.Path)
+		parent := filepath.Base(dir)
+		if parent != "." && parent != "skills" {
+			skill.Tags = []string{parent}
+		}
+	}
+
 	return skill
 }
 
@@ -61,15 +90,4 @@ func IsClaudeSkillPath(path string) bool {
 	return false
 }
 
-// DefaultTiersContainsClaude checks whether DefaultTiers includes a Claude
-// skills tier. This is a convenience function used in tests and diagnostics.
-func DefaultTiersContainsClaude() bool {
-	tiers := DefaultTiers()
-	for _, tier := range tiers {
-		if tier.Priority == PriorityClaude && strings.HasSuffix(tier.Path, ".claude"+string(filepath.Separator)+"skills") {
-			return true
-		}
-	}
-	return false
-}
 

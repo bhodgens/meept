@@ -361,38 +361,35 @@ Body.
 	}
 }
 
-func TestDiscovery_FourTiers(t *testing.T) {
+func TestDiscovery_ThreeFilesystemTiersAndClaudeSource(t *testing.T) {
+	// DefaultTiers returns 3 filesystem tiers (project, user, system).
 	tiers := DefaultTiers()
-	if len(tiers) != 4 {
-		t.Errorf("DefaultTiers returned %d tiers, want 4", len(tiers))
+	if len(tiers) != 3 {
+		t.Errorf("DefaultTiers returned %d tiers, want 3", len(tiers))
 	}
 
-	if !DefaultTiersContainsClaude() {
-		t.Error("DefaultTiers should contain a Claude skills tier")
+	// NewDiscovery() adds a ClaudeSource as a 4th source.
+	d := NewDiscovery()
+	sources := d.Sources()
+	if len(sources) != 2 {
+		t.Errorf("NewDiscovery has %d sources, want 2 (FileSource + ClaudeSource)", len(sources))
 	}
 
-	// Verify the Claude tier has the correct priority and path suffix.
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("Cannot determine home directory")
-	}
-
-	expectedPath := filepath.Join(homeDir, ".claude", "skills")
-	found := false
-	for _, tier := range tiers {
-		if tier.Priority == PriorityClaude {
-			if tier.Path != expectedPath {
-				t.Errorf("Claude tier path = %q, want %q", tier.Path, expectedPath)
-			}
-			if tier.Priority != 2 {
-				t.Errorf("Claude tier priority = %d, want 2", tier.Priority)
-			}
-			found = true
-			break
+	// Verify we have a FileSource and a ClaudeSource.
+	var hasFile, hasClaude bool
+	for _, src := range sources {
+		switch src.Name() {
+		case "filesystem":
+			hasFile = true
+		case "claude":
+			hasClaude = true
 		}
 	}
-	if !found {
-		t.Error("No tier with PriorityClaude found in DefaultTiers")
+	if !hasFile {
+		t.Error("NewDiscovery should include a FileSource")
+	}
+	if !hasClaude {
+		t.Error("NewDiscovery should include a ClaudeSource")
 	}
 }
 

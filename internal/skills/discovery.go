@@ -23,8 +23,9 @@ type DiscoveryTier struct {
 	Priority int
 }
 
-// DefaultTiers returns the standard 4-tier discovery paths.
-// Discovery priority (highest to lowest): project > user > claude = system.
+// DefaultTiers returns the standard 3-tier filesystem discovery paths.
+// Claude skills (~/.claude/skills/) are handled by the dedicated ClaudeSource.
+// Discovery priority (highest to lowest): project > user > system.
 func DefaultTiers() []DiscoveryTier {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -34,7 +35,6 @@ func DefaultTiers() []DiscoveryTier {
 	return []DiscoveryTier{
 		{Path: ".meept/skills", Priority: PriorityProject},
 		{Path: filepath.Join(homeDir, ".meept", "skills"), Priority: PriorityUser},
-		{Path: filepath.Join(homeDir, ".claude", "skills"), Priority: PriorityClaude},
 		{Path: filepath.Join(homeDir, ".config", "meept", "skills"), Priority: PrioritySystem},
 	}
 }
