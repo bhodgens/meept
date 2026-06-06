@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meept — Production-Grade Autonomous Agent Daemon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0a0a0a;--bg-raised:#111;--bg-card:#0d0d0d;
+    --orange:#ff6b00;--green:#00ff41;--dim:#555;--mid:#888;
+    --text:#e0e0e0;--text-bright:#fff;
+    --font-mono:'JetBrains Mono','Fira Code',menlo,consolas,monospace;
+    --scanline-opacity:0.04;
+  }
+  html{scroll-behavior:smooth;font-size:16px}
+  body{
+    background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    line-height:1.6;overflow-x:hidden;position:relative;
+  }
+
+  /* Scan-line overlay */
+  body::after{
+    content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;
+    background:repeating-linear-gradient(
+      0deg,transparent,transparent 2px,rgba(0,0,0,var(--scanline-opacity)) 2px,rgba(0,0,0,var(--scanline-opacity)) 4px
+    );
+  }
+
+  a{color:var(--green);text-decoration:none;transition:color .2s}
+  a:hover{color:var(--orange)}
+
+  /* Container */
+  .container{max-width:1100px;margin:0 auto;padding:0 24px}
+
+  /* ── NAV ── */
+  nav{
+    position:sticky;top:0;z-index:100;
+    background:rgba(10,10,10,.92);backdrop-filter:blur(12px);
+    border-bottom:1px solid #1a1a1a;padding:12px 0;
+  }
+  nav .container{display:flex;justify-content:space-between;align-items:center}
+  .logo{font-family:var(--font-mono);font-weight:700;font-size:1.25rem;color:var(--text-bright)}
+  .logo span{color:var(--orange)}
+  nav ul{list-style:none;display:flex;gap:24px}
+  nav ul li a{color:var(--mid);font-size:.85rem;font-family:var(--font-mono);transition:color .2s}
+  nav ul li a:hover{color:var(--green)}
+
+  /* ── HERO ── */
+  .hero{
+    padding:120px 0 80px;text-align:center;position:relative;
+  }
+  .hero::before{
+    content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);
+    width:600px;height:600px;border-radius:50%;
+    background:radial-gradient(circle,rgba(255,107,0,.08) 0%,transparent 70%);
+    pointer-events:none;
+  }
+  .hero-badge{
+    display:inline-block;font-family:var(--font-mono);font-size:.7rem;
+    color:var(--green);border:1px solid var(--green);border-radius:999px;
+    padding:4px 16px;margin-bottom:24px;text-transform:uppercase;letter-spacing:1px;
+  }
+  .hero h1{
+    font-family:var(--font-mono);font-size:clamp(2rem,5vw,3.2rem);
+    font-weight:700;color:var(--text-bright);line-height:1.2;margin-bottom:16px;
+  }
+  .hero h1 .accent{color:var(--orange)}
+  .hero .tagline{font-size:1.15rem;color:var(--mid);max-width:620px;margin:0 auto 40px}
+
+  .cta-group{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:64px}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    font-family:var(--font-mono);font-size:.9rem;font-weight:600;
+    padding:14px 28px;border-radius:4px;border:none;cursor:pointer;
+    transition:all .25s;text-decoration:none;
+  }
+  .btn-primary{background:var(--orange);color:#000}
+  .btn-primary:hover{background:#ff8533;transform:translateY(-2px);box-shadow:0 0 24px rgba(255,107,0,.35)}
+  .btn-outline{background:transparent;color:var(--green);border:1px solid var(--green)}
+  .btn-outline:hover{background:rgba(0,255,65,.08);transform:translateY(-2px);box-shadow:0 0 24px rgba(0,255,65,.2)}
+
+  /* Terminal */
+  .terminal{
+    max-width:680px;margin:0 auto;
+    background:#050505;border:1px solid #1a1a1a;border-radius:8px;
+    overflow:hidden;text-align:left;position:relative;
+    box-shadow:0 4px 40px rgba(0,0,0,.6);
+  }
+  .terminal-bar{
+    display:flex;gap:8px;padding:12px 16px;background:#111;border-bottom:1px solid #1a1a1a;
+  }
+  .terminal-dot{width:12px;height:12px;border-radius:50%}
+  .terminal-dot.r{background:#ff5f57}.terminal-dot.y{background:#febc2e}.terminal-dot.g{background:#28c840}
+  .terminal-body{
+    padding:20px 24px;font-family:var(--font-mono);font-size:.85rem;min-height:180px;
+  }
+  .terminal-prompt{color:var(--green)}
+  .terminal-cursor{
+    display:inline-block;width:8px;height:16px;background:var(--green);
+    animation:blink 1s step-end infinite;vertical-align:text-bottom;
+  }
+  @keyframes blink{50%{opacity:0}}
+
+  .typewriter-line{
+    white-space:nowrap;overflow:hidden;
+    border-right:2px solid var(--green);
+    animation:typing 3s steps(36,end) .5s both,blink 1s step-end 3.5s infinite;
+    color:var(--text);
+  }
+
+  @keyframes typing{
+    from{width:0}
+    to{width:100%}
+  }
+
+  /* ── FEATURES ── */
+  .features{padding:80px 0}
+  .section-label{
+    font-family:var(--font-mono);font-size:.75rem;color:var(--green);
+    text-transform:uppercase;letter-spacing:2px;margin-bottom:12px;
+  }
+  .section-title{
+    font-family:var(--font-mono);font-size:clamp(1.5rem,3vw,2rem);
+    font-weight:700;color:var(--text-bright);margin-bottom:48px;
+  }
+  .features-grid{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:20px;
+  }
+  .feature-card{
+    background:var(--bg-card);border:1px solid #1a1a1a;border-radius:8px;
+    padding:32px 28px;transition:all .3s;position:relative;overflow:hidden;
+  }
+  .feature-card:hover{
+    border-color:var(--orange);
+    box-shadow:0 0 30px rgba(255,107,0,.1),inset 0 0 30px rgba(255,107,0,.03);
+    transform:translateY(-4px);
+  }
+  .feature-card::before{
+    content:'';position:absolute;top:0;left:0;right:0;height:2px;
+    background:linear-gradient(90deg,transparent,var(--orange),transparent);
+    opacity:0;transition:opacity .3s;
+  }
+  .feature-card:hover::before{opacity:1}
+  .feature-icon{
+    font-family:var(--font-mono);font-size:1.6rem;color:var(--green);
+    margin-bottom:16px;display:block;
+  }
+  .feature-card h3{
+    font-family:var(--font-mono);font-size:1rem;font-weight:600;
+    color:var(--text-bright);margin-bottom:10px;
+  }
+  .feature-card p{font-size:.9rem;color:var(--mid);line-height:1.6}
+
+  /* ── COMPARISON ── */
+  .comparison{padding:80px 0}
+  .table-wrap{overflow-x:auto}
+  table{
+    width:100%;border-collapse:collapse;font-size:.9rem;
+  }
+  th,td{padding:14px 20px;text-align:left;border-bottom:1px solid #1a1a1a}
+  th{
+    font-family:var(--font-mono);font-size:.75rem;font-weight:600;
+    text-transform:uppercase;letter-spacing:1px;color:var(--dim);
+    border-bottom:2px solid #222;
+  }
+  th:not(:first-child){text-align:center}
+  td:not(:first-child){text-align:center}
+  td:first-child{font-family:var(--font-mono);font-weight:500;color:var(--text)}
+  .check{color:var(--green);font-size:1.1rem}
+  .cross{color:#444;font-size:1rem}
+  .partial{color:var(--orange);font-size:.8rem}
+  tr:hover td{background:rgba(255,107,0,.03)}
+  .product-highlight{color:var(--orange);font-weight:700}
+
+  /* ── QUICK START ── */
+  .quickstart{padding:80px 0}
+  .code-block{
+    background:#050505;border:1px solid #1a1a1a;border-radius:8px;
+    padding:24px 28px;font-family:var(--font-mono);font-size:.85rem;
+    overflow-x:auto;position:relative;
+  }
+  .code-block .copy-btn{
+    position:absolute;top:12px;right:12px;font-family:var(--font-mono);
+    font-size:.7rem;background:rgba(255,255,255,.05);color:var(--mid);
+    border:1px solid #222;border-radius:4px;padding:4px 12px;cursor:pointer;
+    transition:all .2s;
+  }
+  .code-block .copy-btn:hover{color:var(--green);border-color:var(--green)}
+  .code-block .prompt{color:var(--green)}
+  .code-block .cmd{color:var(--text)}
+  .code-block .comment{color:#444}
+  .code-block .flag{color:var(--orange)}
+  .quickstart-steps{margin-top:32px}
+  .step{
+    display:flex;gap:16px;align-items:flex-start;margin-bottom:20px;
+    font-size:.95rem;color:var(--mid);
+  }
+  .step-num{
+    flex-shrink:0;width:32px;height:32px;border-radius:50%;
+    border:1px solid var(--orange);display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);font-size:.8rem;color:var(--orange);
+  }
+
+  /* ── DEMO ── */
+  .demo{padding:80px 0}
+  .demo-placeholder{
+    background:var(--bg-card);border:1px solid #1a1a1a;border-radius:8px;
+    height:400px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:20px;position:relative;overflow:hidden;
+  }
+  .demo-placeholder::before{
+    content:'';position:absolute;inset:0;
+    background:linear-gradient(135deg,rgba(255,107,0,.03),rgba(0,255,65,.03));
+  }
+  .play-btn{
+    width:80px;height:80px;border-radius:50%;
+    border:2px solid var(--green);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:all .3s;z-index:1;
+  }
+  .play-btn:hover{
+    background:rgba(0,255,65,.1);box-shadow:0 0 40px rgba(0,255,65,.25);
+    transform:scale(1.1);
+  }
+  .play-btn::after{
+    content:'';display:block;width:0;height:0;
+    border-top:16px solid transparent;border-bottom:16px solid transparent;
+    border-left:26px solid var(--green);margin-left:4px;
+  }
+  .demo-placeholder p{font-family:var(--font-mono);color:var(--mid);font-size:.85rem;z-index:1}
+
+  /* ── DOCS ── */
+  .docs{padding:80px 0}
+  .docs-grid{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:16px;
+  }
+  .docs-card{
+    background:var(--bg-card);border:1px solid #1a1a1a;border-radius:8px;
+    padding:24px;transition:all .3s;
+  }
+  .docs-card:hover{border-color:var(--green);transform:translateY(-2px)}
+  .docs-card h4{
+    font-family:var(--font-mono);font-size:.9rem;color:var(--text-bright);margin-bottom:6px;
+  }
+  .docs-card p{font-size:.8rem;color:var(--mid);margin-bottom:12px}
+  .docs-card .link{font-family:var(--font-mono);font-size:.8rem;color:var(--green)}
+  .docs-card .link::after{content:' →';transition:margin .2s;display:inline-block}
+  .docs-card:hover .link::after{margin-left:4px}
+
+  /* ── FOOTER ── */
+  footer{
+    border-top:1px solid #1a1a1a;padding:40px 0;text-align:center;
+    font-family:var(--font-mono);font-size:.75rem;color:#444;
+  }
+  footer a{color:var(--mid)}
+  footer a:hover{color:var(--orange)}
+
+  /* ── RESPONSIVE ── */
+  @media(max-width:900px){
+    .features-grid{grid-template-columns:repeat(2,1fr)}
+    .docs-grid{grid-template-columns:repeat(2,1fr)}
+  }
+  @media(max-width:600px){
+    .features-grid,.docs-grid{grid-template-columns:1fr}
+    .hero{padding:80px 0 60px}
+    nav ul{gap:14px}
+    .hero h1{font-size:1.7rem}
+    .cta-group{flex-direction:column;align-items:center}
+    .btn{width:100%;max-width:280px;justify-content:center}
+    .terminal-body{padding:16px;font-size:.75rem}
+  }
+</style>
+</head>
+<body>
+
+<!-- ── NAV ── -->
+<nav>
+  <div class="container">
+    <div class="logo">meept<span>.</span></div>
+    <ul>
+      <li><a href="#features">features</a></li>
+      <li><a href="#compare">compare</a></li>
+      <li><a href="#start">get started</a></li>
+      <li><a href="https://docs.meept.dev" target="_blank">docs</a></li>
+      <li><a href="https://github.com/caimlas/meept" target="_blank">github</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge">&#9679; production-ready v1.0</div>
+    <h1>Production-Grade<br><span class="accent">Autonomous Agent</span> Daemon</h1>
+    <p class="tagline">Multi-agent orchestration, persistent memory, and evidence-based execution — all running as a persistent Go daemon on your infrastructure.</p>
+
+    <div class="cta-group">
+      <a href="#" class="btn btn-primary">&#9655; Download</a>
+      <a href="https://github.com/caimlas/meept" class="btn btn-outline">&#9733; GitHub</a>
+    </div>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dot r"></div>
+        <div class="terminal-dot y"></div>
+        <div class="terminal-dot g"></div>
+      </div>
+      <div class="terminal-body">
+        <div class="typewriter-line">meept<span class="prompt"> </span>chat "fix the auth bug"</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FEATURES ── -->
+<section class="features" id="features">
+  <div class="container">
+    <div class="section-label">// capabilities</div>
+    <h2 class="section-title">Built for production workloads</h2>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <span class="feature-icon">&#10041;</span>
+        <h3>Multi-Agent Orchestration</h3>
+        <p>Specialist agents for coding, debugging, planning, and analysis — dispatched and routed by a central classifier. Agents collaborate via channel-based pairing.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">&#11088;</span>
+        <h3>5-Tier Memory System</h3>
+        <p>From episodic recollections to task-level working memory with domain FTS5 search. All backed by SQLite with automatic deduplication and consolidation.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">&#9745;</span>
+        <h3>Evidence Pipeline</h3>
+        <p>Every agent action is logged, verified, and auditable. Security engine checks permissions pre-execution. Full audit trail with SQLite-backed records.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">&#9679;</span>
+        <h3>Context Firewall</h3>
+        <p>Intelligent context compaction with summary generation, message dropping, and pressure monitoring. Stats expose drop rates and compaction savings in real time.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">&#9936;</span>
+        <h3>Skill-Based Routing</h3>
+        <p>Three-tier skills discovery with priority shadowing. YAML frontmatter declares requirements; cheapest compliant model gets auto-selected for each task.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">&#9014;</span>
+        <h3>Q Agent — Self-Optimization</h3>
+        <p>A meta-agent that analyzes sessions for improvement opportunities, generates optimizations, and applies them autonomously — the system that writes itself.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── COMPARISON ── -->
+<section class="comparison" id="compare">
+  <div class="container">
+    <div class="section-label">// comparison</div>
+    <h2 class="section-title">How we stack up</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th class="product-highlight">Meept</th>
+            <th>Hermes</th>
+            <th>OpenCode</th>
+            <th>Claude Code</th>
+            <th>Cursor</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Architecture</td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+          </tr>
+          <tr>
+            <td>Multi-Agent</td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+          </tr>
+          <tr>
+            <td>Persistent Memory</td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="partial">limited</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="partial">limited</span></td>
+          </tr>
+          <tr>
+            <td>Security Engine</td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+          </tr>
+          <tr>
+            <td>Job Scheduling</td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="partial">api</span></td>
+            <td><span class="cross">&#10007;</span></td>
+          </tr>
+          <tr>
+            <td>Open Source</td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+          </tr>
+          <tr>
+            <td>Local / air-gapped</td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="check">">&#10003;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+            <td><span class="cross">&#10007;</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ── QUICK START ── -->
+<section class="quickstart" id="start">
+  <div class="container">
+    <div class="section-label">// quick start</div>
+    <h2 class="section-title">Up and running in 60 seconds</h2>
+
+    <div class="code-block">
+      <button class="copy-btn" onclick="navigator.clipboard.writeText(this.parentElement.textContent);this.textContent='copied!';setTimeout(()=>this.textContent='copy',1500)">copy</button>
+      <div><span class="prompt">$</span> <span class="cmd">git</span> <span class="cmd">clone</span> <span class="flag">https://github.com/caimlas/meept.git</span></div>
+      <div><span class="prompt">$</span> <span class="cmd">cd</span> <span class="cmd">meept</span></div>
+      <div><span class="prompt">$</span> <span class="cmd">make</span> <span class="cmd">build</span></div>
+      <div><span class="prompt">$</span> <span class="cmd">./bin/meept-daemon</span> <span class="comment"># start the daemon</span></div>
+      <div><span class="prompt">$</span> <span class="cmd">./bin/meept</span> <span class="cmd">chat</span> <span class="flag">"write a unit test"</span></div>
+    </div>
+
+    <div class="quickstart-steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div>Clone the repo and <code style="color:var(--green);font-family:var(--font-mono)">make build</code> or <code style="color:var(--green);font-family:var(--font-mono)">go build ./...</code></div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div>Run the daemon — it auto-discovers models, skills, and agents from your config</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div>Chat via CLI, menubar app, or HTTP REST API on port 8081</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── DEMO ── -->
+<section class="demo">
+  <div class="container">
+    <div class="section-label">// demo</div>
+    <h2 class="section-title">See it in action</h2>
+
+    <div class="demo-placeholder">
+      <div class="play-btn"></div>
+      <p>watch demo — coming soon</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── DOCS ── -->
+<section class="docs" id="docs">
+  <div class="container">
+    <div class="section-label">// documentation</div>
+    <h2 class="section-title">Pick up where you left off</h2>
+
+    <div class="docs-grid">
+      <a href="#" class="docs-card">
+        <h4>Getting Started</h4>
+        <p>Installation, configuration, and your first chat session.</p>
+        <span class="link">get started</span>
+      </a>
+      <a href="#" class="docs-card">
+        <h4>Architecture</h4>
+        <p>Multi-agent system, message bus, and component wiring.</p>
+        <span class="link">read docs</span>
+      </a>
+      <a href="#" class="docs-card">
+        <h4>API Reference</h4>
+        <p>HTTP REST endpoints, RPC protocol, and message bus topics.</p>
+        <span class="link">reference</span>
+      </a>
+      <a href="#" class="docs-card">
+        <h4>Configuration</h4>
+        <p>Models, agents, skills, security, and transport setup.</p>
+        <span class="link">configure</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── FOOTER ── -->
+<footer>
+  <div class="container">
+    <p>built with &#9889; by the meept team · <a href="https://github.com/caimlas/meept">github</a> · <a href="https://docs.meept.dev">docs</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

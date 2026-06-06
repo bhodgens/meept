@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meept — Agents that work while you don't</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --orange: #ff6b00;
+  --orange-glow: rgba(255, 107, 0, 0.3);
+  --green: #00ff41;
+  --green-glow: rgba(0, 255, 65, 0.3);
+  --dark: #0a0a0a;
+  --light: #fafafa;
+  --dark-text: #e0e0e0;
+  --light-text: #1a1a1a;
+  --inter: 'Inter', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--inter);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== NAV ===== */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 3rem; height: 60px;
+  background: rgba(10,10,10,0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,107,0,0.15);
+}
+nav .logo {
+  font-weight: 800; font-size: 1.25rem;
+  background: linear-gradient(135deg, var(--orange), var(--green));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  letter-spacing: -0.5px;
+}
+nav ul { display: flex; list-style: none; gap: 2rem; }
+nav ul li a {
+  color: var(--dark-text); text-decoration: none; font-size: 0.875rem;
+  font-weight: 500; opacity: 0.75; transition: opacity 0.2s;
+}
+nav ul li a:hover { opacity: 1; }
+nav .nav-cta {
+  background: var(--orange); color: #fff; border: none; padding: 0.5rem 1.25rem;
+  border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer;
+  transition: box-shadow 0.3s;
+}
+nav .nav-cta:hover { box-shadow: 0 0 20px var(--orange-glow); }
+
+/* ===== HERO ===== */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.hero .split-left {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  background: var(--dark);
+  clip-path: polygon(0 0, 65% 0, 50% 100%, 0 100%);
+}
+.hero .split-right {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  background: var(--light);
+  clip-path: polygon(65% 0, 100% 0, 100% 100%, 50% 100%);
+}
+
+.hero .content {
+  position: relative; z-index: 10; width: 100%;
+  display: flex; align-items: center; justify-content: center;
+  padding: 6rem 3rem 3rem;
+}
+.hero .hero-left {
+  flex: 1; padding-right: 4rem; text-align: right;
+}
+.hero .hero-left h1 {
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  font-weight: 900; line-height: 1.05; letter-spacing: -2px;
+  color: var(--dark-text);
+}
+.hero .hero-left h1 .accent {
+  color: var(--orange);
+}
+.hero .hero-left p {
+  margin-top: 1.5rem; font-size: 1.125rem;
+  color: rgba(224,224,224,0.6); max-width: 480px;
+  margin-left: auto; line-height: 1.6;
+}
+.hero .hero-center {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0 2rem;
+}
+.hero .hero-center .cta-group {
+  display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;
+  margin-top: 2rem;
+}
+.btn-primary {
+  background: var(--orange); color: #fff; border: none;
+  padding: 1rem 2.5rem; border-radius: 8px; font-weight: 700;
+  font-size: 1rem; cursor: pointer; transition: all 0.3s;
+  text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem;
+}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px var(--orange-glow); }
+.btn-secondary {
+  background: transparent; color: var(--light-text);
+  border: 2px solid rgba(0,255,65,0.5);
+  padding: 1rem 2.5rem; border-radius: 8px; font-weight: 700;
+  font-size: 1rem; cursor: pointer; transition: all 0.3s;
+  text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem;
+}
+.btn-secondary:hover { border-color: var(--green); box-shadow: 0 8px 30px var(--green-glow); transform: translateY(-2px); }
+
+.hero .hero-right {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding-left: 4rem;
+}
+.hero .daemon-visual {
+  width: 320px; height: 320px; position: relative;
+}
+.daemon-visual svg { width: 100%; height: 100%; }
+
+.hero .diagonal-line {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 57.5%;
+  width: 3px;
+  background: linear-gradient(to bottom, var(--orange), rgba(255,255,255,0.3), var(--green));
+  z-index: 20;
+}
+
+/* Geometric accents */
+.geo-triangle {
+  position: absolute; z-index: 5;
+  width: 0; height: 0;
+  border-style: solid;
+}
+.geo-t1 {
+  top: 10%; left: 55%;
+  border-width: 0 40px 70px 40px;
+  border-color: transparent transparent var(--orange) transparent;
+  opacity: 0.15;
+}
+.geo-t2 {
+  bottom: 15%; right: 10%;
+  border-width: 60px 60px 0 60px;
+  border-color: var(--green) transparent transparent transparent;
+  opacity: 0.12;
+}
+
+/* Diagonal shimmer on divide */
+.hero .dividers::after {
+  content: '';
+  position: absolute;
+  top: -20%; left: 57.5%;
+  width: 4px; height: 140%;
+  background: linear-gradient(180deg, var(--orange) 0%, var(--green) 100%);
+  transform: rotate(-15deg);
+  z-index: 20;
+  opacity: 0.6;
+}
+
+/* ===== SECTION: FEATURES ===== */
+.features {
+  position: relative; padding: 6rem 0;
+  background: var(--dark);
+}
+.features .section-label {
+  text-align: center; font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 3px;
+  color: var(--orange); margin-bottom: 1.5rem;
+}
+.features .section-title {
+  text-align: center; font-size: clamp(1.75rem, 3vw, 2.75rem);
+  font-weight: 800; color: #fff; margin-bottom: 4rem; letter-spacing: -1px;
+}
+
+.feature-row {
+  display: flex; align-items: center;
+  max-width: 1100px; margin: 0 auto 6rem;
+  gap: 4rem;
+}
+.feature-row:nth-child(even) { flex-direction: row-reverse; }
+
+.feature-row .feature-visual {
+  flex: 1; min-height: 260px; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+}
+
+.feature-row:nth-child(odd) .feature-visual {
+  background: linear-gradient(135deg, rgba(255,107,0,0.08), rgba(255,107,0,0.02));
+  border: 1px solid rgba(255,107,0,0.15);
+}
+.feature-row:nth-child(even) .feature-visual {
+  background: linear-gradient(135deg, rgba(0,255,65,0.06), rgba(0,255,65,0.02));
+  border: 1px solid rgba(0,255,65,0.12);
+}
+
+.feature-row .feature-text { flex: 1; }
+.feature-row .feature-text h3 {
+  font-size: 1.5rem; font-weight: 700; margin-bottom: 0.75rem; letter-spacing: -0.5px;
+}
+.feature-row:nth-child(odd) .feature-text h3 { color: var(--orange); }
+.feature-row:nth-child(even) .feature-text h3 { color: var(--green); }
+
+.feature-row .feature-text p {
+  font-size: 1rem; line-height: 1.7; color: rgba(224,224,224,0.55);
+}
+
+.terminal-block {
+  background: rgba(0,0,0,0.6); border: 1px solid rgba(255,107,0,0.15);
+  border-radius: 12px; padding: 1.5rem; font-family: var(--mono);
+  font-size: 0.8rem; line-height: 1.8; width: 100%;
+}
+.terminal-block .prompt { color: var(--orange); }
+.terminal-block .cmd { color: #e0e0e0; }
+.terminal-block .flag { color: var(--green); }
+.terminal-block .output { color: rgba(224,224,224,0.4); }
+
+.agent-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; width: 100%;
+}
+.agent-card {
+  background: rgba(255,107,0,0.06); border: 1px solid rgba(255,107,0,0.1);
+  border-radius: 10px; padding: 1rem; text-align: center;
+  transition: all 0.3s;
+}
+.agent-card:hover { background: rgba(255,107,0,0.12); transform: translateY(-2px); }
+.agent-card .agent-name {
+  font-weight: 700; font-size: 0.85rem; color: var(--orange); margin-bottom: 0.25rem;
+}
+.agent-card .agent-role { font-size: 0.7rem; color: rgba(224,224,224,0.4); }
+
+.flow-diagram {
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+}
+.flow-node {
+  background: rgba(255,107,0,0.08); border: 1px solid rgba(255,107,0,0.2);
+  border-radius: 8px; padding: 0.75rem 1.25rem;
+  font-family: var(--mono); font-size: 0.75rem; color: var(--orange);
+}
+.flow-arrow { color: rgba(255,107,0,0.4); font-size: 1.25rem; }
+
+/* Features divider */
+.features .section-divider {
+  height: 80px; position: relative; margin-top: 2rem;
+  overflow: hidden;
+}
+.features .section-divider::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, var(--dark) 0%, transparent 50%, var(--light) 100%);
+  clip-path: polygon(0 40%, 50% 0, 100% 60%, 100% 100%, 0 100%);
+}
+
+/* ===== SECTION: COMPARISON ===== */
+.comparison {
+  position: relative; padding: 6rem 3rem;
+  background: var(--light);
+  clip-path: polygon(0 3%, 100% 0, 100% 97%, 0 100%);
+  padding-top: 8rem; padding-bottom: 8rem;
+}
+.comparison .comp-inner {
+  max-width: 900px; margin: 0 auto;
+}
+.comparison .section-label {
+  text-align: center; font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 3px;
+  color: var(--green); margin-bottom: 1.5rem;
+}
+.comparison .section-title {
+  text-align: center; font-size: clamp(1.75rem, 3vw, 2.75rem);
+  font-weight: 800; color: var(--light-text); margin-bottom: 3rem; letter-spacing: -1px;
+}
+
+.comp-table {
+  width: 100%; border-collapse: collapse;
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 4px 30px rgba(0,0,0,0.06);
+}
+.comp-table thead th {
+  padding: 1.25rem 1.5rem; font-weight: 700; font-size: 0.9rem;
+  text-align: center;
+}
+.comp-table thead th:first-child {
+  background: #e8e8e8; color: var(--light-text);
+}
+.comp-table thead th:nth-child(2) {
+  background: var(--dark); color: #fff;
+  clip-path: polygon(0 15%, 100% 0, 100% 100%, 0 85%);
+}
+.comp-table thead th:nth-child(3) {
+  background: #e0e0e0; color: var(--light-text);
+}
+.comp-table tbody td {
+  padding: 1rem 1.5rem; font-size: 0.875rem;
+  text-align: center; border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.comp-table tbody td:first-child {
+  text-align: left; font-weight: 600; color: var(--light-text);
+  background: rgba(0,0,0,0.02);
+}
+.comp-table tbody tr:hover { background: rgba(255,107,0,0.03); }
+.comp-table .check { color: var(--green); font-weight: 700; font-size: 1.1rem; }
+.comp-table .cross { color: #ccc; font-size: 1.1rem; }
+.comp-table .partial { color: var(--orange); }
+
+/* ===== SECTION: QUICK START ===== */
+.quickstart {
+  position: relative; padding: 6rem 3rem;
+  background: var(--dark);
+  display: flex; justify-content: center;
+}
+.quickstart .qs-inner {
+  max-width: 700px; width: 100%;
+}
+.quickstart .section-label {
+  text-align: center; font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 3px;
+  color: var(--orange); margin-bottom: 1.5rem;
+}
+.quickstart .section-title {
+  text-align: center; font-size: clamp(1.75rem, 3vw, 2.75rem);
+  font-weight: 800; color: #fff; margin-bottom: 2.5rem; letter-spacing: -1px;
+}
+
+.code-block {
+  background: #111; border: 1px solid rgba(255,107,0,0.12);
+  border-radius: 14px; overflow: hidden;
+}
+.code-block .code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  background: rgba(255,107,0,0.06);
+  border-bottom: 1px solid rgba(255,107,0,0.1);
+}
+.code-block .code-header .dots {
+  display: flex; gap: 6px;
+}
+.code-block .code-header .dot {
+  width: 10px; height: 10px; border-radius: 50%;
+}
+.code-block .code-header .dot:nth-child(1) { background: #ff5f57; }
+.code-block .code-header .dot:nth-child(2) { background: #febc2e; }
+.code-block .code-header .dot:nth-child(3) { background: #28c840; }
+.code-block .code-header span {
+  font-family: var(--mono); font-size: 0.7rem; color: rgba(224,224,224,0.4);
+}
+.code-block pre {
+  padding: 1.5rem; font-family: var(--mono); font-size: 0.825rem;
+  line-height: 1.9; overflow-x: auto; color: var(--dark-text);
+}
+.code-block .line { display: block; }
+.code-block .kw { color: var(--orange); }
+.code-block .fn { color: var(--green); }
+.code-block .str { color: #e6db74; }
+.code-block .cmt { color: rgba(224,224,224,0.25); font-style: italic; }
+.code-block .flag { color: #66d9ef; }
+.code-block .url { color: var(--green); }
+
+/* ===== SECTION: DEMO ===== */
+.demo {
+  position: relative; padding: 6rem 3rem;
+  background: linear-gradient(135deg, var(--dark) 0%, rgba(255,107,0,0.03) 100%);
+  clip-path: polygon(0 5%, 100% 0, 100% 95%, 0 100%);
+  padding-top: 8rem; padding-bottom: 8rem;
+}
+.demo-inner {
+  max-width: 800px; margin: 0 auto; text-align: center;
+}
+.demo .section-label {
+  text-align: center; font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 3px;
+  color: var(--green); margin-bottom: 1.5rem;
+}
+.demo .section-title {
+  text-align: center; font-size: clamp(1.75rem, 3vw, 2.75rem);
+  font-weight: 800; color: #fff; margin-bottom: 3rem; letter-spacing: -1px;
+}
+
+.demo-player {
+  position: relative; width: 100%; aspect-ratio: 16/9;
+  border-radius: 16px; overflow: hidden;
+  background: #111; border: 2px solid rgba(0,255,65,0.2);
+  cursor: pointer;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.demo-player .play-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(10,10,10,0.7);
+  transition: background 0.3s;
+}
+.demo-player:hover .play-overlay { background: rgba(10,10,10,0.5); }
+.play-btn {
+  width: 72px; height: 72px; border-radius: 50%;
+  background: var(--green); display: flex;
+  align-items: center; justify-content: center;
+  box-shadow: 0 0 40px var(--green-glow);
+  transition: transform 0.3s;
+}
+.demo-player:hover .play-btn { transform: scale(1.1); }
+.play-btn::after {
+  content: ''; display: block;
+  width: 0; height: 0;
+  border-style: solid;
+  border-width: 12px 0 12px 22px;
+  border-color: transparent transparent transparent var(--dark);
+  margin-left: 4px;
+}
+.mock-terminal {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--mono); font-size: 0.75rem;
+  color: rgba(224,224,224,0.5); text-align: left;
+  line-height: 1.8;
+}
+.mock-terminal .green { color: var(--green); }
+.mock-terminal .orange { color: var(--orange); }
+
+/* ===== SECTION: DOCS ===== */
+.docs {
+  position: relative; padding: 6rem 3rem;
+  background: var(--light);
+  text-align: center;
+}
+.docs .section-title {
+  font-size: clamp(1.75rem, 3vw, 2.75rem);
+  font-weight: 800; color: var(--light-text); margin-bottom: 3rem;
+  letter-spacing: -1px;
+}
+.docs-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem; max-width: 900px; margin: 0 auto;
+}
+.doc-card {
+  background: #fff; border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 12px; padding: 2rem 1.5rem;
+  text-decoration: none; color: var(--light-text);
+  transition: all 0.3s; display: block;
+}
+.doc-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--green);
+  box-shadow: 0 10px 30px rgba(0,255,65,0.1);
+}
+.doc-card .doc-icon {
+  font-size: 2rem; margin-bottom: 1rem;
+  display: block;
+}
+.doc-card h3 {
+  font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem;
+}
+.doc-card p {
+  font-size: 0.825rem; color: rgba(26,26,26,0.5); line-height: 1.5;
+}
+.doc-card .arrow {
+  display: inline-block; margin-top: 1rem; font-size: 1.25rem;
+  color: var(--green); transition: transform 0.2s;
+}
+.doc-card:hover .arrow { transform: translateX(4px); }
+
+/* ===== FOOTER ===== */
+footer {
+  background: var(--dark); padding: 3rem;
+  text-align: center; border-top: 1px solid rgba(255,107,0,0.1);
+}
+footer .footer-inner {
+  max-width: 600px; margin: 0 auto;
+}
+footer .footer-logo {
+  font-weight: 800; font-size: 1.25rem;
+  background: linear-gradient(135deg, var(--orange), var(--green));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  margin-bottom: 1rem;
+}
+footer p { color: rgba(224,224,224,0.3); font-size: 0.8rem; line-height: 1.6; }
+footer .footer-links {
+  display: flex; justify-content: center; gap: 2rem;
+  margin-top: 1.5rem; list-style: none;
+}
+footer .footer-links a {
+  color: rgba(224,224,224,0.5); text-decoration: none;
+  font-size: 0.8rem; transition: color 0.2s;
+}
+footer .footer-links a:hover { color: var(--orange); }
+
+/* ===== ANIMATIONS ===== */
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-12px) rotate(2deg); }
+}
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.daemon-visual svg { animation: float 6s ease-in-out infinite; }
+.geo-t1 { animation: float 8s ease-in-out infinite; }
+.geo-t2 { animation: float 7s ease-in-out infinite 1s; }
+
+.section-label, .section-title, .feature-row, .demo-player, .code-block {
+  opacity: 0; transform: translateY(30px);
+  transition: opacity 0.7s cubic-bezier(0.22,1,0.36,1), transform 0.7s cubic-bezier(0.22,1,0.36,1);
+}
+.section-label.visible, .section-title.visible, .feature-row.visible, .demo-player.visible, .code-block.visible {
+  opacity: 1; transform: translateY(0);
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 768px) {
+  nav { padding: 0 1.5rem; }
+  nav ul { display: none; }
+
+  .hero { min-height: auto; padding-bottom: 4rem; }
+  .hero .content {
+    flex-direction: column; padding: 7rem 1.5rem 3rem;
+  }
+  .hero .split-left {
+    clip-path: polygon(0 0, 100% 0, 100% 55%, 0 55%);
+  }
+  .hero .split-right {
+    clip-path: polygon(0 55%, 100% 0, 100% 100%, 0 100%);
+  }
+  .hero .dividers::after {
+    left: 0; top: 55%; width: 100%; height: 3px;
+    transform: rotate(0deg);
+  }
+  .hero .hero-left { text-align: center; padding-right: 0; }
+  .hero .hero-left p { margin-left: 0; }
+  .hero .hero-center { padding: 2rem 0; }
+  .hero .hero-right { display: none; }
+  .hero .diagonal-line { display: none; }
+  .hero .geo-t1, .hero .geo-t2 { display: none; }
+
+  .features { padding: 4rem 1.5rem; }
+  .feature-row,
+  .feature-row:nth-child(even) {
+    flex-direction: column; gap: 2rem;
+  }
+  .features .section-title,
+  .features .section-label { padding: 0 1rem; }
+
+  .comparison { clip-path: none; padding: 4rem 1.5rem; }
+  .comp-table { font-size: 0.75rem; }
+  .comp-table thead th, .comp-table tbody td { padding: 0.75rem 0.5rem; }
+
+  .quickstart { padding: 4rem 1.5rem; }
+  .demo { clip-path: none; padding: 4rem 1.5rem; }
+  .docs { padding: 4rem 1.5rem; }
+  .docs-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 480px) {
+  .docs-grid { grid-template-columns: 1fr; }
+  .agent-grid { grid-template-columns: 1fr; }
+  .cta-group { flex-direction: column; width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="logo">meept</div>
+  <ul>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#compare">Compare</a></li>
+    <li><a href="#quickstart">Quick Start</a></li>
+    <li><a href="#demo">Demo</a></li>
+    <li><a href="#docs">Docs</a></li>
+  </ul>
+  <button class="nav-cta">Get Started</button>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="split-left"></div>
+  <div class="split-right"></div>
+  <div class="dividers"></div>
+
+  <div class="geo-triangle geo-t1"></div>
+  <div class="geo-triangle geo-t2"></div>
+
+  <div class="content">
+    <div class="hero-left">
+      <h1>Agents that work<br>while you <span class="accent">don't</span></h1>
+      <p>A self-hosted multi-agent platform that writes code, debugs systems, plans deployments, and manages infrastructure — autonomously.</p>
+    </div>
+
+    <div class="hero-center">
+      <div class="cta-group">
+        <a href="#quickstart" class="btn-primary">Start Building — Free</a>
+        <a href="#demo" class="btn-secondary">Watch Demo</a>
+      </div>
+    </div>
+
+    <div class="hero-right">
+      <div class="daemon-visual">
+        <svg viewBox="0 0 320 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Abstract daemon creature -->
+          <circle cx="160" cy="130" r="50" stroke="#00ff41" stroke-width="1.5" fill="none" opacity="0.6"/>
+          <circle cx="160" cy="130" r="35" stroke="#00ff41" stroke-width="1" fill="none" opacity="0.3"/>
+          <circle cx="150" cy="125" r="5" fill="#00ff41" opacity="0.8"/>
+          <circle cx="170" cy="125" r="5" fill="#00ff41" opacity="0.8"/>
+          <line x1="145" y1="145" x2="145" y2="155" stroke="#00ff41" stroke-width="1.5" opacity="0.5"/>
+          <line x1="160" y1="143" x2="160" y2="158" stroke="#00ff41" stroke-width="1.5" opacity="0.5"/>
+          <line x1="175" y1="145" x2="175" y2="155" stroke="#00ff41" stroke-width="1.5" opacity="0.5"/>
+
+          <!-- Tentacles / connections -->
+          <path d="M120 160 Q80 200 100 250 Q110 275 90 290" stroke="#00ff41" stroke-width="1.2" fill="none" opacity="0.35"/>
+          <path d="M200 160 Q240 195 220 245 Q210 270 230 290" stroke="#00ff41" stroke-width="1.2" fill="none" opacity="0.35"/>
+          <path d="M140 170 Q120 210 140 260 Q148 280 130 300" stroke="#00ff41" stroke-width="1" fill="none" opacity="0.2"/>
+          <path d="M180 170 Q200 210 180 260 Q172 280 190 300" stroke="#00ff41" stroke-width="1" fill="none" opacity="0.2"/>
+
+          <!-- Geometric accents -->
+          <polygon points="160,50 180,80 140,80" stroke="#00ff41" stroke-width="1" fill="none" opacity="0.2"/>
+          <line x1="20" y1="100" x2="60" y2="110" stroke="#00ff41" stroke-width="1" opacity="0.15"/>
+          <line x1="260" y1="100" x2="300" y2="110" stroke="#00ff41" stroke-width="1" opacity="0.15"/>
+          <circle cx="50" cy="200" r="8" stroke="#00ff41" stroke-width="0.8" fill="none" opacity="0.15"/>
+          <circle cx="270" cy="210" r="12" stroke="#00ff41" stroke-width="0.8" fill="none" opacity="0.1"/>
+          <polygon points="80,240 90,260 70,260" stroke="#00ff41" stroke-width="0.8" fill="none" opacity="0.15"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="section-label" data-animate>What Meept Does</div>
+  <h2 class="section-title" data-animate>Eight agents. Zero babysitting.</h2>
+
+  <!-- Feature 1 -->
+  <div class="feature-row" data-animate>
+    <div class="feature-text">
+      <h3>Multi-Agent Orchestration</h3>
+      <p>Dispatcher, coder, debugger, planner, analyst, committer, scheduler, and chat — each a specialist. They delegate, debate, and get results. No single agent has to do everything.</p>
+    </div>
+    <div class="feature-visual">
+      <div class="agent-grid">
+        <div class="agent-card"><div class="agent-name">dispatcher</div><div class="agent-role">Intake &amp; routing</div></div>
+        <div class="agent-card"><div class="agent-name">coder</div><div class="agent-role">Files, shell, builds</div></div>
+        <div class="agent-card"><div class="agent-name">debugger</div><div class="agent-role">Troubleshooting</div></div>
+        <div class="agent-card"><div class="agent-name">planner</div><div class="agent-role">Decomposition</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 2 -->
+  <div class="feature-row" data-animate>
+    <div class="feature-text">
+      <h3>Self-Hosted Daemon</h3>
+      <p>One binary. No cloud dependency. Runs on your laptop, CI runner, or bare metal. Your prompts, your code, your data — never in someone else's sinkhole.</p>
+    </div>
+    <div class="feature-visual">
+      <div class="terminal-block">
+        <span class="line"><span class="prompt">$</span> <span class="cmd">go build</span> <span class="flag">-o bin/meept-daemon</span> <span class="cmt">./cmd/meept-daemon</span></span>
+        <span class="line"><span class="prompt">$</span> <span class="cmd">./bin/meept-daemon</span> <span class="flag">-f</span></span>
+        <span class="line"> <span class="output">daemon started · pid 48271 · port :8081</span></span>
+        <span class="line"> <span class="output">8 agents loaded · config synced</span></span>
+        <span class="line"><span class="prompt">$</span> <span class="cmd">./bin/meept</span> <span class="flag">status</span></span>
+        <span class="line"> <span class="green">● running · 2m 14s uptime · 3 idle agents</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 3 -->
+  <div class="feature-row" data-animate>
+    <div class="feature-text">
+      <h3>Structured Tool Protocol</h3>
+      <p>60+ built-in tools across file manipulation, shell execution, LSP queries, AST analysis, MCP integration, calendar access, and more. Each tool is type-checked before the LLM sees it.</p>
+    </div>
+    <div class="feature-visual">
+      <div class="flow-diagram">
+        <div class="flow-node">file_read</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node">ast_parse</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node">symbol_resolve</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node">tool_result</div>
+        <div class="flow-node" style="margin-top:0.75rem">memory_store</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node">security_check</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node">response</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 4 -->
+  <div class="feature-row" data-animate>
+    <div class="feature-text">
+      <h3>Episodic Memory</h3>
+      <p>Every interaction persists in SQLite-backed FTS5 indexes. Agents remember context across sessions, consolidate learnings, and build institutional knowledge. No cold starts.</p>
+    </div>
+    <div class="feature-visual">
+      <div class="terminal-block">
+        <span class="line"><span class="prompt">memory></span> <span class="cmd">find</span> <span class="flag">--semantic</span> <span class="str">"postgres connection pool"</span></span>
+        <span class="line"> <span class="output">3 matches across 12 sessions</span></span>
+        <span class="line"> <span class="output">→ pr/482: connection timeout fix (coder)</span></span>
+        <span class="line"> <span class="output">→ session/291: pool tuning discussion (analyst)</span></span>
+        <span class="line"> <span class="output">→ session/204: initial db setup (planner)</span></span>
+        <span class="line"><span class="prompt">memory></span> <span class="cmd">consolidate</span> <span class="flag">--domain db-optimization</span></span>
+        <span class="line"> <span class="green">3 facts merged into task memory</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 5 -->
+  <div class="feature-row" data-animate>
+    <div class="feature-text">
+      <h3>Security Engine</h3>
+      <p>Tirith-based command scanning, TLS everywhere, SQLite permission matrix, tool gating with granular ACLs, and full audit logging. Your agents can be powerful without being reckless.</p>
+    </div>
+    <div class="feature-visual">
+      <div class="flow-diagram">
+        <div class="flow-node" style="border-color: rgba(0,255,65,0.3); color: var(--green);">input</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node" style="border-color: rgba(255,107,0,0.4); color: var(--orange);">sanitize</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node" style="border-color: rgba(255,107,0,0.4); color: var(--orange);">Tirith</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-node" style="border-color: rgba(0,255,65,0.3); color: var(--green);">permit</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature 6 -->
+  <div class="feature-row" data-animate>
+    <div class="feature-text">
+      <h3>HTTP + RPC Dual Transport</h3>
+      <p>Use the CLI over Unix socket, hit the REST API from your menubar app, or stream real-time updates via WebSocket. One daemon, every client.</p>
+    </div>
+    <div class="feature-visual">
+      <div class="agent-grid">
+        <div class="agent-card" style="border-color: rgba(0,255,65,0.15); background: rgba(0,255,65,0.06);">
+          <div class="agent-name" style="color: var(--green);">CLI</div>
+          <div class="agent-role">Unix socket</div>
+        </div>
+        <div class="agent-card" style="border-color: rgba(0,255,65,0.15); background: rgba(0,255,65,0.06);">
+          <div class="agent-name" style="color: var(--green);">REST API</div>
+          <div class="agent-role">40+ endpoints</div>
+        </div>
+        <div class="agent-card" style="border-color: rgba(0,255,65,0.15); background: rgba(0,255,65,0.06);">
+          <div class="agent-name" style="color: var(--green);">WebSocket</div>
+          <div class="agent-role">Streaming</div>
+        </div>
+        <div class="agent-card" style="border-color: rgba(0,255,65,0.15); background: rgba(0,255,65,0.06);">
+          <div class="agent-name" style="color: var(--green);">MCP SSE</div>
+          <div class="agent-role">Agent-to-agent</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DIVIDER -->
+<div style="height: 80px; position: relative; overflow: hidden;">
+  <div style="position: absolute; inset: 0; background: linear-gradient(135deg, var(--dark) 0%, transparent 50%, var(--light) 100%); clip-path: polygon(0 30%, 50% 0, 100% 70%, 100% 100%, 0 100%);"></div>
+</div>
+
+<!-- COMPARISON -->
+<section class="comparison" id="compare">
+  <div class="comp-inner">
+    <div class="section-label" data-animate>.me vs the alternatives</div>
+    <h2 class="section-title" data-animate>No contest</h2>
+
+    <table class="comp-table" data-animate>
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>Meept</th>
+          <th>Others</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Multi-agent orchestration</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">○</span></td>
+        </tr>
+        <tr>
+          <td>Self-hosted / on-prem</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="partial">partial</span></td>
+        </tr>
+        <tr>
+          <td>Memory across sessions</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">○</span></td>
+        </tr>
+        <tr>
+          <td>SQLite-backed storage</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">○</span></td>
+        </tr>
+        <tr>
+          <td>60+ built-in tools</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="partial">5–20</span></td>
+        </tr>
+        <tr>
+          <td>Zero cloud dependency</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">○</span></td>
+        </tr>
+        <tr>
+          <td>Go binary (one file)</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">○</span></td>
+        </tr>
+        <tr>
+          <td>Structured security layer</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="partial">basic</span></td>
+        </tr>
+        <tr>
+          <td>Planner with task decomposition</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="partial">partial</span></td>
+        </tr>
+        <tr>
+          <td>Collaborative agent pairing</td>
+          <td><span class="check">✓</span></td>
+          <td><span class="cross">○</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- DIVIDER -->
+<div style="height: 60px; position: relative; overflow: hidden;">
+  <div style="position: absolute; inset: 0; background: linear-gradient(225deg, var(--light) 0%, transparent 50%, var(--dark) 100%); clip-path: polygon(0 0, 100% 50%, 100% 70%, 0 100%);"></div>
+</div>
+
+<!-- QUICK START -->
+<section class="quickstart" id="quickstart">
+  <div class="qs-inner">
+    <div class="section-label" data-animate>Three commands.</div>
+    <h2 class="section-title" data-animate>Running in 60 seconds.</h2>
+
+    <div class="code-block" data-animate>
+      <div class="code-header">
+        <div class="dots">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        <span>bash</span>
+      </div>
+      <pre>
+<span class="line"><span class="cmt"># 1. Install</span></span>
+<span class="line"><span class="prompt">$</span> <span class="cmd">curl</span> <span class="flag">-fsSL</span> <span class="url">https://meept.dev/install.sh</span> <span class="kw">|</span> <span class="fn">bash</span></span>
+<span class="line"></span>
+<span class="line"><span class="cmt"># 2. Start the daemon</span></span>
+<span class="line"><span class="prompt">$</span> <span class="kw">go</span> <span class="fn">build</span> <span class="flag">-o</span> bin/meept-daemon <span class="str">./cmd/meept-daemon</span></span>
+<span class="line"><span class="prompt">$</span> <span class="fn">./bin/meept-daemon</span> <span class="flag">-f</span></span>
+<span class="line"> <span class="green">✓ daemon running · pid 48271 · 8 agents</span></span>
+<span class="line"></span>
+<span class="line"><span class="cmt"># 3. Chat</span></span>
+<span class="line"><span class="prompt">$</span> <span class="kw">./bin/meept</span> <span class="fn">chat</span> <span class="str">"Migrate our connection pool from pgx to lib/pq"</span></span>
+<span class="line"> <span class="orange">→ dispatching to coder + planner...</span></span>
+<span class="line"> <span class="orange">→ planner decomposed into 3 tasks</span></span>
+<span class="line"> <span class="orange">→ executing: analyze current pool config</span></span>
+<span class="line"> <span class="green">→ complete. 14 files changed. 23 tests pass.</span></span>
+      </pre>
+    </div>
+
+    <div style="text-align: center; margin-top: 2rem;" data-animate>
+      <a href="#" class="btn-primary" style="font-size: 0.875rem;">Read the Install Guide →</a>
+    </div>
+  </div>
+</section>
+
+<!-- DIVIDER -->
+<div style="height: 60px; position: relative; overflow: hidden;">
+  <div style="position: absolute; inset: 0; background: linear-gradient(135deg, var(--dark) 0%, transparent 50%, rgba(0,255,65,0.05) 100%); clip-path: polygon(0 60%, 50% 0, 100% 40%, 100% 100%, 0 100%);"></div>
+</div>
+
+<!-- DEMO -->
+<section class="demo" id="demo">
+  <div class="demo-inner">
+    <div class="section-label" data-animate>See it in action</div>
+    <h2 class="section-title" data-animate>Watch a session live.</h2>
+
+    <div class="demo-player" data-animate>
+      <div class="mock-terminal">
+        <span><span class="prompt">$</span> <span class="cmd">meept chat</span> <span class="str">"Why is the test suite 12s slow?"</span></span><br>
+        <br>
+        <span class="green">▶ dispatcher → classifier: perf</span><br>
+        <span class="green">  → agent: debugger</span><br>
+        <br>
+        <span class="orange">[debugger] analyzing test profiles...</span><br>
+        <span class="orange">[debugger] found: TestDBConnection — 8.2s (no context isolation)</span><br>
+        <span class="orange">[debugger] found: TestFilesystem — 3.1s (leaking temp dirs)</span><br>
+        <br>
+        <span class="green">▶ 2 fixes generated, 18 tests re-run</span><br>
+        <span class="green">▶ total time: 34s | savings: ~16s/test</span><br>
+      </div>
+      <div class="play-overlay">
+        <div class="play-btn"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DOCS -->
+<section class="docs" id="docs">
+  <h2 class="section-title" data-animate>Documentation</h2>
+  <div class="docs-grid">
+    <a href="#" class="doc-card" data-animate>
+      <span class="doc-icon">📖</span>
+      <h3>Quick Start</h3>
+      <p>Get your daemon running and first agent chatting in under 5 minutes.</p>
+      <span class="arrow">→</span>
+    </a>
+    <a href="#" class="doc-card" data-animate>
+      <span class="doc-icon">⚙️</span>
+      <h3>Configuration</h3>
+      <p>Model presets, security policies, transport setup, and agent tuning.</p>
+      <span class="arrow">→</span>
+    </a>
+    <a href="#" class="doc-card" data-animate>
+      <span class="doc-icon">🤖</span>
+      <h3>Agents</h3>
+      <p>How each agent works, capability resolution, and custom agent creation.</p>
+      <span class="arrow">→</span>
+    </a>
+    <a href="#" class="doc-card" data-animate>
+      <span class="doc-icon">🔧</span>
+      <h3>Tools</h3>
+      <p>The full tool reference — 60+ built-in tools and MCP integration.</p>
+      <span class="arrow">→</span>
+    </a>
+    <a href="#" class="doc-card" data-animate>
+      <span class="doc-icon">🔒</span>
+      <h3>Security</h3>
+      <p>Engine architecture, Tirith scanning, TLS config, and ACL management.</p>
+      <span class="arrow">→</span>
+    </a>
+    <a href="#" class="doc-card" data-animate>
+      <span class="doc-icon">💾</span>
+      <h3>Memory</h3>
+      <p>Episodic and task memory, FTS5 search, consolidation, and fine-tuning.</p>
+      <span class="arrow">→</span>
+    </a>
+    <a href="#" class="doc-card" data-animate>
+      <span class="doc-icon">🔌</span>
+      <h3>HTTP API</h3>
+      <p>40+ REST endpoints, WebSocket streaming, and OpenAPI spec.</p>
+      <span class="arrow">→</span>
+    </a>
+    <a href="#" class="doc-card" data-animate>
+      <span class="doc-icon">🧩</span>
+      <h3>ClawSkills</h3>
+      <p>Third-party skill discovery, installation, and security scanning.</p>
+      <span class="arrow">→</span>
+    </a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-logo">meept</div>
+    <p>Open-source. Self-hosted. Zero cloud dependency.<br>Built in Go. Licensed MIT.</p>
+    <ul class="footer-links">
+      <li><a href="#">GitHub</a></li>
+      <li><a href="#">Docs</a></li>
+      <li><a href="#">Discord</a></li>
+      <li><a href="#">Blog</a></li>
+      <li><a href="#">CLI Reference</a></li>
+    </ul>
+    <p style="margin-top: 2rem; font-size: 0.7rem; opacity: 0.4;">&copy; 2026 Meept Project. All rights reserved.</p>
+  </div>
+</footer>
+
+<!-- SCROLL ANIMATIONS -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15, rootMargin: '0px 0px -50px 0px' });
+
+  document.querySelectorAll('[data-animate]').forEach(el => {
+    observer.observe(el);
+  });
+
+  // Smooth nav scroll
+  document.querySelectorAll('nav ul li a').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const target = document.querySelector(link.getAttribute('href'));
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  });
+
+  // Parallax on geometric shapes
+  window.addEventListener('scroll', () => {
+    const scrollY = window.pageYOffset;
+    document.querySelectorAll('.geo-triangle').forEach((el, i) => {
+      const speed = (i + 1) * 0.02;
+      el.style.transform = `translateY(${scrollY * speed}px)`;
+    });
+  });
+
+  // Player click
+  document.querySelector('.demo-player').addEventListener('click', () => {
+    alert('Demo video would play here.\n(Placeholder for actual video embed)');
+  });
+});
+</script>
+
+</body>
+</html>

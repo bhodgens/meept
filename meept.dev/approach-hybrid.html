@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meept - Production-Grade Autonomous Agent Daemon</title>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0a0a0a; --bg-card: #0f0f0f; --border: #1a1a1a;
+  --orange: #ff6b00; --green: #00ff41; --text: #e0e0e0;
+  --text-dim: #888; --text-muted: #555;
+  --mono: 'SF Mono','Fira Code','Cascadia Code','Consolas',monospace;
+  --sans: 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --radius: 12px;
+}
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg); color: var(--text); font-family: var(--sans);
+  line-height: 1.6; font-size: 16px; overflow-x: hidden;
+}
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.container { max-width: 1120px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+section { margin-bottom: 80px; opacity: 0; transform: translateY(24px); animation: fadeUp 0.6s ease forwards; }
+section:nth-child(2) { animation-delay: 0.08s; }
+section:nth-child(3) { animation-delay: 0.16s; }
+section:nth-child(4) { animation-delay: 0.24s; }
+section:nth-child(5) { animation-delay: 0.32s; }
+section:nth-child(6) { animation-delay: 0.4s; }
+@keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
+
+.section-label {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 2px;
+  color: var(--orange); text-transform: uppercase; margin-bottom: 16px;
+}
+.section-label::before { content: '//'; color: var(--orange); margin-right: 8px; }
+
+.card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 32px; position: relative; overflow: hidden;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.card:hover { border-color: var(--orange); box-shadow: 0 0 30px rgba(255,107,0,0.06); }
+.card::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--orange), transparent); opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.card:hover::after { opacity: 0.5; }
+.section-full .card { padding: 40px; }
+
+/* NAV */
+.navbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: rgba(10,10,10,0.85); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.navbar-inner {
+  max-width: 1120px; margin: 0 auto; padding: 0 24px; height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.navbar-brand {
+  font-family: var(--mono); font-size: 14px; font-weight: 700;
+  text-decoration: none;
+  background: linear-gradient(90deg, var(--orange), var(--green));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.navbar-links { display: flex; gap: 24px; list-style: none; }
+.navbar-links a {
+  font-family: var(--mono); font-size: 12px; color: var(--orange);
+  text-decoration: none; transition: color 0.2s ease;
+}
+.navbar-links a:hover { color: var(--green); }
+body::after { content: ''; display: block; height: 56px; }
+
+/* HERO */
+.hero { display: flex; align-items: center; gap: 40px; padding: 48px 40px; min-height: 380px; }
+.hero-content { flex: 1; }
+.hero-image {
+  flex-shrink: 0; width: 280px; height: 280px;
+  display: flex; align-items: center; justify-content: center;
+}
+.hero-image img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  filter: drop-shadow(0 0 20px rgba(255,107,0,0.15));
+}
+.hero h1 {
+  font-family: var(--mono); font-size: clamp(26px, 3.5vw, 40px);
+  font-weight: 700; line-height: 1.2; margin-bottom: 10px;
+}
+.hero h1 .title-orange { color: var(--orange); }
+.hero h1 .title-green { color: var(--green); }
+.hero .tagline { font-size: 17px; color: var(--text-dim); margin-bottom: 26px; max-width: 500px; }
+.hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 28px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px;
+  border-radius: 8px; font-family: var(--mono); font-size: 14px;
+  font-weight: 600; text-decoration: none; cursor: pointer; border: none;
+  transition: all 0.2s ease;
+}
+.btn-primary { background: var(--orange); color: #000; }
+.btn-primary:hover { background: #ff8533; box-shadow: 0 0 20px rgba(255,107,0,0.3); }
+.btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--green); color: var(--green); }
+
+.terminal {
+  background: #050505; border: 1px solid #222; border-radius: 8px;
+  padding: 16px 20px; font-family: var(--mono); font-size: 13px;
+  min-width: 420px; max-width: 520px;
+}
+.terminal-dots { display: flex; gap: 6px; margin-bottom: 12px; }
+.terminal-dots span { width: 10px; height: 10px; border-radius: 50%; background: #333; }
+.terminal-dots span:nth-child(1) { background: #ff5f57; }
+.terminal-dots span:nth-child(2) { background: #febc2e; }
+.terminal-dots span:nth-child(3) { background: #28c840; }
+.terminal-line { display: flex; gap: 8px; align-items: baseline; }
+.terminal-prompt { color: var(--green); white-space: nowrap; }
+.terminal-cursor {
+  display: inline-block; width: 8px; height: 16px; background: var(--green);
+  animation: blink 1s step-end infinite; vertical-align: middle;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.typewriter-text {
+  display: inline-block; overflow: hidden; white-space: nowrap;
+  animation: typewriter 2.5s steps(28) 1.5s both;
+  border-right: none;
+}
+@keyframes typewriter { from { width: 0; } to { width: 100%; } }
+
+/* FEATURES */
+.features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.feature-card { padding: 28px; }
+.feature-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.feature-icon { font-size: 22px; line-height: 1; }
+.feature-card h3 { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--orange); margin: 0; }
+.feature-card p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+
+/* COMPARISON */
+.comparison-wrap { overflow-x: auto; }
+.comparison-table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px; }
+.comparison-table thead th {
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border);
+  color: var(--text-dim); white-space: nowrap;
+}
+.comparison-table thead th.highlight { color: var(--green); }
+.comparison-table thead th.highlight::before {
+  content: '◉ '; font-size: 9px; vertical-align: middle;
+}
+.comparison-table tbody td {
+  padding: 13px 16px; border-bottom: 1px solid var(--border); vertical-align: middle;
+}
+.comparison-table tbody tr:hover { background: rgba(255,107,0,0.03); }
+.comparison-table .row-label { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
+.dot-yes {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 4px var(--green); vertical-align: middle;
+}
+.dot-no {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid #333; vertical-align: middle;
+}
+
+/* QUICK START */
+.quickstart-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.quickstart-header h2 { font-family: var(--mono); font-size: 18px; color: var(--orange); }
+.copy-btn {
+  font-family: var(--mono); font-size: 11px; padding: 6px 14px;
+  background: transparent; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); cursor: pointer; transition: all 0.2s ease; white-space: nowrap;
+}
+.copy-btn:hover { border-color: var(--green); color: var(--green); }
+.copy-btn.copied { border-color: var(--green); color: var(--green); background: rgba(0,255,65,0.05); }
+.code-block {
+  background: #050505; border: 1px solid #1a1a1a; border-radius: 8px;
+  padding: 24px; font-family: var(--mono); font-size: 13px;
+  line-height: 1.8; overflow-x: auto;
+}
+.cp { color: var(--green); }
+.cc { color: #e0e0e0; }
+.ca { color: #ff8533; }
+.cm { color: var(--text-muted); font-style: italic; }
+.co { color: var(--text-muted); }
+
+/* DEMO */
+.demo-video {
+  position: relative; width: 100%; aspect-ratio: 16/9; background: #050505;
+  border: 1px solid var(--border); border-radius: 8px; display: flex;
+  align-items: center; justify-content: center; cursor: pointer; overflow: hidden;
+}
+.demo-video::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,107,0,0.04), transparent 60%),
+              radial-gradient(circle at 50% 50%, rgba(0,255,65,0.02), transparent 70%);
+}
+.play-btn {
+  position: absolute; width: 64px; height: 64px; border-radius: 50%;
+  background: var(--orange); display: flex; align-items: center; justify-content: center;
+  transition: all 0.25s ease; z-index: 2;
+  box-shadow: 0 0 30px rgba(255,107,0,0.3);
+}
+.play-btn::after {
+  content: ''; display: block; width: 0; height: 0;
+  border-style: solid; border-width: 10px 0 10px 18px;
+  border-color: transparent transparent transparent #000; margin-left: 3px;
+}
+.play-btn:hover { transform: scale(1.1); box-shadow: 0 0 50px rgba(255,107,0,0.45); }
+
+/* DOCS */
+.docs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.doc-link {
+  display: flex; flex-direction: column; padding: 20px; text-decoration: none;
+  color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  transition: all 0.25s ease; background: transparent;
+}
+.doc-link:hover { border-color: var(--green); color: var(--green); }
+.doc-link .doc-icon { font-size: 20px; margin-bottom: 10px; }
+.doc-link .doc-title { font-family: var(--mono); font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.doc-link .doc-desc { font-size: 12px; color: var(--text-muted); }
+
+/* RESPONSIVE */
+@media (max-width: 900px) {
+  .features-grid, .docs-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-image { display: none; }
+  .terminal { min-width: auto; }
+}
+@media (max-width: 640px) {
+  .container { padding: 0 16px; }
+  section { margin-bottom: 48px; }
+  .card, .section-full .card { padding: 20px; }
+  .hero { padding: 28px 20px; min-height: auto; flex-direction: column; }
+  .features-grid, .docs-grid { grid-template-columns: 1fr; }
+  .hero-ctas { flex-direction: column; }
+  .hero-ctas .btn { width: 100%; justify-content: center; }
+  .comparison-table { font-size: 12px; }
+  .comparison-table thead th, .comparison-table tbody td { padding: 10px 8px; }
+  .quickstart-header { flex-direction: column; }
+  .navbar-links { gap: 14px; }
+  .navbar-inner { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="#" class="navbar-brand">meept.dev</a>
+    <ul class="navbar-links">
+      <li><a href="#features">features</a></li>
+      <li><a href="#compare">compare</a></li>
+      <li><a href="#quickstart">quickstart</a></li>
+      <li><a href="#demo">demo</a></li>
+      <li><a href="https://docs.meept.dev" target="_blank">docs &#x2197;</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main class="container">
+
+  <!-- 01: HERO -->
+  <section>
+    <div class="section-label">OVERVIEW</div>
+    <div class="card hero">
+      <div class="hero-content">
+        <h1><span class="title-orange">MEEPT</span><br><span class="title-green">Production-Grade<br>Autonomous Agent Daemon</span></h1>
+        <p class="tagline">A self-hosted Go daemon with intelligent agent orchestration, memory-backed conversations, and tool-driven autonomy.</p>
+        <div class="hero-ctas">
+          <a href="#quickstart" class="btn btn-primary">&#x25B6; get started</a>
+          <a href="https://docs.meept.dev" target="_blank" class="btn btn-secondary">read the docs &#x2192;</a>
+        </div>
+        <div class="terminal">
+          <div class="terminal-dots"><span></span><span></span><span></span></div>
+          <div class="terminal-line">
+            <span class="terminal-prompt">$</span>
+            <span class="typewriter-text">meept chat "fix the auth bug"</span>
+            <span style="color:var(--text-muted);"> &lt;enter&gt;</span>
+          </div>
+          <div style="margin-top:8px; padding-left:20px;">
+            <span style="color:var(--text-muted); font-size:12px;">&#x25CF; classifying intent...</span><br>
+            <span style="color:var(--text-muted); font-size:12px;">&#x25CF; delegating to coder agent</span><br>
+            <span style="color:var(--green); font-size:12px;">&#x25CF; done. PR #42 opened.</span>
+          </div>
+        </div>
+      </div>
+      <div class="hero-image">
+        <img src="assets/meept.png" alt="Meept mascot" />
+      </div>
+    </div>
+  </section>
+
+  <!-- 02: FEATURES -->
+  <section>
+    <div class="section-label">FEATURES</div>
+    <div class="features-grid">
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F9E1;</div>
+          <h3>Multi-Agent Orchestration</h3>
+        </div>
+        <p>Dispatcher routes tasks to specialist agents: coder, debugger, planner, analyst, committer.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F4AC;</div>
+          <h3>Memory-Backed Chat</h3>
+        </div>
+        <p>Episodic and task memory via SQLite+FTS5. Agents remember context across sessions.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F6E0;</div>
+          <h3>Built-in Security</h3>
+        </div>
+        <p>Input sanitization, TIRITH scanning, tool gating, TLS--defense in depth.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x2699;&#xFE0E;</div>
+          <h3>Tool Ecosystem</h3>
+        </div>
+        <p>Built-in tools, MCP server integration, ClawSkills, and custom tool registration.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F504;</div>
+          <h3>Collaborative Pairs</h3>
+        </div>
+        <p>Channel-based agent pairing with editor token, round-robin, and turn management.</p>
+      </div>
+
+      <div class="card feature-card">
+        <div class="feature-header">
+          <div class="feature-icon">&#x1F4C8;</div>
+          <h3>Self-Improvement</h3>
+        </div>
+        <p>Detect, analyze, generate, validate, and apply improvements autonomously.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 03: COMPARISON -->
+  <section>
+    <div class="section-label">COMPARISON</div>
+    <div class="card section-full">
+      <div class="comparison-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th class="highlight">Meept</th>
+              <th>Hermes</th>
+              <th>Claude Code</th>
+              <th>Cursor</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="row-label">Self-hosted daemon</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+            <tr>
+              <td class="row-label">Multi-agent orchestration</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+            <tr>
+              <td class="row-label">Episodic memory (SQLite)</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+            <tr>
+              <td class="row-label">CLI + HTTP + RPC</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+            <tr>
+              <td class="row-label">TIRITH security scanning</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+            <tr>
+              <td class="row-label">MCP server support</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+            <tr>
+              <td class="row-label">Collaborative pairs</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+            <tr>
+              <td class="row-label">Self-improvement loop</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+            <tr>
+              <td class="row-label">Open source</td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-yes"></span></td>
+              <td><span class="dot-no"></span></td>
+              <td><span class="dot-no"></span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04: QUICK START -->
+  <section>
+    <div class="section-label">QUICK START</div>
+    <div class="card section-full">
+      <div class="quickstart-header">
+        <h2>Install &amp; run in 3 commands</h2>
+        <button class="copy-btn" id="copyBtn" onclick="copyCode()">&#x2398; C copy</button>
+      </div>
+      <div class="code-block">
+<span class="cm"># 1. Clone and install the daemon</span><br>
+<span class="cp">$</span> <span class="cc">git clone https://github.com/meept/meept.git</span><br>
+<span class="cp">$</span> <span class="cc">cd meept</span><br>
+<span class="cp">$</span> <span class="cc">make install</span><br>
+<br>
+<span class="cm"># 2. Start the daemon</span><br>
+<span class="cp">$</span> <span class="cc">meept-daemon</span><br>
+<span class="co">[daemon] listening on :8081</span><br>
+<span class="co">[daemon] agents loaded: dispatcher, coder, debugger, planner, analyst, committer</span><br>
+<span class="co">[daemon] memory store initialized: sqlite://~/.meept/episodic.db</span><br>
+<br>
+<span class="cm"># 3. Chat with your agent</span><br>
+<span class="cp">$</span> <span class="cc">meept chat "fix the auth bug in handlers.go"</span><br>
+<span class="co">[dispatcher] intent: CODE -&gt; routing to coder agent ...</span><br>
+<span class="co">[coder] analyzing handlers.go...</span><br>
+<span class="co">[coder] found 2 vulnerability points -&gt; opened PR #42</span><br>
+<span class="co">[coder] done. 4 files changed, 23 additions, 7 deletions.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05: DEMO -->
+  <section>
+    <div class="section-label">DEMO</div>
+    <div class="card section-full">
+      <h2 style="font-family:var(--mono); font-size:18px; margin-bottom:20px; color: var(--orange);">See it in action</h2>
+      <div class="demo-video">
+        <div class="demo-screen" style="padding:24px;">
+          <span class="cp">$</span> <span class="cc">meept chat "write a unit test for user auth"</span><br><br>
+          <span class="co">[dispatcher] classifying: intent=CODE, agent=coder</span><br>
+          <span class="co">[coder] reading auth_handler.go...</span><br>
+          <span class="co">[coder] found 3 untested functions</span><br>
+          <span class="co">[coder] generating tests for TestLogin, TestLogout, TestRefresh</span><br>
+          <span class="co">[coder] running tests...</span><br>
+          <span class="co">[coder] &#x2713; TestLogin    0.02s</span></br>
+          <span class="co">[coder] &#x2713; TestLogout   0.01s</span><br>
+          <span class="co">[coder] &#x2713; TestRefresh  0.03s</span><br>
+          <span class="cp">[coder] all tests passing. PR ready.</span>
+        </div>
+        <div class="play-btn" title="play demo"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06: DOCS -->
+  <section>
+    <div class="section-label">DOCS</div>
+    <div class="card section-full" style="padding: 28px;">
+      <h2 style="font-family:var(--mono); font-size:18px; margin-bottom:24px; color: var(--orange);">Documentation</h2>
+      <div class="docs-grid">
+        <a class="doc-link" href="#">
+          <div class="doc-icon">&#x1F4D6;</div>
+          <div class="doc-title">Getting Started</div>
+          <div class="doc-desc">Installation and first run</div>
+        </a>
+        <a class="doc-link" href="#">
+          <div class="doc-icon">&#x2699;&#xFE0E;</div>
+          <div class="doc-title">Configuration</div>
+          <div class="doc-desc">JSON5 config schema and presets</div>
+        </a>
+        <a class="doc-link" href="#">
+          <div class="doc-icon">&#x1F9E1;</div>
+          <div class="doc-title">Multi-Agent System</div>
+          <div class="doc-desc">Agents, capabilities, routing</div>
+        </a>
+        <a class="doc-link" href="#">
+          <div class="doc-icon">&#x1F504;</div>
+          <div class="doc-title">Security Engine</div>
+          <div class="doc-desc">Sanitizer, TIRITH, TLS, fencing</div>
+        </a>
+        <a class="doc-link" href="#">
+          <div class="doc-icon">&#x1F4AC;</div>
+          <div class="doc-title">Memory System</div>
+          <div class="doc-desc">Episodic, task, SQLite+FTS5</div>
+        </a>
+        <a class="doc-link" href="#">
+          <div class="doc-icon">&#x1F310;</div>
+          <div class="doc-title">HTTP API Reference</div>
+          <div class="doc-desc">40+ REST endpoints, WebSocket</div>
+        </a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+function copyCode() {
+  const text = `git clone https://github.com/meept/meept.git && cd meept && make install
+go run ./cmd/meept-daemon
+meept chat "fix the auth bug in handlers.go"`;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = '\u2713 copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.innerHTML = '&#x2398; C copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+</script>
+</body>
+</html>

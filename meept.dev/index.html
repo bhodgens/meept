@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meept Product Page Mockups</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #ff6b00, #00ff41);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        p.subtitle {
+            color: #888;
+            margin-bottom: 3rem;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 1200px;
+        }
+        .card {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            text-decoration: none;
+            color: inherit;
+        }
+        .card:hover {
+            transform: translateY(-4px);
+            border-color: #ff6b00;
+            box-shadow: 0 8px 32px rgba(255, 107, 0, 0.2);
+        }
+        .card h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+            color: #ff6b00;
+        }
+        .card p {
+            color: #888;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        .card .tag {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            background: #00ff41;
+            color: #000;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-top: 1rem;
+        }
+        .card.recommended {
+            border-color: #00ff41;
+            position: relative;
+        }
+        .card.recommended::before {
+            content: '★';
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            color: #00ff41;
+            font-size: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>Meept Product Pages</h1>
+    <p class="subtitle">Design mockups for review — click to preview</p>
+
+    <div class="grid">
+        <a href="approach-a.html" class="card">
+            <h3>Approach A</h3>
+            <p>Terminal Cyberpunk — futuristic CLI aesthetic with scan lines and glowing accents</p>
+            <span class="tag">Dark Mode</span>
+        </a>
+
+        <a href="approach-b.html" class="card">
+            <h3>Approach B</h3>
+            <p>Split Personality — diagonal design split between dark/light themes</p>
+            <span class="tag">Dynamic</span>
+        </a>
+
+        <a href="approach-c.html" class="card">
+            <h3>Approach C</h3>
+            <p>Modular Blocks — clean grid-based layout with numbered sections</p>
+            <span class="tag">Structured</span>
+        </a>
+
+        <a href="approach-hybrid.html" class="card recommended">
+            <h3>Hybrid (Recommended)</h3>
+            <p>Terminal + Modular — daemon aesthetic meets organized, scannable design</p>
+            <span class="tag">Best of Both</span>
+        </a>
+    </div>
+</body>
+</html>
