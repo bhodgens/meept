@@ -8,8 +8,6 @@ import (
 )
 
 // AgentCapabilities holds the aggregated capability view for an agent.
-//
-//nolint:revive // stutter with package name is intentional for API clarity
 type AgentCapabilities struct {
 	// AgentID is the unique identifier for this agent.
 	AgentID string `json:"agent_id"`
@@ -47,8 +45,9 @@ func (ac *AgentCapabilities) HasTag(tag string) bool {
 
 // HasIntentType checks if the agent handles a specific intent type.
 func (ac *AgentCapabilities) HasIntentType(intentType string) bool {
+	intentLower := strings.ToLower(intentType)
 	for _, it := range ac.IntentTypes {
-		if strings.EqualFold(it, intentType) {
+		if strings.EqualFold(it, intentLower) {
 			return true
 		}
 	}

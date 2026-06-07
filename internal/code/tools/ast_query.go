@@ -153,21 +153,22 @@ func (t *ASTQueryTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	var result *ast.RuleResult
 	var queryResult *ast.QueryResult
-	var err error
 
 	if isRuleMode {
 		// Rule mode: Load and execute YAML rule
-		rule := ruleStr
-		if rule == "" && ruleName != "" {
-			var ruleOk bool
-			rule, ruleOk = ast.GetCommonRule(ruleName)
-			if !ruleOk {
+		var rule string
+		if ruleStr != "" {
+			rule = ruleStr
+		} else if ruleName != "" {
+			var ok bool
+			rule, ok = ast.GetCommonRule(ruleName)
+			if !ok {
 				return nil, fmt.Errorf("no predefined rule '%s'", ruleName)
 			}
-		}
-		if rule == "" && ruleFile != "" {
+		} else if ruleFile != "" {
 			return t.executeRuleFile(ctx, filePath, lang, ruleFile, maxMatches, includeSource)
 		}
+
 		if rule != "" {
 			parsedRule, err := ast.ParseRule(rule)
 			if err != nil {
@@ -192,6 +193,7 @@ func (t *ASTQueryTool) Execute(ctx context.Context, args map[string]any) (any, e
 			return nil, fmt.Errorf("either query or query_name must be provided")
 		}
 
+		var err error
 		queryResult, err = t.executor.RunQueryWithLanguage(ctx, filePath, lang, query)
 		if err != nil {
 			return nil, fmt.Errorf("query failed: %w", err)

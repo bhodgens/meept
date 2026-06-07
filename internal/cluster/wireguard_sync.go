@@ -240,3 +240,15 @@ func (m *WireGuardManager) generateSyncConf(cfg *WireGuardConfig) ([]byte, error
 func parseTemplate(name, text string) (*texttemplate.Template, error) {
 	return texttemplate.New(name).Parse(text)
 }
+
+// InterfaceName returns the WireGuard interface name.
+func (m *WireGuardManager) InterfaceName() string {
+	return m.iface
+}
+
+// Stop releases resources held by the WireGuardManager.
+// Currently a no-op since no background goroutines are started,
+// but provided as a hook for future cleanup.
+func (m *WireGuardManager) Stop() error {
+	return nil
+}

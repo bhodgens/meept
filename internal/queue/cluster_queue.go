@@ -56,9 +56,9 @@ type ClaimRecord struct {
 
 // NodeReachabilityResult holds structured reachability info for a node.
 type NodeReachabilityResult struct {
-	NodeID     string
+	NodeID      string
 	IsReachable bool
-	Reason     string
+	Reason      string
 }
 
 // DefaultClusterQueueConfig returns a config with sensible defaults.

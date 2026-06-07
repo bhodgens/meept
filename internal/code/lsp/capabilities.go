@@ -65,6 +65,16 @@ func (c Capabilities) HasRename() bool {
 	return c.RenameProvider
 }
 
+// HasWillRenameFiles returns true if workspace file rename is supported.
+func (c Capabilities) HasWillRenameFiles() bool {
+	// Check if the server advertises willRenameFiles capability
+	// The capability is typically in workspace.fileOperations.willRename
+	if c.WorkspaceFileOperations != nil {
+		return c.WorkspaceFileOperations.WillRename != nil
+	}
+	return false
+}
+
 // TextDocumentSyncKindFromCapabilities extracts sync kind from capabilities.
 func TextDocumentSyncKindFromCapabilities(caps ServerCapabilities) TextDocumentSyncKind {
 	if caps.TextDocumentSync == nil {

@@ -41,6 +41,18 @@ type Config struct {
 	Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
 	Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
 	Session           SessionConfig           `json:"session"            toml:"session"`
+	Cluster           ClusterConfig           `json:"cluster"             toml:"cluster"`
+	Bots              BotsConfig              `json:"bots"                toml:"bots"`
+}
+
+// BotsConfig holds configuration for the persistent bot framework.
+type BotsConfig struct {
+	Enabled                     bool   `json:"enabled" toml:"enabled"`
+	DataDir                     string `json:"data_dir" toml:"data_dir"`
+	MaxConcurrentBots           int    `json:"max_concurrent_bots" toml:"max_concurrent_bots"`
+	DefaultDailyBudgetCents     int    `json:"default_daily_budget_cents" toml:"default_daily_budget_cents"`
+	AutoPauseOnConsecutiveFails int    `json:"auto_pause_on_consecutive_failures" toml:"auto_pause_on_consecutive_failures"`
+	WebhookEnabled              bool   `json:"webhook_enabled" toml:"webhook_enabled"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -1408,6 +1420,15 @@ func DefaultConfig() *Config {
 			Branching:              true,
 			BranchSummaryThreshold: 3,
 			RestoreMessageLimit:    0,
+		},
+		Cluster: DefaultClusterConfig(),
+		Bots: BotsConfig{
+			Enabled:                     false,
+			DataDir:                     "~/.meept/bots",
+			MaxConcurrentBots:           10,
+			DefaultDailyBudgetCents:     500, // $5.00
+			AutoPauseOnConsecutiveFails: 5,
+			WebhookEnabled:              false,
 		},
 	}
 }

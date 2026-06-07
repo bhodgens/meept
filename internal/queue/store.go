@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"crypto/ed25519"
+
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
@@ -884,6 +886,89 @@ func (s *Store) Close() error {
 // DB returns the underlying database connection for recovery operations.
 func (s *Store) DB() *sql.DB {
 	return s.db
+}
+
+// GetClusterMembers reads active cluster members from the cluster_members table.
+func (s *Store) GetClusterMembers() ([]*ClusterMember, error) {
+	rows, err := s.db.Query(`
+		SELECT node_id, node_name, wireguard_pub, signing_pub,
+		       endpoint, capabilities, cluster_ip,
+		       joined_at, last_heartbeat, status
+		FROM cluster_members WHERE status = 'active'
+		ORDER BY joined_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query cluster_members: %w", err)
+	}
+	defer rows.Close()
+
+	var members []*ClusterMember
+	for rows.Next() {
+		var m ClusterMember
+		if err := s.scanClusterMember(rows, &m); err != nil {
+			s.logger.Warn("failed to scan cluster member", "error", err)
+			continue
+		}
+		members = append(members, &m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating cluster_members: %w", err)
+	}
+	return members, nil
+}
+
+// scanClusterMember scans a row into a ClusterMember struct.
+func (s *Store) scanClusterMember(row Scanner, m *ClusterMember) error {
+	var (
+		joinedAt, lastHb        int64
+		signingPubRaw           []byte
+		capabilities, endpoint  string
+		wireguardPub, nodeID    string
+		nodeName, clusterIP     sql.NullString
+		status                  string
+	)
+	if err := row.Scan(&nodeID, &nodeName, &wireguardPub, &signingPubRaw,
+		&endpoint, &capabilities, &clusterIP,
+		&joinedAt, &lastHb, &status); err != nil {
+		return err
+	}
+	m.NodeID = nodeID
+	m.NodeName = nodeName.String
+	m.WireGuardPub = wireguardPub
+	m.SigningPub = signingPubRaw
+	m.Endpoint = endpoint
+	m.ClusterIP = clusterIP.String
+	m.Status = status
+	if joinedAt > 0 {
+		m.JoinedAt = time.Unix(joinedAt, 0)
+	}
+	if lastHb > 0 {
+		m.LastHeartbeat = time.Unix(lastHb, 0)
+	}
+	if capabilities != "" {
+		_ = json.Unmarshal([]byte(capabilities), &m.Capabilities)
+	}
+	return nil
+}
+
+// ClusterMember is a simplified representation of a cluster peer.
+type ClusterMember struct {
+	NodeID       string        `json:"node_id"`
+	NodeName     string        `json:"node_name"`
+	WireGuardPub string        `json:"wireguard_pubkey"`
+	SigningPub   ed25519.PublicKey `json:"signing_pubkey"`
+	WireGuardKey []byte        `json:"-"`
+	Capabilities []string      `json:"capabilities"`
+	Endpoint     string        `json:"endpoint"`
+	ClusterIP    string        `json:"cluster_ip"`
+	JoinedAt     time.Time     `json:"joined_at"`
+	LastHeartbeat time.Time    `json:"last_heartbeat"`
+	Status       string        `json:"status"`
+}
+
+// Scanner is a minimal interface for rows/row.
+type Scanner interface {
+	Scan(dest ...any) error
 }
 
 func (s *Store) scanJob(row *sql.Row) (*Job, error) {

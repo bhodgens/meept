@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // newTestDB creates an in-memory SQLite database for testing.
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
@@ -31,12 +31,10 @@ func newTestDBFile(t *testing.T) *sql.DB {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		t.Fatalf("failed to open test db: %v", err)
 	}
-	// Single connection prevents SQLITE_BUSY from pool-multiplexed writes.
-	db.SetMaxOpenConns(1)
 	t.Cleanup(func() {
 		db.Close()
 		os.Remove(dbPath)
@@ -702,23 +700,19 @@ func TestQueuePersister_ConcurrentAccess(t *testing.T) {
 
 	// Concurrent Flush calls.
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			p.Flush()
-		}()
+		})
 	}
 
 	// Concurrent LoadPending calls.
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := p.LoadPending()
 			if err != nil {
 				errCount.Add(1)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

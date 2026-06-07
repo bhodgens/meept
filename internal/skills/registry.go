@@ -122,11 +122,12 @@ func (r *Registry) FindByTag(tag string) []*Skill {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	normalizedTag := strings.ToLower(strings.TrimSpace(tag))
 	var results []*Skill
 
 	for _, skill := range r.skills {
 		for _, t := range skill.Tags {
-			if strings.EqualFold(t, tag) {
+			if strings.EqualFold(t, normalizedTag) {
 				results = append(results, skill)
 				break
 			}
@@ -173,15 +174,16 @@ func hasAllTags(skill *Skill, normalizedTags []string) bool {
 }
 
 // FindByCapability returns skills that require a specific capability.
-func (r *Registry) FindByCapability(capability string) []*Skill {
+func (r *Registry) FindByCapability(cap string) []*Skill {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	normalizedCap := strings.ToLower(strings.TrimSpace(cap))
 	var results []*Skill
 
 	for _, skill := range r.skills {
 		for _, c := range skill.Requires {
-			if strings.EqualFold(c, capability) {
+			if strings.EqualFold(c, normalizedCap) {
 				results = append(results, skill)
 				break
 			}
@@ -290,8 +292,6 @@ func (r *Registry) MatchAll(query string) []*SkillMatch {
 }
 
 // SkillMatch holds a skill with its match score.
-//
-//nolint:revive // stutter with package name is intentional for API clarity
 type SkillMatch struct {
 	Skill *Skill
 	Score int
