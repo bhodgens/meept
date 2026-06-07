@@ -20,6 +20,7 @@ const (
 	FieldNumber
 	FieldFloat
 	FieldDrilldown // opens a sub-screen (list of structs)
+	FieldAction    // action button (e.g. connect/disconnect)
 )
 
 // Field is the interface for all editable config fields.
@@ -423,6 +424,42 @@ func (f *DrilldownField) IsDirty() bool {
 		}
 	}
 	return false
+}
+
+// --- ActionField ---
+
+// ActionField represents a non-editable action button (e.g. "connect",
+// "disconnect"). It is never dirty and cannot be edited through the normal
+// field editor. When the user presses enter on an ActionField, the app
+// calls the registered callback.
+type ActionField struct {
+	baseField
+	callback func() error // called when the user activates the action
+}
+
+// NewActionField creates an action field with the given key, label, and
+// callback function. The display value is the label text itself.
+func NewActionField(key, label string, callback func() error) *ActionField {
+	return &ActionField{
+		baseField: baseField{key: key, label: label, current: label, orig: label},
+		callback:  callback,
+	}
+}
+
+func (f *ActionField) Type() FieldType { return FieldAction }
+
+// Set is a no-op for action fields. They cannot be edited.
+func (f *ActionField) Set(v string) error { return nil }
+
+// Reset is a no-op for action fields. They have no editable state.
+func (f *ActionField) Reset() {}
+
+// Activate invokes the action callback and returns any error.
+func (f *ActionField) Activate() error {
+	if f.callback != nil {
+		return f.callback()
+	}
+	return nil
 }
 
 // --- helpers ---

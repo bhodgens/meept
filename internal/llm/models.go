@@ -129,6 +129,14 @@ type ModelConfig struct {
 	ContextLimit         int
 	Capabilities         map[string]bool
 	ProviderID           string
+	// OAuthProvider identifies the OAuth provider (e.g. "github-models",
+	// "google-oauth") whose token should be used in place of a static API
+	// key. When non-empty, the LLM client resolves a fresh access token
+	// from the token store before each request.
+	OAuthProvider string
+	// ExtraHeaders are additional HTTP headers sent with every request.
+	// For example, GitHub Models requires X-GitHub-Api-Version.
+	ExtraHeaders map[string]string
 }
 
 // HasCapability checks if the model has a specific capability.

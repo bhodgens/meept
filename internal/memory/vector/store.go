@@ -23,6 +23,7 @@ type SearchResult struct {
 	Metadata         map[string]any
 	RelevanceScore   float64
 	VectorSimilarity float64
+	RawRowID         int64
 }
 
 // Store stores and retrieves embeddings for memories.

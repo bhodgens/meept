@@ -1,7 +1,9 @@
 // Package llm provides LLM client functionality for OpenAI-compatible APIs.
 package llm
 
-import "context"
+import (
+	"context"
+)
 
 // ProgressStage represents the current stage of an LLM request.
 type ProgressStage int
@@ -61,3 +63,13 @@ var (
 	_ Chatter = (*ModelBroker)(nil)
 	_ Chatter = (*ContextFirewall)(nil)
 )
+
+// TokenResolver is implemented by token stores that can provide a valid access
+// token for an OAuth provider. The llm package depends on this interface
+// rather than importing the auth package directly, avoiding circular imports.
+type TokenResolver interface {
+	// ResolveToken returns a valid (possibly refreshed) access token for the
+	// given provider. Implementations should handle token expiry and refresh
+	// transparently.
+	ResolveToken(ctx context.Context, provider string) (string, error)
+}

@@ -36,9 +36,11 @@ type DebugSession struct {
 	Adapter      string
 	Client       *Client
 	State        SessionState
+	Mode         SessionMode
 	Output       *RingBuffer
 	CreatedAt    time.Time
 	LastActivity time.Time
+	Program      string // Program path or process identifier
 
 	// CurrentThreads caches the most recent thread list from the adapter.
 	CurrentThreadID int
@@ -100,9 +102,11 @@ func (m *Manager) Launch(ctx context.Context, adapterCfg *AdapterConfig, program
 		Adapter:      adapterCfg.Name,
 		Client:       client,
 		State:        SessionLaunching,
+		Mode:         SessionModeLaunch,
 		Output:       NewRingBuffer(1024 * 1024), // 1MB output buffer
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
+		Program:      program,
 	}
 
 	// Register session.
@@ -152,6 +156,162 @@ func (m *Manager) Launch(ctx context.Context, adapterCfg *AdapterConfig, program
 	)
 
 	return session, nil
+}
+
+// Attach creates a new debug session by spawning a DAP adapter, initializing
+// it, and attaching to a running process.
+func (m *Manager) Attach(ctx context.Context, adapterCfg *AdapterConfig, pid int, processName string) (*DebugSession, error) {
+	if adapterCfg == nil {
+		return nil, fmt.Errorf("adapter config is required")
+	}
+	if pid <= 0 && processName == "" {
+		return nil, fmt.Errorf("either processId or processName is required")
+	}
+
+	// Validate the adapter command to prevent command injection.
+	if err := validateAdapterCommand(adapterCfg.Command); err != nil {
+		return nil, fmt.Errorf("invalid adapter command: %w", err)
+	}
+
+	// Resolve PID from process name if needed.
+	if pid <= 0 && processName != "" {
+		resolvedPID, err := FindPIDByName(processName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find process %q: %w", processName, err)
+		}
+		pid = resolvedPID
+	}
+
+	// Build command.
+	cmdArgs := make([]string, len(adapterCfg.Args))
+	copy(cmdArgs, adapterCfg.Args)
+	cmd := exec.CommandContext(ctx, adapterCfg.Command, cmdArgs...)
+
+	client, err := NewClient(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create DAP client: %w", err)
+	}
+
+	// Generate session ID.
+	id := fmt.Sprintf("dbg-%d", m.nextID.Add(1))
+
+	programLabel := processName
+	if programLabel == "" {
+		programLabel = fmt.Sprintf("pid:%d", pid)
+	}
+
+	session := &DebugSession{
+		ID:           id,
+		Adapter:      adapterCfg.Name,
+		Client:       client,
+		State:        SessionLaunching,
+		Mode:         SessionModeAttach,
+		Output:       NewRingBuffer(1024 * 1024), // 1MB output buffer
+		CreatedAt:    time.Now(),
+		LastActivity: time.Now(),
+		Program:      programLabel,
+	}
+
+	// Register session.
+	m.mu.Lock()
+	m.sessions[id] = session
+	m.active = id
+	m.mu.Unlock()
+
+	// Start the client read loop using a background context so it
+	// persists beyond the caller's request context.
+	bgCtx := context.Background()
+	client.Start(bgCtx)
+
+	// Forward output events to the ring buffer.
+	go m.drainEvents(session)
+
+	// Initialize the adapter.
+	if err := client.Initialize(ctx, adapterCfg.Name); err != nil {
+		_ = client.Close()
+		m.mu.Lock()
+		delete(m.sessions, id)
+		m.mu.Unlock()
+		return nil, fmt.Errorf("failed to initialize adapter: %w", err)
+	}
+
+	// Attach to the process.
+	attachArgs := AttachRequestArguments{
+		ProcessID: &pid,
+	}
+	if err := client.Attach(ctx, attachArgs); err != nil {
+		_ = client.Close()
+		m.mu.Lock()
+		delete(m.sessions, id)
+		m.mu.Unlock()
+		return nil, fmt.Errorf("failed to attach to process %d: %w", pid, err)
+	}
+
+	session.State = SessionConfigured
+	session.LastActivity = time.Now()
+
+	m.logger.Info("debug session attached",
+		"id", id,
+		"adapter", adapterCfg.Name,
+		"pid", pid,
+		"process_name", processName,
+	)
+
+	return session, nil
+}
+
+// LoadCore creates a new debug session by analyzing a core dump. Unlike launch
+// and attach, this does not spawn a long-running DAP adapter. Instead it runs
+// the native debugger in batch mode, parses the output, and returns a
+// CoreDumpResult. The session is marked as terminated immediately since core
+// analysis is a one-shot operation.
+func (m *Manager) LoadCore(ctx context.Context, coreFile, program, adapterName string) (*CoreDumpResult, *DebugSession, error) {
+	if coreFile == "" {
+		return nil, nil, fmt.Errorf("core file path is required")
+	}
+	if program == "" {
+		return nil, nil, fmt.Errorf("program path is required")
+	}
+
+	result, err := AnalyzeCoreDump(ctx, coreFile, program, adapterName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Create a terminated session for tracking purposes.
+	id := fmt.Sprintf("dbg-%d", m.nextID.Add(1))
+
+	session := &DebugSession{
+		ID:           id,
+		Adapter:      string(result.Adapter),
+		State:        SessionTerminated,
+		Mode:         SessionModeCore,
+		Output:       NewRingBuffer(1024 * 1024),
+		CreatedAt:    time.Now(),
+		LastActivity: time.Now(),
+		Program:      fmt.Sprintf("%s (core: %s)", program, coreFile),
+	}
+
+	// Store the crash report in the output buffer.
+	report := CrashReport(result)
+	_, _ = session.Output.Write([]byte(report))
+
+	// Register session.
+	m.mu.Lock()
+	m.sessions[id] = session
+	m.active = id
+	m.mu.Unlock()
+
+	m.logger.Info("core dump analysis complete",
+		"id", id,
+		"adapter", result.Adapter,
+		"program", program,
+		"core_file", coreFile,
+		"signal", result.Signal,
+		"threads", len(result.Threads),
+	)
+
+	return result, session, nil
 }
 
 // drainEvents reads events from the client and updates session state.

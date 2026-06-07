@@ -25,8 +25,12 @@ var (
 )
 
 // SaveSection writes modified fields back to the correct config file.
+// For the "oauth" section, save is a no-op because actions (connect/disconnect)
+// execute immediately when activated and don't produce dirty fields.
 func SaveSection(sm *SectionModel) error {
 	switch sm.ConfigFile() {
+	case "oauth":
+		return nil // actions are immediate; no config file to persist
 	case "client.json5":
 		return saveClientConfig(sm)
 	case "models.json5":

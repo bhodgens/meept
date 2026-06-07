@@ -74,6 +74,8 @@ func BuildSectionFields(keyPath string) []Field {
 		return buildPresetsFields()
 	case "projects":
 		return buildProjectsFields()
+	case "oauth":
+		return buildOAuthFields()
 	default:
 		return []Field{
 			NewTextField("_stub", "(section not yet implemented)", ""),

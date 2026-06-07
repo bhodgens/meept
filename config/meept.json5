@@ -122,11 +122,12 @@
     // Vector embeddings for semantic memory search
     "embeddings": {
       "enabled": false,
-      "provider": "",      // "openai" or "ollama"
+      "provider": "",      // "openai", "ollama", or "sentence-transformer"
       "api_key": "",
       "base_url": "",
-      "model": "",
-      "dimension": 0,
+      "model": "",         // e.g. "nomic-embed-text-v1.5", "all-MiniLM-L6-v2"
+      "dimension": 0,      // 768 (native), 512, 256, or 128 (Matryoshka)
+      "auto_update": false, // Check HuggingFace for model updates
     },
     "security": {
       "enabled": true,

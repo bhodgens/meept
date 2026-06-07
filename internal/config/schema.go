@@ -45,6 +45,7 @@ type Config struct {
 	Projects          ProjectsConfig          `json:"projects"           toml:"projects"`
 	Plans             PlansConfig             `json:"plans"              toml:"plans"`
 	Cluster           ClusterConfig           `json:"cluster"            toml:"cluster"`
+	OAuth             OAuthConfig             `json:"oauth"              toml:"oauth"`
 }
 
 // ClusterConfig holds distributed cluster settings.
@@ -157,18 +158,44 @@ func DefaultClusterConfig() ClusterConfig {
 	}
 }
 
+// OAuthConfig holds OAuth device-code flow settings.
+// When enabled, the daemon creates a shared encrypted token store and
+// background refresh manager. Providers with stored tokens are automatically
+// registered as LLM endpoints.
+type OAuthConfig struct {
+	// Enabled turns on OAuth token management
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// TokenDir is the directory for encrypted token files (default: ~/.meept/oauth)
+	TokenDir string `json:"token_dir" toml:"token_dir"`
+	// RefreshInterval is how often to check for expiring tokens (default: 5m)
+	RefreshInterval string `json:"refresh_interval" toml:"refresh_interval"`
+	// RefreshMargin is how far before expiry to proactively refresh (default: 10m)
+	RefreshMargin string `json:"refresh_margin" toml:"refresh_margin"`
+	// EncryptionKey is an optional user-provided encryption key.
+	// When empty, a machine-derived key is used.
+	EncryptionKey string `json:"encryption_key" toml:"encryption_key"`
+	// Providers holds per-provider OAuth configuration overrides.
+	// Keys are provider IDs (e.g. "github-models", "google-oauth", "google-calendar").
+	// Values allow overriding the embedded client ID and client secret.
+	Providers map[string]OAuthProviderEntry `json:"providers" toml:"providers"`
+}
+
+// OAuthProviderEntry holds per-provider OAuth configuration.
+type OAuthProviderEntry struct {
+	// ClientID overrides the embedded default client ID.
+	ClientID string `json:"client_id" toml:"client_id"`
+	// ClientSecret overrides the embedded default client secret.
+	ClientSecret string `json:"client_secret" toml:"client_secret"`
+}
+
 // CalendarConfig holds Google Calendar integration settings.
+// OAuth credentials are managed via the shared OAuth device-code flow
+// (see 'meept config oauth connect google-calendar').
 type CalendarConfig struct {
 	// Enabled turns on Google Calendar integration
 	Enabled bool `json:"enabled" toml:"enabled"`
-	// ClientID is the Google OAuth2 client ID (supports ${ENV_VAR} expansion)
-	ClientID string `json:"client_id" toml:"client_id"`
-	// ClientSecret is the Google OAuth2 client secret (supports ${ENV_VAR} expansion)
-	ClientSecret string `json:"client_secret" toml:"client_secret"` //nolint:gosec // field name, not a secret
 	// CalendarID is the Google Calendar ID (default: "primary")
 	CalendarID string `json:"calendar_id" toml:"calendar_id"`
-	// RedirectURI is the OAuth2 redirect URI (default: "http://localhost:8888/callback")
-	RedirectURI string `json:"redirect_uri" toml:"redirect_uri"`
 	// ReminderEnabled turns on the reminder watcher for upcoming events
 	ReminderEnabled bool `json:"reminder_enabled" toml:"reminder_enabled"`
 	// ReminderCheckInterval is how often to check for upcoming events (default: 5m)
@@ -608,12 +635,13 @@ type PersonalityConfig struct {
 
 // EmbeddingConfig holds vector embedding settings for semantic memory search.
 type EmbeddingConfig struct {
-	Enabled   bool   `json:"enabled"   toml:"enabled"`
-	Provider  string `json:"provider"  toml:"provider"` // "openai" or "ollama"
-	APIKey    string `json:"api_key"   toml:"api_key"`  //nolint:gosec // field name, not a secret
-	BaseURL   string `json:"base_url"  toml:"base_url"`
-	Model     string `json:"model"     toml:"model"`
-	Dimension int    `json:"dimension" toml:"dimension"`
+	Enabled      bool   `json:"enabled"      toml:"enabled"`
+	Provider     string `json:"provider"     toml:"provider"` // "openai", "ollama", or "sentence-transformer"
+	APIKey       string `json:"api_key"      toml:"api_key"`   //nolint:gosec // field name, not a secret
+	BaseURL      string `json:"base_url"     toml:"base_url"`
+	Model        string `json:"model"        toml:"model"`
+	Dimension    int    `json:"dimension"    toml:"dimension"`
+	AutoUpdate   bool   `json:"auto_update"  toml:"auto_update"` // Check HF for model updates
 }
 
 // MemvidConfig holds memvid service settings.
@@ -1624,7 +1652,6 @@ func DefaultConfig() *Config {
 		Calendar: CalendarConfig{
 			Enabled:                false,
 			CalendarID:             "primary",
-			RedirectURI:            "http://localhost:8888/callback",
 			ReminderEnabled:        false,
 			ReminderCheckInterval:  "5m",
 			ReminderAdvanceMinutes: 10,
@@ -1690,6 +1717,14 @@ func DefaultConfig() *Config {
 			},
 		},
 		Cluster: DefaultClusterConfig(),
+		OAuth: OAuthConfig{
+			Enabled:          true,
+			TokenDir:         "~/.meept/oauth",
+			RefreshInterval:  "5m",
+			RefreshMargin:    "10m",
+			EncryptionKey:    "",
+			Providers:        nil,
+		},
 	}
 }
 

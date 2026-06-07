@@ -93,6 +93,9 @@ type Client struct {
 	timeoutCalc  *metrics.Calculator
 	tokenCache   ResponseCache
 	keyBuilder   *CacheKeyBuilder
+	tokenResolver       TokenResolver
+	oauthProvider       string
+	extraHeaders        map[string]string
 }
 
 // ClientOption is a functional option for configuring a Client.
@@ -139,6 +142,30 @@ func WithTokenCache(cache ResponseCache) ClientOption {
 		if cache != nil {
 			c.tokenCache = cache
 			c.keyBuilder = NewCacheKeyBuilder(true) // Enable file-aware caching
+		}
+	}
+}
+
+// WithTokenResolver sets the OAuth token resolver and provider name for the
+// client. When set, the client resolves a fresh access token from the resolver
+// before each request and uses it as the Bearer token. A nil resolver is
+// safely ignored.
+func WithTokenResolver(tr TokenResolver, provider string) ClientOption {
+	return func(c *Client) {
+		if tr != nil {
+			c.tokenResolver = tr
+			c.oauthProvider = provider
+		}
+	}
+}
+
+// WithExtraHeaders sets additional HTTP headers sent with every request.
+// For example, GitHub Models requires X-GitHub-Api-Version. A nil map is
+// safely ignored.
+func WithExtraHeaders(headers map[string]string) ClientOption {
+	return func(c *Client) {
+		if headers != nil {
+			c.extraHeaders = headers
 		}
 	}
 }
@@ -537,6 +564,7 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 	modelID := c.config.ModelID
 	apiKey := c.config.APIKey
 	providerID := c.config.ProviderID
+	extraHeaders := c.extraHeaders
 	c.configMu.RUnlock()
 	url := baseURL + "/chat/completions"
 
@@ -549,8 +577,21 @@ func (c *Client) doRequest(ctx context.Context, payload map[string]any) (*Respon
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	if apiKey != "" {
+
+	// Resolve OAuth token if a token resolver is configured.
+	if c.tokenResolver != nil && c.oauthProvider != "" {
+		token, err := c.tokenResolver.ResolveToken(ctx, c.oauthProvider)
+		if err != nil {
+			return nil, &ClientError{Message: "failed to resolve OAuth token", Cause: err}
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	// Apply extra headers (e.g. X-GitHub-Api-Version for GitHub Models).
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
 	}
 
 	// Time the HTTP request
@@ -815,6 +856,7 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	modelID := c.config.ModelID
 	apiKey := c.config.APIKey
 	providerID := c.config.ProviderID
+	extraHeaders := c.extraHeaders
 	c.configMu.RUnlock()
 	url := baseURL + "/chat/completions"
 
@@ -824,8 +866,21 @@ func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessa
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	if apiKey != "" {
+
+	// Resolve OAuth token if a token resolver is configured.
+	if c.tokenResolver != nil && c.oauthProvider != "" {
+		token, err := c.tokenResolver.ResolveToken(ctx, c.oauthProvider)
+		if err != nil {
+			return nil, &ClientError{Message: "failed to resolve OAuth token", Cause: err}
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	// Apply extra headers (e.g. X-GitHub-Api-Version for GitHub Models).
+	for k, v := range extraHeaders {
+		req.Header.Set(k, v)
 	}
 
 	resp, err := c.httpClient.Do(req)

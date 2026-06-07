@@ -71,6 +71,11 @@ type ProviderManagerConfig struct {
 
 	// Logger for operations
 	Logger *slog.Logger
+
+	// TokenResolver resolves OAuth access tokens for providers that use
+	// device-code authentication. If nil, OAuth providers will fail at chat
+	// time with a clear error.
+	TokenResolver TokenResolver
 }
 
 // ProviderManager manages multiple LLM providers with failover and health tracking.
@@ -80,6 +85,10 @@ type ProviderManager struct {
 	providers []*ProviderEntry
 	config    ProviderManagerConfig
 	logger    *slog.Logger
+
+	// TokenResolver resolves OAuth access tokens for providers that use
+	// device-code authentication.
+	tokenResolver TokenResolver
 
 	// Circuit breaker state
 	lastHealthCheck time.Time
@@ -98,7 +107,7 @@ func isAnthropic(cfg *ModelConfig) bool {
 // createChatterFor creates a Chatter for a ModelConfig, selecting the right
 // client implementation (Anthropic vs OpenAI-compatible) based on provider ID
 // and base URL.
-func createChatterFor(cfg *ModelConfig, budget *Budget, logger *slog.Logger) Chatter {
+func createChatterFor(cfg *ModelConfig, budget *Budget, logger *slog.Logger, tr TokenResolver) Chatter {
 	if isAnthropic(cfg) {
 		opts := []AnthropicClientOption{
 			WithAnthropicLogger(logger),
@@ -114,6 +123,12 @@ func createChatterFor(cfg *ModelConfig, budget *Budget, logger *slog.Logger) Cha
 	}
 	if budget != nil {
 		opts = append(opts, WithBudget(budget))
+	}
+	if tr != nil && cfg.OAuthProvider != "" {
+		opts = append(opts, WithTokenResolver(tr, cfg.OAuthProvider))
+	}
+	if len(cfg.ExtraHeaders) > 0 {
+		opts = append(opts, WithExtraHeaders(cfg.ExtraHeaders))
 	}
 	return NewClient(cfg, opts...)
 }
@@ -135,16 +150,17 @@ func NewProviderManager(cfg ProviderManagerConfig) *ProviderManager {
 	// FailoverTimeout of 0 means no timeout (use provider's HTTP client timeout only)
 
 	pm := &ProviderManager{
-		config:   cfg,
-		logger:   cfg.Logger,
-		stopChan: make(chan struct{}),
+		config:        cfg,
+		logger:        cfg.Logger,
+		stopChan:      make(chan struct{}),
+		tokenResolver: cfg.TokenResolver,
 	}
 
 	// Initialize providers
 	for i, providerCfg := range cfg.Providers {
 		entry := &ProviderEntry{
 			Config:   providerCfg,
-			Chatter:  createChatterFor(providerCfg, cfg.Budget, cfg.Logger),
+			Chatter:  createChatterFor(providerCfg, cfg.Budget, cfg.Logger, cfg.TokenResolver),
 			Priority: i,
 			Health: &ProviderHealth{
 				ProviderID: providerCfg.ProviderID,
@@ -532,7 +548,7 @@ func (pm *ProviderManager) AddProvider(cfg *ModelConfig, priority int) {
 
 	entry := &ProviderEntry{
 		Config:   cfg,
-		Chatter:  createChatterFor(cfg, pm.config.Budget, pm.logger),
+		Chatter:  createChatterFor(cfg, pm.config.Budget, pm.logger, pm.tokenResolver),
 		Priority: priority,
 		Health: &ProviderHealth{
 			ProviderID: cfg.ProviderID,

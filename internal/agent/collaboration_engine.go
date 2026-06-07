@@ -23,6 +23,29 @@ type CollaborationEngineDeps struct {
 }
 
 // CollaborationEngine manages collaboration sessions and registered modes.
+//
+// Each mode implements the CollaborationMode interface (see collaboration.go)
+// and is registered via RegisterMode. The engine dispatches RunSession calls
+// to the appropriate driver based on the session's mode string.
+//
+// # Current Modes
+//   - "pair_programming": Two agents alternate editor token in a shared workspace
+//     (PairProgrammingDriver in collaboration_pair_driver.go).
+//   - "differential": Four-phase A/B pipeline with independent branches and a
+//     synthesizing differentiator (DifferentialDriver in collaboration_diff_driver.go).
+//   - "team_parallel": N-agent parallel teams with lead agent synthesis
+//     (ParallelTeamDriver in collaboration_team_driver.go).
+//
+// The ParallelTeamDriver uses message bus topics for N-agent coordination:
+//   - team.{sessionID}.status   -- shared task board
+//   - team.{sessionID}.message  -- inter-agent broadcast/targeted messages
+//   - team.{sessionID}.result   -- partial results aggregation
+//
+// No changes to existing modes or the CollaborationMode interface are required.
+// The CollaborationMode interface is intentionally minimal (Name, Run, CanInitiate)
+// to support heterogeneous collaboration strategies.
+//
+// See docs/concepts/multi-agent-parallelism.md for the full design.
 type CollaborationEngine struct {
 	modes       map[string]CollaborationMode
 	sessions    map[string]*CollaborationSession
@@ -181,6 +204,8 @@ func (e *CollaborationEngine) nestedDepth(sessionID string) int {
 }
 
 // resolveParticipants resolves agent IDs for a collaboration mode.
+// When team_parallel mode is added, this switch should be extended to
+// resolve a lead agent + specialist roster based on the mode's team config.
 func (e *CollaborationEngine) resolveParticipants(mode string, preferred []string) []string {
 	if len(preferred) >= 2 {
 		return preferred
@@ -191,6 +216,12 @@ func (e *CollaborationEngine) resolveParticipants(mode string, preferred []strin
 		return append(preferred, "coder", "planner")
 	case "differential":
 		return append(preferred, "coder", "planner", "analyst")
+	case "team_parallel":
+		// Team mode: lead (planner) + specialist roster (coder, analyst, debugger)
+		if len(preferred) == 0 {
+			preferred = []string{"planner"}
+		}
+		return append(preferred, "coder", "analyst", "debugger")
 	default:
 		return append(preferred, "coder", "planner")
 	}

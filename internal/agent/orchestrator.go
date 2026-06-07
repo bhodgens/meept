@@ -78,6 +78,8 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"collaboration.result": o.handleCollabResult,
 		"collaboration.error": o.handleCollabError,
 		"collaboration.requested": o.handleCollabRequested,
+		"team.result":           o.handleTeamResult,
+		"team.error":            o.handleTeamError,
 	}
 
 	for topic, handler := range topics {
@@ -502,5 +504,39 @@ func (o *Orchestrator) handleCollabRequested(_ context.Context, msg *models.BusM
 		"session_id", event.SessionID,
 		"mode", event.Mode,
 		"preferred_agents", event.PreferredAgents,
+	)
+}
+
+// handleTeamResult handles team completion events published by the TeamOrchestrator.
+func (o *Orchestrator) handleTeamResult(_ context.Context, msg *models.BusMessage) {
+	var event TeamSessionState
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse team result event", "error", err)
+		return
+	}
+
+	o.logger.Info("Team session completed",
+		"session_id", event.SessionID,
+		KeyTaskID, event.TaskID,
+		"lead", event.LeadAgent,
+		"phase", event.Phase,
+		"members", len(event.Roster),
+	)
+}
+
+// handleTeamError handles team error events published by the TeamOrchestrator.
+func (o *Orchestrator) handleTeamError(_ context.Context, msg *models.BusMessage) {
+	var event struct {
+		SessionID string `json:"session_id"`
+		Error     string `json:"error"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Error("Failed to parse team error event", "error", err)
+		return
+	}
+
+	o.logger.Error("Team session error",
+		"session_id", event.SessionID,
+		"error", event.Error,
 	)
 }

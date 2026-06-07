@@ -73,6 +73,7 @@ nav:
       - concepts/index.md
       - Architecture: concepts/architecture.md
       - Multi-Agent System: concepts/multi-agent.md
+      - Multi-Agent Parallelism: concepts/multi-agent-parallelism.md
       - Request Flow: concepts/request-flow.md
       - Tools: concepts/tools.md
       - Memory: concepts/memory.md

@@ -1,16 +1,13 @@
 package main
 
 import (
-	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/config"
 )
@@ -22,7 +19,7 @@ func newCalendarCmd() *cobra.Command {
 		Long: `Manage Google Calendar integration.
 
 Subcommands:
-  auth   - Authenticate with Google Calendar via OAuth2
+  auth   - Authenticate with Google Calendar via OAuth device code
   today  - Show today's calendar events`,
 	}
 
@@ -36,10 +33,10 @@ func newCalendarAuthCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "auth",
 		Short: "authenticate with google calendar",
-		Long: `Start the OAuth2 flow to grant meept access to your Google Calendar.
+		Long: `Authenticate meept with Google Calendar using the OAuth device-code flow.
 
-This opens a local HTTP server on port 8888 to receive the callback.
-Open the printed URL in your browser to authorize.`,
+This is a convenience shortcut for 'meept config oauth connect google-calendar'.
+OAuth tokens are stored in ~/.meept/oauth/google-calendar.json (encrypted).`,
 		RunE: runCalendarAuth,
 	}
 }
@@ -53,89 +50,12 @@ func newCalendarTodayCmd() *cobra.Command {
 }
 
 func runCalendarAuth(cmd *cobra.Command, args []string) error {
-	cfg, err := loadCalendarConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if cfg.ClientID == "" || cfg.ClientSecret == "" {
-		return fmt.Errorf("calendar client_id and client_secret must be configured in meept.toml or via environment variables")
-	}
-
-	redirectURI := cfg.RedirectURI
-	if redirectURI == "" {
-		redirectURI = "http://localhost:8888/callback"
-	}
-
-	oauthCfg := calendar.DefaultOAuth2Config(cfg.ClientID, cfg.ClientSecret, redirectURI)
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to determine home directory: %w", err)
-	}
-	tokenPath := filepath.Join(homeDir, ".meept", "calendar_token.json")
-	auth := calendar.NewOAuth2Authenticator(oauthCfg, tokenPath)
-
-	// Generate state for CSRF protection
-	state, err := generateRandomState()
-	if err != nil {
-		return fmt.Errorf("failed to generate state: %w", err)
-	}
-
-	authURL := auth.AuthURL(state)
-	fmt.Printf("Open this URL in your browser to authorize meept:\n\n%s\n\n", authURL)
-	fmt.Println("Waiting for authorization on http://localhost:8888/callback ...")
-
-	// Start local server to receive callback
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("state") != state {
-			http.Error(w, "state mismatch", http.StatusForbidden)
-			errCh <- fmt.Errorf("OAuth state mismatch")
-			return
-		}
-		code := r.URL.Query().Get("code")
-		if code == "" {
-			http.Error(w, "no code in response", http.StatusBadRequest)
-			errCh <- fmt.Errorf("no authorization code received")
-			return
-		}
-		codeCh <- code
-		fmt.Fprintln(w, "Authorization successful! You can close this window.")
-	})
-
-	server := &http.Server{Addr: ":8888", Handler: mux} //nolint:gosec // local dev server, not exposed to network
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
-		}
-	}()
-	defer func() { _ = server.Shutdown(context.Background()) }()
-
-	// Wait for code or error
-	var code string
-	select {
-	case code = <-codeCh:
-	case err := <-errCh:
-		return fmt.Errorf("OAuth callback failed: %w", err)
-	case <-cmd.Context().Done():
-		return cmd.Context().Err()
-	}
-
-	// Exchange code for token
-	token, err := auth.Exchange(cmd.Context(), code)
-	if err != nil {
-		return fmt.Errorf("failed to exchange authorization code: %w", err)
-	}
-
-	if err := auth.SaveToken(token); err != nil {
-		return fmt.Errorf("failed to save token: %w", err)
-	}
-
-	fmt.Println("Calendar authentication successful! Token saved.")
+	fmt.Println("To authenticate Google Calendar, run:")
+	fmt.Println()
+	fmt.Println("  meept config oauth connect google-calendar")
+	fmt.Println()
+	fmt.Println("This starts the OAuth device-code flow. Open the printed URL,")
+	fmt.Println("enter the code, and authorize the application.")
 	return nil
 }
 
@@ -145,27 +65,14 @@ func runCalendarToday(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	if cfg.ClientID == "" || cfg.ClientSecret == "" {
-		return fmt.Errorf("calendar not configured. Set client_id and client_secret in meept.toml")
-	}
-
-	redirectURI := cfg.RedirectURI
-	if redirectURI == "" {
-		redirectURI = "http://localhost:8888/callback"
-	}
-
-	oauthCfg := calendar.DefaultOAuth2Config(cfg.ClientID, cfg.ClientSecret, redirectURI)
-
-	homeDir, err := os.UserHomeDir()
+	store, err := buildCalendarTokenStore()
 	if err != nil {
-		return fmt.Errorf("failed to determine home directory: %w", err)
+		return err
 	}
-	tokenPath := filepath.Join(homeDir, ".meept", "calendar_token.json")
-	auth := calendar.NewOAuth2Authenticator(oauthCfg, tokenPath)
 
-	token, err := auth.GetValidToken(cmd.Context())
+	token, err := calendar.GetAccessToken(cmd.Context(), store)
 	if err != nil {
-		return fmt.Errorf("authentication required: %w\nRun 'meept calendar auth' first", err)
+		return fmt.Errorf("authentication required: %w\nRun 'meept config oauth connect google-calendar' to authenticate", err)
 	}
 
 	calendarID := cfg.CalendarID
@@ -174,7 +81,7 @@ func runCalendarToday(cmd *cobra.Command, args []string) error {
 	}
 
 	client, err := calendar.NewClient(calendar.ClientConfig{
-		AccessToken: token.AccessToken,
+		AccessToken: token,
 		CalendarID:  calendarID,
 	}, nil)
 	if err != nil {
@@ -208,6 +115,22 @@ func runCalendarToday(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// buildCalendarTokenStore creates an encryption key and returns an initialised
+// TokenStore for calendar OAuth operations.
+func buildCalendarTokenStore() (*auth.TokenStore, error) {
+	userKey := os.Getenv("MEEPT_OAUTH_ENCRYPTION_KEY")
+	enc, err := auth.NewEncryptionKey(userKey)
+	if err != nil {
+		return nil, fmt.Errorf("create encryption key: %w", err)
+	}
+
+	store := auth.NewTokenStore(enc)
+	if err := store.Init(); err != nil {
+		return nil, fmt.Errorf("init token store: %w", err)
+	}
+	return store, nil
+}
+
 // loadCalendarConfig loads the meept config and returns the calendar section.
 func loadCalendarConfig() (*config.CalendarConfig, error) {
 	homeDir, err := os.UserHomeDir()
@@ -224,13 +147,4 @@ func loadCalendarConfig() (*config.CalendarConfig, error) {
 	}
 
 	return &cfg.Calendar, nil
-}
-
-// generateRandomState creates a random OAuth state string.
-func generateRandomState() (string, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }

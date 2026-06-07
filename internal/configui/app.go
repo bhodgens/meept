@@ -96,6 +96,7 @@ func NewApp() *App {
 		{Title: "projects", Description: "path fencing, worktrees, project registration", KeyPath: "projects", ConfigFile: "meept.json5"},
 		{Title: "mcp servers", Description: "MCP server definitions (stdio/http)", KeyPath: "mcp_servers", ConfigFile: "mcp_servers.json5"},
 		{Title: "client / tui", Description: "connection, keybindings, vim, rendering, chat", KeyPath: "client", ConfigFile: "client.json5"},
+		{Title: "oauth", Description: "connected providers, tokens, status", KeyPath: "oauth", ConfigFile: "oauth"},
 		{Title: "scheduler", Description: "timezone", KeyPath: "scheduler", ConfigFile: "meept.json5"},
 	}
 
@@ -184,6 +185,7 @@ func (a *App) BackToMenu() {
 	a.stashCurrentSection()
 	a.section = nil
 	a.editor = nil
+	a.errMsg = ""
 	a.phase = PhaseMenu
 }
 
@@ -193,6 +195,42 @@ func (a *App) stashCurrentSection() {
 	if a.section != nil && a.section.IsDirty() && !a.section.IsDrilldown() {
 		a.sectionCache[a.section.SectionKey()] = a.section
 	}
+}
+
+// rebuildCurrentSection rebuilds the fields for the current section from the
+// live data source. This is used by sections like "oauth" where actions
+// (connect/disconnect) change the underlying state and the display needs to
+// reflect the new status.
+func (a *App) rebuildCurrentSection() {
+	if a.section == nil {
+		return
+	}
+	keyPath := a.section.SectionKey()
+	fields := BuildSectionFields(keyPath)
+	a.section = NewSectionModel(
+		a.section.Title(),
+		a.section.SectionKey(),
+		a.section.ConfigFile(),
+		fields,
+	)
+}
+
+// rebuildParentSection rebuilds the parent section (from drilldown context)
+// so that the drilldown items reflect the latest state. This is used after
+// executing an action in a drilldown sub-section where the underlying data
+// has changed (e.g., disconnecting an OAuth provider).
+func (a *App) rebuildParentSection() {
+	if a.parentSection == nil {
+		return
+	}
+	keyPath := a.parentSection.SectionKey()
+	fields := BuildSectionFields(keyPath)
+	a.parentSection = NewSectionModel(
+		a.parentSection.Title(),
+		a.parentSection.SectionKey(),
+		a.parentSection.ConfigFile(),
+		fields,
+	)
 }
 
 // --- bubbletea.Model interface ---
@@ -279,6 +317,26 @@ func (a *App) handleSectionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if a.section != nil {
 			f := a.section.CurrentField()
 			if f == nil {
+				return a, nil
+			}
+			// Action fields execute immediately without entering the editor.
+			if af, ok := f.(*ActionField); ok {
+				if err := af.Activate(); err != nil {
+					a.errMsg = err.Error()
+				}
+				// If this is a drilldown sub-section, rebuild the parent
+				// section (which contains the drilldown field with provider
+				// items) and navigate back to it so the updated status is
+				// visible in the drilldown list.
+				if a.parentSection != nil {
+					a.rebuildParentSection()
+					a.section = a.parentSection
+					a.parentSection = nil
+					a.phase = PhaseDrilldown
+					return a, nil
+				}
+				// Top-level section: rebuild in place.
+				a.rebuildCurrentSection()
 				return a, nil
 			}
 			if f.Type() == FieldDrilldown {
@@ -566,6 +624,9 @@ func (a *App) viewSection() string {
 		unsavedMarker = " " + a.styles.dirtyMarker.Render("(unsaved)")
 	}
 	s := a.styles.breadcrumb.Render("meept config > ") + a.styles.title.Render(a.section.Title()) + unsavedMarker + "\n\n"
+	if a.errMsg != "" {
+		s += a.styles.dirtyMarker.Render("error: " + a.errMsg) + "\n\n"
+	}
 	for i, f := range a.section.Fields() {
 		cursor := "  "
 		style := a.styles.unselected
@@ -685,6 +746,7 @@ var sectionAliases = map[string]string{
 	"distmem":   "distributed memory",
 	"mcpserver": "mcp servers",
 	"menubar":   "client / tui",
+	"oauth":     "oauth",
 }
 
 // JumpToSection searches allItems for a matching section and selects it.

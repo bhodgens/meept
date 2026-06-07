@@ -311,6 +311,12 @@ func NewProviderFromConfig(cfg config.EmbeddingConfig) (Provider, error) {
 			Dimension: cfg.Dimension,
 		}), nil
 
+	case "sentence-transformer":
+		return NewSentenceTransformerProvider(SentenceTransformerConfig{
+			ModelID:     cfg.Model,
+			TargetDim:   cfg.Dimension,
+		})
+
 	default:
 		return nil, fmt.Errorf("unsupported embedding provider: %s", cfg.Provider)
 	}

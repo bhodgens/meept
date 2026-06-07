@@ -183,6 +183,24 @@ var CanonicalProviders = []ProviderDef{
 		DocURL:    "https://docs.aws.amazon.com/bedrock",
 		Supports:  []string{CapStreaming, CapTools, "aws"},
 	},
+	{
+		ID:           "github-models",
+		Name:         "GitHub Models",
+		Transport:    TransportOpenAIChat,
+		AuthType:     AuthOAuthDevice,
+		BaseURL:      "https://models.github.ai/inference",
+		DocURL:       "https://docs.github.com/en/github-models",
+		Supports:     []string{CapStreaming, CapTools, CapCode},
+	},
+	{
+		ID:           "google-oauth",
+		Name:         "Google AI (OAuth)",
+		Transport:    TransportOpenAIChat,
+		AuthType:     AuthOAuthDevice,
+		BaseURL:      "https://generativelanguage.googleapis.com/v1beta/openai",
+		DocURL:       "https://ai.google.dev",
+		Supports:     []string{CapStreaming, CapTools, CapImages},
+	},
 }
 
 // GetProviderByID looks up a provider by its canonical ID.
