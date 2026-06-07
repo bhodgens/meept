@@ -430,6 +430,32 @@ func (c *Client) Rename(ctx context.Context, uri string, line, char int, newName
 	return &edit, nil
 }
 
+// WillRenameFiles requests the LSP server to compute edits needed when files are renamed.
+// This is used for barrel file updates, re-export changes, and aliased import handling.
+// Returns WorkspaceEditWithOperations which may contain both text changes and file operations.
+func (c *Client) WillRenameFiles(ctx context.Context, oldURI, newURI string) (*WorkspaceEditWithOperations, error) {
+	params := RenameFilesParams{
+		Files: []FileRename{
+			{OldURI: oldURI, NewURI: newURI},
+		},
+	}
+
+	result, err := c.Call(ctx, "workspace/willRenameFiles", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(result) == 0 || string(result) == "null" {
+		return nil, nil
+	}
+
+	var edit WorkspaceEditWithOperations
+	if err := json.Unmarshal(result, &edit); err != nil {
+		return nil, fmt.Errorf("failed to parse willRenameFiles result: %w", err)
+	}
+
+	return &edit, nil
+}
 // TypeDefinition finds the type definition of a symbol at a position.
 func (c *Client) TypeDefinition(ctx context.Context, uri string, line, char int) ([]Location, error) {
 	params := TextDocumentPositionParams{

@@ -243,6 +243,32 @@ func (m *Manager) GetServer(name string) (*ServerInstance, bool) {
 	return srv, ok
 }
 
+// WillRenameFiles calls the LSP server's workspace/willRenameFiles endpoint.
+// This is used for barrel file updates, re-export changes, and aliased import handling.
+// Returns nil if the server doesn't support this capability.
+func (m *Manager) WillRenameFiles(ctx context.Context, oldURI, newURI string) (*WorkspaceEditWithOperations, error) {
+	m.mu.RLock()
+	// Use the first available server - in practice you'd want to route to the right server
+	var client *Client
+	for _, srv := range m.servers {
+		client = srv.Client
+		break
+	}
+	m.mu.RUnlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("no LSP server available")
+	}
+
+	// Check if server supports willRenameFiles capability
+	caps := NewCapabilities(client.Capabilities())
+	if !caps.HasWillRenameFiles() {
+		return nil, nil // Server doesn't support this capability
+	}
+
+	return client.WillRenameFiles(ctx, oldURI, newURI)
+}
+
 // SupportsLanguage checks if any server supports a language.
 func (m *Manager) SupportsLanguage(languageID string) bool {
 	// Check running servers
