@@ -40,6 +40,7 @@ func newClusterCmd() *cobra.Command {
 	cmd.AddCommand(newClusterLeaveCmd())
 	cmd.AddCommand(newClusterKeygenCmd())
 	cmd.AddCommand(newClusterRemoteCmd())
+	cmd.AddCommand(newClusterDebugCmd())
 
 	return cmd
 }
@@ -517,6 +518,161 @@ Example:
 			fmt.Println("wireguard mesh key:")
 			fmt.Printf("  public:  %s\n", wgKey.Public().String())
 			fmt.Printf("  private: %s\n", wgKey.Private().String())
+			return nil
+		},
+	}
+
+	return cmd
+}
+
+// ---------------------------------------------------------------------------
+// cluster debug
+// ---------------------------------------------------------------------------
+
+func newClusterDebugCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "debug",
+		Short: "Show cluster debug information",
+		Long:  `Display cluster internals for debugging: event log and peer connectivity.`,
+	}
+
+	cmd.AddCommand(newClusterDebugEventsCmd())
+	cmd.AddCommand(newClusterDebugPeersCmd())
+
+	return cmd
+}
+
+func newClusterDebugEventsCmd() *cobra.Command {
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "events",
+		Short: "show recent cluster events",
+		Long:  `Display recent cluster events from the event log. Events are shown in reverse chronological order.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			if limit <= 0 {
+				limit = 50
+			}
+
+			raw, err := client.Call("cluster.debug.events", map[string]any{
+				"limit": limit,
+			})
+			if err != nil {
+				return fmt.Errorf("cluster debug events failed: %w", err)
+			}
+
+			var events []map[string]any
+			if err := json.Unmarshal(raw, &events); err != nil {
+				return fmt.Errorf("failed to parse events: %w", err)
+			}
+
+			if len(events) == 0 {
+				fmt.Println("(no cluster events)")
+				return nil
+			}
+
+			fmt.Printf("%-36s %-16s %-20s %-30s %s\n",
+				"EVENT_ID", "TYPE", "NODE", "TIMESTAMP", "PAYLOAD_SUMMARY")
+			fmt.Printf("%s %s %s %s %s\n",
+				strings.Repeat("-", 36), strings.Repeat("-", 16),
+				strings.Repeat("-", 20), strings.Repeat("-", 30),
+				strings.Repeat("-", 40))
+
+			for _, ev := range events {
+				eventID := getStringOr(ev, "event_id", "?")
+				evType := getStringOr(ev, "event_type", "?")
+				nodeID := getStringOr(ev, "node_id", "?")
+				ts := getStringOr(ev, "timestamp", "?")
+				payload := getStringOr(ev, "payload_summary", "")
+
+				if len(eventID) > 36 {
+					eventID = eventID[:33] + "..."
+				}
+				if len(nodeID) > 20 {
+					nodeID = nodeID[:17] + "..."
+				}
+				if len(ts) > 30 {
+					ts = ts[:27] + "..."
+				}
+				if len(payload) > 40 {
+					payload = payload[:37] + "..."
+				}
+
+				fmt.Printf("%-36s %-16s %-20s %-30s %s\n",
+					eventID, evType, nodeID, ts, payload)
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVar(&limit, "limit", 50, "maximum number of events to show (1-1000)")
+
+	return cmd
+}
+
+func newClusterDebugPeersCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "peers",
+		Short: "show peer connectivity",
+		Long:  `Display all known cluster peers and their connectivity status.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := connectDaemon()
+			if err != nil {
+				return fmt.Errorf("failed to connect to daemon: %w", err)
+			}
+			defer client.Close()
+
+			raw, err := client.Call("cluster.peers", map[string]any{})
+			if err != nil {
+				return fmt.Errorf("cluster peers failed: %w", err)
+			}
+
+			var peers []map[string]any
+			if err := json.Unmarshal(raw, &peers); err != nil {
+				return fmt.Errorf("failed to parse peers: %w", err)
+			}
+
+			if len(peers) == 0 {
+				fmt.Println("(no peers connected)")
+				return nil
+			}
+
+			fmt.Printf("%-36s %-30s %-10s %-20s\n",
+				"NODE_ID", "ENDPOINT", "STATUS", "LAST_SEEN")
+			fmt.Printf("%s %s %s %s\n",
+				strings.Repeat("-", 36), strings.Repeat("-", 30),
+				strings.Repeat("-", 10), strings.Repeat("-", 20))
+
+			for _, p := range peers {
+				nodeID := getStringOr(p, "node_id", getStringOr(p, "NodeID", "?"))
+				endpoint := getStringOr(p, "endpoint", getStringOr(p, "Endpoint", "-"))
+				status := getStringOr(p, "status", getStringOr(p, "Status", "?"))
+				lastSeen := getStringOr(p, "last_seen", getStringOr(p, "LastSeen", "-"))
+				joinedAt := getStringOr(p, "joined_at", getStringOr(p, "JoinedAt", ""))
+
+				if len(nodeID) > 36 {
+					nodeID = nodeID[:33] + "..."
+				}
+				if len(endpoint) > 30 {
+					endpoint = endpoint[:27] + "..."
+				}
+
+				// If last_seen is empty, use joined_at as fallback
+				if lastSeen == "-" && joinedAt != "" {
+					lastSeen = joinedAt
+				}
+
+				fmt.Printf("%-36s %-30s %-10s %-20s\n",
+					nodeID, endpoint, status, lastSeen)
+			}
+
 			return nil
 		},
 	}

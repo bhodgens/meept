@@ -14,6 +14,10 @@ type Config struct {
 	ClusterID   string `json:"cluster_id"`
 	ClusterName string `json:"cluster_name"`
 
+	// JoinKey is the secret key required for new nodes to join the cluster.
+	// When empty, any join key is accepted (open mode).
+	JoinKey string `json:"join_key"`
+
 	// Network configuration (WireGuard)
 	Network NetworkConfig `json:"network"`
 

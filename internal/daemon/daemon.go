@@ -303,6 +303,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if rpcServer != nil && (clusterEngine != nil || clusterCfg != nil) {
 		clusterHandler := rpc.NewClusterHandler(clusterEngine, clusterGitSync, clusterCfg)
 		clusterHandler.SetClusterQueue(clusterMQ)
+		clusterHandler.SetStore(queueStore)
 		clusterHandler.RegisterClusterMethods(rpcServer)
 		logger.Info("cluster RPC handlers registered")
 	}
@@ -329,9 +330,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// Wire WireGuard sync into components
-	if clusterWG != nil {
+	if clusterWireGuard != nil {
 		if components != nil {
-			components.ClusterWireGuard = clusterWG
+			components.ClusterWireGuard = clusterWireGuard
 		}
 	}
 
