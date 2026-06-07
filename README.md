@@ -234,6 +234,7 @@ For complete feature details, see [Features](docs/features.md).
 | Code intelligence | ✅ Working | Tree-sitter AST + LSP client tools |
 | LLM management | ✅ Working | Multi-provider, alias resolution, failover, budgeting |
 | Job scheduling | ✅ Working | Cron, reminders, SQLite queue |
+| **Persistent bots** | ✅ Working | Autonomous bots with cron/bus/webhook triggers, memory isolation, cost budgets |
 | **Skills system** | ✅ Complete | Discovery, execution, CLI commands (`meept skills list/run/show`) |
 | Security engine | ✅ Complete | Input sanitization, Tirith scanning, audit logging, security hooks for all tools |
 | Collaborative planning | ✅ Complete | Programming task detection, plan review/approval workflow wired into chat handler |
@@ -265,6 +266,12 @@ For complete feature details, see [Features](docs/features.md).
 # Skills
 ./bin/meept clawskills list                # Installed skills
 ./bin/meept clawskills search "kubernetes" # Search marketplace
+
+# Bots
+./bin/meept bots list                      # List all bots
+./bin/meept bots create bot-def.json        # Create a bot
+./bin/meept bots pause <bot-id>            # Pause a bot
+./bin/meept bots resume <bot-id>           # Resume a bot
 ```
 
 Complete reference: [CLI Reference](docs/reference/cli.md)

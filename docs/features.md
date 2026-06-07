@@ -1276,6 +1276,21 @@ scan_runtime_logs = true
 scan_type_check = true
 ```
 
+### Persistent Bot Framework
+
+Meept supports persistent autonomous bots that execute on schedules and respond to events, with independent memory, cost isolation, and security boundaries.
+
+**Trigger types:**
+- **Cron** - Recurring time-based execution (e.g., `*/15 * * * *`)
+- **Bus events** - React to internal system events (e.g., calendar reminders, task completion)
+- **Webhooks** - HTTP POST triggers from external systems (e.g., CI status, GitHub)
+
+**Memory isolation modes:** `private` (bot-only), `shared` (full access), `read_only` (read shared, write own)
+
+**Budget controls:** Daily spend caps (cents), invocation limits, auto-pause after 10 consecutive failures.
+
+Bots are defined as JSON documents with prompt, triggers, tools, and constraints, then managed via `meept bots` CLI commands. See [Persistent Bot Framework](workflows/bots.md) for full documentation.
+
 ---
 
 ## Feature Reference
@@ -1459,6 +1474,14 @@ enable_checkpoints = true
 # Models
 ./bin/meept models setup           # Interactive model configuration
 ./bin/meept models list            # List configured models
+
+# Bots
+./bin/meept bots list              # List all bots
+./bin/meept bots show <bot-id>     # Show bot details
+./bin/meept bots create <def.json> # Create a bot from a definition file
+./bin/meept bots pause <bot-id>    # Pause a running bot
+./bin/meept bots resume <bot-id>   # Resume a paused bot
+./bin/meept bots delete <bot-id>   # Delete a bot
 ```
 
 ---
