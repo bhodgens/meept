@@ -263,9 +263,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			clusterEngine = cluster.NewGossipEngine(clusterCfg, localNodeID, msgBus, logger)
 		}
 
+		// Create git sync for cluster membership registry
+		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
+		clusterGitSync = cluster.NewGitSync(clusterCfg, clusterCfg, gitRepoPath, logger)
+
 		// Create cluster-aware queue wrapping the existing queue
 		if components != nil && components.Queue != nil {
-			// Check if we have a store to use
 			localNodeID := clusterCfg.NodeID
 			if localNodeID == "" {
 				localNodeID = "local"
@@ -615,6 +618,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 			"llm_configured", d.components.LLMClient != nil,
 			"cluster_enabled", d.components.ClusterEngine != nil,
 		)
+	}
+
+	// Start cluster components (gossip engine, git sync)
+	if d.components != nil && d.components.ClusterEngine != nil {
+		if err := d.components.ClusterEngine.Start(ctx); err != nil {
+			d.logger.Error("Failed to start gossip engine", "error", err)
+		}
+	}
+	if d.components != nil && d.components.ClusterGitSync != nil {
+		if err := d.components.ClusterGitSync.Start(ctx); err != nil {
+			d.logger.Error("Failed to start git sync", "error", err)
+		}
 	}
 
 	// Start local LLM runtimes in the background so the daemon reaches

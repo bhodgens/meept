@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // ClusterQueue wraps the standard queue with cluster-aware claim/timeout/reclaim logic.
@@ -17,6 +20,7 @@ type ClusterQueue struct {
 	localNodeID string
 	logger      *slog.Logger
 	cfg         ClusterQueueConfig
+	bus         *bus.MessageBus
 
 	mu      sync.RWMutex
 	claimed map[string]*ClaimRecord
@@ -66,6 +70,12 @@ func NewClusterQueue(q Queue, store *Store, localNodeID string, logger *slog.Log
 		claimed:     make(map[string]*ClaimRecord),
 		stopCh:      make(chan struct{}),
 	}
+}
+
+// WithMessageBus attaches a message bus to the cluster queue
+// for publishing cluster-wide reclaim events.
+func (cq *ClusterQueue) WithMessageBus(b *bus.MessageBus) {
+	cq.bus = b
 }
 
 // Claim wraps the underlying queue's Claim with cluster-aware logic.
@@ -126,6 +136,74 @@ func (cq *ClusterQueue) Fail(ctx context.Context, jobID string, err error) error
 	return cq.Queue.Fail(ctx, jobID, err)
 }
 
+// ReclaimJob reclaims a claimed job back to pending state due to node failure
+// or claim timeout. It records the reclaim event, resets the job state in the
+// store, removes the local claim record, and publishes a bus event so other
+// nodes are aware the job needs to be re-handled.
+func (cq *ClusterQueue) ReclaimJob(ctx context.Context, jobID, reason string) error {
+	// 1. Record TASK_RECLAIM event in cluster_events table
+	if cq.store != nil {
+		if err := cq.store.RecordClaimEvent(ctx, jobID, cq.localNodeID, "reclaim"); err != nil {
+			cq.logger.Warn("cluster_queue: failed to record reclaim event",
+				"job_id", jobID, "reason", reason, "error", err)
+		}
+	}
+
+	// 2. Reset job state to PENDING in the store
+	if err := cq.store.ResetToPending(ctx, jobID); err != nil {
+		cq.logger.Warn("cluster_queue: failed to reset job to pending",
+			"job_id", jobID, "reason", reason, "error", err)
+		// Non-fatal: other nodes still learned about the reclaim via the event.
+	}
+
+	// 3. Remove local claim record
+	cq.mu.Lock()
+	delete(cq.claimed, jobID)
+	cq.mu.Unlock()
+
+	// 4. Publish bus event so subscribers across the cluster are notified
+	if cq.bus != nil {
+		msg, err := models.NewBusMessage(models.MessageTypeEvent, "cluster_queue", map[string]any{
+			"job_id":  jobID,
+			"reason":  reason,
+			"node_id": cq.localNodeID,
+		})
+		if err == nil {
+			cq.bus.Publish("event.cluster.task_reclaim", msg)
+		}
+	}
+
+	cq.logger.Info("cluster_queue: job reclaimed",
+		"job_id", jobID,
+		"reason", reason,
+		"reclaimed_by", cq.localNodeID,
+	)
+
+	return nil
+}
+
+// CheckNodeReachability checks if a node is reachable by querying the
+// cluster_members table for a recent heartbeat. Returns true if the node
+// has heartbeat within the configured reachability timeout.
+func (cq *ClusterQueue) CheckNodeReachability(nodeID string) bool {
+	if cq.store == nil {
+		return false
+	}
+
+	var lastHeartbeat int64
+	row := cq.store.db.QueryRow(
+		`SELECT last_heartbeat FROM cluster_members WHERE node_id = ?`,
+		nodeID,
+	)
+	if err := row.Scan(&lastHeartbeat); err != nil {
+		// Node not found in cluster_members — treat as unreachable.
+		return false
+	}
+
+	threshold := time.Now().UnixNano() - int64(cq.cfg.NodeReachabilityTimeout)
+	return lastHeartbeat > threshold
+}
+
 // IsClaimed checks if a job is currently claimed by any node.
 func (cq *ClusterQueue) IsClaimed(ctx context.Context, jobID string) (string, bool) {
 	cq.mu.RLock()
@@ -136,7 +214,8 @@ func (cq *ClusterQueue) IsClaimed(ctx context.Context, jobID string) (string, bo
 	return "", false
 }
 
-// ReclaimIfStale marks locally tracked claims as expired if the timeout has passed.
+// ReclaimIfStale checks all locally tracked claims and reclaims any whose
+// timeout has expired by delegating to ReclaimJob.
 func (cq *ClusterQueue) ReclaimIfStale(ctx context.Context) []*Job {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
@@ -144,12 +223,13 @@ func (cq *ClusterQueue) ReclaimIfStale(ctx context.Context) []*Job {
 	var reclaiming []*Job
 	for jobID, record := range cq.claimed {
 		if time.Now().After(record.TimeoutAt) {
-			cq.logger.Info("cluster_queue: reclaiming stale job",
-				"job_id", jobID,
-				"claimed_by", record.ClaimedBy,
-			)
+			// ReclaimJob internally deletes the record from claimed map,
+			// so we capture the job ID and record first.
 			reclaiming = append(reclaiming, &Job{ID: jobID})
-			delete(cq.claimed, jobID)
+			if err := cq.ReclaimJob(ctx, jobID, "claim_stale"); err != nil {
+				cq.logger.Warn("cluster_queue: reclaim_if_stale: reclaim failed",
+					"job_id", jobID, "error", err)
+			}
 		}
 	}
 

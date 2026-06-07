@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -542,6 +543,35 @@ func (s *Store) Retry(jobID string) error {
 		"backoff", backoff,
 		"next_retry_at", nextRetryAt,
 	)
+	return nil
+}
+
+// ResetToPending resets a claimed/processing job back to pending state,
+// clearing the claimed_by, result, and error fields. This is used when
+// a node is unreachable and its jobs need to be re-handled by another node.
+func (s *Store) ResetToPending(ctx context.Context, jobID string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET state = 'pending',
+		    claimed_by = NULL,
+		    result = NULL,
+		    error = NULL,
+		    timeout_at = NULL,
+		    last_heartbeat_at = NULL,
+		    updated_at = ?
+		WHERE id = ? AND state IN ('claimed', 'processing')`,
+		now, jobID)
+	if err != nil {
+		return fmt.Errorf("failed to reset job to pending: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("job not found or not in claimed/processing state: %s", jobID)
+	}
+
+	s.logger.Info("cluster_queue: job reset to pending", "job_id", jobID)
 	return nil
 }
 

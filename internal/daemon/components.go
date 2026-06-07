@@ -2131,6 +2131,14 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewMemoryGetContextTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetVersionTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetVersionHistoryTool(memoryMgr))
+
+		// Memory curation tools (retain/recall/reflect) backed by task memory
+		if taskMem := memoryMgr.Task(); taskMem != nil {
+			curationStore := memory.NewCuratedMemoryStore(taskMem, logger.With("component", "memory-curation"))
+			builtin.RegisterMemoryCurationTools(registry, curationStore)
+			logger.Debug("Registered memory curation tools")
+		}
+
 		logger.Debug("Registered memory tools")
 	} else if memoryMgr != nil {
 		logger.Warn("Memory tools not registered: memory manager not initialized")
@@ -2540,6 +2548,16 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 	} else {
 		c.ToolRegistry.Register(tool)
 	}
+	if tool, err := codetools.NewASTEditTool(c.ASTParser); err != nil {
+		logger.Error("Failed to initialize AST edit tool", "error", err)
+	} else {
+		c.ToolRegistry.Register(tool)
+	}
+	if tool, err := codetools.NewResolveASTEditTool(c.ASTParser); err != nil {
+		logger.Error("Failed to initialize resolve AST edit tool", "error", err)
+	} else {
+		c.ToolRegistry.Register(tool)
+	}
 	logger.Debug("Registered AST tools")
 
 	// Initialize LSP manager if servers are configured
@@ -2589,6 +2607,11 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 		}
 		if tool, err := codetools.NewLSPRenameTool(c.LSPManager); err != nil {
 			logger.Error("Failed to initialize LSP rename tool", "error", err)
+		} else {
+			c.ToolRegistry.Register(tool)
+		}
+		if tool, err := codetools.NewLSPRenameFilesTool(c.LSPManager); err != nil {
+			logger.Error("Failed to initialize LSP rename files tool", "error", err)
 		} else {
 			c.ToolRegistry.Register(tool)
 		}
