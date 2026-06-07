@@ -247,6 +247,13 @@ func (m *TTSRManager) InjectionState() map[string]int {
 	return state
 }
 
+// HasRules returns true if the manager has any loaded rules.
+func (m *TTSRManager) HasRules() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.rules) > 0
+}
+
 // Rules returns a copy of the current rules list (for inspection/testing).
 func (m *TTSRManager) Rules() []*TTSRRule {
 	m.mu.RLock()

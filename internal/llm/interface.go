@@ -39,6 +39,21 @@ type Chatter interface {
 	Config() *ModelConfig
 }
 
+// StreamingChatter is the interface for LLMs that support per-delta streaming.
+// Time-traveling stream rules (TTSR) use this to abort mid-generation and
+// retry with injected rule enforcement content.
+type StreamingChatter interface {
+	Chatter
+	ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error)
+}
+
+// AsStreamingChatter attempts to cast a Chatter to a StreamingChatter.
+// Returns nil, false if the underlying implementation does not support streaming.
+func AsStreamingChatter(c Chatter) (StreamingChatter, bool) {
+	sc, ok := c.(StreamingChatter)
+	return sc, ok
+}
+
 // Ensure implementations satisfy the interface
 var (
 	_ Chatter = (*Client)(nil)

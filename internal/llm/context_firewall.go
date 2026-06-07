@@ -450,6 +450,34 @@ func (f *ContextFirewall) ChatWithProgress(ctx context.Context, messages []ChatM
 	return resp, err
 }
 
+// ChatWithDeltaCallback sends a request with streaming delta callback through context filtering.
+func (f *ContextFirewall) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error) {
+	processed := f.processMessages(ctx, messages)
+
+	// Validate context size after reduction
+	if err := f.ValidateContextSize(processed); err != nil {
+		return nil, err
+	}
+
+	// Cast inner to StreamingChatter if possible; fallback to non-streaming otherwise
+	if sc, ok := f.inner.(StreamingChatter); ok {
+		resp, err := sc.ChatWithDeltaCallback(ctx, processed, onDelta, opts...)
+		if err == nil && f.logger != nil {
+			util := f.ContextUtilization(processed)
+			f.logger.Debug("context utilization", "ratio", util)
+		}
+		return resp, err
+	}
+
+	// Fallback to non-streaming
+	resp, err := f.inner.Chat(ctx, processed, opts...)
+	if err == nil && f.logger != nil {
+		util := f.ContextUtilization(processed)
+		f.logger.Debug("context utilization", "ratio", util)
+	}
+	return resp, err
+}
+
 // DerivedIterationBudget returns the iteration (per-turn) token budget.
 func (f *ContextFirewall) DerivedIterationBudget() int {
 	if f.model == nil || f.model.ContextLimit == 0 {
@@ -938,3 +966,6 @@ func (f *ContextFirewall) Config() *ModelConfig {
 
 // Ensure ContextFirewall implements Chatter
 var _ Chatter = (*ContextFirewall)(nil)
+
+// Ensure ContextFirewall supports streaming when its inner does
+var _ StreamingChatter = (*ContextFirewall)(nil)

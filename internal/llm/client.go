@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -747,6 +748,169 @@ func (c *Client) parseResponse(chatResp *ChatResponse) (*Response, error) {
 		},
 		Model:        model,
 		FinishReason: choice.FinishReason,
+	}, nil
+}
+
+// ChatWithDeltaCallback sends a streaming chat completion request and invokes
+// onDelta for each content chunk. If onDelta returns a non-nil error, the
+// stream is cancelled and that error is returned. The final accumulated
+// Response is returned on successful completion.
+func (c *Client) ChatWithDeltaCallback(ctx context.Context, messages []ChatMessage, onDelta DeltaCallback, opts ...ChatOption) (*Response, error) {
+	if onDelta == nil {
+		// Fallback to non-streaming when no callback provided
+		return c.Chat(ctx, messages, opts...)
+	}
+
+	c.configMu.RLock()
+	cfg := c.config
+	c.configMu.RUnlock()
+
+	chatOpts := &chatOptions{
+		temperature:      cfg.Temperature,
+		maxTokens:        cfg.MaxTokens,
+		topP:             cfg.TopP,
+		frequencyPenalty: cfg.FrequencyPenalty,
+		presencePenalty:  cfg.PresencePenalty,
+		stopSequences:    cfg.StopSequences,
+	}
+	for _, opt := range opts {
+		opt(chatOpts)
+	}
+
+	msgDicts := make([]map[string]any, len(messages))
+	for i, msg := range messages {
+		msgDicts[i] = msg.ToOpenAIDict()
+	}
+
+	payload := map[string]any{
+		"model":       cfg.ModelID,
+		"messages":    msgDicts,
+		"temperature": chatOpts.temperature,
+		"max_tokens":  chatOpts.maxTokens,
+		"stream":      true,
+	}
+	if chatOpts.topP > 0 {
+		payload["top_p"] = chatOpts.topP
+	}
+	if chatOpts.frequencyPenalty != 0 {
+		payload["frequency_penalty"] = chatOpts.frequencyPenalty
+	}
+	if chatOpts.presencePenalty != 0 {
+		payload["presence_penalty"] = chatOpts.presencePenalty
+	}
+	if len(chatOpts.stopSequences) > 0 {
+		payload["stop"] = chatOpts.stopSequences
+	}
+	if len(chatOpts.tools) > 0 {
+		payload["tools"] = chatOpts.tools
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, &ClientError{Message: "failed to marshal request", Cause: err}
+	}
+
+	c.configMu.RLock()
+	baseURL := strings.TrimSuffix(c.config.BaseURL, "/")
+	modelID := c.config.ModelID
+	apiKey := c.config.APIKey
+	providerID := c.config.ProviderID
+	c.configMu.RUnlock()
+	url := baseURL + "/chat/completions"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, &ClientError{Message: "failed to create request", Cause: err}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &ClientError{Message: "request failed", Cause: err}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		detail, _ := io.ReadAll(resp.Body)
+		return nil, &APIError{StatusCode: resp.StatusCode, Detail: string(detail)}
+	}
+
+	var accumulated strings.Builder
+	var finishReason string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			c.logger.Warn("failed to parse stream chunk", "error", err, "data", data)
+			continue
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		delta := chunk.Choices[0].Delta.Content
+		if delta != "" {
+			accumulated.WriteString(delta)
+			if err := onDelta(delta); err != nil {
+				return nil, err // Stream aborted by callback (e.g. TTSR rule)
+			}
+		}
+		if chunk.Choices[0].FinishReason != nil {
+			finishReason = *chunk.Choices[0].FinishReason
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, &ClientError{Message: "stream read failed", Cause: err}
+	}
+
+	if c.metricsStore != nil {
+		costUSD := float64(0) // streaming responses don't always include usage
+		go func() {
+			record := metrics.RequestRecord{
+				Timestamp:  time.Now(),
+				ProviderID: providerID,
+				ModelID:    modelID,
+				LatencyMs:  0,
+				HTTPStatus: resp.StatusCode,
+				ErrorType:  metrics.ErrorTypeNone,
+				Success:    true,
+				CostUSD:    costUSD,
+			}
+			_ = c.metricsStore.Record(context.Background(), record)
+		}()
+	}
+
+	return &Response{
+		Content:      accumulated.String(),
+		Usage:        TokenUsage{}, // streaming may not include per-request usage
+		Model:        modelID,
+		FinishReason: finishReason,
 	}, nil
 }
 

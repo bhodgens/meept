@@ -85,6 +85,8 @@ type Intent struct {
 	RequiresPlanning bool `json:"requires_planning"`
 	// Summary is a brief description of the intent.
 	Summary string `json:"summary,omitempty"`
+	// TrueAnalysis holds the IntentGate-style pre-classification analysis if available.
+	TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
 }
 
 // MemoryContext wraps memory results with conversation metadata.
@@ -165,6 +167,7 @@ type Dispatcher struct {
 	templateRegistry  *templates.Registry
 	logger            *slog.Logger
 	llmClassifier     *LLMClassifier
+	intentAnalyzer    *IntentAnalyzer
 	keywordClassifier *KeywordClassifier
 	capabilityMatcher *CapabilityMatcher
 	semanticIndex     *SemanticIndex
@@ -244,6 +247,8 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 			},
 			cfg.Logger,
 		)
+		// Initialize intent analyzer using same classifier client
+		d.intentAnalyzer = NewIntentAnalyzer(classifierClient, cfg.Logger)
 	}
 
 	// Initialize semantic index if embedding client is provided
@@ -343,7 +348,25 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// 3. Build memory context with session history
 	memCtx := d.buildMemoryContext(ctx, input, sessionID)
 
-	// 2. Resolve anaphora (context references)
+	// 3.5. IntentGate-style true intent analysis
+	if d.intentAnalyzer != nil {
+		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, input)
+		if err == nil && analysis != nil {
+			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) {
+				return d.buildClarificationResult(input, analysis, sessionID)
+			}
+			// Store analysis for downstream use (e.g. planner interview mode)
+			memCtx.LastIntent = &Intent{
+				Type:         analysis.Category,
+				Confidence:   analysis.Confidence,
+				AgentType:    analysis.Category,
+				Summary:      analysis.Goal,
+				TrueAnalysis: analysis,
+			}
+		}
+	}
+
+	// 4. Resolve anaphora (context references)
 	resolvedInput := d.resolveAnaphora(input, memCtx)
 
 	// 3. Check for compound (multi-intent) requests
@@ -669,6 +692,54 @@ func (d *Dispatcher) routeToPlan(ctx context.Context, input string, intent *Inte
 		Intent:  intent,
 		Response: fmt.Sprintf("plan created: %s (status: %s)", p.Title, p.State),
 		Plan:    p,
+	}, nil
+}
+
+// buildClarificationResult creates a DispatchResult for ambiguous input
+// that asks clarifying questions before proceeding with routing.
+func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntentAnalysis, sessionID string) (*DispatchResult, error) {
+	var questions []string
+	if len(analysis.SuggestedQuestions) > 0 {
+		questions = analysis.SuggestedQuestions
+	} else {
+		questions = []string{"Could you provide more details about what you'd like to do?"}
+	}
+
+	// Build a single clarifying message
+	var sb strings.Builder
+	sb.WriteString("I'm not quite sure what you're asking for. ")
+	if analysis.Goal != "" {
+		sb.WriteString(fmt.Sprintf("It seems like you want to %s, but ", analysis.Goal))
+	}
+	sb.WriteString("I need a bit more clarity:\n\n")
+	for i, q := range questions {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, q))
+	}
+
+	intent := &Intent{
+		Type:         string(IntentClarify),
+		Confidence:   analysis.Confidence,
+		AgentType:    config.AgentIDChat,
+		Summary:      extractSummary(input),
+		TrueAnalysis: analysis,
+	}
+
+	// Record for analytics
+	d.recordClassificationMethod("intent_analyzer")
+	d.recordAgent(config.AgentIDChat)
+	d.recordIntentType(string(IntentClarify))
+
+	d.logger.Info("Requesting clarification",
+		"ambiguity", analysis.Ambiguity,
+		"category", analysis.Category,
+		"questions", len(questions),
+	)
+
+	return &DispatchResult{
+		AgentID:            config.AgentIDChat,
+		Intent:             intent,
+		Response:           sb.String(),
+		ClarificationReply: sb.String(),
 	}, nil
 }
 

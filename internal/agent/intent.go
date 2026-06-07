@@ -44,6 +44,9 @@ const (
 
 	// Compound (multi-intent)
 	IntentCompound IntentType = "compound"
+
+	// Clarification (inline)
+	IntentClarify IntentType = "clarify"
 )
 
 // IntentCategory groups intents by routing behavior.
@@ -58,7 +61,7 @@ const (
 func (t IntentType) Category() IntentCategory {
 	switch t {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
-		IntentAnalyze, IntentSearch, IntentResearch:
+		IntentAnalyze, IntentSearch, IntentResearch, IntentClarify:
 		return CategoryInline
 	case IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit, IntentSchedule, IntentPair, IntentCollaborate:
 		return CategoryDefer
@@ -100,6 +103,8 @@ func (t IntentType) DefaultAgent() string {
 		return "skill"
 	case IntentCompound:
 		return "orchestrator"
+	case IntentClarify:
+		return config.AgentIDChat
 	default:
 		return config.AgentIDChat
 	}
@@ -146,7 +151,7 @@ func IsValidIntentType(s string) bool {
 	case IntentChat, IntentReport, IntentRecall, IntentPlatform, IntentStatus,
 		IntentCode, IntentDebug, IntentReview, IntentPlan, IntentGit,
 		IntentSchedule, IntentAnalyze, IntentSearch, IntentResearch,
-		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound:
+		IntentSecurity, IntentToolUse, IntentSkill, IntentPair, IntentCollaborate, IntentCompound, IntentClarify:
 		return true
 	}
 	return false
@@ -193,6 +198,8 @@ func (t IntentType) Keywords() []string {
 		return []string{"collaborate", "pair program", "debate", "a/b test", "differential", "compare approaches"}
 	case IntentCompound:
 		return []string{"and also", "as well as", "plus"}
+	case IntentClarify:
+		return []string{"clarify", "unsure", "ambiguous"}
 	default:
 		return nil
 	}

@@ -2131,6 +2131,9 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewMemoryGetContextTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetVersionTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetVersionHistoryTool(memoryMgr))
+		registry.Register(builtin.NewRetainTool(memoryMgr))
+		registry.Register(builtin.NewRecallTool(memoryMgr))
+		registry.Register(builtin.NewReflectTool(memoryMgr))
 		logger.Debug("Registered memory tools")
 	} else if memoryMgr != nil {
 		logger.Warn("Memory tools not registered: memory manager not initialized")

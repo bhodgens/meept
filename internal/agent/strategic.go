@@ -10,6 +10,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/task"
 	"github.com/caimlas/meept/pkg/models"
 )
@@ -24,6 +25,12 @@ type PlanRequest struct {
 	// Compound support (Phase 3)
 	IsCompound   bool   `json:"is_compound,omitempty"`
 	CompoundType string `json:"compound_type,omitempty"`
+
+	// PlanningContext carries verified context from a Prometheus-style interview.
+	PlanningCtx *plan.PlanningContext `json:"planning_ctx,omitempty"`
+
+	// TrueAnalysis carries IntentGate-style pre-classification analysis.
+	TrueAnalysis *TrueIntentAnalysis `json:"true_analysis,omitempty"`
 }
 
 // plannerStep is the JSON structure expected from the planner LLM output.
@@ -60,6 +67,8 @@ Output ONLY valid JSON in this exact format (no markdown, no explanation):
 
 The "depends_on" field uses 0-based step indices. Steps with empty depends_on can run in parallel.
 Keep the plan to %d steps maximum. Be specific and actionable.
+
+%s
 
 Request to decompose:
 %s`
@@ -275,8 +284,49 @@ func (sp *StrategicPlanner) generatePlan(ctx context.Context, req PlanRequest) (
 		return nil, fmt.Errorf("planner agent not available: %w", err)
 	}
 
+	// Build planning context section if available
+	var contextSection string
+	if req.TrueAnalysis != nil {
+		var sb strings.Builder
+		sb.WriteString("## Verified Context\n")
+		if req.TrueAnalysis.Goal != "" {
+			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.TrueAnalysis.Goal))
+		}
+		if req.TrueAnalysis.Scope != "" {
+			sb.WriteString(fmt.Sprintf("Scope: %s\n", req.TrueAnalysis.Scope))
+		}
+		if req.TrueAnalysis.Category != "" {
+			sb.WriteString(fmt.Sprintf("Category: %s\n", req.TrueAnalysis.Category))
+		}
+		contextSection = sb.String()
+	}
+	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted {
+		var sb strings.Builder
+		if contextSection != "" {
+			sb.WriteString(contextSection)
+		} else {
+			sb.WriteString("## Verified Context\n")
+		}
+		if req.PlanningCtx.TrueGoal != "" {
+			sb.WriteString(fmt.Sprintf("True goal: %s\n", req.PlanningCtx.TrueGoal))
+		}
+		if len(req.PlanningCtx.Requirements) > 0 {
+			sb.WriteString("Requirements:\n")
+			for _, r := range req.PlanningCtx.Requirements {
+				sb.WriteString(fmt.Sprintf("- %s\n", r))
+			}
+		}
+		if len(req.PlanningCtx.Constraints) > 0 {
+			sb.WriteString("Constraints:\n")
+			for k, v := range req.PlanningCtx.Constraints {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+			}
+		}
+		contextSection = sb.String()
+	}
+
 	// Build prompt
-	prompt := fmt.Sprintf(plannerPromptTemplate, sp.maxPlanSteps, req.Input)
+	prompt := fmt.Sprintf(plannerPromptTemplate, sp.maxPlanSteps, contextSection, req.Input)
 
 	// Run with timeout
 	planCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
@@ -388,6 +438,16 @@ func (sp *StrategicPlanner) shouldDecompose(req PlanRequest) bool {
 
 		// Simple requests don't need decomposition
 		return false
+	}
+
+	// If the request was ambiguous enough to need interviewing, probably decompose
+	if req.TrueAnalysis != nil && req.TrueAnalysis.Ambiguity >= 0.5 {
+		return true
+	}
+
+	// If interview context says this is broad scope, decompose
+	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted {
+		return true
 	}
 
 	// Longer requests may benefit from decomposition

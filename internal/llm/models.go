@@ -3,6 +3,7 @@ package llm
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -375,6 +376,24 @@ type SummaryExtract struct {
 	FileWrites          []string `json:"file_writes"` // Files written (compaction)
 	FileEdits           []string `json:"file_edits"`  // Files edited (compaction)
 	ErrorsEncountered   []string `json:"errors"`      // Errors encountered (compaction)
+}
+
+// DeltaCallback is invoked for each content chunk during a streaming response.
+type DeltaCallback func(delta string) error
+
+// StreamAbortedError indicates that a TTSR rule triggered mid-stream,
+// requiring the caller to retry with the rule content injected.
+type StreamAbortedError struct {
+	RuleName string
+	RuleBody string
+	Reason   string
+}
+
+func (e *StreamAbortedError) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("stream aborted by rule %q: %s", e.RuleName, e.Reason)
+	}
+	return fmt.Sprintf("stream aborted by rule %q", e.RuleName)
 }
 
 // Ptr returns a pointer to the given value.

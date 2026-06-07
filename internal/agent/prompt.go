@@ -58,6 +58,7 @@ type PromptBuilder struct {
 	userPrefs         map[string]string
 	customSections    []promptSection
 	coworkerAwareness string
+	agentsContext     string
 }
 
 type promptSection struct {
@@ -175,6 +176,24 @@ func (b *PromptBuilder) AddSection(title, content string) *PromptBuilder {
 	return b
 }
 
+// WithAgentsContext sets the AGENTS.md context for this conversation.
+// Loads hierarchical AGENTS.md files from the project root relative to
+// the working file path.
+func (b *PromptBuilder) WithAgentsContext(content string) *PromptBuilder {
+	if content == "" {
+		b.agentsContext = ""
+		return b
+	}
+	b.agentsContext = fmt.Sprintf(`<agents-context>
+[System note: The following describes project conventions, architecture, and
+symbol references from AGENTS.md. Use shorthand notation when referencing
+symbols mentioned here.]
+
+%s
+</agents-context>`, content)
+	return b
+}
+
 // WithCoworkerAwareness sets the coworker awareness section.
 // This tells agents about their introspection capabilities.
 func (b *PromptBuilder) WithCoworkerAwareness(awareness string) *PromptBuilder {
@@ -236,6 +255,11 @@ func (b *PromptBuilder) Build() string {
 	// Memory Context
 	if b.memoryContext != "" {
 		sections = append(sections, "\n# Relevant Context from Memory", b.memoryContext)
+	}
+
+	// AGENTS.md Context (project conventions and symbol references)
+	if b.agentsContext != "" {
+		sections = append(sections, "\n# Project Context", b.agentsContext)
 	}
 
 	// Session-scoped Templates

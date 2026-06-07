@@ -105,6 +105,28 @@ func generateSignoffID() string {
 	return fmt.Sprintf("signoff-%s-%04d", time.Now().UTC().Format("20060102150405"), seq)
 }
 
+// PlanningContext holds the result of a Prometheus-style pre-decomposition
+// interview. It captures ambiguities, constraints, and clarifications so
+// that downstream agents have verified context before touching code.
+type PlanningContext struct {
+	// Questions asked during the interview phase.
+	InterviewQuestions []string `json:"interview_questions,omitempty"`
+	// User answers to interview questions.
+	InterviewAnswers []string `json:"interview_answers,omitempty"`
+	// Ambiguities identified before decomposition.
+	Ambiguities []string `json:"ambiguities,omitempty"`
+	// Constraints extracted from conversation (time, scope, dependencies).
+	Constraints map[string]string `json:"constraints,omitempty"`
+	// Requirements distilled from the request.
+	Requirements []string `json:"requirements,omitempty"`
+	// InterviewCompleted is true when the interview phase finished.
+	InterviewCompleted bool `json:"interview_completed"`
+	// UserApproved is true when the user explicitly confirmed the plan.
+	UserApproved bool `json:"user_approved"`
+	// Raw context from TrueIntentAnalysis if available.
+	TrueGoal string `json:"true_goal,omitempty"`
+}
+
 // NewPlan creates a Plan in the planning state.
 func NewPlan(title, description, projectID, filePath, sourceSession string) *Plan {
 	now := time.Now().UTC()

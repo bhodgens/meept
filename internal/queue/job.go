@@ -59,6 +59,11 @@ type Job struct {
 	UpdatedAt    time.Time       `json:"updated_at"`
 	DueAt        *time.Time      `json:"due_at,omitempty"`
 	NextRetryAt  *time.Time      `json:"next_retry_at,omitempty"` // Retry backoff time
+
+	// Cluster fields
+	ManagingNode  string   `json:"managing_node,omitempty"` // Node that manages this task
+	ClaimedByNode string   `json:"claimed_by_node,omitempty"`
+	TimeoutAt     string   `json:"timeout_at,omitempty"`
 }
 
 // NewJob creates a new job with default values.
@@ -115,6 +120,12 @@ func (j *Job) WithAgentID(agentID string) *Job {
 // WithDueAt sets when the job should be executed.
 func (j *Job) WithDueAt(t time.Time) *Job {
 	j.DueAt = &t
+	return j
+}
+
+// WithManagingNode sets the node ID that manages this job (for distributed queues).
+func (j *Job) WithManagingNode(nodeID string) *Job {
+	j.ManagingNode = nodeID
 	return j
 }
 

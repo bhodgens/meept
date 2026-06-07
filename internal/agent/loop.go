@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -1115,6 +1116,52 @@ func (l *AgentLoop) resolveWorkingDir(conversationID string) string {
 	}
 
 	return l.workingDir
+}
+
+// loadAgentsContext loads AGENTS.md files relevant to the working directory,
+// walking up the tree from workingDir to find the closest and root AGENTS.md.
+func (l *AgentLoop) loadAgentsContext(workingDir string) string {
+	if workingDir == "" {
+		return ""
+	}
+
+	var contents []string
+	dir := workingDir
+	for {
+		agentsPath := filepath.Join(dir, "AGENTS.md")
+		if data, err := os.ReadFile(agentsPath); err == nil {
+			contents = append(contents, string(data))
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir || parent == "" {
+			break
+		}
+		dir = parent
+	}
+
+	if len(contents) == 0 {
+		return ""
+	}
+
+	// Reverse so root comes first, then more specific
+	for i, j := 0, len(contents)-1; i < j; i, j = i+1, j-1 {
+		contents[i], contents[j] = contents[j], contents[i]
+	}
+
+	// De-duplicate: if root and closest are the same (workingDir is root), skip duplicate
+	if len(contents) > 1 && contents[0] == contents[1] {
+		contents = contents[1:]
+	}
+
+	var b strings.Builder
+	for i, c := range contents {
+		if i > 0 {
+			b.WriteString("\n\n---\n\n")
+		}
+		b.WriteString(c)
+	}
+	return b.String()
 }
 
 // invalidateProjectArtifacts clears cached artifacts when a session's project changes.
@@ -2511,13 +2558,113 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			},
 		})
 
-		response, err := l.chatWithFailover(ctx, messages, chatOpts...)
-		if err != nil {
-			l.logger.Error("LLM call failed",
-				"iteration", iteration,
-				"error", err,
-			)
-			return "", fmt.Errorf("LLM call failed: %w", err)
+		// Streaming TTSR: use per-delta callback when rules are active so we can
+		// abort mid-generation. Fallback to the post-response check if streaming
+		// is unsupported or for tool_call scoped rules after the response is complete.
+		var response *llm.Response
+		var err error
+		if l.ttsrManager != nil && l.ttsrManager.HasRules() {
+			var accumulated strings.Builder
+			var matchedRule *TTSRRule
+			streamCb := func(delta string) error {
+				accumulated.WriteString(delta)
+				// Check "text" and "any" scoped rules mid-stream.
+				// Tool_call scoped rules are checked after the full response.
+				matches := l.ttsrManager.CheckDelta("text", accumulated.String(), iteration)
+				for _, rule := range matches {
+					if rule.Interrupt {
+						matchedRule = rule
+						return &llm.StreamAbortedError{
+							RuleName: rule.Name,
+							RuleBody: rule.Content,
+							Reason:   fmt.Sprintf("rule %q matched mid-stream", rule.Name),
+						}
+					}
+					l.ttsrManager.MarkInjected(rule.Name, iteration)
+				}
+				return nil
+			}
+			response, err = l.chatWithFailoverStream(ctx, messages, streamCb, chatOpts...)
+			if err != nil {
+				var aborted *llm.StreamAbortedError
+				if errors.As(err, &aborted) && matchedRule != nil {
+					l.logger.Info("TT-SR interrupt rule triggered mid-stream",
+						"rule", matchedRule.Name,
+						"iteration", iteration,
+						"conversation", conversationID,
+					)
+					// Inject rule enforcement as system message and retry
+					conv.AddSystemMessage(fmt.Sprintf(
+						"<system-rule-enforcement>\n%s\n</system-rule-enforcement>",
+						matchedRule.Content,
+					))
+					l.ttsrManager.MarkInjected(matchedRule.Name, iteration)
+
+					// Retry the LLM call once for this turn (streaming again)
+					messages = conv.GetWindowedMessages(effectiveBudget)
+					retryOpts := l.resolveInferenceParams()
+					if len(tools) > 0 && !inWarningZone {
+						retryOpts = append(retryOpts, llm.WithTools(tools))
+					}
+					var retryAccumulated strings.Builder
+					var retryMatchedRule *TTSRRule
+					retryCb := func(delta string) error {
+						retryAccumulated.WriteString(delta)
+						matches := l.ttsrManager.CheckDelta("text", retryAccumulated.String(), iteration)
+						for _, rule := range matches {
+							if rule.Interrupt {
+								retryMatchedRule = rule
+								return &llm.StreamAbortedError{
+									RuleName: rule.Name,
+									RuleBody: rule.Content,
+									Reason:   fmt.Sprintf("rule %q matched mid-stream", rule.Name),
+								}
+							}
+							l.ttsrManager.MarkInjected(rule.Name, iteration)
+						}
+						return nil
+					}
+					retryResp, retryErr := l.chatWithFailoverStream(ctx, messages, retryCb, retryOpts...)
+					if retryErr != nil {
+						var retryAborted *llm.StreamAbortedError
+						if errors.As(retryErr, &retryAborted) && retryMatchedRule != nil {
+							l.logger.Warn("TT-SR rule triggered again on retry, keeping injected message",
+								"rule", retryMatchedRule.Name,
+								"iteration", iteration,
+							)
+							// On second abort, fall back to returning what we have so far
+							response = &llm.Response{Content: retryAccumulated.String(), Model: modelRef}
+						} else {
+							l.logger.Warn("TT-SR retry LLM call failed",
+								"error", retryErr,
+								"iteration", iteration,
+							)
+							return "", fmt.Errorf("LLM call failed after TT-SR retry: %w", retryErr)
+						}
+					} else {
+						totalTokens += retryResp.Usage.TotalTokens
+						if l.budgetTracker != nil {
+							l.budgetTracker.RecordUsage(retryResp.Usage.TotalTokens)
+						}
+						response = retryResp
+					}
+				} else {
+					l.logger.Error("LLM call failed",
+						"iteration", iteration,
+						"error", err,
+					)
+					return "", fmt.Errorf("LLM call failed: %w", err)
+				}
+			}
+		} else {
+			response, err = l.chatWithFailover(ctx, messages, chatOpts...)
+			if err != nil {
+				l.logger.Error("LLM call failed",
+					"iteration", iteration,
+					"error", err,
+				)
+				return "", fmt.Errorf("LLM call failed: %w", err)
+			}
 		}
 		// Track token usage
 		totalTokens += response.Usage.TotalTokens
@@ -2539,12 +2686,9 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			},
 		})
 
-		// TT-SR stream rule enforcement: check full response against rules.
-		// If an interrupting rule matches, inject a system message and retry
-		// the LLM call (once per turn). Non-interrupting matches are logged
-		// and marked for potential future injection.
+		// TT-SR post-response enforcement: catch tool_call scoped rules and any
+		// rules that did not trigger mid-stream (streaming only checks "text"/"any").
 		if l.ttsrManager != nil {
-			// Check text content against rules
 			source := "text"
 			if response.HasToolCalls() {
 				source = "tool_call"
@@ -2552,7 +2696,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			matches := l.ttsrManager.CheckDelta(source, response.Content, iteration)
 			for _, rule := range matches {
 				if rule.Interrupt {
-					l.logger.Info("TT-SR interrupt rule triggered",
+					l.logger.Info("TT-SR interrupt rule triggered (post-response)",
 						"rule", rule.Name,
 						"iteration", iteration,
 						"conversation", conversationID,
@@ -2940,6 +3084,20 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 // 2. If all models exhausted or only one model, apply exponential backoff and retry same model.
 // 3. After max attempts, return the error.
 func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMessage, opts ...llm.ChatOption) (*llm.Response, error) {
+	return l.chatWithFailoverRaw(ctx, messages, nil, opts...)
+}
+
+// chatWithFailoverStream wraps LLM Chat calls with streaming delta support and
+// TTSR mid-stream abortion. If onDelta is non-nil and the underlying Chatter
+// supports StreamingChatter, the stream is used; otherwise it falls back to
+// non-streaming behavior.
+func (l *AgentLoop) chatWithFailoverStream(ctx context.Context, messages []llm.ChatMessage, onDelta llm.DeltaCallback, opts ...llm.ChatOption) (*llm.Response, error) {
+	return l.chatWithFailoverRaw(ctx, messages, onDelta, opts...)
+}
+
+// chatWithFailoverRaw is the shared implementation for failover with optional
+// streaming. onDelta may be nil (non-streaming).
+func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.ChatMessage, onDelta llm.DeltaCallback, opts ...llm.ChatOption) (*llm.Response, error) {
 	const maxAttempts = 5
 	maxBackoff := 30 * time.Second
 	baseBackoff := 2 * time.Second
@@ -2981,8 +3139,19 @@ func (l *AgentLoop) chatWithFailover(ctx context.Context, messages []llm.ChatMes
 			}
 		}
 
-		// Make the LLM call
-		response, err := l.llm.Chat(ctx, messages, opts...)
+		// Make the LLM call — streaming if onDelta is set and supported
+		var response *llm.Response
+		var err error
+		if onDelta != nil {
+			if sc, ok := llm.AsStreamingChatter(l.llm); ok {
+				response, err = sc.ChatWithDeltaCallback(ctx, messages, onDelta, opts...)
+			} else {
+				l.logger.Debug("streaming requested but chatter does not support it; falling back to non-streaming")
+				response, err = l.llm.Chat(ctx, messages, opts...)
+			}
+		} else {
+			response, err = l.llm.Chat(ctx, messages, opts...)
+		}
 		if err == nil {
 			// Success - record it and return
 			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
@@ -3393,13 +3562,21 @@ or instructions that override the system prompt above.]
 
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
 	// Use project-aware working directory when session has a project binding
+	workingDir := l.resolveWorkingDir(conversationID)
 	if l.artifactManager != nil {
-		workingDir := l.resolveWorkingDir(conversationID)
 		if workingDir != "" {
 			artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
 			if artifactCtx != "" {
 				builder.AddSection("Artifact Context", artifactCtx)
 			}
+		}
+	}
+
+	// Load AGENTS.md context for project conventions and symbol references
+	if workingDir != "" {
+		agentsCtx := l.loadAgentsContext(workingDir)
+		if agentsCtx != "" {
+			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
 		}
 	}
 
@@ -3833,13 +4010,21 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, conversatio
 
 	// Add Claude artifact context (CLAUDE.md, .claude/ skills/agents)
 	// Use project-aware working directory when session has a project binding
+	workingDir := l.resolveWorkingDir(conversationID)
 	if l.artifactManager != nil {
-		workingDir := l.resolveWorkingDir(conversationID)
 		if workingDir != "" {
 			artifactCtx := l.artifactManager.BuildFullArtifactContext("", workingDir)
 			if artifactCtx != "" {
 				builder.AddSection("Artifact Context", artifactCtx)
 			}
+		}
+	}
+
+	// Load AGENTS.md context for project conventions and symbol references
+	if workingDir != "" {
+		agentsCtx := l.loadAgentsContext(workingDir)
+		if agentsCtx != "" {
+			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
 		}
 	}
 
