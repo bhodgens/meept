@@ -11,6 +11,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 func TestNewScheduler(t *testing.T) {
@@ -517,8 +518,8 @@ func TestAgentJob(t *testing.T) {
 		t.Errorf("expected type 'agent', got %q", job.Type())
 	}
 
-	// Subscribe to agent.chat
-	sub := msgBus.Subscribe("test", "agent.chat")
+	// Subscribe to chat.request (the topic ChatHandler actually listens on)
+	sub := msgBus.Subscribe("test", "chat.request")
 	defer msgBus.Unsubscribe(sub)
 
 	ctx := context.Background()
@@ -526,7 +527,7 @@ func TestAgentJob(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	// Check message was published
+	// Check message was published to the correct topic
 	select {
 	case msg := <-sub.Channel:
 		var payload map[string]any
@@ -537,7 +538,7 @@ func TestAgentJob(t *testing.T) {
 			t.Errorf("expected prompt 'Hello, world!', got %v", payload["prompt"])
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for message")
+		t.Fatal("timeout waiting for message on chat.request")
 	}
 }
 
@@ -733,6 +734,61 @@ func TestValidateJobConfig(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestAgentJob_PublishesToCorrectTopic(t *testing.T) {
+	// This test specifically verifies the topic mismatch fix:
+	// AgentJob.Execute() must publish to "chat.request", not "agent.chat".
+	msgBus := bus.New(nil, nil)
+
+	// Subscribe to the topic ChatHandler actually listens on
+	received := make(chan *models.BusMessage, 1)
+	sub := msgBus.Subscribe("test-topic-fix", "chat.request")
+	go func() {
+		select {
+		case msg := <-sub.Channel:
+			received <- msg
+		case <-time.After(2 * time.Second):
+		}
+	}()
+
+	// Give the subscription time to register
+	time.Sleep(50 * time.Millisecond)
+
+	jobCfg := JobConfig{
+		ID:       "topic-fix-job",
+		Name:     "Topic Fix Test",
+		Type:     JobTypeAgent,
+		Schedule: "@yearly",
+		Enabled:  true,
+		AgentConfig: &AgentJobConfig{
+			Prompt: "hello",
+		},
+	}
+
+	job, err := NewAgentJob(jobCfg, msgBus)
+	if err != nil {
+		t.Fatalf("NewAgentJob failed: %v", err)
+	}
+
+	ctx := context.Background()
+	err = job.Execute(ctx)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	select {
+	case msg := <-received:
+		if msg.Payload == nil {
+			t.Fatal("expected non-nil payload")
+		}
+		if msg.Topic != "chat.request" {
+			t.Errorf("expected topic 'chat.request', got %q", msg.Topic)
+		}
+		t.Logf("received message on chat.request: %s", string(msg.Payload))
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for message on chat.request - topic mismatch?")
 	}
 }
 

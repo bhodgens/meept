@@ -1,4 +1,5 @@
 site_name: Meept
+site_dir: mkdocs
 site_description: Self-executing autonomous agent daemon with multi-agent orchestration, hybrid memory, and skill-based task execution.
 site_url: https://github.com/caimlas/meept
 repo_url: https://github.com/caimlas/meept
@@ -105,7 +106,6 @@ nav:
       - Context Firewall: workflows/context-firewall.md
       - Code Intelligence: workflows/code-intelligence.md
       - Job Scheduling: workflows/job-scheduling.md
-      - ClawSkills Marketplace: workflows/clawskills.md
       - External Integrations: workflows/external-integrations.md
       - Collaborative Planning: workflows/collaborative-planning.md
       - Taint Tracking: workflows/taint-tracking.md
@@ -114,6 +114,7 @@ nav:
       - Agent Lateral Interrogation Howto: workflows/agent-lateral-interrogation-howto.md
       - Project Context: workflows/project-context.md
       - Plans: workflows/plans.md
+      - Persistent Bot Framework: workflows/bots.md
   - Reference:
       - reference/index.md
       - CLI Commands: reference/cli.md

@@ -22,6 +22,8 @@ const (
 	RoleExecutor AgentRole = "executor"
 	// RoleReviewer is an agent that reviews and validates work.
 	RoleReviewer AgentRole = "reviewer"
+	// RoleBot is a persistent autonomous agent that runs on triggers.
+	RoleBot AgentRole = "bot"
 )
 
 // AgentConstraints defines operational limits for an agent.

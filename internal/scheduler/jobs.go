@@ -207,10 +207,10 @@ func (j *AgentJob) Execute(ctx context.Context) error {
 		return fmt.Errorf("failed to create bus message: %w", err)
 	}
 
-	// Publish to agent.chat topic for the front agent to pick up
-	delivered := j.bus.Publish("agent.chat", msg)
+	// Publish to chat.request topic for the ChatHandler to pick up
+	delivered := j.bus.Publish("chat.request", msg)
 	if delivered == 0 {
-		return fmt.Errorf("no subscribers for agent.chat topic")
+		return fmt.Errorf("no subscribers for chat.request topic")
 	}
 
 	return nil

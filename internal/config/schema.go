@@ -11,7 +11,6 @@ import (
 //gendoc:section config
 //gendoc:desc Root configuration structure containing all subsystem configurations.
 //gendoc:example [config] daemon.socket_path = "~/.meept/meept.sock"
-//nolint:revive // stutter with package name is intentional for API clarity
 type Config struct {
 	Daemon            DaemonConfig            `json:"daemon"             toml:"daemon"`
 	Transport         TransportConfig         `json:"transport"          toml:"transport"`
@@ -42,8 +41,18 @@ type Config struct {
 	Tooling           ToolingConfig           `json:"tooling"            toml:"tooling"`
 	Compaction        CompactionConfig        `json:"compaction"         toml:"compaction"`
 	Session           SessionConfig           `json:"session"            toml:"session"`
-	Projects          ProjectsConfig          `json:"projects"           toml:"projects"`
-	Plans             PlansConfig             `json:"plans"              toml:"plans"`
+	Cluster           ClusterConfig           `json:"cluster"             toml:"cluster"`
+	Bots              BotsConfig              `json:"bots"                toml:"bots"`
+}
+
+// BotsConfig holds configuration for the persistent bot framework.
+type BotsConfig struct {
+	Enabled                     bool   `json:"enabled" toml:"enabled"`
+	DataDir                     string `json:"data_dir" toml:"data_dir"`
+	MaxConcurrentBots           int    `json:"max_concurrent_bots" toml:"max_concurrent_bots"`
+	DefaultDailyBudgetCents     int    `json:"default_daily_budget_cents" toml:"default_daily_budget_cents"`
+	AutoPauseOnConsecutiveFails int    `json:"auto_pause_on_consecutive_failures" toml:"auto_pause_on_consecutive_failures"`
+	WebhookEnabled              bool   `json:"webhook_enabled" toml:"webhook_enabled"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -53,7 +62,7 @@ type CalendarConfig struct {
 	// ClientID is the Google OAuth2 client ID (supports ${ENV_VAR} expansion)
 	ClientID string `json:"client_id" toml:"client_id"`
 	// ClientSecret is the Google OAuth2 client secret (supports ${ENV_VAR} expansion)
-	ClientSecret string `json:"client_secret" toml:"client_secret"` //nolint:gosec // field name, not a secret
+	ClientSecret string `json:"client_secret" toml:"client_secret"`
 	// CalendarID is the Google Calendar ID (default: "primary")
 	CalendarID string `json:"calendar_id" toml:"calendar_id"`
 	// RedirectURI is the OAuth2 redirect URI (default: "http://localhost:8888/callback")
@@ -103,104 +112,28 @@ type ToolingConfig struct {
 
 // CompactionConfig configures LLM-based context compaction.
 type CompactionConfig struct {
-	Enabled           bool    `json:"enabled"             toml:"enabled"`
-	Model             string  `json:"model"               toml:"model"`
-	ReserveTokens     int     `json:"reserve_tokens"      toml:"reserve_tokens"`
-	KeepRecentTokens  int     `json:"keep_recent_tokens"  toml:"keep_recent_tokens"`
+	Enabled           bool    `json:"enabled"            toml:"enabled"`
+	Model             string  `json:"model"              toml:"model"`
+	ReserveTokens     int     `json:"reserve_tokens"     toml:"reserve_tokens"`
+	KeepRecentTokens  int     `json:"keep_recent_tokens" toml:"keep_recent_tokens"`
 	MaxResponseTokens int     `json:"max_response_tokens" toml:"max_response_tokens"`
-	SummaryFormat     string  `json:"summary_format"      toml:"summary_format"`
-	Strategy          string  `json:"strategy"            toml:"strategy"` // "structured" | "handoff" | "off"
-	TriggerRatio      float64 `json:"trigger_ratio"       toml:"trigger_ratio"`
-	IterativeUpdates  bool    `json:"iterative_updates"   toml:"iterative_updates"`
-	TrackFileOps      bool    `json:"track_file_ops"      toml:"track_file_ops"`
-	TimeoutSeconds    int     `json:"timeout_seconds"     toml:"timeout_seconds"`
+	SummaryFormat     string  `json:"summary_format"     toml:"summary_format"`
+	TriggerRatio      float64 `json:"trigger_ratio"      toml:"trigger_ratio"`
+	IterativeUpdates  bool    `json:"iterative_updates"  toml:"iterative_updates"`
+	TrackFileOps      bool    `json:"track_file_ops"     toml:"track_file_ops"`
+	TimeoutSeconds    int     `json:"timeout_seconds"    toml:"timeout_seconds"`
 }
 
-// SessionConfig configures session persistence, branching, and compaction.
+// SessionConfig holds session persistence and branching settings.
 type SessionConfig struct {
-	// Persistence enables restoring sessions from SQLite on startup (default: true)
+	// Persistence enables session restore from SQLite on startup.
 	Persistence bool `json:"persistence" toml:"persistence"`
-	// Branching enables conversation branching (default: true)
+	// Branching enables conversation branching.
 	Branching bool `json:"branching" toml:"branching"`
-	// MaxBranches is the maximum number of branches per session (0 = unlimited, default: 20)
-	MaxBranches int `json:"max_branches" toml:"max_branches"`
-	// BranchSummaryThreshold is the minimum messages in an abandoned branch before auto-summarization (default: 5)
+	// BranchSummaryThreshold is the minimum abandoned messages before summarization.
 	BranchSummaryThreshold int `json:"branch_summary_threshold" toml:"branch_summary_threshold"`
-	// RestoreMessageLimit is the maximum messages to restore on resumption (0 = all, default: 0)
+	// RestoreMessageLimit is the maximum messages to restore (0 = all).
 	RestoreMessageLimit int `json:"restore_message_limit" toml:"restore_message_limit"`
-	// Compaction enables tree-based compaction entries instead of deleting messages (default: true)
-	Compaction bool `json:"compaction" toml:"compaction"`
-	// CompactionThreshold is the minimum messages before compaction is considered (default: 50)
-	CompactionThreshold int `json:"compaction_threshold" toml:"compaction_threshold"`
-	// CompactionTargetRatio is the target compression ratio (0.0-1.0, default: 0.6)
-	CompactionTargetRatio float64 `json:"compaction_target_ratio" toml:"compaction_target_ratio"`
-	// AutoFork controls auto-fork behavior: "never", "ask", or "always" (default: "ask")
-	AutoFork string `json:"auto_fork" toml:"auto_fork"`
-	// LegacyTruncation reverts to old message deletion behavior instead of compaction (default: false)
-	LegacyTruncation bool `json:"legacy_truncation" toml:"legacy_truncation"`
-}
-
-// ProjectsConfig holds project management and worktree settings.
-type ProjectsConfig struct {
-	// Enabled turns on project management features (default: true)
-	Enabled bool `json:"enabled" toml:"enabled"`
-	// BaseDir is the root directory for project data (default: "~/.meept/projects")
-	BaseDir string `json:"base_dir" toml:"base_dir"`
-	// AutoDetect enables automatic project detection from the working directory (default: true)
-	AutoDetect bool `json:"auto_detect" toml:"auto_detect"`
-	// WorktreePerPlan controls when a git worktree is created per plan: "auto", "always", or "never" (default: "auto")
-	WorktreePerPlan string `json:"worktree_per_plan" toml:"worktree_per_plan"`
-	// WorktreeIsolationThreshold is the minimum number of changed files before auto-creating a worktree (default: 5)
-	WorktreeIsolationThreshold int `json:"worktree_isolation_threshold" toml:"worktree_isolation_threshold"`
-	// MaxWorktreesPerProject limits concurrent worktrees per project (default: 10)
-	MaxWorktreesPerProject int `json:"max_worktrees_per_project" toml:"max_worktrees_per_project"`
-	// CleanupOrphanedWorktrees removes worktrees left behind after plan completion (default: true)
-	CleanupOrphanedWorktrees bool `json:"cleanup_orphaned_worktrees" toml:"cleanup_orphaned_worktrees"`
-	// FenceEnabled enables the project fence that restricts file access to the project root (default: true)
-	FenceEnabled bool `json:"fence_enabled" toml:"fence_enabled"`
-	// AllowReadSystemPaths lists system paths that may be read even when the fence is active (default: ["/usr", "/etc", "/tmp"])
-	AllowReadSystemPaths []string `json:"allow_read_system_paths" toml:"allow_read_system_paths"`
-	// AutoSyncOnAttach syncs the project state when attaching to an existing session (default: false)
-	AutoSyncOnAttach bool `json:"auto_sync_on_attach" toml:"auto_sync_on_attach"`
-	// DefaultBranch is the default git branch name for new projects (default: "main")
-	DefaultBranch string `json:"default_branch" toml:"default_branch"`
-}
-
-// PlansConfig configures the plan system.
-type PlansConfig struct {
-	Mode         string                  `json:"mode"          toml:"mode"`
-	Threshold    PlansThresholdConfig    `json:"threshold"     toml:"threshold"`
-	Storage      PlansStorageConfig      `json:"storage"       toml:"storage"`
-	Approval     PlansApprovalConfig     `json:"approval"      toml:"approval"`
-	Confirmation PlansConfirmationConfig `json:"confirmation"  toml:"confirmation"`
-}
-
-// PlansThresholdConfig holds plan creation threshold settings.
-type PlansThresholdConfig struct {
-	MinSteps           int      `json:"min_steps"            toml:"min_steps"`
-	ComplexityKeywords []string `json:"complexity_keywords"  toml:"complexity_keywords"`
-	AlwaysPlanIntents  []string `json:"always_plan_intents"  toml:"always_plan_intents"`
-}
-
-// PlansStorageConfig holds plan storage path settings.
-type PlansStorageConfig struct {
-	DefaultPath      string `json:"default_path"       toml:"default_path"`
-	ExternalPath     string `json:"external_path"      toml:"external_path"`
-	FilenameTemplate string `json:"filename_template"  toml:"filename_template"`
-}
-
-// PlansApprovalConfig holds plan approval workflow settings.
-type PlansApprovalConfig struct {
-	RequireApproval   bool `json:"require_approval"    toml:"require_approval"`
-	AutoApproveSimple bool `json:"auto_approve_simple" toml:"auto_approve_simple"`
-	AllowRevision     bool `json:"allow_revision"      toml:"allow_revision"`
-	MaxRevisions      int  `json:"max_revisions"       toml:"max_revisions"`
-}
-
-// PlansConfirmationConfig holds plan confirmation and signoff settings.
-type PlansConfirmationConfig struct {
-	RequireSignoff    bool `json:"require_signoff"     toml:"require_signoff"`
-	AutoConfirmPhases bool `json:"auto_confirm_phases" toml:"auto_confirm_phases"`
 }
 
 // ASTConfig holds AST parsing settings.
@@ -223,12 +156,6 @@ type LSPConfig struct {
 	AutoStartServers bool `json:"auto_start_servers" toml:"auto_start_servers"`
 	// ConnectionTimeoutSeconds is the timeout for connecting to LSP servers
 	ConnectionTimeoutSeconds int `json:"connection_timeout_seconds" toml:"connection_timeout_seconds"`
-	// FormatOnWrite requests LSP formatting after file writes (default: false)
-	FormatOnWrite bool `json:"format_on_write" toml:"format_on_write"`
-	// DiagnosticsOnWrite waits for LSP diagnostics after file writes (default: false)
-	DiagnosticsOnWrite bool `json:"diagnostics_on_write" toml:"diagnostics_on_write"`
-	// DiagnosticsTimeout is the max seconds to wait for diagnostics (default: 5)
-	DiagnosticsTimeout int `json:"diagnostics_timeout" toml:"diagnostics_timeout"`
 }
 
 // LSPServerConfig configures a single LSP server.
@@ -272,25 +199,12 @@ type RPCTransportConfig struct {
 	SocketPath string `json:"socket_path" toml:"socket_path"` // Unix socket path (default: "~/.meept/meept.sock")
 }
 
-// HTTPTransportConfig configures the HTTP transport with modular endpoint support.
-// TLS is always enabled; there are no flags to disable HTTPS.
+// HTTPTransportConfig configures the HTTP REST transport.
 type HTTPTransportConfig struct {
-	Enabled     bool     `json:"enabled"       toml:"enabled"`       // Enable HTTP server (default: false)
-	Addr        string   `json:"addr"          toml:"addr"`          // Listen address (default: ":8081")
-	RequireAuth bool     `json:"require_auth"  toml:"require_auth"`  // Require API key authentication (default: true)
-	APIKeys     []string `json:"api_keys"      toml:"api_keys"`      // Valid API keys for authentication
-	TLSCertFile string   `json:"tls_cert_file" toml:"tls_cert_file"` // TLS certificate file path (default: ~/.meept/tls/cert.pem)
-	TLSKeyFile  string   `json:"tls_key_file"  toml:"tls_key_file"`  // TLS private key file path (default: ~/.meept/tls/key.pem)
-
-	// Modular endpoints - enable/disable individual transport features
-	REST      bool   `json:"rest"       toml:"rest"`      // Enable REST API at /api/v1/* (default: true)
-	WebSocket bool   `json:"websocket"  toml:"websocket"` // Enable WebSocket at /ws (default: false)
-	WSPath    string `json:"ws_path"    toml:"ws_path"`   // WebSocket endpoint path (default: "/ws")
-	MCP       bool   `json:"mcp"        toml:"mcp"`       // Enable MCP over HTTP+SSE at /mcp (default: false)
-	MCPPath   string `json:"mcp_path"   toml:"mcp_path"`  // MCP endpoint path (default: "/mcp")
-
-	// TLS hardening
-	TLSMinVersion string `json:"tls_min_version" toml:"tls_min_version"` // "tls1.2" or "tls1.3" (default: "tls1.2")
+	Enabled     bool   `json:"enabled"      toml:"enabled"`      // Enable HTTP server (default: false)
+	Addr        string `json:"addr"         toml:"addr"`         // Listen address (default: ":8081")
+	TLSCertFile string `json:"tls_cert_file" toml:"tls_cert_file"` // TLS certificate file path
+	TLSKeyFile  string `json:"tls_key_file"  toml:"tls_key_file"`  // TLS key file path
 }
 
 // LLMConfig holds LLM configuration including budget, broker, and metrics.
@@ -378,14 +292,10 @@ type LLMMetricsConfig struct {
 
 // BudgetConfig holds token budget settings.
 type BudgetConfig struct {
-	HourlyTokenLimit     int     `json:"hourly_token_limit" toml:"hourly_token_limit"`
-	DailyTokenLimit      int     `json:"daily_token_limit"  toml:"daily_token_limit"`
-	DailyCostLimit       float64 `json:"daily_cost_limit"   toml:"daily_cost_limit"`    // Max USD per UTC day (0 = no limit)
-	HourlyCostLimit      float64 `json:"hourly_cost_limit"  toml:"hourly_cost_limit"`   // Max USD per sliding hour (0 = no limit)
-	RateLimitRPM         int     `json:"rate_limit_rpm"     toml:"rate_limit_rpm"`
-	Aggressiveness       float64 `json:"aggressiveness"     toml:"aggressiveness"`
-	PerTaskTokenLimit    int     `json:"per_task_token_limit"  toml:"per_task_token_limit"`      // max tokens per single task (0 = no cap)
-	PerSessionTokenLimit int     `json:"per_session_token_limit" toml:"per_session_token_limit"` // max tokens per single session (0 = no cap)
+	HourlyTokenLimit int     `json:"hourly_token_limit" toml:"hourly_token_limit"`
+	DailyTokenLimit  int     `json:"daily_token_limit"  toml:"daily_token_limit"`
+	RateLimitRPM     int     `json:"rate_limit_rpm"     toml:"rate_limit_rpm"`
+	Aggressiveness   float64 `json:"aggressiveness"     toml:"aggressiveness"`
 }
 
 // MemoryBackend defines the storage backend for memory.
@@ -499,7 +409,7 @@ type PersonalityConfig struct {
 type EmbeddingConfig struct {
 	Enabled   bool   `json:"enabled"   toml:"enabled"`
 	Provider  string `json:"provider"  toml:"provider"` // "openai" or "ollama"
-	APIKey    string `json:"api_key"   toml:"api_key"`  //nolint:gosec // field name, not a secret
+	APIKey    string `json:"api_key"   toml:"api_key"`
 	BaseURL   string `json:"base_url"  toml:"base_url"`
 	Model     string `json:"model"     toml:"model"`
 	Dimension int    `json:"dimension" toml:"dimension"`
@@ -748,7 +658,7 @@ type SecurityConfig struct {
 
 	// Output monitoring
 	MonitorOutput bool `json:"monitor_output" toml:"monitor_output"` // Enable credential detection in LLM output
-	RedactOutput  bool `json:"redact_output"  toml:"redact_output"`  //nolint:gosec // field name, not a secret // Automatically redact detected credentials
+	RedactOutput  bool `json:"redact_output"  toml:"redact_output"`  // Automatically redact detected credentials
 
 	// Shell command security
 	ScanShellCommands bool   `json:"scan_shell_commands" toml:"scan_shell_commands"` // Enable Tirith command scanning
@@ -806,7 +716,7 @@ type WebConfig struct {
 	Enabled   bool   `json:"enabled"    toml:"enabled"`
 	Host      string `json:"host"       toml:"host"`
 	Port      int    `json:"port"       toml:"port"`
-	SecretKey string `json:"secret_key" toml:"secret_key"` //nolint:gosec // field name, not a secret
+	SecretKey string `json:"secret_key" toml:"secret_key"`
 }
 
 // MCPConfig holds MCP settings.
@@ -856,7 +766,7 @@ type SelfImproveConfig struct {
 type AIInfraConfig struct {
 	Enabled         bool    `json:"enabled"          toml:"enabled"`
 	BaseURL         string  `json:"base_url"         toml:"base_url"`
-	APIKeyEnv       string  `json:"api_key_env"      toml:"api_key_env"` //nolint:gosec // field name, not a secret
+	APIKeyEnv       string  `json:"api_key_env"      toml:"api_key_env"`
 	AnalysisModel   string  `json:"analysis_model"   toml:"analysis_model"`
 	GenerationModel string  `json:"generation_model" toml:"generation_model"`
 	ReviewModel     string  `json:"review_model"     toml:"review_model"`
@@ -896,22 +806,14 @@ type DetectionConfig struct {
 	PytestArgs       []string `json:"pytest_args"        toml:"pytest_args"`
 	MypyArgs         []string `json:"mypy_args"          toml:"mypy_args"`
 	RuffArgs         []string `json:"ruff_args"          toml:"ruff_args"`
-
-	// Code-scanning error patterns (FIX #0056)
-	CodeErrorPatterns []string `json:"code_error_patterns" toml:"code_error_patterns"`
-	// TODO de-duplication
-	MaxCodeIssuesPerFile int  `json:"max_code_issues_per_file" toml:"max_code_issues_per_file"`
-	DeduplicateTODOs     bool `json:"deduplicate_todos" toml:"deduplicate_todos"`
 }
 
 // OrchestratorConfig holds hierarchical orchestrator settings.
 type OrchestratorConfig struct {
-	MaxPlanSteps       int  `json:"max_plan_steps"        toml:"max_plan_steps"`
-	MaxResearchSteps   int  `json:"max_research_steps"    toml:"max_research_steps"`
-	PlannerTimeout     int  `json:"planner_timeout"       toml:"planner_timeout"`
-	TokenBudgetAlert   int  `json:"token_budget_alert"    toml:"token_budget_alert"`
-	MaxHandoffSteps    int  `json:"max_handoff_steps"     toml:"max_handoff_steps"`
-	HandoffUseAmendment bool `json:"handoff_use_amendment" toml:"handoff_use_amendment"`
+	MaxPlanSteps     int `json:"max_plan_steps"     toml:"max_plan_steps"`
+	MaxResearchSteps int `json:"max_research_steps" toml:"max_research_steps"`
+	PlannerTimeout   int `json:"planner_timeout"    toml:"planner_timeout"`
+	TokenBudgetAlert int `json:"token_budget_alert" toml:"token_budget_alert"`
 }
 
 // ShadowConfig holds shadow training settings.
@@ -1039,7 +941,7 @@ func DefaultConfig() *Config {
 		Daemon: DaemonConfig{
 			SocketPath: "~/.meept/meept.sock",
 			PIDFile:    "~/.meept/meept.pid",
-			LogLevel:   LogLevelInfo,
+			LogLevel:   "INFO",
 			DataDir:    "~/.meept",
 		},
 		Transport: TransportConfig{
@@ -1048,26 +950,16 @@ func DefaultConfig() *Config {
 				SocketPath: "~/.meept/meept.sock",
 			},
 			HTTP: HTTPTransportConfig{
-				Enabled:     false,
-				Addr:        ":8081",
-				RequireAuth: true,
-				TLSCertFile: "~/.meept/tls/cert.pem",
-				TLSKeyFile:  "~/.meept/tls/key.pem",
-				REST:        true,  // REST API enabled by default when HTTP is enabled
-				WebSocket:   false, // WebSocket disabled by default
-				WSPath:      "/ws",
-				MCP:         false, // MCP disabled by default
-				MCPPath:     "/mcp",
+				Enabled: false,
+				Addr:    ":8081",
 			},
 		},
 		LLM: LLMConfig{
 			Budget: BudgetConfig{
-				HourlyTokenLimit:     100000,
-				DailyTokenLimit:      1000000,
-				RateLimitRPM:         30,
-				Aggressiveness:       0.5,
-				PerTaskTokenLimit:    50000,  // 50% of hourly budget max per task
-				PerSessionTokenLimit: 100000, // 100% of hourly budget max per session
+				HourlyTokenLimit: 100000,
+				DailyTokenLimit:  1000000,
+				RateLimitRPM:     30,
+				Aggressiveness:   0.5,
 			},
 			Broker: LLMBrokerConfig{
 				MaxErrorRate:    0.10,
@@ -1115,7 +1007,7 @@ func DefaultConfig() *Config {
 			},
 			Task: TaskMemoryConfig{
 				Enabled: true,
-				Domains: []string{"general", DomainCode, "commands"},
+				Domains: []string{"general", "code", "commands"},
 			},
 			Personality: PersonalityConfig{
 				Enabled:                     true,
@@ -1183,7 +1075,7 @@ func DefaultConfig() *Config {
 			ConfigDirs:   []string{"~/.meept/agents", "config/agents"},
 			PromptsDir:   "config/prompts",
 			DefaultModel: "", // Empty = use llm.default_model
-			DispatcherID: AgentIDDispatcher,
+			DispatcherID: "dispatcher",
 		},
 		Agent: AgentConfig{
 			ProgressEnabled:         true, // Enabled by default for TUI progress bars
@@ -1210,23 +1102,23 @@ func DefaultConfig() *Config {
 			},
 			Review: ReviewConfig{
 				Enabled:       true,
-				RequireReview: []string{HintCode, HintRefactor, HintDebug, HintGit},
+				RequireReview: []string{"code", "refactor", "debug", "git"},
 				SkipReview:    []string{"chat", "report", "recall", "search"},
 				ReviewerMapping: map[string]string{
-					AgentIDCoder:     "code-reviewer",
-					AgentIDDebugger:  "debug-reviewer",
-					AgentIDPlanner:   "planner-reviewer",
-					AgentIDAnalyst:   "analyst-reviewer",
-					AgentIDCommitter: "code-reviewer",
+					"coder":     "code-reviewer",
+					"debugger":  "debug-reviewer",
+					"planner":   "planner-reviewer",
+					"analyst":   "analyst-reviewer",
+					"committer": "code-reviewer",
 				},
 				MaxRevisionCycles:   3,
 				AutoApprovePatterns: []string{"*.md", "LICENSE"},
 			},
 			Validation: ValidationConfig{
 				Enabled:              true,
-				RequireValidation:    []string{HintCode, HintRefactor, HintDebug, HintGit, HintFix, HintCommit},
+				RequireValidation:    []string{"code", "refactor", "debug", "git", "fix", "commit"},
 				SkipValidation:       []string{"chat", "report", "recall", "search", "analyze", "platform"},
-				SkipValidationAgents: []string{AgentIDChat, AgentIDAnalyst},
+				SkipValidationAgents: []string{"chat", "analyst"},
 				MaxValidationLoops:   3,
 			},
 			Watchdog: WatchdogConfig{
@@ -1273,7 +1165,7 @@ func DefaultConfig() *Config {
 		Workers: WorkersConfig{
 			PoolSize:           4,
 			IdleTimeoutSeconds: 300,
-			DefaultCaps:        []string{CapCode, CapReasoning},
+			DefaultCaps:        []string{"code", "reasoning"},
 		},
 		Isolation: IsolationConfig{
 			BaseDir:     "~/.meept/sandboxes",
@@ -1320,7 +1212,6 @@ func DefaultConfig() *Config {
 			MaxIterationsPerCycle: 5,
 			MaxFixesPerCycle:      10,
 			AutoRunIntervalHours:  0,
-			//nolint:gosec // field name, not a secret
 			AIInfra: AIInfraConfig{
 				Enabled:         false,
 				BaseURL:         "http://localhost:8100",
@@ -1361,12 +1252,10 @@ func DefaultConfig() *Config {
 			},
 		},
 		Orchestrator: OrchestratorConfig{
-			MaxPlanSteps:        10,
-			MaxResearchSteps:    3,
-			PlannerTimeout:      120,
-			TokenBudgetAlert:    5000,
-			MaxHandoffSteps:     5,
-			HandoffUseAmendment: true,
+			MaxPlanSteps:     10,
+			MaxResearchSteps: 3,
+			PlannerTimeout:   120,
+			TokenBudgetAlert: 5000,
 		},
 		Shadow: ShadowConfig{
 			Enabled: false,
@@ -1493,9 +1382,6 @@ func DefaultConfig() *Config {
 				Servers:                  make(map[string]LSPServerConfig),
 				AutoStartServers:         true,
 				ConnectionTimeoutSeconds: 10,
-				FormatOnWrite:            false,
-				DiagnosticsOnWrite:       false,
-				DiagnosticsTimeout:       5,
 			},
 		},
 		Tooling: ToolingConfig{
@@ -1524,98 +1410,39 @@ func DefaultConfig() *Config {
 			KeepRecentTokens:  20000,
 			MaxResponseTokens: 13107,
 			SummaryFormat:     "structured",
-			Strategy:          "structured",
 			TriggerRatio:      0.60,
 			IterativeUpdates:  true,
 			TrackFileOps:      true,
 			TimeoutSeconds:    30,
 		},
 		Session: SessionConfig{
-			Persistence:            true,
+			Persistence:            false,
 			Branching:              true,
-			MaxBranches:            20,
-			BranchSummaryThreshold: 5,
+			BranchSummaryThreshold: 3,
 			RestoreMessageLimit:    0,
-			Compaction:             true,
-			CompactionThreshold:    50,
-			CompactionTargetRatio:  0.6,
-			AutoFork:               "ask",
-			LegacyTruncation:       false,
 		},
-		Projects: ProjectsConfig{
-			Enabled:                    true,
-			BaseDir:                    "~/.meept/projects",
-			AutoDetect:                 true,
-			WorktreePerPlan:            "auto",
-			WorktreeIsolationThreshold: 5,
-			MaxWorktreesPerProject:     10,
-			CleanupOrphanedWorktrees:   true,
-			FenceEnabled:               true,
-			AllowReadSystemPaths:       []string{"/usr", "/etc", "/tmp"},
-			AutoSyncOnAttach:           false,
-			DefaultBranch:              "main",
-		},
-		Plans: PlansConfig{
-			Mode: "threshold",
-			Threshold: PlansThresholdConfig{
-				MinSteps: 3,
-				ComplexityKeywords: []string{
-					"refactor", "migrate", "implement", "redesign",
-					"rewrite", "integrate", "architect",
-				},
-				AlwaysPlanIntents: []string{"plan", "implement", "build"},
-			},
-			Storage: PlansStorageConfig{
-				DefaultPath:      "docs/plans",
-				FilenameTemplate: "{{slug}}.md",
-			},
-			Approval: PlansApprovalConfig{
-				RequireApproval: true,
-				AllowRevision:   true,
-				MaxRevisions:    3,
-			},
-			Confirmation: PlansConfirmationConfig{
-				RequireSignoff: true,
-			},
+		Cluster: DefaultClusterConfig(),
+		Bots: BotsConfig{
+			Enabled:                     false,
+			DataDir:                     "~/.meept/bots",
+			MaxConcurrentBots:           10,
+			DefaultDailyBudgetCents:     500, // $5.00
+			AutoPauseOnConsecutiveFails: 5,
+			WebhookEnabled:              false,
 		},
 	}
 }
 
-// Tool hint constants used in review and validation policy defaults.
-const (
-	HintCode     = "code"
-	HintRefactor = "refactor"
-	HintDebug    = "debug"
-	HintGit      = "git"
-	HintFix      = "fix"
-	HintCommit   = "commit"
-)
-
-// Capability and domain constants used in default configurations.
-const (
-	CapCode      = "code"
-	CapReasoning = "reasoning"
-	DomainCode   = "code"
-)
-
-// Log level constants used for configuration.
-const (
-	LogLevelInfo  = "INFO"
-	LogLevelDebug = "DEBUG"
-	LogLevelWarn  = "WARN"
-	LogLevelError = "ERROR"
-)
-
 // ParseLogLevel converts a string log level to slog.Level.
 func ParseLogLevel(level string) slog.Level {
 	switch level {
-	case LogLevelDebug:
+	case "DEBUG":
 		return slog.LevelDebug
-	case LogLevelInfo:
+	case "INFO":
 		return slog.LevelInfo
-	case LogLevelWarn, "WARNING":
+	case "WARN", "WARNING":
 		return slog.LevelWarn
-	case LogLevelError:
+	case "ERROR":
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
