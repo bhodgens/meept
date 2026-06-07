@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"crypto/rand"
 	"fmt"
 	"strings"
 	"sync"
@@ -57,6 +58,78 @@ func FormatHashLines(lines []string, startLine int) string {
 	return sb.String()
 }
 
+// snapshotTagLen is the length of snapshot tag strings in characters.
+const snapshotTagLen = 4
+
+// GenerateSnapshotTag returns a random 4-character hexadecimal snapshot tag.
+// Tags are minted per read/search call and stored in ReadCache.
+func GenerateSnapshotTag() string {
+	b := make([]byte, 2)
+	if _, err := rand.Read(b); err != nil {
+		// fall back to a deterministic tag on entropy failure
+		return "0000"
+	}
+	return fmt.Sprintf("%02x%02x", b[0], b[1])
+}
+
+// FormatSnapshotHashLine formats a single line as "LINE_NUMBER:TAG:HASH|CONTENT".
+// This is the enhanced hashline format that includes a session snapshot tag.
+func FormatSnapshotHashLine(lineNum int, snapshotTag string, line string) string {
+	return fmt.Sprintf("%d:%s:%s|%s", lineNum, snapshotTag, ComputeLineHash(line), line)
+}
+
+// FormatSnapshotHashLines formats multiple lines with snapshot-tagged hashlines.
+// startLine is 1-based. snapshotTag is a 4-hex-character tag from GenerateSnapshotTag.
+func FormatSnapshotHashLines(lines []string, startLine int, snapshotTag string) string {
+	var sb strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(FormatSnapshotHashLine(startLine+i, snapshotTag, line))
+	}
+	return sb.String()
+}
+
+// ParseSnapshotAnchor parses a snapshot-tagged anchor string and returns the
+// line number, snapshot tag, and hash. it accepts either "LINE:TAG:HASH"
+// (new format) or "LINE:HASH" (legacy format).
+// Returns (0, "", "", error) on invalid format.
+func ParseSnapshotAnchor(anchor string) (lineNum int, snapshotTag string, hash string, err error) {
+	if anchor == "BOF" || anchor == "EOF" {
+		return 0, "", anchor, nil
+	}
+
+	parts := strings.SplitN(anchor, ":", 3)
+	switch len(parts) {
+	case 2:
+		// legacy "LINE:HASH" format
+		var n int
+		if _, err := fmt.Sscanf(parts[0], "%d", &n); err != nil {
+			return 0, "", "", fmt.Errorf("invalid line number in anchor %q: %w", anchor, err)
+		}
+		if len(parts[1]) != 2 {
+			return 0, "", "", fmt.Errorf("invalid hash in anchor %q: expected 2-char bigram", anchor)
+		}
+		return n, "", parts[1], nil
+	case 3:
+		// new "LINE:TAG:HASH" format
+		var n int
+		if _, err := fmt.Sscanf(parts[0], "%d", &n); err != nil {
+			return 0, "", "", fmt.Errorf("invalid line number in anchor %q: %w", anchor, err)
+		}
+		if len(parts[1]) != snapshotTagLen {
+			return 0, "", "", fmt.Errorf("invalid snapshot tag in anchor %q: expected %d-hex tag", anchor, snapshotTagLen)
+		}
+		if len(parts[2]) != 2 {
+			return 0, "", "", fmt.Errorf("invalid hash in anchor %q: expected 2-char bigram", anchor)
+		}
+		return n, parts[1], parts[2], nil
+	default:
+		return 0, "", "", fmt.Errorf("invalid anchor format %q: expected LINE:HASH or LINE:TAG:HASH", anchor)
+	}
+}
+
 // ParseAnchor parses a "LINE_NUMBER:HASH" anchor string and returns the line number and hash.
 // Returns (0, "", error) on invalid format.
 func ParseAnchor(anchor string) (lineNum int, hash string, err error) {
@@ -97,7 +170,8 @@ type ReadCache struct {
 }
 
 type cacheEntry struct {
-	lines []string // 0-indexed lines
+	lines       []string // 0-indexed lines
+	snapshotTag string   // snapshot tag for this cached version
 }
 
 // NewReadCache creates a ReadCache with the given maximum entries.
@@ -112,8 +186,14 @@ func NewReadCache(maxItems int) *ReadCache {
 	}
 }
 
-// Store records a file snapshot in the cache.
+// Store records a file snapshot in the cache with an optional snapshot tag.
 func (c *ReadCache) Store(path string, lines []string) {
+	c.StoreWithTag(path, lines, "")
+}
+
+// StoreWithTag records a file snapshot in the cache with a snapshot tag.
+// The tag allows editors to reference the exact version they read.
+func (c *ReadCache) StoreWithTag(path string, lines []string, snapshotTag string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -137,7 +217,7 @@ func (c *ReadCache) Store(path string, lines []string) {
 	// Store a copy to avoid aliasing
 	copied := make([]string, len(lines))
 	copy(copied, lines)
-	c.entries[path] = &cacheEntry{lines: copied}
+	c.entries[path] = &cacheEntry{lines: copied, snapshotTag: snapshotTag}
 	c.order = append(c.order, path)
 }
 
@@ -151,6 +231,39 @@ func (c *ReadCache) Get(path string) []string {
 		copied := make([]string, len(entry.lines))
 		copy(copied, entry.lines)
 		return copied
+	}
+	return nil
+}
+
+// GetTagged retrieves a file snapshot and its tag from the cache.
+// Returns (nil, "") if not found.
+func (c *ReadCache) GetTagged(path string) ([]string, string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if entry, ok := c.entries[path]; ok {
+		copied := make([]string, len(entry.lines))
+		copy(copied, entry.lines)
+		return copied, entry.snapshotTag
+	}
+	return nil, ""
+}
+
+// GetByTag looks up a cached snapshot by its snapshot tag.
+// Returns nil if no snapshot with that tag is found.
+func (c *ReadCache) GetByTag(tag string) []string {
+	if tag == "" {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, entry := range c.entries {
+		if entry.snapshotTag == tag {
+			copied := make([]string, len(entry.lines))
+			copy(copied, entry.lines)
+			return copied
+		}
 	}
 	return nil
 }

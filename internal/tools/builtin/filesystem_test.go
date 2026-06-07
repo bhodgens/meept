@@ -115,8 +115,22 @@ func TestReadFileTool(t *testing.T) {
 	t.Run("hashline consistent", func(t *testing.T) {
 		result1, _ := tool.Execute(ctx, map[string]any{"path": filePath})
 		result2, _ := tool.Execute(ctx, map[string]any{"path": filePath})
-		if result1.(tools.ToolResult).Result != result2.(tools.ToolResult).Result {
-			t.Error("hashline output should be deterministic")
+		str1 := result1.(tools.ToolResult).Result.(string)
+		str2 := result2.(tools.ToolResult).Result.(string)
+		lines1 := strings.Split(str1, "\n")
+		lines2 := strings.Split(str2, "\n")
+		if len(lines1) != len(lines2) {
+			t.Fatal("hashline output line counts differ")
+		}
+		// Verify hashes (the 2-char part after the tag) are deterministic
+		for i, l1 := range lines1 {
+			l2 := lines2[i]
+			// Extract hash from each line: lineNum:TAG:HASH|content or lineNum:HASH|content
+			hash1 := extractHashFromHashline(l1)
+			hash2 := extractHashFromHashline(l2)
+			if hash1 != hash2 {
+				t.Errorf("line %d: hash mismatch %q vs %q", i+1, hash1, hash2)
+			}
 		}
 	})
 
@@ -406,4 +420,23 @@ func containsHashlineFormat(output string, lineNum int, content string) bool {
 		}
 	}
 	return false
+}
+
+// extractHashFromHashline extracts the 2-character content hash from a hashline string.
+// Handles both "LINE:HASH|content" and "LINE:TAG:HASH|content" formats.
+func extractHashFromHashline(line string) string {
+	parts := strings.SplitN(line, "|", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+	anchor := parts[0] // e.g., "1:ab" or "1:#0a3b:cd"
+	segments := strings.Split(anchor, ":")
+	switch len(segments) {
+	case 2:
+		return segments[1] // "1:ab" → "ab"
+	case 3:
+		return segments[2] // "1:tag:ab" → "ab"
+	default:
+		return ""
+	}
 }

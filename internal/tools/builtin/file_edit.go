@@ -15,11 +15,18 @@ import (
 	"github.com/caimlas/meept/pkg/security"
 )
 
+// BlockResolver resolves a syntactic block span from a file path and line number.
+// This is satisfied by *ast.ParserManager.FindBlockSpan.
+type BlockResolver interface {
+	ResolveBlock(filePath string, lineNum int) (startLine int, endLine int, err error)
+}
+
 // FileEditTool performs incremental file edits using hashline-anchored line references.
 type FileEditTool struct {
-	checker     *security.PermissionChecker
-	readCache   *ReadCache
-	lspNotifier LSPWriteNotifier
+	checker       *security.PermissionChecker
+	readCache     *ReadCache
+	lspNotifier   LSPWriteNotifier
+	blockResolver BlockResolver
 }
 
 // NewFileEditTool creates a new file edit tool.
@@ -32,6 +39,13 @@ func NewFileEditTool(checker *security.PermissionChecker, readCache *ReadCache) 
 func (t *FileEditTool) SetLSPNotifier(notifier LSPWriteNotifier) {
 	if notifier != nil {
 		t.lspNotifier = notifier
+	}
+}
+
+// SetBlockResolver sets the block resolver for syntactic block operations.
+func (t *FileEditTool) SetBlockResolver(resolver BlockResolver) {
+	if resolver != nil {
+		t.blockResolver = resolver
 	}
 }
 
@@ -62,10 +76,11 @@ func (t *FileEditTool) Parameters() llm.FunctionParameters {
 
 // editOp represents a single parsed edit operation.
 type editOp struct {
-	Op        string // "replace", "insert_after", "insert_before", "delete"
-	Anchor    string // "LINE:HASH", "BOF", "EOF"
-	EndAnchor string // for range ops
-	Content   string // new content (empty for delete)
+	Op          string // "replace", "insert_after", "insert_before", "delete", "replace_block", "delete_block"
+	Anchor      string // "LINE:HASH", "LINE:TAG:HASH", "BOF", "EOF"
+	EndAnchor   string // for range ops
+	Content     string // new content (empty for delete)
+	SnapshotTag string // optional snapshot tag for cache lookup
 }
 
 func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, error) {
@@ -113,6 +128,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		op.Anchor, _ = editMap["anchor"].(string)
 		op.EndAnchor, _ = editMap["end_anchor"].(string)
 		op.Content, _ = editMap["content"].(string)
+		op.SnapshotTag, _ = editMap["tag"].(string)
 
 		if op.Op == "" {
 			return nil, fmt.Errorf("edit %d: missing 'op' field", i+1)
@@ -122,13 +138,54 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		}
 
 		switch op.Op {
-		case "replace", "insert_after", "insert_before", "delete":
+		case "replace", "insert_after", "insert_before", "delete", "replace_block", "delete_block":
 			// valid
 		default:
-			return nil, fmt.Errorf("edit %d: invalid op %q (must be replace, insert_after, insert_before, or delete)", i+1, op.Op)
+			return nil, fmt.Errorf("edit %d: invalid op %q (must be replace, replace_block, insert_after, insert_before, delete, or delete_block)", i+1, op.Op)
 		}
 
 		ops = append(ops, op)
+	}
+
+	// Validate patch grammar before any file I/O or block resolution.
+	if errs := ValidatePatchFromOps(ops); len(errs) > 0 {
+		var msgs []string
+		for _, e := range errs {
+			msgs = append(msgs, fmt.Sprintf("edit %d %s: %s", e.EditIndex, e.Field, e.Message))
+		}
+		return nil, fmt.Errorf("patch validation failed:\n%s", strings.Join(msgs, "\n"))
+	}
+
+	// Resolve block operations before validation.
+	// Block ops are converted to regular replace/delete with computed end_anchor.
+	for i, op := range ops {
+		if op.Op != "replace_block" && op.Op != "delete_block" {
+			continue
+		}
+		if t.blockResolver == nil {
+			return nil, fmt.Errorf("edit %d: block operations require a block resolver, but none is configured", i+1)
+		}
+		lineNum, _, _, err := ParseSnapshotAnchor(op.Anchor)
+		if err != nil {
+			return nil, fmt.Errorf("edit %d: invalid block anchor: %w", i+1, err)
+		}
+		blockStart, blockEnd, resolveErr := t.blockResolver.ResolveBlock(resolved, lineNum)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("edit %d: could not resolve block at line %d: %w (try using explicit start_anchor and end_anchor instead)", i+1, lineNum, resolveErr)
+		}
+		// Rewrite the op: replace_block → replace, delete_block → delete
+		if op.Op == "replace_block" {
+			ops[i].Op = "replace"
+		} else {
+			ops[i].Op = "delete"
+		}
+		// Update anchor and build end_anchor from resolved block boundaries
+		if blockStart >= 1 && blockStart <= len(lines) {
+			ops[i].Anchor = fmt.Sprintf("%d:%s", blockStart, ComputeLineHash(lines[blockStart-1]))
+		}
+		if blockEnd >= 1 && blockEnd <= len(lines) {
+			ops[i].EndAnchor = fmt.Sprintf("%d:%s", blockEnd, ComputeLineHash(lines[blockEnd-1]))
+		}
 	}
 
 	// Validate all anchors before applying any changes
@@ -137,10 +194,17 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 		if op.Anchor == "BOF" || op.Anchor == "EOF" {
 			continue
 		}
-		lineNum, hash, err := ParseAnchor(op.Anchor)
+		lineNum, snapTag, hash, err := ParseSnapshotAnchor(op.Anchor)
 		if err != nil {
 			return nil, fmt.Errorf("edit %d: %w", i+1, err)
 		}
+		// If tag was provided separately in the "tag" field but not in anchor, use it
+		if snapTag == "" && op.SnapshotTag != "" {
+			snapTag = op.SnapshotTag
+		}
+		// Update the op with the parsed tag for recovery later
+		ops[i].SnapshotTag = snapTag
+
 		if !ValidateAnchor(lines, lineNum, hash) {
 			actualContent := "(beyond file)"
 			if lineNum >= 1 && lineNum <= len(lines) {
@@ -151,7 +215,7 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 		// Validate end_anchor for range ops
 		if (op.Op == "replace" || op.Op == "delete") && op.EndAnchor != "" {
-			endLineNum, endHash, err := ParseAnchor(op.EndAnchor)
+			endLineNum, _, endHash, err := ParseSnapshotAnchor(op.EndAnchor)
 			if err != nil {
 				return nil, fmt.Errorf("edit %d end_anchor: %w", i+1, err)
 			}
@@ -168,16 +232,29 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 	if len(mismatches) > 0 {
 		// Attempt 3-way merge recovery from read cache
 		if t.readCache != nil {
-			cachedLines := t.readCache.Get(resolved)
+			var cachedLines []string
+			// Try to find cached snapshot by tag first (tag-based recovery)
+			for _, op := range ops {
+				if op.SnapshotTag != "" {
+					cachedLines = t.readCache.GetByTag(op.SnapshotTag)
+					if cachedLines != nil {
+						break
+					}
+				}
+			}
+			// Fall back to path-based lookup if no tag match
+			if cachedLines == nil {
+				cachedLines = t.readCache.Get(resolved)
+			}
 			if cachedLines != nil {
-				recovered, recoverErr := t.attemptRecovery(cachedLines, lines, ops)
+				recovered, strategy, recoverErr := t.attemptRecovery(cachedLines, lines, ops)
 				if recoverErr == nil {
 					// Recovery succeeded -- write the recovered content
 					result := strings.Join(recovered, "\n")
 					if err := os.WriteFile(resolved, []byte(result), 0o644); err != nil {
 						return nil, fmt.Errorf("recovery succeeded but write failed: %w", err)
 					}
-					msg := fmt.Sprintf("Edit applied with stale-anchor recovery to %s (%d lines)", resolved, len(recovered))
+					msg := fmt.Sprintf("Edit applied with stale-anchor recovery to %s (%d lines, strategy: %s)", resolved, len(recovered), strategy)
 					if t.lspNotifier != nil {
 						if lspResult := t.lspNotifier.NotifyWrite(ctx, resolved, result); lspResult != nil {
 							msg += lspResult.String()
@@ -258,14 +335,14 @@ func absorbBoundaries(fileLines []string, ops []editOp) []editOp {
 		if op.Anchor == "BOF" || op.Anchor == "EOF" {
 			continue
 		}
-		startLine, _, _ := ParseAnchor(op.Anchor)
-		if startLine < 1 {
+		startLine, _, _, err := ParseSnapshotAnchor(op.Anchor)
+		if err != nil || startLine < 1 {
 			continue
 		}
 
 		endLine := startLine
 		if op.EndAnchor != "" {
-			endLine, _, _ = ParseAnchor(op.EndAnchor)
+			endLine, _, _, _ = ParseSnapshotAnchor(op.EndAnchor)
 		}
 
 		content := strings.Split(op.Content, "\n")
@@ -307,14 +384,28 @@ func absorbBoundaries(fileLines []string, ops []editOp) []editOp {
 	return result
 }
 
+// recoveryWindow is the ±line search radius for stale-anchor relocation.
+const recoveryWindow = 10
+
+// fuzzyMatchThreshold is the minimum Levenshtein ratio for fuzzy matching.
+const fuzzyMatchThreshold = 0.6
+
+// fuzzyMatchMaxLength is the maximum line length for fuzzy matching (skip longer lines).
+const fuzzyMatchMaxLength = 500
+
 // attemptRecovery tries to remap stale anchors from the cached snapshot onto the
-// current file content. For each anchor, it looks up the cached line at that line
-// number, then scans the current file for a matching line within a ±5 line window.
-// If all anchors are found, the ops are rewritten with the new line numbers and
-// applied against the current file.
-func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops []editOp) ([]string, error) {
+// current file content using a tiered strategy: exact match, hash-only match, then
+// fuzzy (Levenshtein) match. For each anchor, it looks up the cached line at that
+// line number, then scans the current file within a ±10 line window. If all anchors
+// are found, the ops are rewritten with the new line numbers and applied against
+// the current file. The strategy name used for the first anchor that required recovery
+// is returned for reporting.
+func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops []editOp) ([]string, string, error) {
 	// remap maps old (cached) line numbers to new (current) line numbers.
 	remap := make(map[int]int)
+
+	// Track the best (strongest) strategy used for reporting.
+	bestStrategy := "exact"
 
 	for _, op := range ops {
 		anchors := []string{op.Anchor}
@@ -328,9 +419,9 @@ func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops [
 			if anchor == "BOF" || anchor == "EOF" {
 				continue
 			}
-			lineNum, hash, err := ParseAnchor(anchor)
+			lineNum, _, hash, err := ParseSnapshotAnchor(anchor)
 			if err != nil {
-				return nil, fmt.Errorf("recovery: invalid anchor %q: %w", anchor, err)
+				return nil, "", fmt.Errorf("recovery: invalid anchor %q: %w", anchor, err)
 			}
 
 			// Already remapped?
@@ -340,40 +431,42 @@ func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops [
 
 			// Validate anchor against cached snapshot.
 			if !ValidateAnchor(cachedLines, lineNum, hash) {
-				return nil, fmt.Errorf("recovery: anchor %q does not match cached snapshot", anchor)
+				return nil, "", fmt.Errorf("recovery: anchor %q does not match cached snapshot", anchor)
 			}
 
 			// Get the cached line content.
 			cachedIdx := lineNum - 1
 			if cachedIdx < 0 || cachedIdx >= len(cachedLines) {
-				return nil, fmt.Errorf("recovery: cached line %d out of range", lineNum)
+				return nil, "", fmt.Errorf("recovery: cached line %d out of range", lineNum)
 			}
 			cachedContent := cachedLines[cachedIdx]
 
-			// Search current file for the same content within ±5 lines of the original position.
-			found := false
-			searchStart := max(lineNum-1-5, 0) // 0-based
-			searchEnd := min(lineNum-1+5, len(currentLines)-1)
-			for i := searchStart; i <= searchEnd; i++ {
-				if currentLines[i] == cachedContent {
-					remap[lineNum] = i + 1 // 1-based
-					found = true
-					break
-				}
-			}
+			// Search current file within ±recoveryWindow lines using tiered strategies.
+			searchStart := max(lineNum-1-recoveryWindow, 0)  // 0-based
+			searchEnd := min(lineNum-1+recoveryWindow, len(currentLines)-1)
+
+			newLine, strategy, found := findMatchingLine(cachedContent, hash, currentLines, searchStart, searchEnd)
 			if !found {
-				return nil, fmt.Errorf("recovery: could not relocate cached line %d in current file", lineNum)
+				return nil, "", fmt.Errorf("recovery: could not relocate cached line %d in current file", lineNum)
+			}
+			remap[lineNum] = newLine
+
+			// Track the strongest (worst) strategy used: exact < hash < fuzzy
+			if strategyRank(strategy) > strategyRank(bestStrategy) {
+				bestStrategy = strategy
 			}
 		}
 	}
 
-	// Build remapped ops by adjusting anchor line numbers.
+	// Build remapped ops by adjusting anchor line numbers and hashes.
+	// For hash/fuzzy recovery, the remapped anchor hash must match the current
+	// file content, not the original cached content.
 	remappedOps := make([]editOp, len(ops))
 	for i, op := range ops {
 		remappedOps[i] = op
-		remappedOps[i].Anchor = remapAnchor(op.Anchor, remap)
+		remappedOps[i].Anchor = remapAnchorWithHash(op.Anchor, remap, currentLines)
 		if op.EndAnchor != "" {
-			remappedOps[i].EndAnchor = remapAnchor(op.EndAnchor, remap)
+			remappedOps[i].EndAnchor = remapAnchorWithHash(op.EndAnchor, remap, currentLines)
 		}
 	}
 
@@ -382,21 +475,129 @@ func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops [
 		if op.Anchor == "BOF" || op.Anchor == "EOF" {
 			continue
 		}
-		lineNum, hash, _ := ParseAnchor(op.Anchor)
+		lineNum, _, hash, _ := ParseSnapshotAnchor(op.Anchor)
 		if !ValidateAnchor(currentLines, lineNum, hash) {
-			return nil, fmt.Errorf("recovery: remapped anchor %q does not match current file", op.Anchor)
+			return nil, "", fmt.Errorf("recovery: remapped anchor %q does not match current file", op.Anchor)
 		}
 		if (op.Op == "replace" || op.Op == "delete") && op.EndAnchor != "" {
-			endLineNum, endHash, _ := ParseAnchor(op.EndAnchor)
+			endLineNum, _, endHash, _ := ParseSnapshotAnchor(op.EndAnchor)
 			if !ValidateAnchor(currentLines, endLineNum, endHash) {
-				return nil, fmt.Errorf("recovery: remapped end_anchor %q does not match current file", op.EndAnchor)
+				return nil, "", fmt.Errorf("recovery: remapped end_anchor %q does not match current file", op.EndAnchor)
 			}
 		}
 	}
 
 	// Apply the remapped edits against current file content.
 	result := t.applyEdits(currentLines, remappedOps)
-	return result, nil
+	return result, bestStrategy, nil
+}
+
+// findMatchingLine searches currentLines[searchStart..searchEnd] for a line
+// matching cachedContent using a tiered strategy: exact match, hash-only match,
+// then fuzzy Levenshtein match. Returns the 1-based line number, strategy name,
+// and whether a match was found.
+func findMatchingLine(cachedContent, cachedHash string, currentLines []string, searchStart, searchEnd int) (int, string, bool) {
+	// Strategy 1: exact content match.
+	for i := searchStart; i <= searchEnd; i++ {
+		if currentLines[i] == cachedContent {
+			return i + 1, "exact", true
+		}
+	}
+
+	// Strategy 2: hash-only match (same xxhash bigram).
+	for i := searchStart; i <= searchEnd; i++ {
+		if ComputeLineHash(currentLines[i]) == cachedHash {
+			return i + 1, "hash", true
+		}
+	}
+
+	// Strategy 3: fuzzy match (Levenshtein ratio above threshold).
+	// Skip for lines longer than fuzzyMatchMaxLength to avoid O(n^2) cost.
+	if len(cachedContent) <= fuzzyMatchMaxLength {
+		bestIdx := -1
+		bestRatio := 0.0
+		for i := searchStart; i <= searchEnd; i++ {
+			candidate := currentLines[i]
+			// Skip candidates that are too long as well.
+			if len(candidate) > fuzzyMatchMaxLength {
+				continue
+			}
+			ratio := levenshteinRatio(cachedContent, candidate)
+			if ratio > bestRatio {
+				bestRatio = ratio
+				bestIdx = i
+			}
+		}
+		if bestIdx >= 0 && bestRatio >= fuzzyMatchThreshold {
+			return bestIdx + 1, "fuzzy", true
+		}
+	}
+
+	return 0, "", false
+}
+
+// strategyRank returns a numeric rank for recovery strategy reporting.
+// Higher rank = weaker strategy. Used to report the worst strategy needed.
+func strategyRank(s string) int {
+	switch s {
+	case "exact":
+		return 0
+	case "hash":
+		return 1
+	case "fuzzy":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// levenshteinDistance computes the Levenshtein edit distance between two strings
+// using standard DP. Only intended for short strings (< 500 chars).
+func levenshteinDistance(a, b string) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+
+	// Use two rows to save memory.
+	prev := make([]int, lb+1)
+	curr := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+
+	for i := 1; i <= la; i++ {
+		curr[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			del := prev[j] + 1
+			ins := curr[j-1] + 1
+			sub := prev[j-1] + cost
+			curr[j] = min(del, min(ins, sub))
+		}
+		prev, curr = curr, prev
+	}
+	return prev[lb]
+}
+
+// levenshteinRatio returns the similarity ratio between two strings in [0.0, 1.0].
+// 1.0 means identical, 0.0 means completely different.
+func levenshteinRatio(a, b string) float64 {
+	maxLen := len(a)
+	if len(b) > maxLen {
+		maxLen = len(b)
+	}
+	if maxLen == 0 {
+		return 1.0
+	}
+	dist := levenshteinDistance(a, b)
+	return 1.0 - float64(dist)/float64(maxLen)
 }
 
 // remapAnchor adjusts an anchor string using the remap table.
@@ -405,14 +606,46 @@ func remapAnchor(anchor string, remap map[int]int) string {
 	if anchor == "BOF" || anchor == "EOF" {
 		return anchor
 	}
-	lineNum, hash, err := ParseAnchor(anchor)
+	lineNum, tag, hash, err := ParseSnapshotAnchor(anchor)
 	if err != nil {
 		return anchor
 	}
 	if newLine, ok := remap[lineNum]; ok {
+		if tag != "" {
+			return fmt.Sprintf("%d:%s:%s", newLine, tag, hash)
+		}
 		return fmt.Sprintf("%d:%s", newLine, hash)
 	}
 	return anchor
+}
+
+// remapAnchorWithHash adjusts an anchor string using the remap table and updates
+// the hash to match the current file content. This is needed for hash/fuzzy
+// recovery where the remapped line may have different content (and thus hash)
+// than the original cached line.
+// BOF and EOF anchors are returned unchanged.
+func remapAnchorWithHash(anchor string, remap map[int]int, currentLines []string) string {
+	if anchor == "BOF" || anchor == "EOF" {
+		return anchor
+	}
+	lineNum, tag, _, err := ParseSnapshotAnchor(anchor)
+	if err != nil {
+		return anchor
+	}
+	newLine, ok := remap[lineNum]
+	if !ok {
+		return anchor
+	}
+	// Compute the hash from the current file content at the remapped position.
+	idx := newLine - 1
+	if idx < 0 || idx >= len(currentLines) {
+		return anchor
+	}
+	newHash := ComputeLineHash(currentLines[idx])
+	if tag != "" {
+		return fmt.Sprintf("%d:%s:%s", newLine, tag, newHash)
+	}
+	return fmt.Sprintf("%d:%s", newLine, newHash)
 }
 
 // applyEdits applies the given edit operations against the provided lines and
@@ -430,10 +663,10 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 	for _, op := range ops {
 		switch op.Op {
 		case "delete":
-			startLine, _, _ := ParseAnchor(op.Anchor)
+			startLine, _, _, _ := ParseSnapshotAnchor(op.Anchor)
 			endLine := startLine
 			if op.EndAnchor != "" {
-				endLine, _, _ = ParseAnchor(op.EndAnchor)
+				endLine, _, _, _ = ParseSnapshotAnchor(op.EndAnchor)
 			}
 			lineOps = append(lineOps, lineOp{
 				opType:    "delete_range",
@@ -442,10 +675,10 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			})
 
 		case "replace":
-			startLine, _, _ := ParseAnchor(op.Anchor)
+			startLine, _, _, _ := ParseSnapshotAnchor(op.Anchor)
 			endLine := startLine
 			if op.EndAnchor != "" {
-				endLine, _, _ = ParseAnchor(op.EndAnchor)
+				endLine, _, _, _ = ParseSnapshotAnchor(op.EndAnchor)
 			}
 			content := strings.Split(op.Content, "\n")
 			if len(content) > 1 && content[len(content)-1] == "" {
@@ -469,7 +702,7 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			} else if op.Anchor == "EOF" {
 				insertLine = len(lines) + 1
 			} else {
-				insertLine, _, _ = ParseAnchor(op.Anchor)
+				insertLine, _, _, _ = ParseSnapshotAnchor(op.Anchor)
 			}
 			content := strings.Split(op.Content, "\n")
 			if len(content) > 1 && content[len(content)-1] == "" {
@@ -488,7 +721,7 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 			} else if op.Anchor == "EOF" {
 				insertLine = len(lines) + 1
 			} else {
-				insertLine, _, _ = ParseAnchor(op.Anchor)
+				insertLine, _, _, _ = ParseSnapshotAnchor(op.Anchor)
 				insertLine++
 			}
 			content := strings.Split(op.Content, "\n")
