@@ -29,11 +29,14 @@ type Engine struct {
 
 	gossip    *GossipEngine
 	gitSync   *GitSync
+	wgSync    *WireGuardSync
 	signingPriv ed25519.PrivateKey
 	signingPub  ed25519.PublicKey
 
 	nodeID   string
 	nodeName string
+
+	enableWireGuard bool
 
 	running bool
 	mu      sync.RWMutex
@@ -41,13 +44,14 @@ type Engine struct {
 
 // EngineConfig holds parameters for NewEngine.
 type EngineConfig struct {
-	Cfg         *Config
-	LocalCfg    *Config
-	Logger      *slog.Logger
-	MsgBus      *bus.MessageBus
-	QueueStore  *q.Store
-	GitRepoPath string
-	NodeName    string
+	Cfg              *Config
+	LocalCfg         *Config
+	Logger           *slog.Logger
+	MsgBus           *bus.MessageBus
+	QueueStore       *q.Store
+	GitRepoPath      string
+	NodeName         string
+	EnableWireGuard  bool
 }
 
 // NewEngine creates a new cluster engine from the given configuration.
@@ -65,14 +69,15 @@ func NewEngine(cfg EngineConfig) *Engine {
 	}
 
 	return &Engine{
-		cfg:         cfg.Cfg,
-		localCfg:    cfg.LocalCfg,
-		logger:      cfg.Logger,
-		msgBus:      cfg.MsgBus,
-		queueStore:  cfg.QueueStore,
-		gitRepoPath: cfg.GitRepoPath,
-		nodeID:      nodeID,
-		nodeName:    cfg.NodeName,
+		cfg:             cfg.Cfg,
+		localCfg:        cfg.LocalCfg,
+		logger:          cfg.Logger,
+		msgBus:          cfg.MsgBus,
+		queueStore:      cfg.QueueStore,
+		gitRepoPath:     cfg.GitRepoPath,
+		nodeID:          nodeID,
+		nodeName:        cfg.NodeName,
+		enableWireGuard: cfg.EnableWireGuard,
 	}
 }
 
@@ -103,9 +108,16 @@ func (e *Engine) Start(ctx context.Context) error {
 		}
 	}
 
+	// Create git sync first so we can pass it as MembersProvider to gossip
+	e.gitSync = NewGitSync(e.cfg, e.localCfg, e.gitRepoPath, e.logger)
+	if err := e.gitSync.Start(ctx); err != nil {
+		return fmt.Errorf("engine: start git sync: %w", err)
+	}
+
 	// Build gossip options
 	gossipOpts := []GossipOption{
 		WithSigningKey(e.signingPriv, e.signingPub),
+		WithMembersProvider(e.gitSync), // Enables TCP transport for peer delivery
 	}
 	// Wire database if queue store has a usable db handle
 	if e.queueStore != nil {
@@ -115,17 +127,24 @@ func (e *Engine) Start(ctx context.Context) error {
 	// Create and start gossip engine
 	e.gossip = NewGossipEngine(e.cfg, e.nodeID, e.msgBus, e.logger, gossipOpts...)
 	if err := e.gossip.Start(ctx); err != nil {
+		gitErr := e.gitSync.Stop()
+		if gitErr != nil {
+			e.logger.Warn("engine: stop git_sync after gossip failure", "error", gitErr)
+		}
 		return fmt.Errorf("engine: start gossip: %w", err)
 	}
 
-	// Create and start git sync
-	e.gitSync = NewGitSync(e.cfg, e.localCfg, e.gitRepoPath, e.logger)
-	if err := e.gitSync.Start(ctx); err != nil {
-		gossipErr := e.gossip.Stop()
-		if gossipErr != nil {
-			e.logger.Warn("engine: stop gossip after git_sync failure", "error", gossipErr)
+	// Create and start WireGuard sync (if enabled)
+	// WireGuard tools (wg, wg-quick, ip) are Linux-only; on other platforms
+	// the sync loop will log warnings but will not crash the engine.
+	if e.enableWireGuard {
+		e.wgSync = NewWireGuardSync(e.cfg, e.localCfg, e.gitRepoPath, e.logger)
+		if err := e.wgSync.Start(ctx); err != nil {
+			e.logger.Warn("engine: wireguard sync start failed, continuing without it",
+				"error", err,
+			)
+			e.wgSync = nil
 		}
-		return fmt.Errorf("engine: start git sync: %w", err)
 	}
 
 	e.running = true
@@ -153,6 +172,13 @@ func (e *Engine) Stop() error {
 	if e.gitSync != nil {
 		if err := e.gitSync.Stop(); err != nil {
 			e.logger.Warn("engine: git sync stop error", "error", err)
+		}
+	}
+
+	// Stop WireGuard sync before gossip
+	if e.wgSync != nil {
+		if err := e.wgSync.Stop(); err != nil {
+			e.logger.Warn("engine: wireguard sync stop error", "error", err)
 		}
 	}
 
@@ -201,6 +227,13 @@ func (e *Engine) GitSync() *GitSync {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.gitSync
+}
+
+// WireGuardSync returns the WireGuard sync instance, or nil if not started.
+func (e *Engine) WireGuardSync() *WireGuardSync {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.wgSync
 }
 
 // SigningKey returns the node's ed25519 signing key pair.

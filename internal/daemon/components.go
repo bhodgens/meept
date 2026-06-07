@@ -170,6 +170,7 @@ type Components struct {
 	ClusterGitSync *cluster.GitSync
 	ClusterQueue   *queue.ClusterQueue
 	ClusterConfig  *cluster.Config
+	ClusterWireGuard *cluster.WireGuardSync
 
 	Logger *slog.Logger
 }

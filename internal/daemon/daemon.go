@@ -243,6 +243,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	var clusterCfg *cluster.Config
 	var clusterEngine *cluster.GossipEngine
 	var clusterGitSync *cluster.GitSync
+	var clusterWG *cluster.WireGuardSync
 	var clusterMQ *queue.ClusterQueue
 
 	cfgPath := cluster.DefaultClusterConfigPath()
@@ -267,6 +268,9 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
 		clusterGitSync = cluster.NewGitSync(clusterCfg, clusterCfg, gitRepoPath, logger)
 
+		// Create WireGuard sync for mesh networking (best-effort; non-fatal on macOS)
+		clusterWG = cluster.NewWireGuardSync(clusterCfg, clusterCfg, gitRepoPath, logger)
+
 		// Create cluster-aware queue wrapping the existing queue
 		if components != nil && components.Queue != nil {
 			localNodeID := clusterCfg.NodeID
@@ -286,6 +290,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	} else if err != nil {
 		logger.Debug("cluster config not found, cluster features disabled", "path", cfgPath, "error", err)
+	}
+
+	// Initialize WireGuard sync for cluster mesh
+	var clusterWireGuard *cluster.WireGuardSync
+	if clusterCfg != nil && clusterGitSync != nil {
+		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
+		clusterWireGuard = cluster.NewWireGuardSync(clusterCfg, clusterCfg, gitRepoPath, logger)
 	}
 
 	// Register cluster RPC handlers if RPC server is available
@@ -314,6 +325,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if clusterCfg != nil {
 		if components != nil {
 			components.ClusterConfig = clusterCfg
+		}
+	}
+
+	// Wire WireGuard sync into components
+	if clusterWG != nil {
+		if components != nil {
+			components.ClusterWireGuard = clusterWG
 		}
 	}
 
@@ -636,6 +654,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
+	// Start WireGuard sync (best-effort; non-fatal on macOS where wg tools are unavailable)
+	if d.components != nil && d.components.ClusterWireGuard != nil {
+		if err := d.components.ClusterWireGuard.Start(ctx); err != nil {
+			d.logger.Warn("Failed to start WireGuard sync, continuing without it", "error", err)
+		}
+	}
+
 	// Start local LLM runtimes in the background so the daemon reaches
 	// "running" status without blocking on potentially slow model loading.
 	if d.components != nil && d.components.RuntimeManager != nil {
@@ -775,7 +800,7 @@ func (d *Daemon) shutdown() error {
 		}
 	}
 
-	// Stop cluster components (gossip engine, git sync, cluster queue)
+	// Stop cluster components (gossip engine, git sync, wireguard, cluster queue)
 	if d.components != nil && d.components.ClusterEngine != nil {
 		if err := d.components.ClusterEngine.Stop(); err != nil {
 			d.logger.Error("Failed to stop gossip engine", "error", err)
@@ -784,6 +809,11 @@ func (d *Daemon) shutdown() error {
 	if d.components != nil && d.components.ClusterGitSync != nil {
 		if err := d.components.ClusterGitSync.Stop(); err != nil {
 			d.logger.Error("Failed to stop git sync", "error", err)
+		}
+	}
+	if d.components != nil && d.components.ClusterWireGuard != nil {
+		if err := d.components.ClusterWireGuard.Stop(); err != nil {
+			d.logger.Warn("Failed to stop WireGuard sync", "error", err)
 		}
 	}
 	if d.components != nil && d.components.ClusterQueue != nil {
