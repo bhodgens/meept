@@ -226,17 +226,27 @@ func (t *GossipTransport) handleConnection(ctx context.Context, conn net.Conn) {
 	conn.Write(ack)
 
 	// Process through the gossip engine's existing handler pipeline.
-	// We inject the event into the bus so it goes through the normal
-	// dedup, verify, persist, re-broadcast flow.
-	if t.gossip != nil && t.gossip.msgBus != nil {
-		payload, _ := json.Marshal(map[string]json.RawMessage{"event": data})
-		body, _ := models.NewBusMessage(
-			models.MessageTypeEvent,
-			"gossip_transport",
-			map[string]any{"event": data},
-		)
-		body.Payload = payload
-		t.gossip.msgBus.Publish("cluster.event.received", body)
+	// Call handleClusterEvent directly since the bus subscriber channel
+	// is not actively consumed by the gossip engine.
+	if t.gossip != nil {
+		// Build a BusMessage in the same format the gossip engine expects
+		payloadMap := map[string]json.RawMessage{"event": data}
+		payload, _ := json.Marshal(payloadMap)
+		body := &models.BusMessage{
+			ID:        fmt.Sprintf("transport-recv-%d", time.Now().UnixNano()),
+			Type:      models.MessageTypeEvent,
+			Source:    "gossip_transport",
+			Timestamp: time.Now().UTC(),
+			Payload:   payload,
+		}
+
+		// Also publish to bus for any external subscribers
+		if t.gossip.msgBus != nil {
+			t.gossip.msgBus.Publish("cluster.event.received", body)
+		}
+
+		// Process through gossip handler (dedup, verify, persist, re-broadcast)
+		t.gossip.handleClusterEvent(body)
 	}
 }
 

@@ -263,12 +263,15 @@ func (g *GossipEngine) Publish(event *models.ClusterEvent) {
 
 	// Broadcast to bus so handleClusterEvent can re-gossip to peers
 	if g.msgBus != nil {
-		payload, _ := json.Marshal(event)
-		body, _ := models.NewBusMessage(
-			models.MessageTypeEvent,
-			"gossip",
-			map[string]any{"event": payload},
-		)
+		eventPayload, _ := json.Marshal(event)
+		busPayload, _ := json.Marshal(map[string]json.RawMessage{"event": eventPayload})
+		body := &models.BusMessage{
+			ID:        fmt.Sprintf("gossip-pub-%d", time.Now().UnixNano()),
+			Type:      models.MessageTypeEvent,
+			Source:    "gossip",
+			Timestamp: time.Now().UTC(),
+			Payload:   busPayload,
+		}
 		g.msgBus.Publish("cluster.event.broadcast", body)
 	}
 
@@ -353,12 +356,15 @@ func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
 
 	// Re-broadcast to peers via bus
 	if g.msgBus != nil {
-		payload, _ := json.Marshal(event)
-		body, _ := models.NewBusMessage(
-			models.MessageTypeEvent,
-			g.localNode,
-			map[string]any{"event": payload},
-		)
+		eventPayload, _ := json.Marshal(event)
+		busPayload, _ := json.Marshal(map[string]json.RawMessage{"event": eventPayload})
+		body := &models.BusMessage{
+			ID:        fmt.Sprintf("gossip-%s-%d", g.localNode, time.Now().UnixNano()),
+			Type:      models.MessageTypeEvent,
+			Source:    g.localNode,
+			Timestamp: time.Now().UTC(),
+			Payload:   busPayload,
+		}
 		g.msgBus.Publish("cluster.event.broadcast", body)
 	}
 
