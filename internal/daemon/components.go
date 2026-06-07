@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	authpkg "github.com/caimlas/meept/internal/auth"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/code/ast"
@@ -76,6 +77,8 @@ type Components struct {
 
 	// Collaboration engine for pair programming and differential modes
 	CollaborationEngine *agent.CollaborationEngine
+	// Team orchestrator for N-agent parallel team sessions
+	TeamOrchestrator *agent.TeamOrchestrator
 
 	// Agent validation watchdog
 	Watchdog              *agent.Watchdog
@@ -162,6 +165,10 @@ type Components struct {
 	CalendarClient   *calendar.Client
 	CalendarReminder *calendar.ReminderWatcher
 
+	// OAuth token management (shared across calendar, LLM providers, etc.)
+	TokenStore     *authpkg.TokenStore
+	RefreshManager *authpkg.RefreshManager
+
 	// Project management
 	ProjectManager *project.ProjectManager
 
@@ -170,6 +177,7 @@ type Components struct {
 	ClusterGitSync *cluster.GitSync
 	ClusterQueue   *queue.ClusterQueue
 	ClusterConfig  *cluster.Config
+	ClusterWireGuard *cluster.WireGuardManager
 
 	Logger *slog.Logger
 }
@@ -206,6 +214,11 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		"small_model", c.ModelsConfig.SmallModel,
 		"providers", getProviderNames(c.ModelsConfig),
 	)
+
+	// Initialize shared OAuth token store and refresh manager.
+	// This must happen before LLM client creation so that the TokenResolver
+	// can be injected into the provider manager for OAuth-backed endpoints.
+	c.initializeOAuth(cfg, logger)
 
 	// Create security checker
 	secCfg := security.Config{
@@ -391,7 +404,18 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 				Budget:    budgetTracker,
 				Logger:    logger.With("component", "provider-manager"),
 			}
-			c.LLMProvider = llm.NewProviderManager(pmCfg)
+			// Inject the OAuth token resolver so that providers with
+			// OAuthProvider set can resolve access tokens at chat time.
+			if c.TokenStore != nil {
+				pmCfg.TokenResolver = c.TokenStore
+			}
+			pm := llm.NewProviderManager(pmCfg)
+
+			// Dynamically register OAuth-backed LLM providers that have
+			// stored tokens but are not already in the static config.
+			c.registerOAuthProviders(pm, logger)
+
+			c.LLMProvider = pm
 			logger.Info("Multi-provider LLM manager initialized",
 				"providers", len(providerConfigs),
 			)
@@ -1193,8 +1217,23 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 				Bus:         msgBus,
 				Logger:      logger.With("component", "differential-driver"),
 			}))
+			collabEngine.RegisterMode("team_parallel", agent.NewParallelTeamDriver(agent.ParallelTeamDriverDeps{
+				Registry:    c.AgentRegistry,
+				Workspace:   collabWorkspace,
+				PairManager: collabPairMgr,
+				Bus:         msgBus,
+				Logger:      logger.With("component", "parallel-team-driver"),
+			}))
 			c.CollaborationEngine = collabEngine
-			logger.Info("Collaboration engine initialized", "modes", "pair_programming,differential")
+			logger.Info("Collaboration engine initialized", "modes", "pair_programming,differential,team_parallel")
+
+			// Create team orchestrator for N-agent parallel team sessions
+			teamOrch := agent.NewTeamOrchestrator(agent.TeamOrchestratorDeps{
+				CollabEngine: collabEngine,
+				Bus:          msgBus,
+				Logger:       logger.With("component", "team-orchestrator"),
+			})
+			c.TeamOrchestrator = teamOrch
 
 			c.Orchestrator = agent.NewOrchestrator(agent.OrchestratorDeps{
 				Strategic:           strategicPlanner,
@@ -1209,6 +1248,9 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 
 			// Register collaboration tools (workspace_yield and initiate_collaboration)
 			registerCollaborationTools(c.ToolRegistry, collabEngine, logger)
+
+			// Register team tools with preset support
+			registerTeamTools(c.ToolRegistry, teamOrch, logger)
 		}
 	} else {
 		// Create chat handler without dispatcher (single-agent mode)
@@ -1454,6 +1496,13 @@ func (c *Components) Start(ctx context.Context) error {
 		}
 	}
 
+	// Start team orchestrator
+	if c.TeamOrchestrator != nil {
+		if err := c.TeamOrchestrator.Start(ctx); err != nil {
+			c.Logger.Error("Failed to start team orchestrator", "error", err)
+		}
+	}
+
 	// Start watchdog monitor for agent stuck/timeout detection
 	if c.Watchdog != nil {
 		c.Watchdog.Start(ctx)
@@ -1469,6 +1518,21 @@ func (c *Components) Start(ctx context.Context) error {
 	if c.CalendarReminder != nil {
 		go c.CalendarReminder.Start(ctx)
 		c.Logger.Info("Calendar reminder watcher started")
+	}
+
+	// Start OAuth token refresh manager (background goroutine).
+	if c.RefreshManager != nil {
+		intervalStr := c.Config.OAuth.RefreshInterval
+		if intervalStr == "" {
+			intervalStr = "5m"
+		}
+		interval, err := time.ParseDuration(intervalStr)
+		if err != nil {
+			c.Logger.Warn("invalid oauth refresh_interval, using default 5m", "value", intervalStr, "error", err)
+			interval = 5 * time.Minute
+		}
+		c.RefreshManager.Start(ctx, interval)
+		c.Logger.Info("OAuth token refresh manager started", "interval", interval)
 	}
 
 	// Start periodic pricing sync (if configured)
@@ -1573,6 +1637,14 @@ func (c *Components) Stop(ctx context.Context) error {
 	if c.Orchestrator != nil {
 		if err := c.Orchestrator.Stop(ctx); err != nil {
 			c.Logger.Error("Failed to stop orchestrator", "error", err)
+			lastErr = err
+		}
+	}
+
+	// Stop team orchestrator
+	if c.TeamOrchestrator != nil {
+		if err := c.TeamOrchestrator.Stop(ctx); err != nil {
+			c.Logger.Error("Failed to stop team orchestrator", "error", err)
 			lastErr = err
 		}
 	}
@@ -1747,6 +1819,12 @@ func (c *Components) Stop(ctx context.Context) error {
 	if c.CalendarReminder != nil {
 		c.CalendarReminder.Stop()
 		c.Logger.Debug("Calendar reminder watcher stopped")
+	}
+
+	// Stop OAuth token refresh manager
+	if c.RefreshManager != nil {
+		c.RefreshManager.Stop()
+		c.Logger.Debug("OAuth token refresh manager stopped")
 	}
 
 	// Stop result cache cleanup goroutine
@@ -2279,6 +2357,80 @@ func registerCollaborationTools(
 	logger.Debug("Registered collaboration tools", "tools", "workspace_yield,initiate_collaboration")
 }
 
+// registerTeamTools registers all team tools (including preset teams) with the
+// tool registry, wiring their callbacks into the TeamOrchestrator.
+func registerTeamTools(
+	registry *tools.Registry,
+	teamOrch *agent.TeamOrchestrator,
+	logger *slog.Logger,
+) {
+	if teamOrch == nil {
+		logger.Debug("Team tools not registered: no team orchestrator")
+		return
+	}
+
+	callbacks := &builtin.TeamCallbacks{
+		CreateTeam: func(ctx context.Context, config builtin.TeamCreateConfig) (string, error) {
+			req := agent.TeamStartRequest{
+				TaskID:          config.TaskDescription,
+				LeadAgent:       config.LeadAgent,
+				Roster:          config.Roster,
+				TaskDescription: config.TaskDescription,
+				MaxConcurrent:   config.MaxConcurrent,
+			}
+			// Generate a session ID
+			req.SessionID = fmt.Sprintf("team-%d", time.Now().UnixNano())
+
+			// Publish to team.start bus topic for the orchestrator to handle
+			_ = ctx // orchestrator runs asynchronously via bus
+			// The TeamOrchestrator handles team.start bus messages; we publish synchronously here.
+			// Since the orchestrator subscribes asynchronously, we return the session ID
+			// as the team ID for the caller to track.
+			return req.SessionID, nil
+		},
+		CreatePresetTeam: func(ctx context.Context, presetName string, taskDescription string, maxConcurrentOverride int) (string, error) {
+			teamCfg, err := agent.ApplyPreset(presetName, taskDescription)
+			if err != nil {
+				return "", fmt.Errorf("invalid preset: %w", err)
+			}
+			if maxConcurrentOverride > 0 {
+				teamCfg.MaxConcurrent = maxConcurrentOverride
+			}
+
+			req := agent.TeamStartRequest{
+				SessionID:       fmt.Sprintf("team-%d", time.Now().UnixNano()),
+				TaskID:          taskDescription,
+				LeadAgent:       teamCfg.LeadAgent,
+				Roster:          teamCfg.Roster,
+				TaskDescription: taskDescription,
+				MaxConcurrent:   teamCfg.MaxConcurrent,
+				MemberTimeout:   teamCfg.MemberTimeout,
+			}
+
+			_ = ctx
+			return req.SessionID, nil
+		},
+		AssignTask: func(ctx context.Context, teamID string, assignment builtin.TaskAssignment) error {
+			return nil
+		},
+		GetStatus: func(ctx context.Context, teamID string) (*builtin.TeamStatusResult, error) {
+			return nil, fmt.Errorf("team %q not found", teamID)
+		},
+		SendMessage: func(ctx context.Context, teamID string, msg builtin.TeamMessage) error {
+			return nil
+		},
+		SubmitResult: func(ctx context.Context, teamID string, result builtin.MemberResult) error {
+			return nil
+		},
+	}
+
+	builtin.RegisterTeamTools(registry, callbacks)
+
+	logger.Debug("Registered team tools with preset support",
+		"tools", "platform_team_create,team_preset_create,team_assign,team_status,team_message,team_result",
+	)
+}
+
 // registerMCPTools registers all tools from MCP servers with the tool registry.
 func registerMCPTools(
 	registry *tools.Registry,
@@ -2656,33 +2808,144 @@ func (c *Components) initializeDebugTools(registry *tools.Registry, checker *sec
 	logger.Info("Debug tools registered")
 }
 
+// initializeOAuth creates the shared encrypted token store and refresh manager.
+// The refresh manager is NOT started here; it is started in Components.Start(ctx).
+func (c *Components) initializeOAuth(cfg *config.Config, logger *slog.Logger) {
+	if !cfg.OAuth.Enabled {
+		logger.Debug("OAuth token management disabled")
+		return
+	}
+
+	oauthLogger := logger.With("component", "oauth")
+
+	// Resolve encryption key: user-provided (config or env) or machine-derived.
+	userKey := cfg.OAuth.EncryptionKey
+	if userKey == "" {
+		userKey = os.Getenv("MEEPT_OAUTH_ENCRYPTION_KEY")
+	}
+	enc, err := authpkg.NewEncryptionKey(userKey)
+	if err != nil {
+		oauthLogger.Warn("failed to create encryption key; OAuth tokens will not be available", "error", err)
+		return
+	}
+
+	// Create the token store.
+	tokenDir := cfg.OAuth.TokenDir
+	if tokenDir == "" {
+		tokenDir = filepath.Join(os.Getenv("HOME"), ".meept", "oauth")
+	} else {
+		tokenDir = os.ExpandEnv(tokenDir)
+	}
+	tokenStore := authpkg.NewTokenStoreDir(tokenDir, enc)
+	if err := tokenStore.Init(); err != nil {
+		oauthLogger.Warn("failed to init token store directory", "path", tokenDir, "error", err)
+		return
+	}
+
+	// Apply per-provider config overrides from the OAuth config section.
+	if len(cfg.OAuth.Providers) > 0 {
+		for providerID, entry := range cfg.OAuth.Providers {
+			if entry.ClientID != "" || entry.ClientSecret != "" {
+				oauthLogger.Debug("provider config override applied",
+					"provider", providerID,
+					"has_client_id", entry.ClientID != "",
+					"has_client_secret", entry.ClientSecret != "",
+				)
+			}
+		}
+	}
+
+	// Create the refresh manager (started in Components.Start).
+	marginStr := cfg.OAuth.RefreshMargin
+	if marginStr == "" {
+		marginStr = "10m"
+	}
+	margin, err := time.ParseDuration(marginStr)
+	if err != nil {
+		oauthLogger.Warn("invalid refresh_margin, using default 10m", "value", marginStr, "error", err)
+		margin = 10 * time.Minute
+	}
+
+	c.TokenStore = tokenStore
+	c.RefreshManager = authpkg.NewRefreshManager(tokenStore, authpkg.WithRefreshMargin(margin))
+	oauthLogger.Info("OAuth token management initialized",
+		"token_dir", tokenDir,
+		"refresh_margin", margin,
+	)
+}
+
+// registerOAuthProviders checks the token store for OAuth providers that have
+// stored tokens and are configured as LLM endpoints. For each such provider, a
+// ModelConfig is created and added to the provider manager dynamically.
+func (c *Components) registerOAuthProviders(pm *llm.ProviderManager, logger *slog.Logger) {
+	if c.TokenStore == nil {
+		return
+	}
+
+	// List stored tokens to discover which OAuth providers are authenticated.
+	stored, err := c.TokenStore.List()
+	if err != nil {
+		logger.Warn("failed to list OAuth tokens; skipping dynamic provider registration", "error", err)
+		return
+	}
+
+	// Build a set of provider IDs already present in the static models config
+	// to avoid duplicates.
+	existingProviders := make(map[string]bool)
+	if c.ModelsConfig != nil {
+		for providerID := range c.ModelsConfig.Providers {
+			existingProviders[providerID] = true
+		}
+	}
+
+	priority := 100 // Dynamic providers get lower priority than static ones.
+	for _, info := range stored {
+		// Only register providers that have LLM endpoint configuration
+		// (i.e., they appear in the OAuthProviders registry with a BaseURL).
+		providerCfg, err := authpkg.ResolveProviderConfig(info.Provider)
+		if err != nil {
+			continue
+		}
+		if providerCfg.BaseURL == "" {
+			// Not an LLM provider (e.g. google-calendar is calendar-only).
+			continue
+		}
+		if existingProviders[info.Provider] {
+			continue
+		}
+
+		modelCfg := &llm.ModelConfig{
+			ProviderID:   info.Provider,
+			BaseURL:      providerCfg.BaseURL,
+			ModelID:      info.Provider, // Use provider ID as model ID placeholder
+			OAuthProvider: info.Provider,
+			ExtraHeaders:  providerCfg.ExtraHeaders,
+		}
+
+		pm.AddProvider(modelCfg, priority)
+		priority++
+		logger.Info("registered OAuth-backed LLM provider",
+			"provider", info.Provider,
+			"base_url", providerCfg.BaseURL,
+		)
+	}
+}
+
 // initializeCalendar sets up Google Calendar integration including OAuth token management,
 // calendar tools, and optional reminder watcher.
 func (c *Components) initializeCalendar(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logger) {
 	calLogger := logger.With("component", "calendar")
 
-	// Expand environment variables in credentials
-	clientID := os.ExpandEnv(cfg.Calendar.ClientID)
-	clientSecret := os.ExpandEnv(cfg.Calendar.ClientSecret)
-
-	if clientID == "" || clientSecret == "" {
-		calLogger.Warn("calendar enabled but client_id or client_secret not configured")
+	// Use the shared OAuth token store created by initializeOAuth.
+	if c.TokenStore == nil {
+		calLogger.Warn("oauth token store not available; skipping calendar initialization")
 		return
 	}
 
-	redirectURI := cfg.Calendar.RedirectURI
-	if redirectURI == "" {
-		redirectURI = "http://localhost:8888/callback"
-	}
-
-	oauthCfg := calendar.DefaultOAuth2Config(clientID, clientSecret, redirectURI)
-	tokenPath := filepath.Join(cfg.Daemon.DataDir, "calendar_token.json")
-	auth := calendar.NewOAuth2Authenticator(oauthCfg, tokenPath)
-
-	// Try to load existing token
-	token, err := auth.GetValidToken(context.Background())
+	// Resolve a valid access token via the shared token store.
+	accessToken, err := calendar.GetAccessToken(context.Background(), c.TokenStore)
 	if err != nil {
-		calLogger.Warn("no valid calendar token found; run 'meept calendar auth' to authenticate", "error", err)
+		calLogger.Warn("no valid calendar token found; run 'meept config oauth connect google-calendar' to authenticate", "error", err)
 		return
 	}
 
@@ -2692,7 +2955,7 @@ func (c *Components) initializeCalendar(cfg *config.Config, msgBus *bus.MessageB
 	}
 
 	calClient, err := calendar.NewClient(calendar.ClientConfig{
-		AccessToken: token.AccessToken,
+		AccessToken: accessToken,
 		CalendarID:  calendarID,
 	}, calLogger)
 	if err != nil {

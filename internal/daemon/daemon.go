@@ -281,6 +281,23 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Debug("cluster config not found, cluster features disabled", "path", cfgPath, "error", err)
 	}
 
+	// Initialize WireGuard manager for cluster mesh
+	var clusterWG *cluster.WireGuardManager
+	if clusterCfg != nil {
+		wgConfigPath := filepath.Join(cfg.StateDir, "cluster", "wg0.conf")
+		iface := clusterCfg.Network.Interface
+		if iface == "" {
+			iface = "wg0"
+		}
+		wgMgr, err := cluster.NewWireGuardManager(wgConfigPath, iface)
+		if err != nil {
+			logger.Warn("failed to create WireGuard manager", "error", err)
+		} else {
+			clusterWG = wgMgr
+			logger.Info("cluster WireGuard manager initialized", "config", wgConfigPath, "interface", iface)
+		}
+	}
+
 	// Register cluster RPC handlers if RPC server is available
 	if rpcServer != nil && (clusterEngine != nil || clusterCfg != nil) {
 		clusterHandler := rpc.NewClusterHandler(clusterEngine, clusterGitSync, clusterCfg)
@@ -307,6 +324,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if clusterCfg != nil {
 		if components != nil {
 			components.ClusterConfig = clusterCfg
+		}
+	}
+
+	// Wire WireGuard manager into components
+	if clusterWG != nil {
+		if components != nil {
+			components.ClusterWireGuard = clusterWG
 		}
 	}
 
@@ -636,6 +660,25 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
+	// Sync WireGuard configuration for cluster mesh (best-effort)
+	if d.components != nil && d.components.ClusterWireGuard != nil && d.components.ClusterConfig != nil && d.components.ClusterGitSync != nil {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := d.syncWireGuardConfig(); err != nil {
+						d.logger.Warn("WireGuard config sync failed", "error", err)
+					}
+				}
+			}
+		}()
+	}
+
 	// Recover pending follow-ups from queue persistence.
 	// This scans queued_followups for conversations that had messages pending
 	// when the daemon last shut down, loads them, and publishes restore events
@@ -790,6 +833,75 @@ func (d *Daemon) shutdown() error {
 
 	d.status.Store(models.StatusStopped)
 	d.logger.Info("daemon: stopped")
+	return nil
+}
+
+// syncWireGuardConfig generates and applies the WireGuard configuration
+// for the cluster mesh based on the current member registry.
+func (d *Daemon) syncWireGuardConfig() error {
+	wgMgr := d.components.ClusterWireGuard
+	cfg := d.components.ClusterConfig
+	gitSync := d.components.ClusterGitSync
+
+	if wgMgr == nil || cfg == nil || gitSync == nil {
+		return nil
+	}
+
+	// Load WireGuard private key from keys directory
+	keysDir := filepath.Join(d.config.StateDir, "cluster", "keys")
+	privPath := filepath.Join(keysDir, "wg_private.key")
+	privKey, err := os.ReadFile(privPath)
+	if err != nil {
+		return fmt.Errorf("failed to read WireGuard private key: %w", err)
+	}
+
+	// Get current members from git
+	members, err := gitSync.GetMembers()
+	if err != nil {
+		return fmt.Errorf("failed to get cluster members: %w", err)
+	}
+
+	// Find self in members to get our ClusterIP
+	var selfClusterIP string
+	for _, m := range members {
+		if m.NodeID == cfg.NodeID {
+			selfClusterIP = m.ClusterIP
+			break
+		}
+	}
+	if selfClusterIP == "" {
+		return fmt.Errorf("local node %q not found in cluster members", cfg.NodeID)
+	}
+
+	// Build WireGuard config
+	wgConfig := &cluster.WireGuardConfig{
+		PrivateKey:          string(privKey),
+		ClusterIP:           selfClusterIP,
+		ListenPort:          cfg.Network.WireGuardPort,
+		DNS:                 "8.8.8.8",
+		Peers:               make([]cluster.Member, 0, len(members)),
+		PersistentKeepalive: "25",
+	}
+
+	// Add peers (skip self)
+	for _, m := range members {
+		if m.NodeID == cfg.NodeID {
+			continue // Skip self
+		}
+		wgConfig.Peers = append(wgConfig.Peers, cluster.Member{
+			NodeID:       m.NodeID,
+			WireGuardPub: m.WireGuardPub,
+			Endpoint:     m.Endpoint,
+			ClusterIP:    m.ClusterIP,
+		})
+	}
+
+	// Apply the config
+	if err := wgMgr.ApplyConfig(wgConfig); err != nil {
+		return fmt.Errorf("failed to apply WireGuard config: %w", err)
+	}
+
+	d.logger.Debug("WireGuard config synced", "peers", len(wgConfig.Peers))
 	return nil
 }
 

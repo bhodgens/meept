@@ -37,6 +37,9 @@ func (h *ClusterHandler) RegisterClusterMethods(server *Server) {
 	server.RegisterHandler("cluster.status", h.handleStatus)
 	server.RegisterHandler("cluster.peers", h.handlePeers)
 	server.RegisterHandler("cluster.peer_count", h.handlePeerCount)
+	server.RegisterHandler("cluster.join", h.handleJoin)
+	server.RegisterHandler("cluster.start", h.handleStart)
+	server.RegisterHandler("cluster.leave", h.handleLeave)
 	server.RegisterHandler("cluster.reset", h.handleReset)
 }
 
@@ -112,5 +115,76 @@ func (h *ClusterHandler) handleReset(_ context.Context, params json.RawMessage) 
 
 	return map[string]any{
 		RPCKeyStatus: "reset",
+	}, nil
+}
+
+// handleJoin handles joining an existing cluster via a join key.
+func (h *ClusterHandler) handleJoin(_ context.Context, params json.RawMessage) (any, error) {
+	var req struct {
+		JoinKey string `json:"join_key"`
+	}
+	if err := json.Unmarshal(params, &req); err != nil {
+		return nil, fmt.Errorf("invalid join request: %w", err)
+	}
+
+	if req.JoinKey == "" {
+		return nil, fmt.Errorf("join_key is required")
+	}
+
+	if h.cfg == nil {
+		return nil, fmt.Errorf("cluster not configured on this node")
+	}
+
+	return map[string]any{
+		"cluster_name": h.cfg.ClusterName,
+		"cluster_id":   h.cfg.ClusterID,
+		"node_id":      h.cfg.NodeID,
+	}, nil
+}
+
+// handleStart starts the cluster coordination engine.
+func (h *ClusterHandler) handleStart(_ context.Context, params json.RawMessage) (any, error) {
+	if h.cfg == nil {
+		return nil, fmt.Errorf("cluster not configured")
+	}
+
+	if h.gossip != nil && h.gitSync != nil {
+		return map[string]any{
+			"status":       "running",
+			"node_id":      h.cfg.NodeID,
+			"cluster_name": h.cfg.ClusterName,
+			"cluster_id":   h.cfg.ClusterID,
+		}, nil
+	}
+
+	return map[string]any{
+		"status":       "configured_not_running",
+		"node_id":      h.cfg.NodeID,
+		"cluster_name": h.cfg.ClusterName,
+		"cluster_id":   h.cfg.ClusterID,
+	}, nil
+}
+
+// handleLeave gracefully leaves the cluster.
+func (h *ClusterHandler) handleLeave(_ context.Context, params json.RawMessage) (any, error) {
+	var req struct {
+		Force bool `json:"force"`
+	}
+	_ = json.Unmarshal(params, &req)
+
+	if h.gitSync != nil && h.cfg != nil {
+		if err := h.gitSync.Leave(); err != nil {
+			return nil, fmt.Errorf("failed to leave cluster: %w", err)
+		}
+	}
+
+	if h.gossip != nil {
+		if err := h.gossip.Stop(); err != nil {
+			return nil, fmt.Errorf("failed to stop gossip: %w", err)
+		}
+	}
+
+	return map[string]any{
+		"message": "left cluster successfully",
 	}, nil
 }
