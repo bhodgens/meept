@@ -41,6 +41,10 @@ type GossipEngine struct {
 	// Database handle for event persistence
 	db *sql.DB
 
+	// TCP transport for peer-to-peer event delivery
+	transport       *GossipTransport
+	membersProvider MembersProvider
+
 	// Retry queue for failed broadcasts
 	retryQueue chan *models.ClusterEvent
 
@@ -121,6 +125,13 @@ func pubKeyID(key ed25519.PublicKey) string {
 	return fmt.Sprintf("%08x", xxhash.Sum64(key))
 }
 
+// WithMembersProvider sets the members provider for TCP transport peer resolution.
+func WithMembersProvider(mp MembersProvider) GossipOption {
+	return func(g *GossipEngine) {
+		g.membersProvider = mp
+	}
+}
+
 // SigningPrivate returns the gossip engine's ed25519 private signing key, or nil if none was set.
 func (g *GossipEngine) SigningPrivate() ed25519.PrivateKey {
 	g.mu.RLock()
@@ -185,11 +196,12 @@ func (g *GossipEngine) persistEvent(event *models.ClusterEvent) {
 
 	vcJSON, _ := json.Marshal(event.VectorClock)
 	payloadJSON := []byte(event.Payload)
+	receivedAt := time.Now().UnixNano()
 
 	_, err := g.db.Exec(`
 		INSERT OR IGNORE INTO cluster_events
-			(event_id, node_id, event_type, timestamp, vector_clock, payload, signature)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+			(event_id, node_id, event_type, timestamp, vector_clock, payload, signature, received_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		event.EventID,
 		event.NodeID,
@@ -198,6 +210,7 @@ func (g *GossipEngine) persistEvent(event *models.ClusterEvent) {
 		string(vcJSON),
 		string(payloadJSON),
 		sigB64,
+		receivedAt,
 	)
 	if err != nil {
 		g.logger.Error("gossip: persist event failed", "event_id", event.EventID, "err", err)
@@ -257,6 +270,11 @@ func (g *GossipEngine) Publish(event *models.ClusterEvent) {
 			map[string]any{"event": payload},
 		)
 		g.msgBus.Publish("cluster.event.broadcast", body)
+	}
+
+	// Send to remote peers via TCP transport
+	if g.transport != nil {
+		g.transport.SendEvent(event)
 	}
 
 	g.logger.Debug("gossip: published event",
@@ -435,6 +453,16 @@ func (g *GossipEngine) Start(ctx context.Context) error {
 	// Start background retry loop
 	g.startRetryLoop(ctx)
 
+	// Start TCP transport for peer-to-peer event delivery
+	if g.membersProvider != nil {
+		g.transport = NewGossipTransport(g.cfg, g.localNode, g, g.membersProvider, g.logger)
+		if err := g.transport.Start(ctx); err != nil {
+			g.logger.Warn("gossip: TCP transport start failed (events will be local-only)", "error", err)
+		}
+	} else {
+		g.logger.Info("gossip: no members provider, TCP transport disabled")
+	}
+
 	// Heartbeat and event propagation goroutine
 	go g.run(ctx)
 
@@ -453,6 +481,13 @@ func (g *GossipEngine) Stop() error {
 
 	close(g.stopCh)
 	<-g.doneCh
+
+	// Stop TCP transport
+	if g.transport != nil {
+		if err := g.transport.Stop(); err != nil {
+			g.logger.Warn("gossip: transport stop error", "error", err)
+		}
+	}
 
 	// Unsubscribe from bus if applicable
 	if g.msgBus != nil && g.sub != nil {

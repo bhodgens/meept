@@ -223,6 +223,12 @@ func (g *GitSync) GetMembers() (map[string]*Member, error) {
 	return active, nil
 }
 
+// GetActiveMembers returns currently active cluster members.
+// It implements the MembersProvider interface for the gossip transport.
+func (g *GitSync) GetActiveMembers() (map[string]*Member, error) {
+	return g.GetMembers()
+}
+
 // IsRunning returns whether the git sync loop is currently active.
 func (g *GitSync) IsRunning() bool {
 	g.mu.Lock()
