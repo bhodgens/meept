@@ -110,6 +110,11 @@ func (q *PersistentQueue) SetTaskCancelledCallback(fn IsTaskCancelledFunc) {
 	q.isTaskCancelled = fn
 }
 
+// Store returns the underlying store for cluster-aware operations.
+func (q *PersistentQueue) Store() *Store {
+	return q.store
+}
+
 // DB returns the underlying database connection for recovery operations.
 func (q *PersistentQueue) DB() *sql.DB {
 	return q.store.DB()

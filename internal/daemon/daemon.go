@@ -278,7 +278,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				NodeReachabilityTimeout: clusterCfg.Gossip.PeerTimeout,
 				FullPayloadReplication:  false,
 			}
-			clusterMQ = queue.NewClusterQueue(components.Queue, nil, localNodeID, logger, cqConfig)
+			var queueStore *queue.Store
+			if pq, ok := components.Queue.(*queue.PersistentQueue); ok {
+				queueStore = pq.Store()
+			}
+			clusterMQ = queue.NewClusterQueue(components.Queue, queueStore, localNodeID, logger, cqConfig)
 		}
 	} else if err != nil {
 		logger.Debug("cluster config not found, cluster features disabled", "path", cfgPath, "error", err)
