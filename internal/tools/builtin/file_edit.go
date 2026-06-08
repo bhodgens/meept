@@ -8,12 +8,29 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
+
+// RecoveryConfig controls the behavior of stale-anchor recovery.
+type RecoveryConfig struct {
+	FuzzFactor     float64 // multiplier for fuzzy threshold (unused; reserved)
+	RecoveryWindow int     // ±line search radius for relocation
+	FuzzyThreshold float64 // minimum Levenshtein ratio for fuzzy matching
+}
+
+// DefaultRecoveryConfig returns the default recovery configuration.
+func DefaultRecoveryConfig() RecoveryConfig {
+	return RecoveryConfig{
+		FuzzFactor:     0.6,
+		RecoveryWindow: 10,
+		FuzzyThreshold: 0.6,
+	}
+}
 
 // BlockResolver resolves a syntactic block span from a file path and line number.
 // This is satisfied by *ast.ParserManager.FindBlockSpan.
@@ -23,16 +40,17 @@ type BlockResolver interface {
 
 // FileEditTool performs incremental file edits using hashline-anchored line references.
 type FileEditTool struct {
-	checker              *security.PermissionChecker
-	readCache            *ReadCache
-	lspNotifier          LSPWriteNotifier
-	blockResolver        BlockResolver
-	pendingChangesRegistry *PendingChangesRegistry
+	checker                 *security.PermissionChecker
+	readCache               *ReadCache
+	lspNotifier             LSPWriteNotifier
+	blockResolver           BlockResolver
+	pendingChangesRegistry  *PendingChangesRegistry
+	recoveryConfig          RecoveryConfig
 }
 
 // NewFileEditTool creates a new file edit tool.
 func NewFileEditTool(checker *security.PermissionChecker, readCache *ReadCache) *FileEditTool {
-	return &FileEditTool{checker: checker, readCache: readCache}
+	return &FileEditTool{checker: checker, readCache: readCache, recoveryConfig: DefaultRecoveryConfig()}
 }
 
 // SetLSPNotifier sets the LSP write notifier for post-write notifications.
@@ -53,6 +71,11 @@ func (t *FileEditTool) SetBlockResolver(resolver BlockResolver) {
 // SetPendingChangesRegistry sets the pending changes registry for preview/accept workflow.
 func (t *FileEditTool) SetPendingChangesRegistry(registry *PendingChangesRegistry) {
 	t.pendingChangesRegistry = registry
+}
+
+// SetRecoveryConfig sets the recovery configuration.
+func (t *FileEditTool) SetRecoveryConfig(cfg RecoveryConfig) {
+	t.recoveryConfig = cfg
 }
 
 func (t *FileEditTool) Name() string { return "file_edit" }
@@ -272,6 +295,28 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 					}, nil
 				}
 			}
+
+			// Attempt session chain recovery: walk edit history newest to oldest.
+			history := t.readCache.GetHistory(resolved)
+			if len(history) > 0 {
+				recovered, strategy, recoverErr := t.attemptSessionChainRecovery(lines, history, ops)
+				if recoverErr == nil {
+					result := strings.Join(recovered, "\n")
+					if err := os.WriteFile(resolved, []byte(result), 0o644); err != nil {
+						return nil, fmt.Errorf("session chain recovery succeeded but write failed: %w", err)
+					}
+					msg := fmt.Sprintf("Edit applied with session chain recovery to %s (%d lines, strategy: %s)", resolved, len(recovered), strategy)
+					if t.lspNotifier != nil {
+						if lspResult := t.lspNotifier.NotifyWrite(ctx, resolved, result); lspResult != nil {
+							msg += lspResult.String()
+						}
+					}
+					return tools.ToolResult{
+						Success: true,
+						Result:  msg,
+					}, nil
+				}
+			}
 		}
 
 		// Return error with fresh hashline content
@@ -292,8 +337,56 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 	// Apply edits using the shared helper.
 	result := t.applyEdits(lines, ops)
 
-	// Write result
+	// Build output content
 	output := strings.Join(result, "\n")
+
+	// Check if preview/accept workflow is enabled
+	if t.pendingChangesRegistry != nil {
+		// Create pending change instead of applying directly
+		originalContent := string(content)
+		
+		// Generate unified diff preview
+		diff := t.generateDiffPreview(resolved, originalContent, output)
+		
+		// Create pending change with session ID from context (or generate one)
+		sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+		if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
+			sessionID = sid
+		}
+		
+		now := time.Now()
+		expiresAt := now.Add(30 * time.Minute) // Default expiry: 30 minutes
+		
+		change := &PendingChange{
+			ID:        fmt.Sprintf("change_%s_%d", resolved, now.UnixNano()),
+			SessionID: sessionID,
+			FilePath:  resolved,
+			Original:  originalContent,
+			Modified:  output,
+			Diff:      diff,
+			CreatedAt: now,
+			ExpiresAt: &expiresAt,
+			Metadata: map[string]any{
+				"tool":      "file_edit",
+				"edits":     len(ops),
+				"old_lines": len(lines),
+				"new_lines": len(result),
+			},
+		}
+		
+		t.pendingChangesRegistry.Add(change)
+		
+		return tools.ToolResult{
+			Success: true,
+			Result: fmt.Sprintf("Created pending change %s for %s (%d edits, %d -> %d lines). Use 'resolve' tool to accept or reject.",
+				change.ID, resolved, len(ops), len(lines), len(result)),
+			Evidence: []models.Evidence{
+				models.NewEvidence("pending_change_created", resolved, change.ID, t.Name()),
+			},
+		}, nil
+	}
+
+	// Direct mode: write result immediately
 	if err := os.WriteFile(resolved, []byte(output), 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -390,12 +483,6 @@ func absorbBoundaries(fileLines []string, ops []editOp) []editOp {
 	return result
 }
 
-// recoveryWindow is the ±line search radius for stale-anchor relocation.
-const recoveryWindow = 10
-
-// fuzzyMatchThreshold is the minimum Levenshtein ratio for fuzzy matching.
-const fuzzyMatchThreshold = 0.6
-
 // fuzzyMatchMaxLength is the maximum line length for fuzzy matching (skip longer lines).
 const fuzzyMatchMaxLength = 500
 
@@ -448,10 +535,10 @@ func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops [
 			cachedContent := cachedLines[cachedIdx]
 
 			// Search current file within ±recoveryWindow lines using tiered strategies.
-			searchStart := max(lineNum-1-recoveryWindow, 0)  // 0-based
-			searchEnd := min(lineNum-1+recoveryWindow, len(currentLines)-1)
+			searchStart := max(lineNum-1-t.recoveryConfig.RecoveryWindow, 0) // 0-based
+			searchEnd := min(lineNum-1+t.recoveryConfig.RecoveryWindow, len(currentLines)-1)
 
-			newLine, strategy, found := findMatchingLine(cachedContent, hash, currentLines, searchStart, searchEnd)
+			newLine, strategy, found := findMatchingLine(cachedContent, hash, currentLines, searchStart, searchEnd, t.recoveryConfig.FuzzyThreshold)
 			if !found {
 				return nil, "", fmt.Errorf("recovery: could not relocate cached line %d in current file", lineNum)
 			}
@@ -498,11 +585,120 @@ func (t *FileEditTool) attemptRecovery(cachedLines, currentLines []string, ops [
 	return result, bestStrategy, nil
 }
 
+// attemptRecoveryWithConfig performs recovery using the given cached snapshot and
+// configuration values. This is extracted so session chain recovery can reuse it.
+func (t *FileEditTool) attemptRecoveryWithConfig(cachedLines, currentLines []string, ops []editOp, window int, threshold float64) ([]string, string, error) {
+	// remap maps old (cached) line numbers to new (current) line numbers.
+	remap := make(map[int]int)
+
+	// Track the best (strongest) strategy used for reporting.
+	bestStrategy := "exact"
+
+	for _, op := range ops {
+		anchors := []string{op.Anchor}
+		if op.Op == "replace" || op.Op == "delete" {
+			if op.EndAnchor != "" {
+				anchors = append(anchors, op.EndAnchor)
+			}
+		}
+
+		for _, anchor := range anchors {
+			if anchor == "BOF" || anchor == "EOF" {
+				continue
+			}
+			lineNum, _, hash, err := ParseSnapshotAnchor(anchor)
+			if err != nil {
+				return nil, "", fmt.Errorf("recovery: invalid anchor %q: %w", anchor, err)
+			}
+
+			// Already remapped?
+			if _, done := remap[lineNum]; done {
+				continue
+			}
+
+			// Validate anchor against cached snapshot.
+			if !ValidateAnchor(cachedLines, lineNum, hash) {
+				return nil, "", fmt.Errorf("recovery: anchor %q does not match cached snapshot", anchor)
+			}
+
+			// Get the cached line content.
+			cachedIdx := lineNum - 1
+			if cachedIdx < 0 || cachedIdx >= len(cachedLines) {
+				return nil, "", fmt.Errorf("recovery: cached line %d out of range", lineNum)
+			}
+			cachedContent := cachedLines[cachedIdx]
+
+			// Search current file within ±window lines using tiered strategies.
+			searchStart := max(lineNum-1-window, 0)
+			searchEnd := min(lineNum-1+window, len(currentLines)-1)
+
+			newLine, strategy, found := findMatchingLine(cachedContent, hash, currentLines, searchStart, searchEnd, threshold)
+			if !found {
+				return nil, "", fmt.Errorf("recovery: could not relocate cached line %d in current file", lineNum)
+			}
+			remap[lineNum] = newLine
+
+			// Track the strongest (worst) strategy used: exact < hash < fuzzy
+			if strategyRank(strategy) > strategyRank(bestStrategy) {
+				bestStrategy = strategy
+			}
+		}
+	}
+
+	// Build remapped ops by adjusting anchor line numbers and hashes.
+	remappedOps := make([]editOp, len(ops))
+	for i, op := range ops {
+		remappedOps[i] = op
+		remappedOps[i].Anchor = remapAnchorWithHash(op.Anchor, remap, currentLines)
+		if op.EndAnchor != "" {
+			remappedOps[i].EndAnchor = remapAnchorWithHash(op.EndAnchor, remap, currentLines)
+		}
+	}
+
+	// Validate remapped anchors against current file.
+	for _, op := range remappedOps {
+		if op.Anchor == "BOF" || op.Anchor == "EOF" {
+			continue
+		}
+		lineNum, _, hash, _ := ParseSnapshotAnchor(op.Anchor)
+		if !ValidateAnchor(currentLines, lineNum, hash) {
+			return nil, "", fmt.Errorf("recovery: remapped anchor %q does not match current file", op.Anchor)
+		}
+		if (op.Op == "replace" || op.Op == "delete") && op.EndAnchor != "" {
+			endLineNum, _, endHash, _ := ParseSnapshotAnchor(op.EndAnchor)
+			if !ValidateAnchor(currentLines, endLineNum, endHash) {
+				return nil, "", fmt.Errorf("recovery: remapped end_anchor %q does not match current file", op.EndAnchor)
+			}
+		}
+	}
+
+	// Apply the remapped edits against current file content.
+	result := t.applyEdits(currentLines, remappedOps)
+	return result, bestStrategy, nil
+}
+
+// attemptSessionChainRecovery walks the edit history (newest to oldest) and
+// tries recovery against each historical snapshot. Returns the first successful
+// result with a strategy "session_chain(snapshotTag, recoveryStrategy)".
+func (t *FileEditTool) attemptSessionChainRecovery(currentLines []string, history []SnapshotEntry, ops []editOp) ([]string, string, error) {
+	for _, entry := range history {
+		recovered, strategy, err := t.attemptRecoveryWithConfig(
+			entry.Lines, currentLines, ops,
+			t.recoveryConfig.RecoveryWindow,
+			t.recoveryConfig.FuzzyThreshold,
+		)
+		if err == nil {
+			return recovered, fmt.Sprintf("session_chain(%s, %s)", entry.Tag, strategy), nil
+		}
+	}
+	return nil, "", fmt.Errorf("session chain recovery: no historical snapshot matched")
+}
+
 // findMatchingLine searches currentLines[searchStart..searchEnd] for a line
 // matching cachedContent using a tiered strategy: exact match, hash-only match,
 // then fuzzy Levenshtein match. Returns the 1-based line number, strategy name,
 // and whether a match was found.
-func findMatchingLine(cachedContent, cachedHash string, currentLines []string, searchStart, searchEnd int) (int, string, bool) {
+func findMatchingLine(cachedContent, cachedHash string, currentLines []string, searchStart, searchEnd int, threshold float64) (int, string, bool) {
 	// Strategy 1: exact content match.
 	for i := searchStart; i <= searchEnd; i++ {
 		if currentLines[i] == cachedContent {
@@ -534,7 +730,7 @@ func findMatchingLine(cachedContent, cachedHash string, currentLines []string, s
 				bestIdx = i
 			}
 		}
-		if bestIdx >= 0 && bestRatio >= fuzzyMatchThreshold {
+		if bestIdx >= 0 && bestRatio >= threshold {
 			return bestIdx + 1, "fuzzy", true
 		}
 	}
@@ -784,6 +980,48 @@ func (t *FileEditTool) applyEdits(lines []string, ops []editOp) []string {
 	}
 
 	return result
+}
+
+// generateDiffPreview creates a unified diff preview between original and modified content.
+func (t *FileEditTool) generateDiffPreview(filePath, original, modified string) string {
+	// Simple unified diff format
+	lines := strings.Split(original, "\n")
+	modLines := strings.Split(modified, "\n")
+	
+	var diff []string
+	diff = append(diff, fmt.Sprintf("--- a/%s", filePath))
+	diff = append(diff, fmt.Sprintf("+++ b/%s", filePath))
+	
+	// Simple line-by-line comparison
+	maxLen := len(lines)
+	if len(modLines) > maxLen {
+		maxLen = len(modLines)
+	}
+	
+	for i := 0; i < maxLen; i++ {
+		oldLine := ""
+		newLine := ""
+		if i < len(lines) {
+			oldLine = lines[i]
+		}
+		if i < len(modLines) {
+			newLine = modLines[i]
+		}
+		
+		if i >= len(lines) {
+			// Added line
+			diff = append(diff, fmt.Sprintf("+%s", newLine))
+		} else if i >= len(modLines) {
+			// Deleted line
+			diff = append(diff, fmt.Sprintf("-%s", oldLine))
+		} else if oldLine != newLine {
+			// Changed line
+			diff = append(diff, fmt.Sprintf("-%s", oldLine))
+			diff = append(diff, fmt.Sprintf("+%s", newLine))
+		}
+	}
+	
+	return strings.Join(diff, "\n")
 }
 
 // Ensure FileEditTool implements the Tool interface.
