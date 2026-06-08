@@ -34,7 +34,7 @@ It is designed for operators who want **deterministic, observable, and resilient
 
 Meept has evolved fairly rapidly from this initial ideation and I've borrowed a number of ideas (and anti-ideas) from the other agentic tools. If something irritates me, I'll try to implement it "fixed" in meept; if something catches my eye on X or in a paper, I'll evaluage it. 
 
-Look at [features.md](./features.md) to see what else it does. 
+Look at [features.md](./docs/features.md) to see what else it does. 
 
 The client is currently available as either a console interface, Flutter based local client/web interface, or MCP, with a Web UI in progress. 
 
@@ -231,7 +231,7 @@ User Input (CLI / HTTP REST / MenuBar)
                         └──────────┘            └──────────┘            └──────────┘
 ```
 
-For complete feature details, see [Features](docs/features.md).
+For complete feature details, see [Features](./docs/features.md).
 
 ## Feature Status
 
