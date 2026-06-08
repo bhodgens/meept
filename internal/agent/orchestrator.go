@@ -277,9 +277,7 @@ func (o *Orchestrator) extractTaskIDFromJob(ctx context.Context, jobID string) (
 	// Job has task_id directly if it was created as part of a task
 	if job.TaskID != "" {
 		// Also extract step_id from the payload if present
-		var payload struct {
-			StepID string `json:"step_id"`
-		}
+		var payload StepJobPayload
 		if err := json.Unmarshal(job.Payload, &payload); err == nil && payload.StepID != "" {
 			stepID = payload.StepID
 		}

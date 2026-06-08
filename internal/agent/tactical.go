@@ -133,6 +133,11 @@ func NewTacticalScheduler(cfg TacticalSchedulerConfig) *TacticalScheduler {
 	}
 }
 
+// GetJobByID retrieves a job from the queue by ID.
+func (ts *TacticalScheduler) GetJobByID(ctx context.Context, jobID string) (*queue.Job, error) {
+	return ts.queue.Get(ctx, jobID)
+}
+
 // ScheduleReadySteps finds ready steps for a task and enqueues them as jobs.
 // Steps that cannot be scheduled due to semaphore limits remain in "ready" state
 // and will be retried on the next scheduling cycle.
