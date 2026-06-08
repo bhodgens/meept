@@ -85,7 +85,7 @@ func (g *GitSync) Stop() error {
 func (g *GitSync) run(ctx context.Context) {
 	defer close(g.doneCh)
 
-	ticker := time.NewTicker(g.cfg.Git.SyncInterval.ToTimeDuration())
+	ticker := time.NewTicker(g.cfg.Git.SyncInterval)
 	defer ticker.Stop()
 
 	// Periodic heartbeat commit
@@ -96,7 +96,7 @@ func (g *GitSync) run(ctx context.Context) {
 	}
 
 	g.logger.Info("git_sync: loop started",
-		"sync_interval", g.cfg.Git.SyncInterval.ToTimeDuration(),
+		"sync_interval", g.cfg.Git.SyncInterval,
 		"heartbeat_commit", g.cfg.Git.HeartbeatCommit,
 	)
 
@@ -213,14 +213,20 @@ func (g *GitSync) GetMembers() (map[string]*Member, error) {
 	// Filter to active members only
 	active := make(map[string]*Member)
 	for id, m := range members {
-		if g.cfg.Gossip.PeerTimeout.ToTimeDuration() > 0 && m.IsActive(g.cfg.Gossip.PeerTimeout.ToTimeDuration()) {
+		if g.cfg.Gossip.PeerTimeout > 0 && m.IsActive(g.cfg.Gossip.PeerTimeout) {
 			active[id] = m
-		} else if g.cfg.Gossip.PeerTimeout.ToTimeDuration() == 0 && m.Status == "active" {
+		} else if g.cfg.Gossip.PeerTimeout == 0 && m.Status == "active" {
 			active[id] = m
 		}
 	}
 
 	return active, nil
+}
+
+// GetActiveMembers returns currently active cluster members.
+// It implements the MembersProvider interface for the gossip transport.
+func (g *GitSync) GetActiveMembers() (map[string]*Member, error) {
+	return g.GetMembers()
 }
 
 // IsRunning returns whether the git sync loop is currently active.

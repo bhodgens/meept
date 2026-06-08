@@ -2,106 +2,187 @@ package ast
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestRewriteEngine_GenerateProposal_Rename(t *testing.T) {
-	tmpDir := t.TempDir()
-	f := filepath.Join(tmpDir, "test.go")
-	content := `package main
+// TestRewriteTemplate tests template parsing and application
+func TestRewriteTemplate(t *testing.T) {
+	t.Run("parse template with single capture", func(t *testing.T) {
+		template, err := ParseRewriteTemplate("func {{name}}() { /* body */ }")
+		if err != nil {
+			t.Fatalf("ParseRewriteTemplate failed: %v", err)
+		}
+
+		if len(template.CaptureNames) != 1 {
+			t.Errorf("Expected 1 capture, got %d", len(template.CaptureNames))
+		}
+		if template.CaptureNames[0] != "name" {
+			t.Errorf("Expected capture name 'name', got '%s'", template.CaptureNames[0])
+		}
+	})
+
+	t.Run("parse template with multiple captures", func(t *testing.T) {
+		template, err := ParseRewriteTemplate("{{visibility}} func {{name}}({{params}}) {{returnType}}")
+		if err != nil {
+			t.Fatalf("ParseRewriteTemplate failed: %v", err)
+		}
+
+		if len(template.CaptureNames) != 4 {
+			t.Errorf("Expected 4 captures, got %d", len(template.CaptureNames))
+		}
+	})
+
+	t.Run("apply template", func(t *testing.T) {
+		template := &RewriteTemplate{
+			Template:     "func {{name}}() { return {{value}} }",
+			CaptureNames: []string{"name", "value"},
+		}
+
+		captures := map[string]string{
+			"name":  "GetResult",
+			"value": "42",
+		}
+
+		result := template.Apply(captures)
+		expected := "func GetResult() { return 42 }"
+		if result != expected {
+			t.Errorf("Apply() = %q, want %q", result, expected)
+		}
+	})
+
+	t.Run("apply template with missing capture", func(t *testing.T) {
+		template := &RewriteTemplate{
+			Template:     "func {{name}}() { return {{value}} }",
+			CaptureNames: []string{"name", "value"},
+		}
+
+		captures := map[string]string{
+			"name": "GetResult",
+			// missing "value"
+		}
+
+		result := template.Apply(captures)
+		// Should leave placeholder unchanged
+		if result != "func GetResult() { return {{value}} }" {
+			t.Errorf("Apply() = %q", result)
+		}
+	})
+}
+
+// TestASTRewriter tests the AST rewrite engine
+func TestASTRewriter(t *testing.T) {
+	parser := NewParserManager(DefaultParserConfig())
+	rewriter := NewASTRewriter(parser)
+
+	t.Run("rewrite function names in Go", func(t *testing.T) {
+		source := []byte(`
+package main
 
 func Hello() string {
 	return "world"
 }
-`
-	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
-	pm := NewParserManager(DefaultParserConfig())
-	engine := NewRewriteEngine(pm)
+func Goodbye() string {
+	return "farewell"
+}
+`)
 
-	proposal, err := engine.GenerateProposal(context.Background(), f, LangGo,
-		"(function_declaration name: (identifier) @name)", OpRename, "Goodbye")
+		query := "(function_declaration name: (identifier) @name)"
+		template := "func {{name}}V2() string { /* refactored */ }"
+
+		result, err := rewriter.RunRewrite(source, LangGo, query, template)
+		if err != nil {
+			t.Fatalf("RunRewrite failed: %v", err)
+		}
+
+		if result.Rewrite.MatchCount != 2 {
+			t.Errorf("Expected 2 matches, got %d", result.Rewrite.MatchCount)
+		}
+
+		if len(result.Rewrite.ProposedEdits) != 2 {
+			t.Errorf("Expected 2 edits, got %d", len(result.Rewrite.ProposedEdits))
+		}
+	})
+
+	t.Run("no overlapping edits", func(t *testing.T) {
+		source := []byte(`
+package main
+
+func Test() {
+	x := 1
+	y := 2
+}
+`)
+
+		// Query that matches nested nodes
+		query := "(assignment_expression left: (identifier) @var)"
+		template := "{{var}} = 0 // zeroed"
+
+		result, err := rewriter.RunRewrite(source, LangGo, query, template)
+		if err != nil {
+			t.Fatalf("RunRewrite failed: %v", err)
+		}
+
+		// Should have 2 non-overlapping edits
+		if result.Rewrite.MatchCount < 2 {
+			t.Errorf("Expected at least 2 matches, got %d", result.Rewrite.MatchCount)
+		}
+	})
+
+	t.Run("ApplyEdits reverse order", func(t *testing.T) {
+		source := []byte(`
+package main
+
+func A() {}
+func B() {}
+func C() {}
+`)
+
+		edits := []ProposedEdit{
+			{StartLine: 2, StartChar: 0, EndLine: 2, EndChar: 10, OldText: "func A() {}", NewText: "func Alpha() {}"},
+			{StartLine: 3, StartChar: 0, EndLine: 3, EndChar: 10, OldText: "func B() {}", NewText: "func Beta() {}"},
+			{StartLine: 4, StartChar: 0, EndLine: 4, EndChar: 10, OldText: "func C() {}", NewText: "func Gamma() {}"},
+		}
+
+		result := ApplyEdits(source, edits)
+		if len(result) == 0 {
+			t.Error("Expected non-empty result")
+		}
+	})
+}
+
+// TestRunRewriteOnFile tests file-based rewriting
+func TestRunRewriteOnFile(t *testing.T) {
+	t.Skip("Requires actual test file - integration test")
+	// This would test against a real file in the codebase
+	// Example:
+	// parser := NewParserManager(DefaultParserConfig())
+	// rewriter := NewASTRewriter(parser)
+	// result, err := rewriter.RunRewriteOnFile("some_file.go", query, template)
+}
+
+// TestRewriteResultStructure tests the result structure
+func TestRewriteResultStructure(t *testing.T) {
+	parser := NewParserManager(DefaultParserConfig())
+	rewriter := NewASTRewriter(parser)
+
+	source := []byte(`package main; func Test() {}`)
+	query := "(function_declaration name: (identifier) @name)"
+	template := "func {{name}}2() {}"
+
+	result, err := rewriter.RunRewrite(source, LangGo, query, template)
 	if err != nil {
-		t.Fatalf("GenerateProposal failed: %v", err)
+		t.Fatalf("RunRewrite failed: %v", err)
 	}
 
-	if proposal.MatchCount != 1 {
-		t.Fatalf("expected 1 match, got %d", proposal.MatchCount)
+	// Verify result structure
+	if result.Rewrite == nil {
+		t.Error("Expected non-nil Rewrite")
 	}
-
-	edit := proposal.Edits[0]
-	if edit.NewText != "Goodbye" {
-		t.Errorf("expected new_text 'Goodbye', got %q", edit.NewText)
+	if result.Source == nil {
+		t.Error("Expected non-nil Source")
 	}
-	if !strings.Contains(proposal.PreviewText[0], "rename") {
-		t.Errorf("expected preview to mention rename, got %q", proposal.PreviewText[0])
-	}
-}
-
-func TestRewriteEngine_GenerateProposal_Replace(t *testing.T) {
-	tmpDir := t.TempDir()
-	f := filepath.Join(tmpDir, "test.go")
-	content := `package main
-
-func Hello() string {
-	return "world"
-}
-`
-	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	pm := NewParserManager(DefaultParserConfig())
-	engine := NewRewriteEngine(pm)
-
-	// Replace function declaration with a comment
-	proposal, err := engine.GenerateProposal(context.Background(), f, LangGo,
-		"(function_declaration) @func", OpReplace, "// removed: @func")
-	if err != nil {
-		t.Fatalf("GenerateProposal failed: %v", err)
-	}
-
-	if proposal.MatchCount != 1 {
-		t.Fatalf("expected 1 match, got %d", proposal.MatchCount)
-	}
-
-	edit := proposal.Edits[0]
-	if !strings.Contains(edit.NewText, "removed") {
-		t.Errorf("expected new_text to contain 'removed', got %q", edit.NewText)
-	}
-}
-
-func TestApplyEdits_Basic(t *testing.T) {
-	tmpDir := t.TempDir()
-	f := filepath.Join(tmpDir, "test.go")
-	content := "package main\n\nfunc Hello() {}\n"
-	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	edits := []EditProposal{
-		{
-			FilePath:  f,
-			StartLine: 2,
-			StartCol:  5,
-			EndLine:   2,
-			EndCol:    10,
-			NewText:   "Goodbye",
-		},
-	}
-
-	if err := ApplyEdits(f, edits); err != nil {
-		t.Fatalf("ApplyEdits failed: %v", err)
-	}
-
-	got, _ := os.ReadFile(f)
-	want := "package main\n\nfunc Goodbye() {}\n"
-	if string(got) != want {
-		t.Errorf("content mismatch\ngot:  %q\nwant: %q", string(got), want)
+	if result.Rewrite.Query != query {
+		t.Errorf("Query mismatch: got %q", result.Rewrite.Query)
 	}
 }

@@ -1,267 +1,88 @@
 package cluster
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/caimlas/meept/internal/bus"
-	"github.com/caimlas/meept/internal/queue"
+
+	"github.com/cespare/xxhash/v2"
+	q "github.com/caimlas/meept/internal/queue"
 )
 
-// Engine is the main cluster engine that coordinates all cluster components.
-// It implements the clusterEngine interface for RPC handling.
+// Engine is the central orchestrator for cluster operations.
+// It manages gossip communication, git-based membership sync,
+// node signing, and integrates with the task queue store.
 type Engine struct {
 	cfg        *Config
 	localCfg   *Config
 	logger     *slog.Logger
 	msgBus     *bus.MessageBus
+	queueStore *q.Store
 	gitRepoPath string
-	queueStore  *queue.Store
 
-	mu          sync.RWMutex
-	running     bool
-	nodeID      string
-	nodeName    string
-	clusterID   string
-	clusterName string
-	joinKey     string
-
-	// Components
-	gossip *GossipEngine
-	gitSync *GitSync
-	wgMgr  *WireGuardManager
-
-	// Keys
-	signingPub  ed25519.PublicKey
+	gossip    *GossipEngine
+	gitSync   *GitSync
+	wgSync    *WireGuardSync
 	signingPriv ed25519.PrivateKey
-	wgPub       string
-	wgPriv      string
+	signingPub  ed25519.PublicKey
+
+	nodeID   string
+	nodeName string
+
+	enableWireGuard bool
+
+	running bool
+	mu      sync.RWMutex
 }
 
-// EngineConfig holds configuration for creating a cluster engine.
+// EngineConfig holds parameters for NewEngine.
 type EngineConfig struct {
-	Config      *Config
-	LocalConfig *Config
-	Logger      *slog.Logger
-	MessageBus  *bus.MessageBus
-	GitRepoPath string
-	QueueStore  *queue.Store
+	Cfg              *Config
+	LocalCfg         *Config
+	Logger           *slog.Logger
+	MsgBus           *bus.MessageBus
+	QueueStore       *q.Store
+	GitRepoPath      string
+	NodeName         string
+	EnableWireGuard  bool
 }
 
-// NewEngine creates a new cluster engine.
-func NewEngine(cfg EngineConfig) (*Engine, error) {
-	engine := &Engine{
-		cfg:         cfg.Config,
-		localCfg:    cfg.LocalConfig,
-		logger:      cfg.Logger,
-		msgBus:      cfg.MessageBus,
-		gitRepoPath: cfg.GitRepoPath,
-		queueStore:  cfg.QueueStore,
+// NewEngine creates a new cluster engine from the given configuration.
+// It does not start any background routines; call Start() to begin.
+func NewEngine(cfg EngineConfig) *Engine {
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
 	}
 
-	// Load existing WireGuard keys from disk, or generate new ones.
-	if err := engine.loadOrGenerateKeys(); err != nil {
-		engine.logger.Warn("cluster: failed to load existing keys, will generate fresh ones on Init", "error", err)
+	nodeID := ""
+	if cfg.Cfg != nil {
+		nodeID = cfg.Cfg.NodeID
+	} else if cfg.LocalCfg != nil {
+		nodeID = cfg.LocalCfg.NodeID
 	}
 
-	// Load existing WireGuard keys from disk, or generate new ones.
-	if err := engine.loadOrGenerateKeys(); err != nil {
-		engine.logger.Warn("cluster: failed to load existing keys, will generate fresh ones on Init", "error", err)
+	return &Engine{
+		cfg:             cfg.Cfg,
+		localCfg:        cfg.LocalCfg,
+		logger:          cfg.Logger,
+		msgBus:          cfg.MsgBus,
+		queueStore:      cfg.QueueStore,
+		gitRepoPath:     cfg.GitRepoPath,
+		nodeID:          nodeID,
+		nodeName:        cfg.NodeName,
+		enableWireGuard: cfg.EnableWireGuard,
 	}
-
-	return engine, nil
 }
 
-// keyDir returns the directory where cluster keys are stored.
-// Defaults to ~/.meept/cluster.
-func (e *Engine) keyDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".meept", "cluster")
-}
-
-// loadOrGenerateKeys loads existing WireGuard keys from disk, or generates fresh ones.
-// If keys exist on disk they are reused so the node identity is preserved across restarts.
-func (e *Engine) loadOrGenerateKeys() error {
-	keyDir := e.keyDir()
-	if keyDir == "" {
-		return fmt.Errorf("cannot determine key storage directory")
-	}
-
-	privPath := filepath.Join(keyDir, "wireguard_private_key")
-	pubPath := filepath.Join(keyDir, "wireguard_public_key")
-
-	// Try to load from disk first
-	privData, err := os.ReadFile(privPath)
-	if err == nil {
-		privKey := strings.TrimSpace(string(privData))
-		if pubData, err := os.ReadFile(pubPath); err == nil {
-			pubKey := strings.TrimSpace(string(pubData))
-			// Validate that this is a proper base64 WireGuard key (44 chars, ends with ==)
-			if len(privKey) == 44 && strings.HasSuffix(privKey, "==") &&
-				len(pubKey) == 44 && strings.HasSuffix(pubKey, "==") {
-				e.wgPriv = privKey
-				e.wgPub = pubKey
-				e.logger.Info("cluster: loaded WireGuard keys from disk", "path", keyDir)
-				return nil
-			}
-		}
-	}
-
-	wgPrivKey, wgPubKey, err := generateWireGuardKeys()
-	if err != nil {
-		return fmt.Errorf("failed to generate WireGuard keys: %w", err)
-	}
-	e.wgPriv = wgPrivKey
-	e.wgPub = wgPubKey
-
-	// Persist keys to disk
-	if err := os.MkdirAll(keyDir, 0o700); err != nil {
-		return fmt.Errorf("failed to create key directory %s: %w", keyDir, err)
-	}
-	if err := os.WriteFile(privPath, []byte(wgPrivKey+"\n"), 0o600); err != nil {
-		return fmt.Errorf("failed to write private key: %w", err)
-	}
-	if err := os.WriteFile(pubPath, []byte(wgPubKey+"\n"), 0o600); err != nil {
-		return fmt.Errorf("failed to write public key: %w", err)
-	}
-	e.logger.Info("cluster: generated and saved new WireGuard keys", "directory", keyDir)
-
-	return nil
-}
-
-// Init creates a new cluster and returns the join key.
-func (e *Engine) Init(clusterName, nodeName, nodeID string) (string, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.running {
-		return "", fmt.Errorf("cluster engine already running")
-	}
-
-	// Generate signing keys
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate signing keys: %w", err)
-	}
-	e.signingPub = pub
-	e.signingPriv = priv
-
-	// WireGuard keys should already be loaded by NewEngine -> loadOrGenerateKeys().
-	// Only generate fresh ones if they are empty (e.g. if loadOrGenerateKeys failed).
-	if e.wgPriv == "" {
-		wgPrivKey, wgPubKey, err := generateWireGuardKeys()
-		if err != nil {
-			return "", fmt.Errorf("failed to generate WireGuard keys: %w", err)
-		}
-		e.wgPriv = wgPrivKey
-		e.wgPub = wgPubKey
-	}
-
-	// Set cluster identity
-	e.clusterName = clusterName
-	e.nodeName = nodeName
-	e.nodeID = nodeID
-	e.clusterID = generateClusterID()
-
-	// Generate join key (simple hex token for now)
-	e.joinKey = hex.EncodeToString(generateJoinKey())
-
-	// Create member record for this node
-	member := &Member{
-		NodeID:        nodeID,
-		NodeName:      nodeName,
-		WireGuardPub:  e.wgPub,
-		SigningPub:    pub,
-		ClusterIP:     "10.200.0.1", // First node gets .1
-		JoinedAt:      time.Now().UTC(),
-		LastHeartbeat: time.Now().UTC(),
-		Status:        "active",
-	}
-
-	// Save member to git repo
-	if err := SaveMember(e.gitRepoPath, member); err != nil {
-		return "", fmt.Errorf("failed to save member: %w", err)
-	}
-
-	e.logger.Info("cluster: initialized",
-		"cluster_id", e.clusterID,
-		"cluster_name", e.clusterName,
-		"node_id", e.nodeID,
-		"join_key", e.joinKey,
-	)
-
-	return e.joinKey, nil
-}
-
-// Join joins an existing cluster with the given join key.
-func (e *Engine) Join(joinKey string) (map[string]any, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	// For now, accept any join key (real implementation would validate)
-	if joinKey == "" {
-		return nil, fmt.Errorf("join key required")
-	}
-
-	// Generate signing keys for new node
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate signing keys: %w", err)
-	}
-	e.signingPub = pub
-	e.signingPriv = priv
-
-	// WireGuard keys should already be loaded by NewEngine.
-	// Only generate fresh ones if they are empty.
-	if e.wgPriv == "" {
-		wgPrivKey, wgPubKey, err := generateWireGuardKeys()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate WireGuard keys: %w", err)
-		}
-		e.wgPriv = wgPrivKey
-		e.wgPub = wgPubKey
-	}
-
-	e.joinKey = joinKey
-	e.nodeID = generateNodeID()
-	e.clusterName = "joined-cluster"
-	e.nodeName = "node-" + e.nodeID[:8]
-
-	result := map[string]any{
-		"status":           "joined",
-		"node_id":          e.nodeID,
-		"node_name":        e.nodeName,
-		"cluster_name":     e.clusterName,
-		"signing_pubkey":   hex.EncodeToString(pub),
-		"wireguard_pubkey": e.wgPub,
-		"cluster_ip":       "10.200.0.2", // Second node gets .2
-	}
-
-	e.logger.Info("cluster: joined",
-		"node_id", e.nodeID,
-		"join_key", joinKey,
-	)
-
-	return result, nil
-}
-
-// Start initializes the cluster coordination protocol.
-func (e *Engine) Start() error {
+// Start initializes and starts all cluster components (gossip and git sync).
+func (e *Engine) Start(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -269,152 +90,75 @@ func (e *Engine) Start() error {
 		return fmt.Errorf("cluster engine already running")
 	}
 
-	ctx := context.Background()
-
-	// Start git sync if configured
-	if e.gitRepoPath != "" && e.cfg != nil {
-		e.gitSync = NewGitSync(e.cfg, e.localCfg, e.gitRepoPath, e.logger)
-		if err := e.gitSync.Start(ctx); err != nil {
-			e.logger.Warn("cluster: git sync start failed", "error", err)
+	// Load or generate signing keys
+	if e.signingPriv == nil {
+		if err := e.loadKeys(); err != nil {
+			return fmt.Errorf("engine: load keys: %w", err)
 		}
 	}
 
-	// WireGuard manager is started after git sync
-
-	// Start gossip engine if we have a message bus
-	if e.msgBus != nil && e.cfg != nil {
-		e.gossip = NewGossipEngine(e.cfg, e.nodeID, e.msgBus, e.logger)
-
-		// Wire the queue store's SQLite DB into the gossip engine for event persistence.
-		if e.queueStore != nil {
-			e.gossip.WithDatabase(e.queueStore.DB())
+	// Ensure node ID is resolved
+	if e.nodeID == "" {
+		e.nodeID = nodeIDFromPub(e.signingPub)
+		if e.cfg != nil {
+			e.cfg.NodeID = e.nodeID
 		}
-
-		// Wire signing key and peers' public keys
-		if e.signingPriv != nil {
-			e.gossip.WithSigningKey(e.signingPriv)
-			// Register this node's public key so events from us can be verified
-			e.gossip.SetPeerSigningKey(e.nodeID, e.signingPub)
-		}
-
-		// Wire peer signing keys from the cluster_members table (loaded from git-synced config).
-		if e.queueStore != nil {
-			members, err := e.queueStore.GetClusterMembers()
-			if err != nil {
-				e.logger.Debug("cluster: failed to read cluster_members table for gossip peers", "error", err)
-			} else {
-				for _, m := range members {
-					if m.NodeID != e.nodeID && len(m.SigningPub) == ed25519.PublicKeySize {
-						e.gossip.SetPeerSigningKey(m.NodeID, m.SigningPub)
-					}
-				}
-				e.logger.Info("cluster: loaded gossip peer signing keys from cluster_members",
-					"peer_count", len(members))
-			}
-		}
-
-		if err := e.gossip.Start(ctx); err != nil {
-			e.logger.Warn("cluster: gossip engine start failed", "error", err)
+		if e.localCfg != nil {
+			e.localCfg.NodeID = e.nodeID
 		}
 	}
 
-	// Wire and start WireGuard manager if we have keys and config
-	if e.cfg != nil && e.wgPriv != "" && e.wgPub != "" {
-		wgIface := e.cfg.Network.Interface
-		if wgIface == "" {
-			wgIface = "wg0"
+	// Create git sync first so we can pass it as MembersProvider to gossip
+	e.gitSync = NewGitSync(e.cfg, e.localCfg, e.gitRepoPath, e.logger)
+	if err := e.gitSync.Start(ctx); err != nil {
+		return fmt.Errorf("engine: start git sync: %w", err)
+	}
+
+	// Build gossip options
+	gossipOpts := []GossipOption{
+		WithSigningKey(e.signingPriv, e.signingPub),
+		WithMembersProvider(e.gitSync), // Enables TCP transport for peer delivery
+	}
+	// Wire database if queue store has a usable db handle
+	if e.queueStore != nil {
+		gossipOpts = append(gossipOpts, WithDatabase(e.queueStore.DB()))
+	}
+
+	// Create and start gossip engine
+	e.gossip = NewGossipEngine(e.cfg, e.nodeID, e.msgBus, e.logger, gossipOpts...)
+	if err := e.gossip.Start(ctx); err != nil {
+		gitErr := e.gitSync.Stop()
+		if gitErr != nil {
+			e.logger.Warn("engine: stop git_sync after gossip failure", "error", gitErr)
 		}
-		keyDir := e.keyDir()
-		wgConfPath := filepath.Join(keyDir, "wg0.conf")
+		return fmt.Errorf("engine: start gossip: %w", err)
+	}
 
-		wgMgr, err := NewWireGuardManager(wgConfPath, wgIface)
-		if err != nil {
-			e.logger.Warn("cluster: WireGuard manager creation failed", "error", err)
-		} else {
-			e.wgMgr = wgMgr
-
-			// Build WireGuard config with current peers
-			members, _ := e.gitSync.GetMembers()
-			var peers []Member
-			for _, m := range members {
-				if m.NodeID != e.nodeID {
-					peers = append(peers, *m)
-				}
-			}
-
-			wgCfg := &WireGuardConfig{
-				PrivateKey:            e.wgPriv,
-				ClusterIP:             "10.200.0.1",
-				ListenPort:            e.cfg.Network.WireGuardPort,
-				DNS:                   "8.8.8.8",
-				PersistentKeepalive:   "25",
-				Peers:                 peers,
-			}
-
-			if err := wgMgr.WriteConfig(wgCfg); err != nil {
-				e.logger.Warn("cluster: WireGuard config write failed", "error", err)
-			} else {
-				e.logger.Info("cluster: WireGuard config written", "path", wgConfPath)
-			}
+	// Create and start WireGuard sync (if enabled)
+	// WireGuard tools (wg, wg-quick, ip) are Linux-only; on other platforms
+	// the sync loop will log warnings but will not crash the engine.
+	if e.enableWireGuard {
+		e.wgSync = NewWireGuardSync(e.cfg, e.localCfg, e.gitRepoPath, e.logger)
+		if err := e.wgSync.Start(ctx); err != nil {
+			e.logger.Warn("engine: wireguard sync start failed, continuing without it",
+				"error", err,
+			)
+			e.wgSync = nil
 		}
 	}
 
 	e.running = true
-
-	e.logger.Info("cluster: started",
+	e.logger.Info("cluster engine started",
 		"node_id", e.nodeID,
-		"gossip_ok", e.gossip != nil,
-		"git_sync_ok", e.gitSync != nil,
-		"wireguard_ok", e.wgMgr != nil,
+		"node_name", e.nodeName,
+		"repo", e.gitRepoPath,
 	)
 
 	return nil
 }
 
-// Status returns the current cluster state.
-func (e *Engine) Status() (map[string]any, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	status := map[string]any{
-		"cluster_id":      e.clusterID,
-		"cluster_name":    e.clusterName,
-		"node_id":         e.nodeID,
-		"node_name":       e.nodeName,
-		"running":         e.running,
-		"join_key_set":    e.joinKey != "",
-		"git_repo_path":   e.gitRepoPath,
-	}
-
-	// Add member info if we have git sync
-	if e.gitSync != nil {
-		members, err := e.gitSync.GetMembers()
-		if err != nil {
-			status["members_error"] = err.Error()
-		} else {
-			status["member_count"] = len(members)
-			status["members"] = members
-		}
-	}
-
-	// Add WireGuard info
-	if e.wgMgr != nil {
-		status["wireguard_iface"] = e.wgMgr.iface
-		status["wireguard_key_set"] = true
-	}
-
-	// Add gossip info if we have gossip engine
-	if e.gossip != nil {
-		peers := e.gossip.Peers()
-		status["peer_count"] = len(peers)
-		status["peers"] = peers
-	}
-
-	return status, nil
-}
-
-// Leave gracefully departs the cluster.
-func (e *Engine) Leave(force bool) error {
+// Stop gracefully shuts down all cluster components.
+func (e *Engine) Stop() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -422,237 +166,158 @@ func (e *Engine) Leave(force bool) error {
 		return nil
 	}
 
-	// Stop gossip engine
-	if e.gossip != nil {
-		if err := e.gossip.Stop(); err != nil {
-			e.logger.Warn("cluster: gossip stop failed", "error", err)
+	e.logger.Info("cluster engine stopping", "node_id", e.nodeID)
+
+	// Stop git sync first so it can push final state
+	if e.gitSync != nil {
+		if err := e.gitSync.Stop(); err != nil {
+			e.logger.Warn("engine: git sync stop error", "error", err)
 		}
-		e.gossip = nil
 	}
 
-	// Stop git sync
-	if e.gitSync != nil {
-		if !force {
-			if err := e.gitSync.Leave(); err != nil {
-				e.logger.Warn("cluster: git sync leave failed", "error", err)
-			}
+	// Stop WireGuard sync before gossip
+	if e.wgSync != nil {
+		if err := e.wgSync.Stop(); err != nil {
+			e.logger.Warn("engine: wireguard sync stop error", "error", err)
 		}
-		if err := e.gitSync.Stop(); err != nil {
-			e.logger.Warn("cluster: git sync stop failed", "error", err)
+	}
+
+	// Then stop gossip
+	if e.gossip != nil {
+		if err := e.gossip.Stop(); err != nil {
+			e.logger.Warn("engine: gossip stop error", "error", err)
 		}
-		e.gitSync = nil
 	}
 
 	e.running = false
-
-	e.logger.Info("cluster: stopped",
-		"node_id", e.nodeID,
-		"force", force,
-	)
-
+	e.logger.Info("cluster engine stopped", "node_id", e.nodeID)
 	return nil
 }
 
-// NodeID returns the local node ID.
+// NodeID returns this node's unique identifier.
 func (e *Engine) NodeID() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.nodeID
 }
 
-// Config returns the cluster configuration.
+// Config returns the global cluster configuration.
 func (e *Engine) Config() *Config {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.cfg
 }
 
-// LocalConfig returns the local cluster configuration.
-func (e *Engine) LocalConfig() *Config {
+// LocalCfg returns the local node configuration.
+func (e *Engine) LocalCfg() *Config {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.localCfg
 }
 
-// GitSync returns the git sync component.
-func (e *Engine) GitSync() *GitSync {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.gitSync
-}
-
-// Gossip returns the gossip engine component.
+// Gossip returns the gossip engine, or nil if not started.
 func (e *Engine) Gossip() *GossipEngine {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.gossip
 }
 
-// WireGuardKeys returns the WireGuard key pair.
-func (e *Engine) WireGuardKeys() (privateKey, publicKey string) {
+// GitSync returns the git sync instance, or nil if not started.
+func (e *Engine) GitSync() *GitSync {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.wgPriv, e.wgPub
+	return e.gitSync
 }
 
-// SigningKeys returns the ed25519 key pair.
-func (e *Engine) SigningKeys() (ed25519.PrivateKey, ed25519.PublicKey) {
+// WireGuardSync returns the WireGuard sync instance, or nil if not started.
+func (e *Engine) WireGuardSync() *WireGuardSync {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.wgSync
+}
+
+// SigningKey returns the node's ed25519 signing key pair.
+func (e *Engine) SigningKey() (ed25519.PrivateKey, ed25519.PublicKey) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.signingPriv, e.signingPub
 }
 
-// WireGuardManager returns the WireGuard manager (may be nil if not wired).
-func (e *Engine) WireGuardManager() *WireGuardManager {
+// IsRunning returns true if the engine is currently active.
+func (e *Engine) IsRunning() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.wgMgr
-}
-func generateClusterID() string {
-	return fmt.Sprintf("cluster-%s", hex.EncodeToString(generateRandomBytes(8)))
+	return e.running
 }
 
-// generateNodeID creates a unique node ID.
-func generateNodeID() string {
-	return hex.EncodeToString(generateRandomBytes(8))
+// loadKeys loads ed25519 signing keys from the local keys directory,
+// or generates a new key pair if none exist.
+func (e *Engine) loadKeys() error {
+	keysDir := defaultKeysDir()
+
+	if err := os.MkdirAll(keysDir, 0o700); err != nil {
+		return fmt.Errorf("engine: create keys dir: %w", err)
+	}
+
+	privPath := filepath.Join(keysDir, "signing_priv.ed25519")
+	pubPath := filepath.Join(keysDir, "signing_pub.ed25519")
+
+	// Try to load existing keys
+	privData, err := os.ReadFile(privPath)
+	if err == nil {
+		// Private key is 64 bytes (32-byte seed + 32-byte public key)
+		if len(privData) == 64 {
+			e.signingPriv = ed25519.NewKeyFromSeed(privData[:32])
+		} else {
+			e.logger.Warn("engine: corrupt existing private key (bad length), generating new")
+			goto generate
+		}
+		pubData, err2 := os.ReadFile(pubPath)
+		if err2 == nil {
+			if len(pubData) == ed25519.PublicKeySize {
+				e.signingPub = pubData
+			}
+		} else {
+			e.signingPub = e.signingPriv.Public().(ed25519.PublicKey)
+		}
+		e.logger.Info("engine: loaded existing signing keys",
+			"pubkey_prefix", fmt.Sprintf("%08x", xxhash.Sum64(e.signingPub)))
+		return nil
+	}
+
+generate:
+	// Generate new keys
+	e.logger.Info("engine: generating new signing keys")
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("engine: generate signing key: %w", err)
+	}
+
+	e.signingPriv = priv
+	e.signingPub = pub
+
+	// Persist keys (64-byte seed+pub format for private key)
+	_ = priv // priv is already a 64-byte PrivateKey (seed + pub concatenated)
+	if err := os.WriteFile(privPath, priv, 0o600); err != nil {
+		return fmt.Errorf("engine: write private key: %w", err)
+	}
+	pubBytes := pub
+	if err := os.WriteFile(pubPath, pubBytes, 0o600); err != nil {
+		return fmt.Errorf("engine: write public key: %w", err)
+	}
+
+	e.logger.Info("engine: generated and persisted new signing keys",
+		"pubkey_prefix", fmt.Sprintf("%08x", xxhash.Sum64(e.signingPub)))
+	return nil
 }
 
-// generateJoinKey creates a join key for cluster invitation.
-func generateJoinKey() []byte {
-	return generateRandomBytes(16)
+// defaultKeysDir returns the default path for cluster signing keys.
+func defaultKeysDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".meept", "cluster", "keys")
 }
 
-// generateRandomBytes generates n cryptographically random bytes.
-func generateRandomBytes(n int) []byte {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		panic(fmt.Sprintf("crypto/rand failed: %v", err))
-	}
-	return b
-}
-
-// generateWireGuardKeys generates a WireGuard key pair by shelling out to
-// `wg genkey` and piping the result into `wg pubkey`. This uses the system
-// WireGuard toolkit which implements correct Curve25519 derivation.
-func generateWireGuardKeys() (privateKey, publicKey string, err error) {
-	// Generate private key via `wg genkey`
-	cmd := exec.Command("wg", "genkey")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	privPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return "", "", fmt.Errorf("failed to run wg genkey: %w", err)
-	}
-
-	privBytes, err := io.ReadAll(io.LimitReader(privPipe, 64))
-	privPipe.Close()
-	if err != nil {
-		cmd.Wait()
-		return "", "", fmt.Errorf("failed to read wg genkey output: %w", err)
-	}
-
-	if waitErr := cmd.Wait(); waitErr != nil {
-		return "", "", fmt.Errorf("wg genkey failed: %w%s", waitErr, stderr.String())
-	}
-
-	privKey := strings.TrimSpace(string(privBytes))
-
-	// Derive public key via `wg pubkey`, piping the private key on stdin
-	pubCmd := exec.Command("wg", "pubkey")
-	pubStdin, err := pubCmd.StdinPipe()
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create stdin pipe for pubkey: %w", err)
-	}
-	pubOut, err := pubCmd.StdoutPipe()
-	if err != nil {
-		pubStdin.Close()
-		return "", "", fmt.Errorf("failed to create stdout pipe for pubkey: %w", err)
-	}
-	pubCmd.Stderr = &stderr
-
-	if err := pubCmd.Start(); err != nil {
-		pubStdin.Close()
-		return "", "", fmt.Errorf("failed to run wg pubkey: %w", err)
-	}
-
-	if _, err := pubStdin.Write([]byte(privKey + "\n")); err != nil {
-		pubStdin.Close()
-		return "", "", fmt.Errorf("failed to write private key to pubkey pipe: %w", err)
-	}
-	pubStdin.Close()
-
-	pubBytes, err := io.ReadAll(io.LimitReader(pubOut, 64))
-	pubOut.Close()
-	if err != nil {
-		pubCmd.Wait()
-		return "", "", fmt.Errorf("failed to read wg pubkey output: %w", err)
-	}
-
-	if waitErr := pubCmd.Wait(); waitErr != nil {
-		return "", "", fmt.Errorf("wg pubkey failed: %w%s", waitErr, stderr.String())
-	}
-
-	pubKey := strings.TrimSpace(string(pubBytes))
-
-	return privKey, pubKey, nil
-}
-
-// LoadKeysFromDir loads signing and WireGuard keys from the given directory.
-// Derives the WireGuard public key from the private key using `wg pubkey`.
-func LoadKeysFromDir(dir string) (signingPriv ed25519.PrivateKey, signingPub ed25519.PublicKey, wgPriv, wgPub string, err error) {
-	// Load signing key
-	signingKeyPath := filepath.Join(dir, "node_private_key")
-	signingData, err := os.ReadFile(signingKeyPath)
-	if err != nil {
-		return nil, nil, "", "", fmt.Errorf("failed to read signing key: %w", err)
-	}
-
-	signingPriv = ed25519.PrivateKey(signingData)
-	signingPub = signingPriv.Public().(ed25519.PublicKey)
-
-	// Load WireGuard private key
-	wgKeyPath := filepath.Join(dir, "wireguard_private_key")
-	wgData, err := os.ReadFile(wgKeyPath)
-	if err != nil {
-		return signingPriv, signingPub, "", "", fmt.Errorf("failed to read WireGuard key: %w", err)
-	}
-
-	wgPriv = strings.TrimSpace(string(wgData))
-
-	// Derive public key via `wg pubkey`
-	pubCmd := exec.Command("wg", "pubkey")
-	pubStdin, err := pubCmd.StdinPipe()
-	if err != nil {
-		return signingPriv, signingPub, wgPriv, "", fmt.Errorf("failed to create stdin pipe for pubkey: %w", err)
-	}
-	pubOut, err := pubCmd.StdoutPipe()
-	if err != nil {
-		pubStdin.Close()
-		return signingPriv, signingPub, wgPriv, "", fmt.Errorf("failed to create stdout pipe for pubkey: %w", err)
-	}
-
-	if _, err := pubStdin.Write([]byte(wgPriv + "\n")); err != nil {
-		pubStdin.Close()
-		return signingPriv, signingPub, wgPriv, "", fmt.Errorf("failed to write private key to pubkey pipe: %w", err)
-	}
-	pubStdin.Close()
-
-	pubBytes, err := io.ReadAll(io.LimitReader(pubOut, 64))
-	pubOut.Close()
-	if err != nil {
-		pubCmd.Wait()
-		return signingPriv, signingPub, wgPriv, "", fmt.Errorf("failed to read wg pubkey output: %w", err)
-	}
-
-	if err := pubCmd.Wait(); err != nil {
-		return signingPriv, signingPub, wgPriv, "", fmt.Errorf("wg pubkey failed: %w", err)
-	}
-
-	wgPub = strings.TrimSpace(string(pubBytes))
-
-	return signingPriv, signingPub, wgPriv, wgPub, nil
+// nodeIDFromPub derives a deterministic node ID from an ed25519 public key.
+func nodeIDFromPub(pub ed25519.PublicKey) string {
+	return fmt.Sprintf("node-%08x", xxhash.Sum64(pub))
 }

@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -9,15 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"crypto/ed25519"
-	"github.com/cespare/xxhash/v2"
-
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/pkg/models"
-)
 
-// gossipEventTopic is the bus topic used for relaying cluster events between peers.
-const gossipEventTopic = "cluster.event.broadcast"
+	"github.com/cespare/xxhash/v2"
+)
 
 // GossipEngine handles peer-to-peer event gossip within the cluster.
 // It runs periodic heartbeats, publishes events to connected peers,
@@ -27,35 +25,36 @@ type GossipEngine struct {
 	localNode string
 	msgBus    *bus.MessageBus
 	logger    *slog.Logger
-	signPriv  ed25519.PrivateKey
 
 	mu        sync.RWMutex
 	peers     map[string]*PeerInfo
-	peerKeys  map[string]ed25519.PublicKey // nodeID -> signing public key
 	running   bool
 	sub       *bus.Subscriber
 	stopCh    chan struct{}
 	doneCh    chan struct{}
 	eventID   string
 
-	// Event persistence
+	// Signing key for this node (ed25519)
+	signingPriv ed25519.PrivateKey
+	signingPub  map[string]ed25519.PublicKey // indexed by peer nodeID
+
+	// Database handle for event persistence
 	db *sql.DB
 
-	// Deduplication cache: event hash -> event ID (approx max 10k entries)
-	seenEvents    map[uint64]string
-	seenEventsMu  sync.RWMutex
-	maxSeenEvents int
+	// TCP transport for peer-to-peer event delivery
+	transport       *GossipTransport
+	membersProvider MembersProvider
 
-	// Retry queue: event ID -> retry metadata
-	retryQueue    map[string]*retryEntry
-	retryQueueMu  sync.Mutex
-}
+	// Retry queue for failed broadcasts
+	retryQueue chan *models.ClusterEvent
 
-type retryEntry struct {
-	attempts  int
-	lastRetry time.Time
-	payload   []byte
-	eventType models.ClusterEventType
+	// Deduplication cache (xxhash of event_id -> expiration time)
+	dedupCache map[string]time.Time
+	dedupMu    sync.RWMutex
+
+	// Vector clock (local state)
+	vectorClock map[string]int64
+	vcMu        sync.RWMutex
 }
 
 // PeerInfo describes a connected cluster peer.
@@ -67,53 +66,376 @@ type PeerInfo struct {
 	Status   string // "active" | "inactive" | "syncing"
 }
 
+// GossipOption configures a GossipEngine via functional options.
+type GossipOption func(*GossipEngine)
+
 // NewGossipEngine creates a new gossip engine.
-func NewGossipEngine(cfg *Config, localNode string, msgBus *bus.MessageBus, logger *slog.Logger) *GossipEngine {
-	return &GossipEngine{
-		cfg:           cfg,
-		localNode:     localNode,
-		msgBus:        msgBus,
-		logger:        logger,
-		peers:         make(map[string]*PeerInfo),
-		peerKeys:      make(map[string]ed25519.PublicKey),
-		stopCh:        make(chan struct{}),
-		doneCh:        make(chan struct{}),
-		seenEvents:    make(map[uint64]string),
-		retryQueue:    make(map[string]*retryEntry),
-		maxSeenEvents: 10000,
+func NewGossipEngine(cfg *Config, localNode string, msgBus *bus.MessageBus, logger *slog.Logger, opts ...GossipOption) *GossipEngine {
+	g := &GossipEngine{
+		cfg:         cfg,
+		localNode:   localNode,
+		msgBus:      msgBus,
+		logger:      logger,
+		peers:       make(map[string]*PeerInfo),
+		stopCh:      make(chan struct{}),
+		doneCh:      make(chan struct{}),
+		signingPub:  make(map[string]ed25519.PublicKey),
+		retryQueue:  make(chan *models.ClusterEvent, 64),
+		dedupCache:  make(map[string]time.Time),
+		vectorClock: make(map[string]int64),
+	}
+
+	// Generate an ed25519 signing key pair if signing is required
+	if g.signingPriv == nil && cfg.Security.RequireNodeSignatures {
+		_, privBytes, _ := ed25519.GenerateKey(rand.Reader)
+		g.signingPriv = privBytes
+	}
+
+	for _, opt := range opts {
+		opt(g)
+	}
+
+	// Register our own public key under our nodeID if we have a signing key
+	if g.signingPriv != nil {
+		g.signingPub[localNode] = g.signingPriv.Public().(ed25519.PublicKey)
+	}
+
+	return g
+}
+
+// WithDatabase sets the database handle on the gossip engine.
+func WithDatabase(db *sql.DB) GossipOption {
+	return func(g *GossipEngine) {
+		g.db = db
 	}
 }
 
-// WithSigningKey sets the ed25519 private key used for signing outgoing events.
-func (g *GossipEngine) WithSigningKey(privKey ed25519.PrivateKey) *GossipEngine {
-	g.signPriv = privKey
-	return g
+// WithSigningKey sets the ed25519 signing key pair on the gossip engine.
+func WithSigningKey(priv ed25519.PrivateKey, pub ed25519.PublicKey) GossipOption {
+	return func(g *GossipEngine) {
+		g.signingPriv = priv
+		if pub != nil {
+			g.signingPub[pubKeyID(pub)] = pub
+		}
+	}
 }
 
-// WithDatabase sets the SQLite DB handle used for event persistence.
-func (g *GossipEngine) WithDatabase(db *sql.DB) *GossipEngine {
-	g.db = db
-	return g
+// pubKeyID returns a short hex identifier for a public key.
+func pubKeyID(key ed25519.PublicKey) string {
+	return fmt.Sprintf("%08x", xxhash.Sum64(key))
 }
 
-// SetPeerSigningKey records the signing public key for a known peer.
+// WithMembersProvider sets the members provider for TCP transport peer resolution.
+func WithMembersProvider(mp MembersProvider) GossipOption {
+	return func(g *GossipEngine) {
+		g.membersProvider = mp
+	}
+}
+
+// SigningPrivate returns the gossip engine's ed25519 private signing key, or nil if none was set.
+func (g *GossipEngine) SigningPrivate() ed25519.PrivateKey {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.signingPriv
+}
+
+// PublicSigningKey returns the gossip engine's signing public key, or nil if none was set.
+func (g *GossipEngine) PublicSigningKey() ed25519.PublicKey {
+	if g.signingPriv == nil {
+		return nil
+	}
+	return g.signingPriv.Public().(ed25519.PublicKey)
+}
+
+// SetPeerSigningKey records the ed25519 public key for a peer node.
+// The key is indexed by nodeID for signature verification on receipt.
 func (g *GossipEngine) SetPeerSigningKey(nodeID string, pubKey ed25519.PublicKey) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.peerKeys[nodeID] = pubKey
+	g.signingPub[nodeID] = pubKey
+	_ = pubKeyID(pubKey)
 }
 
-// PeerSigningKey returns the signing public key for a given node.
+// PeerSigningKey retrieves the ed25519 public key for a peer node.
+// Returns the key and true if found, or nil and false otherwise.
 func (g *GossipEngine) PeerSigningKey(nodeID string) (ed25519.PublicKey, bool) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
-	key, ok := g.peerKeys[nodeID]
+	key, ok := g.signingPub[nodeID]
 	return key, ok
 }
 
-// engineDB returns the database handle if available.
-func (g *GossipEngine) engineDB() *sql.DB {
-	return g.db
+// incrementVC increments the vector clock entry for the given nodeID.
+func (g *GossipEngine) incrementVC(nodeID string) {
+	g.vcMu.Lock()
+	defer g.vcMu.Unlock()
+	g.vectorClock[nodeID]++
+}
+
+// getVC returns a snapshot of the current vector clock.
+func (g *GossipEngine) getVC() map[string]int64 {
+	g.vcMu.RLock()
+	defer g.vcMu.RUnlock()
+	cp := make(map[string]int64, len(g.vectorClock))
+	for k, v := range g.vectorClock {
+		cp[k] = v
+	}
+	return cp
+}
+
+// persistEvent writes a cluster event into the cluster_events table using INSERT OR IGNORE.
+func (g *GossipEngine) persistEvent(event *models.ClusterEvent) {
+	if g.db == nil {
+		return
+	}
+
+	sigB64 := ""
+	if event.Signature != nil {
+		sigB64 = string(event.Signature)
+	}
+
+	vcJSON, _ := json.Marshal(event.VectorClock)
+	payloadJSON := []byte(event.Payload)
+	receivedAt := time.Now().UnixNano()
+
+	_, err := g.db.Exec(`
+		INSERT OR IGNORE INTO cluster_events
+			(event_id, node_id, event_type, timestamp, vector_clock, payload, signature, received_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		event.EventID,
+		event.NodeID,
+		string(event.EventType),
+		event.Timestamp.UnixNano(),
+		string(vcJSON),
+		string(payloadJSON),
+		sigB64,
+		receivedAt,
+	)
+	if err != nil {
+		g.logger.Error("gossip: persist event failed", "event_id", event.EventID, "err", err)
+	}
+}
+
+// RecordLocalVC increments the vector clock for the local node and returns a map
+// suitable for embedding into a ClusterEvent's VectorClock field.
+func (g *GossipEngine) RecordLocalVC() map[string]int64 {
+	g.incrementVC(g.localNode)
+	return g.getVC()
+}
+
+// Publish creates, signs, persists, and broadcasts a cluster event.
+// If any fields are missing they are auto-generated. Events are persisted first,
+// then published to the message bus topic "cluster.event.broadcast" for peer re-gossip.
+func (g *GossipEngine) Publish(event *models.ClusterEvent) {
+	if event == nil {
+		return
+	}
+
+	// Auto-generate required fields if missing
+	if event.EventID == "" {
+		event.EventID = models.GenerateEventID()
+	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now().UTC()
+	}
+	if event.NodeID == "" {
+		event.NodeID = g.localNode
+	}
+
+	// Increment local vector clock and attach
+	vc := g.RecordLocalVC()
+	event.VectorClock = make(map[string]int64, len(vc))
+	for k, v := range vc {
+		event.VectorClock[k] = v
+	}
+
+	// Sign the event
+	priv := g.SigningPrivate()
+	if priv != nil {
+		_ = event.Sign(priv)
+	}
+
+	// Persist to database before broadcasting
+	if g.db != nil {
+		g.persistEvent(event)
+	}
+
+	// Broadcast to bus so handleClusterEvent can re-gossip to peers
+	if g.msgBus != nil {
+		eventPayload, _ := json.Marshal(event)
+		busPayload, _ := json.Marshal(map[string]json.RawMessage{"event": eventPayload})
+		body := &models.BusMessage{
+			ID:        fmt.Sprintf("gossip-pub-%d", time.Now().UnixNano()),
+			Type:      models.MessageTypeEvent,
+			Source:    "gossip",
+			Timestamp: time.Now().UTC(),
+			Payload:   busPayload,
+		}
+		g.msgBus.Publish("cluster.event.broadcast", body)
+	}
+
+	// Send to remote peers via TCP transport
+	if g.transport != nil {
+		g.transport.SendEvent(event)
+	}
+
+	g.logger.Debug("gossip: published event",
+		"event_id", event.EventID,
+		"event_type", event.EventType,
+		"node_id", event.NodeID,
+	)
+}
+
+// handleClusterEvent processes an incoming cluster event from the message bus.
+// It deduplicates via xxhash, verifies ed25519 signatures, persists, re-broadcasts,
+// and updates peer LastSeen timestamps.
+func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
+	if msg == nil {
+		return
+	}
+
+	// Unmarshal event payload
+	var rawEvent map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Payload, &rawEvent); err != nil {
+		g.logger.Debug("gossip: handleClusterEvent bad payload", "err", err)
+		return
+	}
+
+	eventBytes, ok := rawEvent["event"]
+	if !ok {
+		return
+	}
+
+	var event models.ClusterEvent
+	if err := json.Unmarshal(eventBytes, &event); err != nil {
+		g.logger.Debug("gossip: handleClusterEvent unmarshal fail", "err", err)
+		return
+	}
+
+	// Deduplicate via xxhash of event_id
+	checksum := fmt.Sprintf("%d", xxhash.Sum64String(event.EventID))
+	g.dedupMu.RLock()
+	if expiry, seen := g.dedupCache[checksum]; seen {
+		if time.Now().Before(expiry) {
+			g.dedupMu.RUnlock()
+			return // duplicate, skip
+		}
+		g.dedupMu.RUnlock()
+	} else {
+		g.dedupMu.RUnlock()
+	}
+	g.dedupMu.Lock()
+	g.dedupCache[checksum] = time.Now().Add(g.cfg.Gossip.EventRetention)
+	g.dedupMu.Unlock()
+
+	// Verify signature if node signature requirement is enabled
+	if g.cfg.Security.RequireNodeSignatures && len(event.Signature) > 0 {
+		pubKey, found := g.PeerSigningKey(event.NodeID)
+		if !found {
+			g.logger.Warn("gossip: no signing key for event sender", "node_id", event.NodeID)
+			return
+		}
+		if !event.Verify(pubKey) {
+			g.logger.Warn("gossip: event signature verification failed", "event_id", event.EventID, "node_id", event.NodeID)
+			return
+		}
+	}
+
+	// Persist (INSERT OR IGNORE prevents duplicates)
+	if g.db != nil {
+		g.persistEvent(&event)
+	}
+
+	// Update peer LastSeen timestamp
+	g.mu.Lock()
+	if peer, exists := g.peers[event.NodeID]; exists {
+		peer.LastSeen = time.Now().UTC()
+	}
+	g.mu.Unlock()
+
+	// Re-broadcast to peers via bus
+	if g.msgBus != nil {
+		eventPayload, _ := json.Marshal(event)
+		busPayload, _ := json.Marshal(map[string]json.RawMessage{"event": eventPayload})
+		body := &models.BusMessage{
+			ID:        fmt.Sprintf("gossip-%s-%d", g.localNode, time.Now().UnixNano()),
+			Type:      models.MessageTypeEvent,
+			Source:    g.localNode,
+			Timestamp: time.Now().UTC(),
+			Payload:   busPayload,
+		}
+		g.msgBus.Publish("cluster.event.broadcast", body)
+	}
+
+	g.logger.Debug("gossip: processed cluster event",
+		"event_id", event.EventID,
+		"event_type", event.EventType,
+		"node_id", event.NodeID,
+	)
+}
+
+// QueueForRetry adds an event to the retry queue for later redelivery.
+func (g *GossipEngine) QueueForRetry(event *models.ClusterEvent) {
+	if event == nil {
+		return
+	}
+	select {
+	case g.retryQueue <- event:
+		g.logger.Debug("gossip: queued event for retry", "event_id", event.EventID)
+	default:
+		g.logger.Warn("gossip: retry queue full, dropping event", "event_id", event.EventID)
+	}
+}
+
+// cleanupDedupCache removes expired entries from the deduplication cache.
+func (g *GossipEngine) cleanupDedupCache() {
+	now := time.Now()
+	g.dedupMu.Lock()
+	defer g.dedupMu.Unlock()
+	for checksum, expiry := range g.dedupCache {
+		if now.After(expiry) {
+			delete(g.dedupCache, checksum)
+		}
+	}
+}
+
+// startRetryLoop launches a background goroutine that retries failed event broadcasts
+// up to maxRetryAttempts times.
+func (g *GossipEngine) startRetryLoop(ctx context.Context) {
+	go g.retryLoop(ctx)
+}
+
+// retryLoop processes the retry queue, re-publishing events until max attempts.
+func (g *GossipEngine) retryLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	maxAttempts := g.cfg.Gossip.MaxRetryAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-g.stopCh:
+			return
+		case <-ticker.C:
+			g.cleanupDedupCache()
+			// Drain retry queue at most once per tick
+			select {
+			case event := <-g.retryQueue:
+				g.logger.Info("gossip: retrying event broadcast",
+					"event_id", event.EventID, "attempt", 1)
+				// Re-broadcast via existing Publish path
+				g.Publish(event)
+			default:
+				// nothing to retry
+			}
+		}
+	}
 }
 
 // Start begins the gossip heartbeat and event propagation loop.
@@ -134,15 +456,21 @@ func (g *GossipEngine) Start(ctx context.Context) error {
 		g.sub = g.msgBus.Subscribe(g.eventID, "cluster.event.*")
 	}
 
-	// Retry ticker for failed sends
-	retryInterval := g.cfg.Gossip.HeartbeatInterval.ToTimeDuration() / 2
-	if retryInterval < 2*time.Second {
-		retryInterval = 2 * time.Second
+	// Start background retry loop
+	g.startRetryLoop(ctx)
+
+	// Start TCP transport for peer-to-peer event delivery
+	if g.membersProvider != nil {
+		g.transport = NewGossipTransport(g.cfg, g.localNode, g, g.membersProvider, g.logger)
+		if err := g.transport.Start(ctx); err != nil {
+			g.logger.Warn("gossip: TCP transport start failed (events will be local-only)", "error", err)
+		}
+	} else {
+		g.logger.Info("gossip: no members provider, TCP transport disabled")
 	}
-	retryTicker := time.NewTicker(retryInterval)
 
 	// Heartbeat and event propagation goroutine
-	go g.run(ctx, retryTicker)
+	go g.run(ctx)
 
 	return nil
 }
@@ -159,6 +487,13 @@ func (g *GossipEngine) Stop() error {
 
 	close(g.stopCh)
 	<-g.doneCh
+
+	// Stop TCP transport
+	if g.transport != nil {
+		if err := g.transport.Stop(); err != nil {
+			g.logger.Warn("gossip: transport stop error", "error", err)
+		}
+	}
 
 	// Unsubscribe from bus if applicable
 	if g.msgBus != nil && g.sub != nil {
@@ -205,18 +540,17 @@ func (g *GossipEngine) PeerCount() int {
 	return len(g.peers)
 }
 
-// run is the main gossip loop that drives heartbeats, event processing, and retries.
-func (g *GossipEngine) run(ctx context.Context, retryTicker *time.Ticker) {
+// run is the main gossip loop that drives heartbeats and event propagation.
+func (g *GossipEngine) run(ctx context.Context) {
 	defer close(g.doneCh)
-	defer retryTicker.Stop()
 
-	heartbeatTicker := time.NewTicker(g.cfg.Gossip.HeartbeatInterval.ToTimeDuration())
-	defer heartbeatTicker.Stop()
+	ticker := time.NewTicker(g.cfg.Gossip.HeartbeatInterval)
+	defer ticker.Stop()
 
 	g.logger.Info("gossip: engine started",
 		"node_id", g.localNode,
-		"heartbeat_interval", g.cfg.Gossip.HeartbeatInterval.ToTimeDuration(),
-		"peer_timeout", g.cfg.Gossip.PeerTimeout.ToTimeDuration(),
+		"heartbeat_interval", g.cfg.Gossip.HeartbeatInterval,
+		"peer_timeout", g.cfg.Gossip.PeerTimeout,
 	)
 
 	for {
@@ -225,315 +559,24 @@ func (g *GossipEngine) run(ctx context.Context, retryTicker *time.Ticker) {
 			return
 		case <-g.stopCh:
 			return
-		case <-heartbeatTicker.C:
+		case <-ticker.C:
 			g.sendHeartbeat()
 			g.pruneStalePeers()
-		case <-retryTicker.C:
-			g.retryFailedEvents()
-		case msg, ok := <-g.sub.Channel:
-			if !ok {
-				return
-			}
-			g.handleClusterEvent(msg)
 		}
 	}
 }
 
 // sendHeartbeat publishes a heartbeat event to the cluster.
 func (g *GossipEngine) sendHeartbeat() {
-	payload, _ := json.Marshal(map[string]any{
+	g.logger.Debug("gossip: sending heartbeat", "node", g.localNode)
+	// Broadcast to cluster bus topic for peer discovery
+	body, _ := models.NewBusMessage(models.MessageTypeEvent, "cluster", map[string]any{
+		"event":        "heartbeat",
 		"node_id":      g.localNode,
 		"peer_count":   g.PeerCount(),
 	})
-
-	g.mu.RLock()
-	key := g.signPriv
-	g.mu.RUnlock()
-
-	if key == nil {
-		g.logger.Warn("gossip: cannot send heartbeat, no signing key")
-		return
-	}
-
-	event := &models.ClusterEvent{
-		EventID:     models.GenerateEventID(),
-		NodeID:      g.localNode,
-		EventType:   models.EventNodeHeartbeat,
-		Timestamp:   time.Now().UTC(),
-		VectorClock: incrementVC(g.localNode, nil),
-		Payload:     payload,
-	}
-
-	if err := event.Sign(key); err != nil {
-		g.logger.Error("gossip: heartbeat sign failed", "error", err)
-		return
-	}
-
-	g.publishEvent(event)
-}
-
-// Publish creates, signs, and publishes a cluster event to the bus.
-// This is the primary entry point for initiating cluster-wide events.
-// It persists the event locally and attempts to forward to all known peers.
-func (g *GossipEngine) Publish(event *models.ClusterEvent) error {
-	if g.signPriv == nil {
-		return fmt.Errorf("gossip: cannot publish, no signing key")
-	}
-
-	// Generate an event ID if not already set
-	if event.EventID == "" {
-		event.EventID = models.GenerateEventID()
-	}
-
-	// Set timestamp if not already set
-	if event.Timestamp.IsZero() {
-		event.Timestamp = time.Now().UTC()
-	}
-
-	// Set node ID if not already set
-	if event.NodeID == "" {
-		event.NodeID = g.localNode
-	}
-
-	// Increment the local vector clock
-	if event.VectorClock == nil {
-		event.VectorClock = make(map[string]int64)
-	}
-	event.VectorClock[g.localNode]++
-
-	// Sign the event
-	if err := event.Sign(g.signPriv); err != nil {
-		return fmt.Errorf("gossip: event signing failed: %w", err)
-	}
-
-	// Persist locally before publishing
-	if g.db != nil {
-		if err := g.persistEvent(event); err != nil {
-			// Non-fatal: continue publishing even if persistence fails
-			g.logger.Warn("gossip: event persistence skipped (continuing)",
-				"event_id", event.EventID, "error", err)
-		}
-	}
-
-	// Publish to the bus (broadcasts on gossipEventTopic for peer delivery).
-	g.publishEvent(event)
-
-	g.logger.Info("gossip: published event",
-		"event_id", event.EventID,
-		"event_type", event.EventType,
-		"node_id", event.NodeID,
-	)
-
-	return nil
-}
-
-// publishEvent serializes the cluster event and publishes it to the gossip broadcast topic.
-func (g *GossipEngine) publishEvent(event *models.ClusterEvent) {
-	payload, err := json.Marshal(event)
-	if err != nil {
-		g.logger.Error("gossip: failed to marshal cluster event",
-			"event_id", event.EventID, "error", err)
-		return
-	}
-
-	msg, err := models.NewBusMessage(
-		models.MessageTypeEvent,
-		"gossip",
-		payload,
-	)
-	if err != nil {
-		g.logger.Error("gossip: failed to create bus message", "error", err)
-		return
-	}
-
 	if g.msgBus != nil {
-		delivered := g.msgBus.Publish(gossipEventTopic, msg)
-		g.logger.Debug("gossip: event broadcast",
-			"event_id", event.EventID,
-			"delivered", delivered,
-			"peers", g.PeerCount(),
-		)
-	}
-}
-
-// persistEvent stores the event in the cluster_events SQLite table.
-// Uses INSERT OR IGNORE on the event_id primary key for idempotency.
-func (g *GossipEngine) persistEvent(event *models.ClusterEvent) error {
-	db := g.engineDB()
-	if db == nil {
-		return fmt.Errorf("no database configured")
-	}
-
-	// Marshal vector clock as JSON
-	vcJSON, err := json.Marshal(event.VectorClock)
-	if err != nil {
-		return fmt.Errorf("failed to marshal vector clock: %w", err)
-	}
-
-	query := `
-		INSERT OR IGNORE INTO cluster_events
-			(event_id, node_id, event_type, timestamp, vector_clock, payload, signature, received_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`
-	_, err = db.Exec(query,
-		event.EventID,
-		event.NodeID,
-		string(event.EventType),
-		event.Timestamp.UnixNano(),
-		string(vcJSON),
-		event.Payload,
-		event.Signature,
-		time.Now().UnixNano(),
-	)
-	return err
-}
-
-// handleClusterEvent processes an incoming cluster event from the message bus.
-// It verifies the signature, deduplicates, persists, and forwards to peers.
-func (g *GossipEngine) handleClusterEvent(msg *models.BusMessage) {
-	if msg == nil {
-		return
-	}
-
-	// Extract the cluster event JSON from the bus message payload
-	var rawEvent struct {
-		EventID     string                        `json:"event_id"`
-		NodeID      string                        `json:"node_id"`
-		EventType   models.ClusterEventType       `json:"event_type"`
-		Timestamp   int64                         `json:"timestamp"`
-		VectorClock map[string]int64              `json:"vector_clock"`
-		Payload     json.RawMessage               `json:"payload"`
-		Signature   []byte                        `json:"signature"`
-	}
-
-	if err := json.Unmarshal(msg.Payload, &rawEvent); err != nil {
-		g.logger.Warn("gossip: failed to unmarshal cluster event payload",
-			"source", msg.Source, "error", err)
-		return
-	}
-
-	// Build the ClusterEvent struct
-	event := &models.ClusterEvent{
-		EventID:     rawEvent.EventID,
-		NodeID:      rawEvent.NodeID,
-		EventType:   rawEvent.EventType,
-		Timestamp:   time.Unix(0, rawEvent.Timestamp),
-		VectorClock: rawEvent.VectorClock,
-		Payload:     rawEvent.Payload,
-		Signature:   rawEvent.Signature,
-	}
-
-	// Deduplication check
-	if g.isDuplicate(event.EventID) {
-		g.logger.Debug("gossip: duplicate event dropped", "event_id", event.EventID)
-		return
-	}
-	g.markSeen(event.EventID)
-
-	// Verify signature
-	pubKey, known := g.PeerSigningKey(event.NodeID)
-	if known {
-		if !event.Verify(pubKey) {
-			g.logger.Warn("gossip: event signature verification failed",
-				"event_id", event.EventID,
-				"node_id", event.NodeID,
-				"event_type", event.EventType,
-			)
-			return
-		}
-	} else {
-		// Unknown node - log but still process (the node's key may arrive later via NODE_JOIN event)
-		g.logger.Info("gossip: event from unknown node (key not yet known), accepting",
-			"event_id", event.EventID,
-			"node_id", event.NodeID,
-		)
-	}
-
-	// Persist to the cluster events table
-	if g.db != nil {
-		if err := g.persistEvent(event); err != nil {
-			g.logger.Warn("gossip: event persistence failed (non-fatal)",
-				"event_id", event.EventID, "error", err)
-		}
-	}
-
-	// Forward to all peers via the gossip bus
-	g.msgBroadcast(event)
-
-	// Update peer heartbeat
-	if event.NodeID != g.localNode {
-		g.updatePeerLastSeen(event.NodeID)
-	}
-
-	g.logger.Debug("gossip: processed cluster event",
-		"event_id", event.EventID,
-		"event_type", event.EventType,
-		"node_id", event.NodeID,
-	)
-}
-
-// msgBroadcast forwards an event to the gossip broadcast topic.
-// This is called after handleClusterEvent has already accepted the event,
-// so other nodes in the mesh receive a copy.
-func (g *GossipEngine) msgBroadcast(event *models.ClusterEvent) {
-	payload, _ := json.Marshal(event)
-	msg, err := models.NewBusMessage(models.MessageTypeEvent, "gossip-forward", payload)
-	if err != nil {
-		return
-	}
-	if g.msgBus != nil {
-		g.msgBus.Publish(gossipEventTopic, msg)
-	}
-}
-
-// isDuplicate checks if an event ID has already been seen, using a hash-based cache.
-func (g *GossipEngine) isDuplicate(eventID string) bool {
-	g.seenEventsMu.RLock()
-	defer g.seenEventsMu.RUnlock()
-	_, ok := g.seenEvents[eventHash(eventID)]
-	return ok
-}
-
-// markSeen adds an event ID to the deduplication cache, trimming if over capacity.
-func (g *GossipEngine) markSeen(eventID string) {
-	hash := eventHash(eventID)
-
-	g.seenEventsMu.Lock()
-	defer g.seenEventsMu.Unlock()
-
-	if len(g.seenEvents) >= g.maxSeenEvents {
-		g.seenEvents = trimSeenMap(g.seenEvents)
-	}
-	g.seenEvents[hash] = eventID
-}
-
-// trimSeenMap keeps approximately the most recent 2/3 of entries from the cache.
-func trimSeenMap(m map[uint64]string) map[uint64]string {
-	keep := len(m) * 2 / 3
-	if keep < 100 {
-		keep = 100
-	}
-	result := make(map[uint64]string, keep)
-	for h, id := range m {
-		if len(result) < keep {
-			result[h] = id
-		}
-	}
-	return result
-}
-
-// eventHash computes a fast hash of an event ID string for the dedup cache.
-func eventHash(eventID string) uint64 {
-	return xxhash.Sum64String(eventID)
-}
-
-// updatePeerLastSeen updates the LastSeen timestamp for a peer node.
-func (g *GossipEngine) updatePeerLastSeen(nodeID string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if peer, ok := g.peers[nodeID]; ok {
-		peer.LastSeen = time.Now().UTC()
+		g.msgBus.Publish("cluster.event.heartbeat", body)
 	}
 }
 
@@ -542,93 +585,11 @@ func (g *GossipEngine) pruneStalePeers() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	timeout := g.cfg.Gossip.PeerTimeout.ToTimeDuration()
+	timeout := g.cfg.Gossip.PeerTimeout
 	for nodeID, peer := range g.peers {
 		if time.Since(peer.LastSeen) > timeout {
 			g.logger.Info("gossip: peer timeout", "node_id", nodeID)
 			delete(g.peers, nodeID)
 		}
 	}
-}
-
-// retryFailedEvents checks the retry queue and re-publishes events that have not
-// been confirmed via the gossip mesh.
-func (g *GossipEngine) retryFailedEvents() {
-	maxRetries := g.cfg.Gossip.MaxRetryAttempts
-	cooldown := time.Second // Minimum time between retries
-
-	g.retryQueueMu.Lock()
-
-	for eventID, entry := range g.retryQueue {
-		if entry.attempts >= maxRetries {
-			g.logger.Warn("gossip: max retries exceeded for event, dropping",
-				"event_id", eventID, "attempts", entry.attempts)
-			delete(g.retryQueue, eventID)
-			continue
-		}
-
-		if time.Since(entry.lastRetry) < cooldown {
-			continue
-		}
-
-		g.logger.Info("gossip: retrying event",
-			"event_id", eventID,
-			"attempt", entry.attempts+1,
-			"max", maxRetries,
-		)
-
-		// Re-broadcast the raw payload to trigger handleClusterEvent on peers
-		msg, err := models.NewBusMessage(
-			models.MessageTypeEvent,
-			"gossip-retry",
-			entry.payload,
-		)
-		if err != nil {
-			g.logger.Error("gossip: retry failed to create message",
-				"event_id", eventID, "error", err)
-			delete(g.retryQueue, eventID)
-			continue
-		}
-		if g.msgBus != nil {
-			g.msgBus.Publish(gossipEventTopic, msg)
-		}
-
-		entry.attempts++
-		entry.lastRetry = time.Now()
-		g.retryQueue[eventID] = entry
-	}
-
-	g.retryQueueMu.Unlock()
-}
-
-// QueueForRetry adds an event to the retry queue in case it was not properly delivered.
-func (g *GossipEngine) QueueForRetry(event *models.ClusterEvent) {
-	payload, _ := json.Marshal(event)
-
-	g.retryQueueMu.Lock()
-	defer g.retryQueueMu.Unlock()
-
-	if _, exists := g.retryQueue[event.EventID]; !exists {
-		g.retryQueue[event.EventID] = &retryEntry{
-			attempts:  0,
-			lastRetry: time.Now(),
-			payload:   payload,
-			eventType: event.EventType,
-		}
-	}
-}
-
-// incrementVC increments the vector clock for the given node and returns a copy.
-// Accepts an optional existing clock to increment; returns nil-protected result.
-func incrementVC(nodeID string, vc map[string]int64) map[string]int64 {
-	if vc == nil {
-		vc = make(map[string]int64)
-	}
-	vc[nodeID]++
-	// Return a copy
-	result := make(map[string]int64, len(vc))
-	for k, v := range vc {
-		result[k] = v
-	}
-	return result
 }

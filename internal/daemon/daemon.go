@@ -244,6 +244,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	var clusterCfg *cluster.Config
 	var clusterEngine *cluster.GossipEngine
 	var clusterGitSync *cluster.GitSync
+	var clusterWG *cluster.WireGuardSync
 	var clusterMQ *queue.ClusterQueue
 
 	cfgPath := cluster.DefaultClusterConfigPath()
@@ -255,79 +256,55 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			"node_id", clusterCfg.NodeID,
 		)
 
-		// Create gossip engine if we have a message bus.
+		// Create gossip engine if we have a message bus
 		if msgBus != nil {
 			localNodeID := clusterCfg.NodeID
 			if localNodeID == "" {
 				localNodeID = "local"
 			}
 			clusterEngine = cluster.NewGossipEngine(clusterCfg, localNodeID, msgBus, logger)
-
-			// Wire the job queue's SQLite DB into the gossip engine for event persistence.
-			if clusterEngine != nil {
-				if db := getQueueDB(components); db != nil {
-					clusterEngine.WithDatabase(db)
-
-					// Load peer signing keys from the cluster_members table so
-					// incoming gossip events can be verified before processing.
-					if components != nil && components.Queue != nil {
-						if pq, ok := components.Queue.(*queue.PersistentQueue); ok {
-							members, err := pq.Store().GetClusterMembers()
-							if err != nil {
-								logger.Debug("cluster: failed to read cluster_members table", "error", err)
-							} else {
-								for _, m := range members {
-									if m.NodeID != localNodeID && len(m.SigningPub) == ed25519.PublicKeySize {
-										clusterEngine.SetPeerSigningKey(m.NodeID, m.SigningPub)
-									}
-								}
-								logger.Info("cluster: loaded peer signing keys from cluster_members",
-									"peer_count", len(members))
-							}
-						}
-					}
-				}
-			}
 		}
 
-		// Create cluster-aware queue wrapping the existing queue.
+		// Create git sync for cluster membership registry
+		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
+		clusterGitSync = cluster.NewGitSync(clusterCfg, clusterCfg, gitRepoPath, logger)
+
+		// Create WireGuard sync for mesh networking (best-effort; non-fatal on macOS)
+		clusterWG = cluster.NewWireGuardSync(clusterCfg, clusterCfg, gitRepoPath, logger)
+
+		// Create cluster-aware queue wrapping the existing queue
 		if components != nil && components.Queue != nil {
-			clusterNodeID := clusterCfg.NodeID
-			if clusterNodeID == "" {
-				clusterNodeID = "local"
+			localNodeID := clusterCfg.NodeID
+			if localNodeID == "" {
+				localNodeID = "local"
 			}
 			cqConfig := queue.ClusterQueueConfig{
-				DefaultClaimTimeout:     clusterCfg.Queue.DefaultClaimTimeout.ToTimeDuration(),
-				NodeReachabilityTimeout: clusterCfg.Queue.NodeReachabilityTimeout.ToTimeDuration(),
+				DefaultClaimTimeout:     clusterCfg.Gossip.HeartbeatInterval,
+				NodeReachabilityTimeout: clusterCfg.Gossip.PeerTimeout,
 				FullPayloadReplication:  false,
 			}
-			clusterMQ = queue.NewClusterQueue(components.Queue, nil, clusterNodeID, logger, cqConfig)
+			var queueStore *queue.Store
+			if pq, ok := components.Queue.(*queue.PersistentQueue); ok {
+				queueStore = pq.Store()
+			}
+			clusterMQ = queue.NewClusterQueue(components.Queue, queueStore, localNodeID, logger, cqConfig)
 		}
 	} else if err != nil {
 		logger.Debug("cluster config not found, cluster features disabled", "path", cfgPath, "error", err)
 	}
 
-	// Initialize WireGuard manager for cluster mesh
-	var clusterWG *cluster.WireGuardManager
-	if clusterCfg != nil {
-		wgConfigPath := filepath.Join(cfg.StateDir, "cluster", "wg0.conf")
-		iface := clusterCfg.Network.Interface
-		if iface == "" {
-			iface = "wg0"
-		}
-		wgMgr, err := cluster.NewWireGuardManager(wgConfigPath, iface)
-		if err != nil {
-			logger.Warn("failed to create WireGuard manager", "error", err)
-		} else {
-			clusterWG = wgMgr
-			logger.Info("cluster WireGuard manager initialized", "config", wgConfigPath, "interface", iface)
-		}
+	// Initialize WireGuard sync for cluster mesh
+	var clusterWireGuard *cluster.WireGuardSync
+	if clusterCfg != nil && clusterGitSync != nil {
+		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
+		clusterWireGuard = cluster.NewWireGuardSync(clusterCfg, clusterCfg, gitRepoPath, logger)
 	}
 
 	// Register cluster RPC handlers if RPC server is available
 	if rpcServer != nil && (clusterEngine != nil || clusterCfg != nil) {
 		clusterHandler := rpc.NewClusterHandler(clusterEngine, clusterGitSync, clusterCfg)
 		clusterHandler.SetClusterQueue(clusterMQ)
+		clusterHandler.SetStore(queueStore)
 		clusterHandler.RegisterClusterMethods(rpcServer)
 		logger.Info("cluster RPC handlers registered")
 	}
@@ -353,10 +330,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		}
 	}
 
-	// Wire WireGuard manager into components
-	if clusterWG != nil {
+	// Wire WireGuard sync into components
+	if clusterWireGuard != nil {
 		if components != nil {
-			components.ClusterWireGuard = clusterWG
+			components.ClusterWireGuard = clusterWireGuard
 		}
 	}
 
@@ -667,6 +644,25 @@ func (d *Daemon) Run(ctx context.Context) error {
 		)
 	}
 
+	// Start cluster components (gossip engine, git sync)
+	if d.components != nil && d.components.ClusterEngine != nil {
+		if err := d.components.ClusterEngine.Start(ctx); err != nil {
+			d.logger.Error("Failed to start gossip engine", "error", err)
+		}
+	}
+	if d.components != nil && d.components.ClusterGitSync != nil {
+		if err := d.components.ClusterGitSync.Start(ctx); err != nil {
+			d.logger.Error("Failed to start git sync", "error", err)
+		}
+	}
+
+	// Start WireGuard sync (best-effort; non-fatal on macOS where wg tools are unavailable)
+	if d.components != nil && d.components.ClusterWireGuard != nil {
+		if err := d.components.ClusterWireGuard.Start(ctx); err != nil {
+			d.logger.Warn("Failed to start WireGuard sync, continuing without it", "error", err)
+		}
+	}
+
 	// Start local LLM runtimes in the background so the daemon reaches
 	// "running" status without blocking on potentially slow model loading.
 	if d.components != nil && d.components.RuntimeManager != nil {
@@ -825,7 +821,7 @@ func (d *Daemon) shutdown() error {
 		}
 	}
 
-	// Stop cluster components (gossip engine, git sync, cluster queue)
+	// Stop cluster components (gossip engine, git sync, wireguard, cluster queue)
 	if d.components != nil && d.components.ClusterEngine != nil {
 		if err := d.components.ClusterEngine.Stop(); err != nil {
 			d.logger.Error("Failed to stop gossip engine", "error", err)
@@ -834,6 +830,11 @@ func (d *Daemon) shutdown() error {
 	if d.components != nil && d.components.ClusterGitSync != nil {
 		if err := d.components.ClusterGitSync.Stop(); err != nil {
 			d.logger.Error("Failed to stop git sync", "error", err)
+		}
+	}
+	if d.components != nil && d.components.ClusterWireGuard != nil {
+		if err := d.components.ClusterWireGuard.Stop(); err != nil {
+			d.logger.Warn("Failed to stop WireGuard sync", "error", err)
 		}
 	}
 	if d.components != nil && d.components.ClusterQueue != nil {

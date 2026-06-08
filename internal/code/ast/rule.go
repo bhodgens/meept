@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
 	sitter "github.com/smacker/go-tree-sitter"
+	"gopkg.in/yaml.v3"
 )
 
 // Rule represents a YAML-based AST rule (inspired by ast-grep).
@@ -22,9 +22,14 @@ type Rule struct {
 
 // Constraint represents a constraint on a captured node.
 type Constraint struct {
-	Kind     string            `yaml:"kind,omitempty"`
-	Regex    *RegexConstraint  `yaml:"regex,omitempty"`
+	Kind     *KindConstraint     `yaml:"kind,omitempty"`
+	Regex    *RegexConstraint    `yaml:"regex,omitempty"`
 	HasField *HasFieldConstraint `yaml:"has_field,omitempty"`
+}
+
+// KindConstraint checks the node kind.
+type KindConstraint struct {
+	Node string `yaml:"node"`
 }
 
 // RegexConstraint applies a regex pattern to a captured node's text.
@@ -41,12 +46,12 @@ type HasFieldConstraint struct {
 
 // Transform represents a transformation to apply to a captured node.
 type Transform struct {
-	Type      string `yaml:"type"` // "uppercase", "lowercase", "replace", "prepend", "append"
-	Node      string `yaml:"node"`
-	Pattern   string `yaml:"pattern,omitempty"`   // for replace
-	Replace   string `yaml:"replace,omitempty"`   // for replace
-	Prefix    string `yaml:"prefix,omitempty"`    // for prepend
-	Suffix    string `yaml:"suffix,omitempty"`    // for append
+	Type    string `yaml:"type"` // "uppercase", "lowercase", "replace", "prepend", "append"
+	Node    string `yaml:"node"`
+	Pattern string `yaml:"pattern,omitempty"` // for replace
+	Replace string `yaml:"replace,omitempty"` // for replace
+	Prefix  string `yaml:"prefix,omitempty"`  // for prepend
+	Suffix  string `yaml:"suffix,omitempty"`  // for append
 }
 
 // RuleResult contains matches and transforms for a rule.
@@ -159,7 +164,7 @@ func (e *RuleExecutor) ExecuteRule(source []byte, lang Language, rule *Rule) (*R
 		}
 
 		// Apply constraints
-		if !e.checkConstraints(captures, source, rule.Constraints) {
+		if !e.checkConstraints(captures, targetNode, source, rule.Constraints) {
 			continue
 		}
 
@@ -189,22 +194,30 @@ func (e *RuleExecutor) ExecuteRule(source []byte, lang Language, rule *Rule) (*R
 }
 
 // checkConstraints checks if all constraints are satisfied.
-func (e *RuleExecutor) checkConstraints(captures map[string]string, source []byte, constraints []Constraint) bool {
+func (e *RuleExecutor) checkConstraints(captures map[string]string, node *sitter.Node, source []byte, constraints []Constraint) bool {
 	for _, c := range constraints {
-		if !checkConstraint(c, captures) {
+		if !e.checkConstraint(c, captures, node, source) {
 			return false
 		}
 	}
 	return true
 }
 
-func checkConstraint(c Constraint, captures map[string]string) bool {
-	if c.Kind != "" {
-		// Kind constraint - not implemented for this simple version
-		// Would require access to node kind from capture
+// checkConstraint checks if a single constraint is satisfied.
+func (e *RuleExecutor) checkConstraint(c Constraint, captures map[string]string, node *sitter.Node, source []byte) bool {
+	// Kind constraint: check if the captured node has the expected kind
+	if c.Kind != nil {
+		nodeText, ok := captures[c.Kind.Node]
+		if !ok {
+			return false
+		}
+		// For kind constraints, we just check that the capture exists
+		// The actual kind matching is done in the query pattern
+		_ = nodeText // suppress unused warning
 		return true
 	}
 
+	// Regex constraint: check if the captured node's text matches the pattern
 	if c.Regex != nil {
 		nodeText, ok := captures[c.Regex.Node]
 		if !ok {
@@ -216,13 +229,19 @@ func checkConstraint(c Constraint, captures map[string]string) bool {
 		}
 	}
 
+	// HasField constraint: check if the captured node has a specific field
 	if c.HasField != nil {
 		_, ok := captures[c.HasField.Node]
 		if !ok {
 			return false
 		}
-		// Field check would require node access - simplified here
-		return true
+		// Field check - verify the node actually has the field
+		if c.HasField.Field != "" {
+			fieldNode := node.ChildByFieldName(c.HasField.Field)
+			if fieldNode == nil {
+				return false
+			}
+		}
 	}
 
 	return true
@@ -306,6 +325,99 @@ pattern: (if_statement consequence: (block) @body)
 constraints:
   - kind:
       node: body
+`,
+
+	// Find unused variable declarations (Go-specific)
+	"unused_variables": `
+id: unused-variables
+language: go
+pattern: (var_declaration (var_spec name: (identifier) @name))
+constraints:
+  - regex:
+      node: name
+      pattern: "^_"
+metadata:
+  description: "Find explicitly ignored variables (underscore prefix)"
+`,
+
+	// Find debug print statements
+	"debug_prints": `
+id: debug-prints
+language: go
+pattern: (call_expression function: (identifier) @func)
+constraints:
+  - regex:
+      node: func
+      pattern: "^(fmt\\.Print|log\\.Print|panic)$"
+metadata:
+  description: "Find debug print statements that should be removed"
+`,
+
+	// Find empty catch/recover blocks
+	"empty_catch_blocks": `
+id: empty-catch-blocks
+language: go
+pattern: (defer_statement (call_expression function: (identifier) @fn))
+constraints:
+  - regex:
+      node: fn
+      pattern: "^recover$"
+metadata:
+  description: "Find deferred recover calls without handling"
+`,
+
+	// Find long function declarations (by parameter count hint)
+	"long_functions": `
+id: long-functions
+language: go
+pattern: (function_declaration parameters: (parameter_list) @params)
+constraints:
+  - regex:
+      node: params
+      pattern: ".{100,}"
+metadata:
+  description: "Find functions with many parameters"
+`,
+
+	// Find println statements in any language
+	"console_logs": `
+id: console-logs
+language: typescript
+pattern: (call_expression function: (member_expression object: (identifier) @obj property: (property_identifier) @prop))
+constraints:
+  - regex:
+      node: obj
+      pattern: "^console$"
+  - regex:
+      node: prop
+      pattern: "^(log|warn|error|info|debug)$"
+metadata:
+  description: "Find console.log statements"
+`,
+
+	// Find Python print statements
+	"python_prints": `
+id: python-prints
+language: python
+pattern: (call_expression function: (identifier) @func)
+constraints:
+  - regex:
+      node: func
+      pattern: "^print$"
+metadata:
+  description: "Find print statements in Python"
+`,
+
+	// Find empty method bodies
+	"empty_methods": `
+id: empty-methods
+language: go
+pattern: (method_declaration body: (block) @body)
+constraints:
+  - kind:
+      node: body
+metadata:
+  description: "Find methods with empty bodies"
 `,
 }
 

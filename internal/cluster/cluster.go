@@ -12,17 +12,16 @@ import (
 
 // Member represents a cluster member (stored in git nodes/*.json5).
 type Member struct {
-	NodeID              string    `json:"node_id"`
-	NodeName            string    `json:"node_name"`
-	WireGuardPub        string    `json:"wireguard_pubkey"`
-	SigningPub          []byte    `json:"signing_pubkey"`
-	Endpoint            string    `json:"endpoint"`
-	Capabilities        []string  `json:"capabilities"`
-	ClusterIP           string    `json:"cluster_ip"`
-	PersistentKeepalive string    `json:"persistent_keepalive,omitempty"`
-	JoinedAt            time.Time `json:"joined_at"`
-	LastHeartbeat       time.Time `json:"last_heartbeat"`
-	Status              string    `json:"status"` // "active" | "inactive" | "leaving"
+	NodeID        string    `json:"node_id"`
+	NodeName      string    `json:"node_name"`
+	WireGuardPub  string    `json:"wireguard_pubkey"`
+	SigningPub    []byte    `json:"signing_pubkey"`
+	Endpoint      string    `json:"endpoint"`
+	Capabilities  []string  `json:"capabilities"`
+	ClusterIP     string    `json:"cluster_ip"`
+	JoinedAt      time.Time `json:"joined_at"`
+	LastHeartbeat time.Time `json:"last_heartbeat"`
+	Status        string    `json:"status"` // "active" | "inactive" | "leaving"
 }
 
 // MemberPath returns the path to a node's registry file.

@@ -134,6 +134,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newMCPChatServerCmd())
 	rootCmd.AddCommand(newTokenCmd())
 	rootCmd.AddCommand(newClusterCmd())
+	rootCmd.AddCommand(newBotsCmd())
 	rootCmd.AddCommand(newInitCmd())
 
 	if err := rootCmd.Execute(); err != nil {

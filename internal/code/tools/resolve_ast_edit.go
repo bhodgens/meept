@@ -10,51 +10,40 @@ import (
 	"github.com/caimlas/meept/internal/tools"
 )
 
-// ASTEditTool performs structural AST-based edits with preview/apply pattern.
-type ASTEditTool struct {
-	rewriter *ast.ASTRewriter
-	parser   *ast.ParserManager
+// ResolveASTEditTool applies or discards pending ast_edit proposals.
+// This tool provides an explicit resolve pattern for the preview-before-apply workflow.
+type ResolveASTEditTool struct {
+	parser *ast.ParserManager
 }
 
-// NewASTEditTool creates a new AST edit tool.
-func NewASTEditTool(parser *ast.ParserManager) (*ASTEditTool, error) {
+// NewResolveASTEditTool creates a new resolve AST edit tool.
+func NewResolveASTEditTool(parser *ast.ParserManager) (*ResolveASTEditTool, error) {
 	if parser == nil {
 		return nil, fmt.Errorf("ast.ParserManager cannot be nil")
 	}
-	return &ASTEditTool{
-		rewriter: ast.NewASTRewriter(parser),
-		parser:   parser,
-	}, nil
+	return &ResolveASTEditTool{parser: parser}, nil
 }
 
-func (t *ASTEditTool) Name() string { return "ast_edit" }
+func (t *ResolveASTEditTool) Name() string { return "resolve_ast_edit" }
 
-func (t *ASTEditTool) Category() string { return "code" }
+func (t *ResolveASTEditTool) Category() string { return "code" }
 
-func (t *ASTEditTool) Description() string {
-	return `Perform structural AST-based code edits using tree-sitter queries.
-Use this tool for batch modifications like:
-- Replace all function bodies matching a pattern
-- Rename all variable declarations of a type
-- Insert code before/after specific AST node types
-
-The tool returns proposed edits without modifying files. Use preview_only=false to apply.
+func (t *ResolveASTEditTool) Description() string {
+	return `Apply or discard proposed AST edits from a previous ast_edit call.
+Use this tool after reviewing ast_edit output to explicitly apply the changes.
 
 Parameters:
 - file_path: Source file to edit
-- query: Tree-sitter S-expression query to match nodes
-- query_name: Predefined query (functions, classes, imports, etc.)
-- rewrite_template: Template with {{capture}} placeholders for replacement
-- language: Override language detection
-- preview_only: If true, only show preview (default: true)
+- query: Tree-sitter S-expression query (must match original ast_edit call)
+- rewrite_template: Template with {{capture}} placeholders (must match original)
+- action: "apply" to write changes, "discard" to show diff without modifying
 
-Example rewrite templates:
-- "{{visibility}} func {{name}}({{params}}) {{return_type}} { /* refactored */ }"
-- "const {{name}} = {{value}} // deprecated: use {{newName}} instead"
+The apply action re-runs the query and applies edits atomically.
+This ensures the edits are still valid at application time.
 `
 }
 
-func (t *ASTEditTool) Parameters() llm.FunctionParameters {
+func (t *ResolveASTEditTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
 		Type: SchemaTypeObject,
 		Properties: map[string]llm.ParameterProperty{
@@ -64,11 +53,11 @@ func (t *ASTEditTool) Parameters() llm.FunctionParameters {
 			},
 			"query": {
 				Type:        SchemaTypeString,
-				Description: "Tree-sitter S-expression query pattern. Use @name to capture nodes.",
+				Description: "Tree-sitter S-expression query pattern (must match original ast_edit call).",
 			},
 			"query_name": {
 				Type:        SchemaTypeString,
-				Description: "Use a predefined query: functions, classes, imports, strings, comments.",
+				Description: "Predefined query name (functions, classes, imports, etc.).",
 			},
 			"rewrite_template": {
 				Type:        SchemaTypeString,
@@ -76,31 +65,36 @@ func (t *ASTEditTool) Parameters() llm.FunctionParameters {
 			},
 			SchemaPropLanguage: {
 				Type:        SchemaTypeString,
-				Description: "Override language detection (go, python, typescript, etc.).",
+				Description: "Override language detection.",
 			},
-			"preview_only": {
-				Type:        SchemaTypeBoolean,
-				Description: "If true, only return preview without applying (default: true).",
+			"action": {
+				Type:        SchemaTypeString,
+				Description: "Action to take: 'apply' to write changes, 'discard' to show preview only.",
+				Enum:        []string{"apply", "discard"},
 			},
 		},
-		Required: []string{SchemaPropFilePath, "rewrite_template"},
+		Required: []string{SchemaPropFilePath, "rewrite_template", "action"},
 	}
 }
 
-func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+func (t *ResolveASTEditTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	filePath, _ := args[SchemaPropFilePath].(string)
 	if filePath == "" {
 		return nil, fmt.Errorf("file_path is required")
+	}
+
+	action, _ := args["action"].(string)
+	if action == "" {
+		action = "discard" // default to safe preview
+	}
+	if action != "apply" && action != "discard" {
+		return nil, fmt.Errorf("action must be 'apply' or 'discard'")
 	}
 
 	query, _ := args["query"].(string)
 	queryName, _ := args["query_name"].(string)
 	rewriteTemplate, _ := args["rewrite_template"].(string)
 	langStr, _ := args["language"].(string)
-	previewOnly := true
-	if p, ok := args["preview_only"].(bool); ok {
-		previewOnly = p
-	}
 
 	if rewriteTemplate == "" {
 		return nil, fmt.Errorf("rewrite_template is required")
@@ -117,7 +111,7 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 		var ok bool
 		query, ok = ast.GetCommonQuery(queryName, lang)
 		if !ok {
-			return nil, fmt.Errorf("no predefined query '%s' for language '%s'", queryName, langStr)
+			return nil, fmt.Errorf("no predefined query '%s'", queryName)
 		}
 	}
 
@@ -143,12 +137,13 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 	}
 
 	// Run rewrite
-	result, err := t.rewriter.RunRewrite(source, lang, query, rewriteTemplate)
+	rewriter := ast.NewASTRewriter(t.parser)
+	result, err := rewriter.RunRewrite(source, lang, query, rewriteTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("rewrite failed: %w", err)
 	}
 
-	// Build response
+	// Build edits
 	edits := make([]map[string]any, len(result.Rewrite.ProposedEdits))
 	for i, edit := range result.Rewrite.ProposedEdits {
 		edits[i] = map[string]any{
@@ -164,28 +159,32 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 	}
 
 	response := map[string]any{
-		SchemaPropFound:   result.Rewrite.MatchCount > 0,
-		"match_count":     result.Rewrite.MatchCount,
-		"file_path":       filePath,
-		"query":           result.Rewrite.Query,
-		"edits":           edits,
-		"preview_only":    previewOnly,
-		"modified_source": "",
+		SchemaPropFound: result.Rewrite.MatchCount > 0,
+		"match_count":   result.Rewrite.MatchCount,
+		"file_path":     filePath,
+		"query":         result.Rewrite.Query,
+		"action":        action,
+		"edits":         edits,
 	}
 
-	// Apply edits if not preview-only
-	if !previewOnly {
+	// Apply edits if action is "apply"
+	if action == "apply" {
 		modifiedSource := ast.ApplyEdits(source, result.Rewrite.ProposedEdits)
-		response["modified_source"] = string(modifiedSource)
+		response["applied"] = true
 
 		// Write to file
 		if err := os.WriteFile(filePath, modifiedSource, 0o644); err != nil {
 			return nil, fmt.Errorf("failed to write modified file: %w", err)
 		}
+		response["message"] = fmt.Sprintf("Applied %d edits to %s", len(edits), filePath)
+	} else {
+		response["applied"] = false
+		response["modified_source_preview"] = string(ast.ApplyEdits(source, result.Rewrite.ProposedEdits))
+		response["message"] = fmt.Sprintf("Preview of %d edits (use action='apply' to write)", len(edits), filePath)
 	}
 
 	return response, nil
 }
 
 // Ensure tool implements the Tool interface
-var _ tools.Tool = (*ASTEditTool)(nil)
+var _ tools.Tool = (*ResolveASTEditTool)(nil)

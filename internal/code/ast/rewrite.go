@@ -21,14 +21,14 @@ type ASTRewrite struct {
 
 // ProposedEdit represents a single text edit proposal.
 type ProposedEdit struct {
-	StartLine  int
-	StartChar  int
-	EndLine    int
-	EndChar    int
-	OldText    string
-	NewText    string
-	NodeKind   string
-	Captures   map[string]string
+	StartLine int
+	StartChar int
+	EndLine   int
+	EndChar   int
+	OldText   string
+	NewText   string
+	NodeKind  string
+	Captures  map[string]string
 }
 
 // RewriteTemplate handles template-based rewrites with capture placeholders.
@@ -39,7 +39,6 @@ type RewriteTemplate struct {
 
 // ParseRewriteTemplate parses a template string with {{capture}} placeholders.
 func ParseRewriteTemplate(template string) (*RewriteTemplate, error) {
-	// Find all {{name}} placeholders
 	re := regexp.MustCompile(`\{\{(\w+)\}\}`)
 	matches := re.FindAllStringSubmatch(template, -1)
 
@@ -93,25 +92,21 @@ func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rew
 		return nil, fmt.Errorf("unsupported language: %s", lang)
 	}
 
-	// Parse the template
 	template, err := ParseRewriteTemplate(rewriteTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid rewrite template: %w", err)
 	}
 
-	// Parse the source
 	tree, err := r.parser.GetTree(nil, source, lang)
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
 
-	// Compile the query
 	query, err := sitter.NewQuery([]byte(queryPattern), grammar)
 	if err != nil {
 		return nil, fmt.Errorf("invalid query: %w", err)
 	}
 
-	// Execute query and collect matches
 	cursor := sitter.NewQueryCursor()
 	cursor.Exec(query, tree.RootNode())
 
@@ -121,7 +116,6 @@ func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rew
 		ProposedEdits: make([]ProposedEdit, 0),
 	}
 
-	// Track byte ranges to avoid overlapping edits
 	type byteRange struct {
 		start uint32
 		end   uint32
@@ -136,26 +130,22 @@ func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rew
 
 		match = cursor.FilterPredicates(match, source)
 
-		// Extract captures
 		captures := make(map[string]string)
-		var targetNode sitter.Node
+		var targetNode *sitter.Node
 		for _, capture := range match.Captures {
 			captureName := query.CaptureNameForId(capture.Index)
 			nodeText := string(source[capture.Node.StartByte():capture.Node.EndByte()])
 			captures[captureName] = nodeText
 
-			// Use the first capture as the target for replacement
-			if targetNode.ID() == 0 {
-				targetNode = *capture.Node
+			if targetNode == nil {
+				targetNode = capture.Node
 			}
 		}
 
-		// Skip if we don't have a target node
-		if targetNode.ID() == 0 {
+		if targetNode == nil {
 			continue
 		}
 
-		// Check for overlapping edits
 		startByte := targetNode.StartByte()
 		endByte := targetNode.EndByte()
 		overlaps := false
@@ -170,21 +160,17 @@ func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rew
 		}
 		appliedRanges = append(appliedRanges, byteRange{start: startByte, end: endByte})
 
-		// Apply the template
 		newText := template.Apply(captures)
 		oldText := string(source[startByte:endByte])
 
-		// Calculate position
-		startPos := bytes.Count(source[:startByte], []byte("\n"))
-		startLine := startPos
+		startLine := bytes.Count(source[:startByte], []byte("\n"))
 		lines := bytes.Split(source[:startByte], []byte("\n"))
 		startChar := 0
 		if len(lines) > 0 {
 			startChar = len(lines[len(lines)-1])
 		}
 
-		endPos := bytes.Count(source[:endByte], []byte("\n"))
-		endLine := endPos
+		endLine := bytes.Count(source[:endByte], []byte("\n"))
 		lines = bytes.Split(source[:endByte], []byte("\n"))
 		endChar := 0
 		if len(lines) > 0 {
@@ -192,21 +178,20 @@ func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rew
 		}
 
 		edit := ProposedEdit{
-			StartLine:  startLine,
-			StartChar:  startChar,
-			EndLine:    endLine,
-			EndChar:    endChar,
-			OldText:    oldText,
-			NewText:    newText,
-			NodeKind:   targetNode.Type(),
-			Captures:   captures,
+			StartLine: startLine,
+			StartChar: startChar,
+			EndLine:   endLine,
+			EndChar:   endChar,
+			OldText:   oldText,
+			NewText:   newText,
+			NodeKind:  targetNode.Type(),
+			Captures:  captures,
 		}
 
 		rewrite.ProposedEdits = append(rewrite.ProposedEdits, edit)
 		rewrite.MatchCount++
 	}
 
-	// Sort edits by position (reverse order for safe application)
 	sort.Slice(rewrite.ProposedEdits, func(i, j int) bool {
 		if rewrite.ProposedEdits[i].StartLine != rewrite.ProposedEdits[j].StartLine {
 			return rewrite.ProposedEdits[i].StartLine > rewrite.ProposedEdits[j].StartLine
@@ -237,7 +222,6 @@ func (r *ASTRewriter) RunRewriteOnFile(filePath, queryPattern, rewriteTemplate s
 
 // ApplyEdits applies the proposed edits to source code and returns the modified content.
 func ApplyEdits(source []byte, edits []ProposedEdit) []byte {
-	// Sort edits by position in reverse order (so we can apply from end to start)
 	sortedEdits := make([]ProposedEdit, len(edits))
 	copy(sortedEdits, edits)
 	sort.Slice(sortedEdits, func(i, j int) bool {
@@ -251,11 +235,9 @@ func ApplyEdits(source []byte, edits []ProposedEdit) []byte {
 	copy(result, source)
 
 	for _, edit := range sortedEdits {
-		// Calculate byte positions from line/char
 		startByte := positionToByte(result, edit.StartLine, edit.StartChar)
 		endByte := positionToByte(result, edit.EndLine, edit.EndChar)
 
-		// Apply the edit
 		newResult := make([]byte, 0, len(result)-int(endByte-startByte)+len(edit.NewText))
 		newResult = append(newResult, result[:startByte]...)
 		newResult = append(newResult, edit.NewText...)
@@ -266,7 +248,6 @@ func ApplyEdits(source []byte, edits []ProposedEdit) []byte {
 	return result
 }
 
-// positionToByte converts line/char position to byte offset.
 func positionToByte(source []byte, line, char int) int {
 	currentLine := 0
 	currentChar := 0

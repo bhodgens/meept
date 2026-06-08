@@ -55,36 +55,6 @@ type BotsConfig struct {
 	WebhookEnabled              bool   `json:"webhook_enabled" toml:"webhook_enabled"`
 }
 
-// OAuthConfig holds OAuth device-code flow settings.
-// When enabled, the daemon creates a shared encrypted token store and
-// background refresh manager. Providers with stored tokens are automatically
-// registered as LLM endpoints.
-type OAuthConfig struct {
-	// Enabled turns on OAuth token management
-	Enabled bool `json:"enabled" toml:"enabled"`
-	// TokenDir is the directory for encrypted token files (default: ~/.meept/oauth)
-	TokenDir string `json:"token_dir" toml:"token_dir"`
-	// RefreshInterval is how often to check for expiring tokens (default: 5m)
-	RefreshInterval string `json:"refresh_interval" toml:"refresh_interval"`
-	// RefreshMargin is how far before expiry to proactively refresh (default: 10m)
-	RefreshMargin string `json:"refresh_margin" toml:"refresh_margin"`
-	// EncryptionKey is an optional user-provided encryption key.
-	// When empty, a machine-derived key is used.
-	EncryptionKey string `json:"encryption_key" toml:"encryption_key"`
-	// Providers holds per-provider OAuth configuration overrides.
-	// Keys are provider IDs (e.g. "github-models", "google-oauth", "google-calendar").
-	// Values allow overriding the embedded client ID and client secret.
-	Providers map[string]OAuthProviderEntry `json:"providers" toml:"providers"`
-}
-
-// OAuthProviderEntry holds per-provider OAuth configuration.
-type OAuthProviderEntry struct {
-	// ClientID overrides the embedded default client ID.
-	ClientID string `json:"client_id" toml:"client_id"`
-	// ClientSecret overrides the embedded default client secret.
-	ClientSecret string `json:"client_secret" toml:"client_secret"`
-}
-
 // CalendarConfig holds Google Calendar integration settings.
 // OAuth credentials are managed via the shared OAuth device-code flow
 // (see 'meept config oauth connect google-calendar').

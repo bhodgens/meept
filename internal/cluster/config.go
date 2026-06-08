@@ -1,8 +1,6 @@
 package cluster
 
 import (
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,51 +8,40 @@ import (
 	"github.com/caimlas/meept/internal/config"
 )
 
-// Duration is a time.Duration wrapper that supports JSON unmarshaling from strings.
-type Duration time.Duration
-
-// UnmarshalJSON implements json.Unmarshaler for Duration.
-func (d *Duration) UnmarshalJSON(data []byte) error {
-	var v interface{}
-	if err := json.Unmarshal(data, &v); err != nil {
-		return err
-	}
-	switch value := v.(type) {
-	case float64:
-		*d = Duration(time.Duration(value))
-		return nil
-	case string:
-		tmp, err := time.ParseDuration(value)
-		if err != nil {
-			return err
-		}
-		*d = Duration(tmp)
-		return nil
-	default:
-		return fmt.Errorf("cannot unmarshal %T into Duration", value)
-	}
-}
-
-// MarshalJSON implements json.Marshaler for Duration.
-func (d *Duration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(d.String())
-}
-
-// String returns the duration as a string.
-func (d *Duration) String() string {
-	return time.Duration(*d).String()
-}
-
 // Config holds the global cluster configuration.
 type Config struct {
-	ClusterID   string        `json:"cluster_id"`
-	ClusterName string        `json:"cluster_name"`
-	NodeID      string        `json:"node_id"`
-	Network     NetworkConfig `json:"network"`
-	Gossip      GossipConfig  `json:"gossip"`
-	Queue       QueueConfig   `json:"queue"`
-	Git         GitConfig     `json:"git"`
-	Security    SecurityConfig `json:"security"`
+	// Identity
+	ClusterID   string `json:"cluster_id"`
+	ClusterName string `json:"cluster_name"`
+
+	// JoinKey is the secret key required for new nodes to join the cluster.
+	// When empty, any join key is accepted (open mode).
+	JoinKey string `json:"join_key"`
+
+	// Network configuration (WireGuard)
+	Network NetworkConfig `json:"network"`
+
+	// Gossip configuration
+	Gossip GossipConfig `json:"gossip"`
+
+	// Queue configuration
+	Queue QueueConfig `json:"queue"`
+
+	// Git sync configuration
+	Git GitConfig `json:"git"`
+
+	// Security configuration
+	Security SecurityConfig `json:"security"`
+
+	// Local node identity
+	NodeID string `json:"node_id"`
+}
+
+// QueueConfig holds task queue settings.
+type QueueConfig struct {
+	DefaultClaimTimeout     time.Duration `json:"default_claim_timeout"`
+	NodeReachabilityTimeout time.Duration `json:"node_reachability_timeout"`
+	FullPayloadReplication  bool          `json:"full_payload_replication"`
 }
 
 // NetworkConfig holds WireGuard network settings.
@@ -66,30 +53,23 @@ type NetworkConfig struct {
 
 // GossipConfig holds gossip protocol settings.
 type GossipConfig struct {
-	HeartbeatInterval Duration `json:"heartbeat_interval"`
-	PeerTimeout       Duration `json:"peer_timeout"`
-	EventRetention    Duration `json:"event_retention"`
-	MaxRetryAttempts  int      `json:"max_retry_attempts"`
-}
-
-// QueueConfig holds task queue settings.
-type QueueConfig struct {
-	DefaultClaimTimeout     Duration `json:"default_claim_timeout"`
-	NodeReachabilityTimeout Duration `json:"node_reachability_timeout"`
-	FullPayloadReplication  bool     `json:"full_payload_replication"`
+	HeartbeatInterval time.Duration `json:"heartbeat_interval"`
+	PeerTimeout       time.Duration `json:"peer_timeout"`
+	EventRetention    time.Duration `json:"event_retention"`
+	MaxRetryAttempts  int           `json:"max_retry_attempts"`
 }
 
 // GitConfig holds git sync settings.
 type GitConfig struct {
-	SyncInterval    Duration `json:"sync_interval"`
-	HeartbeatCommit bool     `json:"heartbeat_commit"`
-	RemoteURL       string   `json:"remote_url"`
+	SyncInterval    time.Duration `json:"sync_interval"`
+	HeartbeatCommit bool          `json:"heartbeat_commit"`
+	RemoteURL       string        `json:"remote_url"`
 }
 
 // SecurityConfig holds security settings.
 type SecurityConfig struct {
-	RequireNodeSignatures  bool `json:"require_node_signatures"`
-	Ed25519KeyRotationDays int  `json:"ed25519_key_rotation_days"`
+	RequireNodeSignatures   bool `json:"require_node_signatures"`
+	Ed25519KeyRotationDays  int  `json:"ed25519_key_rotation_days"`
 }
 
 // LoadClusterConfig loads cluster configuration from a JSON5 file.
@@ -105,6 +85,7 @@ func LoadClusterConfig(path string) (*Config, error) {
 	}
 
 	cfg.setDefault()
+
 	return &cfg, nil
 }
 
@@ -132,29 +113,24 @@ func (c *Config) setDefault() {
 		c.Network.Interface = "wg0"
 	}
 	if c.Gossip.HeartbeatInterval == 0 {
-		c.Gossip.HeartbeatInterval = Duration(30 * time.Second)
+		c.Gossip.HeartbeatInterval = 30 * time.Second
 	}
 	if c.Gossip.PeerTimeout == 0 {
-		c.Gossip.PeerTimeout = Duration(2 * time.Minute)
+		c.Gossip.PeerTimeout = 2 * time.Minute
 	}
 	if c.Gossip.MaxRetryAttempts == 0 {
 		c.Gossip.MaxRetryAttempts = 3
 	}
 	if c.Queue.DefaultClaimTimeout == 0 {
-		c.Queue.DefaultClaimTimeout = Duration(5 * time.Minute)
+		c.Queue.DefaultClaimTimeout = 5 * time.Minute
 	}
 	if c.Queue.NodeReachabilityTimeout == 0 {
-		c.Queue.NodeReachabilityTimeout = Duration(2 * time.Minute)
+		c.Queue.NodeReachabilityTimeout = 2 * time.Minute
 	}
 	if c.Git.SyncInterval == 0 {
-		c.Git.SyncInterval = Duration(5 * time.Minute)
+		c.Git.SyncInterval = 5 * time.Minute
 	}
 	if c.Security.Ed25519KeyRotationDays == 0 {
 		c.Security.Ed25519KeyRotationDays = 90
 	}
-}
-
-// ToTimeDuration converts Duration to time.Duration.
-func (d Duration) ToTimeDuration() time.Duration {
-	return time.Duration(d)
 }
