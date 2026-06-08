@@ -40,6 +40,7 @@ plugins:
   - mermaid2:
       version: 10.9.0
   - git-revision-date-localized:
+  - awesome-pages:
       enable_creation_date: true
 
 markdown_extensions:
@@ -60,76 +61,6 @@ markdown_extensions:
   - footnotes
   - toc:
       permalink: true
-
-nav:
-  - Home: index.md
-  - Getting Started:
-      - getting-started/index.md
-      - Installation: getting-started/installation.md
-      - Quick Start: getting-started/quick-start.md
-      - First Run: getting-started/first-run.md
-      - Troubleshooting: getting-started/troubleshooting.md
-  - Concepts:
-      - concepts/index.md
-      - Architecture: concepts/architecture.md
-      - Multi-Agent System: concepts/multi-agent.md
-      - Multi-Agent Parallelism: concepts/multi-agent-parallelism.md
-      - Request Flow: concepts/request-flow.md
-      - Tools: concepts/tools.md
-      - Memory: concepts/memory.md
-      - Context Management: concepts/context-management.md
-      - Skills: concepts/skills.md
-      - Token Caching: concepts/token-caching.md
-      - Plans: concepts/plans.md
-  - Configuration:
-      - configuration/index.md
-      - Daemon: configuration/daemon.md
-      - Agents: configuration/agents.md
-      - LLM & Models: configuration/llm.md
-      - Runtime Lifecycle: configuration/llm-lifecycle.md
-      - Production Security: configuration/production-security.md
-      - Distributed Cluster: configuration/cluster.md
-      - Examples:
-          - configuration/examples/index.md
-          - Minimal: configuration/examples/minimal.md
-          - Production: configuration/examples/production.md
-          - Advanced: configuration/examples/advanced.md
-  - Workflows:
-      - workflows/index.md
-      - Dynamic Tool Routing: workflows/tool-routing.md
-      - Multi-Agent Orchestration: workflows/agent-orchestration.md
-      - Skill System: workflows/skills.md
-      - Security Engine: workflows/security.md
-      - Memory System: workflows/memory.md
-      - Self-Improvement: workflows/self-improvement.md
-      - LLM Provider Management: workflows/llm-management.md
-      - Models CLI: workflows/models-cli.md
-      - Context Firewall: workflows/context-firewall.md
-      - Code Intelligence: workflows/code-intelligence.md
-      - Job Scheduling: workflows/job-scheduling.md
-      - External Integrations: workflows/external-integrations.md
-      - Collaborative Planning: workflows/collaborative-planning.md
-      - Taint Tracking: workflows/taint-tracking.md
-      - Shadow Training: workflows/shadow-training.md
-      - Multi-Participant Communication: workflows/multi-participant-comms.md
-      - Agent Lateral Interrogation Howto: workflows/agent-lateral-interrogation-howto.md
-      - Project Context: workflows/project-context.md
-      - Plans: workflows/plans.md
-      - Persistent Bot Framework: workflows/bots.md
-  - Reference:
-      - reference/index.md
-      - CLI Commands: reference/cli.md
-      - Token Cache CLI: reference/token-cache-cli.md
-      - Models CLI Reference: reference/models-cli.md
-      - RPC API: reference/rpc.md
-      - HTTP API: reference/http-api.md
-      - Tool Reference: reference/tools.md
-      - Agent Loop & Tool Architecture: reference/agent-loop-tools.md
-      - Logging: reference/logging.md
-      - Metrics & Debugging: reference/metrics.md
-      - Generated Docs: reference/generated/
-  - Plans:
-      - plans/index.md
 
 extra:
   social:
