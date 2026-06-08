@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/meept.jpg" alt="Meept" width="200"/>
+  <img src="assets/meept.png" alt="Meept" width="200"/>
   <h1>Meept</h1>
   <p><strong>Production-grade autonomous agent daemon with multi-agent orchestration, hybrid memory, evidence-based execution, and self-optimizing infrastructure.</strong></p>
   <p>
