@@ -784,6 +784,16 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/plans/{id}/confirm", s.handlePlanConfirm)
 	mux.HandleFunc("POST /api/v1/plans/{id}/revise", s.handlePlanRevise)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/plans", s.handleSessionPlans)
+
+	// Search endpoint
+	mux.HandleFunc("POST /api/v1/search", s.handleSearch)
+
+	// Project branch endpoints
+	mux.HandleFunc("GET /api/v1/projects/{id}/branches", s.handleProjectBranches)
+	mux.HandleFunc("POST /api/v1/projects/{id}/checkout", s.handleProjectCheckout)
+
+	// Skill UI endpoint
+	mux.HandleFunc("GET /api/v1/skills/{slug}/ui", s.handleSkillUI)
 }
 
 // middleware applies common middleware (CORS, logging, auth).

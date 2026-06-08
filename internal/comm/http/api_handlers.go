@@ -2852,3 +2852,113 @@ func (s *Server) handleMemoryVectorStats(w http.ResponseWriter, r *http.Request)
 
 	s.writeJSON(w, http.StatusOK, stats)
 }
+
+// ===== Search Endpoint =====
+
+// handleSearch handles POST /api/v1/search.
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Search == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "search service not available")
+		return
+	}
+
+	var req services.SearchRequest
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+
+	results, err := s.services.Search.Search(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"results": results,
+		KeyCount:  len(results),
+	})
+}
+
+// ===== Project Branch Endpoints =====
+
+// handleProjectBranches handles GET /api/v1/projects/{id}/branches.
+func (s *Server) handleProjectBranches(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+
+	branches, err := s.services.Project.ListBranches(r.Context(), id)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"branches": branches,
+		KeyCount:   len(branches),
+	})
+}
+
+// handleProjectCheckout handles POST /api/v1/projects/{id}/checkout.
+func (s *Server) handleProjectCheckout(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
+		return
+	}
+
+	var req struct {
+		Branch string `json:"branch"`
+	}
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+
+	if req.Branch == "" {
+		s.writeError(w, http.StatusBadRequest, "branch name is required")
+		return
+	}
+
+	if err := s.services.Project.CheckoutBranch(r.Context(), id, req.Branch); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "checked out"})
+}
+
+// ===== Skill UI Endpoint =====
+
+// handleSkillUI handles GET /api/v1/skills/{slug}/ui.
+func (s *Server) handleSkillUI(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Skills == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "skills service not available")
+		return
+	}
+
+	slug := r.PathValue("slug")
+	if slug == "" {
+		s.writeError(w, http.StatusBadRequest, "skill slug is required")
+		return
+	}
+
+	descriptor, err := s.services.Skills.GetUIDescriptor(r.Context(), services.SkillsGetRequest{Slug: slug})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, descriptor)
+}

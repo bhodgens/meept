@@ -266,3 +266,5 @@ func (pm *ProjectManager) gitOutput(ctx context.Context, dir string, args ...str
 	out, err := cmd.Output()
 	return string(out), err
 }
+
+// Branch operations are in manager_branches.go
