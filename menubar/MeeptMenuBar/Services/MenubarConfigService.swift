@@ -94,9 +94,9 @@ class MenubarConfigService {
             let data = try Data(contentsOf: fileURL)
             guard let content = String(data: data, encoding: .utf8) else { return }
 
-            // Strip line comments for JSONDecoder compatibility
-            let cleanContent = Self.stripLineComments(content)
-            guard let cleanData = cleanContent.data(using: .utf8) else { return }
+            // Convert JSON5 → strict JSON so JSONDecoder can parse it
+            let cleanJSON = try JSON5Normalizer.normalize(content)
+            guard let cleanData = cleanJSON.data(using: .utf8) else { return }
 
             let decoder = JSONDecoder()
             self.config = try decoder.decode(MenubarConfig.self, from: cleanData)
@@ -104,42 +104,5 @@ class MenubarConfigService {
             // On parse error, keep defaults
             print("Failed to load menubar config: \(error)")
         }
-    }
-
-    private static func stripLineComments(_ content: String) -> String {
-        var result = ""
-        for line in content.components(separatedBy: "\n") {
-            var inString = false
-            var escaped = false
-            var commentStart: String.Index?
-            for (index, char) in line.enumerated() {
-                let lineIndex = line.index(line.startIndex, offsetBy: index)
-                if escaped {
-                    escaped = false
-                    continue
-                }
-                if char == "\\" {
-                    escaped = true
-                    continue
-                }
-                if char == "\"" {
-                    inString.toggle()
-                    continue
-                }
-                if !inString && char == "/" {
-                    let nextIndex = line.index(after: lineIndex)
-                    if nextIndex < line.endIndex && line[nextIndex] == "/" {
-                        commentStart = lineIndex
-                        break
-                    }
-                }
-            }
-            if let start = commentStart {
-                result += String(line[..<start]) + "\n"
-            } else {
-                result += line + "\n"
-            }
-        }
-        return result
     }
 }

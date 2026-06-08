@@ -66,6 +66,9 @@ mkdocs/
 # Brainstorming
 .superpowers/
 
+# Brainstorming
+.superpowers/
+
 # Worktrees
 .worktrees/
 worktrees/

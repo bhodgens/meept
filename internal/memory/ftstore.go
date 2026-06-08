@@ -262,10 +262,7 @@ func (s *SQLiteFTSStore) DeleteByIDs(ctx context.Context, tableName string, ids 
 		args[i] = id
 	}
 
-	// #nosec G201 -- table name from FTSConfig, not user input
-
 	query := fmt.Sprintf("DELETE FROM %s WHERE id IN (%s)", tableName, strings.Join(placeholders, ",")) //nolint:gosec // table name from FTSConfig, not user input
-	// #nosec G202 -- tableName is whitelisted config value, not user input
 	result, err := s.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete items: %w", err)
