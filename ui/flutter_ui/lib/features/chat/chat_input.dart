@@ -271,32 +271,36 @@ class _ChatInputState extends ConsumerState<ChatInput> {
           return KeyEventResult.handled;
         }
 
-        final chatState = ref.read(chatProvider);
-
-        // During sending: double-enter cancels / sends a follow-up (or steer)
-        if (chatState.isLoading) {
-          final now = DateTime.now();
-          if (_lastEnterTime != null) {
-            final delta = now.difference(_lastEnterTime!).inMilliseconds;
-            if (delta <= _doubleEnterThresholdMs) {
-              _enterDebounceTimer?.cancel();
-              _lastEnterTime = null;
-              _sendSteer(_controller.text);
-              return KeyEventResult.handled;
-            }
+        final now = DateTime.now();
+        if (_lastEnterTime != null) {
+          final delta = now.difference(_lastEnterTime!).inMilliseconds;
+          if (delta <= _doubleEnterThresholdMs) {
+            _enterDebounceTimer?.cancel();
+            _lastEnterTime = null;
+            _sendSteer(_controller.text);
+            return KeyEventResult.handled;
           }
-          _lastEnterTime = now;
-          _enterDebounceTimer?.cancel();
-          _enterDebounceTimer = Timer(
-            const Duration(milliseconds: _doubleEnterThresholdMs),
-            () => _lastEnterTime = null,
-          );
-          return KeyEventResult.handled;
         }
 
-        // Normal (not sending): single Enter sends immediately
-        _lastEnterTime = null;
-        _sendNormal(_controller.text);
+        _lastEnterTime = now;
+        _enterDebounceTimer?.cancel();
+
+        // Check configured double-enter behavior from storage
+        final storage = ref.read(storageProvider);
+        final mode = storage.getDoubleEnter();
+
+        _enterDebounceTimer = Timer(
+          const Duration(milliseconds: _doubleEnterThresholdMs),
+          () {
+            _lastEnterTime = null;
+            if (mode == 'steer') {
+              _sendNormal(_controller.text);
+            } else {
+              // interrupt / preempt — not yet wired to backend endpoints
+              _sendNormal(_controller.text);
+            }
+          },
+        );
         return KeyEventResult.handled;
       }
 
@@ -321,12 +325,6 @@ class _ChatInputState extends ConsumerState<ChatInput> {
       }
 
       if (event.logicalKey == LogicalKeyboardKey.escape) {
-        final chatState = ref.read(chatProvider);
-        // Cancel sending first if active
-        if (chatState.isLoading) {
-          ref.read(chatProvider.notifier).cancelLoading();
-          return KeyEventResult.handled;
-        }
         if (_showSlashAutocomplete) {
           setState(() {
             _showSlashAutocomplete = false;
@@ -376,13 +374,11 @@ class _ChatInputState extends ConsumerState<ChatInput> {
       (previous, next) {
         if (next) {
           _focusNode.requestFocus();
-          final slashPrefix = ref.read(focusInputSlashPrefixProvider);
-          if (slashPrefix && _controller.text.isEmpty) {
+          if (_controller.text.isEmpty) {
             _controller.text = '/';
             _controller.selection = TextSelection.collapsed(offset: 1);
           }
           ref.read(focusInputRequestProvider.notifier).state = false;
-          ref.read(focusInputSlashPrefixProvider.notifier).state = false;
         }
       },
     );
@@ -390,24 +386,26 @@ class _ChatInputState extends ConsumerState<ChatInput> {
     return Focus(
       onKeyEvent: _handleKeyEvent,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+        padding: const EdgeInsets.all(12),
+        decoration: const BoxDecoration(
+          color: CyberpunkColors.darkGray,
+          border: Border(
+            top: BorderSide(color: CyberpunkColors.orangePrimary, width: 1),
+          ),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_showSlashAutocomplete)
-              Container(
-                margin: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-                child: SlashAutocomplete(
-                  query: _slashQuery,
-                  selectedIndex: _slashSelectedIndex,
-                  onSelected: _onSlashSelected,
-                  onDismiss: () {
-                    setState(() {
-                      _showSlashAutocomplete = false;
-                      _slashQuery = '';
-                    });
-                  },
-                ),
+              SlashAutocomplete(
+                query: _slashQuery,
+                onSelected: _onSlashSelected,
+                onDismiss: () {
+                  setState(() {
+                    _showSlashAutocomplete = false;
+                    _slashQuery = '';
+                  });
+                },
               ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -421,48 +419,53 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: CyberpunkColors.darkGray,
+                      color: CyberpunkColors.black,
                       border: Border.all(
                         color: CyberpunkColors.midGray,
                         width: 1,
                       ),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      enabled: true,
-                      style: CyberpunkTypography.bodyMedium.copyWith(
-                        color: CyberpunkColors.greenSuccess,
-                        fontFamily: 'SourceCodePro',
-                      ),
-                      cursorColor: CyberpunkColors.orangePrimary,
-                      decoration: InputDecoration(
-                        hintText: chatState.isLoading
-                            ? 'sending... (esc to cancel, enter again to follow-up)'
-                            : 'enter command...',
-                        hintStyle: CyberpunkTypography.bodySmall,
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.zero,
-                        isDense: true,
-                        // Ghost text shown as suffix when single match
-                        suffix: _ghostText != null &&
-                                _controller.text.isNotEmpty &&
-                                _ghostText!.startsWith(_controller.text)
-                            ? Text(
-                                _ghostText!.substring(_controller.text.length),
-                                style: CyberpunkTypography.bodyMedium.copyWith(
-                                  color: CyberpunkColors.midGray,
-                                  fontFamily: 'SourceCodePro',
-                                ),
-                              )
-                            : null,
-                      ),
-                      minLines: _minLines,
-                      maxLines: _maxLines,
-                      keyboardType: TextInputType.multiline,
-                      textCapitalization: TextCapitalization.sentences,
-                      onSubmitted: (_) {},
+                    child: Stack(
+                      alignment: Alignment.centerLeft,
+                      children: [
+                        TextField(
+                          controller: _controller,
+                          focusNode: _focusNode,
+                          enabled: !chatState.isLoading,
+                          style: CyberpunkTypography.bodyMedium.copyWith(
+                            color: CyberpunkColors.greenSuccess,
+                            fontFamily: 'SourceCodePro',
+                          ),
+                          cursorColor: CyberpunkColors.orangePrimary,
+                          decoration: InputDecoration(
+                            hintText: chatState.isLoading
+                                ? 'sending...'
+                                : 'enter command...',
+                            hintStyle: CyberpunkTypography.bodySmall,
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                            isDense: true,
+                            // Ghost text shown as suffix when single match
+                            suffix: _ghostText != null &&
+                                    _controller.text.isNotEmpty &&
+                                    _ghostText!.startsWith(_controller.text)
+                                ? Text(
+                                    _ghostText!.substring(_controller.text.length),
+                                    style: CyberpunkTypography.bodyMedium.copyWith(
+                                      color: CyberpunkColors.midGray,
+                                      fontFamily: 'SourceCodePro',
+                                    ),
+                                  )
+                                : null,
+                          ),
+                          minLines: _minLines,
+                          maxLines: _maxLines,
+                          keyboardType: TextInputType.multiline,
+                          textCapitalization: TextCapitalization.sentences,
+                          onSubmitted: (_) {},
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -590,8 +593,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   Widget _buildSendButton() {
     final chatState = ref.watch(chatProvider);
     return GestureDetector(
-      // During sending: button sends a steer/follow-up; normal: sends message
-      onTap: () => _sendNormal(_controller.text),
+      onTap: chatState.isLoading ? null : () => _sendNormal(_controller.text),
       child: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
@@ -605,7 +607,7 @@ class _ChatInputState extends ConsumerState<ChatInput> {
                 width: 18,
                 height: 18,
                 child: AnimatedOpacity(
-                  opacity: 1.0,
+                  opacity: chatState.isLoading ? 1.0 : 0.5,
                   duration: const Duration(milliseconds: 400),
                   child: CircularProgressIndicator(
                     strokeWidth: 2,

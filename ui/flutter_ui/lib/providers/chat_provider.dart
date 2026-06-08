@@ -158,8 +158,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
     );
   }
 
-  Timer? _responseTimeout;
-
   Future<void> _doSend({
     required String sessionId,
     required String text,
@@ -213,10 +211,11 @@ class ChatNotifier extends StateNotifier<ChatState> {
             source: 'flutter_ui',
           );
       }
-      // isLoading stays true until a WebSocket response arrives (see addStreamMessage)
-      _startResponseTimeout(sessionId);
+      state = ChatState(
+        messages: state.messages,
+        isLoading: false,
+      );
     } catch (e) {
-      _responseTimeout?.cancel();
       state = ChatState(
         messages: state.messages,
         isLoading: false,
@@ -227,36 +226,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
     }
   }
 
-  void _startResponseTimeout(String sessionId) {
-    _responseTimeout?.cancel();
-    _responseTimeout = Timer(const Duration(seconds: 60), () {
-      if (state.isLoading) {
-        state = ChatState(
-          messages: state.messages,
-          isLoading: false,
-          error: 'response timeout',
-        );
-      }
-    });
-  }
-
-  /// Cancel the pending loading state (user hit escape).
-  void cancelLoading() {
-    _responseTimeout?.cancel();
-    _isSending = false;
-    state = ChatState(
-      messages: state.messages,
-      isLoading: false,
-    );
-  }
-
   /// Add a chat message from websocket stream
   void addStreamMessage(Map<String, dynamic> data) {
     try {
       final message = ChatMessage.fromBackendMessage(data);
-
-      // Cancel response timeout when any message arrives
-      _responseTimeout?.cancel();
 
       // Replace or update existing message by id if it exists
       final existingIndex = state.messages.indexWhere(
@@ -275,13 +248,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
         newMessages = newMessages.sublist(newMessages.length - _maxMessages);
       }
 
-      // Turn off loading spinner when a response arrives
-      state = ChatState(
-        messages: newMessages,
-        isLoading: false,
-      );
+      state = state.copyWith(messages: newMessages);
     } catch (e) {
-      _responseTimeout?.cancel();
       final errorMessage = ChatMessage(
         id: 'error_${DateTime.now().millisecondsSinceEpoch}',
         role: 'system',
@@ -311,7 +279,6 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   @override
   void dispose() {
-    _responseTimeout?.cancel();
     _chatSubscription?.cancel();
     _chatSubscription = null;
     _wsChatSubscription?.cancel();

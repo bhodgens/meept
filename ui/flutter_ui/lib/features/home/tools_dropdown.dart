@@ -126,8 +126,8 @@ class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: CyberpunkColors.blackTransparent(0.2),
-          border: Border.all(color: CyberpunkColors.orangeDark, width: 1),
+          color: CyberpunkColors.blackTransparent(0.3),
+          border: Border.all(color: CyberpunkColors.midGray, width: 1),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
@@ -136,21 +136,20 @@ class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
             const Icon(
               Icons.build,
               size: 14,
-              color: CyberpunkColors.black,
+              color: CyberpunkColors.orangePrimary,
             ),
             const SizedBox(width: 6),
             Text(
               'tools',
               style: CyberpunkTypography.label.copyWith(
                 fontSize: 11,
-                color: CyberpunkColors.black,
-                fontWeight: FontWeight.bold,
+                color: CyberpunkColors.orangePrimary,
               ),
             ),
             const Icon(
               Icons.arrow_drop_down,
               size: 14,
-              color: CyberpunkColors.black,
+              color: CyberpunkColors.orangePrimary,
             ),
           ],
         ),

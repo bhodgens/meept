@@ -1,18 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/constants.dart';
 import '../../core/shortcuts.dart';
 import '../../theme/colors.dart';
 import '../../theme/effects.dart';
 import '../../theme/typography.dart';
 import '../../widgets/tab_bar.dart';
 import '../../providers/providers.dart';
-import '../../models/api_models.dart';
 import '../drawer/drawer_overlay.dart';
 import 'tab_content.dart';
 import 'tools_dropdown.dart';
 
 /// Home tab enum - 5 tabs
 enum HomeTab { chat, sessions, plans, tasks, agents }
+
+/// Connection status dot - small indicator in toolbar
+class _ConnectionDot extends ConsumerWidget {
+  const _ConnectionDot();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connected = ref.watch(connectionStateProvider);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: connected
+                ? CyberpunkColors.greenSuccess
+                : CyberpunkColors.redAlert,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          connected ? 'connected' : 'disconnected',
+          style: CyberpunkTypography.bodySmall.copyWith(
+            color: connected
+                ? CyberpunkColors.greenSuccess
+                : CyberpunkColors.redAlert,
+            fontFamily: 'SourceCodePro',
+            fontSize: 10,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 /// Home screen - main app screen with top tab navigation and toolbar
 class HomeScreen extends ConsumerStatefulWidget {
@@ -23,6 +60,8 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  HomeTab _selectedTab = HomeTab.chat;
+
   final List<String> _tabLabels = ['chat', 'sessions', 'plans', 'tasks', 'agents'];
 
   bool _initialLoadDone = false;
@@ -34,7 +73,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _leaderController = LeaderKeyController();
     _leaderController.onTabSelected = (index) {
       if (index >= 0 && index < HomeTab.values.length) {
-        ref.read(selectedTabIndexProvider.notifier).state = index;
+        setState(() => _selectedTab = HomeTab.values[index]);
       }
     };
     _leaderController.onToggleDrawer = () {
@@ -42,10 +81,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.read(drawerOpenProvider.notifier).state = !isOpen;
     };
     _leaderController.onShowHelp = _showHelpDialog;
-    _leaderController.onFocusInput = () {
-      ref.read(selectedTabIndexProvider.notifier).state = 0;
-      ref.read(focusInputSlashPrefixProvider.notifier).state =
-          _leaderController.slashPrefix;
+    _leaderController.onFocusInput = ({slashPrefix = false}) {
+      if (_selectedTab != HomeTab.chat) {
+        setState(() => _selectedTab = HomeTab.chat);
+      }
       ref.read(focusInputRequestProvider.notifier).state = true;
     };
     _leaderController.onFind = () {
@@ -72,16 +111,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.read(sessionProvider.notifier).loadSessions();
       ref.read(taskProvider.notifier).loadTasks();
       ref.read(agentProvider.notifier).loadAgents();
-      // Default to 'default' session on startup
-      final active = ref.read(activeSessionProvider);
-      if (active == null) {
-        ref.read(activeSessionProvider.notifier).state = Session(
-          id: 'default',
-          title: 'default',
-          createdAt: DateTime.now(),
-          lastActivity: DateTime.now(),
-        );
-      }
     }
   }
 
@@ -123,11 +152,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               _buildHelpRow('leader p', 'find / search'),
               _buildHelpRow('leader b', 'branches'),
               _buildHelpRow('leader ?', 'this help'),
-              _buildHelpRow('ctrl+k / cmd+k', 'focus input (/)'),
+              _buildHelpRow('cmd+k', 'focus input (/)'),
               _buildHelpRow('esc', 'close / dismiss / blur'),
               const SizedBox(height: 8),
               Text(
-                'leader = ctrl+x or cmd+x',
+                'leader = cmd+x (mac) / ctrl+x (linux/win)',
                 style: CyberpunkTypography.bodySmall.copyWith(
                   color: CyberpunkColors.midGray,
                   fontSize: 10,
@@ -182,9 +211,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final drawerOpen = ref.watch(drawerOpenProvider);
-    final selectedTabIndex = ref.watch(selectedTabIndexProvider);
-    final selectedTab = HomeTab.values[selectedTabIndex.clamp(0, HomeTab.values.length - 1)];
-
     ref.listen<bool>(connectionStateProvider, (prev, connected) {
       _onConnectionChanged(connected);
     });
@@ -205,150 +231,89 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     // Top tab bar
                     OrangeVoidTabBar(
                       tabs: _tabLabels,
-                      selectedIndex: selectedTabIndex,
+                      selectedIndex: _selectedTab.index,
                       onTabSelected: (index) =>
-                          ref.read(selectedTabIndexProvider.notifier).state = index,
+                          setState(() => _selectedTab = HomeTab.values[index]),
                     ),
-                    // Toolbar with tools dropdown, session name, connection indicator
+                    // Toolbar with drawer toggle, tools dropdown + connection indicator
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: CyberpunkColors.orangePrimary,
-                        border: const Border(
-                          bottom: BorderSide(color: CyberpunkColors.orangeDark, width: 1),
-                        ),
-                      ),
+                      color: CyberpunkColors.blackTransparent(0.7),
                       child: Row(
                         children: [
-                          // Tools dropdown
+                          GestureDetector(
+                            onTap: () {
+                              ref.read(drawerOpenProvider.notifier).state = true;
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: CyberpunkColors.darkGray,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Icon(
+                                Icons.menu,
+                                size: 16,
+                                color: CyberpunkColors.orangePrimary,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
                           ToolsDropdown(
                             onToolSelected: (route) {
                               ref.read(activeToolProvider.notifier).state = route;
-                              // Switch to chat tab to show the tool
-                              ref.read(selectedTabIndexProvider.notifier).state = 0;
+                              if (_selectedTab != HomeTab.chat) {
+                                setState(() => _selectedTab = HomeTab.chat);
+                              }
                             },
                           ),
-                          const SizedBox(width: 16),
-                          // Session name in toolbar
-                          Consumer(
-                            builder: (context, ref, child) {
-                              final session = ref.watch(activeSessionProvider);
-                              final displayName = session?.title ?? 'meept';
-                              return Text(
-                                displayName.toLowerCase(),
-                                style: CyberpunkTypography.bodyMedium.copyWith(
-                                  color: CyberpunkColors.black,
-                                  fontFamily: 'SourceCodePro',
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                ),
-                              );
-                            },
-                          ),
-                          const Spacer(),
-                          // Connection dot (light colors for orange bar)
-                          Consumer(
-                            builder: (context, ref, child) {
-                              final connected = ref.watch(connectionStateProvider);
-                              return Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: connected
-                                          ? CyberpunkColors.black
-                                          : CyberpunkColors.redAlert,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    connected ? 'connected' : 'disconnected',
-                                    style: CyberpunkTypography.bodySmall.copyWith(
-                                      color: connected
-                                          ? CyberpunkColors.black
-                                          : CyberpunkColors.redAlert,
-                                      fontFamily: 'SourceCodePro',
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
+                          const SizedBox(width: 12),
+                          const _ConnectionDot(),
                         ],
                       ),
                     ),
                     const Divider(height: 1, color: CyberpunkColors.midGray),
                     // Main content area
                     Expanded(
-                      child: TabContent(
-                        selectedTab: selectedTab,
-                        activeSession: ref.watch(activeSessionProvider),
-                      ),
+                      child: _buildTabContent(),
                     ),
                   ],
                 ),
                 // Drawer overlay
                 if (drawerOpen) const DrawerOverlay(),
-                // Leader key waiting indicator with shortcut list
-                ListenableBuilder(
-                  listenable: _leaderController,
-                  builder: (context, _) {
-                    if (!_leaderController.isWaiting) {
-                      return const SizedBox.shrink();
-                    }
-                    return Positioned(
-                      top: 80,
-                      left: 16,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: CyberpunkColors.darkGray.withValues(alpha: 0.95),
-                          border: Border.all(color: CyberpunkColors.orangePrimary, width: 1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'ctrl+x — leader key',
-                              style: CyberpunkTypography.bodySmall.copyWith(
-                                color: CyberpunkColors.orangePrimary,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            _buildHelpRow('s', 'sessions'),
-                            _buildHelpRow('c', 'chat'),
-                            _buildHelpRow('d', 'drawer'),
-                            _buildHelpRow('p', 'find'),
-                            _buildHelpRow('b', 'branches'),
-                            _buildHelpRow('?', 'more help'),
-                            const SizedBox(height: 4),
-                            Text(
-                              'esc to cancel',
-                              style: CyberpunkTypography.bodySmall.copyWith(
-                                color: CyberpunkColors.midGray,
-                                fontSize: 10,
-                              ),
-                            ),
-                          ],
+                // Leader key waiting indicator
+                if (_leaderController.isWaiting)
+                  Positioned(
+                    top: 80,
+                    left: 16,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: CyberpunkColors.orangePrimary.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'leader key — waiting...',
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          color: CyberpunkColors.black,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTabContent() {
+    final activeSession = ref.watch(activeSessionProvider);
+    return TabContent(
+      selectedTab: _selectedTab,
+      activeSession: activeSession,
     );
   }
 }

@@ -7,17 +7,15 @@ import '../../theme/typography.dart';
 /// Slash command autocomplete popup overlay.
 ///
 /// Displays up to 8 matching commands below the input field.
-/// Navigation is handled by the parent [ChatInput] via [selectedIndex].
+/// Handles arrow/tab/enter navigation internally, esc to cancel.
 class SlashAutocomplete extends StatefulWidget {
   final String query;
-  final int selectedIndex;
   final void Function(SlashCommand command)? onSelected;
   final VoidCallback? onDismiss;
 
   const SlashAutocomplete({
     super.key,
     required this.query,
-    required this.selectedIndex,
     this.onSelected,
     this.onDismiss,
   });
@@ -30,7 +28,7 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
   static final _registry = SlashCommandRegistry();
 
   late List<SlashCommand> _matches;
-  int _displayIndex = 0;
+  int _selectedIndex = 0;
 
   @override
   void initState() {
@@ -43,8 +41,6 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.query != widget.query) {
       _updateMatches();
-    } else {
-      _displayIndex = widget.selectedIndex;
     }
   }
 
@@ -56,13 +52,44 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
     }
     // Clamp selected index to visible range (max 8 items)
     final visibleCount = _matches.length > 8 ? 8 : _matches.length;
-    _displayIndex = widget.selectedIndex.clamp(0, visibleCount - 1);
+    _selectedIndex = _selectedIndex.clamp(0, visibleCount - 1);
     setState(() {});
   }
 
   void _accept() {
     if (_matches.isEmpty) return;
-    widget.onSelected?.call(_matches[_displayIndex]);
+    widget.onSelected?.call(_matches[_selectedIndex]);
+  }
+
+  void _moveSelection(int delta) {
+    final visibleCount = _matches.length > 8 ? 8 : _matches.length;
+    setState(() {
+      _selectedIndex =
+          (_selectedIndex + delta).clamp(0, visibleCount - 1);
+    });
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _moveSelection(1);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _moveSelection(-1);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.tab ||
+          event.logicalKey == LogicalKeyboardKey.enter) {
+        _accept();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        widget.onDismiss?.call();
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -71,24 +98,28 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
 
     final visible = _matches.take(8).toList();
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 4),
-      constraints: const BoxConstraints(maxHeight: 280, maxWidth: 360),
-      decoration: BoxDecoration(
-        color: CyberpunkColors.darkGray,
-        border: Border.all(color: CyberpunkColors.orangePrimary, width: 1),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: visible.length,
-          itemBuilder: (context, index) {
-            final cmd = visible[index];
-            final isSelected = index == _displayIndex;
-            return _buildItem(cmd, widget.query, isSelected, index);
-          },
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 4),
+        constraints: const BoxConstraints(maxHeight: 280, maxWidth: 360),
+        decoration: BoxDecoration(
+          color: CyberpunkColors.darkGray,
+          border: Border.all(color: CyberpunkColors.orangePrimary, width: 1),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: visible.length,
+            itemBuilder: (context, index) {
+              final cmd = visible[index];
+              final isSelected = index == _selectedIndex;
+              return _buildItem(cmd, widget.query, isSelected, index);
+            },
+          ),
         ),
       ),
     );
@@ -102,7 +133,7 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
 
     return InkWell(
       onTap: () {
-        setState(() => _displayIndex = index);
+        setState(() => _selectedIndex = index);
         _accept();
       },
       child: Container(
