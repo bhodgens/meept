@@ -258,11 +258,34 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 	}
 }
 
-// extractTaskIDFromJob extracts the task ID from a job ID by looking up the step.
+// extractTaskIDFromJob extracts the task ID from a job ID by looking up the job.
+// Jobs created for task steps have the task_id embedded in their payload.
 func (o *Orchestrator) extractTaskIDFromJob(ctx context.Context, jobID string) (stepID string, taskID string) {
-	// This would require access to the step store - for now, return empty
-	// In full implementation, this would query the step store to find the step
-	// associated with the job, then get the task_id from the step.
+	// Get the job from the queue to extract task_id
+	// The tactical scheduler has access to the queue
+	if o.tactical == nil {
+		return "", ""
+	}
+
+	// Look up job by ID - the queue interface has Get method
+	job, err := o.tactical.GetJobByID(ctx, jobID)
+	if err != nil || job == nil {
+		o.logger.Debug("Job not found for task extraction", "job_id", jobID, "error", err)
+		return "", ""
+	}
+
+	// Job has task_id directly if it was created as part of a task
+	if job.TaskID != "" {
+		// Also extract step_id from the payload if present
+		var payload struct {
+			StepID string `json:"step_id"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err == nil && payload.StepID != "" {
+			stepID = payload.StepID
+		}
+		return stepID, job.TaskID
+	}
+
 	return "", ""
 }
 
