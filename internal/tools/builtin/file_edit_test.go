@@ -1196,6 +1196,237 @@ func TestLevenshteinDistance(t *testing.T) {
 	}
 }
 
+// --- absorbBoundaries tests ---
+
+func TestAbsorbBoundaries_LeadingMatch(t *testing.T) {
+	// File content: 5 lines
+	// Anchor at line 3, content starts with line 2 ("beta").
+	// Expected: line 2 absorbed, anchor moves to line 2, content trimmed.
+	fileLines := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+	anchor := fmt.Sprintf("%d:%s", 3, ComputeLineHash(fileLines[2]))
+	ops := []editOp{
+		{
+			Op:     "replace",
+			Anchor: anchor,
+			Content: "beta\nGAMMA_NEW",
+		},
+	}
+
+	result := absorbBoundaries(fileLines, ops)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 op, got %d", len(result))
+	}
+
+	// Anchor should have moved to line 2
+	startLine, _, _, err := ParseSnapshotAnchor(result[0].Anchor)
+	if err != nil {
+		t.Fatalf("failed to parse anchor: %v", err)
+	}
+	if startLine != 2 {
+		t.Errorf("expected start line 2, got %d", startLine)
+	}
+
+	// Content should have the leading boundary line removed
+	wantContent := "GAMMA_NEW"
+	if result[0].Content != wantContent {
+		t.Errorf("expected content %q, got %q", wantContent, result[0].Content)
+	}
+}
+
+func TestAbsorbBoundaries_TrailingMatch(t *testing.T) {
+	// File content: 5 lines
+	// Single-line anchor at line 2, content ends with line 3 ("gamma").
+	// Expected: line 3 absorbed, endAnchor added at line 3, content trimmed.
+	fileLines := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+	anchor := fmt.Sprintf("%d:%s", 2, ComputeLineHash(fileLines[1]))
+	ops := []editOp{
+		{
+			Op:     "replace",
+			Anchor: anchor,
+			Content: "BETA_NEW\ngamma",
+		},
+	}
+
+	result := absorbBoundaries(fileLines, ops)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 op, got %d", len(result))
+	}
+
+	// EndAnchor should be set to line 3
+	if result[0].EndAnchor == "" {
+		t.Fatal("expected EndAnchor to be set")
+	}
+	endLine, _, _, err := ParseSnapshotAnchor(result[0].EndAnchor)
+	if err != nil {
+		t.Fatalf("failed to parse end anchor: %v", err)
+	}
+	if endLine != 3 {
+		t.Errorf("expected end line 3, got %d", endLine)
+	}
+
+	// Content should have the trailing boundary line removed
+	wantContent := "BETA_NEW"
+	if result[0].Content != wantContent {
+		t.Errorf("expected content %q, got %q", wantContent, result[0].Content)
+	}
+}
+
+func TestAbsorbBoundaries_BothBoundaries(t *testing.T) {
+	// File content: 5 lines
+	// Anchor at line 3, content starts with line 2 and ends with line 4.
+	// Expected: both lines absorbed, anchor moves to 2, endAnchor set to 4.
+	fileLines := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+	anchor := fmt.Sprintf("%d:%s", 3, ComputeLineHash(fileLines[2]))
+	ops := []editOp{
+		{
+			Op:     "replace",
+			Anchor: anchor,
+			Content: "beta\nGAMMA_NEW\ndelta",
+		},
+	}
+
+	result := absorbBoundaries(fileLines, ops)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 op, got %d", len(result))
+	}
+
+	// Anchor should have moved to line 2
+	startLine, _, _, err := ParseSnapshotAnchor(result[0].Anchor)
+	if err != nil {
+		t.Fatalf("failed to parse anchor: %v", err)
+	}
+	if startLine != 2 {
+		t.Errorf("expected start line 2, got %d", startLine)
+	}
+
+	// EndAnchor should be set to line 4
+	if result[0].EndAnchor == "" {
+		t.Fatal("expected EndAnchor to be set")
+	}
+	endLine, _, _, err := ParseSnapshotAnchor(result[0].EndAnchor)
+	if err != nil {
+		t.Fatalf("failed to parse end anchor: %v", err)
+	}
+	if endLine != 4 {
+		t.Errorf("expected end line 4, got %d", endLine)
+	}
+
+	// Content should have both boundary lines removed
+	wantContent := "GAMMA_NEW"
+	if result[0].Content != wantContent {
+		t.Errorf("expected content %q, got %q", wantContent, result[0].Content)
+	}
+}
+
+func TestAbsorbBoundaries_NoMatch(t *testing.T) {
+	// Content does not match any file boundaries.
+	fileLines := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
+	anchor := fmt.Sprintf("%d:%s", 3, ComputeLineHash(fileLines[2]))
+	ops := []editOp{
+		{
+			Op:      "replace",
+			Anchor:  anchor,
+			Content: "COMPLETELY_NEW_CONTENT",
+		},
+	}
+
+	result := absorbBoundaries(fileLines, ops)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 op, got %d", len(result))
+	}
+
+	// Anchor should remain unchanged
+	if result[0].Anchor != anchor {
+		t.Errorf("expected anchor %q, got %q", anchor, result[0].Anchor)
+	}
+	// Content should remain unchanged
+	if result[0].Content != "COMPLETELY_NEW_CONTENT" {
+		t.Errorf("expected content unchanged, got %q", result[0].Content)
+	}
+	// EndAnchor should remain empty
+	if result[0].EndAnchor != "" {
+		t.Errorf("expected EndAnchor to remain empty, got %q", result[0].EndAnchor)
+	}
+}
+
+func TestAbsorbBoundaries_NonReplaceOp(t *testing.T) {
+	// Non-replace ops should pass through unchanged.
+	fileLines := []string{"alpha", "beta", "gamma"}
+	anchor := fmt.Sprintf("%d:%s", 2, ComputeLineHash(fileLines[1]))
+	ops := []editOp{
+		{Op: "insert_before", Anchor: anchor, Content: "new"},
+		{Op: "insert_after", Anchor: anchor, Content: "new"},
+		{Op: "delete", Anchor: anchor},
+	}
+
+	result := absorbBoundaries(fileLines, ops)
+
+	if len(result) != 3 {
+		t.Fatalf("expected 3 ops, got %d", len(result))
+	}
+
+	for i, op := range ops {
+		if result[i].Anchor != op.Anchor {
+			t.Errorf("op %d: expected anchor %q, got %q", i, op.Anchor, result[i].Anchor)
+		}
+		if result[i].Content != op.Content {
+			t.Errorf("op %d: expected content %q, got %q", i, op.Content, result[i].Content)
+		}
+		if result[i].EndAnchor != op.EndAnchor {
+			t.Errorf("op %d: expected EndAnchor %q, got %q", i, op.EndAnchor, result[i].EndAnchor)
+		}
+	}
+}
+
+func TestAbsorbBoundaries_BOFEOF(t *testing.T) {
+	// BOF/EOF anchors should be skipped entirely.
+	fileLines := []string{"alpha", "beta", "gamma"}
+	ops := []editOp{
+		{Op: "replace", Anchor: "BOF", Content: "alpha\nnew_content"},
+		{Op: "replace", Anchor: "EOF", Content: "gamma\nnew_content"},
+	}
+
+	result := absorbBoundaries(fileLines, ops)
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 ops, got %d", len(result))
+	}
+
+	for i, op := range ops {
+		if result[i].Anchor != op.Anchor {
+			t.Errorf("op %d: expected anchor %q, got %q", i, op.Anchor, result[i].Anchor)
+		}
+		if result[i].Content != op.Content {
+			t.Errorf("op %d: expected content unchanged, got %q", i, result[i].Content)
+		}
+	}
+}
+
+func TestAbsorbBoundaries_EmptyContent(t *testing.T) {
+	// Empty content ops should be skipped.
+	fileLines := []string{"alpha", "beta", "gamma"}
+	anchor := fmt.Sprintf("%d:%s", 2, ComputeLineHash(fileLines[1]))
+	ops := []editOp{
+		{Op: "replace", Anchor: anchor, Content: ""},
+	}
+
+	result := absorbBoundaries(fileLines, ops)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 op, got %d", len(result))
+	}
+	if result[0].Anchor != anchor {
+		t.Errorf("expected anchor unchanged")
+	}
+	if result[0].Content != "" {
+		t.Errorf("expected content still empty, got %q", result[0].Content)
+	}
+}
+
 func TestLevenshteinRatio(t *testing.T) {
 	tests := []struct {
 		a, b     string

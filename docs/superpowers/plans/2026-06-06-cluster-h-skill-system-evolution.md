@@ -2,7 +2,7 @@
 
 ## Plan Review
 
-**Status:** Ready for execution
+**Status:** COMPLETE
 
 ### Key Findings from Codebase Analysis
 
@@ -15,20 +15,54 @@
 ## Tasks
 
 ### Task 1: Remove ClawSkills Package
+**Status:** DONE
 **Complexity:** Mechanical (delete files, remove references)
 **Files:** `internal/clawskills/clawskills.go`, `internal/rpc/clawskills.go`, `cmd/meept/clawskills.go`, docs references
+- `internal/clawskills/` directory deleted
+- Zero Go source file references to clawskills remain
+- Stale references exist only in docs/auto-analysis files (not Go code)
 
 ### Task 2: Add MCP-Embedded Skills Support
+**Status:** DONE
 **Complexity:** Integration (new field + runtime lifecycle)
-**Files:** `internal/skills/models.go`, new `internal/skills/mcp_runtime.go`, `internal/skills/executor.go`
+**Files:** `internal/skills/models.go`, `internal/skills/mcp_runtime.go`, `internal/skills/executor.go`
+- `MCPServerConfig` struct in `models.go` with Name, Command, Args, Env fields
+- `MCPRuntime` in `mcp_runtime.go`: lifecycle management (Start/Shutdown/Tools), mutex-protected, graceful shutdown with JSON-RPC shutdown notification
+- `SkillExecutor` in `executor.go`: integrates MCP runtime into Execute/ExecuteWithMessages, defers Shutdown
+- `SkillMCPTool` in `skill_mcp_tool.go`: wraps MCP tools as `tools.Tool` for agent-loop integration
+- Tests: `mcp_runtime_test.go` (12 tests), `executor_test.go` (8 tests including MCP scenarios), `skill_mcp_tool_test.go` (6 tests)
 
 ### Task 3: Add Claude Skills Discovery Tier
+**Status:** DONE
 **Complexity:** Integration (new tier + format adapter)
-**Files:** `internal/skills/discovery.go`, new `internal/skills/adapter.go`, `internal/skills/parser.go`
+**Files:** `internal/skills/discovery.go`, `internal/skills/adapter.go`, `internal/skills/source_claude.go`, `internal/skills/parser.go`
+- `PriorityClaude = 2` constant in `discovery.go` (between user=1 and system=3)
+- `ClaudeSource` in `source_claude.go`: scans `~/.claude/skills/`, applies adapter, context support
+- `ClaudeSkillAdapter` in `adapter.go`: sets Source="claude", derives description from body, derives tags from parent directory
+- CamelCase field normalization in `parser.go`: `allowedTools`, `riskLevel`, `maxIterations`, `maxTokens` all mapped
+- Trigger-to-Tags mapping in `parser.go`
+- Tests: `source_claude_test.go` (8 tests), `adapter_test.go` (6 test groups), `parser_test.go` (camelCase + trigger tests)
 
 ### Task 4: Unified Skill Loader with Pluggable Sources
+**Status:** DONE
 **Complexity:** Architecture (refactor discovery into interface-based system)
-**Files:** `internal/skills/discovery.go`, new source files
+**Files:** `internal/skills/discovery.go`, `internal/skills/source_file.go`, `internal/skills/source_claude.go`
+- `SkillSource` interface: `Name() string` + `Discover(ctx context.Context) ([]*Skill, error)`
+- `FileSource`: multi-tier filesystem discovery with priority shadowing, metadata-only path, context cancellation
+- `ClaudeSource`: dedicated source for `~/.claude/skills/` with adapter integration
+- `Discovery` orchestrator: pluggable via `WithSources()`, `WithTiers()`, `WithDiscoveryLogger()`; default includes FileSource + ClaudeSource
+- `DiscoverMetadataOnly()`: optimized path using FileSource metadata-only scanning, fallback for other sources
+- `NewDiscovery()` default creates both FileSource (3 tiers) and ClaudeSource
+- Tests: `discovery_test.go` (14 tests), `discovery_sources_test.go` (9 tests), `source_file_test.go` (12 tests)
+
+## Verification
+
+All 95 tests pass:
+```
+ok  github.com/caimlas/meept/internal/skills  0.352s
+```
+
+Package compiles cleanly: `go build ./internal/skills/...` succeeds.
 
 ## Execution Order
 

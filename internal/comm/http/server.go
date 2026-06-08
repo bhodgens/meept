@@ -771,6 +771,8 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/projects/{id}", s.handleProjectUnregister)
 	mux.HandleFunc("POST /api/v1/projects/{id}/sync", s.handleProjectSync)
 	mux.HandleFunc("GET /api/v1/projects/{id}/status", s.handleProjectStatus)
+	mux.HandleFunc("GET /api/v1/projects/{id}/branches", s.handleProjectBranches)
+	mux.HandleFunc("POST /api/v1/projects/{id}/checkout", s.handleProjectCheckout)
 	mux.HandleFunc("POST /api/v1/projects/detect", s.handleProjectDetect)
 
 	// Plan endpoints

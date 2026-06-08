@@ -29,7 +29,7 @@ type Engine struct {
 
 	gossip    *GossipEngine
 	gitSync   *GitSync
-	wgSync    *WireGuardSync
+	wgMgr     *WireGuardManager
 	signingPriv ed25519.PrivateKey
 	signingPub  ed25519.PublicKey
 
@@ -138,12 +138,14 @@ func (e *Engine) Start(ctx context.Context) error {
 	// WireGuard tools (wg, wg-quick, ip) are Linux-only; on other platforms
 	// the sync loop will log warnings but will not crash the engine.
 	if e.enableWireGuard {
-		e.wgSync = NewWireGuardSync(e.cfg, e.localCfg, e.gitRepoPath, e.logger)
-		if err := e.wgSync.Start(ctx); err != nil {
-			e.logger.Warn("engine: wireguard sync start failed, continuing without it",
+		wgConfigPath := filepath.Join(e.gitRepoPath, "wireguard")
+		wgMgr, err := NewWireGuardManager(wgConfigPath, e.cfg.Network.Interface)
+		if err != nil {
+			e.logger.Warn("engine: wireguard manager creation failed, continuing without it",
 				"error", err,
 			)
-			e.wgSync = nil
+		} else {
+			e.wgMgr = wgMgr
 		}
 	}
 
@@ -175,10 +177,10 @@ func (e *Engine) Stop() error {
 		}
 	}
 
-	// Stop WireGuard sync before gossip
-	if e.wgSync != nil {
-		if err := e.wgSync.Stop(); err != nil {
-			e.logger.Warn("engine: wireguard sync stop error", "error", err)
+	// Stop WireGuard manager before gossip
+	if e.wgMgr != nil {
+		if err := e.wgMgr.Stop(); err != nil {
+			e.logger.Warn("engine: wireguard stop error", "error", err)
 		}
 	}
 
@@ -229,11 +231,11 @@ func (e *Engine) GitSync() *GitSync {
 	return e.gitSync
 }
 
-// WireGuardSync returns the WireGuard sync instance, or nil if not started.
-func (e *Engine) WireGuardSync() *WireGuardSync {
+// WireGuardManager returns the WireGuard manager instance, or nil if not started.
+func (e *Engine) WireGuardManager() *WireGuardManager {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.wgSync
+	return e.wgMgr
 }
 
 // SigningKey returns the node's ed25519 signing key pair.

@@ -10,6 +10,9 @@ import '../files/files_panel.dart';
 import '../calendar/calendar_panel.dart';
 import '../metrics/metrics_panel.dart';
 import '../terminal/terminal_panel.dart';
+import '../skills/skill_panel.dart';
+import '../projects/branches_panel.dart';
+import '../search/search_panel.dart';
 
 /// Chat tab - full-width layout with main chat area only.
 /// Tools open in the main content area (replaces chat view).
@@ -47,6 +50,12 @@ class _ChatTabState extends ConsumerState<ChatTab> {
         return const MetricsPanel();
       case 'terminal':
         return const TerminalPanel();
+      case 'skills':
+        return const SkillPanel();
+      case 'branches':
+        return const BranchesPanel();
+      case 'search':
+        return const SearchPanel();
     }
 
     // Unknown tool: placeholder

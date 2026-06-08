@@ -120,11 +120,6 @@ func (q *PersistentQueue) DB() *sql.DB {
 	return q.store.DB()
 }
 
-// Store returns the underlying store for cluster operations.
-func (q *PersistentQueue) Store() *Store {
-	return q.store
-}
-
 // Enqueue adds a job to the queue.
 func (q *PersistentQueue) Enqueue(ctx context.Context, job *Job) error {
 	q.mu.Lock()

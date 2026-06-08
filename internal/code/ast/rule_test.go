@@ -277,7 +277,7 @@ if false {
 
 // TestConstraintTypes tests different constraint types
 func TestConstraintTypes(t *testing.T) {
-	parser := NewParserManager(DefaultParserManager())
+	parser := NewParserManager(DefaultParserConfig())
 	executor := NewRuleExecutor(parser)
 
 	t.Run("regex constraint", func(t *testing.T) {

@@ -196,9 +196,10 @@ type FunctionParameters struct {
 
 // ParameterProperty defines a single parameter property.
 type ParameterProperty struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description,omitempty"`
-	Enum        []string `json:"enum,omitempty"`
+	Type        string             `json:"type"`
+	Description string             `json:"description,omitempty"`
+	Enum        []string           `json:"enum,omitempty"`
+	Items       *ParameterProperty `json:"items,omitempty"`
 }
 
 // NewToolDefinition creates a new tool definition.

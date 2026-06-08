@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/llm"
@@ -79,35 +80,41 @@ func (t *ASTResolveTool) Execute(ctx context.Context, args map[string]any) (any,
 		return nil, fmt.Errorf("invalid edits_json: %w", err)
 	}
 
-	edits := make([]ast.EditProposal, 0, len(rawEdits))
+	edits := make([]ast.ProposedEdit, 0, len(rawEdits))
 	for i, e := range rawEdits {
-		edit := ast.EditProposal{FilePath: filePath}
+		edit := ast.ProposedEdit{}
 
 		if v, ok := e["start_line"].(float64); ok {
 			edit.StartLine = int(v)
 		}
 		if v, ok := e["start_column"].(float64); ok {
-			edit.StartCol = int(v)
+			edit.StartChar = int(v)
 		}
 		if v, ok := e["end_line"].(float64); ok {
 			edit.EndLine = int(v)
 		}
 		if v, ok := e["end_column"].(float64); ok {
-			edit.EndCol = int(v)
+			edit.EndChar = int(v)
 		}
 		if v, ok := e["new_text"].(string); ok {
 			edit.NewText = v
 		}
 
-		if edit.StartLine == 0 && edit.StartCol == 0 && edit.EndLine == 0 && edit.EndCol == 0 {
+		if edit.StartLine == 0 && edit.StartChar == 0 && edit.EndLine == 0 && edit.EndChar == 0 {
 			return nil, fmt.Errorf("edit %d has invalid range", i)
 		}
 
 		edits = append(edits, edit)
 	}
 
-	if err := ast.ApplyEdits(filePath, edits); err != nil {
-		return nil, fmt.Errorf("failed to apply edits: %w", err)
+	source, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	result := ast.ApplyEdits(source, edits)
+	if err := os.WriteFile(filePath, result, 0); err != nil {
+		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
 	return map[string]any{

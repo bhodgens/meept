@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -101,6 +102,70 @@ func (q *QueryExecutor) RunQueryWithLanguage(ctx context.Context, filePath strin
 	}
 
 	return q.RunQuery(ctx, source, lang, queryPattern)
+}
+
+// MatchCheck holds a capture's info for constraint checking.
+type MatchCheck struct {
+	Name     string
+	Text     string
+	NodeType string
+}
+
+// QueryRule is an alias for Rule, used by query-based rule execution.
+type QueryRule = Rule
+
+// ApplyConstraints checks if all rule constraints are satisfied by the given checks.
+func (r *Rule) ApplyConstraints(checks []MatchCheck) bool {
+	for _, c := range r.Constraints {
+		matched := false
+		for _, chk := range checks {
+			if c.Regex != nil && c.Regex.Node == chk.Name {
+				matched, _ = regexp.MatchString(c.Regex.Pattern, chk.Text)
+				if !matched {
+					return false
+				}
+			}
+			if c.Kind != nil && c.Kind.Node == chk.Name {
+				matched = true
+			}
+		}
+		if !matched && c.Kind == nil && c.Regex == nil && c.HasField == nil {
+			// constraint could not be evaluated — skip
+			continue
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+// ApplyTransforms applies rule transforms to the given checks and returns a name->value map.
+func (r *Rule) ApplyTransforms(checks []MatchCheck) map[string]string {
+	result := make(map[string]string)
+	for _, chk := range checks {
+		result[chk.Name] = chk.Text
+	}
+	for _, t := range r.Transform {
+		val, ok := result[t.Node]
+		if !ok {
+			continue
+		}
+		switch t.Type {
+		case "uppercase":
+			result[t.Node] = strings.ToUpper(val)
+		case "lowercase":
+			result[t.Node] = strings.ToLower(val)
+		case "replace":
+			re := regexp.MustCompile(t.Pattern)
+			result[t.Node] = re.ReplaceAllString(val, t.Replace)
+		case "prepend":
+			result[t.Node] = t.Prefix + val
+		case "append":
+			result[t.Node] = val + t.Suffix
+		}
+	}
+	return result
 }
 
 // RunQueryWithRule executes a query using an ast-grep style YAML rule.

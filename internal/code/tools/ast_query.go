@@ -198,58 +198,6 @@ func (t *ASTQueryTool) Execute(ctx context.Context, args map[string]any) (any, e
 		if err != nil {
 			return nil, fmt.Errorf("query failed: %w", err)
 		}
-
-		if rule != "" {
-			parsedRule, err := ast.ParseRule(rule)
-			if err != nil {
-				return nil, fmt.Errorf("invalid YAML rule: %w", err)
-			}
-			result, err = t.ruleExecutor.ExecuteRuleOnFile(filePath, parsedRule)
-			if err != nil {
-				return nil, fmt.Errorf("rule execution failed: %w", err)
-			}
-		}
-	} else {
-		// Query mode: Execute S-expression query
-		if query == "" && queryName != "" {
-			var ok bool
-			query, ok = ast.GetCommonQuery(queryName, lang)
-			if !ok {
-				return nil, fmt.Errorf("no predefined query '%s' for language '%s'", queryName, lang)
-			}
-		}
-
-		if query == "" {
-			return nil, fmt.Errorf("either query or query_name must be provided")
-		}
-
-		var err error
-		queryResult, err = t.executor.RunQueryWithLanguage(ctx, filePath, lang, query)
-		if err != nil {
-			return nil, fmt.Errorf("query failed: %w", err)
-		}
-		// Override language from rule if provided
-		if rule.Language != "" {
-			lang = ast.LanguageFromString(rule.Language)
-		}
-		source, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return nil, fmt.Errorf("failed to read file: %w", readErr)
-		}
-		result, err = t.executor.RunQueryWithRule(ctx, source, lang, rule)
-	} else {
-		// S-expression query mode
-		if query == "" && queryName != "" {
-			var ok bool
-			query, ok = ast.GetCommonQuery(queryName, lang)
-			if !ok {
-				return nil, fmt.Errorf("no predefined query '%s' for language '%s'", queryName, lang)
-			}
-		}
-		if query == "" {
-			return nil, fmt.Errorf("either query, query_name, or yaml_rule must be provided")
-		}
-		result, err = t.executor.RunQueryWithLanguage(ctx, filePath, lang, query)
 	}
 
 	// Build response

@@ -570,3 +570,45 @@ class ApiClientException implements Exception {
   @override
   String toString() => 'ApiClientException: $message (HTTP $statusCode)';
 }
+
+  // ===== Search Endpoints =====
+
+  Future<SearchResults> search({
+    required String query,
+    SearchScope scope = SearchScope.all,
+  }) async {
+    final data = await post<Map<String, dynamic>>(
+      '/search',
+      data: {
+        'query': query,
+        'scope': scope.name,
+      },
+    );
+    return SearchResults.fromJson(data);
+  }
+
+  // ===== Project/Branch Endpoints =====
+
+  Future<List<BranchInfo>> listBranches(String projectId) async {
+    final data = await get<List<dynamic>>('/projects/$projectId/branches');
+    return data
+        .map((b) => BranchInfo.fromJson(b as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> checkoutBranch(String projectId, String branch) async {
+    await post('/projects/$projectId/checkout', data: {'branch': branch});
+  }
+
+  // ===== Skill Execution Endpoints =====
+
+  Future<SkillExecuteResult> executeSkill({
+    required String slug,
+    required String prompt,
+  }) async {
+    final data = await post<Map<String, dynamic>>(
+      '/skills/$slug/execute',
+      data: {'prompt': prompt},
+    );
+    return SkillExecuteResult.fromJson(data);
+  }

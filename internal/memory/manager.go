@@ -1606,6 +1606,15 @@ func (m *Manager) IsDistributed() bool {
 	return m.distributed
 }
 
+// Stats returns a snapshot of memory statistics (context-free convenience wrapper).
+func (m *Manager) Stats() *MemoryStats {
+	stats, err := m.GetStats(context.Background())
+	if err != nil {
+		return &MemoryStats{}
+	}
+	return stats
+}
+
 // IsInitialized returns true if the memory manager was successfully initialized.
 // This should be checked before using memory tools to avoid "not initialized" errors.
 func (m *Manager) IsInitialized() bool {

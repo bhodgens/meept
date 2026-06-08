@@ -426,12 +426,12 @@ type FileOperationMetadata struct {
 // WorkspaceEditWithOperations extends WorkspaceEdit with file operations.
 type WorkspaceEditWithOperations struct {
 	Changes          map[string][]TextEdit `json:"changes,omitempty"`
-	DocumentChanges  []DocumentChange      `json:"documentChanges,omitempty"`
+	DocumentChanges  []WorkspaceDocumentChange      `json:"documentChanges,omitempty"`
 	FileOperations   []FileOperation       `json:"fileOperations,omitempty"`
 }
 
-// DocumentChange represents a text document change.
-type DocumentChange struct {
+// DocumentChange represents a text document change (workspace edit variant).
+type WorkspaceDocumentChange struct {
 	TextDocument      VersionedTextDocumentIdentifier `json:"textDocument"`
 	Edits             []TextEdit                      `json:"edits"`
 }

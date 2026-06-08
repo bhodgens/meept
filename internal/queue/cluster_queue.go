@@ -136,11 +136,9 @@ func (cq *ClusterQueue) Fail(ctx context.Context, jobID string, err error) error
 	return cq.Queue.Fail(ctx, jobID, err)
 }
 
-// ReclaimJob reclaims a claimed job back to pending state due to node failure
-// or claim timeout. It records the reclaim event, resets the job state in the
-// store, removes the local claim record, and publishes a bus event so other
-// nodes are aware the job needs to be re-handled.
-func (cq *ClusterQueue) ReclaimJob(ctx context.Context, jobID, reason string) error {
+// reclaimJobUnlocked reclaims a claimed job back to pending state.
+// The caller must already hold cq.mu (write lock).
+func (cq *ClusterQueue) reclaimJobUnlocked(ctx context.Context, jobID, reason string) error {
 	// 1. Record TASK_RECLAIM event in cluster_events table
 	if cq.store != nil {
 		if err := cq.store.RecordClaimEvent(ctx, jobID, cq.localNodeID, "reclaim"); err != nil {
@@ -156,10 +154,8 @@ func (cq *ClusterQueue) ReclaimJob(ctx context.Context, jobID, reason string) er
 		// Non-fatal: other nodes still learned about the reclaim via the event.
 	}
 
-	// 3. Remove local claim record
-	cq.mu.Lock()
+	// 3. Remove local claim record (caller holds the lock, no need to acquire)
 	delete(cq.claimed, jobID)
-	cq.mu.Unlock()
 
 	// 4. Publish bus event so subscribers across the cluster are notified
 	if cq.bus != nil {
@@ -180,6 +176,16 @@ func (cq *ClusterQueue) ReclaimJob(ctx context.Context, jobID, reason string) er
 	)
 
 	return nil
+}
+
+// ReclaimJob reclaims a claimed job back to pending state due to node failure
+// or claim timeout. It records the reclaim event, resets the job state in the
+// store, removes the local claim record, and publishes a bus event so other
+// nodes are aware the job needs to be re-handled.
+func (cq *ClusterQueue) ReclaimJob(ctx context.Context, jobID, reason string) error {
+	cq.mu.Lock()
+	defer cq.mu.Unlock()
+	return cq.reclaimJobUnlocked(ctx, jobID, reason)
 }
 
 // CheckNodeReachability checks if a node is reachable by querying the
@@ -215,7 +221,7 @@ func (cq *ClusterQueue) IsClaimed(ctx context.Context, jobID string) (string, bo
 }
 
 // ReclaimIfStale checks all locally tracked claims and reclaims any whose
-// timeout has expired by delegating to ReclaimJob.
+// timeout has expired.
 func (cq *ClusterQueue) ReclaimIfStale(ctx context.Context) []*Job {
 	cq.mu.Lock()
 	defer cq.mu.Unlock()
@@ -223,10 +229,8 @@ func (cq *ClusterQueue) ReclaimIfStale(ctx context.Context) []*Job {
 	var reclaiming []*Job
 	for jobID, record := range cq.claimed {
 		if time.Now().After(record.TimeoutAt) {
-			// ReclaimJob internally deletes the record from claimed map,
-			// so we capture the job ID and record first.
 			reclaiming = append(reclaiming, &Job{ID: jobID})
-			if err := cq.ReclaimJob(ctx, jobID, "claim_stale"); err != nil {
+			if err := cq.reclaimJobUnlocked(ctx, jobID, "claim_stale"); err != nil {
 				cq.logger.Warn("cluster_queue: reclaim_if_stale: reclaim failed",
 					"job_id", jobID, "error", err)
 			}

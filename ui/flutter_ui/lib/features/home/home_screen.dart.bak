@@ -88,12 +88,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.read(focusInputRequestProvider.notifier).state = true;
     };
     _leaderController.onFind = () {
-      setState(() => _selectedTab = HomeTab.chat);
-      ref.read(activeToolProvider.notifier).state = 'search';
+      _showSnack('search: not yet implemented');
     };
     _leaderController.onBranches = () {
-      setState(() => _selectedTab = HomeTab.chat);
-      ref.read(activeToolProvider.notifier).state = 'branches';
+      _showSnack('branches: not yet implemented');
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatProvider);

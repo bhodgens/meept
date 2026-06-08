@@ -43,6 +43,9 @@ type Config struct {
 	Session           SessionConfig           `json:"session"            toml:"session"`
 	Cluster           ClusterConfig           `json:"cluster"             toml:"cluster"`
 	Bots              BotsConfig              `json:"bots"                toml:"bots"`
+	Plans             PlansConfig             `json:"plans"               toml:"plans"`
+	Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
+	OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
 }
 
 // BotsConfig holds configuration for the persistent bot framework.
@@ -53,6 +56,56 @@ type BotsConfig struct {
 	DefaultDailyBudgetCents     int    `json:"default_daily_budget_cents" toml:"default_daily_budget_cents"`
 	AutoPauseOnConsecutiveFails int    `json:"auto_pause_on_consecutive_failures" toml:"auto_pause_on_consecutive_failures"`
 	WebhookEnabled              bool   `json:"webhook_enabled" toml:"webhook_enabled"`
+}
+
+// PlansConfig holds configuration for the plan system.
+type PlansConfig struct {
+	Mode         string                  `json:"mode"          toml:"mode"`
+	Threshold    PlansThresholdConfig    `json:"threshold"     toml:"threshold"`
+	Storage      PlansStorageConfig      `json:"storage"       toml:"storage"`
+	Approval     PlansApprovalConfig     `json:"approval"      toml:"approval"`
+	Confirmation PlansConfirmationConfig `json:"confirmation"  toml:"confirmation"`
+}
+
+// PlansThresholdConfig holds threshold-based plan triggering settings.
+type PlansThresholdConfig struct {
+	MinSteps           int      `json:"min_steps"            toml:"min_steps"`
+	ComplexityKeywords []string `json:"complexity_keywords"  toml:"complexity_keywords"`
+	AlwaysPlanIntents  []string `json:"always_plan_intents"  toml:"always_plan_intents"`
+}
+
+// PlansStorageConfig holds plan file storage settings.
+type PlansStorageConfig struct {
+	DefaultPath      string `json:"default_path"       toml:"default_path"`
+	FilenameTemplate string `json:"filename_template"  toml:"filename_template"`
+	ExternalPath     string `json:"external_path"      toml:"external_path"`
+}
+
+// PlansApprovalConfig holds plan approval workflow settings.
+type PlansApprovalConfig struct {
+	RequireApproval bool `json:"require_approval" toml:"require_approval"`
+	AllowRevision   bool `json:"allow_revision"   toml:"allow_revision"`
+	MaxRevisions    int  `json:"max_revisions"    toml:"max_revisions"`
+}
+
+// PlansConfirmationConfig holds plan confirmation settings.
+type PlansConfirmationConfig struct {
+	RequireSignoff bool `json:"require_signoff" toml:"require_signoff"`
+}
+
+// ProjectsConfig holds configuration for the project system.
+type ProjectsConfig struct {
+	Enabled                     bool   `json:"enabled"                        toml:"enabled"`
+	BaseDir                     string `json:"base_dir"                       toml:"base_dir"`
+	DefaultBranch               string `json:"default_branch"                 toml:"default_branch"`
+	WorktreePerPlan             string `json:"worktree_per_plan"              toml:"worktree_per_plan"`
+	WorktreeIsolationThreshold  int    `json:"worktree_isolation_threshold"   toml:"worktree_isolation_threshold"`
+	AutoDetect                  bool   `json:"auto_detect"                    toml:"auto_detect"`
+	MaxWorktreesPerProject      int    `json:"max_worktrees_per_project"      toml:"max_worktrees_per_project"`
+	CleanupOrphanedWorktrees    bool   `json:"cleanup_orphaned_worktrees"     toml:"cleanup_orphaned_worktrees"`
+	FenceEnabled                bool   `json:"fence_enabled"                  toml:"fence_enabled"`
+	AllowReadSystemPaths        bool   `json:"allow_read_system_paths"        toml:"allow_read_system_paths"`
+	AutoSyncOnAttach            bool   `json:"auto_sync_on_attach"            toml:"auto_sync_on_attach"`
 }
 
 // CalendarConfig holds Google Calendar integration settings.
@@ -134,6 +187,16 @@ type SessionConfig struct {
 	BranchSummaryThreshold int `json:"branch_summary_threshold" toml:"branch_summary_threshold"`
 	// RestoreMessageLimit is the maximum messages to restore (0 = all).
 	RestoreMessageLimit int `json:"restore_message_limit" toml:"restore_message_limit"`
+	// MaxBranches limits the number of branches per session.
+	MaxBranches int `json:"max_branches" toml:"max_branches"`
+	// AutoFork enables automatic forking on context overflow.
+	AutoFork bool `json:"auto_fork" toml:"auto_fork"`
+	// Compaction enables automatic context compaction.
+	Compaction bool `json:"compaction" toml:"compaction"`
+	// CompactionThreshold is the token count that triggers compaction.
+	CompactionThreshold int `json:"compaction_threshold" toml:"compaction_threshold"`
+	// CompactionTargetRatio is the target context ratio after compaction.
+	CompactionTargetRatio float64 `json:"compaction_target_ratio" toml:"compaction_target_ratio"`
 }
 
 // ASTConfig holds AST parsing settings.
@@ -156,6 +219,12 @@ type LSPConfig struct {
 	AutoStartServers bool `json:"auto_start_servers" toml:"auto_start_servers"`
 	// ConnectionTimeoutSeconds is the timeout for connecting to LSP servers
 	ConnectionTimeoutSeconds int `json:"connection_timeout_seconds" toml:"connection_timeout_seconds"`
+	// DiagnosticsTimeoutSeconds is the timeout for LSP diagnostics on write
+	DiagnosticsTimeout int `json:"diagnostics_timeout" toml:"diagnostics_timeout"`
+	// FormatOnWrite enables formatting on write
+	FormatOnWrite bool `json:"format_on_write" toml:"format_on_write"`
+	// DiagnosticsOnWrite enables diagnostics on write
+	DiagnosticsOnWrite bool `json:"diagnostics_on_write" toml:"diagnostics_on_write"`
 }
 
 // LSPServerConfig configures a single LSP server.
@@ -292,10 +361,14 @@ type LLMMetricsConfig struct {
 
 // BudgetConfig holds token budget settings.
 type BudgetConfig struct {
-	HourlyTokenLimit int     `json:"hourly_token_limit" toml:"hourly_token_limit"`
-	DailyTokenLimit  int     `json:"daily_token_limit"  toml:"daily_token_limit"`
-	RateLimitRPM     int     `json:"rate_limit_rpm"     toml:"rate_limit_rpm"`
-	Aggressiveness   float64 `json:"aggressiveness"     toml:"aggressiveness"`
+	HourlyTokenLimit  int     `json:"hourly_token_limit"  toml:"hourly_token_limit"`
+	DailyTokenLimit   int     `json:"daily_token_limit"   toml:"daily_token_limit"`
+	DailyCostLimit    float64 `json:"daily_cost_limit"    toml:"daily_cost_limit"`
+	HourlyCostLimit   float64 `json:"hourly_cost_limit"   toml:"hourly_cost_limit"`
+	RateLimitRPM      int     `json:"rate_limit_rpm"      toml:"rate_limit_rpm"`
+	Aggressiveness    float64 `json:"aggressiveness"      toml:"aggressiveness"`
+	PerTaskTokenLimit int     `json:"per_task_token_limit" toml:"per_task_token_limit"`
+	PerSessionTokenLimit int  `json:"per_session_token_limit" toml:"per_session_token_limit"`
 }
 
 // MemoryBackend defines the storage backend for memory.
@@ -407,12 +480,15 @@ type PersonalityConfig struct {
 
 // EmbeddingConfig holds vector embedding settings for semantic memory search.
 type EmbeddingConfig struct {
-	Enabled   bool   `json:"enabled"   toml:"enabled"`
-	Provider  string `json:"provider"  toml:"provider"` // "openai" or "ollama"
-	APIKey    string `json:"api_key"   toml:"api_key"`
-	BaseURL   string `json:"base_url"  toml:"base_url"`
-	Model     string `json:"model"     toml:"model"`
-	Dimension int    `json:"dimension" toml:"dimension"`
+	Enabled        bool     `json:"enabled"         toml:"enabled"`
+	Provider       string   `json:"provider"        toml:"provider"` // "openai" or "ollama"
+	APIKey         string   `json:"api_key"         toml:"api_key"`
+	BaseURL        string   `json:"base_url"        toml:"base_url"`
+	Model          string   `json:"model"           toml:"model"`
+	Dimension      int      `json:"dimension"       toml:"dimension"`
+	ShardBasePath  string   `json:"shard_base_path" toml:"shard_base_path"` // Directory for shard files
+	MaxRAMShards   int      `json:"max_ram_shards"  toml:"max_ram_shards"`  // LRU cache size
+	ShardTypes     []string `json:"shard_types"     toml:"shard_types"`     // Enabled shard types
 }
 
 // MemvidConfig holds memvid service settings.
@@ -531,6 +607,19 @@ type AgentConfig struct {
 	Watchdog WatchdogConfig `json:"watchdog" toml:"watchdog"`
 	// Queues holds steering and follow-up message queue settings
 	Queues AgentQueuesConfig `json:"queues" toml:"queues"`
+	// Compaction holds context compaction settings
+	Compaction AgentCompactionConfig `json:"compaction" toml:"compaction"`
+}
+
+// AgentCompactionConfig holds context compaction settings for the agent.
+type AgentCompactionConfig struct {
+	Enabled           bool   `json:"enabled"            toml:"enabled"`
+	ReserveTokens     int    `json:"reserve_tokens"      toml:"reserve_tokens"`
+	KeepRecentTokens  int    `json:"keep_recent_tokens"  toml:"keep_recent_tokens"`
+	MaxResponseTokens int    `json:"max_response_tokens" toml:"max_response_tokens"`
+	SummaryFormat     string `json:"summary_format"      toml:"summary_format"`
+	TrackFileOps      bool   `json:"track_file_ops"       toml:"track_file_ops"`
+	TimeoutSeconds    int    `json:"timeout_seconds"      toml:"timeout_seconds"`
 }
 
 // WatchdogConfig holds agent monitoring and timeout settings.
@@ -797,23 +886,28 @@ type SafetyConfig struct {
 
 // DetectionConfig holds detection settings for self-improvement.
 type DetectionConfig struct {
-	ScanPytest       bool     `json:"scan_pytest"        toml:"scan_pytest"`
-	ScanRuntimeLogs  bool     `json:"scan_runtime_logs"  toml:"scan_runtime_logs"`
-	ScanTypeCheck    bool     `json:"scan_type_check"    toml:"scan_type_check"`
-	ScanLint         bool     `json:"scan_lint"          toml:"scan_lint"`
-	LogFile          string   `json:"log_file"           toml:"log_file"`
-	LogLookbackHours int      `json:"log_lookback_hours" toml:"log_lookback_hours"`
-	PytestArgs       []string `json:"pytest_args"        toml:"pytest_args"`
-	MypyArgs         []string `json:"mypy_args"          toml:"mypy_args"`
-	RuffArgs         []string `json:"ruff_args"          toml:"ruff_args"`
+	ScanPytest          bool     `json:"scan_pytest"           toml:"scan_pytest"`
+	ScanRuntimeLogs     bool     `json:"scan_runtime_logs"     toml:"scan_runtime_logs"`
+	ScanTypeCheck       bool     `json:"scan_type_check"       toml:"scan_type_check"`
+	ScanLint            bool     `json:"scan_lint"             toml:"scan_lint"`
+	LogFile             string   `json:"log_file"              toml:"log_file"`
+	LogLookbackHours    int      `json:"log_lookback_hours"    toml:"log_lookback_hours"`
+	PytestArgs          []string `json:"pytest_args"           toml:"pytest_args"`
+	MypyArgs            []string `json:"mypy_args"             toml:"mypy_args"`
+	RuffArgs            []string `json:"ruff_args"             toml:"ruff_args"`
+	CodeErrorPatterns   []string `json:"code_error_patterns"   toml:"code_error_patterns"`
+	MaxCodeIssuesPerFile int     `json:"max_code_issues_per_file" toml:"max_code_issues_per_file"`
+	DeduplicateTODOs    bool     `json:"deduplicate_todos"     toml:"deduplicate_todos"`
 }
 
 // OrchestratorConfig holds hierarchical orchestrator settings.
 type OrchestratorConfig struct {
-	MaxPlanSteps     int `json:"max_plan_steps"     toml:"max_plan_steps"`
-	MaxResearchSteps int `json:"max_research_steps" toml:"max_research_steps"`
-	PlannerTimeout   int `json:"planner_timeout"    toml:"planner_timeout"`
-	TokenBudgetAlert int `json:"token_budget_alert" toml:"token_budget_alert"`
+	MaxPlanSteps        int  `json:"max_plan_steps"        toml:"max_plan_steps"`
+	MaxResearchSteps    int  `json:"max_research_steps"    toml:"max_research_steps"`
+	PlannerTimeout      int  `json:"planner_timeout"       toml:"planner_timeout"`
+	TokenBudgetAlert    int  `json:"token_budget_alert"    toml:"token_budget_alert"`
+	MaxHandoffSteps     int  `json:"max_handoff_steps"     toml:"max_handoff_steps"`
+	HandoffUseAmendment bool `json:"handoff_use_amendment" toml:"handoff_use_amendment"`
 }
 
 // ShadowConfig holds shadow training settings.
@@ -1451,4 +1545,20 @@ func ParseLogLevel(level string) slog.Level {
 // ShutdownTimeout returns the default shutdown timeout.
 func (c *Config) ShutdownTimeout() time.Duration {
 	return 10 * time.Second
+}
+
+// OAuthConfig holds configuration for the OAuth token management system.
+type OAuthConfig struct {
+	Enabled        bool                          `json:"enabled"          toml:"enabled"`
+	RefreshInterval string                        `json:"refresh_interval" toml:"refresh_interval"`
+	RefreshMargin  string                        `json:"refresh_margin"   toml:"refresh_margin"`
+	EncryptionKey  string                        `json:"encryption_key"   toml:"encryption_key"`
+	TokenDir       string                        `json:"token_dir"        toml:"token_dir"`
+	Providers      map[string]OAuthProviderEntry `json:"providers"       toml:"providers"`
+}
+
+// OAuthProviderEntry holds per-provider OAuth overrides.
+type OAuthProviderEntry struct {
+	ClientID     string `json:"client_id"     toml:"client_id"`
+	ClientSecret string `json:"client_secret" toml:"client_secret"`
 }

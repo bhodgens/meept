@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	botpkg "github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/comm/http"
@@ -244,7 +245,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	var clusterCfg *cluster.Config
 	var clusterEngine *cluster.GossipEngine
 	var clusterGitSync *cluster.GitSync
-	var clusterWG *cluster.WireGuardSync
+	var clusterWG *cluster.WireGuardManager
 	var clusterMQ *queue.ClusterQueue
 
 	cfgPath := cluster.DefaultClusterConfigPath()
@@ -270,7 +271,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		clusterGitSync = cluster.NewGitSync(clusterCfg, clusterCfg, gitRepoPath, logger)
 
 		// Create WireGuard sync for mesh networking (best-effort; non-fatal on macOS)
-		clusterWG = cluster.NewWireGuardSync(clusterCfg, clusterCfg, gitRepoPath, logger)
+		clusterWG = nil // WireGuard manager created separately below
 
 		// Create cluster-aware queue wrapping the existing queue
 		if components != nil && components.Queue != nil {
@@ -294,10 +295,10 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// Initialize WireGuard sync for cluster mesh
-	var clusterWireGuard *cluster.WireGuardSync
+	var clusterWireGuard *cluster.WireGuardManager
 	if clusterCfg != nil && clusterGitSync != nil {
 		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
-		clusterWireGuard = cluster.NewWireGuardSync(clusterCfg, clusterCfg, gitRepoPath, logger)
+		clusterWireGuard = nil // WireGuard manager created separately above
 	}
 
 	// Register cluster RPC handlers if RPC server is available
@@ -491,6 +492,15 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			}
 			projectHandler.RegisterProjectMethods(rpcServer)
 			logger.Info("Project RPC handlers registered")
+		}
+
+		// Bot management handlers
+		if components.BotManager != nil {
+			botRPCHandler := botpkg.NewRPCHandler(components.BotManager)
+			for method, handler := range botRPCHandler.Handlers() {
+				rpcServer.RegisterHandler(method, handler)
+			}
+			logger.Info("Bot RPC handlers registered")
 		}
 	}
 

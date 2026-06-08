@@ -49,9 +49,10 @@ var SteeringHeuristicTable = map[IntentType]bool{
 	IntentAnalyze:  false, // Analysis extends naturally
 	IntentSearch:   false, // Search queries are not urgent
 	IntentSkill:    false, // Skill operations can wait
-	IntentPair:     false, // Pair tasks are not urgent
-	IntentCompound: false, // Compound intents default to follow-up
-	IntentUnknown:  false,
+	IntentPair:        false, // Pair tasks are not urgent
+	IntentCollaborate: false, // Collaboration tasks are not urgent
+	IntentCompound:     false, // Compound intents default to follow-up
+	IntentUnknown:      false,
 }
 
 // shouldSteer determines if a message should interrupt the current flow.
@@ -1291,6 +1292,9 @@ var keywordPatterns = []keywordPattern{
 	// Planning
 	{[]string{string(IntentPlan), KeywordDesign, "architect", "how should i", "break down", "decompose"}, string(IntentPlan), config.AgentIDPlanner, 0.8, true},
 
+	// Collaboration (pair programming, differential analysis)
+	{[]string{"collaborate", "pair program", "differential", "a/b test", "compare approaches", "work together", "collaborative"}, string(IntentCollaborate), config.AgentIDAnalyst, 0.8, true},
+
 	// Analysis/Research ("summarize" alone stays here for document summarization;
 	// "summarize what" and "summary of work" are captured by report intent above)
 	{[]string{"research", string(IntentAnalyze), "summarize", KeywordExplain, "what is", "how does"}, string(IntentAnalyze), config.AgentIDAnalyst, 0.7, false},
@@ -1690,6 +1694,15 @@ func (d *Dispatcher) ShouldRouteToPair(result *DispatchResult) bool {
 		return false
 	}
 	return IntentType(result.Intent.Type) == IntentPair
+}
+
+// ShouldRouteToCollaborate returns true if the dispatch result should be
+// routed to the CollaborationEngine for a collaboration session.
+func (d *Dispatcher) ShouldRouteToCollaborate(result *DispatchResult) bool {
+	if result == nil || result.Intent == nil {
+		return false
+	}
+	return IntentType(result.Intent.Type) == IntentCollaborate
 }
 
 // RoutingValidation checks if a task was routed correctly.

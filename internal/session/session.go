@@ -347,6 +347,20 @@ func (s *MemoryStore) UpdateName(sessionID, name string) error {
 	return nil
 }
 
+// SetProject sets the project for a session.
+func (s *MemoryStore) SetProject(sessionID, projectID, projectPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, exists := s.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.ProjectID = projectID
+	session.ProjectPath = projectPath
+	return nil
+}
+
 // HasResponses checks if a session has any assistant messages.
 func (s *MemoryStore) HasResponses(sessionID string) (bool, error) {
 	s.mu.RLock()
@@ -390,21 +404,6 @@ func (s *MemoryStore) SetLeafMessageID(sessionID string, messageID int64) error 
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	session.LeafMessageID = &messageID
-	return nil
-}
-
-// SetProject updates the project association for a session.
-func (s *MemoryStore) SetProject(sessionID, projectID, projectPath string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	session, exists := s.sessions[sessionID]
-	if !exists {
-		return fmt.Errorf("session not found: %s", sessionID)
-	}
-	session.ProjectID = projectID
-	session.ProjectPath = projectPath
-	session.LastActivity = time.Now()
 	return nil
 }
 

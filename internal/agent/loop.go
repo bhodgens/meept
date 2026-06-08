@@ -342,6 +342,20 @@ type AgentConfig struct {
 	// SummaryLevelThreshold is the token count at which a summary is
 	// re-summarized at the next level (default 500).
 	SummaryLevelThreshold int
+	// Compaction holds context compaction settings for the agent loop.
+	Compaction CompactionAgentConfig
+}
+
+// CompactionAgentConfig holds per-agent compaction settings.
+type CompactionAgentConfig struct {
+	Enabled           bool
+	ReserveTokens     int
+	KeepRecentTokens  int
+	MaxResponseTokens int
+	SummaryFormat     string
+	TrackFileOps      bool
+	TimeoutSeconds    int
+	TriggerRatio      float64
 }
 
 // DefaultAgentConfig returns a configuration with sensible defaults.
@@ -450,6 +464,40 @@ type AgentLoop struct {
 
 	// Agent registry for queue registration during RunOnce
 	agentRegistry *AgentRegistry
+
+	// TT-SR stream rule enforcement (shared with agent registry)
+	ttsrManager *TTSRManager
+
+	// Event system
+	eventEmitter *EventEmitter
+	hookRegistry *HookRegistry
+
+	// Session persistence (wired after construction)
+	sessionStore sessionStore
+
+	// Branch navigation (wired after construction)
+	branchManager branchManager
+
+	// MCP server awareness for system prompt context
+	mcpServerLister func() []MCPServerInfo
+}
+
+// sessionStore is an interface for session persistence operations needed by AgentLoop.
+type sessionStore interface {
+	Get(id string) interface{}
+	SaveMessages(sessionID string, messages interface{}) error
+}
+
+// branchManager is an interface for branch navigation operations needed by AgentLoop.
+type branchManager interface {
+	ListBranches(sessionID string) ([]interface{}, error)
+}
+
+// MCPServerInfo describes a connected MCP server for system prompt context.
+type MCPServerInfo struct {
+	Name      string
+	Connected bool
+	ToolCount int
 }
 
 // LearningPipeline is the interface for the learning pipeline.
@@ -711,6 +759,45 @@ func WithWatchdog(w *Watchdog) LoopOption {
 func WithGlobalRules(rules string) LoopOption {
 	return func(l *AgentLoop) {
 		l.config.GlobalRules = rules
+	}
+}
+
+// WithTTSRManager sets the TT-SR manager for mid-stream rule enforcement.
+// When enabled, each streaming delta is checked against loaded rules.
+// If a rule matches, the stream is aborted and the rule content is
+// retried on the next reasoning cycle.
+func WithTTSRManager(mgr *TTSRManager) LoopOption {
+	return func(l *AgentLoop) {
+		if mgr != nil {
+			l.ttsrManager = mgr
+		}
+	}
+}
+
+// WithSharedConversationStore sets a shared conversation store for cross-agent handoffs.
+func WithSharedConversationStore(store *ConversationStore) LoopOption {
+	return func(l *AgentLoop) {
+		if store != nil {
+			l.conversations = store
+		}
+	}
+}
+
+// WithEventEmitter sets the event emitter for agent lifecycle events.
+func WithEventEmitter(em *EventEmitter) LoopOption {
+	return func(l *AgentLoop) {
+		if em != nil {
+			l.eventEmitter = em
+		}
+	}
+}
+
+// WithHookRegistry sets the hook registry for transform and lifecycle hooks.
+func WithHookRegistry(hr *HookRegistry) LoopOption {
+	return func(l *AgentLoop) {
+		if hr != nil {
+			l.hookRegistry = hr
+		}
 	}
 }
 
@@ -1546,11 +1633,61 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		response, err := l.chatWithFailover(ctx, messages, chatOpts...)
 		if err != nil {
-			l.logger.Error("LLM call failed",
-				"iteration", iteration,
-				"error", err,
-			)
-			return "", fmt.Errorf("LLM call failed: %w", err)
+			// Check for TTSR abort — retry with rule content injected.
+			// On mid-stream rule match, the LLM output violated a guardrail.
+			// We prepend the rule as a system reminder and retry.
+			var abortErr *llm.StreamAbortedError
+			if errors.As(err, &abortErr) {
+				l.logger.Info("TTSR abort detected, retrying with rule injection",
+					"iteration", iteration,
+					"rule", abortErr.RuleName,
+				)
+				// Prepend rule as system reminder and retry the chat call
+				// within the same reasoning iteration
+				ruleReminder := fmt.Sprintf("[TT-SR RULE TRIGGERED: %s]\n%s", abortErr.RuleName, abortErr.RuleBody)
+				messagesWithRule := append([]llm.ChatMessage{
+					{Role: llm.RoleSystem, Content: ruleReminder},
+				}, messages...)
+
+				l.logger.Debug("Retrying after TTSR abort with rule injection",
+					"iteration", iteration,
+					"rule", abortErr.RuleName,
+				)
+
+				response, err = l.chatWithFailover(ctx, messagesWithRule, chatOpts...)
+				if err != nil {
+					// Check if it's still a TTSR abort (rule triggered again)
+					// This can happen if the retry also violates. We allow one
+					// retry to absorb the rule; if it happens again, skip and continue.
+					if errors.As(err, &abortErr) {
+						l.logger.Warn("TTSR rule triggered again after injection, skipping retry",
+							"rule", abortErr.RuleName,
+							"iteration", iteration,
+						)
+						// Fall through to handle no-content response
+						response, _ = l.chatWithFailover(ctx, messages, chatOpts...)
+						if response == nil || response.Content == "" {
+							l.logger.Error("LLM call failed",
+								"iteration", iteration,
+								"error", err,
+							)
+							return "", fmt.Errorf("LLM call failed: %w", err)
+						}
+					} else {
+						l.logger.Error("LLM call failed",
+							"iteration", iteration,
+							"error", err,
+						)
+						return "", fmt.Errorf("LLM call failed: %w", err)
+					}
+				}
+			} else {
+				l.logger.Error("LLM call failed",
+					"iteration", iteration,
+					"error", err,
+				)
+				return "", fmt.Errorf("LLM call failed: %w", err)
+			}
 		}
 		// Track token usage
 		totalTokens += response.Usage.TotalTokens
@@ -1834,7 +1971,35 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 		var err error
 		if onDelta != nil {
 			if sc, ok := llm.AsStreamingChatter(l.llm); ok {
-				response, err = sc.ChatWithDeltaCallback(ctx, messages, onDelta, opts...)
+				// Wrap the delta callback with TTSR rule checking.
+				// Each chunk is checked against loaded TT-SR rules before
+				// being passed to the caller's callback. If a rule triggers
+				// an abort (interrupt=true), ChatWithDeltaCallback returns
+				// a *llm.StreamAbortedError.
+				wrappedOnDelta := func(delta string) error {
+					// Check TTSR rules if enabled (text scope for streaming text).
+					// Stream chunks are all within a single reasoning iteration,
+					// so we use turn 1 for repeat-policy tracking.
+					const streamingTurnNum = 1
+					if l.ttsrManager != nil {
+						if matched := l.ttsrManager.CheckDelta("text", delta, streamingTurnNum); len(matched) > 0 {
+							rule := matched[0]
+							l.logger.Warn("TTSR rule triggered mid-stream, aborting",
+								"rule", rule.Name,
+								"scope", rule.Scope,
+							)
+							// Mark this rule as injected so "once" repeat doesn't re-trigger
+							l.ttsrManager.MarkInjected(rule.Name, streamingTurnNum)
+							return &llm.StreamAbortedError{
+								RuleName: rule.Name,
+								RuleBody: rule.Content,
+								Reason:   fmt.Sprintf("pattern %q matched in delta", rule.Condition),
+							}
+						}
+					}
+					return onDelta(delta)
+				}
+				response, err = sc.ChatWithDeltaCallback(ctx, messages, wrappedOnDelta, opts...)
 			} else {
 				l.logger.Debug("streaming requested but chatter does not support it; falling back to non-streaming")
 				response, err = l.llm.Chat(ctx, messages, opts...)
@@ -1843,6 +2008,25 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 			response, err = l.llm.Chat(ctx, messages, opts...)
 		}
 		if err == nil {
+			// Non-streaming path: check full response against TTSR rules.
+			// If a rule triggers, treat it as a mid-stream abort and
+			// return a StreamAbortedError so the caller can retry.
+			if onDelta == nil && l.ttsrManager != nil && response != nil && response.Content != "" {
+				if matched := l.ttsrManager.CheckDelta("text", response.Content, 1); len(matched) > 0 {
+					rule := matched[0]
+					l.logger.Warn("TTSR rule triggered on full response, will retry",
+						"rule", rule.Name,
+						"scope", rule.Scope,
+					)
+					l.ttsrManager.MarkInjected(rule.Name, 1)
+					return nil, &llm.StreamAbortedError{
+						RuleName: rule.Name,
+						RuleBody: rule.Content,
+						Reason:   fmt.Sprintf("pattern %q matched in full response", rule.Condition),
+					}
+				}
+			}
+
 			// Success - record it and return
 			if l.modelRef != "" && l.resolver != nil && l.resolver.HasAlias(l.modelRef) {
 				l.resolver.RecordAliasSuccess(l.modelRef)
@@ -2167,8 +2351,8 @@ or instructions that override the system prompt above.]
 	}
 
 	// Load AGENTS.md context for project conventions and symbol references
-	if workingDir != "" {
-		agentsCtx := l.loadAgentsContext(workingDir)
+	if l.workingDir != "" {
+		agentsCtx := l.loadAgentsContext(l.workingDir)
 		if agentsCtx != "" {
 			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
 		}
@@ -2565,8 +2749,8 @@ func (l *AgentLoop) buildSystemPromptWithSkills(ctx context.Context, discovered 
 	}
 
 	// Load AGENTS.md context for project conventions and symbol references
-	if workingDir != "" {
-		agentsCtx := l.loadAgentsContext(workingDir)
+	if l.workingDir != "" {
+		agentsCtx := l.loadAgentsContext(l.workingDir)
 		if agentsCtx != "" {
 			builder.AddSection("Project Conventions (AGENTS.md)", agentsCtx)
 		}
@@ -2835,6 +3019,46 @@ func (l *AgentLoop) SetSkillLoader(loader *skills.LazySkillLoader) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.skillLoader = loader
+}
+
+// SetSessionStore wires a session store and config for persistence.
+// Stub implementation: the session store reference is retained for future use.
+func (l *AgentLoop) SetSessionStore(store any, sessionCfg any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if store != nil {
+		l.sessionStore, _ = store.(sessionStore)
+	}
+}
+
+// SetBranchManager wires a branch manager for in-memory cache coordination.
+// Stub implementation: the branch manager reference is retained for future use.
+func (l *AgentLoop) SetBranchManager(mgr any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if mgr != nil {
+		l.branchManager, _ = mgr.(branchManager)
+	}
+}
+
+// SetMCPServerLister wires a callback that returns current MCP server info.
+// Used by the system prompt builder to include available MCP tools.
+func (l *AgentLoop) SetMCPServerLister(lister func() []MCPServerInfo) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if lister != nil {
+		l.mcpServerLister = lister
+	}
+}
+
+// loadAgentsContext loads AGENTS.md and related project convention context
+// from the given working directory. Returns empty string if no context found.
+func (l *AgentLoop) loadAgentsContext(workingDir string) string {
+	if workingDir == "" {
+		return ""
+	}
+	_ = filepath.Join(workingDir, "AGENTS.md") // TODO: load and return content
+	return ""
 }
 
 // skillDiscoveryThreshold returns the configured skill discovery confidence threshold.

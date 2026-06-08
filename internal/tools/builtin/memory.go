@@ -3,9 +3,11 @@ package builtin
 
 import (
 	"context"
-	"slices"
-
 	"fmt"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
@@ -476,3 +478,445 @@ func getCurrentVersionFromList(versions []map[string]any) int {
 	}
 	return len(versions)
 }
+
+// ============================================================================
+// Memory Curation Tools (Hindsight Bank Pattern)
+// ============================================================================
+
+// MemoryRetainTool queues facts into a "Hindsight bank" for later recall.
+type MemoryRetainTool struct {
+	manager *memory.Manager
+}
+
+// NewMemoryRetainTool creates a new memory retain tool.
+func NewMemoryRetainTool(manager *memory.Manager) *MemoryRetainTool {
+	return &MemoryRetainTool{manager: manager}
+}
+
+func (t *MemoryRetainTool) Name() string { return "memory_retain" }
+
+func (t *MemoryRetainTool) Category() string { return "memory" }
+
+func (t *MemoryRetainTool) Description() string {
+	return "Queue a fact into the Hindsight bank for later recall. Use this to deliberately curate important knowledge that should be remembered, such as key decisions, learnings, preferences, or domain insights. Unlike automatic memory storage, retain is intentional and selective."
+}
+
+func (t *MemoryRetainTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: schemaTypeObject,
+		Properties: map[string]llm.ParameterProperty{
+			schemaPropContent: {
+				Type:        schemaTypeString,
+				Description: "The fact to retain. Should be concise, self-contained, and clearly stated.",
+			},
+			"domain": {
+				Type:        schemaTypeString,
+				Description: "Optional domain label to organize retained facts (e.g., 'architecture', 'debugging', 'team-process').",
+			},
+			"importance": {
+				Type:        schemaTypeString,
+				Description: "Importance level: 'high' for critical knowledge, 'medium' for useful context, 'low' for nice-to-know.",
+				Enum:        []string{"high", "medium", "low"},
+			},
+		},
+		Required: []string{"content"},
+	}
+}
+
+// MemoryRetainResult is returned after retaining a fact.
+type MemoryRetainResult struct {
+	Success      bool   `json:"success"`
+	MemoryID     string `json:"memory_id,omitempty"`
+	Domain       string `json:"domain,omitempty"`
+	Importance   string `json:"importance,omitempty"`
+	Message      string `json:"message"`
+	HindsightLen int    `json:"hindsight_count,omitempty"`
+}
+
+func (t *MemoryRetainTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.manager == nil {
+		return nil, fmt.Errorf("memory manager not configured")
+	}
+
+	content, _ := args["content"].(string)
+	if content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+
+	domain, _ := args["domain"].(string)
+	importance, _ := args["importance"].(string)
+	if importance == "" {
+		importance = "medium"
+	}
+
+	// Store as task memory with special category for retained facts
+	mem := memory.Memory{
+		Content:  content,
+		Type:     memory.MemoryTypeTask,
+		Category: "hindsight:" + importance,
+		Metadata: map[string]any{
+			"retained":   true,
+			"domain":     domain,
+			"importance": importance,
+		},
+	}
+
+	id, err := t.manager.Store(ctx, mem)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retain memory: %w", err)
+	}
+
+	// Count total retained facts for feedback
+	stats := t.manager.Stats()
+
+	return MemoryRetainResult{
+		Success:      true,
+		MemoryID:     id,
+		Domain:       domain,
+		Importance:   importance,
+		Message:      fmt.Sprintf("Fact retained in hindsight bank (importance: %s)", importance),
+		HindsightLen: stats.TaskCount,
+	}, nil
+}
+
+// MemoryRecallTool searches the Hindsight bank for curated facts.
+type MemoryRecallTool struct {
+	manager *memory.Manager
+}
+
+// NewMemoryRecallTool creates a new memory recall tool.
+func NewMemoryRecallTool(manager *memory.Manager) *MemoryRecallTool {
+	return &MemoryRecallTool{manager: manager}
+}
+
+func (t *MemoryRecallTool) Name() string { return "memory_recall" }
+
+func (t *MemoryRecallTool) Category() string { return "memory" }
+
+func (t *MemoryRecallTool) Description() string {
+	return "Search the Hindsight bank for curated facts. Use this to retrieve deliberately retained knowledge relevant to the current task. Recall returns facts that were intentionally saved, not automatic conversation history."
+}
+
+func (t *MemoryRecallTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: schemaTypeObject,
+		Properties: map[string]llm.ParameterProperty{
+			"query": {
+				Type:        schemaTypeString,
+				Description: "Search query for finding relevant retained facts.",
+			},
+			"domain": {
+				Type:        schemaTypeString,
+				Description: "Optional domain filter (e.g., 'architecture', 'debugging').",
+			},
+			"min_importance": {
+				Type:        schemaTypeString,
+				Description: "Minimum importance level to include.",
+				Enum:        []string{"high", "medium", "low"},
+			},
+			"limit": {
+				Type:        schemaTypeInteger,
+				Description: "Maximum number of results to return.",
+			},
+		},
+		Required: []string{"query"},
+	}
+}
+
+// MemoryRecallResult is returned after recalling facts.
+type MemoryRecallResult struct {
+	Success bool              `json:"success"`
+	Results []MemoryFact      `json:"results,omitempty"`
+	Count   int               `json:"count"`
+	Message string            `json:"message"`
+}
+
+// MemoryFact represents a recalled fact from the Hindsight bank.
+type MemoryFact struct {
+	ID           string  `json:"id"`
+	Content      string  `json:"content"`
+	Domain       string  `json:"domain,omitempty"`
+	Importance   string  `json:"importance"`
+	RetrievedAt  string  `json:"retrieved_at"`
+}
+
+func (t *MemoryRecallTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.manager == nil {
+		return nil, fmt.Errorf("memory manager not configured")
+	}
+
+	query, _ := args["query"].(string)
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+
+	domain, _ := args["domain"].(string)
+	minImportance, _ := args["min_importance"].(string)
+	limitRaw, _ := args["limit"].(int)
+	if limitRaw == 0 {
+		limitRaw = 10
+	}
+
+	// Search memories with hindsight category
+	results, err := t.manager.Search(ctx, memory.MemoryQuery{
+		Query:    query,
+		Type:     memory.MemoryTypeTask,
+		Category: "hindsight",
+		Limit:    limitRaw,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to recall memories: %w", err)
+	}
+
+	// Filter and convert results
+	facts := make([]MemoryFact, 0, len(results))
+	for _, r := range results {
+		// Skip if importance filter applies
+		if minImportance != "" && r.Memory.Metadata != nil {
+			if imp, ok := r.Memory.Metadata["importance"].(string); ok {
+				if importanceRank(imp) < importanceRank(minImportance) {
+					continue
+				}
+			}
+		}
+
+		// Extract domain from metadata or category
+		dom := domain
+		if dom == "" && r.Memory.Metadata != nil {
+			if d, ok := r.Memory.Metadata["domain"].(string); ok {
+				dom = d
+			}
+		}
+
+		// Extract importance
+		imp := "medium"
+		if r.Memory.Metadata != nil {
+			if i, ok := r.Memory.Metadata["importance"].(string); ok {
+				imp = i
+			}
+		}
+
+		facts = append(facts, MemoryFact{
+			ID:          r.Memory.ID,
+			Content:     r.Memory.Content,
+			Domain:      dom,
+			Importance:  imp,
+			RetrievedAt: time.Now().Format(time.RFC3339),
+		})
+	}
+
+	return MemoryRecallResult{
+		Success: true,
+		Results: facts,
+		Count:   len(facts),
+		Message: fmt.Sprintf("Recalled %d facts from hindsight bank", len(facts)),
+	}, nil
+}
+
+// importanceRank returns a numeric rank for importance (higher = more important).
+func importanceRank(level string) int {
+	switch level {
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// MemoryReflectTool performs meta-cognition on stored memories to generate insights.
+type MemoryReflectTool struct {
+	manager *memory.Manager
+	llmClient llm.Client
+}
+
+// NewMemoryReflectTool creates a new memory reflect tool.
+func NewMemoryReflectTool(manager *memory.Manager, llmClient llm.Client) *MemoryReflectTool {
+	return &MemoryReflectTool{
+		manager: manager,
+		llmClient: llmClient,
+	}
+}
+
+func (t *MemoryReflectTool) Name() string { return "memory_reflect" }
+
+func (t *MemoryReflectTool) Category() string { return "memory" }
+
+func (t *MemoryReflectTool) Description() string {
+	return "Perform meta-cognition on stored memories to generate insights, identify patterns, or synthesize learnings. Use this to reflect on accumulated knowledge and extract higher-level understanding from individual facts."
+}
+
+func (t *MemoryReflectTool) Parameters() llm.FunctionParameters {
+	return llm.FunctionParameters{
+		Type: schemaTypeObject,
+		Properties: map[string]llm.ParameterProperty{
+			"domain": {
+				Type:        schemaTypeString,
+				Description: "Domain to reflect on (e.g., 'architecture', 'debugging', 'team-process').",
+			},
+			"prompt": {
+				Type:        schemaTypeString,
+				Description: "Specific reflection prompt or question to guide the analysis.",
+			},
+			"min_importance": {
+				Type:        schemaTypeString,
+				Description: "Minimum importance level to include in reflection.",
+				Enum:        []string{"high", "medium", "low"},
+			},
+		},
+		Required: []string{"prompt"},
+	}
+}
+
+// MemoryReflectResult contains reflection insights.
+type MemoryReflectResult struct {
+	Success    bool     `json:"success"`
+	Insights   []string `json:"insights,omitempty"`
+	Summary    string   `json:"summary"`
+	FactsUsed  int      `json:"facts_used"`
+	Message    string   `json:"message"`
+}
+
+func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (any, error) {
+	if t.manager == nil {
+		return nil, fmt.Errorf("memory manager not configured")
+	}
+
+	prompt, _ := args["prompt"].(string)
+	if prompt == "" {
+		return nil, fmt.Errorf("prompt is required")
+	}
+
+	domain, _ := args["domain"].(string)
+	minImportance, _ := args["min_importance"].(string)
+
+	// Gather relevant memories
+	queryStr := prompt
+	if domain != "" {
+		queryStr = domain + " " + prompt
+	}
+
+	results, err := t.manager.Search(ctx, memory.MemoryQuery{
+		Query:    queryStr,
+		Type:     memory.MemoryTypeTask,
+		Category: "hindsight",
+		Limit:    50,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to gather memories for reflection: %w", err)
+	}
+
+	// Filter by importance and domain
+	var filteredMemories []memory.Memory
+	for _, r := range results {
+		// Filter by domain if specified
+		if domain != "" && r.Memory.Metadata != nil {
+			if d, ok := r.Memory.Metadata["domain"].(string); ok && d != domain {
+				continue
+			}
+		}
+
+		// Filter by importance
+		if minImportance != "" && r.Memory.Metadata != nil {
+			if imp, ok := r.Memory.Metadata["importance"].(string); ok {
+				if importanceRank(imp) < importanceRank(minImportance) {
+					continue
+				}
+			}
+		}
+
+		filteredMemories = append(filteredMemories, r.Memory)
+	}
+
+	if len(filteredMemories) == 0 {
+		return MemoryReflectResult{
+			Success:   false,
+			Message:   "No relevant memories found for reflection",
+			FactsUsed: 0,
+		}, nil
+	}
+
+	// Build context from memories
+	var factsContext strings.Builder
+	factsContext.WriteString("The following facts have been retained in the hindsight bank:\n\n")
+	for i, mem := range filteredMemories {
+		dom := ""
+		if mem.Metadata != nil {
+			if d, ok := mem.Metadata["domain"].(string); ok {
+				dom = d
+			}
+		}
+		imp := "medium"
+		if mem.Metadata != nil {
+			if i2, ok := mem.Metadata["importance"].(string); ok {
+				imp = i2
+			}
+		}
+		factsContext.WriteString(fmt.Sprintf("[%d] (domain: %s, importance: %s) %s\n", i+1, dom, imp, mem.Content))
+	}
+
+	// Call LLM for reflection
+	messages := []llm.ChatMessage{
+		{
+			Role: llm.RoleSystem,
+			Content: "You are performing meta-cognition on retained memories. Analyze the provided facts and generate insights, identify patterns, or synthesize learnings based on the user's reflection prompt.",
+		},
+		{
+			Role: llm.RoleUser,
+			Content: fmt.Sprintf("%s\n\n---\n\nReflection prompt: %s\n\nGenerate 3-5 key insights and a brief summary.", factsContext.String(), prompt),
+		},
+	}
+
+	response, err := t.llmClient.Chat(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate reflection: %w", err)
+	}
+
+	// Parse response into structured insights
+	insights := parseInsightsFromResponse(response.Content)
+
+	return MemoryReflectResult{
+		Success:   true,
+		Insights:  insights,
+		Summary:   response.Content,
+		FactsUsed: len(filteredMemories),
+		Message:   fmt.Sprintf("Generated reflection from %d facts", len(filteredMemories)),
+	}, nil
+}
+
+// parseInsightsFromResponse extracts bullet-point insights from LLM response.
+
+// numberedInsightRegex matches numbered list items like "1." or "1)"
+var numberedInsightRegex = regexp.MustCompile(`^\d+[\.\)]\s*`)
+
+// parseInsightsFromResponse extracts bullet-point insights from LLM response.
+func parseInsightsFromResponse(content string) []string {
+	lines := strings.Split(content, "\n")
+	insights := make([]string, 0, 5)
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Look for numbered or bulleted insights
+		if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "• ") {
+			insights = append(insights, strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(line, "- "), "* "), "• "))
+		} else if numberedInsightRegex.MatchString(line) {
+			// Numbered list like "1." or "1)"
+			insights = append(insights, numberedInsightRegex.ReplaceAllString(line, ""))
+		}
+	}
+	
+	if len(insights) == 0 {
+		// Fall back to treating entire response as summary
+		insights = append(insights, content)
+	}
+	
+	return insights
+}
+
+// Ensure all curation tools implement the Tool interface.
+var _ tools.Tool = (*MemoryRetainTool)(nil)
+var _ tools.Tool = (*MemoryRecallTool)(nil)
+var _ tools.Tool = (*MemoryReflectTool)(nil)

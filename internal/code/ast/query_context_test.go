@@ -73,8 +73,8 @@ func World() string {
 	rule := &QueryRule{
 		ID:      "find-hello",
 		Pattern: "(function_declaration name: (identifier) @name)",
-		Constraints: map[string]Constraint{
-			"name": {Regex: "^Hello$"},
+		Constraints: []Constraint{
+			{Regex: &RegexConstraint{Node: "name", Pattern: "^Hello$"}},
 		},
 	}
 

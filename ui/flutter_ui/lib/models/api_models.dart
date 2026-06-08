@@ -567,3 +567,95 @@ class PlanPhase extends Equatable {
   @override
   List<Object?> get props => [id, planID, name, sequence, state];
 }
+
+// ===== Search Models =====
+
+enum SearchScope { all, sessions, tasks, memories, plans }
+
+enum SearchResultType { session, task, memory, plan }
+
+class SearchResults {
+  final List<SearchResultItem> results;
+
+  SearchResults({required this.results});
+
+  factory SearchResults.fromJson(Map<String, dynamic> json) {
+    final rawResults = json['results'] as List?;
+    if (rawResults == null) return SearchResults(results: []);
+    return SearchResults(
+      results: rawResults
+          .map((r) => SearchResultItem.fromJson(r as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class SearchResultItem {
+  final SearchResultType type;
+  final String id;
+  final String title;
+  final String snippet;
+
+  SearchResultItem({
+    required this.type,
+    required this.id,
+    required this.title,
+    this.snippet = '',
+  });
+
+  factory SearchResultItem.fromJson(Map<String, dynamic> json) {
+    return SearchResultItem(
+      type: SearchResultType.values.firstWhere(
+        (t) => t.name == json['type'],
+        orElse: () => SearchResultType.session,
+      ),
+      id: json['id'] as String,
+      title: json['title'] as String,
+      snippet: json['snippet'] as String? ?? '',
+    );
+  }
+}
+
+// ===== Branch Models =====
+
+class BranchInfo {
+  final String name;
+  final bool isCurrent;
+  final bool isHead;
+
+  BranchInfo({
+    required this.name,
+    this.isCurrent = false,
+    this.isHead = false,
+  });
+
+  factory BranchInfo.fromJson(Map<String, dynamic> json) {
+    return BranchInfo(
+      name: json['name'] as String,
+      isCurrent: json['is_current'] as bool? ?? false,
+      isHead: json['is_head'] as bool? ?? false,
+    );
+  }
+}
+
+// ===== Skill Execution Models =====
+
+class SkillExecuteResult {
+  final String output;
+  final bool success;
+  final String? error;
+
+  SkillExecuteResult({
+    required this.output,
+    required this.success,
+    this.error,
+  });
+
+  factory SkillExecuteResult.fromJson(Map<String, dynamic> json) {
+    return SkillExecuteResult(
+      output: json['output'] as String? ?? '',
+      success: json['success'] as bool? ?? false,
+      error: json['error'] as String?,
+    );
+  }
+}

@@ -23,10 +23,11 @@ type BlockResolver interface {
 
 // FileEditTool performs incremental file edits using hashline-anchored line references.
 type FileEditTool struct {
-	checker       *security.PermissionChecker
-	readCache     *ReadCache
-	lspNotifier   LSPWriteNotifier
-	blockResolver BlockResolver
+	checker              *security.PermissionChecker
+	readCache            *ReadCache
+	lspNotifier          LSPWriteNotifier
+	blockResolver        BlockResolver
+	pendingChangesRegistry *PendingChangesRegistry
 }
 
 // NewFileEditTool creates a new file edit tool.
@@ -47,6 +48,11 @@ func (t *FileEditTool) SetBlockResolver(resolver BlockResolver) {
 	if resolver != nil {
 		t.blockResolver = resolver
 	}
+}
+
+// SetPendingChangesRegistry sets the pending changes registry for preview/accept workflow.
+func (t *FileEditTool) SetPendingChangesRegistry(registry *PendingChangesRegistry) {
+	t.pendingChangesRegistry = registry
 }
 
 func (t *FileEditTool) Name() string { return "file_edit" }

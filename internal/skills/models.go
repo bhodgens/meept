@@ -65,6 +65,11 @@ type Skill struct {
 
 	// MCPServers lists MCP servers that should be started when this skill is activated.
 	MCPServers []MCPServerConfig `json:"mcp_servers,omitempty"`
+
+	// UIType is an optional UI descriptor for skill rendering.
+	// Values: "panel" (renders as a panel), "dialog" (opens a dialog), "external" (opens URL).
+	// Empty means default behavior (description + execute button).
+	UIType string `json:"ui_type,omitempty"`
 }
 
 // HasCapability checks if the skill requires a specific capability.
@@ -114,6 +119,7 @@ type SkillMetadata struct {
 	Temperature   *float64          `yaml:"temperature"`
 	MaxTokens     *int              `yaml:"max-tokens"`
 	MCPServers    []MCPServerConfig `yaml:"mcp-servers"`
+	UIType        string            `yaml:"ui-type"`
 
 	// Claude-specific fields (parsed separately, merged into Tags).
 	Trigger string `yaml:"trigger"`

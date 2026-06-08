@@ -75,9 +75,14 @@ type Store interface {
 	GetMessagePath(sessionID string, leafID int64) ([]Message, error)
 	GetMessageBranches(sessionID string) ([]Branch, error)
 	NavigateToBranch(sessionID string, targetMessageID int64) (oldLeaf int64, err error)
+	GetTree(sessionID string) ([]TreeNode, error)
+	ForkSession(sourceSessionID string, fromMessageID int64, newName string) (*Session, error)
 
 	// Tool call operations
 	SaveToolCalls(messageID int64, toolCalls []ToolCall) error
 	GetToolCalls(messageID int64) ([]ToolCall, error)
 	GetToolCallsForMessages(messageIDs []int64) (map[int64][]ToolCall, error)
+
+	// Project operations
+	SetProject(sessionID, projectID, projectPath string) error
 }

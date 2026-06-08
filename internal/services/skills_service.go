@@ -34,6 +34,7 @@ type SkillInfo struct {
 	Category     string   `json:"category,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
 	Enabled      bool     `json:"enabled"`
+	UIType       string   `json:"ui_type,omitempty"`
 }
 
 // List returns available skills.
@@ -55,6 +56,7 @@ func (s *SkillsService) List(ctx context.Context, req SkillsListRequest) ([]Skil
 			Description:  skill.Description,
 			Capabilities: skill.Requires,
 			Enabled:      true,
+			UIType:       skill.UIType,
 		})
 		if req.Limit > 0 && len(result) >= req.Limit {
 			break
@@ -88,6 +90,7 @@ func (s *SkillsService) Get(ctx context.Context, req SkillsGetRequest) (*SkillIn
 		Description:  skill.Description,
 		Capabilities: skill.Requires,
 		Enabled:      true,
+		UIType:       skill.UIType,
 	}, nil
 }
 

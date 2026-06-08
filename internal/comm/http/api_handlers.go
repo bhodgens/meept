@@ -2476,6 +2476,66 @@ func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, project)
 }
 
+
+// handleProjectBranches handles GET /api/v1/projects/{id}/branches.
+func (s *Server) handleProjectBranches(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	// Get project ID from URL path
+	projectID := r.PathValue("id")
+	if projectID == "" {
+		s.writeError(w, http.StatusBadRequest, "project id required")
+		return
+	}
+
+	branches, err := s.services.Project.ListBranches(r.Context(), projectID)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, branches)
+}
+
+// handleProjectCheckout handles POST /api/v1/projects/{id}/checkout.
+func (s *Server) handleProjectCheckout(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Project == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
+		return
+	}
+
+	// Get project ID from URL path
+	projectID := r.PathValue("id")
+	if projectID == "" {
+		s.writeError(w, http.StatusBadRequest, "project id required")
+		return
+	}
+
+	var req struct {
+		Branch string `json:"branch"`
+	}
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+
+	if req.Branch == "" {
+		s.writeError(w, http.StatusBadRequest, "branch name required")
+		return
+	}
+
+	if err := s.services.Project.CheckoutBranch(r.Context(), projectID, req.Branch); err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{
+		"status": "success",
+		"branch": req.Branch,
+	})
+}
 // ===== Plan Endpoints =====
 
 // handlePlanList handles GET /api/v1/plans.

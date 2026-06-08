@@ -1387,6 +1387,16 @@ func (s *SQLiteStore) InsertCompaction(sessionID string, parentID int64, summary
 	return id, nil
 }
 
+// CompactionEntry represents a stored compaction event.
+type CompactionEntry struct {
+	ID            int64     `json:"id"`
+	SessionID     string    `json:"session_id"`
+	Content       string    `json:"content"`
+	Timestamp     time.Time `json:"timestamp"`
+	ParentID      *int64    `json:"parent_id,omitempty"`
+	CompressedIDs []int64   `json:"compressed_ids,omitempty"`
+}
+
 // CompactionContent represents the JSON content of a compaction entry.
 type CompactionContent struct {
 	Summary       string  `json:"summary"`

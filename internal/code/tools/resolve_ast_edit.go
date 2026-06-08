@@ -180,7 +180,7 @@ func (t *ResolveASTEditTool) Execute(ctx context.Context, args map[string]any) (
 	} else {
 		response["applied"] = false
 		response["modified_source_preview"] = string(ast.ApplyEdits(source, result.Rewrite.ProposedEdits))
-		response["message"] = fmt.Sprintf("Preview of %d edits (use action='apply' to write)", len(edits), filePath)
+		response["message"] = fmt.Sprintf("Preview of %d edits to %s (use action='apply' to write)", len(edits), filePath)
 	}
 
 	return response, nil

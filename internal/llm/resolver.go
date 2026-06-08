@@ -32,6 +32,7 @@ type Resolver struct {
 	allModels    []*ModelConfig
 	aliases      map[string]*AliasEntry
 	health       map[string]*AliasHealth
+	pricingSyncer *PricingSyncer
 	mu           sync.Mutex
 	logger       *slog.Logger
 }
@@ -386,4 +387,11 @@ func (r *Resolver) GetAllModelsForAlias(aliasName string) ([]*ModelConfig, bool)
 	models := make([]*ModelConfig, len(alias.Models))
 	copy(models, alias.Models)
 	return models, true
+}
+
+// SetPricingSyncer sets the pricing syncer for live cost enrichment on resolved models.
+func (r *Resolver) SetPricingSyncer(ps *PricingSyncer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pricingSyncer = ps
 }

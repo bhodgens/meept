@@ -58,6 +58,8 @@ func (p *ProxyHandler) RegisterProxyMethods(server *Server) {
 	server.RegisterHandler("memory.query", p.makeProxy("memory.query", "memory.result", 30*time.Second))
 	server.RegisterHandler("memory.recent", p.makeProxy("memory.recent", "memory.result", 10*time.Second))
 	server.RegisterHandler("memory.export", p.makeProxy("memory.export", "memory.result", 10*time.Second))
+	server.RegisterHandler("memory.vector.search", p.makeProxy("memory.vector.search", "memory.result", 30*time.Second))
+	server.RegisterHandler("memory.vector.stats", p.makeProxy("memory.vector.stats", "memory.result", 10*time.Second))
 
 	// Scheduler methods
 	server.RegisterHandler("scheduler.list_jobs", p.makeProxy("scheduler.list_jobs", "scheduler.result", 10*time.Second))
