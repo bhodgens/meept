@@ -956,6 +956,27 @@ func (l *AgentLoop) SetContextFirewallConfig(fw config.LLMContextFirewallConfig)
 	l.config.SummaryLevelThreshold = fw.SummaryLevelThreshold
 }
 
+// FirewallStats returns a map snapshot of the context firewall counters.
+// Returns nil if the context firewall is not enabled on this agent loop.
+func (l *AgentLoop) FirewallStats() map[string]any {
+	if l.contextFirewall == nil {
+		return nil
+	}
+	stats := l.contextFirewall.Stats()
+	return map[string]any{
+		"summarization_failures":       stats.SummarizationFailures,
+		"dropped_messages":             stats.DroppedMessages,
+		"drop_events":                  stats.DropEvents,
+		"compression_warning_events":   stats.CompressionWarningEvents,
+		"compression_summarize_events": stats.CompressionSummarizeEvents,
+		"compression_aggressive_events": stats.CompressionAggressiveEvents,
+		"compression_hard_limit_events": stats.CompressionHardLimitEvents,
+		"compression_tokens_saved":     stats.CompressionTokensSaved,
+		"avg_quality_score":            stats.AvgQualityScore,
+		"total_compressions":           stats.TotalCompressions,
+	}
+}
+
 // RunOnce processes a single user turn through the full reasoning loop.
 func (l *AgentLoop) RunOnce(ctx context.Context, userMessage, conversationID string) (response string, err error) {
 	if l.llm == nil {
@@ -1789,6 +1810,22 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 			// Publish iteration completed event
 			l.publishIteration(conversationID, iteration)
+
+			// Check if any tool requested termination (no LLM follow-up needed)
+			shouldTerminate := false
+			for _, result := range results {
+				if result.Terminate {
+					shouldTerminate = true
+					break
+				}
+			}
+			if shouldTerminate {
+				l.logger.Debug("Tool requested termination, skipping LLM follow-up",
+					"conversation", conversationID,
+					"iteration", iteration,
+				)
+				return l.buildTerminateResponse(results), nil
+			}
 
 			// Continue loop for LLM to process tool results
 			continue
@@ -3189,13 +3226,18 @@ func (l *AgentLoop) buildMCPContextSection() string {
 	}
 	var sb strings.Builder
 	sb.WriteString("\n## MCP Servers\n\n")
+	totalTools := 0
 	for _, srv := range servers {
 		status := "disconnected"
 		if srv.Connected {
 			status = "connected"
 		}
 		sb.WriteString(fmt.Sprintf("- %s (%d tool(s), %s)\n", srv.Name, srv.ToolCount, status))
+		totalTools += srv.ToolCount
 	}
+	sb.WriteString(fmt.Sprintf("\nTotal: %d tool(s) across %d server(s)\n", totalTools, len(servers)))
+	sb.WriteString("Use the platform_tools tool to list all available tools.\n")
+	sb.WriteString("Use the mcp_servers tool to inspect individual server details.\n")
 	return sb.String()
 }
 
