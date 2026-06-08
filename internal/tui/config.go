@@ -17,6 +17,7 @@ type ClientConfig struct {
 	Rendering   RenderingConfig   `json:"rendering"`
 	Input       InputConfig       `json:"input"`
 	Chat        ChatConfig        `json:"chat"`
+	STT         STTConfig         `json:"stt"`
 
 	// Connection configures how the CLI connects to the daemon.
 	// Transport: "rpc", "http", or "auto" (default: "auto" -> rpc)
@@ -100,6 +101,14 @@ type SessionConfig struct {
 	DefaultName string `json:"default_name"` // Default name for new sessions (default: "default")
 }
 
+// STTConfig defines speech-to-text settings for the TUI.
+type STTConfig struct {
+	Enabled  bool   `json:"enabled"`   // Enable speech-to-text (default: false)
+	Engine   string `json:"engine"`    // Transcription engine: "whisper", "parakeet", or "native" (default: "whisper")
+	Language string `json:"language"`  // Language code for transcription (default: "en")
+	AutoSend bool   `json:"auto_send"` // Send transcription result immediately (default: false)
+}
+
 // DefaultClientConfig returns the default client configuration.
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
@@ -151,6 +160,10 @@ func DefaultClientConfig() *ClientConfig {
 		},
 		Chat: ChatConfig{
 			Verbosity: "normal",
+		},
+		STT: STTConfig{
+			Engine:   "whisper",
+			Language: "en",
 		},
 	}
 }

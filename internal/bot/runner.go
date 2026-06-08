@@ -1,16 +1,36 @@
 package bot
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
+
+	"log/slog"
 )
 
 const maxConsecutiveFailures = 10
 
+// BotExecutor abstracts the agent loop execution for bots.
+type BotExecutor interface {
+	ExecuteBot(ctx context.Context, systemPrompt, userMessage string) (output string, tokensUsed int, err error)
+}
+
+// BotExecutionResult holds the outcome of a single bot execution.
+type BotExecutionResult struct {
+	BotID      string
+	Output     string
+	TokensUsed int
+	Success    bool
+	Error      string
+	Duration   time.Duration
+}
+
 type BotRunner struct {
 	definition BotDefinition
 	namespace  *MemoryNamespace
+	executor   BotExecutor
+	logger     *slog.Logger
 }
 
 func NewBotRunner(def BotDefinition) *BotRunner {
@@ -75,4 +95,69 @@ func (r *BotRunner) BuildSystemPrompt(triggerContext string) string {
 // BuildUserMessage constructs the user message for a bot invocation.
 func (r *BotRunner) BuildUserMessage(triggerContext string) string {
 	return fmt.Sprintf("[Bot %s triggered] %s", r.definition.ID, triggerContext)
+}
+
+// WithExecutor returns a copy of the runner with the given executor.
+func (r *BotRunner) WithExecutor(executor BotExecutor) *BotRunner {
+	cp := *r
+	cp.executor = executor
+	return &cp
+}
+
+// WithLogger returns a copy of the runner with the given logger.
+func (r *BotRunner) WithLogger(logger *slog.Logger) *BotRunner {
+	cp := *r
+	cp.logger = logger
+	return &cp
+}
+
+// Execute runs the bot through the executor, checking ShouldRun first.
+func (r *BotRunner) Execute(ctx context.Context, state *BotState, triggerCtx string) (*BotExecutionResult, error) {
+	if r.executor == nil {
+		return nil, fmt.Errorf("bot %q: no executor configured", r.definition.ID)
+	}
+
+	if !r.ShouldRun(state) {
+		return &BotExecutionResult{
+			BotID:   r.definition.ID,
+			Success: false,
+			Error:   "skipped: budget exhausted or consecutive failure limit reached",
+		}, nil
+	}
+
+	systemPrompt := r.BuildSystemPrompt(triggerCtx)
+	userMessage := r.BuildUserMessage(triggerCtx)
+
+	// Apply per-bot timeout if configured.
+	if r.definition.Constraints.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.definition.Constraints.Timeout)
+		defer cancel()
+	}
+
+	start := time.Now()
+	output, tokensUsed, err := r.executor.ExecuteBot(ctx, systemPrompt, userMessage)
+	duration := time.Since(start)
+
+	result := &BotExecutionResult{
+		BotID:      r.definition.ID,
+		Output:     output,
+		TokensUsed: tokensUsed,
+		Duration:   duration,
+	}
+
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		if r.logger != nil {
+			r.logger.Error("bot execution failed", "bot_id", r.definition.ID, "error", err, "duration", duration)
+		}
+	} else {
+		result.Success = true
+		if r.logger != nil {
+			r.logger.Info("bot execution succeeded", "bot_id", r.definition.ID, "tokens", tokensUsed, "duration", duration)
+		}
+	}
+
+	return result, nil
 }

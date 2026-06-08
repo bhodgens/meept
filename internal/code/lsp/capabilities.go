@@ -8,6 +8,10 @@ type HasCapability interface {
 	HasDocumentSymbols() bool
 	HasWorkspaceSymbols() bool
 	HasDiagnostics() bool
+	HasCodeActions() bool
+	HasFormatting() bool
+	HasRename() bool
+	HasWillRenameFiles() bool
 }
 
 // Capabilities wraps ServerCapabilities with convenience methods.

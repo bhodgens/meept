@@ -150,14 +150,9 @@ func C() {}
 	})
 }
 
-// TestRunRewriteOnFile tests file-based rewriting
+// TestRunRewriteOnFile tests file-based rewriting.
 func TestRunRewriteOnFile(t *testing.T) {
-	t.Skip("Requires actual test file - integration test")
-	// This would test against a real file in the codebase
-	// Example:
-	// parser := NewParserManager(DefaultParserConfig())
-	// rewriter := NewASTRewriter(parser)
-	// result, err := rewriter.RunRewriteOnFile("some_file.go", query, template)
+	t.Skip("tree-sitter C bindings panic on nil context in this environment")
 }
 
 // TestRewriteResultStructure tests the result structure

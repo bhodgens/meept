@@ -425,6 +425,12 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 		)
 	}
 
+	// Approval gate: if the task went through an interview and user has not
+	// yet approved, pause here and present the plan for sign-off.
+	if req.PlanningCtx != nil && req.PlanningCtx.InterviewCompleted && !req.PlanningCtx.UserApproved {
+		return sp.awaitUserApproval(ctx, t, steps, req)
+	}
+
 	// Persist steps
 	for _, step := range steps {
 		if err := sp.stepStore.Create(step); err != nil {
@@ -853,6 +859,247 @@ func (sp *StrategicPlanner) ReplanFailedTask(ctx context.Context, taskID, failur
 	}
 
 	return sp.Plan(ctx, req)
+}
+
+// awaitUserApproval stores the generated plan steps in the task metadata,
+// sets the task to StateAwaitingApproval, and publishes a pending_approval
+// event so the TUI/transport layer can present the plan to the user.
+func (sp *StrategicPlanner) awaitUserApproval(ctx context.Context, t *task.Task, steps []*task.TaskStep, req PlanRequest) error {
+	// Build plan summary for the event payload.
+	summaries := make([]map[string]string, 0, len(steps))
+	for i, step := range steps {
+		summaries = append(summaries, map[string]string{
+			"sequence":    fmt.Sprintf("%d", i),
+			"description": step.Description,
+			"tool_hint":   step.ToolHint,
+		})
+	}
+
+	// Serialize the steps into task metadata under the "pending_steps" key.
+	if err := sp.storePendingSteps(t, steps); err != nil {
+		sp.logger.Error("Failed to store pending steps for approval", "error", err)
+		return fmt.Errorf("failed to store pending steps: %w", err)
+	}
+
+	t.TotalJobs = len(steps)
+	t.SetState(task.StateAwaitingApproval)
+	if err := sp.taskStore.Update(t); err != nil {
+		sp.logger.Error("Failed to update task to awaiting_approval", "error", err)
+		return fmt.Errorf("failed to update task state: %w", err)
+	}
+
+	sp.logger.Info("Plan awaiting user approval",
+		"task_id", req.TaskID,
+		"steps", len(steps),
+	)
+
+	sp.publishEvent("task.pending_approval", map[string]any{
+		KeyTaskID:    req.TaskID,
+		"session_id": req.SessionID,
+		"steps":      summaries,
+		"total":      len(steps),
+	})
+
+	return nil
+}
+
+// ApprovePlan resumes a plan that was paused at the approval gate.
+// It loads the persisted steps, sets UserApproved on the planning context,
+// transitions to StateExecuting, and triggers scheduling.
+func (sp *StrategicPlanner) ApprovePlan(ctx context.Context, taskID string) error {
+	sp.logger.Info("Approving plan", "task_id", taskID)
+
+	t, err := sp.taskStore.GetByID(taskID)
+	if err != nil || t == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if t.State != task.StateAwaitingApproval {
+		return fmt.Errorf("task %s is in state %q, expected %q", taskID, t.State, task.StateAwaitingApproval)
+	}
+
+	// Extract pending steps from task metadata.
+	steps, err := sp.extractPendingSteps(t)
+	if err != nil {
+		return fmt.Errorf("failed to extract pending steps for task %s: %w", taskID, err)
+	}
+	if len(steps) == 0 {
+		return fmt.Errorf("no pending steps found for task %s", taskID)
+	}
+
+	// Mark the planning context as user-approved.
+	if len(t.Metadata) > 0 {
+		var meta map[string]json.RawMessage
+		if json.Unmarshal(t.Metadata, &meta) == nil {
+			if pctxRaw, ok := meta["planning_context"]; ok {
+				var pctx plan.PlanningContext
+				if json.Unmarshal(pctxRaw, &pctx) == nil {
+					pctx.UserApproved = true
+					if updated, err := json.Marshal(pctx); err == nil {
+						meta["planning_context"] = updated
+					}
+				}
+			}
+			if merged, err := json.Marshal(meta); err == nil {
+				t.Metadata = merged
+			}
+		}
+	}
+
+	// Remove the pending_steps key from metadata since steps will be persisted now.
+	t.Metadata = removeMetadataKey(t.Metadata, "pending_steps")
+
+	// Persist steps
+	for _, step := range steps {
+		if err := sp.stepStore.Create(step); err != nil {
+			sp.logger.Error("Failed to persist step on approval", "step_id", step.ID, "error", err)
+			return fmt.Errorf("failed to persist steps: %w", err)
+		}
+	}
+
+	// Generate spec from planned steps.
+	spec := GenerateSpecFromSteps(steps)
+	StoreSpecInTask(t, spec)
+	sp.logger.Info("Generated task spec on approval",
+		"task_id", taskID,
+		"criteria_count", len(spec.Criteria),
+	)
+
+	// Transition to executing.
+	t.SetState(task.StateExecuting)
+	if err := sp.taskStore.Update(t); err != nil {
+		sp.logger.Error("Failed to update task after approval", "error", err)
+		return fmt.Errorf("failed to update task: %w", err)
+	}
+
+	// Promote root steps (no dependencies) to ready.
+	promoted, err := sp.stepStore.PromoteReadySteps(taskID)
+	if err != nil {
+		sp.logger.Error("Failed to promote ready steps on approval", "error", err)
+	} else {
+		sp.logger.Info("Promoted root steps after approval",
+			"task_id", taskID,
+			"promoted", len(promoted),
+			"total_steps", len(steps),
+		)
+	}
+
+	sp.publishEvent("task.approved", map[string]any{
+		KeyTaskID:     taskID,
+		"total_steps": len(steps),
+		"ready_steps": len(promoted),
+	})
+
+	sp.publishEvent("orchestrator.schedule", map[string]any{
+		KeyTaskID: taskID,
+	})
+
+	sp.logger.Info("Plan approved and scheduled", "task_id", taskID)
+	return nil
+}
+
+// RejectPlan cancels a plan that was awaiting approval.
+// It sets the task to StateRejected and publishes a rejection event.
+func (sp *StrategicPlanner) RejectPlan(ctx context.Context, taskID string, reason string) error {
+	sp.logger.Info("Rejecting plan", "task_id", taskID, "reason", reason)
+
+	t, err := sp.taskStore.GetByID(taskID)
+	if err != nil || t == nil {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
+	if t.State != task.StateAwaitingApproval {
+		return fmt.Errorf("task %s is in state %q, expected %q", taskID, t.State, task.StateAwaitingApproval)
+	}
+
+	// Clean up pending steps from metadata.
+	t.Metadata = removeMetadataKey(t.Metadata, "pending_steps")
+
+	t.SetState(task.StateRejected)
+	if err := sp.taskStore.Update(t); err != nil {
+		sp.logger.Error("Failed to update task after rejection", "error", err)
+		return fmt.Errorf("failed to update task: %w", err)
+	}
+
+	sp.publishEvent("task.rejected", map[string]any{
+		KeyTaskID: taskID,
+		"reason":  reason,
+	})
+
+	sp.logger.Info("Plan rejected", "task_id", taskID)
+	return nil
+}
+
+// storePendingSteps serializes steps and stores them in the task metadata under the
+// "pending_steps" key, merging with any existing metadata.
+func (sp *StrategicPlanner) storePendingSteps(t *task.Task, steps []*task.TaskStep) error {
+	pendingStepsData, err := json.Marshal(steps)
+	if err != nil {
+		return fmt.Errorf("failed to marshal pending steps: %w", err)
+	}
+	t.Metadata = mergeMetadata(t.Metadata, map[string]json.RawMessage{
+		"pending_steps": pendingStepsData,
+	})
+	return nil
+}
+
+// extractPendingSteps deserializes steps from the task's "pending_steps" metadata key.
+func (sp *StrategicPlanner) extractPendingSteps(t *task.Task) ([]*task.TaskStep, error) {
+	if len(t.Metadata) == 0 {
+		return nil, fmt.Errorf("task has no metadata")
+	}
+
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(t.Metadata, &meta); err != nil {
+		return nil, fmt.Errorf("failed to parse task metadata: %w", err)
+	}
+
+	raw, ok := meta["pending_steps"]
+	if !ok {
+		return nil, fmt.Errorf("no pending_steps in metadata")
+	}
+
+	var steps []*task.TaskStep
+	if err := json.Unmarshal(raw, &steps); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pending steps: %w", err)
+	}
+	return steps, nil
+}
+
+// mergeMetadata merges a set of key-value pairs into existing JSON metadata.
+// If existing is nil/empty, it creates a fresh object.
+func mergeMetadata(existing json.RawMessage, kv map[string]json.RawMessage) json.RawMessage {
+	var meta map[string]json.RawMessage
+	if len(existing) > 0 {
+		if json.Unmarshal(existing, &meta) != nil {
+			meta = make(map[string]json.RawMessage)
+		}
+	} else {
+		meta = make(map[string]json.RawMessage)
+	}
+	for k, v := range kv {
+		meta[k] = v
+	}
+	merged, err := json.Marshal(meta)
+	if err != nil {
+		return existing
+	}
+	return merged
+}
+
+// removeMetadataKey removes a single key from the task's JSON metadata map.
+func removeMetadataKey(existing json.RawMessage, key string) json.RawMessage {
+	if len(existing) == 0 {
+		return existing
+	}
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(existing, &meta) != nil {
+		return existing
+	}
+	delete(meta, key)
+	merged, err := json.Marshal(meta)
+	if err != nil {
+		return existing
+	}
+	return merged
 }
 
 func (sp *StrategicPlanner) publishEvent(topic string, data map[string]any) {

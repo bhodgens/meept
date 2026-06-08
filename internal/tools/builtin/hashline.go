@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cespare/xxhash/v2"
 )
@@ -160,13 +161,21 @@ func ValidateAnchor(lines []string, lineNum int, expectedHash string) bool {
 	return ComputeLineHash(lines[idx]) == expectedHash
 }
 
+// SnapshotEntry records a single historical snapshot for session chain recovery.
+type SnapshotEntry struct {
+	Lines     []string
+	Tag       string
+	Timestamp time.Time
+}
+
 // ReadCache is a thread-safe LRU cache for file snapshots used by the edit tool
 // for stale-anchor recovery.
 type ReadCache struct {
-	mu       sync.RWMutex
-	entries  map[string]*cacheEntry
-	order    []string // LRU order (front = oldest)
-	maxItems int
+	mu          sync.RWMutex
+	entries     map[string]*cacheEntry
+	order       []string // LRU order (front = oldest)
+	maxItems    int
+	editHistory map[string][]SnapshotEntry
 }
 
 type cacheEntry struct {
@@ -180,9 +189,10 @@ func NewReadCache(maxItems int) *ReadCache {
 		maxItems = 30
 	}
 	return &ReadCache{
-		entries:  make(map[string]*cacheEntry),
-		order:    make([]string, 0, maxItems),
-		maxItems: maxItems,
+		entries:     make(map[string]*cacheEntry),
+		order:       make([]string, 0, maxItems),
+		maxItems:    maxItems,
+		editHistory: make(map[string][]SnapshotEntry),
 	}
 }
 
@@ -193,6 +203,7 @@ func (c *ReadCache) Store(path string, lines []string) {
 
 // StoreWithTag records a file snapshot in the cache with a snapshot tag.
 // The tag allows editors to reference the exact version they read.
+// It also appends the snapshot to editHistory (capped at 10 per path).
 func (c *ReadCache) StoreWithTag(path string, lines []string, snapshotTag string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -219,6 +230,20 @@ func (c *ReadCache) StoreWithTag(path string, lines []string, snapshotTag string
 	copy(copied, lines)
 	c.entries[path] = &cacheEntry{lines: copied, snapshotTag: snapshotTag}
 	c.order = append(c.order, path)
+
+	// Append to edit history, capped at 10 per path.
+	const maxHistoryPerPath = 10
+	hist := c.editHistory[path]
+	entry := SnapshotEntry{
+		Lines:     copied,
+		Tag:       snapshotTag,
+		Timestamp: time.Now(),
+	}
+	hist = append(hist, entry)
+	if len(hist) > maxHistoryPerPath {
+		hist = hist[len(hist)-maxHistoryPerPath:]
+	}
+	c.editHistory[path] = hist
 }
 
 // Get retrieves a file snapshot from the cache.
@@ -266,4 +291,34 @@ func (c *ReadCache) GetByTag(tag string) []string {
 		}
 	}
 	return nil
+}
+
+// GetHistory returns the edit history for a given path, ordered newest-first.
+// Each entry contains a copy of the lines at that snapshot.
+func (c *ReadCache) GetHistory(path string) []SnapshotEntry {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	hist := c.editHistory[path]
+	if len(hist) == 0 {
+		return nil
+	}
+
+	// Return newest-first with copies of the lines to avoid aliasing.
+	result := make([]SnapshotEntry, len(hist))
+	for i, entry := range hist {
+		result[i] = SnapshotEntry{
+			Tag:       entry.Tag,
+			Timestamp: entry.Timestamp,
+		}
+		if entry.Lines != nil {
+			result[i].Lines = make([]string, len(entry.Lines))
+			copy(result[i].Lines, entry.Lines)
+		}
+	}
+	// Reverse so newest is first.
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	return result
 }

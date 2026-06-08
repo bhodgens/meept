@@ -13,6 +13,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/internal/task"
 )
 
 func TestExtractJSON_DirectJSON(t *testing.T) {
@@ -640,5 +641,509 @@ func TestParseInterviewQuestions_EmptyOutput(t *testing.T) {
 	questions := sp.parseInterviewQuestions("")
 	if questions != nil {
 		t.Errorf("expected nil for empty output, got %v", questions)
+	}
+}
+
+func TestMergeMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing json.RawMessage
+		kv       map[string]json.RawMessage
+		wantKey  string
+	}{
+		{
+			name:     "merge into empty",
+			existing: nil,
+			kv:       map[string]json.RawMessage{"a": json.RawMessage(`"val"`)},
+			wantKey:  "a",
+		},
+		{
+			name:     "merge into existing",
+			existing: json.RawMessage(`{"existing": true}`),
+			kv:       map[string]json.RawMessage{"new": json.RawMessage(`1`)},
+			wantKey:  "new",
+		},
+		{
+			name:     "existing key preserved",
+			existing: json.RawMessage(`{"existing": true}`),
+			kv:       map[string]json.RawMessage{"new": json.RawMessage(`1`)},
+			wantKey:  "existing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mergeMetadata(tt.existing, tt.kv)
+			var meta map[string]json.RawMessage
+			if err := json.Unmarshal(result, &meta); err != nil {
+				t.Fatalf("failed to unmarshal result: %v", err)
+			}
+			if _, ok := meta[tt.wantKey]; !ok {
+				t.Errorf("expected key %q in result, got %v", tt.wantKey, meta)
+			}
+		})
+	}
+}
+
+func TestRemoveMetadataKey(t *testing.T) {
+	existing := json.RawMessage(`{"a": 1, "b": 2, "c": 3}`)
+	result := removeMetadataKey(existing, "b")
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(result, &meta); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if _, ok := meta["b"]; ok {
+		t.Error("key 'b' should have been removed")
+	}
+	if _, ok := meta["a"]; !ok {
+		t.Error("key 'a' should be preserved")
+	}
+	if _, ok := meta["c"]; !ok {
+		t.Error("key 'c' should be preserved")
+	}
+}
+
+func TestRemoveMetadataKey_Empty(t *testing.T) {
+	result := removeMetadataKey(nil, "b")
+	if result != nil {
+		t.Errorf("expected nil for nil input, got %s", result)
+	}
+}
+
+func TestAwaitUserApproval(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	stepStore := taskStore.StepStore()
+
+	pendingSub := msgBus.Subscribe("test-observer", "task.pending_approval")
+	defer msgBus.Unsubscribe(pendingSub)
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		TaskStore:      taskStore,
+		StepStore:      stepStore,
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	tsk := newTestTask("task-approval-test", "implement auth module")
+	tsk.SetState(task.StatePlanning)
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	steps := []*task.TaskStep{
+		task.NewTaskStep(tsk.ID, "Write the auth handler", 0),
+		task.NewTaskStep(tsk.ID, "Write tests", 1),
+		task.NewTaskStep(tsk.ID, "Commit changes", 2),
+	}
+	steps[2].DependsOn = []string{steps[0].ID, steps[1].ID}
+
+	req := PlanRequest{
+		TaskID:    tsk.ID,
+		SessionID: "session-approval",
+		Input:     "implement auth module",
+		Intent:    "code",
+		PlanningCtx: &plan.PlanningContext{
+			InterviewCompleted: true,
+			UserApproved:       false,
+		},
+	}
+
+	err = sp.awaitUserApproval(context.Background(), tsk, steps, req)
+	if err != nil {
+		t.Fatalf("awaitUserApproval failed: %v", err)
+	}
+
+	updated, err := taskStore.GetByID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if updated.State != task.StateAwaitingApproval {
+		t.Errorf("task state = %q, want %q", updated.State, task.StateAwaitingApproval)
+	}
+	if updated.TotalJobs != 3 {
+		t.Errorf("total_jobs = %d, want 3", updated.TotalJobs)
+	}
+
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(updated.Metadata, &meta); err != nil {
+		t.Fatalf("failed to parse metadata: %v", err)
+	}
+	if _, ok := meta["pending_steps"]; !ok {
+		t.Error("expected 'pending_steps' key in metadata")
+	}
+
+	select {
+	case msg := <-pendingSub.Channel:
+		if msg.Topic != "task.pending_approval" {
+			t.Errorf("expected topic 'task.pending_approval', got %q", msg.Topic)
+		}
+		var event map[string]any
+		if err := json.Unmarshal(msg.Payload, &event); err != nil {
+			t.Fatalf("failed to unmarshal payload: %v", err)
+		}
+		if event["task_id"] != tsk.ID {
+			t.Errorf("task_id = %v, want %s", event["task_id"], tsk.ID)
+		}
+		if total, ok := event["total"].(float64); !ok || total != 3 {
+			t.Errorf("total = %v, want 3", event["total"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for task.pending_approval event")
+	}
+}
+
+func TestApprovePlan(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	stepStore := taskStore.StepStore()
+
+	approvedSub := msgBus.Subscribe("test-observer", "task.approved")
+	defer msgBus.Unsubscribe(approvedSub)
+
+	schedSub := msgBus.Subscribe("test-observer", "orchestrator.schedule")
+	defer msgBus.Unsubscribe(schedSub)
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		TaskStore:      taskStore,
+		StepStore:      stepStore,
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	tsk := newTestTask("task-approve-test", "implement auth module")
+	tsk.SetState(task.StateAwaitingApproval)
+	tsk.TotalJobs = 2
+
+	steps := []*task.TaskStep{
+		task.NewTaskStep(tsk.ID, "Write code", 0),
+		task.NewTaskStep(tsk.ID, "Write tests", 1),
+	}
+	pendingData, _ := json.Marshal(steps)
+	tsk.Metadata = mergeMetadata(nil, map[string]json.RawMessage{
+		"pending_steps": pendingData,
+	})
+
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	err = sp.ApprovePlan(context.Background(), tsk.ID)
+	if err != nil {
+		t.Fatalf("ApprovePlan failed: %v", err)
+	}
+
+	updated, err := taskStore.GetByID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if updated.State != task.StateExecuting {
+		t.Errorf("task state = %q, want %q", updated.State, task.StateExecuting)
+	}
+
+	persistedSteps, err := stepStore.ListByTaskID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+	if len(persistedSteps) != 2 {
+		t.Errorf("persisted steps = %d, want 2", len(persistedSteps))
+	}
+
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(updated.Metadata, &meta) == nil {
+		if _, ok := meta["pending_steps"]; ok {
+			t.Error("'pending_steps' should have been removed from metadata")
+		}
+	}
+
+	select {
+	case msg := <-approvedSub.Channel:
+		if msg.Topic != "task.approved" {
+			t.Errorf("expected 'task.approved', got %q", msg.Topic)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for task.approved event")
+	}
+
+	select {
+	case msg := <-schedSub.Channel:
+		if msg.Topic != "orchestrator.schedule" {
+			t.Errorf("expected 'orchestrator.schedule', got %q", msg.Topic)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for orchestrator.schedule event")
+	}
+}
+
+func TestApprovePlan_WrongState(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		TaskStore:      taskStore,
+		StepStore:      taskStore.StepStore(),
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	tsk := newTestTask("task-wrong-state", "some task")
+	tsk.SetState(task.StateExecuting)
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	err = sp.ApprovePlan(context.Background(), tsk.ID)
+	if err == nil {
+		t.Fatal("expected error for wrong state, got nil")
+	}
+}
+
+func TestApprovePlan_NotFound(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		TaskStore:      taskStore,
+		StepStore:      taskStore.StepStore(),
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	err = sp.ApprovePlan(context.Background(), "nonexistent-task")
+	if err == nil {
+		t.Fatal("expected error for nonexistent task, got nil")
+	}
+}
+
+func TestRejectPlan(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	rejectedSub := msgBus.Subscribe("test-observer", "task.rejected")
+	defer msgBus.Unsubscribe(rejectedSub)
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		TaskStore:      taskStore,
+		StepStore:      taskStore.StepStore(),
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	tsk := newTestTask("task-reject-test", "implement auth module")
+	tsk.SetState(task.StateAwaitingApproval)
+	tsk.Metadata = mergeMetadata(nil, map[string]json.RawMessage{
+		"pending_steps": json.RawMessage(`[]`),
+	})
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	err = sp.RejectPlan(context.Background(), tsk.ID, "out of scope")
+	if err != nil {
+		t.Fatalf("RejectPlan failed: %v", err)
+	}
+
+	updated, err := taskStore.GetByID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if updated.State != task.StateRejected {
+		t.Errorf("task state = %q, want %q", updated.State, task.StateRejected)
+	}
+
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(updated.Metadata, &meta) == nil {
+		if _, ok := meta["pending_steps"]; ok {
+			t.Error("'pending_steps' should have been removed from metadata")
+		}
+	}
+
+	select {
+	case msg := <-rejectedSub.Channel:
+		if msg.Topic != "task.rejected" {
+			t.Errorf("expected 'task.rejected', got %q", msg.Topic)
+		}
+		var event map[string]any
+		if err := json.Unmarshal(msg.Payload, &event); err != nil {
+			t.Fatalf("failed to unmarshal payload: %v", err)
+		}
+		if event["reason"] != "out of scope" {
+			t.Errorf("reason = %v, want 'out of scope'", event["reason"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for task.rejected event")
+	}
+}
+
+func TestRejectPlan_WrongState(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		TaskStore:      taskStore,
+		StepStore:      taskStore.StepStore(),
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	tsk := newTestTask("task-reject-wrong-state", "some task")
+	tsk.SetState(task.StatePlanning)
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	err = sp.RejectPlan(context.Background(), tsk.ID, "bad plan")
+	if err == nil {
+		t.Fatal("expected error for wrong state, got nil")
+	}
+}
+
+func TestPlan_ApprovalGate(t *testing.T) {
+	msgBus := bus.New(nil, slogDiscardLogger())
+	defer msgBus.Close()
+
+	tmpDir := t.TempDir()
+	taskStore, err := newTestTaskStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create task store: %v", err)
+	}
+	defer taskStore.Close()
+
+	stepStore := taskStore.StepStore()
+
+	pendingSub := msgBus.Subscribe("test-observer", "task.pending_approval")
+	defer msgBus.Unsubscribe(pendingSub)
+
+	sp := NewStrategicPlanner(StrategicPlannerConfig{
+		Registry:       nil,
+		TaskStore:      taskStore,
+		StepStore:      stepStore,
+		Bus:            msgBus,
+		MaxPlanSteps:   5,
+		PlannerTimeout: 10 * time.Second,
+		Logger:         slogDiscardLogger(),
+	})
+
+	tsk := newTestTask("task-gate-test", "complex task with interview")
+	if err := taskStore.Create(tsk); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	req := PlanRequest{
+		TaskID:    tsk.ID,
+		SessionID: "session-gate",
+		Input:     "complex task with interview",
+		Intent:    "code",
+		PlanningCtx: &plan.PlanningContext{
+			InterviewCompleted: true,
+			UserApproved:       false,
+		},
+	}
+
+	err = sp.Plan(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Plan() failed: %v", err)
+	}
+
+	updated, err := taskStore.GetByID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if updated.State != task.StateAwaitingApproval {
+		t.Errorf("task state = %q, want %q", updated.State, task.StateAwaitingApproval)
+	}
+
+	persistedSteps, err := stepStore.ListByTaskID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+	if len(persistedSteps) != 0 {
+		t.Errorf("expected 0 persisted steps during approval wait, got %d", len(persistedSteps))
+	}
+
+	select {
+	case msg := <-pendingSub.Channel:
+		if msg.Topic != "task.pending_approval" {
+			t.Errorf("expected 'task.pending_approval', got %q", msg.Topic)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for task.pending_approval event")
+	}
+
+	err = sp.ApprovePlan(context.Background(), tsk.ID)
+	if err != nil {
+		t.Fatalf("ApprovePlan failed: %v", err)
+	}
+
+	approved, err := taskStore.GetByID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if approved.State != task.StateExecuting {
+		t.Errorf("task state after approval = %q, want %q", approved.State, task.StateExecuting)
+	}
+
+	finalSteps, err := stepStore.ListByTaskID(tsk.ID)
+	if err != nil {
+		t.Fatalf("failed to list steps: %v", err)
+	}
+	if len(finalSteps) != 1 {
+		t.Errorf("expected 1 persisted step after approval, got %d", len(finalSteps))
 	}
 }

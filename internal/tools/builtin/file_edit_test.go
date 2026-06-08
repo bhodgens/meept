@@ -1117,7 +1117,7 @@ func TestFindMatchingLine_FailsForUnrelatedContent(t *testing.T) {
 		"REPLACED_WITH_SOMETHING_VERY_DIFFERENT",
 		"ccc",
 	}
-	lineNum, strategy, found := findMatchingLine(cachedContent, cachedHash, currentLines, 0, len(currentLines)-1)
+	lineNum, strategy, found := findMatchingLine(cachedContent, cachedHash, currentLines, 0, len(currentLines)-1, 0.6)
 	if found {
 		t.Errorf("expected no match, got lineNum=%d, strategy=%s", lineNum, strategy)
 	}

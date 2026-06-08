@@ -15,13 +15,15 @@ import (
 type TaskState string
 
 const (
-	StatePending   TaskState = "pending"
-	StatePlanning  TaskState = "planning"
-	StateExecuting TaskState = "executing"
-	StateTesting   TaskState = "testing"
-	StateCompleted TaskState = "completed"
-	StateFailed    TaskState = "failed"
-	StateCancelled TaskState = "cancelled"
+	StatePending          TaskState = "pending"
+	StatePlanning         TaskState = "planning"
+	StateAwaitingApproval TaskState = "awaiting_approval"
+	StateExecuting        TaskState = "executing"
+	StateTesting          TaskState = "testing"
+	StateCompleted        TaskState = "completed"
+	StateFailed           TaskState = "failed"
+	StateRejected         TaskState = "rejected"
+	StateCancelled        TaskState = "cancelled"
 )
 
 func (s TaskState) String() string {
@@ -30,7 +32,7 @@ func (s TaskState) String() string {
 
 // IsTerminal returns true if the task is in a terminal state.
 func (s TaskState) IsTerminal() bool {
-	return s == StateCompleted || s == StateFailed || s == StateCancelled
+	return s == StateCompleted || s == StateFailed || s == StateCancelled || s == StateRejected
 }
 
 // Task represents a unit of work that may spawn multiple jobs.
@@ -181,7 +183,7 @@ func (t *Task) FailJob() {
 // SetState updates the task state.
 func (t *Task) SetState(state TaskState) {
 	// Set StartedAt when transitioning from pending to an active state
-	if t.State == StatePending && (state == StatePlanning || state == StateExecuting) {
+	if t.State == StatePending && (state == StatePlanning || state == StateExecuting || state == StateAwaitingApproval) {
 		t.StartedAt = time.Now().UTC()
 	}
 	t.State = state

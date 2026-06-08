@@ -1295,13 +1295,17 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 
 	var mem Memory
 	var metaJSON string
+	var createdAtStr string
 	var lastAccessedStr sql.NullString
-	err = row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &mem.CreatedAt, &lastAccessedStr)
+	err = row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &createdAtStr, &lastAccessedStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
+	}
+	if t, err := time.Parse(time.RFC3339Nano, createdAtStr); err == nil {
+		mem.CreatedAt = t
 	}
 	// Handle empty string or NULL for last_accessed_at
 	if lastAccessedStr.Valid && lastAccessedStr.String != "" {
@@ -1771,4 +1775,10 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 // Returns nil if vector search is not configured.
 func (m *Manager) GetVectorSearcher() VectorSearcher {
 	return m.vectorStore
+}
+
+// ScopedManager returns a ScopedMemoryManager that filters all operations
+// to memories belonging to the given botID.
+func (m *Manager) ScopedManager(botID string) *ScopedMemoryManager {
+	return &ScopedMemoryManager{manager: m, botID: botID, logger: m.logger}
 }
