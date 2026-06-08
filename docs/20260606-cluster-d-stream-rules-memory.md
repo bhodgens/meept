@@ -61,7 +61,7 @@ Meept's TTSR (`internal/agent/ttsr.go`) monitors LLM output for pattern violatio
 - `internal/memory/retain.go` (new, optional) — Hindsight-style tools
 
 ## Success Criteria
-- [ ] TTSR rules trigger mid-stream and retry with injected content
-- [ ] `meept init` generates correct hierarchical `AGENTS.md` in a test project
-- [ ] Working on a file auto-loads relevant `AGENTS.md` into context
-- [ ] Memory quality decision documented; implementation complete if approved
+- [x] TTSR rules trigger mid-stream and retry with injected content
+- [x] `meept init` generates correct hierarchical `AGENTS.md` in a test project
+- [x] Working on a file auto-loads relevant `AGENTS.md` into context
+- [x] Memory quality decision documented; implementation complete if approved

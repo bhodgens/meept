@@ -563,6 +563,10 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	logger.Info("Hallucination detector initialized")
 
 	c.ArtifactManager = agent.NewArtifactManager(logger.With("component", "artifact-manager"))
+	// Set project root for hierarchical AGENTS.md loading
+	if wd, err := os.Getwd(); err == nil {
+		c.ArtifactManager.WithProjectRoot(wd)
+	}
 	logger.Info("Artifact manager initialized")
 
 	// Create TT-SR stream rule manager and load rules from all skills directories

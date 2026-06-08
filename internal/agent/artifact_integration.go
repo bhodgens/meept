@@ -7,6 +7,7 @@ import (
 	"time"
 
 	artifactcontext "github.com/caimlas/meept/internal/context"
+	"github.com/caimlas/meept/internal/project"
 )
 
 // ArtifactManager integrates Claude artifact detection and context building
@@ -24,6 +25,10 @@ type ArtifactManager struct {
 
 	// Cache expiry
 	cacheExpiry time.Duration
+
+	// projectRoot is the root directory of the current project, used for
+	// hierarchical AGENTS.md loading.
+	projectRoot string
 
 	// Logger
 	logger *slog.Logger
@@ -306,6 +311,71 @@ func summarizeREADME(content string) string {
 		truncated = truncated[:idx]
 	}
 	truncated += "\n\n[... README truncated at 4KB ...]"
+	return truncated
+}
+
+// maxAgentsContextBytes caps the total size of combined AGENTS.md content injected
+// into the prompt. This prevents deeply-nested hierarchies from consuming too much
+// context window space.
+const maxAgentsContextBytes = 8 * 1024 // 8KB
+
+// WithProjectRoot sets the project root directory for hierarchical AGENTS.md loading.
+// This must be called before LoadAgentsContext to have effect.
+func (am *ArtifactManager) WithProjectRoot(root string) *ArtifactManager {
+	am.projectRoot = root
+	return am
+}
+
+// LoadAgentsContext loads hierarchical AGENTS.md files relative to filePath and
+// returns them joined as a single string suitable for prompt injection.
+// If projectRoot is not set, or no AGENTS.md files are found, returns "".
+// The total output is capped at maxAgentsContextBytes.
+func (am *ArtifactManager) LoadAgentsContext(filePath string) string {
+	if am.projectRoot == "" {
+		return ""
+	}
+
+	loaded, err := project.LoadAgentsMDForPath(am.projectRoot, filePath)
+	if err != nil {
+		am.logger.Debug("AGENTS.md loading failed", "error", err)
+		return ""
+	}
+	if len(loaded) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for _, l := range loaded {
+		if sb.Len() > 0 {
+			sb.WriteString("\n---\n")
+		}
+		if l.RelPath != "" {
+			fmt.Fprintf(&sb, "<!-- %s/AGENTS.md -->\n", l.RelPath)
+		} else {
+			sb.WriteString("<!-- AGENTS.md (root) -->\n")
+		}
+		sb.WriteString(l.Content)
+	}
+
+	result := sb.String()
+	if len(result) > maxAgentsContextBytes {
+		result = truncateAtNewline(result, maxAgentsContextBytes)
+		result += "\n\n[... AGENTS.md context truncated at 8KB ...]"
+	}
+
+	return result
+}
+
+// truncateAtNewline truncates s to at most maxLen bytes, walking back to the
+// last newline boundary to avoid cutting mid-line.
+func truncateAtNewline(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	truncated := s[:maxLen]
+	if idx := strings.LastIndex(truncated, "\n"); idx > 0 {
+		truncated = truncated[:idx]
+	}
 	return truncated
 }
 

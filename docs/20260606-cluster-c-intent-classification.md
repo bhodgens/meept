@@ -56,7 +56,7 @@ Meept's current `LLMClassifier` classifies directly into intent types with keywo
 - `internal/plan/types.go` — PlanningContext field
 
 ## Success Criteria
-- [ ] Dispatcher asks clarifying questions for ambiguous requests (e.g., "use GLM" -> "Which GLM model?")
-- [ ] Planner agent interviews user before complex plans
-- [ ] Plans are presented for approval before agent scheduling
-- [ ] Classification accuracy improves (fewer misrouted intents)
+- [x] Dispatcher asks clarifying questions for ambiguous requests (e.g., "use GLM" -> "Which GLM model?")
+- [x] Planner agent interviews user before complex plans
+- [x] Plans are presented for approval before agent scheduling
+- [x] Classification accuracy improves (fewer misrouted intents)
