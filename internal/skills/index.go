@@ -7,8 +7,6 @@ import (
 )
 
 // SkillIndexEntry holds skill metadata only (no body) for fast lookup.
-//
-//nolint:revive // stutter with package name is intentional for API clarity
 type SkillIndexEntry struct {
 	// Name is the unique identifier for the skill.
 	Name string `json:"name"`
@@ -31,9 +29,10 @@ type SkillIndexEntry struct {
 }
 
 // HasCapability checks if the entry requires a specific capability.
-func (e *SkillIndexEntry) HasCapability(capability string) bool {
+func (e *SkillIndexEntry) HasCapability(cap string) bool {
+	capLower := strings.ToLower(cap)
 	for _, c := range e.Requires {
-		if strings.EqualFold(c, capability) {
+		if strings.EqualFold(c, capLower) {
 			return true
 		}
 	}
@@ -42,8 +41,9 @@ func (e *SkillIndexEntry) HasCapability(capability string) bool {
 
 // HasTag checks if the entry has a specific tag.
 func (e *SkillIndexEntry) HasTag(tag string) bool {
+	tagLower := strings.ToLower(tag)
 	for _, t := range e.Tags {
-		if strings.EqualFold(t, tag) {
+		if strings.EqualFold(t, tagLower) {
 			return true
 		}
 	}
@@ -51,8 +51,6 @@ func (e *SkillIndexEntry) HasTag(tag string) bool {
 }
 
 // SkillIndex provides fast lookup of skill metadata without bodies.
-//
-//nolint:revive // stutter with package name is intentional for API clarity
 type SkillIndex struct {
 	mu      sync.RWMutex
 	entries map[string]*SkillIndexEntry // normalized name -> entry
@@ -95,8 +93,8 @@ func (idx *SkillIndex) Index(entry *SkillIndexEntry) {
 	}
 
 	// Add to capability index
-	for _, capName := range entry.Requires {
-		capKey := strings.ToLower(capName)
+	for _, cap := range entry.Requires {
+		capKey := strings.ToLower(cap)
 		idx.byCap[capKey] = append(idx.byCap[capKey], entry)
 	}
 }
@@ -110,8 +108,8 @@ func (idx *SkillIndex) removeFromSecondaryIndices(entry *SkillIndexEntry) {
 	}
 
 	// Remove from capability index
-	for _, capName := range entry.Requires {
-		capKey := strings.ToLower(capName)
+	for _, cap := range entry.Requires {
+		capKey := strings.ToLower(cap)
 		idx.byCap[capKey] = removeEntry(idx.byCap[capKey], entry)
 	}
 }
@@ -184,11 +182,11 @@ func (idx *SkillIndex) FindByTag(tag string) []*SkillIndexEntry {
 }
 
 // FindByCapability returns entries that require a specific capability.
-func (idx *SkillIndex) FindByCapability(capability string) []*SkillIndexEntry {
+func (idx *SkillIndex) FindByCapability(cap string) []*SkillIndexEntry {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	capKey := strings.ToLower(capability)
+	capKey := strings.ToLower(cap)
 	entries := idx.byCap[capKey]
 	result := make([]*SkillIndexEntry, len(entries))
 	copy(result, entries)
@@ -266,8 +264,8 @@ func (idx *SkillIndex) AllCapabilities() []string {
 	defer idx.mu.RUnlock()
 
 	caps := make([]string, 0, len(idx.byCap))
-	for capName := range idx.byCap {
-		caps = append(caps, capName)
+	for cap := range idx.byCap {
+		caps = append(caps, cap)
 	}
 	sort.Strings(caps)
 	return caps
@@ -282,11 +280,12 @@ func (idx *SkillIndex) Match(query string) *SkillIndexEntry {
 		return nil
 	}
 
+	queryLower := strings.ToLower(query)
 	var bestMatch *SkillIndexEntry
 	bestScore := 0
 
 	for _, entry := range idx.entries {
-		score := matchEntryScore(entry, query)
+		score := matchEntryScore(entry, queryLower)
 		if score > bestScore {
 			bestScore = score
 			bestMatch = entry
@@ -302,8 +301,7 @@ func (idx *SkillIndex) Match(query string) *SkillIndexEntry {
 }
 
 // matchEntryScore calculates a fuzzy match score for an entry.
-func matchEntryScore(entry *SkillIndexEntry, query string) int {
-	queryLower := strings.ToLower(query)
+func matchEntryScore(entry *SkillIndexEntry, queryLower string) int {
 	score := 0
 	nameLower := strings.ToLower(entry.Name)
 	descLower := strings.ToLower(entry.Description)
@@ -336,7 +334,7 @@ func matchEntryScore(entry *SkillIndexEntry, query string) int {
 
 	// Tag match
 	for _, tag := range entry.Tags {
-		if strings.EqualFold(tag, query) {
+		if strings.EqualFold(tag, queryLower) {
 			score += 20
 		} else if strings.Contains(strings.ToLower(tag), queryLower) {
 			score += 5
@@ -354,8 +352,6 @@ func matchEntryScore(entry *SkillIndexEntry, query string) int {
 }
 
 // SkillIndexMatch holds an entry with its match score.
-//
-//nolint:revive // stutter with package name is intentional for API clarity
 type SkillIndexMatch struct {
 	Entry *SkillIndexEntry
 	Score int
@@ -370,10 +366,11 @@ func (idx *SkillIndex) MatchAll(query string) []*SkillIndexMatch {
 		return nil
 	}
 
+	queryLower := strings.ToLower(query)
 	var matches []*SkillIndexMatch
 
 	for _, entry := range idx.entries {
-		score := matchEntryScore(entry, query)
+		score := matchEntryScore(entry, queryLower)
 		if score > 0 {
 			matches = append(matches, &SkillIndexMatch{
 				Entry: entry,

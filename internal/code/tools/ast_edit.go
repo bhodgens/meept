@@ -10,9 +10,10 @@ import (
 	"github.com/caimlas/meept/internal/tools"
 )
 
-// ASTEditTool generates structural edit proposals from tree-sitter queries.
+// ASTEditTool performs structural AST-based edits with preview/apply pattern.
 type ASTEditTool struct {
-	parser *ast.ParserManager
+	rewriter *ast.ASTRewriter
+	parser   *ast.ParserManager
 }
 
 // NewASTEditTool creates a new AST edit tool.
@@ -20,7 +21,10 @@ func NewASTEditTool(parser *ast.ParserManager) (*ASTEditTool, error) {
 	if parser == nil {
 		return nil, fmt.Errorf("ast.ParserManager cannot be nil")
 	}
-	return &ASTEditTool{parser: parser}, nil
+	return &ASTEditTool{
+		rewriter: ast.NewASTRewriter(parser),
+		parser:   parser,
+	}, nil
 }
 
 func (t *ASTEditTool) Name() string { return "ast_edit" }
@@ -28,39 +32,58 @@ func (t *ASTEditTool) Name() string { return "ast_edit" }
 func (t *ASTEditTool) Category() string { return "code" }
 
 func (t *ASTEditTool) Description() string {
-	return `Run a tree-sitter query to find AST nodes and generate proposed edits WITHOUT applying them.
-Use this for structural code changes like renaming variables, replacing function bodies, or inserting code.
-Returns a preview of changes with edit_count, file_count, and affected ranges.
-Use the "ast_resolve" tool with apply=true to apply the proposal afterward.`
+	return `Perform structural AST-based code edits using tree-sitter queries.
+Use this tool for batch modifications like:
+- Replace all function bodies matching a pattern
+- Rename all variable declarations of a type
+- Insert code before/after specific AST node types
+
+The tool returns proposed edits without modifying files. Use resolve_ast_edit to apply.
+
+Parameters:
+- file_path: Source file to edit
+- query: Tree-sitter S-expression query to match nodes
+- query_name: Predefined query (functions, classes, imports, etc.)
+- rewrite_template: Template with {{capture}} placeholders for replacement
+- language: Override language detection
+- preview_only: If true, only show preview (default: true)
+
+Example rewrite templates:
+- "{{visibility}} func {{name}}({{params}}) {{return_type}} { /* refactored */ }"
+- "const {{name}} = {{value}} // deprecated: use {{newName}} instead"
+`
 }
 
 func (t *ASTEditTool) Parameters() llm.FunctionParameters {
 	return llm.FunctionParameters{
 		Type: SchemaTypeObject,
-		Properties: map[string]llm.ParameterProperty{
+		 Properties: map[string]llm.ParameterProperty{
 			SchemaPropFilePath: {
 				Type:        SchemaTypeString,
 				Description: "Path to the source file to edit.",
 			},
 			"query": {
 				Type:        SchemaTypeString,
-				Description: "Tree-sitter S-expression query pattern. Captured nodes (@name) will be rewritten.",
+				Description: "Tree-sitter S-expression query pattern. Use @name to capture nodes.",
 			},
-			"operation": {
+			"query_name": {
 				Type:        SchemaTypeString,
-				Description: "Operation type: replace (replace node with template), rename (rename identifier), insert_after (insert template after node).",
-				Enum:        []string{"replace", "rename", "insert_after"},
+				Description: "Use a predefined query: functions, classes, imports, strings, comments.",
 			},
-			"template": {
+			"rewrite_template": {
 				Type:        SchemaTypeString,
-				Description: "Template for the new text. For 'replace', use @capture_name to substitute captured text. For 'rename', this is the new name.",
+				Description: "Template for replacement with {{capture}} placeholders.",
 			},
 			SchemaPropLanguage: {
 				Type:        SchemaTypeString,
 				Description: "Override language detection (go, python, typescript, etc.).",
 			},
+			"preview_only": {
+				Type:        SchemaTypeBoolean,
+				Description: "If true, only return preview без applying (default: true).",
+			},
 		},
-		Required: []string{SchemaPropFilePath, "query", "operation", "template"},
+		Required: []string{SchemaPropFilePath, "rewrite_template"},
 	}
 }
 
@@ -71,22 +94,44 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 	}
 
 	query, _ := args["query"].(string)
+	queryName, _ := args["query_name"].(string)
+	rewriteTemplate, _ := args["rewrite_template"].(string)
+	langStr, _ := args["language"].(string)
+	previewOnly := true
+	if p, ok := args["preview_only"].(bool); ok {
+		previewOnly = p
+	}
+
+	if rewriteTemplate == "" {
+		return nil, fmt.Errorf("rewrite_template is required")
+	}
+
+	// Resolve query
+	if query == "" && queryName != "" {
+		var lang ast.Language
+		if langStr != "" {
+			lang = ast.LanguageFromString(langStr)
+		} else {
+			lang = ast.DetectLanguage(filePath)
+		}
+		var ok bool
+		query, ok = ast.GetCommonQuery(queryName, lang)
+		if !ok {
+			return nil, fmt.Errorf("no predefined query '%s' for language '%s'", queryName, langStr)
+		}
+	}
+
 	if query == "" {
-		return nil, fmt.Errorf("query is required")
+		return nil, fmt.Errorf("either query or query_name must be provided")
 	}
 
-	opStr, _ := args["operation"].(string)
-	if opStr == "" {
-		return nil, fmt.Errorf("operation is required")
+	// Read file
+	source, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	template, _ := args["template"].(string)
-	if template == "" {
-		return nil, fmt.Errorf("template is required")
-	}
-
-	langStr, _ := args[SchemaPropLanguage].(string)
-
+	// Detect language
 	var lang ast.Language
 	if langStr != "" {
 		lang = ast.LanguageFromString(langStr)
@@ -97,74 +142,49 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 		return nil, fmt.Errorf("could not detect language for: %s", filePath)
 	}
 
-	operation := ast.OperationType(opStr)
-	switch operation {
-	case ast.OpReplace, ast.OpRename, ast.OpInsertAfter:
-		// valid
-	default:
-		return nil, fmt.Errorf("unknown operation: %s (valid: replace, rename, insert_after)", opStr)
-	}
-
-	// Verify file exists
-	if _, err := os.Stat(filePath); err != nil {
-		return nil, fmt.Errorf("file not found: %w", err)
-	}
-
-	engine := ast.NewRewriteEngine(t.parser)
-	proposal, err := engine.GenerateProposal(ctx, filePath, lang, query, operation, template)
+	// Run rewrite
+	result, err := t.rewriter.RunRewrite(source, lang, query, rewriteTemplate)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate proposal: %w", err)
+		return nil, fmt.Errorf("rewrite failed: %w", err)
 	}
 
-	if proposal.MatchCount == 0 {
-		return map[string]any{
-			SchemaPropFound:   false,
-			SchemaPropMessage: "No matches found for the given query",
-			SchemaPropFilePath: filePath,
-			"query":           query,
-		}, nil
+	// Build response
+	edits := make([]map[string]any, len(result.Rewrite.ProposedEdits))
+	for i, edit := range result.Rewrite.ProposedEdits {
+		edits[i] = map[string]any{
+			"start_line":  edit.StartLine,
+			"start_char":  edit.StartChar,
+			"end_line":    edit.EndLine,
+			"end_char":    edit.EndChar,
+			"old_text":    edit.OldText,
+			"new_text":    edit.NewText,
+			"node_kind":   edit.NodeKind,
+			"captures":    edit.Captures,
+		}
 	}
 
-	// Populate file paths in edits for resolve tool
-	for i := range proposal.Edits {
-		proposal.Edits[i].FilePath = filePath
+	response := map[string]any{
+		SchemaPropFound:   result.Rewrite.MatchCount > 0,
+		"match_count":     result.Rewrite.MatchCount,
+		"file_path":       filePath,
+		"query":           result.Rewrite.Query,
+		"edits":           edits,
+		"preview_only":    previewOnly,
+		"modified_source": "",
 	}
 
-	// Build preview summary
-	changeSummaries := make([]map[string]any, 0, len(proposal.Edits))
-	for _, edit := range proposal.Edits {
-		changeSummaries = append(changeSummaries, map[string]any{
-			SchemaPropFilePath:  filePath,
-			SchemaPropStartLine: edit.StartLine,
-			SchemaPropStartChar: edit.StartCol,
-			SchemaPropEndLine:   edit.EndLine,
-			SchemaPropEndChar:   edit.EndCol,
-			"old_text":          truncate(edit.OldText, 60),
-			"new_text":          truncate(edit.NewText, 60),
-		})
+	// Apply edits if not preview-only
+	if !previewOnly {
+		modifiedSource := ast.ApplyEdits(source, result.Rewrite.ProposedEdits)
+		response["modified_source"] = string(modifiedSource)
+
+		// Write to file
+		if err := os.WriteFile(filePath, modifiedSource, 0o644); err != nil {
+			return nil, fmt.Errorf("failed to write modified file: %w", err)
+		}
 	}
 
-	return map[string]any{
-		SchemaPropFound:      true,
-		SchemaPropFilePath:   filePath,
-		"query":              query,
-		"operation":          opStr,
-		"template":           template,
-		SchemaPropCount:      proposal.MatchCount,
-		"preview":            proposal.PreviewText,
-		"proposed_edits":     changeSummaries,
-		"proposal_id":        fmt.Sprintf("ast_edit_%s_%d", filePath, len(proposal.Edits)),
-		"requires_resolve":   true,
-		"resolve_tool":       "ast_resolve",
-		"resolve_params_hint": map[string]any{"proposal_id": fmt.Sprintf("ast_edit_%s_%d", filePath, len(proposal.Edits)), "apply": true},
-	}, nil
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
+	return response, nil
 }
 
 // Ensure tool implements the Tool interface

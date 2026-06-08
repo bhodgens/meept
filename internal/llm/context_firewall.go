@@ -225,19 +225,11 @@ type ContextFirewall struct {
 	tokenizer    Tokenizer
 	compressor   *ContextCompressor
 	compactor    *ContextCompactor
-	// compactionTriggerRatio is the utilization threshold at which the
-	// compactor is invoked as the primary context reduction strategy.
-	// Default 0.60 (60%). When zero, compaction only runs through the
-	// compressor pipeline (if ProactiveCompression is enabled).
-	compactionTriggerRatio float64
 
 	// Counters (atomic-safe for concurrent callers)
 	summarizationFailures atomic.Uint64
 	droppedMessages       atomic.Uint64
 	dropEvents            atomic.Uint64
-	compactionEvents      atomic.Uint64
-	compactionTokensSaved atomic.Uint64
-	compactionFallbacks   atomic.Uint64
 }
 
 // FirewallStats is a snapshot of firewall counters including compression stats.
@@ -245,10 +237,6 @@ type FirewallStats struct {
 	SummarizationFailures uint64
 	DroppedMessages       uint64
 	DropEvents            uint64
-	// Compaction stats (populated when compactor is set)
-	CompactionEvents      uint64
-	CompactionTokensSaved uint64
-	CompactionFallbacks   uint64
 	// Compression stats (populated when ProactiveCompression is enabled)
 	CompressionWarningEvents    uint64
 	CompressionSummarizeEvents  uint64
@@ -262,15 +250,11 @@ type FirewallStats struct {
 
 // Stats returns a snapshot of firewall counters. When proactive compression
 // is enabled, compression counters are populated from the internal compressor.
-// When a compactor is set, compaction counters are populated.
 func (f *ContextFirewall) Stats() FirewallStats {
 	stats := FirewallStats{
 		SummarizationFailures: f.summarizationFailures.Load(),
 		DroppedMessages:       f.droppedMessages.Load(),
 		DropEvents:            f.dropEvents.Load(),
-		CompactionEvents:      f.compactionEvents.Load(),
-		CompactionTokensSaved: f.compactionTokensSaved.Load(),
-		CompactionFallbacks:   f.compactionFallbacks.Load(),
 	}
 
 	if f.compressor != nil {
@@ -304,11 +288,7 @@ func (f *ContextFirewall) Compress(ctx context.Context, messages []ChatMessage) 
 	}
 
 	currentTokens := f.countTokens(messages)
-	contextLimit := f.model.ContextLimit
-	if contextLimit <= 0 {
-		contextLimit = 128000 // sensible default
-	}
-	utilization := float64(currentTokens) / float64(contextLimit)
+	utilization := float64(currentTokens) / float64(f.model.ContextLimit)
 	result := f.compressor.Compress(ctx, messages, utilization)
 	return result, nil
 }
@@ -391,38 +371,25 @@ func NewContextFirewall(
 	}
 }
 
-// SetCompactor sets the ContextCompactor for smart summarization and
-// configures the trigger ratio for direct compaction in processMessages.
-// When triggerRatio > 0, the compactor is invoked at that utilization level
-// as the primary context reduction strategy. When triggerRatio is 0, the
-// compactor is only used through the compressor pipeline.
-func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor, triggerRatio float64) {
+// SetCompactor sets the ContextCompactor for smart summarization.
+func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor) {
 	if compactor == nil {
 		return
 	}
 	f.compactor = compactor
-	f.compactionTriggerRatio = triggerRatio
-	// When triggerRatio > 0, processMessages (Layer 1) handles compaction
-	// directly. Wiring the compactor into the compressor would cause double
-	// compaction. When triggerRatio == 0, the compactor is only invoked
-	// through the compressor pipeline (Layer 2).
-	if triggerRatio == 0 && f.compressor != nil {
+	if f.compressor != nil {
 		f.compressor.SetCompactor(compactor)
 	}
 }
 
 // Chat sends a request through context filtering.
-// Validation runs AFTER the reduction pipeline so that salvageable requests
-// are given a chance through compaction, compression, summarization, and
-// hard-limit context dropping. Only if the reduced context still exceeds the
-// model limit is the request rejected.
 func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
-	processed := f.processMessages(ctx, messages)
-
-	// Validate context size after reduction
-	if err := f.ValidateContextSize(processed); err != nil {
+	// Validate context size before processing
+	if err := f.ValidateContextSize(messages); err != nil {
 		return nil, err
 	}
+
+	processed := f.processMessages(ctx, messages)
 
 	resp, err := f.inner.Chat(ctx, processed, opts...)
 	if err == nil && f.logger != nil {
@@ -433,14 +400,13 @@ func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts
 }
 
 // ChatWithProgress sends a request with progress reporting through context filtering.
-// Validation runs AFTER the reduction pipeline (same as Chat).
 func (f *ContextFirewall) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
-	processed := f.processMessages(ctx, messages)
-
-	// Validate context size after reduction
-	if err := f.ValidateContextSize(processed); err != nil {
+	// Validate context size before processing
+	if err := f.ValidateContextSize(messages); err != nil {
 		return nil, err
 	}
+
+	processed := f.processMessages(ctx, messages)
 
 	resp, err := f.inner.ChatWithProgress(ctx, processed, progress, opts...)
 	if err == nil && f.logger != nil {
@@ -528,41 +494,13 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	currentTokens := f.countTokens(result)
 	utilization := float64(currentTokens) / float64(f.model.ContextLimit)
 
-	// Layer 1: LLM-based compaction (primary strategy). When a compactor
-	// is configured with a trigger ratio, invoke it when utilization exceeds
-	// that threshold. This runs before the compressor so the smarter
-	// summarization gets first shot at reducing context pressure.
-	if f.compactor != nil && f.compactionTriggerRatio > 0 && utilization >= f.compactionTriggerRatio {
-		cr := f.compactor.Compact(ctx, result)
-		if cr.Compacted {
-			f.logger.Info("context compaction applied",
-				"tokens_before", cr.TokensBefore,
-				"tokens_after", cr.TokensAfter,
-				"utilization_before", utilization,
-			)
-			f.compactionEvents.Add(1)
-			saved := cr.TokensBefore - cr.TokensAfter
-			if saved > 0 {
-				f.compactionTokensSaved.Add(uint64(saved))
-			}
-			result = cr.Messages
-			currentTokens = cr.TokensAfter
-			utilization = float64(currentTokens) / float64(f.model.ContextLimit)
-		} else {
-			f.logger.Warn("compaction returned without compacting, falling back to compressor",
-				"utilization", utilization,
-			)
-			f.compactionFallbacks.Add(1)
-		}
-	}
-
-	// Layer 2: Proactive compression: run the multi-stage compressor before the
+	// Proactive compression: run the multi-stage compressor before the
 	// legacy pipeline so that the more granular thresholds can reduce
 	// context pressure early.
 	if f.compressor != nil {
 		cr := f.compressor.Compress(ctx, result, utilization)
 		if cr.Compressed {
-			f.logger.Info("proactive compression applied",
+			f.logger.Debug("proactive compression applied",
 				"stage", cr.Stage.String(),
 				"tokens_before", cr.TokensBefore,
 				"tokens_after", cr.TokensAfter,
@@ -767,30 +705,10 @@ func (f *ContextFirewall) greedyChunk(parts []string, maxChars int, sep string) 
 }
 
 // countTokens counts tokens in a message slice using the configured tokenizer.
-// Includes ToolCalls (function name + arguments) and ToolCallID fields which
-// are serialized to the API and consume tokens.
 func (f *ContextFirewall) countTokens(messages []ChatMessage) int {
 	total := 0
 	for _, msg := range messages {
-		total += f.countMessageTokens(msg)
-	}
-	return total
-}
-
-// countMessageTokens returns the token count for a single ChatMessage,
-// accounting for Content, ToolCalls (function name + arguments),
-// ToolCallID, and Name fields.
-func (f *ContextFirewall) countMessageTokens(msg ChatMessage) int {
-	total := f.tokenizer.CountTokens(msg.Content)
-	for _, tc := range msg.ToolCalls {
-		total += f.tokenizer.CountTokens(tc.Function.Name)
-		total += f.tokenizer.CountTokens(tc.Function.Arguments)
-	}
-	if msg.ToolCallID != "" {
-		total += f.tokenizer.CountTokens(msg.ToolCallID)
-	}
-	if msg.Name != "" {
-		total += f.tokenizer.CountTokens(msg.Name)
+		total += f.tokenizer.CountTokens(msg.Content)
 	}
 	return total
 }
@@ -812,6 +730,7 @@ func (f *ContextFirewall) summarizeOldHistory(ctx context.Context, messages []Ch
 // FINDINGS, SUMMARY). The raw response is parsed into a SummaryExtract and
 // then formatted as a compact, information-dense summary message.
 func (f *ContextFirewall) summarizeWithLevel(ctx context.Context, messages []ChatMessage, level int) ([]ChatMessage, error) {
+	// At level 1, prefer the compactor if available.
 	if f.compactor != nil && level == 1 {
 		cr := f.compactor.Compact(ctx, messages)
 		if cr.Compacted {

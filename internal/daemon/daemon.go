@@ -3,6 +3,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
@@ -254,28 +255,53 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			"node_id", clusterCfg.NodeID,
 		)
 
-		// Create gossip engine if we have a message bus
+		// Create gossip engine if we have a message bus.
 		if msgBus != nil {
 			localNodeID := clusterCfg.NodeID
 			if localNodeID == "" {
 				localNodeID = "local"
 			}
 			clusterEngine = cluster.NewGossipEngine(clusterCfg, localNodeID, msgBus, logger)
+
+			// Wire the job queue's SQLite DB into the gossip engine for event persistence.
+			if clusterEngine != nil {
+				if db := getQueueDB(components); db != nil {
+					clusterEngine.WithDatabase(db)
+
+					// Load peer signing keys from the cluster_members table so
+					// incoming gossip events can be verified before processing.
+					if components != nil && components.Queue != nil {
+						if pq, ok := components.Queue.(*queue.PersistentQueue); ok {
+							members, err := pq.Store().GetClusterMembers()
+							if err != nil {
+								logger.Debug("cluster: failed to read cluster_members table", "error", err)
+							} else {
+								for _, m := range members {
+									if m.NodeID != localNodeID && len(m.SigningPub) == ed25519.PublicKeySize {
+										clusterEngine.SetPeerSigningKey(m.NodeID, m.SigningPub)
+									}
+								}
+								logger.Info("cluster: loaded peer signing keys from cluster_members",
+									"peer_count", len(members))
+							}
+						}
+					}
+				}
+			}
 		}
 
-		// Create cluster-aware queue wrapping the existing queue
+		// Create cluster-aware queue wrapping the existing queue.
 		if components != nil && components.Queue != nil {
-			// Check if we have a store to use
-			localNodeID := clusterCfg.NodeID
-			if localNodeID == "" {
-				localNodeID = "local"
+			clusterNodeID := clusterCfg.NodeID
+			if clusterNodeID == "" {
+				clusterNodeID = "local"
 			}
 			cqConfig := queue.ClusterQueueConfig{
 				DefaultClaimTimeout:     clusterCfg.Queue.DefaultClaimTimeout.ToTimeDuration(),
 				NodeReachabilityTimeout: clusterCfg.Queue.NodeReachabilityTimeout.ToTimeDuration(),
 				FullPayloadReplication:  false,
 			}
-			clusterMQ = queue.NewClusterQueue(components.Queue, nil, localNodeID, logger, cqConfig)
+			clusterMQ = queue.NewClusterQueue(components.Queue, nil, clusterNodeID, logger, cqConfig)
 		}
 	} else if err != nil {
 		logger.Debug("cluster config not found, cluster features disabled", "path", cfgPath, "error", err)

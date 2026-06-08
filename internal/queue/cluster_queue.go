@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/pkg/models"
 )
 
 // GossipReachability provides node reachability info from the gossip engine.
@@ -23,6 +26,7 @@ type ClusterQueue struct {
 	localNodeID string
 	logger      *slog.Logger
 	cfg         ClusterQueueConfig
+	bus         *bus.MessageBus
 
 	mu      sync.RWMutex
 	claimed map[string]*ClaimRecord
@@ -48,6 +52,13 @@ type ClaimRecord struct {
 	TimeoutAt    time.Time
 	IsReplica    bool
 	ManagingNode string
+}
+
+// NodeReachabilityResult holds structured reachability info for a node.
+type NodeReachabilityResult struct {
+	NodeID      string
+	IsReachable bool
+	Reason      string
 }
 
 // DefaultClusterQueueConfig returns a config with sensible defaults.
@@ -102,6 +113,18 @@ func (o *reachabilityOpt) apply(cq *ClusterQueue) {
 	cq.gossipReachability = o.gr
 }
 
+// WithMessageBus attaches a message bus to the cluster queue so that
+// reclaim events can be published as cluster-wide TASK_RECLAIM bus events.
+func WithMessageBus(b *bus.MessageBus) clusterQueueOpt {
+	return &busOpt{b}
+}
+
+type busOpt struct{ b *bus.MessageBus }
+
+func (o *busOpt) apply(cq *ClusterQueue) {
+	cq.bus = o.b
+}
+
 // IsNodeReachable checks if a node is reachable using the gossip engine,
 // falling back to assuming all nodes are reachable if no gossip provider is set.
 func (cq *ClusterQueue) IsNodeReachable(nodeID string) bool {
@@ -112,6 +135,35 @@ func (cq *ClusterQueue) IsNodeReachable(nodeID string) bool {
 		return cq.gossipReachability.IsNodeReachable(nodeID)
 	}
 	return true
+}
+
+// CheckNodeReachability checks the reachability of a single node and returns
+// structured reachability info including the reason for unreachability.
+func (cq *ClusterQueue) CheckNodeReachability(nodeID string) NodeReachabilityResult {
+	if nodeID == cq.localNodeID {
+		return NodeReachabilityResult{
+			NodeID:         nodeID,
+			IsReachable:    true,
+			Reason:         "local node",
+		}
+	}
+	if cq.gossipReachability != nil {
+		reachable := cq.gossipReachability.IsNodeReachable(nodeID)
+		reason := "reachable via gossip"
+		if !reachable {
+			reason = "unreachable via gossip"
+		}
+		return NodeReachabilityResult{
+			NodeID:    nodeID,
+			IsReachable: reachable,
+			Reason:    reason,
+		}
+	}
+	return NodeReachabilityResult{
+		NodeID:    nodeID,
+		IsReachable: true,
+		Reason:    "no gossip provider - assuming reachable",
+	}
 }
 
 // Claim wraps the underlying queue's Claim with cluster-aware logic.
@@ -230,15 +282,32 @@ func (cq *ClusterQueue) IsClaimed(ctx context.Context, jobID string) (string, bo
 // Reclaim re-enqueues a stale or unreachable-node job so another node can take it over.
 // It records a TASK_RECLAIM cluster event and resets the job state to pending.
 func (cq *ClusterQueue) Reclaim(jobID string) error {
-	if cq.store != nil {
-		if err := cq.store.RecordReclaimEvent(context.Background(), jobID, cq.localNodeID, "node_timeout"); err != nil {
-			cq.logger.Warn("cluster_queue: failed to record reclaim event", "job_id", jobID, "error", err)
-		}
-	}
-
 	cq.mu.Lock()
 	delete(cq.claimed, jobID)
 	cq.mu.Unlock()
+
+	return cq.reclaimInternal(jobID, "node_timeout", nil)
+}
+
+// Reclaim resets a stale job's state back to pending so that another node
+// can claim it. It clears the local claim record, updates the store, and
+// publishes a TASK_RECLAIM bus event for cluster-wide awareness.
+func (cq *ClusterQueue) ReclaimJob(job *Job) error {
+	cq.mu.Lock()
+	delete(cq.claimed, job.ID)
+	cq.mu.Unlock()
+
+	return cq.reclaimInternal(job.ID, "stale_claim", job)
+}
+
+// reclaimInternal is the shared implementation that resets job state in the store,
+// records a TASK_RECLAIM event, and publishes the event to the bus.
+func (cq *ClusterQueue) reclaimInternal(jobID, reason string, job *Job) error {
+	if cq.store != nil {
+		if err := cq.store.RecordReclaimEvent(context.Background(), jobID, cq.localNodeID, reason); err != nil {
+			cq.logger.Warn("cluster_queue: failed to record reclaim event", "job_id", jobID, "error", err)
+		}
+	}
 
 	if cq.store != nil {
 		if err := cq.store.UpdateState(jobID, StatePending); err != nil {
@@ -248,8 +317,36 @@ func (cq *ClusterQueue) Reclaim(jobID string) error {
 		}
 	}
 
+	// Publish TASK_RECLAIM cluster event via the message bus.
+	cq.publishReclaimEvent(jobID, reason, job)
+
 	cq.logger.Info("cluster_queue: job reclaimed", "job_id", jobID, "node", cq.localNodeID)
 	return nil
+}
+
+// publishReclaimEvent publishes a TASK_RECLAIM event to the message bus so
+// that cluster-wide consumers (agent loop, other nodes) are notified of the reclaim.
+func (cq *ClusterQueue) publishReclaimEvent(jobID, reason string, job *Job) {
+	if cq.bus == nil {
+		return
+	}
+	data := map[string]any{
+		"job_id":       jobID,
+		"reason":       reason,
+		"reclaimed_by": cq.localNodeID,
+	}
+	if job != nil {
+		data["job_type"] = string(job.Type)
+		data["task_id"] = job.TaskID
+		data["agent_id"] = job.AgentID
+	}
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "cluster_queue", data)
+	if err != nil {
+		cq.logger.Error("cluster_queue: failed to create bus message for reclaim",
+			"job_id", jobID, "error", err)
+		return
+	}
+	cq.bus.Publish("event.cluster.task_reclaim", msg)
 }
 
 // ErrNodeUnreachable is returned when a managing node is unreachable.

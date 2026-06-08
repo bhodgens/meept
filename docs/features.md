@@ -1312,6 +1312,7 @@ scan_type_check = true
 | **Validation Retry Loop** | Automatic step re-queue on validation failure with configurable max retries |
 | **Model Failover** | Alias rotation with exponential backoff |
 | **Hallucination Detection** | Pattern-based detection with configurable sensitivity |
+| **Persistent Bot Framework** | Autonomous bots triggered by cron, bus events, and webhooks with memory isolation, cost budgets, and auto-pause on failures |
 
 ### External Integrations
 

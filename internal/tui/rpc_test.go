@@ -180,7 +180,7 @@ func (s *mockServer) handleConn(conn net.Conn) {
 		}
 
 		respData, _ := json.Marshal(resp)
-		_ = writer.WriteFrame(respData)
+		_, _ = writer.WriteFrame(respData)
 	}
 }
 

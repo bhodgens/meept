@@ -250,18 +250,19 @@ type InitializeResult struct {
 
 // ServerCapabilities represents the server's capabilities.
 type ServerCapabilities struct {
-	TextDocumentSync           any  `json:"textDocumentSync,omitempty"`
-	HoverProvider              bool `json:"hoverProvider,omitempty"`
-	DefinitionProvider         bool `json:"definitionProvider,omitempty"`
-	TypeDefinitionProvider     bool `json:"typeDefinitionProvider,omitempty"`
-	ImplementationProvider     bool `json:"implementationProvider,omitempty"`
-	ReferencesProvider         bool `json:"referencesProvider,omitempty"`
-	DocumentSymbolProvider     bool `json:"documentSymbolProvider,omitempty"`
-	WorkspaceSymbolProvider    bool `json:"workspaceSymbolProvider,omitempty"`
-	CodeActionProvider         bool `json:"codeActionProvider,omitempty"`
-	DocumentFormattingProvider bool `json:"documentFormattingProvider,omitempty"`
-	RenameProvider             bool `json:"renameProvider,omitempty"`
-	DiagnosticProvider         any  `json:"diagnosticProvider,omitempty"`
+	TextDocumentSync           any                             `json:"textDocumentSync,omitempty"`
+	HoverProvider              bool                            `json:"hoverProvider,omitempty"`
+	DefinitionProvider         bool                            `json:"definitionProvider,omitempty"`
+	TypeDefinitionProvider     bool                            `json:"typeDefinitionProvider,omitempty"`
+	ImplementationProvider     bool                            `json:"implementationProvider,omitempty"`
+	ReferencesProvider         bool                            `json:"referencesProvider,omitempty"`
+	DocumentSymbolProvider     bool                            `json:"documentSymbolProvider,omitempty"`
+	WorkspaceSymbolProvider    bool                            `json:"workspaceSymbolProvider,omitempty"`
+	CodeActionProvider         bool                            `json:"codeActionProvider,omitempty"`
+	DocumentFormattingProvider bool                            `json:"documentFormattingProvider,omitempty"`
+	RenameProvider             bool                            `json:"renameProvider,omitempty"`
+	DiagnosticProvider         any                             `json:"diagnosticProvider,omitempty"`
+	WorkspaceFileOperations    *WorkspaceFileOperationCapabilities `json:"workspaceFileOperations,omitempty"`
 }
 
 // TextDocumentSyncKind defines how text documents are synced.
@@ -383,3 +384,61 @@ const (
 	ErrorCodeUnknownError   = -32001
 	ErrorCodeRequestFailed  = -32803
 )
+
+// =============================================================================
+// Workspace File Operations (LSP 3.16+)
+// =============================================================================
+
+// FileRename represents a file rename operation.
+type FileRename struct {
+	OldURI string `json:"oldUri"`
+	NewURI string `json:"newUri"`
+}
+
+// RenameFilesParams is the parameter for workspace/willRenameFiles.
+type RenameFilesParams struct {
+	Files []FileRename `json:"files"`
+}
+
+// FileOperation represents a file operation edit.
+type FileOperation struct {
+	Kind     string                 `json:"kind"` // "rename" | "create" | "delete"
+	Options  *FileOperationOptions  `json:"options,omitempty"`
+	Target   string                 `json:"target,omitempty"`   // For create/delete
+	OldURI   string                 `json:"oldUri,omitempty"`   // For rename
+	NewURI   string                 `json:"newUri,omitempty"`   // For rename
+	Metadata *FileOperationMetadata `json:"metadata,omitempty"`
+}
+
+// FileOperationOptions represents options for file operations.
+type FileOperationOptions struct {
+	Recursive      bool `json:"recursive,omitempty"`
+	IgnoreIfExists bool `json:"ignoreIfExists,omitempty"`
+	Overwrite      bool `json:"overwrite,omitempty"`
+	IgnoreIfNotExists bool `json:"ignoreIfNotExists,omitempty"`
+}
+
+// FileOperationMetadata represents metadata for file operations.
+type FileOperationMetadata struct {
+	CapabilityID string `json:"capabilityId,omitempty"`
+}
+
+// WorkspaceEditWithOperations extends WorkspaceEdit with file operations.
+type WorkspaceEditWithOperations struct {
+	Changes          map[string][]TextEdit `json:"changes,omitempty"`
+	DocumentChanges  []DocumentChange      `json:"documentChanges,omitempty"`
+	FileOperations   []FileOperation       `json:"fileOperations,omitempty"`
+}
+
+// DocumentChange represents a text document change.
+type DocumentChange struct {
+	TextDocument      VersionedTextDocumentIdentifier `json:"textDocument"`
+	Edits             []TextEdit                      `json:"edits"`
+}
+
+// WorkspaceFileOperationCapabilities represents server's file operation capabilities.
+type WorkspaceFileOperationCapabilities struct {
+	DynamicRegistration bool                   `json:"dynamicRegistration,omitempty"`
+	DidRename           *FileOperationOptions  `json:"didRename,omitempty"`
+	WillRename          *FileOperationOptions  `json:"willRename,omitempty"`
+}

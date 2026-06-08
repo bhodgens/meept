@@ -1,56 +1,89 @@
 package ast
 
 import (
-	"context"
+	"bytes"
 	"fmt"
 	"os"
+	"regexp"
+	"sort"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
 )
 
-// EditProposal represents a single proposed text edit.
-type EditProposal struct {
-	FilePath  string `json:"file_path"`
-	StartLine int    `json:"start_line"`
-	StartCol  int    `json:"start_column"`
-	EndLine   int    `json:"end_line"`
-	EndCol    int    `json:"end_column"`
-	OldText   string `json:"old_text,omitempty"`
-	NewText   string `json:"new_text"`
+// ASTRewrite represents a proposed AST-based text rewrite.
+type ASTRewrite struct {
+	FilePath      string
+	Query         string
+	MatchCount    int
+	ProposedEdits []ProposedEdit
 }
 
-// RewriteProposal holds a collection of proposed edits for preview/resolve.
-type RewriteProposal struct {
-	ID          string         `json:"id"`
-	FilePath    string         `json:"file_path"`
-	Query       string         `json:"query"`
-	MatchCount  int            `json:"match_count"`
-	Edits       []EditProposal `json:"edits"`
-	PreviewText []string       `json:"preview_text,omitempty"`
+// ProposedEdit represents a single text edit proposal.
+type ProposedEdit struct {
+	StartLine  int
+	StartChar  int
+	EndLine    int
+	EndChar    int
+	OldText    string
+	NewText    string
+	NodeKind   string
+	Captures   map[string]string
 }
 
-// RewriteEngine generates structural edits from tree-sitter queries.
-type RewriteEngine struct {
+// RewriteTemplate handles template-based rewrites with capture placeholders.
+type RewriteTemplate struct {
+	Template     string
+	CaptureNames []string
+}
+
+// ParseRewriteTemplate parses a template string with {{capture}} placeholders.
+func ParseRewriteTemplate(template string) (*RewriteTemplate, error) {
+	// Find all {{name}} placeholders
+	re := regexp.MustCompile(`\{\{(\w+)\}\}`)
+	matches := re.FindAllStringSubmatch(template, -1)
+
+	captureNames := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) > 1 {
+			captureNames = append(captureNames, match[1])
+		}
+	}
+
+	return &RewriteTemplate{
+		Template:     template,
+		CaptureNames: captureNames,
+	}, nil
+}
+
+// Apply applies the template with actual capture values.
+func (rt *RewriteTemplate) Apply(captures map[string]string) string {
+	result := rt.Template
+	for name, value := range captures {
+		placeholder := "{{" + name + "}}"
+		result = strings.ReplaceAll(result, placeholder, value)
+	}
+	return result
+}
+
+// ASTRewriter performs AST-based rewrites.
+type ASTRewriter struct {
 	parser *ParserManager
 }
 
-// NewRewriteEngine creates a new rewrite engine.
-func NewRewriteEngine(parser *ParserManager) *RewriteEngine {
-	return &RewriteEngine{parser: parser}
+// NewASTRewriter creates a new AST rewriter.
+func NewASTRewriter(parser *ParserManager) *ASTRewriter {
+	return &ASTRewriter{parser: parser}
 }
 
-// OperationType defines the type of rewrite operation.
-type OperationType string
+// RewriteResult contains the result of an AST rewrite operation.
+type RewriteResult struct {
+	Rewrite *ASTRewrite
+	Source  []byte
+}
 
-const (
-	OpReplace     OperationType = "replace"
-	OpRename      OperationType = "rename"
-	OpInsertAfter OperationType = "insert_after"
-)
-
-// GenerateProposal runs a query and generates edit proposals without applying them.
-func (r *RewriteEngine) GenerateProposal(ctx context.Context, filePath string, lang Language, queryPattern string, operation OperationType, template string) (*RewriteProposal, error) {
+// RunRewrite executes an AST rewrite on source code.
+func (r *ASTRewriter) RunRewrite(source []byte, lang Language, queryPattern, rewriteTemplate string) (*RewriteResult, error) {
 	if lang == LangUnknown {
 		return nil, fmt.Errorf("unknown language")
 	}
@@ -60,29 +93,40 @@ func (r *RewriteEngine) GenerateProposal(ctx context.Context, filePath string, l
 		return nil, fmt.Errorf("unsupported language: %s", lang)
 	}
 
-	source, err := os.ReadFile(filePath)
+	// Parse the template
+	template, err := ParseRewriteTemplate(rewriteTemplate)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("invalid rewrite template: %w", err)
 	}
 
-	tree, err := r.parser.GetTree(ctx, source, lang)
+	// Parse the source
+	tree, err := r.parser.GetTree(nil, source, lang)
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
 
+	// Compile the query
 	query, err := sitter.NewQuery([]byte(queryPattern), grammar)
 	if err != nil {
 		return nil, fmt.Errorf("invalid query: %w", err)
 	}
 
+	// Execute query and collect matches
 	cursor := sitter.NewQueryCursor()
 	cursor.Exec(query, tree.RootNode())
 
-	proposal := &RewriteProposal{
-		FilePath: filePath,
-		Query:    queryPattern,
-		Edits:    make([]EditProposal, 0),
+	rewrite := &ASTRewrite{
+		Query:         queryPattern,
+		MatchCount:    0,
+		ProposedEdits: make([]ProposedEdit, 0),
 	}
+
+	// Track byte ranges to avoid overlapping edits
+	type byteRange struct {
+		start uint32
+		end   uint32
+	}
+	appliedRanges := make([]byteRange, 0)
 
 	for {
 		match, ok := cursor.NextMatch()
@@ -92,150 +136,150 @@ func (r *RewriteEngine) GenerateProposal(ctx context.Context, filePath string, l
 
 		match = cursor.FilterPredicates(match, source)
 
+		// Extract captures
+		captures := make(map[string]string)
+		var targetNode sitter.Node
 		for _, capture := range match.Captures {
-			node := capture.Node
 			captureName := query.CaptureNameForId(capture.Index)
+			nodeText := string(source[capture.Node.StartByte():capture.Node.EndByte()])
+			captures[captureName] = nodeText
 
-			edit, preview, err := r.buildEdit(node, source, operation, template, captureName)
-			if err != nil {
-				continue // Skip unprocessable matches
-			}
-
-			proposal.Edits = append(proposal.Edits, edit)
-			if preview != "" {
-				proposal.PreviewText = append(proposal.PreviewText, preview)
+			// Use the first capture as the target for replacement
+			if targetNode.ID() == 0 {
+				targetNode = *capture.Node
 			}
 		}
+
+		// Skip if we don't have a target node
+		if targetNode.ID() == 0 {
+			continue
+		}
+
+		// Check for overlapping edits
+		startByte := targetNode.StartByte()
+		endByte := targetNode.EndByte()
+		overlaps := false
+		for _, br := range appliedRanges {
+			if startByte < br.end && endByte > br.start {
+				overlaps = true
+				break
+			}
+		}
+		if overlaps {
+			continue
+		}
+		appliedRanges = append(appliedRanges, byteRange{start: startByte, end: endByte})
+
+		// Apply the template
+		newText := template.Apply(captures)
+		oldText := string(source[startByte:endByte])
+
+		// Calculate position
+		startPos := bytes.Count(source[:startByte], []byte("\n"))
+		startLine := startPos
+		lines := bytes.Split(source[:startByte], []byte("\n"))
+		startChar := 0
+		if len(lines) > 0 {
+			startChar = len(lines[len(lines)-1])
+		}
+
+		endPos := bytes.Count(source[:endByte], []byte("\n"))
+		endLine := endPos
+		lines = bytes.Split(source[:endByte], []byte("\n"))
+		endChar := 0
+		if len(lines) > 0 {
+			endChar = len(lines[len(lines)-1])
+		}
+
+		edit := ProposedEdit{
+			StartLine:  startLine,
+			StartChar:  startChar,
+			EndLine:    endLine,
+			EndChar:    endChar,
+			OldText:    oldText,
+			NewText:    newText,
+			NodeKind:   targetNode.Type(),
+			Captures:   captures,
+		}
+
+		rewrite.ProposedEdits = append(rewrite.ProposedEdits, edit)
+		rewrite.MatchCount++
 	}
 
-	proposal.MatchCount = len(proposal.Edits)
-	return proposal, nil
+	// Sort edits by position (reverse order for safe application)
+	sort.Slice(rewrite.ProposedEdits, func(i, j int) bool {
+		if rewrite.ProposedEdits[i].StartLine != rewrite.ProposedEdits[j].StartLine {
+			return rewrite.ProposedEdits[i].StartLine > rewrite.ProposedEdits[j].StartLine
+		}
+		return rewrite.ProposedEdits[i].StartChar > rewrite.ProposedEdits[j].StartChar
+	})
+
+	return &RewriteResult{
+		Rewrite: rewrite,
+		Source:  source,
+	}, nil
 }
 
-func (r *RewriteEngine) buildEdit(node *sitter.Node, source []byte, op OperationType, template, captureName string) (EditProposal, string, error) {
-	startLine := int(node.StartPoint().Row)
-	startCol := int(node.StartPoint().Column)
-	endLine := int(node.EndPoint().Row)
-	endCol := int(node.EndPoint().Column)
-	oldText := node.Content(source)
-
-	var newText string
-	var preview string
-
-	switch op {
-	case OpReplace:
-		// Replace captured node with template (substituting @name placeholders)
-		newText = substituteTemplate(template, captureName, oldText)
-		preview = fmt.Sprintf("replace: %q → %q", truncate(oldText, 40), truncate(newText, 40))
-
-	case OpRename:
-		// Replace the captured identifier text
-		newText = template
-		preview = fmt.Sprintf("rename: %q → %q", truncate(oldText, 40), truncate(newText, 40))
-
-	case OpInsertAfter:
-		// Insert template after the captured node
-		newText = oldText + template
-		preview = fmt.Sprintf("insert after %q: +%q", truncate(oldText, 40), truncate(template, 40))
-
-	default:
-		return EditProposal{}, "", fmt.Errorf("unknown operation: %s", op)
+// RunRewriteOnFile executes an AST rewrite on a file.
+func (r *ASTRewriter) RunRewriteOnFile(filePath, queryPattern, rewriteTemplate string) (*RewriteResult, error) {
+	lang := DetectLanguage(filePath)
+	if lang == LangUnknown {
+		return nil, fmt.Errorf("could not detect language for: %s", filePath)
 	}
 
-	edit := EditProposal{
-		FilePath:  "",
-		StartLine: startLine,
-		StartCol:  startCol,
-		EndLine:   endLine,
-		EndCol:    endCol,
-		OldText:   oldText,
-		NewText:   newText,
-	}
-
-	return edit, preview, nil
-}
-
-// substituteTemplate replaces @CAPNAME placeholders in the template with the captured text.
-func substituteTemplate(template, captureName, capturedText string) string {
-	placeholder := "@" + captureName
-	return strings.ReplaceAll(template, placeholder, capturedText)
-}
-
-// ApplyEdits applies proposed edits to a file on disk.
-// Edits are applied in reverse order (bottom-up) to preserve line positions.
-func ApplyEdits(filePath string, edits []EditProposal) error {
-	content, err := os.ReadFile(filePath)
+	source, err := os.ReadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	lines := strings.Split(string(content), "\n")
-
-	// Apply in reverse order to preserve positions
-	for i := len(edits) - 1; i >= 0; i-- {
-		edit := edits[i]
-		if err := applyEditToLines(&lines, edit); err != nil {
-			return fmt.Errorf("edit at line %d: %w", edit.StartLine, err)
-		}
-	}
-
-	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644)
+	return r.RunRewrite(source, lang, queryPattern, rewriteTemplate)
 }
 
-// applyEditToLines applies a single edit to a line slice.
-func applyEditToLines(lines *[]string, edit EditProposal) error {
-	// Build content as single string with positions
-	var content strings.Builder
-	for i, line := range *lines {
-		if i > 0 {
-			content.WriteString("\n")
+// ApplyEdits applies the proposed edits to source code and returns the modified content.
+func ApplyEdits(source []byte, edits []ProposedEdit) []byte {
+	// Sort edits by position in reverse order (so we can apply from end to start)
+	sortedEdits := make([]ProposedEdit, len(edits))
+	copy(sortedEdits, edits)
+	sort.Slice(sortedEdits, func(i, j int) bool {
+		if sortedEdits[i].StartLine != sortedEdits[j].StartLine {
+			return sortedEdits[i].StartLine > sortedEdits[j].StartLine
 		}
-		content.WriteString(line)
+		return sortedEdits[i].StartChar > sortedEdits[j].StartChar
+	})
+
+	result := make([]byte, len(source))
+	copy(result, source)
+
+	for _, edit := range sortedEdits {
+		// Calculate byte positions from line/char
+		startByte := positionToByte(result, edit.StartLine, edit.StartChar)
+		endByte := positionToByte(result, edit.EndLine, edit.EndChar)
+
+		// Apply the edit
+		newResult := make([]byte, 0, len(result)-int(endByte-startByte)+len(edit.NewText))
+		newResult = append(newResult, result[:startByte]...)
+		newResult = append(newResult, edit.NewText...)
+		newResult = append(newResult, result[endByte:]...)
+		result = newResult
 	}
 
-	s := content.String()
-
-	// Calculate byte offsets for start and end positions
-	startOffset := lineColToOffset(s, edit.StartLine, edit.StartCol)
-	endOffset := lineColToOffset(s, edit.EndLine, edit.EndCol)
-
-	if startOffset < 0 || endOffset < 0 || startOffset > len(s) || endOffset > len(s) || startOffset > endOffset {
-		return fmt.Errorf("invalid edit range: (%d,%d)-(%d,%d)", edit.StartLine, edit.StartCol, edit.EndLine, edit.EndCol)
-	}
-
-	newContent := s[:startOffset] + edit.NewText + s[endOffset:]
-	*lines = strings.Split(newContent, "\n")
-	return nil
+	return result
 }
 
-// lineColToOffset converts a line:column position to a byte offset in the string.
-func lineColToOffset(s string, line, col int) int {
-	offset := 0
+// positionToByte converts line/char position to byte offset.
+func positionToByte(source []byte, line, char int) int {
 	currentLine := 0
-	for i := 0; i < len(s); i++ {
-		if currentLine == line {
-			// We're on the target line, count columns
-			if i-offset >= col {
-				return offset + col
-			}
+	currentChar := 0
+	for i, b := range source {
+		if currentLine == line && currentChar == char {
+			return i
 		}
-		if s[i] == '\n' {
+		if b == '\n' {
 			currentLine++
-			if currentLine == line {
-				offset = i + 1
-			}
+			currentChar = 0
+		} else {
+			currentChar++
 		}
 	}
-	// Return end of string if past last line
-	if currentLine == line {
-		return offset + col
-	}
-	return len(s)
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
+	return len(source)
 }

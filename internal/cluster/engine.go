@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
+	"github.com/caimlas/meept/internal/queue"
 )
 
 // Engine is the main cluster engine that coordinates all cluster components.
@@ -27,6 +28,7 @@ type Engine struct {
 	logger     *slog.Logger
 	msgBus     *bus.MessageBus
 	gitRepoPath string
+	queueStore  *queue.Store
 
 	mu          sync.RWMutex
 	running     bool
@@ -55,6 +57,7 @@ type EngineConfig struct {
 	Logger      *slog.Logger
 	MessageBus  *bus.MessageBus
 	GitRepoPath string
+	QueueStore  *queue.Store
 }
 
 // NewEngine creates a new cluster engine.
@@ -65,6 +68,12 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		logger:      cfg.Logger,
 		msgBus:      cfg.MessageBus,
 		gitRepoPath: cfg.GitRepoPath,
+		queueStore:  cfg.QueueStore,
+	}
+
+	// Load existing WireGuard keys from disk, or generate new ones.
+	if err := engine.loadOrGenerateKeys(); err != nil {
+		engine.logger.Warn("cluster: failed to load existing keys, will generate fresh ones on Init", "error", err)
 	}
 
 	// Load existing WireGuard keys from disk, or generate new ones.
@@ -272,15 +281,38 @@ func (e *Engine) Start() error {
 
 	// WireGuard manager is started after git sync
 
-	// Stop gossip engine if we have a message bus
+	// Start gossip engine if we have a message bus
 	if e.msgBus != nil && e.cfg != nil {
 		e.gossip = NewGossipEngine(e.cfg, e.nodeID, e.msgBus, e.logger)
+
+		// Wire the queue store's SQLite DB into the gossip engine for event persistence.
+		if e.queueStore != nil {
+			e.gossip.WithDatabase(e.queueStore.DB())
+		}
+
 		// Wire signing key and peers' public keys
 		if e.signingPriv != nil {
 			e.gossip.WithSigningKey(e.signingPriv)
 			// Register this node's public key so events from us can be verified
 			e.gossip.SetPeerSigningKey(e.nodeID, e.signingPub)
 		}
+
+		// Wire peer signing keys from the cluster_members table (loaded from git-synced config).
+		if e.queueStore != nil {
+			members, err := e.queueStore.GetClusterMembers()
+			if err != nil {
+				e.logger.Debug("cluster: failed to read cluster_members table for gossip peers", "error", err)
+			} else {
+				for _, m := range members {
+					if m.NodeID != e.nodeID && len(m.SigningPub) == ed25519.PublicKeySize {
+						e.gossip.SetPeerSigningKey(m.NodeID, m.SigningPub)
+					}
+				}
+				e.logger.Info("cluster: loaded gossip peer signing keys from cluster_members",
+					"peer_count", len(members))
+			}
+		}
+
 		if err := e.gossip.Start(ctx); err != nil {
 			e.logger.Warn("cluster: gossip engine start failed", "error", err)
 		}
