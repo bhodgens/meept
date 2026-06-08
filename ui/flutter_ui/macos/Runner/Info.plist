@@ -28,5 +28,9 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Meept needs microphone access for speech-to-text transcription.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Meept needs speech recognition to transcribe your voice input.</string>
 </dict>
 </plist>

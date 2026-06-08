@@ -27,6 +27,12 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   bool _apiKeyObscured = true;
   String? _apiKeyStatus;
 
+  // STT settings state
+  bool _sttEnabled = false;
+  String _sttEngine = 'native';
+  final _sttLanguageController = TextEditingController(text: 'en');
+  bool _sttAutoSend = false;
+
   late final ApiClient _client;
   late final TextEditingController _controller;
 
@@ -49,6 +55,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   void dispose() {
     _controller.dispose();
     _apiKeyController.dispose();
+    _sttLanguageController.dispose();
     super.dispose();
   }
 
@@ -174,6 +181,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
         children: [
           _buildHeader(),
           _buildApiTokenSection(),
+          _buildSttSettingsSection(),
           if (_error != null) _buildErrorBanner(),
           Expanded(child: _buildEditor()),
         ],
@@ -282,6 +290,159 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
               fontSize: 9,
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSttSettingsSection() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: const BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: CyberpunkColors.midGray, width: 1),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // section header
+          Row(
+            children: [
+              const Icon(
+                Icons.mic,
+                color: CyberpunkColors.orangePrimary,
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'speech-to-text',
+                style: CyberpunkTypography.label.copyWith(
+                  color: CyberpunkColors.orangePrimary,
+                ),
+              ),
+              const Spacer(),
+              Switch(
+                value: _sttEnabled,
+                onChanged: (value) {
+                  setState(() {
+                    _sttEnabled = value;
+                  });
+                },
+                activeColor: CyberpunkColors.orangePrimary,
+                inactiveTrackColor: CyberpunkColors.midGray,
+              ),
+            ],
+          ),
+          if (_sttEnabled) ...[
+            const SizedBox(height: 8),
+            // engine selector
+            Row(
+              children: [
+                Text(
+                  'engine',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.lightGray,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ...['native', 'whisper', 'parakeet'].map((engine) {
+                  final isSelected = _sttEngine == engine;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: ChoiceChip(
+                      label: Text(
+                        engine,
+                        style: CyberpunkTypography.bodySmall.copyWith(
+                          fontFamily: 'SourceCodePro',
+                          fontSize: 10,
+                        ),
+                      ),
+                      selected: isSelected,
+                      selectedColor: CyberpunkColors.orangeDark,
+                      backgroundColor:
+                          CyberpunkColors.midGray.withValues(alpha: 0.2),
+                      labelStyle: TextStyle(
+                        color: isSelected
+                            ? CyberpunkColors.orangeBright
+                            : CyberpunkColors.lightGray,
+                      ),
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() {
+                            _sttEngine = engine;
+                          });
+                        }
+                      },
+                    ),
+                  );
+                }),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // language field
+            Row(
+              children: [
+                Text(
+                  'language',
+                  style: CyberpunkTypography.bodySmall.copyWith(
+                    color: CyberpunkColors.lightGray,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 100,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: CyberpunkColors.black,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: CyberpunkColors.midGray),
+                    ),
+                    child: TextField(
+                      controller: _sttLanguageController,
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        fontFamily: 'SourceCodePro',
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'en',
+                        hintStyle: TextStyle(
+                          color: CyberpunkColors.midGray,
+                          fontFamily: 'SourceCodePro',
+                        ),
+                        border: InputBorder.none,
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                // auto-send toggle
+                Row(
+                  children: [
+                    Text(
+                      'auto-send',
+                      style: CyberpunkTypography.bodySmall.copyWith(
+                        color: CyberpunkColors.lightGray,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Switch(
+                      value: _sttAutoSend,
+                      onChanged: (value) {
+                        setState(() {
+                          _sttAutoSend = value;
+                        });
+                      },
+                      activeColor: CyberpunkColors.orangePrimary,
+                      inactiveTrackColor: CyberpunkColors.midGray,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

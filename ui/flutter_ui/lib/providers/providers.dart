@@ -4,6 +4,7 @@ export 'agent_provider.dart';
 export 'metrics_provider.dart';
 export 'job_provider.dart';
 export 'plan_provider.dart';
+export 'stt_provider.dart';
 
 import 'dart:async';
 
