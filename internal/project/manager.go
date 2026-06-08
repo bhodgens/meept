@@ -266,3 +266,92 @@ func (pm *ProjectManager) gitOutput(ctx context.Context, dir string, args ...str
 	out, err := cmd.Output()
 	return string(out), err
 }
+
+// ---------- branch operations ----------
+
+// ListBranches returns all local and remote branches for a project.
+func (pm *ProjectManager) ListBranches(ctx context.Context, id string) ([]BranchInfo, error) {
+	p, err := pm.store.GetProject(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get project: %w", err)
+	}
+
+	out, err := pm.gitOutput(ctx, p.LocalPath, "branch", "-a", "--no-color")
+	if err != nil {
+		return nil, fmt.Errorf("git branch -a: %w", err)
+	}
+
+	// Determine current branch for marking IsCurrent
+	currentBranch, _ := pm.gitOutput(ctx, p.LocalPath, "rev-parse", "--abbrev-ref", "HEAD")
+	currentBranch = strings.TrimSpace(currentBranch)
+
+	var branches []BranchInfo
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		info := BranchInfo{
+			IsCurrent: false,
+			IsRemote:  false,
+		}
+
+		// Strip leading "* " or "  " prefix
+		if strings.HasPrefix(line, "* ") {
+			info.IsCurrent = true
+			line = strings.TrimPrefix(line, "* ")
+		} else {
+			line = strings.TrimLeft(line, " ")
+		}
+
+		// Strip leading "remotes/" for remote branches
+		if strings.HasPrefix(line, "remotes/") {
+			line = strings.TrimPrefix(line, "remotes/")
+			info.IsRemote = true
+
+			// Strip HEAD -> origin/HEAD pointer
+			if strings.HasSuffix(line, " -> ") || strings.Contains(line, " -> ") {
+				parts := strings.SplitN(line, " -> ", 2)
+				line = parts[0]
+			}
+		}
+
+		info.Name = strings.TrimSpace(line)
+
+		// Mark as current if it matches the HEAD ref
+		if !info.IsCurrent && currentBranch != "" {
+			if info.Name == currentBranch || info.Name == "origin/"+currentBranch {
+				info.IsCurrent = true
+			}
+		}
+
+		if info.Name != "" {
+			branches = append(branches, info)
+		}
+	}
+
+	return branches, nil
+}
+
+// CheckoutBranch switches to the specified branch in a project.
+func (pm *ProjectManager) CheckoutBranch(ctx context.Context, id string, branch string) error {
+	p, err := pm.store.GetProject(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get project: %w", err)
+	}
+	if branch == "" {
+		return fmt.Errorf("branch name is required")
+	}
+
+	if err := pm.runGit(ctx, p.LocalPath, "checkout", branch); err != nil {
+		return fmt.Errorf("git checkout %s: %w", branch, err)
+	}
+
+	// Update the project record with the new branch
+	currentBranch, _ := pm.gitOutput(ctx, p.LocalPath, "rev-parse", "--abbrev-ref", "HEAD")
+	p.Branch = strings.TrimSpace(currentBranch)
+	p.UpdatedAt = pm.now()
+	return pm.store.UpdateProject(ctx, p)
+}

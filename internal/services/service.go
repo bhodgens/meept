@@ -50,6 +50,7 @@ type ServiceRegistry struct {
 	Terminal     *TerminalService
 	Project      *ProjectService
 	Plan         *PlanService
+	Search       *SearchService
 }
 
 // Config holds dependencies for service instantiation.
@@ -161,6 +162,10 @@ func NewRegistry(cfg Config, logger *slog.Logger) (*ServiceRegistry, error) {
 	if cfg.PlanManager != nil && cfg.PlanStore != nil {
 		reg.Plan = NewPlanService(cfg.PlanManager, cfg.PlanStore)
 	}
+
+	// SearchService is always created with whatever dependencies are available.
+	// Missing dependencies simply mean those scopes return no results.
+	reg.Search = NewSearchService(cfg.SessionStore, cfg.TaskRegistry, cfg.MemoryManager, cfg.PlanStore)
 
 	return reg, nil
 }

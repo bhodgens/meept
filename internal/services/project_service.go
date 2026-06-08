@@ -160,3 +160,35 @@ func (s *ProjectService) DetectProject(ctx context.Context, path string) (*proje
 	}
 	return p, nil
 }
+
+// ListBranches returns all branches for a project.
+func (s *ProjectService) ListBranches(ctx context.Context, id string) ([]project.BranchInfo, error) {
+	if s.pm == nil {
+		return nil, wrapError("project", "ListBranches", ErrUnavailable)
+	}
+	if id == "" {
+		return nil, wrapError("project", "ListBranches", ErrInvalidInput)
+	}
+	branches, err := s.pm.ListBranches(ctx, id)
+	if err != nil {
+		return nil, wrapError("project", "ListBranches", err)
+	}
+	return branches, nil
+}
+
+// CheckoutBranch switches to the specified branch in a project.
+func (s *ProjectService) CheckoutBranch(ctx context.Context, id string, branch string) error {
+	if s.pm == nil {
+		return wrapError("project", "CheckoutBranch", ErrUnavailable)
+	}
+	if id == "" {
+		return wrapError("project", "CheckoutBranch", ErrInvalidInput)
+	}
+	if branch == "" {
+		return wrapError("project", "CheckoutBranch", fmt.Errorf("branch name is required"))
+	}
+	if err := s.pm.CheckoutBranch(ctx, id, branch); err != nil {
+		return wrapError("project", "CheckoutBranch", err)
+	}
+	return nil
+}
