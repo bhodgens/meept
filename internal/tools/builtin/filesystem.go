@@ -172,13 +172,23 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 		}
 	}
 
+	// Generate snapshot tag for this read
+	snapshotTag := ""
+	if !raw {
+		snapshotTag = GenerateSnapshotTag()
+	}
+
 	// Store full file snapshot in read cache for edit recovery
 	if t.readCache != nil {
 		snapshotLines := allFileLines
 		if len(snapshotLines) > 0 && snapshotLines[len(snapshotLines)-1] == "" {
 			snapshotLines = snapshotLines[:len(snapshotLines)-1]
 		}
-		t.readCache.Store(resolved, snapshotLines)
+		if snapshotTag != "" {
+			t.readCache.StoreWithTag(resolved, snapshotLines, snapshotTag)
+		} else {
+			t.readCache.Store(resolved, snapshotLines)
+		}
 	}
 
 	// Apply hashline formatting unless raw mode
@@ -203,7 +213,11 @@ func (t *ReadFileTool) executeRead(args map[string]any, progress func(tools.Prog
 			}
 			startLineNum = 1
 		}
-		text = FormatHashLines(linesToFormat, startLineNum)
+		if snapshotTag != "" {
+			text = FormatSnapshotHashLines(linesToFormat, startLineNum, snapshotTag)
+		} else {
+			text = FormatHashLines(linesToFormat, startLineNum)
+		}
 	}
 
 	// Compute evidence: file stat and hash

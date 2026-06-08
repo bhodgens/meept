@@ -2902,6 +2902,17 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 				}
 			}
 		}
+
+		// Wire AST block resolver into file_edit tool
+		if tool := c.ToolRegistry.Get("file_edit"); tool != nil {
+			if et, ok := tool.(interface {
+				SetBlockResolver(builtin.BlockResolver)
+			}); ok {
+				blockResolver := builtin.NewASTBlockResolver(c.ASTParser, context.Background())
+				et.SetBlockResolver(blockResolver)
+				logger.Debug("Wired AST block resolver into file_edit tool")
+			}
+		}
 	} else {
 		logger.Info("LSP tools not registered (no servers configured)")
 	}
