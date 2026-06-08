@@ -191,6 +191,15 @@ type QueryResult struct {
 	Query   string       `json:"query"`
 	Matches []QueryMatch `json:"matches"`
 	Count   int          `json:"count"`
+	RuleID  string       `json:"rule_id,omitempty"` // Set when using YAML rules
+}
+
+// ContextMatch wraps a QueryMatch with surrounding source context.
+type ContextMatch struct {
+	Match          QueryMatch `json:"match"`
+	BeforeContext  []string   `json:"before_context,omitempty"`
+	AfterContext   []string   `json:"after_context,omitempty"`
+	MatchedLines   []string   `json:"matched_lines,omitempty"`
 }
 
 // SymbolFilter specifies which symbol kinds to include.

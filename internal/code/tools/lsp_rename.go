@@ -120,7 +120,39 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 		return nil, fmt.Errorf("failed to get rename edits: %w", err)
 	}
 
-	if workspaceEdit == nil || len(workspaceEdit.Changes) == 0 {
+	if workspaceEdit == nil {
+		return map[string]any{
+			SchemaPropFound:     false,
+			SchemaPropMessage:   "No rename edits returned for this location",
+			SchemaPropFilePath:  filePath,
+			SchemaPropLine:      line,
+			SchemaPropCharacter: char,
+		}, nil
+	}
+
+	// Gather edits from both Changes and DocumentChanges formats.
+	type fileEdit struct {
+		path  string
+		edits []lsp.TextEdit
+	}
+
+	fileEdits := make([]fileEdit, 0)
+
+	for fileURI, edits := range workspaceEdit.Changes {
+		fileEdits = append(fileEdits, fileEdit{
+			path:  lsp.URIToPath(fileURI),
+			edits: edits,
+		})
+	}
+
+	for _, docChange := range workspaceEdit.DocumentChanges {
+		fileEdits = append(fileEdits, fileEdit{
+			path:  lsp.URIToPath(docChange.TextDocument.URI),
+			edits: docChange.Edits,
+		})
+	}
+
+	if len(fileEdits) == 0 {
 		return map[string]any{
 			SchemaPropFound:     false,
 			SchemaPropMessage:   "No rename edits returned for this location",
@@ -131,12 +163,11 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 	}
 
 	// Build changes summary
-	changes := make([]map[string]any, 0)
+	changes := make([]map[string]any, 0, len(fileEdits))
 	totalEdits := 0
-	for fileURI, edits := range workspaceEdit.Changes {
-		path := lsp.URIToPath(fileURI)
-		editList := make([]map[string]any, len(edits))
-		for i, edit := range edits {
+	for _, fe := range fileEdits {
+		editList := make([]map[string]any, len(fe.edits))
+		for i, edit := range fe.edits {
 			editList[i] = map[string]any{
 				SchemaPropStartLine: edit.Range.Start.Line,
 				SchemaPropStartChar: edit.Range.Start.Character,
@@ -146,19 +177,18 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 			}
 		}
 		changes = append(changes, map[string]any{
-			SchemaPropFilePath: path,
+			SchemaPropFilePath: fe.path,
 			"edits":            editList,
 			SchemaPropCount:    len(editList),
 		})
-		totalEdits += len(edits)
+		totalEdits += len(fe.edits)
 	}
 
 	// Apply edits if requested
 	if apply {
-		for fileURI, edits := range workspaceEdit.Changes {
-			path := lsp.URIToPath(fileURI)
-			if err := applyTextEdits(path, edits); err != nil {
-				return nil, fmt.Errorf("failed to apply edits to %s: %w", path, err)
+		for _, fe := range fileEdits {
+			if err := applyTextEdits(fe.path, fe.edits); err != nil {
+				return nil, fmt.Errorf("failed to apply edits to %s: %w", fe.path, err)
 			}
 		}
 	}
@@ -168,7 +198,7 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 		"applied":       apply,
 		"new_name":      newName,
 		"changes":       changes,
-		"file_count":    len(workspaceEdit.Changes),
+		"file_count":    len(fileEdits),
 		"edit_count":    totalEdits,
 	}, nil
 }
@@ -201,6 +231,9 @@ func applyTextEdits(filePath string, edits []lsp.TextEdit) error {
 				before.WriteString("\n")
 			}
 			before.WriteString(lines[l])
+		}
+		if startLine > 0 {
+			before.WriteString("\n")
 		}
 		if startLine < len(lines) {
 			before.WriteString(lines[startLine][:min(startChar, len(lines[startLine]))])

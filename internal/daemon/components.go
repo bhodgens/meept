@@ -2803,6 +2803,16 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 	} else {
 		c.ToolRegistry.Register(tool)
 	}
+	if tool, err := codetools.NewASTEditTool(c.ASTParser); err != nil {
+		logger.Error("Failed to initialize AST edit tool", "error", err)
+	} else {
+		c.ToolRegistry.Register(tool)
+	}
+	if tool, err := codetools.NewASTResolveTool(); err != nil {
+		logger.Error("Failed to initialize AST resolve tool", "error", err)
+	} else {
+		c.ToolRegistry.Register(tool)
+	}
 	logger.Debug("Registered AST tools")
 
 	// Initialize LSP manager if servers are configured

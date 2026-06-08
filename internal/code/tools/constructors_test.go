@@ -90,3 +90,19 @@ func TestNewLSPFormatTool_ErrorOnNil(t *testing.T) {
 		t.Fatal("expected error for nil manager, got nil")
 	}
 }
+
+func TestNewASTEditTool_ErrorOnNil(t *testing.T) {
+	if _, err := NewASTEditTool(nil); err == nil {
+		t.Fatal("expected error for nil parser, got nil")
+	}
+}
+
+func TestNewASTResolveTool_OK(t *testing.T) {
+	tool, err := NewASTResolveTool()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if tool == nil {
+		t.Fatal("expected non-nil tool")
+	}
+}

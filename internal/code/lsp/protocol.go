@@ -311,7 +311,14 @@ type RenameParams struct {
 
 // WorkspaceEdit represents a collection of changes across multiple documents.
 type WorkspaceEdit struct {
-	Changes map[string][]TextEdit `json:"changes,omitempty"`
+	Changes         map[string][]TextEdit `json:"changes,omitempty"`
+	DocumentChanges []DocumentChange      `json:"documentChanges,omitempty"`
+}
+
+// DocumentChange represents a change to a specific text document (LSP v3 format).
+type DocumentChange struct {
+	TextDocument VersionedTextDocumentIdentifier `json:"textDocument"`
+	Edits        []TextEdit                      `json:"edits"`
 }
 
 // TextEdit represents a text edit operation.
