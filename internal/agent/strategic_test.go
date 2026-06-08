@@ -12,6 +12,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/config"
+	"github.com/caimlas/meept/internal/plan"
 )
 
 func TestExtractJSON_DirectJSON(t *testing.T) {
@@ -512,5 +513,132 @@ func TestSelectReviewerAgent(t *testing.T) {
 				t.Errorf("selectReviewerAgent(%q) = %q, want %q", tt.intent, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestConductInterview_SkipWhenNoAnalysis(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+	req := PlanRequest{TaskID: "task-1", Input: "do something"}
+
+	pctx, err := sp.ConductInterview(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pctx != nil {
+		t.Error("expected nil PlanningContext when no TrueAnalysis")
+	}
+}
+
+func TestConductInterview_SkipWhenLowAmbiguity(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+	req := PlanRequest{
+		TaskID: "task-1",
+		Input:  "fix the typo in readme",
+		TrueAnalysis: &TrueIntentAnalysis{
+			Goal:      "fix typo in readme",
+			Ambiguity: 0.2,
+			Scope:     "narrow",
+			Category:  "fix",
+			Confidence: 0.95,
+		},
+	}
+
+	pctx, err := sp.ConductInterview(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pctx != nil {
+		t.Error("expected nil PlanningContext when ambiguity is low")
+	}
+}
+
+func TestConductInterview_AlreadyHasAnswers(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+	req := PlanRequest{
+		TaskID: "task-1",
+		Input:  "something complex",
+		PlanningCtx: &plan.PlanningContext{
+			InterviewQuestions: []string{"What scope?", "What constraints?"},
+			InterviewAnswers:   []string{"Only the auth module", "Must use JWT"},
+		},
+	}
+
+	pctx, err := sp.ConductInterview(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pctx == nil {
+		t.Fatal("expected non-nil PlanningContext when answers exist")
+	}
+	if !pctx.InterviewCompleted {
+		t.Error("expected InterviewCompleted = true when answers are provided")
+	}
+	if len(pctx.InterviewAnswers) != 2 {
+		t.Errorf("expected 2 answers, got %d", len(pctx.InterviewAnswers))
+	}
+}
+
+func TestConductInterview_SkipWhenNoRegistry(t *testing.T) {
+	sp := &StrategicPlanner{registry: nil, logger: slogDiscardLogger()}
+	req := PlanRequest{
+		TaskID: "task-1",
+		Input:  "something complex",
+		TrueAnalysis: &TrueIntentAnalysis{
+			Goal:      "build something",
+			Ambiguity: 0.9,
+			Scope:     "broad",
+			Category:  "implementation",
+			Confidence: 0.5,
+		},
+	}
+
+	pctx, err := sp.ConductInterview(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// When registry is nil, interview is skipped gracefully
+	if pctx != nil {
+		t.Error("expected nil PlanningContext when registry is nil")
+	}
+}
+
+func TestParseInterviewQuestions_ValidJSON(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+
+	output := `{"questions": ["What is the scope?", "Any specific constraints?", "What timeline?"]}`
+	questions := sp.parseInterviewQuestions(output)
+	if len(questions) != 3 {
+		t.Fatalf("expected 3 questions, got %d", len(questions))
+	}
+	if questions[0] != "What is the scope?" {
+		t.Errorf("question[0] = %q, want %q", questions[0], "What is the scope?")
+	}
+}
+
+func TestParseInterviewQuestions_MarkdownWrapped(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+
+	output := "Here are the questions:\n```json\n{\"questions\": [\"Q1?\", \"Q2?\"]}\n```"
+	questions := sp.parseInterviewQuestions(output)
+	if len(questions) != 2 {
+		t.Fatalf("expected 2 questions, got %d", len(questions))
+	}
+}
+
+func TestParseInterviewQuestions_InvalidJSON(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+
+	questions := sp.parseInterviewQuestions("not json at all")
+	if questions != nil {
+		t.Errorf("expected nil for invalid JSON, got %v", questions)
+	}
+}
+
+func TestParseInterviewQuestions_EmptyOutput(t *testing.T) {
+	sp := &StrategicPlanner{logger: slogDiscardLogger()}
+
+	questions := sp.parseInterviewQuestions("")
+	if questions != nil {
+		t.Errorf("expected nil for empty output, got %v", questions)
 	}
 }

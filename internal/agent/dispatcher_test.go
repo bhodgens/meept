@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
+	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/task"
 )
 
@@ -559,5 +561,130 @@ func TestRouteToAgentUsesReportRouter(t *testing.T) {
 	// The router field must be initialized by NewDispatcher
 	if d.router == nil {
 		t.Fatal("dispatcher.router should be initialized by NewDispatcher")
+	}
+}
+
+func TestIsPendingClarification_NoTracker(t *testing.T) {
+	d := &Dispatcher{sessionTracker: nil}
+	if d.isPendingClarification("session-1") {
+		t.Error("should return false when sessionTracker is nil")
+	}
+}
+
+func TestIsPendingClarification_NoHistory(t *testing.T) {
+	d := &Dispatcher{sessionTracker: NewSessionTracker(30 * time.Minute)}
+	if d.isPendingClarification("session-1") {
+		t.Error("should return false for session with no history")
+	}
+}
+
+func TestIsPendingClarification_LastIntentWasClarify(t *testing.T) {
+	d := &Dispatcher{sessionTracker: NewSessionTracker(30 * time.Minute)}
+	intent := &Intent{
+		Type:       string(IntentClarify),
+		Confidence: 0.8,
+		AgentType:  config.AgentIDChat,
+		Summary:    "fix something",
+		TrueAnalysis: &TrueIntentAnalysis{
+			Goal:      "fix something",
+			Ambiguity: 0.8,
+			Scope:     "broad",
+			Category:  "fix",
+			Confidence: 0.7,
+		},
+	}
+	d.sessionTracker.RecordIntent("session-1", intent, config.AgentIDChat)
+
+	if !d.isPendingClarification("session-1") {
+		t.Error("should return true when last intent was clarify")
+	}
+}
+
+func TestIsPendingClarification_LastIntentWasNotClarify(t *testing.T) {
+	d := &Dispatcher{sessionTracker: NewSessionTracker(30 * time.Minute)}
+	intent := &Intent{
+		Type:       string(IntentCode),
+		Confidence: 0.9,
+		AgentType:  config.AgentIDCoder,
+		Summary:    "write some code",
+	}
+	d.sessionTracker.RecordIntent("session-1", intent, config.AgentIDCoder)
+
+	if d.isPendingClarification("session-1") {
+		t.Error("should return false when last intent was code, not clarify")
+	}
+}
+
+func TestGetPendingClarification_NoTracker(t *testing.T) {
+	d := &Dispatcher{sessionTracker: nil}
+	pending := d.getPendingClarification("session-1")
+	if pending != nil {
+		t.Error("should return nil when sessionTracker is nil")
+	}
+}
+
+func TestGetPendingClarification_ValidState(t *testing.T) {
+	d := &Dispatcher{sessionTracker: NewSessionTracker(30 * time.Minute)}
+	intent := &Intent{
+		Type:       string(IntentClarify),
+		Confidence: 0.8,
+		AgentType:  config.AgentIDChat,
+		Summary:    "fix the authentication system",
+		TrueAnalysis: &TrueIntentAnalysis{
+			Goal:               "fix authentication system",
+			Ambiguity:          0.8,
+			Scope:              "broad",
+			Category:           "fix",
+			SuggestedQuestions:  []string{"Which auth system?", "What's the bug?"},
+			Confidence:         0.7,
+		},
+	}
+	d.sessionTracker.RecordIntent("session-1", intent, config.AgentIDChat)
+
+	pending := d.getPendingClarification("session-1")
+	if pending == nil {
+		t.Fatal("should return non-nil pending clarification")
+	}
+	if pending.OriginalInput != "fix the authentication system" {
+		t.Errorf("OriginalInput = %q, want %q", pending.OriginalInput, "fix the authentication system")
+	}
+	if pending.Analysis == nil {
+		t.Error("Analysis should not be nil")
+	}
+	if pending.Analysis.Ambiguity != 0.8 {
+		t.Errorf("Analysis.Ambiguity = %v, want 0.8", pending.Analysis.Ambiguity)
+	}
+}
+
+func TestGetPendingClarification_NoTrueAnalysis(t *testing.T) {
+	d := &Dispatcher{sessionTracker: NewSessionTracker(30 * time.Minute)}
+	intent := &Intent{
+		Type:       string(IntentClarify),
+		Confidence: 0.8,
+		AgentType:  config.AgentIDChat,
+		Summary:    "something",
+		// No TrueAnalysis
+	}
+	d.sessionTracker.RecordIntent("session-1", intent, config.AgentIDChat)
+
+	pending := d.getPendingClarification("session-1")
+	if pending != nil {
+		t.Error("should return nil when last clarify intent has no TrueAnalysis")
+	}
+}
+
+func TestGetPendingClarification_WrongIntentType(t *testing.T) {
+	d := &Dispatcher{sessionTracker: NewSessionTracker(30 * time.Minute)}
+	intent := &Intent{
+		Type:       string(IntentCode),
+		Confidence: 0.9,
+		AgentType:  config.AgentIDCoder,
+		Summary:    "write code",
+	}
+	d.sessionTracker.RecordIntent("session-1", intent, config.AgentIDCoder)
+
+	pending := d.getPendingClarification("session-1")
+	if pending != nil {
+		t.Error("should return nil when last intent is not clarify")
 	}
 }
