@@ -635,13 +635,20 @@ type PersonalityConfig struct {
 
 // EmbeddingConfig holds vector embedding settings for semantic memory search.
 type EmbeddingConfig struct {
-	Enabled      bool   `json:"enabled"      toml:"enabled"`
-	Provider     string `json:"provider"     toml:"provider"` // "openai", "ollama", or "sentence-transformer"
-	APIKey       string `json:"api_key"      toml:"api_key"`   //nolint:gosec // field name, not a secret
-	BaseURL      string `json:"base_url"     toml:"base_url"`
-	Model        string `json:"model"        toml:"model"`
-	Dimension    int    `json:"dimension"    toml:"dimension"`
-	AutoUpdate   bool   `json:"auto_update"  toml:"auto_update"` // Check HF for model updates
+	Enabled         bool   `json:"enabled"          toml:"enabled"`
+	Provider        string `json:"provider"         toml:"provider"` // "openai", "ollama", or "sentence-transformer"
+	APIKey          string `json:"api_key"          toml:"api_key"` //nolint:gosec // field name, not a secret
+	BaseURL         string `json:"base_url"         toml:"base_url"`
+	Model           string `json:"model"            toml:"model"`
+	Dimension       int    `json:"dimension"        toml:"dimension"`
+	AutoUpdate      bool   `json:"auto_update"      toml:"auto_update"` // Check HF for model updates
+	// Shard configuration for sqlite-vec based storage
+	ShardBasePath   string   `json:"shard_base_path"   toml:"shard_base_path"`   // Base directory for shard files (default: ~/.meept/memory/shards)
+	MaxRAMShards    int      `json:"max_ram_shards"    toml:"max_ram_shards"`    // Max shards to keep in RAM with LRU eviction (default: 5)
+	ShardTypes      []string `json:"shard_types"       toml:"shard_types"`       // Enabled shard types: consolidated, recent, project, code, archive (default: all)
+	HnswM           int      `json:"hnsw_m"            toml:"hnsw_m"`            // HNSW graph M parameter (default: 16)
+	HnswEFConstruction int   `json:"hnsw_ef_construction" toml:"hnsw_ef_construction"` // HNSW efConstruction parameter (default: 200)
+	HnswEFSearch    int      `json:"hnsw_ef_search"    toml:"hnsw_ef_search"`    // HNSW efSearch parameter for queries (default: 50)
 }
 
 // MemvidConfig holds memvid service settings.

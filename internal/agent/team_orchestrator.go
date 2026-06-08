@@ -47,6 +47,28 @@ type TeamSessionState struct {
 	StartTime      time.Time                    `json:"start_time"`
 }
 
+// SubtaskAssignment holds a subtask assignment for a team member.
+type SubtaskAssignment struct {
+	AgentID  string
+	Subtask  string
+	Priority string
+}
+
+// TeamBroadcastMessage holds a message to send within a team.
+type TeamBroadcastMessage struct {
+	Content     string
+	TargetAgent string // empty for broadcast
+	MessageType string
+}
+
+// TeamMemberResultSubmission holds a partial result submission from a team member.
+type TeamMemberResultSubmission struct {
+	AgentID   string
+	Output    string
+	Status    string
+	Artifacts []string
+}
+
 // TeamOrchestrator manages team lifecycle via bus subscriptions.
 // It subscribes to team.start to initiate teams, runs the ParallelTeamDriver,
 // and publishes results to team.result and errors to team.error.
@@ -281,6 +303,183 @@ func (to *TeamOrchestrator) publishResult(state *TeamSessionState) {
 		"members",    len(state.Roster),
 		"delivered",  delivered,
 	)
+}
+
+// AssignSubtask assigns a subtask to a specific team member. The assignment
+// is published to the per-session message topic so the member's running
+// agent loop can pick it up, and the team state is updated.
+func (to *TeamOrchestrator) AssignSubtask(ctx context.Context, sessionID string, assignment SubtaskAssignment) error {
+	val, ok := to.teams.Load(sessionID)
+	if !ok {
+		return fmt.Errorf("team %q not found", sessionID)
+	}
+	state := val.(*TeamSessionState)
+
+	// Verify agent is on the roster
+	found := false
+	for _, m := range state.Roster {
+		if m == assignment.AgentID {
+			found = true
+			break
+		}
+	}
+	if !found && assignment.AgentID != state.LeadAgent {
+		return fmt.Errorf("agent %q is not a member of team %q", assignment.AgentID, sessionID)
+	}
+
+	// Update member result with the assigned subtask
+	if mr, exists := state.MemberResults[assignment.AgentID]; exists {
+		mr.Subtask = assignment.Subtask
+		mr.Status = MemberPending
+	}
+
+	// Publish assignment to per-session message topic
+	topic := TeamMessageTopic(sessionID)
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "team-orchestrator", map[string]any{
+		"session_id": sessionID,
+		"event":      "subtask_assigned",
+		"agent_id":   assignment.AgentID,
+		"subtask":    assignment.Subtask,
+		"priority":   assignment.Priority,
+		"timestamp":  time.Now().UTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create assignment message: %w", err)
+	}
+	msg.Topic = topic
+	to.bus.Publish(topic, msg)
+
+	to.logger.Info("Subtask assigned to team member",
+		"session_id", sessionID,
+		"agent_id",   assignment.AgentID,
+		"subtask",    assignment.Subtask,
+		"priority",   assignment.Priority,
+	)
+	return nil
+}
+
+// Status returns the current status of a team session.
+func (to *TeamOrchestrator) Status(ctx context.Context, sessionID string) (*TeamSessionState, error) {
+	val, ok := to.teams.Load(sessionID)
+	if !ok {
+		return nil, fmt.Errorf("team %q not found", sessionID)
+	}
+	return val.(*TeamSessionState), nil
+}
+
+// BroadcastMessage sends a message to team members via the per-session
+// message topic. If targetAgent is empty, the message is a broadcast.
+func (to *TeamOrchestrator) BroadcastMessage(ctx context.Context, sessionID string, tm TeamBroadcastMessage) error {
+	val, ok := to.teams.Load(sessionID)
+	if !ok {
+		return fmt.Errorf("team %q not found", sessionID)
+	}
+	state := val.(*TeamSessionState)
+
+	// Validate target agent if specified
+	if tm.TargetAgent != "" {
+		found := false
+		for _, m := range state.Roster {
+			if m == tm.TargetAgent {
+				found = true
+				break
+			}
+		}
+		if !found && tm.TargetAgent != state.LeadAgent {
+			return fmt.Errorf("agent %q is not a member of team %q", tm.TargetAgent, sessionID)
+		}
+	}
+
+	topic := TeamMessageTopic(sessionID)
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "team-orchestrator", map[string]any{
+		"session_id":   sessionID,
+		"event":        "team_message",
+		"content":      tm.Content,
+		"target_agent": tm.TargetAgent,
+		"message_type": tm.MessageType,
+		"timestamp":    time.Now().UTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create team message: %w", err)
+	}
+	msg.Topic = topic
+	to.bus.Publish(topic, msg)
+
+	target := "all members"
+	if tm.TargetAgent != "" {
+		target = tm.TargetAgent
+	}
+	to.logger.Debug("Team message sent",
+		"session_id",   sessionID,
+		"target",       target,
+		"message_type", tm.MessageType,
+	)
+	return nil
+}
+
+// ReceiveResult records a partial result from a team member and publishes
+// it to the per-session result topic.
+func (to *TeamOrchestrator) ReceiveResult(ctx context.Context, sessionID string, result TeamMemberResultSubmission) error {
+	val, ok := to.teams.Load(sessionID)
+	if !ok {
+		return fmt.Errorf("team %q not found", sessionID)
+	}
+	state := val.(*TeamSessionState)
+
+	// Verify agent is on the roster
+	found := false
+	for _, m := range state.Roster {
+		if m == result.AgentID {
+			found = true
+			break
+		}
+	}
+	if !found && result.AgentID != state.LeadAgent {
+		return fmt.Errorf("agent %q is not a member of team %q", result.AgentID, sessionID)
+	}
+
+	// Update team state with the member's result
+	status := MemberDone
+	if result.Status == "failed" {
+		status = MemberFailed
+	} else if result.Status == "partial" {
+		status = MemberRunning
+	}
+
+	if mr, exists := state.MemberResults[result.AgentID]; exists {
+		mr.Output = result.Output
+		mr.Status = status
+	} else {
+		state.MemberResults[result.AgentID] = &TeamMemberResult{
+			AgentID: result.AgentID,
+			Output:  result.Output,
+			Status:  status,
+		}
+	}
+
+	// Publish partial result to per-session result topic
+	topic := TeamResultTopic(sessionID)
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "team-orchestrator", map[string]any{
+		"session_id": sessionID,
+		"event":      "member_result",
+		"agent_id":   result.AgentID,
+		"output":     result.Output,
+		"status":     string(status),
+		"artifacts":  result.Artifacts,
+		"timestamp":  time.Now().UTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create result message: %w", err)
+	}
+	msg.Topic = topic
+	to.bus.Publish(topic, msg)
+
+	to.logger.Info("Team member result received",
+		"session_id", sessionID,
+		"agent_id",   result.AgentID,
+		"status",     string(status),
+	)
+	return nil
 }
 
 // publishError publishes a team error event.

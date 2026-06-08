@@ -658,6 +658,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/memory/recent", s.handleMemoryRecent)
 	mux.HandleFunc("POST /api/v1/memory/export", s.handleMemoryExport)
 
+	// Memory Vector endpoints
+	mux.HandleFunc("POST /api/v1/memory/vector/search", s.handleMemoryVectorSearch)
+	mux.HandleFunc("POST /api/v1/memory/vector/store", s.handleMemoryVectorStore)
+	mux.HandleFunc("DELETE /api/v1/memory/vector/{id}", s.handleMemoryVectorDelete)
+	mux.HandleFunc("GET /api/v1/memory/vector/stats", s.handleMemoryVectorStats)
+
 	// Queue endpoints
 	mux.HandleFunc("POST /api/v1/queue/jobs", s.handleQueueEnqueue)
 	mux.HandleFunc("GET /api/v1/queue/jobs", s.handleQueueList)

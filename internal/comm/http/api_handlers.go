@@ -2709,3 +2709,86 @@ func (s *Server) handleSessionPlans(w http.ResponseWriter, r *http.Request) {
 		"plans": plans,
 	})
 }
+
+// ===== Memory Vector Endpoints =====
+
+// handleMemoryVectorSearch handles POST /api/v1/memory/vector/search.
+func (s *Server) handleMemoryVectorSearch(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Memory == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "memory service not available")
+		return
+	}
+
+	var req services.VectorSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	results, err := s.services.Memory.VectorSearch(r.Context(), req)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string][]services.VectorSearchResult{"results": results})
+}
+
+// handleMemoryVectorStore handles POST /api/v1/memory/vector/store.
+func (s *Server) handleMemoryVectorStore(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Memory == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "memory service not available")
+		return
+	}
+
+	var req services.VectorStoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.services.Memory.VectorStore(r.Context(), req); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "stored"})
+}
+
+// handleMemoryVectorDelete handles DELETE /api/v1/memory/vector/:id.
+func (s *Server) handleMemoryVectorDelete(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Memory == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "memory service not available")
+		return
+	}
+
+	// Extract memory ID from URL path
+	memoryID := strings.TrimPrefix(r.URL.Path, "/api/v1/memory/vector/")
+	if memoryID == "" {
+		s.writeError(w, http.StatusBadRequest, "memory ID required")
+		return
+	}
+
+	if err := s.services.Memory.VectorDelete(r.Context(), memoryID); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// handleMemoryVectorStats handles GET /api/v1/memory/vector/stats.
+func (s *Server) handleMemoryVectorStats(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Memory == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "memory service not available")
+		return
+	}
+
+	stats, err := s.services.Memory.VectorStats()
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, stats)
+}

@@ -26,6 +26,7 @@ Examples:
 	}
 
 	cmd.AddCommand(newMemoryExportCmd())
+	cmd.AddCommand(newMemoryVectorCmd())
 
 	cmd.Flags().IntVarP(&limit, "limit", "n", 10, "Maximum number of results")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -150,5 +151,192 @@ func getTypeColor(memType string) string {
 		return "\033[35m" // Magenta
 	default:
 		return "\033[37m" // White
+	}
+}
+
+// newMemoryVectorCmd creates the vector search subcommand.
+func newMemoryVectorCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "vector",
+		Short: "Vector search operations",
+		Long: `Vector search operations using semantic embeddings.
+
+Examples:
+  meept memory vector search "query string"    # Search using vector similarity
+  meept memory vector stats                    # Show vector shard statistics`,
+	}
+
+	cmd.AddCommand(newMemoryVectorSearchCmd())
+	cmd.AddCommand(newMemoryVectorStatsCmd())
+
+	return cmd
+}
+
+// newMemoryVectorSearchCmd creates the vector search subcommand.
+func newMemoryVectorSearchCmd() *cobra.Command {
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "search [query]",
+		Short: "Search using vector similarity",
+		Long: `Search memories using semantic vector similarity.
+
+Examples:
+  meept memory vector search "Go concurrency patterns"
+  meept memory vector search "database optimization" -n 20`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("query is required")
+			}
+			query := strings.Join(args, " ")
+			return runVectorSearch(query, limit)
+		},
+	}
+
+	cmd.Flags().IntVarP(&limit, "limit", "n", 10, "Maximum number of results")
+	return cmd
+}
+
+// newMemoryVectorStatsCmd creates the vector stats subcommand.
+func newMemoryVectorStatsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "stats",
+		Short: "Show vector shard statistics",
+		Long: `Display statistics about vector shards including:
+- Number of loaded shards
+- LRU cache statistics
+- Per-shard vector counts and dimensions`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runVectorStats()
+		},
+	}
+	return cmd
+}
+
+// runVectorSearch performs vector similarity search.
+func runVectorSearch(query string, limit int) error {
+	client, err := connectDaemon()
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
+	}
+	defer client.Close()
+
+	// Call vector search endpoint
+	params := map[string]any{
+		"query": query,
+		"limit": limit,
+	}
+
+	rawResult, err := client.Call("memory.vector.search", params)
+	if err != nil {
+		return fmt.Errorf("failed to search vectors: %w", err)
+	}
+
+	var result struct {
+		Results []struct {
+			MemoryID         string         `json:"memory_id"`
+			Content          string         `json:"content"`
+			Metadata         map[string]any `json:"metadata,omitempty"`
+			RelevanceScore   float64        `json:"relevance_score"`
+			VectorSimilarity float64        `json:"vector_similarity"`
+		} `json:"results"`
+	}
+
+	if err := json.Unmarshal(rawResult, &result); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if len(result.Results) == 0 {
+		fmt.Println("No vector search results found")
+		return nil
+	}
+
+	for i, r := range result.Results {
+		content := strings.ReplaceAll(r.Content, "\n", " ")
+		if len(content) > 80 {
+			content = content[:77] + "..."
+		}
+
+		fmt.Printf("\n\033[36m[%d]\033[0m %s\n", i+1, r.MemoryID)
+		fmt.Printf("    %s\n", content)
+		fmt.Printf("    \033[90mSimilarity: %.3f | Relevance: %.3f\033[0m\n", r.VectorSimilarity, r.RelevanceScore)
+	}
+
+	fmt.Printf("\n%d result(s)\n", len(result.Results))
+	return nil
+}
+
+// runVectorStats displays vector shard statistics.
+func runVectorStats() error {
+	client, err := connectDaemon()
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
+	}
+	defer client.Close()
+
+	rawResult, err := client.Call("memory.vector.stats", nil)
+	if err != nil {
+		return fmt.Errorf("failed to get vector stats: %w", err)
+	}
+
+	var stats struct {
+		LoadedShards  int    `json:"loaded_shards"`
+		MaxRAMShards  int    `json:"max_ram_shards"`
+		LRUHits       int64  `json:"lru_hits"`
+		LRUMisses     int64  `json:"lru_misses"`
+		LRUEvictions  int64  `json:"lru_evictions"`
+		ShardDetails  map[string]struct {
+			Dimension      int   `json:"dimension"`
+			M              int   `json:"m"`
+			EFConstruction int   `json:"ef_construction"`
+			EFSearch       int   `json:"ef_search"`
+			VectorCount    int64 `json:"vector_count"`
+			DatabaseSize   int64 `json:"database_size_bytes"`
+			ShardID        string `json:"shard_id"`
+		} `json:"shard_details"`
+	}
+
+	if err := json.Unmarshal(rawResult, &stats); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	fmt.Println("Vector Shard Statistics")
+	fmt.Println("=======================")
+	fmt.Printf("Loaded Shards: %d / %d (max)\n", stats.LoadedShards, stats.MaxRAMShards)
+	fmt.Printf("LRU Cache: %d hits, %d misses, %d evictions\n\n", stats.LRUHits, stats.LRUMisses, stats.LRUEvictions)
+
+	if len(stats.ShardDetails) == 0 {
+		fmt.Println("No shard details available")
+		return nil
+	}
+
+	fmt.Println("Shard Details:")
+	for name, detail := range stats.ShardDetails {
+		fmt.Printf("\n  %s:\n", name)
+		fmt.Printf("    Dimension: %d\n", detail.Dimension)
+		fmt.Printf("    M: %d, EF Construction: %d, EF Search: %d\n", detail.M, detail.EFConstruction, detail.EFSearch)
+		fmt.Printf("    Vectors: %d\n", detail.VectorCount)
+		fmt.Printf("    Database Size: %s\n", formatBytes(detail.DatabaseSize))
+	}
+
+	return nil
+}
+
+// formatBytes formats bytes into human-readable size.
+func formatBytes(bytes int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+	switch {
+	case bytes >= GB:
+		return fmt.Sprintf("%.2f GB", float64(bytes)/GB)
+	case bytes >= MB:
+		return fmt.Sprintf("%.2f MB", float64(bytes)/MB)
+	case bytes >= KB:
+		return fmt.Sprintf("%.2f KB", float64(bytes)/KB)
+	default:
+		return fmt.Sprintf("%d bytes", bytes)
 	}
 }

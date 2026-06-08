@@ -28,6 +28,7 @@ import (
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
+	"github.com/caimlas/meept/internal/memory/vector"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/scheduler"
@@ -713,6 +714,52 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	}
 	c.StatusHandler = NewStatusHandler(msgBus, logger, statusOpts...)
 
+	// Create vector shard manager for semantic search
+	var vectorSearcher memory.VectorSearcher
+	if cfg.Memory.Embeddings.Enabled {
+		// Create embedding provider
+		embedder, err := vector.NewProviderFromConfig(cfg.Memory.Embeddings)
+		if err != nil {
+			logger.Warn("Failed to create embedding provider, vector search disabled", "error", err)
+		} else {
+			// Parse shard types from config
+			var shardTypes []vector.ShardType
+			for _, st := range cfg.Memory.Embeddings.ShardTypes {
+				switch st {
+				case "consolidated":
+					shardTypes = append(shardTypes, vector.ConsolidatedShard)
+				case "recent":
+					shardTypes = append(shardTypes, vector.RecentShard)
+				case "project":
+					shardTypes = append(shardTypes, vector.ProjectShard)
+				case "code":
+					shardTypes = append(shardTypes, vector.CodeShard)
+				case "archive":
+					shardTypes = append(shardTypes, vector.ArchiveShard)
+				}
+			}
+
+			// Create shard manager
+			shardMgr, err := vector.NewShardManager(vector.ShardManagerConfig{
+				BasePath:     cfg.Memory.Embeddings.ShardBasePath,
+				MaxRAMShards: cfg.Memory.Embeddings.MaxRAMShards,
+				Embedder:     embedder,
+				Logger:       logger.With("component", "vector-shards"),
+			})
+			if err != nil {
+				logger.Warn("Failed to create shard manager, vector search disabled", "error", err)
+			} else {
+				// Create adapter to implement VectorSearcher interface
+				vectorSearcher = memory.NewShardManagerVectorSearcher(shardMgr, shardTypes)
+				logger.Info("Vector shard manager initialized",
+					"basePath", cfg.Memory.Embeddings.ShardBasePath,
+					"maxRAMShards", cfg.Memory.Embeddings.MaxRAMShards,
+					"shardTypes", cfg.Memory.Embeddings.ShardTypes,
+				)
+			}
+		}
+	}
+
 	// Create memory manager
 	c.MemoryManager = memory.NewManager(memory.ManagerConfig{
 		Config:            cfg.Memory,
@@ -722,6 +769,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		Sanitizer:         c.SecurityOrchestrator.InputSanitizer(),
 		SecurityConfig:    cfg.Memory.Security,
 		LLM:               c.LLMProvider,
+		VectorStore:       vectorSearcher,
 	})
 	if err := c.MemoryManager.Initialize(context.Background()); err != nil {
 		logger.Error("Failed to initialize memory manager", "error", err)
@@ -1250,7 +1298,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			registerCollaborationTools(c.ToolRegistry, collabEngine, logger)
 
 			// Register team tools with preset support
-			registerTeamTools(c.ToolRegistry, teamOrch, logger)
+			registerTeamTools(c.ToolRegistry, teamOrch, msgBus, logger)
 		}
 	} else {
 		// Create chat handler without dispatcher (single-agent mode)
@@ -2362,6 +2410,7 @@ func registerCollaborationTools(
 func registerTeamTools(
 	registry *tools.Registry,
 	teamOrch *agent.TeamOrchestrator,
+	msgBus *bus.MessageBus,
 	logger *slog.Logger,
 ) {
 	if teamOrch == nil {
@@ -2381,11 +2430,22 @@ func registerTeamTools(
 			// Generate a session ID
 			req.SessionID = fmt.Sprintf("team-%d", time.Now().UnixNano())
 
-			// Publish to team.start bus topic for the orchestrator to handle
-			_ = ctx // orchestrator runs asynchronously via bus
-			// The TeamOrchestrator handles team.start bus messages; we publish synchronously here.
-			// Since the orchestrator subscribes asynchronously, we return the session ID
-			// as the team ID for the caller to track.
+			// Publish to team.start bus topic so the TeamOrchestrator picks it up
+			payload, err := json.Marshal(req)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal team start request: %w", err)
+			}
+			busMsg := &models.BusMessage{
+				ID:        fmt.Sprintf("team-create-%d", time.Now().UnixNano()),
+				Type:      models.MessageTypeEvent,
+				Topic:     agent.TopicTeamStart,
+				Source:    "daemon-team-tools",
+				Timestamp: time.Now().UTC(),
+				Payload:   payload,
+			}
+			msgBus.Publish(agent.TopicTeamStart, busMsg)
+			logger.Debug("Published team.start event", "session_id", req.SessionID)
+
 			return req.SessionID, nil
 		},
 		CreatePresetTeam: func(ctx context.Context, presetName string, taskDescription string, maxConcurrentOverride int) (string, error) {
@@ -2407,20 +2467,68 @@ func registerTeamTools(
 				MemberTimeout:   teamCfg.MemberTimeout,
 			}
 
-			_ = ctx
+			// Publish to team.start bus topic so the TeamOrchestrator picks it up
+			payload, err := json.Marshal(req)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal preset team start request: %w", err)
+			}
+			busMsg := &models.BusMessage{
+				ID:        fmt.Sprintf("team-preset-%d", time.Now().UnixNano()),
+				Type:      models.MessageTypeEvent,
+				Topic:     agent.TopicTeamStart,
+				Source:    "daemon-team-tools",
+				Timestamp: time.Now().UTC(),
+				Payload:   payload,
+			}
+			msgBus.Publish(agent.TopicTeamStart, busMsg)
+			logger.Debug("Published team.start event for preset", "session_id", req.SessionID, "preset", presetName)
+
 			return req.SessionID, nil
 		},
 		AssignTask: func(ctx context.Context, teamID string, assignment builtin.TaskAssignment) error {
-			return nil
+			return teamOrch.AssignSubtask(ctx, teamID, agent.SubtaskAssignment{
+				AgentID:  assignment.AgentID,
+				Subtask:  assignment.Subtask,
+				Priority: assignment.Priority,
+			})
 		},
 		GetStatus: func(ctx context.Context, teamID string) (*builtin.TeamStatusResult, error) {
-			return nil, fmt.Errorf("team %q not found", teamID)
+			state, err := teamOrch.Status(ctx, teamID)
+			if err != nil {
+				return nil, err
+			}
+
+			memberResults := make(map[string]*builtin.MemberStatusInfo, len(state.MemberResults))
+			for agentID, mr := range state.MemberResults {
+				memberResults[agentID] = &builtin.MemberStatusInfo{
+					AgentID: mr.AgentID,
+					Status:  string(mr.Status),
+					Output:  mr.Output,
+					Error:   mr.Error,
+				}
+			}
+
+			return &builtin.TeamStatusResult{
+				SessionID:     state.SessionID,
+				LeadAgent:     state.LeadAgent,
+				Phase:         state.Phase,
+				MemberResults: memberResults,
+			}, nil
 		},
 		SendMessage: func(ctx context.Context, teamID string, msg builtin.TeamMessage) error {
-			return nil
+			return teamOrch.BroadcastMessage(ctx, teamID, agent.TeamBroadcastMessage{
+				Content:     msg.Content,
+				TargetAgent: msg.TargetAgent,
+				MessageType: msg.MessageType,
+			})
 		},
 		SubmitResult: func(ctx context.Context, teamID string, result builtin.MemberResult) error {
-			return nil
+			return teamOrch.ReceiveResult(ctx, teamID, agent.TeamMemberResultSubmission{
+				AgentID:   result.AgentID,
+				Output:    result.Output,
+				Status:    result.Status,
+				Artifacts: result.Artifacts,
+			})
 		},
 	}
 

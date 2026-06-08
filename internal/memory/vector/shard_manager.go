@@ -292,3 +292,40 @@ func SortByRelevance(results []SearchResult) {
 		}
 	}
 }
+
+// VectorSearcherAdapter wraps ShardManager to implement the memory.VectorSearcher interface.
+// This adapter bridges the signature difference between ShardManager.Search and VectorSearcher.Search.
+type VectorSearcherAdapter struct {
+	manager    *ShardManager
+	shardTypes []ShardType
+}
+
+// NewVectorSearcherAdapter creates a new adapter that wraps a ShardManager.
+// If shardTypes is nil or empty, searches all available shard types.
+func NewVectorSearcherAdapter(manager *ShardManager, shardTypes []ShardType) *VectorSearcherAdapter {
+	return &VectorSearcherAdapter{
+		manager:    manager,
+		shardTypes: shardTypes,
+	}
+}
+
+// Search implements the memory.VectorSearcher interface.
+// It delegates to ShardManager.Search with the configured shard types.
+func (a *VectorSearcherAdapter) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	shardTypes := a.shardTypes
+	if len(shardTypes) == 0 {
+		// Default to consolidated and recent shards if not specified
+		shardTypes = []ShardType{ConsolidatedShard, RecentShard}
+	}
+	return a.manager.Search(ctx, query, limit, shardTypes)
+}
+
+// Manager returns the underlying ShardManager for advanced operations.
+func (a *VectorSearcherAdapter) Manager() *ShardManager {
+	return a.manager
+}
+
+// ShardTypes returns the configured shard types for search.
+func (a *VectorSearcherAdapter) ShardTypes() []ShardType {
+	return a.shardTypes
+}

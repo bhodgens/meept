@@ -1757,3 +1757,9 @@ func (m *Manager) SearchHybrid(ctx context.Context, query string, limit int) ([]
 		Limit: limit,
 	})
 }
+
+// GetVectorSearcher returns the underlying vector searcher if configured.
+// Returns nil if vector search is not configured.
+func (m *Manager) GetVectorSearcher() VectorSearcher {
+	return m.vectorStore
+}
