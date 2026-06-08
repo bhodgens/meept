@@ -74,3 +74,32 @@ func TestMemoryNamespace_TagMemory_NilMeta(t *testing.T) {
 		t.Errorf("TagMemory should handle nil meta")
 	}
 }
+
+func TestMemoryNamespace_FilterBotMemories(t *testing.T) {
+	ns := MemoryNamespace{BotID: "ci-monitor"}
+
+	results := []map[string]any{
+		{"bot_id": "ci-monitor", "content": "build failed"},
+		{"bot_id": "other-bot", "content": "unrelated"},
+		{"content": "no bot id"},
+		{"bot_id": "ci-monitor", "content": "tests passed"},
+	}
+
+	// Private scope filters to own bot only
+	filtered := ns.FilterBotMemories(MemoryScopePrivate, results)
+	if len(filtered) != 2 {
+		t.Errorf("private: got %d results, want 2", len(filtered))
+	}
+
+	// Shared scope returns all
+	shared := ns.FilterBotMemories(MemoryScopeShared, results)
+	if len(shared) != 4 {
+		t.Errorf("shared: got %d results, want 4", len(shared))
+	}
+
+	// ReadOnly scope filters like private
+	ro := ns.FilterBotMemories(MemoryScopeReadOnly, results)
+	if len(ro) != 2 {
+		t.Errorf("read_only: got %d results, want 2", len(ro))
+	}
+}

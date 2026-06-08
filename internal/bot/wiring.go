@@ -1,50 +1,18 @@
 package bot
 
-// Wiring documents how to integrate the bot framework into the daemon.
+// Wiring documents how the bot framework integrates into the daemon.
 //
-// In internal/daemon/components.go, after the scheduler is set up:
+// IMPLEMENTED in internal/daemon/components.go (NewComponents):
+//   - BotStore and BotManager fields on Components struct
+//   - Bot framework initialization when cfg.Bots.Enabled is true
+//   - BotManager.StartAll() called in Components.Start()
+//   - BotManager.StopAll() and BotStore.Close() called in Components.Stop()
 //
-//	if cfg.Bots.Enabled {
-//	    botStore, err := bot.NewStore(filepath.Join(cfg.Bots.DataDir, "bots.db"))
-//	    if err != nil {
-//	        return fmt.Errorf("bot store: %w", err)
-//	    }
-//	    botRouter := bot.NewEventActionRouter(msgBus, nil) // handler wired separately
-//	    botManager := bot.NewManager(botStore, botRouter)
-//	    botRPCHandler := bot.NewRPCHandler(botManager)
+// IMPLEMENTED in internal/daemon/daemon.go:
+//   - Bot RPC handlers registered with rpcServer via botpkg.NewRPCHandler
 //
-//	    // Register RPC handlers
-//	    for method, handler := range botRPCHandler.Handlers() {
-//	        rpcServer.RegisterHandler(method, handler)
-//	    }
-//
-//	    // Register webhook endpoint
-//	    if cfg.Bots.WebhookEnabled {
-//	        webhookHandler := bot.NewWebhookHandler(botManager)
-//	        httpMux.Handle("/api/v1/bot/", webhookHandler)
-//	    }
-//
-//	    // Start all enabled bots
-//	    if err := botManager.StartAll(ctx); err != nil {
-//	        logger.Error("failed to start bots", "error", err)
-//	    }
-//
-//	    c.BotManager = botManager
-//	    c.BotStore = botStore
-//	}
-//
-// In internal/daemon/daemon.go shutdown:
-//
-//	if c.BotManager != nil {
-//	    c.BotManager.StopAll()
-//	}
-//	if c.BotStore != nil {
-//	    c.BotStore.Close()
-//	}
-//
-// In cmd/meept/main.go, register the bots subcommand:
-//
-//	rootCmd.AddCommand(botsCmd)
+// IMPLEMENTED in cmd/meept/bot_cmd.go:
+//   - bots subcommand with list, show, create, delete, pause, resume
 
 // WiringPlaceholder ensures this file is part of the package.
-const WiringPlaceholder = "see comments for daemon integration instructions"
+const WiringPlaceholder = "bot framework is wired into daemon"

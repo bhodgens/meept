@@ -3,7 +3,6 @@ package daemon
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/tls"
 	"fmt"
 	"log/slog"
@@ -247,6 +246,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	var clusterGitSync *cluster.GitSync
 	var clusterWG *cluster.WireGuardManager
 	var clusterMQ *queue.ClusterQueue
+	var queueStore *queue.Store
 
 	cfgPath := cluster.DefaultClusterConfigPath()
 	if loadedCfg, err := cluster.LoadClusterConfig(cfgPath); err == nil && loadedCfg != nil {
@@ -294,7 +294,6 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				NodeReachabilityTimeout: clusterCfg.Gossip.PeerTimeout,
 				FullPayloadReplication:  false,
 			}
-			var queueStore *queue.Store
 			if pq, ok := components.Queue.(*queue.PersistentQueue); ok {
 				queueStore = pq.Store()
 			}
@@ -423,6 +422,11 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 
 		// Create PlanManager
 		planManagerInst = plan.NewPlanManager(planStoreIF, msgBus, fullCfg.Plans, taskCreator, logger)
+
+		// Wire PlanManager into components for RalphLoop access
+		if components != nil {
+			components.PlanManager = planManagerInst
+		}
 
 		// Create PlanHandler (subscribes to task events for progress tracking)
 		planHandlerInst = plan.NewPlanHandler(planManagerInst, msgBus, logger)

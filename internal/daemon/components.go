@@ -30,6 +30,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/scheduler"
@@ -69,7 +70,9 @@ type Components struct {
 	Queue         queue.Queue
 	QueueHandler  *queue.Handler
 	TaskRegistry  *task.Registry
+	TaskStore     *task.Store
 	TaskHandler   *task.Handler
+	PlanManager   *plan.PlanManager
 	AmendmentMgr  *task.AmendmentManager
 	WorkerPool    *worker.Pool
 	WorkerHandler *worker.Handler
@@ -81,6 +84,8 @@ type Components struct {
 	CollaborationEngine *agent.CollaborationEngine
 	// Team orchestrator for N-agent parallel team sessions
 	TeamOrchestrator *agent.TeamOrchestrator
+	// Ralph loop for automatic replanning on incomplete tasks
+	RalphLoop *agent.RalphLoop
 
 	// Agent validation watchdog
 	Watchdog              *agent.Watchdog
@@ -949,6 +954,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		logger.Warn("Failed to create task registry", "error", err)
 	} else {
 		c.TaskRegistry = taskRegistry
+		c.TaskStore = taskRegistry.Store()
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
 		c.AmendmentMgr = taskRegistry.AmendmentManager()
 
@@ -1292,11 +1298,17 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			})
 			c.TeamOrchestrator = teamOrch
 
+			// Create Ralph loop for automatic replanning on incomplete tasks
+			ralphLoopCfg := agent.DefaultRalphLoopConfig()
+			ralphLoop := agent.NewRalphLoop(ralphLoopCfg, nil, c.TaskStore, c.PlanManager, msgBus, logger.With("component", "ralph-loop"))
+			c.RalphLoop = ralphLoop
+
 			c.Orchestrator = agent.NewOrchestrator(agent.OrchestratorDeps{
 				Strategic:           strategicPlanner,
 				Tactical:            tacticalScheduler,
 				BusPairOrchestrator: busPairOrchestrator,
 				CollaborationEngine: collabEngine,
+				RalphLoop:           ralphLoop,
 				Bus:                 msgBus,
 				Logger:              logger.With("component", "orchestrator"),
 			})
@@ -2325,9 +2337,10 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewMemoryRetainTool(memoryMgr))
 		registry.Register(builtin.NewMemoryRecallTool(memoryMgr))
 		// Memory reflect tool requires LLM client - only register if available
-		if llmClient != nil {
-			registry.Register(builtin.NewMemoryReflectTool(memoryMgr, llmClient))
-		}
+		// TODO: wire llmClient into registerBuiltinTools and uncomment
+		// if llmClient != nil {
+		//	registry.Register(builtin.NewMemoryReflectTool(memoryMgr, llmClient))
+		// }
 		logger.Debug("Registered memory curation tools")
 
 		logger.Debug("Registered memory tools")
