@@ -21,6 +21,7 @@ type Orchestrator struct {
 	bus                  *bus.MessageBus
 	logger               *slog.Logger
 	collaborationEngine  *CollaborationEngine     // optional: enables agent collaboration modes
+	ralphLoop           *RalphLoop               // optional: Ralph loop for auto-replanning
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -34,6 +35,7 @@ type OrchestratorDeps struct {
 	BusPairOrchestrator *PairOrchestrator    // optional: enables channel-based pairing (Option C)
 	PlanManager         *plan.PlanManager    // optional: plan system integration
 	CollaborationEngine *CollaborationEngine     // optional: enables agent collaboration modes
+	RalphLoop           *RalphLoop               // optional: Ralph loop for auto-replanning
 	Bus                 *bus.MessageBus
 	Logger              *slog.Logger
 }
@@ -51,6 +53,7 @@ func NewOrchestrator(deps OrchestratorDeps) *Orchestrator {
 		busPairOrchestrator: deps.BusPairOrchestrator,
 		planManager:         deps.PlanManager,
 		collaborationEngine: deps.CollaborationEngine,
+		ralphLoop:           deps.RalphLoop,
 		bus:                 deps.Bus,
 		logger:              deps.Logger,
 	}
@@ -224,12 +227,43 @@ func (o *Orchestrator) handleJobCompleted(ctx context.Context, msg *models.BusMe
 
 	o.logger.Info("Job completed event received", "job_id", event.JobID)
 
+	// Ralph loop completion check: verify task completion and trigger replan if needed
+	if o.ralphLoop != nil {
+		// Extract task_id from job (jobs are linked to steps which are linked to tasks)
+		stepID, taskID := o.extractTaskIDFromJob(ctx, event.JobID)
+		if taskID != "" {
+			isComplete, evidence, needsReplan := o.ralphLoop.CheckCompletion(ctx, taskID, event.Result)
+			if needsReplan && !isComplete {
+				o.logger.Info("Ralph loop: task incomplete, triggering replan",
+					"task_id", taskID,
+					"step_id", stepID,
+					"iteration", o.ralphLoop.GetIterationCount(taskID))
+				if err := o.ralphLoop.TriggerReplan(ctx, taskID, evidence); err != nil {
+					o.logger.Error("Failed to trigger replan", "error", err)
+				}
+				return // Skip normal completion processing
+			}
+			if isComplete {
+				// Reset iteration counter on successful completion
+				o.ralphLoop.Reset(taskID)
+			}
+		}
+	}
+
 	if err := o.tactical.OnJobCompleted(ctx, event.JobID, event.Result); err != nil {
 		o.logger.Error("Failed to handle job completion",
 			"job_id", event.JobID,
 			"error", err,
 		)
 	}
+}
+
+// extractTaskIDFromJob extracts the task ID from a job ID by looking up the step.
+func (o *Orchestrator) extractTaskIDFromJob(ctx context.Context, jobID string) (stepID string, taskID string) {
+	// This would require access to the step store - for now, return empty
+	// In full implementation, this would query the step store to find the step
+	// associated with the job, then get the task_id from the step.
+	return "", ""
 }
 
 func (o *Orchestrator) handleJobFailed(ctx context.Context, msg *models.BusMessage) {

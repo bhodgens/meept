@@ -2319,6 +2319,12 @@ func registerBuiltinTools(
 	}
 	registry.Register(shellTool)
 
+	// Git tools for commit workflow
+	registry.Register(builtin.NewGitOverviewTool(wd))
+	registry.Register(builtin.NewGitSplitTool(wd))
+	registry.Register(builtin.NewGitCommitTool(wd))
+	registry.Register(builtin.NewGitValidateTool())
+
 	// Web fetch tool
 	registry.Register(builtin.NewWebFetchTool(30*time.Second, 100000))
 
