@@ -270,8 +270,18 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
 		clusterGitSync = cluster.NewGitSync(clusterCfg, clusterCfg, gitRepoPath, logger)
 
-		// Create WireGuard sync for mesh networking (best-effort; non-fatal on macOS)
-		clusterWG = nil // WireGuard manager created separately below
+		// Create WireGuard manager for mesh networking (best-effort; non-fatal on macOS)
+		wgConfigPath := filepath.Join(gitRepoPath, "wireguard")
+		wgIface := clusterCfg.Network.Interface
+		if wgIface == "" {
+			wgIface = "wg0"
+		}
+		wgMgr, wgErr := cluster.NewWireGuardManager(wgConfigPath, wgIface)
+		if wgErr != nil {
+			logger.Warn("failed to create WireGuard manager, continuing without it", "error", wgErr)
+		} else {
+			clusterWG = wgMgr
+		}
 
 		// Create cluster-aware queue wrapping the existing queue
 		if components != nil && components.Queue != nil {
@@ -294,12 +304,8 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		logger.Debug("cluster config not found, cluster features disabled", "path", cfgPath, "error", err)
 	}
 
-	// Initialize WireGuard sync for cluster mesh
-	var clusterWireGuard *cluster.WireGuardManager
-	if clusterCfg != nil && clusterGitSync != nil {
-		gitRepoPath := filepath.Join(cfg.StateDir, "cluster")
-		clusterWireGuard = nil // WireGuard manager created separately above
-	}
+	// Use the WireGuard manager created above (clusterWG)
+	clusterWireGuard := clusterWG
 
 	// Register cluster RPC handlers if RPC server is available
 	if rpcServer != nil && (clusterEngine != nil || clusterCfg != nil) {
@@ -666,12 +672,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
-	// Start WireGuard sync (best-effort; non-fatal on macOS where wg tools are unavailable)
-	if d.components != nil && d.components.ClusterWireGuard != nil {
-		if err := d.components.ClusterWireGuard.Start(ctx); err != nil {
-			d.logger.Warn("Failed to start WireGuard sync, continuing without it", "error", err)
-		}
-	}
+	// WireGuard manager is config-only (no background goroutines);
+	// configuration is applied on-demand via syncWireGuardConfig.
 
 	// Start local LLM runtimes in the background so the daemon reaches
 	// "running" status without blocking on potentially slow model loading.
