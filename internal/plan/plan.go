@@ -54,10 +54,11 @@ type Plan struct {
 	ConfirmedAt   *time.Time  `json:"confirmed_at,omitempty"`
 	ApprovedBy    string      `json:"approved_by,omitempty"`
 	ConfirmedBy   string      `json:"confirmed_by,omitempty"`
-	TaskID        string      `json:"task_id,omitempty"`
-	SourceSession string      `json:"source_session,omitempty"`
-	RevisionCount int         `json:"revision_count,omitempty"`
-	Phases        []PlanPhase `json:"phases,omitempty"`
+	TaskID          string            `json:"task_id,omitempty"`
+	SourceSession   string            `json:"source_session,omitempty"`
+	RevisionCount   int               `json:"revision_count,omitempty"`
+	Phases          []PlanPhase       `json:"phases,omitempty"`
+	PlanningContext *PlanningContext  `json:"planning_context,omitempty"`
 }
 
 // PlanPhase represents a named phase within a plan.

@@ -45,6 +45,38 @@ type plannerOutput struct {
 	Steps []plannerStep `json:"steps"`
 }
 
+const interviewAmbiguityThreshold = 0.6
+
+// interviewPromptTemplate is the system prompt for generating interview questions
+// based on true intent analysis. The LLM generates 2-4 targeted questions about
+// scope, constraints, requirements, and ambiguities.
+const interviewPromptTemplate = `You are a project planning interviewer. Based on the user's request and intent analysis below, generate 2-4 targeted interview questions to resolve ambiguities before task decomposition.
+
+Your questions should cover:
+1. Specific scope boundaries (what is in vs. out of scope)
+2. Constraints and preferences (technology, performance, timeline)
+3. Priority or ordering of requirements
+4. Specific ambiguities identified in the analysis
+
+Rules:
+- Generate ONLY valid JSON, no markdown, no explanation
+- Keep questions concise and actionable
+- Each question should have a clear, specific focus
+- Maximum 4 questions, minimum 2
+
+Output format:
+{"questions": ["question 1", "question 2", ...]}
+
+Request: %s
+
+Intent analysis:
+- Goal: %s
+- Ambiguity: %.1f
+- Scope: %s
+- Category: %s
+- Confidence: %.1f
+- Identified ambiguities: %s`
+
 const plannerPromptTemplate = `You are a task planner. Decompose the following request into discrete, executable steps.
 Each step should be a single unit of work that can be assigned to a specialist agent.
 
@@ -122,6 +154,125 @@ func NewStrategicPlanner(cfg StrategicPlannerConfig) *StrategicPlanner {
 	}
 }
 
+// ConductInterview determines whether an interview is needed for the given plan
+// request. If the TrueAnalysis indicates high ambiguity or broad scope, it uses
+// the LLM to generate targeted interview questions. If interview answers are
+// already present, it marks the interview as completed and returns.
+//
+// Returns a PlanningContext that may or may not have InterviewCompleted set to true.
+// If the interview is incomplete, the caller should present the questions to the
+// user and re-invoke ConductInterview once answers are collected.
+func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanRequest) (*plan.PlanningContext, error) {
+	// If we already have interview answers, mark as completed and return.
+	if req.PlanningCtx != nil && len(req.PlanningCtx.InterviewAnswers) > 0 {
+		req.PlanningCtx.InterviewCompleted = true
+		sp.logger.Info("Interview completed with answers",
+			"task_id", req.TaskID,
+			"answer_count", len(req.PlanningCtx.InterviewAnswers),
+		)
+		return req.PlanningCtx, nil
+	}
+
+	// Skip interview if no true analysis or ambiguity is below threshold.
+	if req.TrueAnalysis == nil {
+		return nil, nil
+	}
+	if req.TrueAnalysis.Ambiguity < interviewAmbiguityThreshold && req.TrueAnalysis.Scope != "broad" {
+		sp.logger.Debug("Skipping interview: low ambiguity",
+			"task_id", req.TaskID,
+			"ambiguity", req.TrueAnalysis.Ambiguity,
+			"scope", req.TrueAnalysis.Scope,
+		)
+		return nil, nil
+	}
+
+	// Need to generate interview questions. Get the planner agent.
+	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
+	if err != nil {
+		sp.logger.Warn("Planner agent not available for interview, skipping",
+			"task_id", req.TaskID,
+			"error", err,
+		)
+		return nil, nil
+	}
+
+	// Build the list of identified ambiguities.
+	ambiguityList := "none"
+	if len(req.TrueAnalysis.SuggestedQuestions) > 0 {
+		ambiguityList = strings.Join(req.TrueAnalysis.SuggestedQuestions, "; ")
+	}
+
+	prompt := fmt.Sprintf(interviewPromptTemplate,
+		req.Input,
+		req.TrueAnalysis.Goal,
+		req.TrueAnalysis.Ambiguity,
+		req.TrueAnalysis.Scope,
+		req.TrueAnalysis.Category,
+		req.TrueAnalysis.Confidence,
+		ambiguityList,
+	)
+
+	interviewCtx, cancel := context.WithTimeout(ctx, sp.plannerTimeout)
+	defer cancel()
+
+	conversationID := fmt.Sprintf("interview-%s-%d", req.TaskID, time.Now().UnixNano())
+	output, err := plannerLoop.RunOnce(interviewCtx, prompt, conversationID)
+	if err != nil {
+		sp.logger.Warn("Interview question generation failed, skipping",
+			"task_id", req.TaskID,
+			"error", err,
+		)
+		return nil, nil
+	}
+
+	questions := sp.parseInterviewQuestions(output)
+	if len(questions) == 0 {
+		// Fallback to suggested questions from TrueAnalysis if LLM failed to produce JSON.
+		if len(req.TrueAnalysis.SuggestedQuestions) > 0 {
+			questions = req.TrueAnalysis.SuggestedQuestions
+		} else {
+			questions = []string{"Could you provide more details about what you'd like to accomplish?"}
+		}
+	}
+
+	// Cap to 4 questions.
+	if len(questions) > 4 {
+		questions = questions[:4]
+	}
+
+	pctx := &plan.PlanningContext{
+		InterviewQuestions: questions,
+		InterviewCompleted: false,
+		TrueGoal:         req.TrueAnalysis.Goal,
+		Ambiguities:      req.TrueAnalysis.SuggestedQuestions,
+	}
+
+	sp.logger.Info("Interview questions generated",
+		"task_id", req.TaskID,
+		"question_count", len(questions),
+		"ambiguity", req.TrueAnalysis.Ambiguity,
+	)
+
+	return pctx, nil
+}
+
+// parseInterviewQuestions extracts question strings from the LLM interview output.
+func (sp *StrategicPlanner) parseInterviewQuestions(output string) []string {
+	jsonStr := extractJSON(output)
+	if jsonStr == "" {
+		return nil
+	}
+
+	var result struct {
+		Questions []string `json:"questions"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		sp.logger.Warn("Failed to parse interview questions JSON", "error", err)
+		return nil
+	}
+	return result.Questions
+}
+
 // Plan decomposes a task into executable steps.
 func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	sp.logger.Info("Starting strategic planning",
@@ -194,6 +345,48 @@ func (sp *StrategicPlanner) Plan(ctx context.Context, req PlanRequest) error {
 	}
 
 	var steps []*task.TaskStep
+
+	// Interview phase: if the request has TrueAnalysis with high ambiguity,
+	// conduct an interview before decomposition.
+	if sp.registry != nil {
+		pctx, interviewErr := sp.ConductInterview(ctx, req)
+		if interviewErr != nil {
+			sp.logger.Warn("Interview failed, proceeding with planning",
+				"task_id", req.TaskID,
+				"error", interviewErr,
+			)
+		} else if pctx != nil && !pctx.InterviewCompleted {
+			// Interview incomplete: publish event with questions and return early.
+			// The task stays in planning state until answers are provided.
+			sp.publishEvent("task.interview", map[string]any{
+				KeyTaskID:     req.TaskID,
+				"session_id":  req.SessionID,
+				"questions":   pctx.InterviewQuestions,
+				"ambiguities": pctx.Ambiguities,
+			})
+
+			// Store planning context on the task metadata so it persists.
+			if pctxJSON, err := json.Marshal(pctx); err == nil {
+				t.Metadata = json.RawMessage(pctxJSON)
+				if err := sp.taskStore.Update(t); err != nil {
+					sp.logger.Warn("Failed to update task with planning context", "error", err)
+				}
+			}
+
+			sp.logger.Info("Interview questions sent, awaiting user answers",
+				"task_id", req.TaskID,
+				"question_count", len(pctx.InterviewQuestions),
+			)
+			return nil
+		} else if pctx != nil {
+			// Interview completed: inject the planning context into the request
+			// so that generatePlan uses verified context.
+			req.PlanningCtx = pctx
+			sp.logger.Info("Interview completed, proceeding with verified context",
+				"task_id", req.TaskID,
+			)
+		}
+	}
 
 	// Fast-path: simple requests don't need LLM decomposition
 	if !sp.shouldDecompose(req) {

@@ -291,6 +291,19 @@ func NewDispatcher(cfg DispatcherConfig) *Dispatcher {
 func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID string) (*DispatchResult, error) {
 	d.logger.Debug("Dispatching request", "session", sessionID, "input_len", len(input))
 
+	// Check for clarification follow-up: if the last intent for this session
+	// was IntentClarify, treat the current input as the user's response to
+	// the clarification questions.
+	if d.isPendingClarification(sessionID) && !strings.HasPrefix(input, "/") {
+		pending := d.getPendingClarification(sessionID)
+		if pending != nil {
+			d.logger.Info("Detected clarification follow-up, resuming classification",
+				"session", sessionID,
+			)
+			return d.ResumeAfterClarification(ctx, pending.OriginalInput, input, sessionID)
+		}
+	}
+
 	// Check for explicit skill invocation (/skill-name)
 	if strings.HasPrefix(input, "/") {
 		// Handle /plan command — force plan creation
@@ -742,6 +755,148 @@ func (d *Dispatcher) buildClarificationResult(input string, analysis *TrueIntent
 		Response:           sb.String(),
 		ClarificationReply: sb.String(),
 	}, nil
+}
+
+// clarificationSessionKey is the key used to store the original input and
+// analysis for a pending clarification in the session tracker metadata.
+const clarificationSessionKey = "pending_clarification"
+
+// pendingClarification holds the state needed to resume after a clarification.
+type pendingClarification struct {
+	OriginalInput string              `json:"original_input"`
+	Analysis      *TrueIntentAnalysis `json:"analysis"`
+	SessionID     string              `json:"session_id"`
+}
+
+// ResumeAfterClarification re-classifies a user input that is a response to a
+// previous clarification request. It combines the original input with the user's
+// response and re-runs intent analysis. If the combined input is still ambiguous,
+// it asks follow-up questions. Otherwise, it routes normally.
+func (d *Dispatcher) ResumeAfterClarification(ctx context.Context, originalInput, userResponse, sessionID string) (*DispatchResult, error) {
+	combinedInput := originalInput + "\n\nUser clarification: " + userResponse
+
+	d.logger.Info("Resuming after clarification",
+		"session", sessionID,
+		"combined_len", len(combinedInput),
+	)
+
+	// Re-analyze the combined input with the intent analyzer.
+	if d.intentAnalyzer != nil {
+		analysis, err := d.intentAnalyzer.AnalyzeTrueIntent(ctx, combinedInput)
+		if err == nil && analysis != nil {
+			if analysis.IsAmbiguous(d.intentAnalyzer.ambiguityThreshold) {
+				d.logger.Info("Still ambiguous after clarification, asking follow-up",
+					"ambiguity", analysis.Ambiguity,
+				)
+				return d.buildClarificationResult(combinedInput, analysis, sessionID)
+			}
+
+			// Clear the pending clarification from the session.
+			d.clearPendingClarification(sessionID)
+
+			// Build memory context with the combined input.
+			memCtx := d.buildMemoryContext(ctx, combinedInput, sessionID)
+
+			// Propagate the analysis as the last intent.
+			memCtx.LastIntent = &Intent{
+				Type:         analysis.Category,
+				Confidence:   analysis.Confidence,
+				AgentType:    analysis.Category,
+				Summary:      analysis.Goal,
+				TrueAnalysis: analysis,
+			}
+
+			// Resolve anaphora.
+			resolvedInput := d.resolveAnaphora(combinedInput, memCtx)
+
+			// Classify and route normally.
+			intent := d.classifyIntent(ctx, resolvedInput, memCtx)
+			intent.MemoryRefs = d.extractMemoryRefs(memCtx.Results)
+			intent.TrueAnalysis = analysis
+
+			// Check for plan routing.
+			if d.planManager != nil && d.planManager.ShouldCreatePlan(intent.Type, 0) {
+				return d.routeToPlan(ctx, combinedInput, intent, sessionID)
+			}
+
+			// Create task if needed.
+			var createdTask *task.Task
+			if d.shouldCreateTask(intent) && d.taskStore != nil {
+				createdTask = d.createTask(ctx, combinedInput, intent, sessionID)
+			}
+
+			result := &DispatchResult{
+				Task:          createdTask,
+				AgentID:       intent.AgentType,
+				Intent:        intent,
+				MemoryContext:  memCtx.Results,
+				OriginalInput: combinedInput,
+			}
+
+			d.logger.Info("Clarification resolved, routed normally",
+				"agent", intent.AgentType,
+				"intent_type", intent.Type,
+				"confidence", intent.Confidence,
+			)
+
+			// Record intent in session tracker.
+			d.sessionTracker.RecordIntent(sessionID, intent, intent.AgentType)
+
+			return result, nil
+		}
+	}
+
+	// Fallback: if intent analysis is unavailable or fails, proceed with normal
+	// classification of the combined input.
+	d.clearPendingClarification(sessionID)
+	return d.ClassifyAndRoute(ctx, combinedInput, sessionID)
+}
+
+// isPendingClarification checks if the previous intent for a session was a
+// clarification request, indicating that the current user input is a response.
+func (d *Dispatcher) isPendingClarification(sessionID string) bool {
+	if d.sessionTracker == nil {
+		return false
+	}
+	lastIntent := d.sessionTracker.GetLastIntent(sessionID)
+	if lastIntent == nil {
+		return false
+	}
+	return lastIntent.Type == string(IntentClarify)
+}
+
+// getPendingClarification retrieves stored clarification state from the session
+// tracker. Returns nil if no pending clarification exists.
+func (d *Dispatcher) getPendingClarification(sessionID string) *pendingClarification {
+	if d.sessionTracker == nil {
+		return nil
+	}
+	state := d.sessionTracker.GetSession(sessionID)
+	if state == nil || state.TotalRequests == 0 {
+		return nil
+	}
+	lastIntent := state.IntentHistory[len(state.IntentHistory)-1]
+	if lastIntent == nil || lastIntent.Type != string(IntentClarify) {
+		return nil
+	}
+	if lastIntent.TrueAnalysis == nil {
+		return nil
+	}
+	// Reconstruct the original input from the intent summary (best-effort).
+	return &pendingClarification{
+		OriginalInput: lastIntent.Summary,
+		Analysis:      lastIntent.TrueAnalysis,
+		SessionID:     sessionID,
+	}
+}
+
+// clearPendingClarification removes the clarification state for a session.
+// This is called when the clarification flow is resolved.
+func (d *Dispatcher) clearPendingClarification(sessionID string) {
+	// The clarification state is implicitly cleared by recording a new
+	// non-clarify intent in the session tracker. No explicit clearing needed
+	// since the next RecordIntent call in ClassifyAndRoute will overwrite
+	// the last intent.
 }
 
 // shouldCreateTask determines if a task should be created.
