@@ -42,9 +42,3 @@ type ProjectStatus struct {
 	ModifiedFiles int    `json:"modified_files"`
 }
 
-// BranchInfo describes a single git branch.
-type BranchInfo struct {
-	Name      string `json:"name"`
-	IsCurrent bool   `json:"is_current"`
-	IsRemote  bool   `json:"is_remote"`
-}

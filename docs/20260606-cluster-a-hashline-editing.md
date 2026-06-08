@@ -72,7 +72,7 @@ Meept's `file_edit` tool already uses `LINE:HASH` anchors, but the implementatio
 - `internal/tools/builtin/hashline_parser.go` (new) — Grammar parser
 
 ## Success Criteria
-- [ ] `replace block 5:` works for Go function blocks
-- [ ] Stale anchor with cached file changes is recovered 90%+ of the time
-- [ ] Snapshot tags prevent corruption from interleaved edits
-- [ ] All existing tests pass; new tests cover block ops and recovery
+- [x] `replace block 5:` works for Go function blocks
+- [x] Stale anchor with cached file changes is recovered 90%+ of the time
+- [x] Snapshot tags prevent corruption from interleaved edits
+- [x] All existing tests pass; new tests cover block ops and recovery

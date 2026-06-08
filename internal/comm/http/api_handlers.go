@@ -2476,6 +2476,7 @@ func (s *Server) handleProjectDetect(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, project)
 }
 
+// ===== Project Branch Endpoints =====
 
 // handleProjectBranches handles GET /api/v1/projects/{id}/branches.
 func (s *Server) handleProjectBranches(w http.ResponseWriter, r *http.Request) {
@@ -2484,20 +2485,22 @@ func (s *Server) handleProjectBranches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get project ID from URL path
-	projectID := r.PathValue("id")
-	if projectID == "" {
-		s.writeError(w, http.StatusBadRequest, "project id required")
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
 		return
 	}
 
-	branches, err := s.services.Project.ListBranches(r.Context(), projectID)
+	branches, err := s.services.Project.ListBranches(r.Context(), id)
 	if err != nil {
 		s.handleServiceError(w, err)
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, branches)
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"branches": branches,
+		KeyCount:   len(branches),
+	})
 }
 
 // handleProjectCheckout handles POST /api/v1/projects/{id}/checkout.
@@ -2507,10 +2510,9 @@ func (s *Server) handleProjectCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get project ID from URL path
-	projectID := r.PathValue("id")
-	if projectID == "" {
-		s.writeError(w, http.StatusBadRequest, "project id required")
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "project id is required")
 		return
 	}
 
@@ -2522,20 +2524,18 @@ func (s *Server) handleProjectCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Branch == "" {
-		s.writeError(w, http.StatusBadRequest, "branch name required")
+		s.writeError(w, http.StatusBadRequest, "branch name is required")
 		return
 	}
 
-	if err := s.services.Project.CheckoutBranch(r.Context(), projectID, req.Branch); err != nil {
+	if err := s.services.Project.CheckoutBranch(r.Context(), id, req.Branch); err != nil {
 		s.handleServiceError(w, err)
 		return
 	}
 
-	s.writeJSON(w, http.StatusOK, map[string]string{
-		"status": "success",
-		"branch": req.Branch,
-	})
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "checked out"})
 }
+
 // ===== Plan Endpoints =====
 
 // handlePlanList handles GET /api/v1/plans.
@@ -2877,66 +2877,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		"results": results,
 		KeyCount:  len(results),
 	})
-}
-
-// ===== Project Branch Endpoints =====
-
-// handleProjectBranches handles GET /api/v1/projects/{id}/branches.
-func (s *Server) handleProjectBranches(w http.ResponseWriter, r *http.Request) {
-	if s.services == nil || s.services.Project == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
-		return
-	}
-
-	id := r.PathValue("id")
-	if id == "" {
-		s.writeError(w, http.StatusBadRequest, "project id is required")
-		return
-	}
-
-	branches, err := s.services.Project.ListBranches(r.Context(), id)
-	if err != nil {
-		s.handleServiceError(w, err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]any{
-		"branches": branches,
-		KeyCount:   len(branches),
-	})
-}
-
-// handleProjectCheckout handles POST /api/v1/projects/{id}/checkout.
-func (s *Server) handleProjectCheckout(w http.ResponseWriter, r *http.Request) {
-	if s.services == nil || s.services.Project == nil {
-		s.writeError(w, http.StatusServiceUnavailable, "project service not available")
-		return
-	}
-
-	id := r.PathValue("id")
-	if id == "" {
-		s.writeError(w, http.StatusBadRequest, "project id is required")
-		return
-	}
-
-	var req struct {
-		Branch string `json:"branch"`
-	}
-	if !s.readJSON(w, r, &req) {
-		return
-	}
-
-	if req.Branch == "" {
-		s.writeError(w, http.StatusBadRequest, "branch name is required")
-		return
-	}
-
-	if err := s.services.Project.CheckoutBranch(r.Context(), id, req.Branch); err != nil {
-		s.handleServiceError(w, err)
-		return
-	}
-
-	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "checked out"})
 }
 
 // ===== Skill UI Endpoint =====

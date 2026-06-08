@@ -187,6 +187,12 @@ func (sp *StrategicPlanner) ConductInterview(ctx context.Context, req PlanReques
 	}
 
 	// Need to generate interview questions. Get the planner agent.
+	if sp.registry == nil {
+		sp.logger.Warn("Agent registry not available for interview, skipping",
+			"task_id", req.TaskID,
+		)
+		return nil, nil
+	}
 	plannerLoop, err := sp.registry.Get(config.AgentIDPlanner)
 	if err != nil {
 		sp.logger.Warn("Planner agent not available for interview, skipping",

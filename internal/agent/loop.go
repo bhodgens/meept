@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -391,9 +392,10 @@ type AgentLoop struct {
 	mu sync.RWMutex
 
 	// Core components
-	llm          llm.Chatter   // Interface for LLM operations (Client or ProviderManager)
-	llmClient    *llm.Client   // Concrete client for config access (may be nil if using ProviderManager)
-	resolver     *llm.Resolver // Model resolver for alias resolution
+	llm             llm.Chatter         // Interface for LLM operations (Client or ProviderManager)
+	llmClient       *llm.Client         // Concrete client for config access (may be nil if using ProviderManager)
+	contextFirewall *llm.ContextFirewall // Reference to the context firewall wrapper (nil if not enabled)
+	resolver        *llm.Resolver       // Model resolver for alias resolution
 	modelRef     string        // Model reference from agent spec (can be alias or direct ref)
 	spec         *AgentSpec    // Agent specification (for inference parameter overrides)
 	executor     *Executor
@@ -801,6 +803,13 @@ func WithHookRegistry(hr *HookRegistry) LoopOption {
 	}
 }
 
+// WithMCPServerLister sets the MCP server lister for system prompt context.
+func WithMCPServerLister(lister func() []MCPServerInfo) LoopOption {
+	return func(l *AgentLoop) {
+		l.mcpServerLister = lister
+	}
+}
+
 // NewAgentLoop creates a new agent loop.
 func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 	loop := &AgentLoop{
@@ -920,6 +929,7 @@ func NewAgentLoop(opts ...LoopOption) *AgentLoop {
 		}
 
 		loop.llm = firewall
+		loop.contextFirewall = firewall
 		loop.logger.Debug("ContextFirewall enabled for agent loop")
 	}
 
@@ -3165,4 +3175,47 @@ func (l *AgentLoop) currentModelInfo() (modelID, providerID string) {
 		}
 	}
 	return "unknown", "unknown"
+}
+
+// buildMCPContextSection builds the MCP server context section for the system prompt.
+// Returns an empty string when no MCP server lister is configured or no servers are available.
+func (l *AgentLoop) buildMCPContextSection() string {
+	if l.mcpServerLister == nil {
+		return ""
+	}
+	servers := l.mcpServerLister()
+	if len(servers) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n## MCP Servers\n\n")
+	for _, srv := range servers {
+		status := "disconnected"
+		if srv.Connected {
+			status = "connected"
+		}
+		sb.WriteString(fmt.Sprintf("- %s (%d tool(s), %s)\n", srv.Name, srv.ToolCount, status))
+	}
+	return sb.String()
+}
+
+// buildTerminateResponse builds a response string from tool execution results.
+// Successful results are JSON-encoded and joined; if all results failed, returns "done".
+func (l *AgentLoop) buildTerminateResponse(results []*ExecutionResult) string {
+	var parts []string
+	for _, r := range results {
+		if r == nil || !r.Success {
+			continue
+		}
+		data, err := json.Marshal(r.Result)
+		if err != nil {
+			parts = append(parts, fmt.Sprintf("%v", r.Result))
+		} else {
+			parts = append(parts, string(data))
+		}
+	}
+	if len(parts) == 0 {
+		return "done"
+	}
+	return strings.Join(parts, "\n")
 }

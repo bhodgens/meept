@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04
 **Branch:** combined-ui-parity-design
-**Status:** Planned — requires backend endpoint work
+**Status:** Backend implemented — Flutter UI panels still needed
 
 ---
 
