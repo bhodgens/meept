@@ -125,6 +125,12 @@ flowchart TB
 | Daemon | `cmd/meept-daemon` | Background daemon process |
 | TUI | `internal/tui` | Bubble Tea interactive terminal UI |
 
+### Client-Side Services
+
+| Component | Package | Description |
+|-----------|---------|-------------|
+| Speech-to-Text | `internal/stt` | Client-side voice transcription (whisper, parakeet, native engines) |
+
 ### Communication
 
 | Component | Package | Description |
@@ -221,3 +227,5 @@ flowchart LR
 4. **SQLite backbone** — Job queue, memory, audit logs, and metrics all use SQLite for zero-dependency persistence.
 
 5. **OpenAI-compatible API** — LLM providers all use the OpenAI chat completion format, making it easy to add new providers.
+
+6. **Client-side STT** — Speech-to-text runs entirely in the client (TUI or Flutter), not through the daemon. The `internal/stt` package provides a `Transcriber` interface with pluggable engines (whisper, parakeet, native). Recording and transcription happen locally; only the resulting text is sent to the daemon as a normal chat message.

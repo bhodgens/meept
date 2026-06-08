@@ -155,7 +155,7 @@ meept config get <keypath>
 meept config set <keypath> <value>
 ```
 
-**Sections:** daemon, transport, llm, models, agents, memory, security, mcp, client/tui, scheduler (primary), plus ~20 advanced sections.
+**Sections:** daemon, transport, llm, models, agents, memory, security, mcp, client/tui, scheduler, stt (primary), plus ~20 advanced sections.
 
 **Examples:**
 ```bash
@@ -170,6 +170,15 @@ meept config set llm.default_model "claude-opus-4-6"
 
 # List all config files
 meept config list
+
+# Open STT configuration section
+meept config stt
+
+# Check if STT is enabled
+meept config get stt.enabled
+
+# Change STT engine
+meept config set stt.engine "native"
 ```
 
 ### `meept agents` - Agent Management

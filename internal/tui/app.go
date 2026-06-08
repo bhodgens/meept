@@ -12,6 +12,7 @@ import (
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/sharedclient"
+	"github.com/caimlas/meept/internal/stt"
 	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -260,6 +261,18 @@ func NewApp(socketPath string) *App {
 
 	// Initialize notification manager
 	app.notifications = components.NewNotificationManager()
+
+	// Initialize STT (speech-to-text) from client config
+	if clientConfig.STT.Enabled {
+		app.chat.InitSTT(
+			stt.Config{
+				Engine:   clientConfig.STT.Engine,
+				Language: clientConfig.STT.Language,
+			},
+			true,
+			clientConfig.STT.AutoSend,
+		)
+	}
 
 	// Initialize verbosity from client config
 	app.verbosity = parseVerbosity(clientConfig.Chat.Verbosity)
@@ -1152,6 +1165,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case models.CopyToClipboardMsg:
 		// Handle clipboard copy request from chat view
 		return a, doCopy(msg.Text)
+
+	case models.ChatToastMsg:
+		// Handle toast notification request from chat view
+		if a.notifications != nil {
+			level := components.NotifyInfo
+			if msg.Title == "stt error" {
+				level = components.NotifyError
+			}
+			_, expiryCmd := a.notifications.Push(level, msg.Title, msg.Message)
+			return a, expiryCmd
+		}
+		return a, nil
 
 	case CopySuccessMsg:
 		// Copy silently - do not display a "Copied: ..." status message.

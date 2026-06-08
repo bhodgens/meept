@@ -125,6 +125,7 @@ User Input (CLI/Telegram/Web/MenuBar)
 | **Skills** | `internal/skills` (discovery, registry, parser, models) |
 | **Memory** | `internal/memory` (manager, episodic, task, consolidation, ftstore) |
 | **Tools** | `internal/tools` (registry, builtin/*, mcp) |
+| **STT** | `internal/stt` (transcriber, recorder, whisper, parakeet, native) |
 | **Code Intel** | `internal/code/ast` (tree-sitter parser + symbol extraction), `internal/code/lsp` (LSP client/manager), `internal/code/tools` (ast_* and lsp_* agent tools) |
 | **Self-Improve** | `internal/selfimprove` (controller, detector, analyzer, generator, validator, applier) |
 | **Scheduler** | `internal/scheduler` (scheduler, jobs) |
@@ -293,6 +294,15 @@ The HTTP API uses a **service layer pattern** to share business logic between RP
   `CompactionTokensSaved`, and `CompactionFallbacks` so operators can monitor
   context-pressure indicators and compaction effectiveness.
 
+### Speech-to-Text Configuration
+
+STT is client-side only (TUI and Flutter). Requires external tools depending on engine:
+- whisper: `whisper-cli` + `ffmpeg`, model at `~/.meept/models/ggml-base.en.bin`
+- parakeet: parakeet CLI + `ffmpeg`, model at `~/.meept/models/`
+- native: macOS Speech framework or Windows SAPI (no external deps)
+
+Config: `meept config stt`
+
 ## Skills Discovery
 
 Three-tier with priority shadowing:
@@ -409,6 +419,7 @@ internal/
   security/        # Security engine, sanitizer, tirith
   selfimprove/     # Self-improvement system
   skills/          # Skill discovery and parsing
+  stt/             # Speech-to-text (transcriber interface, whisper, parakeet, native)
   tools/           # Tool registry and builtins
 config/            # Configuration templates
   presets.json5    # Model presets (NEW)

@@ -125,6 +125,9 @@ type Server struct {
 
 	wsHub *WebSocketHub
 
+	// Bot webhook handler (optional, set via WithBotWebhook)
+	botWebhookHandler http.Handler
+
 	// MCP over HTTP+SSE support
 	mcpServices *services.ServiceRegistry
 	mcpSessions sync.Map // map[string]*MCPSession
@@ -386,6 +389,15 @@ type SSEEvent struct {
 	ID   string
 	Type string
 	Data []byte
+}
+
+// WithBotWebhook registers an HTTP handler for bot webhook triggers.
+func WithBotWebhook(h http.Handler) ServerOption {
+	return func(s *Server) {
+		if h != nil {
+			s.botWebhookHandler = h
+		}
+	}
 }
 
 // WithMCP enables MCP over HTTP+SSE support.
@@ -790,6 +802,11 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 
 	// Skill UI endpoint
 	mux.HandleFunc("GET /api/v1/skills/{slug}/ui", s.handleSkillUI)
+
+	// Bot webhook endpoint (optional, depends on WithBotWebhook option)
+	if s.botWebhookHandler != nil {
+		mux.Handle("POST /api/v1/bot/{botID}/trigger", s.botWebhookHandler)
+	}
 }
 
 // middleware applies common middleware (CORS, logging, auth).

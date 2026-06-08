@@ -74,6 +74,8 @@ func BuildSectionFields(keyPath string) []Field {
 		return buildPresetsFields()
 	case "projects":
 		return buildProjectsFields()
+	case "stt":
+		return buildSTTFields()
 	case "oauth":
 		return buildOAuthFields()
 	default:

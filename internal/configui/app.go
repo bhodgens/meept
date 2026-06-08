@@ -98,6 +98,7 @@ func NewApp() *App {
 		{Title: "client / tui", Description: "connection, keybindings, vim, rendering, chat", KeyPath: "client", ConfigFile: "client.json5"},
 		{Title: "oauth", Description: "connected providers, tokens, status", KeyPath: "oauth", ConfigFile: "oauth"},
 		{Title: "scheduler", Description: "timezone", KeyPath: "scheduler", ConfigFile: "meept.json5"},
+		{Title: "stt", Description: "speech-to-text engine and recording", KeyPath: "stt", ConfigFile: "meept.json5"},
 	}
 
 	advanced := []MenuItem{
@@ -747,6 +748,8 @@ var sectionAliases = map[string]string{
 	"mcpserver": "mcp servers",
 	"menubar":   "client / tui",
 	"oauth":     "oauth",
+	"stt":       "stt",
+	"speech":    "stt",
 }
 
 // JumpToSection searches allItems for a matching section and selects it.

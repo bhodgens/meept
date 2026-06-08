@@ -2,7 +2,9 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"slices"
 
 	"fmt"
@@ -16,8 +18,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/sharedclient"
+	"github.com/caimlas/meept/internal/stt"
 	"github.com/caimlas/meept/internal/tui/render"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
@@ -49,6 +52,19 @@ const maxHistorySize = 100
 
 // flushDelay is how long to wait before flushing dirty messages to the server.
 const flushDelay = 3 * time.Second
+
+// sttState represents the speech-to-text recording state machine.
+type sttState int
+
+const (
+	sttIdle sttState = iota
+	sttRecording
+	sttTranscribing
+)
+
+// doubleEnterTTL is the maximum interval between two Enter presses to
+// be considered a double-enter gesture.
+const doubleEnterTTL = 500 * time.Millisecond
 
 // ChatMessage represents a single chat message.
 type ChatMessage struct {
@@ -175,6 +191,15 @@ type ChatModel struct {
 	steerBadgeStyle       lipgloss.Style
 	followUpBadgeStyle    lipgloss.Style
 	agentActiveBadgeStyle lipgloss.Style
+
+	// Speech-to-text state
+	recordingState sttState       // current state in the STT state machine
+	transcriber    stt.Transcriber // nil if STT disabled or unavailable
+	sttConfig      stt.Config
+	sttAvailable   bool   // true if engine dependencies found
+	sttEnabled     bool   // true if stt is enabled in config
+	sttAutoSend    bool   // true if transcription results should auto-send
+	lastEnterTime  time.Time // tracks double-enter detection for STT activation
 }
 
 // RPCClient interface for the chat model.
@@ -312,6 +337,38 @@ func NewChatModelWithConfig(rpc RPCClient, userStyle, assistantStyle, systemStyl
 			Padding(0, 1).
 			Bold(true),
 	}
+}
+
+// InitSTT initializes speech-to-text support from the given configuration.
+// This must be called after NewChatModelWithConfig if STT is desired.
+// If enabled is false or the engine is unavailable, STT features are disabled.
+func (m *ChatModel) InitSTT(cfg stt.Config, enabled, autoSend bool) {
+	m.sttEnabled = enabled
+	m.sttAutoSend = autoSend
+	m.sttConfig = cfg
+	m.recordingState = sttIdle
+
+	if !enabled {
+		return
+	}
+
+	// Check if the engine is available
+	if err := stt.CheckAvailable(cfg); err != nil {
+		slog.Warn("stt engine unavailable", "engine", cfg.Engine, "error", err)
+		m.sttAvailable = false
+		return
+	}
+
+	// Create the transcriber
+	t, err := stt.NewTranscriber(cfg)
+	if err != nil {
+		slog.Warn("stt transcriber creation failed", "engine", cfg.Engine, "error", err)
+		m.sttAvailable = false
+		return
+	}
+
+	m.transcriber = t
+	m.sttAvailable = true
 }
 
 func generateConversationID() string {
@@ -474,6 +531,18 @@ type FollowUpRestoredMsg struct {
 	Count int
 }
 
+// STTResultMsg carries the transcription result from the stt engine.
+type STTResultMsg struct {
+	Text string
+	Err  error
+}
+
+// ChatToastMsg requests the parent app to show a toast notification.
+type ChatToastMsg struct {
+	Title   string
+	Message string
+}
+
 // ProgressState holds current progress for display in chat.
 type ProgressState struct {
 	AgentID       string
@@ -609,6 +678,16 @@ func (m *ChatModel) SetFocusFromSidebar() {
 // HandleEscape handles escape key behavior.
 // Returns a command if an action was taken.
 func (m *ChatModel) HandleEscape() tea.Cmd {
+	// If recording, cancel and discard audio
+	if m.recordingState == sttRecording {
+		m.cancelRecording()
+		return nil
+	}
+	// If transcribing, cancel and return to idle
+	if m.recordingState == sttTranscribing {
+		m.recordingState = sttIdle
+		return nil
+	}
 	// If message is selected, deselect it
 	if m.selectedMsgIdx >= 0 {
 		m.selectedMsgIdx = -1
@@ -841,7 +920,7 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			if m.focused != FocusInput {
 				return nil
 			}
-			return m.doSendMessage()
+			return m.handleEnter()
 
 		case "shift+enter", "ctrl+j":
 			// Shift+Enter or Ctrl+J inserts a newline
@@ -956,6 +1035,32 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 			m.textarea, taCmd = m.textarea.Update(msg)
 			return taCmd
 		}
+
+	case STTResultMsg:
+		m.recordingState = sttIdle
+		if msg.Err != nil {
+			return func() tea.Msg {
+				return ChatToastMsg{
+					Title:   "stt error",
+					Message: msg.Err.Error(),
+				}
+			}
+		}
+		if strings.TrimSpace(msg.Text) == "" {
+			return func() tea.Msg {
+				return ChatToastMsg{
+					Title:   "stt",
+					Message: "no speech detected",
+				}
+			}
+		}
+		// Place transcription result in textarea
+		m.textarea.SetValue(msg.Text)
+		m.textarea.CursorEnd()
+		if m.sttAutoSend {
+			return m.doSendMessage()
+		}
+		return nil
 
 	case ChatResponseMsg:
 		m.loading = false
@@ -1858,65 +1963,74 @@ func (m *ChatModel) View() string {
 		inputBorder = m.focusedBorder
 	}
 
-	// Build input area: optional attachments line + textarea
+	// Build input area: optional attachments line + textarea (or STT overlay)
 	var inputContent strings.Builder
 
-	// Show attached files in orange [filename.ext] format
-	if len(m.attachments) > 0 {
-		attachStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316")) // orange
-		attachLabels := make([]string, 0, len(m.attachments))
-		for _, path := range m.attachments {
-			name := filepath.Base(path)
-			attachLabels = append(attachLabels, attachStyle.Render("["+name+"]"))
-		}
-		inputContent.WriteString(strings.Join(attachLabels, " "))
-		inputContent.WriteString("\n")
-	}
-
-	// Render input with ghost text completion
-	ghostText := m.renderInputWithGhostText()
-	if ghostText != "" {
-		// Render styled ghost text (textarea will render cursor on top)
-		inputContent.WriteString(ghostText)
+	if m.recordingState == sttRecording || m.recordingState == sttTranscribing {
+		// STT recording/transcribing overlay: replace normal input area
+		inputContent.WriteString(m.renderSTTOverlay())
 	} else {
-		// No ghost - use normal textarea rendering
-		inputView := m.textarea.View()
-		if m.historyIdx >= 0 {
-			history := m.currentHistory()
-			historyIndicator := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6B7280")).
-				Italic(true).
-				Render(fmt.Sprintf(" [history %d/%d]", m.historyIdx+1, len(history)))
-			inputView += historyIndicator
+		// Normal input rendering
+
+		// Show attached files in orange [filename.ext] format
+		if len(m.attachments) > 0 {
+			attachStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F97316")) // orange
+			attachLabels := make([]string, 0, len(m.attachments))
+			for _, path := range m.attachments {
+				name := filepath.Base(path)
+				attachLabels = append(attachLabels, attachStyle.Render("["+name+"]"))
+			}
+			inputContent.WriteString(strings.Join(attachLabels, " "))
+			inputContent.WriteString("\n")
 		}
-		inputContent.WriteString(inputView)
+
+		// Render input with ghost text completion
+		ghostText := m.renderInputWithGhostText()
+		if ghostText != "" {
+			// Render styled ghost text (textarea will render cursor on top)
+			inputContent.WriteString(ghostText)
+		} else {
+			// No ghost - use normal textarea rendering
+			inputView := m.textarea.View()
+			if m.historyIdx >= 0 {
+				history := m.currentHistory()
+				historyIndicator := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#6B7280")).
+					Italic(true).
+					Render(fmt.Sprintf(" [history %d/%d]", m.historyIdx+1, len(history)))
+				inputView += historyIndicator
+			}
+			inputContent.WriteString(inputView)
+		}
 	}
 
 	inputStyle := inputBorder.Width(m.width - 2)
 	b.WriteString(inputStyle.Render(inputContent.String()))
 
-	// Render slash command completions below input (only when / is typed)
-	inputValue := m.textarea.Value()
-	if strings.HasPrefix(inputValue, "/") {
-		commands := builtinCommands()
-		filter := strings.TrimPrefix(inputValue, "/")
-		filter = strings.TrimSpace(filter)
+	// Render slash command completions below input (only when / is typed and not recording)
+	if m.recordingState == sttIdle {
+		inputValue := m.textarea.Value()
+		if strings.HasPrefix(inputValue, "/") {
+			commands := builtinCommands()
+			filter := strings.TrimPrefix(inputValue, "/")
+			filter = strings.TrimSpace(filter)
 
-		// Filter commands
-		var matches []string
-		for _, cmd := range commands {
-			if filter == "" || strings.HasPrefix(cmd, filter) {
-				matches = append(matches, cmd)
+			// Filter commands
+			var matches []string
+			for _, cmd := range commands {
+				if filter == "" || strings.HasPrefix(cmd, filter) {
+					matches = append(matches, cmd)
+				}
 			}
-		}
 
-		if len(matches) > 0 {
-			// Show all matching commands (including all when just / is typed)
-			// Add newline BEFORE completions line
-			b.WriteString("\n")
-			completions := "/" + strings.Join(matches, "  /")
-			completionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).PaddingLeft(2)
-			b.WriteString(completionStyle.Render(completions))
+			if len(matches) > 0 {
+				// Show all matching commands (including all when just / is typed)
+				// Add newline BEFORE completions line
+				b.WriteString("\n")
+				completions := "/" + strings.Join(matches, "  /")
+				completionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).PaddingLeft(2)
+				b.WriteString(completionStyle.Render(completions))
+			}
 		}
 	}
 
@@ -1947,6 +2061,11 @@ func (m *ChatModel) Reset() {
 	if m.history != nil {
 		m.history.Reset("")
 	}
+	// Reset STT state
+	if m.recordingState != sttIdle {
+		m.cancelRecording()
+	}
+	m.lastEnterTime = time.Time{}
 	m.updateViewport()
 }
 
@@ -2739,4 +2858,188 @@ func (m *ChatModel) renderQueueIndicator() string {
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, badges...)
+}
+
+// ============================================================================
+// Speech-to-Text Methods
+// ============================================================================
+
+// handleEnter processes the Enter key with STT-aware double-enter detection.
+//
+// State transitions:
+//   - sttIdle + empty input + double-enter  -> sttRecording (or toast if unavailable)
+//   - sttIdle + non-empty input              -> send message (normal)
+//   - sttIdle + empty input + single-enter  -> nothing (normal)
+//   - sttRecording + double-enter           -> sttTranscribing
+//   - sttRecording + single-enter            -> nothing
+//   - sttTranscribing                        -> nothing (wait for result)
+func (m *ChatModel) handleEnter() tea.Cmd {
+	input := strings.TrimSpace(m.textarea.Value())
+
+	switch m.recordingState {
+	case sttRecording:
+		// Double-enter while recording: stop and transcribe.
+		now := time.Now()
+		if now.Sub(m.lastEnterTime) < doubleEnterTTL {
+			return m.stopRecording()
+		}
+		m.lastEnterTime = now
+		return nil
+
+	case sttTranscribing:
+		// Already transcribing, ignore enter.
+		return nil
+
+	default:
+		// sttIdle: check for empty-input double-enter to start recording
+		if input == "" && len(m.attachments) == 0 {
+			now := time.Now()
+			if now.Sub(m.lastEnterTime) < doubleEnterTTL {
+				m.lastEnterTime = time.Time{} // reset
+				return m.startRecording()
+			}
+			m.lastEnterTime = now
+			return nil
+		}
+		// Normal send (has text or attachments)
+		m.lastEnterTime = time.Time{}
+		return m.doSendMessage()
+	}
+}
+
+// startRecording begins speech-to-text recording.
+// Returns a toast if STT is not enabled or the engine is unavailable.
+func (m *ChatModel) startRecording() tea.Cmd {
+	if !m.sttEnabled {
+		return func() tea.Msg {
+			return ChatToastMsg{
+				Title:   "stt",
+				Message: "speech-to-text is disabled",
+			}
+		}
+	}
+	if !m.sttAvailable {
+		return func() tea.Msg {
+			return ChatToastMsg{
+				Title:   "stt",
+				Message: fmt.Sprintf("%s not available", m.sttConfig.Engine),
+			}
+		}
+	}
+	if m.transcriber == nil {
+		return func() tea.Msg {
+			return ChatToastMsg{
+				Title:   "stt",
+				Message: "no transcriber configured",
+			}
+		}
+	}
+
+	m.recordingState = sttRecording
+	err := m.transcriber.Start(context.Background(), func(r stt.Result) {
+		// Partial results are ignored for now; we only use the final Stop() result.
+	})
+	if err != nil {
+		m.recordingState = sttIdle
+		return func() tea.Msg {
+			return ChatToastMsg{
+				Title:   "stt error",
+				Message: err.Error(),
+			}
+		}
+	}
+	return nil
+}
+
+// stopRecording stops the transcriber and returns a command that yields
+// the transcription result as an STTResultMsg.
+func (m *ChatModel) stopRecording() tea.Cmd {
+	m.recordingState = sttTranscribing
+	t := m.transcriber
+	return func() tea.Msg {
+		text, err := t.Stop()
+		return STTResultMsg{Text: text, Err: err}
+	}
+}
+
+// cancelRecording stops the transcriber and discards the result.
+func (m *ChatModel) cancelRecording() {
+	if m.transcriber != nil && m.transcriber.IsRecording() {
+		// Best-effort stop in a goroutine; we discard the result.
+		go func() {
+			_, _ = m.transcriber.Stop()
+		}()
+	}
+	m.recordingState = sttIdle
+}
+
+// renderSTTOverlay renders the STT recording/transcribing overlay in place
+// of the normal textarea content.
+func (m *ChatModel) renderSTTOverlay() string {
+	orange := lipgloss.Color("#F97316")
+	darkOrange := lipgloss.Color("#9A3412")
+
+	var content strings.Builder
+	overlayHeight := 3
+
+	if m.recordingState == sttRecording {
+		// Center "speak to transcribe..." in bold black on orange
+		promptStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Bold(true)
+		prompt := promptStyle.Render("speak to transcribe...")
+
+		// Top padding line
+		content.WriteString("\n")
+		// Center the prompt within the available width
+		availWidth := m.width - 6 // account for borders + padding
+		if availWidth < 1 {
+			availWidth = 1
+		}
+		promptWidth := lipgloss.Width(prompt)
+		if promptWidth < availWidth {
+			padding := (availWidth - promptWidth) / 2
+			content.WriteString(strings.Repeat(" ", padding))
+		}
+		content.WriteString(prompt)
+		content.WriteString("\n")
+
+		// Bottom hint line
+		hintStyle := lipgloss.NewStyle().
+			Foreground(darkOrange).
+			Italic(true)
+		hint := hintStyle.Render("double-enter to stop  |  esc to cancel")
+		hintWidth := lipgloss.Width(hint)
+		if hintWidth < availWidth {
+			padding := (availWidth - hintWidth) / 2
+			content.WriteString(strings.Repeat(" ", padding))
+		}
+		content.WriteString(hint)
+	} else {
+		// sttTranscribing: dimmed "transcribing..."
+		promptStyle := lipgloss.NewStyle().
+			Foreground(darkOrange).
+			Bold(true)
+		prompt := promptStyle.Render("transcribing...")
+
+		content.WriteString("\n")
+		availWidth := m.width - 6
+		if availWidth < 1 {
+			availWidth = 1
+		}
+		promptWidth := lipgloss.Width(prompt)
+		if promptWidth < availWidth {
+			padding := (availWidth - promptWidth) / 2
+			content.WriteString(strings.Repeat(" ", padding))
+		}
+		content.WriteString(prompt)
+		content.WriteString("\n")
+		content.WriteString("\n") // extra padding for transcribing state
+	}
+
+	// Wrap in orange background style
+	overlayStyle := lipgloss.NewStyle().
+		Background(orange).
+		Height(overlayHeight)
+	return overlayStyle.Render(content.String())
 }

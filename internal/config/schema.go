@@ -45,6 +45,7 @@ type Config struct {
 	Bots              BotsConfig              `json:"bots"                toml:"bots"`
 	Plans             PlansConfig             `json:"plans"               toml:"plans"`
 	Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
+	STT               STTConfig               `json:"stt"                 toml:"stt"`
 	OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
 }
 
@@ -1533,6 +1534,15 @@ func DefaultConfig() *Config {
 			AutoPauseOnConsecutiveFails: 5,
 			WebhookEnabled:              false,
 		},
+		STT: STTConfig{
+			Enabled:    false,
+			Engine:     "whisper",
+			Language:   "en",
+			AutoSend:   false,
+			Whisper:    WhisperConfig{BinPath: "whisper-cli", ModelPath: "", Threads: 4},
+			Parakeet:   ParakeetConfig{BinPath: "parakeet-transcribe", ModelPath: ""},
+			Recording:  RecordingConfig{RecorderBin: "ffmpeg", SampleRate: 16000, Channels: 1, Format: "wav"},
+		},
 	}
 }
 
@@ -1571,4 +1581,42 @@ type OAuthConfig struct {
 type OAuthProviderEntry struct {
 	ClientID     string `json:"client_id"     toml:"client_id"`
 	ClientSecret string `json:"client_secret" toml:"client_secret"`
+}
+
+// STTConfig holds configuration for speech-to-text transcription.
+type STTConfig struct {
+	Enabled  bool              `json:"enabled"       toml:"enabled"`
+	Engine   string            `json:"engine"        toml:"engine"`
+	Language string            `json:"language"      toml:"language"`
+	AutoSend bool              `json:"auto_send"     toml:"auto_send"`
+	Whisper  WhisperConfig     `json:"whisper"       toml:"whisper"`
+	Parakeet ParakeetConfig    `json:"parakeet"      toml:"parakeet"`
+	Native   NativeConfig      `json:"native"        toml:"native"`
+	Recording RecordingConfig  `json:"recording"     toml:"recording"`
+}
+
+// WhisperConfig holds whisper.cpp engine settings.
+type WhisperConfig struct {
+	BinPath   string `json:"bin_path"   toml:"bin_path"`
+	ModelPath string `json:"model_path" toml:"model_path"`
+	Threads   int    `json:"threads"    toml:"threads"`
+}
+
+// ParakeetConfig holds parakeet.cpp engine settings.
+type ParakeetConfig struct {
+	BinPath   string `json:"bin_path"   toml:"bin_path"`
+	ModelPath string `json:"model_path" toml:"model_path"`
+}
+
+// NativeConfig holds native (OS-level) speech recognition settings.
+type NativeConfig struct {
+	// macOS Speech framework / Windows SAPI - no extra config needed.
+}
+
+// RecordingConfig holds audio recording settings for STT.
+type RecordingConfig struct {
+	RecorderBin string `json:"recorder_bin" toml:"recorder_bin"`
+	SampleRate  int    `json:"sample_rate"  toml:"sample_rate"`
+	Channels    int    `json:"channels"     toml:"channels"`
+	Format      string `json:"format"       toml:"format"`
 }

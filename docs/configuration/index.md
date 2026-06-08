@@ -62,6 +62,21 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
 - **Plans** - Plan lifecycle, approval workflow, and task synthesis
 - **Scheduler** - Background job scheduling
 - **Workspace** - Git-backed task tracking
+- **Speech-to-Text (STT)** - Client-side voice transcription for TUI and Flutter
+  - `stt.enabled` - Enable/disable speech-to-text (default: `false`)
+  - `stt.engine` - Transcription engine: `"whisper"`, `"parakeet"`, or `"native"` (default: `"whisper"`)
+  - `stt.language` - Language code for transcription (default: `"en"`)
+  - `stt.auto_send` - Send transcription immediately without review (default: `false`)
+  - `stt.whisper.bin_path` - Path to whisper-cli binary (default: `"whisper-cli"`)
+  - `stt.whisper.model_path` - Path to whisper model file (default: `~/.meept/models/ggml-base.en.bin`)
+  - `stt.whisper.threads` - Number of threads for whisper (default: `4`)
+  - `stt.parakeet.bin_path` - Path to parakeet CLI binary
+  - `stt.parakeet.model_path` - Path to parakeet model file
+  - `stt.recording.recorder_bin` - Audio recorder: `"ffmpeg"` or `"sox"` (default: `"ffmpeg"`)
+  - `stt.recording.sample_rate` - Sample rate in Hz (default: `16000`)
+  - `stt.recording.channels` - Audio channels (default: `1`)
+  - `stt.recording.format` - Audio format: `"wav"`, `"flac"`, or `"ogg"` (default: `"wav"`)
+  - See [Speech-to-Text](../workflows/speech-to-text.md) for full feature documentation
 
 ### Integration Configuration
 

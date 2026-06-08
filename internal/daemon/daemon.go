@@ -555,6 +555,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("MCP over HTTP+SSE enabled", "path", mcpPath)
 			}
 
+			// Bot webhook support (if bot manager is available)
+			if components.BotManager != nil {
+				httpOpts = append(httpOpts, http.WithBotWebhook(botpkg.NewWebhookHandler(components.BotManager)))
+				logger.Info("Bot webhook endpoint enabled", "path", "/api/v1/bot/{botID}/trigger")
+			}
+
 			var metricsService interface {
 				GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error)
 				GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error)
