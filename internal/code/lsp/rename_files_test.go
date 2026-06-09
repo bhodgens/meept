@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/caimlas/meept/internal/config"
 )
 
 // TestWillRenameFiles tests the WillRenameFiles client method
@@ -28,20 +30,37 @@ func TestWillRenameFiles(t *testing.T) {
 		responseBytes, _ := json.Marshal(mockResponse)
 
 		// Create mock transport
-		mockTransport := &mockTransport{
-			readData: []byte(`{"jsonrpc":"2.0","id":1,"result":` + string(responseBytes) + `}`),
-		}
-
-		client := NewClient(mockTransport)
+		transport := newMockTransport()
+		client := NewClient(transport)
 		client.Start(context.Background())
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		// Inject async response for initialize call (id=1)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			transport.injectResponse(&JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      float64(1),
+				Result:  json.RawMessage(`{"capabilities":{"workspace":{"fileOperations":{"willRename":{"filters":[{"scheme":"file"}]}}}}}`),
+			})
+		}()
+
 		// Initialize with mock server
 		if err := client.Initialize(ctx, "file:///test"); err != nil {
 			t.Fatalf("Initialize failed: %v", err)
 		}
+
+		// Inject async response for willRenameFiles call (id=2)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			transport.injectResponse(&JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      float64(2),
+				Result:  json.RawMessage(responseBytes),
+			})
+		}()
 
 		// Call WillRenameFiles
 		result, err := client.WillRenameFiles(ctx, "file:///test/old.go", "file:///test/new.go")
@@ -59,19 +78,36 @@ func TestWillRenameFiles(t *testing.T) {
 	})
 
 	t.Run("null response handling", func(t *testing.T) {
-		mockTransport := &mockTransport{
-			readData: []byte(`{"jsonrpc":"2.0","id":1,"result":null}`),
-		}
-
-		client := NewClient(mockTransport)
+		transport := newMockTransport()
+		client := NewClient(transport)
 		client.Start(context.Background())
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		// Inject async response for initialize call (id=1)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			transport.injectResponse(&JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      float64(1),
+				Result:  json.RawMessage(`{"capabilities":{"workspace":{"fileOperations":{"willRename":{"filters":[{"scheme":"file"}]}}}}}`),
+			})
+		}()
+
 		if err := client.Initialize(ctx, "file:///test"); err != nil {
 			t.Fatalf("Initialize failed: %v", err)
 		}
+
+		// Inject async null response for willRenameFiles call (id=2)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			transport.injectResponse(&JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      float64(2),
+				Result:  json.RawMessage(`null`),
+			})
+		}()
 
 		result, err := client.WillRenameFiles(ctx, "file:///test/old.go", "file:///test/new.go")
 		if err != nil {
@@ -130,7 +166,7 @@ func TestHasWillRenameFiles(t *testing.T) {
 // TestManagerWillRenameFiles tests the manager's WillRenameFiles wrapper
 func TestManagerWillRenameFiles(t *testing.T) {
 	t.Run("no servers available", func(t *testing.T) {
-		manager := NewManager(LSPConfig{})
+		manager := NewManager(config.LSPConfig{})
 
 		ctx := context.Background()
 		result, err := manager.WillRenameFiles(ctx, "file:///old.go", "file:///new.go")
@@ -142,21 +178,4 @@ func TestManagerWillRenameFiles(t *testing.T) {
 			t.Error("Expected nil result when no servers available")
 		}
 	})
-}
-
-// mockTransport implements the Transport interface for testing
-type mockTransport struct {
-	readData []byte
-}
-
-func (m *mockTransport) Read(ctx context.Context) ([]byte, error) {
-	return m.readData, nil
-}
-
-func (m *mockTransport) Write(ctx context.Context, data []byte) error {
-	return nil
-}
-
-func (m *mockTransport) Close() error {
-	return nil
 }

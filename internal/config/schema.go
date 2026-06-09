@@ -1055,8 +1055,11 @@ func DefaultConfig() *Config {
 				SocketPath: "~/.meept/meept.sock",
 			},
 			HTTP: HTTPTransportConfig{
-				Enabled: false,
-				Addr:    ":8081",
+				Enabled:     false,
+				Addr:        ":8081",
+				RequireAuth: true,
+				TLSCertFile: "~/.meept/certs/tls.crt",
+				TLSKeyFile:  "~/.meept/certs/tls.key",
 			},
 		},
 		LLM: LLMConfig{

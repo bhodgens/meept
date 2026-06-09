@@ -410,10 +410,12 @@ func loadWeights(path string, logger *slog.Logger) (*modelWeights, error) {
 	// Remaining weights: linear layer + layer norm
 	mw.linearOut = weights[wIdx:]
 
-	logger.Info("loaded model weights",
-		"hiddenIn", hiddenIn, "hiddenOut", hiddenOut,
-		"vocabSize", vocabSize, "maxSeqLen", maxSeqLen,
-		"totalWeights", len(weights))
+	if logger != nil {
+		logger.Info("loaded model weights",
+			"hiddenIn", hiddenIn, "hiddenOut", hiddenOut,
+			"vocabSize", vocabSize, "maxSeqLen", maxSeqLen,
+			"totalWeights", len(weights))
+	}
 
 	return mw, nil
 }

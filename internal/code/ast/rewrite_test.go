@@ -108,13 +108,14 @@ func Goodbye() string {
 package main
 
 func Test() {
-	x := 1
-	y := 2
+	x = 1
+	y = 2
 }
 `)
 
-		// Query that matches nested nodes
-		query := "(assignment_expression left: (identifier) @var)"
+		// Query that matches assignment statements in Go
+		// Note: Go tree-sitter uses assignment_statement with expression_list on left
+		query := "(assignment_statement left: (expression_list (identifier) @var))"
 		template := "{{var}} = 0 // zeroed"
 
 		result, err := rewriter.RunRewrite(source, LangGo, query, template)

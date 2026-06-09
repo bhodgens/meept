@@ -115,12 +115,12 @@ func (mi ModelInfo) ValidDimension(dim int) int {
 			return s
 		}
 	}
-	// Return closest supported dimension
-	best := mi.Dimension
-	bestDist := abs(mi.Dimension - dim)
+	// Return closest supported dimension; on ties prefer lower dimension (closer to 512 center)
+	best := 0
+	bestDist := dim + 768 + 1 // larger than any possible distance
 	for _, s := range supportedDims {
 		d := abs(s - dim)
-		if d < bestDist {
+		if d < bestDist || (d == bestDist && abs(s-512) < abs(best-512)) {
 			best = s
 			bestDist = d
 		}

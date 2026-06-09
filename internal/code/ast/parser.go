@@ -101,6 +101,9 @@ func (pm *ParserManager) Parse(ctx context.Context, source []byte, lang Language
 	lock.Lock()
 	defer lock.Unlock()
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	tree, err := parser.ParseCtx(ctx, nil, source)
 	if err != nil {
 		return nil, fmt.Errorf("parse error: %w", err)
@@ -272,6 +275,9 @@ func (pm *ParserManager) GetTree(ctx context.Context, source []byte, lang Langua
 	lock.Lock()
 	defer lock.Unlock()
 
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return parser.ParseCtx(ctx, nil, source)
 }
 

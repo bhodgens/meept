@@ -226,10 +226,15 @@ type ContextFirewall struct {
 	compressor   *ContextCompressor
 	compactor    *ContextCompactor
 
+	compactorTriggerRatio float64
+
 	// Counters (atomic-safe for concurrent callers)
 	summarizationFailures atomic.Uint64
 	droppedMessages       atomic.Uint64
 	dropEvents            atomic.Uint64
+	compactionEvents       atomic.Uint64
+	compactionFallbacks    atomic.Uint64
+	compactionTokensSaved  atomic.Uint64
 }
 
 // FirewallStats is a snapshot of firewall counters including compression stats.
@@ -246,6 +251,10 @@ type FirewallStats struct {
 	// Quality metrics (populated when ProactiveCompression is enabled)
 	AvgQualityScore   float64 // Running average quality score across compressions
 	TotalCompressions uint64  // Total number of compression passes applied
+	// Compaction stats (direct compactor trigger in processMessages)
+	CompactionEvents       uint64
+	CompactionFallbacks    uint64
+	CompactionTokensSaved  uint64
 }
 
 // Stats returns a snapshot of firewall counters. When proactive compression
@@ -255,6 +264,9 @@ func (f *ContextFirewall) Stats() FirewallStats {
 		SummarizationFailures: f.summarizationFailures.Load(),
 		DroppedMessages:       f.droppedMessages.Load(),
 		DropEvents:            f.dropEvents.Load(),
+		CompactionEvents:      f.compactionEvents.Load(),
+		CompactionFallbacks:   f.compactionFallbacks.Load(),
+		CompactionTokensSaved:  f.compactionTokensSaved.Load(),
 	}
 
 	if f.compressor != nil {
@@ -372,11 +384,14 @@ func NewContextFirewall(
 }
 
 // SetCompactor sets the ContextCompactor for smart summarization.
-func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor) {
+func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor, triggerRatio ...float64) {
 	if compactor == nil {
 		return
 	}
 	f.compactor = compactor
+	if len(triggerRatio) > 0 {
+		f.compactorTriggerRatio = triggerRatio[0]
+	}
 	if f.compressor != nil {
 		f.compressor.SetCompactor(compactor)
 	}
@@ -493,6 +508,33 @@ func (f *ContextFirewall) processMessages(ctx context.Context, messages []ChatMe
 	// Estimate current token usage using tokenizer
 	currentTokens := f.countTokens(result)
 	utilization := float64(currentTokens) / float64(f.model.ContextLimit)
+
+	// Compactor trigger: if a trigger ratio is set and utilization exceeds it,
+	// attempt compaction before proactive compression.
+	if f.compactor != nil && f.compactorTriggerRatio > 0 && utilization >= f.compactorTriggerRatio {
+		before := currentTokens
+		cr := f.compactor.Compact(ctx, result)
+		if cr.Compacted {
+			f.compactionEvents.Add(1)
+			saved := before - cr.TokensAfter
+			if saved > 0 {
+				f.compactionTokensSaved.Add(uint64(saved))
+			}
+			f.logger.Info("context compaction applied",
+				"tokens_before", before,
+				"tokens_after", cr.TokensAfter,
+				"utilization_before", utilization,
+			)
+			result = cr.Messages
+			currentTokens = cr.TokensAfter
+			utilization = float64(currentTokens) / float64(f.model.ContextLimit)
+		} else {
+			f.compactionFallbacks.Add(1)
+			f.logger.Debug("compaction returned without compacting",
+				"utilization", utilization,
+			)
+		}
+	}
 
 	// Proactive compression: run the multi-stage compressor before the
 	// legacy pipeline so that the more granular thresholds can reduce

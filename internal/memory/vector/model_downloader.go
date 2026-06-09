@@ -35,6 +35,7 @@ type ModelDownloader struct {
 	cacheDir  string
 	client    *http.Client
 	logger    *slog.Logger
+	apiBase   string
 }
 
 // NewModelDownloader creates a model downloader with the given cache directory.
@@ -52,7 +53,8 @@ func NewModelDownloader(cacheDir string, logger *slog.Logger) *ModelDownloader {
 		client: &http.Client{
 			Timeout: 30 * time.Minute,
 		},
-		logger: logger,
+		logger:  logger,
+		apiBase: "https://huggingface.co",
 	}
 }
 
@@ -77,7 +79,7 @@ func (d *ModelDownloader) DownloadModel(ctx context.Context, modelID string) (*C
 
 	// Download model files
 	hfPath := url.QueryEscape(modelID)
-	hfHUB := "https://huggingface.co"
+	hfHUB := d.apiBase
 
 	d.logger.Info("downloading model", "model", modelID)
 
@@ -147,7 +149,7 @@ func (d *ModelDownloader) CheckForUpdates(modelID string) (newCommit string, err
 	}
 
 	// Get current commit from HuggingFace API
-	apiURL := fmt.Sprintf("https://huggingface.co/api/models/%s", modelID)
+	apiURL := fmt.Sprintf("%s/api/models/%s", d.apiBase, modelID)
 	resp, err := d.client.Get(apiURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch model info: %w", err)
@@ -277,7 +279,7 @@ func (d *ModelDownloader) downloadFile(ctx context.Context, url, localPath strin
 
 // getCommitInfo fetches the latest commit SHA and modification time from HuggingFace.
 func (d *ModelDownloader) getCommitInfo(modelID string) (commitSHA string, modified time.Time, err error) {
-	apiURL := fmt.Sprintf("https://huggingface.co/api/models/%s", modelID)
+	apiURL := fmt.Sprintf("%s/api/models/%s", d.apiBase, modelID)
 	resp, err := d.client.Get(apiURL)
 	if err != nil {
 		return "", time.Time{}, err
