@@ -106,7 +106,7 @@ type ContextCompactor struct {
 	summarizer  Chatter
 	tokenizer   Tokenizer
 	logger      *slog.Logger
-	fileOpsMu   sync.Mutex
+	mu          sync.Mutex
 	fileOps     *FileOperationSet
 	lastSummary string
 }
@@ -122,6 +122,9 @@ func NewContextCompactor(cfg CompactorConfig, summarizer Chatter, tokenizer Toke
 }
 
 func (c *ContextCompactor) Compact(ctx context.Context, messages []ChatMessage) CompactResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	// Strategy "off" skips compaction entirely.
 	strategy := c.config.Strategy
 	if strategy == "" {
@@ -615,8 +618,6 @@ func (c *ContextCompactor) updateFileOps(summary SummaryExtract) {
 	if !c.config.TrackFileOps || c.fileOps == nil {
 		return
 	}
-	c.fileOpsMu.Lock()
-	defer c.fileOpsMu.Unlock()
 	for _, f := range summary.FileReads {
 		c.fileOps.Read[f] = true
 	}

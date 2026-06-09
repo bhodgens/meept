@@ -299,7 +299,7 @@ var CommonRules = map[string]string{
 	"go_test_functions": `
 id: go-test-functions
 language: go
-pattern: (function_declaration name: (identifier) @name)
+pattern: "(function_declaration name: (identifier) @name)"
 constraints:
   - regex:
       node: name
@@ -321,7 +321,7 @@ constraints:
 	"empty_if_blocks": `
 id: empty-if-blocks
 language: go
-pattern: (if_statement consequence: (block) @body)
+pattern: "(if_statement consequence: (block) @body)"
 constraints:
   - kind:
       node: body
@@ -331,7 +331,7 @@ constraints:
 	"unused_variables": `
 id: unused-variables
 language: go
-pattern: (var_declaration (var_spec name: (identifier) @name))
+pattern: "(var_declaration (var_spec name: (identifier) @name))"
 constraints:
   - regex:
       node: name
@@ -344,7 +344,7 @@ metadata:
 	"debug_prints": `
 id: debug-prints
 language: go
-pattern: (call_expression function: (identifier) @func)
+pattern: "(call_expression function: (identifier) @func)"
 constraints:
   - regex:
       node: func
@@ -357,7 +357,7 @@ metadata:
 	"empty_catch_blocks": `
 id: empty-catch-blocks
 language: go
-pattern: (defer_statement (call_expression function: (identifier) @fn))
+pattern: "(defer_statement (call_expression function: (identifier) @fn))"
 constraints:
   - regex:
       node: fn
@@ -370,7 +370,7 @@ metadata:
 	"long_functions": `
 id: long-functions
 language: go
-pattern: (function_declaration parameters: (parameter_list) @params)
+pattern: "(function_declaration parameters: (parameter_list) @params)"
 constraints:
   - regex:
       node: params
@@ -383,7 +383,7 @@ metadata:
 	"console_logs": `
 id: console-logs
 language: typescript
-pattern: (call_expression function: (member_expression object: (identifier) @obj property: (property_identifier) @prop))
+pattern: "(call_expression function: (member_expression object: (identifier) @obj property: (property_identifier) @prop))"
 constraints:
   - regex:
       node: obj
@@ -399,7 +399,7 @@ metadata:
 	"python_prints": `
 id: python-prints
 language: python
-pattern: (call_expression function: (identifier) @func)
+pattern: "(call_expression function: (identifier) @func)"
 constraints:
   - regex:
       node: func
@@ -412,7 +412,7 @@ metadata:
 	"empty_methods": `
 id: empty-methods
 language: go
-pattern: (method_declaration body: (block) @body)
+pattern: "(method_declaration body: (block) @body)"
 constraints:
   - kind:
       node: body

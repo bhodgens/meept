@@ -10,7 +10,7 @@ func TestParseRule(t *testing.T) {
 		yamlStr := `
 id: test-rule
 language: go
-pattern: (function_declaration name: (identifier) @name)
+pattern: "(function_declaration name: (identifier) @name)"
 constraints:
   - regex:
       node: name
@@ -45,7 +45,7 @@ transform:
 		yamlStr := `
 id: simple-rule
 language: python
-pattern: (function_definition name: (identifier) @name)
+pattern: "(function_definition name: (identifier) @name)"
 `
 		rule, err := ParseRule(yamlStr)
 		if err != nil {
@@ -63,7 +63,7 @@ pattern: (function_definition name: (identifier) @name)
 	t.Run("parse rule missing id", func(t *testing.T) {
 		yamlStr := `
 language: go
-pattern: (function_declaration)
+pattern: "(function_declaration)"
 `
 		_, err := ParseRule(yamlStr)
 		if err == nil {
@@ -85,7 +85,7 @@ language: go
 	t.Run("parse rule missing language", func(t *testing.T) {
 		yamlStr := `
 id: test-rule
-pattern: (function_declaration)
+pattern: "(function_declaration)"
 `
 		_, err := ParseRule(yamlStr)
 		if err == nil {
@@ -119,7 +119,7 @@ func NotATest() {
 		rule, err := ParseRule(`
 id: go-test-functions
 language: go
-pattern: (function_declaration name: (identifier) @name)
+pattern: "(function_declaration name: (identifier) @name)"
 constraints:
   - regex:
       node: name
@@ -198,7 +198,7 @@ func TestFoo() {}
 		rule, err := ParseRule(`
 id: uppercase-names
 language: go
-pattern: (function_declaration name: (identifier) @name)
+pattern: "(function_declaration name: (identifier) @name)"
 transform:
   - type: uppercase
     node: name
@@ -285,7 +285,7 @@ func TestConstraintTypes(t *testing.T) {
 		rule, _ := ParseRule(`
 id: regex-test
 language: go
-pattern: (function_declaration name: (identifier) @name)
+pattern: "(function_declaration name: (identifier) @name)"
 constraints:
   - regex:
       node: name
@@ -305,7 +305,7 @@ constraints:
 		rule, _ := ParseRule(`
 id: kind-test
 language: go
-pattern: (function_declaration body: (block) @body)
+pattern: "(function_declaration body: (block) @body)"
 constraints:
   - kind:
       node: body

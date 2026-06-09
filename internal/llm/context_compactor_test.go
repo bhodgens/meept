@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -18,11 +19,14 @@ import (
 type compactorMockChatter struct {
 	response *Response
 	err      error
+	mu       sync.Mutex
 	called   bool
 	lastMsgs []ChatMessage // messages received in the last Chat call
 }
 
 func (m *compactorMockChatter) Chat(_ context.Context, msgs []ChatMessage, _ ...ChatOption) (*Response, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.called = true
 	m.lastMsgs = msgs
 	if m.err != nil {
