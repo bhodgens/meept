@@ -1,6 +1,6 @@
 # Runtime Lifecycle Gap Closure Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Close all identified gaps in the local LLM runtime lifecycle management system: auto-restart, HTTP/RPC API, metrics, daemon status integration, AutoStop bug, health transitions, individual provider control, CLI health wait, and code quality fixes.
 
@@ -40,7 +40,7 @@
 
 The `StopAll` method currently stops ALL runtimes regardless of `auto_stop_on_exit` config. Fix this and add individual start/stop/restart methods.
 
-- [ ] **Step 1: Add RuntimeStatus type and Status method**
+- [x] **Step 1: Add RuntimeStatus type and Status method**
 
 Add to `internal/llm/runtime_manager.go`:
 
@@ -105,7 +105,7 @@ func (m *RuntimeManager) StatusForProvider(providerID string) (RuntimeStatus, bo
 }
 ```
 
-- [ ] **Step 2: Fix StopAll to respect AutoStop**
+- [x] **Step 2: Fix StopAll to respect AutoStop**
 
 Replace the existing `StopAll` method:
 
@@ -137,7 +137,7 @@ func (m *RuntimeManager) StopAll(ctx context.Context) error {
 }
 ```
 
-- [ ] **Step 3: Add individual Start/Stop/RestartProvider methods**
+- [x] **Step 3: Add individual Start/Stop/RestartProvider methods**
 
 Add to `internal/llm/runtime_manager.go`:
 
@@ -203,7 +203,7 @@ func (m *RuntimeManager) RestartProvider(ctx context.Context, providerID string)
 }
 ```
 
-- [ ] **Step 4: Write tests for new methods**
+- [x] **Step 4: Write tests for new methods**
 
 Add to `internal/llm/runtime_manager_test.go`:
 
@@ -388,7 +388,7 @@ func TestRuntimeManager_StartStopProvider(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```bash
 go test ./internal/llm/... -run "RuntimeManager" -v -count=1
@@ -396,7 +396,7 @@ go test ./internal/llm/... -run "RuntimeManager" -v -count=1
 
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/llm/runtime_manager.go internal/llm/runtime_manager_test.go
@@ -413,7 +413,7 @@ git commit -m "feat(llm): add individual start/stop/restart, status, fix AutoSto
 - Modify: `internal/llm/runtime_manager.go`
 - Modify: `config/models.json5`
 
-- [ ] **Step 1: Add RestartPolicy to config types**
+- [x] **Step 1: Add RestartPolicy to config types**
 
 Add to `internal/llm/runtime_config.go` after the `HealthCheckConfig` struct:
 
@@ -493,7 +493,7 @@ RestartCooldown:    restartCooldown,
 RestartResetAfter:  restartResetAfter,
 ```
 
-- [ ] **Step 2: Add health transition callbacks to HealthChecker**
+- [x] **Step 2: Add health transition callbacks to HealthChecker**
 
 Add to `internal/llm/health_checker.go`. Add callback fields to the struct and invoke them on state transitions:
 
@@ -586,7 +586,7 @@ func (h *HealthChecker) notifyTransition(wasHealthy bool) {
 }
 ```
 
-- [ ] **Step 3: Add auto-restart logic to RuntimeManager**
+- [x] **Step 3: Add auto-restart logic to RuntimeManager**
 
 Add auto-restart state tracking and logic to `internal/llm/runtime_manager.go`:
 
@@ -715,7 +715,7 @@ func (m *RuntimeManager) attemptAutoRestart(providerID string) {
 }
 ```
 
-- [ ] **Step 4: Update config/models.json5**
+- [x] **Step 4: Update config/models.json5**
 
 Add restart policy to the local provider lifecycle section:
 
@@ -743,14 +743,14 @@ Add restart policy to the local provider lifecycle section:
 }
 ```
 
-- [ ] **Step 5: Run tests and build**
+- [x] **Step 5: Run tests and build**
 
 ```bash
 go build ./...
 go test ./internal/llm/... -v -count=1
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/llm/runtime_config.go internal/llm/health_checker.go internal/llm/runtime_manager.go config/models.json5
@@ -765,7 +765,7 @@ git commit -m "feat(llm): add auto-restart policy with configurable attempts and
 - Create: `internal/services/runtime_service.go`
 - Create: `internal/services/runtime_service_test.go`
 
-- [ ] **Step 1: Implement RuntimeService**
+- [x] **Step 1: Implement RuntimeService**
 
 Create `internal/services/runtime_service.go`:
 
@@ -840,7 +840,7 @@ func (s *RuntimeService) RestartProvider(ctx context.Context, providerID string)
 }
 ```
 
-- [ ] **Step 2: Write tests**
+- [x] **Step 2: Write tests**
 
 Create `internal/services/runtime_service_test.go`:
 
@@ -897,7 +897,7 @@ func TestRuntimeService_Status(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 go test ./internal/services/runtime_service_test.go ./internal/services/runtime_service.go -v -count=1
@@ -905,7 +905,7 @@ go test ./internal/services/runtime_service_test.go ./internal/services/runtime_
 
 Expected: All tests pass
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/services/runtime_service.go internal/services/runtime_service_test.go
@@ -921,7 +921,7 @@ git commit -m "feat(services): add RuntimeService for HTTP/RPC transport parity"
 - Modify: `internal/daemon/components.go`
 - Modify: `internal/daemon/daemon.go`
 
-- [ ] **Step 1: Add RuntimeService to ServiceRegistry**
+- [x] **Step 1: Add RuntimeService to ServiceRegistry**
 
 In `internal/services/service.go`, add to the `ServiceRegistry` struct:
 
@@ -943,7 +943,7 @@ if cfg.RuntimeManager != nil {
 }
 ```
 
-- [ ] **Step 2: Pass RuntimeManager to service registry in daemon.go**
+- [x] **Step 2: Pass RuntimeManager to service registry in daemon.go**
 
 In `internal/daemon/daemon.go`, find the `services.NewRegistry(services.Config{...})` call and add:
 
@@ -951,7 +951,7 @@ In `internal/daemon/daemon.go`, find the `services.NewRegistry(services.Config{.
 RuntimeManager: components.RuntimeManager,
 ```
 
-- [ ] **Step 3: Add runtime health to daemon status RPC response**
+- [x] **Step 3: Add runtime health to daemon status RPC response**
 
 In `internal/daemon/daemon.go`, find the `registerBuiltinHandlers` function and locate the `status` handler (the one that builds the `DaemonStatusResponse`). After the existing status map construction, add runtime health data:
 
@@ -973,7 +973,7 @@ if components != nil && components.RuntimeManager != nil {
 }
 ```
 
-- [ ] **Step 4: Build and verify**
+- [x] **Step 4: Build and verify**
 
 ```bash
 go build ./...
@@ -981,7 +981,7 @@ go build ./...
 
 Expected: Clean build
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/services/service.go internal/daemon/components.go internal/daemon/daemon.go
@@ -995,7 +995,7 @@ git commit -m "feat(daemon): wire RuntimeService into service registry and daemo
 **Files:**
 - Modify: `internal/comm/http/server.go`
 
-- [ ] **Step 1: Add runtime HTTP handlers**
+- [x] **Step 1: Add runtime HTTP handlers**
 
 Add to `internal/comm/http/server.go`. First add the route registrations in `setupRESTRoutes`:
 
@@ -1090,13 +1090,13 @@ func (s *Server) handleRuntimeRestart(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 2: Build and verify**
+- [x] **Step 2: Build and verify**
 
 ```bash
 go build ./...
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/comm/http/server.go
@@ -1111,7 +1111,7 @@ git commit -m "feat(http): add runtime management API endpoints"
 - Create: `internal/rpc/runtime.go`
 - Modify: `internal/daemon/daemon.go`
 
-- [ ] **Step 1: Create RPC handlers**
+- [x] **Step 1: Create RPC handlers**
 
 Create `internal/rpc/runtime.go`:
 
@@ -1244,7 +1244,7 @@ func (h *RuntimeRPCHandler) handleRestart(ctx context.Context, params json.RawMe
 }
 ```
 
-- [ ] **Step 2: Wire RPC handlers in daemon.go**
+- [x] **Step 2: Wire RPC handlers in daemon.go**
 
 In `internal/daemon/daemon.go`, find the RPC handler registration section (after other handler registrations) and add:
 
@@ -1256,13 +1256,13 @@ if svcRegistry.Runtime != nil {
 }
 ```
 
-- [ ] **Step 3: Build and verify**
+- [x] **Step 3: Build and verify**
 
 ```bash
 go build ./...
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/rpc/runtime.go internal/daemon/daemon.go
@@ -1277,7 +1277,7 @@ git commit -m "feat(rpc): add runtime management RPC handlers"
 - Modify: `internal/llm/runtime_manager.go`
 - Modify: `internal/daemon/daemon.go`
 
-- [ ] **Step 1: Add metrics recording methods to RuntimeManager**
+- [x] **Step 1: Add metrics recording methods to RuntimeManager**
 
 Add to `internal/llm/runtime_manager.go`. Add a `metricsRecorder` field and setter:
 
@@ -1355,7 +1355,7 @@ if err := m.RestartProvider(ctx, providerID); err != nil {
 }
 ```
 
-- [ ] **Step 2: Implement metrics adapter in daemon.go**
+- [x] **Step 2: Implement metrics adapter in daemon.go**
 
 In `internal/daemon/daemon.go`, add a metrics adapter after the `metricsStoreWrapper`:
 
@@ -1415,13 +1415,13 @@ if metricsStore != nil && components.RuntimeManager != nil {
 }
 ```
 
-- [ ] **Step 3: Build and verify**
+- [x] **Step 3: Build and verify**
 
 ```bash
 go build ./...
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/llm/runtime_manager.go internal/daemon/daemon.go
@@ -1435,7 +1435,7 @@ git commit -m "feat(metrics): add runtime lifecycle metrics (spawn, health, rest
 **Files:**
 - Modify: `cmd/meept/runtime.go`
 
-- [ ] **Step 1: Add --wait flag to runtime start**
+- [x] **Step 1: Add --wait flag to runtime start**
 
 Add a `--wait` flag to `newRuntimeStartCmd`:
 
@@ -1516,7 +1516,7 @@ func runRuntimeStart(ctx context.Context, provider string, wait bool) error {
 }
 ```
 
-- [ ] **Step 2: Add --format flag to runtime status**
+- [x] **Step 2: Add --format flag to runtime status**
 
 Add `--format` flag to `newRuntimeStatusCmd`:
 
@@ -1623,17 +1623,17 @@ func jsonOutput(data any) error {
 }
 ```
 
-- [ ] **Step 3: Fix status command side effect**
+- [x] **Step 3: Fix status command side effect**
 
 The old `runRuntimeStatus` had `os.Remove(pidFile)` for stale PID files. The new `runRuntimeStatusFormatted` does NOT remove stale PID files on status queries, fixing the side effect. Add `encoding/json` to imports.
 
-- [ ] **Step 4: Build and verify**
+- [x] **Step 4: Build and verify**
 
 ```bash
 go build ./cmd/meept/...
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/meept/runtime.go
@@ -1647,7 +1647,7 @@ git commit -m "feat(cli): add --wait and --format flags to runtime commands, fix
 **Files:**
 - Modify: `internal/comm/http/server.go`
 
-- [ ] **Step 1: Add runtime info to handleDaemonStatus**
+- [x] **Step 1: Add runtime info to handleDaemonStatus**
 
 In `internal/comm/http/server.go`, find `handleDaemonStatus`. After the status map is built, add runtime data:
 
@@ -1669,13 +1669,13 @@ if s.services != nil && s.services.Runtime != nil {
 }
 ```
 
-- [ ] **Step 2: Build and verify**
+- [x] **Step 2: Build and verify**
 
 ```bash
 go build ./...
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/comm/http/server.go
@@ -1689,7 +1689,7 @@ git commit -m "feat(http): include runtime health in daemon status response"
 **Files:**
 - Modify: `internal/comm/http/unified_http_test.go`
 
-- [ ] **Step 1: Add runtime endpoint tests**
+- [x] **Step 1: Add runtime endpoint tests**
 
 Add to `internal/comm/http/unified_http_test.go`:
 
@@ -1765,13 +1765,13 @@ func TestUnifiedHTTPServer_RuntimeStatus_WithManager(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run all HTTP tests**
+- [x] **Step 2: Run all HTTP tests**
 
 ```bash
 go test ./internal/comm/http/... -v -count=1 -run "Runtime|Unified"
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/comm/http/unified_http_test.go
@@ -1785,7 +1785,7 @@ git commit -m "test(http): add runtime endpoint tests"
 **Files:**
 - Modify: `docs/configuration/llm-lifecycle.md`
 
-- [ ] **Step 1: Document new features**
+- [x] **Step 1: Document new features**
 
 Add to `docs/configuration/llm-lifecycle.md` after the "How It Works" section:
 
@@ -1868,7 +1868,7 @@ Runtime lifecycle events are recorded to the metrics subsystem:
 | `runtime.restart.failure` | Count of failed restarts |
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/configuration/llm-lifecycle.md

@@ -48,7 +48,7 @@
 - Create: `pkg/models/cluster.go`
 - Test: `pkg/models/cluster_test.go`
 
-- [ ] **Step 1: Write cluster event type tests**
+- [x] **Step 1: Write cluster event type tests**
 
 ```go
 // pkg/models/cluster_test.go
@@ -117,7 +117,7 @@ func TestClusterEvent_MarshalUnmarshal(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd /Users/caimlas/git/meept
@@ -125,7 +125,7 @@ go test ./pkg/models/cluster_test.go -v
 ```
 Expected: FAIL with "undefined: ClusterEvent"
 
-- [ ] **Step 3: Implement cluster event types**
+- [x] **Step 3: Implement cluster event types**
 
 ```go
 // pkg/models/cluster.go
@@ -275,14 +275,14 @@ type NodePayload struct {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 go test ./pkg/models/ -v -run TestClusterEvent
 ```
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pkg/models/cluster.go pkg/models/cluster_test.go
@@ -301,7 +301,7 @@ git commit -m "feat(cluster): add cluster event types and signing
 - Create: `internal/cluster/cluster.go`
 - Test: `internal/cluster/cluster_test.go`
 
-- [ ] **Step 1: Write config loading tests**
+- [x] **Step 1: Write config loading tests**
 
 ```go
 // internal/cluster/cluster_test.go
@@ -376,14 +376,14 @@ func TestMember_MarshalUnmarshal(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 go test ./internal/cluster/ -v
 ```
 Expected: FAIL (package doesn't exist yet)
 
-- [ ] **Step 3: Implement cluster config types**
+- [x] **Step 3: Implement cluster config types**
 
 ```go
 // internal/cluster/cluster.go
@@ -560,7 +560,7 @@ func SaveMember(baseDir string, member *Member) error {
 }
 ```
 
-- [ ] **Step 4: Add UnmarshalJSON5 helper to config package**
+- [x] **Step 4: Add UnmarshalJSON5 helper to config package**
 
 ```go
 // internal/config/json5.go (new file or modify existing)
@@ -576,13 +576,13 @@ func UnmarshalJSON5(data []byte, v interface{}) error {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 go test ./internal/cluster/ -v
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/cluster/cluster.go internal/cluster/cluster_test.go internal/config/json5.go
@@ -603,7 +603,7 @@ git commit -m "feat(cluster): add cluster configuration types
 - Create: `internal/queue/schema_cluster.sql`
 - Test: `internal/queue/cluster_schema_test.go`
 
-- [ ] **Step 1: Write schema migration test**
+- [x] **Step 1: Write schema migration test**
 
 ```go
 // internal/queue/cluster_schema_test.go
@@ -684,14 +684,14 @@ func TestClusterSchemaMigration(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 go test ./internal/queue/ -v -run TestClusterSchema
 ```
 Expected: FAIL (clusterSchema doesn't exist)
 
-- [ ] **Step 3: Add cluster schema to store.go**
+- [x] **Step 3: Add cluster schema to store.go**
 
 ```go
 // internal/queue/store.go - add these after baseSchema
@@ -742,7 +742,7 @@ CREATE INDEX IF NOT EXISTS idx_members_status ON cluster_members(status);
 `
 ```
 
-- [ ] **Step 4: Modify NewStore to apply cluster schema**
+- [x] **Step 4: Modify NewStore to apply cluster schema**
 
 ```go
 // internal/queue/store.go - modify NewStore function
@@ -778,13 +778,13 @@ func NewStore(dbPath string) (*Store, error) {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 go test ./internal/queue/ -v -run TestClusterSchema
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/queue/store.go internal/queue/cluster_schema_test.go

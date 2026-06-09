@@ -1,10 +1,9 @@
 // internal/configui/sections_transport.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildTransportFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	t := &cfg.Transport
 	r := &t.RPC
 	h := &t.HTTP

@@ -1,10 +1,9 @@
 // internal/configui/sections_compaction.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildCompactionFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Compaction
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

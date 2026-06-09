@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
@@ -51,7 +52,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                 // Auto-switch to new session and chat tab
                 if (session != null && context.mounted) {
                   ref.read(activeSessionProvider.notifier).state = session;
-                  ref.read(selectedTabIndexProvider.notifier).state = 0;
+                  context.go('/');
                 }
               }
             },
@@ -177,7 +178,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
       onTap: () => ref.read(activeSessionProvider.notifier).state = session,
       onDoubleTap: () {
         ref.read(activeSessionProvider.notifier).state = session;
-        ref.read(selectedTabIndexProvider.notifier).state = 0;
+        context.go('/');
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

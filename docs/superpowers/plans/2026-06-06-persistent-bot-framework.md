@@ -54,7 +54,7 @@
 
 This is a pre-existing bug: `AgentJob.Execute()` publishes to `"agent.chat"` but `ChatHandler` subscribes to `"chat.request"`. Scheduled agent jobs are silently lost.
 
-- [ ] **Step 1: Write a failing test**
+- [x] **Step 1: Write a failing test**
 
 ```go
 // internal/scheduler/scheduler_test.go
@@ -96,12 +96,12 @@ func TestAgentJob_PublishesToCorrectTopic(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./internal/scheduler/ -run TestAgentJob_PublishesToCorrectTopic -v`
 Expected: FAIL (timeout - message published to `agent.chat`, not `chat.request`)
 
-- [ ] **Step 3: Fix the topic**
+- [x] **Step 3: Fix the topic**
 
 In `internal/scheduler/jobs.go`, change line 211 from:
 
@@ -115,17 +115,17 @@ to:
 delivered := j.bus.Publish("chat.request", msg)
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `go test ./internal/scheduler/ -run TestAgentJob_PublishesToCorrectTopic -v`
 Expected: PASS
 
-- [ ] **Step 5: Run existing scheduler tests**
+- [x] **Step 5: Run existing scheduler tests**
 
 Run: `go test ./internal/scheduler/ -v`
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/scheduler/jobs.go internal/scheduler/scheduler_test.go
@@ -140,7 +140,7 @@ git commit -m "fix(scheduler): correct AgentJob topic from agent.chat to chat.re
 - Create: `internal/bot/types.go`
 - Test: `internal/bot/types_test.go`
 
-- [ ] **Step 1: Write the types test**
+- [x] **Step 1: Write the types test**
 
 ```go
 // internal/bot/types_test.go
@@ -260,12 +260,12 @@ func TestBotDefinition_Validate(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./internal/bot/ -run TestBot -v`
 Expected: FAIL (package doesn't exist)
 
-- [ ] **Step 3: Write the types**
+- [x] **Step 3: Write the types**
 
 ```go
 // internal/bot/types.go
@@ -438,12 +438,12 @@ type BotState struct {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `go test ./internal/bot/ -run TestBot -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/bot/types.go internal/bot/types_test.go
@@ -458,7 +458,7 @@ git commit -m "feat(bot): add bot definition, trigger, and state types"
 - Modify: `internal/agent/spec.go:18-25`
 - Test: `internal/bot/types_test.go` (add validation test)
 
-- [ ] **Step 1: Add the RoleBot constant**
+- [x] **Step 1: Add the RoleBot constant**
 
 In `internal/agent/spec.go`, add after line 24 (`RoleReviewer`):
 
@@ -467,12 +467,12 @@ In `internal/agent/spec.go`, add after line 24 (`RoleReviewer`):
     RoleBot AgentRole = "bot"
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `go build ./internal/agent/...`
 Expected: Success
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/agent/spec.go
@@ -489,7 +489,7 @@ git commit -m "feat(agent): add RoleBot agent role for persistent bots"
 - Create: `internal/bot/store.go`
 - Test: `internal/bot/store_test.go`
 
-- [ ] **Step 1: Write the store tests**
+- [x] **Step 1: Write the store tests**
 
 ```go
 // internal/bot/store_test.go
@@ -686,12 +686,12 @@ func TestStore_UpdateState(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./internal/bot/ -run TestStore -v`
 Expected: FAIL (Store type doesn't exist)
 
-- [ ] **Step 3: Implement the store**
+- [x] **Step 3: Implement the store**
 
 ```go
 // internal/bot/store.go
@@ -863,12 +863,12 @@ func (s *Store) Close() error {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `go test ./internal/bot/ -run TestStore -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/bot/store.go internal/bot/store_test.go
@@ -886,7 +886,7 @@ git commit -m "feat(bot): add SQLite-backed bot definition and state store"
 - Create: `internal/bot/memory_scope.go`
 - Test: `internal/bot/memory_scope_test.go`
 
-- [ ] **Step 1: Add BotID field to Memory struct**
+- [x] **Step 1: Add BotID field to Memory struct**
 
 In `internal/memory/types.go`, add to the `Memory` struct after the `TaskID` field (line 51):
 
@@ -895,7 +895,7 @@ In `internal/memory/types.go`, add to the `Memory` struct after the `TaskID` fie
     BotID string `json:"bot_id,omitempty"`
 ```
 
-- [ ] **Step 2: Write memory scope tests**
+- [x] **Step 2: Write memory scope tests**
 
 ```go
 // internal/bot/memory_scope_test.go
@@ -968,12 +968,12 @@ func TestMemoryNamespace_TagMemory(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `go test ./internal/bot/ -run TestMemoryNamespace -v`
 Expected: FAIL
 
-- [ ] **Step 4: Implement memory namespace**
+- [x] **Step 4: Implement memory namespace**
 
 ```go
 // internal/bot/memory_scope.go
@@ -1038,12 +1038,12 @@ func (n *MemoryNamespace) FilterBotMemories(scope MemoryScope, results []map[str
 }
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `go test ./internal/bot/ -run TestMemoryNamespace -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/memory/types.go internal/bot/memory_scope.go internal/bot/memory_scope_test.go
@@ -1062,7 +1062,7 @@ git commit -m "feat(bot): add memory namespace isolation for bot-scoped memory"
 
 This is the core component that subscribes to bus topics and routes events to bots.
 
-- [ ] **Step 1: Write router tests**
+- [x] **Step 1: Write router tests**
 
 ```go
 // internal/bot/router_test.go
@@ -1183,12 +1183,12 @@ func TestEventActionRouter_Unregister(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./internal/bot/ -run TestEventActionRouter -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement the router**
+- [x] **Step 3: Implement the router**
 
 ```go
 // internal/bot/router.go
@@ -1355,12 +1355,12 @@ func indexOf(s, substr string) int {
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `go test ./internal/bot/ -run TestEventActionRouter -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/bot/router.go internal/bot/router_test.go
@@ -1377,7 +1377,7 @@ git commit -m "feat(bot): add event action router for bus event to bot trigger b
 - Create: `internal/bot/runner.go`
 - Test: `internal/bot/runner_test.go`
 
-- [ ] **Step 1: Write runner tests**
+- [x] **Step 1: Write runner tests**
 
 ```go
 // internal/bot/runner_test.go
@@ -1505,12 +1505,12 @@ func searchString(s, substr string) bool {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./internal/bot/ -run TestBotRunner -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement BotRunner**
+- [x] **Step 3: Implement BotRunner**
 
 ```go
 // internal/bot/runner.go
@@ -1631,12 +1631,12 @@ func (r *BotRunner) AgentSpec() map[string]any {
 
 Note: `AgentConstraints` in the `AgentSpec()` method refers to the `AgentConstraints` type from `internal/agent/spec.go`. In practice this method would return an actual `*agent.AgentSpec` -- the map is shown here for clarity since the full integration with AgentLoop happens in Phase 6.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `go test ./internal/bot/ -run TestBotRunner -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/bot/runner.go internal/bot/runner_test.go
@@ -1653,7 +1653,7 @@ git commit -m "feat(bot): add bot runner with budget checks and prompt construct
 - Create: `internal/bot/lifecycle.go`
 - Test: `internal/bot/lifecycle_test.go`
 
-- [ ] **Step 1: Write lifecycle tests**
+- [x] **Step 1: Write lifecycle tests**
 
 ```go
 // internal/bot/lifecycle_test.go
@@ -1768,12 +1768,12 @@ func TestManager_ListBots(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./internal/bot/ -run TestManager -v`
 Expected: FAIL
 
-- [ ] **Step 3: Implement lifecycle manager**
+- [x] **Step 3: Implement lifecycle manager**
 
 ```go
 // internal/bot/lifecycle.go
@@ -1977,12 +1977,12 @@ func (m *Manager) registerCronTrigger(ctx context.Context, botID string, trigger
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `go test ./internal/bot/ -run TestManager -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/bot/lifecycle.go internal/bot/lifecycle_test.go
@@ -1998,7 +1998,7 @@ git commit -m "feat(bot): add bot lifecycle manager with start/stop/pause/resume
 **Files:**
 - Create: `cmd/meept/bot_cmd.go`
 
-- [ ] **Step 1: Write the CLI command**
+- [x] **Step 1: Write the CLI command**
 
 ```go
 // cmd/meept/bot_cmd.go
@@ -2138,7 +2138,7 @@ func init() {
 
 Note: `rpcCall` is the existing helper in `cmd/meept/main.go` for making JSON-RPC calls. The actual function signature and wiring may differ -- this is a template that will be adapted to match the existing RPC call patterns in the CLI.
 
-- [ ] **Step 2: Register the command in main.go**
+- [x] **Step 2: Register the command in main.go**
 
 In `cmd/meept/main.go`, add to the root command setup:
 
@@ -2146,12 +2146,12 @@ In `cmd/meept/main.go`, add to the root command setup:
 rootCmd.AddCommand(botsCmd)
 ```
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./cmd/meept/`
 Expected: Success (may need adjustments to match existing rpcCall pattern)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add cmd/meept/bot_cmd.go cmd/meept/main.go
@@ -2166,7 +2166,7 @@ git commit -m "feat(cli): add bots subcommand for bot management"
 - Create: `internal/bot/handler.go`
 - Modify: `internal/rpc/server.go` (register bot handlers)
 
-- [ ] **Step 1: Write the RPC handler**
+- [x] **Step 1: Write the RPC handler**
 
 ```go
 // internal/bot/handler.go
@@ -2290,7 +2290,7 @@ func (h *RPCHandler) handleStatus(ctx context.Context, raw json.RawMessage) (any
 }
 ```
 
-- [ ] **Step 2: Register handlers in RPC server**
+- [x] **Step 2: Register handlers in RPC server**
 
 In `internal/rpc/server.go`, add to `registerBuiltinHandlers()`:
 
@@ -2305,12 +2305,12 @@ In `internal/rpc/server.go`, add to `registerBuiltinHandlers()`:
 
 The `botHandler` parameter will be passed during server construction from `components.go`.
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./internal/bot/ ./internal/rpc/`
 Expected: Success
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/bot/handler.go internal/rpc/server.go
@@ -2327,7 +2327,7 @@ git commit -m "feat(bot): add RPC handlers for bot management operations"
 - Create: `internal/bot/webhook.go`
 - Modify: `internal/comm/http/server.go` (register route)
 
-- [ ] **Step 1: Write the webhook handler**
+- [x] **Step 1: Write the webhook handler**
 
 ```go
 // internal/bot/webhook.go
@@ -2433,7 +2433,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- [ ] **Step 2: Register the route**
+- [x] **Step 2: Register the route**
 
 In `internal/comm/http/server.go`, add to the route registration:
 
@@ -2444,12 +2444,12 @@ In `internal/comm/http/server.go`, add to the route registration:
     }
 ```
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./internal/bot/ ./internal/comm/http/`
 Expected: Success
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/bot/webhook.go internal/comm/http/server.go
@@ -2465,7 +2465,7 @@ git commit -m "feat(bot): add HTTP webhook endpoint for bot triggers"
 - Modify: `internal/daemon/components.go` (wire bot components)
 - Modify: `internal/daemon/daemon.go` (shutdown bots)
 
-- [ ] **Step 1: Add BotsConfig to schema**
+- [x] **Step 1: Add BotsConfig to schema**
 
 In `internal/config/schema.go`, add after the `QAgentConfig` struct:
 
@@ -2489,7 +2489,7 @@ type BotsConfig struct {
 
 Add `Bots BotsConfig` to the `Config` struct.
 
-- [ ] **Step 2: Wire components in daemon startup**
+- [x] **Step 2: Wire components in daemon startup**
 
 In `internal/daemon/components.go`, add bot framework initialization after scheduler setup:
 
@@ -2525,7 +2525,7 @@ In `internal/daemon/components.go`, add bot framework initialization after sched
     }
 ```
 
-- [ ] **Step 3: Add shutdown in daemon.go**
+- [x] **Step 3: Add shutdown in daemon.go**
 
 In `internal/daemon/daemon.go`, add to the shutdown sequence:
 
@@ -2538,12 +2538,12 @@ In `internal/daemon/daemon.go`, add to the shutdown sequence:
     }
 ```
 
-- [ ] **Step 4: Verify it compiles**
+- [x] **Step 4: Verify it compiles**
 
 Run: `go build ./...`
 Expected: Success
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/config/schema.go internal/daemon/components.go internal/daemon/daemon.go
@@ -2559,7 +2559,7 @@ git commit -m "feat(bot): add config schema and daemon wiring for bot framework"
 **Files:**
 - Create: `tests/bot_integration_test.go`
 
-- [ ] **Step 1: Write an integration test that exercises the full bot lifecycle**
+- [x] **Step 1: Write an integration test that exercises the full bot lifecycle**
 
 ```go
 // tests/bot_integration_test.go
@@ -2693,12 +2693,12 @@ func TestBotLifecycle_Integration(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the integration test**
+- [x] **Step 2: Run the integration test**
 
 Run: `go test ./tests/ -run TestBotLifecycle -tags=integration -v`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/bot_integration_test.go
@@ -2715,7 +2715,7 @@ git commit -m "test(bot): add end-to-end bot lifecycle integration test"
 - Modify: `mkdocs.yml` (add nav entry)
 - Modify: `README.md` (add bot feature to feature list)
 
-- [ ] **Step 1: Write bot workflow documentation**
+- [x] **Step 1: Write bot workflow documentation**
 
 Create `docs/workflows/bots.md` covering:
 - What persistent bots are
@@ -2728,19 +2728,19 @@ Create `docs/workflows/bots.md` covering:
 - Example: "Create a calendar reminder bot"
 - Example: "Create a webhook-driven bot"
 
-- [ ] **Step 2: Update features.md**
+- [x] **Step 2: Update features.md**
 
 Add bot framework feature entry.
 
-- [ ] **Step 3: Update mkdocs.yml**
+- [x] **Step 3: Update mkdocs.yml**
 
 Add `bots.md` to the workflows nav section.
 
-- [ ] **Step 4: Update README.md**
+- [x] **Step 4: Update README.md**
 
 Add persistent bots to the feature list.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/workflows/bots.md docs/features.md mkdocs.yml README.md

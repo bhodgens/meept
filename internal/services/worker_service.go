@@ -16,6 +16,34 @@ func NewWorkerService(p *worker.Pool) *WorkerService {
 	return &WorkerService{pool: p}
 }
 
+// WorkerInfo describes a single worker for API responses.
+type WorkerInfo struct {
+	ID           string   `json:"id"`
+	Capabilities []string `json:"capabilities"`
+	State        string   `json:"state"`
+	JobsComplete int      `json:"jobs_complete"`
+	JobsFailed   int      `json:"jobs_failed"`
+}
+
+// List returns all workers in the pool.
+func (s *WorkerService) List(ctx context.Context) ([]WorkerInfo, error) {
+	if s.pool == nil {
+		return nil, wrapError("worker", "List", ErrUnavailable)
+	}
+	stats := s.pool.GetStats()
+	result := make([]WorkerInfo, 0, len(stats.WorkerStats))
+	for _, ws := range stats.WorkerStats {
+		result = append(result, WorkerInfo{
+			ID:           ws.ID,
+			Capabilities: ws.Capabilities,
+			State:        string(ws.State),
+			JobsComplete: ws.JobsComplete,
+			JobsFailed:   ws.JobsFailed,
+		})
+	}
+	return result, nil
+}
+
 // WorkerStatsResponse returns worker pool statistics.
 type WorkerStatsResponse struct {
 	TotalWorkers int                  `json:"total_workers"`

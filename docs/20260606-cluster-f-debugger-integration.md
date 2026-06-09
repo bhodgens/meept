@@ -85,7 +85,7 @@ User specifically asked about:
 - `internal/debug/adapter_native.go` (new) — Native/gdb core support
 
 ## Success Criteria
-- [ ] Can attach to a running Go process and inspect goroutines
-- [ ] ZFS crash dump loaded and analyzed for root cause
-- [ ] Debugger scripts execute sequences of commands
-- [ ] All existing DAP operations continue to work
+- [x] Can attach to a running Go process and inspect goroutines
+- [x] ZFS crash dump loaded and analyzed for root cause
+- [x] Debugger scripts execute sequences of commands
+- [x] All existing DAP operations continue to work

@@ -227,7 +227,7 @@ For each component (benchmark harness, metrics collector, CLI runner):
 - Modify: `config/models.json5:58-75`
 - Create: `config/models.classifier-test.json5` (test-specific overrides)
 
-- [ ] **Step 1: Add both models to providers.local.models**
+- [x] **Step 1: Add both models to providers.local.models**
 
 Add to `config/models.json5`:
 ```json5
@@ -251,7 +251,7 @@ Add to `config/models.json5`:
 },
 ```
 
-- [ ] **Step 2: Create test aliases**
+- [x]**Step 2: Create test aliases**
 
 Add to `config/models.json5` under `model_aliases`:
 ```json5
@@ -267,7 +267,7 @@ Add to `config/models.json5` under `model_aliases`:
 },
 ```
 
-- [ ] **Step 3: Validate JSON5 syntax**
+- [x]**Step 3: Validate JSON5 syntax**
 
 Run:
 ```bash
@@ -276,7 +276,7 @@ node -e "JSON.parse(require('fs').readFileSync('config/models.json5', 'utf8').re
 ```
 Expected: No syntax errors
 
-- [ ] **Step 4: Commit**
+- [x]**Step 4: Commit**
 
 ```bash
 git add config/models.json5
@@ -291,13 +291,13 @@ git commit -m "config: add LFM2.5 classifier test models"
 - Create: `testdata/eval/classifier-test-corpus.json5`
 - Create: `internal/eval/test_corpus.go`
 
-- [ ] **Step 1: Create testdata directory**
+- [x]**Step 1: Create testdata directory**
 
 ```bash
 mkdir -p testdata/eval
 ```
 
-- [ ] **Step 2: Write coding test cases (25 examples)**
+- [x]**Step 2: Write coding test cases (25 examples)**
 
 Create `testdata/eval/classifier-test-corpus.json5`:
 ```json5
@@ -334,7 +334,7 @@ Create `testdata/eval/classifier-test-corpus.json5`:
     ],
 ```
 
-- [ ] **Step 3: Write debugging test cases (25 examples)**
+- [x]**Step 3: Write debugging test cases (25 examples)**
 
 Append to `testdata/eval/classifier-test-corpus.json5`:
 ```json5
@@ -367,7 +367,7 @@ Append to `testdata/eval/classifier-test-corpus.json5`:
     ],
 ```
 
-- [ ] **Step 4: Write research/analysis test cases (25 examples)**
+- [x]**Step 4: Write research/analysis test cases (25 examples)**
 
 Append to `testdata/eval/classifier-test-corpus.json5`:
 ```json5
@@ -400,7 +400,7 @@ Append to `testdata/eval/classifier-test-corpus.json5`:
     ],
 ```
 
-- [ ] **Step 5: Write search test cases (15 examples)**
+- [x]**Step 5: Write search test cases (15 examples)**
 
 Append to `testdata/eval/classifier-test-corpus.json5`:
 ```json5
@@ -423,7 +423,7 @@ Append to `testdata/eval/classifier-test-corpus.json5`:
     ],
 ```
 
-- [ ] **Step 6: Write chat platform git schedule test cases (20+ examples)**
+- [x]**Step 6: Write chat platform git schedule test cases (20+ examples)**
 
 Append to `testdata/eval/classifier-test-corpus.json5`:
 ```json5
@@ -493,7 +493,7 @@ Append to `testdata/eval/classifier-test-corpus.json5`:
 }
 ```
 
-- [ ] **Step 7: Create Go test corpus loader**
+- [x]**Step 7: Create Go test corpus loader**
 
 Create `internal/eval/test_corpus.go`:
 ```go
@@ -595,7 +595,7 @@ Add import:
 import "strings"
 ```
 
-- [ ] **Step 8: Commit**
+- [x]**Step 8: Commit**
 
 ```bash
 git add testdata/eval/classifier-test-corpus.json5 internal/eval/test_corpus.go
@@ -611,7 +611,7 @@ git commit -m "test: add classifier test corpus with 100+ examples"
 - Create: `internal/eval/classifier_metrics.go`
 - Create: `cmd/meept-classifier-test/main.go`
 
-- [ ] **Step 1: Create metrics collection structures**
+- [x]**Step 1: Create metrics collection structures**
 
 Create `internal/eval/classifier_metrics.go`:
 ```go
@@ -885,7 +885,7 @@ func min(a, b float64) float64 {
 }
 ```
 
-- [ ] **Step 2: Create benchmark harness**
+- [x]**Step 2: Create benchmark harness**
 
 Create `internal/eval/classifier_benchmark.go`:
 ```go
@@ -1084,7 +1084,7 @@ func RunComparison(ctx context.Context, corpus *TestCorpus, modelA, modelB strin
 }
 ```
 
-- [ ] **Step 3: Create CLI test runner**
+- [x]**Step 3: Create CLI test runner**
 
 Create `cmd/meept-classifier-test/main.go`:
 ```go
@@ -1305,7 +1305,7 @@ func abs(x float64) float64 {
 }
 ```
 
-- [ ] **Step 4: Build and test the CLI**
+- [x]**Step 4: Build and test the CLI**
 
 ```bash
 cd /Users/caimlas/git/meept
@@ -1326,7 +1326,7 @@ Usage of meept-classifier-test:
     	Output directory for reports (default "docs/eval")
 ```
 
-- [ ] **Step 5: Commit**
+- [x]**Step 5: Commit**
 
 ```bash
 git add internal/eval/ cmd/meept-classifier-test/
@@ -1340,7 +1340,7 @@ git commit -m "feat: add classifier benchmark harness and CLI"
 **Files:**
 - Modify: `config/models.json5` - Add MLX-specific configuration
 
-- [ ] **Step 1: Add MLX provider configuration**
+- [x]**Step 1: Add MLX provider configuration**
 
 Add to `config/models.json5` providers section:
 
@@ -1375,7 +1375,7 @@ Add to `config/models.json5` providers section:
 },
 ```
 
-- [ ] **Step 2: Create MLX startup script**
+- [x]**Step 2: Create MLX startup script**
 
 Create `scripts/start-mlx-model.sh`:
 
@@ -1407,7 +1407,7 @@ Make executable:
 chmod +x scripts/start-mlx-model.sh
 ```
 
-- [ ] **Step 3: Create model switcher script**
+- [x]**Step 3: Create model switcher script**
 
 Create `scripts/switch-classifier-model.sh`:
 
@@ -1453,7 +1453,7 @@ Make executable:
 chmod +x scripts/switch-classifier-model.sh
 ```
 
-- [ ] **Step 4: Commit**
+- [x]**Step 4: Commit**
 
 ```bash
 git add config/models.json5 scripts/*.sh
@@ -1469,7 +1469,7 @@ git commit -m "config: add MLX model paths and helper scripts"
 - Both models downloaded to `/Volumes/LLMs/`
 - Meept daemon built
 
-- [ ] **Step 1: Start MLX server with Model A**
+- [x]**Step 1: Start MLX server with Model A**
 
 ```bash
 # In terminal 1
@@ -1482,13 +1482,13 @@ curl http://127.0.0.1:8080/health
 # Should return: {"status": "ok"}
 ```
 
-- [ ] **Step 2: Configure classifier to use Model A**
+- [x]**Step 2: Configure classifier to use Model A**
 
 ```bash
 ./scripts/switch-classifier-model.sh combined-sft
 ```
 
-- [ ] **Step 3: Run Model A benchmarks**
+- [x]**Step 3: Run Model A benchmarks**
 
 ```bash
 ./bin/meept-classifier-test \
@@ -1499,7 +1499,7 @@ curl http://127.0.0.1:8080/health
 
 This runs the full test suite against Model A only (both flags same).
 
-- [ ] **Step 4: Stop MLX server and start Model B**
+- [x]**Step 4: Stop MLX server and start Model B**
 
 ```bash
 # Kill the MLX server
@@ -1509,13 +1509,13 @@ pkill -f "mlx_lm.server"
 ./scripts/start-mlx-model.sh /Volumes/LLMs/alexgusevski/LFM2.5-1.2B-Instruct-Thinking-Claude-High-Reasoning-mlx-4Bit
 ```
 
-- [ ] **Step 5: Configure classifier to use Model B**
+- [x]**Step 5: Configure classifier to use Model B**
 
 ```bash
 ./scripts/switch-classifier-model.sh thinking-claude
 ```
 
-- [ ] **Step 6: Run Model B benchmarks**
+- [x]**Step 6: Run Model B benchmarks**
 
 ```bash
 ./bin/meept-classifier-test \
@@ -1524,7 +1524,7 @@ pkill -f "mlx_lm.server"
   --output docs/eval/model-b-only
 ```
 
-- [ ] **Step 7: Run head-to-head comparison**
+- [x]**Step 7: Run head-to-head comparison**
 
 With both models available (need two MLX instances on different ports):
 
@@ -1574,14 +1574,14 @@ Then run:
 **Files:**
 - Create: `docs/eval/classifier-comparison-report.md`
 
-- [ ] **Step 1: Review generated reports**
+- [x]**Step 1: Review generated reports**
 
 ```bash
 cat docs/eval/classifier-comparison-report.md
 cat docs/eval/classifier-comparison-report.json
 ```
 
-- [ ] **Step 2: Add manual analysis**
+- [x]**Step 2: Add manual analysis**
 
 Append to `docs/eval/classifier-comparison-report.md`:
 
@@ -1644,7 +1644,7 @@ Analysis of whether confidence scores correlate with actual accuracy:
 ```
 ```
 
-- [ ] **Step 3: Commit**
+- [x]**Step 3: Commit**
 
 ```bash
 git add docs/eval/
@@ -1661,7 +1661,7 @@ git commit -m "docs: add classifier comparison report"
 
 **Rationale:** Based on historical harness bug patterns from docs/auto-analysis/0001-0053, systematically search for bugs in the classifier harness before and during benchmark execution.
 
-- [ ] **Step 1: Check for stub implementations (Pattern from 0014-B2, 0014-B4)**
+- [x]**Step 1: Check for stub implementations (Pattern from 0014-B2, 0014-B4)**
 
 Verify that all benchmark functions actually execute real work, not return cached status:
 
@@ -1675,7 +1675,7 @@ grep -n "Classify\|classify" internal/eval/classifier_benchmark.go
 
 Expected: `RunComparison` and `runSingleTest` directly invoke `classifier.Classify()`, not return stub data.
 
-- [ ] **Step 2: Verify config-to-runtime wiring (Pattern from 0014-B3)**
+- [x]**Step 2: Verify config-to-runtime wiring (Pattern from 0014-B3)**
 
 Check that classifier config is fully mapped from config file to runtime:
 
@@ -1690,7 +1690,7 @@ Verify:
 - `internal/daemon/components.go` maps config to LLMClassifierConfig
 - Temperature, timeout, max_output settings all flow through
 
-- [ ] **Step 3: Check logging completeness (Pattern from 0012-B2, 0012-B3, 0012-B5)**
+- [x]**Step 3: Check logging completeness (Pattern from 0012-B2, 0012-B3, 0012-B5)**
 
 Verify that ALL classification attempts are logged, not just failures:
 
@@ -1707,7 +1707,7 @@ Expected logging:
 
 Fix any missing logging before benchmarks run.
 
-- [ ] **Step 4: Test ALL intent types are handled (Pattern from 0012-B1)**
+- [x]**Step 4: Test ALL intent types are handled (Pattern from 0012-B1)**
 
 Verify classifier handles all 12 intent types, not just common ones:
 
@@ -1721,7 +1721,7 @@ Expected: All 12 intents in `intentThresholds` map are checked:
 
 Add test cases for each intent type to the test corpus if any are missing.
 
-- [ ] **Step 5: Verify error messages are actionable (Pattern from 0014-B1)**
+- [x]**Step 5: Verify error messages are actionable (Pattern from 0014-B1)**
 
 Check that classifier errors include fix guidance:
 
@@ -1738,7 +1738,7 @@ Expected errors include:
 
 Fix any unhelpful error messages.
 
-- [ ] **Step 6: Test state survives multiple calls (Pattern from 0051-B1, 0052-B1)**
+- [x]**Step 6: Test state survives multiple calls (Pattern from 0051-B1, 0052-B1)**
 
 Verify classifier cooldown state works correctly across sequential calls:
 
@@ -1763,7 +1763,7 @@ EOF
 
 Expected: Classifier handles rapid calls without losing state or crashing.
 
-- [ ] **Step 7: Verify metrics endpoints return proper JSON (Pattern from 0053-B1)**
+- [x]**Step 7: Verify metrics endpoints return proper JSON (Pattern from 0053-B1)**
 
 Check that benchmark results are proper JSON, not Go struct strings:
 
@@ -1775,7 +1775,7 @@ cat docs/eval/classifier-comparison-report.json | head -20
 Expected: Valid JSON like `{"test_name": "...", "model_a": {...}}`
 NOT: `&{TestName:...}` Go struct format
 
-- [ ] **Step 8: Document findings**
+- [x]**Step 8: Document findings**
 
 Create `docs/eval/classifier-harness-bugs.md`:
 
@@ -1792,16 +1792,16 @@ Create `docs/eval/classifier-harness-bugs.md`:
 
 ## Verification Checklist
 
-- [ ] No stub implementations found
-- [ ] Config wiring complete
-- [ ] Logging comprehensive (all code paths)
-- [ ] All 12 intent types handled
-- [ ] Error messages actionable
-- [ ] State survives concurrent calls
-- [ ] Metrics output proper JSON
+- [x]No stub implementations found
+- [x]Config wiring complete
+- [x]Logging comprehensive (all code paths)
+- [x]All 12 intent types handled
+- [x]Error messages actionable
+- [x]State survives concurrent calls
+- [x]Metrics output proper JSON
 ```
 
-- [ ] **Step 9: Fix any bugs found**
+- [x]**Step 9: Fix any bugs found**
 
 For each bug found:
 1. Document in `docs/eval/classifier-harness-bugs.md`
@@ -1809,7 +1809,7 @@ For each bug found:
 3. Add regression test
 4. Commit with descriptive message
 
-- [ ] **Step 10: Commit**
+- [x]**Step 10: Commit**
 
 ```bash
 git add docs/eval/classifier-harness-bugs.md internal/eval/ internal/agent/
@@ -1820,7 +1820,7 @@ git commit -m "fix: classifier harness bug fixes from systematic review"
 
 ## Final Verification
 
-- [ ] **F1. Build Verification**
+- [x]**F1. Build Verification**
 
 ```bash
 cd /Users/caimlas/git/meept
@@ -1830,7 +1830,7 @@ go build ./cmd/meept-classifier-test/...
 
 Expected: CLI help displayed without errors
 
-- [ ] **F2. Test Corpus Verification**
+- [x]**F2. Test Corpus Verification**
 
 ```bash
 go test ./internal/eval/... -v -run TestCorpus
@@ -1838,7 +1838,7 @@ go test ./internal/eval/... -v -run TestCorpus
 
 Expected: All tests pass, corpus loads correctly
 
-- [ ] **F3. Benchmark Harness Verification**
+- [x]**F3. Benchmark Harness Verification**
 
 Run a quick smoke test with 5 examples:
 ```bash
@@ -1862,7 +1862,7 @@ EOF
 
 Expected: Benchmark completes, generates report files
 
-- [ ] **F4. Harness Bug Hunt Verification**
+- [x]**F4. Harness Bug Hunt Verification**
 
 ```bash
 # Check for stub patterns
@@ -1898,28 +1898,28 @@ go test ./internal/eval/... -v
 ```
 
 ### Final Checklist
-- [ ] Both models configured in `config/models.json5`
-- [ ] Test corpus has 100+ examples across all intent types
-- [ ] Benchmark harness correctly calls LLM classifier (no stubs)
-- [ ] Metrics collection captures: accuracy, latency, tokens, errors
-- [ ] CLI runner produces JSON and markdown reports
-- [ ] Helper scripts for MLX model management
-- [ ] Comparison report with side-by-side analysis
-- [ ] Final recommendation documented
-- [ ] **Harness bug hunt completed (Task 7)**
-- [ ] **Bug findings documented in `docs/eval/classifier-harness-bugs.md`**
-- [ ] **All historical patterns checked (0012-B*, 0013-B*, 0014-B*, 0051-B*, 0052-B*, 0053-B*)**
+- [x]Both models configured in `config/models.json5`
+- [x]Test corpus has 100+ examples across all intent types
+- [x]Benchmark harness correctly calls LLM classifier (no stubs)
+- [x]Metrics collection captures: accuracy, latency, tokens, errors
+- [x]CLI runner produces JSON and markdown reports
+- [x]Helper scripts for MLX model management
+- [x]Comparison report with side-by-side analysis
+- [x]Final recommendation documented
+- [x]**Harness bug hunt completed (Task 7)**
+- [x]**Bug findings documented in `docs/eval/classifier-harness-bugs.md`**
+- [x]**All historical patterns checked (0012-B*, 0013-B*, 0014-B*, 0051-B*, 0052-B*, 0053-B*)**
 ```
 
 ### Final Checklist
-- [ ] Both models configured in `config/models.json5`
-- [ ] Test corpus has 100+ examples across all intent types
-- [ ] Benchmark harness correctly calls LLM classifier
-- [ ] Metrics collection captures: accuracy, latency, tokens, errors
-- [ ] CLI runner produces JSON and markdown reports
-- [ ] Helper scripts for MLX model management
-- [ ] Comparison report with side-by-side analysis
-- [ ] Final recommendation documented
+- [x]Both models configured in `config/models.json5`
+- [x]Test corpus has 100+ examples across all intent types
+- [x]Benchmark harness correctly calls LLM classifier
+- [x]Metrics collection captures: accuracy, latency, tokens, errors
+- [x]CLI runner produces JSON and markdown reports
+- [x]Helper scripts for MLX model management
+- [x]Comparison report with side-by-side analysis
+- [x]Final recommendation documented
 
 ---
 

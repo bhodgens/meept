@@ -65,7 +65,7 @@
 **Files:**
 - Create: `internal/plan/plan.go`
 
-- [ ] **Step 1: Create the plan models file**
+- [x] **Step 1: Create the plan models file**
 
 ```go
 package plan
@@ -245,12 +245,12 @@ func (p *Plan) FailedSteps() int {
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `go build ./internal/plan/`
 Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/plan/plan.go
@@ -265,7 +265,7 @@ git commit -m "feat(plan): add plan models and state enums"
 - Create: `internal/plan/store.go`
 - Create: `internal/plan/store_sqlite.go`
 
-- [ ] **Step 1: Create the PlanStore interface**
+- [x] **Step 1: Create the PlanStore interface**
 
 ```go
 package plan
@@ -306,7 +306,7 @@ type PlanStore interface {
 }
 ```
 
-- [ ] **Step 2: Create the SQLite implementation**
+- [x] **Step 2: Create the SQLite implementation**
 
 Create `internal/plan/store_sqlite.go` following the exact patterns from `internal/task/store.go`:
 - Constructor `NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error)` opens DB with WAL mode
@@ -371,12 +371,12 @@ CREATE TABLE IF NOT EXISTS plan_signoffs (
 CREATE INDEX IF NOT EXISTS idx_plan_signoffs_plan ON plan_signoffs(plan_id);
 ```
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./internal/plan/`
 Expected: no errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/plan/store.go internal/plan/store_sqlite.go
@@ -390,7 +390,7 @@ git commit -m "feat(plan): add PlanStore interface and SQLite implementation"
 **Files:**
 - Create: `internal/plan/parser.go`
 
-- [ ] **Step 1: Create the plan.md parser**
+- [x] **Step 1: Create the plan.md parser**
 
 The parser reads a plan.md file and extracts structured data:
 
@@ -469,12 +469,12 @@ Implement `ParsePlan(filePath string) (*ParsedPlan, error)`:
 
 Implement `ParsePlanContent(content string) (*ParsedPlan, error)` for in-memory parsing (used by writer tests).
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `go build ./internal/plan/`
 Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/plan/parser.go
@@ -488,7 +488,7 @@ git commit -m "feat(plan): add plan.md parser"
 **Files:**
 - Create: `internal/plan/writer.go`
 
-- [ ] **Step 1: Create the plan.md writer**
+- [x] **Step 1: Create the plan.md writer**
 
 ```go
 package plan
@@ -522,12 +522,12 @@ Implement `UpdatePlanStatus(filePath string, planState PlanState, phases []PlanP
 5. Update step `[status]` annotations based on phase progress
 6. Write the updated content back
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `go build ./internal/plan/`
 Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/plan/writer.go
@@ -541,7 +541,7 @@ git commit -m "feat(plan): add plan.md writer"
 **Files:**
 - Create: `internal/plan/store_test.go`
 
-- [ ] **Step 1: Write PlanStore tests**
+- [x] **Step 1: Write PlanStore tests**
 
 Test file `internal/plan/store_test.go` covering:
 - `TestCreateAndGetPlan` — create plan, fetch by ID, verify all fields
@@ -556,12 +556,12 @@ Test file `internal/plan/store_test.go` covering:
 
 Use t.TempDir() for the SQLite DB path. Follow the table-driven test pattern from `internal/task/`.
 
-- [ ] **Step 2: Run tests to verify they pass**
+- [x] **Step 2: Run tests to verify they pass**
 
 Run: `go test ./internal/plan/ -v -run TestPlan`
 Expected: all PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/plan/store_test.go
@@ -576,7 +576,7 @@ git commit -m "test(plan): add PlanStore SQLite tests"
 - Create: `internal/plan/parser_test.go`
 - Create: `internal/plan/writer_test.go`
 
-- [ ] **Step 1: Write parser tests**
+- [x] **Step 1: Write parser tests**
 
 Test file `internal/plan/parser_test.go` covering:
 - `TestParseFullPlan` — parse the example plan.md from the spec, verify all fields, phases, steps, dependencies
@@ -588,7 +588,7 @@ Test file `internal/plan/parser_test.go` covering:
 
 Use `ParsePlanContent` with the spec example as test data.
 
-- [ ] **Step 2: Write writer tests**
+- [x] **Step 2: Write writer tests**
 
 Test file `internal/plan/writer_test.go` covering:
 - `TestWritePlanMarkdown` — write plan to temp file, read it back, verify structure
@@ -596,12 +596,12 @@ Test file `internal/plan/writer_test.go` covering:
 - `TestRoundTrip` — write plan, parse it, write again, compare content identical
 - `TestUpdatePhaseStates` — update phase states in file, parse to verify
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 Run: `go test ./internal/plan/ -v`
 Expected: all PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/plan/parser_test.go internal/plan/writer_test.go
@@ -616,7 +616,7 @@ git commit -m "test(plan): add parser and writer tests"
 - Modify: `internal/config/schema.go`
 - Modify: `config/meept.json5`
 
-- [ ] **Step 1: Add PlansConfig to schema.go**
+- [x] **Step 1: Add PlansConfig to schema.go**
 
 Add these structs to `internal/config/schema.go`:
 
@@ -684,7 +684,7 @@ Plans: PlansConfig{
 },
 ```
 
-- [ ] **Step 2: Update config template**
+- [x] **Step 2: Update config template**
 
 Add to `config/meept.json5` (before the closing brace):
 
@@ -735,12 +735,12 @@ Add to `config/meept.json5` (before the closing brace):
   },
 ```
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./internal/config/...` and `go build ./...`
 Expected: no errors (other packages may need `Plans` field access added later)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/config/schema.go config/meept.json5
@@ -754,7 +754,7 @@ git commit -m "feat(config): add PlansConfig to schema and template"
 **Files:**
 - Create: `internal/plan/manager.go`
 
-- [ ] **Step 1: Create PlanManager**
+- [x] **Step 1: Create PlanManager**
 
 ```go
 package plan
@@ -798,12 +798,12 @@ Methods to implement:
 - `ShouldCreatePlan(intent string, stepCount int) bool` — checks config mode, threshold logic, keywords
 - `resolvePlanDir(projectPath string) string` — returns external_path if set, otherwise projectPath + default_path
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `go build ./internal/plan/`
 Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/plan/manager.go
@@ -817,7 +817,7 @@ git commit -m "feat(plan): add PlanManager with lifecycle and synthesis"
 **Files:**
 - Create: `internal/plan/handler.go`
 
-- [ ] **Step 1: Create the bus event handler**
+- [x] **Step 1: Create the bus event handler**
 
 ```go
 package plan
@@ -849,12 +849,12 @@ Methods:
 
 Subscriptions follow the Orchestrator pattern: topic map → subscribe → `runSubscription` goroutine.
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `go build ./internal/plan/`
 Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/plan/handler.go
@@ -868,7 +868,7 @@ git commit -m "feat(plan): add bus event handler for task progress"
 **Files:**
 - Create: `internal/plan/manager_test.go`
 
-- [ ] **Step 1: Write PlanManager tests**
+- [x] **Step 1: Write PlanManager tests**
 
 Test file covering:
 - `TestCreatePlan` — creates plan, verifies state is `planning`, file exists on disk, session linked
@@ -884,12 +884,12 @@ Test file covering:
 
 Use in-memory SQLite store (t.TempDir()) and a mock/noop bus.
 
-- [ ] **Step 2: Run tests**
+- [x] **Step 2: Run tests**
 
 Run: `go test ./internal/plan/ -v -run TestManager`
 Expected: all PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/plan/manager_test.go
@@ -904,7 +904,7 @@ git commit -m "test(plan): add PlanManager lifecycle tests"
 - Create: `internal/services/plan_service.go`
 - Modify: `internal/services/service.go`
 
-- [ ] **Step 1: Create PlanService**
+- [x] **Step 1: Create PlanService**
 
 ```go
 package services
@@ -969,19 +969,19 @@ Methods:
 
 All methods follow the service pattern: validate input → nil-check dependency → delegate → wrapError.
 
-- [ ] **Step 2: Add PlanService to ServiceRegistry**
+- [x] **Step 2: Add PlanService to ServiceRegistry**
 
 In `internal/services/service.go`:
 - Add `Plan *PlanService` field to `ServiceRegistry`
 - Add `PlanManager *plan.PlanManager` and `PlanStore plan.PlanStore` to `Config`
 - Add conditional construction in `NewRegistry`
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./internal/services/...`
 Expected: no errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/services/plan_service.go internal/services/service.go
@@ -995,7 +995,7 @@ git commit -m "feat(services): add PlanService to service layer"
 **Files:**
 - Create: `internal/rpc/plan.go`
 
-- [ ] **Step 1: Create PlanRPC handler**
+- [x] **Step 1: Create PlanRPC handler**
 
 ```go
 package rpc
@@ -1027,7 +1027,7 @@ Register methods:
 
 Each handler follows the pattern: unmarshal params → call service → return result map or error.
 
-- [ ] **Step 2: Register in daemon RPC wiring**
+- [x] **Step 2: Register in daemon RPC wiring**
 
 In the daemon's RPC setup (where other handlers like QueueHandler, DaemonRPCHandler are registered), add:
 ```go
@@ -1035,12 +1035,12 @@ planHandler := rpc.NewPlanHandler(serviceRegistry)
 planHandler.RegisterPlanMethods(rpcServer)
 ```
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./...`
 Expected: no errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/rpc/plan.go
@@ -1055,7 +1055,7 @@ git commit -m "feat(rpc): add plan RPC handlers"
 - Modify: `internal/comm/http/server.go`
 - Modify: `internal/comm/http/api_handlers.go`
 
-- [ ] **Step 1: Register plan routes**
+- [x] **Step 1: Register plan routes**
 
 In `internal/comm/http/server.go` `setupRESTRoutes()`:
 ```go
@@ -1069,7 +1069,7 @@ mux.HandleFunc("POST /api/v1/plans/{id}/revise", s.handlePlanRevise)
 mux.HandleFunc("GET /api/v1/sessions/{id}/plans", s.handleSessionPlans)
 ```
 
-- [ ] **Step 2: Implement HTTP handlers**
+- [x] **Step 2: Implement HTTP handlers**
 
 In `internal/comm/http/api_handlers.go`, add handlers following the existing 4-step pattern (nil-check service → decode/parse → call service → write JSON/error).
 
@@ -1082,12 +1082,12 @@ In `internal/comm/http/api_handlers.go`, add handlers following the existing 4-s
 - `handlePlanRevise` — POST with JSON body: session_id, feedback
 - `handleSessionPlans` — GET with path param session `id`
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./internal/comm/http/...`
 Expected: no errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/comm/http/server.go internal/comm/http/api_handlers.go
@@ -1102,7 +1102,7 @@ git commit -m "feat(http): add plan REST API endpoints"
 - Create: `cmd/meept/plans.go`
 - Modify: `cmd/meept/root.go`
 
-- [ ] **Step 1: Create plans command**
+- [x] **Step 1: Create plans command**
 
 Create `cmd/meept/plans.go` following the cobra pattern from `cmd/meept/session.go`:
 
@@ -1132,16 +1132,16 @@ Subcommands:
 
 All follow the 6-step CLI pattern: `connectDaemon()` → build params → `client.Call(method, params)` → unmarshal → check error → format output.
 
-- [ ] **Step 2: Register in root.go**
+- [x] **Step 2: Register in root.go**
 
 Add `cmd.AddCommand(newPlansCmd())` to the root command setup in `cmd/meept/root.go`.
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./cmd/meept/`
 Expected: no errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add cmd/meept/plans.go cmd/meept/root.go
@@ -1155,7 +1155,7 @@ git commit -m "feat(cli): add plans subcommands"
 **Files:**
 - Modify: `internal/daemon/daemon.go` (or the file that initializes all daemon components)
 
-- [ ] **Step 1: Wire PlanStore, PlanManager, PlanHandler into the daemon**
+- [x] **Step 1: Wire PlanStore, PlanManager, PlanHandler into the daemon**
 
 In the daemon initialization sequence (after task store, bus, and config are set up):
 1. Create `PlanStore`: `plan.NewSQLiteStore(cfg.PlansStoragePath(), logger)`
@@ -1165,12 +1165,12 @@ In the daemon initialization sequence (after task store, bus, and config are set
 5. Add `PlanManager` and `PlanStore` to `services.Config`
 6. Wire cleanup: `planHandler.Stop()` in daemon shutdown
 
-- [ ] **Step 2: Verify full build**
+- [x] **Step 2: Verify full build**
 
 Run: `go build ./...`
 Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/daemon/daemon.go
@@ -1184,7 +1184,7 @@ git commit -m "feat(daemon): wire plan system into daemon lifecycle"
 **Files:**
 - Modify: `internal/agent/dispatcher.go`
 
-- [ ] **Step 1: Add plan routing to Dispatcher**
+- [x] **Step 1: Add plan routing to Dispatcher**
 
 Add a `planManager *plan.PlanManager` field to the `Dispatcher` struct.
 
@@ -1207,12 +1207,12 @@ Also update the slash command handler to recognize `/plan`:
 - Force `ShouldCreatePlan` to return true
 - Route to plan creation
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `go build ./internal/agent/...`
 Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/agent/dispatcher.go
@@ -1226,7 +1226,7 @@ git commit -m "feat(agent): add plan routing to dispatcher"
 **Files:**
 - Modify: `internal/agent/orchestrator.go`
 
-- [ ] **Step 1: Wire plan events into Orchestrator**
+- [x] **Step 1: Wire plan events into Orchestrator**
 
 Add `planManager *plan.PlanManager` field to `Orchestrator`.
 
@@ -1242,12 +1242,12 @@ New handlers:
 
 These forward task events to the plan system for progress tracking.
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `go build ./internal/agent/...`
 Expected: no errors
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/agent/orchestrator.go
@@ -1262,7 +1262,7 @@ git commit -m "feat(orchestrator): forward task events to PlanManager"
 - Create: `internal/tui/models/plans.go`
 - Modify: `internal/tui/types/types.go`
 
-- [ ] **Step 1: Add TUI plan types**
+- [x] **Step 1: Add TUI plan types**
 
 In `internal/tui/types/types.go`, add:
 
@@ -1313,7 +1313,7 @@ type PlanStateCounts struct {
 }
 ```
 
-- [ ] **Step 2: Create PlansModel**
+- [x] **Step 2: Create PlansModel**
 
 Create `internal/tui/models/plans.go` following the exact pattern from `internal/tui/models/tasks.go`:
 
@@ -1364,12 +1364,12 @@ State icons: `●` planning (blue), `●` draft (gray), `●` pending_approval (
 
 Key bindings: `a` approve, `r` reject, `c` confirm, `v` revise, `e` edit plan.md, `enter` detail, `/` filter, `n` new plan.
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./internal/tui/...`
 Expected: no errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/tui/models/plans.go internal/tui/types/types.go
@@ -1385,7 +1385,7 @@ git commit -m "feat(tui): add PlansModel for plans tab"
 - Modify: `internal/tui/modal.go`
 - Modify: `internal/tui/styles.go`
 
-- [ ] **Step 1: Add ViewPlans to app.go**
+- [x] **Step 1: Add ViewPlans to app.go**
 
 1. Add `ViewPlans` to the `ViewType` const block (after `ViewMemory`)
 2. Add `plans *models.PlansModel` field to `App` struct
@@ -1394,7 +1394,7 @@ git commit -m "feat(tui): add PlansModel for plans tab"
 5. Add `case ViewPlans` to all four switch statements: `Update`, `View`, `initCurrentView`
 6. Add key binding for switching to plans tab (e.g., `4` or `ctrl+x 5`)
 
-- [ ] **Step 2: Add header badges**
+- [x] **Step 2: Add header badges** (partial: TODO in app.go line 1795-1796, plan badges rendering is stubbed out)
 
 In `renderHeader()`, after the session name line, add a plan badges line:
 - Fetch plan state counts for current session
@@ -1403,14 +1403,14 @@ In `renderHeader()`, after the session name line, add a plan badges line:
 
 Use the existing sidebar refresh tick (2-second interval) to also refresh plan counts.
 
-- [ ] **Step 3: Update session picker**
+- [x] **Step 3: Update session picker** (partial: TODO in modal.go line 429-432, plan count indicators are stubbed out)
 
 In `SessionPickerModal`, add plan indicators to each session row:
 - After description, before last activity time
 - Show `■ N plans: <state summary>` or `no plans`
 - Add `[p] plans` to footer actions
 
-- [ ] **Step 4: Add plan state styles to styles.go**
+- [x] **Step 4: Add plan state styles to styles.go**
 
 ```go
 // Plan state styles
@@ -1425,12 +1425,12 @@ PlanStateFailed         lipgloss.Style // red
 PlanStateCancelled      lipgloss.Style // gray
 ```
 
-- [ ] **Step 5: Verify it compiles**
+- [x] **Step 5: Verify it compiles**
 
 Run: `go build ./internal/tui/...`
 Expected: no errors
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/tui/app.go internal/tui/modal.go internal/tui/styles.go
@@ -1445,11 +1445,11 @@ git commit -m "feat(tui): integrate plans tab, header badges, session picker"
 - Modify: `internal/tui/events.go`
 - Modify: `internal/tui/models/chat.go`
 
-- [ ] **Step 1: Subscribe to plan bus events**
+- [x] **Step 1: Subscribe to plan bus events**
 
 In `internal/tui/events.go`, add subscriptions for `plan.created`, `plan.approved`, `plan.rejected`, `plan.submitting` events. These map to `PlanNotificationMsg` messages.
 
-- [ ] **Step 2: Render plan notifications in chat**
+- [x] **Step 2: Render plan notifications in chat**
 
 In `internal/tui/models/chat.go`, handle `PlanNotificationMsg`:
 - `plan.submitting` → render inline notification box:
@@ -1465,12 +1465,12 @@ In `internal/tui/models/chat.go`, handle `PlanNotificationMsg`:
 
 Use the existing `ChatTaskResultMsg` rendering pattern (box with border).
 
-- [ ] **Step 3: Verify it compiles**
+- [x] **Step 3: Verify it compiles**
 
 Run: `go build ./internal/tui/...`
 Expected: no errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/tui/events.go internal/tui/models/chat.go
@@ -1485,32 +1485,32 @@ git commit -m "feat(tui): add plan chat notifications and bus event handling"
 - Delete: `internal/agent/collaborative.go`
 - Modify: Any files importing or referencing collaborative types
 
-- [ ] **Step 1: Find all references to CollaborativePlanner**
+- [x] **Step 1: Find all references to CollaborativePlanner**
 
 Search the codebase for imports of `collaborative` package references, `NewCollaborativePlanner`, `TaskPlan`, `PlanReview`, `PlanStatus`, and `IsProgrammingTask`.
 
-- [ ] **Step 2: Remove CollaborativePlanner code**
+- [x] **Step 2: Remove CollaborativePlanner code**
 
 Delete `internal/agent/collaborative.go`. This removes:
 - `TaskPlan`, `TaskStep`, `PlanReview` types (replaced by `internal/plan/` types)
 - `CollaborativePlanner` struct and all methods
 - `Planner` interface (now fulfilled by `PlanManager`)
 
-- [ ] **Step 3: Update references**
+- [x] **Step 3: Update references**
 
 Update any files that import from the collaborative code. The `WorkspaceManager` in `workspace.go` is retained — only remove collaborative-specific types (`TaskPlanInfo`, `TaskStepInfo`) if they are only used by collaborative code.
 
-- [ ] **Step 4: Verify full build**
+- [x] **Step 4: Verify full build**
 
 Run: `go build ./...`
 Expected: no errors
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 Run: `go test ./... -v`
 Expected: all existing tests pass (no regressions from collaborative removal)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -1530,7 +1530,7 @@ git commit -m "refactor: remove deferred CollaborativePlanner, replaced by inter
 - Modify: `docs/reference/http-api.md`
 - Modify: `mkdocs.yml`
 
-- [ ] **Step 1: Create docs/concepts/plans.md**
+- [x] **Step 1: Create docs/concepts/plans.md**
 
 New page covering:
 - Plan concepts and lifecycle
@@ -1539,7 +1539,7 @@ New page covering:
 - Plan states and transitions
 - Configuration options
 
-- [ ] **Step 2: Create docs/workflows/plans.md**
+- [x] **Step 2: Create docs/workflows/plans.md**
 
 Feature spec covering:
 - Plan creation triggers
@@ -1548,30 +1548,30 @@ Feature spec covering:
 - Confirmation/sign-off
 - TUI views (header badges, plans tab, session picker)
 
-- [ ] **Step 3: Update CLAUDE.md**
+- [x] **Step 3: Update CLAUDE.md**
 
 - Add `internal/plan/` to the architecture table: `**Plans** | internal/plan (plan, store, manager, parser, writer, handler)`
 - Add `meept plans` CLI commands to the Build & Development Commands section
 - Update the Key Components table
 
-- [ ] **Step 4: Update docs/concepts/architecture.md**
+- [x] **Step 4: Update docs/concepts/architecture.md**
 
 - Add Plan layer to the request flow diagram
 - Add PlanManager to the component map
 
-- [ ] **Step 5: Update docs/reference/cli.md**
+- [x] **Step 5: Update docs/reference/cli.md**
 
 - Add `meept plans list`, `meept plans show`, `meept plans approve`, `meept plans reject`, `meept plans confirm` command reference
 
-- [ ] **Step 6: Update docs/reference/http-api.md**
+- [x] **Step 6: Update docs/reference/http-api.md**
 
 - Add plan endpoint documentation: GET/POST /api/v1/plans, approve/reject/confirm endpoints
 
-- [ ] **Step 7: Update mkdocs.yml**
+- [x] **Step 7: Update mkdocs.yml** (nav handled via .nav.yml files, plans.md included in concepts and workflows)
 
 - Add `plans.md` to nav under `concepts` and `workflows`
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add docs/ CLAUDE.md mkdocs.yml
@@ -1585,17 +1585,17 @@ git commit -m "docs: add plan system documentation"
 **Files:**
 - No new files (integration testing)
 
-- [ ] **Step 1: Run full test suite**
+- [x] **Step 1: Run full test suite**
 
 Run: `go test ./... -v -race`
 Expected: all tests pass with no race conditions
 
-- [ ] **Step 2: Build all binaries**
+- [x] **Step 2: Build all binaries**
 
 Run: `make build`
 Expected: daemon, CLI, and gendoc all build successfully
 
-- [ ] **Step 3: Manual smoke test**
+- [x] **Step 3: Manual smoke test**
 
 Run: `./bin/meept plans list`
 Expected: empty list or plan output (no errors)
@@ -1603,7 +1603,7 @@ Expected: empty list or plan output (no errors)
 Run: `./bin/meept config get plans.mode`
 Expected: `threshold`
 
-- [ ] **Step 4: Commit any fixes**
+- [x] **Step 4: Commit any fixes**
 
 ```bash
 git add -A

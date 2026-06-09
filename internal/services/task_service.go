@@ -169,6 +169,40 @@ func (s *TaskService) Cancel(ctx context.Context, req CancelTaskRequest) error {
 	return s.registry.UpdateState(ctx, req.ID, task.StateCancelled)
 }
 
+// LinkSessionRequest contains parameters for linking a session to a task.
+type LinkSessionRequest struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+}
+
+// LinkSession links a session to a task.
+func (s *TaskService) LinkSession(ctx context.Context, req LinkSessionRequest) error {
+	if req.TaskID == "" || req.SessionID == "" {
+		return wrapError("task", "LinkSession", ErrInvalidInput)
+	}
+	if s.registry == nil {
+		return wrapError("task", "LinkSession", ErrUnavailable)
+	}
+	return s.registry.LinkSession(ctx, req.TaskID, req.SessionID)
+}
+
+// UnlinkSessionRequest contains parameters for unlinking a session from a task.
+type UnlinkSessionRequest struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+}
+
+// UnlinkSession unlinks a session from a task.
+func (s *TaskService) UnlinkSession(ctx context.Context, req UnlinkSessionRequest) error {
+	if req.TaskID == "" || req.SessionID == "" {
+		return wrapError("task", "UnlinkSession", ErrInvalidInput)
+	}
+	if s.registry == nil {
+		return wrapError("task", "UnlinkSession", ErrUnavailable)
+	}
+	return s.registry.UnlinkSession(ctx, req.TaskID, req.SessionID)
+}
+
 // GetTaskStepsRequest contains get steps parameters.
 type GetTaskStepsRequest struct {
 	ID string `json:"id"`

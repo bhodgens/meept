@@ -22,16 +22,17 @@ type DaemonController interface {
 
 // DaemonStatus contains daemon status information.
 type DaemonStatus struct {
-	Status          string  `json:"status"`
-	PID             int     `json:"pid,omitempty"`
-	UptimeSeconds   float64 `json:"uptime_seconds,omitempty"`
-	Model           string  `json:"model,omitempty"`
-	TokensUsed      int     `json:"tokens_used"`
-	TokensRemaining int     `json:"tokens_remaining"`
-	BudgetUsed      float64 `json:"budget_used"`
-	BudgetRemaining float64 `json:"budget_remaining"`
-	Methods         int     `json:"registered_methods"`
-	BusSubscribers  int     `json:"bus_subscribers"`
+	Status          string         `json:"status"`
+	PID             int            `json:"pid,omitempty"`
+	UptimeSeconds   float64        `json:"uptime_seconds,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	TokensUsed      int            `json:"tokens_used"`
+	TokensRemaining int            `json:"tokens_remaining"`
+	BudgetUsed      float64        `json:"budget_used"`
+	BudgetRemaining float64        `json:"budget_remaining"`
+	Methods         int            `json:"registered_methods"`
+	BusSubscribers  int            `json:"bus_subscribers"`
+	Runtimes        map[string]any `json:"runtimes,omitempty"`
 }
 
 // DaemonService handles daemon lifecycle operations.

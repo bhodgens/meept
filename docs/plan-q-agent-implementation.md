@@ -202,12 +202,12 @@ meept q status                   # Check Q Agent configuration
 
 | Component | Test Approach | Status |
 |-----------|--------------|--------|
-| Session Analyzer | Unit tests with synthetic session data | ⏳ Pending |
-| Pattern Detector | Table-driven tests with known patterns | ⏳ Pending |
-| Research Engine | Integration tests with recorded transcripts | ⏳ Pending |
-| Agent Designer | Golden file tests for AGENT.md generation | ⏳ Pending |
-| Impact Estimator | Unit tests with known metrics | ⏳ Pending |
-| End-to-End | Synthetic multi-session scenario | ⏳ Pending |
+| Session Analyzer | Unit tests with synthetic session data | Done |
+| Pattern Detector | Table-driven tests with known patterns | Done |
+| Research Engine | Integration tests with recorded transcripts | Done |
+| Agent Designer | Golden file tests for AGENT.md generation | Done |
+| Impact Estimator | Unit tests with known metrics | Done |
+| End-to-End | Synthetic multi-session scenario | Done |
 
 ---
 
@@ -222,15 +222,15 @@ meept q status                   # Check Q Agent configuration
   - Cross-reference session outcomes with memory injection
   - Identify missing memory references
 
-- [ ] **Background Goroutine** - Automatic idle trigger
+- [x] **Background Goroutine** - Automatic idle trigger
   - Periodic check for idle sessions
   - Automatic persistence to memvid
 
-- [ ] **Reviewer Agent Integration** - Validation layer
+- [x] **Reviewer Agent Integration** - Validation layer
   - All recommendations pass through reviewer
   - Validity check before user presentation
 
-- [ ] **Notification Channels** - User alerts
+- [x] **Notification Channels** - User alerts
   - Chat notifications
   - Menu bar integration (macOS)
 

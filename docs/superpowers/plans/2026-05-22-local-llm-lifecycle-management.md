@@ -64,7 +64,7 @@ The `models.json5` local provider gets extended with:
 - Create: `internal/llm/runtime_config.go`
 - Test: `internal/llm/runtime_config_test.go`
 
-- [ ] **Step 1: Add LifecycleConfig to schema.go**
+- [x] **Step 1: Add LifecycleConfig to schema.go**
 
 Add the following types to `internal/config/schema.go`:
 
@@ -90,7 +90,7 @@ type HealthCheckConfig struct {
 }
 ```
 
-- [ ] **Step 2: Add LifecycleConfig to ProviderConfig**
+- [x] **Step 2: Add LifecycleConfig to ProviderConfig**
 
 In `internal/config/schema.go`, modify `ProviderConfig`:
 
@@ -103,7 +103,7 @@ type ProviderConfig struct {
 }
 ```
 
-- [ ] **Step 3: Create runtime_config.go**
+- [x] **Step 3: Create runtime_config.go**
 
 Create `internal/llm/runtime_config.go`:
 
@@ -214,7 +214,7 @@ func ValidateAndNormalize(cfg RuntimeLifecycleConfig) (*RuntimeConfig, error) {
 }
 ```
 
-- [ ] **Step 4: Write unit tests for runtime_config.go**
+- [x] **Step 4: Write unit tests for runtime_config.go**
 
 Create `internal/llm/runtime_config_test.go`:
 
@@ -311,7 +311,7 @@ func TestValidateAndNormalize_ModelNotFound(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```bash
 cd /Users/caimlas/git/meept
@@ -320,7 +320,7 @@ go test ./internal/llm/runtime_config_test.go ./internal/llm/runtime_config.go -
 
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/config/schema.go internal/llm/runtime_config.go internal/llm/runtime_config_test.go
@@ -335,7 +335,7 @@ git commit -m "feat: add RuntimeLifecycleConfig types for local LLM management"
 - Create: `internal/llm/health_checker.go`
 - Test: `internal/llm/health_checker_test.go`
 
-- [ ] **Step 1: Implement HealthChecker**
+- [x] **Step 1: Implement HealthChecker**
 
 Create `internal/llm/health_checker.go`:
 
@@ -451,11 +451,11 @@ func (h *HealthChecker) WaitForHealthy(ctx context.Context, timeout time.Duratio
 }
 ```
 
-- [ ] **Step 2: Write tests**
+- [x] **Step 2: Write tests**
 
 Create `internal/llm/health_checker_test.go` with tests for `NewHealthChecker`, `Start`, `Stop`, `IsHealthy`, and `WaitForHealthy`.
 
-- [ ] **Step 3: Run tests and commit**
+- [x] **Step 3: Run tests and commit**
 
 ```bash
 go test ./internal/llm/health_checker_test.go ./internal/llm/health_checker.go -v
@@ -471,7 +471,7 @@ git commit -m "feat: add HealthChecker for periodic runtime health monitoring"
 - Create: `internal/llm/runtime_process.go`
 - Test: `internal/llm/runtime_process_test.go`
 
-- [ ] **Step 1: Implement RuntimeProcess**
+- [x] **Step 1: Implement RuntimeProcess**
 
 Create `internal/llm/runtime_process.go`:
 
@@ -624,11 +624,11 @@ func (p *RuntimeProcess) readPIDFile() (int, error) {
 }
 ```
 
-- [ ] **Step 2: Write tests**
+- [x] **Step 2: Write tests**
 
 Create `internal/llm/runtime_process_test.go`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/llm/runtime_process.go internal/llm/runtime_process_test.go
@@ -644,7 +644,7 @@ git commit -m "feat: add RuntimeProcess for spawn/stop lifecycle"
 - Modify: `internal/daemon/components.go`
 - Modify: `internal/daemon/daemon.go`
 
-- [ ] **Step 1: Implement RuntimeManager**
+- [x] **Step 1: Implement RuntimeManager**
 
 Create `internal/llm/runtime_manager.go`:
 
@@ -759,15 +759,15 @@ func (m *RuntimeManager) GetHealthChecker(providerID string) (*HealthChecker, bo
 }
 ```
 
-- [ ] **Step 2: Wire into components.go**
+- [x] **Step 2: Wire into components.go**
 
 In `internal/daemon/components.go`, find `NewComponents` and add RuntimeManager initialization.
 
-- [ ] **Step 3: Wire into daemon.go shutdown**
+- [x] **Step 3: Wire into daemon.go shutdown**
 
 In `internal/daemon/daemon.go`, add RuntimeManager to the Components struct and shutdown sequence.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ---
 
@@ -777,18 +777,18 @@ In `internal/daemon/daemon.go`, add RuntimeManager to the Components struct and 
 - Modify: `config/models.json5`
 - Test: Manual testing
 
-- [ ] **Step 1: Add lifecycle config to local provider**
+- [x] **Step 1: Add lifecycle config to local provider**
 
 Edit `config/models.json5` and add the lifecycle section to the "local" provider.
 
-- [ ] **Step 2: Test configuration loading**
+- [x] **Step 2: Test configuration loading**
 
 ```bash
 go build -o bin/meept ./cmd/meept
 ./bin/meept status
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add config/models.json5
@@ -803,7 +803,7 @@ git commit -m "config: add lifecycle config for local LLM runtime"
 - Create: `cmd/meept/runtime.go`
 - Test: Manual testing
 
-- [ ] **Step 1: Implement runtime CLI commands**
+- [x] **Step 1: Implement runtime CLI commands**
 
 ```bash
 meept runtime status    # Show runtime status
@@ -812,7 +812,7 @@ meept runtime stop      # Stop a runtime
 meept runtime restart   # Restart a runtime
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ---
 
@@ -823,11 +823,11 @@ meept runtime restart   # Restart a runtime
 - Modify: `docs/configuration/llm.md`
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1: Write configuration documentation**
+- [x] **Step 1: Write configuration documentation**
 
-- [ ] **Step 2: Update CLAUDE.md with architecture notes**
+- [x] **Step 2: Update CLAUDE.md with architecture notes**
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/configuration/

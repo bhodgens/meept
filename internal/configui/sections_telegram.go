@@ -4,11 +4,10 @@ package configui
 import (
 	"strconv"
 
-	"github.com/caimlas/meept/internal/config"
 )
 
 func buildTelegramFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Telegram
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

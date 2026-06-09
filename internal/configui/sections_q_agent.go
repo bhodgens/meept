@@ -1,10 +1,9 @@
 // internal/configui/sections_q_agent.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildQAgentFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.QAgent
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

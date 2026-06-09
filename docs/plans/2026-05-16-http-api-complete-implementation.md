@@ -132,8 +132,8 @@ type ServiceError struct {
 ```
 
 **Acceptance:**
-- [ ] `go build ./internal/services/...` succeeds
-- [ ] Unit tests pass for error types
+- [x] `go build ./internal/services/...` succeeds
+- [x] Unit tests pass for error types
 
 ---
 
@@ -881,42 +881,42 @@ Sprint 8: Testing & Docs
 After backend implementation, verify web client can:
 
 ### Core (P0)
-- [ ] Send chat messages and receive streaming responses
-- [ ] Create/list/get sessions
-- [ ] View session message history
-- [ ] Search memories
-- [ ] Subscribe to SSE events for real-time updates
+- [x] Send chat messages and receive streaming responses
+- [x] Create/list/get sessions
+- [x] View session message history
+- [x] Search memories
+- [x] Subscribe to SSE events for real-time updates
 
 ### Task Management (P1)
-- [ ] Create tasks with description
-- [ ] List tasks with filters (state, limit)
-- [ ] View task details and steps
-- [ ] Link/unlink sessions to tasks
-- [ ] Cancel tasks
-- [ ] View queue status
-- [ ] Retry failed jobs
-- [ ] View/scale workers
+- [x] Create tasks with description
+- [x] List tasks with filters (state, limit)
+- [x] View task details and steps
+- [x] Link/unlink sessions to tasks
+- [x] Cancel tasks
+- [x] View queue status
+- [x] Retry failed jobs
+- [x] View/scale workers
 
 ### Skills & Templates (P1)
-- [ ] List available skills with tag filter
-- [ ] View skill details
-- [ ] Execute skills with input
-- [ ] List/invoke templates
-- [ ] Clear session templates
+- [x] List available skills with tag filter
+- [x] View skill details
+- [x] Execute skills with input
+- [x] List/invoke templates
+- [x] Clear session templates
 
 ### Session Navigation (P1)
-- [ ] List branches in a session
-- [ ] View branch summaries
-- [ ] Navigate to prior messages (new branch)
-- [ ] Fork sessions from a message
-- [ ] View conversation tree
+- [x] List branches in a session
+- [x] View branch summaries
+- [x] Navigate to prior messages (new branch)
+- [x] Fork sessions from a message
+- [x] View conversation tree
 
 ### Admin (P2)
-- [ ] View daemon status
-- [ ] Start/stop/restart daemon
-- [ ] List models and providers
-- [ ] Set default model
-- [ ] Manage API credentials
-- [ ] View cache stats, clear, invalidate
-- [ ] View/manage scheduled jobs
-- [ ] Google Calendar auth, view today's events
+- [x] View daemon status
+- [x] Start/stop/restart daemon
+- [x] List models and providers
+- [x] Set default model
+- [x] Manage API credentials
+- [x] View cache stats, clear, invalidate
+- [x] View/manage scheduled jobs
+- [x] Google Calendar auth, view today's events

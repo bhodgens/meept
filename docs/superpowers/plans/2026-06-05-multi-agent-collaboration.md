@@ -46,7 +46,7 @@
 **Files:**
 - Create: `internal/agent/collaboration.go`
 
-- [ ] **Step 1: Define core session types, states, turn entries, bus topics**
+- [x] **Step 1: Define core session types, states, turn entries, bus topics**
 
 ```go
 package agent
@@ -221,7 +221,7 @@ func (s *CollaborationSession) MarkFailed() {
 }
 ```
 
-- [ ] **Step 2: Write the test file**
+- [x] **Step 2: Write the test file**
 
 Create `internal/agent/collaboration_test.go`:
 
@@ -310,7 +310,7 @@ func TestCollaborationSession_StateTransitions(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 cd /Users/caimlas/git/meept
@@ -318,7 +318,7 @@ go test ./internal/agent -run "TestSessionState|TestNewCollaborationSession|Test
 ```
 Expected: PASS (3 tests)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/collaboration.go internal/agent/collaboration_test.go
@@ -332,7 +332,7 @@ git commit -m "feat(collab): add core collaboration session types and states"
 **Files:**
 - Create: `internal/agent/collaboration_errors.go`
 
-- [ ] **Step 1: Define collaboration-specific errors**
+- [x] **Step 1: Define collaboration-specific errors**
 
 ```go
 package agent
@@ -377,7 +377,7 @@ var ErrBudgetExceeded = &CollaborationError{Code: ErrCodeBudgetExceeded, Message
 var ErrDepthExceeded = &CollaborationError{Code: ErrCodeDepthExceeded, Message: "maximum collaboration nesting depth exceeded"}
 ```
 
-- [ ] **Step 2: Write test**
+- [x] **Step 2: Write test**
 
 Create `internal/agent/collaboration_errors_test.go`:
 
@@ -414,14 +414,14 @@ func TestErrDepthExceeded(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 go test ./internal/agent -run "TestCollaborationError|TestErrBudgetExceeded|TestErrDepthExceeded" -v
 ```
 Expected: PASS (3 tests)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/collaboration_errors.go internal/agent/collaboration_errors_test.go
@@ -436,7 +436,7 @@ git commit -m "feat(collab): add collaboration-specific error types"
 - Create: `internal/agent/collaboration_turn_manager.go`
 - Create: `internal/agent/collaboration_turn_manager_test.go`
 
-- [ ] **Step 1: Implement TurnManager with token tracking**
+- [x] **Step 1: Implement TurnManager with token tracking**
 
 ```go
 package agent
@@ -613,7 +613,7 @@ func (tm *TurnManager) MaxTurns() int {
 }
 ```
 
-- [ ] **Step 2: Write TurnManager tests**
+- [x] **Step 2: Write TurnManager tests**
 
 ```go
 package agent
@@ -709,14 +709,14 @@ func TestTurnManager_DefaultValues(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 go test ./internal/agent -run "TestNewTurnManager|TestTurnManager_" -v
 ```
 Expected: PASS (4 tests)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/collaboration_turn_manager.go internal/agent/collaboration_turn_manager_test.go
@@ -731,7 +731,7 @@ git commit -m "feat(collab): add TurnManager with editor token and round-robin s
 - Create: `internal/tools/builtin/workspace_yield.go`
 - Create: `internal/tools/builtin/workspace_yield_test.go`
 
-- [ ] **Step 1: Define the workspace_yield tool for pair programming**
+- [x] **Step 1: Define the workspace_yield tool for pair programming**
 
 ```go
 package builtin
@@ -836,7 +836,7 @@ func (t *WorkspaceYieldTool) Execute(ctx context.Context, args map[string]any) (
 var _ tools.Tool = (*WorkspaceYieldTool)(nil)
 ```
 
-- [ ] **Step 2: Write tests**
+- [x] **Step 2: Write tests**
 
 ```go
 package builtin
@@ -896,7 +896,7 @@ func TestWorkspaceYieldTool_Execute_InvalidAction(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 cd /Users/caimlas/git/meept
@@ -904,7 +904,7 @@ go test ./internal/tools/builtin -run "TestWorkspaceYield" -v
 ```
 Expected: PASS (3 tests)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/tools/builtin/workspace_yield.go internal/tools/builtin/workspace_yield_test.go
@@ -919,7 +919,7 @@ git commit -m "feat(collab): add workspace_yield tool for pair programming"
 - Create: `internal/tools/builtin/collaboration.go`
 - Create: `internal/tools/builtin/collaboration_test.go`
 
-- [ ] **Step 1: Implement the initiate_collaboration tool**
+- [x] **Step 1: Implement the initiate_collaboration tool**
 
 ```go
 package builtin
@@ -1059,7 +1059,7 @@ func (t *InitiateCollaborationTool) Execute(ctx context.Context, args map[string
 var _ tools.Tool = (*InitiateCollaborationTool)(nil)
 ```
 
-- [ ] **Step 2: Write tests**
+- [x] **Step 2: Write tests**
 
 ```go
 package builtin
@@ -1160,14 +1160,14 @@ func TestInitiateCollaborationTool_Execute_CallbackError(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 go test ./internal/tools/builtin -run "TestInitiateCollaboration" -v
 ```
 Expected: PASS (5 tests)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/tools/builtin/collaboration.go internal/tools/builtin/collaboration_test.go
@@ -1182,7 +1182,7 @@ git commit -m "feat(collab): add initiate_collaboration tool for agent-initiated
 - Create: `internal/agent/collaboration_pair_driver.go`
 - Create: `internal/agent/collaboration_pair_driver_test.go`
 
-- [ ] **Step 1: Implement PairProgrammingDriver**
+- [x] **Step 1: Implement PairProgrammingDriver**
 
 ```go
 package agent
@@ -1591,7 +1591,7 @@ func (d *PairProgrammingDriver) publishEvent(sessionID, topic string, data map[s
 }
 ```
 
-- [ ] **Step 2: Write PairProgrammingDriver tests**
+- [x] **Step 2: Write PairProgrammingDriver tests**
 
 ```go
 package agent
@@ -1667,14 +1667,14 @@ func TestNewPairProgrammingDriver_Defaults(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 go test ./internal/agent -run "TestPairProgrammingDriver" -v
 ```
 Expected: PASS (5 tests)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/collaboration_pair_driver.go internal/agent/collaboration_pair_driver_test.go
@@ -1689,7 +1689,7 @@ git commit -m "feat(collab): add PairProgrammingDriver with symmetric turn loop"
 - Create: `internal/agent/collaboration_diff_driver.go`
 - Create: `internal/agent/collaboration_diff_driver_test.go`
 
-- [ ] **Step 1: Implement DifferentialDriver**
+- [x] **Step 1: Implement DifferentialDriver**
 
 ```go
 package agent
@@ -2006,7 +2006,7 @@ func (d *DifferentialDriver) buildDifferentiatorPrompt(sess *CollaborationSessio
 }
 ```
 
-- [ ] **Step 2: Write DifferentialDriver tests**
+- [x] **Step 2: Write DifferentialDriver tests**
 
 ```go
 package agent
@@ -2112,7 +2112,7 @@ func containsString(s, substr string) bool {
 }
 ```
 
-- [ ] **Step 3: Add imports fix for test file**
+- [x] **Step 3: Add imports fix for test file**
 
 Note: The test file needs `"strings"` and `"path/filepath"` imports. Add a `filepath` import:
 
@@ -2126,14 +2126,14 @@ import (
 )
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 go test ./internal/agent -run "TestDifferentialDriver|TestValidateCheckpointResult|TestDifferentialDriver_phaseFork" -v
 ```
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/collaboration_diff_driver.go internal/agent/collaboration_diff_driver_test.go
@@ -2148,7 +2148,7 @@ git commit -m "feat(collab): add DifferentialDriver with four-phase pipeline"
 - Create: `internal/agent/collaboration_engine.go`
 - Create: `internal/agent/collaboration_engine_test.go`
 
-- [ ] **Step 1: Implement CollaborationEngine**
+- [x] **Step 1: Implement CollaborationEngine**
 
 ```go
 package agent
@@ -2398,7 +2398,7 @@ func (e *CollaborationEngine) publishCollaborationEvent(topic string, data map[s
 }
 ```
 
-- [ ] **Step 2: Write CollaborationEngine tests**
+- [x] **Step 2: Write CollaborationEngine tests**
 
 ```go
 package agent
@@ -2547,14 +2547,14 @@ func TestCollaborationEngine_RunSession_MissingMode(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 go test ./internal/agent -run "TestNewCollaborationEngine|TestCollaborationEngine_" -v
 ```
 Expected: PASS (8 tests)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/collaboration_engine.go internal/agent/collaboration_engine_test.go
@@ -2568,7 +2568,7 @@ git commit -m "feat(collab): add CollaborationEngine with mode registration and 
 **Files:**
 - Modify: `internal/agent/orchestrator.go`
 
-- [ ] **Step 1: Add CollaborationEngine field and bus handlers**
+- [x] **Step 1: Add CollaborationEngine field and bus handlers**
 
 ```go
 	// Add to struct (around line 15)
@@ -2578,7 +2578,7 @@ git commit -m "feat(collab): add CollaborationEngine with mode registration and 
 	CollaborationEngine *CollaborationEngine     // optional: enables agent collaboration modes
 ```
 
-- [ ] **Step 2: Wire in NewOrchestrator and Start**
+- [x] **Step 2: Wire in NewOrchestrator and Start**
 
 In `NewOrchestrator`, set:
 ```go
@@ -2687,14 +2687,14 @@ func (o *Orchestrator) handleCollabError(_ context.Context, msg *models.BusMessa
 }
 ```
 
-- [ ] **Step 3: Update tests if needed**
+- [x] **Step 3: Update tests if needed**
 
 Verify existing `orchestrator_test.go` still compiles:
 ```bash
 go test ./internal/agent -run TestOrchestrator -v
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/orchestrator.go
@@ -2708,7 +2708,7 @@ git commit -m "feat(collab): wire CollaborationEngine into Orchestrator bus topi
 **Files:**
 - Modify: `internal/agent/intent.go`
 
-- [ ] **Step 1: Add IntentCollaborate constant and update methods**
+- [x] **Step 1: Add IntentCollaborate constant and update methods**
 
 After `IntentPair`, add:
 ```go
@@ -2751,14 +2751,14 @@ Update `Keywords()`:
 		return []string{"collaborate", "pair program", "debate", "a/b test", "differential", "compare approaches"}
 ```
 
-- [ ] **Step 2: Update `ShouldCreateTask` for IntentCollaborate**
+- [x] **Step 2: Update `ShouldCreateTask` for IntentCollaborate**
 
 ```go
 	case IntentCode, IntentDebug, IntentPlan, IntentSchedule, IntentGit, IntentCompound, IntentCollaborate:
 		return true
 ```
 
-- [ ] **Step 3: Write integration test**
+- [x] **Step 3: Write integration test**
 
 Create `internal/agent/intent_collaborate_test.go`:
 
@@ -2815,7 +2815,7 @@ func TestIntentCollaborate_Keywords(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 go test ./internal/agent -run "TestIntentCollaborate" -v
@@ -2823,7 +2823,7 @@ go test ./internal/agent -run "TestIntentCollaborate" -v
 
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/intent.go internal/agent/intent_collaborate_test.go
@@ -2834,7 +2834,7 @@ git commit -m "feat(collab): add IntentCollaborate to dispatcher intent system"
 
 ## Task 11: Full Suite Compilation Check
 
-- [ ] **Step 1: Build the project**
+- [x] **Step 1: Build the project**
 
 ```bash
 cd /Users/caimlas/git/meept
@@ -2842,28 +2842,28 @@ go build ./...
 ```
 Expected: SUCCESS
 
-- [ ] **Step 2: Run all agent package tests**
+- [x] **Step 2: Run all agent package tests**
 
 ```bash
 go test ./internal/agent/... -v -count=1
 ```
 Expected: All tests pass (including new collaboration tests + existing tests)
 
-- [ ] **Step 3: Run tools package tests**
+- [x] **Step 3: Run tools package tests**
 
 ```bash
 go test ./internal/tools/... -v -count=1
 ```
 Expected: All tests pass
 
-- [ ] **Step 4: Run race detector**
+- [x] **Step 4: Run race detector**
 
 ```bash
 go test -race ./internal/agent/... -run "TestCollaboration|TestTurnManager|TestPairProgrammingDriver|TestDifferentialDriver"
 ```
 Expected: No race conditions detected
 
-- [ ] **Step 5: Commit any minor fixes**
+- [x] **Step 5: Commit any minor fixes**
 
 ```bash
 git add -A && git commit -m "feat(collab): finalize collaboration system with full test coverage"

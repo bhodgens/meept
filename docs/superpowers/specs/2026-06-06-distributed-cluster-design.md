@@ -791,46 +791,46 @@ File this under "Cluster 2.0" or similar milestone.
 
 ## 12. Implementation Checklist
 
-- [ ] **Phase 1: Foundation**
-  - [ ] Create `internal/cluster/` package structure
-  - [ ] Add cluster event types to `pkg/models/cluster.go`
-  - [ ] Extend SQLite schema with cluster tables
-  - [ ] Implement Git sync (pull, push, heartbeat commits)
+- [x] **Phase 1: Foundation**
+  - [x] Create `internal/cluster/` package structure
+  - [x] Add cluster event types to `pkg/models/cluster.go`
+  - [x] Extend SQLite schema with cluster tables
+  - [x] Implement Git sync (pull, push, heartbeat commits)
 
-- [ ] **Phase 2: WireGuard Integration**
-  - [ ] Implement `wireguard_sync.go` (Option A: `wg` binary)
-  - [ ] Generate WireGuard configs from git state
-  - [ ] Test peer connectivity
+- [x] **Phase 2: WireGuard Integration**
+  - [x] Implement `wireguard_sync.go` (Option A: `wg` binary)
+  - [x] Generate WireGuard configs from git state
+  - [x] Test peer connectivity
 
-- [ ] **Phase 3: Gossip Engine**
-  - [ ] Implement gossip flood protocol
-  - [ ] Event signing/verification (ed25519)
-  - [ ] ACK/retry logic
-  - [ ] Event persistence
+- [x] **Phase 3: Gossip Engine**
+  - [x] Implement gossip flood protocol
+  - [x] Event signing/verification (ed25519)
+  - [x] ACK/retry logic
+  - [x] Event persistence
 
-- [ ] **Phase 4: Cluster Queue**
-  - [ ] Implement `cluster_queue.go`
-  - [ ] Task claim/timeout logic
-  - [ ] Manager reachability checks
-  - [ ] Failover/reclaim logic
+- [x] **Phase 4: Cluster Queue**
+  - [x] Implement `cluster_queue.go`
+  - [x] Task claim/timeout logic
+  - [x] Manager reachability checks
+  - [x] Failover/reclaim logic
 
-- [ ] **Phase 5: CLI Commands**
-  - [ ] `meept cluster init`
-  - [ ] `meept cluster join`
-  - [ ] `meept cluster start`
-  - [ ] `meept cluster status`
-  - [ ] `meept cluster leave`
-  - [ ] `meept cluster debug` (diagnostics)
+- [x] **Phase 5: CLI Commands**
+  - [x] `meept cluster init`
+  - [x] `meept cluster join`
+  - [x] `meept cluster start`
+  - [x] `meept cluster status`
+  - [x] `meept cluster leave`
+  - [x] `meept cluster debug` (diagnostics)
 
-- [ ] **Phase 6: Documentation**
-  - [ ] Write `docs/configuration/cluster.md` (user guide)
-  - [ ] Write `docs/concepts/cluster-architecture.md` (technical overview)
-  - [ ] Update `mkdocs.yml` navigation
+- [x] **Phase 6: Documentation**
+  - [x] Write `docs/configuration/cluster.md` (user guide)
+  - [x] Write `docs/concepts/cluster-architecture.md` (technical overview)
+  - [x] Update `mkdocs.yml` navigation
 
-- [ ] **Phase 7: Testing**
-  - [ ] Unit tests for gossip engine
-  - [ ] Integration tests (multi-node cluster in Docker)
-  - [ ] Failover tests (simulate node crash)
+- [x] **Phase 7: Testing**
+  - [x] Unit tests for gossip engine
+  - [x] Integration tests (multi-node cluster in Docker)
+  - [x] Failover tests (simulate node crash)
 
 ---
 

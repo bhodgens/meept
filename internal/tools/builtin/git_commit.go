@@ -17,6 +17,19 @@ type GitCommitTool struct {
 	workingDir string
 }
 
+// BatchCommitEntry represents a single commit in a batch operation.
+type BatchCommitEntry struct {
+	Message string   `json:"message"`
+	Files   []string `json:"files,omitempty"`
+}
+
+// BatchCommitResult contains results from a multi-commit batch operation.
+type BatchCommitResult struct {
+	Success  bool            `json:"success"`
+	Commits  []GitCommitResult `json:"commits,omitempty"`
+	Message  string           `json:"message"`
+}
+
 // NewGitCommitTool creates a new git commit tool.
 func NewGitCommitTool(workingDir string) *GitCommitTool {
 	if workingDir == "" {
@@ -39,7 +52,7 @@ func (t *GitCommitTool) Parameters() llm.FunctionParameters {
 		Properties: map[string]llm.ParameterProperty{
 			"message": {
 				Type:        schemaTypeString,
-				Description: "Commit message (required for single commit).",
+				Description: "Commit message (required for single commit). Ignored when 'commits' is provided.",
 			},
 			"files": {
 				Type:        schemaTypeArray,
@@ -47,6 +60,14 @@ func (t *GitCommitTool) Parameters() llm.FunctionParameters {
 				Items: &llm.ParameterProperty{
 					Type:        schemaTypeString,
 					Description: "File path to commit",
+				},
+			},
+			"commits": {
+				Type:        schemaTypeArray,
+				Description: "List of ordered commits for batch atomic commit creation. Each entry is an object with 'message' (string, required) and 'files' (array of strings, optional). Commits are created in order by dependency (source first, then tests, then docs, then config). Use with git_split to create atomic commits.",
+				Items: &llm.ParameterProperty{
+					Type:        schemaTypeObject,
+					Description: "A single commit entry with 'message' and optional 'files'.",
 				},
 			},
 			"validate": {
@@ -83,6 +104,13 @@ func (t *GitCommitTool) Execute(ctx context.Context, args map[string]any) (any, 
 		validate = true // Default to validation enabled
 	}
 
+	// Check for batch commit mode
+	commitsRaw, hasCommits := args["commits"].([]any)
+	if hasCommits && len(commitsRaw) > 0 {
+		return t.executeBatchCommits(ctx, workingDir, commitsRaw, validate)
+	}
+
+	// Single commit mode
 	// Get message
 	message, _ := args["message"].(string)
 	if message == "" {
@@ -131,6 +159,121 @@ func (t *GitCommitTool) Execute(ctx context.Context, args map[string]any) (any, 
 		Success:    true,
 		Message:    fmt.Sprintf("Successfully created commit %s", hash[:7]),
 	}, nil
+}
+
+// executeBatchCommits creates multiple ordered atomic commits.
+// Each commit in the list is staged and committed separately in order.
+func (t *GitCommitTool) executeBatchCommits(ctx context.Context, workingDir string, commitsRaw []any, validate bool) (any, error) {
+	var results []GitCommitResult
+	allSuccess := true
+
+	for i, cRaw := range commitsRaw {
+		cMap, ok := cRaw.(map[string]any)
+		if !ok {
+			return BatchCommitResult{
+				Success: false,
+				Commits: results,
+				Message: fmt.Sprintf("commit %d: expected object, got %T", i, cRaw),
+			}, fmt.Errorf("commit %d: expected object", i)
+		}
+
+		message, _ := cMap["message"].(string)
+		if message == "" {
+			return BatchCommitResult{
+				Success: false,
+				Commits: results,
+				Message: fmt.Sprintf("commit %d: message required", i),
+			}, fmt.Errorf("commit %d: message required", i)
+		}
+
+		if validate {
+			if err := t.validateCommitMessage(message); err != nil {
+				allSuccess = false
+				results = append(results, GitCommitResult{
+					Success: false,
+					Message: fmt.Sprintf("commit %d: invalid message: %v", i, err),
+				})
+				continue
+			}
+		}
+
+		// Reset staging area before each commit to ensure clean state
+		if _, err := t.runGitCmd(ctx, workingDir, "reset", "HEAD", "--"); err != nil {
+			// Not a fatal error — may have no previous state to reset
+		}
+
+		var files []string
+		if filesRaw, ok := cMap["files"].([]any); ok {
+			for _, f := range filesRaw {
+				if s, ok := f.(string); ok {
+					files = append(files, s)
+				}
+			}
+		}
+
+		if len(files) > 0 {
+			for _, file := range files {
+				if _, err := t.runGitCmd(ctx, workingDir, "add", file); err != nil {
+					allSuccess = false
+					results = append(results, GitCommitResult{
+						Success: false,
+						Message: fmt.Sprintf("commit %d: failed to stage %s: %v", i, file, err),
+					})
+					continue
+				}
+			}
+		} else {
+			// If no files specified for this commit, stage all remaining changes
+			if _, err := t.runGitCmd(ctx, workingDir, "add", "-A"); err != nil {
+				allSuccess = false
+				results = append(results, GitCommitResult{
+					Success: false,
+					Message: fmt.Sprintf("commit %d: failed to stage all: %v", i, err),
+				})
+				continue
+			}
+		}
+
+		hash, err := t.createCommit(ctx, workingDir, message)
+		if err != nil {
+			allSuccess = false
+			results = append(results, GitCommitResult{
+				Success: false,
+				Message: fmt.Sprintf("commit %d: %v", i, err),
+			})
+			continue
+		}
+
+		results = append(results, GitCommitResult{
+			CommitHash: hash,
+			Success:    true,
+			Message:    fmt.Sprintf("Successfully created commit %d/%d: %s", i+1, len(commitsRaw), hash[:7]),
+		})
+	}
+
+	if allSuccess {
+		return BatchCommitResult{
+			Success: true,
+			Commits: results,
+			Message: fmt.Sprintf("Successfully created %d atomic commits", len(results)),
+		}, nil
+	}
+
+	return BatchCommitResult{
+		Success: false,
+		Commits: results,
+		Message: fmt.Sprintf("Created %d/%d commits with errors", countSuccessfulCommits(results), len(commitsRaw)),
+	}, nil
+}
+
+func countSuccessfulCommits(results []GitCommitResult) int {
+	count := 0
+	for _, r := range results {
+		if r.Success {
+			count++
+		}
+	}
+	return count
 }
 
 func (t *GitCommitTool) createCommit(ctx context.Context, dir, message string) (string, error) {

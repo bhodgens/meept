@@ -63,9 +63,9 @@ Add the permission mapping in `ToolActionMap` (after the `"delegate_task": "agen
 go build ./internal/agent/...
 ```
 
-- [ ] `ToolRequestReview` constant added to `internal/agent/cache.go`
-- [ ] `ToolRequestReview` mapped to `"agent_delegate"` in `ToolActionMap` in `internal/agent/executor.go`
-- [ ] `go build ./internal/agent/...` passes
+- [x] `ToolRequestReview` constant added to `internal/agent/cache.go`
+- [x] `ToolRequestReview` mapped to `"agent_delegate"` in `ToolActionMap` in `internal/agent/executor.go`
+- [x] `go build ./internal/agent/...` passes
 
 ---
 
@@ -610,9 +610,9 @@ go test ./internal/tools/builtin/... -run TestRequestReview -v
 go vet ./internal/tools/builtin/...
 ```
 
-- [ ] `internal/tools/builtin/review_tools.go` created with RequestReviewTool
-- [ ] `internal/tools/builtin/review_tools_test.go` created with 11 test cases
-- [ ] All tests pass: `go test ./internal/tools/builtin/... -run TestRequestReview -v`
+- [x] `internal/tools/builtin/review_tools.go` created with RequestReviewTool
+- [x] `internal/tools/builtin/review_tools_test.go` created with 11 test cases
+- [x] All tests pass: `go test ./internal/tools/builtin/... -run TestRequestReview -v`
 
 ---
 
@@ -677,9 +677,9 @@ go build ./internal/agent/...
 go build ./internal/daemon/...
 ```
 
-- [ ] `ToolRequestReview` added to `CoderAgentSpec().AdditionalTools` in `internal/agent/spec.go`
-- [ ] `NewRequestReviewTool` registered in `internal/daemon/components.go`
-- [ ] `go build ./internal/daemon/...` passes
+- [x] `ToolRequestReview` added to `CoderAgentSpec().AdditionalTools` in `internal/agent/spec.go`
+- [x] `NewRequestReviewTool` registered in `internal/daemon/components.go`
+- [x] `go build ./internal/daemon/...` passes
 
 ---
 
@@ -800,11 +800,11 @@ go test ./internal/tools/builtin/... -run "TestRequestReview" -v
 go test ./internal/agent/... -run "TestCoder" -v
 ```
 
-- [ ] Integration test `TestRequestReviewTool_Integration_CoderSpec` verifies coder spec has tool
-- [ ] Integration test `TestRequestReviewTool_Integration_ReviewPolicyMapping` verifies mapping alignment
-- [ ] Integration test `TestRequestReviewTool_Integration_FullFlow` validates end-to-end flow
-- [ ] Integration test `TestRequestReviewTool_Integration_DebuggerToDebugReviewer` validates debugger routing
-- [ ] All tests pass
+- [x] Integration test `TestRequestReviewTool_Integration_CoderSpec` verifies coder spec has tool
+- [x] Integration test `TestRequestReviewTool_Integration_ReviewPolicyMapping` verifies mapping alignment
+- [x] Integration test `TestRequestReviewTool_Integration_FullFlow` validates end-to-end flow
+- [x] Integration test `TestRequestReviewTool_Integration_DebuggerToDebugReviewer` validates debugger routing
+- [x] All tests pass
 
 ---
 
@@ -817,5 +817,5 @@ go test ./internal/agent/... ./internal/tools/builtin/... -v
 go build ./...
 ```
 
-- [ ] `go test ./internal/agent/... ./internal/tools/builtin/... -v` passes
-- [ ] `go build ./...` passes
+- [x] `go test ./internal/agent/... ./internal/tools/builtin/... -v` passes
+- [x] `go build ./...` passes

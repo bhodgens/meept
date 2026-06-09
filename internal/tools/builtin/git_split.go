@@ -12,6 +12,24 @@ import (
 	"github.com/caimlas/meept/internal/tools"
 )
 
+// lockFileSuffixes are file suffixes that represent lock files and should be
+// excluded from commit splitting analysis.
+var lockFileSuffixes = []string{
+	".lock",
+	"package-lock.json",
+	"yarn.lock",
+	"pnpm-lock.yaml",
+	"cargo.lock",
+	"composer.lock",
+	"Gemfile.lock",
+	"mix.lock",
+	"flake.lock",
+	"go.sum",
+	"pubspec.lock",
+	"poetry.lock",
+	"Pipfile.lock",
+}
+
 // GitSplitTool suggests atomic commit groups from working tree changes.
 type GitSplitTool struct {
 	workingDir string
@@ -133,7 +151,38 @@ func (t *GitSplitTool) getAllChangedFiles(ctx context.Context, dir string) ([]Fi
 		allChanges = append(allChanges, changes...)
 	}
 
+	// Filter out lock files from analysis
+	allChanges = filterLockFiles(allChanges)
+
 	return allChanges, nil
+}
+
+// isLockFile returns true if the given file path is a lock file.
+func isLockFile(filePath string) bool {
+	for _, suffix := range lockFileSuffixes {
+		if strings.HasSuffix(filePath, suffix) {
+			return true
+		}
+	}
+	// Also check basename for files like "package-lock.json"
+	base := filePath[strings.LastIndex(filePath, "/")+1:]
+	for _, name := range lockFileSuffixes {
+		if base == name || strings.HasSuffix(base, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// filterLockFiles removes lock files from the changes list.
+func filterLockFiles(changes []FileChangeInfo) []FileChangeInfo {
+	filtered := make([]FileChangeInfo, 0, len(changes))
+	for _, c := range changes {
+		if !isLockFile(c.FilePath) {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
 }
 
 func (t *GitSplitTool) parseSimpleStatus(output string) []FileChangeInfo {

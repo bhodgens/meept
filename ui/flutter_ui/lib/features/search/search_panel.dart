@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../styles/cyberpunk_theme.dart';
+import '../../theme/colors.dart';
+import '../../theme/typography.dart';
 import '../../services/api_client.dart';
 import '../../providers/providers.dart';
 
@@ -129,7 +130,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
-                  color: CyberpunkColors.orangePrimary.withOpacity(0.3),
+                  color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
                   width: 1,
                 ),
               ),
@@ -146,7 +147,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                     const SizedBox(width: 12),
                     Text(
                       'search',
-                      style: CyberpunkTypography.headingSmall.copyWith(
+                      style: CyberpunkTypography.headlineSmall.copyWith(
                         color: CyberpunkColors.orangePrimary,
                       ),
                     ),
@@ -157,7 +158,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                 Container(
                   decoration: BoxDecoration(
                     border: Border.all(
-                      color: CyberpunkColors.orangePrimary.withOpacity(0.3),
+                      color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
                       width: 1,
                     ),
                     borderRadius: BorderRadius.circular(4),
@@ -378,7 +379,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
           ? Text(
               result.snippet,
               style: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.textSecondary,
+                color: CyberpunkColors.midGray,
               ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,

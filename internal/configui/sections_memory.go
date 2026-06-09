@@ -4,11 +4,10 @@ package configui
 import (
 	"strings"
 
-	"github.com/caimlas/meept/internal/config"
 )
 
 func buildMemoryFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	mem := &cfg.Memory
 	ep := &mem.Episodic
 	tk := &mem.Task

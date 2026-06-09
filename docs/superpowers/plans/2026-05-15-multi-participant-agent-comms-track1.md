@@ -41,7 +41,7 @@
 
 This is the foundation — all other tasks depend on messages knowing who sent them.
 
-- [ ] **Step 1: Write the failing test**
+- [x]**Step 1: Write the failing test**
 
 Create `pkg/models/types_test.go`:
 
@@ -99,12 +99,12 @@ func TestBusMessageSourceClientOmitEmpty(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x]**Step 2: Run test to verify it fails**
 
 Run: `go test ./pkg/models/... -v -run TestBusMessage`
 Expected: compile error or `SourceClient` field not found on `BusMessage`
 
-- [ ] **Step 3: Add `SourceClient` field to `BusMessage`**
+- [x]**Step 3: Add `SourceClient` field to `BusMessage`**
 
 In `pkg/models/types.go`, modify the `BusMessage` struct:
 
@@ -121,17 +121,17 @@ type BusMessage struct {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x]**Step 4: Run test to verify it passes**
 
 Run: `go test ./pkg/models/... -v -run TestBusMessage`
 Expected: PASS
 
-- [ ] **Step 5: Run full test suite to check for regressions**
+- [x]**Step 5: Run full test suite to check for regressions**
 
 Run: `go test ./... -count=1 2>&1 | tail -20`
 Expected: All tests pass (no tests reference `SourceClient` yet, so no breakage)
 
-- [ ] **Step 6: Commit**
+- [x]**Step 6: Commit**
 
 ```bash
 git add pkg/models/types.go pkg/models/types_test.go
@@ -147,7 +147,7 @@ git commit -m "feat: add SourceClient field to BusMessage for multi-participant 
 - Modify: `internal/agent/events.go` (add new event types)
 - Test: `go test ./internal/agent/... -v -run TestChatRequest`
 
-- [ ] **Step 1: Write the failing test**
+- [x]**Step 1: Write the failing test**
 
 In `internal/agent/handler_test.go` (or create if needed), add:
 
@@ -178,12 +178,12 @@ func TestChatRequestSourceClientDefault(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x]**Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/agent/... -v -run TestChatRequest`
 Expected: compile error — `ChatRequest` has no `SourceClient` field
 
-- [ ] **Step 3: Add `SourceClient` to `ChatRequest`**
+- [x]**Step 3: Add `SourceClient` to `ChatRequest`**
 
 In `internal/agent/handler.go`, modify the `ChatRequest` struct:
 
@@ -195,7 +195,7 @@ type ChatRequest struct {
 }
 ```
 
-- [ ] **Step 4: Add new event types for bilateral visibility**
+- [x]**Step 4: Add new event types for bilateral visibility**
 
 In `internal/agent/events.go`, add after the existing `SettledData` type:
 
@@ -229,17 +229,17 @@ Add the corresponding `AgentEventType` constants:
 	AgentEventChatClientDisconnected AgentEventType = "chat_client_disconnected"
 ```
 
-- [ ] **Step 5: Run tests**
+- [x]**Step 5: Run tests**
 
 Run: `go test ./internal/agent/... -v -run "TestChatRequest"`
 Expected: PASS
 
-- [ ] **Step 6: Run broader agent tests for regressions**
+- [x]**Step 6: Run broader agent tests for regressions**
 
 Run: `go test ./internal/agent/... -count=1 2>&1 | tail -20`
 Expected: All tests pass
 
-- [ ] **Step 7: Commit**
+- [x]**Step 7: Commit**
 
 ```bash
 git add internal/agent/handler.go internal/agent/events.go
@@ -254,7 +254,7 @@ git commit -m "feat: add SourceClient to ChatRequest and bilateral visibility ev
 - Modify: `internal/agent/handler.go:397-512` (handleRequest function)
 - Test: `go test ./internal/agent/... -v -run TestHandleRequest`
 
-- [ ] **Step 1: Write the failing test**
+- [x]**Step 1: Write the failing test**
 
 Add to `internal/agent/handler_test.go`:
 
@@ -309,12 +309,12 @@ func TestHandleRequestBroadcastsMessageReceived(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x]**Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/agent/... -v -run TestHandleRequestBroadcastsMessageReceived -timeout 10s`
 Expected: timeout / no broadcast received (the feature doesn't exist yet)
 
-- [ ] **Step 3: Add broadcast in `handleRequest`**
+- [x]**Step 3: Add broadcast in `handleRequest`**
 
 In `internal/agent/handler.go`, in the `handleRequest` function, add the broadcast **after** the `req.Message == ""` check and conversation ID generation, and **before** the worker creation. Insert after line ~418 (after `conversationID` is determined):
 
@@ -346,17 +346,17 @@ Also add the legacy topic mapping in `internal/agent/emitter.go`:
 	AgentEventChatMessageReceived: "chat.message.received",
 ```
 
-- [ ] **Step 4: Run test**
+- [x]**Step 4: Run test**
 
 Run: `go test ./internal/agent/... -v -run TestHandleRequestBroadcastsMessageReceived -timeout 10s`
 Expected: PASS
 
-- [ ] **Step 5: Run full agent tests**
+- [x]**Step 5: Run full agent tests**
 
 Run: `go test ./internal/agent/... -count=1 2>&1 | tail -20`
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x]**Step 6: Commit**
 
 ```bash
 git add internal/agent/handler.go internal/agent/emitter.go
@@ -373,7 +373,7 @@ git commit -m "feat: broadcast chat.message.received for bilateral session visib
 
 This replaces the dead-end code in `dispatcher.go:699-710` where `DetermineRouteAction` is computed but never acted on.
 
-- [ ] **Step 1: Write the failing test**
+- [x]**Step 1: Write the failing test**
 
 Create `internal/agent/report_router_test.go`:
 
@@ -436,12 +436,12 @@ func TestReportRouterMaxDepth(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x]**Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/agent/... -v -run TestReportRouter`
 Expected: compile error — `ReportRouter`, `NewReportRouter`, `ReportRouterConfig`, `RouteParams` don't exist
 
-- [ ] **Step 3: Implement ReportRouter**
+- [x]**Step 3: Implement ReportRouter**
 
 Create `internal/agent/report_router.go`:
 
@@ -620,17 +620,17 @@ func (r *ReportRouter) formatErrorResponse(params RouteParams) string {
 }
 ```
 
-- [ ] **Step 4: Run test**
+- [x]**Step 4: Run test**
 
 Run: `go test ./internal/agent/... -v -run TestReportRouter`
 Expected: PASS
 
-- [ ] **Step 5: Run full agent test suite**
+- [x]**Step 5: Run full agent test suite**
 
 Run: `go test ./internal/agent/... -count=1 2>&1 | tail -20`
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x]**Step 6: Commit**
 
 ```bash
 git add internal/agent/report_router.go internal/agent/report_router_test.go
@@ -646,7 +646,7 @@ git commit -m "feat: add ReportRouter for multi-agent handoff routing"
 
 This replaces the section where `DetermineRouteAction` is computed and discarded with an actual routing decision using the `ReportRouter`.
 
-- [ ] **Step 1: Write the failing test**
+- [x]**Step 1: Write the failing test**
 
 Add to `internal/agent/dispatcher_test.go`:
 
@@ -685,12 +685,12 @@ func TestRouteToAgentUsesReportRouter(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test**
+- [x]**Step 2: Run test**
 
 Run: `go test ./internal/agent/... -v -run TestRouteToAgentUsesReportRouter`
 Expected: compile error — `dispatcher.router` field doesn't exist yet
 
-- [ ] **Step 3: Add router to Dispatcher and wire into RouteToAgent**
+- [x]**Step 3: Add router to Dispatcher and wire into RouteToAgent**
 
 In `internal/agent/dispatcher.go`, add `router` field to the `Dispatcher` struct (after `stats` at line ~132):
 
@@ -813,17 +813,17 @@ func (d *Dispatcher) buildAccumulatedContext(report *AgentReport, displayRespons
 }
 ```
 
-- [ ] **Step 4: Run test**
+- [x]**Step 4: Run test**
 
 Run: `go test ./internal/agent/... -v -run TestRouteToAgentUsesReportRouter`
 Expected: PASS
 
-- [ ] **Step 5: Run full test suite**
+- [x]**Step 5: Run full test suite**
 
 Run: `go test ./internal/agent/... -count=1 2>&1 | tail -20`
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x]**Step 6: Commit**
 
 ```bash
 git add internal/agent/dispatcher.go
@@ -840,7 +840,7 @@ git commit -m "feat: wire ReportRouter into Dispatcher for multi-agent handoff"
 
 This handles the MCP protocol JSON-RPC framing over stdin/stdout.
 
-- [ ] **Step 1: Write the failing test**
+- [x]**Step 1: Write the failing test**
 
 Create `internal/mcp/transport_test.go`:
 
@@ -889,12 +889,12 @@ func TestWriteMessage(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x]**Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/mcp/... -v`
 Expected: package doesn't exist yet
 
-- [ ] **Step 3: Create the MCP transport package**
+- [x]**Step 3: Create the MCP transport package**
 
 Create `internal/mcp/transport.go`:
 
@@ -983,12 +983,12 @@ Fix the `ReadMessage` to use `bytes.TrimSpace` directly — the `line` from `Rea
 
 This is already in the code above. Good.
 
-- [ ] **Step 4: Run test**
+- [x]**Step 4: Run test**
 
 Run: `go test ./internal/mcp/... -v -run TestRead`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x]**Step 5: Commit**
 
 ```bash
 git add internal/mcp/transport.go internal/mcp/transport_test.go
@@ -1005,7 +1005,7 @@ git commit -m "feat: add MCP transport layer (JSON-RPC over stdio)"
 
 Defines the MCP tools that the server exposes: `meept_sessions`, `meept_send`, `meept_events`, `meept_status`.
 
-- [ ] **Step 1: Write the failing test**
+- [x]**Step 1: Write the failing test**
 
 Create `internal/mcp/tools_test.go`:
 
@@ -1054,12 +1054,12 @@ func TestToolDefinitionsJSON(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x]**Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/mcp/... -v -run TestTool`
 Expected: `ToolDefinitions` undefined
 
-- [ ] **Step 3: Implement tool definitions**
+- [x]**Step 3: Implement tool definitions**
 
 Create `internal/mcp/tools.go`:
 
@@ -1173,12 +1173,12 @@ func ToolDefinitions() []ToolDefinition {
 }
 ```
 
-- [ ] **Step 4: Run test**
+- [x]**Step 4: Run test**
 
 Run: `go test ./internal/mcp/... -v -run TestTool`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x]**Step 5: Commit**
 
 ```bash
 git add internal/mcp/tools.go internal/mcp/tools_test.go
@@ -1195,7 +1195,7 @@ git commit -m "feat: add MCP tool definitions for meept session operations"
 
 The server reads JSON-RPC from stdin, dispatches to tool implementations, writes responses to stdout. It connects to meept-daemon via the existing RPC transport.
 
-- [ ] **Step 1: Write the failing test**
+- [x]**Step 1: Write the failing test**
 
 Create `internal/mcp/server_test.go`:
 
@@ -1266,12 +1266,12 @@ func TestServerHandlesToolsList(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x]**Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/mcp/... -v -run TestServer`
 Expected: `NewServer`, `processOne` undefined
 
-- [ ] **Step 3: Implement MCP server**
+- [x]**Step 3: Implement MCP server**
 
 Create `internal/mcp/server.go`:
 
@@ -1596,12 +1596,12 @@ func (s *Server) ConnectAndSubscribe(socketPath string) (string, error) {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x]**Step 4: Run tests**
 
 Run: `go test ./internal/mcp/... -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x]**Step 5: Commit**
 
 ```bash
 git add internal/mcp/server.go internal/mcp/server_test.go
@@ -1616,7 +1616,7 @@ git commit -m "feat: add MCP server with tool implementations and RPC bridge"
 - Create: `cmd/meept/mcp_chat_server.go`
 - Modify: `cmd/meept/main.go:110-129` (add subcommand registration)
 
-- [ ] **Step 1: Create the subcommand**
+- [x]**Step 1: Create the subcommand**
 
 Create `cmd/meept/mcp_chat_server.go`:
 
@@ -1678,7 +1678,7 @@ func runMCPChatServer(cmd *cobra.Command, args []string) error {
 }
 ```
 
-- [ ] **Step 2: Register the subcommand in main.go**
+- [x]**Step 2: Register the subcommand in main.go**
 
 In `cmd/meept/main.go`, add after the existing `rootCmd.AddCommand` lines (around line 129):
 
@@ -1686,17 +1686,17 @@ In `cmd/meept/main.go`, add after the existing `rootCmd.AddCommand` lines (aroun
 	rootCmd.AddCommand(newMCPChatServerCmd())
 ```
 
-- [ ] **Step 3: Build and verify it compiles**
+- [x]**Step 3: Build and verify it compiles**
 
 Run: `go build -o bin/meept ./cmd/meept`
 Expected: no errors
 
-- [ ] **Step 4: Verify the help text**
+- [x]**Step 4: Verify the help text**
 
 Run: `./bin/meept mcp-chat-server --help`
 Expected: prints usage info with description
 
-- [ ] **Step 5: Commit**
+- [x]**Step 5: Commit**
 
 ```bash
 git add cmd/meept/mcp_chat_server.go cmd/meept/main.go
@@ -1710,7 +1710,7 @@ git commit -m "feat: add meept mcp-chat-server CLI subcommand"
 **Files:**
 - Modify: `config/meept.json5`
 
-- [ ] **Step 1: Add config section**
+- [x]**Step 1: Add config section**
 
 In `config/meept.json5`, add after the transport section:
 
@@ -1722,17 +1722,17 @@ In `config/meept.json5`, add after the transport section:
   },
 ```
 
-- [ ] **Step 2: Verify the config is valid JSON5**
+- [x]**Step 2: Verify the config is valid JSON5**
 
 Run: `python3 -c "import json5; json5.load(open('config/meept.json5'))" 2>&1 || echo "json5 not available, manual check"`
 Expected: no parse error (or manual verification)
 
-- [ ] **Step 3: Build to verify no breakage**
+- [x]**Step 3: Build to verify no breakage**
 
 Run: `go build -o bin/meept-daemon ./cmd/meept-daemon`
 Expected: no errors
 
-- [ ] **Step 4: Commit**
+- [x]**Step 4: Commit**
 
 ```bash
 git add config/meept.json5

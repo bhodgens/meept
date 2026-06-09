@@ -119,7 +119,7 @@ go vet ./internal/agent/...
 go build ./internal/agent/...
 ```
 
-- [ ] Task 1 complete: PairChannel types compile
+- [x] Task 1 complete: PairChannel types compile
 
 ---
 
@@ -557,7 +557,7 @@ go vet ./internal/agent/...
 go build ./internal/agent/...
 ```
 
-- [ ] Task 2 complete: PairOrchestrator compiles
+- [x] Task 2 complete: PairOrchestrator compiles
 
 ---
 
@@ -850,7 +850,7 @@ go test ./internal/agent/... -run TestPairTopic -v
 
 All tests must pass. The tests that require a real AgentRegistry with RunAgent (the full conversation flow) will be covered in the integration test (Task 6).
 
-- [ ] Task 3 complete: PairOrchestrator unit tests pass
+- [x] Task 3 complete: PairOrchestrator unit tests pass
 
 ---
 
@@ -933,7 +933,7 @@ go build ./internal/agent/...
 go test ./internal/agent/... -run TestIntent -v
 ```
 
-- [ ] Task 4 complete: Dispatcher classification for pair channel
+- [x] Task 4 complete: Dispatcher classification for pair channel
 
 ---
 
@@ -1112,7 +1112,7 @@ go build ./internal/agent/...
 go test ./internal/agent/... -run TestChatHandler -v
 ```
 
-- [ ] Task 5 complete: Handler routing for pair messages
+- [x] Task 5 complete: Handler routing for pair messages
 
 ---
 
@@ -1222,7 +1222,7 @@ go build ./internal/daemon/...
 go build ./...
 ```
 
-- [ ] Task 6 complete: Orchestrator wiring
+- [x] Task 6 complete: Orchestrator wiring
 
 ---
 
@@ -1427,7 +1427,7 @@ go test ./internal/agent/... -run TestPairOrchestrator -v
 go test ./internal/agent/... -run TestIntentPair -v
 ```
 
-- [ ] Task 7 complete: Integration tests pass
+- [x] Task 7 complete: Integration tests pass
 
 ---
 
@@ -1453,7 +1453,7 @@ Add `IntentPair` to the multi-agent agent table and add bus topic patterns for `
 grep -c "pair" docs/concepts/multi-agent.md
 ```
 
-- [ ] Task 8 complete: Documentation updated
+- [x] Task 8 complete: Documentation updated
 
 ---
 

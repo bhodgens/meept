@@ -1,6 +1,6 @@
 # Multi-Participant Agent Communication — Track 2 (TUI Polish)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add progress synthesis (tiered agent activity summaries), participant badges on messages, and configurable verbosity to the TUI chat experience.
 
@@ -36,7 +36,7 @@
 
 The synthesizer subscribes to agent events and produces human-readable tiered summaries published as `agent.progress.synthesized` bus events.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `internal/agent/progress_synthesizer_test.go`:
 
@@ -153,12 +153,12 @@ func TestSynthesizeTurnEndVerbose(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/agent/... -v -run TestSynthesize`
 Expected: compile error — `ProgressSynthesizer`, `VerbosityQuiet`, etc. undefined
 
-- [ ] **Step 3: Implement ProgressSynthesizer**
+- [x] **Step 3: Implement ProgressSynthesizer**
 
 Create `internal/agent/progress_synthesizer.go`:
 
@@ -359,17 +359,17 @@ func truncate(s string, maxLen int) string {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `go test ./internal/agent/... -v -run TestSynthesize`
 Expected: PASS
 
-- [ ] **Step 5: Run full agent test suite**
+- [x] **Step 5: Run full agent test suite**
 
 Run: `go test ./internal/agent/... -count=1 2>&1 | tail -20`
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/progress_synthesizer.go internal/agent/progress_synthesizer_test.go
@@ -384,7 +384,7 @@ git commit -m "feat: add ProgressSynthesizer for tiered agent progress summaries
 - Modify: `internal/tui/config.go:57-61` (ChatConfig struct)
 - Modify: `config/client.json5:89-94` (chat section)
 
-- [ ] **Step 1: Add Verbosity field to ChatConfig**
+- [x] **Step 1: Add Verbosity field to ChatConfig**
 
 In `internal/tui/config.go`, modify the `ChatConfig` struct:
 
@@ -397,7 +397,7 @@ type ChatConfig struct {
 }
 ```
 
-- [ ] **Step 2: Set default in DefaultClientConfig**
+- [x] **Step 2: Set default in DefaultClientConfig**
 
 In `DefaultClientConfig()`, the `Chat` field isn't explicitly set. Add it after the `Input` block:
 
@@ -407,7 +407,7 @@ In `DefaultClientConfig()`, the `Chat` field isn't explicitly set. Add it after 
 		},
 ```
 
-- [ ] **Step 3: Add `verbosity` to `config/client.json5`**
+- [x] **Step 3: Add `verbosity` to `config/client.json5`**
 
 In `config/client.json5`, modify the `"chat"` section:
 
@@ -423,12 +423,12 @@ In `config/client.json5`, modify the `"chat"` section:
   },
 ```
 
-- [ ] **Step 4: Build to verify**
+- [x] **Step 4: Build to verify**
 
 Run: `go build ./internal/tui/... && go build ./cmd/meept/...`
 Expected: no errors
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/tui/config.go config/client.json5
@@ -442,7 +442,7 @@ git commit -m "feat: add verbosity setting to ChatConfig and client.json5"
 **Files:**
 - Modify: `internal/tui/app.go` (add ctrl+v handling, verbosity state, status bar)
 
-- [ ] **Step 1: Add verbosity state to App struct**
+- [x] **Step 1: Add verbosity state to App struct**
 
 In `internal/tui/app.go`, add to the `App` struct (after `tabFlashTime` around line ~102):
 
@@ -488,7 +488,7 @@ func parseVerbosity(s string) VerbosityLevel {
 }
 ```
 
-- [ ] **Step 2: Initialize verbosity from config**
+- [x] **Step 2: Initialize verbosity from config**
 
 In `NewApp` (where client config is loaded), after the config is available, add:
 
@@ -496,7 +496,7 @@ In `NewApp` (where client config is loaded), after the config is available, add:
 	a.verbosity = parseVerbosity(a.clientConfig.Chat.Verbosity)
 ```
 
-- [ ] **Step 3: Add ctrl+v keybinding handler**
+- [x] **Step 3: Add ctrl+v keybinding handler**
 
 In the `Update` method of `App`, in the key handling section (around the `ctrl+s` handling at line ~402), add after the `ctrl+s` block:
 
@@ -510,7 +510,7 @@ In the `Update` method of `App`, in the key handling section (around the `ctrl+s
 		}
 ```
 
-- [ ] **Step 4: Add verbosity indicator to status bar**
+- [x] **Step 4: Add verbosity indicator to status bar**
 
 In `renderStatusBar()`, add the verbosity indicator to the status bar content. Find the line where `parts` are joined (`content := strings.Join(parts, " │ ")`) and add before it:
 
@@ -519,7 +519,7 @@ In `renderStatusBar()`, add the verbosity indicator to the status bar content. F
 	parts = append(parts, a.styles.Muted.Render(fmt.Sprintf("verbosity: %s", a.verbosity)))
 ```
 
-- [ ] **Step 5: Add ctrl+v to quick actions**
+- [x] **Step 5: Add ctrl+v to quick actions**
 
 In `getQuickActions()`, in the chat view section (around line ~1630), add to the actions:
 
@@ -529,12 +529,12 @@ In `getQuickActions()`, in the chat view section (around line ~1630), add to the
 				)
 ```
 
-- [ ] **Step 6: Build and verify**
+- [x] **Step 6: Build and verify**
 
 Run: `go build -o bin/meept ./cmd/meept`
 Expected: no errors
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/tui/app.go
@@ -550,7 +550,7 @@ git commit -m "feat: add ctrl+v verbosity cycling and status bar indicator to TU
 - Modify: `internal/tui/models/constants.go` (add RoleParticipant)
 - Modify: `internal/tui/models/chat.go` (render participant badge in message view)
 
-- [ ] **Step 1: Add SourceClient to ChatMessage**
+- [x] **Step 1: Add SourceClient to ChatMessage**
 
 In `internal/tui/models/chat.go`, modify the `ChatMessage` struct:
 
@@ -569,7 +569,7 @@ type ChatMessage struct {
 }
 ```
 
-- [ ] **Step 2: Add RoleParticipant constant**
+- [x] **Step 2: Add RoleParticipant constant**
 
 In `internal/tui/models/constants.go`, add:
 
@@ -577,7 +577,7 @@ In `internal/tui/models/constants.go`, add:
 	RoleParticipant = "participant"
 ```
 
-- [ ] **Step 3: Add helper for participant messages**
+- [x] **Step 3: Add helper for participant messages**
 
 In `internal/tui/models/chat.go`, add a helper method:
 
@@ -595,7 +595,7 @@ func (m *ChatModel) AddParticipantMessage(sourceClient, content string) {
 }
 ```
 
-- [ ] **Step 4: Render participant badge in message view**
+- [x] **Step 4: Render participant badge in message view**
 
 Find the message rendering function in `chat.go` (look for where messages are rendered based on role). Add a case for `RoleParticipant`:
 
@@ -607,7 +607,7 @@ Find the message rendering function in `chat.go` (look for where messages are re
 
 Note: The exact rendering location depends on the chat model's view rendering. The implementor should find the switch on `msg.Role` and add this case.
 
-- [ ] **Step 5: Handle chat.message.received events in TUI**
+- [x] **Step 5: Handle chat.message.received events in TUI**
 
 In the TUI's event handling (where `EventStreamDataMsg` is processed), add handling for `chat.message.received` topic events. When received, call `m.chat.AddParticipantMessage(sourceClient, content)`.
 
@@ -627,12 +627,12 @@ This wiring happens in `internal/tui/app.go` in the `Update` method where event 
 			}
 ```
 
-- [ ] **Step 6: Build and verify**
+- [x] **Step 6: Build and verify**
 
 Run: `go build -o bin/meept ./cmd/meept`
 Expected: no errors
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/tui/models/chat.go internal/tui/models/constants.go internal/tui/app.go
@@ -648,7 +648,7 @@ git commit -m "feat: add participant badges and multi-client message display to 
 
 This connects the synthesized progress events to the TUI, filtered by the current verbosity level.
 
-- [ ] **Step 1: Add progress event handling in TUI Update**
+- [x] **Step 1: Add progress event handling in TUI Update**
 
 In the TUI's event stream data handler (same location as Task 4 Step 5), add handling for `agent.progress.synthesized` events:
 
@@ -668,7 +668,7 @@ In the TUI's event stream data handler (same location as Task 4 Step 5), add han
 			}
 ```
 
-- [ ] **Step 2: Ensure the event stream subscribes to progress events**
+- [x] **Step 2: Ensure the event stream subscribes to progress events**
 
 In `internal/tui/events.go`, in `DefaultEventStreamConfig()`, verify that `agent.progress.*` is in the topics list. The current config has `"agent.*"` which should already match `agent.progress.synthesized`. If the glob pattern doesn't match nested topics, add it explicitly:
 
@@ -676,17 +676,17 @@ In `internal/tui/events.go`, in `DefaultEventStreamConfig()`, verify that `agent
 		"agent.progress.*",
 ```
 
-- [ ] **Step 3: Build and verify**
+- [x] **Step 3: Build and verify**
 
 Run: `go build -o bin/meept ./cmd/meept`
 Expected: no errors
 
-- [ ] **Step 4: Run full test suite**
+- [x] **Step 4: Run full test suite**
 
 Run: `go test ./internal/tui/... -count=1 2>&1 | tail -20`
 Expected: All tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/tui/app.go internal/tui/events.go
@@ -702,11 +702,11 @@ git commit -m "feat: wire synthesized progress events into TUI with verbosity fi
 
 The synthesizer needs to be started as a daemon component so it subscribes to agent events and produces synthesized progress events on the bus.
 
-- [ ] **Step 1: Find the daemon component initialization**
+- [x] **Step 1: Find the daemon component initialization**
 
 Find where `EventEmitter`, `ChatHandler`, etc. are wired up in the daemon startup. This is typically in `internal/daemon/components.go` or `internal/daemon/daemon.go`.
 
-- [ ] **Step 2: Add ProgressSynthesizer initialization**
+- [x] **Step 2: Add ProgressSynthesizer initialization**
 
 After the bus and LLM client are initialized, add:
 
@@ -750,17 +750,17 @@ For the initial implementation, the synthesizer can be called from the `EventEmi
 	}()
 ```
 
-- [ ] **Step 3: Build and verify**
+- [x] **Step 3: Build and verify**
 
 Run: `go build -o bin/meept-daemon ./cmd/meept-daemon`
 Expected: no errors
 
-- [ ] **Step 4: Run full test suite**
+- [x] **Step 4: Run full test suite**
 
 Run: `go test ./... -count=1 2>&1 | tail -20`
 Expected: All tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/daemon/components.go

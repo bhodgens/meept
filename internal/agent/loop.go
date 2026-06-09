@@ -482,6 +482,10 @@ type AgentLoop struct {
 
 	// MCP server awareness for system prompt context
 	mcpServerLister func() []MCPServerInfo
+
+	// modelOverride holds a model reference from a user's reassignment directive.
+	// Set before reasoningCycle() runs; cleared after application.
+	modelOverride string
 }
 
 // sessionStore is an interface for session persistence operations needed by AgentLoop.
@@ -808,6 +812,35 @@ func WithMCPServerLister(lister func() []MCPServerInfo) LoopOption {
 	return func(l *AgentLoop) {
 		l.mcpServerLister = lister
 	}
+}
+
+// WithModelOverride sets the model override for the next reasoning cycle.
+// This is used by the dispatcher to apply user-specified model reassignment.
+func WithModelOverride(modelRef string) LoopOption {
+	return func(l *AgentLoop) {
+		l.modelOverride = modelRef
+	}
+}
+
+// SetModelOverride sets the model override at runtime (thread-safe).
+func (l *AgentLoop) SetModelOverride(modelRef string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.modelOverride = modelRef
+}
+
+// GetModelOverride returns the current model override (thread-safe).
+func (l *AgentLoop) GetModelOverride() string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.modelOverride
+}
+
+// ClearModelOverride clears the model override after it has been applied.
+func (l *AgentLoop) ClearModelOverride() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.modelOverride = ""
 }
 
 // NewAgentLoop creates a new agent loop.
@@ -1512,10 +1545,17 @@ func (l *AgentLoop) conversationTokenBudget() int {
 // reasoningCycle runs the main reasoning loop with tool execution.
 func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conversationID string) (string, error) {
 	var totalTokens int
+	var cachedTokens int
+	var hadToolCalls bool
+	var toolCallCount int
 	convBudget := l.conversationTokenBudget()
 	inWarningZone := false
 
 	for iteration := 1; iteration <= l.config.MaxIterations; iteration++ {
+		// Reset per-iteration tracking
+		hadToolCalls = false
+		toolCallCount = 0
+
 		select {
 		case <-ctx.Done():
 			return "", ErrContextCancelled
@@ -1593,6 +1633,14 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			tools = l.registry.GetDefinitions()
 		}
 
+		// Stabilize tool prefix ordering for cache hit optimization
+		if len(tools) > 0 && conv != nil {
+			tools = conv.StabilizeToolPrefix(tools)
+			if conv.PrefixChanged() {
+				l.logger.Debug("prefix cache invalidated", "hash", conv.GetCachePrefixHash())
+			}
+		}
+
 		// Enforce token budget before LLM call to prevent context explosion.
 		// Reserve space for tool definitions using accurate token counting.
 		// Tool definitions are sent alongside messages but not counted by TruncateByTokens.
@@ -1662,6 +1710,34 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 			}
 		}
 
+		// Apply model override from user's reassignment directive (if set).
+		// This takes precedence over alias resolution when a user explicitly
+		// requests a specific model for this task/step.
+		if override := l.GetModelOverride(); override != "" && l.resolver != nil && l.llmClient != nil {
+			if modelConfig := l.resolver.ResolveRef(override); modelConfig != nil {
+				oldModel := l.llmClient.Config().ModelID
+				if err := l.llmClient.SwitchModel(modelConfig); err == nil {
+					l.logger.Info("Applied model override from user directive",
+						"agent_id", l.agentID,
+						"from_model", oldModel,
+						"to_model", modelConfig.ModelID,
+						"override_ref", override,
+					)
+				} else {
+					l.logger.Warn("Failed to apply model override, using current model",
+						"override_ref", override,
+						"error", err,
+					)
+				}
+			} else {
+				l.logger.Warn("Could not resolve model override reference, using current model",
+					"override_ref", override,
+				)
+			}
+			// Clear override after first application to avoid repeated switches
+			l.ClearModelOverride()
+		}
+
 		response, err := l.chatWithFailover(ctx, messages, chatOpts...)
 		if err != nil {
 			// Check for TTSR abort — retry with rule content injected.
@@ -1722,6 +1798,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		}
 		// Track token usage
 		totalTokens += response.Usage.TotalTokens
+		cachedTokens += response.Usage.CachedTokens
+
+		// Emit after-provider-response event with cache data
+		if l.eventEmitter != nil {
+			l.eventEmitter.EmitWithFields(ctx, AgentEvent{
+				Type:           AgentEventAfterProviderResponse,
+				ConversationID: conversationID,
+				Iteration:      iteration,
+				Data: AfterProviderResponseData{
+					ModelID:        response.Model,
+					ResponseTokens: response.Usage.TotalTokens,
+					CachedTokens:   response.Usage.CachedTokens,
+				},
+			})
+		}
 
 		// Record budget usage for multi-turn tracking
 		if l.budgetTracker != nil {
@@ -1733,6 +1824,8 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Case 1: LLM returned tool calls
 		if response.HasToolCalls() {
+			hadToolCalls = true
+			toolCallCount = len(response.ToolCalls)
 			// Add assistant message with tool calls
 			conv.AddAssistantMessageWithToolCalls(response.Content, response.ToolCalls)
 
@@ -1810,6 +1903,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 			// Publish iteration completed event
 			l.publishIteration(conversationID, iteration)
+			l.publishTurnEndEvent(ctx, conversationID, iteration, hadToolCalls, toolCallCount, response.Usage.TotalTokens, response.Usage.CachedTokens, "tool_calls")
 
 			// Check if any tool requested termination (no LLM follow-up needed)
 			shouldTerminate := false
@@ -1875,6 +1969,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 				// Publish iteration completed event
 				l.publishIteration(conversationID, iteration)
+				l.publishTurnEndEvent(ctx, conversationID, iteration, hadToolCalls, toolCallCount, response.Usage.TotalTokens, response.Usage.CachedTokens, "hallucination_correction")
 				continue
 			}
 		}
@@ -1922,6 +2017,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 
 		// Publish iteration completed event
 		l.publishIteration(conversationID, iteration)
+		l.publishTurnEndEvent(ctx, conversationID, iteration, hadToolCalls, toolCallCount, response.Usage.TotalTokens, response.Usage.CachedTokens, "end_turn")
 
 		// Capture interaction for shadow training
 		if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
@@ -2235,6 +2331,19 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		"provider", providerID,
 	)
 
+	// Extract and apply model override from task metadata if present.
+	// The dispatcher stores user-specified model reassignment directives
+	// in task metadata when a model override is detected.
+	if len(t.Metadata) > 0 {
+		if modelRef := l.extractModelOverrideFromMetadata(t.Metadata); modelRef != "" {
+			l.SetModelOverride(modelRef)
+			l.logger.Info("Model override extracted from task metadata",
+				"task_id", t.ID,
+				"model_ref", modelRef,
+			)
+		}
+	}
+
 	// Run reasoning cycle
 	startTime := time.Now()
 	response, err := l.reasoningCycle(ctx, conv, conversationID)
@@ -2267,6 +2376,24 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	}
 
 	return response, nil
+}
+
+// extractModelOverrideFromMetadata extracts a model override reference from
+// task metadata set by the dispatcher's model reassignment parser.
+func (l *AgentLoop) extractModelOverrideFromMetadata(metadata json.RawMessage) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(metadata, &meta); err != nil {
+		l.logger.Debug("Failed to parse task metadata for model override", "error", err)
+		return ""
+	}
+	ref, ok := meta["model_override"].(string)
+	if !ok || ref == "" {
+		return ""
+	}
+	return ref
 }
 
 // buildMemoryContext fetches and formats memory context for the task.
@@ -3006,6 +3133,27 @@ func (l *AgentLoop) publishIteration(conversationID string, iteration int) {
 		return
 	}
 	l.bus.Publish(bus.EventAgentIteration, msg)
+}
+
+// publishTurnEndEvent emits a TurnEnd event through the event emitter with
+// cache data and tool call tracking.
+func (l *AgentLoop) publishTurnEndEvent(ctx context.Context, conversationID string, iteration int, hadToolCalls bool, toolCallCount int, responseTokens int, cachedTokens int, stoppedBy string) {
+	if l.eventEmitter == nil {
+		return
+	}
+	l.eventEmitter.EmitWithFields(ctx, AgentEvent{
+		Type:           AgentEventTurnEnd,
+		ConversationID: conversationID,
+		Iteration:      iteration,
+		Data: TurnEndData{
+			TurnNumber:     iteration,
+			HadToolCalls:   hadToolCalls,
+			ToolCallCount:  toolCallCount,
+			ResponseTokens: responseTokens,
+			CachedTokens:   cachedTokens,
+			StoppedBy:      stoppedBy,
+		},
+	})
 }
 
 // GetConversation returns a conversation by ID.

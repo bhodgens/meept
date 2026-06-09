@@ -228,9 +228,9 @@ git add internal/agent/pair_modality.go internal/agent/pair_modality_test.go
 git commit -m "feat(agent): add PairModality enum for agentic pair modality selection"
 ```
 
-- [ ] `internal/agent/pair_modality.go` created
-- [ ] `internal/agent/pair_modality_test.go` created
-- [ ] `go test ./internal/agent/ -run TestPairModality -v` passes
+- [x] `internal/agent/pair_modality.go` created
+- [x] `internal/agent/pair_modality_test.go` created
+- [x] `go test ./internal/agent/ -run TestPairModality -v` passes
 
 ---
 
@@ -540,10 +540,10 @@ git add internal/agent/spec_generation.go internal/agent/spec_generation_test.go
 git commit -m "feat(agent): generate acceptance criteria spec during strategic planning"
 ```
 
-- [ ] `internal/agent/spec_generation.go` created with TaskSpec, StepCriterion, GenerateSpecFromSteps, StoreSpecInTask, ExtractSpecFromTask
-- [ ] `internal/agent/spec_generation_test.go` created
-- [ ] `internal/agent/strategic.go` modified to generate spec after planning
-- [ ] Tests pass
+- [x] `internal/agent/spec_generation.go` created with TaskSpec, StepCriterion, GenerateSpecFromSteps, StoreSpecInTask, ExtractSpecFromTask
+- [x] `internal/agent/spec_generation_test.go` created
+- [x] `internal/agent/strategic.go` modified to generate spec after planning
+- [x] Tests pass
 
 ---
 
@@ -747,10 +747,10 @@ git add internal/agent/review_manager.go internal/agent/review_spec_test.go inte
 git commit -m "feat(agent): include task spec in reviewer prompt for spec-driven review"
 ```
 
-- [ ] `ReviewStep` and `buildReviewPrompt` accept `*TaskSpec` parameter
-- [ ] tactical.go loads spec before calling ReviewStep
-- [ ] All callers updated
-- [ ] Tests pass
+- [x] `ReviewStep` and `buildReviewPrompt` accept `*TaskSpec` parameter
+- [x] tactical.go loads spec before calling ReviewStep
+- [x] All callers updated
+- [x] Tests pass
 
 ---
 
@@ -967,11 +967,11 @@ git add internal/agent/feedback_propagation.go internal/agent/feedback_propagati
 git commit -m "feat(agent): propagate reviewer feedback and spec to revision step context"
 ```
 
-- [ ] `internal/agent/feedback_propagation.go` created with BuildRevisionContext
-- [ ] `internal/task/step.go` has CreateRevisionWithContext
-- [ ] HandleReviewResult accepts spec and uses BuildRevisionContext
-- [ ] handleReviewResult in tactical.go loads spec
-- [ ] Tests pass
+- [x] `internal/agent/feedback_propagation.go` created with BuildRevisionContext
+- [x] `internal/task/step.go` has CreateRevisionWithContext
+- [x] HandleReviewResult accepts spec and uses BuildRevisionContext
+- [x] handleReviewResult in tactical.go loads spec
+- [x] Tests pass
 
 ---
 
@@ -1106,9 +1106,9 @@ git add internal/agent/max_revision_guard_test.go internal/agent/review_manager.
 git commit -m "feat(agent): enforce max revision guard with spec-aware human escalation message"
 ```
 
-- [ ] Max revision guard tests pass
-- [ ] Feedback includes spec criteria when max exceeded
-- [ ] All tests pass
+- [x] Max revision guard tests pass
+- [x] Feedback includes spec criteria when max exceeded
+- [x] All tests pass
 
 ---
 
@@ -1313,9 +1313,9 @@ git add internal/agent/spec_review_integration_test.go
 git commit -m "test(agent): add integration tests for spec-driven review loop"
 ```
 
-- [ ] Integration tests pass
-- [ ] Full test suite passes
-- [ ] No regressions
+- [x] Integration tests pass
+- [x] Full test suite passes
+- [x] No regressions
 
 ---
 

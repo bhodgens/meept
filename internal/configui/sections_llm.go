@@ -1,10 +1,9 @@
 // internal/configui/sections_llm.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildLLMFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	llm := &cfg.LLM
 	b := &llm.Budget
 	br := &llm.Broker

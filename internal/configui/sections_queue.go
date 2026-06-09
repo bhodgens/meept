@@ -1,10 +1,9 @@
 // internal/configui/sections_queue.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildQueueFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Queue
 	return []Field{
 		NewTextField("db_path", "db path", s.DBPath),

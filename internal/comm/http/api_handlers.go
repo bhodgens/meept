@@ -2902,3 +2902,210 @@ func (s *Server) handleSkillUI(w http.ResponseWriter, r *http.Request) {
 
 	s.writeJSON(w, http.StatusOK, descriptor)
 }
+
+// ===== Template Endpoints =====
+
+// handleTemplatesList handles GET /api/v1/templates.
+func (s *Server) handleTemplatesList(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Templates == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "templates service not available")
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	result, err := s.services.Templates.List(r.Context(), services.TemplatesListRequest{Limit: limit})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleTemplatesGet handles GET /api/v1/templates/{name}.
+func (s *Server) handleTemplatesGet(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Templates == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "templates service not available")
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		s.writeError(w, http.StatusBadRequest, "template name is required")
+		return
+	}
+
+	result, err := s.services.Templates.Get(r.Context(), services.TemplatesGetRequest{Name: name})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleTemplatesInvoke handles POST /api/v1/templates/{name}/invoke.
+func (s *Server) handleTemplatesInvoke(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Templates == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "templates service not available")
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		s.writeError(w, http.StatusBadRequest, "template name is required")
+		return
+	}
+
+	var req services.TemplatesInvokeRequest
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+	req.Name = name
+
+	result, err := s.services.Templates.Invoke(r.Context(), req)
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// handleTemplatesClear handles DELETE /api/v1/templates/{name}.
+func (s *Server) handleTemplatesClear(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Templates == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "templates service not available")
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		s.writeError(w, http.StatusBadRequest, "template name is required")
+		return
+	}
+
+	// Use conversation_id from query to identify session-scoped templates.
+	conversationID := r.URL.Query().Get("conversation_id")
+
+	result, err := s.services.Templates.ClearSession(r.Context(), services.TemplatesClearRequest{
+		ConversationID: conversationID,
+		Name:          name,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}
+
+// ===== Task Link/Unlink Session Endpoints =====
+
+// handleTaskLinkSession handles POST /api/v1/tasks/{id}/link-session.
+func (s *Server) handleTaskLinkSession(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Task == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "task service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "task id is required")
+		return
+	}
+
+	var body struct {
+		SessionID string `json:"session_id"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	if body.SessionID == "" {
+		s.writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+
+	err := s.services.Task.LinkSession(r.Context(), services.LinkSessionRequest{
+		TaskID:    id,
+		SessionID: body.SessionID,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "linked"})
+}
+
+// handleTaskUnlinkSession handles POST /api/v1/tasks/{id}/unlink-session.
+func (s *Server) handleTaskUnlinkSession(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Task == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "task service not available")
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		s.writeError(w, http.StatusBadRequest, "task id is required")
+		return
+	}
+
+	var body struct {
+		SessionID string `json:"session_id"`
+	}
+	if !s.readJSON(w, r, &body) {
+		return
+	}
+	if body.SessionID == "" {
+		s.writeError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+
+	err := s.services.Task.UnlinkSession(r.Context(), services.UnlinkSessionRequest{
+		TaskID:    id,
+		SessionID: body.SessionID,
+	})
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]string{KeyStatus: "unlinked"})
+}
+
+// ===== Session Most Recent Endpoint =====
+
+// handleSessionMostRecent handles GET /api/v1/sessions/most-recent.
+func (s *Server) handleSessionMostRecent(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Session == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "session service not available")
+		return
+	}
+
+	sess, err := s.services.Session.GetMostRecent(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, sess)
+}
+
+// ===== Worker List Endpoint =====
+
+// handleWorkerList handles GET /api/v1/workers.
+func (s *Server) handleWorkerList(w http.ResponseWriter, r *http.Request) {
+	if s.services == nil || s.services.Worker == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "worker service not available")
+		return
+	}
+
+	result, err := s.services.Worker.List(r.Context())
+	if err != nil {
+		s.handleServiceError(w, err)
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, result)
+}

@@ -102,6 +102,22 @@ type ListSessionsRequest struct {
 	Limit int `json:"limit,omitempty"`
 }
 
+// GetMostRecent returns the most recently active session, or nil if none exist.
+func (s *SessionService) GetMostRecent(ctx context.Context) (*session.Session, error) {
+	if s.store == nil {
+		return nil, wrapError("session", "GetMostRecent", ErrUnavailable)
+	}
+	sessions, err := s.store.List()
+	if err != nil {
+		return nil, wrapError("session", "GetMostRecent", err)
+	}
+	if len(sessions) == 0 {
+		return nil, wrapError("session", "GetMostRecent", ErrNotFound)
+	}
+	// Sessions from store.List() are ordered by most recent first.
+	return sessions[0], nil
+}
+
 // List returns all sessions.
 func (s *SessionService) List(ctx context.Context, req ListSessionsRequest) ([]*session.Session, error) {
 	if s.store == nil {

@@ -4,7 +4,9 @@
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:speech_to_text/speech_to_text.dart'
+    as stt show SpeechToText, ListenMode, SpeechListenOptions;
+import 'package:speech_to_text/speech_recognition_error.dart';
 
 /// Client-side speech-to-text service.
 ///
@@ -16,7 +18,6 @@ class SttService {
   bool _initialized = false;
   bool _isRecording = false;
   String _lastResult = '';
-  Function(String)? _onResult;
   Function(String)? _onError;
 
   /// Whether the underlying speech recognizer has been successfully
@@ -40,7 +41,7 @@ class SttService {
     return _initialized;
   }
 
-  void _handleError(stt.SpeechRecognitionError error) {
+  void _handleError(SpeechRecognitionError error) {
     _isRecording = false;
     _onError?.call(error.errorMsg);
   }
@@ -62,7 +63,6 @@ class SttService {
     Function(String)? onError,
   }) {
     if (!_initialized || _isRecording) return;
-    _onResult = onResult;
     _onError = onError;
     _lastResult = '';
     _isRecording = true;
@@ -71,8 +71,10 @@ class SttService {
         _lastResult = result.recognizedWords;
         onResult(_lastResult);
       },
-      localeId: language,
-      listenMode: stt.ListenMode.dictation,
+      listenOptions: stt.SpeechListenOptions(
+        localeId: language,
+        listenMode: stt.ListenMode.dictation,
+      ),
     );
   }
 

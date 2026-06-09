@@ -2,11 +2,10 @@
 package configui
 
 import (
-	"github.com/caimlas/meept/internal/config"
 )
 
 func buildProjectsFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Projects
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

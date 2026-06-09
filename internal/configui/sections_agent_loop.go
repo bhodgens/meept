@@ -4,11 +4,10 @@ package configui
 import (
 	"strings"
 
-	"github.com/caimlas/meept/internal/config"
 )
 
 func buildAgentLoopFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Agent
 	return []Field{
 		NewToggleField("progress_enabled", "progress enabled", s.ProgressEnabled),

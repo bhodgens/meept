@@ -19,7 +19,7 @@ These tasks build the reusable core components. They can be built sequentially s
 **Files:**
 - Create: `internal/configui/fields.go`
 
-- [ ] **Step 1: Write the field type tests**
+- [x] **Step 1: Write the field type tests**
 
 ```go
 // internal/configui/fields_test.go
@@ -149,16 +149,16 @@ func TestFieldHelp(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/configui/... -v -run TestTextField`
 Expected: FAIL (package doesn't exist)
 
-- [ ] **Step 3: Create the configui package directory**
+- [x] **Step 3: Create the configui package directory**
 
 Run: `mkdir -p internal/configui`
 
-- [ ] **Step 4: Write the field type implementation**
+- [x] **Step 4: Write the field type implementation**
 
 ```go
 // internal/configui/fields.go
@@ -430,12 +430,12 @@ func formatBool(b bool) string {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/configui/... -v`
 Expected: all PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/configui/fields.go internal/configui/fields_test.go
@@ -450,7 +450,7 @@ git commit -m "feat(configui): add field type definitions for config editor TUI"
 - Create: `internal/configui/writers.go`
 - Create: `internal/configui/writers_test.go`
 
-- [ ] **Step 1: Write the writer tests**
+- [x] **Step 1: Write the writer tests**
 
 ```go
 // internal/configui/writers_test.go
@@ -556,12 +556,12 @@ func TestConfigFilePath(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/configui/... -v -run TestAtomicWrite`
 Expected: FAIL (function doesn't exist)
 
-- [ ] **Step 3: Write the config writer implementation**
+- [x] **Step 3: Write the config writer implementation**
 
 ```go
 // internal/configui/writers.go
@@ -627,12 +627,12 @@ func SaveMainConfig(cfg *config.Config) error {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/configui/... -v -run TestAtomicWrite`
 Expected: all PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/configui/writers.go internal/configui/writers_test.go
@@ -647,7 +647,7 @@ git commit -m "feat(configui): add atomic config file writer"
 - Create: `internal/configui/section.go`
 - Create: `internal/configui/section_test.go`
 
-- [ ] **Step 1: Write the section model tests**
+- [x] **Step 1: Write the section model tests**
 
 ```go
 // internal/configui/section_test.go
@@ -739,12 +739,12 @@ func TestSectionModelDirtyTracking(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/configui/... -v -run TestNewSection`
 Expected: FAIL
 
-- [ ] **Step 3: Write the section model implementation**
+- [x] **Step 3: Write the section model implementation**
 
 ```go
 // internal/configui/section.go
@@ -805,12 +805,12 @@ func (s *SectionModel) IsDirty() bool {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/configui/... -v -run TestSection`
 Expected: all PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/configui/section.go internal/configui/section_test.go
@@ -825,7 +825,7 @@ git commit -m "feat(configui): add SectionModel for field list management"
 - Create: `internal/configui/editor.go`
 - Create: `internal/configui/editor_test.go`
 
-- [ ] **Step 1: Write the editor tests**
+- [x] **Step 1: Write the editor tests**
 
 ```go
 // internal/configui/editor_test.go
@@ -938,12 +938,12 @@ func TestEditorCancelResets(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/configui/... -v -run TestEditor`
 Expected: FAIL
 
-- [ ] **Step 3: Write the editor implementation**
+- [x] **Step 3: Write the editor implementation**
 
 ```go
 // internal/configui/editor.go
@@ -1070,12 +1070,12 @@ func indexOf(slice []string, val string) int {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `go test ./internal/configui/... -v -run TestEditor`
 Expected: all PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/configui/editor.go internal/configui/editor_test.go
@@ -1092,7 +1092,7 @@ git commit -m "feat(configui): add inline field editor for toggle/select/text/nu
 - Create: `internal/configui/app.go`
 - Create: `internal/configui/app_test.go`
 
-- [ ] **Step 1: Write the app model tests**
+- [x] **Step 1: Write the app model tests**
 
 ```go
 // internal/configui/app_test.go
@@ -1158,12 +1158,12 @@ func TestAppAdvancedToggle(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/configui/... -v -run TestApp`
 Expected: FAIL
 
-- [ ] **Step 3: Write the app model implementation**
+- [x] **Step 3: Write the app model implementation**
 
 ```go
 // internal/configui/app.go
@@ -1612,7 +1612,7 @@ func RunApp() error {
 }
 ```
 
-- [ ] **Step 4: Create the section builder stub**
+- [x] **Step 4: Create the section builder stub**
 
 The `BuildSectionFields` function referenced by `app.go`. For now, create it with a few sections and a stub for the rest.
 
@@ -1672,12 +1672,12 @@ func buildSchedulerFields() []Field {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/configui/... -v`
 Expected: all PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/configui/app.go internal/configui/app_test.go internal/configui/sections.go internal/configui/sections_daemon.go internal/configui/sections_scheduler.go
@@ -1694,7 +1694,7 @@ git commit -m "feat(configui): add bubbletea app model with menu, section, edito
 - Create: `cmd/meept/config.go`
 - Modify: `cmd/meept/main.go` — add `rootCmd.AddCommand(newConfigCmd())` and remove `models` command registration
 
-- [ ] **Step 1: Write the config command**
+- [x] **Step 1: Write the config command**
 
 ```go
 // cmd/meept/config.go
@@ -1801,7 +1801,7 @@ func newConfigSetCmd() *cobra.Command {
 }
 ```
 
-- [ ] **Step 2: Add keypath resolver stub**
+- [x] **Step 2: Add keypath resolver stub**
 
 ```go
 // internal/configui/keypath.go
@@ -2000,11 +2000,11 @@ func TestSetKeypathNotFound(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Wire config command into main.go**
+- [x] **Step 3: Wire config command into main.go**
 
 In `cmd/meept/main.go`, add `rootCmd.AddCommand(newConfigCmd())` alongside the existing command registrations (around line 110-133), and remove the `rootCmd.AddCommand(newModelsCmd())` line.
 
-- [ ] **Step 4: Build and verify**
+- [x] **Step 4: Build and verify**
 
 Run: `go build ./cmd/meept/`
 Expected: compiles successfully
@@ -2015,7 +2015,7 @@ Expected: prints config file paths with status
 Run: `./bin/meept config get daemon.log_level`
 Expected: prints the current log level value
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/meept/config.go cmd/meept/main.go internal/configui/keypath.go internal/configui/keypath_test.go
@@ -2049,11 +2049,11 @@ Each task follows the same pattern. Create a file `internal/configui/sections/<n
 | 17 | advanced batch 3 | `config.Config` | telegram, web, mcp toggle, plugins, self-improve, shadow, distributed_memory, q_agent, tooling, calendar, memvid |
 
 Each section task:
-- [ ] Creates `internal/configui/sections/<name>.go`
-- [ ] Adds case to `BuildSectionFields` in `sections.go`
-- [ ] Writes tests verifying field count and key names
-- [ ] Builds: `go build ./cmd/meept/`
-- [ ] Commits
+- [x] Creates `internal/configui/sections/<name>.go`
+- [x] Adds case to `BuildSectionFields` in `sections.go`
+- [x] Writes tests verifying field count and key names
+- [x] Builds: `go build ./cmd/meept/`
+- [x] Commits
 
 The pattern for each file:
 

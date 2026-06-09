@@ -478,6 +478,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	if rpcServer != nil {
 		if svcRegistry.Daemon != nil {
 			daemonHandler := NewDaemonRPCHandler(svcRegistry.Daemon)
+			daemonHandler.SetRuntimeService(svcRegistry.Runtime)
 			daemonHandler.RegisterDaemonMethods(rpcServer)
 			logger.Info("Daemon RPC handlers registered")
 		}

@@ -4,6 +4,7 @@ nav:
   - request-flow.md
   - multi-agent.md
   - multi-agent-parallelism.md
+  - cluster-architecture.md
   - context-management.md
   - memory.md
   - tools.md

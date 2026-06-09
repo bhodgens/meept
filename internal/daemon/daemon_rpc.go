@@ -11,12 +11,18 @@ import (
 
 // DaemonRPCHandler handles daemon RPC methods.
 type DaemonRPCHandler struct {
-	daemon *services.DaemonService
+	daemon  *services.DaemonService
+	runtime *services.RuntimeService
 }
 
 // NewDaemonRPCHandler creates a new daemon RPC handler.
 func NewDaemonRPCHandler(daemon *services.DaemonService) *DaemonRPCHandler {
 	return &DaemonRPCHandler{daemon: daemon}
+}
+
+// SetRuntimeService sets the optional runtime service for enriching daemon status.
+func (h *DaemonRPCHandler) SetRuntimeService(svc *services.RuntimeService) {
+	h.runtime = svc
 }
 
 // RegisterDaemonMethods registers all daemon RPC methods.
@@ -36,6 +42,21 @@ func (h *DaemonRPCHandler) handleStatus(ctx context.Context, params json.RawMess
 	status, err := h.daemon.Status(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	// Enrich with runtime health info if available
+	if h.runtime != nil {
+		if rtResp, err := h.runtime.Status(ctx); err == nil && len(rtResp.Runtimes) > 0 {
+			runtimeInfo := make(map[string]any)
+			for _, rs := range rtResp.Runtimes {
+				runtimeInfo[rs.ProviderID] = map[string]any{
+					"running": rs.Running,
+					"healthy": rs.Healthy,
+					"pid":     rs.PID,
+				}
+			}
+			status.Runtimes = runtimeInfo
+		}
 	}
 
 	return status, nil

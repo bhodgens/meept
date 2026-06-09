@@ -1,10 +1,9 @@
 // internal/configui/sections_workers.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildWorkersFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Workers
 	return []Field{
 		NewNumberField("pool_size", "pool size", s.PoolSize),

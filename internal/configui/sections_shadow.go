@@ -4,11 +4,10 @@ package configui
 import (
 	"strings"
 
-	"github.com/caimlas/meept/internal/config"
 )
 
 func buildShadowFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Shadow
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

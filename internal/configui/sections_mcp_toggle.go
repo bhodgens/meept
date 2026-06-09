@@ -1,10 +1,9 @@
 // internal/configui/sections_mcp_toggle.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildMCPFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.MCP
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

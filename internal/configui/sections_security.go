@@ -1,10 +1,9 @@
 // internal/configui/sections_security.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildSecurityFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Security
 	return []Field{
 		NewToggleField("sanitize_inputs", "sanitize inputs", s.SanitizeInputs),

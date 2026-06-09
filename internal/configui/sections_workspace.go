@@ -1,10 +1,9 @@
 // internal/configui/sections_workspace.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildWorkspaceFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Workspace
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

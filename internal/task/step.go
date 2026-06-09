@@ -254,6 +254,7 @@ func (s *StepStore) migrate() error {
 		token_usage    INTEGER DEFAULT 0,
 		memory_refs    TEXT,
 		accumulated_context TEXT,
+		model_override TEXT,
 		created_at     TEXT NOT NULL,
 		updated_at     TEXT NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -292,6 +293,7 @@ func (s *StepStore) migrate() error {
 		"ALTER TABLE task_steps ADD COLUMN token_usage INTEGER DEFAULT 0",
 		"ALTER TABLE task_steps ADD COLUMN memory_refs TEXT",
 		"ALTER TABLE task_steps ADD COLUMN accumulated_context TEXT",
+		"ALTER TABLE task_steps ADD COLUMN model_override TEXT",
 	} {
 		_, _ = s.db.Exec(col)
 	}
@@ -311,8 +313,9 @@ func (s *StepStore) Create(step *TaskStep) error {
 		INSERT INTO task_steps (id, task_id, description, depends_on, tool_hint, agent_id,
 		                        job_id, state, result, sequence, revision_count,
 		                        recommendations, evidence, claims, validated, validation_error,
-		                        token_usage, memory_refs, accumulated_context, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                        token_usage, memory_refs, accumulated_context, model_override,
+		                        created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.ID,
 		step.TaskID,
 		step.Description,
@@ -332,6 +335,7 @@ func (s *StepStore) Create(step *TaskStep) error {
 		step.TokenUsage,
 		nullableString(memoryRefsJSON),
 		nullableString(step.AccumulatedContext),
+		nullableString(step.ModelOverride),
 		step.CreatedAt.Format(time.RFC3339),
 		step.UpdatedAt.Format(time.RFC3339),
 	)
@@ -416,7 +420,8 @@ func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
-		       token_usage, memory_refs, accumulated_context, created_at, updated_at
+		       token_usage, memory_refs, accumulated_context, model_override,
+		       created_at, updated_at
 		FROM task_steps WHERE id = ?`, id)
 
 	return s.scanStep(row)
@@ -428,7 +433,8 @@ func (s *StepStore) GetByJobID(jobID string) (*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
-		       token_usage, memory_refs, accumulated_context, created_at, updated_at
+		       token_usage, memory_refs, accumulated_context, model_override,
+		       created_at, updated_at
 		FROM task_steps WHERE job_id = ?`, jobID)
 
 	return s.scanStep(row)
@@ -440,7 +446,8 @@ func (s *StepStore) ListByTaskID(taskID string) ([]*TaskStep, error) {
 		SELECT id, task_id, description, depends_on, tool_hint, agent_id,
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
-		       token_usage, memory_refs, accumulated_context, created_at, updated_at
+		       token_usage, memory_refs, accumulated_context, model_override,
+		       created_at, updated_at
 		FROM task_steps
 		WHERE task_id = ?
 		ORDER BY sequence ASC`, taskID)
@@ -714,13 +721,14 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		validated                           bool
 		validationError                     sql.NullString
 		memoryRefs, accumulatedContext      sql.NullString
+		modelOverride                       sql.NullString
 		createdAt, updatedAt                string
 	)
 
 	err := row.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
-		&tokenUsage, &memoryRefs, &accumulatedContext, &createdAt, &updatedAt)
+		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrStepNotFound
@@ -731,7 +739,7 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
 		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
-		memoryRefs, accumulatedContext, createdAt, updatedAt), nil
+		memoryRefs, accumulatedContext, modelOverride, createdAt, updatedAt), nil
 }
 
 func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
@@ -744,13 +752,14 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		validated                           bool
 		validationError                     sql.NullString
 		memoryRefs, accumulatedContext      sql.NullString
+		modelOverride                       sql.NullString
 		createdAt, updatedAt                string
 	)
 
 	err := rows.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
-		&tokenUsage, &memoryRefs, &accumulatedContext, &createdAt, &updatedAt)
+		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -758,7 +767,7 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
 		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
-		memoryRefs, accumulatedContext, createdAt, updatedAt), nil
+		memoryRefs, accumulatedContext, modelOverride, createdAt, updatedAt), nil
 }
 
 func buildStep(id, taskID, description, state string,
@@ -766,7 +775,7 @@ func buildStep(id, taskID, description, state string,
 	sequence, revisionCount, tokenUsage int,
 	recommendations, evidence, claims sql.NullString,
 	validated bool, validationError sql.NullString,
-	memoryRefs, accumulatedContext sql.NullString,
+	memoryRefs, accumulatedContext, modelOverride sql.NullString,
 	createdAt, updatedAt string) *TaskStep {
 
 	step := &TaskStep{
@@ -780,6 +789,10 @@ func buildStep(id, taskID, description, state string,
 		Validated:          validated,
 		MemoryRefs:         decodeStringSlice(memoryRefs.String),
 		AccumulatedContext: accumulatedContext.String,
+	}
+
+	if modelOverride.Valid {
+		step.ModelOverride = modelOverride.String
 	}
 
 	if dependsOn.Valid {

@@ -1,10 +1,9 @@
 // internal/configui/sections_orchestrator.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildOrchestratorFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Orchestrator
 	return []Field{
 		NewNumberField("max_plan_steps", "max plan steps", s.MaxPlanSteps),

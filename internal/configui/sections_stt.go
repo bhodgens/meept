@@ -1,10 +1,9 @@
 // internal/configui/sections_stt.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildSTTFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.STT
 	w := &s.Whisper
 	p := &s.Parakeet

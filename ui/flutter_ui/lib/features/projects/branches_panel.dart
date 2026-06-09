@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../styles/cyberpunk_theme.dart';
+import '../../theme/colors.dart';
+import '../../theme/typography.dart';
 import '../../services/api_client.dart';
 import '../../providers/providers.dart';
 
@@ -124,7 +125,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
       backgroundColor: CyberpunkColors.darkGray,
       title: Text(
         'checkout branch',
-        style: CyberpunkTypography.headingSmall.copyWith(
+        style: CyberpunkTypography.headlineSmall.copyWith(
           color: CyberpunkColors.orangePrimary,
         ),
       ),
@@ -166,7 +167,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
-                  color: CyberpunkColors.orangePrimary.withOpacity(0.3),
+                  color: CyberpunkColors.orangePrimary.withValues(alpha: 0.3),
                   width: 1,
                 ),
               ),
@@ -181,7 +182,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
                 const SizedBox(width: 12),
                 Text(
                   'branches',
-                  style: CyberpunkTypography.headingSmall.copyWith(
+                  style: CyberpunkTypography.headlineSmall.copyWith(
                     color: CyberpunkColors.orangePrimary,
                   ),
                 ),
@@ -301,7 +302,7 @@ class _BranchesPanelState extends ConsumerState<BranchesPanel> {
             style: CyberpunkTypography.bodyMedium.copyWith(
               color: isCurrent
                   ? CyberpunkColors.orangeBright
-                  : CyberpunkColors.textPrimary,
+                  : CyberpunkColors.lightGray,
             ),
           ),
           trailing: branch.isHead

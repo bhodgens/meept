@@ -1,10 +1,9 @@
 // internal/configui/sections_web.go
 package configui
 
-import "github.com/caimlas/meept/internal/config"
 
 func buildWebFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.Web
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

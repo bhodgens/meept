@@ -698,10 +698,13 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/tasks/{id}", s.handleTaskDelete)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/cancel", s.handleTaskCancel)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/steps", s.handleTaskSteps)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/link-session", s.handleTaskLinkSession)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/unlink-session", s.handleTaskUnlinkSession)
 
 	// Session endpoints
 	mux.HandleFunc("POST /api/v1/sessions", s.handleSessionCreate)
 	mux.HandleFunc("GET /api/v1/sessions", s.handleSessionList)
+	mux.HandleFunc("GET /api/v1/sessions/most-recent", s.handleSessionMostRecent)
 	mux.HandleFunc("GET /api/v1/sessions/{id}", s.handleSessionGet)
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleSessionDelete)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/attach", s.handleSessionAttach)
@@ -715,6 +718,7 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/sessions/{id}/compact", s.handleSessionCompact)
 
 	// Worker endpoints
+	mux.HandleFunc("GET /api/v1/workers", s.handleWorkerList)
 	mux.HandleFunc("GET /api/v1/workers/stats", s.handleWorkerStats)
 	mux.HandleFunc("POST /api/v1/workers", s.handleWorkerAdd)
 	mux.HandleFunc("DELETE /api/v1/workers/{id}", s.handleWorkerRemove)
@@ -724,6 +728,12 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/skills", s.handleSkillsList)
 	mux.HandleFunc("GET /api/v1/skills/{slug}", s.handleSkillsGet)
 	mux.HandleFunc("POST /api/v1/skills/{slug}/execute", s.handleSkillsExecute)
+
+	// Template endpoints
+	mux.HandleFunc("GET /api/v1/templates", s.handleTemplatesList)
+	mux.HandleFunc("GET /api/v1/templates/{name}", s.handleTemplatesGet)
+	mux.HandleFunc("POST /api/v1/templates/{name}/invoke", s.handleTemplatesInvoke)
+	mux.HandleFunc("DELETE /api/v1/templates/{name}", s.handleTemplatesClear)
 
 	// Self-improve endpoints
 	mux.HandleFunc("GET /api/v1/selfimprove/status", s.handleSelfImproveStatus)
@@ -1132,6 +1142,22 @@ func (s *Server) handleDaemonStatus(w http.ResponseWriter, r *http.Request) {
 	if s.daemonCtrl.IsRunning() {
 		status["pid"] = s.daemonCtrl.PID()
 		status["uptime"] = s.daemonCtrl.Uptime().String()
+	}
+
+	// Add runtime health info if available
+	if s.services != nil && s.services.Runtime != nil {
+		if resp, err := s.services.Runtime.Status(r.Context()); err == nil && len(resp.Runtimes) > 0 {
+			runtimes := make(map[string]any)
+			for _, rt := range resp.Runtimes {
+				runtimes[rt.ProviderID] = map[string]any{
+					"running": rt.Running,
+					"healthy": rt.Healthy,
+					"pid":     rt.PID,
+					"runtime": rt.Runtime,
+				}
+			}
+			status["runtimes"] = runtimes
+		}
 	}
 
 	s.writeJSON(w, http.StatusOK, status)

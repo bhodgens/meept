@@ -8,7 +8,7 @@ import (
 )
 
 func buildCodeIntelFields() []Field {
-	cfg, _ := config.LoadDefault()
+	cfg := loadMainConfigOrFallback()
 	s := &cfg.CodeIntel
 	return []Field{
 		NewToggleField("enabled", "enabled", s.Enabled),

@@ -1,6 +1,6 @@
 # Prefix Cache Hit Measurement — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Thread provider-returned cache token counts through the entire stack — from LLM API response parsing, through the agent loop, into metrics storage and events — so operators can measure prefix cache hit rates.
 
@@ -45,7 +45,7 @@
 - Modify: `internal/llm/models.go:280-284` (ChatResponse.Usage)
 - Test: `internal/llm/models_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add a test verifying the new fields exist and serialize correctly:
 
@@ -63,12 +63,12 @@ func TestTokenUsage_CacheFields(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/llm/... -run TestTokenUsage_CacheFields -v`
 Expected: FAIL — `CachedTokens` field does not exist
 
-- [ ] **Step 3: Add fields to TokenUsage**
+- [x] **Step 3: Add fields to TokenUsage**
 
 In `internal/llm/models.go`, update the `TokenUsage` struct (line 93-98):
 
@@ -82,7 +82,7 @@ type TokenUsage struct {
 }
 ```
 
-- [ ] **Step 4: Add cache fields to ChatResponse.Usage**
+- [x] **Step 4: Add cache fields to ChatResponse.Usage**
 
 In `internal/llm/models.go`, update the inline `Usage` struct inside `ChatResponse` (line 280-284). The OpenAI API returns cached tokens in `prompt_tokens_details`:
 
@@ -104,12 +104,12 @@ type ChatResponse struct {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `go test ./internal/llm/... -run TestTokenUsage_CacheFields -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/llm/models.go internal/llm/models_test.go
@@ -127,7 +127,7 @@ git commit -m "feat(llm): add CachedTokens field to TokenUsage and ChatResponse.
 - Modify: `internal/llm/anthropic.go:937-981` (parseResponse)
 - Test: `internal/llm/anthropic_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 func TestAnthropicUsage_CacheFields(t *testing.T) {
@@ -145,12 +145,12 @@ func TestAnthropicUsage_CacheFields(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/llm/... -run TestAnthropicUsage_CacheFields -v`
 Expected: FAIL — fields do not exist
 
-- [ ] **Step 3: Add cache fields to anthropicUsage**
+- [x] **Step 3: Add cache fields to anthropicUsage**
 
 In `internal/llm/anthropic.go`, update the `anthropicUsage` struct (line 431-434):
 
@@ -163,7 +163,7 @@ type anthropicUsage struct {
 }
 ```
 
-- [ ] **Step 4: Populate cache fields in buildResponseFromBlocks**
+- [x] **Step 4: Populate cache fields in buildResponseFromBlocks**
 
 In `internal/llm/anthropic.go`, update the `TokenUsage` construction in `buildResponseFromBlocks` (around line 926-930):
 
@@ -176,7 +176,7 @@ In `internal/llm/anthropic.go`, update the `TokenUsage` construction in `buildRe
 		},
 ```
 
-- [ ] **Step 5: Populate cache fields in parseResponse**
+- [x] **Step 5: Populate cache fields in parseResponse**
 
 In `internal/llm/anthropic.go`, update the `TokenUsage` construction in `parseResponse` (around line 973-977):
 
@@ -189,7 +189,7 @@ In `internal/llm/anthropic.go`, update the `TokenUsage` construction in `parseRe
 		},
 ```
 
-- [ ] **Step 6: Capture cache fields from message_start stream event**
+- [x] **Step 6: Capture cache fields from message_start stream event**
 
 In `internal/llm/anthropic.go`, update the `message_start` case in the streaming handler (around line 814-816). Currently it only captures `InputTokens`. Add cache fields:
 
@@ -202,12 +202,12 @@ In `internal/llm/anthropic.go`, update the `message_start` case in the streaming
 			}
 ```
 
-- [ ] **Step 7: Run test to verify it passes**
+- [x] **Step 7: Run test to verify it passes**
 
 Run: `go test ./internal/llm/... -run TestAnthropicUsage_CacheFields -v`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/llm/anthropic.go internal/llm/anthropic_test.go
@@ -222,7 +222,7 @@ git commit -m "feat(llm): parse Anthropic cache_creation_input_tokens and cache_
 - Modify: `internal/llm/client.go:638-673` (parseResponse)
 - Test: `internal/llm/client_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 func TestParseResponse_CachedTokens(t *testing.T) {
@@ -249,14 +249,14 @@ func TestParseResponse_CachedTokens(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/llm/... -run TestParseResponse_CachedTokens -v`
 Expected: FAIL — `PromptTokensDetails` field does not exist (but it was added in Task 1 Step 4)
 
 Note: If Task 1 was done correctly, this test should already PASS for the JSON parsing. The remaining work is in `parseResponse`.
 
-- [ ] **Step 3: Populate CachedTokens in Client.parseResponse**
+- [x] **Step 3: Populate CachedTokens in Client.parseResponse**
 
 In `internal/llm/client.go`, update `parseResponse` (around line 665-669):
 
@@ -275,12 +275,12 @@ In `internal/llm/client.go`, update `parseResponse` (around line 665-669):
 	}, nil
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/llm/... -run TestParseResponse_CachedTokens -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/llm/client.go internal/llm/client_test.go
@@ -300,7 +300,7 @@ git commit -m "feat(llm): parse OpenAI prompt_tokens_details.cached_tokens into 
 - Modify: `internal/llm/anthropic.go:738-765` (Anthropic streaming metrics)
 - Test: `internal/llm/metrics/store_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add a test that inserts a record with CachedTokens and reads it back:
 
@@ -344,12 +344,12 @@ func TestStore_RecordWithCachedTokens(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/llm/metrics/... -run TestStore_RecordWithCachedTokens -v`
 Expected: FAIL — `CachedTokens` field does not exist on `RequestRecord`
 
-- [ ] **Step 3: Add CachedTokens to RequestRecord**
+- [x] **Step 3: Add CachedTokens to RequestRecord**
 
 In `internal/llm/metrics/store.go`, add a field to `RequestRecord` (after line 36):
 
@@ -370,7 +370,7 @@ type RequestRecord struct {
 }
 ```
 
-- [ ] **Step 4: Add column to SQLite schema**
+- [x] **Step 4: Add column to SQLite schema**
 
 In `internal/llm/metrics/store.go`, add `cached_tokens` to the CREATE TABLE statement (after line 138):
 
@@ -405,7 +405,7 @@ Wrap this in a `try/catch` pattern (SQLite will error if column already exists):
 db.ExecContext(ctx, "ALTER TABLE provider_requests ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0")
 ```
 
-- [ ] **Step 5: Update INSERT statement**
+- [x] **Step 5: Update INSERT statement**
 
 In `internal/llm/metrics/store.go`, update `recordSync` (around line 212-222):
 
@@ -422,7 +422,7 @@ if r.Success {
 _, err := db.ExecContext(ctx, q, ts, r.ProviderID, r.ModelID, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.LatencyMs, r.TTFBMs, r.HTTPStatus, string(r.ErrorType), r.ErrorMessage, success)
 ```
 
-- [ ] **Step 6: Populate CachedTokens in OpenAI client metrics**
+- [x] **Step 6: Populate CachedTokens in OpenAI client metrics**
 
 In `internal/llm/client.go`, update the metrics record construction (around line 617-627):
 
@@ -441,7 +441,7 @@ In `internal/llm/client.go`, update the metrics record construction (around line
 			}
 ```
 
-- [ ] **Step 7: Populate CachedTokens in Anthropic non-streaming metrics**
+- [x] **Step 7: Populate CachedTokens in Anthropic non-streaming metrics**
 
 In `internal/llm/anthropic.go`, update the non-streaming metrics record (around line 636-645). The Anthropic client records metrics **before** parsing the response body, so it doesn't have cache data at record time. Move the metrics recording to **after** response parsing, or defer the cache field population:
 
@@ -480,7 +480,7 @@ The simplest approach: record metrics after parsing (like the OpenAI client does
 
 Remove the earlier pre-parse metrics recording block (lines 628-657).
 
-- [ ] **Step 8: Populate CachedTokens in Anthropic streaming metrics**
+- [x] **Step 8: Populate CachedTokens in Anthropic streaming metrics**
 
 In `internal/llm/anthropic.go`, the streaming metrics are also recorded before parsing. Move to after the stream completes, when `usage` is fully populated. Restructure similarly to step 7: move the metrics recording to after the stream parsing loop, using the final `usage` values:
 
@@ -511,12 +511,12 @@ In `internal/llm/anthropic.go`, the streaming metrics are also recorded before p
 
 Remove the earlier pre-stream metrics recording block (lines 738-765).
 
-- [ ] **Step 9: Run test to verify it passes**
+- [x] **Step 9: Run test to verify it passes**
 
 Run: `go test ./internal/llm/metrics/... -run TestStore_RecordWithCachedTokens -v`
 Expected: PASS
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add internal/llm/metrics/store.go internal/llm/client.go internal/llm/anthropic.go internal/llm/metrics/store_test.go
@@ -533,7 +533,7 @@ git commit -m "feat(metrics): wire CachedTokens through metrics store and both L
 - Modify: `internal/agent/loop.go:2334-2343` (event emission)
 - Modify: `internal/agent/loop.go:3891-3906` (turn end event)
 
-- [ ] **Step 1: Add CachedTokens to AfterProviderResponseData**
+- [x] **Step 1: Add CachedTokens to AfterProviderResponseData**
 
 In `internal/agent/events.go`, add a field:
 
@@ -549,7 +549,7 @@ type AfterProviderResponseData struct {
 }
 ```
 
-- [ ] **Step 2: Add CachedTokens to TurnEndData**
+- [x] **Step 2: Add CachedTokens to TurnEndData**
 
 In `internal/agent/events.go`, add a field:
 
@@ -564,7 +564,7 @@ type TurnEndData struct {
 }
 ```
 
-- [ ] **Step 3: Populate CachedTokens in AfterProviderResponseData emission**
+- [x] **Step 3: Populate CachedTokens in AfterProviderResponseData emission**
 
 In `internal/agent/loop.go`, update the event emission (around line 2339-2342):
 
@@ -581,7 +581,7 @@ In `internal/agent/loop.go`, update the event emission (around line 2339-2342):
 		})
 ```
 
-- [ ] **Step 4: Populate CachedTokens in TurnEndData emission**
+- [x] **Step 4: Populate CachedTokens in TurnEndData emission**
 
 In `internal/agent/loop.go`, update the turn end event emission (around line 3899-3905). The agent loop needs to track the last response's cached tokens. Add a local accumulator:
 
@@ -598,12 +598,12 @@ In `internal/agent/loop.go`, update the turn end event emission (around line 389
 
 Where `cachedTokens` is accumulated alongside `responseTokens` in the same loop.
 
-- [ ] **Step 5: Build and verify**
+- [x] **Step 5: Build and verify**
 
 Run: `go build ./internal/agent/... ./internal/llm/...`
 Expected: clean build, no errors
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/events.go internal/agent/loop.go
@@ -617,11 +617,11 @@ git commit -m "feat(agent): emit CachedTokens in AfterProviderResponseData and T
 **Files:**
 - Modify: `internal/agent/loop.go`
 
-- [ ] **Step 1: Find where tool definitions are assembled for the LLM call**
+- [x] **Step 1: Find where tool definitions are assembled for the LLM call**
 
 Search `internal/agent/loop.go` for where tools are collected and passed to `chatWithFailover`. The `StabilizeToolPrefix` method on `Conversation` must be called before each LLM call with the tool definitions.
 
-- [ ] **Step 2: Add StabilizeToolPrefix call before LLM calls**
+- [x] **Step 2: Add StabilizeToolPrefix call before LLM calls**
 
 Wherever tool definitions are assembled (before passing to `chatWithFailover` or the equivalent), add:
 
@@ -641,12 +641,12 @@ func (c *Conversation) StabilizeToolPrefix(tools []llm.ToolDefinition) []llm.Too
 
 The tools must be `[]llm.ToolDefinition`. If the current code uses a different tool type, you may need to convert.
 
-- [ ] **Step 3: Build and verify**
+- [x] **Step 3: Build and verify**
 
 Run: `go build ./internal/agent/...`
 Expected: clean build
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/loop.go
@@ -659,22 +659,22 @@ git commit -m "feat(agent): wire StabilizeToolPrefix before LLM calls for cache 
 
 **Files:** None (verification only)
 
-- [ ] **Step 1: Full build**
+- [x] **Step 1: Full build**
 
 Run: `go build ./...`
 Expected: clean build
 
-- [ ] **Step 2: Run all LLM tests**
+- [x] **Step 2: Run all LLM tests**
 
 Run: `go test ./internal/llm/... -v`
 Expected: all PASS (excluding pre-existing failures unrelated to this change)
 
-- [ ] **Step 3: Run agent tests**
+- [x] **Step 3: Run agent tests**
 
 Run: `go test ./internal/agent/... -v`
 Expected: all PASS (excluding pre-existing integration test failures)
 
-- [ ] **Step 4: Final commit if any fixes needed**
+- [x] **Step 4: Final commit if any fixes needed**
 
 ```bash
 git add -A

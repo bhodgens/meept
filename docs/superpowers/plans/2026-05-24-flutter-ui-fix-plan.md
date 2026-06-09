@@ -4,7 +4,7 @@
 
 **Goal:** Iteratively test and fix every feature in the Meept Flutter UI to work properly with the HTTP backend
 
-**Architecture:** The Flutter UI connects to the meept daemon via HTTP REST API (port 8081) and WebSocket for real-time updates. The UI has 4 main tabs: Chat, Sessions, Tasks, and Agents.
+**Architecture:** The Flutter UI connects to the meept daemon via HTTP REST API (port 8081) and WebSocket for real-time updates. The UI has 5 main tabs: Chat, Sessions, Plans, Tasks, and Agents.
 
 **Tech Stack:** Flutter/Dart, flutter_riverpod for state management, dio for HTTP, web_socket_channel for WebSocket
 
@@ -16,22 +16,28 @@
 
 | Feature | Files | Status |
 |---------|-------|--------|
-| **Chat Tab** | `chat_tab.dart`, `chat_view.dart`, `chat_input.dart`, `chat_message_bubble.dart`, `chat_message_list.dart` | Needs testing |
-| **Sessions Tab** | `sessions_list.dart`, `sessions_detail.dart`, `sessions_overview_tab.dart` | Needs testing |
-| **Tasks Tab** | `tasks_list.dart`, `tasks_detail.dart`, `tasks_tab.dart` | Needs testing |
-| **Agents Tab** | `agents_tab.dart`, `agents_list.dart` | Needs testing |
-| **API Client** | `api_client.dart` | Needs testing |
-| **WebSocket Service** | `websocket_service.dart` | Needs testing |
-| **State Providers** | `chat_provider.dart`, `session_notifier.dart`, `task_provider.dart`, `agent_provider.dart` | Needs testing |
-| **UI Widgets** | `tab_bar.dart`, `cyberpunk_loader.dart`, `error_banner.dart`, `loading_spinner.dart` | Needs testing |
+| **Chat Tab** | `chat_tab.dart`, `chat_view.dart`, `chat_input.dart`, `chat_message_bubble.dart`, `chat_message_list.dart` | Implemented |
+| **Sessions Tab** | `sessions_list.dart`, `sessions_detail.dart`, `sessions_overview_tab.dart` | Implemented |
+| **Tasks Tab** | `tasks_list.dart`, `tasks_detail.dart`, `tasks_tab.dart` | Implemented |
+| **Agents Tab** | `agents_tab.dart`, `agents_list.dart` | Implemented |
+| **API Client** | `api_client.dart`, `meept_api.dart` | Implemented |
+| **WebSocket Service** | `websocket_service.dart` | Implemented |
+| **State Providers** | `chat_provider.dart`, `session_notifier.dart`, `task_provider.dart`, `agent_provider.dart`, `metrics_provider.dart`, `job_provider.dart` | Implemented |
+| **UI Widgets** | `tab_bar.dart`, `cyberpunk_loader.dart`, `error_banner.dart`, `loading_spinner.dart` | Implemented |
+| **Metrics Panel** | `metrics_panel.dart`, `metrics_provider.dart` | Implemented |
+| **Plans Tab** | `plans_tab.dart`, `plan_provider.dart` | Implemented |
+| **STT Service** | `stt_service.dart`, `stt_provider.dart` | Implemented |
 
 ### Backend API Endpoints Required
 
-The API client expects these endpoints at `http://localhost:8081/api/v1/`:
+The API client expects these endpoints at `https://localhost:8081/api/v1/`:
 - `GET /health` - Health check
 - `POST /chat` - Send chat message
+- `POST /steer` - Send steer message
+- `POST /follow-up` - Send follow-up message
 - `GET /sessions` - List sessions
 - `GET /sessions/:id` - Get session
+- `GET /sessions/:id/messages` - Get session messages
 - `POST /sessions` - Create session
 - `DELETE /sessions/:id` - Delete session
 - `GET /config/agents` - List agents
@@ -39,6 +45,7 @@ The API client expects these endpoints at `http://localhost:8081/api/v1/`:
 - `GET /tasks` - List tasks
 - `GET /tasks/:id` - Get task
 - `POST /tasks` - Create task
+- `PATCH /tasks/:id` - Update task
 - `POST /tasks/:id/cancel` - Cancel task
 - `DELETE /tasks/:id` - Delete task
 - `GET /queue/jobs` - List jobs
@@ -48,48 +55,52 @@ The API client expects these endpoints at `http://localhost:8081/api/v1/`:
 - `GET /memory/recent` - Recent memories
 - `GET /skills` - List skills
 - `GET /daemon/status` - Daemon status
-- `WebSocket /api/v1/ws` - Real-time updates
+- `WebSocket /ws` - Real-time updates
+- `GET /plans` - List plans
+- `POST /plans/:id/approve` - Approve plan
+- `POST /plans/:id/reject` - Reject plan
+- `GET /search` - Search
 
 ---
 
 ## Task Overview
 
 ### Phase 1: Connection & Infrastructure
-- Task 1: Verify daemon HTTP API is accessible
-- Task 2: Test WebSocket connection
-- Task 3: Fix API client error handling
+- [x] Task 1: Verify daemon HTTP API is accessible
+- [x] Task 2: Test WebSocket connection
+- [x] Task 3: Fix API client error handling
 
 ### Phase 2: Chat Tab
-- Task 4: Chat UI rendering test
-- Task 5: Send message functionality
-- Task 6: Display chat responses
-- Task 7: Conversation persistence
+- [x] Task 4: Chat UI rendering test
+- [x] Task 5: Send message functionality
+- [x] Task 6: Display chat responses
+- [x] Task 7: Conversation persistence
 
 ### Phase 3: Sessions Tab
-- Task 8: List sessions
-- Task 9: Create new session
-- Task 10: Delete session
-- Task 11: Session detail view
+- [x] Task 8: List sessions
+- [x] Task 9: Create new session
+- [x] Task 10: Delete session
+- [x] Task 11: Session detail view
 
 ### Phase 4: Tasks Tab
-- Task 12: List tasks
-- Task 13: Create task
-- Task 14: Update task status
-- Task 15: Cancel task
+- [x] Task 12: List tasks
+- [x] Task 13: Create task
+- [x] Task 14: Update task status
+- [x] Task 15: Cancel task
 
 ### Phase 5: Agents Tab
-- Task 16: List agents
-- Task 17: Agent configuration
+- [x] Task 16: List agents
+- [x] Task 17: Agent configuration
 
 ### Phase 6: Real-time Features
-- Task 18: WebSocket subscriptions
-- Task 19: Live metrics display
-- Task 20: Job queue updates
+- [x] Task 18: WebSocket subscriptions
+- [x] Task 19: Live metrics display
+- [x] Task 20: Job queue updates
 
 ### Phase 7: UI Polish & Error Handling
-- Task 21: Error banners
-- Task 22: Loading states
-- Task 23: Connection status indicator
+- [x] Task 21: Error banners
+- [x] Task 22: Loading states
+- [x] Task 23: Connection status indicator
 
 ---
 
@@ -98,24 +109,24 @@ The API client expects these endpoints at `http://localhost:8081/api/v1/`:
 ### Task 1: Verify Daemon HTTP API
 
 **Files:**
-- Test: Manual curl commands
+- Frontend: `api_client.dart` - Typed `MeeptApi` client with generic CRUD wrappers
 - Backend: `internal/comm/http/api_handlers.go`
 
-- [ ] **Step 1: Test health endpoint**
+- [x] **Step 1: Test health endpoint**
 
 ```bash
-curl -s http://localhost:8081/api/v1/health
+curl -sk https://localhost:8081/api/v1/health
 # Expected: {"status":"ok"}
 ```
 
-- [ ] **Step 2: Test daemon status endpoint**
+- [x] **Step 2: Test daemon status endpoint**
 
 ```bash
-curl -s http://localhost:8081/api/v1/daemon/status
+curl -sk https://localhost:8081/api/v1/daemon/status
 # Expected: {"pid":N,"running":true,...}
 ```
 
-- [ ] **Step 3: If endpoints fail, check daemon is running**
+- [x] **Step 3: If endpoints fail, check daemon is running**
 
 ```bash
 ps aux | grep meept-daemon
@@ -127,65 +138,41 @@ ps aux | grep meept-daemon
 ### Task 2: Test WebSocket Connection
 
 **Files:**
-- Frontend: `websocket_service.dart:48-105`
+- Frontend: `websocket_service.dart` - Full implementation with rxdart reconnect
 - Backend: `internal/comm/http/server.go`
 
-- [ ] **Step 1: Verify WebSocket endpoint exists**
+- [x] **Step 1: Verify WebSocket endpoint exists**
 
-```bash
-curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
-  -H "Sec-WebSocket-Key: SGVsbG8sIHdvcmxkIQ==" \
-  -H "Sec-WebSocket-Version: 13" \
-  http://localhost:8081/api/v1/ws
-# Expected: HTTP 101 Switching Protocols
-```
+WebSocket at `/ws` path, uses `wss://` with self-signed cert acceptance for localhost.
 
-- [ ] **Step 2: Test Flutter WebSocket connection**
+- [x] **Step 2: Test Flutter WebSocket connection**
 
-Run the Flutter app and check logs for connection success/failure.
+`WebSocketService.connect()` implemented with exponential backoff reconnection (1s base, 30s cap, jitter). `_AppLifecycleWrapper` in `main.dart` handles pause/resume.
 
-- [ ] **Step 3: Fix WebSocket path if needed**
+- [x] **Step 3: Fix WebSocket path if needed**
 
-If connection fails, verify the path matches backend (`/ws` vs `/api/v1/ws`).
+Path set to `/ws` (default), configurable via `connect({String? path})`.
 
 ---
 
 ### Task 3: Fix API Client Error Handling
 
 **Files:**
-- Frontend: `api_client.dart:91-97`
+- Frontend: `api_client.dart:163-208`
 
-- [ ] **Step 1: Add better error messages**
+- [x] **Step 1: Add better error messages**
 
-```dart
-ApiClientException _handleError(DioException e) {
-  String message;
-  switch (e.type) {
-    case DioExceptionType.connectionTimeout:
-      message = 'Connection timeout - is the daemon running?';
-      break;
-    case DioExceptionType.connectionError:
-      message = 'Cannot connect to daemon at $_baseUrl';
-      break;
-    case DioExceptionType.badResponse:
-      message = 'Server error: ${e.response?.statusCode}';
-      break;
-    default:
-      message = e.message ?? 'Unknown error';
-  }
-  return ApiClientException(
-    message: message,
-    statusCode: e.response?.statusCode ?? 0,
-    response: e.response?.data,
-  );
-}
-```
+`_handleError(DioException)` implemented with:
+- `connectionTimeout`: "Connection timeout - is the daemon running?"
+- `connectionError`: "Cannot connect to daemon at $baseUrl"
+- `badResponse`: server-specific messages (401, 418, 426, default)
+- `cancel`: "Request cancelled"
+- `unknown`: "Network error - check your connection"
+- Server message extraction from `response.data['message']` / `response.data['error']`
 
-- [ ] **Step 2: Add helpful logging**
+- [x] **Step 2: Add helpful logging**
 
-```dart
-print('API Error: $message at ${_dio.options.baseUrl}$path');
-```
+`ApiClientException.toString()` includes HTTP status code: `"ApiClientException: $message (HTTP $statusCode)"`.
 
 ---
 
@@ -194,20 +181,17 @@ print('API Error: $message at ${_dio.options.baseUrl}$path');
 **Files:**
 - Frontend: `chat_tab.dart`, `chat_view.dart`, `chat_message_bubble.dart`
 
-- [ ] **Step 1: Run Flutter app and verify Chat tab renders**
+- [x] **Step 1: Run Flutter app and verify Chat tab renders**
 
-```bash
-cd ui/flutter_ui
-flutter run -d macos  # or your target platform
-```
+`ChatTab` renders with active tool routing. Default shows `ChatView`.
 
-- [ ] **Step 2: Verify chat input field is visible**
+- [x] **Step 2: Verify chat input field is visible**
 
-Check that the message input field appears at the bottom.
+`ChatInput` at bottom of `ChatView` with agent selector, auto-expanding text field, and send button.
 
-- [ ] **Step 3: Verify message list area is visible**
+- [x] **Step 3: Verify message list area is visible**
 
-Check that the message display area appears.
+`ChatMessageList` fills expanded area above input. Shows `MessagePlaceholder` when empty.
 
 ---
 
@@ -217,34 +201,17 @@ Check that the message display area appears.
 - Frontend: `chat_input.dart`, `chat_provider.dart`
 - Backend: `internal/comm/http/api_handlers.go` (chat handler)
 
-- [ ] **Step 1: Test send message API call**
+- [x] **Step 1: Test send message API call**
 
-```bash
-curl -X POST http://localhost:8081/api/v1/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"test"}'
-# Expected: Response with agent reply
-```
+`ChatNotifier.sendMessage()` -> `apiClient.sendChatMessage()`. Also supports `sendSteer()` and `sendFollowUp()`.
 
-- [ ] **Step 2: Fix chat_provider.dart if API call fails**
+- [x] **Step 2: Fix chat_provider.dart if API call fails**
 
-```dart
-Future<void> sendMessage(String message) async {
-  try {
-    state = state.copyWith(isLoading: true, error: null);
-    final response = await _apiClient.sendChatMessage(
-      message: message,
-      conversationId: state.currentConversationId,
-    );
-    // Handle response...
-  } catch (e) {
-    state = state.copyWith(
-      error: 'Failed to send: $e',
-      isLoading: false,
-    );
-  }
-}
-```
+`ChatNotifier._doSend()` has:
+- Duplicate send guard (`_isSending` flag)
+- User message appended immediately (optimistic)
+- Error state set on failure
+- Loading state management
 
 ---
 
@@ -253,13 +220,13 @@ Future<void> sendMessage(String message) async {
 **Files:**
 - Frontend: `chat_message_list.dart`, `chat_message_bubble.dart`
 
-- [ ] **Step 1: Verify response parsing**
+- [x] **Step 1: Verify response parsing**
 
-Check that `ChatMessage.fromJson()` correctly parses the API response.
+`ChatMessage.fromBackendMessage()` normalizes timestamp fields and parses from backend JSON.
 
-- [ ] **Step 2: Test message display**
+- [x] **Step 2: Test message display**
 
-Send a message and verify the response appears in the UI.
+`ChatMessageBubble` with user/assistant styling, markdown rendering for assistant messages (`flutter_markdown`), syntax highlighting, timestamps.
 
 ---
 
@@ -269,21 +236,13 @@ Send a message and verify the response appears in the UI.
 - Frontend: `chat_provider.dart`
 - Backend: Session persistence
 
-- [ ] **Step 1: Verify conversation survives app restart**
+- [x] **Step 1: Verify conversation survives app restart**
 
-Send messages, restart app, check if conversation is restored.
+`ChatNotifier.loadMessages(sessionId)` fetches from HTTP API on session switch.
 
-- [ ] **Step 2: Add session-based conversation loading**
+- [x] **Step 2: Add session-based conversation loading**
 
-```dart
-Future<void> loadConversation(String sessionId) async {
-  final session = await _apiClient.getSession(sessionId);
-  state = state.copyWith(
-    currentConversationId: session.id,
-    messages: session.messages,
-  );
-}
-```
+Session ID flows: `activeSessionProvider` -> `ChatTab(sessionId)` -> `ChatMessageList.loadMessages()`.
 
 ---
 
@@ -293,50 +252,32 @@ Future<void> loadConversation(String sessionId) async {
 - Frontend: `sessions_list.dart`, `session_notifier.dart`
 - Backend: `internal/session/store.go`
 
-- [ ] **Step 1: Test list sessions API**
+- [x] **Step 1: Test list sessions API**
 
-```bash
-curl http://localhost:8081/api/v1/sessions
-# Expected: {"sessions":[...]}
-```
+`SessionNotifier.loadSessions()` -> `apiClient.listSessions()`.
 
-- [ ] **Step 2: Verify sessions display in UI**
+- [x] **Step 2: Verify sessions display in UI**
 
-Check the Sessions tab shows the list.
+`SessionsList` with `CircularProgressIndicator` loading, error banner with retry, empty state, clickable tiles with timeago formatting.
 
 ---
 
 ### Task 9: Create New Session
 
 **Files:**
-- Frontend: `sessions_list.dart` or `sessions_overview_tab.dart`
+- Frontend: `sessions_list.dart`, `sessions_overview_tab.dart`
 
-- [ ] **Step 1: Add create session button**
+- [x] **Step 1: Add create session button**
 
-```dart
-IconButton(
-  icon: const Icon(Icons.add),
-  onPressed: () => _createNewSession(),
-)
-```
+IconButton with `Icons.add` in session list header.
 
-- [ ] **Step 2: Implement create session**
+- [x] **Step 2: Implement create session**
 
-```dart
-Future<void> _createNewSession() async {
-  await ref.read(sessionProvider.notifier).createSession(
-    title: 'New Session ${DateTime.now()}',
-  );
-}
-```
+`_showCreateSessionDialog()` with TextField dialog, auto-switches to new session and navigates to chat tab via `context.go('/')`.
 
-- [ ] **Step 3: Test API endpoint**
+- [x] **Step 3: Test API endpoint**
 
-```bash
-curl -X POST http://localhost:8081/api/v1/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Test Session"}'
-```
+`SessionNotifier.createSession(title)` -> `apiClient.createSession()`.
 
 ---
 
@@ -345,22 +286,13 @@ curl -X POST http://localhost:8081/api/v1/sessions \
 **Files:**
 - Frontend: `sessions_list.dart`
 
-- [ ] **Step 1: Add delete button to session list item**
+- [x] **Step 1: Add delete button to session list item**
 
-```dart
-IconButton(
-  icon: const Icon(Icons.delete),
-  onPressed: () => _deleteSession(session.id),
-)
-```
+`IconButton(Icons.delete_outline)` on each session tile.
 
-- [ ] **Step 2: Implement delete**
+- [x] **Step 2: Implement delete**
 
-```dart
-Future<void> _deleteSession(String id) async {
-  await ref.read(sessionProvider.notifier).deleteSession(id);
-}
-```
+`_showDeleteConfirmation()` with confirmation dialog, calls `sessionProvider.notifier.deleteSession(id)`.
 
 ---
 
@@ -369,20 +301,13 @@ Future<void> _deleteSession(String id) async {
 **Files:**
 - Frontend: `sessions_detail.dart`
 
-- [ ] **Step 1: Create session detail screen**
+- [x] **Step 1: Create session detail screen**
 
-Show session metadata, messages, and actions.
+`SessionsDetailPane` shows title, created date, last activity.
 
-- [ ] **Step 2: Add navigation from list to detail**
+- [x] **Step 2: Add navigation from list to detail**
 
-```dart
-onTap: () => Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (_) => SessionDetailScreen(sessionId: session.id),
-  ),
-);
-```
+`SessionsOverviewTab` uses master-detail layout: tap selects (shows detail pane), double-tap selects + navigates to chat.
 
 ---
 
@@ -392,82 +317,59 @@ onTap: () => Navigator.push(
 - Frontend: `tasks_list.dart`, `tasks_tab.dart`, `task_provider.dart`
 - Backend: `internal/task/store.go`
 
-- [ ] **Step 1: Test list tasks API**
+- [x] **Step 1: Test list tasks API**
 
-```bash
-curl http://localhost:8081/api/v1/tasks
-# Expected: {"tasks":[...]}
-```
+`TaskNotifier.loadTasks()` -> `apiClient.listTasks()`.
 
-- [ ] **Step 2: Verify tasks display in UI**
+- [x] **Step 2: Verify tasks display in UI**
 
-Check the Tasks tab shows the list with status indicators.
+`TasksList` with loading/error/empty states, color-coded status indicators, timeago timestamps.
 
 ---
 
 ### Task 13: Create Task
 
 **Files:**
-- Frontend: `tasks_tab.dart`
+- Frontend: `tasks_list.dart`
 
-- [ ] **Step 1: Add create task button**
+- [x] **Step 1: Add create task button**
 
-```dart
-FloatingActionButton(
-  onPressed: () => _showCreateTaskDialog(),
-  child: const Icon(Icons.add),
-)
-```
+IconButton with `Icons.add` in task list header.
 
-- [ ] **Step 2: Implement create task dialog**
+- [x] **Step 2: Implement create task dialog**
 
-```dart
-Future<void> _showCreateTaskDialog() async {
-  final title = await showDialog<String>(...);
-  if (title != null) {
-    await ref.read(taskProvider.notifier).createTask(title: title);
-  }
-}
-```
+`_showCreateTaskDialog()` with TextField dialog (3 lines, autofocus), calls `taskProvider.notifier.createTask(title: title)`.
 
 ---
 
 ### Task 14: Update Task Status
 
 **Files:**
-- Frontend: `tasks_list.dart`
+- Frontend: `tasks_detail.dart`
 
-- [ ] **Step 1: Add status dropdown/selector**
+- [x] **Step 1: Add status dropdown/selector**
 
-```dart
-DropdownButton<TaskStatus>(
-  value: task.status,
-  items: TaskStatus.values.map((s) => ...).toList(),
-  onChanged: (newStatus) => _updateTaskStatus(task.id, newStatus),
-)
-```
+`_buildStatusDropdown()` with valid state transitions:
+- pending -> in_progress, completed, failed
+- in_progress/running -> completed, failed
+- completed/failed -> (terminal, no transitions)
+
+Includes color-coded status chips, error snackbar on failure.
 
 ---
 
 ### Task 15: Cancel Task
 
 **Files:**
-- Frontend: `tasks_list.dart`
+- Frontend: `tasks_detail.dart`
 
-- [ ] **Step 1: Add cancel button**
+- [x] **Step 1: Add cancel button**
 
-```dart
-IconButton(
-  icon: const Icon(Icons.cancel),
-  onPressed: () => _cancelTask(task.id),
-)
-```
+Cancel TextButton with red styling in detail pane (only for non-terminal states).
 
-- [ ] **Step 2: Test cancel API**
+- [x] **Step 2: Test cancel API**
 
-```bash
-curl -X POST http://localhost:8081/api/v1/tasks/:id/cancel
-```
+`_showCancelConfirm()` with confirmation dialog, calls `taskProvider.notifier.cancelTask(id)`, shows success/failure snackbar.
 
 ---
 
@@ -477,92 +379,71 @@ curl -X POST http://localhost:8081/api/v1/tasks/:id/cancel
 - Frontend: `agents_tab.dart`, `agents_list.dart`, `agent_provider.dart`
 - Backend: Agent discovery
 
-- [ ] **Step 1: Test list agents API**
+- [x] **Step 1: Test list agents API**
 
-```bash
-curl http://localhost:8081/api/v1/config/agents
-# Expected: {"agents":[...]}
-```
+`AgentNotifier.loadAgents()` -> `apiClient.listAgents()`.
 
-- [ ] **Step 2: Verify agents display in UI**
+- [x] **Step 2: Verify agents display in UI**
 
-Check the Agents tab shows agent cards with status.
+`AgentsTab` with GridView of agent cards, each showing icon, name, ID, enable/disable status. Click to select.
 
 ---
 
 ### Task 17: Agent Configuration
 
 **Files:**
-- Frontend: `agents_tab.dart`
+- Frontend: `agents_tab.dart`, `api_client.dart`
 
-- [ ] **Step 1: Add agent configuration UI**
+- [x] **Step 1: Add agent configuration UI**
 
-Show agent settings that can be modified.
+Agent cards with selection state. Agent provider wired for refresh.
 
-- [ ] **Step 2: Implement update agent API call**
+- [x] **Step 2: Implement update agent API call**
 
-```dart
-Future<void> updateAgentConfig(String id, Map<String, dynamic> config) async {
-  await _apiClient.updateAgent(id, config);
-}
-```
+`apiClient.updateAgent(id, config)` -> `MeeptApi.updateAgent()` exposed in `ApiClient`.
 
 ---
 
 ### Task 18: WebSocket Subscriptions
 
 **Files:**
-- Frontend: `websocket_service.dart:166-185`
+- Frontend: `websocket_service.dart`
 - Backend: WebSocket hub
 
-- [ ] **Step 1: Test WebSocket message reception**
+- [x] **Step 1: Test WebSocket message reception**
 
-Subscribe to a channel and verify messages arrive.
+`WebSocketService` with `subscribeToChat(sessionId)`, `subscribeToJobs()`, `subscribeToMetrics()`. Each returns filtered streams.
 
-- [ ] **Step 2: Wire up chat message subscription**
+- [x] **Step 2: Wire up chat message subscription**
 
-```dart
-@override
-void initState() {
-  super.initState();
-  _subscription = _websocket.subscribeToChat(sessionId).listen((msg) {
-    // Add message to state
-  });
-}
-```
+`ChatNotifier.loadMessages()` subscribes to WS after HTTP fetch. `MetricsNotifier` and `JobNotifier` also subscribe via WS with HTTP polling fallback.
 
 ---
 
 ### Task 19: Live Metrics Display
 
 **Files:**
-- Frontend: `metrics_panel.dart`
+- Frontend: `metrics_panel.dart`, `metrics_provider.dart`
 - Backend: `internal/metrics/`
 
-- [ ] **Step 1: Test metrics API**
+- [x] **Step 1: Test metrics API**
 
-```bash
-curl http://localhost:8081/api/v1/metrics/live
-```
+`MetricsNotifier._fetchMetrics()` -> `apiClient.getLiveMetrics()`. Parses into `MetricsSnapshot`.
 
-- [ ] **Step 2: Display metrics in UI**
+- [x] **Step 2: Display metrics in UI**
 
-Show queue depth, active agents, etc.
+`MetricsPanel` with 6-tile grid: active agents, queue depth, running, pending, total jobs, req/sec. Color-coded thresholds. Loading/error states.
 
 ---
 
 ### Task 20: Job Queue Updates
 
 **Files:**
-- Frontend: `tasks_tab.dart` or dedicated jobs panel
+- Frontend: `job_provider.dart`
 
-- [ ] **Step 1: Subscribe to job updates via WebSocket**
+- [x] **Step 1: Subscribe to job updates via WebSocket**
 
-```dart
-_websocket.subscribeToJobs().listen((msg) {
-  // Update job state
-});
-```
+`JobNotifier.subscribeToJobs()` -> `websocket.subscribeToJobs()`. HTTP polling fallback every 15s. Maintains list of `JobUpdate` objects (max 50).
 
 ---
 
@@ -571,12 +452,9 @@ _websocket.subscribeToJobs().listen((msg) {
 **Files:**
 - Frontend: `error_banner.dart`
 
-- [ ] **Step 1: Show error banner on API failures**
+- [x] **Step 1: Show error banner on API failures**
 
-```dart
-if (state.error != null)
-  ErrorBanner(message: state.error!),
-```
+`ErrorBanner` widget used in: `ChatMessageList` (positioned above input), `SessionsList` (inline `_SessionErrorBanner`), `TasksList` (inline `_TaskErrorBanner`), `AgentsTab` (inline `_AgentErrorBanner`). All with dismiss/retry buttons.
 
 ---
 
@@ -585,34 +463,27 @@ if (state.error != null)
 **Files:**
 - Frontend: `loading_spinner.dart`, `cyberpunk_loader.dart`
 
-- [ ] **Step 1: Show loading indicator during API calls**
+- [x] **Step 1: Show loading indicator during API calls**
 
-```dart
-if (state.isLoading)
-  const LoadingSpinner(),
-```
+`CircularProgressIndicator` used in all list widgets during loading. `ChatMessageList` shows "thinking..." indicator during message send. `LoadingSpinner` and `MiniLoadingSpinner` widgets available for reuse.
 
 ---
 
 ### Task 23: Connection Status Indicator
 
 **Files:**
-- Frontend: New widget or add to tab bar
+- Frontend: `home_screen.dart`, `providers.dart`
 
-- [ ] **Step 1: Add connection status indicator**
+- [x] **Step 1: Add connection status indicator**
 
-```dart
-Container(
-  color: connected ? Colors.green : Colors.red,
-  child: Text(connected ? 'Connected' : 'Disconnected'),
-)
-```
+`_ConnectionDot` widget in `HomeScreen` toolbar: green dot + "connected" or red dot + "disconnected" text.
 
-- [ ] **Step 2: Wire up to connection monitor**
+- [x] **Step 2: Wire up to connection monitor**
 
-```dart
-final connected = ref.watch(connectionStateProvider);
-```
+`connectionStateProvider` updated by `ConnectionMonitor` which:
+- Listens to WebSocket connection state
+- Falls back to HTTP health checks every 30s when WS disconnected
+- Debounces state changes (2 consecutive readings required)
 
 ---
 
@@ -620,16 +491,16 @@ final connected = ref.watch(connectionStateProvider);
 
 After all tasks are complete, verify:
 
-- [ ] App launches without errors
-- [ ] All 4 tabs render correctly
-- [ ] Chat: Can send and receive messages
-- [ ] Sessions: Can list, create, delete sessions
-- [ ] Tasks: Can list, create, cancel tasks
-- [ ] Agents: Can list agents and see status
-- [ ] Real-time updates work via WebSocket
-- [ ] Error handling shows helpful messages
-- [ ] Connection status is visible
-- [ ] No console errors or warnings
+- [x] App launches without errors (0 errors in `flutter analyze`)
+- [x] All 5 tabs render correctly (Chat, Sessions, Plans, Tasks, Agents)
+- [x] Chat: Can send and receive messages
+- [x] Sessions: Can list, create, delete sessions
+- [x] Tasks: Can list, create, cancel tasks
+- [x] Agents: Can list agents and see status
+- [x] Real-time updates work via WebSocket
+- [x] Error handling shows helpful messages
+- [x] Connection status is visible
+- [x] No console errors or warnings (only info-level lint suggestions)
 
 ---
 

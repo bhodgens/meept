@@ -1,6 +1,20 @@
 // internal/configui/sections.go
 package configui
 
+import "github.com/caimlas/meept/internal/config"
+
+// loadMainConfigOrFallback loads the main config via the (possibly test-overridden)
+// loadMainConfig loader, falling back to DefaultConfig if the result is nil.
+// This prevents nil-pointer panics in section builders when the user's config
+// file has parse errors.
+func loadMainConfigOrFallback() *config.Config {
+	cfg, err := loadMainConfig()
+	if err != nil || cfg == nil {
+		return config.DefaultConfig()
+	}
+	return cfg
+}
+
 // BuildSectionFields creates the fields for a given section key path.
 // Sections are defined in separate files (sections_*.go) but this function
 // dispatches to them.
