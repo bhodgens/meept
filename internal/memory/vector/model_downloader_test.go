@@ -61,6 +61,7 @@ func TestModelDownloader_CheckForUpdates(t *testing.T) {
 		cacheDir: dir,
 		client:   server.Client(),
 		logger:   logger,
+		apiBase:  server.URL,
 	}
 
 	// No commit saved yet
@@ -152,8 +153,8 @@ func TestModelDownloader_downloadFile_ContextCancellation(t *testing.T) {
 	logger := slog.Default()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Never respond -- let the context cancel
-		select {}
+		// Wait until client disconnects, then return
+		<-r.Context().Done()
 	}))
 	defer server.Close()
 

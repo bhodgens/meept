@@ -729,14 +729,14 @@ func importanceRank(level string) int {
 
 // MemoryReflectTool performs meta-cognition on stored memories to generate insights.
 type MemoryReflectTool struct {
-	manager *memory.Manager
-	llmClient llm.Client
+	manager   *memory.Manager
+	llmClient *llm.Client
 }
 
 // NewMemoryReflectTool creates a new memory reflect tool.
-func NewMemoryReflectTool(manager *memory.Manager, llmClient llm.Client) *MemoryReflectTool {
+func NewMemoryReflectTool(manager *memory.Manager, llmClient *llm.Client) *MemoryReflectTool {
 	return &MemoryReflectTool{
-		manager: manager,
+		manager:   manager,
 		llmClient: llmClient,
 	}
 }

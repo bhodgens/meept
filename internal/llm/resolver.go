@@ -394,4 +394,30 @@ func (r *Resolver) SetPricingSyncer(ps *PricingSyncer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pricingSyncer = ps
+	if ps == nil {
+		return
+	}
+
+	// Enrich all models with live pricing
+	enrich := func(m *ModelConfig) {
+		if m == nil {
+			return
+		}
+		key := m.ProviderID + "/" + m.ModelID
+		if price := ps.GetPrice(key); price != nil {
+			m.CostPerMillionInput = price.InputCost
+			m.CostPerMillionOutput = price.OutputCost
+		}
+	}
+
+	for _, m := range r.allModels {
+		enrich(m)
+	}
+	for _, alias := range r.aliases {
+		for _, m := range alias.Models {
+			enrich(m)
+		}
+	}
+	enrich(r.defaultModel)
+	enrich(r.smallModel)
 }
