@@ -1,1 +1,2 @@
-docs/skills/*.md
+nav:
+  - mlx-classifier-benchmark/

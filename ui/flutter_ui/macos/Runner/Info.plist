@@ -32,5 +32,16 @@
 	<string>Meept needs microphone access for speech-to-text transcription.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Meept needs speech recognition to transcribe your voice input.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.caimlas.meept</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>meept</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

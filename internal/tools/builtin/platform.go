@@ -271,7 +271,7 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 		return DelegateResult{
 			AgentID: agentID,
 			Success: false,
-			Error:   "agent not found: " + agentID + ". Available: " + joinStrings(available),
+			Error:   "agent not found: " + agentID + ". Available: " + strings.Join(available, ", "),
 		}, nil
 	}
 
@@ -339,17 +339,7 @@ func (t *DelegateTaskTool) Execute(ctx context.Context, args map[string]any) (an
 	}, nil
 }
 
-func joinStrings(strs []string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	var result strings.Builder
-	result.WriteString(strs[0])
-	for i := 1; i < len(strs); i++ {
-		result.WriteString(", " + strs[i])
-	}
-	return result.String()
-}
+
 
 func generateDelegateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())

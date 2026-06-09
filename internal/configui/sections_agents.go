@@ -4,6 +4,7 @@ package configui
 import (
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
@@ -41,9 +42,9 @@ func buildAgentItems(agents map[string]*config.AgentDefinition) []DrilldownItem 
 			NewSelectField("model", "model", a.Model, modelOptions),
 			NewToggleField("enabled", "enabled", a.Enabled),
 			NewToggleField("can_delegate", "can delegate", a.CanDelegate),
-			NewTextField("additional_tools", "additional tools", joinStrings(a.AdditionalTools)),
-			NewTextField("capabilities", "capabilities", joinStrings(a.Capabilities)),
-			NewTextField("prompt_components", "prompt components", joinStrings(a.PromptComponents)),
+			NewTextField("additional_tools", "additional tools", strings.Join(a.AdditionalTools, ", ")),
+			NewTextField("capabilities", "capabilities", strings.Join(a.Capabilities, ", ")),
+			NewTextField("prompt_components", "prompt components", strings.Join(a.PromptComponents, ", ")),
 		}
 		items = append(items, DrilldownItem{Name: a.ID, Fields: fields})
 	}

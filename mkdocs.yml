@@ -40,8 +40,7 @@ plugins:
   - mermaid2:
       version: 10.9.0
   - git-revision-date-localized:
-  - awesome-pages:
-      enable_creation_date: true
+  - awesome-pages
 
 markdown_extensions:
   - pymdownx.superfences:

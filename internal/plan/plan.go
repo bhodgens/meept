@@ -63,14 +63,14 @@ type Plan struct {
 
 // PlanPhase represents a named phase within a plan.
 type PlanPhase struct {
-	ID             string     `json:"id"`
-	PlanID         string     `json:"plan_id"`
-	Name           string     `json:"name"`
-	Sequence       int        `json:"sequence"`
-	TotalSteps     int        `json:"total_steps"`
-	CompletedSteps int        `json:"completed_steps"`
-	FailedSteps    int        `json:"failed_steps"`
-	State          PhaseState `json:"state"`
+	ID             string     `json:"id" db:"id"`
+	PlanID         string     `json:"plan_id" db:"plan_id"`
+	Name           string     `json:"name" db:"name"`
+	Sequence       int        `json:"sequence" db:"sequence"`
+	TotalSteps     int        `json:"total_steps" db:"total_steps"`
+	CompletedSteps int        `json:"completed_steps" db:"completed_steps"`
+	FailedSteps    int        `json:"failed_steps" db:"failed_steps"`
+	State          PhaseState `json:"state" db:"state"`
 }
 
 // PlanSignoff records an approval, rejection, or confirmation action.

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestShellExecuteTool_Execute(t *testing.T) {

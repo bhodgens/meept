@@ -1002,16 +1002,19 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 	}
 
+	// Create shared pending changes registry for preview/accept workflow
+	pendingChangesRegistry := builtin.NewPendingChangesRegistry()
+
 	// Register builtin tools now that all dependencies are available
 	var taskStore *task.Store
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, logger)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, logger)
 
 	// Initialize code intelligence if enabled
 	if cfg.CodeIntel.Enabled {
-		c.initializeCodeIntel(cfg, logger)
+		c.initializeCodeIntel(cfg, pendingChangesRegistry, logger)
 	}
 
 	// Initialize DAP debugging support
@@ -2289,6 +2292,7 @@ func registerBuiltinTools(
 	memoryMgr *memory.Manager,
 	taskStore *task.Store,
 	sched *scheduler.Scheduler,
+	pendingChangesRegistry *builtin.PendingChangesRegistry,
 	logger *slog.Logger,
 ) {
 	// Shared read cache for hashline edit recovery
@@ -2860,7 +2864,7 @@ func (a *learningPipelineAdapter) Retrieve(ctx context.Context, query, domain st
 }
 
 // initializeCodeIntel sets up code intelligence (AST and LSP).
-func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger) {
+func (c *Components) initializeCodeIntel(cfg *config.Config, pendingChangesRegistry *builtin.PendingChangesRegistry, logger *slog.Logger) {
 	logger.Info("Initializing code intelligence")
 
 	// Initialize AST parser manager
@@ -2895,6 +2899,9 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 	if tool, err := codetools.NewASTEditTool(c.ASTParser); err != nil {
 		logger.Error("Failed to initialize AST edit tool", "error", err)
 	} else {
+		if pendingChangesRegistry != nil {
+			tool.SetPendingChangesRegistry(pendingChangesRegistry)
+		}
 		c.ToolRegistry.Register(tool)
 	}
 	if tool, err := codetools.NewResolveASTEditTool(c.ASTParser); err != nil {
@@ -2952,6 +2959,9 @@ func (c *Components) initializeCodeIntel(cfg *config.Config, logger *slog.Logger
 		if tool, err := codetools.NewLSPRenameTool(c.LSPManager); err != nil {
 			logger.Error("Failed to initialize LSP rename tool", "error", err)
 		} else {
+			if pendingChangesRegistry != nil {
+				tool.SetPendingChangesRegistry(pendingChangesRegistry)
+			}
 			c.ToolRegistry.Register(tool)
 		}
 		if tool, err := codetools.NewLSPRenameFilesTool(c.LSPManager); err != nil {

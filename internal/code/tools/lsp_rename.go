@@ -6,15 +6,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caimlas/meept/internal/code/lsp"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
 // LSPRenameTool renames a symbol across the workspace.
 type LSPRenameTool struct {
-	manager *lsp.Manager
+	manager                *lsp.Manager
+	pendingChangesRegistry *builtin.PendingChangesRegistry
 }
 
 // NewLSPRenameTool creates a new LSP rename tool.
@@ -23,6 +26,11 @@ func NewLSPRenameTool(manager *lsp.Manager) (*LSPRenameTool, error) {
 		return nil, fmt.Errorf("lsp.Manager cannot be nil")
 	}
 	return &LSPRenameTool{manager: manager}, nil
+}
+
+// SetPendingChangesRegistry sets the pending changes registry for preview/accept workflow.
+func (t *LSPRenameTool) SetPendingChangesRegistry(registry *builtin.PendingChangesRegistry) {
+	t.pendingChangesRegistry = registry
 }
 
 func (t *LSPRenameTool) Name() string { return "lsp_rename" }
@@ -184,7 +192,61 @@ func (t *LSPRenameTool) Execute(ctx context.Context, args map[string]any) (any, 
 		totalEdits += len(fe.edits)
 	}
 
-	// Apply edits if requested
+	// Handle preview/accept workflow when registry is available and apply=false
+	if t.pendingChangesRegistry != nil && !apply {
+		// Create pending changes for each file
+		sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+		if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
+			sessionID = sid
+		}
+
+		now := time.Now()
+		expiresAt := now.Add(30 * time.Minute)
+
+		for _, fe := range fileEdits {
+			// Read original content
+			originalContent, err := os.ReadFile(fe.path)
+			if err != nil {
+				continue
+			}
+
+			// Calculate modified content
+			modifiedContent := applyTextEditsToString(string(originalContent), fe.edits)
+
+			// Generate simple diff
+			diff := generateSimpleDiff(string(originalContent), modifiedContent, fe.path)
+
+			change := &builtin.PendingChange{
+				ID:        fmt.Sprintf("lsp_%s_%d", fe.path, now.UnixNano()),
+				SessionID: sessionID,
+				FilePath:  fe.path,
+				Original:  string(originalContent),
+				Modified:  modifiedContent,
+				Diff:      diff,
+				CreatedAt: now,
+				ExpiresAt: &expiresAt,
+				Metadata: map[string]any{
+					"tool":       "lsp_rename",
+					"new_name":   newName,
+					"edit_count": len(fe.edits),
+				},
+			}
+
+			t.pendingChangesRegistry.Add(change)
+		}
+
+		return map[string]any{
+			SchemaPropFound:       true,
+			"pending_change_ids":  []string{fmt.Sprintf("lsp_renamed_%d", now.UnixNano())},
+			SchemaPropMessage:     fmt.Sprintf("Rename preview created for %d files. Use 'resolve' tool to accept/reject changes.", len(fileEdits)),
+			"new_name":            newName,
+			"changes":             changes,
+			"file_count":          len(fileEdits),
+			"edit_count":          totalEdits,
+		}, nil
+	}
+
+	// Apply edits immediately when apply=true or no registry
 	if apply {
 		for _, fe := range fileEdits {
 			if err := applyTextEdits(fe.path, fe.edits); err != nil {
@@ -256,3 +318,50 @@ func applyTextEdits(filePath string, edits []lsp.TextEdit) error {
 
 // Ensure tool implements the Tool interface
 var _ tools.Tool = (*LSPRenameTool)(nil)
+
+// applyTextEditsToString applies LSP text edits to a string content.
+func applyTextEditsToString(content string, edits []lsp.TextEdit) string {
+	lines := strings.Split(content, "\n")
+
+	// Apply edits in reverse order to preserve positions
+	for i := len(edits) - 1; i >= 0; i-- {
+		edit := edits[i]
+		startLine := edit.Range.Start.Line
+		startChar := edit.Range.Start.Character
+		endLine := edit.Range.End.Line
+		endChar := edit.Range.End.Character
+
+		if startLine >= len(lines) || endLine >= len(lines) {
+			continue
+		}
+
+		// Modify the line
+		line := lines[startLine]
+		if startLine == endLine {
+			// Single line edit
+			before := ""
+			if startChar > 0 && startChar <= len(line) {
+				before = line[:startChar]
+			}
+			after := ""
+			if endChar < len(line) {
+				after = line[endChar:]
+			}
+			lines[startLine] = before + edit.NewText + after
+		} else {
+			// Multi-line edit - simplified handling
+			before := ""
+			if startChar > 0 && startChar <= len(lines[startLine]) {
+				before = lines[startLine][:startChar]
+			}
+			after := ""
+			if endChar < len(lines[endLine]) {
+				after = lines[endLine][endChar:]
+			}
+			newLines := strings.Split(before + edit.NewText + after, "\n")
+			lines = append(lines[:startLine], append(newLines, lines[endLine+1:]...)...)
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}

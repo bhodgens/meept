@@ -3,6 +3,7 @@ package configui
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/caimlas/meept/internal/llm"
 )
@@ -15,7 +16,7 @@ func buildModelsFields() []Field {
 	return []Field{
 		NewTextField("model", "default model", cfg.Model),
 		NewTextField("small_model", "small model", cfg.SmallModel),
-		NewTextField("disabled_providers", "disabled providers", joinStrings(cfg.DisabledProviders)),
+		NewTextField("disabled_providers", "disabled providers", strings.Join(cfg.DisabledProviders, ", ")),
 		NewDrilldownField("providers", "providers", buildProviderItems(cfg.Providers)),
 	}
 }
@@ -41,14 +42,4 @@ func buildProviderItems(providers map[string]llm.ProviderConfig) []DrilldownItem
 	return items
 }
 
-// joinStrings joins a string slice with ", " for display in a text field.
-func joinStrings(ss []string) string {
-	result := ""
-	for i, s := range ss {
-		if i > 0 {
-			result += ", "
-		}
-		result += s
-	}
-	return result
-}
+

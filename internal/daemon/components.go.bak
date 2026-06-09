@@ -14,6 +14,7 @@ import (
 
 	"github.com/caimlas/meept/internal/agent"
 	authpkg "github.com/caimlas/meept/internal/auth"
+	"github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/calendar"
 	"github.com/caimlas/meept/internal/code/ast"
@@ -29,6 +30,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
+	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
 	"github.com/caimlas/meept/internal/scheduler"
@@ -68,7 +70,9 @@ type Components struct {
 	Queue         queue.Queue
 	QueueHandler  *queue.Handler
 	TaskRegistry  *task.Registry
+	TaskStore     *task.Store
 	TaskHandler   *task.Handler
+	PlanManager   *plan.PlanManager
 	AmendmentMgr  *task.AmendmentManager
 	WorkerPool    *worker.Pool
 	WorkerHandler *worker.Handler
@@ -80,6 +84,8 @@ type Components struct {
 	CollaborationEngine *agent.CollaborationEngine
 	// Team orchestrator for N-agent parallel team sessions
 	TeamOrchestrator *agent.TeamOrchestrator
+	// Ralph loop for automatic replanning on incomplete tasks
+	RalphLoop *agent.RalphLoop
 
 	// Agent validation watchdog
 	Watchdog              *agent.Watchdog
@@ -166,6 +172,10 @@ type Components struct {
 	CalendarClient   *calendar.Client
 	CalendarReminder *calendar.ReminderWatcher
 
+	// Bot framework
+	BotManager *bot.Manager
+	BotStore   *bot.Store
+
 	// OAuth token management (shared across calendar, LLM providers, etc.)
 	TokenStore     *authpkg.TokenStore
 	RefreshManager *authpkg.RefreshManager
@@ -178,7 +188,7 @@ type Components struct {
 	ClusterGitSync *cluster.GitSync
 	ClusterQueue   *queue.ClusterQueue
 	ClusterConfig  *cluster.Config
-	ClusterWireGuard *cluster.WireGuardSync
+	ClusterWireGuard *cluster.WireGuardManager
 
 	Logger *slog.Logger
 }
@@ -944,6 +954,7 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		logger.Warn("Failed to create task registry", "error", err)
 	} else {
 		c.TaskRegistry = taskRegistry
+		c.TaskStore = taskRegistry.Store()
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
 		c.AmendmentMgr = taskRegistry.AmendmentManager()
 
@@ -1287,11 +1298,17 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 			})
 			c.TeamOrchestrator = teamOrch
 
+			// Create Ralph loop for automatic replanning on incomplete tasks
+			ralphLoopCfg := agent.DefaultRalphLoopConfig()
+			ralphLoop := agent.NewRalphLoop(ralphLoopCfg, nil, c.TaskStore, c.PlanManager, msgBus, logger.With("component", "ralph-loop"))
+			c.RalphLoop = ralphLoop
+
 			c.Orchestrator = agent.NewOrchestrator(agent.OrchestratorDeps{
 				Strategic:           strategicPlanner,
 				Tactical:            tacticalScheduler,
 				BusPairOrchestrator: busPairOrchestrator,
 				CollaborationEngine: collabEngine,
+				RalphLoop:           ralphLoop,
 				Bus:                 msgBus,
 				Logger:              logger.With("component", "orchestrator"),
 			})
@@ -1469,6 +1486,32 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		}
 	}
 
+	// Initialize bot framework if enabled
+	if cfg.Bots.Enabled {
+		botDataDir := cfg.Bots.DataDir
+		if botDataDir == "" {
+			botDataDir = filepath.Join(cfg.Daemon.DataDir, "bots")
+		}
+		if err := os.MkdirAll(botDataDir, 0o755); err != nil {
+			logger.Error("failed to create bot data directory", "error", err, "path", botDataDir)
+		} else {
+			botStore, err := bot.NewStore(filepath.Join(botDataDir, "bots.db"))
+			if err != nil {
+				logger.Error("failed to create bot store", "error", err)
+			} else {
+				botRouter := bot.NewEventActionRouter(msgBus, nil)
+				botManager := bot.NewManager(botStore, botRouter)
+
+				c.BotManager = botManager
+				c.BotStore = botStore
+				logger.Info("Bot framework initialized",
+					"data_dir", botDataDir,
+					"max_concurrent", cfg.Bots.MaxConcurrentBots,
+				)
+			}
+		}
+	}
+
 	return c, nil
 }
 
@@ -1629,6 +1672,15 @@ func (c *Components) Start(ctx context.Context) error {
 		}()
 	}
 
+	// Start bot framework
+	if c.BotManager != nil {
+		if err := c.BotManager.StartAll(ctx); err != nil {
+			c.Logger.Error("Failed to start bots", "error", err)
+		} else {
+			c.Logger.Info("Bot framework started")
+		}
+	}
+
 	// Start gossip engine (cluster mode)
 	if c.ClusterEngine != nil {
 		if err := c.ClusterEngine.Start(ctx); err != nil {
@@ -1704,6 +1756,18 @@ func (c *Components) Stop(ctx context.Context) error {
 	// Stop watchdog monitor
 	if c.Watchdog != nil {
 		c.Watchdog.Stop()
+	}
+
+	// Stop bot framework before scheduler
+	if c.BotManager != nil {
+		c.BotManager.StopAll()
+		c.Logger.Info("Bot framework stopped")
+	}
+	if c.BotStore != nil {
+		if err := c.BotStore.Close(); err != nil {
+			c.Logger.Error("Failed to close bot store", "error", err)
+			lastErr = err
+		}
 	}
 
 	// Stop scheduler first to prevent new job executions
@@ -2233,8 +2297,15 @@ func registerBuiltinTools(
 	// Filesystem tools
 	registry.Register(builtin.NewReadFileTool(checker, readCache))
 	registry.Register(builtin.NewWriteFileTool(checker))
-	registry.Register(builtin.NewFileEditTool(checker, readCache))
+	// Pending changes registry for preview/accept workflow
+	pendingChanges := builtin.NewPendingChangesRegistry()
+	
+	fileEditTool := builtin.NewFileEditTool(checker, readCache)
+	fileEditTool.SetPendingChangesRegistry(pendingChanges)
+	registry.Register(fileEditTool)
+	
 	registry.Register(builtin.NewDeleteFileTool(checker))
+	registry.Register(builtin.NewResolveTool(pendingChanges))
 	registry.Register(builtin.NewListDirectoryTool(checker))
 	registry.Register(builtin.NewFileFindTool(checker))
 	registry.Register(builtin.NewFileGrepTool(checker))
@@ -2247,6 +2318,12 @@ func registerBuiltinTools(
 		logger.Debug("Shell tool configured with security orchestrator")
 	}
 	registry.Register(shellTool)
+
+	// Git tools for commit workflow
+	registry.Register(builtin.NewGitOverviewTool(wd))
+	registry.Register(builtin.NewGitSplitTool(wd))
+	registry.Register(builtin.NewGitCommitTool(wd))
+	registry.Register(builtin.NewGitValidateTool())
 
 	// Web fetch tool
 	registry.Register(builtin.NewWebFetchTool(30*time.Second, 100000))
@@ -2262,12 +2339,15 @@ func registerBuiltinTools(
 		registry.Register(builtin.NewMemoryGetVersionTool(memoryMgr))
 		registry.Register(builtin.NewMemoryGetVersionHistoryTool(memoryMgr))
 
-		// Memory curation tools (retain/recall/reflect) backed by task memory
-		if taskMem := memoryMgr.Task(); taskMem != nil {
-			curationStore := memory.NewCuratedMemoryStore(taskMem, logger.With("component", "memory-curation"))
-			builtin.RegisterMemoryCurationTools(registry, curationStore)
-			logger.Debug("Registered memory curation tools")
-		}
+		// Memory curation tools (retain/recall/reflect)
+		registry.Register(builtin.NewMemoryRetainTool(memoryMgr))
+		registry.Register(builtin.NewMemoryRecallTool(memoryMgr))
+		// Memory reflect tool requires LLM client - only register if available
+		// TODO: wire llmClient into registerBuiltinTools and uncomment
+		// if llmClient != nil {
+		//	registry.Register(builtin.NewMemoryReflectTool(memoryMgr, llmClient))
+		// }
+		logger.Debug("Registered memory curation tools")
 
 		logger.Debug("Registered memory tools")
 	} else if memoryMgr != nil {

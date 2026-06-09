@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMessageBus_PubSub(t *testing.T) {

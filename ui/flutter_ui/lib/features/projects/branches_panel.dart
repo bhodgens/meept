@@ -1,25 +1,31 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../styles/cyberpunk_theme.dart';
+import '../../services/api_client.dart';
+import '../../providers/providers.dart';
 
 /// BranchesPanel displays git branches for the current project.
 ///
 /// Allows switching branches and viewing branch status.
-class BranchesPanel extends StatefulWidget {
+class BranchesPanel extends ConsumerStatefulWidget {
   const BranchesPanel({super.key});
 
   @override
-  State<BranchesPanel> createState() => _BranchesPanelState();
+  ConsumerState<BranchesPanel> createState() => _BranchesPanelState();
 }
 
-class _BranchesPanelState extends State<BranchesPanel> {
+class _BranchesPanelState extends ConsumerState<BranchesPanel> {
   List<BranchInfo> _branches = [];
   String? _currentBranch;
   bool _isLoading = false;
   String? _error;
 
+  late final ApiClient _apiClient;
+
   @override
   void initState() {
     super.initState();
+    _apiClient = ref.read(apiClientProvider);
     _loadBranches();
   }
 
@@ -29,19 +35,41 @@ class _BranchesPanelState extends State<BranchesPanel> {
       _error = null;
     });
 
-    // TODO: Wire to API - GET /api/v1/projects/{id}/branches
-    // For now, show placeholder
-    await Future.delayed(const Duration(milliseconds: 500));
+    try {
+      final data = await _apiClient
+          .get<Map<String, dynamic>>('/projects/default/branches');
+      final rawBranches = data['branches'] as List?;
+      if (rawBranches == null || rawBranches.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _branches = [];
+            _currentBranch = null;
+          });
+        }
+        return;
+      }
 
-    setState(() {
-      _isLoading = false;
-      _branches = [
-        // Sample data - replace with API call
-        BranchInfo(name: 'main', isCurrent: true, isHead: false),
-        BranchInfo(name: 'develop', isCurrent: false, isHead: false),
-      ];
-      _currentBranch = 'main';
-    });
+      final branches = rawBranches
+          .map((b) => BranchInfo.fromJson(b as Map<String, dynamic>))
+          .toList();
+      final current = branches.where((b) => b.isCurrent).firstOrNull;
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _branches = branches;
+          _currentBranch = current?.name;
+        });
+      }
+    } on ApiClientException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = e.message;
+        });
+      }
+    }
   }
 
   Future<void> _checkoutBranch(String branchName) async {
@@ -50,18 +78,43 @@ class _BranchesPanelState extends State<BranchesPanel> {
       builder: (context) => _buildCheckoutDialog(branchName),
     );
 
-    if (confirmed == true) {
-      // TODO: Wire to API - POST /api/v1/projects/{id}/checkout
-      setState(() {
-        _currentBranch = branchName;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('switched to branch $branchName'),
-            backgroundColor: CyberpunkColors.orangePrimary,
-          ),
-        );
+    if (confirmed == true && mounted) {
+      try {
+        final data = await _apiClient
+            .post<Map<String, dynamic>>('/projects/default/checkout', data: {
+          'branch': branchName,
+        });
+        final success = data['success'] as bool? ?? false;
+        final message = data['message'] as String?;
+
+        if (success && mounted) {
+          // Refresh branch list so is_current flags are accurate
+          await _loadBranches();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message ?? 'switched to branch $branchName'),
+                backgroundColor: CyberpunkColors.orangePrimary,
+              ),
+            );
+          }
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(message ?? 'failed to switch branch'),
+              backgroundColor: CyberpunkColors.orangeDark,
+            ),
+          );
+        }
+      } on ApiClientException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(e.message),
+              backgroundColor: CyberpunkColors.orangeDark,
+            ),
+          );
+        }
       }
     }
   }
@@ -289,4 +342,12 @@ class BranchInfo {
     this.isCurrent = false,
     this.isHead = false,
   });
+
+  factory BranchInfo.fromJson(Map<String, dynamic> json) {
+    return BranchInfo(
+      name: json['name'] as String? ?? '',
+      isCurrent: json['is_current'] as bool? ?? false,
+      isHead: json['is_head'] as bool? ?? false,
+    );
+  }
 }

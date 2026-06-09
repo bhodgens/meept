@@ -15,17 +15,15 @@ class DashboardService {
         self.apiToken = config.apiToken
     }
 
-    func getLiveMetrics(completion: @escaping (Result<LiveMetrics, Error>) -> Void) {
+    // MARK: - async/await
+
+    func getLiveMetrics() async throws -> LiveMetrics {
         let request = makeRequest(path: "/api/v1/metrics/live", method: "GET")
-        perform(request: request, completion: completion) { data in
-            try JSONDecoder().decode(LiveMetrics.self, from: data)
-        }
+        let data = try await performData(request: request)
+        return try JSONDecoder().decode(LiveMetrics.self, from: data)
     }
 
-    func getHistoricalMetrics(
-        from: String, to: String, resolution: String,
-        completion: @escaping (Result<[MetricPoint], Error>) -> Void
-    ) {
+    func getHistoricalMetrics(from: String, to: String, resolution: String) async throws -> [MetricPoint] {
         var components = URLComponents(
             url: baseURL.appendingPathComponent("/api/v1/metrics/historical"),
             resolvingAgainstBaseURL: true
@@ -36,19 +34,32 @@ class DashboardService {
             URLQueryItem(name: "resolution", value: resolution)
         ]
         guard let url = components?.url else {
-            completion(.failure(APIError.invalidURL))
-            return
+            throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         if let token = apiToken, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        perform(request: request, completion: completion) { data in
-            let result = try JSONDecoder().decode([String: [MetricPoint]].self, from: data)
-            return result["points"] ?? []
-        }
+        let data = try await performData(request: request)
+        let result = try JSONDecoder().decode([String: [MetricPoint]].self, from: data)
+        return result["points"] ?? []
     }
+
+    // MARK: - Backward-compatible completion handler wrappers
+
+    func getLiveMetrics(completion: @escaping (Result<LiveMetrics, Error>) -> Void) {
+        Task { do { completion(.success(try await getLiveMetrics())) } catch { completion(.failure(error)) } }
+    }
+
+    func getHistoricalMetrics(
+        from: String, to: String, resolution: String,
+        completion: @escaping (Result<[MetricPoint], Error>) -> Void
+    ) {
+        Task { do { completion(.success(try await getHistoricalMetrics(from: from, to: to, resolution: resolution))) } catch { completion(.failure(error)) } }
+    }
+
+    // MARK: - Private helpers
 
     private func makeRequest(path: String, method: String) -> URLRequest {
         let url = baseURL.appendingPathComponent(path)
@@ -60,38 +71,19 @@ class DashboardService {
         return request
     }
 
-    private func perform<T>(
-        request: URLRequest,
-        completion: @escaping (Result<T, Error>) -> Void,
-        parse: @escaping (Data) throws -> T
-    ) {
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    completion(.failure(APIError.networkError(error.localizedDescription)))
-                    return
-                }
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    completion(.failure(APIError.invalidResponse))
-                    return
-                }
-                guard (200..<300).contains(httpResponse.statusCode) else {
-                    let body = self.extractErrorMessage(from: data)
-                    completion(.failure(APIError.httpError(httpResponse.statusCode, body)))
-                    return
-                }
-                guard let data = data else {
-                    completion(.failure(APIError.invalidResponse))
-                    return
-                }
-                do {
-                    let result = try parse(data)
-                    completion(.success(result))
-                } catch {
-                    completion(.failure(APIError.decodingError(error.localizedDescription)))
-                }
-            }
-        }.resume()
+    private func performData(request: URLRequest) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = extractErrorMessage(from: data)
+            throw APIError.httpError(httpResponse.statusCode, body)
+        }
+        guard !data.isEmpty else {
+            throw APIError.invalidResponse
+        }
+        return data
     }
 
     private func extractErrorMessage(from data: Data?) -> String? {

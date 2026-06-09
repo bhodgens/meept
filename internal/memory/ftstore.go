@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/caimlas/meept/pkg/sqlite"
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
+
+	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
 // ErrNotFound is returned when a memory is not found.
@@ -38,7 +42,7 @@ type FTSConfig struct {
 // SQLiteFTSStore provides shared SQLite + FTS5 functionality.
 // Both EpisodicMemory and TaskMemory embed this to eliminate duplication.
 type SQLiteFTSStore struct {
-	pool        *sqlite.Pool
+	db          *sqlx.DB
 	config      FTSConfig
 	dataDir     string
 	initialized bool
@@ -70,20 +74,45 @@ func (s *SQLiteFTSStore) Initialize(ctx context.Context) error {
 
 	dbPath := filepath.Join(s.dataDir, s.config.TableName+".db")
 
-	pool, err := sqlite.NewPool(sqlite.PoolConfig{
-		Path:     dbPath,
-		PoolSize: 5,
-		WALMode:  true,
-		Logger:   s.logger,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create connection pool: %w", err)
+	// Ensure parent directory exists
+	dir := filepath.Dir(dbPath)
+	//nolint:gosec // user config directory/file permissions
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create database directory: %w", err)
 	}
-	s.pool = pool
+
+	// Open database directly using sqlx
+	dsn := "file:" + dbPath + "?_fk=1&_journal_mode=WAL&_busy_timeout=5000&cache=shared"
+	rawDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+
+	db := sqlx.NewDb(rawDB, "sqlite")
+
+	// SQLite writes must be serialized
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(time.Hour)
+
+	// Apply pragmas
+	for _, pragma := range []string{
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			return fmt.Errorf("failed to set pragma: %w", err)
+		}
+	}
+
+	s.db = db
 
 	// Initialize schema
 	if err := s.initSchema(ctx); err != nil {
-		pool.Close()
+		db.Close()
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
 
@@ -105,57 +134,55 @@ func (s *SQLiteFTSStore) HasFTS5() bool {
 
 // initSchema creates the database tables and indexes.
 func (s *SQLiteFTSStore) initSchema(ctx context.Context) error {
-	return s.pool.WithConn(ctx, func(db *sql.DB) error {
-		// Create main table
-		if len(s.config.Schema) > 0 {
-			if _, err := db.ExecContext(ctx, s.config.Schema[0]); err != nil {
-				return fmt.Errorf("failed to create main table: %w", err)
-			}
+	// Create main table
+	if len(s.config.Schema) > 0 {
+		if _, err := s.db.ExecContext(ctx, s.config.Schema[0]); err != nil {
+			return fmt.Errorf("failed to create main table: %w", err)
 		}
+	}
 
-		// FIX #0020: Run schema migrations for backward compatibility
-		// This adds columns that may be missing from older database versions
-		if err := s.migrateSchema(ctx, db); err != nil {
-			s.logger.Warn("Schema migration had issues", "error", err)
-			// Continue anyway - the table exists, just may lack some columns
-		}
+	// FIX #0020: Run schema migrations for backward compatibility
+	// This adds columns that may be missing from older database versions
+	if err := s.migrateSchema(ctx); err != nil {
+		s.logger.Warn("Schema migration had issues", "error", err)
+		// Continue anyway - the table exists, just may lack some columns
+	}
 
-		// Try to create FTS5 virtual table
-		if len(s.config.Schema) > 1 {
-			_, err := db.ExecContext(ctx, s.config.Schema[1])
-			if err != nil {
-				// FTS5 not available
-				s.logger.Warn("FTS5 not available, using LIKE-based search (slower)",
-					"error", err,
-					"hint", "Install SQLite with FTS5 support for better search performance",
-				)
-				s.hasFTS5 = false
-				return nil
-			}
-
-			// FTS5 is available, create triggers
-			s.hasFTS5 = true
-			for _, trigger := range s.config.Triggers {
-				if _, err := db.ExecContext(ctx, trigger); err != nil {
-					return fmt.Errorf("failed to create FTS trigger: %w", err)
-				}
-			}
-		} else {
-			// No FTS5 schema
+	// Try to create FTS5 virtual table
+	if len(s.config.Schema) > 1 {
+		_, err := s.db.ExecContext(ctx, s.config.Schema[1])
+		if err != nil {
+			// FTS5 not available
+			s.logger.Warn("FTS5 not available, using LIKE-based search (slower)",
+				"error", err,
+				"hint", "Install SQLite with FTS5 support for better search performance",
+			)
 			s.hasFTS5 = false
+			return nil
 		}
 
-		return nil
-	})
+		// FTS5 is available, create triggers
+		s.hasFTS5 = true
+		for _, trigger := range s.config.Triggers {
+			if _, err := s.db.ExecContext(ctx, trigger); err != nil {
+				return fmt.Errorf("failed to create FTS trigger: %w", err)
+			}
+		}
+	} else {
+		// No FTS5 schema
+		s.hasFTS5 = false
+	}
+
+	return nil
 }
 
 // migrateSchema applies schema migrations to existing tables.
 // FIX #0020: Adds columns that may be missing from older database versions.
-func (s *SQLiteFTSStore) migrateSchema(ctx context.Context, db *sql.DB) error {
+func (s *SQLiteFTSStore) migrateSchema(ctx context.Context) error {
 	// Check and add last_accessed_at column if missing (episodic/task memory)
 	columns := []string{"last_accessed_at", "parent_id", "is_current", "version"}
 	for _, col := range columns {
-		if err := s.addColumnIfMissing(ctx, db, s.config.TableName, col, "TEXT", "DEFAULT ''"); err != nil {
+		if err := s.addColumnIfMissing(ctx, s.config.TableName, col, "TEXT", "DEFAULT ''"); err != nil {
 			s.logger.Debug("Column migration skipped", "column", col, "error", err)
 		}
 	}
@@ -163,10 +190,10 @@ func (s *SQLiteFTSStore) migrateSchema(ctx context.Context, db *sql.DB) error {
 }
 
 // addColumnIfMissing adds a column to a table if it doesn't exist.
-func (s *SQLiteFTSStore) addColumnIfMissing(ctx context.Context, db *sql.DB, tableName, columnName, colType, defaultVal string) error {
+func (s *SQLiteFTSStore) addColumnIfMissing(ctx context.Context, tableName, columnName, colType, defaultVal string) error {
 	// Check if column exists by querying all columns
 	query := fmt.Sprintf("PRAGMA table_info(%s)", tableName)
-	rows, err := db.QueryContext(ctx, query)
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return err
 	}
@@ -186,16 +213,16 @@ func (s *SQLiteFTSStore) addColumnIfMissing(ctx context.Context, db *sql.DB, tab
 
 	// Column doesn't exist, add it
 	alterSQL := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s %s", tableName, columnName, colType, defaultVal)
-	if _, err := db.ExecContext(ctx, alterSQL); err != nil {
+	if _, err := s.db.ExecContext(ctx, alterSQL); err != nil {
 		return fmt.Errorf("failed to add column %s: %w", columnName, err)
 	}
 	s.logger.Info("Schema migration: added column", "table", tableName, "column", columnName)
 	return nil
 }
 
-// GetPool returns the connection pool for custom queries.
-func (s *SQLiteFTSStore) GetPool() *sqlite.Pool {
-	return s.pool
+// GetDB returns the underlying sqlx.DB for custom queries.
+func (s *SQLiteFTSStore) GetDB() *sqlx.DB {
+	return s.db
 }
 
 // HasFTS5Public returns whether FTS5 is available.
@@ -212,7 +239,7 @@ func (s *SQLiteFTSStore) Store(ctx context.Context, query string, args ...any) e
 	}
 	s.mu.RUnlock()
 
-	_, err := s.pool.Exec(ctx, query, args...)
+	_, err := s.db.ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -226,7 +253,7 @@ func (s *SQLiteFTSStore) Delete(ctx context.Context, query string, args ...any) 
 	}
 	s.mu.RUnlock()
 
-	result, err := s.pool.Exec(ctx, query, args...)
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -263,7 +290,7 @@ func (s *SQLiteFTSStore) DeleteByIDs(ctx context.Context, tableName string, ids 
 	}
 
 	query := fmt.Sprintf("DELETE FROM %s WHERE id IN (%s)", tableName, strings.Join(placeholders, ",")) //nolint:gosec // table name from FTSConfig, not user input
-	result, err := s.pool.Exec(ctx, query, args...)
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete items: %w", err)
 	}

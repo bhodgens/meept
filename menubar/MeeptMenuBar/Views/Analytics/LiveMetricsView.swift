@@ -5,34 +5,30 @@
 
 import SwiftUI
 
+@MainActor
 struct LiveMetricsView: View {
-    @State private var metrics: LiveMetrics?
-    @State private var isLoading = false
-    @State private var lastUpdated: Date?
-    @State private var metricsTimer: Timer?
+    @ObservedObject var metricsViewModel: MetricsViewModel
 
-    private let dashboardService = DashboardService()
-    private let updateInterval: TimeInterval = 5.0
     private let relativeFormatter = RelativeDateTimeFormatter()
-    
+
     var body: some View {
         VStack(spacing: 16) {
             HStack {
                 Text("live metrics")
                     .font(.headline)
                 Spacer()
-                if isLoading {
+                if metricsViewModel.isLoadingLive {
                     ProgressView()
                         .scaleEffect(0.8)
                 }
-                if let lastUpdated = lastUpdated {
+                if let lastUpdated = metricsViewModel.lastUpdated {
                     Text("updated \(timeAgo(from: lastUpdated))")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
-            
-            if let metrics = metrics {
+
+            if let metrics = metricsViewModel.liveMetrics {
                 LazyVGrid(columns: [
                     GridItem(.flexible()),
                     GridItem(.flexible())
@@ -73,47 +69,18 @@ struct LiveMetricsView: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            
+
             Spacer()
         }
         .padding()
         .onAppear {
-            startPolling()
+            metricsViewModel.startLivePolling()
         }
         .onDisappear {
-            stopPolling()
-        }
-    }
-    
-    private func startPolling() {
-        fetchMetrics()
-        metricsTimer?.invalidate()
-        metricsTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { _ in
-            fetchMetrics()
+            metricsViewModel.stopLivePolling()
         }
     }
 
-    private func stopPolling() {
-        metricsTimer?.invalidate()
-        metricsTimer = nil
-    }
-    
-    private func fetchMetrics() {
-        isLoading = true
-        dashboardService.getLiveMetrics { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let metrics):
-                    self.metrics = metrics
-                    self.lastUpdated = Date()
-                case .failure:
-                    break
-                }
-                isLoading = false
-            }
-        }
-    }
-    
     private func timeAgo(from date: Date) -> String {
         relativeFormatter.dateTimeStyle = .named
         return relativeFormatter.localizedString(for: date, relativeTo: Date())
@@ -125,7 +92,7 @@ struct MetricCard: View {
     let value: String
     let icon: String
     let color: Color
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -148,5 +115,5 @@ struct MetricCard: View {
 }
 
 #Preview {
-    LiveMetricsView()
+    LiveMetricsView(metricsViewModel: MetricsViewModel(dashboardService: DashboardService()))
 }

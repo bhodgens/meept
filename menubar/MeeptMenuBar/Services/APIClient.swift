@@ -25,25 +25,48 @@ class APIClient {
         )
     }
 
-    // MARK: - Daemon Status
+    // MARK: - Daemon Status (async/await)
+
+    func getDaemonStatus() async throws -> DaemonStatus {
+        let request = makeRequest(path: "/api/v1/daemon/status", method: "GET")
+        let data = try await performData(request: request)
+        let decoder = JSONDecoder()
+        let status = try decoder.decode(DaemonStatusResponse.self, from: data)
+        return DaemonStatus(
+            running: status.running,
+            pid: status.pid,
+            uptime: status.uptime,
+            state: DaemonState(rawValue: status.state) ?? .offline
+        )
+    }
+
+    func restartDaemon() async throws {
+        let request = makeRequest(path: "/api/v1/daemon/restart", method: "POST")
+        try await performVoid(request: request)
+    }
+
+    // MARK: - Backward-compatible completion handler wrappers
 
     func getDaemonStatus(completion: @escaping (Result<DaemonStatus, Error>) -> Void) {
-        var request = makeRequest(path: "/api/v1/daemon/status", method: "GET")
-        perform(request: request, completion: completion) { data in
-            let decoder = JSONDecoder()
-            let status = try decoder.decode(DaemonStatusResponse.self, from: data)
-            return DaemonStatus(
-                running: status.running,
-                pid: status.pid,
-                uptime: status.uptime,
-                state: DaemonState(rawValue: status.state) ?? .offline
-            )
+        Task {
+            do {
+                let status = try await getDaemonStatus()
+                completion(.success(status))
+            } catch {
+                completion(.failure(error))
+            }
         }
     }
 
     func restartDaemon(completion: @escaping (Result<Void, Error>) -> Void) {
-        var request = makeRequest(path: "/api/v1/daemon/restart", method: "POST")
-        performVoid(request: request, completion: completion)
+        Task {
+            do {
+                try await restartDaemon()
+                completion(.success(()))
+            } catch {
+                completion(.failure(error))
+            }
+        }
     }
 
     // MARK: - Private helpers
@@ -58,60 +81,44 @@ class APIClient {
         return request
     }
 
-    private func perform<T>(
-        request: URLRequest,
-        completion: @escaping (Result<T, Error>) -> Void,
-        parse: @escaping (Data) throws -> T
-    ) {
-        let task = session.dataTask(with: request) { data, response, error in
-            if let error = error {
-                completion(.failure(APIError.networkError(error.localizedDescription)))
-                return
-            }
-            guard let httpResponse = response as? HTTPURLResponse else {
-                completion(.failure(APIError.invalidResponse))
-                return
-            }
-            guard (200..<300).contains(httpResponse.statusCode) else {
-                let body = self.extractErrorMessage(from: data)
-                completion(.failure(APIError.httpError(httpResponse.statusCode, body)))
-                return
-            }
-            guard let data = data else {
-                completion(.failure(APIError.invalidResponse))
-                return
-            }
-            do {
-                let result = try parse(data)
-                completion(.success(result))
-            } catch {
-                completion(.failure(APIError.decodingError(error.localizedDescription)))
-            }
+    private func performData(request: URLRequest) async throws -> Data {
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
         }
-        task.resume()
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = extractErrorMessage(from: data)
+            throw APIError.httpError(httpResponse.statusCode, body)
+        }
+        guard !data.isEmpty else {
+            throw APIError.invalidResponse
+        }
+        return data
     }
 
-    private func performVoid(
+    private func perform<T>(
         request: URLRequest,
-        completion: @escaping (Result<Void, Error>) -> Void
-    ) {
-        let task = session.dataTask(with: request) { data, response, error in
-            if let error = error {
-                completion(.failure(APIError.networkError(error.localizedDescription)))
-                return
-            }
-            guard let httpResponse = response as? HTTPURLResponse else {
-                completion(.failure(APIError.invalidResponse))
-                return
-            }
-            guard (200..<300).contains(httpResponse.statusCode) else {
-                let body = self.extractErrorMessage(from: data)
-                completion(.failure(APIError.httpError(httpResponse.statusCode, body)))
-                return
-            }
-            completion(.success(()))
+        parse: (Data) throws -> T
+    ) async throws -> T {
+        let data = try await performData(request: request)
+        do {
+            return try parse(data)
+        } catch let error as APIError {
+            throw error
+        } catch {
+            throw APIError.decodingError(error.localizedDescription)
         }
-        task.resume()
+    }
+
+    private func performVoid(request: URLRequest) async throws {
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = extractErrorMessage(from: data)
+            throw APIError.httpError(httpResponse.statusCode, body)
+        }
     }
 
     private func extractErrorMessage(from data: Data?) -> String? {

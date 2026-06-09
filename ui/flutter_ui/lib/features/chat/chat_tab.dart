@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
-import '../../theme/typography.dart';
 import '../../providers/providers.dart';
 import 'chat_view.dart';
 import '../memory/memory_panel.dart';
@@ -58,35 +57,7 @@ class _ChatTabState extends ConsumerState<ChatTab> {
         return const SearchPanel();
     }
 
-    // Unknown tool: placeholder
-    return Container(
-      color: CyberpunkColors.darkGray,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.tune,
-              size: 48,
-              color: CyberpunkColors.orangeBright,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '${activeTool.toLowerCase()} view',
-              style: CyberpunkTypography.bodyMedium.copyWith(
-                color: CyberpunkColors.orangePrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'coming soon',
-              style: CyberpunkTypography.bodySmall.copyWith(
-                color: CyberpunkColors.orangeDark,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    // Unknown tool: if it looks like a skill slug, route to skill panel
+    return SkillPanel(initialSlug: activeTool);
   }
 }

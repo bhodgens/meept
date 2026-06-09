@@ -19,7 +19,7 @@ func buildAgentLoopFields() []Field {
 				NewNumberField("cache.max_entries", "max entries", s.Cache.MaxEntries),
 				NewNumberField("cache.default_ttl_seconds", "default ttl seconds", s.Cache.DefaultTTLSeconds),
 				NewNumberField("cache.cleanup_freq_seconds", "cleanup freq seconds", s.Cache.CleanupFreqSeconds),
-				NewTextField("cache.enabled_tools", "enabled tools", joinStrings(s.Cache.EnabledTools)),
+				NewTextField("cache.enabled_tools", "enabled tools", strings.Join(s.Cache.EnabledTools, ", ")),
 			}},
 		}),
 		NewDrilldownField("errors", "errors", []DrilldownItem{

@@ -18,42 +18,50 @@ class DaemonController {
             .path
     }
 
-    func startDaemon(completion: @escaping (Result<Void, Error>) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            if !self.ensurePlistExists() {
-                completion(.failure(DaemonError.plistNotFound))
-                return
-            }
+    // MARK: - async/await
 
-            let loadResult = self.runLaunchctl("load", "-w", self.plistPath)
-            if !loadResult.success {
-                completion(.failure(DaemonError.loadFailed(loadResult.output)))
-                return
-            }
-
-            _ = self.runLaunchctl("kickstart", "-k", self.launchAgentLabel)
-            completion(.success(()))
+    func startDaemon() async throws {
+        if !ensurePlistExists() {
+            throw DaemonError.plistNotFound
         }
+
+        let loadResult = runLaunchctl("load", "-w", plistPath)
+        if !loadResult.success {
+            throw DaemonError.loadFailed(loadResult.output)
+        }
+
+        _ = runLaunchctl("kickstart", "-k", launchAgentLabel)
+    }
+
+    func stopDaemon() async throws {
+        _ = runLaunchctl("stop", launchAgentLabel)
+        let unloadResult = runLaunchctl("unload", "-w", plistPath)
+        if !unloadResult.success {
+            throw DaemonError.unloadFailed(unloadResult.output)
+        }
+    }
+
+    func restartDaemon() async throws {
+        try await stopDaemon()
+        try await Task.sleep(nanoseconds: 500_000_000) // 0.5s
+        try await startDaemon()
+    }
+
+    // MARK: - Backward-compatible completion handler wrappers
+
+    func startDaemon(completion: @escaping (Result<Void, Error>) -> Void) {
+        Task { do { completion(.success(try await startDaemon())) } catch { completion(.failure(error)) } }
     }
 
     func stopDaemon(completion: @escaping (Result<Void, Error>) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            _ = self.runLaunchctl("stop", self.launchAgentLabel)
-            let unloadResult = self.runLaunchctl("unload", "-w", self.plistPath)
-            if !unloadResult.success {
-                completion(.failure(DaemonError.unloadFailed(unloadResult.output)))
-                return
-            }
-            completion(.success(()))
-        }
+        Task { do { completion(.success(try await stopDaemon())) } catch { completion(.failure(error)) } }
     }
 
     func restartDaemon(completion: @escaping (Result<Void, Error>) -> Void) {
-        stopDaemon { [weak self] _ in
-            Thread.sleep(forTimeInterval: 0.5)
-            self?.startDaemon(completion: completion)
-        }
+        Task { do { completion(.success(try await restartDaemon())) } catch { completion(.failure(error)) } }
     }
+
+    // MARK: - Private helpers
 
     private func ensurePlistExists() -> Bool {
         let fm = FileManager.default

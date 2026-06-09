@@ -7,16 +7,17 @@ import SwiftUI
 
 struct DashboardWindow: View {
     @State private var selectedTab = 0
-    
+    @ObservedObject var metricsViewModel: MetricsViewModel
+
     var body: some View {
         TabView(selection: $selectedTab) {
-            LiveMetricsView()
+            LiveMetricsView(metricsViewModel: metricsViewModel)
                 .tabItem {
                     Label("live", systemImage: "arrow.up.circle")
                 }
                 .tag(0)
-            
-            HistoricalReportView()
+
+            HistoricalReportView(metricsViewModel: metricsViewModel)
                 .tabItem {
                     Label("historical", systemImage: "clock")
                 }
@@ -26,12 +27,10 @@ struct DashboardWindow: View {
     }
 }
 
+@MainActor
 struct HistoricalReportView: View {
-    @State private var fromDate = Date().addingTimeInterval(-3600 * 24) // 24 hours ago
-    @State private var toDate = Date()
-    @State private var resolution = "hour"
-    @State private var isLoading = false
-    
+    @ObservedObject var metricsViewModel: MetricsViewModel
+
     var body: some View {
         VStack(spacing: 16) {
             HStack {
@@ -39,28 +38,33 @@ struct HistoricalReportView: View {
                     .font(.headline)
                 Spacer()
             }
-            
+
             HStack(spacing: 12) {
-                DatePicker("from", selection: $fromDate, displayedComponents: [.date, .hourAndMinute])
-                DatePicker("to", selection: $toDate, displayedComponents: [.date, .hourAndMinute])
-                
-                Picker("resolution", selection: $resolution) {
+                DatePicker("from", selection: Binding(
+                    get: { metricsViewModel.fromDate },
+                    set: { metricsViewModel.fromDate = $0 }
+                ), displayedComponents: [.date, .hourAndMinute])
+                DatePicker("to", selection: Binding(
+                    get: { metricsViewModel.toDate },
+                    set: { metricsViewModel.toDate = $0 }
+                ), displayedComponents: [.date, .hourAndMinute])
+
+                Picker("resolution", selection: Binding(
+                    get: { metricsViewModel.resolution },
+                    set: { metricsViewModel.resolution = $0 }
+                )) {
                     Text("hour").tag("hour")
                     Text("day").tag("day")
                     Text("week").tag("week")
                 }
             }
-            
+
             Button("load") {
-                isLoading = true
-                // Would call dashboardService.getHistoricalMetrics
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    isLoading = false
-                }
+                metricsViewModel.fetchHistorical()
             }
-            .disabled(isLoading)
-            
-            if isLoading {
+            .disabled(metricsViewModel.isLoadingHistorical)
+
+            if metricsViewModel.isLoadingHistorical {
                 ProgressView("loading...")
                     .padding()
             } else {
@@ -68,7 +72,7 @@ struct HistoricalReportView: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            
+
             Spacer()
         }
         .padding()
@@ -76,5 +80,5 @@ struct HistoricalReportView: View {
 }
 
 #Preview {
-    DashboardWindow()
+    DashboardWindow(metricsViewModel: MetricsViewModel(dashboardService: DashboardService()))
 }

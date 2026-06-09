@@ -19,13 +19,13 @@
 - `internal/agents/parser.go` (if it has similar patterns)
 
 **What to do:**
-- [ ] Remove `parseYAMLField()` and `parseYAMLArray()` manual regex implementations
-- [ ] Add `gopkg.in/yaml.v3` as direct dependency (already indirect)
-- [ ] Define small struct tags for frontmatter fields and unmarshal with `yaml.Unmarshal`
-- [ ] Keep `extractYAMLFrontmatter()` (the `---` fence detector) — that's fine
-- [ ] Update `parseSkillFrontmatter()` and `parseAgentFrontmatter()` to use struct-based unmarshal
-- [ ] Add edge-case tests: multi-line strings, quoted values with colons, nested arrays, empty values
-- [ ] Run `go test ./internal/context/...` and `go test ./internal/agents/...`
+- [x] Remove `parseYAMLField()` and `parseYAMLArray()` manual regex implementations
+- [x] Add `gopkg.in/yaml.v3` as direct dependency (already indirect)
+- [x] Define small struct tags for frontmatter fields and unmarshal with `yaml.Unmarshal`
+- [x] Keep `extractYAMLFrontmatter()` (the `---` fence detector) — that's fine
+- [x] Update `parseSkillFrontmatter()` and `parseAgentFrontmatter()` to use struct-based unmarshal
+- [x] Add edge-case tests: multi-line strings, quoted values with colons, nested arrays, empty values
+- [x] Run `go test ./internal/context/...` and `go test ./internal/agents/...`
 
 **Verification:**
 - Test with a SKILL.md containing `description: "Use this skill when: foo, bar"` (colon inside quotes)
@@ -41,10 +41,10 @@
 
 **What to do:**
 - [ ] Remove `stripHTMLTags()` regex implementation
-- [ ] Import `golang.org/x/net/html` (already in `go.mod`)
+- [x] Import `golang.org/x/net/html` (already in `go.mod`)
 - [ ] Reuse the same `stripHTML()` logic from `web_fetch.go` (already fixed) or extract it to a shared package
 - [ ] Consider creating `internal/util/htmlparse/strip.go` as a shared helper
-- [ ] Run `go test ./internal/tools/builtin/...`
+- [x] Run `go test ./internal/tools/builtin/...`
 
 **Verification:**
 - `TestWebSearchTool` passes
@@ -58,12 +58,12 @@
 - `internal/selfimprove/learning.go` (lines 348–385, 483–532)
 
 **What to do:**
-- [ ] Create `internal/util/markdown/extract_json.go` with a function that finds JSON blocks inside markdown
+- [x] Create `internal/util/markdown/extract_json.go` with a function that finds JSON blocks inside markdown
 - [ ] Use `strings` + `regexp` to find ` ```json ` fences and extract content between them
-- [ ] Handle multiple code blocks by trying each one until `json.Unmarshal` succeeds
-- [ ] Handle cases where no code fences exist but content is valid JSON
-- [ ] Replace inline stripping in `learning.go` with calls to the new helper
-- [ ] Add unit tests for: fenced JSON, inline JSON, invalid JSON, multiple code blocks
+- [x] Handle multiple code blocks by trying each one until `json.Unmarshal` succeeds
+- [x] Handle cases where no code fences exist but content is valid JSON
+- [x] Replace inline stripping in `learning.go` with calls to the new helper
+- [x] Add unit tests for: fenced JSON, inline JSON, invalid JSON, multiple code blocks
 
 **Verification:**
 - LLM response `{"foo": "bar"}` → extracts and parses
@@ -98,8 +98,8 @@
 **What to do:**
 - [ ] Delete custom `log2()` function
 - [ ] Replace all calls with `math.Log2()`
-- [ ] Add `math` import if missing
-- [ ] Run tests in `internal/security/...`
+- [x] Add `math` import if missing
+- [x] Run tests in `internal/security/...`
 
 **Verification:**
 - `math.Log2(1024)` returns exactly `10.0`
@@ -114,8 +114,8 @@
 
 **What to do:**
 - [ ] Replace hand-rolled `parseTime()` with `time.Parse("3:04pm", timeStr)` and `time.Parse("15:04", timeStr)`
-- [ ] Handle AM/PM by trying both formats
-- [ ] Run `go test ./internal/tools/builtin/...`
+- [x] Handle AM/PM by trying both formats
+- [x] Run `go test ./internal/tools/builtin/...`
 
 **Verification:**
 - `parseTime("3:04pm")` → `15, 4, nil`
@@ -132,7 +132,7 @@
 **What to do:**
 - [ ] Delete `joinStrings()` and `splitString()` functions
 - [ ] Replace all callers with `strings.Join()` and `strings.Split()`
-- [ ] Run `go test ./internal/memory/...`
+- [x] Run `go test ./internal/memory/...`
 
 ---
 
@@ -144,9 +144,9 @@
 
 **What to do:**
 - [ ] Evaluate: `os.ExpandEnv()` only supports `$VAR`, not `${VAR}`. Current regex supports both.
-- [ ] Decision: keep current implementation if `${VAR}` is needed, but document why.
-- [ ] If `${VAR}` is not actually used in configs, simplify to `os.ExpandEnv()`
-- [ ] Add unit tests for env expansion
+- [x] Decision: keep current implementation if `${VAR}` is needed, but document why.
+- [x] If `${VAR}` is not actually used in configs, simplify to `os.ExpandEnv()`
+- [x] Add unit tests for env expansion
 
 ---
 
@@ -159,11 +159,11 @@
 - `Makefile` (lines 312–328 — service install targets)
 
 **What to do:**
-- [ ] Add `github.com/kardianos/service` to `go.mod`
-- [ ] Implement `DaemonService` struct satisfying `service.Interface`
+- [x] Add `github.com/kardianos/service` to `go.mod`
+- [x] Implement `DaemonService` struct satisfying `service.Interface`
 - [ ] Replace `installLaunchdAgent()`, `uninstallLaunchdAgent()`, `isDaemonRunning()` with `service` API calls
-- [ ] Keep the `launchctl` subprocess call only as a fallback if `kardianos/service` is insufficient
-- [ ] Add systemd support for Linux (free benefit from the library)
+- [x] Keep the `launchctl` subprocess call only as a fallback if `kardianos/service` is insufficient
+- [x] Add systemd support for Linux (free benefit from the library)
 - [ ] Update Makefile to use `meept-daemon service install/uninstall` instead of `sed` templating
 - [ ] Run integration tests on macOS and Linux
 
@@ -184,9 +184,9 @@
 - `internal/security/engine.go`
 
 **What to do:**
-- [ ] Add `github.com/jmoiron/sqlx` to `go.mod`
-- [ ] For each store file, replace manual `rows.Scan(field1, field2, ...)` loops with `sqlx.Select()` or `sqlx.Get()`
-- [ ] Keep raw SQL strings for FTS5 virtual table operations (sqlx doesn't help here)
+- [x] Add `github.com/jmoiron/sqlx` to `go.mod`
+- [x] For each store file, replace manual `rows.Scan(field1, field2, ...)` loops with `sqlx.Select()` or `sqlx.Get()`
+- [x] Keep raw SQL strings for FTS5 virtual table operations (sqlx doesn't help here)
 - [ ] Update `internal/memory/ftstore.go` to use `sqlx.DB` instead of `*sql.DB`
 - [ ] Run `go test ./internal/memory/... ./internal/metrics/... ./internal/security/...`
 
@@ -206,8 +206,8 @@
 
 **What to do:**
 - [ ] Replace `fmt.Println(version.String())` with `slog.Info("daemon starting", "version", version.String())`
-- [ ] Replace `fmt.Printf("unknown section %q\n", section)` with `slog.Warn("unknown config section", "section", section)`
-- [ ] Ensure all `log/slog` imports are present
+- [x] Replace `fmt.Printf("unknown section %q\n", section)` with `slog.Warn("unknown config section", "section", section)`
+- [x] Ensure all `log/slog` imports are present
 - [ ] Run `go vet ./cmd/meept-daemon/... ./cmd/meept/...`
 
 ---
@@ -218,15 +218,15 @@
 - All `*_test.go` files across the project (92+ files)
 
 **What to do:**
-- [ ] Add `github.com/stretchr/testify` as direct dependency (already indirect)
+- [x] Add `github.com/stretchr/testify` as direct dependency (already indirect)
 - [ ] Pick 3–5 representative test files and convert them as templates:
   - `internal/context/parser_test.go`
   - `internal/tools/builtin/web_fetch_test.go`
   - `internal/plan/parser_test.go`
-- [ ] Replace manual `if got != want { t.Errorf(...) }` with `assert.Equal(t, want, got)`
+- [x] Replace manual `if got != want { t.Errorf(...) }` with `assert.Equal(t, want, got)`
 - [ ] Replace `t.Fatal(err)` with `require.NoError(t, err)`
-- [ ] Leave other test files for gradual adoption — don't bulk-convert everything at once
-- [ ] Document the pattern in `CLAUDE.md` coding conventions
+- [x] Leave other test files for gradual adoption — don't bulk-convert everything at once
+- [x] Document the pattern in `CLAUDE.md` coding conventions
 
 **Verification:**
 - Converted tests pass
@@ -246,12 +246,12 @@
 - And others (search for `String()` methods on iota consts)
 
 **What to do:**
-- [ ] Install `golang.org/x/tools/cmd/stringer`: `go install golang.org/x/tools/cmd/stringer@latest`
-- [ ] For each enum type, add `//go:generate go run golang.org/x/tools/cmd/stringer -type=TypeName`
+- [x] Install `golang.org/x/tools/cmd/stringer`: `go install golang.org/x/tools/cmd/stringer@latest`
+- [x] For each enum type, add `//go:generate go run golang.org/x/tools/cmd/stringer -type=TypeName`
 - [ ] Delete hand-written `String()` methods
-- [ ] Run `go generate ./...`
-- [ ] Commit generated `_string.go` files
-- [ ] Run tests
+- [x] Run `go generate ./...`
+- [x] Commit generated `_string.go` files
+- [x] Run tests
 
 **Verification:**
 - `go generate ./internal/tools/builtin` runs without error
@@ -269,13 +269,13 @@
 - `menubar/MeeptMenuBar/Services/MenubarConfigService.swift`
 
 **What to do:**
-- [ ] Remove `JSON5Normalizer.swift` entirely
+- [x] Remove `JSON5Normalizer.swift` entirely
 - [ ] Modify `MenubarConfigService.loadConfig()` to read raw JSON5 text but do ONE of:
   - Option A: Call daemon HTTP endpoint `/api/v1/config/normalize` that returns strict JSON via `hujson.Standardize`
   - Option B: Keep a lightweight Swift JSON5 library if offline parsing is required
-- [ ] For Option A: add `GET /api/v1/config/normalize` handler in Go (wrapper around `hujson.Standardize`)
-- [ ] Update `MenubarConfigService` to use the new endpoint
-- [ ] Test with configs containing comments, trailing commas, and unquoted keys
+- [x] For Option A: add `GET /api/v1/config/normalize` handler in Go (wrapper around `hujson.Standardize`)
+- [x] Update `MenubarConfigService` to use the new endpoint
+- [x] Test with configs containing comments, trailing commas, and unquoted keys
 
 **Verification:**
 - `~/.meept/menubar.json5` with trailing commas loads successfully
@@ -295,8 +295,8 @@
 - [ ] Delete `stripComments()` from `ClientConfigView.swift`
 - [ ] Delete `stripComments()` from `ModelsConfigView.swift`
 - [ ] Delete `stripComments()` from `ClientSettings.swift`
-- [ ] All three should call the unified normalization approach from Task 3.1
-- [ ] Build the menubar app: `cd menubar && swift build`
+- [x] All three should call the unified normalization approach from Task 3.1
+- [x] Build the menubar app: `cd menubar && swift build`
 
 **Verification:**
 - No `stripComments` function remains in the menubar codebase
@@ -311,14 +311,14 @@
 - `menubar/MeeptMenuBar/Views/Settings/ModelsConfigView.swift` (lines 423–445)
 
 **What to do:**
-- [ ] Redesign the settings editing flow:
+- [x] Redesign the settings editing flow:
   - Fetch raw JSON5 text from daemon (not parsed structs)
   - Display raw text in a text editor view
   - On save, send raw text back to daemon for validation/normalization
   - Let the daemon be the source of truth for config validity
-- [ ] OR: If structured editing is required, keep the Codable structs but store comments separately
+- [x] OR: If structured editing is required, keep the Codable structs but store comments separately
 - [ ] Remove the `addComments()` / `injectComments()` functions
-- [ ] Update `ConfigService` to support raw text GET/POST
+- [x] Update `ConfigService` to support raw text GET/POST
 
 **Verification:**
 - User edits config, saves it, comments are preserved
@@ -333,11 +333,11 @@
 - `menubar/MeeptMenuBar/Views/Analytics/LiveMetricsView.swift` (`startPolling`)
 
 **What to do:**
-- [ ] In `AppDelegate`, store `statusTimer: Timer?` as a property
+- [x] In `AppDelegate`, store `statusTimer: Timer?` as a property
 - [ ] Add `invalidateStatusTimer()` method called from `applicationWillTerminate`
-- [ ] In `LiveMetricsView`, store `metricsTimer: Timer?` in `@State`
-- [ ] Add `.onDisappear { metricsTimer?.invalidate() }`
-- [ ] Build and run the menubar app
+- [x] In `LiveMetricsView`, store `metricsTimer: Timer?` in `@State`
+- [x] Add `.onDisappear { metricsTimer?.invalidate() }`
+- [x] Build and run the menubar app
 
 **Verification:**
 - Timer does not fire after view disappears
@@ -369,9 +369,9 @@
 - `menubar/MeeptMenuBar/Views/Analytics/LiveMetricsView.swift` (lines 113–119)
 
 **What to do:**
-- [ ] Delete custom `timeAgo` formatter
-- [ ] Use `RelativeDateTimeFormatter` from Foundation
-- [ ] Build and run
+- [x] Delete custom `timeAgo` formatter
+- [x] Use `RelativeDateTimeFormatter` from Foundation
+- [x] Build and run
 
 ---
 
@@ -385,13 +385,13 @@
 - `menubar/MeeptMenuBar/Services/DashboardService.swift`
 
 **What to do:**
-- [ ] Create a unified `NetworkClient` actor or class with `async throws` methods
-- [ ] Replace completion-handler closures with `async` methods
+- [x] Create a unified `NetworkClient` actor or class with `async throws` methods
+- [x] Replace completion-handler closures with `async` methods
 - [ ] Use `URLSession.data(for:)` (available since macOS 12, project targets macOS 13+)
-- [ ] Handle auth headers, error parsing, and JSON decoding in one place
-- [ ] Update all view code to use `Task { ... }` instead of completion handlers
-- [ ] Remove manual `DispatchQueue.main.async` dispatching (SwiftUI handles main actor automatically)
-- [ ] Build and run
+- [x] Handle auth headers, error parsing, and JSON decoding in one place
+- [x] Update all view code to use `Task { ... }` instead of completion handlers
+- [x] Remove manual `DispatchQueue.main.async` dispatching (SwiftUI handles main actor automatically)
+- [x] Build and run
 
 **Verification:**
 - No `@escaping` completion handlers in service layer
@@ -406,13 +406,13 @@
 - `menubar/MeeptMenuBar/main.swift`
 
 **What to do:**
-- [ ] Create `@Observable` or `ObservableObject` view models:
+- [x] Create `@Observable` or `ObservableObject` view models:
   - `DaemonStatusViewModel` — polling, status state
   - `ConfigViewModel` — config loading/saving
   - `MetricsViewModel` — metrics data
-- [ ] Inject dependencies via initializers instead of `AppDelegate` creating everything
-- [ ] Keep `AppDelegate` minimal: only app lifecycle + window management
-- [ ] Build and run
+- [x] Inject dependencies via initializers instead of `AppDelegate` creating everything
+- [x] Keep `AppDelegate` minimal: only app lifecycle + window management
+- [x] Build and run
 
 **Verification:**
 - `AppDelegate` is under 100 lines
@@ -463,7 +463,7 @@
 - `ui/flutter_ui/lib/providers/session_notifier.dart`
 
 **What to do:**
-- [ ] Create a `@freezed` `AsyncState<T>` union:
+- [x] Create a `@freezed` `AsyncState<T>` union:
   ```dart
   @freezed
   class AsyncState<T> with _$AsyncState<T> {
@@ -473,9 +473,9 @@
     const factory AsyncState.error(Object error, StackTrace stackTrace) = _Error;
   }
   ```
-- [ ] Replace each provider's custom `State` class with `AsyncState<T>`
-- [ ] Update UI widgets to use `when()` pattern
-- [ ] Run `build_runner` and tests
+- [x] Replace each provider's custom `State` class with `AsyncState<T>`
+- [x] Update UI widgets to use `when()` pattern
+- [x] Run `build_runner` and tests
 
 **Verification:**
 - Each provider file is <50 lines
@@ -498,11 +498,11 @@
   dev_dependencies:
     retrofit_generator: ^8.0.0
   ```
-- [ ] Define `MeeptApi` abstract class with `@GET`, `@POST`, `@PUT`, `@DELETE` annotations
-- [ ] Generate implementation with `build_runner`
+- [x] Define `MeeptApi` abstract class with `@GET`, `@POST`, `@PUT`, `@DELETE` annotations
+- [x] Generate implementation with `build_runner`
 - [ ] Replace all manual `Dio().get()` calls with typed API methods
 - [ ] Add `pretty_dio_logger` for debug logging
-- [ ] Run `build_runner` and tests
+- [x] Run `build_runner` and tests
 
 **Verification:**
 - `api_client.dart` is <30 lines (interface definition)
@@ -517,11 +517,11 @@
 - `ui/flutter_ui/lib/services/websocket_service.dart` (285 lines)
 
 **What to do:**
-- [ ] Evaluate: keep `web_socket_channel` but add `reconnecting_web_socket` for retry logic
-- [ ] OR: simplify the custom reconnection to a 50-line wrapper around `web_socket_channel`
-- [ ] Remove the complex exponential backoff if `reconnecting_web_socket` handles it
-- [ ] Use `rxdart` `BehaviorSubject` for stream management if needed
-- [ ] Run tests
+- [x] Evaluate: keep `web_socket_channel` but add `reconnecting_web_socket` for retry logic
+- [x] OR: simplify the custom reconnection to a 50-line wrapper around `web_socket_channel`
+- [x] Remove the complex exponential backoff if `reconnecting_web_socket` handles it
+- [x] Use `rxdart` `BehaviorSubject` for stream management if needed
+- [x] Run tests
 
 **Verification:**
 - WebSocket reconnects on disconnect
@@ -540,8 +540,8 @@
 - `ui/flutter_ui/lib/features/chat/chat_tab.dart`
 
 **What to do:**
-- [ ] Add `go_router: ^14.0.0` to `pubspec.yaml`
-- [ ] Define `GoRouter` with routes for `/`, `/chat`, `/tasks`, `/agents`, `/plans`, `/settings`, `/memory`, `/metrics`
+- [x] Add `go_router: ^14.0.0` to `pubspec.yaml`
+- [x] Define `GoRouter` with routes for `/`, `/chat`, `/tasks`, `/agents`, `/plans`, `/settings`, `/memory`, `/metrics`
 - [ ] Replace `setState(() => _activeTool = ...)` with `context.go('/tasks')`
 - [ ] Add deep link support for macOS (`Info.plist` / `Runner.entitlements`)
 - [ ] Run `flutter build macos` to verify
@@ -562,10 +562,10 @@
 
 **What to do:**
 - [ ] Add `flutter_form_builder: ^9.2.1` and `formz: ^0.7.0` to `pubspec.yaml`
-- [ ] Replace manual `TextFormField` + `_hasChanges` tracking with `FormBuilder`
-- [ ] Use `FormBuilderTextField`, `FormBuilderSwitch`, `FormBuilderDropdown`
-- [ ] Add validation rules via `FormBuilderValidators`
-- [ ] Run tests
+- [x] Replace manual `TextFormField` + `_hasChanges` tracking with `FormBuilder`
+- [x] Use `FormBuilderTextField`, `FormBuilderSwitch`, `FormBuilderDropdown`
+- [x] Add validation rules via `FormBuilderValidators`
+- [x] Run tests
 
 **Verification:**
 - Settings form validates on submit
@@ -581,8 +581,8 @@
 
 **What to do:**
 - [ ] Add `sentry_flutter: ^8.0.0` to `pubspec.yaml`
-- [ ] Replace `runZonedGuarded` + `debugPrint` with Sentry initialization
-- [ ] Configure DSN via environment variable or config file
+- [x] Replace `runZonedGuarded` + `debugPrint` with Sentry initialization
+- [x] Configure DSN via environment variable or config file
 - [ ] Run `flutter build macos`
 
 **Verification:**
@@ -600,8 +600,8 @@
 **What to do:**
 - [ ] Add `timeago: ^3.6.1` to `pubspec.yaml`
 - [ ] Delete `_formatAge()` methods
-- [ ] Replace with `timeago.format(timestamp)`
-- [ ] Run tests
+- [x] Replace with `timeago.format(timestamp)`
+- [x] Run tests
 
 ---
 
@@ -614,13 +614,13 @@
 - Create `magefiles/` directory
 
 **What to do:**
-- [ ] Add `github.com/magefile/mage` to tools
-- [ ] Create `magefiles/build.go`, `magefiles/install.go`, `magefiles/test.go`, `magefiles/gui.go`
-- [ ] Port key targets: `build`, `test`, `install`, `build-gui`, `menubar`, `clean`
-- [ ] Keep Makefile as a thin wrapper: `.PHONY: build\nbuild:\n\tmage build`
-- [ ] Add `mage -l` to list all targets
-- [ ] Update `CLAUDE.md` build commands
-- [ ] Test on macOS and Linux
+- [x] Add `github.com/magefile/mage` to tools
+- [x] Create `magefiles/build.go`, `magefiles/install.go`, `magefiles/test.go`, `magefiles/gui.go`
+- [x] Port key targets: `build`, `test`, `install`, `build-gui`, `menubar`, `clean`
+- [x] Keep Makefile as a thin wrapper: `.PHONY: build\nbuild:\n\tmage build`
+- [x] Add `mage -l` to list all targets
+- [x] Update `CLAUDE.md` build commands
+- [x] Test on macOS and Linux
 
 **Verification:**
 - `mage build` produces same binaries as `make build`
@@ -637,14 +637,14 @@
 - `internal/services/` (service layer structs)
 
 **What to do:**
-- [ ] Evaluate options:
+- [x] Evaluate options:
   - Option A: `github.com/swaggo/swag` — requires gin/chi framework (we use `http.ServeMux`)
   - Option B: `github.com/go-openapi/spec` — more manual but works with any router
   - Option C: Annotate structs and write a small `go:generate` tool
-- [ ] Decision: likely Option C — write a `cmd/gendoc-openapi` that reflects service request/response structs
-- [ ] Keep `openapi.yaml` as output, not source of truth
-- [ ] Add `go generate ./internal/comm/http/...` to regenerate
-- [ ] Run and compare output with existing spec
+- [x] Decision: likely Option C — write a `cmd/gendoc-openapi` that reflects service request/response structs
+- [x] Keep `openapi.yaml` as output, not source of truth
+- [x] Add `go generate ./internal/comm/http/...` to regenerate
+- [x] Run and compare output with existing spec
 
 **Verification:**
 - Generated spec matches current (or is better)
@@ -659,11 +659,11 @@
 - `mkdocs.yml` (lines 63–142)
 
 **What to do:**
-- [ ] Add `mkdocs-awesome-pages-plugin` to requirements
-- [ ] Create `.nav.yml` files in each `docs/` subdirectory
-- [ ] Remove manually-maintained `nav:` section from `mkdocs.yml`
-- [ ] Only override for non-alphabetical ordering or hidden pages
-- [ ] Run `mkdocs build` and verify site structure
+- [x] Add `mkdocs-awesome-pages-plugin` to requirements
+- [x] Create `.nav.yml` files in each `docs/` subdirectory
+- [x] Remove manually-maintained `nav:` section from `mkdocs.yml`
+- [x] Only override for non-alphabetical ordering or hidden pages
+- [x] Run `mkdocs build` and verify site structure
 
 **Verification:**
 - All pages are in the nav
@@ -680,10 +680,10 @@
 **What to do:**
 - [ ] Evaluate `github.com/princjef/gomarkdoc` vs `golang.org/x/pkgsite`
 - [ ] `gomarkdoc` generates Markdown from godoc comments — ideal for MkDocs
-- [ ] Add `gomarkdoc` as a tool dependency
-- [ ] Replace `cmd/gendoc` with `gomarkdoc` invocation in Makefile/mage
-- [ ] Update `CLAUDE.md` to reference new command
-- [ ] Run and verify output quality
+- [x] Add `gomarkdoc` as a tool dependency
+- [x] Replace `cmd/gendoc` with `gomarkdoc` invocation in Makefile/mage
+- [x] Update `CLAUDE.md` to reference new command
+- [x] Run and verify output quality
 
 **Verification:**
 - `make docs-generate` runs without error
@@ -703,11 +703,11 @@
 - `internal/security/engine.go`
 
 **What to do:**
-- [ ] Search for `fmt.Sprintf` in SQL-related files
-- [ ] Ensure all user-facing values use `?` placeholders
-- [ ] For dynamic table/column names (which cannot be parameterized), whitelist against known values
-- [ ] Add `github.com/securego/gosec` CI check: `gosec -include=G201,G202 ./...`
-- [ ] Document security posture in `CLAUDE.md`
+- [x] Search for `fmt.Sprintf` in SQL-related files
+- [x] Ensure all user-facing values use `?` placeholders
+- [x] For dynamic table/column names (which cannot be parameterized), whitelist against known values
+- [x] Add `github.com/securego/gosec` CI check: `gosec -include=G201,G202 ./...`
+- [x] Document security posture in `CLAUDE.md`
 
 **Verification:**
 - `gosec` reports zero SQL injection issues
@@ -718,24 +718,24 @@
 ### Task 8.2: Add `gosec` to CI / pre-commit
 
 **What to do:**
-- [ ] Install `github.com/securego/gosec/v2/cmd/gosec`
-- [ ] Add `gosec ./...` to `mage test` or `make lint`
-- [ ] Fix any new issues reported
-- [ ] Document in `CLAUDE.md`
+- [x] Install `github.com/securego/gosec/v2/cmd/gosec`
+- [x] Add `gosec ./...` to `mage test` or `make lint`
+- [x] Fix any new issues reported
+- [x] Document in `CLAUDE.md`
 
 ---
 
 ### Task 8.3: Final integration testing
 
 **What to do:**
-- [ ] Run full test suite: `go test ./... -race`
-- [ ] Build all targets: `mage build`
-- [ ] Test menubar app: `cd menubar && swift build && swift run`
-- [ ] Test Flutter UI: `cd ui/flutter_ui && flutter build macos`
-- [ ] Verify docs build: `mkdocs build`
+- [x] Run full test suite: `go test ./... -race`
+- [x] Build all targets: `mage build`
+- [x] Test menubar app: `cd menubar && swift build && swift run`
+- [x] Test Flutter UI: `cd ui/flutter_ui && flutter build macos`
+- [x] Verify docs build: `mkdocs build`
 - [ ] Run end-to-end smoke test: start daemon, connect menubar, connect Flutter UI, run a chat
-- [ ] Update `CHANGELOG.md` with all changes
-- [ ] Update `CLAUDE.md` with new conventions and build commands
+- [x] Update `CHANGELOG.md` with all changes
+- [x] Update `CLAUDE.md` with new conventions and build commands
 
 ---
 

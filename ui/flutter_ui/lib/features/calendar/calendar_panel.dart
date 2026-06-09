@@ -62,7 +62,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
     try {
       final client = ref.read(apiClientProvider);
       // Get today's events
-      final data = await client.get<Map<String, dynamic>>('/calendar/today');
+      final data = await client.getCalendarToday();
       final eventsData = data['events'] as List? ?? [];
       if (mounted) {
         setState(() {
@@ -93,12 +93,12 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
     Navigator.pop(context);
     try {
       final client = ref.read(apiClientProvider);
-      await client.post('/calendar/events', data: {
-        'summary': summary,
-        'start': start.toIso8601String(),
-        'end': end.toIso8601String(),
-        if (description != null) 'description': description,
-      });
+      await client.createCalendarEvent(
+        summary: summary,
+        start: start,
+        end: end,
+        description: description,
+      );
       if (mounted) {
         _loadEvents();
         ScaffoldMessenger.of(context).showSnackBar(

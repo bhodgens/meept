@@ -2,6 +2,8 @@
 package configui
 
 import (
+	"strings"
+
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/tools/mcp"
 )
@@ -26,7 +28,7 @@ func buildMCPServerItems(servers []mcp.ServerConfig) []DrilldownItem {
 			NewTextField("name", "name", s.Name),
 			NewSelectField("type", "type", serverType, []string{"stdio", "http"}),
 			NewTextField("url", "url", s.URL),
-			NewTextField("command", "command", joinStrings(s.Command)),
+			NewTextField("command", "command", strings.Join(s.Command, ", ")),
 		}
 		if len(s.Env) > 0 {
 			fields = append(fields, NewMapStringStringDrilldownField("env", "env vars", "env", buildMapStringStringItems(s.Env)))

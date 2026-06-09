@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/caimlas/meept/internal/code/ast"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/internal/tools/builtin"
 )
 
 // ASTEditTool performs structural AST-based edits with preview/apply pattern.
 type ASTEditTool struct {
-	rewriter *ast.ASTRewriter
-	parser   *ast.ParserManager
+	rewriter               *ast.ASTRewriter
+	parser                 *ast.ParserManager
+	pendingChangesRegistry *builtin.PendingChangesRegistry
 }
 
 // NewASTEditTool creates a new AST edit tool.
@@ -25,6 +28,11 @@ func NewASTEditTool(parser *ast.ParserManager) (*ASTEditTool, error) {
 		rewriter: ast.NewASTRewriter(parser),
 		parser:   parser,
 	}, nil
+}
+
+// SetPendingChangesRegistry sets the pending changes registry for preview/accept workflow.
+func (t *ASTEditTool) SetPendingChangesRegistry(registry *builtin.PendingChangesRegistry) {
+	t.pendingChangesRegistry = registry
 }
 
 func (t *ASTEditTool) Name() string { return "ast_edit" }
@@ -173,15 +181,51 @@ func (t *ASTEditTool) Execute(ctx context.Context, args map[string]any) (any, er
 		"modified_source": "",
 	}
 
-	// Apply edits if not preview-only
-	if !previewOnly {
-		modifiedSource := ast.ApplyEdits(source, result.Rewrite.ProposedEdits)
-		response["modified_source"] = string(modifiedSource)
+	// Generate modified source
+	modifiedSource := ast.ApplyEdits(source, result.Rewrite.ProposedEdits)
 
-		// Write to file
-		if err := os.WriteFile(filePath, modifiedSource, 0o644); err != nil {
-			return nil, fmt.Errorf("failed to write modified file: %w", err)
+	// Handle preview/accept workflow when registry is available and preview_only=true
+	if t.pendingChangesRegistry != nil && previewOnly {
+		sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+		if sid, ok := ctx.Value("session_id").(string); ok && sid != "" {
+			sessionID = sid
 		}
+
+		now := time.Now()
+		expiresAt := now.Add(30 * time.Minute)
+
+		// Generate simple diff
+		diff := generateSimpleDiff(string(source), string(modifiedSource), filePath)
+
+		change := &builtin.PendingChange{
+			ID:        fmt.Sprintf("ast_%s_%d", filePath, now.UnixNano()),
+			SessionID: sessionID,
+			FilePath:  filePath,
+			Original:  string(source),
+			Modified:  string(modifiedSource),
+			Diff:      diff,
+			CreatedAt: now,
+			ExpiresAt: &expiresAt,
+			Metadata: map[string]any{
+				"tool":        "ast_edit",
+				"match_count": result.Rewrite.MatchCount,
+				"edit_count":  len(edits),
+			},
+		}
+
+		t.pendingChangesRegistry.Add(change)
+
+		response["pending_change_id"] = change.ID
+		response["message"] = fmt.Sprintf("AST edit preview created (%d matches). Use 'resolve' tool to accept/reject change %s", result.Rewrite.MatchCount, change.ID)
+		return response, nil
+	}
+
+	// Apply edits immediately when preview_only=false or no registry
+	response["modified_source"] = string(modifiedSource)
+
+	// Write to file
+	if err := os.WriteFile(filePath, modifiedSource, 0o644); err != nil {
+		return nil, fmt.Errorf("failed to write modified file: %w", err)
 	}
 
 	return response, nil

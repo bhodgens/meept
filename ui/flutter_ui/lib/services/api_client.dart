@@ -4,6 +4,7 @@ import 'package:dio/io.dart';
 import '../core/constants.dart';
 import '../models/api_models.dart';
 import 'storage_service.dart';
+import 'meept_api.dart';
 
 /// Build the base URL from host and port. HTTPS is mandatory.
 String _buildBaseUrl(String? host, int? port) {
@@ -11,9 +12,18 @@ String _buildBaseUrl(String? host, int? port) {
 }
 
 /// API client for Meept HTTP backend (always uses HTTPS).
+///
+/// Wraps a [Dio] instance and a [MeeptApi] typed client.  All endpoint
+/// methods delegate to [MeeptApi] so that the typed interface is the
+/// single source of truth.  The legacy generic `get`/`post`/`put`/`delete`
+/// methods are retained for backward compatibility with code that bypasses
+/// the typed methods.
 class ApiClient {
   final Dio _dio;
   final String baseUrl;
+
+  /// Typed API client -- delegates all endpoint calls.
+  late final MeeptApi _api;
 
   /// Create an API client with explicit [host], [port], and [apiKey].
   ///
@@ -48,6 +58,7 @@ class ApiClient {
         return client;
       },
     );
+    _api = MeeptApi(_dio);
   }
 
   /// Create an API client, optionally loading persisted host/port/API key
@@ -75,6 +86,17 @@ class ApiClient {
       apiKey: apiKey,
     );
   }
+
+  /// Expose the underlying typed API client for direct use.
+  ///
+  /// Providers and widgets that want the fully-typed interface can use
+  /// this directly instead of going through the legacy wrapper methods.
+  MeeptApi get typed => _api;
+
+  /// Expose the underlying Dio instance for advanced usage (e.g. interceptors).
+  Dio get dio => _dio;
+
+  // ===== Generic CRUD (retained for backward compat) =====
 
   /// Generic GET request
   Future<T> get<T>(
@@ -191,166 +213,85 @@ class ApiClient {
     required String message,
     required String conversationId,
     String? agentId,
-  }) async {
-    return post<Map<String, dynamic>>(
-      '/chat',
-      data: {
-        'message': message,
-        if (conversationId != null) 'conversation_id': conversationId,
-        if (agentId != null) 'agent_id': agentId,
-      },
-    );
-  }
+  }) => _api.sendChatMessage(
+    message: message,
+    conversationId: conversationId,
+    agentId: agentId,
+  );
 
-  /// Send a steering message to the active agent conversation queue.
   Future<Map<String, dynamic>> sendSteerMessage({
     required String message,
     required String conversationId,
     String? source,
-  }) async {
-    return post<Map<String, dynamic>>(
-      '/chat/steer',
-      data: {
-        'message': message,
-        'conversation_id': conversationId,
-        if (source != null) 'source': source,
-      },
-    );
-  }
+  }) => _api.sendSteerMessage(
+    message: message,
+    conversationId: conversationId,
+    source: source,
+  );
 
-  /// Send a follow-up message to the active agent conversation queue.
   Future<Map<String, dynamic>> sendFollowUpMessage({
     required String message,
     required String conversationId,
     String? source,
-  }) async {
-    return post<Map<String, dynamic>>(
-      '/chat/followup',
-      data: {
-        'message': message,
-        'conversation_id': conversationId,
-        if (source != null) 'source': source,
-      },
-    );
-  }
+  }) => _api.sendFollowUpMessage(
+    message: message,
+    conversationId: conversationId,
+    source: source,
+  );
 
   // ===== Session Endpoints =====
 
-  Future<List<Session>> listSessions() async {
-    final data = await get<Map<String, dynamic>>('/sessions');
-    final rawSessions = data['sessions'] as List?;
-    if (rawSessions == null) return [];
-    return rawSessions
-        .map((s) => Session.fromJson(s as Map<String, dynamic>))
-        .toList();
-  }
+  Future<List<Session>> listSessions() => _api.listSessions();
 
-  Future<Session> getSession(String id) async {
-    final data = await get<Map<String, dynamic>>('/sessions/$id');
-    return Session.fromJson(data);
-  }
+  Future<Session> getSession(String id) => _api.getSession(id);
 
   Future<List<ChatMessage>> getMessages(String id,
-      {int offset = 0, int limit = 1000}) async {
-    final data = await get<Map<String, dynamic>>('/sessions/$id/messages',
-        queryParameters: {
-          'offset': offset,
-          'limit': limit,
-        });
-    final rawMessages = data['messages'] as List?;
-    if (rawMessages == null) return [];
-    return rawMessages
-        .map((m) => ChatMessage.fromBackendMessage(m as Map<String, dynamic>))
-        .toList();
-  }
+          {int offset = 0, int limit = 1000}) =>
+      _api.getMessages(id, offset: offset, limit: limit);
 
   Future<Session> createSession({
     required String title,
     String? agentId,
-  }) async {
-    final data = await post<Map<String, dynamic>>(
-      '/sessions',
-      data: {
-        'name': title,
-        if (agentId != null) 'agent_id': agentId,
-      },
-    );
-    return Session.fromJson(data);
-  }
+  }) => _api.createSession(title: title, agentId: agentId);
 
-  Future<void> deleteSession(String id) async {
-    await delete('/sessions/$id');
-  }
+  Future<void> deleteSession(String id) => _api.deleteSession(id);
 
   // ===== Agent Endpoints =====
 
-  Future<List<Agent>> listAgents() async {
-    final data = await get<Map<String, dynamic>>('/config/agents');
-    final rawAgents = data['agents'] as List?;
-    if (rawAgents == null) return [];
-    return rawAgents
-        .map((a) => Agent.fromJson(a as Map<String, dynamic>))
-        .toList();
-  }
+  Future<List<Agent>> listAgents() => _api.listAgents();
+
+  Future<Agent> updateAgent(String id, Map<String, dynamic> config) =>
+      _api.updateAgent(id, config);
 
   // ===== Task Endpoints =====
 
-  Future<List<Task>> listTasks({String? sessionId}) async {
-    final data = await get<Map<String, dynamic>>(
-      '/tasks',
-      queryParameters: sessionId != null ? {'session_id': sessionId} : null,
-    );
-    final rawTasks = data['tasks'] as List?;
-    if (rawTasks == null) return [];
-    return rawTasks
-        .map((t) => Task.fromJson(t as Map<String, dynamic>))
-        .toList();
-  }
+  Future<List<Task>> listTasks({String? sessionId}) =>
+      _api.listTasks(sessionId: sessionId);
 
-  Future<Task> getTask(String id) async {
-    final data = await get<Map<String, dynamic>>('/tasks/$id');
-    return Task.fromJson(data);
-  }
-
-  // ===== Task Endpoints (write) =====
+  Future<Task> getTask(String id) => _api.getTask(id);
 
   Future<Task> createTask({
     required String title,
     String? sessionId,
-  }) async {
-    final data = await post<Map<String, dynamic>>(
-      '/tasks',
-      data: {
-        'name': title,
-        if (sessionId != null) 'session_id': sessionId,
-      },
-    );
-    return Task.fromJson(data);
-  }
+  }) => _api.createTask(title: title, sessionId: sessionId);
+
+  Future<Task> updateTask(String id, {String? name, String? state}) =>
+      _api.updateTask(id, name: name, state: state);
+
+  Future<void> deleteTask(String id) => _api.deleteTask(id);
+
+  Future<Map<String, dynamic>> cancelTask(String id) => _api.cancelTask(id);
 
   // ===== Queue Endpoints =====
 
-  Future<List<Job>> listJobs({String? agentId}) async {
-    final data = await get<Map<String, dynamic>>(
-      '/queue/jobs',
-      queryParameters: agentId != null ? {'agent_id': agentId} : null,
-    );
-    final rawJobs = data['jobs'] as List?;
-    if (rawJobs == null) return [];
-    return rawJobs
-        .map((j) => Job.fromJson(j as Map<String, dynamic>))
-        .toList();
-  }
+  Future<List<Job>> listJobs({String? agentId}) =>
+      _api.listJobs(agentId: agentId);
 
-  Future<Map<String, dynamic>> getQueueStats() async {
-    return get<Map<String, dynamic>>('/queue/stats');
-  }
+  Future<Map<String, dynamic>> getQueueStats() => _api.getQueueStats();
 
   // ===== Metrics Endpoints =====
 
-  Future<Map<String, dynamic>> getLiveMetrics() async {
-    return get<Map<String, dynamic>>('/metrics/live');
-  }
+  Future<Map<String, dynamic>> getLiveMetrics() => _api.getLiveMetrics();
 
   // ===== Memory Endpoints =====
 
@@ -358,201 +299,117 @@ class ApiClient {
     required String query,
     int limit = 10,
     String? category,
-  }) async {
-    final data = await post<Map<String, dynamic>>(
-      '/memory/query',
-      data: {
-        'query': query,
-        'limit': limit,
-        if (category != null) 'category': category,
-      },
-    );
-    final rawMemories = data['memories'] as List?;
-    if (rawMemories == null) return [];
-    return rawMemories.cast<Map<String, dynamic>>().toList();
-  }
+  }) => _api.queryMemory(query: query, limit: limit, category: category);
 
-  Future<List<Map<String, dynamic>>> getRecentMemories({
-    int limit = 10,
-  }) async {
-    final data = await get<Map<String, dynamic>>(
-      '/memory/recent',
-      queryParameters: {'limit': limit},
-    );
-    final rawMemories = data['memories'] as List?;
-    if (rawMemories == null) return [];
-    return rawMemories.cast<Map<String, dynamic>>().toList();
-  }
+  Future<List<Map<String, dynamic>>> getRecentMemories({int limit = 10}) =>
+      _api.getRecentMemories(limit: limit);
 
   // ===== Skills/Tools Endpoints =====
 
-  Future<List<Skill>> getSkills({String? category}) async {
-    final data = await get<Map<String, dynamic>>(
-      '/skills',
-      queryParameters:
-          category != null ? {'category': category} : null,
-    );
-    final rawSkills = data['skills'] as List?;
-    if (rawSkills == null) return [];
-    return rawSkills
-        .map((s) => Skill.fromJson(s as Map<String, dynamic>))
-        .toList();
-  }
+  Future<List<Skill>> getSkills({String? category}) =>
+      _api.getSkills(category: category);
+
+  Future<SkillUiDescriptor> getSkillUi(String slug) => _api.getSkillUi(slug);
+
+  Future<SkillExecuteResult> executeSkill({
+    required String slug,
+    required String prompt,
+  }) => _api.executeSkill(slug: slug, prompt: prompt);
+
+  Future<SkillExecuteResult> executeSkillWithParams({
+    required String slug,
+    required Map<String, dynamic> params,
+  }) => _api.executeSkillWithParams(slug: slug, params: params);
 
   // ===== Health Endpoint =====
 
-  Future<Map<String, dynamic>> healthCheck() async {
-    // Health is at root /health, not under /api/v1
-    final rootUrl = baseUrl.substring(0, baseUrl.indexOf('/api/'));
-    final response = await _dio.get('$rootUrl/health');
-    return response.data as Map<String, dynamic>;
-  }
-
-  // ===== Task Endpoints (write) =====
-
-  Future<void> deleteTask(String id) async {
-    await delete('/tasks/$id');
-  }
-
-  /// Update a task's state (and optionally name/title) using PUT.
-  Future<Task> updateTask(
-    String id, {
-    String? name,
-    String? state,
-  }) async {
-    final data = <String, dynamic>{};
-    if (name != null) data['name'] = name;
-    if (state != null) data['state'] = state;
-    final resp = await put<Map<String, dynamic>>('/tasks/$id', data: data);
-    return Task.fromJson(resp);
-  }
-
-  /// Cancel a task via POST /tasks/{id}/cancel.
-  /// The backend returns {"status": "cancelled"}, so we return the raw map.
-  Future<Map<String, dynamic>> cancelTask(String id) async {
-    return post<Map<String, dynamic>>('/tasks/$id/cancel');
-  }
+  Future<Map<String, dynamic>> healthCheck() => _api.healthCheck();
 
   // ===== Plan Endpoints =====
 
-  Future<List<Plan>> listPlans({String? projectID, int limit = 50}) async {
-    final data = await get<Map<String, dynamic>>(
-      '/plans',
-      queryParameters: {
-        if (projectID != null) 'project_id': projectID,
-        'limit': limit,
-      },
-    );
-    final rawPlans = data['plans'] as List?;
-    if (rawPlans == null) return [];
-    return rawPlans
-        .map((p) => Plan.fromJson(p as Map<String, dynamic>))
-        .toList();
-  }
+  Future<List<Plan>> listPlans({String? projectID, int limit = 50}) =>
+      _api.listPlans(projectId: projectID, limit: limit);
 
-  Future<Plan> getPlan(String id) async {
-    final data = await get<Map<String, dynamic>>('/plans/$id');
-    return Plan.fromJson(data);
-  }
+  Future<Plan> getPlan(String id) => _api.getPlan(id);
 
-  Future<List<Plan>> listPlansBySession(String sessionID) async {
-    final data = await get<Map<String, dynamic>>('/sessions/$sessionID/plans');
-    final rawPlans = data['plans'] as List?;
-    if (rawPlans == null) return [];
-    return rawPlans
-        .map((p) => Plan.fromJson(p as Map<String, dynamic>))
-        .toList();
-  }
+  Future<List<Plan>> listPlansBySession(String sessionID) =>
+      _api.listPlansBySession(sessionID);
 
-  Future<Plan> approvePlan(String id, {String? sessionID, String? by}) async {
-    final data = await post<Map<String, dynamic>>(
-      '/plans/$id/approve',
-      data: {
-        if (sessionID != null) 'session_id': sessionID,
-        if (by != null) 'by': by,
-      },
-    );
-    return Plan.fromJson(data);
-  }
+  Future<Plan> approvePlan(String id, {String? sessionID, String? by}) =>
+      _api.approvePlan(id, sessionID: sessionID, by: by);
 
-  Future<Plan> rejectPlan(String id, {String? sessionID, String? by, String? reason}) async {
-    final data = await post<Map<String, dynamic>>(
-      '/plans/$id/reject',
-      data: {
-        if (sessionID != null) 'session_id': sessionID,
-        if (by != null) 'by': by,
-        if (reason != null) 'reason': reason,
-      },
-    );
-    return Plan.fromJson(data);
-  }
+  Future<Plan> rejectPlan(String id,
+          {String? sessionID, String? by, String? reason}) =>
+      _api.rejectPlan(id, sessionID: sessionID, by: by, reason: reason);
 
-  Future<Plan> confirmPlan(String id, {String? sessionID, String? by}) async {
-    final data = await post<Map<String, dynamic>>(
-      '/plans/$id/confirm',
-      data: {
-        if (sessionID != null) 'session_id': sessionID,
-        if (by != null) 'by': by,
-      },
-    );
-    return Plan.fromJson(data);
-  }
+  Future<Plan> confirmPlan(String id, {String? sessionID, String? by}) =>
+      _api.confirmPlan(id, sessionID: sessionID, by: by);
 
-  Future<Plan> revisePlan(String id, {String? sessionID, String? feedback}) async {
-    final data = await post<Map<String, dynamic>>(
-      '/plans/$id/revise',
-      data: {
-        if (sessionID != null) 'session_id': sessionID,
-        if (feedback != null) 'feedback': feedback,
-      },
-    );
-    return Plan.fromJson(data);
-  }
+  Future<Plan> revisePlan(String id,
+          {String? sessionID, String? feedback}) =>
+      _api.revisePlan(id, sessionID: sessionID, feedback: feedback);
 
   // ===== Daemon Endpoints =====
 
-  Future<Map<String, dynamic>> getDaemonStatus() async {
-    return get<Map<String, dynamic>>('/daemon/status');
-  }
-
-  // ===== Config/Agent Endpoints =====
-
-  Future<Agent> updateAgent(
-    String id,
-    Map<String, dynamic> config,
-  ) async {
-    final data = await post<Map<String, dynamic>>('/config/agents/$id', data: config);
-    return Agent.fromJson(data);
-  }
+  Future<Map<String, dynamic>> getDaemonStatus() => _api.getDaemonStatus();
 
   // ===== Config File Endpoints =====
 
-  Future<String> getClientConfig() async {
-    final data = await get<Map<String, dynamic>>('/config/client');
-    return data['content'] as String? ?? '';
-  }
+  Future<String> getClientConfig() => _api.getClientConfig();
 
-  Future<void> saveClientConfig(String content) async {
-    await post('/config/client', data: {'content': content});
-  }
+  Future<void> saveClientConfig(String content) =>
+      _api.saveClientConfig(content);
 
-  Future<String> getModelsConfig() async {
-    final data = await get<Map<String, dynamic>>('/config/models');
-    return data['content'] as String? ?? '';
-  }
+  Future<String> getModelsConfig() => _api.getModelsConfig();
 
-  Future<void> saveModelsConfig(String content) async {
-    await post('/config/models', data: {'content': content});
-  }
+  Future<void> saveModelsConfig(String content) =>
+      _api.saveModelsConfig(content);
 
-  Future<String> getMenubarConfig() async {
-    final data = await get<Map<String, dynamic>>('/config/menubar');
-    return data['content'] as String? ?? '';
-  }
+  Future<String> getMenubarConfig() => _api.getMenubarConfig();
 
-  Future<void> saveMenubarConfig(String content) async {
-    await post('/config/menubar', data: {'content': content});
-  }
+  Future<void> saveMenubarConfig(String content) =>
+      _api.saveMenubarConfig(content);
+
+  // ===== Search Endpoints =====
+
+  Future<SearchResults> search({
+    required String query,
+    SearchScope scope = SearchScope.all,
+  }) => _api.search(query: query, scope: scope);
+
+  // ===== Project/Branch Endpoints =====
+
+  Future<List<BranchInfo>> listBranches(String projectId) =>
+      _api.listBranches(projectId);
+
+  Future<void> checkoutBranch(String projectId, String branch) =>
+      _api.checkoutBranch(projectId, branch);
+
+  // ===== Terminal Endpoints =====
+
+  Future<Map<String, dynamic>> getTerminalHistory() =>
+      _api.getTerminalHistory();
+
+  Future<Map<String, dynamic>> executeCommand(String command) =>
+      _api.executeCommand(command);
+
+  Future<void> clearTerminalHistory() => _api.clearTerminalHistory();
+
+  // ===== Calendar Endpoints =====
+
+  Future<Map<String, dynamic>> getCalendarToday() => _api.getCalendarToday();
+
+  Future<void> createCalendarEvent({
+    required String summary,
+    required DateTime start,
+    required DateTime end,
+    String? description,
+  }) => _api.createCalendarEvent(
+    summary: summary,
+    start: start,
+    end: end,
+    description: description,
+  );
 }
 
 /// API client exception
@@ -570,45 +427,3 @@ class ApiClientException implements Exception {
   @override
   String toString() => 'ApiClientException: $message (HTTP $statusCode)';
 }
-
-  // ===== Search Endpoints =====
-
-  Future<SearchResults> search({
-    required String query,
-    SearchScope scope = SearchScope.all,
-  }) async {
-    final data = await post<Map<String, dynamic>>(
-      '/search',
-      data: {
-        'query': query,
-        'scope': scope.name,
-      },
-    );
-    return SearchResults.fromJson(data);
-  }
-
-  // ===== Project/Branch Endpoints =====
-
-  Future<List<BranchInfo>> listBranches(String projectId) async {
-    final data = await get<List<dynamic>>('/projects/$projectId/branches');
-    return data
-        .map((b) => BranchInfo.fromJson(b as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<void> checkoutBranch(String projectId, String branch) async {
-    await post('/projects/$projectId/checkout', data: {'branch': branch});
-  }
-
-  // ===== Skill Execution Endpoints =====
-
-  Future<SkillExecuteResult> executeSkill({
-    required String slug,
-    required String prompt,
-  }) async {
-    final data = await post<Map<String, dynamic>>(
-      '/skills/$slug/execute',
-      data: {'prompt': prompt},
-    );
-    return SkillExecuteResult.fromJson(data);
-  }

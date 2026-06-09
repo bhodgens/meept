@@ -1,1 +1,16 @@
-docs/reference/*.md
+nav:
+  - index.md
+  - cli.md
+  - rpc.md
+  - http-api.md
+  - http-api-complete.md
+  - http-api-security.md
+  - tools.md
+  - agent-loop-tools.md
+  - logging.md
+  - metrics.md
+  - models-cli.md
+  - token-cache-cli.md
+  - context-compression.md
+  - orchestrator-flow.md
+  - generated/

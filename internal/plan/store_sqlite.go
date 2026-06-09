@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
@@ -16,7 +18,7 @@ var ErrPlanNotFound = errors.New("plan not found")
 
 // SQLiteStore implements PlanStore backed by SQLite.
 type SQLiteStore struct {
-	db     *sql.DB
+	db     *sqlx.DB
 	logger *slog.Logger
 }
 
@@ -26,10 +28,12 @@ func NewSQLiteStore(dbPath string, logger *slog.Logger) (*SQLiteStore, error) {
 		logger = slog.Default()
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	rawDB, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+
+	db := sqlx.NewDb(rawDB, "sqlite")
 
 	store := &SQLiteStore{
 		db:     db,
@@ -119,7 +123,7 @@ func (s *SQLiteStore) Close() error {
 
 // DB returns the underlying database connection.
 func (s *SQLiteStore) DB() *sql.DB {
-	return s.db
+	return s.db.DB
 }
 
 // ---------- Plan CRUD ----------
@@ -274,7 +278,7 @@ func (s *SQLiteStore) CreatePhase(ctx context.Context, p *PlanPhase) error {
 }
 
 func (s *SQLiteStore) GetPhases(ctx context.Context, planID string) ([]*PlanPhase, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryxContext(ctx, `
 		SELECT `+phaseColumns+` FROM plan_phases
 		WHERE plan_id = ?
 		ORDER BY sequence`, planID)
@@ -285,12 +289,12 @@ func (s *SQLiteStore) GetPhases(ctx context.Context, planID string) ([]*PlanPhas
 
 	var phases []*PlanPhase
 	for rows.Next() {
-		p, err := s.scanPhaseRow(rows)
-		if err != nil {
+		var p PlanPhase
+		if err := rows.StructScan(&p); err != nil {
 			s.logger.Error("Failed to scan phase", "error", err)
 			continue
 		}
-		phases = append(phases, p)
+		phases = append(phases, &p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate phases: %w", err)
@@ -588,28 +592,6 @@ func buildPlan(id, title, filePath, state, createdAt, updatedAt string,
 	return p, nil
 }
 
-func (s *SQLiteStore) scanPhaseRow(rows *sql.Rows) (*PlanPhase, error) {
-	var (
-		id, planID, name, state string
-		sequence, totalSteps    int
-		completedSteps          int
-		failedSteps             int
-	)
-	err := rows.Scan(&id, &planID, &name, &sequence, &totalSteps, &completedSteps, &failedSteps, &state)
-	if err != nil {
-		return nil, err
-	}
-	return &PlanPhase{
-		ID:             id,
-		PlanID:         planID,
-		Name:           name,
-		Sequence:       sequence,
-		TotalSteps:     totalSteps,
-		CompletedSteps: completedSteps,
-		FailedSteps:    failedSteps,
-		State:          PhaseState(state),
-	}, nil
-}
 
 // ---------- Nullable helpers ----------
 

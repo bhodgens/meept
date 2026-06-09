@@ -2,22 +2,29 @@ import AppKit
 import SwiftUI
 import os.log
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var settingsWindow: NSWindow?
     private var dashboardWindow: NSWindow?
 
-    private let menubarConfig = MenubarConfigService()
-    private lazy var apiClient = APIClient(
-        baseURL: menubarConfig.daemonBaseURL,
-        apiToken: menubarConfig.apiToken
-    )
-    private let daemonController = DaemonController()
-    private var daemonStatus = DaemonStatus()
-    private var isUpdating = false
-    private var statusTimer: Timer?
+    private let daemonStatusVM: DaemonStatusViewModel
+    private let configVM: ConfigViewModel
+    private let metricsVM: MetricsViewModel
     private let logger = Logger(subsystem: "com.caimlas.meept.menubar", category: "Main")
+
+    override init() {
+        let menubarConfig = MenubarConfigService()
+        let apiClient = APIClient(
+            baseURL: menubarConfig.daemonBaseURL,
+            apiToken: menubarConfig.apiToken
+        )
+        let daemonController = DaemonController()
+        self.daemonStatusVM = DaemonStatusViewModel(apiClient: apiClient, daemonController: daemonController)
+        self.configVM = ConfigViewModel(configService: ConfigService())
+        self.metricsVM = MetricsViewModel(dashboardService: DashboardService())
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.info("applicationDidFinishLaunching called!")
@@ -43,60 +50,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover?.contentSize = NSSize(width: 220, height: 180)
         popover?.behavior = .transient
-        updatePopoverContent()
-
-        startStatusPolling()
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        statusTimer?.invalidate()
-        statusTimer = nil
-    }
-
-    private func createStatusImage() -> NSImage? {
-        let symbolName: String
-        switch daemonStatus.state {
-        case .offline:
-            symbolName = "power"
-        case .idle:
-            symbolName = "checkmark.circle"
-        case .working:
-            symbolName = "gearshape.2.fill"
-        case .error:
-            symbolName = "exclamationmark.triangle.fill"
-        }
-
-        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Meept") {
-            image.isTemplate = true
-            image.size = NSSize(width: 14, height: 14)
-            return image
-        }
-        return nil
-    }
-
-    private func updateStatusImage() {
-        if let image = createStatusImage() {
-            statusItem?.button?.image = image
-        }
-    }
-
-    private func updatePopoverContent() {
         popover?.contentViewController = NSHostingController(
             rootView: MenuView(
-                daemonStatus: daemonStatus,
-                onStart: { [weak self] in self?.startDaemon() },
-                onStop: { [weak self] in self?.stopDaemon() },
-                onRestart: { [weak self] in self?.restartDaemon() },
+                daemonStatusVM: daemonStatusVM,
                 onShowSettings: { [weak self] in self?.showSettings() },
                 onShowDashboard: { [weak self] in self?.showDashboard() },
                 onQuit: { NSApp.terminate(nil) }
             )
         )
+
+        // Update the menubar icon whenever daemon status changes
+        daemonStatusVM.onStatusChanged = { [weak self] in
+            if let image = self?.daemonStatusVM.statusImage {
+                self?.statusItem?.button?.image = image
+            }
+        }
+
+        daemonStatusVM.startPolling()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        daemonStatusVM.stopPolling()
     }
 
     private func showSettings() {
         if settingsWindow == nil {
-            let hostingController = NSHostingController(rootView: SettingsWindow())
+            let hostingController = NSHostingController(rootView: SettingsWindow(configViewModel: configVM))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 600, height: 450),
                 styleMask: [.titled, .closable, .resizable],
@@ -116,7 +95,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showDashboard() {
         if dashboardWindow == nil {
-            let hostingController = NSHostingController(rootView: DashboardWindow())
+            let hostingController = NSHostingController(rootView: DashboardWindow(metricsViewModel: metricsVM))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 500, height: 400),
                 styleMask: [.titled, .closable, .resizable],
@@ -143,63 +122,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-
-    private func startStatusPolling() {
-        statusTimer?.invalidate()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.fetchDaemonStatus()
-        }
-        fetchDaemonStatus()
-    }
-
-    private func fetchDaemonStatus() {
-        guard !isUpdating else { return }
-        apiClient.getDaemonStatus { [weak self] result in
-            DispatchQueue.main.async {
-                if case .success(let status) = result {
-                    self?.daemonStatus = status
-                    self?.updatePopoverContent()
-                    self?.updateStatusImage()
-                }
-            }
-        }
-    }
-
-    private func startDaemon() {
-        guard !isUpdating else { return }
-        isUpdating = true
-        daemonController.startDaemon { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.isUpdating = false
-                self?.fetchDaemonStatus()
-            }
-        }
-    }
-
-    private func stopDaemon() {
-        guard !isUpdating else { return }
-        isUpdating = true
-        daemonController.stopDaemon { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.isUpdating = false
-                self?.fetchDaemonStatus()
-            }
-        }
-    }
-
-    private func restartDaemon() {
-        guard !isUpdating else { return }
-        isUpdating = true
-        daemonController.restartDaemon { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.isUpdating = false
-                self?.fetchDaemonStatus()
-            }
-        }
-    }
 }
 
 let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
+MainActor.assumeIsolated {
+    let delegate = AppDelegate()
+    app.delegate = delegate
+}
 app.run()

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:timeago/timeago.dart' as timeago;
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
@@ -209,7 +210,7 @@ class _SessionsListState extends ConsumerState<SessionsList> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _formatLastActivity(session.lastActivity ?? session.createdAt),
+                    timeago.format(session.lastActivity ?? session.createdAt),
                     style: CyberpunkTypography.bodySmall,
                   ),
                 ],
@@ -227,14 +228,6 @@ class _SessionsListState extends ConsumerState<SessionsList> {
     );
   }
 
-  String _formatLastActivity(DateTime date) {
-    final now = DateTime.now();
-    final diff = now.difference(date);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-    if (diff.inDays < 1) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
-  }
 }
 
 /// Inline error banner for session list errors

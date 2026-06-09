@@ -1,1 +1,6 @@
-docs/getting-started/*.md
+nav:
+  - index.md
+  - installation.md
+  - quick-start.md
+  - first-run.md
+  - troubleshooting.md

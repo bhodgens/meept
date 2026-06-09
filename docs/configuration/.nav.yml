@@ -1,1 +1,9 @@
-docs/configuration/*.md
+nav:
+  - index.md
+  - daemon.md
+  - llm.md
+  - llm-lifecycle.md
+  - agents.md
+  - production-security.md
+  - cluster.md
+  - examples/

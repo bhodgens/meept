@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	_ "modernc.org/sqlite" //nolint:revive // blank import for side effects
 )
 
@@ -32,7 +34,7 @@ const (
 // Store manages metrics storage.
 type Store struct {
 	mu            sync.RWMutex
-	db            *sql.DB
+	db            *sqlx.DB
 	batchSize     int
 	flushInterval time.Duration
 	batch         []metricValue
@@ -88,10 +90,12 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 	}
 
 	// Open database
-	db, err := sql.Open("sqlite", dbPath)
+	rawDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+
+	db := sqlx.NewDb(rawDB, "sqlite")
 
 	// Set connection pool settings
 	db.SetMaxOpenConns(1) // SQLite writes must be serialized
@@ -389,35 +393,35 @@ func (s *Store) GetHistoricalMetrics(from, to time.Time, resolution string) ([]M
 	switch resolution {
 	case "minute":
 		query = `
-		SELECT timestamp, metric_name, value, tags
+		SELECT timestamp AS timestamp, metric_name AS name, value, tags
 		FROM metrics_live
 		WHERE timestamp BETWEEN ? AND ?
 		ORDER BY timestamp ASC
 		`
 	case "hour":
 		query = `
-		SELECT hour, metric_name, avg_value, ''
+		SELECT hour AS timestamp, metric_name AS name, avg_value AS value, '' AS tags
 		FROM metrics_hourly
 		WHERE hour BETWEEN ? AND ?
 		ORDER BY hour ASC
 		`
 	case "day", "week":
 		query = `
-		SELECT date(hour), metric_name, avg_value, ''
+		SELECT date(hour) AS timestamp, metric_name AS name, avg_value AS value, '' AS tags
 		FROM metrics_hourly
 		WHERE hour BETWEEN ? AND ?
 		ORDER BY hour ASC
 		`
 	default:
 		query = `
-		SELECT hour, metric_name, avg_value, ''
+		SELECT hour AS timestamp, metric_name AS name, avg_value AS value, '' AS tags
 		FROM metrics_hourly
 		WHERE hour BETWEEN ? AND ?
 		ORDER BY hour ASC
 		`
 	}
 
-	rows, err := s.db.Query(query, from.Format(time.RFC3339), to.Format(time.RFC3339))
+	rows, err := s.db.Queryx(query, from.Format(time.RFC3339), to.Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -425,16 +429,25 @@ func (s *Store) GetHistoricalMetrics(from, to time.Time, resolution string) ([]M
 
 	var points []MetricPoint
 	for rows.Next() {
-		var point MetricPoint
-		var tagsStr string
-
-		err := rows.Scan(&point.Timestamp, &point.Name, &point.Value, &tagsStr)
-		if err != nil {
+		// metricRow is a scan-only struct matching the aliased SQL columns.
+		type metricRow struct {
+			Timestamp time.Time `db:"timestamp"`
+			Name      string    `db:"name"`
+			Value     float64   `db:"value"`
+			Tags      string    `db:"tags"`
+		}
+		var r metricRow
+		if err := rows.StructScan(&r); err != nil {
 			continue
 		}
 
-		if tagsStr != "" {
-			_ = json.Unmarshal([]byte(tagsStr), &point.Tags)
+		point := MetricPoint{
+			Timestamp: r.Timestamp,
+			Name:      r.Name,
+			Value:     r.Value,
+		}
+		if r.Tags != "" {
+			_ = json.Unmarshal([]byte(r.Tags), &point.Tags)
 		}
 
 		points = append(points, point)
@@ -445,10 +458,10 @@ func (s *Store) GetHistoricalMetrics(from, to time.Time, resolution string) ([]M
 
 // MetricPoint represents a single metric data point.
 type MetricPoint struct {
-	Timestamp time.Time         `json:"timestamp"`
-	Name      string            `json:"name"`
-	Value     float64           `json:"value"`
-	Tags      map[string]string `json:"tags,omitempty"`
+	Timestamp time.Time         `json:"timestamp" db:"timestamp"`
+	Name      string            `json:"name" db:"metric_name"`
+	Value     float64           `json:"value" db:"value"`
+	Tags      map[string]string `json:"tags,omitempty" db:"-"`
 }
 
 // Close closes the metrics store. Safe to call multiple times.
@@ -503,7 +516,7 @@ func (s *Store) GetEvents(limit int, severity string) ([]Event, error) {
 	query += " ORDER BY timestamp DESC LIMIT ?"
 	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.db.Queryx(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -511,16 +524,27 @@ func (s *Store) GetEvents(limit int, severity string) ([]Event, error) {
 
 	var events []Event
 	for rows.Next() {
-		var event Event
-		var ctxJSON string
-
-		err := rows.Scan(&event.Timestamp, &event.EventType, &event.Severity, &event.Message, &ctxJSON)
-		if err != nil {
+		// eventRow is a scan-only struct matching the raw SQL columns.
+		type eventRow struct {
+			Timestamp time.Time `db:"timestamp"`
+			EventType string    `db:"event_type"`
+			Severity  string    `db:"severity"`
+			Message   string    `db:"message"`
+			Context   string    `db:"context"`
+		}
+		var r eventRow
+		if err := rows.StructScan(&r); err != nil {
 			continue
 		}
 
-		if ctxJSON != "" {
-			_ = json.Unmarshal([]byte(ctxJSON), &event.Context)
+		event := Event{
+			Timestamp: r.Timestamp,
+			EventType: r.EventType,
+			Severity:  r.Severity,
+			Message:   r.Message,
+		}
+		if r.Context != "" {
+			_ = json.Unmarshal([]byte(r.Context), &event.Context)
 		}
 
 		events = append(events, event)
@@ -531,11 +555,11 @@ func (s *Store) GetEvents(limit int, severity string) ([]Event, error) {
 
 // Event represents a logged event.
 type Event struct {
-	Timestamp time.Time      `json:"timestamp"`
-	EventType string         `json:"event_type"`
-	Severity  string         `json:"severity"`
-	Message   string         `json:"message"`
-	Context   map[string]any `json:"context,omitempty"`
+	Timestamp time.Time      `json:"timestamp" db:"timestamp"`
+	EventType string         `json:"event_type" db:"event_type"`
+	Severity  string         `json:"severity" db:"severity"`
+	Message   string         `json:"message" db:"message"`
+	Context   map[string]any `json:"context,omitempty" db:"-"`
 }
 
 // SubscribeMetrics returns a channel for receiving metric updates.

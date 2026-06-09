@@ -6,16 +6,13 @@
 import SwiftUI
 
 struct MenuView: View {
-    let daemonStatus: DaemonStatus
-    let onStart: () -> Void
-    let onStop: () -> Void
-    let onRestart: () -> Void
+    @ObservedObject var daemonStatusVM: DaemonStatusViewModel
     let onShowSettings: () -> Void
     let onShowDashboard: () -> Void
     let onQuit: () -> Void
 
     private var stateIcon: String {
-        switch daemonStatus.state {
+        switch daemonStatusVM.daemonStatus.state {
         case .offline: return "power"
         case .idle: return "checkmark.circle"
         case .working: return "gearshape.2.fill"
@@ -24,7 +21,7 @@ struct MenuView: View {
     }
 
     private var stateColor: Color {
-        switch daemonStatus.state {
+        switch daemonStatusVM.daemonStatus.state {
         case .offline: return .gray
         case .idle: return .green
         case .working: return .blue
@@ -41,7 +38,7 @@ struct MenuView: View {
                 VStack(alignment: .leading) {
                     Text("meept")
                         .font(.headline)
-                    Text(daemonStatus.state.rawValue)
+                    Text(daemonStatusVM.daemonStatus.state.rawValue)
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -52,20 +49,20 @@ struct MenuView: View {
             Divider()
 
             // Daemon control
-            if daemonStatus.running {
-                Button("stop daemon", action: onStop)
+            if daemonStatusVM.daemonStatus.running {
+                Button("stop daemon", action: daemonStatusVM.stopDaemon)
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
 
-                Button("restart daemon", action: onRestart)
+                Button("restart daemon", action: daemonStatusVM.restartDaemon)
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
             } else {
-                Button("start daemon", action: onStart)
+                Button("start daemon", action: daemonStatusVM.startDaemon)
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
@@ -100,10 +97,10 @@ struct MenuView: View {
 
 #Preview {
     MenuView(
-        daemonStatus: DaemonStatus(running: true, pid: 123, uptime: "1h", state: .idle),
-        onStart: {},
-        onStop: {},
-        onRestart: {},
+        daemonStatusVM: DaemonStatusViewModel(
+            apiClient: APIClient(baseURL: "https://localhost:8081"),
+            daemonController: DaemonController()
+        ),
         onShowSettings: {},
         onShowDashboard: {},
         onQuit: {}

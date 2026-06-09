@@ -1,1 +1,25 @@
-docs/workflows/*.md
+nav:
+  - index.md
+  - agent-orchestration.md
+  - tool-routing.md
+  - security.md
+  - memory.md
+  - llm-management.md
+  - code-intelligence.md
+  - context-firewall.md
+  - self-improvement.md
+  - shadow-training.md
+  - taint-tracking.md
+  - collaborative-planning.md
+  - plans.md
+  - job-scheduling.md
+  - project-context.md
+  - models-cli.md
+  - speech-to-text.md
+  - bots.md
+  - skills.md
+  - external-integrations.md
+  - multi-participant-comms.md
+  - agent-lateral-interrogation-howto.md
+  - deterministic-execution.md
+  - q-agent.md

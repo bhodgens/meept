@@ -1,1 +1,26 @@
-docs/plans/*.md
+nav:
+  - index.md
+  - 2026-05-10-unused-code-remediation.md
+  - 2026-05-11-remaining-lint-remediation.md
+  - 2026-05-11-tool-streaming-terminate-tentative-needsreview.md
+  - 2026-05-11-typed-agent-events-tentative-needsreview.md
+  - 2026-05-11-prompt-templates-tentative-needsreview.md
+  - 2026-05-11-session-persistence-tentative-needsreview.md
+  - 2026-05-16-complete-feature-integration.md
+  - 2026-05-16-http-api-complete-implementation.md
+  - 2026-05-22-unified-http-server.md
+  - 2026-05-27-dispatcher-model-reassignment.md
+  - 2026-05-27-project-context.md
+  - 2026-05-28-option-c-dual-agent-conversation.md
+  - 2026-06-03-standardization-option-c.md
+  - 2026-06-04-flutter-backend-gaps.md
+  - 2026-06-07-sharded-vector-memory.md
+  - empty-llm-response-handling.md
+  - meept-lite.md
+  - meept-lite-native-scrollback.md
+  - meept-lite-phase6-audit.md
+  - meept-lite-phase6-status.md
+  - openrouter-error-handling.md
+  - old-meept-plan-remediation.md
+  - old-plan-remediation.md
+  - Archive: archive/

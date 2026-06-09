@@ -13,6 +13,8 @@ import (
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/tools"
 	"github.com/caimlas/meept/pkg/security"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockLLMClient is a mock LLM client for testing.

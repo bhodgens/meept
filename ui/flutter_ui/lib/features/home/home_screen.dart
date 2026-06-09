@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/constants.dart';
+import 'package:go_router/go_router.dart';
+import '../../core/router.dart';
 import '../../core/shortcuts.dart';
 import '../../theme/colors.dart';
 import '../../theme/effects.dart';
@@ -64,6 +65,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   final List<String> _tabLabels = ['chat', 'sessions', 'plans', 'tasks', 'agents'];
 
+  /// Route paths corresponding to each tab index.
+  static const List<String> _tabRoutes = ['/', '/sessions', '/plans', '/tasks', '/agents'];
+
   bool _initialLoadDone = false;
   late final LeaderKeyController _leaderController;
 
@@ -71,11 +75,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void initState() {
     super.initState();
     _leaderController = LeaderKeyController();
-    _leaderController.onTabSelected = (index) {
-      if (index >= 0 && index < HomeTab.values.length) {
-        setState(() => _selectedTab = HomeTab.values[index]);
-      }
-    };
+    _leaderController.onTabSelected = _onLeaderTabSelected;
+    _leaderController.onNavigate = _onLeaderNavigate;
     _leaderController.onToggleDrawer = () {
       final isOpen = ref.read(drawerOpenProvider);
       ref.read(drawerOpenProvider.notifier).state = !isOpen;
@@ -88,16 +89,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ref.read(focusInputRequestProvider.notifier).state = true;
     };
     _leaderController.onFind = () {
-      setState(() => _selectedTab = HomeTab.chat);
-      ref.read(activeToolProvider.notifier).state = 'search';
+      context.goToolSearch();
     };
     _leaderController.onBranches = () {
-      setState(() => _selectedTab = HomeTab.chat);
-      ref.read(activeToolProvider.notifier).state = 'branches';
+      context.goToolBranches();
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatProvider);
       _onConnectionChanged(ref.read(connectionStateProvider));
+      // Apply the router-forced initial tab if present.
+      final override = TabOverrideScope.of(context);
+      if (override != null && override != HomeTab.chat) {
+        setState(() => _selectedTab = override);
+      }
     });
   }
 
@@ -107,12 +111,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.dispose();
   }
 
+  /// Handle leader key tab selection — switch to the tab locally and
+  /// update the router so the URL stays in sync.
+  void _onLeaderTabSelected(int index) {
+    if (index >= 0 && index < HomeTab.values.length) {
+      setState(() => _selectedTab = HomeTab.values[index]);
+      context.go(_tabRoutes[index]);
+    }
+  }
+
+  /// Handle leader key navigation via go_router.
+  void _onLeaderNavigate(String path) {
+    context.go(path);
+  }
+
   void _onConnectionChanged(bool connected) {
     if (connected && !_initialLoadDone) {
       _initialLoadDone = true;
       ref.read(sessionProvider.notifier).loadSessions();
       ref.read(taskProvider.notifier).loadTasks();
       ref.read(agentProvider.notifier).loadAgents();
+    }
+  }
+
+  /// Navigate to a tool panel via go_router if it has a registered route.
+  void _navigateTool(String toolName) {
+    switch (toolName) {
+      case 'search':
+        context.goToolSearch();
+      case 'branches':
+        context.goToolBranches();
+      case 'skills':
+        context.goToolSkills();
+      case 'memory':
+        context.goToolMemory();
+      case 'settings':
+        context.goSettings();
+      // Other tools (files, terminal, calendar, metrics) don't have
+      // dedicated routes yet — they stay on the chat tab with the
+      // activeTool provider handling the panel switch.
     }
   }
 
@@ -234,8 +271,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     OrangeVoidTabBar(
                       tabs: _tabLabels,
                       selectedIndex: _selectedTab.index,
-                      onTabSelected: (index) =>
-                          setState(() => _selectedTab = HomeTab.values[index]),
+                      onTabSelected: (index) {
+                        setState(() => _selectedTab = HomeTab.values[index]);
+                        context.go(_tabRoutes[index]);
+                      },
                     ),
                     // Toolbar with drawer toggle, tools dropdown + connection indicator
                     Container(
@@ -267,6 +306,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                               if (_selectedTab != HomeTab.chat) {
                                 setState(() => _selectedTab = HomeTab.chat);
                               }
+                              // Navigate via go_router for known tool routes.
+                              _navigateTool(route);
                             },
                           ),
                           const SizedBox(width: 12),

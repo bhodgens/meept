@@ -82,7 +82,7 @@ func (v *ReviewerValidator) ValidateRecommendation(ctx context.Context, rec Reco
 
 	// Build feedback
 	if len(result.Issues) > 0 {
-		result.Feedback = fmt.Sprintf("Issues found: %s", joinStrings(result.Issues, ", "))
+		result.Feedback = fmt.Sprintf("Issues found: %s", strings.Join(result.Issues, ", "))
 	}
 
 	return result, nil
@@ -143,15 +143,4 @@ func (v *ReviewerValidator) LogValidationResult(ctx context.Context, rec Recomme
 	return err
 }
 
-// joinStrings joins strings with a separator.
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	var result strings.Builder
-	result.WriteString(strs[0])
-	for _, s := range strs[1:] {
-		result.WriteString(sep + s)
-	}
-	return result.String()
-}
+

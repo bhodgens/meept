@@ -49,7 +49,8 @@ struct ModelsConfigView: View {
         onSave(config)
         showValidationSuccess = true
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             showValidationSuccess = false
         }
     }

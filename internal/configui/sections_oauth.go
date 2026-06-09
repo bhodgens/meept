@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/auth"
@@ -110,7 +111,7 @@ func buildOAuthProviderFields(store *auth.TokenStore, providerID string, status 
 	}
 
 	if len(status.scopes) > 0 {
-		fields = append(fields, NewTextField("scopes", "scopes", joinStrings(status.scopes)))
+		fields = append(fields, NewTextField("scopes", "scopes", strings.Join(status.scopes, ", ")))
 	}
 
 	fields = append(fields, NewTextField("refresh_token", "refresh token", formatBool(status.hasRefresh)))

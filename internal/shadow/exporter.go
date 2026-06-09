@@ -446,7 +446,7 @@ func formatPrompt(messages []Message) string {
 	for _, msg := range messages {
 		parts = append(parts, fmt.Sprintf("%s: %s", msg.Role, msg.Content))
 	}
-	return joinStrings(parts, "\n\n")
+	return strings.Join(parts, "\n\n")
 }
 
 // newDedupState creates a new deduplication state with the given similarity threshold.
@@ -587,14 +587,4 @@ func expandPath(path string) string {
 	return path
 }
 
-func joinStrings(parts []string, sep string) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	var result strings.Builder
-	result.WriteString(parts[0])
-	for i := 1; i < len(parts); i++ {
-		result.WriteString(sep + parts[i])
-	}
-	return result.String()
-}
+

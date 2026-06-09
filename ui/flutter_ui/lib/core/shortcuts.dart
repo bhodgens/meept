@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'router.dart';
 
 /// App-wide intent types for keyboard shortcuts.
 abstract class AppIntent extends Intent {
@@ -58,7 +59,13 @@ class FindIntent extends AppIntent {
 ///
 /// Two-stage input: on leader key, enter "waiting" state. Next
 /// character dispatches the corresponding action. Times out after
-/// 1.5s if no follow-up key is pressed.
+/// 0.5s if no follow-up key is pressed.
+///
+/// Navigation can be handled in two ways:
+/// 1. Wire [onNavigate] to call `context.go(path)` — preferred for
+///    widgets that have a BuildContext.
+/// 2. Leave [onNavigate] unset and the controller will use the global
+///    [router] directly via `router.go(path)`.
 class LeaderKeyController extends ChangeNotifier {
   static bool get _isMacOS => Platform.isMacOS;
 
@@ -69,7 +76,7 @@ class LeaderKeyController extends ChangeNotifier {
   Timer? _timeout;
 
   /// Set this callback to route tab switches from the shortcut layer
-  /// up to the containing widget.
+  /// up to the containing widget. Index maps to [HomeTab.values].
   void Function(int index)? onTabSelected;
 
   /// Set this callback to toggle the drawer.
@@ -86,6 +93,13 @@ class LeaderKeyController extends ChangeNotifier {
 
   /// Set this callback to handle find/search.
   VoidCallback? onFind;
+
+  /// Optional callback for go_router navigation.
+  ///
+  /// When set, leader sequences that trigger navigation will call
+  /// this with the target route path (e.g. `/sessions`, `/tools/search`).
+  /// When unset, the controller falls back to the global [router].
+  void Function(String path)? onNavigate;
 
   static LogicalKeySet get leaderKeySet {
     return _isMacOS
@@ -142,18 +156,22 @@ class LeaderKeyController extends ChangeNotifier {
 
     switch (ch) {
       case 's':
+        _navigate('/sessions');
         onTabSelected?.call(1); // sessions
         break;
       case 'p':
+        _navigate('/tools/search');
         onFind?.call();
         break;
       case 'b':
+        _navigate('/tools/branches');
         onBranches?.call();
         break;
       case 'd':
         onToggleDrawer?.call();
         break;
       case 'c':
+        _navigate('/');
         onTabSelected?.call(0); // chat
         break;
       case '?':
@@ -164,6 +182,18 @@ class LeaderKeyController extends ChangeNotifier {
     }
     _exitLeaderMode();
     return KeyEventResult.handled;
+  }
+
+  /// Navigate using go_router.
+  ///
+  /// Prefers [onNavigate] callback (for BuildContext-based navigation);
+  /// falls back to the global [router] instance.
+  void _navigate(String path) {
+    if (onNavigate != null) {
+      onNavigate!(path);
+    } else {
+      router.go(path);
+    }
   }
 
   void _enterLeaderMode() {

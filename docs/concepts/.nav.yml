@@ -1,1 +1,12 @@
-docs/concepts/*.md
+nav:
+  - index.md
+  - architecture.md
+  - request-flow.md
+  - multi-agent.md
+  - multi-agent-parallelism.md
+  - context-management.md
+  - memory.md
+  - tools.md
+  - skills.md
+  - plans.md
+  - token-caching.md

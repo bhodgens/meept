@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
@@ -116,7 +117,7 @@ func (t *RequestReviewTool) Execute(ctx context.Context, args map[string]any) (a
 		available := t.availableReviewers()
 		return tools.NewErrorResult(fmt.Sprintf(
 			"reviewer agent not found: %s. Available reviewers: %s",
-			reviewerID, joinStrings(available),
+			reviewerID, strings.Join(available, ", "),
 		)), nil
 	}
 

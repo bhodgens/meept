@@ -32,7 +32,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
     setState(() => _isLoading = true);
     try {
       final client = ref.read(apiClientProvider);
-      final data = await client.get<Map<String, dynamic>>('/terminal/history');
+      final data = await client.getTerminalHistory();
       final historyData = data['history'] as List? ?? [];
       if (mounted) {
         setState(() {
@@ -59,9 +59,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
     setState(() => _isExecuting = true);
     try {
       final client = ref.read(apiClientProvider);
-      final result = await client.post<Map<String, dynamic>>('/terminal/exec', data: {
-        'command': cmd,
-      });
+      final result = await client.executeCommand(cmd);
 
       if (mounted) {
         _commandController.clear();
@@ -97,7 +95,7 @@ class _TerminalPanelState extends ConsumerState<TerminalPanel> {
   Future<void> _clearHistory() async {
     try {
       final client = ref.read(apiClientProvider);
-      await client.post('/terminal/clear');
+      await client.clearTerminalHistory();
       if (mounted) {
         _loadHistory();
         ScaffoldMessenger.of(context).showSnackBar(

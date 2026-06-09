@@ -5,43 +5,21 @@
 
 import SwiftUI
 
+@MainActor
 struct SettingsWindow: View {
     @State private var selectedTab = 0
-    @State private var clientConfig = "// Loading..."
-    @State private var modelsConfig = "// Loading..."
-    @State private var isSaving = false
-    @State private var showSaveError = false
-    @State private var showNormalizeError = false
 
-    private let configService = ConfigService()
+    @ObservedObject var configViewModel: ConfigViewModel
 
     var body: some View {
         TabView(selection: $selectedTab) {
             ClientConfigView(
-                config: $clientConfig,
-                isSaving: isSaving,
-                onSave: { content in
-                    isSaving = true
-                    configService.normalizeJSON5(content: content) { result in
-                        switch result {
-                        case .success:
-                            // Validated via normalize; save the user's original
-                            // text to preserve comments and formatting.
-                            configService.saveClientConfig(content: content) { saveResult in
-                                isSaving = false
-                                switch saveResult {
-                                case .success:
-                                    break
-                                case .failure:
-                                    showSaveError = true
-                                }
-                            }
-                        case .failure:
-                            isSaving = false
-                            showNormalizeError = true
-                        }
-                    }
-                }
+                config: Binding(
+                    get: { configViewModel.clientConfig },
+                    set: { configViewModel.clientConfig = $0 }
+                ),
+                isSaving: configViewModel.isSaving,
+                onSave: { content in configViewModel.saveClientConfig(content: content) }
             )
             .tabItem {
                 Label("client", systemImage: "gearshape")
@@ -49,37 +27,19 @@ struct SettingsWindow: View {
             .tag(0)
 
             ModelsConfigView(
-                config: $modelsConfig,
-                isSaving: isSaving,
-                onSave: { content in
-                    isSaving = true
-                    configService.normalizeJSON5(content: content) { result in
-                        switch result {
-                        case .success:
-                            // Validated via normalize; save the user's original
-                            // text to preserve comments and formatting.
-                            configService.saveModelsConfig(content: content) { saveResult in
-                                isSaving = false
-                                switch saveResult {
-                                case .success:
-                                    break
-                                case .failure:
-                                    showSaveError = true
-                                }
-                            }
-                        case .failure:
-                            isSaving = false
-                            showNormalizeError = true
-                        }
-                    }
-                }
+                config: Binding(
+                    get: { configViewModel.modelsConfig },
+                    set: { configViewModel.modelsConfig = $0 }
+                ),
+                isSaving: configViewModel.isSaving,
+                onSave: { content in configViewModel.saveModelsConfig(content: content) }
             )
             .tabItem {
                 Label("models", systemImage: "cpu")
             }
             .tag(1)
 
-            AgentsConfigView()
+            AgentsConfigView(configViewModel: configViewModel)
             .tabItem {
                 Label("agents", systemImage: "person.crop.circle")
             }
@@ -87,42 +47,28 @@ struct SettingsWindow: View {
         }
         .frame(width: 600, height: 450)
         .padding()
-        .alert("save error", isPresented: $showSaveError) {
+        .alert("save error", isPresented: Binding(
+            get: { configViewModel.showSaveError },
+            set: { configViewModel.showSaveError = $0 }
+        )) {
             Button("ok", role: .cancel) { }
         } message: {
             Text("Failed to save configuration. Please try again.")
         }
-        .alert("normalization error", isPresented: $showNormalizeError) {
+        .alert("normalization error", isPresented: Binding(
+            get: { configViewModel.showNormalizeError },
+            set: { configViewModel.showNormalizeError = $0 }
+        )) {
             Button("ok", role: .cancel) { }
         } message: {
             Text("Failed to normalize JSON5. Please check your syntax.")
         }
         .onAppear {
-            loadConfigs()
-        }
-    }
-
-    private func loadConfigs() {
-        configService.getClientConfig { result in
-            switch result {
-            case .success(let content):
-                clientConfig = content
-            case .failure:
-                clientConfig = "// Error loading config"
-            }
-        }
-
-        configService.getModelsConfig { result in
-            switch result {
-            case .success(let content):
-                modelsConfig = content
-            case .failure:
-                modelsConfig = "// Error loading config"
-            }
+            configViewModel.loadConfigs()
         }
     }
 }
 
 #Preview {
-    SettingsWindow()
+    SettingsWindow(configViewModel: ConfigViewModel(configService: ConfigService()))
 }

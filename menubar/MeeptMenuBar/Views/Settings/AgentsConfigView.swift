@@ -5,18 +5,12 @@
 
 import SwiftUI
 
+@MainActor
 struct AgentsConfigView: View {
-    @State private var agents: [AgentInfo] = []
-    @State private var selectedAgentId: String?
-    @State private var agentDetails: Agent?
-    @State private var isLoading = true
-    @State private var showRefresh = false
-    @State private var errorMessage: String?
-
-    private let configService = ConfigService()
+    @ObservedObject var configViewModel: ConfigViewModel
 
     private var selectedAgent: AgentInfo? {
-        agents.first { $0.id == selectedAgentId }
+        configViewModel.selectedAgent
     }
 
     var body: some View {
@@ -27,7 +21,7 @@ struct AgentsConfigView: View {
                     Text("agents")
                         .font(.headline)
                     Spacer()
-                    Button(action: loadAgents) {
+                    Button(action: configViewModel.loadAgents) {
                         Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(.borderless)
@@ -37,7 +31,10 @@ struct AgentsConfigView: View {
 
                 Divider()
 
-                List(agents, selection: $selectedAgentId) { agent in
+                List(configViewModel.agents, selection: Binding(
+                    get: { configViewModel.selectedAgentId },
+                    set: { configViewModel.selectedAgentId = $0 }
+                )) { agent in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(agent.name)
                             .font(.system(size: 13))
@@ -56,7 +53,7 @@ struct AgentsConfigView: View {
 
             // Right panel - Agent details editor
             VStack(spacing: 0) {
-                if let agent = agentDetails {
+                if let agent = configViewModel.agentDetails {
                     HStack {
                         Text(agent.name)
                             .font(.headline)
@@ -66,7 +63,7 @@ struct AgentsConfigView: View {
                             set: { newValue in
                                 var updated = agent
                                 updated.enabled = newValue
-                                agentDetails = updated
+                                configViewModel.agentDetails = updated
                             }
                         ))
                         .toggleStyle(.switch)
@@ -99,7 +96,7 @@ struct AgentsConfigView: View {
                                     set: {
                                         var updated = agent
                                         updated.name = $0
-                                        agentDetails = updated
+                                        configViewModel.agentDetails = updated
                                     }
                                 ))
                                 .textFieldStyle(.roundedBorder)
@@ -115,7 +112,7 @@ struct AgentsConfigView: View {
                                     set: {
                                         var updated = agent
                                         updated.description = $0
-                                        agentDetails = updated
+                                        configViewModel.agentDetails = updated
                                     }
                                 ))
                                 .textFieldStyle(.roundedBorder)
@@ -131,7 +128,7 @@ struct AgentsConfigView: View {
                                     set: {
                                         var updated = agent
                                         updated.prompt = $0
-                                        agentDetails = updated
+                                        configViewModel.agentDetails = updated
                                     }
                                 ))
                                 .font(.system(size: NSFont.systemFontSize, weight: .regular, design: .default))
@@ -149,16 +146,16 @@ struct AgentsConfigView: View {
                     HStack {
                         Spacer()
                         Button("cancel") {
-                            if let id = selectedAgentId {
-                                loadAgentDetails(id)
+                            if let id = configViewModel.selectedAgentId {
+                                configViewModel.loadAgentDetails(id)
                             }
                         }
                         .keyboardShortcut(.escape, modifiers: [])
                         Button("save") {
-                            saveAgent()
+                            configViewModel.saveAgent()
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(agentDetails?.name.isEmpty ?? true)
+                        .disabled(configViewModel.agentDetails?.name.isEmpty ?? true)
                     }
                     .padding(8)
                 } else {
@@ -174,72 +171,15 @@ struct AgentsConfigView: View {
             }
             .frame(minWidth: 350)
         }
-        .onAppear(perform: loadAgents)
-        .onChange(of: selectedAgentId) { newId in
+        .onAppear(perform: configViewModel.loadAgents)
+        .onChange(of: configViewModel.selectedAgentId) { newId in
             if let id = newId {
-                loadAgentDetails(id)
-            }
-        }
-    }
-
-    private func loadAgents() {
-        isLoading = true
-        configService.getAgentsList { result in
-            DispatchQueue.main.async {
-                isLoading = false
-                switch result {
-                case .success(let agentList):
-                    self.agents = agentList
-                case .failure(let error):
-                    self.errorMessage = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    private func loadAgentDetails(_ agentId: String) {
-        guard let agent = agents.first(where: { $0.id == agentId }) else {
-            agentDetails = nil
-            return
-        }
-
-        configService.getAgent(id: agent.id) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let details):
-                    self.agentDetails = details
-                case .failure:
-                    // Create a basic agent from info
-                    self.agentDetails = Agent(
-                        id: agent.id,
-                        name: agent.name,
-                        description: agent.description,
-                        prompt: "",
-                        frontmatter: nil,
-                        enabled: agent.enabled
-                    )
-                }
-            }
-        }
-    }
-
-    private func saveAgent() {
-        guard let details = agentDetails else { return }
-
-        configService.saveAgent(id: details.id, agent: details) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success:
-                    // Refresh the list
-                    loadAgents()
-                case .failure(let error):
-                    self.errorMessage = error.localizedDescription
-                }
+                configViewModel.loadAgentDetails(id)
             }
         }
     }
 }
 
 #Preview {
-    AgentsConfigView()
+    AgentsConfigView(configViewModel: ConfigViewModel(configService: ConfigService()))
 }

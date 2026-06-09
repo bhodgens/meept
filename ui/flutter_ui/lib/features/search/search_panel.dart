@@ -1,26 +1,38 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../styles/cyberpunk_theme.dart';
+import '../../services/api_client.dart';
+import '../../providers/providers.dart';
 
 /// SearchPanel provides full-text search across sessions, tasks, memories, and plans.
 ///
 /// Features debounced input and grouped results by type.
-class SearchPanel extends StatefulWidget {
+class SearchPanel extends ConsumerStatefulWidget {
   const SearchPanel({super.key});
 
   @override
-  State<SearchPanel> createState() => _SearchPanelState();
+  ConsumerState<SearchPanel> createState() => _SearchPanelState();
 }
 
-class _SearchPanelState extends State<SearchPanel> {
+class _SearchPanelState extends ConsumerState<SearchPanel> {
   final _searchController = TextEditingController();
   final _debouncer = Debouncer(delay: const Duration(milliseconds: 300));
+
+  late final ApiClient _apiClient;
 
   List<SearchResult> _results = [];
   bool _isSearching = false;
   String _lastQuery = '';
   SearchScope _scope = SearchScope.all;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _apiClient = ref.read(apiClientProvider);
+  }
 
   @override
   void dispose() {
@@ -28,11 +40,12 @@ class _SearchPanelState extends State<SearchPanel> {
     super.dispose();
   }
 
-  void _search(String query) {
+  Future<void> _search(String query) async {
     if (query.isEmpty) {
       setState(() {
         _results = [];
         _lastQuery = '';
+        _error = null;
       });
       return;
     }
@@ -40,34 +53,68 @@ class _SearchPanelState extends State<SearchPanel> {
     setState(() {
       _isSearching = true;
       _lastQuery = query;
+      _error = null;
     });
 
-    // TODO: Wire to API - POST /api/v1/search
-    // Body: {"query": query, "scope": _scope.name}
+    try {
+      final scopeName = _scope == SearchScope.all ? '' : _scope.name;
+      final data = await _apiClient.post<Map<String, dynamic>>(
+        '/search',
+        data: {
+          'query': query,
+          if (scopeName.isNotEmpty) 'scope': scopeName,
+        },
+      );
 
-    // Simulate search delay
-    Future.delayed(const Duration(milliseconds: 500), () {
       if (!mounted) return;
+
+      final rawResults = data['results'] as List?;
+      final List<SearchResult> parsed = [];
+      if (rawResults != null) {
+        for (final r in rawResults) {
+          final map = r as Map<String, dynamic>;
+          parsed.add(SearchResult(
+            type: _parseResultType(map['type'] as String?),
+            id: map['id'] as String? ?? '',
+            title: map['title'] as String? ?? '',
+            snippet: map['snippet'] as String? ?? '',
+          ));
+        }
+      }
 
       setState(() {
         _isSearching = false;
-        // Sample results - replace with API call
-        _results = [
-          SearchResult(
-            type: SearchResultType.session,
-            id: '1',
-            title: 'sample session result',
-            snippet: 'this is a sample snippet from a session...',
-          ),
-          SearchResult(
-            type: SearchResultType.task,
-            id: '2',
-            title: 'sample task result',
-            snippet: 'this is a sample snippet from a task...',
-          ),
-        ];
+        _results = parsed;
       });
-    });
+    } on ApiClientException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSearching = false;
+        _error = e.message;
+        // Keep previous results on network failure
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSearching = false;
+        _error = 'search failed: $e';
+      });
+    }
+  }
+
+  SearchResultType _parseResultType(String? type) {
+    switch (type) {
+      case 'session':
+        return SearchResultType.session;
+      case 'task':
+        return SearchResultType.task;
+      case 'memory':
+        return SearchResultType.memory;
+      case 'plan':
+        return SearchResultType.plan;
+      default:
+        return SearchResultType.session;
+    }
   }
 
   @override
@@ -203,11 +250,13 @@ class _SearchPanelState extends State<SearchPanel> {
                       color: CyberpunkColors.orangePrimary,
                     ),
                   )
-                : _results.isEmpty && _lastQuery.isNotEmpty
-                    ? _buildNoResults()
-                    : _results.isEmpty
-                        ? _buildEmptyState()
-                        : _buildResults(),
+                : _error != null && _results.isEmpty
+                    ? _buildErrorState()
+                    : _results.isEmpty && _lastQuery.isNotEmpty
+                        ? _buildNoResults()
+                        : _results.isEmpty
+                            ? _buildEmptyState()
+                            : _buildResults(),
           ),
         ],
       ),
@@ -253,6 +302,29 @@ class _SearchPanelState extends State<SearchPanel> {
             style: CyberpunkTypography.bodyMedium.copyWith(
               color: CyberpunkColors.orangeDark,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: 48,
+            color: CyberpunkColors.orangeDark,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _error!,
+            style: CyberpunkTypography.bodyMedium.copyWith(
+              color: CyberpunkColors.orangeDark,
+            ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),

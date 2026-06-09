@@ -11,6 +11,9 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mustNewTestFTSStore creates an initialized SQLiteFTSStore for testing.
@@ -51,14 +54,10 @@ func mustNewTestFTSStore(t *testing.T, tmpDir string) *SQLiteFTSStore {
 	}
 
 	store, err := NewSQLiteFTSStore(cfg, slog.Default())
-	if err != nil {
-		t.Fatalf("NewSQLiteFTSStore: %v", err)
-	}
+	require.NoError(t, err, "NewSQLiteFTSStore")
 
 	ctx := context.Background()
-	if err := store.Initialize(ctx); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	require.NoError(t, store.Initialize(ctx), "Initialize")
 
 	return store
 }
@@ -73,9 +72,7 @@ func insertTestItem(t *testing.T, store *SQLiteFTSStore, id, content, category s
 		 VALUES (?, ?, ?, '{}', ?)`,
 		id, content, category, nowISO,
 	)
-	if err != nil {
-		t.Fatalf("insert test item %s: %v", id, err)
-	}
+	require.NoError(t, err, "insert test item %s", id)
 }
 
 // ---------------------------------------------------------------------------
@@ -88,12 +85,8 @@ func TestNewSQLiteFTSStore_NilLogger(t *testing.T) {
 		DataDir:   t.TempDir(),
 	}
 	store, err := NewSQLiteFTSStore(cfg, nil)
-	if err != nil {
-		t.Fatalf("NewSQLiteFTSStore with nil logger: %v", err)
-	}
-	if store == nil {
-		t.Fatal("expected non-nil store")
-	}
+	require.NoError(t, err, "NewSQLiteFTSStore with nil logger")
+	require.NotNil(t, store)
 }
 
 func TestSQLiteFTSStore_Initialize(t *testing.T) {
@@ -101,9 +94,7 @@ func TestSQLiteFTSStore_Initialize(t *testing.T) {
 	store := mustNewTestFTSStore(t, tmpDir)
 	defer store.Close()
 
-	if !store.Initialized() {
-		t.Error("expected store to be initialized")
-	}
+	assert.True(t, store.Initialized(), "expected store to be initialized")
 }
 
 func TestSQLiteFTSStore_Initialize_Idempotent(t *testing.T) {
@@ -112,9 +103,7 @@ func TestSQLiteFTSStore_Initialize_Idempotent(t *testing.T) {
 	defer store.Close()
 
 	ctx := context.Background()
-	if err := store.Initialize(ctx); err != nil {
-		t.Fatalf("second Initialize should be idempotent: %v", err)
-	}
+	require.NoError(t, store.Initialize(ctx), "second Initialize should be idempotent")
 }
 
 func TestSQLiteFTSStore_HasFTS5(t *testing.T) {
@@ -125,9 +114,7 @@ func TestSQLiteFTSStore_HasFTS5(t *testing.T) {
 	// HasFTS5 and HasFTS5Public should return consistent values.
 	hasPrivate := store.HasFTS5()
 	hasPublic := store.HasFTS5Public()
-	if hasPrivate != hasPublic {
-		t.Errorf("HasFTS5=%v but HasFTS5Public=%v, expected same", hasPrivate, hasPublic)
-	}
+	assert.Equal(t, hasPrivate, hasPublic, "HasFTS5 and HasFTS5Public should match")
 	t.Logf("HasFTS5=%v (FTS5 availability depends on SQLite build)", hasPrivate)
 }
 
