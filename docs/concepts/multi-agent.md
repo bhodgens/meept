@@ -434,3 +434,89 @@ meept chat
 - Scope matching uses keyword detection in step descriptions
 - Provider-level references (e.g., "local models") require clarification
 - Step-level integration requires planner/orchestrator modifications
+
+## Ralph Loop: Self-Referential Verification
+
+Ralph Loop adds automatic verification and replanning to the multi-agent execution flow. It monitors task completion and triggers replanning when evidence is insufficient.
+
+### How It Differs from Standard Flow
+
+| Aspect | Standard Flow | Ralph Loop |
+|--------|--------------|------------|
+| **Trigger** | User request | Missing/insufficient completion evidence |
+| **Goal** | Execute planned steps | Achieve verifiable completion |
+| **Decision** | Linear progression | Self-referential: "Am I done?" |
+| **Max iterations** | One pass | Configurable (e.g., 3 replans) |
+
+### Architecture
+
+```
+User Request → Dispatcher → Strategic Planner → Orchestrator → Workers
+                      ↓                              ↑
+                      └────── Ralph Loop ───────────┘
+                            (verification layer)
+```
+
+Ralph Loop is a **verification layer** that wraps around execution, not a replacement for it.
+
+### Opt-in Mechanism
+
+Ralph Loop uses layered opt-in to avoid thrashing on simple tasks:
+
+**Layer 1: Dispatcher (Intent-based)**
+- `IntentCode`, `IntentDebug`, `IntentRefactor` → Enabled
+- `IntentChat`, `IntentRecall`, `IntentGit` → Disabled
+- `IntentResearch`, `IntentPlan` → Optional (planner decides)
+
+**Layer 2: Strategic Planner (Complexity-aware)**
+- Can override dispatcher based on task complexity
+- High complexity → enable even if dispatcher said no
+- Trivial task → disable even if dispatcher said yes
+
+**Layer 3: Orchestrator (Runtime heuristics)**
+- Final gate: task with >3 steps or uncertainty markers → enable
+
+### Evidence Validation
+
+Tasks must provide evidence of completion:
+
+```json
+{
+  "success": true,
+  "result": "Implemented connection pooling",
+  "evidence": [
+    "Added max_connections limit to db/config.go",
+    "Updated connection pool initialization in db/pool.go"
+  ]
+}
+```
+
+Evidence is validated against task description keywords. Example:
+- Task: "Refactor the database connection pooling"
+- Key terms: `refactor`, `database`, `connection`, `pooling`
+- Valid evidence mentions at least one key term
+
+### Configuration
+
+```go
+type RalphLoopConfig struct {
+    Enabled          bool // default: true
+    MaxIterations    int  // default: 3
+    EvidenceRequired bool // default: true
+}
+```
+
+### When Ralph Loop Triggers Replan
+
+1. **No evidence provided** — Task completed but `evidence` array is empty
+2. **Evidence insufficient** — Evidence doesn't mention task key terms
+3. **Parse failure** — Result couldn't be parsed as structured JSON
+
+### Files
+
+- `internal/agent/ralph_loop.go` — Core verification and replanning
+- `internal/agent/orchestrator.go` — Integration point (`handleJobCompleted`)
+- `internal/agent/dispatcher.go` — Intent classification
+- `internal/agent/strategic.go` — Complexity analysis
+
+See [Ralph Loop: Self-Referential Task Verification](ralph-loop.md) for full documentation.

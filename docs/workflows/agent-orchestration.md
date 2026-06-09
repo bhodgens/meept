@@ -170,3 +170,66 @@ max_revision_cycles = 3
 ### Agent Reports No Suggested Next Agent
 - `RouteActionRoute` requires `SuggestedNextAgent` in the report
 - Falls back to `RouteActionClose` if missing
+## Ralph Loop: Automatic Verification and Replanning
+
+Ralph Loop provides self-correcting task execution by verifying completion evidence and triggering automatic replanning when verification fails.
+
+### Workflow
+
+```
+Job Completed
+    ↓
+Extract task_id from job
+    ↓
+RalphLoop.CheckCompletion()
+    ├── Parse result JSON
+    ├── Check evidence array
+    ├── Validate evidence against task keywords
+    └── Return (isComplete, evidence, needsReplan)
+    ↓
+If needsReplan:
+    ├── RalphLoop.TriggerReplan()
+    ├── Publish "orchestrator.replan" bus event
+    └── Skip normal completion
+Else:
+    └── Normal completion processing
+```
+
+### Evidence Requirements
+
+Tasks must return structured results with evidence:
+
+```json
+{
+  "success": true,
+  "result": "Refactored database connection pooling",
+  "evidence": [
+    "Modified db/config.go to add max_connections",
+    "Updated db/pool.go initialization logic"
+  ]
+}
+```
+
+Evidence is validated by checking if it mentions key terms from the task description. For example:
+- Task: "Fix the login bug with session timeout"
+- Key terms: `fix`, `login`, `bug`, `session`, `timeout`
+- Valid evidence: "Fixed session timeout in login handler"
+
+### Opt-in Configuration
+
+Ralph Loop uses layered opt-in:
+
+| Layer | Decision | Override |
+|-------|----------|----------|
+| **Dispatcher** | Intent-based policy | `IntentCode` → Enabled, `IntentChat` → Disabled |
+| **Strategic Planner** | Complexity analysis | High complexity → Enable, Trivial → Disable |
+| **Orchestrator** | Runtime heuristics | >3 steps or uncertainty markers → Enable |
+
+### Files
+
+- `internal/agent/ralph_loop.go` — Verification and replanning logic
+- `internal/agent/orchestrator.go` — `handleJobCompleted()` integration
+- `internal/agent/dispatcher.go` — Intent classification with `RalphLoopPolicy`
+- `internal/agent/strategic.go` — Complexity-based overrides
+
+See [Ralph Loop: Self-Referential Task Verification](../concepts/ralph-loop.md) for full documentation.
