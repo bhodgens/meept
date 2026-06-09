@@ -251,19 +251,19 @@ func (t *StdioTransport) Close() error {
 		<-done
 	}
 
-	// Close stdout file directly to ensure relayStdout unblocks
-	// (cmd.Wait closes the pipes, but do it explicitly to be safe).
-	if t.stdoutFile != nil {
-		t.stdoutFile.Close()
-	}
-
-	// Wait for the relay goroutine to finish
+	// Wait for the relay goroutine to finish before closing stdoutFile,
+	// otherwise we race with relayStdout's read.
 	if t.relayDone != nil {
 		select {
 		case <-t.relayDone:
 		case <-time.After(2 * time.Second):
 			// Relay didn't exit in time; don't block forever
 		}
+	}
+
+	// Close stdout file after relayStdout has exited.
+	if t.stdoutFile != nil {
+		t.stdoutFile.Close()
 	}
 
 	return nil

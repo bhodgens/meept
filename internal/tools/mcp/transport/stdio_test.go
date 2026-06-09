@@ -176,14 +176,10 @@ func TestStdioTransport_WithEnvironment(t *testing.T) {
 	}
 	defer transport.Close()
 
-	// The command will output TEST_VAR value and exit
-	// We need to close stdin to let it complete
-	transport.stdin.Close()
-
-	// Read any output
-	buf := make([]byte, 1024)
-	n, _ := transport.stdout.Read(buf)
-	output := string(buf[:n])
+	// The command will output TEST_VAR value and exit.
+	// relayStdout owns the reader, so read through the relay channel.
+	line := <-transport.relayCh
+	output := string(line.data)
 
 	if !strings.Contains(output, "test_value") {
 		t.Errorf("expected 'test_value' in output, got %q", output)
