@@ -403,7 +403,7 @@ docs-build: docs-deps
 
 docs-generate:
 	@echo "Generating reference docs from Go source..."
-	go run ./cmd/gendoc
+	mage -d magefiles docsGenerate
 
 # =============================================================================
 # Legacy Aliases (for backwards compatibility)
@@ -664,3 +664,15 @@ uninstall-all: uninstall uninstall-gui
 	@echo ""
 	@echo "Full uninstall complete."
 	@echo "Note: Flutter build cache not removed. Run 'cd ui/flutter_ui && flutter clean' if needed."
+
+# Documentation generation
+docs-generate-openapi:
+	@echo "Generating OpenAPI specification..."
+	go build -o $(BIN_DIR)/gendoc-openapi ./cmd/gendoc-openapi
+	$(BIN_DIR)/gendoc-openapi -output docs/reference/http-api/openapi.yaml
+	@echo "Generated docs/reference/http-api/openapi.yaml"
+
+docs-generate: docs-generate-openapi
+	@echo "Regenerating all documentation..."
+	go generate ./...
+	@echo "Documentation generation complete"

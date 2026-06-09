@@ -3,49 +3,14 @@ info:
   title: Meept HTTP API
   description: REST API for Meept daemon - exposes chat, memory, task queue, skills, and self-improvement capabilities
   version: 0.2.0
-  contact:
-    name: Meept
-    url: https://github.com/caimlas/meept
 
 servers:
   - url: http://localhost:8081
     description: Local development server
 
 tags:
-  - name: Health
-    description: Health check endpoints
-  - name: Chat
-    description: Chat and conversation endpoints
-  - name: Memory
-    description: Memory query and management
-  - name: Tasks
-    description: Task CRUD operations
-  - name: Queue
-    description: Job queue management
-  - name: Sessions
-    description: Session management
-  - name: Workers
-    description: Worker management
-  - name: Skills
-    description: Skill discovery and execution
-  - name: Self-Improve
-    description: Self-improvement system
-  - name: Cache
-    description: Token cache management
-  - name: Security
-    description: Security engine queries
-  - name: Scheduler
-    description: Job scheduling
-  - name: Bus
-    description: Message bus operations
-  - name: Config
-    description: Configuration management
-  - name: Daemon
-    description: Daemon lifecycle control
-  - name: Metrics
-    description: Metrics and monitoring
-  - name: Plans
-    description: Plan lifecycle management
+  - name: health
+  - name: v1
 
 components:
   securitySchemes:
@@ -56,138 +21,47 @@ components:
       description: "API key authentication. Use: Authorization: Bearer YOUR_API_KEY"
 
   schemas:
-    # Common error response
-    Error:
+    BusService:
       type: object
       properties:
-        error:
-          type: string
-          description: Error message
-
-    # Chat
-    ChatRequest:
-      type: object
-      required:
-        - message
-        - conversation_id
-      properties:
-        message:
-          type: string
-          description: User message to send
-        conversation_id:
-          type: string
-          description: Conversation identifier
-    ChatResponse:
+        bus:
+          type: object
+          nullable: true
+    PublishRequest:
       type: object
       properties:
-        reply:
-          type: string
-          description: Assistant response
-        model:
-          type: string
-          description: Model used for response
-        tokens_used:
-          type: integer
-          description: Tokens consumed
-
-    # Memory
-    MemoryResult:
-      type: object
-      properties:
-        memories:
-          type: array
-          items:
-            $ref: '#/components/schemas/Memory'
-        count:
-          type: integer
-
-    Memory:
-      type: object
-      properties:
-        id:
-          type: string
-        content:
-          type: string
-        category:
-          type: string
-        timestamp:
-          type: string
-          format: date-time
-
-    # Tasks
-    Task:
-      type: object
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        description:
-          type: string
-        state:
-          type: string
-          enum: [pending, in_progress, completed, cancelled]
-        created_at:
-          type: string
-          format: date-time
-
-    # Queue
-    Job:
-      type: object
-      properties:
-        id:
+        topic:
           type: string
         type:
           type: string
-        state:
+        source,omitempty:
           type: string
-          enum: [pending, claimed, completed, failed]
-        task_id:
+        payload,omitempty:
           type: string
-        priority:
+          nullable: true
+      required:
+        - topic
+        - type
+    BusStatsResponse:
+      type: object
+      properties:
+        subscribers:
           type: integer
-        payload:
+        messages_sent:
+          type: integer
+        queued_messages:
+          type: integer
+      required:
+        - subscribers
+        - messages_sent
+        - queued_messages
+    CacheService:
+      type: object
+      properties:
+        cache:
           type: object
-
-    QueueStats:
-      type: object
-      properties:
-        pending:
-          type: integer
-        claimed:
-          type: integer
-        completed:
-          type: integer
-        failed:
-          type: integer
-
-    # Skills
-    Skill:
-      type: object
-      properties:
-        slug:
-          type: string
-        name:
-          type: string
-        description:
-          type: string
-        frontmatter:
-          type: object
-
-    # Self-Improve
-    SelfImproveStatus:
-      type: object
-      properties:
-        enabled:
-          type: boolean
-        last_analysis:
-          type: string
-          format: date-time
-        pending_improvements:
-          type: integer
-
-    # Cache
-    CacheStats:
+          nullable: true
+    CacheStatsResponse:
       type: object
       properties:
         hits:
@@ -196,32 +70,848 @@ components:
           type: integer
         size:
           type: integer
-        eviction_count:
-          type: integer
-
-    # Security
-    SecurityCheckRequest:
-      type: object
       required:
-        - action
-      properties:
-        action:
-          type: string
-        path:
-          type: string
-        risk_level:
-          type: string
-          enum: [low, medium, high, critical]
-    SecurityCheckResponse:
+        - hits
+        - misses
+        - size
+    ClearCacheRequest:
       type: object
       properties:
-        allowed:
-          type: boolean
-        reason:
+        prefix,omitempty:
           type: string
-
-    # Scheduler
-    ScheduledJob:
+    InvalidateRequest:
+      type: object
+      properties:
+        path,omitempty:
+          type: string
+    CacheInspectResult:
+      type: object
+      properties:
+        prompt_hash:
+          type: string
+        model_id:
+          type: string
+        created_at:
+          type: string
+        expires_at:
+          type: string
+        hit_count:
+          type: integer
+        file_hashes,omitempty:
+          type: string
+          nullable: true
+        source:
+          type: string
+      required:
+        - prompt_hash
+        - model_id
+        - created_at
+        - expires_at
+        - hit_count
+        - source
+    CalendarService:
+      type: object
+      properties:
+        client:
+          type: object
+          nullable: true
+    CalendarEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        summary:
+          type: string
+        description,omitempty:
+          type: string
+        location,omitempty:
+          type: string
+        start:
+          type: string
+        end:
+          type: string
+        all_day:
+          type: boolean
+        status,omitempty:
+          type: string
+        html_link,omitempty:
+          type: string
+        attendees,omitempty:
+          type: array
+          nullable: true
+      required:
+        - id
+        - summary
+        - start
+        - end
+        - all_day
+    AttendeeInfo:
+      type: object
+      properties:
+        email:
+          type: string
+        display_name,omitempty:
+          type: string
+        response,omitempty:
+          type: string
+      required:
+        - email
+    ListEventsRequest:
+      type: object
+      properties:
+        time_min,omitempty:
+          type: string
+        time_max,omitempty:
+          type: string
+        max_results,omitempty:
+          type: integer
+    ListEventsResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          nullable: true
+        count:
+          type: integer
+      required:
+        - events
+        - count
+    CreateEventRequest:
+      type: object
+      properties:
+        summary:
+          type: string
+        description,omitempty:
+          type: string
+        location,omitempty:
+          type: string
+        start:
+          type: string
+        end:
+          type: string
+        attendees,omitempty:
+          type: string
+          nullable: true
+      required:
+        - summary
+        - start
+        - end
+    UpdateEventRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        summary,omitempty:
+          type: string
+        description,omitempty:
+          type: string
+        location,omitempty:
+          type: string
+        start,omitempty:
+          type: string
+          nullable: true
+        end,omitempty:
+          type: string
+          nullable: true
+      required:
+        - id
+    ChatService:
+      type: object
+      properties:
+        bus:
+          type: object
+          nullable: true
+        agentRegistry:
+          type: object
+          nullable: true
+        sessionStore:
+          type: object
+        logger:
+          type: object
+          nullable: true
+    ChatRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        conversation_id:
+          type: string
+        agent_id,omitempty:
+          type: string
+      required:
+        - message
+        - conversation_id
+    ChatResponse:
+      type: object
+      properties:
+        reply:
+          type: string
+        model,omitempty:
+          type: string
+        tokens_used,omitempty:
+          type: integer
+      required:
+        - reply
+    SteerRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        conversation_id:
+          type: string
+        source,omitempty:
+          type: string
+      required:
+        - message
+        - conversation_id
+    FollowUpRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        conversation_id:
+          type: string
+        source,omitempty:
+          type: string
+      required:
+        - message
+        - conversation_id
+    QueueStatusRequest:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+      required:
+        - conversation_id
+    QueueStatusResponse:
+      type: object
+      properties:
+        steering_depth:
+          type: integer
+        followup_depth:
+          type: integer
+        is_active:
+          type: boolean
+        generation:
+          type: integer
+      required:
+        - steering_depth
+        - followup_depth
+        - is_active
+        - generation
+    DaemonStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        pid,omitempty:
+          type: integer
+        uptime_seconds,omitempty:
+          type: number
+        model,omitempty:
+          type: string
+        tokens_used:
+          type: integer
+        tokens_remaining:
+          type: integer
+        budget_used:
+          type: number
+        budget_remaining:
+          type: number
+        registered_methods:
+          type: integer
+        bus_subscribers:
+          type: integer
+      required:
+        - status
+        - tokens_used
+        - tokens_remaining
+        - budget_used
+        - budget_remaining
+        - registered_methods
+        - bus_subscribers
+    DaemonService:
+      type: object
+      properties:
+        pidFile:
+          type: string
+        stateDir:
+          type: string
+        binPath:
+          type: string
+        controller:
+          type: object
+    ServiceError:
+      type: object
+      properties:
+        Service:
+          type: string
+        Op:
+          type: string
+        Err:
+          type: object
+    MemoryService:
+      type: object
+      properties:
+        manager:
+          type: object
+          nullable: true
+    MemoryQueryRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        limit,omitempty:
+          type: integer
+        category,omitempty:
+          type: string
+      required:
+        - query
+    MemoryResult:
+      type: object
+      properties:
+        memory:
+          type: object
+        relevance_score:
+          type: number
+        source:
+          type: string
+      required:
+        - memory
+        - relevance_score
+        - source
+    VectorSearchRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        limit,omitempty:
+          type: integer
+        shard_types,omitempty:
+          type: string
+          nullable: true
+      required:
+        - query
+    VectorSearchResult:
+      type: object
+      properties:
+        memory_id:
+          type: string
+        content:
+          type: string
+        metadata,omitempty:
+          type: string
+          nullable: true
+        relevance_score:
+          type: number
+        vector_similarity:
+          type: number
+      required:
+        - memory_id
+        - content
+        - relevance_score
+        - vector_similarity
+    VectorStoreRequest:
+      type: object
+      properties:
+        memory_id:
+          type: string
+        content:
+          type: string
+        metadata,omitempty:
+          type: string
+          nullable: true
+      required:
+        - memory_id
+        - content
+    VectorStats:
+      type: object
+      properties:
+        loaded_shards:
+          type: integer
+        max_ram_shards:
+          type: integer
+        lru_hits:
+          type: integer
+        lru_misses:
+          type: integer
+        lru_evictions:
+          type: integer
+        shard_details:
+          type: string
+          nullable: true
+      required:
+        - loaded_shards
+        - max_ram_shards
+        - lru_hits
+        - lru_misses
+        - lru_evictions
+        - shard_details
+    ShardDetail:
+      type: object
+      properties:
+        dimension:
+          type: integer
+        m:
+          type: integer
+        ef_construction:
+          type: integer
+        ef_search:
+          type: integer
+        vector_count:
+          type: integer
+        database_size_bytes:
+          type: integer
+        shard_id:
+          type: string
+      required:
+        - dimension
+        - m
+        - ef_construction
+        - ef_search
+        - vector_count
+        - database_size_bytes
+        - shard_id
+    ModelInfo:
+      type: object
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        full_name:
+          type: string
+        base_url:
+          type: string
+        context_limit:
+          type: integer
+        max_output:
+          type: integer
+        capabilities:
+          type: string
+          nullable: true
+        is_default:
+          type: boolean
+        input_cost:
+          type: number
+        output_cost:
+          type: number
+      required:
+        - provider
+        - model
+        - full_name
+        - base_url
+        - context_limit
+        - max_output
+        - capabilities
+        - is_default
+        - input_cost
+        - output_cost
+    ProviderInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        api:
+          type: string
+        base_url:
+          type: string
+        models:
+          type: string
+          nullable: true
+        has_credentials:
+          type: boolean
+      required:
+        - id
+        - name
+        - api
+        - base_url
+        - models
+        - has_credentials
+    ModelService:
+      type: object
+      properties:
+        configPath:
+          type: string
+        credStore:
+          type: object
+          nullable: true
+        stateDir:
+          type: string
+    Pipeline:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        steps:
+          type: array
+          nullable: true
+        metadata:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+        - id
+        - name
+        - description
+        - status
+        - steps
+        - metadata
+        - created_at
+        - updated_at
+    PipelineStep:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        error,omitempty:
+          type: string
+        started_at,omitempty:
+          type: string
+          nullable: true
+        ended_at,omitempty:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+        - status
+    PipelineService:
+      type: object
+      properties:
+        mu:
+          type: object
+        pipelines:
+          type: string
+          nullable: true
+    StatusRequest:
+      type: object
+      properties:
+        pipeline_id:
+          type: string
+      required:
+        - pipeline_id
+    PipelineStatusResponse:
+      type: object
+      properties:
+        pipeline_id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        steps:
+          type: array
+          nullable: true
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+        - pipeline_id
+        - name
+        - status
+        - steps
+        - created_at
+        - updated_at
+    PipelineStepStatus:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        error,omitempty:
+          type: string
+        started_at,omitempty:
+          type: string
+          nullable: true
+        ended_at,omitempty:
+          type: string
+          nullable: true
+      required:
+        - id
+        - name
+        - status
+    PipelineListRequest:
+      type: object
+      properties:
+        limit,omitempty:
+          type: integer
+    PipelineInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+      required:
+        - id
+        - name
+        - status
+        - created_at
+    CreatePipelineRequest:
+      type: object
+      properties:
+        id,omitempty:
+          type: string
+        name:
+          type: string
+        description,omitempty:
+          type: string
+        steps,omitempty:
+          type: array
+          nullable: true
+        metadata,omitempty:
+          type: string
+          nullable: true
+      required:
+        - name
+    DeletePipelineRequest:
+      type: object
+      properties:
+        pipeline_id:
+          type: string
+      required:
+        - pipeline_id
+    UpdateStatusRequest:
+      type: object
+      properties:
+        pipeline_id:
+          type: string
+        status:
+          type: string
+      required:
+        - pipeline_id
+        - status
+    PlanService:
+      type: object
+      properties:
+        manager:
+          type: object
+          nullable: true
+        store:
+          type: object
+    CreatePlanRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description,omitempty:
+          type: string
+        project_id,omitempty:
+          type: string
+        project_path,omitempty:
+          type: string
+        session_id:
+          type: string
+      required:
+        - title
+        - session_id
+    ApprovePlanRequest:
+      type: object
+      properties:
+        plan_id:
+          type: string
+        session_id:
+          type: string
+        by:
+          type: string
+      required:
+        - plan_id
+        - session_id
+        - by
+    RejectPlanRequest:
+      type: object
+      properties:
+        plan_id:
+          type: string
+        session_id:
+          type: string
+        by:
+          type: string
+        reason,omitempty:
+          type: string
+      required:
+        - plan_id
+        - session_id
+        - by
+    ConfirmPlanRequest:
+      type: object
+      properties:
+        plan_id:
+          type: string
+        session_id:
+          type: string
+        by:
+          type: string
+      required:
+        - plan_id
+        - session_id
+        - by
+    RevisePlanRequest:
+      type: object
+      properties:
+        plan_id:
+          type: string
+        session_id:
+          type: string
+        feedback:
+          type: string
+      required:
+        - plan_id
+        - session_id
+        - feedback
+    ProjectService:
+      type: object
+      properties:
+        pm:
+          type: object
+          nullable: true
+        store:
+          type: object
+    RegisterProjectRequest:
+      type: object
+      properties:
+        id,omitempty:
+          type: string
+        name:
+          type: string
+        git_url,omitempty:
+          type: string
+        local_path,omitempty:
+          type: string
+      required:
+        - name
+    SetProjectRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+        project_id:
+          type: string
+      required:
+        - session_id
+        - project_id
+    QueueService:
+      type: object
+      properties:
+        q:
+          type: object
+    EnqueueRequest:
+      type: object
+      properties:
+        type:
+          type: string
+        priority,omitempty:
+          type: integer
+        task_id,omitempty:
+          type: string
+        prompt:
+          type: string
+        session_id,omitempty:
+          type: string
+        required_caps,omitempty:
+          type: string
+          nullable: true
+        payload,omitempty:
+          type: string
+          nullable: true
+      required:
+        - type
+        - prompt
+    ClaimRequest:
+      type: object
+      properties:
+        worker_id:
+          type: string
+        capabilities,omitempty:
+          type: string
+          nullable: true
+      required:
+        - worker_id
+    CompleteRequest:
+      type: object
+      properties:
+        job_id:
+          type: string
+        result,omitempty:
+          type: object
+      required:
+        - job_id
+    FailRequest:
+      type: object
+      properties:
+        job_id:
+          type: string
+        error:
+          type: string
+      required:
+        - job_id
+        - error
+    RetryRequest:
+      type: object
+      properties:
+        job_id:
+          type: string
+      required:
+        - job_id
+    GetRequest:
+      type: object
+      properties:
+        job_id:
+          type: string
+      required:
+        - job_id
+    ListRequest:
+      type: object
+      properties:
+        state,omitempty:
+          type: string
+        limit,omitempty:
+          type: integer
+    RuntimeService:
+      type: object
+      properties:
+        manager:
+          type: object
+          nullable: true
+    RuntimeStatusResponse:
+      type: object
+      properties:
+        runtimes:
+          type: array
+          nullable: true
+      required:
+        - runtimes
+    SchedulerService:
+      type: object
+      properties:
+        scheduler:
+          type: object
+          nullable: true
+    ListJobsResponse:
       type: object
       properties:
         id:
@@ -230,1338 +920,3141 @@ components:
           type: string
         schedule:
           type: string
-          description: Cron expression
         enabled:
           type: boolean
-
-    # Bus
-    BusStats:
-      type: object
-      properties:
-        topics:
-          type: integer
-        subscribers:
-          type: integer
-        messages_published:
-          type: integer
-
-    # Metrics
-    LiveMetricsSnapshot:
-      type: object
-      properties:
-        timestamp:
+        last_run,omitempty:
           type: string
-          format: date-time
-        active_agents:
+          nullable: true
+        next_run,omitempty:
+          type: string
+          nullable: true
+        last_error,omitempty:
+          type: string
+        run_count:
           type: integer
-        queue_depth:
-          type: integer
-        cache_hit_rate:
-          type: number
-        model_failovers:
-          type: integer
-        tokens_used:
-          type: integer
-        requests_total:
-          type: integer
-
-    # Daemon
-    DaemonStatus:
-      type: object
-      properties:
-        running:
+        is_running:
           type: boolean
-        pid:
-          type: integer
-        uptime:
-          type: string
-        state:
-          type: string
-          enum: [offline, idle, working, error]
-
-    # Plans
-    Plan:
+      required:
+        - id
+        - name
+        - schedule
+        - enabled
+        - run_count
+        - is_running
+    AddJobRequest:
       type: object
       properties:
+        id:
+          type: string
+        name:
+          type: string
+        schedule:
+          type: string
+        type:
+          type: string
+        agent_config,omitempty:
+          type: object
+          nullable: true
+        shell_config,omitempty:
+          type: object
+          nullable: true
+        enabled,omitempty:
+          type: boolean
+      required:
+        - id
+        - name
+        - schedule
+        - type
+    AgentJobConfig:
+      type: object
+      properties:
+        prompt:
+          type: string
+        context,omitempty:
+          type: string
+          nullable: true
+        model,omitempty:
+          type: string
+        max_tokens,omitempty:
+          type: integer
+        temperature,omitempty:
+          type: number
+      required:
+        - prompt
+    ShellJobConfig:
+      type: object
+      properties:
+        command:
+          type: string
+        args,omitempty:
+          type: string
+          nullable: true
+        work_dir,omitempty:
+          type: string
+        env,omitempty:
+          type: string
+          nullable: true
+        timeout_secs,omitempty:
+          type: integer
+        capture_output:
+          type: boolean
+      required:
+        - command
+        - capture_output
+    AddJobResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        schedule:
+          type: string
+        enabled:
+          type: boolean
+        last_run,omitempty:
+          type: string
+          nullable: true
+        next_run,omitempty:
+          type: string
+          nullable: true
+        last_error,omitempty:
+          type: string
+        run_count:
+          type: integer
+        is_running:
+          type: boolean
+      required:
+        - id
+        - name
+        - schedule
+        - enabled
+        - run_count
+        - is_running
+    RemoveJobRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    EnableJobRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        enabled:
+          type: boolean
+      required:
+        - id
+        - enabled
+    PauseJobRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    ResumeJobRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    SearchResult:
+      type: object
+      properties:
+        type:
+          type: string
         id:
           type: string
         title:
           type: string
-        description:
+        snippet:
           type: string
-        file_path:
+        relevance:
+          type: number
+      required:
+        - type
+        - id
+        - title
+        - snippet
+        - relevance
+    SearchRequest:
+      type: object
+      properties:
+        query:
           type: string
-        project_id:
+        scope,omitempty:
           type: string
-        state:
-          type: string
-          enum: [planning, draft, pending_approval, approved, executing, completed, confirmed, cancelled, failed]
-        task_id:
-          type: string
-        source_session:
-          type: string
-        approved_at:
-          type: string
-          format: date-time
-        confirmed_at:
-          type: string
-          format: date-time
-        approved_by:
-          type: string
-        confirmed_by:
-          type: string
-        revision_count:
+        limit,omitempty:
           type: integer
-        created_at:
+      required:
+        - query
+    SearchService:
+      type: object
+      properties:
+        sessionStore:
+          type: object
+        taskRegistry:
+          type: object
+          nullable: true
+        memoryMgr:
+          type: object
+          nullable: true
+        planStore:
+          type: object
+    SecurityService:
+      type: object
+      properties:
+        checker:
+          type: object
+          nullable: true
+    CheckRequest:
+      type: object
+      properties:
+        action:
           type: string
-          format: date-time
-        updated_at:
+        resource:
           type: string
-          format: date-time
-
-    PlanPhase:
+      required:
+        - action
+        - resource
+    CheckResponse:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+        reason,omitempty:
+          type: string
+      required:
+        - allowed
+    AuditEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        action:
+          type: string
+        resource:
+          type: string
+        allowed:
+          type: boolean
+      required:
+        - timestamp
+        - action
+        - resource
+        - allowed
+    AuditRequest:
+      type: object
+      properties:
+        limit,omitempty:
+          type: integer
+    SelfImproveService:
+      type: object
+      properties:
+        controller:
+          type: object
+          nullable: true
+    StatusResponse:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        last_cycle,omitempty:
+          type: string
+        skills_learned:
+          type: integer
+        pending_tasks:
+          type: integer
+      required:
+        - enabled
+        - skills_learned
+        - pending_tasks
+    TriggerRequest:
+      type: object
+      properties:
+        force,omitempty:
+          type: boolean
+    CancelRequest:
+      type: object
+      properties:
+        cycle_id:
+          type: string
+      required:
+        - cycle_id
+    GenerateImprovementRequest:
+      type: object
+      properties:
+        improvement_id:
+          type: string
+      required:
+        - improvement_id
+    ValidateImprovementRequest:
+      type: object
+      properties:
+        improvement_id:
+          type: string
+      required:
+        - improvement_id
+    ApplyImprovementRequest:
+      type: object
+      properties:
+        improvement_id:
+          type: string
+      required:
+        - improvement_id
+    RejectImprovementRequest:
+      type: object
+      properties:
+        improvement_id:
+          type: string
+        reason:
+          type: string
+      required:
+        - improvement_id
+        - reason
+    ServiceRegistry:
+      type: object
+      properties:
+        Chat:
+          type: object
+          nullable: true
+        Memory:
+          type: object
+          nullable: true
+        Task:
+          type: object
+          nullable: true
+        Queue:
+          type: object
+          nullable: true
+        Session:
+          type: object
+          nullable: true
+        SessionStore:
+          type: object
+        Worker:
+          type: object
+          nullable: true
+        Pipeline:
+          type: object
+          nullable: true
+        Skills:
+          type: object
+          nullable: true
+        SelfImprove:
+          type: object
+          nullable: true
+        Cache:
+          type: object
+          nullable: true
+        Security:
+          type: object
+          nullable: true
+        Scheduler:
+          type: object
+          nullable: true
+        Bus:
+          type: object
+          nullable: true
+        Templates:
+          type: object
+          nullable: true
+        Daemon:
+          type: object
+          nullable: true
+        Model:
+          type: object
+          nullable: true
+        Calendar:
+          type: object
+          nullable: true
+        Runtime:
+          type: object
+          nullable: true
+        Terminal:
+          type: object
+          nullable: true
+        Project:
+          type: object
+          nullable: true
+        Plan:
+          type: object
+          nullable: true
+        Search:
+          type: object
+          nullable: true
+    Config:
+      type: object
+      properties:
+        Bus:
+          type: object
+          nullable: true
+        AgentRegistry:
+          type: object
+          nullable: true
+        Queue:
+          type: object
+        MemoryManager:
+          type: object
+          nullable: true
+        TaskRegistry:
+          type: object
+          nullable: true
+        SessionStore:
+          type: object
+        WorkerPool:
+          type: object
+          nullable: true
+        SkillRegistry:
+          type: object
+          nullable: true
+        SkillExecutor:
+          type: object
+          nullable: true
+        TemplateRegistry:
+          type: object
+          nullable: true
+        SelfImprove:
+          type: object
+          nullable: true
+        TokenCache:
+          type: object
+          nullable: true
+        SecurityChecker:
+          type: object
+          nullable: true
+        Scheduler:
+          type: object
+          nullable: true
+        CalendarClient:
+          type: object
+          nullable: true
+        DaemonController:
+          type: object
+        RuntimeManager:
+          type: object
+          nullable: true
+        WorkingDir:
+          type: string
+        PidFile:
+          type: string
+        StateDir:
+          type: string
+        BinPath:
+          type: string
+        ProjectManager:
+          type: object
+          nullable: true
+        PlanManager:
+          type: object
+          nullable: true
+        PlanStore:
+          type: object
+    SessionService:
+      type: object
+      properties:
+        store:
+          type: object
+    CreateSessionRequest:
+      type: object
+      properties:
+        name,omitempty:
+          type: string
+    GetSessionRequest:
       type: object
       properties:
         id:
           type: string
-        plan_id:
+      required:
+        - id
+    GetMessagesRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        offset,omitempty:
+          type: integer
+        limit,omitempty:
+          type: integer
+      required:
+        - id
+    DeleteSessionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    ListSessionsRequest:
+      type: object
+      properties:
+        limit,omitempty:
+          type: integer
+    AttachSessionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        agent_id:
+          type: string
+      required:
+        - id
+        - agent_id
+    DetachSessionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        agent_id:
+          type: string
+      required:
+        - id
+        - agent_id
+    ForkSessionRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+        from_message_id:
+          type: integer
+        name,omitempty:
+          type: string
+      required:
+        - session_id
+        - from_message_id
+    ResumeSessionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    BranchSessionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        target_message_id:
+          type: integer
+      required:
+        - id
+        - target_message_id
+    ListBranchesRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    GetTreeRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    CompactSessionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    SkillsService:
+      type: object
+      properties:
+        registry:
+          type: object
+          nullable: true
+        executor:
+          type: object
+          nullable: true
+    SkillsListRequest:
+      type: object
+      properties:
+        category,omitempty:
+          type: string
+        limit,omitempty:
+          type: integer
+    SkillInfo:
+      type: object
+      properties:
+        slug:
           type: string
         name:
           type: string
-        sequence:
-          type: integer
-        total_steps:
-          type: integer
-        completed_steps:
-          type: integer
-        failed_steps:
-          type: integer
-        state:
+        description:
           type: string
-          enum: [pending, in_progress, completed, confirmed, failed]
-
-    PlanListResponse:
+        category,omitempty:
+          type: string
+        capabilities,omitempty:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+        ui_type,omitempty:
+          type: string
+      required:
+        - slug
+        - name
+        - description
+        - enabled
+    SkillUIDescriptor:
       type: object
       properties:
-        plans:
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        ui_type:
+          type: string
+        category,omitempty:
+          type: string
+        tags,omitempty:
+          type: string
+          nullable: true
+        examples,omitempty:
+          type: string
+          nullable: true
+        risk_level,omitempty:
+          type: string
+        body,omitempty:
+          type: string
+        fields,omitempty:
           type: array
-          items:
-            $ref: '#/components/schemas/Plan'
-        count:
+          nullable: true
+        actions,omitempty:
+          type: array
+          nullable: true
+      required:
+        - slug
+        - name
+        - description
+        - ui_type
+    UIFieldDef:
+      type: object
+      properties:
+        name:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+        required,omitempty:
+          type: boolean
+        default,omitempty:
+          type: object
+        options,omitempty:
+          type: string
+          nullable: true
+        placeholder,omitempty:
+          type: string
+        help,omitempty:
+          type: string
+      required:
+        - name
+        - label
+        - type
+    UIActionDef:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+        style,omitempty:
+          type: string
+      required:
+        - id
+        - label
+        - type
+    SkillsGetRequest:
+      type: object
+      properties:
+        slug:
+          type: string
+      required:
+        - slug
+    ExecuteRequest:
+      type: object
+      properties:
+        slug:
+          type: string
+        prompt:
+          type: string
+      required:
+        - slug
+        - prompt
+    ExecuteResult:
+      type: object
+      properties:
+        output:
+          type: string
+        success:
+          type: boolean
+        error,omitempty:
+          type: string
+      required:
+        - output
+        - success
+    TaskService:
+      type: object
+      properties:
+        registry:
+          type: object
+          nullable: true
+    CreateTaskRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description,omitempty:
+          type: string
+        session_id,omitempty:
+          type: string
+      required:
+        - name
+    GetTaskRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    TaskListRequest:
+      type: object
+      properties:
+        limit,omitempty:
           type: integer
+        session_id,omitempty:
+          type: string
+    UpdateTaskRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        state,omitempty:
+          type: string
+        name,omitempty:
+          type: string
+      required:
+        - id
+    DeleteTaskRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    CancelTaskRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    GetTaskStepsRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    TemplatesService:
+      type: object
+      properties:
+        registry:
+          type: object
+          nullable: true
+        executor:
+          type: object
+          nullable: true
+    TemplatesListRequest:
+      type: object
+      properties:
+        limit,omitempty:
+          type: integer
+    TemplateInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        scope:
+          type: object
+        path,omitempty:
+          type: string
+        priority:
+          type: integer
+        body,omitempty:
+          type: string
+      required:
+        - name
+        - description
+        - scope
+        - priority
+    TemplatesGetRequest:
+      type: object
+      properties:
+        name:
+          type: string
+      required:
+        - name
+    TemplatesInvokeRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        args,omitempty:
+          type: string
+          nullable: true
+      required:
+        - name
+    TemplatesInvokeResult:
+      type: object
+      properties:
+        prompt:
+          type: string
+        output,omitempty:
+          type: string
+        success:
+          type: boolean
+        error,omitempty:
+          type: string
+      required:
+        - prompt
+        - success
+    TemplatesClearRequest:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+        name,omitempty:
+          type: string
+      required:
+        - conversation_id
+    TemplatesClearResult:
+      type: object
+      properties:
+        cleared:
+          type: string
+          nullable: true
+      required:
+        - cleared
+    CommandHistory:
+      type: object
+      properties:
+        id:
+          type: string
+        command:
+          type: string
+        output,omitempty:
+          type: string
+        stderr,omitempty:
+          type: string
+        exit_code:
+          type: integer
+        timestamp:
+          type: string
+        working_dir:
+          type: string
+        duration_ms:
+          type: object
+        risk_level:
+          type: object
+        success:
+          type: boolean
+      required:
+        - id
+        - command
+        - exit_code
+        - timestamp
+        - working_dir
+        - duration_ms
+        - risk_level
+        - success
+    TerminalService:
+      type: object
+      properties:
+        shellTool:
+          type: object
+          nullable: true
+        bus:
+          type: object
+          nullable: true
+        logger:
+          type: object
+          nullable: true
+        history:
+          type: array
+          nullable: true
+        historyMu:
+          type: object
+        maxHistory:
+          type: integer
+        workingDir:
+          type: string
+        sessionStore:
+          type: string
+          nullable: true
+        sessionMu:
+          type: object
+    TerminalSession:
+      type: object
+      properties:
+        ID:
+          type: string
+        WorkingDir:
+          type: string
+        CreatedAt:
+          type: string
+        LastUsed:
+          type: string
+        CommandCount:
+          type: integer
+    ListOptions:
+      type: object
+      properties:
+        limit,omitempty:
+          type: integer
+        offset,omitempty:
+          type: integer
+        filter,omitempty:
+          type: string
+    PaginatedResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          nullable: true
+        total:
+          type: integer
+        has_more:
+          type: boolean
+        next_offset,omitempty:
+          type: integer
+      required:
+        - items
+        - total
+        - has_more
+    WorkerService:
+      type: object
+      properties:
+        pool:
+          type: object
+          nullable: true
+    WorkerStatsResponse:
+      type: object
+      properties:
+        total_workers:
+          type: integer
+        idle_workers:
+          type: integer
+        busy_workers:
+          type: integer
+        error_workers:
+          type: integer
+        worker_stats:
+          type: array
+          nullable: true
+      required:
+        - total_workers
+        - idle_workers
+        - busy_workers
+        - error_workers
+        - worker_stats
+    AddWorkerRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        capabilities:
+          type: string
+          nullable: true
+      required:
+        - id
+        - capabilities
+    RemoveWorkerRequest:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    ScaleWorkersRequest:
+      type: object
+      properties:
+        desired_count:
+          type: integer
+      required:
+        - desired_count
 
 paths:
-  /health:
-    get:
-      summary: Health check
-      tags: [Health]
-      responses:
-        '200':
-          description: Service is healthy
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
-
-  # Chat Endpoints
-  /api/v1/chat:
+  /api/v1/bus/publish:
     post:
-      summary: Send a chat message
-      tags: [Chat]
+      summary: s.handleBusPublish
+      tags:
+        - v1
       security:
         - ApiKeyAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ChatRequest'
       responses:
         '200':
-          description: Chat response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ChatResponse'
+          description: Success
         '400':
-          description: Invalid request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          description: Bad request
         '401':
           description: Unauthorized
         '500':
-          description: Service error
-
-  # Memory Endpoints
-  /api/v1/memory/query:
-    post:
-      summary: Search memories
-      tags: [Memory]
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                query:
-                  type: string
-                limit:
-                  type: integer
-                category:
-                  type: string
-      responses:
-        '200':
-          description: Search results
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MemoryResult'
-
-  /api/v1/memory/recent:
-    get:
-      summary: Get recent memories
-      tags: [Memory]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 10
-      responses:
-        '200':
-          description: Recent memories
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MemoryResult'
-
-  /api/v1/memory/export:
-    post:
-      summary: Export memories
-      tags: [Memory]
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                format:
-                  type: string
-                category:
-                  type: string
-      responses:
-        '200':
-          description: Exported data
-          content:
-            application/json:
-              schema:
-                type: string
-                format: binary
-
-  # Task Endpoints
-  /api/v1/tasks:
-    get:
-      summary: List tasks
-      tags: [Tasks]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-      responses:
-        '200':
-          description: List of tasks
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  tasks:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Task'
-                  count:
-                    type: integer
-    post:
-      summary: Create a task
-      tags: [Tasks]
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                name:
-                  type: string
-                description:
-                  type: string
-      responses:
-        '201':
-          description: Task created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Task'
-
-  /api/v1/tasks/{id}:
-    get:
-      summary: Get task by ID
-      tags: [Tasks]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Task details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Task'
-        '404':
-          description: Task not found
-    put:
-      summary: Update task
-      tags: [Tasks]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                state:
-                  type: string
-      responses:
-        '200':
-          description: Task updated
-    delete:
-      summary: Delete task
-      tags: [Tasks]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Task deleted
-
-  /api/v1/tasks/{id}/cancel:
-    post:
-      summary: Cancel a task
-      tags: [Tasks]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Task cancelled
-        '501':
-          description: Not implemented
-
-  /api/v1/tasks/{id}/steps:
-    get:
-      summary: Get task steps
-      tags: [Tasks]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Task steps
-        '501':
-          description: Not implemented
-
-  # Queue Endpoints
-  /api/v1/queue/jobs:
-    get:
-      summary: List jobs
-      tags: [Queue]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: state
-          in: query
-          schema:
-            type: string
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-      responses:
-        '200':
-          description: List of jobs
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  jobs:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Job'
-                  count:
-                    type: integer
-    post:
-      summary: Enqueue a job
-      tags: [Queue]
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - prompt
-              properties:
-                type:
-                  type: string
-                priority:
-                  type: integer
-                task_id:
-                  type: string
-                prompt:
-                  type: string
-                session_id:
-                  type: string
-                required_caps:
-                  type: array
-                  items:
-                    type: string
-      responses:
-        '201':
-          description: Job created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Job'
-
-  /api/v1/queue/jobs/{id}:
-    get:
-      summary: Get job by ID
-      tags: [Queue]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Job details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Job'
-
-  /api/v1/queue/jobs/{id}/claim:
-    post:
-      summary: Claim next job
-      tags: [Queue]
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                worker_id:
-                  type: string
-                capabilities:
-                  type: array
-                  items:
-                    type: string
-      responses:
-        '200':
-          description: Job claimed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Job'
-
-  /api/v1/queue/jobs/{id}/complete:
-    post:
-      summary: Complete a job
-      tags: [Queue]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                result:
-                  type: object
-      responses:
-        '200':
-          description: Job completed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: completed
-
-  /api/v1/queue/jobs/{id}/fail:
-    post:
-      summary: Fail a job
-      tags: [Queue]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                error:
-                  type: string
-      responses:
-        '200':
-          description: Job failed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: failed
-
-  /api/v1/queue/jobs/{id}/retry:
-    post:
-      summary: Retry a failed job
-      tags: [Queue]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Job queued for retry
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: retried
-
-  /api/v1/queue/stats:
-    get:
-      summary: Get queue statistics
-      tags: [Queue]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Queue stats
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueStats'
-
-  # Session Endpoints
-  /api/v1/sessions:
-    get:
-      summary: List sessions
-      tags: [Sessions]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: List of sessions
-    post:
-      summary: Create a session
-      tags: [Sessions]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '201':
-          description: Session created
-
-  /api/v1/sessions/{id}:
-    get:
-      summary: Get session by ID
-      tags: [Sessions]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Session details
-    delete:
-      summary: Delete session
-      tags: [Sessions]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Session deleted
-
-  /api/v1/sessions/{id}/attach:
-    post:
-      summary: Attach to session
-      tags: [Sessions]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Attached
-        '501':
-          description: Not implemented
-
-  /api/v1/sessions/{id}/detach:
-    post:
-      summary: Detach from session
-      tags: [Sessions]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Detached
-        '501':
-          description: Not implemented
-
-  # Worker Endpoints
-  /api/v1/workers/stats:
-    get:
-      summary: Get worker statistics
-      tags: [Workers]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Worker stats
-
-  /api/v1/workers:
-    post:
-      summary: Add a worker
-      tags: [Workers]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '201':
-          description: Worker added
-        '501':
-          description: Not implemented
-
-  /api/v1/workers/{id}:
-    delete:
-      summary: Remove a worker
-      tags: [Workers]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Worker removed
-        '501':
-          description: Not implemented
-
-  /api/v1/workers/scale:
-    post:
-      summary: Scale workers
-      tags: [Workers]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Scaled
-        '501':
-          description: Not implemented
-
-  # Skills Endpoints
-  /api/v1/skills:
-    get:
-      summary: List skills
-      tags: [Skills]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
-      responses:
-        '200':
-          description: List of skills
-
-  /api/v1/skills/{slug}:
-    get:
-      summary: Get skill details
-      tags: [Skills]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: slug
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Skill details
-
-  /api/v1/skills/{slug}/execute:
-    post:
-      summary: Execute a skill
-      tags: [Skills]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: slug
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Execution result
-
-  # Self-Improve Endpoints
-  /api/v1/selfimprove/status:
-    get:
-      summary: Get self-improve status
-      tags: [Self-Improve]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Status info
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SelfImproveStatus'
-
-  /api/v1/selfimprove/trigger:
-    post:
-      summary: Trigger self-improvement
-      tags: [Self-Improve]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Triggered
-
-  /api/v1/selfimprove/analyze:
-    post:
-      summary: Analyze for improvements
-      tags: [Self-Improve]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Analysis started
-        '501':
-          description: Not implemented
-
-  /api/v1/selfimprove/generate:
-    post:
-      summary: Generate improvement
-      tags: [Self-Improve]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '501':
-          description: Not implemented
-
-  /api/v1/selfimprove/validate:
-    post:
-      summary: Validate improvement
-      tags: [Self-Improve]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '501':
-          description: Not implemented
-
-  /api/v1/selfimprove/apply:
-    post:
-      summary: Apply improvement
-      tags: [Self-Improve]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '501':
-          description: Not implemented
-
-  /api/v1/selfimprove/reject:
-    post:
-      summary: Reject improvement
-      tags: [Self-Improve]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '501':
-          description: Not implemented
-
-  # Cache Endpoints
-  /api/v1/cache/stats:
-    get:
-      summary: Get cache statistics
-      tags: [Cache]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Cache stats
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CacheStats'
-
-  /api/v1/cache/clear:
-    post:
-      summary: Clear cache
-      tags: [Cache]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Cache cleared
-
-  # Security Endpoints
-  /api/v1/security/check:
-    post:
-      summary: Check security for an action
-      tags: [Security]
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SecurityCheckRequest'
-      responses:
-        '200':
-          description: Security check result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SecurityCheckResponse'
-
-  # Scheduler Endpoints
-  /api/v1/scheduler/jobs:
-    get:
-      summary: List scheduled jobs
-      tags: [Scheduler]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: List of jobs
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  jobs:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/ScheduledJob'
-    post:
-      summary: Add scheduled job
-      tags: [Scheduler]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '201':
-          description: Job created
-
-  # Bus Endpoints
-  /api/v1/bus/publish:
-    post:
-      summary: Publish message to bus
-      tags: [Bus]
-      security:
-        - ApiKeyAuth: []
-      responses:
-        '200':
-          description: Published
-
+          description: Internal server error
   /api/v1/bus/stats:
     get:
-      summary: Get bus statistics
-      tags: [Bus]
+      summary: s.handleBusStats
+      tags:
+        - v1
       security:
         - ApiKeyAuth: []
       responses:
         '200':
-          description: Bus stats
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BusStats'
-
-  # Daemon Endpoints
-  /api/v1/daemon/status:
-    get:
-      summary: Get daemon status
-      tags: [Daemon]
-      responses:
-        '200':
-          description: Daemon status
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DaemonStatus'
-
-  /api/v1/daemon/restart:
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/cache/clear:
     post:
-      summary: Restart daemon
-      tags: [Daemon]
+      summary: s.handleCacheClear
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: Daemon restarted
-
-  # Metrics Endpoints
-  /api/v1/metrics/live:
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/cache/inspect:
     get:
-      summary: Get live metrics
-      tags: [Metrics]
+      summary: s.handleCacheInspect
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: Live metrics snapshot
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/LiveMetricsSnapshot'
-
-  /api/v1/metrics/historical:
-    get:
-      summary: Get historical metrics
-      tags: [Metrics]
-      parameters:
-        - name: from
-          in: query
-          required: true
-          schema:
-            type: string
-            format: date-time
-        - name: to
-          in: query
-          required: true
-          schema:
-            type: string
-            format: date-time
-        - name: resolution
-          in: query
-          schema:
-            type: string
-            enum: [minute, hour, day]
-            default: hour
-      responses:
-        '200':
-          description: Historical metrics
-
-  /api/v1/metrics/stream:
-    get:
-      summary: Stream metrics (WebSocket)
-      tags: [Metrics]
-      responses:
-        '200':
-          description: WebSocket stream endpoint
-
-  # Config Endpoints
-  /api/v1/config/client:
-    get:
-      summary: Get client config
-      tags: [Config]
-      responses:
-        '200':
-          description: Client configuration
-          content:
-            application/json5:
-              schema:
-                type: string
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/cache/invalidate:
     post:
-      summary: Save client config
-      tags: [Config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                content:
-                  type: string
+      summary: s.handleCacheInvalidate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: Config saved
-
-  /api/v1/config/models:
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/cache/stats:
     get:
-      summary: Get models config
-      tags: [Config]
+      summary: s.handleCacheStats
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: Models configuration
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/calendar/events:
     post:
-      summary: Save models config
-      tags: [Config]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                content:
-                  type: string
+      summary: s.handleCalendarCreate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: Config saved
-
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/calendar/events:
+    get:
+      summary: s.handleCalendarList
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/calendar/events/{id}:
+    delete:
+      summary: s.handleCalendarDelete
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/calendar/events/{id}:
+    put:
+      summary: s.handleCalendarUpdate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/calendar/events/{id}:
+    get:
+      summary: s.handleCalendarGet
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/calendar/quickadd:
+    post:
+      summary: s.handleCalendarQuickAdd
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/calendar/today:
+    get:
+      summary: s.handleCalendarToday
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/calendar/upcoming:
+    get:
+      summary: s.handleCalendarUpcoming
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/chat:
+    post:
+      summary: s.handleChat
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/chat/queue/{id}:
+    get:
+      summary: s.handleChatQueueStatus
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/chat/stream:
+    get:
+      summary: s.handleChatStream
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/chat/with-agent:
+    post:
+      summary: s.handleChatWithAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
   /api/v1/config/agents:
     get:
-      summary: List agents
-      tags: [Config]
+      summary: s.handleListAgents
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: List of agents
-
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/agents/{id}:
+    delete:
+      summary: s.handleDeleteAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
   /api/v1/config/agents/{id}:
     get:
-      summary: Get agent config
-      tags: [Config]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: s.handleGetAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: Agent configuration
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/agents/{id}:
     post:
-      summary: Save agent config
-      tags: [Config]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: s.handleSaveAgent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: Agent saved
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/client:
+    get:
+      summary: s.handleGetClientConfig
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/client:
+    post:
+      summary: s.handleSaveClientConfig
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/menubar:
+    post:
+      summary: s.handleSaveMenubarConfig
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/menubar:
+    get:
+      summary: s.handleGetMenubarConfig
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/models:
+    get:
+      summary: s.handleGetModelsConfig
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/models:
+    post:
+      summary: s.handleSaveModelsConfig
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/config/normalize:
+    post:
+      summary: s.handleNormalizeConfig
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/daemon/restart:
+    post:
+      summary: s.handleDaemonRestart
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/daemon/start:
+    post:
+      summary: s.handleDaemonStart
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/daemon/status:
+    get:
+      summary: s.handleDaemonStatus
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/daemon/stop:
+    post:
+      summary: s.handleDaemonStop
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/health:
+    get:
+      summary: s.handleHealth
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/memory/export:
+    post:
+      summary: s.handleMemoryExport
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/memory/query:
+    post:
+      summary: s.handleMemoryQuery
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/memory/recent:
+    get:
+      summary: s.handleMemoryRecent
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/memory/vector/search:
+    post:
+      summary: s.handleMemoryVectorSearch
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/memory/vector/stats:
+    get:
+      summary: s.handleMemoryVectorStats
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/memory/vector/store:
+    post:
+      summary: s.handleMemoryVectorStore
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/memory/vector/{id}:
     delete:
-      summary: Delete agent
-      tags: [Config]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+      summary: s.handleMemoryVectorDelete
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
-          description: Agent deleted
-
-  # Plans Endpoints
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/metrics/firewall:
+    get:
+      summary: s.handleFirewallStats
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/metrics/historical:
+    get:
+      summary: s.handleHistoricalMetrics
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/metrics/live:
+    get:
+      summary: s.handleLiveMetrics
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/metrics/rate-limits:
+    get:
+      summary: s.handleRateLimitSummary
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/metrics/stream:
+    get:
+      summary: s.handleMetricsStream
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/models:
+    get:
+      summary: s.handleModelsList
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/models/credentials/{provider}:
+    post:
+      summary: s.handleModelsSetCredential
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/models/credentials/{provider}:
+    get:
+      summary: s.handleModelsGetCredential
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/models/credentials/{provider}:
+    delete:
+      summary: s.handleModelsDeleteCredential
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/models/default:
+    get:
+      summary: s.handleModelsGetDefault
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/models/default:
+    post:
+      summary: s.handleModelsSetDefault
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/models/providers:
+    get:
+      summary: s.handleModelsProviders
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/models/{provider}/{model}:
+    delete:
+      summary: s.handleModelsRemove
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/plans:
+    post:
+      summary: s.handlePlanCreate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
   /api/v1/plans:
     get:
-      summary: List plans
-      tags: [Plans]
+      summary: s.handlePlanList
+      tags:
+        - v1
       security:
         - ApiKeyAuth: []
-      parameters:
-        - name: project_id
-          in: query
-          schema:
-            type: string
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 50
       responses:
         '200':
-          description: List of plans
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlanListResponse'
-    post:
-      summary: Create a plan
-      tags: [Plans]
-      security:
-        - ApiKeyAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - title
-              properties:
-                title:
-                  type: string
-                description:
-                  type: string
-                project_id:
-                  type: string
-                project_path:
-                  type: string
-                session_id:
-                  type: string
-      responses:
-        '201':
-          description: Plan created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Plan'
-
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
   /api/v1/plans/{id}:
     get:
-      summary: Get plan by ID
-      tags: [Plans]
+      summary: s.handlePlanGet
+      tags:
+        - v1
       security:
         - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
-          description: Plan details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Plan'
-        '404':
-          description: Plan not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
   /api/v1/plans/{id}/approve:
     post:
-      summary: Approve a plan
-      tags: [Plans]
+      summary: s.handlePlanApprove
+      tags:
+        - v1
       security:
         - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                session_id:
-                  type: string
-                by:
-                  type: string
       responses:
         '200':
-          description: Plan approved
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Plan'
-
-  /api/v1/plans/{id}/reject:
-    post:
-      summary: Reject a plan
-      tags: [Plans]
-      security:
-        - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                session_id:
-                  type: string
-                by:
-                  type: string
-                reason:
-                  type: string
-      responses:
-        '200':
-          description: Plan rejected
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Plan'
-
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
   /api/v1/plans/{id}/confirm:
     post:
-      summary: Confirm a completed plan
-      tags: [Plans]
+      summary: s.handlePlanConfirm
+      tags:
+        - v1
       security:
         - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                session_id:
-                  type: string
-                by:
-                  type: string
       responses:
         '200':
-          description: Plan confirmed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Plan'
-
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/plans/{id}/reject:
+    post:
+      summary: s.handlePlanReject
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
   /api/v1/plans/{id}/revise:
     post:
-      summary: Revise a plan
-      tags: [Plans]
+      summary: s.handlePlanRevise
+      tags:
+        - v1
       security:
         - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                session_id:
-                  type: string
-                feedback:
-                  type: string
       responses:
         '200':
-          description: Plan revised
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Plan'
-
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects:
+    post:
+      summary: s.handleProjectRegister
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects:
+    get:
+      summary: s.handleProjectList
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects/detect:
+    post:
+      summary: s.handleProjectDetect
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects/{id}:
+    delete:
+      summary: s.handleProjectUnregister
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects/{id}:
+    get:
+      summary: s.handleProjectGet
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects/{id}/branches:
+    get:
+      summary: s.handleProjectBranches
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects/{id}/checkout:
+    post:
+      summary: s.handleProjectCheckout
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects/{id}/status:
+    get:
+      summary: s.handleProjectStatus
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/projects/{id}/sync:
+    post:
+      summary: s.handleProjectSync
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/followup:
+    post:
+      summary: s.handleQueueFollowUpRoute
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/jobs:
+    post:
+      summary: s.handleQueueEnqueue
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/jobs:
+    get:
+      summary: s.handleQueueList
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/jobs/{id}:
+    get:
+      summary: s.handleQueueGet
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/jobs/{id}/claim:
+    post:
+      summary: s.handleQueueClaim
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/jobs/{id}/complete:
+    post:
+      summary: s.handleQueueComplete
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/jobs/{id}/fail:
+    post:
+      summary: s.handleQueueFail
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/jobs/{id}/retry:
+    post:
+      summary: s.handleQueueRetry
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/stats:
+    get:
+      summary: s.handleQueueStats
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/status/{id}:
+    get:
+      summary: s.handleQueueStatusRoute
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/queue/steer:
+    post:
+      summary: s.handleQueueSteerRoute
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/runtime/restart/{provider}:
+    post:
+      summary: s.handleRuntimeRestart
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/runtime/start/{provider}:
+    post:
+      summary: s.handleRuntimeStart
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/runtime/status:
+    get:
+      summary: s.handleRuntimeStatus
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/runtime/status/{provider}:
+    get:
+      summary: s.handleRuntimeStatusProvider
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/runtime/stop/{provider}:
+    post:
+      summary: s.handleRuntimeStop
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/scheduler/jobs:
+    post:
+      summary: s.handleSchedulerAddJob
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/scheduler/jobs:
+    get:
+      summary: s.handleSchedulerListJobs
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/scheduler/jobs/{id}:
+    delete:
+      summary: s.handleSchedulerRemoveJob
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/scheduler/jobs/{id}/enable:
+    post:
+      summary: s.handleSchedulerEnableJob
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/scheduler/jobs/{id}/pause:
+    post:
+      summary: s.handleSchedulerPauseJob
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/scheduler/jobs/{id}/resume:
+    post:
+      summary: s.handleSchedulerResumeJob
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/search:
+    post:
+      summary: s.handleSearch
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/security/check:
+    post:
+      summary: s.handleSecurityCheck
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/selfimprove/analyze:
+    post:
+      summary: s.handleSelfImproveAnalyze
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/selfimprove/apply:
+    post:
+      summary: s.handleSelfImproveApply
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/selfimprove/generate:
+    post:
+      summary: s.handleSelfImproveGenerate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/selfimprove/reject:
+    post:
+      summary: s.handleSelfImproveReject
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/selfimprove/status:
+    get:
+      summary: s.handleSelfImproveStatus
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/selfimprove/trigger:
+    post:
+      summary: s.handleSelfImproveTrigger
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/selfimprove/validate:
+    post:
+      summary: s.handleSelfImproveValidate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions:
+    post:
+      summary: s.handleSessionCreate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions:
+    get:
+      summary: s.handleSessionList
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}:
+    get:
+      summary: s.handleSessionGet
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}:
+    delete:
+      summary: s.handleSessionDelete
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/attach:
+    post:
+      summary: s.handleSessionAttach
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/branch:
+    post:
+      summary: s.handleSessionBranch
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/branches:
+    get:
+      summary: s.handleSessionBranches
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/compact:
+    post:
+      summary: s.handleSessionCompact
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/detach:
+    post:
+      summary: s.handleSessionDetach
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/fork:
+    post:
+      summary: s.handleSessionFork
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/messages:
+    get:
+      summary: s.handleSessionMessages
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
   /api/v1/sessions/{id}/plans:
     get:
-      summary: List plans for a session
-      tags: [Plans, Sessions]
+      summary: s.handleSessionPlans
+      tags:
+        - v1
       security:
         - ApiKeyAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         '200':
-          description: List of plans for the session
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlanListResponse'
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/resume:
+    post:
+      summary: s.handleSessionResume
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/sessions/{id}/tree:
+    get:
+      summary: s.handleSessionTree
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/skills:
+    get:
+      summary: s.handleSkillsList
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/skills/{slug}:
+    get:
+      summary: s.handleSkillsGet
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/skills/{slug}/execute:
+    post:
+      summary: s.handleSkillsExecute
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/skills/{slug}/ui:
+    get:
+      summary: s.handleSkillUI
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/tasks:
+    post:
+      summary: s.handleTaskCreate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/tasks:
+    get:
+      summary: s.handleTaskList
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/tasks/{id}:
+    get:
+      summary: s.handleTaskGet
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/tasks/{id}:
+    put:
+      summary: s.handleTaskUpdate
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/tasks/{id}:
+    delete:
+      summary: s.handleTaskDelete
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/tasks/{id}/cancel:
+    post:
+      summary: s.handleTaskCancel
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/tasks/{id}/steps:
+    get:
+      summary: s.handleTaskSteps
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/terminal/clear:
+    post:
+      summary: s.handleTerminalClear
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/terminal/exec:
+    post:
+      summary: s.handleTerminalExec
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/terminal/history:
+    get:
+      summary: s.handleTerminalHistory
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/terminal/sessions:
+    get:
+      summary: s.handleTerminalSessions
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/workers:
+    post:
+      summary: s.handleWorkerAdd
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/workers/scale:
+    post:
+      summary: s.handleWorkerScale
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/workers/stats:
+    get:
+      summary: s.handleWorkerStats
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /api/v1/workers/{id}:
+    delete:
+      summary: s.handleWorkerRemove
+      tags:
+        - v1
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+  /health:
+    get:
+      summary: s.handleHealth
+      tags:
+        - health
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Success
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error

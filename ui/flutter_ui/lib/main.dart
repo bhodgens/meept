@@ -1,12 +1,14 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'services/storage_service.dart';
 import 'services/websocket_service.dart';
 import 'theme/cyberpunk_theme.dart';
 import 'core/constants.dart';
-import 'features/home/home_screen.dart';
+import 'core/router.dart';
 import 'providers/providers.dart';
 
 void main() async {
@@ -15,17 +17,23 @@ void main() async {
   // Initialize persistent storage before any provider or service reads
   await StorageService.instance.init();
 
-  runZonedGuarded(() {
-    runApp(
-      const ProviderScope(
-        child: CyberpunkApp(),
-      ),
-    );
-  }, (error, stackTrace) {
-    // Log unhandled errors — in production, wire this to a crash reporting service
-    debugPrint('Unhandled error: $error');
-    debugPrint('Stack trace: $stackTrace');
-  });
+  // Initialize Sentry for crash reporting
+  await SentryFlutter.init(
+    (options) {
+      options.dsn = Platform.environment['SENTRY_DSN'] ??
+          'https://placeholder@placeholder.ingest.sentry.io/placeholder';
+      options.debug = true;
+      options.tracesSampleRate = 1.0;
+      options.profilesSampleRate = 1.0;
+    },
+    appRunner: () {
+      runApp(
+        const ProviderScope(
+          child: CyberpunkApp(),
+        ),
+      );
+    },
+  );
 }
 
 class CyberpunkApp extends StatelessWidget {
@@ -33,11 +41,14 @@ class CyberpunkApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
+      routerConfig: router,
       title: 'Meept GUI Client v${AppConstants.appVersion}',
       debugShowCheckedModeBanner: false,
       theme: CyberpunkTheme.darkTheme,
-      home: const _AppLifecycleWrapper(child: HomeScreen()),
+      builder: (context, child) {
+        return _AppLifecycleWrapper(child: child!);
+      },
     );
   }
 }

@@ -1,0 +1,11 @@
+nav:
+  - index.md
+  - features.md
+  - Getting Started: getting-started/
+  - Concepts: concepts/
+  - Configuration: configuration/
+  - Workflows: workflows/
+  - Skills: skills/
+  - Reference: reference/
+  - Plans: plans/
+  - Auto-Analysis: auto-analysis/
