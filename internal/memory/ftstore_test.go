@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -130,12 +129,8 @@ func TestSQLiteFTSStore_Store(t *testing.T) {
 	insertTestItem(t, store, "id-1", "hello world", "general")
 
 	count, err := store.Count(context.Background(), "test_items")
-	if err != nil {
-		t.Fatalf("Count: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("expected count 1, got %d", count)
-	}
+	require.NoError(t, err, "Count")
+	assert.Equal(t, 1, count)
 }
 
 func TestSQLiteFTSStore_Delete(t *testing.T) {
@@ -146,9 +141,7 @@ func TestSQLiteFTSStore_Delete(t *testing.T) {
 	insertTestItem(t, store, "id-1", "hello world", "general")
 
 	err := store.Delete(context.Background(), "DELETE FROM test_items WHERE id = ?", "id-1")
-	if err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
+	require.NoError(t, err, "Delete")
 
 	count, _ := store.Count(context.Background(), "test_items")
 	if count != 0 {
@@ -166,17 +159,11 @@ func TestSQLiteFTSStore_DeleteByIDs(t *testing.T) {
 	insertTestItem(t, store, "id-3", "item 3", "general")
 
 	deleted, err := store.DeleteByIDs(context.Background(), "test_items", []string{"id-1", "id-3"})
-	if err != nil {
-		t.Fatalf("DeleteByIDs: %v", err)
-	}
-	if deleted != 2 {
-		t.Errorf("expected 2 deleted, got %d", deleted)
-	}
+	require.NoError(t, err, "DeleteByIDs")
+	assert.Equal(t, 2, deleted)
 
 	count, _ := store.Count(context.Background(), "test_items")
-	if count != 1 {
-		t.Errorf("expected count 1, got %d", count)
-	}
+	assert.Equal(t, 1, count)
 }
 
 func TestSQLiteFTSStore_DeleteByIDs_Empty(t *testing.T) {
@@ -185,9 +172,7 @@ func TestSQLiteFTSStore_DeleteByIDs_Empty(t *testing.T) {
 	defer store.Close()
 
 	deleted, err := store.DeleteByIDs(context.Background(), "test_items", []string{})
-	if err != nil {
-		t.Fatalf("DeleteByIDs empty: %v", err)
-	}
+	require.NoError(t, err, "DeleteByIDs empty")
 	if deleted != 0 {
 		t.Errorf("expected 0 deleted for empty list, got %d", deleted)
 	}
@@ -206,12 +191,8 @@ func TestSQLiteFTSStore_Count(t *testing.T) {
 	insertTestItem(t, store, "id-2", "b", "code")
 
 	count, err := store.Count(context.Background(), "test_items")
-	if err != nil {
-		t.Fatalf("Count: %v", err)
-	}
-	if count != 2 {
-		t.Errorf("expected count 2, got %d", count)
-	}
+	require.NoError(t, err, "Count")
+	assert.Equal(t, 2, count)
 }
 
 func TestSQLiteFTSStore_GetOldestTimestamp_Empty(t *testing.T) {
@@ -220,12 +201,8 @@ func TestSQLiteFTSStore_GetOldestTimestamp_Empty(t *testing.T) {
 	defer store.Close()
 
 	ts, err := store.GetOldestTimestamp(context.Background(), "test_items")
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetOldestTimestamp expected ErrNotFound, got: %v", err)
-	}
-	if ts != nil {
-		t.Error("expected nil for empty store")
-	}
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Nil(t, ts, "expected nil for empty store")
 }
 
 func TestSQLiteFTSStore_GetNewestTimestamp_Empty(t *testing.T) {
@@ -234,12 +211,8 @@ func TestSQLiteFTSStore_GetNewestTimestamp_Empty(t *testing.T) {
 	defer store.Close()
 
 	ts, err := store.GetNewestTimestamp(context.Background(), "test_items")
-	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetNewestTimestamp expected ErrNotFound, got: %v", err)
-	}
-	if ts != nil {
-		t.Error("expected nil for empty store")
-	}
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Nil(t, ts, "expected nil for empty store")
 }
 
 func TestSQLiteFTSStore_Timestamps_WithData(t *testing.T) {
@@ -253,20 +226,12 @@ func TestSQLiteFTSStore_Timestamps_WithData(t *testing.T) {
 	insertTestItem(t, store, "id-2", "second", "general")
 
 	oldest, err := store.GetOldestTimestamp(ctx, "test_items")
-	if err != nil {
-		t.Fatalf("GetOldestTimestamp: %v", err)
-	}
-	if oldest == nil {
-		t.Fatal("expected non-nil oldest timestamp")
-	}
+	require.NoError(t, err, "GetOldestTimestamp")
+	require.NotNil(t, oldest, "expected non-nil oldest timestamp")
 
 	newest, err := store.GetNewestTimestamp(ctx, "test_items")
-	if err != nil {
-		t.Fatalf("GetNewestTimestamp: %v", err)
-	}
-	if newest == nil {
-		t.Fatal("expected non-nil newest timestamp")
-	}
+	require.NoError(t, err, "GetNewestTimestamp")
+	require.NotNil(t, newest, "expected non-nil newest timestamp")
 
 	if !oldest.Before(*newest) {
 		t.Errorf("oldest %v should be before newest %v", oldest, newest)
@@ -289,13 +254,9 @@ func TestSQLiteFTSStore_FindDuplicateGroups(t *testing.T) {
 	insertTestItem(t, store, "id-4", "Unique content that is also long enough to be considered", "general")
 
 	groups, err := store.FindDuplicateGroups(context.Background(), "test_items", 50)
-	if err != nil {
-		t.Fatalf("FindDuplicateGroups: %v", err)
-	}
+	require.NoError(t, err, "FindDuplicateGroups")
 
-	if len(groups) != 1 {
-		t.Fatalf("expected 1 duplicate group, got %d", len(groups))
-	}
+	require.Len(t, groups, 1)
 	if len(groups[0]) != 3 {
 		t.Errorf("expected 3 IDs in duplicate group, got %d", len(groups[0]))
 	}
@@ -310,9 +271,7 @@ func TestSQLiteFTSStore_FindDuplicateGroups_NoDuplicates(t *testing.T) {
 	insertTestItem(t, store, "id-2", "Foxtrot golf hotel india juliet", "code")
 
 	groups, err := store.FindDuplicateGroups(context.Background(), "test_items", 10)
-	if err != nil {
-		t.Fatalf("FindDuplicateGroups: %v", err)
-	}
+	require.NoError(t, err, "FindDuplicateGroups")
 	if len(groups) != 0 {
 		t.Errorf("expected 0 groups for unique content, got %d", len(groups))
 	}
@@ -330,31 +289,20 @@ func TestSQLiteFTSStore_ScanResults_NoRank(t *testing.T) {
 
 	insertTestItem(t, store, "id-1", "hello world", "general")
 
-	pool := store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("pool.Get: %v", err)
-	}
-	defer pool.Put(db)
+	db := store.GetDB()
 
 	rows, err := db.QueryContext(ctx,
 		"SELECT id, content, category, metadata_json, created_at FROM test_items")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
+	require.NoError(t, err, "Query")
 	defer rows.Close()
 
 	results, err := store.ScanResults(rows, false, ScanRowConfig{
 		MemoryType: MemoryTypeEpisodic,
 		SourceFmt:  "episodic",
 	})
-	if err != nil {
-		t.Fatalf("ScanResults: %v", err)
-	}
+	require.NoError(t, err, "ScanResults")
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	r := results[0]
 	if r.Memory.ID != "id-1" {
@@ -390,12 +338,7 @@ func TestSQLiteFTSStore_ScanResults_WithRank(t *testing.T) {
 	insertTestItem(t, store, "id-1", "python programming language", "code")
 	insertTestItem(t, store, "id-2", "go programming basics", "code")
 
-	pool := store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("pool.Get: %v", err)
-	}
-	defer pool.Put(db)
+	db := store.GetDB()
 
 	rows, err := db.QueryContext(ctx, `
 		SELECT m.id, m.content, m.category, m.metadata_json, m.created_at, f.rank
@@ -404,22 +347,16 @@ func TestSQLiteFTSStore_ScanResults_WithRank(t *testing.T) {
 		WHERE test_fts MATCH ?
 		ORDER BY f.rank
 	`, "programming", 10)
-	if err != nil {
-		t.Fatalf("FTS query: %v", err)
-	}
+	require.NoError(t, err, "FTS query")
 	defer rows.Close()
 
 	results, err := store.ScanResults(rows, true, ScanRowConfig{
 		MemoryType: MemoryTypeTask,
 		SourceFmt:  "task:%s",
 	})
-	if err != nil {
-		t.Fatalf("ScanResults: %v", err)
-	}
+	require.NoError(t, err, "ScanResults")
 
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
+	require.Len(t, results, 2)
 
 	for _, r := range results {
 		if r.Memory.Type != MemoryTypeTask {
@@ -441,27 +378,18 @@ func TestSQLiteFTSStore_ScanResults_Empty(t *testing.T) {
 	defer store.Close()
 	ctx := context.Background()
 
-	pool := store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("pool.Get: %v", err)
-	}
-	defer pool.Put(db)
+	db := store.GetDB()
 
 	rows, err := db.QueryContext(ctx,
 		"SELECT id, content, category, metadata_json, created_at FROM test_items WHERE id = 'nonexistent'")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
+	require.NoError(t, err, "Query")
 	defer rows.Close()
 
 	results, err := store.ScanResults(rows, false, ScanRowConfig{
 		MemoryType: MemoryTypeEpisodic,
 		SourceFmt:  "episodic",
 	})
-	if err != nil {
-		t.Fatalf("ScanResults: %v", err)
-	}
+	require.NoError(t, err, "ScanResults")
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
 	}
@@ -480,63 +408,43 @@ func TestSQLiteFTSStore_OperationsBeforeInit(t *testing.T) {
 		},
 	}
 	store, err := NewSQLiteFTSStore(cfg, slog.Default())
-	if err != nil {
-		t.Fatalf("NewSQLiteFTSStore: %v", err)
-	}
+	require.NoError(t, err, "NewSQLiteFTSStore")
 
 	ctx := context.Background()
 
 	// Store should fail
 	err = store.Store(ctx, "INSERT INTO uninit_test (id) VALUES (?)", "x")
-	if err == nil {
-		t.Error("Store should fail before initialization")
-	}
+	assert.Error(t, err, "Store should fail before initialization")
 
 	// Delete should fail
 	err = store.Delete(ctx, "DELETE FROM uninit_test WHERE id = ?", "x")
-	if err == nil {
-		t.Error("Delete should fail before initialization")
-	}
+	assert.Error(t, err, "Delete should fail before initialization")
 
 	// DeleteByIDs should fail
 	_, err = store.DeleteByIDs(ctx, "uninit_test", []string{"x"})
-	if err == nil {
-		t.Error("DeleteByIDs should fail before initialization")
-	}
+	assert.Error(t, err, "DeleteByIDs should fail before initialization")
 
 	// Count should fail
 	_, err = store.Count(ctx, "uninit_test")
-	if err == nil {
-		t.Error("Count should fail before initialization")
-	}
+	assert.Error(t, err, "Count should fail before initialization")
 
 	// GetOldestTimestamp should fail
 	_, err = store.GetOldestTimestamp(ctx, "uninit_test")
-	if err == nil {
-		t.Error("GetOldestTimestamp should fail before initialization")
-	}
+	assert.Error(t, err, "GetOldestTimestamp should fail before initialization")
 
 	// GetNewestTimestamp should fail
 	_, err = store.GetNewestTimestamp(ctx, "uninit_test")
-	if err == nil {
-		t.Error("GetNewestTimestamp should fail before initialization")
-	}
+	assert.Error(t, err, "GetNewestTimestamp should fail before initialization")
 
 	// FindDuplicateGroups should fail
 	_, err = store.FindDuplicateGroups(ctx, "uninit_test", 50)
-	if err == nil {
-		t.Error("FindDuplicateGroups should fail before initialization")
-	}
+	assert.Error(t, err, "FindDuplicateGroups should fail before initialization")
 
 	// HasFTS5 should return false
-	if store.HasFTS5() {
-		t.Error("HasFTS5 should be false before initialization")
-	}
+	assert.False(t, store.HasFTS5(), "HasFTS5 should be false before initialization")
 
 	// Initialized should return false
-	if store.Initialized() {
-		t.Error("Initialized should be false before initialization")
-	}
+	assert.False(t, store.Initialized(), "Initialized should be false before initialization")
 }
 
 // ---------------------------------------------------------------------------
@@ -547,19 +455,13 @@ func TestSQLiteFTSStore_Close(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := mustNewTestFTSStore(t, tmpDir)
 
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	require.NoError(t, store.Close(), "Close: %v")
 
 	// Close should be idempotent
-	if err := store.Close(); err != nil {
-		t.Fatalf("second Close: %v", err)
-	}
+	require.NoError(t, store.Close(), "second Close: %v")
 
 	// After close, Initialized should be false
-	if store.Initialized() {
-		t.Error("Initialized should be false after close")
-	}
+	assert.False(t, store.Initialized(), "Initialized should be false after close")
 }
 
 // ---------------------------------------------------------------------------
@@ -573,9 +475,7 @@ func TestSQLiteFTSStore_ImplementsCloser(t *testing.T) {
 	store := mustNewTestFTSStore(t, tmpDir)
 
 	closer := interface{ Close() error }(store)
-	if err := closer.Close(); err != nil {
-		t.Fatalf("Close via io.Closer: %v", err)
-	}
+	require.NoError(t, closer.Close(), "Close via io.Closer: %v")
 }
 
 // ---------------------------------------------------------------------------
@@ -638,18 +538,16 @@ func TestGenerateUUID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: GetPool
+// Tests: GetDB
 // ---------------------------------------------------------------------------
 
-func TestSQLiteFTSStore_GetPool(t *testing.T) {
+func TestSQLiteFTSStore_GetDB(t *testing.T) {
 	tmpDir := t.TempDir()
 	store := mustNewTestFTSStore(t, tmpDir)
 	defer store.Close()
 
-	pool := store.GetPool()
-	if pool == nil {
-		t.Fatal("GetPool should return non-nil after initialization")
-	}
+	db := store.GetDB()
+	require.NotNil(t, db, "GetDB should return non-nil after initialization")
 }
 
 // ---------------------------------------------------------------------------
@@ -671,19 +569,13 @@ func TestSQLiteFTSStore_NoFTS5Schema(t *testing.T) {
 		},
 	}
 	store, err := NewSQLiteFTSStore(cfg, slog.Default())
-	if err != nil {
-		t.Fatalf("NewSQLiteFTSStore: %v", err)
-	}
+	require.NoError(t, err, "NewSQLiteFTSStore")
 
 	ctx := context.Background()
-	if err := store.Initialize(ctx); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	require.NoError(t, store.Initialize(ctx), "Initialize: %v")
 	defer store.Close()
 
-	if store.HasFTS5() {
-		t.Error("expected HasFTS5 to be false when no FTS5 schema provided")
-	}
+	assert.False(t, store.HasFTS5(), "expected HasFTS5 to be false when no FTS5 schema provided")
 }
 
 // ---------------------------------------------------------------------------
@@ -699,31 +591,20 @@ func TestScanRowConfig_SourceFormatting(t *testing.T) {
 
 	insertTestItem(t, store, "id-1", "test content", "code")
 
-	pool := store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("pool.Get: %v", err)
-	}
-	defer pool.Put(db)
+	db := store.GetDB()
 
 	rows, err := db.QueryContext(ctx,
 		"SELECT id, content, category, metadata_json, created_at FROM test_items")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
+	require.NoError(t, err, "Query")
 	defer rows.Close()
 
 	results, err := store.ScanResults(rows, false, ScanRowConfig{
 		MemoryType: MemoryTypeTask,
 		SourceFmt:  "task:%s",
 	})
-	if err != nil {
-		t.Fatalf("ScanResults: %v", err)
-	}
+	require.NoError(t, err, "ScanResults")
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	if results[0].Source != "task:code" {
 		t.Errorf("expected source 'task:code', got %q", results[0].Source)
@@ -739,31 +620,20 @@ func TestScanRowConfig_StaticSource(t *testing.T) {
 
 	insertTestItem(t, store, "id-1", "test content", "code")
 
-	pool := store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("pool.Get: %v", err)
-	}
-	defer pool.Put(db)
+	db := store.GetDB()
 
 	rows, err := db.QueryContext(ctx,
 		"SELECT id, content, category, metadata_json, created_at FROM test_items")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
+	require.NoError(t, err, "Query")
 	defer rows.Close()
 
 	results, err := store.ScanResults(rows, false, ScanRowConfig{
 		MemoryType: MemoryTypeEpisodic,
 		SourceFmt:  "episodic",
 	})
-	if err != nil {
-		t.Fatalf("ScanResults: %v", err)
-	}
+	require.NoError(t, err, "ScanResults")
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	if results[0].Source != "episodic" {
 		t.Errorf("expected source 'episodic', got %q", results[0].Source)
@@ -782,50 +652,30 @@ func TestSQLiteFTSStore_ScanResults_Metadata(t *testing.T) {
 
 	// Insert with metadata
 	metaJSON := `{"user":"test","count":42}`
-	_, err := store.GetPool().Get(ctx)
-	if err != nil {
-		t.Fatalf("pool.Get: %v", err)
-	}
-
-	pool := store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("pool.Get: %v", err)
-	}
-	defer pool.Put(db)
+	db := store.GetDB()
 
 	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err = db.ExecContext(ctx,
+	_, err := db.ExecContext(ctx,
 		`INSERT INTO test_items (id, content, category, metadata_json, created_at)
 		 VALUES (?, ?, ?, ?, ?)`,
 		"id-meta", "metadata test", "general", metaJSON, nowISO)
-	if err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	require.NoError(t, err, "insert")
 
 	rows, err := db.QueryContext(ctx,
 		"SELECT id, content, category, metadata_json, created_at FROM test_items WHERE id = ?", "id-meta")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
+	require.NoError(t, err, "Query")
 	defer rows.Close()
 
 	results, err := store.ScanResults(rows, false, ScanRowConfig{
 		MemoryType: MemoryTypeEpisodic,
 		SourceFmt:  "episodic",
 	})
-	if err != nil {
-		t.Fatalf("ScanResults: %v", err)
-	}
+	require.NoError(t, err, "ScanResults")
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	meta := results[0].Memory.Metadata
-	if meta == nil {
-		t.Fatal("expected non-nil metadata")
-	}
+	require.NotNil(t, meta, "expected non-nil metadata")
 	if meta["user"] != "test" {
 		t.Errorf("expected user 'test', got %v", meta["user"])
 	}
@@ -844,12 +694,7 @@ func TestScanResults_WithRank_Synthetic(t *testing.T) {
 
 	insertTestItem(t, store, "id-1", "alpha bravo charlie", "code")
 
-	pool := store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("pool.Get: %v", err)
-	}
-	defer pool.Put(db)
+	db := store.GetDB()
 
 	// Use a subquery to provide a synthetic rank column
 	rows, err := db.QueryContext(ctx, `
@@ -857,22 +702,16 @@ func TestScanResults_WithRank_Synthetic(t *testing.T) {
 		FROM test_items
 		WHERE id = ?
 	`, "id-1")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
+	require.NoError(t, err, "Query")
 	defer rows.Close()
 
 	results, err := store.ScanResults(rows, true, ScanRowConfig{
 		MemoryType: MemoryTypeTask,
 		SourceFmt:  "task:%s",
 	})
-	if err != nil {
-		t.Fatalf("ScanResults: %v", err)
-	}
+	require.NoError(t, err, "ScanResults")
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	r := results[0]
 	if r.Memory.ID != "id-1" {

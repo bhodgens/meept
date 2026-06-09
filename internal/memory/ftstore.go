@@ -309,10 +309,8 @@ func (s *SQLiteFTSStore) Count(ctx context.Context, tableName string) (int, erro
 	s.mu.RUnlock()
 
 	var count int
-	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+tableName).Scan(&count) //nolint:gosec // table name from FTSConfig, not user input
+	err := s.db.QueryRowxContext(ctx, "SELECT COUNT(*) FROM "+tableName).Scan(&count) //nolint:gosec // table name from FTSConfig, not user input
 	// #nosec G202 -- tableName is whitelisted config value, not user input
-	})
 	return count, err
 }
 
@@ -326,10 +324,8 @@ func (s *SQLiteFTSStore) GetOldestTimestamp(ctx context.Context, tableName strin
 	s.mu.RUnlock()
 
 	var ts sql.NullString
-	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT MIN(created_at) FROM "+tableName).Scan(&ts) //nolint:gosec // table name from FTSConfig, not user input
+	err := s.db.QueryRowxContext(ctx, "SELECT MIN(created_at) FROM "+tableName).Scan(&ts) //nolint:gosec // table name from FTSConfig, not user input
 	// #nosec G202 -- tableName is whitelisted config value, not user input
-	})
 	if err != nil {
 		return nil, err
 	}
@@ -355,10 +351,8 @@ func (s *SQLiteFTSStore) GetNewestTimestamp(ctx context.Context, tableName strin
 	s.mu.RUnlock()
 
 	var ts sql.NullString
-	err := s.pool.WithConn(ctx, func(db *sql.DB) error {
-		return db.QueryRowContext(ctx, "SELECT MAX(created_at) FROM "+tableName).Scan(&ts) //nolint:gosec // table name from FTSConfig, not user input
+	err := s.db.QueryRowxContext(ctx, "SELECT MAX(created_at) FROM "+tableName).Scan(&ts) //nolint:gosec // table name from FTSConfig, not user input
 	// #nosec G202 -- tableName is whitelisted config value, not user input
-	})
 	if err != nil {
 		return nil, err
 	}
@@ -384,8 +378,8 @@ func (s *SQLiteFTSStore) Close() error {
 	}
 
 	s.initialized = false
-	if s.pool != nil {
-		return s.pool.Close()
+	if s.db != nil {
+		return s.db.Close()
 	}
 	return nil
 }
@@ -410,21 +404,14 @@ func (s *SQLiteFTSStore) FindDuplicateGroups(ctx context.Context, tableName stri
 	}
 	s.mu.RUnlock()
 
-	db, err := s.pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer s.pool.Put(db)
-
-	//nolint:gosec // table name from FTSConfig, not user input
-	// #nosec G202 -- tableName is whitelisted config value, not user input
-	rows, err := db.QueryContext(ctx, `
+	rows, err := s.db.QueryxContext(ctx, `
 		SELECT GROUP_CONCAT(id, ','), content, COUNT(*) as cnt
 		FROM `+tableName+`
 		WHERE LENGTH(content) > ?
 		GROUP BY content
 		HAVING cnt > 1
-	`, thresholdChars)
+	`, thresholdChars) //nolint:gosec // table name from FTSConfig, not user input
+	// #nosec G202 -- tableName is whitelisted config value, not user input
 	if err != nil {
 		return nil, fmt.Errorf("failed to find duplicates: %w", err)
 	}

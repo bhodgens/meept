@@ -529,12 +529,7 @@ func TestEpisodicMemoryStorePopulatesVersioningColumns(t *testing.T) {
 	}
 
 	// Verify the SQL columns are populated by querying directly
-	pool := mem.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get db: %v", err)
-	}
-	defer pool.Put(db)
+	db := mem.store.GetDB()
 
 	// Check root memory SQL columns
 	var rootVersion int
@@ -595,12 +590,7 @@ func TestEpisodicMemoryStoreDefaultVersioning(t *testing.T) {
 		t.Fatalf("Failed to store: %v", err)
 	}
 
-	pool := mem.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get db: %v", err)
-	}
-	defer pool.Put(db)
+	db := mem.store.GetDB()
 
 	var version int
 	var isCurrent int

@@ -24,6 +24,7 @@ mixin _$ChatMessage {
   String get role => throw _privateConstructorUsedError;
   String get content => throw _privateConstructorUsedError;
   DateTime get timestamp => throw _privateConstructorUsedError;
+  @JsonKey(name: 'session_id')
   String? get sessionId => throw _privateConstructorUsedError;
   @JsonKey(name: 'tool_calls')
   List<String>? get toolCalls => throw _privateConstructorUsedError;
@@ -45,7 +46,7 @@ abstract class $ChatMessageCopyWith<$Res> {
       String role,
       String content,
       DateTime timestamp,
-      String? sessionId,
+      @JsonKey(name: 'session_id') String? sessionId,
       @JsonKey(name: 'tool_calls') List<String>? toolCalls});
 }
 
@@ -111,7 +112,7 @@ abstract class _$$ChatMessageImplCopyWith<$Res>
       String role,
       String content,
       DateTime timestamp,
-      String? sessionId,
+      @JsonKey(name: 'session_id') String? sessionId,
       @JsonKey(name: 'tool_calls') List<String>? toolCalls});
 }
 
@@ -170,7 +171,7 @@ class _$ChatMessageImpl extends _ChatMessage {
       required this.role,
       required this.content,
       required this.timestamp,
-      this.sessionId,
+      @JsonKey(name: 'session_id') this.sessionId,
       @JsonKey(name: 'tool_calls') final List<String>? toolCalls})
       : _toolCalls = toolCalls,
         super._();
@@ -187,6 +188,7 @@ class _$ChatMessageImpl extends _ChatMessage {
   @override
   final DateTime timestamp;
   @override
+  @JsonKey(name: 'session_id')
   final String? sessionId;
   final List<String>? _toolCalls;
   @override
@@ -245,7 +247,7 @@ abstract class _ChatMessage extends ChatMessage {
           required final String role,
           required final String content,
           required final DateTime timestamp,
-          final String? sessionId,
+          @JsonKey(name: 'session_id') final String? sessionId,
           @JsonKey(name: 'tool_calls') final List<String>? toolCalls}) =
       _$ChatMessageImpl;
   const _ChatMessage._() : super._();
@@ -262,6 +264,7 @@ abstract class _ChatMessage extends ChatMessage {
   @override
   DateTime get timestamp;
   @override
+  @JsonKey(name: 'session_id')
   String? get sessionId;
   @override
   @JsonKey(name: 'tool_calls')

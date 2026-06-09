@@ -20,14 +20,10 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 		result, err := tool.Execute(ctx, map[string]any{
 			"command": "echo hello",
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 
 		shellResult := unwrapShellResult(t, result)
-		if shellResult.ReturnCode != 0 {
-			t.Errorf("expected return code 0, got %d", shellResult.ReturnCode)
-		}
+		assert.Equal(t, 0, shellResult.ReturnCode)
 		if !strings.Contains(shellResult.Stdout, "hello") {
 			t.Errorf("expected stdout to contain 'hello', got %q", shellResult.Stdout)
 		}
@@ -38,9 +34,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 		result, err := tool.Execute(ctx, map[string]any{
 			"command": "echo error >&2",
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 
 		shellResult := unwrapShellResult(t, result)
 		if !strings.Contains(shellResult.Stderr, "error") {
@@ -53,14 +47,10 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 		result, err := tool.Execute(ctx, map[string]any{
 			"command": "exit 42",
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 
 		shellResult := unwrapShellResult(t, result)
-		if shellResult.ReturnCode != 42 {
-			t.Errorf("expected return code 42, got %d", shellResult.ReturnCode)
-		}
+		assert.Equal(t, 42, shellResult.ReturnCode)
 	})
 
 	// Test timeout
@@ -69,9 +59,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 			"command": "sleep 10",
 			"timeout": float64(0.1),
 		})
-		if err == nil {
-			t.Error("expected timeout error")
-		}
+		assert.Error(t, err, "expected timeout error")
 		if !strings.Contains(err.Error(), "timed out") {
 			t.Errorf("expected timeout error, got: %v", err)
 		}
@@ -82,9 +70,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 		_, err := tool.Execute(ctx, map[string]any{
 			"command": "",
 		})
-		if err == nil {
-			t.Error("expected error for empty command")
-		}
+		assert.Error(t, err, "expected error for empty command")
 	})
 
 	// Test blocked command
@@ -92,9 +78,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 		_, err := tool.Execute(ctx, map[string]any{
 			"command": "rm -rf /",
 		})
-		if err == nil {
-			t.Error("expected error for blocked command")
-		}
+		assert.Error(t, err, "expected error for blocked command")
 		if !strings.Contains(err.Error(), "blocked") {
 			t.Errorf("expected blocked error, got: %v", err)
 		}
@@ -105,9 +89,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 		_, err := tool.Execute(ctx, map[string]any{
 			"command": "sudo ls",
 		})
-		if err == nil {
-			t.Error("expected error for sudo command")
-		}
+		assert.Error(t, err, "expected error for sudo command")
 	})
 }
 
@@ -193,9 +175,7 @@ func TestShellExecuteTool_WorkingDir(t *testing.T) {
 		result, err := tool.Execute(ctx, map[string]any{
 			"command": "pwd",
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 
 		shellResult := unwrapShellResult(t, result)
 		if !strings.Contains(shellResult.Stdout, dir) {
@@ -209,9 +189,7 @@ func TestShellExecuteTool_WorkingDir(t *testing.T) {
 			"command":     "pwd",
 			"working_dir": "/tmp",
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 
 		shellResult := unwrapShellResult(t, result)
 		// /tmp might be a symlink to /private/tmp on macOS

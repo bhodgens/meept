@@ -184,14 +184,10 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	}
 
 	hasFTS5 := e.store.HasFTS5Public()
-	pool := e.store.GetPool()
-
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
+	db := e.store.GetDB()
 
 	var rows *sql.Rows
+	var err error
 
 	if hasFTS5 {
 		// Use FTS5 for efficient full-text search
@@ -219,25 +215,19 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 	}
 
 	if err != nil {
-		pool.Put(db)
 		return nil, fmt.Errorf("failed to search: %w", err)
 	}
 
 	results, err := e.scanResults(rows, hasFTS5)
 	rows.Close()
-	pool.Put(db) // Release connection before updating last_accessed_at
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Update last_accessed_at asynchronously to avoid deadlock risk.
-	// With pool size N and N concurrent searches, synchronous updates could
-	// cause deadlock since Search holds one connection and updateLastAccessed
-	// requests another.
+	// Update last_accessed_at asynchronously to avoid blocking.
 	//nolint:gosec // goroutine outlives request context
 	go func() {
-		// Use a fresh context to avoid cancellation issues
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := e.updateLastAccessed(updateCtx, results); err != nil {
@@ -272,14 +262,7 @@ func (e *EpisodicMemory) updateLastAccessed(ctx context.Context, results []Memor
 	//nolint:gosec // parameterized query
 	query := fmt.Sprintf("UPDATE episodic_memories SET last_accessed_at = ? WHERE id IN (%s)", strings.Join(placeholders, ","))
 
-	pool := e.store.GetPool()
-	db, dbErr := pool.Get(ctx)
-	if dbErr != nil {
-		return dbErr
-	}
-	defer pool.Put(db)
-
-	_, err := db.ExecContext(ctx, query, args...)
+	_, err := e.store.GetDB().ExecContext(ctx, query, args...)
 	return err
 }
 
@@ -289,14 +272,7 @@ func (e *EpisodicMemory) GetRecent(ctx context.Context, limit int) ([]MemoryResu
 		return nil, errors.New("episodic memory not initialized")
 	}
 
-	pool := e.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
-
-	rows, err := db.QueryContext(ctx, `
+	rows, err := e.store.GetDB().QueryContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at
 		FROM episodic_memories
 		ORDER BY created_at DESC
@@ -312,14 +288,7 @@ func (e *EpisodicMemory) GetRecent(ctx context.Context, limit int) ([]MemoryResu
 
 // GetByCategory retrieves memories filtered to a specific category.
 func (e *EpisodicMemory) GetByCategory(ctx context.Context, category string, limit int) ([]MemoryResult, error) {
-	pool := e.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
-
-	rows, err := db.QueryContext(ctx, `
+	rows, err := e.store.GetDB().QueryContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at
 		FROM episodic_memories
 		WHERE category = ?
@@ -336,14 +305,7 @@ func (e *EpisodicMemory) GetByCategory(ctx context.Context, category string, lim
 
 // GetByTimeRange retrieves memories within a time range.
 func (e *EpisodicMemory) GetByTimeRange(ctx context.Context, start, end time.Time, limit int) ([]MemoryResult, error) {
-	pool := e.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
-
-	rows, err := db.QueryContext(ctx, `
+	rows, err := e.store.GetDB().QueryContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at
 		FROM episodic_memories
 		WHERE created_at >= ? AND created_at <= ?
@@ -360,14 +322,7 @@ func (e *EpisodicMemory) GetByTimeRange(ctx context.Context, start, end time.Tim
 
 // GetOldMemories retrieves memories older than the given time.
 func (e *EpisodicMemory) GetOldMemories(ctx context.Context, olderThan time.Time, limit int) ([]MemoryResult, error) {
-	pool := e.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
-
-	rows, err := db.QueryContext(ctx, `
+	rows, err := e.store.GetDB().QueryContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at
 		FROM episodic_memories
 		WHERE created_at < ?
@@ -394,21 +349,14 @@ func (e *EpisodicMemory) GetByID(ctx context.Context, id string) (*MemoryResult,
 		return nil, errors.New("episodic memory not initialized")
 	}
 
-	pool := e.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
-
-	row := db.QueryRowContext(ctx, `
+	row := e.store.GetDB().QueryRowxContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at
 		FROM episodic_memories
 		WHERE id = ?
 	`, id)
 
 	var memID, content, category, metaJSON, createdAtStr string
-	err = row.Scan(&memID, &content, &category, &metaJSON, &createdAtStr)
+	err := row.Scan(&memID, &content, &category, &metaJSON, &createdAtStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

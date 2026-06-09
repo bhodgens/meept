@@ -170,15 +170,10 @@ func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int
 	}
 
 	hasFTS5 := t.store.HasFTS5Public()
-	pool := t.store.GetPool()
-
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
+	db := t.store.GetDB()
 
 	var rows *sql.Rows
+	var err error
 
 	if hasFTS5 {
 		// Use FTS5 for efficient full-text search
@@ -243,14 +238,10 @@ func (t *TaskMemory) GetRecent(ctx context.Context, domain string, limit int) ([
 		return nil, errors.New("task memory not initialized")
 	}
 
-	pool := t.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
+	db := t.store.GetDB()
 
 	var rows *sql.Rows
+	var err error
 	if domain != "" {
 		rows, err = db.QueryContext(ctx, `
 			SELECT id, content, domain, metadata_json, created_at
@@ -296,21 +287,14 @@ func (t *TaskMemory) GetByID(ctx context.Context, id string) (*MemoryResult, err
 		return nil, errors.New("task memory not initialized")
 	}
 
-	pool := t.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
-
-	row := db.QueryRowContext(ctx, `
+	row := t.store.GetDB().QueryRowxContext(ctx, `
 		SELECT id, content, domain, metadata_json, created_at
 		FROM task_memories
 		WHERE id = ?
 	`, id)
 
 	var memID, content, domain, metaJSON, createdAtStr string
-	err = row.Scan(&memID, &content, &domain, &metaJSON, &createdAtStr)
+	err := row.Scan(&memID, &content, &domain, &metaJSON, &createdAtStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

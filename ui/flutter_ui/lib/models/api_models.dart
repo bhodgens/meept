@@ -36,12 +36,12 @@ class ChatMessage with _$ChatMessage {
     required String role,
     required String content,
     required DateTime timestamp,
-    String? sessionId,
+    @JsonKey(name: 'session_id') String? sessionId,
     @JsonKey(name: 'tool_calls') List<String>? toolCalls,
   }) = _ChatMessage;
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) =>
-      _$ChatMessage.fromJson(json);
+      _$$ChatMessageImplFromJson(json);
 
   /// Parse from a backend session.Message (int64 ID, RFC3339 timestamp).
   factory ChatMessage.fromBackendMessage(Map<String, dynamic> json) {
@@ -89,7 +89,7 @@ class ChatRequest with _$ChatRequest {
 
   /// Custom toJson to omit null / history fields when not needed.
   factory ChatRequest.fromJson(Map<String, dynamic> json) =>
-      _$ChatRequest.fromJson(json);
+      _$$ChatRequestImplFromJson(json);
 
   @override
   Map<String, dynamic> toJson() => {
@@ -118,7 +118,7 @@ class Session with _$Session {
   }) = _Session;
 
   factory Session.fromJson(Map<String, dynamic> json) =>
-      _$Session.fromJson(_normaliseSessionJson(json));
+      _$$SessionImplFromJson(_normaliseSessionJson(json));
 
   /// Normalise backend JSON before freezed parsing.
   /// Prefer description as display title when name is generic ("default") or
@@ -163,7 +163,7 @@ class Task with _$Task {
   }) = _Task;
 
   factory Task.fromJson(Map<String, dynamic> json) =>
-      _$Task.fromJson(_normaliseTaskJson(json));
+      _$$TaskImplFromJson(_normaliseTaskJson(json));
 
   /// Normalise backend JSON before freezed parsing.
   static Map<String, dynamic> _normaliseTaskJson(Map<String, dynamic> json) {
@@ -188,7 +188,7 @@ class TaskStep with _$TaskStep {
   }) = _TaskStep;
 
   factory TaskStep.fromJson(Map<String, dynamic> json) =>
-      _$TaskStep.fromJson(json);
+      _$$TaskStepImplFromJson(json);
 }
 
 // ===== Agent Models =====
@@ -204,7 +204,8 @@ class Agent with _$Agent {
     Map<String, dynamic>? frontmatter,
   }) = _Agent;
 
-  factory Agent.fromJson(Map<String, dynamic> json) => _$Agent.fromJson(json);
+  factory Agent.fromJson(Map<String, dynamic> json) =>
+      _$$AgentImplFromJson(json);
 }
 
 // ===== Queue/Job Models =====
@@ -225,7 +226,7 @@ class Job with _$Job {
   }) = _Job;
 
   factory Job.fromJson(Map<String, dynamic> json) =>
-      _$Job.fromJson(_normaliseJobJson(json));
+      _$$JobImplFromJson(_normaliseJobJson(json));
 
   /// Normalise backend JSON before freezed parsing.
   static Map<String, dynamic> _normaliseJobJson(Map<String, dynamic> json) {
@@ -250,7 +251,8 @@ class Skill with _$Skill {
     @Default(true) bool enabled,
   }) = _Skill;
 
-  factory Skill.fromJson(Map<String, dynamic> json) => _$Skill.fromJson(json);
+  factory Skill.fromJson(Map<String, dynamic> json) =>
+      _$$SkillImplFromJson(json);
 }
 
 // ===== Metrics Models =====
@@ -272,7 +274,7 @@ class MetricsSnapshot with _$MetricsSnapshot {
   }) = _MetricsSnapshot;
 
   factory MetricsSnapshot.fromJson(Map<String, dynamic> json) =>
-      _$MetricsSnapshot.fromJson(_normaliseMetricsJson(json));
+      _$$MetricsSnapshotImplFromJson(_normaliseMetricsJson(json));
 
   /// Normalise backend JSON before freezed parsing.
   static Map<String, dynamic> _normaliseMetricsJson(Map<String, dynamic> json) {
@@ -306,7 +308,8 @@ class Plan with _$Plan {
     @Default([]) List<PlanPhase> phases,
   }) = _Plan;
 
-  factory Plan.fromJson(Map<String, dynamic> json) => _$Plan.fromJson(json);
+  factory Plan.fromJson(Map<String, dynamic> json) =>
+      _$$PlanImplFromJson(json);
 }
 
 @freezed
@@ -323,7 +326,7 @@ class PlanPhase with _$PlanPhase {
   }) = _PlanPhase;
 
   factory PlanPhase.fromJson(Map<String, dynamic> json) =>
-      _$PlanPhase.fromJson(json);
+      _$$PlanPhaseImplFromJson(json);
 }
 
 // ===== Search Models =====
@@ -339,7 +342,7 @@ class SearchResults with _$SearchResults {
   }) = _SearchResults;
 
   factory SearchResults.fromJson(Map<String, dynamic> json) =>
-      _$SearchResults.fromJson(json);
+      _$$SearchResultsImplFromJson(json);
 }
 
 @freezed
@@ -352,7 +355,7 @@ class SearchResultItem with _$SearchResultItem {
   }) = _SearchResultItem;
 
   factory SearchResultItem.fromJson(Map<String, dynamic> json) =>
-      _$SearchResultItem.fromJson(json);
+      _$$SearchResultItemImplFromJson(json);
 }
 
 // ===== Branch Models =====
@@ -366,7 +369,7 @@ class BranchInfo with _$BranchInfo {
   }) = _BranchInfo;
 
   factory BranchInfo.fromJson(Map<String, dynamic> json) =>
-      _$BranchInfo.fromJson(json);
+      _$$BranchInfoImplFromJson(json);
 }
 
 // ===== Skill UI Descriptor Models =====
@@ -383,7 +386,7 @@ class SkillFormField with _$SkillFormField {
   }) = _SkillFormField;
 
   factory SkillFormField.fromJson(Map<String, dynamic> json) =>
-      _$SkillFormField.fromJson(json);
+      _$$SkillFormFieldImplFromJson(json);
 }
 
 @freezed
@@ -396,7 +399,7 @@ class SkillUiDescriptor with _$SkillUiDescriptor {
   }) = _SkillUiDescriptor;
 
   factory SkillUiDescriptor.fromJson(Map<String, dynamic> json) =>
-      _$SkillUiDescriptor.fromJson(json);
+      _$$SkillUiDescriptorImplFromJson(json);
 }
 
 // ===== Skill Execution Models =====
@@ -410,5 +413,5 @@ class SkillExecuteResult with _$SkillExecuteResult {
   }) = _SkillExecuteResult;
 
   factory SkillExecuteResult.fromJson(Map<String, dynamic> json) =>
-      _$SkillExecuteResult.fromJson(json);
+      _$$SkillExecuteResultImplFromJson(json);
 }

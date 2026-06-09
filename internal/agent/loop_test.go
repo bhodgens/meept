@@ -78,9 +78,7 @@ func (m *mockChatter) Config() *llm.ModelConfig {
 func TestNewAgentLoop(t *testing.T) {
 	loop := NewAgentLoop()
 
-	if loop == nil {
-		t.Fatal("NewAgentLoop returned nil")
-	}
+	require.NotNil(t, loop, "NewAgentLoop returned nil")
 
 	config := loop.GetConfig()
 	if config.MaxIterations != DefaultMaxIterations {
@@ -99,21 +97,15 @@ func TestAgentLoopWithOptions(t *testing.T) {
 	)
 
 	config := loop.GetConfig()
-	if config.MaxIterations != 5 {
-		t.Errorf("expected MaxIterations=5, got %d", config.MaxIterations)
-	}
-	if config.Constitution != "Custom constitution" {
-		t.Errorf("expected custom constitution")
-	}
+	assert.Equal(t, 5, config.MaxIterations)
+	assert.Equal(t, "Custom constitution", config.Constitution)
 }
 
 func TestAgentLoopNoLLMClient(t *testing.T) {
 	loop := NewAgentLoop()
 
 	_, err := loop.RunOnce(context.Background(), "Hello", "test-conv")
-	if !errors.Is(err, ErrNoLLMClient) {
-		t.Errorf("expected ErrNoLLMClient, got %v", err)
-	}
+	assert.True(t, errors.Is(err, ErrNoLLMClient), "expected ErrNoLLMClient, got %v")
 }
 
 func TestConversationAndMockClient(t *testing.T) {
@@ -134,9 +126,7 @@ func TestConversationAndMockClient(t *testing.T) {
 
 	// Verify mock client works
 	resp, err := mockClient.Chat(context.Background(), nil)
-	if err != nil {
-		t.Errorf("mock client error: %v", err)
-	}
+	require.NoError(t, err, "mock client error")
 	if resp.Content != "Hello! How can I help you?" {
 		t.Errorf("unexpected response: %s", resp.Content)
 	}
@@ -154,18 +144,10 @@ func TestAgentLoopBuildSystemPrompt(t *testing.T) {
 
 	prompt := loop.buildSystemPrompt()
 
-	if !strings.Contains(prompt, "Test constitution") {
-		t.Error("prompt missing constitution")
-	}
-	if !strings.Contains(prompt, "Test restrictions") {
-		t.Error("prompt missing restrictions")
-	}
-	if !strings.Contains(prompt, "Test purpose") {
-		t.Error("prompt missing purpose")
-	}
-	if !strings.Contains(prompt, "Test personality") {
-		t.Error("prompt missing personality")
-	}
+	assert.Contains(t, prompt, "Test constitution")
+	assert.Contains(t, prompt, "Test restrictions")
+	assert.Contains(t, prompt, "Test purpose")
+	assert.Contains(t, prompt, "Test personality")
 }
 
 func TestAgentLoopBuildSystemPromptWithOverride(t *testing.T) {
@@ -194,9 +176,7 @@ func TestAgentLoopBuildSystemPromptWithToolRegistry(t *testing.T) {
 
 	// Tool descriptions should NOT be in the system prompt since they are
 	// sent via the API's tools parameter to avoid duplication.
-	if strings.Contains(prompt, "test_tool") {
-		t.Error("system prompt should not contain tool descriptions (they are sent via API tools parameter)")
-	}
+	assert.NotContains(t, prompt, "test_tool")
 }
 
 func TestAgentLoopConversationManagement(t *testing.T) {
@@ -204,9 +184,7 @@ func TestAgentLoopConversationManagement(t *testing.T) {
 
 	// Get a conversation
 	conv1 := loop.GetConversation("conv1")
-	if conv1 != nil {
-		t.Error("expected nil for non-existent conversation")
-	}
+	assert.Nil(t, conv1, "expected nil for non-existent conversation")
 
 	// Create through conversations store
 	loop.conversations.Get("conv2")
@@ -220,9 +198,7 @@ func TestAgentLoopConversationManagement(t *testing.T) {
 	loop.ClearConversation("conv2")
 
 	conv2After := loop.GetConversation("conv2")
-	if conv2After != nil {
-		t.Error("expected conversation to be cleared")
-	}
+	assert.Nil(t, conv2After, "expected conversation to be cleared")
 }
 
 func TestAgentLoopSetConfig(t *testing.T) {
@@ -236,9 +212,7 @@ func TestAgentLoopSetConfig(t *testing.T) {
 	loop.SetConfig(newConfig)
 
 	config := loop.GetConfig()
-	if config.MaxIterations != 15 {
-		t.Errorf("expected MaxIterations=15, got %d", config.MaxIterations)
-	}
+	assert.Equal(t, 15, config.MaxIterations)
 }
 
 func TestAgentLoopHandleMessage(t *testing.T) {
@@ -246,9 +220,7 @@ func TestAgentLoopHandleMessage(t *testing.T) {
 
 	// Without LLM client, should return error
 	_, err := loop.HandleMessage(context.Background(), "Hello")
-	if !errors.Is(err, ErrNoLLMClient) {
-		t.Errorf("expected ErrNoLLMClient, got %v", err)
-	}
+	assert.True(t, errors.Is(err, ErrNoLLMClient), "expected ErrNoLLMClient, got %v")
 }
 
 func TestAgentLoopExecuteToolCalls(t *testing.T) {
@@ -265,9 +237,7 @@ func TestAgentLoopExecuteToolCalls(t *testing.T) {
 
 	results := loop.executeToolCalls(context.Background(), toolCalls)
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	if results[0].Success {
 		t.Error("expected failure when executor not configured")
@@ -305,9 +275,7 @@ func TestAgentLoopWithExecutor(t *testing.T) {
 
 	results := loop.executeToolCalls(context.Background(), toolCalls)
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	if !results[0].Success {
 		t.Errorf("expected success, got error: %s", results[0].Error)
@@ -335,18 +303,14 @@ func TestAgentResponse(t *testing.T) {
 		ReplyTo:        "msg-123",
 	}
 
-	if resp.ConversationID != "conv-456" {
-		t.Error("unexpected conversation ID")
-	}
+	assert.Equal(t, "conv-456", resp.ConversationID)
 }
 
 func TestGenerateConversationID(t *testing.T) {
 	id1 := generateConversationID()
 	id2 := generateConversationID()
 
-	if id1 == "" {
-		t.Error("expected non-empty ID")
-	}
+	assert.NotEmpty(t, id1, "expected non-empty ID")
 
 	// Verify IDs are unique
 	if id1 == id2 {
@@ -354,13 +318,9 @@ func TestGenerateConversationID(t *testing.T) {
 	}
 
 	// Verify format: conv-<timestamp>
-	if !strings.HasPrefix(id1, "conv-") {
-		t.Errorf("expected 'conv-' prefix, got '%s'", id1)
-	}
+	assert.True(t, strings.HasPrefix(id1, "conv-"), "expected 'conv-' prefix, got '%s'")
 
-	if !strings.HasPrefix(id2, "conv-") {
-		t.Errorf("expected 'conv-' prefix, got '%s'", id2)
-	}
+	assert.True(t, strings.HasPrefix(id2, "conv-"), "expected 'conv-' prefix, got '%s'")
 
 	if len(id1) < 10 {
 		t.Errorf("ID too short: %s", id1)
@@ -404,9 +364,7 @@ func TestAgentLoopRunChannel(t *testing.T) {
 	// Wait for the loop to finish
 	select {
 	case err := <-errCh:
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		require.NoError(t, err, "unexpected error")
 	case <-time.After(time.Second):
 		t.Error("loop did not finish in time")
 	}
@@ -497,9 +455,7 @@ func TestAgentLoopDiscoverRelevantSkills(t *testing.T) {
 
 	// Without capability index, should return nil
 	result := loop.discoverRelevantSkills("write code", 0.5)
-	if result != nil {
-		t.Error("expected nil when no capability index configured")
-	}
+	assert.Nil(t, result, "expected nil when no capability index configured")
 }
 
 func TestAgentLoopSetCapabilityIndex(t *testing.T) {
@@ -597,21 +553,11 @@ func TestBuildMCPContextSection(t *testing.T) {
 		}),
 	)
 	result = loop.buildMCPContextSection()
-	if !strings.Contains(result, "my-server") {
-		t.Error("expected MCP context to contain server name")
-	}
-	if !strings.Contains(result, "5 tool(s)") {
-		t.Error("expected MCP context to contain tool count")
-	}
-	if !strings.Contains(result, "8 tool(s)") {
-		t.Error("expected MCP context to contain total tool count")
-	}
-	if !strings.Contains(result, "platform_tools") {
-		t.Error("expected MCP context to reference platform_tools")
-	}
-	if !strings.Contains(result, "mcp_servers") {
-		t.Error("expected MCP context to reference mcp_servers tool")
-	}
+	assert.Contains(t, result, "my-server")
+	assert.Contains(t, result, "5 tool(s)")
+	assert.Contains(t, result, "8 tool(s)")
+	assert.Contains(t, result, "platform_tools")
+	assert.Contains(t, result, "mcp_servers")
 }
 
 func TestFormatSkillForPrompt(t *testing.T) {
@@ -623,15 +569,9 @@ func TestFormatSkillForPrompt(t *testing.T) {
 
 	formatted := formatSkillForPrompt(skill)
 
-	if !strings.Contains(formatted, "test-skill") {
-		t.Error("formatted skill should contain name")
-	}
-	if !strings.Contains(formatted, "A test skill") {
-		t.Error("formatted skill should contain description")
-	}
-	if !strings.Contains(formatted, "This is the skill body") {
-		t.Error("formatted skill should contain body")
-	}
+	assert.Contains(t, formatted, "test-skill")
+	assert.Contains(t, formatted, "A test skill")
+	assert.Contains(t, formatted, "This is the skill body")
 }
 
 // createTestCapabilityIndex creates a minimal capability index for testing.
@@ -685,9 +625,7 @@ func TestRecallModeDisabledGatesMemoryTools(t *testing.T) {
 	}
 
 	results := loop.executeToolCalls(context.Background(), toolCalls)
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
-	}
+	require.Len(t, results, 3)
 
 	// First tool (memory_search) should be blocked
 	if results[0].Success {
@@ -696,9 +634,7 @@ func TestRecallModeDisabledGatesMemoryTools(t *testing.T) {
 	if results[0].ToolCallID != "tc-1" {
 		t.Errorf("expected tool call ID tc-1, got %s", results[0].ToolCallID)
 	}
-	if !strings.Contains(results[0].Error, "blocked") {
-		t.Errorf("expected blocked error, got: %s", results[0].Error)
-	}
+	assert.True(t, strings.Contains(results[0].Error, "blocked"), "expected blocked error, got: %s")
 
 	// Second tool (file_read) should succeed
 	if !results[1].Success {
@@ -732,9 +668,7 @@ func TestRecallModeAutoAllowsMemoryTools(t *testing.T) {
 	}
 
 	results := loop.executeToolCalls(context.Background(), toolCalls)
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	// Memory tool should succeed when recall mode is auto
 	if !results[0].Success {
@@ -745,9 +679,7 @@ func TestRecallModeAutoAllowsMemoryTools(t *testing.T) {
 func TestSnapshotCachingEnabledControlsFreeze(t *testing.T) {
 	// Test that the default config has SnapshotCachingEnabled=true (backwards compat)
 	defaultCfg := DefaultAgentConfig()
-	if !defaultCfg.Memory.SnapshotCachingEnabled {
-		t.Error("default SnapshotCachingEnabled should be true for backwards compatibility")
-	}
+	assert.True(t, defaultCfg.Memory.SnapshotCachingEnabled, "default SnapshotCachingEnabled should be true for backwards compatibility")
 
 	// Test that the config can disable it
 	cfg := AgentConfig{
@@ -758,9 +690,7 @@ func TestSnapshotCachingEnabledControlsFreeze(t *testing.T) {
 	}
 	loop := NewAgentLoop(WithAgentConfig(cfg))
 
-	if loop.config.Memory.SnapshotCachingEnabled {
-		t.Error("SnapshotCachingEnabled should be false when explicitly set")
-	}
+	assert.False(t, loop.config.Memory.SnapshotCachingEnabled, "SnapshotCachingEnabled should be false when explicitly set")
 }
 
 func TestShouldAutoInject(t *testing.T) {
@@ -826,9 +756,7 @@ func TestAgentLoop_PublishTokenUsage(t *testing.T) {
 	select {
 	case msg := <-sub.Channel:
 		var payload map[string]any
-		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-			t.Fatalf("failed to unmarshal payload: %v", err)
-		}
+		require.NoError(t, json.Unmarshal(msg.Payload, &payload), "failed to unmarshal payload: %v")
 		if tokens, ok := payload["total_tokens"].(float64); !ok || tokens != 1500 {
 			t.Errorf("expected 1500 tokens, got %v", payload["total_tokens"])
 		}
@@ -858,9 +786,7 @@ func TestEmitToolExecutionStart(t *testing.T) {
 	select {
 	case msg := <-sub.Channel:
 		var raw map[string]any
-		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
-			t.Fatalf("failed to unmarshal event: %v", err)
-		}
+		require.NoError(t, json.Unmarshal(msg.Payload, &raw), "failed to unmarshal event: %v")
 		if raw["type"] != string(AgentEventToolExecutionStart) {
 			t.Errorf("expected type %s, got %v", AgentEventToolExecutionStart, raw["type"])
 		}
@@ -897,9 +823,7 @@ func TestEmitToolExecutionEnd(t *testing.T) {
 	select {
 	case msg := <-sub.Channel:
 		var raw map[string]any
-		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
-			t.Fatalf("failed to unmarshal event: %v", err)
-		}
+		require.NoError(t, json.Unmarshal(msg.Payload, &raw), "failed to unmarshal event: %v")
 		if raw["type"] != string(AgentEventToolExecutionEnd) {
 			t.Errorf("expected type %s, got %v", AgentEventToolExecutionEnd, raw["type"])
 		}
@@ -936,9 +860,7 @@ func TestEmitAfterProviderResponse(t *testing.T) {
 	select {
 	case msg := <-sub.Channel:
 		var raw map[string]any
-		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
-			t.Fatalf("failed to unmarshal event: %v", err)
-		}
+		require.NoError(t, json.Unmarshal(msg.Payload, &raw), "failed to unmarshal event: %v")
 		if raw["type"] != string(AgentEventAfterProviderResponse) {
 			t.Errorf("expected type %s, got %v", AgentEventAfterProviderResponse, raw["type"])
 		}
@@ -975,9 +897,7 @@ func TestEmitTurnStart(t *testing.T) {
 	select {
 	case msg := <-sub.Channel:
 		var raw map[string]any
-		if err := json.Unmarshal(msg.Payload, &raw); err != nil {
-			t.Fatalf("failed to unmarshal event: %v", err)
-		}
+		require.NoError(t, json.Unmarshal(msg.Payload, &raw), "failed to unmarshal event: %v")
 		if raw["type"] != string(AgentEventTurnStart) {
 			t.Errorf("expected type %s, got %v", AgentEventTurnStart, raw["type"])
 		}
@@ -1030,9 +950,7 @@ func TestBuildTerminateResponse(t *testing.T) {
 		if !strings.Contains(got, "ok") {
 			t.Errorf("expected successful result, got: %s", got)
 		}
-		if strings.Contains(got, "failed") {
-			t.Error("should not contain failed result")
-		}
+		assert.NotContains(t, got, "failed")
 	})
 
 	t.Run("all failed returns done", func(t *testing.T) {
@@ -1145,14 +1063,10 @@ func TestShouldTerminate_IntegrationWithLoopPath(t *testing.T) {
 	loop.executor = executor
 
 	response, err := loop.RunOnce(context.Background(), "show status", "conv-integration")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err, "unexpected error")
 
 	// Response must come from buildTerminateResponse, not from an LLM follow-up
-	if !strings.Contains(response, "final answer from terminating tool") {
-		t.Errorf("expected terminate response content, got: %s", response)
-	}
+	assert.True(t, strings.Contains(response, "final answer from terminating tool"), "expected terminate response content, got: %s")
 
 	// The chatter must have been called exactly once
 	if chatter.callCount != 1 {
@@ -1202,9 +1116,7 @@ func TestAgentLoop_TerminatePathReturnsToolResults(t *testing.T) {
 	}
 
 	results := loop.executeToolCalls(context.Background(), toolCalls)
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
+	require.Len(t, results, 1)
 
 	if !results[0].Success {
 		t.Errorf("expected success, got error: %s", results[0].Error)
@@ -1220,9 +1132,7 @@ func TestAgentLoop_TerminatePathReturnsToolResults(t *testing.T) {
 
 	// Verify buildTerminateResponse produces expected output
 	response := loop.buildTerminateResponse(results)
-	if !strings.Contains(response, "final answer from terminating tool") {
-		t.Errorf("expected tool result in response, got: %s", response)
-	}
+	assert.True(t, strings.Contains(response, "final answer from terminating tool"), "expected tool result in response, got: %s")
 }
 
 func TestAgentLoop_TerminatePathSkipsLLMFollowUp(t *testing.T) {
@@ -1259,19 +1169,13 @@ func TestAgentLoop_TerminatePathSkipsLLMFollowUp(t *testing.T) {
 
 	// Run the loop
 	response, err := loop.RunOnce(context.Background(), "test query", "conv-term-test")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err, "unexpected error")
 
 	// The response should contain the tool result from buildTerminateResponse
-	if !strings.Contains(response, "final answer from terminating tool") {
-		t.Errorf("expected terminate response containing tool result, got: %s", response)
-	}
+	assert.True(t, strings.Contains(response, "final answer from terminating tool"), "expected terminate response containing tool result, got: %s")
 
 	// The LLM chatter should have been called exactly once:
 	// 1) initial call that produced the tool call
 	// Terminate skips the synthesis follow-up.
-	if chatter.callCount != 1 {
-		t.Errorf("expected exactly 1 LLM call (terminate should skip follow-up), got %d", chatter.callCount)
-	}
+	assert.Equal(t, 1, chatter.callCount)
 }

@@ -60,6 +60,40 @@ func main() {
 		RunE:  checkStatus,
 	})
 
+	// Service management subcommand (uses kardianos/service)
+	serviceCmd := &cobra.Command{
+		Use:   "service",
+		Short: "Manage system service (install/uninstall/start/stop/status)",
+	}
+	serviceCmd.AddCommand(
+		&cobra.Command{
+			Use:   "install",
+			Short: "Install daemon as a system service",
+			RunE:  runServiceInstall,
+		},
+		&cobra.Command{
+			Use:   "uninstall",
+			Short: "Uninstall the system service",
+			RunE:  runServiceUninstall,
+		},
+		&cobra.Command{
+			Use:   "start",
+			Short: "Start the system service",
+			RunE:  runServiceStart,
+		},
+		&cobra.Command{
+			Use:   "stop",
+			Short: "Stop the system service",
+			RunE:  runServiceStop,
+		},
+		&cobra.Command{
+			Use:   "status",
+			Short: "Query system service status",
+			RunE:  runServiceStatus,
+		},
+	)
+	rootCmd.AddCommand(serviceCmd)
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -139,5 +173,85 @@ func checkStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Daemon is running (PID %s)\n", string(data))
+	return nil
+}
+
+func newServiceMgr() (*daemon.DaemonService, error) {
+	svcCfg, err := daemon.DefaultServiceConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service config: %w", err)
+	}
+	if stateDir != "" {
+		svcCfg.StateDir = stateDir
+		svcCfg.PIDFile = filepath.Join(stateDir, "meept.pid")
+	}
+	return daemon.NewServiceManager(svcCfg)
+}
+
+func runServiceInstall(cmd *cobra.Command, args []string) error {
+	mgr, err := newServiceMgr()
+	if err != nil {
+		return err
+	}
+	if err := mgr.Install(); err != nil {
+		return fmt.Errorf("failed to install service: %w", err)
+	}
+	slog.Info("service installed successfully")
+	return nil
+}
+
+func runServiceUninstall(cmd *cobra.Command, args []string) error {
+	mgr, err := newServiceMgr()
+	if err != nil {
+		return err
+	}
+	if err := mgr.Uninstall(); err != nil {
+		return fmt.Errorf("failed to uninstall service: %w", err)
+	}
+	slog.Info("service uninstalled successfully")
+	return nil
+}
+
+func runServiceStart(cmd *cobra.Command, args []string) error {
+	mgr, err := newServiceMgr()
+	if err != nil {
+		return err
+	}
+	if err := mgr.StartService(); err != nil {
+		return fmt.Errorf("failed to start service: %w", err)
+	}
+	slog.Info("service started successfully")
+	return nil
+}
+
+func runServiceStop(cmd *cobra.Command, args []string) error {
+	mgr, err := newServiceMgr()
+	if err != nil {
+		return err
+	}
+	if err := mgr.StopService(); err != nil {
+		return fmt.Errorf("failed to stop service: %w", err)
+	}
+	slog.Info("service stopped successfully")
+	return nil
+}
+
+func runServiceStatus(cmd *cobra.Command, args []string) error {
+	mgr, err := newServiceMgr()
+	if err != nil {
+		return err
+	}
+	status, err := mgr.Status()
+	if err != nil {
+		return fmt.Errorf("failed to get service status: %w", err)
+	}
+	switch status {
+	case 0:
+		fmt.Println("Service status: unknown")
+	case 1:
+		fmt.Println("Service status: running")
+	case 2:
+		fmt.Println("Service status: stopped")
+	}
 	return nil
 }

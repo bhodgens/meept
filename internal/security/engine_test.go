@@ -21,9 +21,7 @@ func TestNewEngine(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Check database was created
@@ -42,9 +40,7 @@ func TestEngineCheckBasicAction(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Test safe action
@@ -67,9 +63,7 @@ func TestEngineCheckHighRiskAction(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Test high-risk action
@@ -92,9 +86,7 @@ func TestEngineCheckDangerousCommand(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	tests := []struct {
@@ -152,9 +144,7 @@ func TestEngineCheckImmutableCommand(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Test immutable command (rm -rf /)
@@ -176,9 +166,7 @@ func TestEngineCheckFinancial(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Test financial operation detection
@@ -188,9 +176,7 @@ func TestEngineCheckFinancial(t *testing.T) {
 	if decision.Allowed {
 		t.Errorf("Financial operations should be blocked, got: %+v", decision)
 	}
-	if decision.RiskLevel != RiskCritical {
-		t.Errorf("Financial operations should have CRITICAL risk level")
-	}
+	assert.Equal(t, RiskCritical, decision.RiskLevel)
 }
 
 func TestEngineRecordOverride(t *testing.T) {
@@ -202,28 +188,20 @@ func TestEngineRecordOverride(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Record an allow override
 	id, err := engine.AllowOnce("shell_execute", "*pip*", "Approved by user", 10, 7)
-	if err != nil {
-		t.Fatalf("AllowOnce failed: %v", err)
-	}
-	if id == 0 {
-		t.Error("Override ID should not be zero")
-	}
+	require.NoError(t, err, "AllowOnce failed")
+	assert.NotZero(t, id, "Override ID should not be zero")
 
 	// Check that the override is applied
 	decision := engine.Check("shell_execute", "shell", map[string]string{"command": "pip install requests"}, "")
 	if !decision.Allowed {
 		t.Errorf("pip install should be allowed with override, got: %+v", decision)
 	}
-	if !decision.OverrideApplied {
-		t.Error("Override should be marked as applied")
-	}
+	assert.True(t, decision.OverrideApplied, "Override should be marked as applied")
 }
 
 func TestEngineBlockAction(t *testing.T) {
@@ -233,26 +211,20 @@ func TestEngineBlockAction(t *testing.T) {
 	cfg := &config.SecurityConfig{}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Record a block override
 	// SEC-3 fix: Use proper glob pattern that matches entire value (filepath.Match semantics)
 	_, err = engine.BlockAction("network_request", "https://dangerous.com/*", "Blocked by admin")
-	if err != nil {
-		t.Fatalf("BlockAction failed: %v", err)
-	}
+	require.NoError(t, err, "BlockAction failed")
 
 	// Check that the block is applied
 	decision := engine.Check("network_request", "network", map[string]string{"url": "https://dangerous.com/malware"}, "")
 	if decision.Allowed {
 		t.Errorf("Request to dangerous.com should be blocked, got: %+v", decision)
 	}
-	if !decision.OverrideApplied {
-		t.Error("Override should be marked as applied")
-	}
+	assert.True(t, decision.OverrideApplied, "Override should be marked as applied")
 }
 
 func TestEngineGetContextForLLM(t *testing.T) {
@@ -260,9 +232,7 @@ func TestEngineGetContextForLLM(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "security.db")
 
 	engine, err := NewEngine(dbPath, nil, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	decision := Decision{
@@ -274,9 +244,7 @@ func TestEngineGetContextForLLM(t *testing.T) {
 
 	context := engine.GetContextForLLM(decision, "shell_execute", map[string]string{"command": "rm -rf /"})
 
-	if context == "" {
-		t.Error("Context should not be empty")
-	}
+	assert.NotEmpty(t, context, "Context should not be empty")
 	if !contains(context, "shell_execute") {
 		t.Error("Context should contain action")
 	}
@@ -297,9 +265,7 @@ func TestEngineConcurrency(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Test concurrent access
@@ -345,19 +311,13 @@ func TestCheckPath_FailClosedOnDBError(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 
 	// Close the DB out from under the engine so subsequent queries fail.
-	if err := engine.db.Close(); err != nil {
-		t.Fatalf("failed to close DB: %v", err)
-	}
+	require.NoError(t, engine.db.Close(), "failed to close DB")
 
 	decision := engine.checkPath("/tmp/should-not-matter", "file_read")
-	if decision == nil {
-		t.Fatal("checkPath returned nil on DB error; expected fail-closed deny Decision")
-	}
+	require.NotNil(t, decision, "checkPath returned nil on DB error; expected fail-closed deny Decision")
 	if decision.Allowed {
 		t.Errorf("checkPath should deny on DB error, got allowed=true: %+v", decision)
 	}
@@ -378,9 +338,7 @@ func TestEngineCheckFinancial_DisabledByConfig(t *testing.T) {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Financial operations should NOT be blocked when BlockFinancial is false
@@ -403,9 +361,7 @@ func TestEngineCheckFinancial_NilConfig(t *testing.T) {
 
 	// Pass nil config
 	engine, err := NewEngine(dbPath, nil, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Financial operations should NOT be blocked when config is nil
@@ -428,18 +384,14 @@ func TestCheckPath_PathTraversalBypass(t *testing.T) {
 	cfg := &config.SecurityConfig{}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// Add an allow rule for /tmp
 	_, err = engine.db.Exec(`
 		INSERT INTO path_rules (pattern, rule_type, risk_level, description, immutable, enabled)
 		VALUES ('/tmp', 'allow', 1, 'Allow temp directory', 0, 1)`)
-	if err != nil {
-		t.Fatalf("Failed to add allow rule: %v", err)
-	}
+	require.NoError(t, err, "Failed to add allow rule")
 
 	// /tmp/test should be allowed (it's under /tmp)
 	decision := engine.checkPath("/tmp/test", "file_read")
@@ -463,9 +415,7 @@ func TestCheckPath_BlockedPathTraversal(t *testing.T) {
 	cfg := &config.SecurityConfig{}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	defer engine.Close()
 
 	// /etc/passwd should be blocked (it's under /etc which is blocked by default seeds)
@@ -543,9 +493,7 @@ func newEngineWithFence(t *testing.T, fenceCfg *FenceConfig) *Engine {
 	}
 
 	engine, err := NewEngine(dbPath, cfg, nil)
-	if err != nil {
-		t.Fatalf("NewEngine failed: %v", err)
-	}
+	require.NoError(t, err, "NewEngine failed")
 	t.Cleanup(func() { engine.Close() })
 
 	// Add a broad allow path rule so the path-rule stage does not deny
@@ -555,9 +503,7 @@ func newEngineWithFence(t *testing.T, fenceCfg *FenceConfig) *Engine {
 	_, err = engine.db.Exec(`
 		INSERT INTO path_rules (pattern, rule_type, risk_level, description, immutable, enabled)
 		VALUES ('/', 'allow', 0, 'test allow-all', 0, 1)`)
-	if err != nil {
-		t.Fatalf("failed to insert test allow rule: %v", err)
-	}
+	require.NoError(t, err, "failed to insert test allow rule")
 
 	if fenceCfg != nil {
 		engine.SetFenceChecker(NewFenceChecker(*fenceCfg))

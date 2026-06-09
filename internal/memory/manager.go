@@ -1156,14 +1156,9 @@ func (m *Manager) markVersionNonCurrent(ctx context.Context, id string) error {
 		return errors.New("episodic memory not available")
 	}
 
-	pool := m.episodic.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return err
-	}
-	defer pool.Put(db)
+	db := m.episodic.store.GetDB()
 
-	_, err = db.ExecContext(ctx, "UPDATE episodic_memories SET is_current = 0 WHERE id = ?", id)
+	_, err := db.ExecContext(ctx, "UPDATE episodic_memories SET is_current = 0 WHERE id = ?", id)
 	return err
 }
 
@@ -1175,13 +1170,8 @@ func (m *Manager) getCurrentVersion(ctx context.Context, id string) int {
 		return 0
 	}
 
-	pool := m.episodic.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		m.logger.Warn("Failed to get database connection for version check", "error", err)
-		return 0
-	}
-	defer pool.Put(db)
+	db := m.episodic.store.GetDB()
+	var err error
 
 	// Find the parent_id of this memory (if it's a version) using the SQL column
 	var parentID sql.NullString
@@ -1226,12 +1216,7 @@ func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, e
 		return nil, errors.New("episodic memory not available")
 	}
 
-	pool := m.episodic.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
+	db := m.episodic.store.GetDB()
 
 	// Find all versions using the SQL parent_id column
 	rows, err := db.QueryContext(ctx, `
@@ -1280,12 +1265,7 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 		return nil, errors.New("episodic memory not available")
 	}
 
-	pool := m.episodic.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
+	db := m.episodic.store.GetDB()
 
 	row := db.QueryRowContext(ctx, `
 		SELECT id, content, category, metadata_json, created_at, last_accessed_at
@@ -1297,7 +1277,7 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	var metaJSON string
 	var createdAtStr string
 	var lastAccessedStr sql.NullString
-	err = row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &createdAtStr, &lastAccessedStr)
+	err := row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &createdAtStr, &lastAccessedStr)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -1345,12 +1325,7 @@ func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, e
 	}
 	cutoffTime := time.Now().AddDate(0, 0, -cutoffDays)
 
-	pool := m.episodic.store.GetPool()
-	db, err := pool.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer pool.Put(db)
+	db := m.episodic.store.GetDB()
 
 	cutoffISO := cutoffTime.UTC().Format(time.RFC3339Nano)
 	rows, err := db.QueryContext(ctx, `

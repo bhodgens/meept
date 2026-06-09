@@ -6,7 +6,6 @@ import (
 
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestMessageBus_PubSub(t *testing.T) {
@@ -25,9 +24,7 @@ func TestMessageBus_PubSub(t *testing.T) {
 	}
 	delivered := bus.Publish("test.topic", msg)
 
-	if delivered != 1 {
-		t.Errorf("expected 1 delivered, got %d", delivered)
-	}
+	assert.Equal(t, 1, delivered)
 
 	// Receive
 	select {
@@ -58,9 +55,7 @@ func TestMessageBus_Wildcard(t *testing.T) {
 	}
 	delivered := bus.Publish("agent.status", msg)
 
-	if delivered != 1 {
-		t.Errorf("expected 1 delivered, got %d", delivered)
-	}
+	assert.Equal(t, 1, delivered)
 
 	// Receive
 	select {
@@ -83,9 +78,7 @@ func TestMessageBus_Unsubscribe(t *testing.T) {
 	// Verify channel is closed
 	select {
 	case _, ok := <-sub.Channel:
-		if ok {
-			t.Error("expected channel to be closed")
-		}
+		assert.False(t, ok, "expected channel to be closed")
 	default:
 		// Channel closed, as expected
 	}

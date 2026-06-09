@@ -316,35 +316,16 @@ build-cross: build-linux build-darwin
 # =============================================================================
 
 install-service:
-	@case "$$(uname)" in \
-		Darwin) \
-			sed "s|{{DAEMON}}|$$(pwd)/$(DAEMON)|g; s|{{MEEPT_DIR}}|$$(pwd)|g" \
-				service/com.meept.daemon.plist > ~/Library/LaunchAgents/com.meept.daemon.plist; \
-			launchctl load ~/Library/LaunchAgents/com.meept.daemon.plist; \
-			echo "Installed launchd service"; \
-			;; \
-		Linux) \
-			sed "s|{{DAEMON}}|$$(pwd)/$(DAEMON)|g; s|{{MEEPT_DIR}}|$$(pwd)|g" \
-				service/meept.service > ~/.config/systemd/user/meept.service; \
-			systemctl --user daemon-reload; \
-			systemctl --user enable meept; \
-			systemctl --user start meept; \
-			echo "Installed systemd service"; \
-			;; \
-	esac
+	@$(MAKE) build
+	@echo "Installing meept-daemon as a system service..."
+	@./bin/meept-daemon service install && \
+		echo "Service installed. Starting..." && \
+		./bin/meept-daemon service start && \
+		echo "Service started." || echo "Service install failed."
 
 uninstall: uninstall-gui
-	@case "$$(uname)" in \
-		Darwin) \
-			launchctl unload ~/Library/LaunchAgents/com.meept.daemon.plist 2>/dev/null || true; \
-			rm -f ~/Library/LaunchAgents/com.meept.daemon.plist; \
-			;; \
-		Linux) \
-			systemctl --user stop meept 2>/dev/null || true; \
-			systemctl --user disable meept 2>/dev/null || true; \
-			rm -f ~/.config/systemd/user/meept.service; \
-			;; \
-	esac
+	@./bin/meept-daemon service stop 2>/dev/null || true
+	@./bin/meept-daemon service uninstall
 	@echo "Service uninstalled (data preserved at $(MEEPT_HOME))"
 
 uninstall-gui:

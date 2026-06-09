@@ -12,7 +12,7 @@ _$ChatMessageImpl _$$ChatMessageImplFromJson(Map<String, dynamic> json) =>
       role: json['role'] as String,
       content: json['content'] as String,
       timestamp: DateTime.parse(json['timestamp'] as String),
-      sessionId: json['sessionId'] as String?,
+      sessionId: json['session_id'] as String?,
       toolCalls: (json['tool_calls'] as List<dynamic>?)
           ?.map((e) => e as String)
           .toList(),
@@ -24,7 +24,7 @@ Map<String, dynamic> _$$ChatMessageImplToJson(_$ChatMessageImpl instance) =>
       'role': instance.role,
       'content': instance.content,
       'timestamp': instance.timestamp.toIso8601String(),
-      'sessionId': instance.sessionId,
+      'session_id': instance.sessionId,
       'tool_calls': instance.toolCalls,
     };
 
