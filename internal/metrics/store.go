@@ -164,6 +164,23 @@ CREATE TABLE IF NOT EXISTS events (
     context TEXT    -- JSON
 );
 
+-- Response quality metrics for LLM responses
+CREATE TABLE IF NOT EXISTS response_quality (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    task_id TEXT,
+    agent_id TEXT,
+    message_id TEXT,
+    is_well_formed BOOLEAN,
+    parse_errors TEXT,
+    has_code_blocks BOOLEAN,
+    has_explanations BOOLEAN,
+    is_lazy BOOLEAN,
+    lazy_reason TEXT,
+    token_count INTEGER,
+    code_token_pct REAL
+);
+
 -- Indexes for query performance
 CREATE INDEX IF NOT EXISTS idx_metrics_live_ts ON metrics_live(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_metrics_live_name ON metrics_live(metric_name);
