@@ -184,7 +184,7 @@ func newServiceMgr() (*daemon.DaemonService, error) {
 		svcCfg.StateDir = stateDir
 		svcCfg.PIDFile = filepath.Join(stateDir, "meept.pid")
 	}
-	return daemon.NewServiceManager(svcCfg)
+	return daemon.NewDaemonService(svcCfg)
 }
 
 func runServiceInstall(cmd *cobra.Command, args []string) error {

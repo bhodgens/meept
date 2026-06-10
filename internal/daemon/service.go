@@ -88,7 +88,7 @@ type DaemonService struct {
 // It discovers the daemon executable path automatically.  The returned
 // DaemonService implements service.Interface but callers typically use the
 // higher-level Install/Uninstall/Start/Stop/Status methods instead.
-func NewServiceManager(cfg *ServiceConfig) (*DaemonService, error) {
+func NewDaemonService(cfg *ServiceConfig) (*DaemonService, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("service config must not be nil")
 	}
