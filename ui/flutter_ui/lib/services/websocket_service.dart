@@ -16,8 +16,8 @@ import 'storage_service.dart';
 /// `message['session_id']`, `message['job_id']`, etc. directly.
 ///
 /// Uses rxdart [BehaviorSubject] and [PublishSubject] for stream management,
-/// and rxdart [Rx.retryWhen] for automatic exponential-backoff
-/// reconnection (1 s base, doubles each attempt, 30 s cap).
+/// and a manual reconnect loop with exponential backoff (1 s base, doubles
+/// each attempt, 30 s cap).
 class WebSocketService {
   WebSocketChannel? _channel;
   final String _host;
@@ -35,7 +35,6 @@ class WebSocketService {
   bool _wasExplicitlyDisconnected = false;
   Timer? _pingTimer;
   StreamSubscription? _wsSubscription;
-  StreamSubscription? _reconnectSubscription;
 
   // Channel subscription tracking
   final Map<String, SessionSubscription> _chatSubscriptions = {};
@@ -82,47 +81,46 @@ class WebSocketService {
 
   /// Connect to WebSocket.
   ///
-  /// Uses rxdart's [Rx.retryWhen] to automatically reconnect with exponential
-  /// backoff (1 s base, doubles each attempt, 30 s cap).  On each
-  /// successful connection the backoff resets to 1 s.
+  /// Uses a manual reconnect loop with exponential backoff (1 s base,
+  /// doubles each failure, 30 s cap, resets on success).  On each
+  /// successful connection the backoff resets to 1 s.  When the
+  /// WebSocket closes, the `onDone` handler triggers a new reconnection
+  /// attempt automatically.
   Future<void> connect({String? path}) async {
     _wasExplicitlyDisconnected = false;
     if (_isDisposed || isConnected || _isConnecting) return;
     _isConnecting = true;
 
-    // Cancel any previous reconnect subscription before starting fresh.
-    _reconnectSubscription?.cancel();
-    _reconnectSubscription = null;
-
-    // Capture path for the factory closure.
+    // Capture path for the connection loop.
     final wsPath = path ?? '/ws';
 
-    // Use rxdart Rx.retryWhen for automatic reconnection with exponential
-    // backoff.  The stream factory is called on the first attempt and on
-    // every retry.  Starts at 1 s, doubles each failure, caps at 30 s,
-    // resets on success.
-    _reconnectSubscription = Rx.retryWhen<void>(
-      () => _openConnection(wsPath).asStream(),
-      (Object error, StackTrace stackTrace) {
-        if (_wasExplicitlyDisconnected || _isDisposed) {
-          // Returning an error stream stops retryWhen permanently.
-          return Stream<void>.error(error, stackTrace);
-        }
-        _errorSubject.addSafe('Reconnecting: $error');
-        // Exponential backoff: 1, 2, 4, 8, 16, 30, 30, ...
+    // Kick off the manual reconnect loop.  _connectWithRetry runs
+    // asynchronously and handles its own retry scheduling.
+    _connectWithRetry(wsPath);
+  }
+
+  /// Manual reconnect loop: try [wsPath], on failure wait with exponential
+  /// backoff and retry.  Exits only when [_disposed] or
+  /// [_wasExplicitlyDisconnected] is set.
+  Future<void> _connectWithRetry(String wsPath) async {
+    while (!_disposed && !_wasExplicitlyDisconnected) {
+      try {
+        await _openConnection(wsPath);
+        // Connection succeeded and the WebSocket stream ended (onDone).
+        // Reset retry count (already done in _openConnection on first
+        // message) and loop back to reconnect.
+        if (_disposed || _wasExplicitlyDisconnected) return;
+        _errorSubject.addSafe('Connection closed, reconnecting...');
         final delay = _nextReconnectDelay();
-        return TimerStream<void>(null, delay);
-      },
-    ).listen(
-      null,
-      onError: (Object e) {
-        _errorSubject.addSafe('Connection error: $e');
-        _isConnecting = false;
-      },
-      onDone: () {
-        _isConnecting = false;
-      },
-    );
+        await Future<void>.delayed(delay);
+      } catch (e) {
+        if (_disposed || _wasExplicitlyDisconnected) return;
+        _errorSubject.addSafe('Reconnecting: $e');
+        final delay = _nextReconnectDelay();
+        await Future<void>.delayed(delay);
+      }
+    }
+    _isConnecting = false;
   }
 
   /// Send any subscribe messages that were queued before the connection
@@ -177,9 +175,12 @@ class WebSocketService {
 
   /// Open a single WebSocket connection (no retry logic).
   ///
-  /// Completes successfully when the connection is established and the
-  /// first message is received.  Throws on connection failure or if
-  /// explicitly disconnected during the handshake.
+  /// Establishes the WebSocket, starts listening for messages, and
+  /// returns a [Future] that completes when the connection is confirmed
+  /// (first message received) and the stream subsequently ends (onDone).
+  /// Throws on connection failure or if explicitly disconnected during
+  /// the handshake.  The caller ([_connectWithRetry]) is responsible for
+  /// re-invoking this method after the future completes.
   Future<void> _openConnection(String wsPath) async {
     if (_isDisposed || _wasExplicitlyDisconnected) {
       throw StateError('Service disposed');
@@ -213,8 +214,12 @@ class WebSocketService {
         _channel = WebSocketChannel.connect(webUri);
       }
 
-      // Listen to the raw stream.
-      final done = Completer<void>();
+      // Completer that resolves once the connection is confirmed (first
+      // message received).  After that the stream listener continues
+      // running until onDone fires, which completes the returned future.
+      final ready = Completer<void>();
+      final streamDone = Completer<void>();
+
       _wsSubscription = _channel!.stream.listen(
         (data) {
           try {
@@ -245,9 +250,7 @@ class WebSocketService {
               _startPingTimer();
               _retryCount = 0;
               _flushPendingSubscriptions();
-              // Complete the singleConnect future so retryWhen knows
-              // the attempt succeeded and resets its backoff.
-              if (!done.isCompleted) done.complete();
+              if (!ready.isCompleted) ready.complete();
             }
           } catch (e) {
             _errorSubject.addSafe('Failed to parse message: $e');
@@ -255,23 +258,28 @@ class WebSocketService {
         },
         onError: (error) {
           _connectionSubject.add(false);
-          _errorSubject.addSafe('WebSocket error: $error');
           _cleanupChannel();
-          if (!done.isCompleted) done.completeError(error);
+          if (!ready.isCompleted) ready.completeError(error);
+          if (!streamDone.isCompleted) streamDone.completeError(error);
         },
         onDone: () {
           _connectionSubject.add(false);
           _cleanupChannel();
-          if (!done.isCompleted) {
-            done.completeError(StateError('WebSocket closed'));
+          // If we never received a first message, signal the handshake
+          // as failed so _connectWithRetry retries.
+          if (!ready.isCompleted) {
+            ready.completeError(StateError('WebSocket closed before ready'));
           }
+          // Signal the stream is done so _connectWithRetry re-enters
+          // its loop and reconnects.
+          if (!streamDone.isCompleted) streamDone.complete();
         },
       );
 
       // Wait for the connection to be confirmed by the first message, or
-      // for an error / done event.  A timeout prevents hanging forever if
-      // the server accepts the socket but never sends data.
-      await done.future.timeout(
+      // for an error during the handshake.  A timeout prevents hanging
+      // forever if the server accepts the socket but never sends data.
+      await ready.future.timeout(
         const Duration(seconds: 30),
         onTimeout: () {
           // Timeout is not fatal — the connection may still be usable.
@@ -284,6 +292,11 @@ class WebSocketService {
           }
         },
       );
+
+      // Now wait for the stream to end (onDone).  This blocks
+      // _connectWithRetry until the connection drops, at which point
+      // it will loop back and reconnect.
+      await streamDone.future;
     } catch (e) {
       _connectionSubject.add(false);
       _cleanupChannel();
@@ -311,8 +324,7 @@ class WebSocketService {
   /// Like [disconnect] but preserves subscription state and keeps the
   /// rxdart subjects open so [connect] can re-establish the channel.
   void pause() {
-    _reconnectSubscription?.cancel();
-    _reconnectSubscription = null;
+    _wasExplicitlyDisconnected = true;
     _cleanupChannel();
     _retryCount = 0;
     _connectionSubject.add(false);
@@ -323,8 +335,6 @@ class WebSocketService {
     if (_disposed) return;
     _disposed = true;
     _wasExplicitlyDisconnected = true;
-    _reconnectSubscription?.cancel();
-    _reconnectSubscription = null;
     _cleanupChannel();
     _chatSubscriptions.clear();
     _jobsSubscribed = false;
@@ -355,7 +365,8 @@ class WebSocketService {
         if (isConnected) {
           _connectionSubject.add(false);
           _cleanupChannel();
-          // Let retryWhen handle the reconnection if still active.
+          // onDone in _openConnection will fire, completing streamDone,
+          // which causes _connectWithRetry to reconnect.
         }
       });
     });
