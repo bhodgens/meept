@@ -99,12 +99,20 @@ func (e *EventEmitter) Publish(event *http.NotificationEvent) {
 
 	// Send to all subscribers (non-blocking)
 	for _, ch := range subscribers {
-		select {
-		case ch <- event:
-		default:
-			// Channel full, skip this subscriber
-			e.logger.Warn("notification subscriber channel full, skipping")
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Channel was closed by Unsubscribe, that's ok
+					e.logger.Debug("notification channel closed during publish", "recover", r)
+				}
+			}()
+			select {
+			case ch <- event:
+			default:
+				// Channel full, skip this subscriber
+				e.logger.Warn("notification subscriber channel full, skipping")
+			}
+		}()
 	}
 }
 
@@ -131,6 +139,7 @@ func (e *EventEmitter) GetEventsSince(t time.Time) []*http.NotificationEvent {
 	for _, event := range e.buffer {
 		eventTime, err := time.Parse(time.RFC3339, event.Timestamp)
 		if err != nil {
+			e.logger.Warn("failed to parse event timestamp", "timestamp", event.Timestamp, "error", err)
 			continue
 		}
 		if eventTime.After(t) || eventTime.Equal(t) {

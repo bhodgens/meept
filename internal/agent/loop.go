@@ -564,15 +564,6 @@ type LearnedPattern struct {
 	Confidence  float64
 }
 
-// NotificationType represents the type of notification.
-type NotificationType string
-
-const (
-	NotificationTypeInfo    NotificationType = "info"
-	NotificationTypeSuccess NotificationType = "success"
-	NotificationTypeWarning NotificationType = "warning"
-	NotificationTypeError   NotificationType = "error"
-)
 
 // NotificationPublisher is an interface for publishing task notifications.
 // This allows the agent to publish notifications without depending on the daemon package.
