@@ -584,13 +584,13 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 
 // permissionOverrideRow maps DB rows for permission_overrides.
 type permissionOverrideRow struct {
-	ID          int64  `db:"id"`
-	Pattern     string `db:"pattern"`
-	Decision    string `db:"decision"`
-	Reason      string `db:"reason"`
-	UsageCount  int    `db:"usage_count"`
-	MaxUses     int    `db:"max_uses"`
-	ExpiresAt   string `db:"expires_at"`
+	ID          int64          `db:"id"`
+	Pattern     string         `db:"pattern"`
+	Decision    string         `db:"decision"`
+	Reason      string         `db:"reason"`
+	UsageCount  int            `db:"usage_count"`
+	MaxUses     int            `db:"max_uses"`
+	ExpiresAt   sql.NullString `db:"expires_at"`
 }
 
 // checkOverrides checks for creator permission overrides.
