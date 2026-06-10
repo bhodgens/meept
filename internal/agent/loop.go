@@ -1848,7 +1848,7 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		cachedTokens += response.Usage.CachedTokens
 
 		// Emit after-provider-response event with cache data
-		if l.eventEmitter != nil {
+		if l.notificationPublisher != nil {
 			l.eventEmitter.EmitWithFields(ctx, AgentEvent{
 				Type:           AgentEventAfterProviderResponse,
 				ConversationID: conversationID,
@@ -2441,7 +2441,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		conv.AddAssistantMessage(errorMsg)
 
 		// Emit task failure notification
-		if l.eventEmitter != nil {
+		if l.notificationPublisher != nil {
 			l.notificationPublisher.PublishTaskNotification(t.ID, l.agentID, "error",
 				"Task Failed", "Task processing encountered an error: "+err.Error())
 		}
