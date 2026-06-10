@@ -703,6 +703,30 @@ CREATE INDEX IF NOT EXISTS idx_agent_task_outcomes_agent_id ON agent_task_outcom
 CREATE INDEX IF NOT EXISTS idx_agent_task_outcomes_timestamp ON agent_task_outcomes(timestamp);
 `
 	_, err := db.Exec(schema)
+	if err != nil {
+		return err
+	}
+
+	// Create agent_errors table for error tracking
+	errorsSchema := `
+CREATE TABLE IF NOT EXISTS agent_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    task_id TEXT,
+    agent_id TEXT,
+    error_type TEXT,
+    error_message TEXT,
+    file_path TEXT,
+    line_number INTEGER,
+    stack_trace TEXT,
+    resolved BOOLEAN,
+    resolution_method TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_errors_task_id ON agent_errors(task_id);
+CREATE INDEX IF NOT EXISTS idx_agent_errors_agent_id ON agent_errors(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_errors_timestamp ON agent_errors(timestamp);
+`
+	_, err = db.Exec(errorsSchema)
 	return err
 }
 

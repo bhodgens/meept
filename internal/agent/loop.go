@@ -21,6 +21,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory/memvid"
+	"github.com/caimlas/meept/internal/metrics"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
@@ -486,6 +487,10 @@ type AgentLoop struct {
 	// modelOverride holds a model reference from a user's reassignment directive.
 	// Set before reasoningCycle() runs; cleared after application.
 	modelOverride string
+
+	// Metrics collection for analytics
+	taskCollector      *metrics.TaskCollector
+	responseAnalyzer   *metrics.ResponseAnalyzer
 }
 
 // sessionStore is an interface for session persistence operations needed by AgentLoop.
@@ -841,6 +846,20 @@ func (l *AgentLoop) ClearModelOverride() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.modelOverride = ""
+}
+
+// WithTaskCollector sets the task collector for metrics recording.
+func WithTaskCollector(tc *metrics.TaskCollector) LoopOption {
+	return func(l *AgentLoop) {
+		l.taskCollector = tc
+	}
+}
+
+// WithResponseAnalyzer sets the response analyzer for quality metrics.
+func WithResponseAnalyzer(ra *metrics.ResponseAnalyzer) LoopOption {
+	return func(l *AgentLoop) {
+		l.responseAnalyzer = ra
+	}
 }
 
 // NewAgentLoop creates a new agent loop.
@@ -2019,6 +2038,21 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		l.publishIteration(conversationID, iteration)
 		l.publishTurnEndEvent(ctx, conversationID, iteration, hadToolCalls, toolCallCount, response.Usage.TotalTokens, response.Usage.CachedTokens, "end_turn")
 
+		// Analyze response quality if response analyzer is configured
+		if l.responseAnalyzer != nil && response.Content != "" {
+			quality := l.responseAnalyzer.Analyze(response.Content, response.Usage.TotalTokens)
+			if l.logger != nil {
+				l.logger.Debug("Response quality analysis",
+					"conversation", conversationID,
+					"well_formed", quality.WellFormed,
+					"is_lazy", quality.IsLazy,
+					"has_code_blocks", quality.HasCodeBlocks,
+					"token_count", quality.TokenCount,
+				)
+			}
+			_ = quality // Quality stored for later task metrics
+		}
+
 		// Capture interaction for shadow training
 		if l.shadowMgr != nil && l.shadowMgr.IsEnabled() {
 			modelID := ""
@@ -2345,6 +2379,7 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	}
 
 	// Run reasoning cycle
+	taskIterations := 0 // Track iterations for metrics
 	startTime := time.Now()
 	response, err := l.reasoningCycle(ctx, conv, conversationID)
 	if err != nil {
@@ -2356,8 +2391,18 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		)
 		errorMsg := "I encountered an error during processing. Please try again."
 		conv.AddAssistantMessage(errorMsg)
+
+		// Record failed task metrics
+		if l.taskCollector != nil {
+			l.recordTaskMetrics(t, modelID, false, taskIterations, time.Since(startTime).Milliseconds(), 0, 0, response)
+		}
+
 		return errorMsg, err
 	}
+
+	// Estimate iterations from conversation length (approximation since reasoningCycle doesn't expose it directly)
+	// For accurate iteration tracking, we'd need to modify reasoningCycle to return iteration count
+	taskIterations = conv.Len() // Use conversation length as proxy
 
 	// Log task completion
 	l.logger.Info("Agent completed task",
@@ -2373,6 +2418,11 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Record memory of this task execution
 	if l.memvid != nil {
 		go l.recordTaskExecution(context.Background(), t, response)
+	}
+
+	// Record task metrics on successful completion
+	if l.taskCollector != nil {
+		l.recordTaskMetrics(t, modelID, true, taskIterations, time.Since(startTime).Milliseconds(), 0, 0, response)
 	}
 
 	return response, nil
@@ -3408,4 +3458,59 @@ func (l *AgentLoop) buildTerminateResponse(results []*ExecutionResult) string {
 		return "done"
 	}
 	return strings.Join(parts, "\n")
+}
+
+
+// recordTaskMetrics records task execution metrics to the task collector.
+func (l *AgentLoop) recordTaskMetrics(t *task.Task, modelID string, success bool, iterations int, durationMs int64, tokensIn, tokensOut int, response string) {
+	if l.taskCollector == nil {
+		return
+	}
+
+	// Analyze response quality
+	var responseWellFormed bool
+	var isLazy bool
+	if l.responseAnalyzer != nil && response != "" {
+		// Estimate token count from response length (rough approximation)
+		tokenCount := len(response) / 4
+		quality := l.responseAnalyzer.Analyze(response, tokenCount)
+		responseWellFormed = quality.WellFormed
+		isLazy = quality.IsLazy
+	}
+
+	// Determine status
+	status := "completed"
+	if !success {
+		status = "failed"
+	}
+
+	// Get skill name from task metadata if available
+	skillName := ""
+	if len(t.Metadata) > 0 {
+		var meta map[string]any
+		if err := json.Unmarshal(t.Metadata, &meta); err == nil {
+			if sn, ok := meta["skill_name"].(string); ok {
+				skillName = sn
+			}
+		}
+	}
+
+	metrics := &metrics.AgentTaskMetrics{
+		TaskID:             t.ID,
+		AgentID:            l.agentID,
+		SkillName:          skillName,
+		Status:             status,
+		Success:            success,
+		Iterations:         iterations,
+		DurationMs:         durationMs,
+		TokensInput:        tokensIn,
+		TokensOutput:       tokensOut,
+		ResponseWellFormed: responseWellFormed,
+		LazyResponse:       isLazy,
+		ModelID:            modelID,
+	}
+
+	if err := l.taskCollector.RecordAgentTask(metrics); err != nil {
+		l.logger.Warn("Failed to record task metrics", "task_id", t.ID, "error", err)
+	}
 }
