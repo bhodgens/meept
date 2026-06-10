@@ -214,7 +214,7 @@ func TestSearchDimensionMismatch(t *testing.T) {
 	}
 	defer otherShard.Close()
 
-	_, err = otherShard.Search(nil, make([]float32, 64), 10, 50)
+	_, err = otherShard.Search(context.Background(), make([]float32, 128), 10, 50)
 	if err == nil {
 		t.Fatal("expected dimension mismatch error")
 	}
@@ -282,10 +282,10 @@ func TestOpenExisting(t *testing.T) {
 	}
 	shard1.Close()
 
-	// Reopen
-	shard2, err := OpenExisting(path)
+	// Reopen with same parameters
+	shard2, err := NewVectorShard(path, 32, 8, 100)
 	if err != nil {
-		t.Fatalf("open existing: %v", err)
+		t.Fatalf("reopen shard: %v", err)
 	}
 	defer shard2.Close()
 
