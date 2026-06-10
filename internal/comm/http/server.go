@@ -133,6 +133,9 @@ type Server struct {
 	mcpSessions sync.Map // map[string]*MCPSession
 	mcpPath     string
 	wsPath      string
+
+	// Notification handler (optional)
+	notifHandler *NotificationHandler
 }
 
 // AgentInfo describes an agent for listing.
@@ -414,6 +417,16 @@ func WithMCP(services *services.ServiceRegistry, mcpPath string) ServerOption {
 	}
 }
 
+// WithNotification enables the notification event system.
+func WithNotification(emitter NotificationEmitter) ServerOption {
+	return func(s *Server) {
+		if emitter == nil {
+			return
+		}
+		s.notifHandler = NewNotificationHandler(emitter, s.logger)
+	}
+}
+
 // ServerOption is a functional option for configuring a Server.
 type ServerOption func(*Server)
 
@@ -609,6 +622,12 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	if s.mcpServices != nil {
 		mux.HandleFunc(fmt.Sprintf("POST %s", s.mcpPath), s.handleMCPPost)
 		mux.HandleFunc(fmt.Sprintf("GET %s/sse", s.mcpPath), s.handleMCPSSE)
+	}
+
+	// Notification endpoints (if enabled)
+	if s.notifHandler != nil {
+		mux.HandleFunc("/ws/notifications", s.notifHandler.ServeWebSocket)
+		mux.HandleFunc("/api/v1/notifications", s.notifHandler.ServeHTTP)
 	}
 }
 

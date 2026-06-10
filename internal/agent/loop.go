@@ -468,6 +468,9 @@ type AgentLoop struct {
 	// Agent registry for queue registration during RunOnce
 	agentRegistry *AgentRegistry
 
+	// Notification publisher for desktop notifications
+	notificationPublisher NotificationPublisher
+
 	// TT-SR stream rule enforcement (shared with agent registry)
 	ttsrManager *TTSRManager
 
@@ -559,6 +562,22 @@ type LearnedPattern struct {
 	Description string
 	Pattern     string
 	Confidence  float64
+}
+
+// NotificationType represents the type of notification.
+type NotificationType string
+
+const (
+	NotificationTypeInfo    NotificationType = "info"
+	NotificationTypeSuccess NotificationType = "success"
+	NotificationTypeWarning NotificationType = "warning"
+	NotificationTypeError   NotificationType = "error"
+)
+
+// NotificationPublisher is an interface for publishing task notifications.
+// This allows the agent to publish notifications without depending on the daemon package.
+type NotificationPublisher interface {
+	PublishTaskNotification(taskID, agentID string, notifType string, title, message string)
 }
 
 // LoopOption is a functional option for configuring an AgentLoop.
@@ -808,6 +827,15 @@ func WithHookRegistry(hr *HookRegistry) LoopOption {
 	return func(l *AgentLoop) {
 		if hr != nil {
 			l.hookRegistry = hr
+		}
+	}
+}
+
+// WithNotificationPublisher sets the notification publisher for desktop notifications.
+func WithNotificationPublisher(publisher NotificationPublisher) LoopOption {
+	return func(l *AgentLoop) {
+		if publisher != nil {
+			l.notificationPublisher = publisher
 		}
 	}
 }
@@ -2381,6 +2409,26 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 	// Run reasoning cycle
 	taskIterations := 0 // Track iterations for metrics
 	startTime := time.Now()
+	
+	// Start long-running task notification goroutine (after 30s)
+	if l.notificationPublisher != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+				// Check if task is still running
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					l.notificationPublisher.PublishTaskNotification(t.ID, l.agentID, "warning",
+						"Long Running Task", "Task has been processing for over 30 seconds...")
+				}
+			}
+		}()
+	}
+	
 	response, err := l.reasoningCycle(ctx, conv, conversationID)
 	if err != nil {
 		l.logger.Error("Task reasoning cycle failed",
@@ -2391,6 +2439,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		)
 		errorMsg := "I encountered an error during processing. Please try again."
 		conv.AddAssistantMessage(errorMsg)
+
+		// Emit task failure notification
+		if l.eventEmitter != nil {
+			l.notificationPublisher.PublishTaskNotification(t.ID, l.agentID, "error",
+				"Task Failed", "Task processing encountered an error: "+err.Error())
+		}
 
 		// Record failed task metrics
 		if l.taskCollector != nil {
@@ -2411,6 +2465,12 @@ func (l *AgentLoop) RunWithTask(ctx context.Context, t *task.Task) (string, erro
 		"model", modelID,
 		"duration_ms", time.Since(startTime).Milliseconds(),
 	)
+
+	// Emit task success notification
+	if l.notificationPublisher != nil {
+		l.notificationPublisher.PublishTaskNotification(t.ID, l.agentID, "success",
+			"Task Completed", "Task completed successfully")
+	}
 
 	// Add final response to conversation
 	conv.AddAssistantMessage(response)
@@ -3246,6 +3306,13 @@ func (l *AgentLoop) SetTaskStore(store *task.Store) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.taskStore = store
+}
+
+// SetNotificationEmitter sets the notification emitter for desktop notifications.
+func (l *AgentLoop) SetNotificationPublisher(publisher NotificationPublisher) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.notificationPublisher = publisher
 }
 
 // SetCapabilityIndex sets the capability index for skill discovery.

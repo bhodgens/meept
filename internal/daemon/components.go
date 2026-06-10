@@ -688,6 +688,10 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 
+	// Wire notification event emitter for desktop notifications
+	noteEmitter := NewEventEmitter(100, logger.With("component", "notification-emitter"))
+	c.AgentLoop.SetNotificationPublisher(&notificationAdapter{emitter: noteEmitter})
+
 	// Start progress synthesizer for tiered agent activity summaries.
 	// Subscribes to all agent events via wildcard and republishes condensed
 	// SynthesizedProgressEvent messages on the "agent.progress.synthesized" topic.
@@ -3820,4 +3824,25 @@ func ttsrSkillsDirs() []string {
 		filepath.Join(homeDir, ".meept", "skills"),
 		".meept/skills",
 	}
+}
+
+// notificationAdapter wraps EventEmitter to implement agent.NotificationPublisher.
+type notificationAdapter struct {
+	emitter *EventEmitter
+}
+
+func (a *notificationAdapter) PublishTaskNotification(taskID, agentID string, notifType string, title, message string) {
+	// Convert string to NotificationType
+	var nType NotificationType
+	switch notifType {
+	case "success":
+		nType = NotificationTypeSuccess
+	case "warning":
+		nType = NotificationTypeWarning
+	case "error":
+		nType = NotificationTypeError
+	default:
+		nType = NotificationTypeInfo
+	}
+	a.emitter.PublishTaskNotification(taskID, agentID, nType, title, message)
 }
