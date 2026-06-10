@@ -48,11 +48,20 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             onPressed: () async {
               if (controller.text.isNotEmpty) {
                 final session = await notifier.createSession(controller.text);
-                Navigator.pop(context);
-                // Auto-switch to new session and chat tab
-                if (session != null && context.mounted) {
+                if (session != null) {
+                  Navigator.pop(context);
                   ref.read(activeSessionProvider.notifier).state = session;
-                  context.go('/');
+                  if (context.mounted) context.go('/');
+                } else {
+                  // Error: don't pop, show feedback (bug F4).
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('failed to create session'),
+                        backgroundColor: CyberpunkColors.redAlert,
+                      ),
+                    );
+                  }
                 }
               }
             },
@@ -80,9 +89,14 @@ class _SessionsListState extends ConsumerState<SessionsList> {
             style: FilledButton.styleFrom(
                 backgroundColor: CyberpunkColors.redAlert),
             onPressed: () {
+              final activeSession = ref.read(activeSessionProvider);
+              final isActive = activeSession?.id == sessionId;
               ref
                   .read(sessionProvider.notifier)
                   .deleteSession(sessionId);
+              if (isActive) {
+                ref.read(activeSessionProvider.notifier).state = null;
+              }
               Navigator.pop(context);
             },
             child: const Text('delete', style: CyberpunkTypography.bodyMedium),

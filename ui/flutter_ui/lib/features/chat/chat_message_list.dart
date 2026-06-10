@@ -89,7 +89,7 @@ class _ChatMessageListState extends ConsumerState<ChatMessageList> {
                 ? const MessagePlaceholder()
                 : ListView.builder(
                     controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, chatState.error != null ? 100 : 16),
                     reverse: false,
                     itemCount:
                         chatState.messages.length + (chatState.isLoading ? 1 : 0),
