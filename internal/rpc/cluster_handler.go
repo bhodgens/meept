@@ -69,11 +69,14 @@ type StatusResponse struct {
 // handleStatus returns the current cluster status.
 func (h *ClusterHandler) handleStatus(_ context.Context, params json.RawMessage) (any, error) {
 	resp := StatusResponse{
-		Enabled:   h.cfg != nil,
-		NodeID:    h.cfg.NodeID,
-		ClusterID: h.cfg.ClusterID,
-		GossipOK:  h.gossip != nil,
-		SyncOK:    h.gitSync != nil,
+		Enabled:  h.cfg != nil,
+		GossipOK: h.gossip != nil,
+		SyncOK:   h.gitSync != nil,
+	}
+
+	if h.cfg != nil {
+		resp.NodeID = h.cfg.NodeID
+		resp.ClusterID = h.cfg.ClusterID
 	}
 
 	if h.gossip != nil {
