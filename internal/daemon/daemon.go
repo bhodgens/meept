@@ -571,6 +571,13 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 				logger.Info("Bot webhook endpoint enabled", "path", "/api/v1/bot/{botID}/trigger")
 			}
 
+			// RPC call bridge: enables /api/v1/bus/call so HTTP clients can
+			// dispatch any RPC method registered on the RPC server.
+			if rpcServer != nil {
+				httpOpts = append(httpOpts, http.WithRPCCall(rpcServer.CallMethod))
+				logger.Info("RPC call bridge enabled", "endpoint", "/api/v1/bus/call")
+			}
+
 			var metricsService interface {
 				GetLiveMetrics() (*metrics.LiveMetricsSnapshot, error)
 				GetHistoricalMetrics(ctx context.Context, from, to time.Time, resolution string) ([]metrics.MetricPoint, error)

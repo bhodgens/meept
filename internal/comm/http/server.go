@@ -133,6 +133,11 @@ type Server struct {
 	mcpSessions sync.Map // map[string]*MCPSession
 	mcpPath     string
 	wsPath      string
+
+	// rpcCall dispatches RPC-style method calls to the RPC handler registry.
+	// When set, the POST /api/v1/bus/call route is registered and forwards
+	// {"method": "...", "params": {...}} requests through this callback.
+	rpcCall func(ctx context.Context, method string, params json.RawMessage) (any, error)
 }
 
 // AgentInfo describes an agent for listing.
@@ -411,6 +416,17 @@ func WithMCP(services *services.ServiceRegistry, mcpPath string) ServerOption {
 			mcpPath = "/mcp"
 		}
 		s.mcpPath = mcpPath
+	}
+}
+
+// WithRPCCall enables the POST /api/v1/bus/call route that dispatches RPC-style
+// method calls. The callback receives the method name and raw JSON params and
+// should return the handler result or an error.
+func WithRPCCall(fn func(ctx context.Context, method string, params json.RawMessage) (any, error)) ServerOption {
+	return func(s *Server) {
+		if fn != nil {
+			s.rpcCall = fn
+		}
 	}
 }
 
@@ -780,6 +796,9 @@ func (s *Server) setupRESTRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/terminal/clear", s.handleTerminalClear)
 
 	// Bus endpoints
+	if s.rpcCall != nil {
+		mux.HandleFunc("POST /api/v1/bus/call", s.handleBusCall)
+	}
 	mux.HandleFunc("POST /api/v1/bus/publish", s.handleBusPublish)
 	mux.HandleFunc("GET /api/v1/bus/stats", s.handleBusStats)
 

@@ -1141,6 +1141,37 @@ func (s *Server) handleModelsDeleteCredential(w http.ResponseWriter, r *http.Req
 
 // ===== Bus Endpoints =====
 
+// handleBusCall handles POST /api/v1/bus/call.
+// It dispatches RPC-style method calls ({"method": "...", "params": {...}})
+// to the RPC handler registry, enabling the HTTP transport to proxy any
+// RPC method that the CLI would normally send over the Unix socket.
+func (s *Server) handleBusCall(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	if !s.readJSON(w, r, &req) {
+		return
+	}
+
+	if req.Method == "" {
+		s.writeError(w, http.StatusBadRequest, "method is required")
+		return
+	}
+
+	result, err := s.rpcCall(r.Context(), req.Method, req.Params)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"result": result,
+	})
+}
+
 // handleBusPublish handles POST /api/v1/bus/publish.
 func (s *Server) handleBusPublish(w http.ResponseWriter, r *http.Request) {
 	if s.services == nil || s.services.Bus == nil {

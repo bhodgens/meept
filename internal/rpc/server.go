@@ -119,6 +119,20 @@ func (s *Server) RegisterHandler(method string, handler Handler) {
 	s.logger.Debug("rpc: registered handler", "method", method)
 }
 
+// CallMethod dispatches a method call through the handler registry.
+// This is the exported entry point for HTTP-to-RPC bridging.
+func (s *Server) CallMethod(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	s.mu.RLock()
+	handler, ok := s.handlers[method]
+	s.mu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("method not found: %s", method)
+	}
+
+	return handler(ctx, params)
+}
+
 // Start starts the RPC server.
 func (s *Server) Start(ctx context.Context) error {
 	// Remove existing socket
