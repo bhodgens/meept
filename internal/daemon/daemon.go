@@ -680,18 +680,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 		)
 	}
 
-	// Start cluster components (gossip engine, git sync)
-	if d.components != nil && d.components.ClusterEngine != nil {
-		if err := d.components.ClusterEngine.Start(ctx); err != nil {
-			d.logger.Error("Failed to start gossip engine", "error", err)
-		}
-	}
-	if d.components != nil && d.components.ClusterGitSync != nil {
-		if err := d.components.ClusterGitSync.Start(ctx); err != nil {
-			d.logger.Error("Failed to start git sync", "error", err)
-		}
-	}
-
 	// WireGuard manager is config-only (no background goroutines);
 	// configuration is applied on-demand via syncWireGuardConfig.
 
@@ -850,28 +838,6 @@ func (d *Daemon) shutdown() error {
 	if d.components != nil && d.components.RuntimeManager != nil {
 		if err := d.components.RuntimeManager.StopAll(ctx); err != nil {
 			d.logger.Error("Failed to stop LLM runtimes", "error", err)
-		}
-	}
-
-	// Stop cluster components (gossip engine, git sync, wireguard, cluster queue)
-	if d.components != nil && d.components.ClusterEngine != nil {
-		if err := d.components.ClusterEngine.Stop(); err != nil {
-			d.logger.Error("Failed to stop gossip engine", "error", err)
-		}
-	}
-	if d.components != nil && d.components.ClusterGitSync != nil {
-		if err := d.components.ClusterGitSync.Stop(); err != nil {
-			d.logger.Error("Failed to stop git sync", "error", err)
-		}
-	}
-	if d.components != nil && d.components.ClusterWireGuard != nil {
-		if err := d.components.ClusterWireGuard.Stop(); err != nil {
-			d.logger.Warn("Failed to stop WireGuard sync", "error", err)
-		}
-	}
-	if d.components != nil && d.components.ClusterQueue != nil {
-		if err := d.components.ClusterQueue.Close(); err != nil {
-			d.logger.Error("Failed to stop cluster queue", "error", err)
 		}
 	}
 
