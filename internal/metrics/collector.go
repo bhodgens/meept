@@ -126,6 +126,7 @@ type TypedEventEmitter interface {
 
 // Collector collects metrics from various sources.
 type Collector struct {
+	subs          []*bus.Subscriber
 	store           *Store
 	bus             *bus.MessageBus
 	stopChan        chan struct{}
@@ -199,6 +200,7 @@ func (c *Collector) subscribeToBus() {
 
 	// Subscribe to metrics topic and process messages in a goroutine
 	sub := c.bus.Subscribe("metrics-collector", "metrics")
+	c.subs = append(c.subs, sub)
 	go func() {
 		for msg := range sub.Channel {
 			c.handleBusMessage(msg)
@@ -207,6 +209,7 @@ func (c *Collector) subscribeToBus() {
 
 	// Subscribe to review events for review metrics
 	reviewSub := c.bus.Subscribe("metrics-collector-review", "step.*")
+	c.subs = append(c.subs, reviewSub)
 	go func() {
 		for msg := range reviewSub.Channel {
 			c.handleBusMessage(msg)
@@ -372,6 +375,7 @@ func (c *Collector) recordReviewMetrics(msg *models.BusMessage) {
 		RevisionCount int     `json:"revision_count"`
 	}
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		c.logger.Error("failed to unmarshal review metrics payload", "error", err)
 		return
 	}
 
@@ -528,6 +532,12 @@ func (c *Collector) Shutdown() {
 		close(c.stopChan)
 	}
 	c.wg.Wait()
+
+	// Clean up bus subscriptions to stop goroutines
+	for _, sub := range c.subs {
+		c.bus.Unsubscribe(sub)
+		close(sub.Channel)
+	}
 }
 
 // CollectFunc is a function that collects metrics.
@@ -599,6 +609,7 @@ type AgentTaskMetrics struct {
 	ReflectionIterations int
 	ReflectionSuccess    bool
 	UserInterventions    int
+	UserSatisfaction     int
 	ModelID              string
 	EditFormat           string
 }
