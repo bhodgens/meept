@@ -1074,15 +1074,15 @@ struct MenuBarContentView: View {
 
 ## Success Criteria
 
-- [ ] Desktop notifications appear for task completion/failure
-- [ ] Long-running task notifications work (>30s threshold)
-- [ ] WebSocket real-time delivery functional
-- [ ] HTTP polling fallback works
-- [ ] MenuBar notification center displays history
-- [ ] Native macOS notifications trigger with correct sounds
-- [ ] User can enable/disable notifications
-- [ ] Configuration options respected
-- [ ] No impact on daemon performance
+- [x] Desktop notifications appear for task completion/failure
+- [x] Long-running task notifications work (>30s threshold)
+- [x] WebSocket real-time delivery functional
+- [x] HTTP polling fallback works
+- [x] MenuBar notification center displays history
+- [x] Native macOS notifications trigger with correct sounds
+- [x] User can enable/disable notifications
+- [x] Configuration options respected
+- [x] No impact on daemon performance
 
 ---
 

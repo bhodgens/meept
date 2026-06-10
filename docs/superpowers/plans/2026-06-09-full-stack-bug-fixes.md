@@ -1,6 +1,6 @@
 # Full-Stack Bug Fixes Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix 45 high-confidence bugs across the daemon, CLI client, transport layer, and Flutter GUI that impact stability, usability, and interoperability.
 
@@ -95,7 +95,7 @@
 - Modify: `internal/daemon/daemon.go:119`
 - Modify: `cmd/meept-daemon/main.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create test that verifies daemon uses the config passed via `--config` flag instead of always calling `LoadDefault()`.
 
@@ -134,12 +134,12 @@ func TestConfigFlagRespected(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./cmd/meept-daemon/ -run TestConfigFlagRespected -v`
 Expected: PASS (test validates config loading; the bug is in daemon.go, which we fix next)
 
-- [ ] **Step 3: Fix daemon.go to use passed config**
+- [x] **Step 3: Fix daemon.go to use passed config**
 
 In `internal/daemon/daemon.go`, replace the `config.LoadDefault()` call at line 119 with the config passed through `daemon.Config`:
 
@@ -171,12 +171,12 @@ dCfg := daemon.Config{
 }
 ```
 
-- [ ] **Step 4: Run all daemon tests**
+- [x] **Step 4: Run all daemon tests**
 
 Run: `go test ./cmd/meept-daemon/ -v && go test ./internal/daemon/ -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/daemon/daemon.go cmd/meept-daemon/main.go
@@ -191,7 +191,7 @@ git commit -m "fix: respect --config flag in daemon instead of always loading de
 - Modify: `internal/daemon/daemon.go:675-684,848-867`
 - Reference: `internal/daemon/components.go:1688-1706,1917-1935`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 // internal/daemon/daemon_test.go -- add to existing test file
@@ -201,7 +201,7 @@ func TestClusterNotDoubleStarted(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Remove duplicate cluster start in daemon.Run()**
+- [x] **Step 2: Remove duplicate cluster start in daemon.Run()**
 
 In `internal/daemon/daemon.go`, remove the cluster start block around lines 675-684:
 
@@ -217,7 +217,7 @@ In `internal/daemon/daemon.go`, remove the cluster start block around lines 675-
 
 These are already handled by `components.Start()` at `components.go:1688-1706`.
 
-- [ ] **Step 3: Remove duplicate cluster stop in shutdown()**
+- [x] **Step 3: Remove duplicate cluster stop in shutdown()**
 
 In `internal/daemon/daemon.go`, remove the cluster stop block around lines 848-867:
 
@@ -241,12 +241,12 @@ These are already handled by `components.Stop()` at `components.go:1917-1935`.
 
 Keep the WireGuard manager cleanup at line ~892 (which does additional cleanup beyond just Stop).
 
-- [ ] **Step 4: Run daemon tests**
+- [x] **Step 4: Run daemon tests**
 
 Run: `go test ./internal/daemon/ -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/daemon/daemon.go
@@ -260,7 +260,7 @@ git commit -m "fix: remove duplicate cluster start/stop that causes double-invoc
 **Files:**
 - Modify: `internal/agent/loop.go:1702,1719,2108`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 // internal/agent/loop_test.go
@@ -271,7 +271,7 @@ func TestSwitchModelConcurrentSafety(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Add mutex protection around SwitchModel**
+- [x] **Step 2: Add mutex protection around SwitchModel**
 
 In `internal/agent/loop.go`, wrap all `SwitchModel` calls with the loop's existing mutex:
 
@@ -301,12 +301,12 @@ l.mu.Unlock()
 
 Alternatively, if the mutex is already held at these call sites, add a dedicated `modelMu sync.Mutex` field to `AgentLoop` and use it specifically for model switching.
 
-- [ ] **Step 3: Run with race detector**
+- [x] **Step 3: Run with race detector**
 
 Run: `go test -race ./internal/agent/ -v -run TestSwitchModel`
 Expected: PASS with no race detected
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/loop.go
@@ -320,7 +320,7 @@ git commit -m "fix: add mutex around SwitchModel to prevent concurrent model cor
 **Files:**
 - Modify: `internal/daemon/components.go:696,1183`
 
-- [ ] **Step 1: Add context to component goroutines**
+- [x] **Step 1: Add context to component goroutines**
 
 In `internal/daemon/components.go`, the `NewComponents` function should accept a context. Pass the daemon context from `daemon.New()`.
 
@@ -329,7 +329,7 @@ In `internal/daemon/components.go`, the `NewComponents` function should accept a
 func NewComponents(ctx context.Context, cfg ComponentsConfig, ...) (*Components, error) {
 ```
 
-- [ ] **Step 2: Fix progress-synthesizer goroutine (line ~696)**
+- [x] **Step 2: Fix progress-synthesizer goroutine (line ~696)**
 
 ```go
 // Replace:
@@ -358,7 +358,7 @@ go func() {
 }()
 ```
 
-- [ ] **Step 3: Fix dispatcher-stats-handler goroutine (line ~1183)**
+- [x] **Step 3: Fix dispatcher-stats-handler goroutine (line ~1183)**
 
 Apply the same pattern:
 
@@ -380,7 +380,7 @@ go func() {
 }()
 ```
 
-- [ ] **Step 4: Pass context from daemon.go**
+- [x] **Step 4: Pass context from daemon.go**
 
 In `daemon.New()`, pass the daemon context to `NewComponents`:
 
@@ -388,12 +388,12 @@ In `daemon.New()`, pass the daemon context to `NewComponents`:
 components, err := NewComponents(d.ctx, componentsConfig, ...)
 ```
 
-- [ ] **Step 5: Run daemon tests**
+- [x] **Step 5: Run daemon tests**
 
 Run: `go test ./internal/daemon/ -v`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/daemon/components.go internal/daemon/daemon.go
@@ -407,7 +407,7 @@ git commit -m "fix: add context cancellation to progress-synthesizer and dispatc
 **Files:**
 - Modify: `internal/config/schema.go:1569-1571`
 
-- [ ] **Step 1: Add ShutdownTimeout field to config struct**
+- [x] **Step 1: Add ShutdownTimeout field to config struct**
 
 In `internal/config/schema.go`, add the field to the `DaemonConfig` struct:
 
@@ -418,7 +418,7 @@ type DaemonConfig struct {
 }
 ```
 
-- [ ] **Step 2: Update ShutdownTimeout() method**
+- [x] **Step 2: Update ShutdownTimeout() method**
 
 ```go
 func (c *Config) ShutdownTimeout() time.Duration {
@@ -432,12 +432,12 @@ func (c *Config) ShutdownTimeout() time.Duration {
 }
 ```
 
-- [ ] **Step 3: Run config tests**
+- [x] **Step 3: Run config tests**
 
 Run: `go test ./internal/config/ -v`
 Expected: All PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/config/schema.go
@@ -454,7 +454,7 @@ git commit -m "fix: respect configured shutdown timeout instead of hardcoding 10
 - Modify: `internal/comm/http/server.go:783-784`
 - Reference: `internal/transport/http_client.go:112`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 // internal/comm/http/server_test.go
@@ -472,12 +472,12 @@ func TestBusCallRoute(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/comm/http/ -run TestBusCallRoute -v`
 Expected: FAIL — route not registered
 
-- [ ] **Step 3: Register the route**
+- [x] **Step 3: Register the route**
 
 In `internal/comm/http/server.go`, add the route in `setupRESTRoutes()` near line 784:
 
@@ -513,12 +513,12 @@ func (s *Server) handleBusCall(w http.ResponseWriter, r *http.Request) {
 
 Wire `s.rpcServer` in the Server struct during construction (passed from daemon wiring).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/comm/http/ -run TestBusCallRoute -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/comm/http/server.go
@@ -532,7 +532,7 @@ git commit -m "fix: register /api/v1/bus/call route for HTTP transport"
 **Files:**
 - Modify: `internal/rpc/cluster_handler.go:70-77`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 // internal/rpc/cluster_handler_test.go
@@ -552,12 +552,12 @@ func TestHandleStatusNilConfig(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails (panics)**
+- [x] **Step 2: Run test to verify it fails (panics)**
 
 Run: `go test ./internal/rpc/ -run TestHandleStatusNilConfig -v`
 Expected: FAIL/PANIC — nil pointer dereference
 
-- [ ] **Step 3: Fix the nil guard**
+- [x] **Step 3: Fix the nil guard**
 
 In `internal/rpc/cluster_handler.go`, fix `handleStatus`:
 
@@ -578,12 +578,12 @@ func (h *ClusterHandler) handleStatus(_ context.Context, params json.RawMessage)
 
 Also review `handleStart` and `handleJoin` for the same pattern and add nil guards where missing.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/rpc/ -run TestHandleStatusNilConfig -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/rpc/cluster_handler.go
@@ -597,7 +597,7 @@ git commit -m "fix: prevent nil pointer dereference in cluster handleStatus"
 **Files:**
 - Modify: `internal/llm/resolver.go:251`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 // internal/llm/resolver_test.go
@@ -616,7 +616,7 @@ func TestRecordAliasFailureBackoffCap(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Fix the overflow**
+- [x] **Step 2: Fix the overflow**
 
 In `internal/llm/resolver.go` at line 251, cap the shift:
 
@@ -641,12 +641,12 @@ if alias == nil {
 }
 ```
 
-- [ ] **Step 3: Run resolver tests**
+- [x] **Step 3: Run resolver tests**
 
 Run: `go test ./internal/llm/ -run TestRecordAlias -v`
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/llm/resolver.go
@@ -660,7 +660,7 @@ git commit -m "fix: cap exponential backoff to prevent integer overflow at high 
 **Files:**
 - Modify: `internal/skills/executor.go:164,306`
 
-- [ ] **Step 1: Fix Execute method (line ~164)**
+- [x] **Step 1: Fix Execute method (line ~164)**
 
 In `internal/skills/executor.go`, add cleanup after chat call in `Execute`:
 
@@ -686,20 +686,20 @@ if createdLocally {
 }
 ```
 
-- [ ] **Step 2: Apply same fix to ExecuteWithMessages (line ~306)**
+- [x] **Step 2: Apply same fix to ExecuteWithMessages (line ~306)**
 
 Apply the identical pattern to the second method.
 
-- [ ] **Step 3: Add io import**
+- [x] **Step 3: Add io import**
 
 Ensure `"io"` is in the import list.
 
-- [ ] **Step 4: Run skills tests**
+- [x] **Step 4: Run skills tests**
 
 Run: `go test ./internal/skills/ -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/skills/executor.go
@@ -713,7 +713,7 @@ git commit -m "fix: close locally-created Chatter instances to prevent HTTP tran
 **Files:**
 - Modify: `internal/memory/vector/store.go:170`
 
-- [ ] **Step 1: Add limit parameter to Search**
+- [x] **Step 1: Add limit parameter to Search**
 
 In `internal/memory/vector/store.go`, change the query at line 170:
 
@@ -733,12 +733,12 @@ rows, err := s.db.Query(`
 
 Also consider accepting a `limit` parameter in the `Search` method signature with a default of 500-1000.
 
-- [ ] **Step 2: Run memory tests**
+- [x] **Step 2: Run memory tests**
 
 Run: `go test ./internal/memory/ -v`
 Expected: All PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/memory/vector/store.go
@@ -755,7 +755,7 @@ git commit -m "fix: add LIMIT to vector search to prevent loading all embeddings
 - Modify: `internal/agent/pair_channel.go:51-61`
 - Modify: `internal/agent/pair_orchestrator.go:93-97`
 
-- [ ] **Step 1: Add mutex to BusPairSessionState**
+- [x] **Step 1: Add mutex to BusPairSessionState**
 
 ```go
 type BusPairSessionState struct {
@@ -772,7 +772,7 @@ type BusPairSessionState struct {
 }
 ```
 
-- [ ] **Step 2: Return deep copy from GetSession**
+- [x] **Step 2: Return deep copy from GetSession**
 
 In `pair_orchestrator.go`, return a copy instead of the pointer:
 
@@ -792,12 +792,12 @@ func (po *PairOrchestrator) GetSession(sessionID string) *BusPairSessionState {
 }
 ```
 
-- [ ] **Step 3: Run agent tests with race detector**
+- [x] **Step 3: Run agent tests with race detector**
 
 Run: `go test -race ./internal/agent/ -v -run TestPair`
 Expected: PASS with no races
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/agent/pair_channel.go internal/agent/pair_orchestrator.go
@@ -811,7 +811,7 @@ git commit -m "fix: add deep copy in GetSession to prevent data race on BusPairS
 **Files:**
 - Modify: `internal/agent/queue_persister.go:179-191`
 
-- [ ] **Step 1: Fix flushLockedHeld to not release caller's lock**
+- [x] **Step 1: Fix flushLockedHeld to not release caller's lock**
 
 ```go
 // Replace flushLockedHeld with a version that does not release the lock:
@@ -832,12 +832,12 @@ func (p *QueuePersister) flushLockedHeld() {
 
 Verify that callers of `flushLockedHeld` still hold the lock after the call returns, or document that the lock is temporarily released. If `EnqueueAsync` has code after `flushLockedHeld` that relies on the lock, wrap that code in its own `p.mu.Lock()/Unlock()`.
 
-- [ ] **Step 2: Run queue persister tests**
+- [x] **Step 2: Run queue persister tests**
 
 Run: `go test ./internal/agent/ -run TestQueuePersister -v`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/agent/queue_persister.go
@@ -853,7 +853,7 @@ git commit -m "fix: clarify lock contract in queue persister flushLockedHeld"
 - Modify: `internal/memory/task.go:205-223`
 - Modify: `internal/memory/ftstore.go:229-231`
 
-- [ ] **Step 1: Fix ESCAPE clause in episodic memory**
+- [x] **Step 1: Fix ESCAPE clause in episodic memory**
 
 In `internal/memory/episodic.go`, append `ESCAPE '\\'` to all LIKE queries that use `escapeLikeWildcards`:
 
@@ -863,11 +863,11 @@ In `internal/memory/episodic.go`, append `ESCAPE '\\'` to all LIKE queries that 
 query += " AND content LIKE ? ESCAPE '\\' "
 ```
 
-- [ ] **Step 2: Fix ESCAPE clause in task memory**
+- [x] **Step 2: Fix ESCAPE clause in task memory**
 
 Apply the same fix to `internal/memory/task.go`.
 
-- [ ] **Step 3: Fix HasFTS5Public race**
+- [x] **Step 3: Fix HasFTS5Public race**
 
 In `internal/memory/ftstore.go`, change `HasFTS5Public` to use the lock:
 
@@ -885,12 +885,12 @@ func (s *SQLiteFTSStore) HasFTS5Public() bool {
 }
 ```
 
-- [ ] **Step 4: Run memory tests with race detector**
+- [x] **Step 4: Run memory tests with race detector**
 
 Run: `go test -race ./internal/memory/ -v`
 Expected: All PASS, no races
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/memory/episodic.go internal/memory/task.go internal/memory/ftstore.go
@@ -904,7 +904,7 @@ git commit -m "fix: add ESCAPE clause to LIKE queries and lock HasFTS5Public"
 **Files:**
 - Modify: `internal/llm/context_firewall.go:401-441`
 
-- [ ] **Step 1: Move validation after processMessages in Chat**
+- [x] **Step 1: Move validation after processMessages in Chat**
 
 In `internal/llm/context_firewall.go`, in the `Chat` method, move `ValidateContextSize` to after `processMessages`:
 
@@ -922,12 +922,12 @@ In `internal/llm/context_firewall.go`, in the `Chat` method, move `ValidateConte
 
 Apply the same fix to `ChatWithProgress`.
 
-- [ ] **Step 2: Run context firewall tests**
+- [x] **Step 2: Run context firewall tests**
 
 Run: `go test ./internal/llm/ -run TestContextFirewall -v`
 Expected: All PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add internal/llm/context_firewall.go
@@ -943,7 +943,7 @@ git commit -m "fix: validate context size after reduction, not before"
 - Modify: `internal/llm/token_cache_l1.go:87-115`
 - Modify: `internal/llm/budget.go:658-691`
 
-- [ ] **Step 1: Fix token cache lock-upgrade antipattern**
+- [x] **Step 1: Fix token cache lock-upgrade antipattern**
 
 In `internal/llm/token_cache.go`, use a single `Lock()` for the `Get` method instead of repeated RLock/Lock cycles:
 
@@ -968,7 +968,7 @@ func (c *TokenCacheCoordinator) Get(ctx context.Context, key string) (string, bo
 }
 ```
 
-- [ ] **Step 2: Fix L1 cache TOCTOU**
+- [x] **Step 2: Fix L1 cache TOCTOU**
 
 In `internal/llm/token_cache_l1.go`, hold a write lock for the entire `Get` that may mutate:
 
@@ -996,7 +996,7 @@ func (c *L1Cache) Get(key string) (string, bool) {
 }
 ```
 
-- [ ] **Step 3: Fix RPM rate limiter concurrent overshoot**
+- [x] **Step 3: Fix RPM rate limiter concurrent overshoot**
 
 In `internal/llm/budget.go`, add re-check after waking:
 
@@ -1014,12 +1014,12 @@ b.mu.Unlock()
 return nil
 ```
 
-- [ ] **Step 4: Run LLM tests with race detector**
+- [x] **Step 4: Run LLM tests with race detector**
 
 Run: `go test -race ./internal/llm/ -v -run TestTokenCache -timeout 30s`
 Expected: All PASS, no races
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/llm/token_cache.go internal/llm/token_cache_l1.go internal/llm/budget.go
@@ -1038,7 +1038,7 @@ git commit -m "fix: resolve token cache lock races and RPM rate limiter overshoo
 - Modify: `internal/skills/discovery.go:112`
 - Modify: `cmd/meept-daemon/main.go:26,44`
 
-- [ ] **Step 1: Fix extractJSONFromLLM bracket matching**
+- [x] **Step 1: Fix extractJSONFromLLM bracket matching**
 
 In `internal/agent/llm_classifier.go`, replace `extractJSONFromLLM` with a bracket-counting parser:
 
@@ -1096,7 +1096,7 @@ func extractJSONFromLLM(s string) string {
 }
 ```
 
-- [ ] **Step 2: Handle crypto/rand.Read error**
+- [x] **Step 2: Handle crypto/rand.Read error**
 
 In `internal/agent/handler.go`, fix `generateMessageID`:
 
@@ -1110,11 +1110,11 @@ func generateMessageID() string {
 }
 ```
 
-- [ ] **Step 3: Fix provider recovery using recent window**
+- [x] **Step 3: Fix provider recovery using recent window**
 
 In `internal/llm/provider_manager.go`, replace lifetime counters with a sliding window for recovery checks. Add a `RecentSuccesses` and `RecentFailures` counter that reset every 5 minutes.
 
-- [ ] **Step 4: Add ToolCalls token counting**
+- [x] **Step 4: Add ToolCalls token counting**
 
 In `internal/llm/context_firewall.go`, update `countTokens`:
 
@@ -1132,20 +1132,20 @@ func (f *ContextFirewall) countTokens(messages []ChatMessage) int {
 }
 ```
 
-- [ ] **Step 5: Add RWMutex to skills discovery**
+- [x] **Step 5: Add RWMutex to skills discovery**
 
 In `internal/skills/discovery.go`, add `sync.RWMutex` to `Discovery` struct and guard `d.skills` access in all methods.
 
-- [ ] **Step 6: Remove unused foreground flag**
+- [x] **Step 6: Remove unused foreground flag**
 
 In `cmd/meept-daemon/main.go`, remove the `foreground` variable and its flag registration (lines 26 and 44), or implement daemonization.
 
-- [ ] **Step 7: Run tests**
+- [x] **Step 7: Run tests**
 
 Run: `go test ./internal/agent/ ./internal/llm/ ./internal/skills/ ./cmd/meept-daemon/ -v`
 Expected: All PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/agent/llm_classifier.go internal/agent/handler.go internal/llm/provider_manager.go internal/llm/context_firewall.go internal/skills/discovery.go cmd/meept-daemon/main.go
@@ -1161,7 +1161,7 @@ git commit -m "fix: bracket matching in JSON extractor, rand error handling, pro
 **Files:**
 - Modify: `cmd/meept/daemon.go:98` (isDaemonRunning function)
 
-- [ ] **Step 1: Fix isDaemonRunning to clean up stale PID files**
+- [x] **Step 1: Fix isDaemonRunning to clean up stale PID files**
 
 In `cmd/meept/daemon.go`, update `isDaemonRunning`:
 
@@ -1189,12 +1189,12 @@ func isDaemonRunning(pidFile string) (int, bool) {
 }
 ```
 
-- [ ] **Step 2: Run daemon CLI tests**
+- [x] **Step 2: Run daemon CLI tests**
 
 Run: `go test ./cmd/meept/ -v -run TestDaemon`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add cmd/meept/daemon.go
@@ -1209,7 +1209,7 @@ git commit -m "fix: clean up stale PID files in isDaemonRunning"
 - Modify: `cmd/meept/cluster_cmd.go:397,832,839,845`
 - Modify: `cmd/meept/calendar.go:141`
 
-- [ ] **Step 1: Guard type assertion in cluster status**
+- [x] **Step 1: Guard type assertion in cluster status**
 
 In `cmd/meept/cluster_cmd.go` at line 397:
 
@@ -1230,7 +1230,7 @@ if !ok {
 }
 ```
 
-- [ ] **Step 2: Handle rand.Read errors in key generators**
+- [x] **Step 2: Handle rand.Read errors in key generators**
 
 Fix `generateNodeID`, `generateClusterID`, `generateJoinKey` to propagate errors:
 
@@ -1246,7 +1246,7 @@ func generateNodeID() (string, error) {
 
 Update all callers to handle the error.
 
-- [ ] **Step 3: Fix calendar config loading**
+- [x] **Step 3: Fix calendar config loading**
 
 In `cmd/meept/calendar.go`, replace `loadCalendarConfig`:
 
@@ -1261,12 +1261,12 @@ func loadCalendarConfig() (*config.CalendarConfig, error) {
 }
 ```
 
-- [ ] **Step 4: Run CLI tests**
+- [x] **Step 4: Run CLI tests**
 
 Run: `go test ./cmd/meept/ -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cmd/meept/cluster_cmd.go cmd/meept/calendar.go
@@ -1281,7 +1281,7 @@ git commit -m "fix: guard cluster type assertions, handle rand errors, use JSON5
 - Modify: `cmd/meept/templates.go:55,140,217,301`
 - Modify: `cmd/meept/mcp_chat_server.go`
 
-- [ ] **Step 1: Fix templates error check**
+- [x] **Step 1: Fix templates error check**
 
 In `cmd/meept/templates.go`, add `&& errMsg != ""` guard to all four error checks:
 
@@ -1293,7 +1293,7 @@ if errMsg, ok := resultMap["error"].(string); ok {
 if errMsg, ok := resultMap["error"].(string); ok && errMsg != "" {
 ```
 
-- [ ] **Step 2: Add Close() to MCP chat server**
+- [x] **Step 2: Add Close() to MCP chat server**
 
 In `cmd/meept/mcp_chat_server.go`, add a `Close` method and call it on exit:
 
@@ -1311,12 +1311,12 @@ func (s *Server) Close() {
 
 In the `Run` method or its caller, add `defer srv.Close()`.
 
-- [ ] **Step 3: Run CLI tests**
+- [x] **Step 3: Run CLI tests**
 
 Run: `go test ./cmd/meept/ -v`
 Expected: All PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add cmd/meept/templates.go cmd/meept/mcp_chat_server.go
@@ -1334,7 +1334,7 @@ git commit -m "fix: guard empty error strings in templates, close MCP server RPC
 - Modify: `internal/rpc/dev.go:358-364`
 - Modify: `internal/rpc/proxy.go:267-304`
 
-- [ ] **Step 1: Store and unsubscribe WS bus goroutines**
+- [x] **Step 1: Store and unsubscribe WS bus goroutines**
 
 In `internal/comm/http/server.go`, store subscribers:
 
@@ -1364,7 +1364,7 @@ for _, sub := range s.wsSubscribers {
 s.wsSubMu.Unlock()
 ```
 
-- [ ] **Step 2: Fix handleReload to return nil error**
+- [x] **Step 2: Fix handleReload to return nil error**
 
 In `internal/rpc/dev.go`, change the error return:
 
@@ -1382,16 +1382,16 @@ return map[string]any{
 }, nil
 ```
 
-- [ ] **Step 3: Add TTL cleanup for bus subscriptions**
+- [x] **Step 3: Add TTL cleanup for bus subscriptions**
 
 In `internal/rpc/proxy.go`, replace `context.Background()` with a context derived from a server-level shutdown context, and add periodic cleanup for stale subscriptions.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `go test ./internal/comm/http/ ./internal/rpc/ -v`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/comm/http/server.go internal/rpc/dev.go internal/rpc/proxy.go
@@ -1410,7 +1410,7 @@ git commit -m "fix: unsubscribe WS goroutines on shutdown, fix handleReload, add
 - Modify: `internal/stt/recorder.go:48-55`
 - Modify: `internal/tools/mcp/manager.go:325-330`
 
-- [ ] **Step 1: Remove query param token for WebSocket auth**
+- [x] **Step 1: Remove query param token for WebSocket auth**
 
 In `internal/comm/http/auth.go`, require the token in the header only:
 
@@ -1430,7 +1430,7 @@ if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 
 Document the migration path: Flutter WebSocket clients must send the token via `Sec-WebSocket-Protocol` or a custom header instead of `?token=`.
 
-- [ ] **Step 2: Fix shell tokenizer escape handling**
+- [x] **Step 2: Fix shell tokenizer escape handling**
 
 In `internal/tools/builtin/shell_tokenize.go`, properly handle backslash escapes:
 
@@ -1451,7 +1451,7 @@ if t.input[t.pos] == '\\' && t.pos+1 < len(t.input) {
 }
 ```
 
-- [ ] **Step 3: Make Tirith block on failure**
+- [x] **Step 3: Make Tirith block on failure**
 
 In `internal/security/tirith.go`:
 
@@ -1467,7 +1467,7 @@ if ctx.Err() != nil || err != nil {
 }
 ```
 
-- [ ] **Step 4: Fix IPv6 IP extraction**
+- [x] **Step 4: Fix IPv6 IP extraction**
 
 In `internal/comm/web/auth.go`:
 
@@ -1486,7 +1486,7 @@ if err != nil {
 ip := strings.Trim(host, "[]")
 ```
 
-- [ ] **Step 5: Fix STT recorder temp file leak**
+- [x] **Step 5: Fix STT recorder temp file leak**
 
 In `internal/stt/recorder.go`, add cleanup on Start failure:
 
@@ -1497,7 +1497,7 @@ if err := r.cmd.Start(); err != nil {
 }
 ```
 
-- [ ] **Step 6: Fix MCP manager orphan on close failure**
+- [x] **Step 6: Fix MCP manager orphan on close failure**
 
 In `internal/tools/mcp/manager.go`:
 
@@ -1516,12 +1516,12 @@ if err := existingClient.Close(); err != nil {
 delete(m.clients, name)
 ```
 
-- [ ] **Step 7: Run security and tool tests**
+- [x] **Step 7: Run security and tool tests**
 
 Run: `go test ./internal/security/ ./internal/tools/ ./internal/stt/ ./internal/comm/ -v`
 Expected: All PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/comm/http/auth.go internal/tools/builtin/shell_tokenize.go internal/security/tirith.go internal/comm/web/auth.go internal/stt/recorder.go internal/tools/mcp/manager.go
@@ -1537,7 +1537,7 @@ git commit -m "fix: remove query param auth, fix shell escapes, block on Tirith 
 **Files:**
 - Modify: `ui/flutter_ui/lib/services/websocket_service.dart:104-124,262-268`
 
-- [ ] **Step 1: Replace Rx.retryWhen with reconnect loop**
+- [x] **Step 1: Replace Rx.retryWhen with reconnect loop**
 
 In `websocket_service.dart`, replace the `connect` method:
 
@@ -1572,7 +1572,7 @@ Future<void> connect({String? path}) async {
   }
 ```
 
-- [ ] **Step 2: Trigger reconnect from onDone**
+- [x] **Step 2: Trigger reconnect from onDone**
 
 In `_openConnection`, update the `onDone` handler to trigger reconnect:
 
@@ -1588,12 +1588,12 @@ onDone: () {
   },
 ```
 
-- [ ] **Step 3: Run Flutter WebSocket tests**
+- [x] **Step 3: Run Flutter WebSocket tests**
 
 Run: `cd ui/flutter_ui && flutter test test/`
 Expected: All PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add ui/flutter_ui/lib/services/websocket_service.dart
@@ -1610,7 +1610,7 @@ git commit -m "fix: replace Rx.retryWhen with reconnect loop for automatic WebSo
 - Modify: `ui/flutter_ui/lib/models/api_models.dart:67`
 - Modify: `ui/flutter_ui/lib/providers/providers.dart`
 
-- [ ] **Step 1: Fix .cast crashes in meept_api.dart**
+- [x] **Step 1: Fix .cast crashes in meept_api.dart**
 
 ```dart
 // Replace at line 241 and 251:
@@ -1620,7 +1620,7 @@ return raw.cast<Map<String, dynamic>>().toList();
 return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
 ```
 
-- [ ] **Step 2: Fix healthCheck URL construction**
+- [x] **Step 2: Fix healthCheck URL construction**
 
 ```dart
 Future<Map<String, dynamic>> healthCheck() async {
@@ -1632,7 +1632,7 @@ Future<Map<String, dynamic>> healthCheck() async {
   }
 ```
 
-- [ ] **Step 3: Fix tool_calls cast in api_models.dart**
+- [x] **Step 3: Fix tool_calls cast in api_models.dart**
 
 ```dart
 // Replace:
@@ -1642,7 +1642,7 @@ Future<Map<String, dynamic>> healthCheck() async {
 'tool_calls': (json['tool_calls'] as List?)?.map((e) => e.toString()).toList(),
 ```
 
-- [ ] **Step 4: Add dispose to ApiClient**
+- [x] **Step 4: Add dispose to ApiClient**
 
 In `api_client.dart`:
 
@@ -1652,7 +1652,7 @@ void dispose() {
   }
 ```
 
-- [ ] **Step 5: Wire disposal in providers.dart**
+- [x] **Step 5: Wire disposal in providers.dart**
 
 ```dart
 final apiClientProvider = Provider<ApiClient>((ref) {
@@ -1663,12 +1663,12 @@ final apiClientProvider = Provider<ApiClient>((ref) {
   });
 ```
 
-- [ ] **Step 6: Run Flutter tests**
+- [x] **Step 6: Run Flutter tests**
 
 Run: `cd ui/flutter_ui && flutter test`
 Expected: All PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add ui/flutter_ui/lib/services/meept_api.dart ui/flutter_ui/lib/services/api_client.dart ui/flutter_ui/lib/models/api_models.dart ui/flutter_ui/lib/providers/providers.dart
@@ -1685,7 +1685,7 @@ git commit -m "fix: unsafe cast crashes, healthCheck URL, and API client disposa
 - Modify: `ui/flutter_ui/lib/providers/stt_provider.dart:49`
 - Modify: `ui/flutter_ui/lib/providers/agent_provider.dart:57`
 
-- [ ] **Step 1: Add generation counter to JobNotifier**
+- [x] **Step 1: Add generation counter to JobNotifier**
 
 ```dart
 class JobNotifier extends StateNotifier<JobState> {
@@ -1713,7 +1713,7 @@ class JobNotifier extends StateNotifier<JobState> {
 }
 ```
 
-- [ ] **Step 2: Add dispose guard to MetricsNotifier WS listener**
+- [x] **Step 2: Add dispose guard to MetricsNotifier WS listener**
 
 In `metrics_provider.dart`, in the `_subscribeToMetrics` listener:
 
@@ -1724,7 +1724,7 @@ _metricsSubscription = websocket.subscribeToMetrics().listen((msg) {
 });
 ```
 
-- [ ] **Step 3: Fix SttNotifier state ordering**
+- [x] **Step 3: Fix SttNotifier state ordering**
 
 In `stt_provider.dart`:
 
@@ -1740,7 +1740,7 @@ Future<void> startRecording({...}) async {
 }
 ```
 
-- [ ] **Step 4: Fix AgentNotifier ref.read -> ref.watch**
+- [x] **Step 4: Fix AgentNotifier ref.read -> ref.watch**
 
 In `agent_provider.dart`:
 
@@ -1752,12 +1752,12 @@ final client = ref.read(apiClientProvider);
 final client = ref.watch(apiClientProvider);
 ```
 
-- [ ] **Step 5: Run Flutter provider tests**
+- [x] **Step 5: Run Flutter provider tests**
 
 Run: `cd ui/flutter_ui && flutter test test/providers/`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add ui/flutter_ui/lib/providers/job_provider.dart ui/flutter_ui/lib/providers/metrics_provider.dart ui/flutter_ui/lib/providers/stt_provider.dart ui/flutter_ui/lib/providers/agent_provider.dart
@@ -1774,7 +1774,7 @@ git commit -m "fix: provider generation guards, dispose safety, STT state orderi
 - Modify: `ui/flutter_ui/lib/features/chat/chat_input.dart`
 - Modify: `ui/flutter_ui/lib/features/chat/slash_autocomplete.dart`
 
-- [ ] **Step 1: Fix re-entrant controller mutations in ChatInput**
+- [x] **Step 1: Fix re-entrant controller mutations in ChatInput**
 
 In `chat_input.dart`, bracket mutations with listener removal:
 
@@ -1796,7 +1796,7 @@ _controller.selection = TextSelection.collapsed(offset: newText.length);
 _controller.addListener(_onTextChanged);
 ```
 
-- [ ] **Step 2: Add isLoading guard to key handler**
+- [x] **Step 2: Add isLoading guard to key handler**
 
 In `_handleKeyEvent`:
 
@@ -1807,7 +1807,7 @@ if (event.logicalKey == LogicalKeyboardKey.enter) {
 }
 ```
 
-- [ ] **Step 3: Defer onDismiss in SlashAutocomplete**
+- [x] **Step 3: Defer onDismiss in SlashAutocomplete**
 
 In `slash_autocomplete.dart`:
 
@@ -1820,16 +1820,16 @@ if (_matches.isEmpty) {
 }
 ```
 
-- [ ] **Step 4: Remove autofocus from SlashAutocomplete**
+- [x] **Step 4: Remove autofocus from SlashAutocomplete**
 
 In `slash_autocomplete.dart`, remove `autofocus: true` from the Focus widget (line ~102).
 
-- [ ] **Step 5: Run Flutter chat tests**
+- [x] **Step 5: Run Flutter chat tests**
 
 Run: `cd ui/flutter_ui && flutter test test/features/chat/`
 Expected: All PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add ui/flutter_ui/lib/features/chat/chat_input.dart ui/flutter_ui/lib/features/chat/slash_autocomplete.dart
@@ -1844,7 +1844,7 @@ git commit -m "fix: re-entrant controller mutations, isLoading guard, deferred o
 - Modify: `ui/flutter_ui/lib/core/router.dart`
 - Modify: `ui/flutter_ui/lib/features/home/home_screen.dart`
 
-- [ ] **Step 1: Add /plans and /agents routes to router**
+- [x] **Step 1: Add /plans and /agents routes to router**
 
 In `router.dart`, add routes:
 
@@ -1869,7 +1869,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 ```
 
-- [ ] **Step 2: Fix tool navigation orphaning activeToolProvider**
+- [x] **Step 2: Fix tool navigation orphaning activeToolProvider**
 
 In `home_screen.dart`:
 
@@ -1888,12 +1888,12 @@ onToolSelected: (route) {
 },
 ```
 
-- [ ] **Step 3: Run Flutter tests**
+- [x] **Step 3: Run Flutter tests**
 
 Run: `cd ui/flutter_ui && flutter test`
 Expected: All PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add ui/flutter_ui/lib/core/router.dart ui/flutter_ui/lib/features/home/home_screen.dart
@@ -1909,7 +1909,7 @@ git commit -m "fix: add /plans and /agents routes, prevent activeTool state orph
 - Modify: `ui/flutter_ui/lib/features/chat/chat_message_list.dart:128-140`
 - Modify: `ui/flutter_ui/lib/features/chat/chat_message_bubble.dart:48-61`
 
-- [ ] **Step 1: Fix session creation error feedback**
+- [x] **Step 1: Fix session creation error feedback**
 
 In `sessions_list.dart`:
 
@@ -1938,7 +1938,7 @@ onPressed: () async {
 },
 ```
 
-- [ ] **Step 2: Clear active session on delete**
+- [x] **Step 2: Clear active session on delete**
 
 In `sessions_list.dart`:
 
@@ -1953,7 +1953,7 @@ onPressed: () {
 },
 ```
 
-- [ ] **Step 3: Add bottom padding for error banner**
+- [x] **Step 3: Add bottom padding for error banner**
 
 In `chat_message_list.dart`:
 
@@ -1964,12 +1964,12 @@ padding: EdgeInsets.fromLTRB(
 ),
 ```
 
-- [ ] **Step 4: Run Flutter tests**
+- [x] **Step 4: Run Flutter tests**
 
 Run: `cd ui/flutter_ui && flutter test test/features/sessions/ test/features/chat/`
 Expected: All PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add ui/flutter_ui/lib/features/sessions/sessions_list.dart ui/flutter_ui/lib/features/chat/chat_message_list.dart
@@ -1989,7 +1989,7 @@ git commit -m "fix: session error feedback, active session cleanup on delete, er
 - Modify: `ui/flutter_ui/lib/features/calendar/calendar_panel.dart:93`
 - Modify: `ui/flutter_ui/lib/widgets/glitch_text.dart:35`
 
-- [ ] **Step 1: Wrap agents_tab states in Expanded**
+- [x] **Step 1: Wrap agents_tab states in Expanded**
 
 ```dart
 if (agentState.isLoading)
@@ -2002,7 +2002,7 @@ else
     Expanded(child: GridView.builder(...))
 ```
 
-- [ ] **Step 2: Guard settings_panel programmatic updates**
+- [x] **Step 2: Guard settings_panel programmatic updates**
 
 ```dart
 bool _programmaticUpdate = false;
@@ -2022,7 +2022,7 @@ onChanged: (value) {
 },
 ```
 
-- [ ] **Step 3: Fix search_panel debouncer and setState**
+- [x] **Step 3: Fix search_panel debouncer and setState**
 
 ```dart
 onChanged: (value) {
@@ -2047,7 +2047,7 @@ void dispose() {
 }
 ```
 
-- [ ] **Step 4: Fix calendar dialog premature pop**
+- [x] **Step 4: Fix calendar dialog premature pop**
 
 ```dart
 Future<void> _createEvent(...) async {
@@ -2065,7 +2065,7 @@ Future<void> _createEvent(...) async {
 }
 ```
 
-- [ ] **Step 5: Fix GlitchText Random allocation**
+- [x] **Step 5: Fix GlitchText Random allocation**
 
 ```dart
 class _GlitchTextState extends State<GlitchText> with SingleTickerProviderStateMixin {
@@ -2077,12 +2077,12 @@ class _GlitchTextState extends State<GlitchText> with SingleTickerProviderStateM
 }
 ```
 
-- [ ] **Step 6: Run all Flutter tests**
+- [x] **Step 6: Run all Flutter tests**
 
 Run: `cd ui/flutter_ui && flutter test`
 Expected: All PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add ui/flutter_ui/lib/features/agents/agents_tab.dart ui/flutter_ui/lib/features/settings/settings_panel.dart ui/flutter_ui/lib/features/search/search_panel.dart ui/flutter_ui/lib/features/calendar/calendar_panel.dart ui/flutter_ui/lib/widgets/glitch_text.dart
@@ -2093,7 +2093,7 @@ git commit -m "fix: agents layout, settings programmatic update guard, search de
 
 ### Task 29: Final verification — run all tests
 
-- [ ] **Step 1: Run full Go test suite**
+- [x] **Step 1: Run full Go test suite**
 
 ```bash
 go test -race ./... -timeout 300s
@@ -2101,7 +2101,7 @@ go test -race ./... -timeout 300s
 
 Expected: All PASS, no races
 
-- [ ] **Step 2: Run full Flutter test suite**
+- [x] **Step 2: Run full Flutter test suite**
 
 ```bash
 cd ui/flutter_ui && flutter test
@@ -2109,7 +2109,7 @@ cd ui/flutter_ui && flutter test
 
 Expected: All PASS
 
-- [ ] **Step 3: Run integration smoke test**
+- [x] **Step 3: Run integration smoke test**
 
 ```bash
 make build
@@ -2119,7 +2119,7 @@ make build
 
 Expected: No panics or crashes
 
-- [ ] **Step 4: Final commit**
+- [x] **Step 4: Final commit**
 
 ```bash
 git commit --allow-empty -m "chore: complete full-stack bug fix sprint — 45 bugs fixed across daemon, client, and Flutter GUI"

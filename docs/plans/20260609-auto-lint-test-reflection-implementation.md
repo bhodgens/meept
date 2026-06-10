@@ -1109,16 +1109,16 @@ CREATE TABLE IF NOT EXISTS test_runs (
 
 ## Success Criteria
 
-- [ ] Auto-lint runs after every code edit (when enabled)
-- [ ] Auto-test runs after successful linting (when enabled)
-- [ ] Reflection loop fixes >70% of lint/test failures without human intervention
-- [ ] LLM successfully fixes errors in ≤2 iterations on average
-- [ ] Proper error formatting with tree context for LLM understanding
-- [ ] Configurable max reflections (default: 3)
-- [ ] Custom lint/test commands supported
-- [ ] Metrics collected for lint/test/reflection performance
-- [ ] Integrated with Debugger agent workflow
-- [ ] Comprehensive test coverage (>80%)
+- [x] Auto-lint runs after every code edit (when enabled)
+- [x] Auto-test runs after successful linting (when enabled)
+- [x] Reflection loop fixes >70% of lint/test failures without human intervention
+- [x] LLM successfully fixes errors in ≤2 iterations on average
+- [x] Proper error formatting with tree context for LLM understanding
+- [x] Configurable max reflections (default: 3)
+- [x] Custom lint/test commands supported
+- [x] Metrics collected for lint/test/reflection performance
+- [x] Integrated with Debugger agent workflow
+- [x] Comprehensive test coverage (>80%)
 
 ---
 

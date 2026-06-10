@@ -47,6 +47,8 @@ type Config struct {
 	Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
 	STT               STTConfig               `json:"stt"                 toml:"stt"`
 	OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
+	Analytics         AnalyticsConfig         `json:"analytics,omitempty" toml:"analytics"`
+	Notifications     NotificationsConfig     `json:"notifications,omitempty" toml:"notifications"`
 }
 
 // BotsConfig holds configuration for the persistent bot framework.
@@ -1624,6 +1626,18 @@ type OAuthConfig struct {
 type OAuthProviderEntry struct {
 	ClientID     string `json:"client_id"     toml:"client_id"`
 	ClientSecret string `json:"client_secret" toml:"client_secret"`
+}
+
+// AnalyticsConfig holds configuration for the analytics system.
+type AnalyticsConfig struct {
+	Enabled       bool `json:"enabled,omitempty"          toml:"enabled"`
+	RetentionDays int  `json:"retention_days,omitempty"   toml:"retention_days"`
+}
+
+// NotificationsConfig holds configuration for desktop notifications.
+type NotificationsConfig struct {
+	Enabled   bool `json:"enabled,omitempty"       toml:"enabled"`
+	Retention int  `json:"retention,omitempty"     toml:"retention"`
 }
 
 // STTConfig holds configuration for speech-to-text transcription.

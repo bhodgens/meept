@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -448,4 +449,56 @@ func BackoffWithJitter(delay time.Duration, maxDelay time.Duration, useJitter bo
 		return time.Duration(rand.Int64N(int64(delay) + 1))
 	}
 	return delay
+}
+
+// ClassificationFailureKind categorizes why LLM classification failed.
+type ClassificationFailureKind string
+
+const (
+	ClassificationFailureEmptyResponse ClassificationFailureKind = "empty_response"
+	ClassificationFailureUnavailable   ClassificationFailureKind = "model_unavailable"
+	ClassificationFailureBudget        ClassificationFailureKind = "budget_exhausted"
+	ClassificationFailureTimeout       ClassificationFailureKind = "timeout"
+	ClassificationFailureUnknown       ClassificationFailureKind = "unknown"
+)
+
+// ClassifyClassificationFailure determines the failure kind from an error.
+func ClassifyClassificationFailure(err error) ClassificationFailureKind {
+	if err == nil {
+		return ClassificationFailureUnknown
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return ClassificationFailureTimeout
+	default:
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "budget") || strings.Contains(msg, "exhausted"):
+			return ClassificationFailureBudget
+		case strings.Contains(msg, "unavailable") || strings.Contains(msg, "no models"):
+			return ClassificationFailureUnavailable
+		case strings.Contains(msg, "empty") || strings.Contains(msg, "no content"):
+			return ClassificationFailureEmptyResponse
+		default:
+			return ClassificationFailureUnknown
+		}
+	}
+}
+
+// ClassificationUserGuidance returns a user-friendly message explaining
+// why classification failed and what the user can do about it.
+func ClassificationUserGuidance(err error) string {
+	kind := ClassifyClassificationFailure(err)
+	switch kind {
+	case ClassificationFailureEmptyResponse:
+		return "The AI model returned an empty response. Please try rephrasing your message."
+	case ClassificationFailureUnavailable:
+		return "No models are currently available for this task. Check your model configuration or try again later."
+	case ClassificationFailureBudget:
+		return "The budget for this session has been exhausted. Consider increasing the budget or starting a new session."
+	case ClassificationFailureTimeout:
+		return "The request timed out while waiting for the AI to respond. Try again with a shorter message or simpler task."
+	default:
+		return "An unexpected error occurred during processing. Please try again."
+	}
 }

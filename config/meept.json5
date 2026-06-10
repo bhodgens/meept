@@ -717,4 +717,16 @@
       "format": "wav",
     },
   },
+
+  // Analytics configuration
+  "analytics": {
+    "enabled": true,
+    "retention_days": 90,
+  },
+
+  // Desktop notifications
+  "notifications": {
+    "enabled": true,
+    "retention": 30,
+  },
 }

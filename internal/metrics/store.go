@@ -181,12 +181,45 @@ CREATE TABLE IF NOT EXISTS response_quality (
     code_token_pct REAL
 );
 
+-- Model performance aggregation
+CREATE TABLE IF NOT EXISTS model_performance (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id        TEXT NOT NULL,
+    provider        TEXT NOT NULL DEFAULT '',
+    total_requests  INTEGER NOT NULL DEFAULT 0,
+    total_errors    INTEGER NOT NULL DEFAULT 0,
+    avg_latency_ms  REAL NOT NULL DEFAULT 0,
+    avg_tokens_in   REAL NOT NULL DEFAULT 0,
+    avg_tokens_out  REAL NOT NULL DEFAULT 0,
+    period_start    TEXT NOT NULL,
+    period_end      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    UNIQUE(model_id, provider, period_start)
+);
+
+-- Error records for retry tracking
+CREATE TABLE IF NOT EXISTS error_records (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    provider       TEXT NOT NULL DEFAULT '',
+    model_id       TEXT NOT NULL DEFAULT '',
+    error_type     TEXT NOT NULL DEFAULT '',
+    error_message  TEXT NOT NULL DEFAULT '',
+    limit_type     TEXT NOT NULL DEFAULT '',
+    retry_attempts INTEGER NOT NULL DEFAULT 0,
+    final_outcome  TEXT NOT NULL DEFAULT ''
+);
+
 -- Indexes for query performance
 CREATE INDEX IF NOT EXISTS idx_metrics_live_ts ON metrics_live(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_metrics_live_name ON metrics_live(metric_name);
 CREATE INDEX IF NOT EXISTS idx_metrics_hourly_ts ON metrics_hourly(hour DESC);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_model_performance_period ON model_performance(period_start DESC);
+CREATE INDEX IF NOT EXISTS idx_model_performance_model ON model_performance(model_id);
+CREATE INDEX IF NOT EXISTS idx_error_records_ts ON error_records(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_error_records_model ON error_records(model_id);
 `
 
 	_, err := s.db.Exec(schema)
@@ -586,6 +619,34 @@ type Event struct {
 	Severity  string         `json:"severity" db:"severity"`
 	Message   string         `json:"message" db:"message"`
 	Context   map[string]any `json:"context,omitempty" db:"-"`
+}
+
+// ModelPerformanceRecord represents aggregated model performance metrics.
+type ModelPerformanceRecord struct {
+	ID             int64   `db:"id" json:"id"`
+	ModelID        string  `db:"model_id" json:"model_id"`
+	Provider       string  `db:"provider" json:"provider"`
+	TotalRequests  int     `db:"total_requests" json:"total_requests"`
+	TotalErrors    int     `db:"total_errors" json:"total_errors"`
+	AvgLatencyMs   float64 `db:"avg_latency_ms" json:"avg_latency_ms"`
+	AvgTokensIn    float64 `db:"avg_tokens_in" json:"avg_tokens_in"`
+	AvgTokensOut   float64 `db:"avg_tokens_out" json:"avg_tokens_out"`
+	PeriodStart    string  `db:"period_start" json:"period_start"`
+	PeriodEnd      string  `db:"period_end" json:"period_end"`
+	UpdatedAt      string  `db:"updated_at" json:"updated_at"`
+}
+
+// ErrorRecord represents an error record for retry tracking.
+type ErrorRecord struct {
+	ID            int64  `db:"id" json:"id"`
+	Timestamp     string `db:"timestamp" json:"timestamp"`
+	Provider      string `db:"provider" json:"provider"`
+	ModelID       string `db:"model_id" json:"model_id"`
+	ErrorType     string `db:"error_type" json:"error_type"`
+	ErrorMessage  string `db:"error_message" json:"error_message"`
+	LimitType     string `db:"limit_type" json:"limit_type,omitempty"`
+	RetryAttempts int    `db:"retry_attempts" json:"retry_attempts"`
+	FinalOutcome  string `db:"final_outcome" json:"final_outcome"`
 }
 
 // SubscribeMetrics returns a channel for receiving metric updates.
