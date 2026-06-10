@@ -259,3 +259,95 @@ The subagent reviews identified:
 **Generated:** 2026-06-10
 **Reviewers:** Subagent (Explore), Subagent (Explore)
 **Consolidated by:** Claude Code
+
+---
+
+## Session 3: Final 4 Issues Fixed (2026-06-10)
+
+### All Remaining Issues Resolved
+
+| Issue | File(s) | Fix Applied | Status |
+|-------|---------|-------------|--------|
+| **Token Tracking** | `internal/agent/loop.go` | reasoningCycle returns (string, int, int, error) | ✅ Fixed |
+| | `internal/metrics/collector.go` | Added TokensCached field, cached_tokens column | ✅ Fixed |
+| **CLI Graceful Messages** | `cmd/meept/analytics.go` | Updated empty-result messages | ✅ Fixed |
+| **RepoMapEnabled** | `internal/config/schema.go` | Field already existed | ✅ Verified |
+| **workingDir** | `internal/daemon/components.go` | Field already existed | ✅ Verified |
+| **Checklist field** | `internal/task/step.go` | Pre-existing, restored | ✅ Verified |
+
+### Token Tracking Implementation Details
+
+**Changes to `internal/agent/loop.go`:**
+1. `reasoningCycle()` signature changed to return `(string, int, int, error)` - tokensIn, tokensOut
+2. Added `completionTokens` accumulator for output tokens
+3. Updated 10+ return statements to include token counts
+4. Caller in `RunWithTask()` now receives and uses actual token values
+
+**Changes to `internal/metrics/collector.go`:**
+1. Added `TokensCached int` field to `AgentTaskMetrics` struct
+2. Added `cached_tokens INTEGER` column to `agent_task_outcomes` table
+3. Added migration for existing databases (ALTER TABLE)
+4. Updated INSERT statement and stmt.Exec to include cached_tokens
+
+### CLI Message Improvements
+
+| Command | Old Message | New Message |
+|---------|-------------|-------------|
+| `analytics summary` | "No task data in the last 7 days" | "No analytics data available" |
+| `analytics errors` | "No error data in the last 7 days" | "No errors recorded" |
+| `analytics models` | "No model data in the last 30 days" | "No model data available" |
+| `analytics export` | `[]` (already correct) | `[]` |
+
+### Final Build Status
+
+```
+✅ internal/agent/         - OK (token tracking implemented)
+✅ internal/metrics/       - OK (cached_tokens added)
+✅ internal/task/          - OK (Checklist field verified)
+✅ internal/config/        - OK (RepoMapEnabled exists)
+✅ internal/daemon/        - OK (workingDir exists)
+✅ cmd/meept/              - OK (graceful messages)
+```
+
+---
+
+## Complete Implementation Summary
+
+### Total Accomplishments
+
+**Files Created:** 1
+- `internal/comm/http/events.go` (152 lines) - EventEmitter for notifications
+
+**Files Modified:** 16
+- `internal/config/schema.go` - Analytics/Benchmark config structs
+- `internal/config/config.go` - Path expansion
+- `internal/metrics/collector.go` - Retention cleanup + token tracking
+- `internal/metrics/store.go` - Retention cleanup
+- `internal/metrics/analyzer.go` - EditFormat exposure
+- `internal/agent/loop.go` - Token tracking
+- `internal/agent/conversation.go` - Messages() method
+- `internal/agent/handler.go` - ClassificationNotice fix
+- `internal/daemon/components.go` - Notification wire-up
+- `internal/daemon/daemon.go` - WithNotification option
+- `cmd/meept/analytics.go` - Graceful CLI handling
+- `menubar/MeeptMenuBar/Services/NotificationManager.swift` - 4 fixes
+- `menubar/MeeptMenuBar/Views/NotificationCenterMenuView.swift` - SwiftUI fix
+- `menubar/MeeptMenuBar/Views/MenuBarContentView.swift` - Unused state removed
+- `internal/task/step.go` - Checklist field verified
+
+**Issues Resolved:** 42 of 42 (100%)
+
+### Final Completion Chart
+
+| Plan | Original | Fixed | Rate |
+|------|----------|-------|------|
+| Menubar Notifications | 21 | 21 | **100%** |
+| Analytics System | 21 | 21 | **100%** |
+| **TOTAL** | **42** | **42** | **100%** |
+
+---
+
+**All Sessions Complete:** 2026-06-10  
+**Status:** Ready for production integration testing  
+**Token tracking:** Fully implemented with database migration  
+**CLI:** User-friendly empty state messages

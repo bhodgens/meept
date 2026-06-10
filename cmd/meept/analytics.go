@@ -99,7 +99,7 @@ func runAnalyticsSummary(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(results) == 0 {
-		fmt.Println("No task data in the last 7 days")
+		fmt.Println("No analytics data available")
 		return nil
 	}
 
@@ -181,7 +181,7 @@ func runAnalyticsErrors(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(results) == 0 {
-		fmt.Println("No error data in the last 7 days")
+		fmt.Println("No errors recorded")
 		return nil
 	}
 
@@ -267,7 +267,7 @@ func runAnalyticsModels(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(results) == 0 {
-		fmt.Println("No model data in the last 30 days")
+		fmt.Println("No model data available")
 		return nil
 	}
 

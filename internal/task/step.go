@@ -96,6 +96,12 @@ type TaskStep struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 	// ModelOverride specifies a model to use for this step (overrides agent default)
 	ModelOverride string `json:"model_override,omitempty"`
+	// Checklist tracks explicit checkbox items for this step
+	Checklist *Checklist `json:"checklist,omitempty"`
+	// Phase identifies which phase/milestone this step belongs to
+	Phase string `json:"phase,omitempty"`
+	// CheckpointGate indicates if this step is a phase gate requiring validation
+	CheckpointGate bool `json:"checkpoint_gate"`
 }
 
 // NewTaskStep creates a new task step.
@@ -255,6 +261,9 @@ func (s *StepStore) migrate() error {
 		memory_refs    TEXT,
 		accumulated_context TEXT,
 		model_override TEXT,
+		checklist      TEXT,
+		phase          TEXT,
+		checkpoint_gate BOOLEAN DEFAULT FALSE,
 		created_at     TEXT NOT NULL,
 		updated_at     TEXT NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -294,6 +303,9 @@ func (s *StepStore) migrate() error {
 		"ALTER TABLE task_steps ADD COLUMN memory_refs TEXT",
 		"ALTER TABLE task_steps ADD COLUMN accumulated_context TEXT",
 		"ALTER TABLE task_steps ADD COLUMN model_override TEXT",
+		"ALTER TABLE task_steps ADD COLUMN checklist TEXT",
+		"ALTER TABLE task_steps ADD COLUMN phase TEXT",
+		"ALTER TABLE task_steps ADD COLUMN checkpoint_gate BOOLEAN DEFAULT FALSE",
 	} {
 		_, _ = s.db.Exec(col)
 	}
@@ -308,6 +320,7 @@ func (s *StepStore) Create(step *TaskStep) error {
 	evidenceJSON := encodeEvidenceSlice(step.Evidence)
 	claimsJSON := encodeStringSlice(step.Claims)
 	memoryRefsJSON := encodeStringSlice(step.MemoryRefs)
+	checklistJSON := encodeChecklist(step.Checklist)
 
 	_, err := s.db.Exec(`
 		INSERT INTO task_steps (id, task_id, description, depends_on, tool_hint, agent_id,
@@ -315,7 +328,7 @@ func (s *StepStore) Create(step *TaskStep) error {
 		                        recommendations, evidence, claims, validated, validation_error,
 		                        token_usage, memory_refs, accumulated_context, model_override,
 		                        created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.ID,
 		step.TaskID,
 		step.Description,
@@ -336,6 +349,9 @@ func (s *StepStore) Create(step *TaskStep) error {
 		nullableString(memoryRefsJSON),
 		nullableString(step.AccumulatedContext),
 		nullableString(step.ModelOverride),
+		nullableString(checklistJSON),
+		nullableString(step.Phase),
+		step.CheckpointGate,
 		step.CreatedAt.Format(time.RFC3339),
 		step.UpdatedAt.Format(time.RFC3339),
 	)
@@ -363,6 +379,7 @@ func (s *StepStore) Update(step *TaskStep) error {
 	evidenceJSON := encodeEvidenceSlice(step.Evidence)
 	claimsJSON := encodeStringSlice(step.Claims)
 	memoryRefsJSON := encodeStringSlice(step.MemoryRefs)
+	checklistJSON := encodeChecklist(step.Checklist)
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := s.db.Exec(`
@@ -370,7 +387,8 @@ func (s *StepStore) Update(step *TaskStep) error {
 		SET description = ?, depends_on = ?, tool_hint = ?, agent_id = ?,
 		    job_id = ?, state = ?, result = ?, sequence = ?, revision_count = ?,
 		    recommendations = ?, evidence = ?, claims = ?, validated = ?,
-		    validation_error = ?, token_usage = ?, memory_refs = ?, accumulated_context = ?, updated_at = ?
+		    validation_error = ?, token_usage = ?, memory_refs = ?, accumulated_context = ?,
+		    model_override = ?, checklist = ?, phase = ?, checkpoint_gate = ?, updated_at = ?
 		WHERE id = ?`,
 		step.Description,
 		nullableString(depsJSON),
@@ -389,6 +407,10 @@ func (s *StepStore) Update(step *TaskStep) error {
 		step.TokenUsage,
 		nullableString(memoryRefsJSON),
 		nullableString(step.AccumulatedContext),
+		nullableString(step.ModelOverride),
+		nullableString(checklistJSON),
+		nullableString(step.Phase),
+		step.CheckpointGate,
 		now,
 		step.ID,
 	)
@@ -721,14 +743,16 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 		validated                           bool
 		validationError                     sql.NullString
 		memoryRefs, accumulatedContext      sql.NullString
-		modelOverride                       sql.NullString
+		modelOverride, checklist, phase     sql.NullString
+		checkpointGate                      bool
 		createdAt, updatedAt                string
 	)
 
 	err := row.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
-		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride, &createdAt, &updatedAt)
+		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride,
+		&checklist, &phase, &checkpointGate, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrStepNotFound
@@ -739,7 +763,8 @@ func (s *StepStore) scanStep(row *sql.Row) (*TaskStep, error) {
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
 		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
-		memoryRefs, accumulatedContext, modelOverride, createdAt, updatedAt), nil
+		memoryRefs, accumulatedContext, modelOverride, checklist, phase,
+		checkpointGate, createdAt, updatedAt), nil
 }
 
 func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
@@ -752,14 +777,16 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 		validated                           bool
 		validationError                     sql.NullString
 		memoryRefs, accumulatedContext      sql.NullString
-		modelOverride                       sql.NullString
+		modelOverride, checklist, phase     sql.NullString
+		checkpointGate                      bool
 		createdAt, updatedAt                string
 	)
 
 	err := rows.Scan(&id, &taskID, &description, &dependsOn, &toolHint, &agentID,
 		&jobID, &state, &result, &sequence, &revisionCount,
 		&recommendations, &evidence, &claims, &validated, &validationError,
-		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride, &createdAt, &updatedAt)
+		&tokenUsage, &memoryRefs, &accumulatedContext, &modelOverride,
+		&checklist, &phase, &checkpointGate, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -767,7 +794,8 @@ func (s *StepStore) scanStepRows(rows *sql.Rows) (*TaskStep, error) {
 	return buildStep(id, taskID, description, state, dependsOn, toolHint,
 		agentID, jobID, result, sequence, revisionCount, tokenUsage,
 		recommendations, evidence, claims, validated, validationError,
-		memoryRefs, accumulatedContext, modelOverride, createdAt, updatedAt), nil
+		memoryRefs, accumulatedContext, modelOverride, checklist, phase,
+		checkpointGate, createdAt, updatedAt), nil
 }
 
 func buildStep(id, taskID, description, state string,
@@ -775,7 +803,8 @@ func buildStep(id, taskID, description, state string,
 	sequence, revisionCount, tokenUsage int,
 	recommendations, evidence, claims sql.NullString,
 	validated bool, validationError sql.NullString,
-	memoryRefs, accumulatedContext, modelOverride sql.NullString,
+	memoryRefs, accumulatedContext, modelOverride, checklist, phase sql.NullString,
+	checkpointGate bool,
 	createdAt, updatedAt string) *TaskStep {
 
 	step := &TaskStep{
@@ -794,6 +823,13 @@ func buildStep(id, taskID, description, state string,
 	if modelOverride.Valid {
 		step.ModelOverride = modelOverride.String
 	}
+	if checklist.Valid {
+		step.Checklist = decodeChecklist(checklist.String)
+	}
+	if phase.Valid {
+		step.Phase = phase.String
+	}
+	step.CheckpointGate = checkpointGate
 
 	if dependsOn.Valid {
 		step.DependsOn = decodeStringSlice(dependsOn.String)
