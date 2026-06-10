@@ -174,7 +174,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	}
 
 	// Create agent components (LLM, tools, agent loop, chat handler)
-	components, err := NewComponents(fullCfg, msgBus, logger, cfg.ModelsConfig)
+	components, err := NewComponents(context.Background(), fullCfg, msgBus, logger, cfg.ModelsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create components: %w", err)
 	}

@@ -51,6 +51,9 @@ import (
 
 // Components holds all the daemon components.
 type Components struct {
+	ctx    context.Context    // lifecycle context, cancelled on Stop
+	cancel context.CancelFunc // cancels the lifecycle context
+
 	Config               *config.Config
 	ModelsConfig         *config.ModelsConfig
 	LLMClient            *llm.Client
@@ -196,11 +199,14 @@ type Components struct {
 // NewComponents creates all daemon components from configuration.
 // NewComponents creates agent components. If modelsCfg is non-nil, it uses the
 // injected config instead of loading from disk.
-func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logger, modelsCfg ...*config.ModelsConfig) (*Components, error) {
+// The provided ctx controls the lifecycle of background goroutines spawned by
+// Components; when ctx is cancelled they will exit.
+func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logger, modelsCfg ...*config.ModelsConfig) (*Components, error) {
 	c := &Components{
 		Config: cfg,
 		Logger: logger,
 	}
+	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	// Load models configuration - fail explicitly if not found
 	var configPath string
@@ -694,27 +700,36 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 	progressSynthesizer := agent.NewProgressSynthesizer(msgBus, c.LLMClient, logger.With("component", "progress-synthesizer"))
 	progressSub := msgBus.Subscribe("progress-synthesizer", "agent.event.*")
 	go func() {
-		for msg := range progressSub.Channel {
-			var event agent.AgentEvent
-			if err := json.Unmarshal(msg.Payload, &event); err != nil {
-				continue
+		for {
+			select {
+			case <-c.ctx.Done():
+				msgBus.Unsubscribe(progressSub)
+				return
+			case msg, ok := <-progressSub.Channel:
+				if !ok {
+					return
+				}
+				var event agent.AgentEvent
+				if err := json.Unmarshal(msg.Payload, &event); err != nil {
+					continue
+				}
+				synthesized := progressSynthesizer.Synthesize(event)
+				if synthesized == nil {
+					continue
+				}
+				payload, err := json.Marshal(synthesized)
+				if err != nil {
+					continue
+				}
+				synthMsg := &models.BusMessage{
+					ID:        msg.ID + "-synth",
+					Type:      models.MessageTypeEvent,
+					Source:    "progress-synthesizer",
+					Timestamp: synthesized.Timestamp,
+					Payload:   payload,
+				}
+				msgBus.Publish("agent.progress.synthesized", synthMsg)
 			}
-			synthesized := progressSynthesizer.Synthesize(event)
-			if synthesized == nil {
-				continue
-			}
-			payload, err := json.Marshal(synthesized)
-			if err != nil {
-				continue
-			}
-			synthMsg := &models.BusMessage{
-				ID:        msg.ID + "-synth",
-				Type:      models.MessageTypeEvent,
-				Source:    "progress-synthesizer",
-				Timestamp: synthesized.Timestamp,
-				Payload:   payload,
-			}
-			msgBus.Publish("agent.progress.synthesized", synthMsg)
 		}
 	}()
 	logger.Info("Progress synthesizer started, subscribed to agent.event.*")
@@ -1181,19 +1196,28 @@ func NewComponents(cfg *config.Config, msgBus *bus.MessageBus, logger *slog.Logg
 		// Subscribe to dispatcher.stats requests
 		statsSub := msgBus.Subscribe("dispatcher-stats-handler", "dispatcher.stats")
 		go func() {
-			for msg := range statsSub.Channel {
-				stats := c.Dispatcher.GetStats()
-				payload, _ := json.Marshal(&stats)
-				resp := &models.BusMessage{
-					ID:        msg.ID + "-response",
-					Type:      models.MessageTypeResponse,
-					Topic:     "dispatcher.stats.result",
-					Source:    "dispatcher-stats-handler",
-					Timestamp: time.Now().UTC(),
-					Payload:   payload,
-					ReplyTo:   msg.ID,
+			for {
+				select {
+				case <-c.ctx.Done():
+					msgBus.Unsubscribe(statsSub)
+					return
+				case msg, ok := <-statsSub.Channel:
+					if !ok {
+						return
+					}
+					stats := c.Dispatcher.GetStats()
+					payload, _ := json.Marshal(&stats)
+					resp := &models.BusMessage{
+						ID:        msg.ID + "-response",
+						Type:      models.MessageTypeResponse,
+						Topic:     "dispatcher.stats.result",
+						Source:    "dispatcher-stats-handler",
+						Timestamp: time.Now().UTC(),
+						Payload:   payload,
+						ReplyTo:   msg.ID,
+					}
+					msgBus.Publish("dispatcher.stats.result", resp)
 				}
-				msgBus.Publish("dispatcher.stats.result", resp)
 			}
 		}()
 
@@ -1710,6 +1734,11 @@ func (c *Components) Start(ctx context.Context) error {
 
 // Stop stops all components.
 func (c *Components) Stop(ctx context.Context) error {
+	// Cancel lifecycle context to unblock background goroutines
+	if c.cancel != nil {
+		c.cancel()
+	}
+
 	var lastErr error
 
 	// Stop web server first (external API)
