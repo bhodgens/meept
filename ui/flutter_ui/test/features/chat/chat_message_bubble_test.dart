@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meept_ui/features/chat/chat_message_bubble.dart';
 import 'package:meept_ui/models/api_models.dart';
 import 'package:meept_ui/theme/colors.dart';

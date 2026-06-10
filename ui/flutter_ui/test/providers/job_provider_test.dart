@@ -128,7 +128,7 @@ void main() {
     test('subscribeToJobs sends correct subscribe message', () {
       final ws = _TestWebSocket();
 
-      final jobsSub = ws.subscribeToJobs();
+      ws.subscribeToJobs();
 
       // Expect a subscribe message for jobs channel
       expect(

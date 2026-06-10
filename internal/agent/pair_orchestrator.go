@@ -93,11 +93,14 @@ func (po *PairOrchestrator) Name() string {
 // Returns nil, false if the session is not found.
 func (po *PairOrchestrator) GetSession(sessionID string) (*BusPairSessionState, bool) {
 	po.mu.RLock()
-	defer po.mu.RUnlock()
 	state, ok := po.sessions[sessionID]
+	po.mu.RUnlock()
 	if !ok {
 		return nil, false
 	}
+
+	state.mu.RLock()
+	defer state.mu.RUnlock()
 	cp := *state
 	cp.Turns = make([]PairTurn, len(state.Turns))
 	copy(cp.Turns, state.Turns)
@@ -177,103 +180,151 @@ func (po *PairOrchestrator) handleStartRequest(ctx context.Context, msg *models.
 // runPairConversation executes the full actor-reviewer loop.
 func (po *PairOrchestrator) runPairConversation(ctx context.Context, state *BusPairSessionState) {
 	defer po.removeSession(state.SessionID)
+	var ct int
 
-	// Construct actor prompt from initial input
+	// Safely read initial config
+	state.mu.RLock()
 	actorPrompt := state.InitialPrompt
+	maxTurns := state.MaxTurns
+	agentID := state.ActorID
+	reviewerID := state.ReviewerID
+	sessionID := state.SessionID
+	state.mu.RUnlock()
 
-	for state.CurrentTurn < state.MaxTurns {
+	ct = 0
+	for {
+		state.mu.RLock()
+		ct = state.CurrentTurn
+		state.mu.RUnlock()
+
+		if ct >= maxTurns {
+			break
+		}
+
 		// Check context cancellation
 		select {
 		case <-ctx.Done():
+			state.mu.Lock()
 			state.Phase = "failed"
-			po.publishError(state.SessionID, "context cancelled")
+			state.mu.Unlock()
+			po.publishError(sessionID, "context cancelled")
 			return
 		default:
 		}
 
 		// --- Actor turn ---
+		state.mu.Lock()
 		state.Phase = "actor_turn"
-		actorOutput, err := po.runAgent(ctx, state.ActorID, actorPrompt, state.SessionID)
+		state.mu.Unlock()
+		actorOutput, err := po.runAgent(ctx, agentID, actorPrompt, sessionID)
 		if err != nil {
+			state.mu.Lock()
 			state.Phase = "failed"
-			po.publishError(state.SessionID, fmt.Sprintf("actor %s failed: %v", state.ActorID, err))
+			state.mu.Unlock()
+			po.publishError(sessionID, fmt.Sprintf("actor %s failed: %v", agentID, err))
 			return
 		}
 
+		state.mu.RLock()
+		ct = state.CurrentTurn
+		state.mu.RUnlock()
 		actorTurn := PairTurn{
-			SessionID:  state.SessionID,
-			TurnNumber: state.CurrentTurn,
-			AgentID:    state.ActorID,
+			SessionID:  sessionID,
+			TurnNumber: ct,
+			AgentID:    agentID,
 			Role:       "actor",
 			Content:    actorOutput,
 		}
+		state.mu.Lock()
 		state.Turns = append(state.Turns, actorTurn)
+		state.mu.Unlock()
 
 		// Publish actor turn to the session topic for observability
-		po.publishTurn(state.SessionID, &actorTurn)
+		po.publishTurn(sessionID, &actorTurn)
 
 		// --- Reviewer turn ---
+		state.mu.Lock()
 		state.Phase = "reviewer_turn"
+		state.mu.Unlock()
 		reviewerPrompt := po.buildReviewerPrompt(state, actorOutput)
-		reviewerOutput, err := po.runAgent(ctx, state.ReviewerID, reviewerPrompt, state.SessionID)
+		reviewerOutput, err := po.runAgent(ctx, reviewerID, reviewerPrompt, sessionID)
 		if err != nil {
+			state.mu.Lock()
 			state.Phase = "failed"
-			po.publishError(state.SessionID, fmt.Sprintf("reviewer %s failed: %v", state.ReviewerID, err))
+			state.mu.Unlock()
+			po.publishError(sessionID, fmt.Sprintf("reviewer %s failed: %v", reviewerID, err))
 			return
 		}
 
 		// Classify the reviewer response
 		verdict, feedback := po.classifyVerdict(reviewerOutput)
+		state.mu.Lock()
 		state.LastVerdict = verdict
+		state.mu.Unlock()
 
 		reviewerTurn := PairTurn{
-			SessionID:  state.SessionID,
-			TurnNumber: state.CurrentTurn,
-			AgentID:    state.ReviewerID,
+			SessionID:  sessionID,
+			TurnNumber: ct,
+			AgentID:    reviewerID,
 			Role:       "reviewer",
 			Content:    reviewerOutput,
 			Verdict:    verdict,
 			Feedback:   feedback,
 		}
+		state.mu.Lock()
 		state.Turns = append(state.Turns, reviewerTurn)
+		state.mu.Unlock()
 
 		// Publish reviewer turn to the session topic for observability
-		po.publishTurn(state.SessionID, &reviewerTurn)
+		po.publishTurn(sessionID, &reviewerTurn)
 
 		// Check verdict
 		if verdict == PairVerdictApproved {
 			// Approved -- emit result and exit
+			state.mu.RLock()
+			resultTurns := make([]PairTurn, len(state.Turns))
+			copy(resultTurns, state.Turns)
+			state.mu.RUnlock()
 			po.publishResult(&PairResult{
-				SessionID:    state.SessionID,
+				SessionID:    sessionID,
 				FinalOutput:  actorOutput,
-				Turns:        state.Turns,
-				TotalTurns:   state.CurrentTurn + 1,
+				Turns:        resultTurns,
+				TotalTurns:   ct + 1,
 				FinalVerdict: PairVerdictApproved,
 			})
+			state.mu.Lock()
 			state.Phase = "completed"
+			state.mu.Unlock()
 			return
 		}
 
 		// Rejected or needs more -- construct revised actor prompt
 		actorPrompt = po.buildRevisionPrompt(state, actorOutput, feedback, reviewerOutput)
+		state.mu.Lock()
 		state.CurrentTurn++
+		state.mu.Unlock()
 	}
 
 	// Reached max turns without approval -- emit result with last actor output
+	state.mu.Lock()
 	state.Phase = "completed"
 	lastActorOutput := ""
+	resultTurns := make([]PairTurn, len(state.Turns))
+	copy(resultTurns, state.Turns)
+	lastVerdict := state.LastVerdict
 	for i := len(state.Turns) - 1; i >= 0; i-- {
 		if state.Turns[i].Role == "actor" {
 			lastActorOutput = state.Turns[i].Content
 			break
 		}
 	}
+	state.mu.Unlock()
 	po.publishResult(&PairResult{
-		SessionID:    state.SessionID,
+		SessionID:    sessionID,
 		FinalOutput:  lastActorOutput,
-		Turns:        state.Turns,
-		TotalTurns:   state.CurrentTurn,
-		FinalVerdict: state.LastVerdict,
+		Turns:        resultTurns,
+		TotalTurns:   ct,
+		FinalVerdict: lastVerdict,
 	})
 }
 
@@ -287,6 +338,12 @@ func (po *PairOrchestrator) runAgent(ctx context.Context, agentID, message, conv
 
 // buildReviewerPrompt constructs the prompt for the reviewer agent.
 func (po *PairOrchestrator) buildReviewerPrompt(state *BusPairSessionState, actorOutput string) string {
+	state.mu.RLock()
+	initialPrompt := state.InitialPrompt
+	turnsCopy := make([]PairTurn, len(state.Turns))
+	copy(turnsCopy, state.Turns)
+	state.mu.RUnlock()
+
 	prompt := fmt.Sprintf(
 		"Review the following output for the task: %s\n\n"+
 			"Agent output to review:\n%s\n\n"+
@@ -294,14 +351,14 @@ func (po *PairOrchestrator) buildReviewerPrompt(state *BusPairSessionState, acto
 			"- If the output is satisfactory, start your response with 'APPROVED:' followed by a brief summary.\n"+
 			"- If the output needs revision, start your response with 'REJECTED:' followed by specific feedback.\n"+
 			"- If you need more information, start your response with 'NEEDS_MORE:' followed by your questions.",
-		state.InitialPrompt,
+		initialPrompt,
 		actorOutput,
 	)
 
 	// Include history from previous turns for context
-	if len(state.Turns) > 1 {
+	if len(turnsCopy) > 1 {
 		prompt += "\n\nPrevious conversation history:\n"
-		for _, turn := range state.Turns {
+		for _, turn := range turnsCopy {
 			prompt += fmt.Sprintf("\n[%s - %s]: %s\n", turn.Role, turn.AgentID, truncateString(turn.Content, 200))
 		}
 	}
@@ -311,13 +368,16 @@ func (po *PairOrchestrator) buildReviewerPrompt(state *BusPairSessionState, acto
 
 // buildRevisionPrompt constructs the prompt for the actor after rejection.
 func (po *PairOrchestrator) buildRevisionPrompt(state *BusPairSessionState, actorOutput, feedback, reviewerOutput string) string {
+	state.mu.RLock()
+	initialPrompt := state.InitialPrompt
+	state.mu.RUnlock()
 	return fmt.Sprintf(
 		"Your previous output was rejected. Please revise based on the feedback.\n\n"+
 			"Original task: %s\n\n"+
 			"Your previous output:\n%s\n\n"+
 			"Reviewer feedback:\n%s\n\n"+
 			"Please provide a revised output that addresses the feedback.",
-		state.InitialPrompt,
+		initialPrompt,
 		actorOutput,
 		reviewerOutput,
 	)

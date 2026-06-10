@@ -24,7 +24,6 @@ void main() async {
           'https://placeholder@placeholder.ingest.sentry.io/placeholder';
       options.debug = true;
       options.tracesSampleRate = 1.0;
-      options.profilesSampleRate = 1.0;
     },
     appRunner: () {
       runApp(
@@ -61,7 +60,7 @@ class CyberpunkApp extends StatelessWidget {
 class _AppLifecycleWrapper extends ConsumerStatefulWidget {
   final Widget child;
 
-  const _AppLifecycleWrapper({required this.child, super.key});
+  const _AppLifecycleWrapper({required this.child});
 
   @override
   ConsumerState<_AppLifecycleWrapper> createState() =>

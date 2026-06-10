@@ -1,6 +1,9 @@
 package agent
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // PairChannel message types for bus-channel-based agent pairing.
 
@@ -58,6 +61,7 @@ type BusPairSessionState struct {
 	LastVerdict   PairVerdict `json:"last_verdict,omitempty"`
 	Turns         []PairTurn  `json:"turns,omitempty"`
 	InitialPrompt string      `json:"initial_prompt"`
+	mu            sync.RWMutex
 }
 
 // PairResult is the final result of a completed pair session.

@@ -16,6 +16,11 @@ import (
 	"github.com/caimlas/meept/pkg/models"
 )
 
+// connectionDoneKey is the context value key for the connection's done channel.
+// Handlers (e.g., bus.subscribe) use this to derive long-lived contexts that are
+// cancelled when the client disconnects, preventing subscription leaks (Bug C8).
+type connectionDoneKey struct{}
+
 // Default timeouts.
 const (
 	DefaultShutdownTimeout = 30 * time.Second // Graceful shutdown deadline
@@ -278,7 +283,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		_ = conn.SetReadDeadline(time.Time{})
 
 		// Process request with connection-scoped context
-		resp := s.dispatch(ctx, req)
+		resp := s.dispatch(ctx, cancel, req)
 
 		// Check if context was cancelled (client disconnected) before writing
 		if ctx.Err() != nil {
@@ -310,7 +315,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-func (s *Server) dispatch(ctx context.Context, req *models.JSONRPCRequest) *models.JSONRPCResponse {
+func (s *Server) dispatch(connCtx context.Context, connCancel context.CancelFunc, req *models.JSONRPCRequest) *models.JSONRPCResponse {
 	s.mu.RLock()
 	handler, ok := s.handlers[req.Method]
 	s.mu.RUnlock()
@@ -334,13 +339,17 @@ func (s *Server) dispatch(ctx context.Context, req *models.JSONRPCRequest) *mode
 
 	// Create a timeout context for this specific operation
 	// This ensures handlers don't run forever even if connection stays open
-	opCtx, cancel := context.WithTimeout(ctx, operationTimeout)
+	opCtx, cancel := context.WithTimeout(connCtx, operationTimeout)
 	defer cancel()
+
+	// Inject the connection-scoped done channel into context (Bug C8 so proxy
+	// can derive long-lived subscription contexts that are cancelled on disconnect).
+	opCtx = context.WithValue(opCtx, connectionDoneKey{}, connCtx.Done())
 
 	result, err := handler(opCtx, req.Params)
 	if err != nil {
 		// Check if the error is due to context cancellation
-		if ctx.Err() != nil {
+		if connCtx.Err() != nil {
 			return MakeErrorResponse(
 				req.ID,
 				models.ErrCodeInternal,

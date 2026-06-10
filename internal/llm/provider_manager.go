@@ -36,6 +36,11 @@ type ProviderHealth struct {
 	TotalCost        float64        `json:"total_cost"`
 	TotalTokens      int64          `json:"total_tokens"`
 	LastError        string         `json:"last_error,omitempty"`
+
+	// successTimestamps and failureTimestamps track timestamps of successes/failures
+	// within the sliding 5-minute window used for recovery decisions.
+	successTimestamps []time.Time `json:"-"`
+	failureTimestamps []time.Time `json:"-"`
 }
 
 // ProviderEntry represents a configured provider with its health state.
@@ -395,17 +400,25 @@ func (pm *ProviderManager) recordSuccess(entry *ProviderEntry, resp *Response, l
 		})
 	}
 
+	// Track recent success timestamp (for sliding window recovery)
+	h.appendSuccessTimestamp()
+	h.pruneOldEntries()
+
 	// Update status
 	if h.Status == ProviderStatusUnhealthy || h.Status == ProviderStatusDegraded {
-		// Check if we should recover
-		// Simple heuristic: if success rate > 80% over recent calls
-		if h.SuccessCount > 0 {
-			recentRate := float64(h.SuccessCount) / float64(h.SuccessCount+h.FailureCount)
+		// Check if we should recover using sliding window rates
+		rSuc := h.recentSuccessCount()
+		rFail := h.recentFailureCount()
+		totalRecent := rSuc + rFail
+		if totalRecent > 0 {
+			recentRate := float64(rSuc) / float64(totalRecent)
 			if recentRate > 0.8 {
 				h.Status = ProviderStatusHealthy
 				h.LastError = ""
 				pm.logger.Info("Provider recovered",
 					"provider", entry.Config.ProviderID,
+					"recent_successes", rSuc,
+					"recent_failures", rFail,
 					"success_rate", recentRate,
 				)
 			} else if h.Status == ProviderStatusUnhealthy && h.ConsecutiveFails == 0 {
@@ -425,6 +438,10 @@ func (pm *ProviderManager) recordFailure(entry *ProviderEntry, err error, latenc
 	h.LastFailure = time.Now()
 	h.ConsecutiveFails++
 	h.LastError = err.Error()
+
+	// Track recent failure timestamp (for sliding window recovery)
+	h.appendFailureTimestamp()
+	h.pruneOldEntries()
 
 	// Update average latency
 	latencyMs := float64(latency.Milliseconds())
@@ -447,6 +464,61 @@ func (pm *ProviderManager) recordFailure(entry *ProviderEntry, err error, latenc
 	} else if h.ConsecutiveFails > 0 && h.Status == ProviderStatusHealthy {
 		h.Status = ProviderStatusDegraded
 	}
+}
+
+// recentSuccessCount returns the count of successes within the sliding 5-minute window.
+func (h *ProviderHealth) recentSuccessCount() int {
+	now := time.Now()
+	count := 0
+	for _, t := range h.successTimestamps {
+		if now.Sub(t) <= 5*time.Minute {
+			count++
+		}
+	}
+	return count
+}
+
+// recentFailureCount returns the count of failures within the sliding 5-minute window.
+func (h *ProviderHealth) recentFailureCount() int {
+	now := time.Now()
+	count := 0
+	for _, t := range h.failureTimestamps {
+		if now.Sub(t) <= 5*time.Minute {
+			count++
+		}
+	}
+	return count
+}
+
+// pruneOldEntries removes entries older than 5 minutes from the recent tracking slices.
+// Must be called while holding the ProviderManager's lock.
+func (h *ProviderHealth) pruneOldEntries() {
+	now := time.Now()
+	cutoff := now.Add(-5 * time.Minute)
+
+	suc := h.successTimestamps[:0]
+	for _, t := range h.successTimestamps {
+		if t.After(cutoff) {
+			suc = append(suc, t)
+		}
+	}
+	h.successTimestamps = suc
+
+	fail := h.failureTimestamps[:0]
+	for _, t := range h.failureTimestamps {
+		if t.After(cutoff) {
+			fail = append(fail, t)
+		}
+	}
+	h.failureTimestamps = fail
+}
+
+func (h *ProviderHealth) appendSuccessTimestamp() {
+	h.successTimestamps = append(h.successTimestamps, time.Now())
+}
+
+func (h *ProviderHealth) appendFailureTimestamp() {
+	h.failureTimestamps = append(h.failureTimestamps, time.Now())
 }
 
 // GetProviderHealth returns health information for all providers.

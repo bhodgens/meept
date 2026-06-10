@@ -724,6 +724,14 @@ hybrid := vector.NewHybridSearcher(vector.HybridSearcherConfig{
 results, err := hybrid.Search(ctx, "query", 20)
 ```
 
+#### Sharded Vector Memory
+- SQLite-vec backend with HNSW indexes for approximate nearest-neighbor search
+- Matryoshka dimension slicing for flexible embedding sizes
+- LRU-based shard management with automatic eviction
+- Cross-shard join queries for distributed searches
+- HTTP API endpoints for vector search, store, and stats
+- CLI commands: `meept memory vector search`, `meept memory vector stats`
+
 #### Personality Memory
 - Tracks user preferences over conversations
 - Updates every N conversations
@@ -842,6 +850,13 @@ Meept supports multiple LLM providers with model resolution based on capabilitie
 - Rate limiting (requests per minute)
 - Aggressiveness setting for cost control
 
+#### Persistent Dollar Cost Tracking
+- Real-time cost computation in USD per LLM request using model pricing data
+- Daily and hourly cost limits (configurable)
+- `PricingSyncer` fetches live pricing from OpenRouter and merges with local catalog
+- Cost metrics exposed via CLI analytics and HTTP API
+- Budget enforcement: requests blocked when daily/hourly caps exceeded
+
 #### Token Cache Metrics
 - L1 cache uses LRU eviction (based on `LastAccessedAt` timestamp) instead of FIFO
 - L1/L2 cache eviction events recorded to metrics store (`cache.eviction` with reason tags: `lru`, `ttl_expired`, `file_invalidation`)
@@ -859,6 +874,22 @@ When rate limits hit:
 1. Rotate to next model in alias (immediate retry)
 2. Exponential backoff if alias exhausted (2s → 4s → 8s → 16s → 32s)
 3. Max 5 attempts before returning error
+
+#### Error Handling & Rate Limiting
+- Structured error types: `RateLimitError`, `APIError`, `ClientError` with `RetryStrategy` and `ProviderErrorDetail`
+- OpenRouter/Anthropic 429 response parsing with `ParseOpenRouterError` and `ParseGenericProviderError`
+- Jitter-based backoff via `BackoffWithJitter()`
+- `UserMessage()` methods on all error types for human-readable output
+- TUI and CLI use `llm.UserMessage(err)` for consistent error display
+- Classifier alias with model fallback for empty LLM responses
+
+#### Local LLM Runtime Lifecycle
+- Automatic lifecycle management for local LLM runtimes (llama.cpp, MLX)
+- Health checking with configurable intervals and `OnHealthChange` callbacks
+- PID management, graceful shutdown, and auto-restart on health transitions
+- `RuntimeManager` with per-provider start/stop/restart/status
+- CLI: `meept runtime status`, `meept runtime start/stop/restart <provider>`
+- HTTP API and RPC endpoints for runtime management
 
 #### Token Usage Trickle-Up
 
@@ -1012,6 +1043,13 @@ Meept provides built-in tools and supports MCP (Model Context Protocol) for exte
 - Returns title, URL, snippet
 - Automatic URL cleaning and HTML entity decoding
 
+#### Streaming & Terminating Tools
+- `StreamingTool` interface for tools that emit incremental progress updates
+- `TerminatingTool` interface for tools whose final result should skip LLM follow-up
+- Progress updates published via `tool.execution.progress` bus topic
+- SSE streaming to connected HTTP clients
+- 16+ tools implement streaming/terminating: shell, memory, platform, filesystem, web_fetch, cron, schedule, MCP, handoff, ask
+
 #### Code Intelligence Tools
 | Tool | Category | Description |
 |------|----------|-------------|
@@ -1075,6 +1113,19 @@ Meept includes multi-language code understanding via tree-sitter parsing and LSP
 - JSON-RPC 2.0 communication
 - Go-to-definition, find-references, hover, workspace symbols, diagnostics
 - Document synchronization
+
+**RepoMap & PageRank (`internal/repomap/`):**
+- Tree-sitter tag extraction for repository-wide symbol mapping
+- Personalized PageRank ranking to identify the most relevant files for a query
+- Token-budget fitting to maximize context utilization
+- Context rendering with ranked file summaries
+- Caching layer for repeated queries
+
+**Auto-Lint & Test Reflection (`internal/lint/`, `internal/agent/reflection.go`):**
+- Linter registry with tree-sitter basic lint and language-specific linters (Go, Python, JS)
+- Test runner integration for automated test execution
+- LLM-driven reflection loop: lint/test failures → LLM fix attempts → re-validate
+- Configurable per-language lint rules and reflection parameters
 
 ---
 
@@ -1173,6 +1224,8 @@ Meept supports a three-tier skill discovery system.
 1. `.meept/skills/` - Project-local (highest priority)
 2. `~/.meept/skills/` - User-global
 3. `~/.config/meept/skills/` - System-wide
+4. Claude Skills (discovered from `.claude/skills/` via `ClaudeSource`)
+5. MCP-Embedded Skills (skills exposed as MCP tools via `mcp_runtime.go`)
 
 #### Runtime Skill Discovery
 - **CapabilityIndex**: Metadata-driven matching without loading full skill bodies
@@ -1328,6 +1381,18 @@ Bots are defined as JSON documents with prompt, triggers, tools, and constraints
 | **Model Failover** | Alias rotation with exponential backoff |
 | **Hallucination Detection** | Pattern-based detection with configurable sensitivity |
 | **Persistent Bot Framework** | Autonomous bots triggered by cron, bus events, and webhooks with memory isolation, cost budgets, and auto-pause on failures |
+| **Dollar Cost Tracking** | Real-time USD cost per request, live pricing sync from OpenRouter, daily/hourly cost limits |
+| **Local LLM Lifecycle** | Automatic health checking, PID management, and graceful restart for llama.cpp and MLX runtimes |
+| **Streaming Tools** | Incremental progress via bus events, terminating tools that skip LLM follow-up, SSE streaming to clients |
+| **Sharded Vector Memory** | SQLite-vec with HNSW indexes, Matryoshka dimension slicing, LRU shard management |
+| **RepoMap & PageRank** | Repository-wide symbol mapping with Personalized PageRank ranking and token-budget fitting |
+| **Auto-Lint & Reflection** | LLM-driven feedback loop: lint/test → fix attempts → re-validate, with tree-sitter and per-language linters |
+| **Distributed Cluster** | P2P mesh networking with gossip protocol, distributed task queue, WireGuard sync, and cluster CLI commands |
+| **MCP Server** | Expose Meept as an MCP server for external agent platforms with tool discovery and execution |
+| **Meept-Lite TUI** | Minimalistic alternative TUI using termbox-go with shared library (`sharedclient`) for code reuse |
+| **Desktop Notifications** | macOS native notifications via daemon event emitter, WebSocket, and UNUserNotificationCenter |
+| **Analytics System** | Agent performance analytics, response quality analysis, benchmark framework, and CLI analytics commands |
+| **Unified HTTP Server** | Single HTTP server serving REST API, WebSocket, and MCP over HTTP+SSE with functional options |
 
 ### External Integrations
 
@@ -1338,7 +1403,10 @@ Bots are defined as JSON documents with prompt, triggers, tools, and constraints
 | **HTTP REST** | REST API for macOS MenuBar app (disabled by default; cache invalidate/inspect endpoints) |
 | **Google Calendar** | Calendar event management |
 | **Git Worktrees** | Isolated task execution environments |
-| **macOS MenuBar** | Native SwiftUI monitoring and control app |
+| **macOS MenuBar** | Native SwiftUI monitoring and control app with desktop notifications |
+| **MCP Server** | Expose Meept as MCP server for external agent platforms |
+| **Distributed Cluster** | P2P mesh networking with gossip protocol for multi-node coordination |
+| **Flutter GUI** | Cross-platform GUI client with chat, sessions, tasks, agents, metrics panels |
 
 ---
 
@@ -1482,6 +1550,34 @@ enable_checkpoints = true
 ./bin/meept bots pause <bot-id>    # Pause a running bot
 ./bin/meept bots resume <bot-id>   # Resume a paused bot
 ./bin/meept bots delete <bot-id>   # Delete a bot
+
+# Cluster
+./bin/meept cluster status         # Show cluster status
+./bin/meept cluster join <addr>    # Join a cluster node
+./bin/meept cluster leave          # Leave the cluster
+
+# Runtime
+./bin/meept runtime status         # Show local LLM runtime status
+./bin/meept runtime start <provider>  # Start a local LLM provider
+./bin/meept runtime stop <provider>   # Stop a local LLM provider
+
+# Analytics
+./bin/meept analytics summary      # Show analytics summary
+./bin/meept analytics errors       # Show error breakdown
+./bin/meept analytics models       # Show model usage
+./bin/meept analytics export       # Export analytics data
+
+# Cache
+./bin/meept cache status           # Show token cache status
+./bin/meept cache clear            # Clear all cached entries
+./bin/meept cache invalidate <file> # Invalidate entries referencing a file
+./bin/meept cache inspect <hash>   # Inspect a specific cache entry
+
+# Plans
+./bin/meept plans list             # List all plans
+./bin/meept plans show <id>        # Show plan details
+./bin/meept plans approve <id>     # Approve a pending plan
+./bin/meept plans reject <id>      # Reject a pending plan
 ```
 
 ---

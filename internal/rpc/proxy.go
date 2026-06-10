@@ -263,15 +263,35 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	// Create subscription ID
 	subID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
 
-	// Create cancellable context for cleanup when client disconnects
-	// FIX #0051: Use context.Background() instead of ctx to prevent
-	// subscription from being killed when the RPC operation context completes.
-	// TODO(Bug C8): Subscriptions use context.Background() so they survive the RPC
-	// handler return. If a client disconnects without calling bus.unsubscribe, the
-	// subscriber goroutines and bus subscriptions leak permanently. A proper fix
-	// requires tracking per-client connection state (e.g., via a connection context
-	// passed through the RPC layer) and cancelling subscriptions on disconnect.
+	// Extract the connection-scoped done channel injected by server.dispatch.
+	// This allows us to create a subscription context that is cancelled when
+	// the client disconnects, preventing subscription leaks (Bug C8).
+	connDoneCh, _ := ctx.Value(connectionDoneKey{}).(chan struct{})
+
 	subCtx, cancelFunc := context.WithCancel(context.Background())
+
+	// When the client disconnects, connDoneCh fires → cancel the subscription
+	// context → cleanup goroutine stops all subscriber goroutines and removes
+	// the subscription from the map.  We also listen on ctx.Done() (the
+	// request-timeout context) as a fallback: if the request handler returns
+	// for any reason, cancelFunc fires so we don't leave dangling goroutines.
+	if connDoneCh != nil {
+		go func() {
+			select {
+			case <-connDoneCh:
+				cancelFunc()
+			case <-ctx.Done():
+				cancelFunc()
+			}
+		}()
+	} else {
+		// Fallback for direct proxy calls (not via server.dispatch): cancel on
+		// request context done.
+		go func() {
+			<-ctx.Done()
+			cancelFunc()
+		}()
+	}
 
 	// Create internal subscription state
 	sub := &busSubscription{

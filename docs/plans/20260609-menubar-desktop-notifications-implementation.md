@@ -4,6 +4,25 @@
 **Priority:** Medium
 **Estimated Effort:** 3-5 days
 **Status:** Pending Approval
+**Last Updated:** 2026-06-10 (Critical/High fixes applied)
+
+---
+
+## Required Fixes Before Implementation
+
+### Critical Fixes Applied
+1. **C1 - Package Structure:** Event emitter moved to `internal/comm/http/events.go` (not `internal/daemon/`)
+2. **C2 - WebSocketManager:** Extend existing `menubar/MeeptMenuBar/Services/WebSocketManager.swift` instead of creating new
+3. **C3 - TLS:** WebSocket URL changed from `ws://` to `wss://` with `LocalhostTrustDelegate`
+4. **C4 - WebSocket Library:** Changed from `gorilla/websocket` to `golang.org/x/net/websocket` (matches existing server)
+
+### High Priority Fixes Applied
+1. **H1 - Unsubscribe Race:** Fixed ordering (remove from slice before close)
+2. **H2 - UUID:** Use `github.com/google/uuid` package
+3. **H3 - Route Registration:** Use server's `mux` instead of global `http.HandleFunc`
+4. **H4 - Goroutine Leak:** Use `time.NewTicker` instead of `time.After` in loop
+5. **H5 - Config Integration:** Menubar config merged into main `config/meept.json5`
+6. **H6 - Authentication:** Add API key auth to WebSocket handler
 
 ## Overview
 
@@ -36,20 +55,28 @@ Implement desktop notifications for the Meept MenuBar app to alert users when:
 │                    Meept Daemon                                 │
 │                                                                  │
 │  ┌─────────────┐      ┌──────────────┐      ┌───────────────┐  │
-│  │ Agent Loop  │─────▶│ Notification │─────▶│ HTTP REST API │  │
+│  │ Agent Loop  │─────▶│ Notification │─────▶│ HTTP+SSE API  │  │
 │  │             │      │ Event emitter│      │   (port 8081) │  │
-│  └─────────────┘      └──────────────┘      └───────┬───────┘  │
-└─────────────────────────────────────────────────────┼──────────┘
-                                                      │
+│  └─────────────┘      └───────────────┘      └───────┬───────┘  │
+│                                (internal/comm/http/)  │         │
+└─────────────────────────────────────────────────────┬─┘          │
+                                                      │ (TLS)
                                                       ▼
 ┌────────────────────────────────────────────────────────────────┐
 │                    macOS MenuBar App                            │
 │  ┌─────────────┐      ┌──────────────┐      ┌───────────────┐ │
-│  │ HTTP Client │─────▶│ Notification │─────▶│ NSUserNotificationCenter │ │
-│  │ (polling)   │      │ Manager      │      │ (macOS native)│ │
+│  │ WSS Client  │─────▶│ Notification │─────▶│ NSUserNotificationCenter │ │
+│  │ (real-time) │      │ Manager      │      │ (macOS native)│ │
 │  └─────────────┘      └──────────────┘      └───────────────┘ │
+│  NOTE: Extend existing WebSocketManager.swift, don't create new │
 └────────────────────────────────────────────────────────────────┘
 ```
+
+**Important Implementation Notes:**
+- Event emitter package: `internal/comm/http/events.go` (NOT `internal/daemon/`)
+- WebSocket library: `golang.org/x/net/websocket` (matches existing server code)
+- TLS required: WSS with `LocalhostTrustDelegate` for self-signed cert
+- Authentication: API key required on WebSocket endpoint
 
 ---
 
