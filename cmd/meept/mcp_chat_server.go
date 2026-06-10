@@ -43,6 +43,7 @@ func runMCPChatServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to daemon: %w\n\nMake sure the daemon is running:\n  meept daemon start", err)
 	}
+	defer srv.CloseRPC()
 
 	// Log subscription info to stderr (stdout is MCP protocol)
 	fmt.Fprintf(os.Stderr, "meept mcp-chat-server: connected (subscription: %s)\n", subID)

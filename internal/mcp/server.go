@@ -322,6 +322,13 @@ func (s *Server) ConnectRPC(socketPath string) error {
 	return nil
 }
 
+// CloseRPC closes the RPC client connection if one was established.
+func (s *Server) CloseRPC() {
+	if s.client != nil {
+		_ = s.client.Close()
+	}
+}
+
 // ConnectAndSubscribe connects to the daemon and subscribes to event topics.
 // Returns the subscription ID for use with meept_events.
 func (s *Server) ConnectAndSubscribe(socketPath string) (string, error) {
