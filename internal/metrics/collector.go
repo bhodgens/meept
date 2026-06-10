@@ -3,14 +3,18 @@ package metrics
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/pkg/models"
+	"github.com/jmoiron/sqlx"
 )
 
 // AgentEventType identifies a typed agent event. This mirrors the type from
@@ -573,4 +577,218 @@ func (c *PeriodicCollector) Shutdown() {
 		close(c.stopChan)
 	}
 	c.wg.Wait()
+}
+
+// AgentTaskMetrics represents metrics for a single agent task execution.
+type AgentTaskMetrics struct {
+	TaskID               string
+	AgentID              string
+	SkillName            string
+	Status               string // completed, failed, timeout, abandoned
+	Success              bool
+	Iterations           int
+	DurationMs           int64
+	TokensInput          int
+	TokensOutput         int
+	EstimatedCostCents   float64
+	ResponseWellFormed   bool
+	SyntaxErrors         int
+	IndentationErrors    int
+	LazyResponse         bool
+	ContextExhausted     bool
+	ReflectionIterations int
+	ReflectionSuccess    bool
+	UserInterventions    int
+	ModelID              string
+	EditFormat           string
+}
+
+// TaskCollector collects agent task metrics with async flush.
+type TaskCollector struct {
+	db          *sqlx.DB
+	logger      *slog.Logger
+	flushQueue  chan *AgentTaskMetrics
+	flushTicker *time.Ticker
+	stopChan    chan struct{}
+	wg          sync.WaitGroup
+}
+
+// NewTaskCollector creates a new task metrics collector.
+// It opens the database at dbPath and starts background flush goroutines.
+func NewTaskCollector(dbPath string, logger *slog.Logger) (*TaskCollector, error) {
+	// Expand path
+	expandedPath := expandPath(dbPath)
+
+	// Ensure directory exists
+	dir := filepath.Dir(expandedPath)
+	//nolint:gosec // user config directory/file permissions
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create metrics directory: %w", err)
+	}
+
+	// Open database
+	rawDB, err := sql.Open("sqlite", expandedPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	db := sqlx.NewDb(rawDB, "sqlite")
+
+	// Set connection pool settings
+	db.SetMaxOpenConns(1) // SQLite writes must be serialized
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(time.Hour)
+
+	// Initialize schema for agent_task_outcomes
+	if err := initAgentTaskSchema(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize agent task schema: %w", err)
+	}
+
+	c := &TaskCollector{
+		db:          db,
+		logger:      logger.With("component", "task-collector"),
+		flushQueue:  make(chan *AgentTaskMetrics, 1000),
+		flushTicker: time.NewTicker(5 * time.Second),
+		stopChan:    make(chan struct{}),
+	}
+
+	// Start background flush loop
+	c.wg.Go(c.flushLoop)
+
+	return c, nil
+}
+
+// initAgentTaskSchema creates the agent_task_outcomes table if it doesn't exist.
+func initAgentTaskSchema(db *sqlx.DB) error {
+	schema := `
+CREATE TABLE IF NOT EXISTS agent_task_outcomes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    task_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    skill_name TEXT,
+    status TEXT,
+    success BOOLEAN,
+    iterations INTEGER,
+    duration_ms INTEGER,
+    tokens_input INTEGER,
+    tokens_output INTEGER,
+    estimated_cost_cents REAL,
+    response_well_formed BOOLEAN,
+    syntax_errors_count INTEGER,
+    indentation_errors_count INTEGER,
+    lazy_response_detected BOOLEAN,
+    context_exhausted BOOLEAN,
+    reflection_iterations INTEGER,
+    reflection_successful BOOLEAN,
+    user_interventions INTEGER,
+    user_satisfaction INTEGER,
+    model_id TEXT,
+    edit_format TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_agent_task_outcomes_task_id ON agent_task_outcomes(task_id);
+CREATE INDEX IF NOT EXISTS idx_agent_task_outcomes_agent_id ON agent_task_outcomes(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_task_outcomes_timestamp ON agent_task_outcomes(timestamp);
+`
+	_, err := db.Exec(schema)
+	return err
+}
+
+// RecordAgentTask queues an agent task metric for asynchronous writing.
+func (c *TaskCollector) RecordAgentTask(m *AgentTaskMetrics) error {
+	select {
+	case c.flushQueue <- m:
+		return nil
+	default:
+		c.logger.Warn("flush queue full, dropping metric")
+		return fmt.Errorf("flush queue full")
+	}
+}
+
+// flushLoop runs the background flush loop.
+func (c *TaskCollector) flushLoop() {
+	for {
+		select {
+		case <-c.flushTicker.C:
+			c.flush()
+		case <-c.stopChan:
+			c.flush() // Final flush
+			return
+		}
+	}
+}
+
+// flush writes queued metrics to the database.
+func (c *TaskCollector) flush() {
+	var metrics []*AgentTaskMetrics
+
+	// Drain the queue
+	for {
+		select {
+		case m := <-c.flushQueue:
+			metrics = append(metrics, m)
+		default:
+			goto flush
+		}
+	}
+
+flush:
+	if len(metrics) == 0 {
+		return
+	}
+
+	tx, err := c.db.Begin()
+	if err != nil {
+		c.logger.Error("failed to begin transaction", "error", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO agent_task_outcomes (
+			task_id, agent_id, skill_name, status, success,
+			iterations, duration_ms, tokens_input, tokens_output,
+			estimated_cost_cents, response_well_formed, syntax_errors_count,
+			indentation_errors_count, lazy_response_detected, context_exhausted,
+			reflection_iterations, reflection_successful, user_interventions,
+			model_id, edit_format
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		c.logger.Error("failed to prepare statement", "error", err)
+		return
+	}
+	defer stmt.Close()
+
+	for _, m := range metrics {
+		_, err := stmt.Exec(
+			m.TaskID, m.AgentID, m.SkillName, m.Status, m.Success,
+			m.Iterations, m.DurationMs, m.TokensInput, m.TokensOutput,
+			m.EstimatedCostCents, m.ResponseWellFormed, m.SyntaxErrors,
+			m.IndentationErrors, m.LazyResponse, m.ContextExhausted,
+			m.ReflectionIterations, m.ReflectionSuccess, m.UserInterventions,
+			m.ModelID, m.EditFormat,
+		)
+		if err != nil {
+			c.logger.Error("failed to insert metric", "task_id", m.TaskID, "error", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		c.logger.Error("failed to commit transaction", "error", err)
+	}
+}
+
+// Shutdown stops the task collector and flushes pending metrics.
+func (c *TaskCollector) Shutdown() {
+	select {
+	case <-c.stopChan:
+		// Already closed
+	default:
+		close(c.stopChan)
+	}
+	c.flushTicker.Stop()
+	c.wg.Wait()
+	_ = c.db.Close()
 }
