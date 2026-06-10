@@ -250,10 +250,11 @@ type LSPServerConfig struct {
 //gendoc:desc Configuration for the daemon process including socket, logging, and data directory.
 //gendoc:example [daemon] socket_path = "~/.meept/meept.sock"
 type DaemonConfig struct {
-	SocketPath string `json:"socket_path" toml:"socket_path"`
-	PIDFile    string `json:"pid_file"    toml:"pid_file"`
-	LogLevel   string `json:"log_level"   toml:"log_level"`
-	DataDir    string `json:"data_dir"    toml:"data_dir"`
+	SocketPath      string `json:"socket_path"      toml:"socket_path"`
+	PIDFile         string `json:"pid_file"          toml:"pid_file"`
+	LogLevel        string `json:"log_level"         toml:"log_level"`
+	DataDir         string `json:"data_dir"          toml:"data_dir"`
+	ShutdownTimeout string `json:"shutdown_timeout"  toml:"shutdown_timeout"`
 }
 
 // TransportConfig controls which transports the daemon exposes.
@@ -1565,8 +1566,13 @@ func ParseLogLevel(level string) slog.Level {
 	}
 }
 
-// ShutdownTimeout returns the default shutdown timeout.
+// ShutdownTimeout returns the configured shutdown timeout, falling back to 10s.
 func (c *Config) ShutdownTimeout() time.Duration {
+	if c.Daemon.ShutdownTimeout != "" {
+		if d, err := time.ParseDuration(c.Daemon.ShutdownTimeout); err == nil {
+			return d
+		}
+	}
 	return 10 * time.Second
 }
 
