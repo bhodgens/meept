@@ -266,6 +266,11 @@ func (p *ProxyHandler) handleBusSubscribe(ctx context.Context, params json.RawMe
 	// Create cancellable context for cleanup when client disconnects
 	// FIX #0051: Use context.Background() instead of ctx to prevent
 	// subscription from being killed when the RPC operation context completes.
+	// TODO(Bug C8): Subscriptions use context.Background() so they survive the RPC
+	// handler return. If a client disconnects without calling bus.unsubscribe, the
+	// subscriber goroutines and bus subscriptions leak permanently. A proper fix
+	// requires tracking per-client connection state (e.g., via a connection context
+	// passed through the RPC layer) and cancelling subscriptions on disconnect.
 	subCtx, cancelFunc := context.WithCancel(context.Background())
 
 	// Create internal subscription state

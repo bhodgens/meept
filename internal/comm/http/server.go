@@ -125,6 +125,13 @@ type Server struct {
 
 	wsHub *WebSocketHub
 
+	// wsSubscribers holds bus subscribers created in WithWebSocket so they can be
+	// unsubscribed during Shutdown. Without this, goroutines forwarding bus events
+	// to WebSocket clients leak permanently (Bug C6).
+	wsSubscribers []*bus.Subscriber
+	wsSubMu       sync.Mutex
+	wsBus         *bus.MessageBus // stored for unsubscribe during Shutdown
+
 	// Bot webhook handler (optional, set via WithBotWebhook)
 	botWebhookHandler http.Handler
 
@@ -275,6 +282,7 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 		}
 		s.wsPath = wsPath
 		s.wsHub = NewWebSocketHub(s.logger)
+		s.wsBus = msgBus
 
 		// Subscribe to all bus topic patterns that produce frontend events.
 		// The bus wildcard "*" only matches single-segment topics, so we
@@ -283,6 +291,9 @@ func WithWebSocket(msgBus *bus.MessageBus, wsPath string) ServerOption {
 			"chat.*", "chat.*.*", "tool.*", "llm.*", "review.*"}
 		for _, topic := range topics {
 			sub := msgBus.Subscribe("http-ws-"+topic, topic)
+			s.wsSubMu.Lock()
+			s.wsSubscribers = append(s.wsSubscribers, sub)
+			s.wsSubMu.Unlock()
 			go func(sub *bus.Subscriber) {
 				for msg := range sub.Channel {
 					s.handleWSEvent(msg)
@@ -597,6 +608,16 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.running = false
 	srv := s.server
 	s.mu.Unlock()
+
+	// Unsubscribe all bus-to-WebSocket forwarding goroutines to prevent leaks (Bug C6).
+	s.wsSubMu.Lock()
+	if s.wsBus != nil {
+		for _, sub := range s.wsSubscribers {
+			s.wsBus.Unsubscribe(sub)
+		}
+	}
+	s.wsSubscribers = nil
+	s.wsSubMu.Unlock()
 
 	s.logger.Info("unified HTTP server shutting down")
 	if srv != nil {

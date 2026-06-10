@@ -360,7 +360,7 @@ func (h *DevHandler) handleReload(ctx context.Context, params json.RawMessage) (
 		return map[string]any{
 			RPCKeySuccess: false,
 			"error":       err.Error(),
-		}, err
+		}, nil
 	}
 
 	return map[string]any{
