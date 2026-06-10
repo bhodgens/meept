@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 
@@ -159,15 +160,25 @@ func (e *Executor) Execute(ctx context.Context, skill *Skill, input string) (*Sk
 
 	// Create or use existing client
 	var chatter llm.Chatter
+	createdLocally := false
 	switch {
 	case e.client == nil:
 		chatter = createChatter(modelConfig, e.logger)
+		createdLocally = true
 	case e.client.Config().ModelID != modelConfig.ModelID:
 		// AnthropicClient doesn't support SwitchModel, so create a new one
 		chatter = createChatter(modelConfig, e.logger)
+		createdLocally = true
 	default:
 		chatter = e.client
 	}
+	defer func() {
+		if createdLocally {
+			if closer, ok := chatter.(io.Closer); ok {
+				closer.Close()
+			}
+		}
+	}()
 
 	// Build messages
 	messages := []llm.ChatMessage{
@@ -301,15 +312,25 @@ func (e *Executor) ExecuteWithMessages(
 
 	// Create or use existing client
 	var chatter llm.Chatter
+	createdLocally := false
 	switch {
 	case e.client == nil:
 		chatter = createChatter(modelConfig, e.logger)
+		createdLocally = true
 	case e.client.Config().ModelID != modelConfig.ModelID:
 		// AnthropicClient doesn't support SwitchModel, so create a new one
 		chatter = createChatter(modelConfig, e.logger)
+		createdLocally = true
 	default:
 		chatter = e.client
 	}
+	defer func() {
+		if createdLocally {
+			if closer, ok := chatter.(io.Closer); ok {
+				closer.Close()
+			}
+		}
+	}()
 
 	// Prepend system message with skill body if not already present
 	if len(messages) == 0 || messages[0].Role != llm.RoleSystem {
