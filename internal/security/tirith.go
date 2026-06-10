@@ -84,13 +84,17 @@ func ScanCommand(ctx context.Context, command, binary string) *TirithResult {
 	cmd := exec.CommandContext(ctx, binary, "check", "--", command)
 	output, err := cmd.CombinedOutput()
 
-	// If timeout or other error, allow execution (graceful degradation)
+	// If timeout or other error, determine whether to allow or block.
 	if ctx.Err() != nil || err != nil {
 		// Check if it's just a non-zero exit code (expected for blocked/warning)
 		exitError := &exec.ExitError{}
 		if errors.As(err, &exitError) {
-			return nil
+			return nil // Non-zero exit = tirith's explicit allow
 		}
+		// Scanner failure (crash, signal, pipe error) = block by default (Bug S3).
+		// This is safer than allowing execution when the scanner is broken.
+		msg := "tirith scanner error: " + err.Error()
+		return &TirithResult{Blocked: true, Message: &msg}
 	}
 
 	outputStr := string(output)

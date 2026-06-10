@@ -3,6 +3,7 @@ package web
 
 import (
 	"crypto/subtle"
+	"net"
 	"net/http"
 	"strings"
 
@@ -225,11 +226,11 @@ func (a *IPWhitelistAuth) extractIP(r *http.Request) string {
 	}
 
 	// Use RemoteAddr as the primary/authoritative source.
-	ip := r.RemoteAddr
-	if colonIdx := strings.LastIndex(ip, ":"); colonIdx != -1 {
-		ip = ip[:colonIdx]
+	// Use net.SplitHostPort to correctly handle IPv6 addresses (e.g. "[::1]:12345").
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
 	}
-	// Remove brackets for IPv6
-	ip = strings.Trim(ip, "[]")
+	ip := strings.Trim(host, "[]")
 	return ip
 }

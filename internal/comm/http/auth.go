@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -72,17 +73,38 @@ func (a *APIKeyAuth) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// extractKey checks the Authorization header (Bearer <key> or <key>),
-// and for WebSocket upgrade requests also checks ?token=<key>.
+// extractKey checks the Authorization header (Bearer <key>),
+// the Sec-WebSocket-Protocol header (for WebSocket clients),
+// and as a legacy fallback the ?token=<key> query parameter for WebSocket.
+// The query param fallback logs a warning because credentials in the URL are
+// visible in server/proxy access logs (Bug S1).
 func (a *APIKeyAuth) extractKey(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if auth != "" {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
 
-	// For WebSocket clients that cannot set custom headers, allow token in query param.
+	// For WebSocket clients, check Sec-WebSocket-Protocol header.
+	// Convention: client sends "bearer.<token>" as a subprotocol.
 	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-		return r.URL.Query().Get("token")
+		if proto := r.Header.Get("Sec-WebSocket-Protocol"); proto != "" {
+			for _, p := range strings.Split(proto, ",") {
+				p = strings.TrimSpace(p)
+				if strings.HasPrefix(p, "bearer.") {
+					return strings.TrimPrefix(p, "bearer.")
+				}
+			}
+		}
+
+		// Legacy fallback: query param token.
+		// WARNING: credentials in query params are logged in access logs.
+		if token := r.URL.Query().Get("token"); token != "" {
+			slog.Warn("websocket auth via query param (credentials visible in logs)",
+				"remote", r.RemoteAddr,
+				"hint", "use Authorization header or Sec-WebSocket-Protocol: bearer.<key>",
+			)
+			return token
+		}
 	}
 
 	return ""
