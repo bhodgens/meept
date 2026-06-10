@@ -74,6 +74,9 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	LogLevel        slog.Level
 
+	// Optional pre-loaded full config (used when --config flag is provided)
+	FullConfig *config.Config
+
 	// Optional pre-loaded models config (used by tests to avoid loading real config)
 	ModelsConfig *config.ModelsConfig
 
@@ -115,11 +118,17 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 	opts := &slog.HandlerOptions{Level: cfg.LogLevel}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, opts))
 
-	// Load full configuration
-	fullCfg, err := config.LoadDefault()
-	if err != nil {
-		logger.Warn("Failed to load config, using defaults", "error", err)
-		fullCfg = config.DefaultConfig()
+	// Use pre-loaded config if provided (e.g. from --config flag), otherwise load defaults
+	var fullCfg *config.Config
+	if cfg.FullConfig != nil {
+		fullCfg = cfg.FullConfig
+	} else {
+		var err error
+		fullCfg, err = config.LoadDefault()
+		if err != nil {
+			logger.Warn("Failed to load config, using defaults", "error", err)
+			fullCfg = config.DefaultConfig()
+		}
 	}
 
 	// Create message bus

@@ -122,6 +122,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		StateDir:                    appCfg.Daemon.DataDir,
 		ShutdownTimeout:             appCfg.ShutdownTimeout(),
 		LogLevel:                    config.ParseLogLevel(appCfg.Daemon.LogLevel),
+		FullConfig:                  appCfg,
 		AllowedPaths:                appCfg.Security.AllowedPaths,
 		BlockedPaths:                appCfg.Security.BlockedPaths,
 		BlockFinancial:              appCfg.Security.BlockFinancial,
