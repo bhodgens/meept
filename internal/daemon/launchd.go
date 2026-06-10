@@ -13,227 +13,139 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/kardianos/service"
 )
 
 const (
 	// LaunchAgentLabel is the label for the launchd agent.
 	LaunchAgentLabel = "com.caimlas.meept-daemon"
-
-	// launchdPlistTemplate is the template for the launchd plist file.
-	launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>%s</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>%s</string>
-        <string>-f</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPathString</key>
-    <string>%s</string>
-    <key>StandardErrorPathString</key>
-    <string>%s</string>
-    <key>WorkingDirectory</key>
-    <string>%s</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin</string>
-    </dict>
-</dict>
-</plist>
-`
 )
 
-// LaunchAgentController manages the launchd agent for the daemon.
-type LaunchAgentController struct {
-	meeptDir   string
-	plistPath  string
+// --- launchService: implements service.Interface ---
+
+// launchService wires kardianos/service into the meept-daemon lifecycle.
+type launchService struct {
 	daemonPath string
-	logPath    string
-	errLogPath string
-	workingDir string
+	logDir     string
 }
 
-// NewLaunchAgentController creates a new LaunchAgentController.
-func NewLaunchAgentController() (*LaunchAgentController, error) {
-	// Get home directory
-	homeDir, err := os.UserHomeDir()
+func (l *launchService) Init(*service.Service) error { return nil }
+
+func (l *launchService) Start(s service.Service) error {
+	_ = s
+	// Exec the daemon binary in foreground mode.
+	cmd := exec.Command(l.daemonPath, "-f") //nolint:gosec
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+func (l *launchService) Stop(s service.Service) error {
+	// Forward to legacy controller which handles PID-based stop.
+	legacy, err := newLegacyController(l.logDir)
 	if err != nil {
-		// Try user.Current as fallback
+		return err
+	}
+	return legacy.Stop()
+}
+
+// --- Legacy controller: kept as a fallback for PID/status queries. ---
+
+// legacyController wraps the PID-file + signal-based approach for
+// querying status, which kardianos/service doesn't provide.
+type legacyController struct {
+	meeptDir string
+}
+
+func getHomeDirOrFallback() string {
+	hd, err := os.UserHomeDir()
+	if err != nil {
 		if u, err := user.Current(); err == nil {
-			homeDir = u.HomeDir
-		} else {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
+			return u.HomeDir
 		}
+		return "/tmp"
 	}
-
-	meeptDir := filepath.Join(homeDir, ".meept")
-	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
-
-	// Ensure directories exist
-	if err := os.MkdirAll(meeptDir, 0o755); err != nil { //nolint:gosec // task workspace dirs are user-readable
-		return nil, fmt.Errorf("failed to create meept directory: %w", err)
-	}
-	if err := os.MkdirAll(launchAgentsDir, 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create LaunchAgents directory: %w", err)
-	}
-
-	// Find daemon binary
-	daemonPath, err := findDaemonBinary()
-	if err != nil {
-		// Use a default path if not found
-		daemonPath = "/usr/local/bin/meept-daemon"
-	}
-
-	return &LaunchAgentController{
-		meeptDir:   meeptDir,
-		plistPath:  filepath.Join(launchAgentsDir, "com.caimlas.meept-daemon.plist"),
-		daemonPath: daemonPath,
-		logPath:    filepath.Join(meeptDir, "daemon.log"),
-		errLogPath: filepath.Join(meeptDir, "daemon.err"),
-		workingDir: homeDir,
-	}, nil
+	return hd
 }
 
-// findDaemonBinary tries to find the meept-daemon binary.
-func findDaemonBinary() (string, error) {
-	// Check common locations
-	locations := []string{
-		"./bin/meept-daemon",
-		filepath.Join(os.Getenv("HOME"), "bin", "meept-daemon"),
-		"/usr/local/bin/meept-daemon",
-		"/opt/homebrew/bin/meept-daemon",
-		"/usr/bin/meept-daemon",
+func newLegacyController(logDir string) (*legacyController, error) {
+	home := getHomeDirOrFallback()
+	meeptDir := logDir
+	if meeptDir == "" {
+		meeptDir = filepath.Join(home, ".meept")
 	}
-
-	for _, path := range locations {
-		//nolint:gosec // path validated by config directory check
-		if _, err := os.Stat(path); err == nil {
-			// Convert to absolute path
-			if !filepath.IsAbs(path) {
-				if abs, err := filepath.Abs(path); err == nil {
-					return abs, nil
-				}
-			}
-			return path, nil
-		}
+	if err := os.MkdirAll(meeptDir, 0o755); err != nil { //nolint:gosec
+		return nil, err
 	}
-
-	return "", fmt.Errorf("meept-daemon binary not found")
+	return &legacyController{meeptDir: meeptDir}, nil
 }
 
-// generatePlist generates the launchd plist content.
-func (c *LaunchAgentController) generatePlist() string {
-	return fmt.Sprintf(
-		launchdPlistTemplate,
-		LaunchAgentLabel,
-		c.daemonPath,
-		c.logPath,
-		c.errLogPath,
-		c.workingDir,
-	)
-}
-
-// ensurePlistFile writes the plist file if it doesn't exist.
-func (c *LaunchAgentController) ensurePlistFile() error {
-	content := c.generatePlist()
-	return os.WriteFile(c.plistPath, []byte(content), 0o644) //nolint:gosec // workspace plan/data files are user-readable
-}
-
-// IsLoaded checks if the launchd agent is currently loaded.
-func (c *LaunchAgentController) IsLoaded() bool {
-	cmd := exec.Command("launchctl", "list", LaunchAgentLabel) //nolint:gosec // path is constructed from known config values
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	err := cmd.Run()
-	// If the command succeeds and output contains the label, it's loaded
-	return err == nil && strings.Contains(out.String(), LaunchAgentLabel)
-}
-
-// IsRunning checks if the daemon process is actually running.
-func (c *LaunchAgentController) IsRunning() bool {
-	// Check PID file
-	pidFile := filepath.Join(c.meeptDir, "meept.pid")
-	data, err := os.ReadFile(pidFile)
-	if err != nil {
-		return false
-	}
-
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		return false
-	}
-
-	// Check if process is running
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	// Send signal 0 to check if process exists
-	return proc.Signal(syscall.Signal(0)) == nil
+// IsRunning checks if the daemon process is actually running via PID file.
+func (c *legacyController) IsRunning() bool {
+	pid := c.GetPID()
+	return pid > 0
 }
 
 // GetPID returns the daemon PID if running, 0 otherwise.
-func (c *LaunchAgentController) GetPID() int {
+func (c *legacyController) GetPID() int {
 	pidFile := filepath.Join(c.meeptDir, "meept.pid")
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0
 	}
-
-	pid, err := strconv.Atoi(string(data))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return 0
 	}
-
-	// Verify process is running
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return 0
+	if proc, err := os.FindProcess(pid); err == nil && proc.Signal(syscall.Signal(0)) == nil {
+		return pid
 	}
-
-	if proc.Signal(syscall.Signal(0)) != nil {
-		return 0
-	}
-
-	return pid
+	return 0
 }
 
-// GetUptime returns the uptime of the daemon.
-func (c *LaunchAgentController) GetUptime() time.Duration {
+// GetUptime returns the daemon uptime.
+func (c *legacyController) GetUptime() time.Duration {
 	pidFile := filepath.Join(c.meeptDir, "meept.pid")
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0
 	}
-
-	pid, err := strconv.Atoi(string(data))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return 0
 	}
-
-	// Get process info
-	cmd := exec.Command("ps", "-o", "etime=", "-p", strconv.Itoa(pid)) //nolint:gosec // path is constructed from known config values
+	cmd := exec.Command("ps", "-o", "etime=", "-p", strconv.Itoa(pid)) //nolint:gosec
 	var out bytes.Buffer
 	cmd.Stdout = &out
-
 	if err := cmd.Run(); err != nil {
 		return 0
 	}
+	return parseElapsedTime(strings.TrimSpace(out.String()))
+}
 
-	// Parse elapsed time (format: [[DD-]hh:]mm:ss)
-	elapsed := strings.TrimSpace(out.String())
-	return parseElapsedTime(elapsed)
+// Stop sends SIGTERM to the running daemon process.
+func (c *legacyController) Stop() error {
+	pid := c.GetPID()
+	if pid == 0 {
+		return nil
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return nil
+	}
+	if proc.Signal(syscall.SIGTERM) == nil {
+		// Best-effort wait for graceful shutdown.
+		for i := 0; i < 40; i++ {
+			time.Sleep(250 * time.Millisecond)
+			if proc.Signal(syscall.Signal(0)) != nil {
+				return nil
+			}
+		}
+		// Force kill if still alive.
+		_ = proc.Signal(syscall.SIGKILL)
+		return nil
+	}
+	return nil
 }
 
 // parseElapsedTime parses the elapsed time string from ps.
@@ -243,12 +155,9 @@ func parseElapsedTime(s string) time.Duration {
 	if len(parts) == 0 {
 		return 0
 	}
-
 	var days, hours, mins, secs int
-
 	switch len(parts) {
 	case 3:
-		// Could be DD-HH:MM:SS or HH:MM:SS
 		dayPart := parts[0]
 		if idx := strings.Index(dayPart, "-"); idx > 0 {
 			days, _ = strconv.Atoi(dayPart[:idx])
@@ -264,164 +173,369 @@ func parseElapsedTime(s string) time.Duration {
 	default:
 		return 0
 	}
-
-	// CORE-8 FIX: Use explicit time.Duration arithmetic instead of
-	// int(time.Hour) casting. The old pattern `int(time.Hour)` was
-	// fragile because it casts a Duration type to int before multiplying,
-	// which can be confusing. Now we use `time.Duration(days)*24*time.Hour`
-	// which keeps everything in Duration types and reads more clearly.
 	return time.Duration(days)*24*time.Hour +
 		time.Duration(hours)*time.Hour +
 		time.Duration(mins)*time.Minute +
 		time.Duration(secs)*time.Second
 }
 
-// Load loads the launchd agent (creates plist and loads it).
-func (c *LaunchAgentController) Load() error {
-	// Generate and write plist file
-	if err := c.ensurePlistFile(); err != nil {
-		return fmt.Errorf("failed to create plist file: %w", err)
+// --- findDaemonBinary ---
+
+// findDaemonBinary tries to find the meept-daemon binary.
+func findDaemonBinary() (string, error) {
+	locations := []string{
+		"./bin/meept-daemon",
+		filepath.Join(os.Getenv("HOME"), "bin", "meept-daemon"),
+		"/usr/local/bin/meept-daemon",
+		"/opt/homebrew/bin/meept-daemon",
+		"/usr/bin/meept-daemon",
 	}
-
-	// Unload first if already loaded (ignore errors)
-	_ = exec.Command("launchctl", "unload", c.plistPath).Run() //nolint:gosec // path is constructed from known config values
-
-	// Load the agent
-	cmd := exec.Command("launchctl", "load", "-w", c.plistPath) //nolint:gosec // path is constructed from known config values
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to load launchd agent: %w, output: %s", err, out.String())
-	}
-
-	return nil
-}
-
-// Unload unloads the launchd agent.
-func (c *LaunchAgentController) Unload() error {
-	if !c.IsLoaded() {
-		return nil
-	}
-
-	cmd := exec.Command("launchctl", "unload", "-w", c.plistPath) //nolint:gosec // path is constructed from known config values
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to unload launchd agent: %w, output: %s", err, out.String())
-	}
-
-	return nil
-}
-
-// Start starts the daemon via launchd.
-func (c *LaunchAgentController) Start() error {
-	// Ensure plist is loaded
-	if err := c.Load(); err != nil {
-		return err
-	}
-
-	// Start the service
-	cmd := exec.Command("launchctl", "kickstart", "-k", LaunchAgentLabel) //nolint:gosec // path is constructed from known config values
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	if err := cmd.Run(); err != nil {
-		// kickstart might fail if already running, that's ok
-		if !strings.Contains(out.String(), "already running") {
-			return fmt.Errorf("failed to start launchd agent: %w, output: %s", err, out.String())
+	for _, path := range locations {
+		//nolint:gosec // path validated by config directory check
+		if _, err := os.Stat(path); err == nil {
+			if !filepath.IsAbs(path) {
+				if abs, err := filepath.Abs(path); err == nil {
+					return abs, nil
+				}
+			}
+			return path, nil
 		}
 	}
-
-	return nil
+	return "", fmt.Errorf("meept-daemon binary not found")
 }
 
-// Stop stops the daemon via launchd.
-func (c *LaunchAgentController) Stop() error {
-	if !c.IsLoaded() {
+// --- ServiceManager: Kardianos/service-backed lifecycle ---
+
+// ServiceManager manages the daemon as a platform service (launchd on macOS).
+type ServiceManager struct {
+	daemonPath string
+	logDir     string
+	svc        service.Service // set after Install/Uninstall for status queries
+	name       string
+}
+
+// ServiceManagerConfig holds options for NewServiceManager.
+type ServiceManagerConfig struct {
+	// LogDir is the directory for daemon logs (default: ~/.meept).
+	LogDir string
+	// Name overrides the service label (default: LaunchAgentLabel).
+	Name string
+}
+
+// NewServiceManager creates a service manager that wraps kardianos/service.
+func NewServiceManager(cfg *ServiceManagerConfig) (*ServiceManager, error) {
+	if cfg == nil {
+		cfg = &ServiceManagerConfig{}
+	}
+	daemonPath, err := findDaemonBinary()
+	if err != nil {
+		daemonPath = "/usr/local/bin/meept-daemon"
+	}
+	home := getHomeDirOrFallback()
+	logDir := cfg.LogDir
+	if logDir == "" {
+		logDir = filepath.Join(home, ".meept")
+	}
+	return &ServiceManager{
+		daemonPath: daemonPath,
+		logDir:     logDir,
+		name:       cfg.Name,
+	}, nil
+}
+
+// Install registers the launchd agent and starts it.
+func (m *ServiceManager) Install() error {
+	label := m.name
+	if label == "" {
+		label = LaunchAgentLabel
+	}
+
+	prg := &launchService{
+		daemonPath: m.daemonPath,
+		logDir:     m.logDir,
+	}
+	cfg := &service.Config{
+		Name:        label,
+		DisplayName: "Meept Daemon",
+		Description: "Meept AI daemon -- agent loop orchestration",
+		Executable:  m.daemonPath,
+		Arguments:   []string{"-f"},
+	}
+
+	svc, err := service.New(prg, cfg)
+	if err != nil {
+		return fmt.Errorf("create service: %w", err)
+	}
+
+	// Use launchctl load as the primary mechanism; kardianos/service
+	// internally writes a plist and runs launchctl, which is exactly
+	// what we want on macOS.
+	err = svc.Install()
+	if err != nil && !strings.Contains(err.Error(), "already installed") {
+		// Fallback: write plist manually + launchctl load.
+		m.writePlistAndLoad(label)
 		return nil
 	}
 
-	cmd := exec.Command("launchctl", "stop", LaunchAgentLabel) //nolint:gosec // path is constructed from known config values
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	return svc.Start()
+}
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stop launchd agent: %w, output: %s", err, out.String())
+// writePlistAndLoad creates a plist file and loads it via launchctl.
+func (m *ServiceManager) writePlistAndLoad(label string) {
+	home := getHomeDirOrFallback()
+	laDir := filepath.Join(home, "Library", "LaunchAgents")
+	if err := os.MkdirAll(laDir, 0o700); err != nil {
+		return
+	}
+	plistPath := filepath.Join(laDir, label+".plist")
+
+	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>%s</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+        <string>-f</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>WorkingDirectory</key><string>%s</string>
+    <key>EnvironmentVariables</key>
+    <dict><key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin</string></dict>
+</dict>
+</plist>
+`, label, m.daemonPath, getHomeDirOrFallback())
+
+	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
+		return
+	}
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	cmd := exec.Command("launchctl", "load", "-w", plistPath)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	_ = cmd.Run()
+}
+
+// Uninstall stops the service and removes the plist.
+func (m *ServiceManager) Uninstall() error {
+	label := m.name
+	if label == "" {
+		label = LaunchAgentLabel
 	}
 
+	prg := &launchService{
+		daemonPath: m.daemonPath,
+		logDir:     m.logDir,
+	}
+	cfg := &service.Config{
+		Name:        label,
+		DisplayName: "Meept Daemon",
+		Description: "Meept AI daemon",
+		Executable:  m.daemonPath,
+		Arguments:   []string{"-f"},
+	}
+	svc, err := service.New(prg, cfg)
+	if err == nil {
+		_ = svc.Stop()
+		_ = svc.Uninstall()
+	}
+
+	// Also clean up the plist file directly as a fallback.
+	home := getHomeDirOrFallback()
+	laDir := filepath.Join(home, "Library", "LaunchAgents")
+	plistPath := filepath.Join(laDir, label+".plist")
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	return os.Remove(plistPath)
+}
+
+// Start starts the service via launchctl kickstart.
+func (m *ServiceManager) Start() error {
+	// Ensure service is installed first.
+	label := m.name
+	if label == "" {
+		label = LaunchAgentLabel
+	}
+	// Try kardianos/service first.
+	prg := &launchService{daemonPath: m.daemonPath, logDir: m.logDir}
+	cfg := &service.Config{
+		Name:        label,
+		DisplayName: "Meept Daemon",
+		Description: "Meept AI daemon",
+		Executable:  m.daemonPath,
+		Arguments:   []string{"-f"},
+	}
+	svc, err := service.New(prg, cfg)
+	if err == nil {
+		if e := svc.Start(); e == nil {
+			return nil
+		}
+	}
+	// Fallback: launchctl kickstart.
+	cmd := exec.Command("launchctl", "kickstart", "-k", label) //nolint:gosec
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		if strings.Contains(out.String(), "already running") {
+			return nil
+		}
+	}
 	return nil
 }
 
-// Restart restarts the daemon via launchd.
-func (c *LaunchAgentController) Restart() error {
-	if err := c.Stop(); err != nil {
+// Stop stops the service via launchctl stop.
+func (m *ServiceManager) Stop() error {
+	label := m.name
+	if label == "" {
+		label = LaunchAgentLabel
+	}
+	cmd := exec.Command("launchctl", "stop", label) //nolint:gosec
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	return cmd.Run()
+}
+
+// Restart stops then starts the service.
+func (m *ServiceManager) Restart() error {
+	if err := m.Stop(); err != nil {
 		return err
 	}
-
-	// Brief pause to ensure clean stop
 	time.Sleep(500 * time.Millisecond)
-
-	return c.Start()
+	return m.Start()
 }
 
-// Install installs the launchd agent for auto-start on login.
-func (c *LaunchAgentController) Install() error {
-	return c.Load()
+// Load loads (但不 start) the launchd config.
+func (m *ServiceManager) Load() error {
+	return m.Install()
 }
 
-// Uninstall removes the launchd agent.
-func (c *LaunchAgentController) Uninstall() error {
-	if err := c.Unload(); err != nil {
-		return err
+// Unload removes the launchd config without removing the plist file.
+func (m *ServiceManager) Unload() error {
+	label := m.name
+	if label == "" {
+		label = LaunchAgentLabel
 	}
-
-	// Remove plist file
-	return os.Remove(c.plistPath)
+	home := getHomeDirOrFallback()
+	laDir := filepath.Join(home, "Library", "LaunchAgents")
+	plistPath := filepath.Join(laDir, label+".plist")
+	cmd := exec.Command("launchctl", "unload", "-w", plistPath) //nolint:gosec
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	return cmd.Run()
 }
 
-// DaemonController interface implementation for HTTP server
+// IsLoaded checks if the service is registered with launchd.
+func (m *ServiceManager) IsLoaded() bool {
+	label := m.name
+	if label == "" {
+		label = LaunchAgentLabel
+	}
+	home := getHomeDirOrFallback()
+	laDir := filepath.Join(home, "Library", "LaunchAgents")
+	plistPath := filepath.Join(laDir, label+".plist")
+	_, err := os.Stat(plistPath)
+	return err == nil
+}
 
-// DaemonControl provides daemon control functionality.
+// IsRunning checks if the daemon process is actually running.
+func (m *ServiceManager) IsRunning() bool {
+	legacy, err := newLegacyController(m.logDir)
+	if err != nil {
+		return false
+	}
+	return legacy.IsRunning()
+}
+
+// GetPID returns the daemon PID if running, 0 otherwise.
+func (m *ServiceManager) GetPID() int {
+	legacy, err := newLegacyController(m.logDir)
+	if err != nil {
+		return 0
+	}
+	return legacy.GetPID()
+}
+
+// GetUptime returns the daemon uptime.
+func (m *ServiceManager) GetUptime() time.Duration {
+	legacy, err := newLegacyController(m.logDir)
+	if err != nil {
+		return 0
+	}
+	return legacy.GetUptime()
+}
+
+// DaemonPIDFile returns the path to the daemon PID file.
+func (m *ServiceManager) DaemonPIDFile() string {
+	return filepath.Join(m.logDir, "meept.pid")
+}
+
+// --- LaunchAgentController: retained for backward compatibility ---
+
+// LaunchAgentController manages the launchd agent for the daemon.
+// Uses kardianos/service under the hood; falls back to launchctl subprocess
+// where service abstraction doesn't fully cover.
+type LaunchAgentController struct {
+	*ServiceManager
+	logDir string
+}
+
+// NewLaunchAgentController creates a new LaunchAgentController backed by
+// kardianos/service on supported platforms.
+func NewLaunchAgentController() (*LaunchAgentController, error) {
+	svcMgr, err := NewServiceManager(nil)
+	if err != nil {
+		return nil, err
+	}
+	return &LaunchAgentController{
+		ServiceManager: svcMgr,
+		logDir:         svcMgr.logDir,
+	}, nil
+}
+
+// --- DaemonControl: HTTP/server control interface ---
+
+// DaemonController is the interface used by HTTP handlers and services.
+type DaemonController interface {
+	IsRunning() bool
+	PID() int
+	Uptime() time.Duration
+	Restart(ctx context.Context) error
+}
+
+// DaemonControl provides daemon control functionality for HTTP servers.
 //
 //nolint:revive // stutter with package name is intentional for API clarity
 type DaemonControl struct {
-	controller *LaunchAgentController
+	manager *ServiceManager
 }
 
 // NewDaemonControl creates a new DaemonControl.
 func NewDaemonControl() (*DaemonControl, error) {
-	controller, err := NewLaunchAgentController()
+	mgr, err := NewServiceManager(nil)
 	if err != nil {
 		return nil, err
 	}
-
-	return &DaemonControl{
-		controller: controller,
-	}, nil
+	return &DaemonControl{manager: mgr}, nil
 }
 
 // IsRunning returns true if the daemon is running.
 func (d *DaemonControl) IsRunning() bool {
-	return d.controller.IsRunning()
+	return d.manager.IsRunning()
 }
 
 // PID returns the daemon PID.
 func (d *DaemonControl) PID() int {
-	return d.controller.GetPID()
+	return d.manager.GetPID()
 }
 
 // Uptime returns the daemon uptime.
 func (d *DaemonControl) Uptime() time.Duration {
-	return d.controller.GetUptime()
+	return d.manager.GetUptime()
 }
 
 // Restart restarts the daemon.
 func (d *DaemonControl) Restart(ctx context.Context) error {
-	return d.controller.Restart()
+	return d.manager.Restart()
 }

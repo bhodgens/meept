@@ -1,0 +1,939 @@
+# Desktop Notifications for MenuBar App Implementation
+
+**Created:** 2026-06-09
+**Priority:** Medium
+**Estimated Effort:** 3-5 days
+**Status:** Pending Approval
+
+## Overview
+
+Implement desktop notifications for the Meept MenuBar app to alert users when:
+- LLM responses are ready
+- Long-running tasks complete
+- Errors or failures occur
+- User confirmation is required
+
+**Inspired by:** aider-ai/aider's `--notifications` flag implementation
+
+## Use Cases
+
+| Scenario | Notification Type | Priority |
+|----------|------------------|----------|
+| LLM response ready (after long delay) | Info | Low |
+| Task completed successfully | Success | Low |
+| Task failed with errors | Error | High |
+| User confirmation needed | Warning | High |
+| Background job finished | Info | Low |
+| Security block occurred | Error | High |
+| Budget threshold exceeded | Warning | Medium |
+
+---
+
+## Architecture
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                    Meept Daemon                                 │
+│                                                                  │
+│  ┌─────────────┐      ┌──────────────┐      ┌───────────────┐  │
+│  │ Agent Loop  │─────▶│ Notification │─────▶│ HTTP REST API │  │
+│  │             │      │ Event emitter│      │   (port 8081) │  │
+│  └─────────────┘      └──────────────┘      └───────┬───────┘  │
+└─────────────────────────────────────────────────────┼──────────┘
+                                                      │
+                                                      ▼
+┌────────────────────────────────────────────────────────────────┐
+│                    macOS MenuBar App                            │
+│  ┌─────────────┐      ┌──────────────┐      ┌───────────────┐ │
+│  │ HTTP Client │─────▶│ Notification │─────▶│ NSUserNotificationCenter │ │
+│  │ (polling)   │      │ Manager      │      │ (macOS native)│ │
+│  └─────────────┘      └──────────────┘      └───────────────┘ │
+└────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Implementation
+
+### 1. Daemon-Side: Notification Event System
+
+#### Event Types (`internal/daemon/events.go`)
+
+```go
+package daemon
+
+// NotificationType represents the type of notification
+type NotificationType string
+
+const (
+    NotificationTypeInfo     NotificationType = "info"
+    NotificationTypeSuccess  NotificationType = "success"
+    NotificationTypeWarning  NotificationType = "warning"
+    NotificationTypeError    NotificationType = "error"
+)
+
+// NotificationEvent represents a notification to be sent to clients
+type NotificationEvent struct {
+    ID        string           `json:"id"`
+    Timestamp string           `json:"timestamp"`  // RFC3339
+    Type      NotificationType `json:"type"`
+    Title     string           `json:"title"`
+    Message   string           `json:"message"`
+    Data      map[string]interface{} `json:"data,omitempty"`
+
+    // Routing
+    AgentID   string `json:"agent_id,omitempty"`
+    TaskID    string `json:"task_id,omitempty"`
+    SessionID string `json:"session_id,omitempty"`
+}
+
+// EventEmitter broadcasts notification events to connected clients
+type EventEmitter struct {
+    mu          sync.RWMutex
+    subscribers []chan *NotificationEvent
+    buffer      []*NotificationEvent  // Recent events for late subscribers
+    maxBuffer   int
+    logger      *slog.Logger
+}
+
+// NewEventEmitter creates the event emitter
+func NewEventEmitter(bufferSize int, logger *slog.Logger) *EventEmitter {
+    return &EventEmitter{
+        subscribers: make([]chan *NotificationEvent, 0),
+        buffer:      make([]*NotificationEvent, 0, bufferSize),
+        maxBuffer:   bufferSize,
+        logger:      logger,
+    }
+}
+
+// Subscribe adds a new subscriber and returns their channel
+func (e *EventEmitter) Subscribe() chan *NotificationEvent {
+    e.mu.Lock()
+    defer e.mu.Unlock()
+
+    ch := make(chan *NotificationEvent, 100)  // Buffered to prevent blocking
+
+    // Send buffered events first
+    for _, event := range e.buffer {
+        select {
+        case ch <- event:
+        default:
+            // Channel full, skip
+        }
+    }
+
+    e.subscribers = append(e.subscribers, ch)
+    return ch
+}
+
+// Unsubscribe removes a subscriber
+func (e *EventEmitter) Unsubscribe(ch chan *NotificationEvent) {
+    e.mu.Lock()
+    defer e.mu.Unlock()
+
+    close(ch)
+
+    for i, sub := range e.subscribers {
+        if sub == ch {
+            e.subscribers = append(e.subscribers[:i], e.subscribers[i+1:]...)
+            break
+        }
+    }
+}
+
+// Publish sends an event to all subscribers
+func (e *EventEmitter) Publish(event *NotificationEvent) {
+    e.mu.Lock()
+    defer e.mu.Unlock()
+
+    // Add to buffer
+    e.buffer = append(e.buffer, event)
+    if len(e.buffer) > e.maxBuffer {
+        e.buffer = e.buffer[1:]
+    }
+
+    // Broadcast to subscribers
+    for _, sub := range e.subscribers {
+        select {
+        case sub <- event:
+        default:
+            // Subscriber not consuming, skip
+            e.logger.Warn("Notification subscriber not consuming", "event", event.Title)
+        }
+    }
+
+    e.logger.Debug("Notification published", "type", event.Type, "title", event.Title)
+}
+
+// PublishTaskNotification is a helper for task-related notifications
+func (e *EventEmitter) PublishTaskNotification(taskID, agentID, notifType, title, message string) {
+    event := &NotificationEvent{
+        ID:        generateUUID(),
+        Timestamp: time.Now().UTC().Format(time.RFC3339),
+        Type:      NotificationType(notifType),
+        Title:     title,
+        Message:   message,
+        Data: map[string]interface{}{
+            "task_id": taskID,
+            "agent_id": agentID,
+        },
+        TaskID:  taskID,
+        AgentID: agentID,
+    }
+    e.Publish(event)
+}
+```
+
+**File:** `internal/daemon/events.go` (NEW)
+
+---
+
+#### Integration with Agent Loop (`internal/agent/orchestrator.go`)
+
+```go
+// Add notification hooks to the agent loop:
+
+type Orchestrator struct {
+    // ... existing fields ...
+    eventEmitter *Daemon.EventEmitter
+}
+
+func (o *Orchestrator) Run(ctx context.Context, task *Task) (*TaskResult, error) {
+    startTime := time.Now()
+
+    // Track if we've notified about long-running task
+    notifiedLongRunning := false
+
+    go func() {
+        // Check for long-running task notification
+        for {
+            select {
+            case <-time.After(30 * time.Second):  // Notify after 30s
+                if time.Since(startTime) > 30*time.Second && !notifiedLongRunning {
+                    o.eventEmitter.PublishTaskNotification(
+                        task.ID,
+                        o.agentID,
+                        string(Daemon.NotificationTypeInfo),
+                        "Task Processing",
+                        fmt.Sprintf("Task '%s' is taking longer than expected...", truncate(task.Description, 50)),
+                    )
+                    notifiedLongRunning = true
+                }
+            case <-ctx.Done():
+                return
+            }
+        }
+    }()
+
+    result, err := o.runLoop(ctx, task)
+
+    // Publish completion notification
+    if err != nil {
+        o.eventEmitter.PublishTaskNotification(
+            task.ID,
+            o.agentID,
+            string(Daemon.NotificationTypeError),
+            "Task Failed",
+            fmt.Sprintf("Task '%s' failed: %v", truncate(task.Description, 50), err),
+        )
+    } else if result.Success {
+        o.eventEmitter.PublishTaskNotification(
+            task.ID,
+            o.agentID,
+            string(Daemon.NotificationTypeSuccess),
+            "Task Completed",
+            fmt.Sprintf("Task '%s' completed successfully", truncate(task.Description, 50)),
+        )
+    }
+
+    return result, err
+}
+
+// Helper for truncation
+func truncate(s string, maxLen int) string {
+    if len(s) <= maxLen {
+        return s
+    }
+    return s[:maxLen-3] + "..."
+}
+```
+
+**File:** `internal/agent/orchestrator.go` (MODIFY)
+
+---
+
+#### HTTP Endpoint for Notifications (`internal/comm/http/notification_handlers.go`)
+
+```go
+package http
+
+import (
+    "encoding/json"
+    "net/http"
+
+    "github.com/caimlas/meept/internal/daemon"
+    "github.com/gorilla/websocket"
+)
+
+var upgrader = websocket.Upgrader{
+    CheckOrigin: func(r *http.Request) bool {
+        return true  // Allow local connections
+    },
+}
+
+// NotificationHandler handles notification endpoints
+type NotificationHandler struct {
+    eventEmitter *daemon.EventEmitter
+    logger       *slog.Logger
+}
+
+// NewNotificationHandler creates the handler
+func NewNotificationHandler(emitter *daemon.EventEmitter, logger *slog.Logger) *NotificationHandler {
+    return &NotificationHandler{
+        eventEmitter: emitter,
+        logger:       logger,
+    }
+}
+
+// ServeWebSocket handles WebSocket connections for real-time notifications
+func (h *NotificationHandler) ServeWebSocket(w http.ResponseWriter, r *http.Request) {
+    conn, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        h.logger.Error("WebSocket upgrade failed", "error", err)
+        return
+    }
+    defer conn.Close()
+
+    // Subscribe to events
+    eventCh := h.eventEmitter.Subscribe()
+    defer h.eventEmitter.Unsubscribe(eventCh)
+
+    // Send events as they arrive
+    for {
+        select {
+        case event, ok := <-eventCh:
+            if !ok {
+                return  // Channel closed
+            }
+            if err := conn.WriteJSON(event); err != nil {
+                h.logger.Warn("WebSocket write error", "error", err)
+                return
+            }
+        case <-r.Context().Done():
+            return  // Client disconnected
+        }
+    }
+}
+
+// HTTP polling endpoint (fallback for clients that don't support WebSocket)
+func (h *NotificationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    // Get events since timestamp
+    since := r.URL.Query().Get("since")
+    if since == "" {
+        http.Error(w, "missing 'since' parameter", http.StatusBadRequest)
+        return
+    }
+
+    // Parse timestamp
+    sinceTime, err := time.Parse(time.RFC3339, since)
+    if err != nil {
+        http.Error(w, "invalid 'since' format", http.StatusBadRequest)
+        return
+    }
+
+    // Get recent events
+    events := h.eventEmitter.GetEventsSince(sinceTime)
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "events": events,
+    })
+}
+
+// GetEventsSince returns events after a given time (from buffer)
+func (e *EventEmitter) GetEventsSince(t time.Time) []*NotificationEvent {
+    e.mu.RLock()
+    defer e.mu.RUnlock()
+
+    var result []*NotificationEvent
+    for _, event := range e.buffer {
+        eventTime, _ := time.Parse(time.RFC3339, event.Timestamp)
+        if eventTime.After(t) {
+            result = append(result, event)
+        }
+    }
+    return result
+}
+```
+
+**File:** `internal/comm/http/notification_handlers.go` (NEW)
+
+---
+
+#### Wire into HTTP Server (`internal/comm/http/server.go`)
+
+```go
+// Add notification endpoints to the unified HTTP server:
+
+type HTTPServer struct {
+    // ... existing fields ...
+    notificationHandler *NotificationHandler
+}
+
+func NewHTTPServer(config *ServerConfig, eventEmitter *daemon.EventEmitter, ...) (*HTTPServer, error) {
+    // ... existing initialization ...
+
+    s := &HTTPServer{
+        // ... existing fields ...
+        notificationHandler: NewNotificationHandler(eventEmitter, logger),
+    }
+
+    // Register routes
+    s.registerRoutes()
+
+    return s, nil
+}
+
+func (s *HTTPServer) registerRoutes() {
+    // ... existing routes ...
+
+    // Notification endpoints
+    if s.config.WebsocketEnabled {
+        http.HandleFunc("/ws/notifications", s.notificationHandler.ServeWebSocket)
+    }
+    http.HandleFunc("/api/v1/notifications", s.notificationHandler.ServeHTTP)
+}
+```
+
+**File:** `internal/comm/http/server.go` (MODIFY)
+
+---
+
+### 2. MenuBar App: Notification Reception
+
+#### Notification Manager (Swift)
+
+```swift
+// MeeptMenuBar/Services/NotificationManager.swift
+
+import Foundation
+import UserNotifications
+
+class NotificationManager: ObservableObject {
+    static let shared = NotificationManager()
+
+    private let notificationCenter = UNUserNotificationCenter.current()
+    private var websocket: WebSocketManager?
+    private var lastNotificationTime: Date = Date.distantPast
+
+    @Published var notifications: [NotificationEvent] = []
+    @Published var isEnabled: Bool = true
+
+    struct NotificationEvent: Codable, Identifiable {
+        let id: String
+        let timestamp: String
+        let type: String  // "info", "success", "warning", "error"
+        let title: String
+        let message: String
+        let data: [String: Any]?
+        let taskID: String?
+        let agentID: String?
+    }
+
+    private init() {
+        requestAuthorization()
+        setupWebSocket()
+    }
+
+    // Request notification permission
+    func requestAuthorization() {
+        notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            if let error = error {
+                os_log("Notification authorization failed: %{public}@", log: .default, type: .error, error.localizedDescription)
+                return
+            }
+
+            if granted {
+                os_log("Notification authorization granted", log: .default, type: .info)
+            } else {
+                os_log("Notification authorization denied", log: .default, type: .info)
+                self.isEnabled = false
+            }
+        }
+    }
+
+    // Setup WebSocket connection for real-time notifications
+    private func setupWebSocket() {
+        let config = ConfigService.shared.config
+        let wsURL = URL(string: "\(config.daemon.httpURL)/ws/notifications")!
+
+        websocket = WebSocketManager(url: wsURL)
+        websocket?.onMessage = { [weak self] data in
+            self?.handleWebSocketMessage(data)
+        }
+        websocket?.connect()
+    }
+
+    // Handle incoming WebSocket message
+    private func handleWebSocketMessage(_ data: Data) {
+        guard let event = try? JSONDecoder().decode(NotificationEvent.self, from: data) else {
+            os_log("Failed to decode notification event", log: .default, type: .error)
+            return
+        }
+
+        DispatchQueue.main.async {
+            self.notifications.append(event)
+
+            // Keep only last 50 notifications
+            if self.notifications.count > 50 {
+                self.notifications.removeFirst()
+            }
+
+            // Show native notification
+            if self.isEnabled {
+                self.showLocalNotification(event)
+            }
+        }
+    }
+
+    // Show native macOS notification
+    private func showLocalNotification(_ event: NotificationEvent) {
+        let content = UNMutableNotificationContent()
+        content.title = event.title
+        content.body = event.message
+        content.sound = getsound(for: event.type)
+        content.userInfo = [
+            "task_id": event.taskID ?? "",
+            "agent_id": event.agentID ?? "",
+            "notif_type": event.type,
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: event.id,
+            content: content,
+            trigger: nil  // Immediate
+        )
+
+        notificationCenter.add(request) { error in
+            if let error = error {
+                os_log("Failed to add notification request: %{public}@", log: .default, type: .error, error.localizedDescription)
+            }
+        }
+    }
+
+    // Get notification sound based on type
+    private func getsound(for type: String) -> UNNotificationSound? {
+        switch type {
+        case "error", "warning":
+            return UNNotificationSound(named: UNNotificationSoundName("alert.aiff"))
+        case "success":
+            return UNNotificationSound(named: UNNotificationSoundName("glass.aiff"))
+        default:
+            return UNNotificationSound(named: UNNotificationSoundName("sent.aiff"))
+        }
+    }
+
+    // Clear all notifications
+    func clearNotifications() {
+        notifications.removeAll()
+        notificationCenter.removeAllDeliveredNotifications()
+    }
+
+    // Mark notification as read
+    func markAsRead(_ eventID: String) {
+        notifications.removeAll { $0.id == eventID }
+    }
+}
+```
+
+**File:** `MeeptMenuBar/Services/NotificationManager.swift` (NEW)
+
+---
+
+#### WebSocket Manager (Swift)
+
+```swift
+// MeeptMenuBar/Services/WebSocketManager.swift
+
+import Foundation
+
+class WebSocketManager: NSObject, URLSessionWebSocketDelegate {
+    var onMessage: ((Data) -> Void)?
+    var onDisconnect: (() -> Void)?
+
+    private var webSocket: URLSessionWebSocketTask?
+    private let url: URL
+    private var reconnectDelay: TimeInterval = 1.0
+
+    init(url: URL) {
+        self.url = url
+        super.init()
+    }
+
+    func connect() {
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        webSocket = session.webSocketTask(with: url)
+        webSocket?.resume()
+        receiveMessage()
+    }
+
+    func disconnect() {
+        webSocket?.cancel(with: .normalClosure, reason: nil)
+        webSocket = nil
+    }
+
+    private func receiveMessage() {
+        webSocket?.receive { [weak self] result in
+            switch result {
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    if let data = text.data(using: .utf8) {
+                        self?.onMessage?(data)
+                    }
+                case .data(let data):
+                    self?.onMessage?(data)
+                @unknown default:
+                    break
+                }
+                self?.receiveMessage()  // Continue listening
+
+            case .failure(let error):
+                os_log("WebSocket error: %{public}@", log: .default, type: .error, error.localizedDescription)
+                self?.reconnect()
+            }
+        }
+    }
+
+    private func reconnect() {
+        guard reconnectDelay < 60 else { return }  // Max 60s delay
+
+        DispatchQueue.global().asyncAfter(deadline: .now() + reconnectDelay) { [weak self] in
+            self?.connect()
+            self?.reconnectDelay *= 2  // Exponential backoff
+        }
+    }
+
+    // URLSessionWebSocketDelegate
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        os_log("WebSocket connected", log: .default, type: .info)
+        reconnectDelay = 1.0  // Reset on successful connection
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        os_log("WebSocket closed", log: .default, type: .info)
+        onDisconnect?()
+    }
+}
+```
+
+**File:** `MeeptMenuBar/Services/WebSocketManager.swift` (NEW)
+
+---
+
+#### Notification Center Menu View (SwiftUI)
+
+```swift
+// MeeptMenuBar/Views/NotificationCenterMenuView.swift
+
+import SwiftUI
+
+struct NotificationCenterMenuView: View {
+    @StateObject private var notificationManager = NotificationManager.shared
+    @State private var expanded = false
+
+    var body: some View {
+        Menu {
+            if notificationManager.notifications.isEmpty {
+                Text("No notifications")
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(notificationManager.notifications) { notification in
+                    NotificationRowView(notification: notification)
+                }
+
+                Divider()
+
+                Button("Clear All") {
+                    notificationManager.clearNotifications()
+                }
+            }
+
+            Divider()
+
+            Toggle("Enable Notifications", isOn: $notificationManager.isEnabled)
+        } label: {
+            ZStack {
+                Image(systemName: "bell")
+
+                if !notificationManager.notifications.isEmpty {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 8, height: 8)
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+    }
+}
+
+struct NotificationRowView: View {
+    let notification: NotificationManager.NotificationEvent
+    @StateObject private var notificationManager = NotificationManager.shared
+
+    var typeIcon: String {
+        switch notification.type {
+        case "error": return "xmark.circle.fill"
+        case "warning": return "exclamationmark.triangle.fill"
+        case "success": return "checkmark.circle.fill"
+        default: return "info.circle.fill"
+        }
+    }
+
+    var typeColor: Color {
+        switch notification.type {
+        case "error": return .red
+        case "warning": return .orange
+        case "success": return .green
+        default: return .blue
+        }
+    }
+
+    var timeAgo: String {
+        guard let date = ISO8601DateFormatter().date(from: notification.timestamp) else {
+            return ""
+        }
+        return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: typeIcon)
+                .foregroundColor(typeColor)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(notification.title)
+                    .font(.system(size: 13, weight: .medium))
+
+                Text(notification.message)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .lineLimit(3)
+
+                Text(timeAgo)
+                    .font(.system(size: 10))
+                    .foregroundColor(.tertiary)
+            }
+
+            Spacer()
+
+            Button(action: {
+                notificationManager.markAsRead(notification.id)
+            }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10))
+                    .foregroundColor(.tertiary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+    }
+}
+```
+
+**File:** `MeeptMenuBar/Views/NotificationCenterMenuView.swift` (NEW)
+
+---
+
+#### Integration with MenuBar App
+
+```swift
+// MeeptMenuBar/MeeptMenuBarApp.swift
+
+import SwiftUI
+
+@main
+struct MeeptMenuBarApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    var body: some Scene {
+        Settings {
+            EmptyView()
+        }
+    }
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem?
+    private let popover = NSPopover()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+
+        if let button = statusItem?.button {
+            let contentView = MenuBarContentView()
+            button.image = NSImage(systemSymbolName: "barbell", accessibilityDescription: "Meept")
+            button.action = #selector(togglePopover)
+            button.target = self
+        }
+
+        popover.contentViewController = NSHostingController(rootView: MenuBarContentView())
+        popover.behavior = .transient
+    }
+
+    @objc func togglePopover() {
+        if let button = statusItem?.button {
+            if popover.isShown {
+                popover.performClose(button)
+            } else {
+                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            }
+        }
+    }
+}
+
+// MeeptMenuBar/Views/MenuBarContentView.swift
+
+import SwiftUI
+
+struct MenuBarContentView: View {
+    @StateObject private var daemonController = DaemonController.shared
+    @StateObject private var configService = ConfigService.shared
+
+    var body: some View {
+        VStack(spacing: 16) {
+            // Daemon status
+            DaemonStatusView()
+
+            Divider()
+
+            // Quick stats
+            QuickStatsView()
+
+            Divider()
+
+            // Notifications
+            NotificationCenterMenuView()
+
+            Divider()
+
+            // Settings
+            MenuBarSettingsView()
+        }
+        .padding()
+        .frame(width: 320)
+    }
+}
+```
+
+**File:** `MeeptMenuBar/Views/MenuBarContentView.swift` (MODIFY)
+
+---
+
+### 3. Configuration
+
+#### Daemon Config (`config/meept.json5`)
+
+```json5
+{
+  notifications: {
+    enabled: true,
+
+    // Event types to notify
+    on_task_complete: true,
+    on_task_failure: true,
+    on_long_running_task: true,  // Notify after 30s
+    on_confirmation_needed: true,
+    on_security_block: true,
+    on_budget_warning: true,
+
+    // Long-running task threshold
+    long_running_threshold_seconds: 30,
+
+    // HTTP API for MenuBar
+    http: {
+      websocket_enabled: true,
+      polling_enabled: true,
+    },
+  },
+}
+```
+
+#### MenuBar Config (`~/.meept/menubar.json5`)
+
+```json5
+{
+  notifications: {
+    enabled: true,
+    show_in_menu: true,
+    play_sounds: true,
+    max_displayed: 50,
+
+    // Filter by type
+    filter: {
+      show_info: true,
+      show_success: true,
+      show_warning: true,
+      show_error: true,
+    },
+  },
+
+  daemon: {
+    transport: "http",
+    http_url: "http://localhost:8081",
+  },
+}
+```
+
+---
+
+## Testing Plan
+
+### Daemon Testing
+1. Event emitter broadcast functionality
+2. WebSocket connection handling
+3. HTTP polling endpoint
+4. Agent loop integration (notification triggers)
+
+### MenuBar Testing
+1. Notification permission request
+2. WebSocket reconnection logic
+3. Native notification display
+4. Menu view rendering
+
+### Integration Testing
+1. End-to-end: daemon → HTTP → MenuBar → macOS notifications
+2. Notification filtering and preferences
+3. WebSocket fallback to polling
+
+---
+
+## Privacy & Security
+
+- All notifications stay local (no external transmission)
+- WebSocket connections only to localhost
+- Notification content limited to avoid leaking sensitive data
+- User can disable notifications at any time
+
+---
+
+## Success Criteria
+
+- [ ] Desktop notifications appear for task completion/failure
+- [ ] Long-running task notifications work (>30s threshold)
+- [ ] WebSocket real-time delivery functional
+- [ ] HTTP polling fallback works
+- [ ] MenuBar notification center displays history
+- [ ] Native macOS notifications trigger with correct sounds
+- [ ] User can enable/disable notifications
+- [ ] Configuration options respected
+- [ ] No impact on daemon performance
+
+---
+
+## Related Documentation
+
+- `docs/reference/http-api.md` — HTTP API endpoints
+- `menubar/` — MenuBar app structure
+- `internal/comm/http/` — HTTP server implementation

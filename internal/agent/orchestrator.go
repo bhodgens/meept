@@ -13,15 +13,16 @@ import (
 
 // Orchestrator coordinates the strategic and tactical layers via bus subscriptions.
 type Orchestrator struct {
-	strategic           *StrategicPlanner
-	tactical            *TacticalScheduler
-	pairManager         *PairManager
-	busPairOrchestrator *PairOrchestrator    // bus-channel-based agent pairing (Option C)
-	planManager         *plan.PlanManager    // plan system integration for progress tracking
-	bus                  *bus.MessageBus
-	logger               *slog.Logger
-	collaborationEngine  *CollaborationEngine     // optional: enables agent collaboration modes
-	ralphLoop           *RalphLoop               // optional: Ralph loop for auto-replanning
+	strategic            *StrategicPlanner
+	tactical             *TacticalScheduler
+	pairManager          *PairManager
+	busPairOrchestrator  *PairOrchestrator    // bus-channel-based agent pairing (Option C)
+	planManager          *plan.PlanManager    // plan system integration for progress tracking
+	bus                   *bus.MessageBus
+	logger                *slog.Logger
+	collaborationEngine   *CollaborationEngine     // optional: enables agent collaboration modes
+	ralphLoop            *RalphLoop               // optional: Ralph loop for auto-replanning
+	reflectionEngine     *ReflectionEngine       // optional: auto-fix reflection loop
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -83,6 +84,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"collaboration.requested": o.handleCollabRequested,
 		"team.result":           o.handleTeamResult,
 		"team.error":            o.handleTeamError,
+		"tool.execution.complete": o.handleToolExecutionComplete,
 	}
 
 	for topic, handler := range topics {
@@ -152,6 +154,19 @@ func (o *Orchestrator) SetPlanManager(pm *plan.PlanManager) {
 // PlanManager returns the plan manager, if configured.
 func (o *Orchestrator) PlanManager() *plan.PlanManager {
 	return o.planManager
+}
+
+// SetReflectionEngine sets the reflection engine for auto-fix loop.
+// This is called by the daemon after the ReflectionEngine is created.
+func (o *Orchestrator) SetReflectionEngine(reflection *ReflectionEngine) {
+	if reflection != nil {
+		o.reflectionEngine = reflection
+	}
+}
+
+// ReflectionEngine returns the reflection engine, if configured.
+func (o *Orchestrator) ReflectionEngine() *ReflectionEngine {
+	return o.reflectionEngine
 }
 
 func (o *Orchestrator) runSubscription(ctx context.Context, sub *bus.Subscriber, handler func(context.Context, *models.BusMessage)) {
@@ -594,4 +609,71 @@ func (o *Orchestrator) handleTeamError(_ context.Context, msg *models.BusMessage
 		"session_id", event.SessionID,
 		"error", event.Error,
 	)
+}
+
+// handleToolExecutionComplete handles tool execution complete events to trigger reflection.
+// When the reflection engine is configured and a file edit was executed, this handler
+// runs the reflection loop to automatically fix lint/test errors.
+func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *models.BusMessage) {
+	if o.reflectionEngine == nil {
+		return
+	}
+
+	var event struct {
+		ToolCallID string `json:"tool_call_id"`
+		ToolName   string `json:"tool_name"`
+		Success    bool   `json:"success"`
+		// EditedFiles contains file paths that were modified by the tool
+		EditedFiles []string `json:"edited_files,omitempty"`
+	}
+	if err := json.Unmarshal(msg.Payload, &event); err != nil {
+		o.logger.Debug("Failed to parse tool execution complete event", "error", err)
+		return
+	}
+
+	// Only trigger reflection for file edit operations
+	if event.ToolName != "file_edit" || !event.Success {
+		return
+	}
+
+	o.logger.Info("File edit completed, running reflection loop",
+		"tool_call_id", event.ToolCallID,
+		"edited_files", len(event.EditedFiles),
+	)
+
+	// Run reflection in a goroutine to not block the message bus
+	go func() {
+		result, err := o.reflectionEngine.RunReflection(ctx, event.EditedFiles)
+		if err != nil {
+			o.logger.Error("Reflection failed",
+				"tool_call_id", event.ToolCallID,
+				"error", err,
+			)
+			return
+		}
+
+		// Log the outcomes
+		if result.Fixed {
+			o.logger.Info("Reflection completed successfully",
+				"tool_call_id", event.ToolCallID,
+				"iterations", result.Iterations,
+				"message", result.FinalMessage,
+			)
+		} else if result.GaveUp {
+			o.logger.Warn("Reflection gave up",
+				"tool_call_id", event.ToolCallID,
+				"iterations", result.Iterations,
+				"lint_errors", len(result.LintErrors),
+				"test_failures", len(result.TestFailures),
+				"message", result.FinalMessage,
+			)
+			// Note: We could add a system message to the conversation here if needed
+			// by publishing to an appropriate topic or calling back into the agent loop
+		} else {
+			o.logger.Debug("Reflection completed with no errors",
+				"tool_call_id", event.ToolCallID,
+				"iterations", result.Iterations,
+			)
+		}
+	}()
 }

@@ -265,6 +265,23 @@
       "persist_followup": true,       // Enable hybrid persistence
       "flush_delay_ms": 5000,         // Write-behind flush delay (milliseconds)
     },
+    // Auto-lint/test reflection loop settings
+    "reflection": {
+      "enabled": false,               // Enable auto-fix reflection loop
+      "max_reflections": 3,           // Max fix attempts before giving up
+      "auto_lint": true,              // Run linters after code edits
+      "auto_test": true,              // Run tests after successful linting
+      "lint_cmd": "",                 // Custom lint command (empty = use built-in linters)
+      "test_cmd": "",                 // Custom test command (empty = use built-in test runners)
+    },
+    // Linting and test runner configuration
+    "lint": {
+      "go_flags": ["-race", "-count=1"],
+      "pytest_flags": ["-x", "-v"],
+      "jest_flags": ["--passWithNoTests"],
+      "timeout_seconds": 300,
+      "max_output_lines": 500,
+    },
   },
 
   // Security configuration
@@ -669,5 +686,35 @@
     "reminder_enabled": false,
     "reminder_check_interval": "5m",
     "reminder_advance_minutes": 10,
+  },
+
+  // Speech-to-text configuration (client-side: TUI and Flutter)
+  "stt": {
+    "enabled": false,
+    "engine": "whisper",           // "whisper" | "parakeet" | "native"
+    "language": "en",              // language code for transcription
+    "auto_send": false,            // true = send immediately after transcription
+
+    "whisper": {
+      "bin_path": "whisper-cli",   // path to whisper-cli binary
+      "model_path": "",            // default: ~/.meept/models/ggml-base.en.bin
+      "threads": 4,
+    },
+
+    "parakeet": {
+      "bin_path": "parakeet-transcribe",
+      "model_path": "",            // default: ~/.meept/models/parakeet-tdt-ctc-110m
+    },
+
+    "native": {
+      // macOS Speech framework / Windows SAPI - no extra config
+    },
+
+    "recording": {
+      "recorder_bin": "ffmpeg",    // or "sox"
+      "sample_rate": 16000,
+      "channels": 1,
+      "format": "wav",
+    },
   },
 }

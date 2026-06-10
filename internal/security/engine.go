@@ -16,6 +16,7 @@ import (
 
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/pathutil"
+	"github.com/jmoiron/sqlx"
 	_ "modernc.org/sqlite" // sqlite3 driver registration
 )
 
@@ -31,7 +32,7 @@ type compiledPattern struct {
 // Engine is the SQLite-backed security decision engine.
 type Engine struct {
 	mu                sync.RWMutex
-	db                *sql.DB
+	db                *sqlx.DB
 	config            *config.SecurityConfig
 	homeDir           string
 	compiledCommands  []compiledPattern
@@ -61,14 +62,15 @@ func NewEngine(dbPath string, cfg *config.SecurityConfig, logger *slog.Logger) (
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	sqlDB, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	// SQLite only supports one writer at a time. Constraining the pool to a
 	// single connection prevents SQLITE_BUSY from concurrent writes routed
 	// through different C-level sqlite3 connections in the pool.
-	db.SetMaxOpenConns(1)
+	sqlDB.SetMaxOpenConns(1)
+	db := sqlx.NewDb(sqlDB, "sqlite")
 
 	// Get home directory for path expansion
 	homeDir := ""
@@ -192,6 +194,15 @@ func (e *Engine) seedDefaults() error {
 	return tx.Commit()
 }
 
+// commandPatternRow maps DB rows to compiledPattern fields.
+type commandPatternRow struct {
+	Pattern     string `db:"pattern"`
+	RiskLevel   int    `db:"risk_level"`
+	Category    string `db:"category"`
+	Description string `db:"description"`
+	Immutable   int    `db:"immutable"`
+}
+
 // compilePatterns pre-compiles regex patterns for performance.
 func (e *Engine) compilePatterns() error {
 	e.mu.Lock()
@@ -199,7 +210,8 @@ func (e *Engine) compilePatterns() error {
 
 	// Compile command patterns
 	e.compiledCommands = nil
-	rows, err := e.db.Query(`
+	var patterns []commandPatternRow
+	err := e.db.Select(&patterns, `
 		SELECT pattern, risk_level, category, description, immutable
 		FROM command_patterns
 		WHERE enabled = 1
@@ -207,59 +219,41 @@ func (e *Engine) compilePatterns() error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var pattern string
-		var riskLevel int
-		var category, description string
-		var immutable int
-
-		if err := rows.Scan(&pattern, &riskLevel, &category, &description, &immutable); err != nil {
-			return err
-		}
-
-		compiled, err := regexp.Compile("(?i)" + pattern)
+	for _, p := range patterns {
+		compiled, err := regexp.Compile("(?i)" + p.Pattern)
 		if err != nil {
-			e.logger.Warn("Invalid command pattern regex", "pattern", pattern, "error", err)
+			e.logger.Warn("Invalid command pattern regex", "pattern", p.Pattern, "error", err)
 			continue
 		}
 
 		e.compiledCommands = append(e.compiledCommands, compiledPattern{
 			Pattern:     compiled,
-			RiskLevel:   RiskLevel(riskLevel),
-			Category:    category,
-			Description: description,
-			Immutable:   immutable == 1,
+			RiskLevel:   RiskLevel(p.RiskLevel),
+			Category:    p.Category,
+			Description: p.Description,
+			Immutable:   p.Immutable == 1,
 		})
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterating command patterns: %w", err)
 	}
 
 	// Compile financial patterns
-	e.compiledFinancial = nil
-	rows, err = e.db.Query(`SELECT pattern FROM financial_patterns WHERE enabled = 1`)
+	var financialPatterns []struct{ Pattern string `db:"pattern"` }
+	err = e.db.Select(&financialPatterns, `SELECT pattern FROM financial_patterns WHERE enabled = 1`)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var pattern string
-		if err := rows.Scan(&pattern); err != nil {
-			return err
-		}
-
-		compiled, err := regexp.Compile("(?i)" + pattern)
+	e.compiledFinancial = nil
+	for _, fp := range financialPatterns {
+		compiled, err := regexp.Compile("(?i)" + fp.Pattern)
 		if err != nil {
-			e.logger.Warn("Invalid financial pattern regex", "pattern", pattern, "error", err)
+			e.logger.Warn("Invalid financial pattern regex", "pattern", fp.Pattern, "error", err)
 			continue
 		}
 		e.compiledFinancial = append(e.compiledFinancial, compiled)
 	}
 
-	return rows.Err()
+	return nil
 }
 
 // Check performs a full permission check pipeline.
@@ -401,32 +395,37 @@ func (e *Engine) checkFinancial(details map[string]string) *Decision {
 	return nil
 }
 
+// toolRuleRow maps DB rows for tool_rule lookups.
+type toolRuleRow struct {
+	RiskLevel           int `db:"risk_level"`
+	RequiresConfirmation int `db:"requires_confirmation"`
+}
+
 // lookupBaseRule looks up the base risk level for an action.
 func (e *Engine) lookupBaseRule(action, toolName string) (RiskLevel, bool) {
-	var riskLevel int
-	var requiresConfirmation int
+	var row toolRuleRow
 
 	// Try exact action match first
-	err := e.db.QueryRow(`
+	err := e.db.Get(&row, `
 		SELECT risk_level, requires_confirmation
 		FROM tool_rules
 		WHERE action = ? AND enabled = 1
-		LIMIT 1`, action).Scan(&riskLevel, &requiresConfirmation)
+		LIMIT 1`, action)
 
 	if err == nil {
-		return RiskLevel(riskLevel), requiresConfirmation == 1
+		return RiskLevel(row.RiskLevel), row.RequiresConfirmation == 1
 	}
 
 	// Try tool_name match
 	if toolName != "" {
-		err = e.db.QueryRow(`
+		err = e.db.Get(&row, `
 			SELECT risk_level, requires_confirmation
 			FROM tool_rules
 			WHERE tool_name = ? AND enabled = 1
-			LIMIT 1`, toolName).Scan(&riskLevel, &requiresConfirmation)
+			LIMIT 1`, toolName)
 
 		if err == nil {
-			return RiskLevel(riskLevel), requiresConfirmation == 1
+			return RiskLevel(row.RiskLevel), row.RequiresConfirmation == 1
 		}
 	}
 
@@ -481,9 +480,17 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 		resolved = absPath
 	}
 
+	type pathRuleBlock struct {
+		Pattern     string `db:"pattern"`
+		Description string `db:"description"`
+		Immutable   int    `db:"immutable"`
+		RiskLevel   int    `db:"risk_level"`
+	}
+
 	// Check block rules first (precedence)
 	// SEC-5 FIX: Use separate variable for block rows
-	blockRows, err := e.db.Query(`
+	var blockRules []pathRuleBlock
+	err := e.db.Select(&blockRules, `
 		SELECT pattern, description, immutable, risk_level
 		FROM path_rules
 		WHERE rule_type = 'block' AND enabled = 1`)
@@ -496,27 +503,19 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 			RuleSource: RuleSourceFailClosed,
 		}
 	}
-	defer blockRows.Close()
 
 	var blocked *Decision
-	for blockRows.Next() {
-		var pattern, description string
-		var immutable, riskLevel int
-
-		if err := blockRows.Scan(&pattern, &description, &immutable, &riskLevel); err != nil {
-			continue
-		}
-
-		expandedPattern := pathutil.ExpandPath(pattern)
+	for _, pr := range blockRules {
+		expandedPattern := pathutil.ExpandPath(pr.Pattern)
 		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
 			ruleSource := "path_rule"
-			if immutable == 1 {
+			if pr.Immutable == 1 {
 				ruleSource = "immutable"
 			}
 			blocked = &Decision{
 				Allowed:    false,
-				Reason:     fmt.Sprintf("Path blocked: %s (pattern: %s)", description, pattern),
-				RiskLevel:  RiskLevel(riskLevel),
+				Reason:     fmt.Sprintf("Path blocked: %s (pattern: %s)", pr.Description, pr.Pattern),
+				RiskLevel:  RiskLevel(pr.RiskLevel),
 				RuleSource: ruleSource,
 			}
 			break
@@ -525,26 +524,16 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 		// SEC-4 FIX: Use proper directory boundary comparison
 		if isPathUnderDir(resolved, expandedPattern) {
 			ruleSource := "path_rule"
-			if immutable == 1 {
+			if pr.Immutable == 1 {
 				ruleSource = "immutable"
 			}
 			blocked = &Decision{
 				Allowed:    false,
-				Reason:     fmt.Sprintf("Path blocked: %s (pattern: %s)", description, pattern),
-				RiskLevel:  RiskLevel(riskLevel),
+				Reason:     fmt.Sprintf("Path blocked: %s (pattern: %s)", pr.Description, pr.Pattern),
+				RiskLevel:  RiskLevel(pr.RiskLevel),
 				RuleSource: ruleSource,
 			}
 			break
-		}
-	}
-	// SEC-10 FIX: Check iterator error instead of silently returning
-	if err := blockRows.Err(); err != nil {
-		e.logger.Error("Failed to iterate block path rules", "error", err)
-		return &Decision{
-			Allowed:    false,
-			Reason:     ReasonPathRuleQueryFailed,
-			RiskLevel:  RiskHigh,
-			RuleSource: RuleSourceFailClosed,
 		}
 	}
 	if blocked != nil {
@@ -554,7 +543,8 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 	// Check allow rules
 	// SEC-5 FIX: Use separate variable for allow rows
 	hasAllowRules := false
-	allowRows, err := e.db.Query(`
+	var allowPatterns []struct{ Pattern string `db:"pattern"` }
+	err = e.db.Select(&allowPatterns, `
 		SELECT pattern
 		FROM path_rules
 		WHERE rule_type = 'allow' AND enabled = 1`)
@@ -567,51 +557,16 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 			RuleSource: RuleSourceFailClosed,
 		}
 	}
-	defer allowRows.Close()
+	hasAllowRules = len(allowPatterns) > 0
 
-	for allowRows.Next() {
-		hasAllowRules = true
-		var pattern string
-		if err := allowRows.Scan(&pattern); err != nil {
-			continue
-		}
-
-		expandedPattern := pathutil.ExpandPath(pattern)
+	for _, ap := range allowPatterns {
+		expandedPattern := pathutil.ExpandPath(ap.Pattern)
 		if matched, _ := filepath.Match(expandedPattern, resolved); matched {
-			// SEC-10 FIX: break instead of returning from inside the loop
-			if err := allowRows.Err(); err != nil {
-				e.logger.Error("Failed to iterate allow path rules", "error", err)
-				return &Decision{
-					Allowed:    false,
-					Reason:     ReasonPathRuleQueryFailed,
-					RiskLevel:  RiskHigh,
-					RuleSource: RuleSourceFailClosed,
-				}
-			}
 			return nil // Allowed
 		}
 		// SEC-4 FIX: Use proper directory boundary comparison
 		if isPathUnderDir(resolved, expandedPattern) {
-			if err := allowRows.Err(); err != nil {
-				e.logger.Error("Failed to iterate allow path rules", "error", err)
-				return &Decision{
-					Allowed:    false,
-					Reason:     ReasonPathRuleQueryFailed,
-					RiskLevel:  RiskHigh,
-					RuleSource: RuleSourceFailClosed,
-				}
-			}
 			return nil // Allowed
-		}
-	}
-	// SEC-10 FIX: Check iterator error after loop
-	if err := allowRows.Err(); err != nil {
-		e.logger.Error("Failed to iterate allow path rules", "error", err)
-		return &Decision{
-			Allowed:    false,
-			Reason:     ReasonPathRuleQueryFailed,
-			RiskLevel:  RiskHigh,
-			RuleSource: RuleSourceFailClosed,
 		}
 	}
 
@@ -627,6 +582,17 @@ func (e *Engine) checkPath(pathStr, _ string) *Decision {
 	return nil
 }
 
+// permissionOverrideRow maps DB rows for permission_overrides.
+type permissionOverrideRow struct {
+	ID          int64  `db:"id"`
+	Pattern     string `db:"pattern"`
+	Decision    string `db:"decision"`
+	Reason      string `db:"reason"`
+	UsageCount  int    `db:"usage_count"`
+	MaxUses     int    `db:"max_uses"`
+	ExpiresAt   string `db:"expires_at"`
+}
+
 // checkOverrides checks for creator permission overrides.
 // SEC-6 FIX: Uses atomic UPDATE...WHERE to prevent TOCTOU race on usage_count.
 // SQLITE-FIX: Two-phase approach — drain the read cursor into memory first, close it,
@@ -635,7 +601,8 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Phase 1: Collect matching overrides into memory.
-	rows, err := e.db.Query(`
+	var overrides []permissionOverrideRow
+	err := e.db.Select(&overrides, `
 		SELECT id, pattern, decision, reason, usage_count, max_uses, expires_at
 		FROM permission_overrides
 		WHERE action = ? AND (expires_at IS NULL OR expires_at > ?)
@@ -651,23 +618,14 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 	}
 	var candidates []overrideCandidate
 
-	for rows.Next() {
-		var id int64
-		var pattern, decisionStr, reason string
-		var usageCount, maxUses int
-		var expiresAt sql.NullString
-
-		if err := rows.Scan(&id, &pattern, &decisionStr, &reason, &usageCount, &maxUses, &expiresAt); err != nil {
-			continue
-		}
-
+	for _, o := range overrides {
 		// Check max_uses (preliminary check - atomic check below)
-		if maxUses > 0 && usageCount >= maxUses {
+		if o.MaxUses > 0 && o.UsageCount >= o.MaxUses {
 			continue
 		}
 
 		// Check pattern match
-		if pattern != "*" {
+		if o.Pattern != "*" {
 			detailsJSON, _ := json.Marshal(details)
 			detailStr := string(detailsJSON)
 
@@ -676,11 +634,11 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 			// Strict mode: use only glob/exact matching (opt-in via config)
 			if e.config != nil && e.config.StrictOverrideMatching {
 				// Try exact match first
-				if detailStr == pattern {
+				if detailStr == o.Pattern {
 					matched = true
 				} else {
 					// Try glob matching against the full JSON details
-					if m, _ := filepath.Match(pattern, detailStr); m {
+					if m, _ := filepath.Match(o.Pattern, detailStr); m {
 						matched = true
 					}
 				}
@@ -688,12 +646,12 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 				// If no match on full JSON, try matching against individual detail values
 				if !matched {
 					for _, v := range details {
-						if m, _ := filepath.Match(pattern, v); m {
+						if m, _ := filepath.Match(o.Pattern, v); m {
 							matched = true
 							break
 						}
 						// Also try exact match on individual values
-						if v == pattern {
+						if v == o.Pattern {
 							matched = true
 							break
 						}
@@ -703,18 +661,18 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 				// Legacy lenient mode: three-strategy cascade
 				// SEC-3 FIX: Use exact match or glob match instead of contains()
 				// to prevent substring bypass attacks
-				if detailStr == pattern {
+				if detailStr == o.Pattern {
 					matched = true
-				} else if m, _ := filepath.Match(pattern, detailStr); m {
+				} else if m, _ := filepath.Match(o.Pattern, detailStr); m {
 					matched = true
 				} else {
 					// Try matching against individual detail values
 					for _, v := range details {
-						if v == pattern {
+						if v == o.Pattern {
 							matched = true
 							break
 						}
-						if m, _ := filepath.Match(pattern, v); m {
+						if m, _ := filepath.Match(o.Pattern, v); m {
 							matched = true
 							break
 						}
@@ -728,14 +686,13 @@ func (e *Engine) checkOverrides(action string, details map[string]string) *Decis
 		}
 
 		candidates = append(candidates, overrideCandidate{
-			id:          id,
-			decisionStr: decisionStr,
-			reason:      reason,
+			id:          o.ID,
+			decisionStr: o.Decision,
+			reason:      o.Reason,
 		})
 	}
-	rows.Close()
 
-	if err := rows.Err(); err != nil {
+	if err != nil {
 		e.logger.Error("Error iterating permission overrides", "error", err)
 	}
 

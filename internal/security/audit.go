@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // AuditLog provides access to the security decision audit log.
 type AuditLog struct {
-	db *sql.DB
+	db *sqlx.DB
 }
 
 // NewAuditLog creates a new audit log accessor using the engine's database.
-func NewAuditLog(db *sql.DB) *AuditLog {
+func NewAuditLog(db *sqlx.DB) *AuditLog {
 	return &AuditLog{db: db}
 }
 

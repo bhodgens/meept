@@ -621,6 +621,10 @@ type AgentConfig struct {
 	Queues AgentQueuesConfig `json:"queues" toml:"queues"`
 	// Compaction holds context compaction settings
 	Compaction AgentCompactionConfig `json:"compaction" toml:"compaction"`
+	// Reflection holds auto-fix reflection loop settings
+	Reflection AgentReflectionConfig `json:"reflection" toml:"reflection"`
+	// Lint holds linting and test runner settings
+	Lint AgentLintConfig `json:"lint" toml:"lint"`
 }
 
 // AgentCompactionConfig holds context compaction settings for the agent.
@@ -632,6 +636,36 @@ type AgentCompactionConfig struct {
 	SummaryFormat     string `json:"summary_format"      toml:"summary_format"`
 	TrackFileOps      bool   `json:"track_file_ops"       toml:"track_file_ops"`
 	TimeoutSeconds    int    `json:"timeout_seconds"      toml:"timeout_seconds"`
+}
+
+// AgentReflectionConfig holds reflection loop settings for auto-fix iterations.
+type AgentReflectionConfig struct {
+	// Enabled turns on the reflection loop for auto-lint/test fixing
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// MaxReflections is the maximum number of fix attempts before giving up
+	MaxReflections int `json:"max_reflections" toml:"max_reflections"`
+	// AutoLint enables automatic linting after code edits
+	AutoLint bool `json:"auto_lint" toml:"auto_lint"`
+	// AutoTest enables automatic testing after successful linting
+	AutoTest bool `json:"auto_test" toml:"auto_test"`
+	// LintCmd is a custom lint command (empty uses built-in linters)
+	LintCmd string `json:"lint_cmd" toml:"lint_cmd"`
+	// TestCmd is a custom test command (empty uses built-in test runners)
+	TestCmd string `json:"test_cmd" toml:"test_cmd"`
+}
+
+// AgentLintConfig holds linting and test runner settings.
+type AgentLintConfig struct {
+	// GoFlags are flags passed to go test
+	GoFlags []string `json:"go_flags" toml:"go_flags"`
+	// PytestFlags are flags passed to pytest
+	PytestFlags []string `json:"pytest_flags" toml:"pytest_flags"`
+	// JestFlags are flags passed to jest
+	JestFlags []string `json:"jest_flags" toml:"jest_flags"`
+	// TimeoutSeconds is the maximum time for lint/test operations
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	// MaxOutputLines limits the number of output lines captured
+	MaxOutputLines int `json:"max_output_lines" toml:"max_output_lines"`
 }
 
 // WatchdogConfig holds agent monitoring and timeout settings.
