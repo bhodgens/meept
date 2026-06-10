@@ -145,6 +145,8 @@ type Server struct {
 	// When set, the POST /api/v1/bus/call route is registered and forwards
 	// {"method": "...", "params": {...}} requests through this callback.
 	rpcCall func(ctx context.Context, method string, params json.RawMessage) (any, error)
+	// Notification handler (optional)
+	notifHandler *NotificationHandler
 }
 
 // AgentInfo describes an agent for listing.
@@ -441,6 +443,16 @@ func WithRPCCall(fn func(ctx context.Context, method string, params json.RawMess
 	}
 }
 
+
+// WithNotification enables the notification event system.
+func WithNotification(emitter NotificationEmitter) ServerOption {
+	return func(s *Server) {
+		if emitter == nil {
+			return
+		}
+		s.notifHandler = NewNotificationHandler(emitter, s.logger)
+	}
+}
 // ServerOption is a functional option for configuring a Server.
 type ServerOption func(*Server)
 
@@ -640,6 +652,12 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// WebSocket endpoint (if enabled)
 	if s.wsHub != nil {
 		mux.HandleFunc(fmt.Sprintf("GET %s", s.wsPath), s.handleWebSocket)
+	}
+
+	// Notification endpoints (if enabled)
+	if s.notifHandler != nil {
+		mux.HandleFunc("/ws/notifications", s.notifHandler.ServeWebSocket)
+		mux.HandleFunc("/api/v1/notifications", s.notifHandler.ServeHTTP)
 	}
 
 	// MCP over HTTP+SSE endpoints (if enabled)

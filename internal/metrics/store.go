@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -33,6 +34,7 @@ const (
 
 // Store manages metrics storage.
 type Store struct {
+	logger        *slog.Logger
 	mu            sync.RWMutex
 	db            *sqlx.DB
 	batchSize     int
@@ -109,6 +111,7 @@ func NewStore(cfg *StoreConfig) (*Store, error) {
 		batch:         make([]metricValue, 0, cfg.BatchSize),
 		lastFlush:     time.Now(),
 		stopChan:      make(chan struct{}),
+		logger:        slog.Default().With("component", "metrics-store"),
 		subscribers:   make(map[chan *LiveMetricsSnapshot]struct{}),
 	}
 
@@ -159,6 +162,23 @@ CREATE TABLE IF NOT EXISTS events (
     severity TEXT,  -- info, warn, error
     message TEXT,
     context TEXT    -- JSON
+);
+
+-- Response quality metrics for LLM responses
+CREATE TABLE IF NOT EXISTS response_quality (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    task_id TEXT,
+    agent_id TEXT,
+    message_id TEXT,
+    is_well_formed BOOLEAN,
+    parse_errors TEXT,
+    has_code_blocks BOOLEAN,
+    has_explanations BOOLEAN,
+    is_lazy BOOLEAN,
+    lazy_reason TEXT,
+    token_count INTEGER,
+    code_token_pct REAL
 );
 
 -- Indexes for query performance
@@ -262,6 +282,7 @@ func (s *Store) aggregateHourly() {
 
 	_, err := s.db.Exec(query)
 	if err != nil {
+		s.logger.Error("failed to aggregate hourly metrics", "error", err)
 		return
 	}
 
@@ -270,6 +291,8 @@ func (s *Store) aggregateHourly() {
 }
 
 // Record records a metric value.
+// Note: The shouldFlush check happens while holding the lock to ensure atomicity.
+// The flush call releases the lock internally via flush() -> s.mu.Lock().
 func (s *Store) Record(name string, value float64, tags map[string]string) {
 	s.mu.Lock()
 
@@ -280,11 +303,13 @@ func (s *Store) Record(name string, value float64, tags map[string]string) {
 		timestamp: time.Now(),
 	})
 
-	// Check if batch is full
+	// Check if batch is full while holding lock for atomic read
 	shouldFlush := len(s.batch) >= s.batchSize
 	s.mu.Unlock()
 
-	// Flush outside of lock to avoid deadlock
+	// Flush outside of lock to allow other Record calls to proceed.
+	// flush() will acquire the lock, and concurrent Record calls will
+	// append to batch and potentially trigger additional flushes.
 	if shouldFlush {
 		s.flush()
 	}
@@ -303,6 +328,7 @@ func (s *Store) RecordEvent(eventType, severity, message string, context map[str
 		time.Now(), eventType, severity, message, ctxJSON,
 	)
 	if err != nil {
+		s.logger.Error("failed to record event", "error", err, "event_type", eventType)
 		return
 	}
 }
