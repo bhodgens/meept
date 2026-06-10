@@ -389,7 +389,8 @@ func (l *AgentLoop) shouldFetchOnQuery() bool {
 
 // AgentLoop orchestrates LLM reasoning interleaved with tool execution.
 type AgentLoop struct {
-	mu sync.RWMutex
+	mu      sync.RWMutex
+	modelMu sync.Mutex // protects SwitchModel calls on shared llmClient
 
 	// Core components
 	llm             llm.Chatter         // Interface for LLM operations (Client or ProviderManager)
@@ -1698,8 +1699,10 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 				)
 			} else if l.llmClient != nil {
 				// Switch the LLM client to the resolved model
+				l.modelMu.Lock()
 				oldModel := l.llmClient.Config().ModelID
 				l.llmClient.SwitchModel(modelConfig)
+				l.modelMu.Unlock()
 				l.logger.Info("Agent switched model",
 					"agent_id", l.agentID,
 					"from_model", oldModel,
@@ -1715,8 +1718,11 @@ func (l *AgentLoop) reasoningCycle(ctx context.Context, conv *Conversation, conv
 		// requests a specific model for this task/step.
 		if override := l.GetModelOverride(); override != "" && l.resolver != nil && l.llmClient != nil {
 			if modelConfig := l.resolver.ResolveRef(override); modelConfig != nil {
+				l.modelMu.Lock()
 				oldModel := l.llmClient.Config().ModelID
-				if err := l.llmClient.SwitchModel(modelConfig); err == nil {
+				err := l.llmClient.SwitchModel(modelConfig)
+				l.modelMu.Unlock()
+				if err == nil {
 					l.logger.Info("Applied model override from user directive",
 						"agent_id", l.agentID,
 						"from_model", oldModel,
@@ -2105,7 +2111,9 @@ func (l *AgentLoop) chatWithFailoverRaw(ctx context.Context, messages []llm.Chat
 				return nil, err
 			}
 			if l.llmClient != nil {
+				l.modelMu.Lock()
 				l.llmClient.SwitchModel(modelConfig)
+				l.modelMu.Unlock()
 			}
 		}
 
