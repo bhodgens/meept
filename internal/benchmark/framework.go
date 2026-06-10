@@ -71,10 +71,11 @@ type TaskResult struct {
 
 // Framework runs benchmarks and collects results.
 type Framework struct {
-	config    BenchmarkConfig
-	results   []TaskResult
-	mu        sync.Mutex
-	semaphore chan struct{}
+	config        BenchmarkConfig
+	results       []TaskResult
+	mu            sync.Mutex
+	semaphore     chan struct{}
+	WorkingDir    string // Working directory for benchmark execution
 }
 
 // NewFramework creates a new benchmark framework with the given configuration.
@@ -204,25 +205,31 @@ func (f *Framework) executeBenchmarkTask(ctx context.Context, task *BenchmarkTas
 	return time.Since(start).Seconds()
 }
 
-// runCommand runs a shell command.
+// runCommand runs a shell command with proper shell parsing and working directory support.
 func (f *Framework) runCommand(cmd string) error {
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return nil
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return fmt.Errorf("empty command")
 	}
 
-	execCmd := exec.Command(parts[0], parts[1:]...)
+	execCmd := exec.Command("sh", "-c", cmd)
+	if f.WorkingDir != "" {
+		execCmd.Dir = f.WorkingDir
+	}
 	return execCmd.Run()
 }
 
-// runCommandOutput runs a shell command and returns its output.
+// runCommandOutput runs a shell command and returns its output with proper shell parsing and working directory support.
 func (f *Framework) runCommandOutput(cmd string) (string, error) {
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return "", nil
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return "", fmt.Errorf("empty command")
 	}
 
-	execCmd := exec.Command(parts[0], parts[1:]...)
+	execCmd := exec.Command("sh", "-c", cmd)
+	if f.WorkingDir != "" {
+		execCmd.Dir = f.WorkingDir
+	}
 	output, err := execCmd.CombinedOutput()
 	return string(output), err
 }
@@ -263,29 +270,6 @@ func (f *Framework) calculateResults(startTime time.Time, commitHash, meeptVersi
 		}
 		totalTokens += r.TokensUsed
 		totalDuration += r.DurationSeconds
-
-		// Aggregate error metrics (would be populated by actual agent responses)
-		if !r.Success && strings.Contains(r.TestOutput, "malformed") {
-			// Count malformed responses
-		}
-		if strings.Contains(r.TestOutput, "syntax error") {
-			// Count syntax errors
-		}
-		if strings.Contains(r.TestOutput, "indentation") {
-			// Count indentation errors
-		}
-		if strings.Contains(r.TestOutput, "lazy") {
-			// Count lazy responses
-		}
-		if strings.Contains(r.TestOutput, "context exhausted") {
-			// Count context exhausted
-		}
-		if strings.Contains(r.TestOutput, "timeout") {
-			// Count timeouts
-		}
-		if strings.Contains(r.TestOutput, "user asks") {
-			// Count user asks
-		}
 	}
 
 	passRate := float64(passed) / float64(total) * 100
