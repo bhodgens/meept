@@ -51,7 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover?.contentSize = NSSize(width: 220, height: 180)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(
-            rootView: MenuView(
+            rootView: MenuBarContentView(
                 daemonStatusVM: daemonStatusVM,
                 onShowSettings: { [weak self] in self?.showSettings() },
                 onShowDashboard: { [weak self] in self?.showDashboard() },
