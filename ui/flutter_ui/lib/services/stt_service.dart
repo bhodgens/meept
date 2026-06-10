@@ -3,7 +3,6 @@
 // Windows SpeechRecognition) via the speech_to_text plugin.
 
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart'
     as stt show SpeechToText, ListenMode, SpeechListenOptions;
 import 'package:speech_to_text/speech_recognition_error.dart';

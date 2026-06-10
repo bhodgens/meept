@@ -88,7 +88,7 @@ class PlanNotifier extends StateNotifier<PlanState> {
   }
 
   void clearError() {
-    state = state.copyWith();
+    state = state.copyWith(error: null);
   }
 }
 

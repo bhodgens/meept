@@ -49,7 +49,6 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
   List<CalendarEvent> _events = [];
   bool _isLoading = false;
   String? _error;
-  bool _showCreateDialog = false;
 
   @override
   void initState() {

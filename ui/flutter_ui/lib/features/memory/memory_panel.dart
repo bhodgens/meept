@@ -88,7 +88,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
       if (mounted) {
         setState(() {
           _memories = data
-              .map((m) => MemoryResultModel.fromJson(m as Map<String, dynamic>))
+              .map((m) => MemoryResultModel.fromJson(m))
               .toList();
           _isLoading = false;
           _error = null;
@@ -121,7 +121,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
       if (mounted) {
         setState(() {
           _memories = data
-              .map((m) => MemoryResultModel.fromJson(m as Map<String, dynamic>))
+              .map((m) => MemoryResultModel.fromJson(m))
               .toList();
           _isLoading = false;
           _error = null;

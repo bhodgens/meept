@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/colors.dart';
 import '../../theme/typography.dart';
 import '../../providers/providers.dart';
-import '../memory/memory_panel.dart';
 
 /// Files panel - browse files referenced in memory/context
 ///

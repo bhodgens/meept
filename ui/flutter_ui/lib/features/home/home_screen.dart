@@ -153,22 +153,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: CyberpunkTypography.bodySmall.copyWith(
-            color: CyberpunkColors.orangePrimary,
-            fontFamily: 'SourceCodePro',
-          ),
-        ),
-        backgroundColor: CyberpunkColors.darkGray,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
   void _showHelpDialog() {
     showDialog(
       context: context,

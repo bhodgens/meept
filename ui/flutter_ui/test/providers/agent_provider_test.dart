@@ -399,7 +399,7 @@ void main() {
       expect(json['frontmatter'], {'key': 'val'});
     });
 
-    test('toJson omits null optional fields', () {
+    test('toJson includes all fields including null optional fields', () {
       const agent = Agent(
         id: 'a1',
         name: 'Test',
@@ -408,8 +408,8 @@ void main() {
       );
 
       final json = agent.toJson();
-      expect(json.containsKey('prompt'), isFalse);
-      expect(json.containsKey('frontmatter'), isFalse);
+      expect(json.containsKey('prompt'), isTrue);
+      expect(json.containsKey('frontmatter'), isTrue);
     });
   });
 

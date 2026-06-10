@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/api_models.dart';
 import '../services/api_client.dart';
 import 'providers.dart';
 import '../services/websocket_service.dart';

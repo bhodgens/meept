@@ -6,7 +6,6 @@ import '../sessions/sessions_overview_tab.dart';
 import '../plans/plans_tab.dart';
 import '../tasks/tasks_tab.dart';
 import '../agents/agents_tab.dart';
-import '../../providers/providers.dart';
 import '../../models/api_models.dart';
 
 /// Tab content router - displays the selected tab's content

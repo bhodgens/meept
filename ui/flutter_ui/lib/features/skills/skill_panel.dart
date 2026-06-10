@@ -750,7 +750,7 @@ class _SkillPanelState extends ConsumerState<SkillPanel> {
 
   Widget _buildSelectField(SkillFormField field) {
     final current = _selectValues[field.name];
-    final options = field.options ?? [];
+    final options = field.options;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(

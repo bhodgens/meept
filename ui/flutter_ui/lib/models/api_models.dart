@@ -198,8 +198,8 @@ class Agent with _$Agent {
   const factory Agent({
     required String id,
     required String name,
-    required String description,
-    required bool enabled,
+    @Default('') String description,
+    @Default(true) bool enabled,
     String? prompt,
     Map<String, dynamic>? frontmatter,
   }) = _Agent;

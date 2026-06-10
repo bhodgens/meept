@@ -1672,8 +1672,8 @@ class _$AgentImpl implements _Agent {
   const _$AgentImpl(
       {required this.id,
       required this.name,
-      required this.description,
-      required this.enabled,
+      this.description = '',
+      this.enabled = true,
       this.prompt,
       final Map<String, dynamic>? frontmatter})
       : _frontmatter = frontmatter;
@@ -1686,8 +1686,10 @@ class _$AgentImpl implements _Agent {
   @override
   final String name;
   @override
+  @JsonKey()
   final String description;
   @override
+  @JsonKey()
   final bool enabled;
   @override
   final String? prompt;
@@ -1744,8 +1746,8 @@ abstract class _Agent implements Agent {
   const factory _Agent(
       {required final String id,
       required final String name,
-      required final String description,
-      required final bool enabled,
+      final String description,
+      final bool enabled,
       final String? prompt,
       final Map<String, dynamic>? frontmatter}) = _$AgentImpl;
 

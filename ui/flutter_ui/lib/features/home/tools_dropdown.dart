@@ -18,7 +18,6 @@ class ToolsDropdown extends ConsumerStatefulWidget {
 
 class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
   List<Skill> _skills = [];
-  bool _loading = true;
 
   @override
   void initState() {
@@ -32,13 +31,9 @@ class _ToolsDropdownState extends ConsumerState<ToolsDropdown> {
       if (!mounted) return;
       setState(() {
         _skills = skills.where((s) => s.enabled).toList();
-        _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-      });
+      // skills remain empty on error
     }
   }
 

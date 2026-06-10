@@ -14,6 +14,8 @@ class PlansTab extends ConsumerStatefulWidget {
 }
 
 class _PlansTabState extends ConsumerState<PlansTab> {
+  int _selectedIndex = 0;
+
   @override
   void initState() {
     super.initState();
@@ -42,7 +44,11 @@ class _PlansTabState extends ConsumerState<PlansTab> {
           Expanded(
             child: planState.plans.isEmpty
                 ? _buildEmptyState()
-                : _PlanDetailPane(plans: planState.plans, sessionId: activeSession?.id),
+                : _PlanDetailPane(
+                    plans: planState.plans,
+                    sessionId: activeSession?.id,
+                    selectedIndex: _selectedIndex,
+                  ),
           ),
         ],
       ),
@@ -92,7 +98,11 @@ class _PlansTabState extends ConsumerState<PlansTab> {
           Expanded(
             child: ListView.builder(
               itemCount: planState.plans.length,
-              itemBuilder: (context, index) => _PlanTile(plan: planState.plans[index]),
+              itemBuilder: (context, index) => _PlanTile(
+                plan: planState.plans[index],
+                selected: _selectedIndex == index,
+                onTap: () => setState(() => _selectedIndex = index),
+              ),
             ),
           ),
       ],
@@ -115,13 +125,18 @@ class _PlansTabState extends ConsumerState<PlansTab> {
 
 class _PlanTile extends ConsumerWidget {
   final Plan plan;
+  final bool selected;
+  final VoidCallback onTap;
 
-  const _PlanTile({required this.plan});
+  const _PlanTile({required this.plan, this.selected = false, required this.onTap});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ListTile(
       dense: true,
+      selected: selected,
+      selectedTileColor: CyberpunkColors.orangePrimary.withValues(alpha: 0.1),
+      onTap: onTap,
       title: Text(
         plan.title.toLowerCase(),
         style: CyberpunkTypography.bodyMedium.copyWith(
@@ -167,21 +182,21 @@ class _PlanTile extends ConsumerWidget {
 class _PlanDetailPane extends ConsumerStatefulWidget {
   final List<Plan> plans;
   final String? sessionId;
+  final int selectedIndex;
 
-  const _PlanDetailPane({required this.plans, this.sessionId});
+  const _PlanDetailPane({required this.plans, this.sessionId, required this.selectedIndex});
 
   @override
   ConsumerState<_PlanDetailPane> createState() => _PlanDetailPaneState();
 }
 
 class _PlanDetailPaneState extends ConsumerState<_PlanDetailPane> {
-  int _selected = 0;
-
   @override
   Widget build(BuildContext context) {
-    if (_selected >= widget.plans.length) _selected = 0;
+    var selected = widget.selectedIndex;
+    if (selected >= widget.plans.length) selected = 0;
     if (widget.plans.isEmpty) return const SizedBox.shrink();
-    final plan = widget.plans[_selected];
+    final plan = widget.plans[selected];
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -386,7 +401,7 @@ class _ActionButtons extends ConsumerWidget {
           ),
         ],
       ),
-    );
+    ).whenComplete(() => controller.dispose());
   }
 
   void _showReviseDialog(BuildContext context, PlanNotifier notifier) {
@@ -412,7 +427,7 @@ class _ActionButtons extends ConsumerWidget {
           ),
         ],
       ),
-    );
+    ).whenComplete(() => controller.dispose());
   }
 }
 

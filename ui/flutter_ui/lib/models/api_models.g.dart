@@ -138,8 +138,8 @@ Map<String, dynamic> _$$TaskStepImplToJson(_$TaskStepImpl instance) =>
 _$AgentImpl _$$AgentImplFromJson(Map<String, dynamic> json) => _$AgentImpl(
       id: json['id'] as String,
       name: json['name'] as String,
-      description: json['description'] as String,
-      enabled: json['enabled'] as bool,
+      description: json['description'] as String? ?? '',
+      enabled: json['enabled'] as bool? ?? true,
       prompt: json['prompt'] as String?,
       frontmatter: json['frontmatter'] as Map<String, dynamic>?,
     );

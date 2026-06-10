@@ -22,22 +22,33 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
   final _debouncer = Debouncer(delay: const Duration(milliseconds: 300));
 
   late final ApiClient _apiClient;
+  late final VoidCallback _searchListener;
 
   List<SearchResult> _results = [];
   bool _isSearching = false;
   String _lastQuery = '';
   SearchScope _scope = SearchScope.all;
   String? _error;
+  bool _showClear = false;
 
   @override
   void initState() {
     super.initState();
     _apiClient = ref.read(apiClientProvider);
+    _searchListener = () {
+      final hasText = _searchController.text.isNotEmpty;
+      if (hasText != _showClear) {
+        setState(() => _showClear = hasText);
+      }
+    };
+    _searchController.addListener(_searchListener);
   }
 
   @override
   void dispose() {
+    _searchController.removeListener(_searchListener);
     _searchController.dispose();
+    _debouncer.dispose();
     super.dispose();
   }
 
@@ -176,7 +187,7 @@ class _SearchPanelState extends ConsumerState<SearchPanel> {
                         horizontal: 12,
                         vertical: 8,
                       ),
-                      suffixIcon: _searchController.text.isNotEmpty
+                      suffixIcon: _showClear
                           ? IconButton(
                               icon: const Icon(
                                 Icons.clear,
@@ -464,5 +475,10 @@ class Debouncer {
   void run(VoidCallback action) {
     _timer?.cancel();
     _timer = Timer(delay, action);
+  }
+
+  void dispose() {
+    _timer?.cancel();
+    _timer = null;
   }
 }
