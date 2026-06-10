@@ -92,7 +92,13 @@ Multi-Agent Orchestration:
 Memory & Skills:
   meept memory                           # Search memory
   meept jobs                             # View scheduled jobs
-  meept config                           # View/edit configuration`,
+  meept config                           # View/edit configuration
+
+Analytics:
+  meept analytics summary                # Performance summary by agent
+  meept analytics errors                 # Error breakdown by type
+  meept analytics models                 # Model performance comparison
+  meept analytics export                 # Export analytics as JSON`,
 		SilenceUsage: true,
 		Args:         cobra.MaximumNArgs(1),
 		RunE:         runChat, // Default to chat when no subcommand
@@ -136,6 +142,7 @@ Memory & Skills:
 	rootCmd.AddCommand(newClusterCmd())
 	rootCmd.AddCommand(newBotsCmd())
 	rootCmd.AddCommand(newInitCmd())
+	rootCmd.AddCommand(newAnalyticsCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
