@@ -16,28 +16,31 @@ import (
 
 // RalphLoopConfig holds configuration for the Ralph loop.
 type RalphLoopConfig struct {
-	Enabled          bool `json:"enabled"`
-	MaxIterations    int  `json:"max_iterations"`    // Maximum replan cycles per task
-	EvidenceRequired bool `json:"evidence_required"` // Require evidence for completion claims
+	Enabled            bool `json:"enabled"`
+	MaxIterations      int  `json:"max_iterations"`      // Maximum replan cycles per task
+	EvidenceRequired   bool `json:"evidence_required"`   // Require evidence for completion claims
+	ChecklistRequired  bool `json:"checklist_required"`  // Require checklist completion
 }
 
 // DefaultRalphLoopConfig returns default Ralph loop configuration.
 func DefaultRalphLoopConfig() RalphLoopConfig {
 	return RalphLoopConfig{
-		Enabled:          true,
-		MaxIterations:    3,
-		EvidenceRequired: true,
+		Enabled:           true,
+		MaxIterations:     3,
+		EvidenceRequired:  true,
+		ChecklistRequired: true,
 	}
 }
 
 // RalphLoop manages self-referential plan execution with automatic replanning.
 type RalphLoop struct {
-	config     RalphLoopConfig
+	config       RalphLoopConfig
 	orchestrator *Orchestrator
-	taskStore  *task.Store
-	planManager *plan.PlanManager
-	bus        *bus.MessageBus
-	logger     slog.Logger
+	taskStore    *task.Store
+	stepStore    *task.StepStore
+	planManager  *plan.PlanManager
+	bus          *bus.MessageBus
+	logger       slog.Logger
 
 	// Iteration tracking: task_id -> iteration count
 	iterations map[string]int
@@ -45,7 +48,7 @@ type RalphLoop struct {
 }
 
 // NewRalphLoop creates a new Ralph loop manager.
-func NewRalphLoop(config RalphLoopConfig, orchestrator *Orchestrator, taskStore *task.Store, planManager *plan.PlanManager, bus *bus.MessageBus, logger *slog.Logger) *RalphLoop {
+func NewRalphLoop(config RalphLoopConfig, orchestrator *Orchestrator, taskStore *task.Store, stepStore *task.StepStore, planManager *plan.PlanManager, bus *bus.MessageBus, logger *slog.Logger) *RalphLoop {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -53,6 +56,7 @@ func NewRalphLoop(config RalphLoopConfig, orchestrator *Orchestrator, taskStore 
 		config:       config,
 		orchestrator: orchestrator,
 		taskStore:    taskStore,
+		stepStore:    stepStore,
 		planManager:  planManager,
 		bus:          bus,
 		logger:       *logger,
@@ -111,6 +115,17 @@ func (rl *RalphLoop) CheckCompletion(ctx context.Context, taskID string, result 
 		return false, resultData.Evidence, true
 	}
 
+	// Validate checklists if required
+	if rl.config.ChecklistRequired {
+		allComplete, total, completed, incomplete := rl.validateChecklists(taskID)
+		if !allComplete && total > 0 {
+			rl.logger.Info("Checklist incomplete, triggering replan",
+				"task_id", taskID, "completed", completed, "total", total,
+				"incomplete_count", len(incomplete))
+			return false, resultData.Evidence, true
+		}
+	}
+
 	return true, resultData.Evidence, false
 }
 
@@ -142,6 +157,48 @@ func (rl *RalphLoop) validateEvidence(taskDescription string, evidence []string)
 	}
 
 	return false
+}
+
+// validateChecklists checks if all step checklists are complete for a task.
+// Returns (allComplete bool, totalItems int, completedItems int, incompleteSteps []string).
+func (rl *RalphLoop) validateChecklists(taskID string) (bool, int, int, []string) {
+	if rl.stepStore == nil {
+		// If no step store, consider checklists as satisfied
+		return true, 0, 0, nil
+	}
+
+	steps, err := rl.stepStore.ListByTaskID(taskID)
+	if err != nil {
+		rl.logger.Warn("Failed to list steps for checklist validation", "task_id", taskID, "error", err)
+		return true, 0, 0, nil // Don't block on error
+	}
+
+	if len(steps) == 0 {
+		return true, 0, 0, nil // No steps, checklists satisfied
+	}
+
+	totalItems := 0
+	completedItems := 0
+	var incompleteSteps []string
+
+	for _, step := range steps {
+		if step.Checklist == nil || len(step.Checklist.Items) == 0 {
+			// No checklist for this step, skip
+			continue
+		}
+
+		for _, item := range step.Checklist.Items {
+			totalItems++
+			if item.Completed {
+				completedItems++
+			} else {
+				incompleteSteps = append(incompleteSteps, fmt.Sprintf("%s:%s", step.ID, item.Text))
+			}
+		}
+	}
+
+	allComplete := totalItems == 0 || completedItems == totalItems
+	return allComplete, totalItems, completedItems, incompleteSteps
 }
 
 // TriggerReplan creates a new planning step for incomplete tasks.

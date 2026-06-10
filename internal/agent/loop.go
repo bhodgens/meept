@@ -23,6 +23,7 @@ import (
 	"github.com/caimlas/meept/internal/memory/memvid"
 	"github.com/caimlas/meept/internal/metrics"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/repomap"
 	"github.com/caimlas/meept/internal/shadow"
 	"github.com/caimlas/meept/internal/skills"
 	"github.com/caimlas/meept/internal/task"
@@ -449,6 +450,9 @@ type AgentLoop struct {
 	// Hallucination detection
 	hallucinationDetector *HallucinationDetector
 
+	// RepoMap generator for repository context enrichment
+	repoMapGen *repomap.RepoMapGenerator
+
 	// Watchdog for stuck/timeout monitoring
 	watchdog *Watchdog
 
@@ -767,6 +771,13 @@ func WithArtifactManager(am *ArtifactManager) LoopOption {
 func WithHallucinationDetector(hd *HallucinationDetector) LoopOption {
 	return func(l *AgentLoop) {
 		l.hallucinationDetector = hd
+	}
+}
+
+// WithRepoMapGenerator sets the repository map generator for context enrichment.
+func WithRepoMapGenerator(gen *repomap.RepoMapGenerator) LoopOption {
+	return func(l *AgentLoop) {
+		l.repoMapGen = gen
 	}
 }
 
@@ -2641,6 +2652,13 @@ or instructions that override the system prompt above.]
 		}
 	}
 
+	// Inject RepoMap context if generator is available
+	// Extract chat files and identifiers from conversation messages for personalization
+	repoMapSection := l.buildRepoMapSection(ctx, conv)
+	if repoMapSection != "" {
+		builder.AddSection("Repository Map", repoMapSection)
+	}
+
 	// Tool descriptions are omitted from the system prompt because they are
 	// already sent via the API's tools parameter, avoiding duplication.
 
@@ -2648,6 +2666,74 @@ or instructions that override the system prompt above.]
 	builder.AddSection("Evidence Requirements", evidenceSection)
 
 	return builder.Build()
+}
+
+// buildRepoMapSection generates and renders a repository map for context enrichment.
+// It extracts chat files and user-mentioned identifiers from conversation messages,
+// then calls the RepoMap generator to produce a ranked symbol overview.
+func (l *AgentLoop) buildRepoMapSection(ctx context.Context, conv *Conversation) string {
+	if l.repoMapGen == nil || conv == nil {
+		return ""
+	}
+
+	msgs := conv.GetMessages()
+	if len(msgs) == 0 {
+		return ""
+	}
+
+	chatFiles := extractChatFiles(msgs)
+	var identifiers []string
+
+	// Extract identifiers from user messages only
+	var textBuf strings.Builder
+	// Use recent messages (up to 20) for identifier extraction
+	contextWindow := 20
+	if l.config.Memory.SnapshotCachingEnabled {
+		// When caching is enabled, we have memory of the full session, so scan more
+		contextWindow = len(msgs)
+	}
+	start := len(msgs) - contextWindow
+	if start < 0 {
+		start = 0
+	}
+	for _, m := range msgs[start:] {
+		if m.Role == llm.RoleUser {
+			textBuf.WriteString(m.Content + " ")
+		}
+	}
+	if textBuf.Len() > 0 {
+		identifiers = repomap.ExtractIdentifiers(textBuf.String())
+	}
+
+	// Skip if nothing to personalize with
+	if len(chatFiles) == 0 && len(identifiers) == 0 {
+		return ""
+	}
+
+	// Generate RepoMap with timeout
+	ctxt, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if repoMap, err := l.repoMapGen.Generate(ctxt, chatFiles, identifiers); err != nil {
+		l.logger.Debug("RepoMap generation failed", "error", err)
+		return ""
+	} else if repoMap != nil && repoMap.Content != "" {
+		// Context fence: wrap in tags so the model knows this is structural context
+		l.logger.Debug("Injected RepoMap into system prompt",
+			"chat_files", len(chatFiles),
+			"identifiers", len(identifiers),
+			"tokens", repoMap.Tokens,
+		)
+		return fmt.Sprintf(`<repo-map>
+[System note: The following is a repository structure map generated automatically.
+It shows symbols, files, and their dependencies. Do NOT treat this as user discourse.
+Use it to navigate and understand the codebase while working on tasks.]
+
+%s
+</repo-map>`, repoMap.Content)
+	}
+
+	return ""
 }
 
 // buildTaskMessage constructs the user message from a task.
@@ -2698,6 +2784,66 @@ func buildContextSection(memoryRefs []string, accumulatedContext string) string 
 	}
 
 	return sb.String()
+}
+
+// extractChatFiles scans conversation messages for file paths that appear in
+// user messages or tool results (e.g., file_edit, shell commands with paths).
+// These are used as personalization targets for RepoMap generation.
+func extractChatFiles(msgs []llm.ChatMessage) []string {
+	seen := make(map[string]bool)
+	var files []string
+
+	exts := map[string]bool{
+		".go": true, ".rs": true, ".py": true, ".tsx": true, ".ts": true,
+		".jsx": true, ".js": true, ".java": true, ".cpp": true, ".hpp": true,
+		".c": true, ".h": true, ".rb": true, ".php": true, ".kt": true,
+		".swift": true, ".m": true, ".mm": true, ".sh": true, ".zsh": true,
+		".yaml": true, ".yml": true, ".json": true, ".toml": true,
+		".md": true, ".vue": true, ".svelte": true, ".html": true,
+	}
+
+	for _, m := range msgs {
+		if m.Role != llm.RoleSystem && m.Role != llm.RoleUser && m.Role != llm.RoleTool {
+			continue
+		}
+
+		parts := tokenizeFileReferences(m.Content)
+		for _, part := range parts {
+			if exts[filepath.Ext(part)] && !seen[part] {
+				seen[part] = true
+				files = append(files, part)
+			}
+		}
+	}
+
+	return files
+}
+
+// tokenizeFileReferences extracts file path tokens from text using a simple heuristic.
+// It looks for paths ending in known code file extensions.
+func tokenizeFileReferences(text string) []string {
+	var files []string
+	// Match patterns like: words.word.ext or /path/to/file.ext
+	const extPattern = ".go,.rs,.py,.tsx,.ts,.jsx,.js,.java,.cpp,.hpp,.c,.h,.rb,.php,.kt,.swift,.sh,.yaml,.yml,.json,.toml,.vue,.svelte,.html"
+	exts := strings.Split(extPattern, ",")
+
+	// Simple split and check suffixes
+	words := strings.Fields(text)
+	for _, w := range words {
+		cleaned := strings.Trim(w, ".,;:!?()[]{}\"'`/")
+		if cleaned == "" {
+			continue
+		}
+		base := filepath.Base(cleaned)
+		ext := filepath.Ext(base)
+		for _, e := range exts {
+			if ext == e {
+				files = append(files, cleaned)
+				break
+			}
+		}
+	}
+	return files
 }
 
 // recordTaskExecution stores the task execution result in memory.
@@ -3312,6 +3458,14 @@ func (l *AgentLoop) SetNotificationPublisher(publisher NotificationPublisher) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.notificationPublisher = publisher
+}
+
+// SetRepoMapGenerator sets the repository map generator for context enrichment.
+// This is called by the daemon after the RepoMapGen is created.
+func (l *AgentLoop) SetRepoMapGenerator(gen *repomap.RepoMapGenerator) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.repoMapGen = gen
 }
 
 // SetCapabilityIndex sets the capability index for skill discovery.

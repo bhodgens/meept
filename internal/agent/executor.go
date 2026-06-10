@@ -766,12 +766,48 @@ func (e *Executor) publishToolComplete(toolCallID, toolName string, result *Exec
 		"terminate":    result.Terminate,
 		"cached":       result.Cached,
 	}
+
+	// Extract edited files from file_edit tool results.
+	// The result summary format is: "Applied N edit(s) to /path/to/file (X lines -> Y lines)"
+	// For pending changes: "Created pending change ... for /path/to/file ..."
+	if toolName == "file_edit" && result.Success && result.Result != nil {
+		if resultStr, ok := result.Result.(string); ok {
+			if files := extractEditedFiles(resultStr); len(files) > 0 {
+				payload["edited_files"] = files
+			}
+		}
+	}
+
 	msg, err := models.NewBusMessage(models.MessageTypeEvent, "executor", payload)
 	if err != nil {
 		e.logger.Warn("Failed to create complete bus message", "error", err)
 		return
 	}
 	e.bus.Publish("tool.execution.complete", msg)
+}
+
+// extractEditedFiles parses a file_edit result summary and returns the file paths.
+// Handles both direct mode ("Applied N edit(s) to /path") and pending changes mode
+// ("Created pending change ... for /path").
+func extractEditedFiles(summary string) []string {
+	// Pending changes format: "Created pending change <id> for <path> (<edits> -> <lines> lines)..."
+	if idx := strings.Index(summary, " for "); idx != -1 {
+		rest := summary[idx+4:]
+		// Extract path up to the "(" that precedes line counts
+		if parenIdx := strings.Index(rest, " ("); parenIdx != -1 {
+			return []string{strings.TrimSpace(rest[:parenIdx])}
+		}
+		return []string{strings.TrimSpace(rest)}
+	}
+	// Direct mode format: "Applied N edit(s) to /path (X lines -> Y lines)"
+	if idx := strings.Index(summary, " to "); idx != -1 {
+		rest := summary[idx+4:]
+		if parenIdx := strings.Index(rest, " ("); parenIdx != -1 {
+			return []string{strings.TrimSpace(rest[:parenIdx])}
+		}
+		return []string{strings.TrimSpace(rest)}
+	}
+	return nil
 }
 
 // ShouldTerminate checks if ALL results in the batch indicate termination.

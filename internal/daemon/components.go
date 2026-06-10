@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/caimlas/meept/internal/config"
 	"github.com/caimlas/meept/internal/cluster"
 	"github.com/caimlas/meept/internal/debug"
+	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
 	"github.com/caimlas/meept/internal/memory/memvid"
@@ -33,6 +35,7 @@ import (
 	"github.com/caimlas/meept/internal/plan"
 	"github.com/caimlas/meept/internal/project"
 	"github.com/caimlas/meept/internal/queue"
+	"github.com/caimlas/meept/internal/repomap"
 	"github.com/caimlas/meept/internal/scheduler"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/selfimprove"
@@ -74,6 +77,7 @@ type Components struct {
 	QueueHandler  *queue.Handler
 	TaskRegistry  *task.Registry
 	TaskStore     *task.Store
+	StepStore     *task.StepStore
 	TaskHandler   *task.Handler
 	PlanManager   *plan.PlanManager
 	AmendmentMgr  *task.AmendmentManager
@@ -157,6 +161,9 @@ type Components struct {
 	// Result cache for tool outputs
 	ResultCache *agent.ResultCache
 
+	// Reflection engine for auto-lint/test fixing
+	ReflectionEngine *agent.ReflectionEngine
+
 	// Web API server
 	WebServer *web.Server
 
@@ -185,6 +192,9 @@ type Components struct {
 
 	// Project management
 	ProjectManager *project.ProjectManager
+
+	// Repository map for context enrichment
+	RepoMapGen *repomap.RepoMapGenerator
 
 	// Distributed cluster support
 	ClusterEngine  *cluster.GossipEngine
@@ -694,6 +704,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 
+	// Wire RepoMap generator for repository context enrichment
+	if c.RepoMapGen != nil {
+		c.AgentLoop.SetRepoMapGenerator(c.RepoMapGen)
+		logger.Info("RepoMap generator wired into agent loop")
+	}
+
 	// Wire notification event emitter for desktop notifications
 	noteEmitter := NewEventEmitter(100, logger.With("component", "notification-emitter"))
 	c.AgentLoop.SetNotificationPublisher(&notificationAdapter{emitter: noteEmitter})
@@ -974,6 +990,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	} else {
 		c.TaskRegistry = taskRegistry
 		c.TaskStore = taskRegistry.Store()
+		c.StepStore = taskRegistry.StepStore()
 		c.TaskHandler = task.NewHandler(taskRegistry, msgBus, logger)
 		c.AmendmentMgr = taskRegistry.AmendmentManager()
 
@@ -1331,7 +1348,7 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 
 			// Create Ralph loop for automatic replanning on incomplete tasks
 			ralphLoopCfg := agent.DefaultRalphLoopConfig()
-			ralphLoop := agent.NewRalphLoop(ralphLoopCfg, nil, c.TaskStore, c.PlanManager, msgBus, logger.With("component", "ralph-loop"))
+			ralphLoop := agent.NewRalphLoop(ralphLoopCfg, nil, c.TaskStore, c.StepStore, c.PlanManager, msgBus, logger.With("component", "ralph-loop"))
 			c.RalphLoop = ralphLoop
 
 			c.Orchestrator = agent.NewOrchestrator(agent.OrchestratorDeps{
@@ -1352,7 +1369,39 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			// Register team tools with preset support
 			registerTeamTools(c.ToolRegistry, teamOrch, msgBus, logger)
 		}
-	} else {
+	}
+
+	// Wire ReflectionEngine for auto-lint/test fixing (works with or without multi-agent)
+	if cfg.Agent.Reflection.Enabled && c.LLMClient != nil && c.Orchestrator != nil {
+		lintRegistry := lint.NewRegistry()
+		testRunner := lint.NewTestRunner(logger)
+
+		reflectionConfig := agent.ReflectionConfig{
+			MaxReflections: cfg.Agent.Reflection.MaxReflections,
+			AutoLint:       cfg.Agent.Reflection.AutoLint,
+			AutoTest:       cfg.Agent.Reflection.AutoTest,
+		}
+		if reflectionConfig.MaxReflections == 0 {
+			reflectionConfig.MaxReflections = 3
+		}
+
+		c.ReflectionEngine = agent.NewReflectionEngineWithConfig(
+			logger,
+			lintRegistry,
+			testRunner,
+			c.LLMClient,
+			reflectionConfig,
+		)
+		c.Orchestrator.SetReflectionEngine(c.ReflectionEngine)
+
+		logger.Info("ReflectionEngine initialized",
+			"auto_lint", cfg.Agent.Reflection.AutoLint,
+			"auto_test", cfg.Agent.Reflection.AutoTest,
+			"max_reflections", reflectionConfig.MaxReflections,
+		)
+	}
+
+	if c.Orchestrator == nil {
 		// Create chat handler without dispatcher (single-agent mode)
 		c.ChatHandler = agent.NewChatHandler(c.AgentLoop, nil, msgBus, logger)
 
@@ -1365,6 +1414,35 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		// Wire budget tracker for async dispatch pre-check (issues 0022/0039)
 		if budgetTracker != nil {
 			c.ChatHandler.SetBudget(budgetTracker)
+		}
+	}
+
+	// Initialize RepoMap generator for context enrichment
+	if c.ProjectManager != nil {
+		repoMapCfg := repomap.DefaultRepoMapConfig()
+		repoMapCfg.CacheDir = filepath.Join(cfg.Daemon.DataDir, "repomap_cache")
+
+		// Discover initial watched files from project base dir
+		var watchedFiles []string
+		if cfg.Projects.BaseDir != "" {
+			watchedFiles = discoverProjectFiles(cfg.Projects.BaseDir, logger)
+		}
+		if len(watchedFiles) == 0 && cfg.Projects.AutoDetect {
+			// Try to pick up files from the project store
+			watchedFiles = discoverProjectFiles(cfg.Projects.BaseDir, logger)
+		}
+
+		gen, err := repomap.NewRepoMapGenerator(repoMapCfg, logger.With("component", "repomap"), watchedFiles)
+		if err != nil {
+			logger.Warn("Failed to create RepoMap generator", "error", err)
+		} else {
+			c.RepoMapGen = gen
+
+			// Wire into the Orchestrator for context enrichment
+			if c.Orchestrator != nil {
+				c.Orchestrator.SetRepoMapGenerator(c.RepoMapGen)
+			}
+			logger.Info("RepoMap generator initialized", "watched_files", len(watchedFiles))
 		}
 	}
 
@@ -3874,4 +3952,55 @@ func (a *notificationAdapter) PublishTaskNotification(taskID, agentID string, no
 		nType = NotificationTypeInfo
 	}
 	a.emitter.PublishTaskNotification(taskID, agentID, nType, title, message)
+}
+
+// discoverProjectFiles walks the base directory and returns a list of tracked source files.
+// It prefers git ls-files output when available, otherwise falls back to a directory walk.
+func discoverProjectFiles(baseDir string, logger *slog.Logger) []string {
+	// Try git ls-files first (respects .gitignore)
+	if files, err := gitLsFiles(baseDir); err == nil && len(files) > 0 {
+		logger.Debug("discovered project files via git", "count", len(files))
+		return files
+	}
+
+	// Fallback: walk directory for common source extensions
+	var files []string
+	exts := map[string]bool{
+		".go": true, ".rs": true, ".ts": true, ".tsx": true, ".js": true,
+		".jsx": true, ".py": true, ".java": true, ".cpp": true, ".hpp": true,
+		".c": true, ".h": true, ".kt": true, ".swift": true, ".m": true,
+		".scala": true, ".rb": true, ".elixir": true,
+	}
+	err := filepath.WalkDir(baseDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if exts[filepath.Ext(path)] {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Warn("failed to discover project files", "error", err)
+		return nil
+	}
+	logger.Debug("discovered project files via directory walk", "count", len(files))
+	return files
+}
+
+// gitLsFiles runs git ls-files in the given directory.
+func gitLsFiles(dir string) ([]string, error) {
+	cmd := exec.CommandContext(context.Background(), "git", "ls-files", "-z")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, f := range strings.Split(string(out[:len(out)-1]), "\x00") {
+		if f != "" {
+			files = append(files, filepath.Join(dir, f))
+		}
+	}
+	return files, nil
 }

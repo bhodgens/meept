@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/plan"
+	"github.com/caimlas/meept/internal/repomap"
 	"github.com/caimlas/meept/pkg/models"
 )
 
@@ -23,6 +27,7 @@ type Orchestrator struct {
 	collaborationEngine   *CollaborationEngine     // optional: enables agent collaboration modes
 	ralphLoop            *RalphLoop               // optional: Ralph loop for auto-replanning
 	reflectionEngine     *ReflectionEngine       // optional: auto-fix reflection loop
+	repoMapGen           *repomap.RepoMapGenerator // optional: repository map for context enrichment
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -39,6 +44,11 @@ type OrchestratorDeps struct {
 	RalphLoop           *RalphLoop               // optional: Ralph loop for auto-replanning
 	Bus                 *bus.MessageBus
 	Logger              *slog.Logger
+}
+
+// SetRepoMapGenerator sets the repo map generator for context enrichment.
+func (o *Orchestrator) SetRepoMapGenerator(gen *repomap.RepoMapGenerator) {
+	o.repoMapGen = gen
 }
 
 // NewOrchestrator creates a new orchestrator.
@@ -652,6 +662,62 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 			return
 		}
 
+		// If a pending fix was generated, apply it to the files and re-run reflection
+		if result.PendingFix != nil {
+			o.logger.Info("Applying pending reflection fix",
+				"tool_call_id", event.ToolCallID,
+				"files", len(result.PendingFix.Files),
+				"fix_length", len(result.PendingFix.FixText),
+			)
+
+			// Apply the fix to the target files
+			appliedFiles := o.applyFix(ctx, result.PendingFix)
+			if len(appliedFiles) > 0 {
+				o.logger.Info("Fix applied, re-running reflection",
+					"tool_call_id", event.ToolCallID,
+					"applied_to", len(appliedFiles),
+				)
+
+				// Re-run reflection on the applied fix to check for remaining errors
+				retryResult, err := o.reflectionEngine.RunReflection(ctx, appliedFiles)
+				if err != nil {
+					o.logger.Warn("Reflection re-check failed",
+						"tool_call_id", event.ToolCallID,
+						"error", err,
+					)
+				} else {
+					// Merge retry results into the main result
+					result.LintErrors = append(result.LintErrors, retryResult.LintErrors...)
+					result.TestFailures = append(result.TestFailures, retryResult.TestFailures...)
+					if retryResult.PendingFix != nil {
+						// Still has issues - apply again (single retry pass to avoid infinite loop)
+						o.logger.Info("Second fix pending, applying fix attempt",
+							"tool_call_id", event.ToolCallID,
+							"iteration", result.Iterations+1,
+						)
+						appliedFiles = o.applyFix(ctx, retryResult.PendingFix)
+						result.PendingFix = retryResult.PendingFix
+						if len(appliedFiles) > 0 {
+							o.logger.Info("Second fix applied",
+								"tool_call_id", event.ToolCallID,
+								"files", len(appliedFiles),
+							)
+						}
+					}
+					result.Fixed = retryResult.Fixed
+					result.Iterations += retryResult.Iterations
+					result.FinalMessage = retryResult.FinalMessage
+					if retryResult.GaveUp {
+						result.GaveUp = retryResult.GaveUp
+					}
+				}
+			} else {
+				o.logger.Warn("Failed to apply reflection fix to any files",
+					"tool_call_id", event.ToolCallID,
+				)
+			}
+		}
+
 		// Log the outcomes
 		if result.Fixed {
 			o.logger.Info("Reflection completed successfully",
@@ -660,15 +726,15 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 				"message", result.FinalMessage,
 			)
 		} else if result.GaveUp {
-			o.logger.Warn("Reflection gave up",
+			o.logger.Warn("Reflection gave up after applying fixes",
 				"tool_call_id", event.ToolCallID,
 				"iterations", result.Iterations,
 				"lint_errors", len(result.LintErrors),
 				"test_failures", len(result.TestFailures),
 				"message", result.FinalMessage,
 			)
-			// Note: We could add a system message to the conversation here if needed
-			// by publishing to an appropriate topic or calling back into the agent loop
+			// Publish a notification event so other components know about the reflection outcome
+			o.publishReflectionEvent(ctx, event.ToolCallID, "reflection_gave_up", result)
 		} else {
 			o.logger.Debug("Reflection completed with no errors",
 				"tool_call_id", event.ToolCallID,
@@ -676,4 +742,145 @@ func (o *Orchestrator) handleToolExecutionComplete(ctx context.Context, msg *mod
 			)
 		}
 	}()
+}
+
+// applyFix writes the LLM's proposed fix text to the target files.
+// It extracts code from markdown code blocks if present, or writes the
+// raw content. Returns the list of files that were successfully written.
+func (o *Orchestrator) applyFix(ctx context.Context, fix *FixAttempt) []string {
+	if fix == nil || fix.FixText == "" {
+		return nil
+	}
+
+	// Try to extract content from markdown code blocks first.
+	// The LLM may wrap code in ```go, ```python, or generic ``` blocks.
+	content := extractCodeFromMarkdown(fix.FixText)
+	if content == "" {
+		content = fix.FixText
+	}
+
+	if content == "" {
+		return nil
+	}
+
+	var applied []string
+	for _, file := range fix.Files {
+		// Resolve relative paths
+		resolved := file
+		if !filepath.IsAbs(file) {
+			// Try current working directory first
+			if abs, err := filepath.Abs(file); err == nil {
+				if _, err2 := os.Stat(abs); err2 == nil {
+					resolved = abs
+				}
+			}
+		}
+
+		// Verify file exists before writing
+		if _, err := os.Stat(resolved); err != nil {
+			o.logger.Debug("Skipping fix application - file not found",
+				"file", resolved,
+			)
+			continue
+		}
+
+		// Attempt to write the fix content to the file
+		if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
+			o.logger.Warn("Failed to apply fix to file",
+				"file", resolved,
+				"error", err,
+			)
+			continue
+		}
+
+		o.logger.Info("Applied fix to file",
+			"file", resolved,
+			"content_length", len(content),
+		)
+		applied = append(applied, resolved)
+	}
+
+	return applied
+}
+
+// extractCodeFromMarkdown tries to extract code content from markdown code blocks.
+// It looks for the first ``` block and returns its content.
+// If the content is not wrapped in code blocks, it returns an empty string.
+func extractCodeFromMarkdown(markdown string) string {
+	markdown = strings.TrimSpace(markdown)
+
+	// Look for code blocks: ```language ... content ... ```
+	blockStart := strings.Index(markdown, "```")
+	if blockStart == -1 {
+		return ""
+	}
+
+	// Skip the newline after the opening ```
+	contentStart := blockStart + 3
+	// Skip language specifier (e.g., "go", "python", etc.)
+	contentStart += strings.IndexFunc(markdown[contentStart:], func(r rune) bool {
+		return r != '\n' && r != '\r' && r != ' ' && r != '\t'
+	})
+	contentStart++ // skip past any non-newline character after the block open
+
+	// Find the closing ```
+	blockEnd := strings.Index(markdown[contentStart:], "```")
+	if blockEnd == -1 {
+		// No closing marker - return the content from start to end of string
+		result := strings.TrimSpace(markdown[contentStart:])
+		if result == "" {
+			return ""
+		}
+		return result
+	}
+
+	result := strings.TrimSpace(markdown[contentStart : contentStart+blockEnd])
+	if result == "" {
+		return ""
+	}
+	return result
+}
+
+// publishReflectionEvent publishes a bus event about reflection results
+// so other components (like the agent loop) are aware of the outcome.
+func (o *Orchestrator) publishReflectionEvent(ctx context.Context, toolCallID, phase string, result *ReflectionResult) {
+	if o.bus == nil {
+		return
+	}
+
+	payload := map[string]any{
+		"tool_call_id": toolCallID,
+		"phase":        phase,
+		"fixed":        result.Fixed,
+		"gave_up":      result.GaveUp,
+		"iterations":   result.Iterations,
+		"message":      result.FinalMessage,
+		"lint_errors":  len(result.LintErrors),
+		"test_failures": len(result.TestFailures),
+	}
+
+	if result.PendingFix != nil {
+		payload["pending_fix"] = map[string]any{
+			"prompt":     result.PendingFix.Prompt,
+			"fix_length": len(result.PendingFix.FixText),
+			"files":      result.PendingFix.Files,
+		}
+	}
+
+	msg, err := models.NewBusMessage(models.MessageTypeEvent, "orchestrator", payload)
+	if err != nil {
+		o.logger.Warn("Failed to create reflection event", "error", err)
+		return
+	}
+	o.bus.Publish("reflection.complete", msg)
+}
+
+// GenerateRepoMap creates a repository map for context enrichment.
+// chatFiles are the files actively being discussed in the conversation.
+// mentionedIdentifiers are identifiers (functions, types, etc.) from the conversation.
+func (o *Orchestrator) GenerateRepoMap(ctx context.Context, chatFiles, mentionedIdentifiers []string) (*repomap.RenderedMap, error) {
+	if o.repoMapGen == nil {
+		return nil, nil
+	}
+	return o.repoMapGen.Generate(ctx, chatFiles, mentionedIdentifiers)
 }

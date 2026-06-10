@@ -24,6 +24,74 @@ type CategorizedRecommendation struct {
 	Confidence  float64 `json:"confidence"`
 }
 
+// ChecklistItem represents a single checkbox item in a checklist.
+type ChecklistItem struct {
+	Text      string     `json:"text"`
+	Completed bool       `json:"completed"`
+	CreatedAt time.Time  `json:"created_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// Checklist tracks explicit checkbox items for a task step.
+type Checklist struct {
+	Items []ChecklistItem `json:"items"`
+}
+
+// AddItem adds a new checklist item.
+func (c *Checklist) AddItem(text string) {
+	if c == nil {
+		return
+	}
+	c.Items = append(c.Items, ChecklistItem{
+		Text:      text,
+		Completed: false,
+		CreatedAt: time.Now().UTC(),
+	})
+}
+
+// CompleteItem marks an item as completed by its text.
+func (c *Checklist) CompleteItem(text string) bool {
+	if c == nil {
+		return false
+	}
+	now := time.Now().UTC()
+	for i := range c.Items {
+		if c.Items[i].Text == text && !c.Items[i].Completed {
+			c.Items[i].Completed = true
+			c.Items[i].CompletedAt = &now
+			return true
+		}
+	}
+	return false
+}
+
+// Remaining returns the number of incomplete items.
+func (c *Checklist) Remaining() int {
+	if c == nil {
+		return 0
+	}
+	count := 0
+	for _, item := range c.Items {
+		if !item.Completed {
+			count++
+		}
+	}
+	return count
+}
+
+// IsComplete returns true if all items are completed (or checklist is nil/empty).
+func (c *Checklist) IsComplete() bool {
+	if c == nil || len(c.Items) == 0 {
+		return true
+	}
+	for _, item := range c.Items {
+		if !item.Completed {
+			return false
+		}
+	}
+	return true
+}
+
 // StepState represents the state of a task step.
 type StepState string
 
@@ -327,8 +395,9 @@ func (s *StepStore) Create(step *TaskStep) error {
 		                        job_id, state, result, sequence, revision_count,
 		                        recommendations, evidence, claims, validated, validation_error,
 		                        token_usage, memory_refs, accumulated_context, model_override,
+		                        checklist, phase, checkpoint_gate,
 		                        created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		step.ID,
 		step.TaskID,
 		step.Description,
@@ -443,6 +512,7 @@ func (s *StepStore) GetByID(id string) (*TaskStep, error) {
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
+		       checklist, phase, checkpoint_gate,
 		       created_at, updated_at
 		FROM task_steps WHERE id = ?`, id)
 
@@ -456,6 +526,7 @@ func (s *StepStore) GetByJobID(jobID string) (*TaskStep, error) {
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
+		       checklist, phase, checkpoint_gate,
 		       created_at, updated_at
 		FROM task_steps WHERE job_id = ?`, jobID)
 
@@ -469,6 +540,7 @@ func (s *StepStore) ListByTaskID(taskID string) ([]*TaskStep, error) {
 		       job_id, state, result, sequence, revision_count,
 		       recommendations, evidence, claims, validated, validation_error,
 		       token_usage, memory_refs, accumulated_context, model_override,
+		       checklist, phase, checkpoint_gate,
 		       created_at, updated_at
 		FROM task_steps
 		WHERE task_id = ?
@@ -887,6 +959,27 @@ func encodeEvidenceSlice(evs []models.Evidence) string {
 	return string(data)
 }
 
+// encodeChecklist encodes a checklist as JSON.
+func encodeChecklist(c *Checklist) string {
+	if c == nil || len(c.Items) == 0 {
+		return ""
+	}
+	data, _ := json.Marshal(c)
+	return string(data)
+}
+
+// decodeChecklist decodes a JSON checklist.
+func decodeChecklist(s string) *Checklist {
+	if s == "" {
+		return nil
+	}
+	var c Checklist
+	if err := json.Unmarshal([]byte(s), &c); err != nil {
+		return nil
+	}
+	return &c
+}
+
 // SetStateWithReason updates a step's state and records the transition with a reason.
 func (s *StepStore) SetStateWithReason(id string, state StepState, reason string) error {
 	// Get current state for transition logging
@@ -1030,4 +1123,74 @@ func (s *StepStore) SetTransitionLogging(enabled bool) {
 // TransitionLoggingEnabled returns whether transition logging is enabled.
 func (s *StepStore) TransitionLoggingEnabled() bool {
 	return s.logTransitions
+}
+
+// GetCheckpointGates returns all steps that are checkpoint gates for a task.
+func (s *StepStore) GetCheckpointGates(taskID string) ([]*TaskStep, error) {
+	steps, err := s.ListByTaskID(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	var gates []*TaskStep
+	for _, step := range steps {
+		if step.CheckpointGate {
+			gates = append(gates, step)
+		}
+	}
+	return gates, nil
+}
+
+// AreCheckpointGatesPassed returns true if all checkpoint gates for a task are completed.
+func (s *StepStore) AreCheckpointGatesPassed(taskID string) (bool, error) {
+	gates, err := s.GetCheckpointGates(taskID)
+	if err != nil {
+		return false, err
+	}
+
+	if len(gates) == 0 {
+		return true, nil // No gates, all passed
+	}
+
+	for _, gate := range gates {
+		if !gate.State.IsSuccessfullyTerminal() {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// GetPhaseSteps returns all steps for a specific phase.
+func (s *StepStore) GetPhaseSteps(taskID, phase string) ([]*TaskStep, error) {
+	steps, err := s.ListByTaskID(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	var phaseSteps []*TaskStep
+	for _, step := range steps {
+		if step.Phase == phase {
+			phaseSteps = append(phaseSteps, step)
+		}
+	}
+	return phaseSteps, nil
+}
+
+// IsPhaseComplete returns true if all steps in a phase are completed.
+func (s *StepStore) IsPhaseComplete(taskID, phase string) (bool, error) {
+	phaseSteps, err := s.GetPhaseSteps(taskID, phase)
+	if err != nil {
+		return false, err
+	}
+
+	if len(phaseSteps) == 0 {
+		return true, nil // No steps in phase, considered complete
+	}
+
+	for _, step := range phaseSteps {
+		if !step.State.IsSuccessfullyTerminal() {
+			return false, nil
+		}
+	}
+	return true, nil
 }
