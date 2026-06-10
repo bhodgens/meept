@@ -46,12 +46,14 @@ class SttNotifier extends StateNotifier<SttState> {
     }
     if (!_service.isAvailable) return;
 
-    state = SttState.recording;
     _service.startRecording(
       language: language,
       onResult: onResult,
       onError: onError,
     );
+
+    // Set recording state only after confirming availability and starting.
+    state = SttState.recording;
   }
 
   /// Stop recording and return the final transcription.

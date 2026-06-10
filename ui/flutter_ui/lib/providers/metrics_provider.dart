@@ -113,6 +113,7 @@ class MetricsNotifier extends StateNotifier<MetricsState> {
     if (_metricsSubscription != null) return;
 
     _metricsSubscription = websocket.subscribeToMetrics().listen((msg) {
+      if (_disposed) return;
       // The websocket subscription filters for type == 'metrics_update'
       // and the message is already flattened by WebSocketService
       try {

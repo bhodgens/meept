@@ -54,6 +54,6 @@ class AgentNotifier extends StateNotifier<AgentState> {
 /// Agent state provider
 final agentProvider =
     StateNotifierProvider<AgentNotifier, AgentState>((ref) {
-  final client = ref.read(apiClientProvider);
+  final client = ref.watch(apiClientProvider);
   return AgentNotifier(apiClient: client);
 });

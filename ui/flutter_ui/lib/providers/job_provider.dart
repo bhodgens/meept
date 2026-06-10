@@ -84,6 +84,8 @@ class JobNotifier extends StateNotifier<JobState> {
   StreamSubscription<Map<String, dynamic>>? _jobsSubscription;
   StreamSubscription<bool>? _connectionSubscription;
   Timer? _pollTimer;
+  int _fetchGeneration = 0;
+  bool _disposed = false;
 
   void _init() {
     _fetchJobs();
@@ -108,9 +110,11 @@ class JobNotifier extends StateNotifier<JobState> {
   }
 
   Future<void> _fetchJobs() async {
+    final gen = ++_fetchGeneration;
     try {
       final jobs = await apiClient.listJobs();
       final stats = await apiClient.getQueueStats();
+      if (_disposed || gen != _fetchGeneration) return;
       final depth = stats['queue_depth'] as int? ?? stats['depth'] as int? ?? 0;
 
       state = state.copyWith(
@@ -128,6 +132,7 @@ class JobNotifier extends StateNotifier<JobState> {
         error: null,
       );
     } catch (e) {
+      if (_disposed || gen != _fetchGeneration) return;
       state = state.copyWith(
         error: 'Failed to load jobs: ${e.toString()}',
         isLoading: false,
@@ -139,6 +144,7 @@ class JobNotifier extends StateNotifier<JobState> {
     if (_jobsSubscription != null) return;
 
     _jobsSubscription = websocket.subscribeToJobs().listen((msg) {
+      if (_disposed) return;
       try {
         final update = JobUpdate.fromJson(msg);
 
@@ -183,6 +189,7 @@ class JobNotifier extends StateNotifier<JobState> {
 
   @override
   void dispose() {
+    _disposed = true;
     _connectionSubscription?.cancel();
     _connectionSubscription = null;
     _jobsSubscription?.cancel();
