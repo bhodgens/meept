@@ -47,7 +47,12 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
   void _updateMatches() {
     _matches = _registry.match(widget.query);
     if (_matches.isEmpty) {
-      widget.onDismiss?.call();
+      // Defer dismiss to avoid calling parent setState during child build
+      // (bug F8: onDismiss during initState/didUpdateWidget triggers parent
+      // rebuild while child is still building).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onDismiss?.call();
+      });
       return;
     }
     // Clamp selected index to visible range (max 8 items)
@@ -99,7 +104,6 @@ class _SlashAutocompleteState extends State<SlashAutocomplete> {
     final visible = _matches.take(8).toList();
 
     return Focus(
-      autofocus: true,
       onKeyEvent: _handleKeyEvent,
       child: Container(
         margin: const EdgeInsets.only(bottom: 4),

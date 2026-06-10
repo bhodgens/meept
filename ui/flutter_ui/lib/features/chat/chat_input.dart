@@ -175,8 +175,12 @@ class _ChatInputState extends ConsumerState<ChatInput> {
       _pasteStore[_pasteCounter] = added;
 
       final newText = _previousText + token;
+      // Remove listener before mutating controller to prevent re-entrant
+      // notification (bug F6: _onTextChanged called from listener + mutation).
+      _controller.removeListener(_onTextChanged);
       _controller.text = newText;
       _controller.selection = TextSelection.collapsed(offset: newText.length);
+      _controller.addListener(_onTextChanged);
     }
   }
 
@@ -244,6 +248,9 @@ class _ChatInputState extends ConsumerState<ChatInput> {
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
       if (event.logicalKey == LogicalKeyboardKey.enter) {
+        // Guard: ignore Enter while LLM is responding (bug F6).
+        if (ref.read(chatProvider).isLoading) return KeyEventResult.ignored;
+
         final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 
         if (isShiftPressed) {
