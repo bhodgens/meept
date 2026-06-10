@@ -42,9 +42,11 @@ func NewResponseAnalyzer() *ResponseAnalyzer {
 
 // Analyze analyzes an LLM response for quality metrics.
 func (a *ResponseAnalyzer) Analyze(response string, tokenCount int) *ResponseQuality {
+	editFormat := detectEditFormat(response)
+
 	quality := &ResponseQuality{
 		TokenCount: tokenCount,
-		WellFormed: true, // Default to true for unknown formats
+		WellFormed: isWellFormed(response, editFormat),
 	}
 
 	// Detect code blocks (check for ```)
@@ -95,6 +97,31 @@ func (a *ResponseAnalyzer) Analyze(response string, tokenCount int) *ResponseQua
 	}
 
 	return quality
+}
+
+// detectEditFormat determines which edit format is being used based on response content.
+func detectEditFormat(response string) string {
+	// Check for editblock-fenced: has code fences AND conflict markers
+	hasFence := strings.Contains(response, "```")
+	hasConflictMarkers := strings.Contains(response, "<<<<<<<")
+	if hasFence && hasConflictMarkers {
+		return "editblock-fenced"
+	}
+
+	// Check for editblock: has conflict markers without code fences
+	if hasConflictMarkers {
+		return "editblock"
+	}
+
+	// Check for udiff: has unified diff markers
+	hasMinus := strings.Contains(response, "--- a/")
+	hasPlus := strings.Contains(response, "+++ b/")
+	if hasMinus && hasPlus {
+		return "udiff"
+	}
+
+	// No recognized edit format
+	return ""
 }
 
 // isWellFormed validates that a response has the correct format markers.
