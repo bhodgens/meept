@@ -45,20 +45,18 @@ class ChatMessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (isUser)
-              Text(
-                message.content,
-                style: CyberpunkTypography.bodyMedium.copyWith(
-                  color: CyberpunkColors.orangeGlow,
-                ),
-              )
-            else
-              MarkdownBody(
-                data: message.content,
-                styleSheet: buildCyberpunkMarkdownStyle(context),
-                selectable: true,
-                syntaxHighlighter: CyberpunkSyntaxHighlighter(),
+            MarkdownBody(
+              data: message.content,
+              styleSheet: buildCyberpunkMarkdownStyle(context).copyWith(
+                p: isUser
+                    ? CyberpunkTypography.bodyMedium.copyWith(
+                        color: CyberpunkColors.orangeGlow,
+                      )
+                    : null,
               ),
+              selectable: true,
+              syntaxHighlighter: CyberpunkSyntaxHighlighter(),
+            ),
             const SizedBox(height: 4),
             Text(
               _formatTime(message.timestamp),

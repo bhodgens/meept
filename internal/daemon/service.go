@@ -84,7 +84,7 @@ type DaemonService struct {
 	isRunning atomic.Bool
 }
 
-// NewServiceManager creates a DaemonService backed by kardianos/service.
+// NewDaemonService creates a DaemonService backed by kardianos/service.
 // It discovers the daemon executable path automatically.  The returned
 // DaemonService implements service.Interface but callers typically use the
 // higher-level Install/Uninstall/Start/Stop/Status methods instead.
