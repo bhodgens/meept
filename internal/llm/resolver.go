@@ -247,8 +247,16 @@ func (r *Resolver) RecordAliasFailure(aliasName string, err error) {
 	health.LastFailure = time.Now()
 
 	// Calculate cooldown with exponential backoff: timeout * 2^(fails-1)
+	// Cap at 2^10 = 1024x to avoid integer overflow and astronomically large backoffs.
 	alias := r.aliases[aliasName]
-	backoffFactor := 1 << uint(health.ConsecutiveFails-1) // 2^(fails-1)
+	if alias == nil {
+		return
+	}
+	shift := health.ConsecutiveFails - 1
+	if shift > 10 {
+		shift = 10
+	}
+	backoffFactor := 1 << uint(shift)
 	cooldownDuration := alias.Timeout * time.Duration(backoffFactor)
 	health.CooldownUntil = time.Now().Add(cooldownDuration)
 
