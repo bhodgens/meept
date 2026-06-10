@@ -409,6 +409,9 @@ func (s *Store) GetTasksForSession(sessionID string) ([]*Task, error) {
 		}
 		tasks = append(tasks, task)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate tasks for session: %w", err)
+	}
 
 	return tasks, nil
 }

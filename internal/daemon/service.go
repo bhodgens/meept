@@ -116,8 +116,13 @@ func NewServiceManager(cfg *ServiceConfig) (*DaemonService, error) {
 	}
 
 	// Set environment variables for the service.
+	// Use the user's current PATH to ensure custom bin directories are available
+	userPath := os.Getenv("PATH")
+	if userPath == "" {
+		userPath = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin"
+	}
 	svcCfg.EnvVars = map[string]string{
-		"PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
+		"PATH": userPath,
 	}
 
 	// Request that kardianos/service redirects stdout/stderr to log files

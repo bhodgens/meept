@@ -180,8 +180,11 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 		return nil, fmt.Errorf("command blocked for safety: %s", baseCmd)
 	}
 
-	// Scan command with Tirith via security orchestrator (if configured)
-	if t.securityOrch != nil {
+	// Scan command with Tirith via security orchestrator
+	// Security orchestrator should be configured for production use
+	if t.securityOrch == nil {
+		// Security orchestrator not configured - scanning skipped
+	} else {
 		blocked, warning, reason := t.securityOrch.ScanShellCommand(ctx, command)
 		if blocked {
 			return nil, fmt.Errorf("command blocked by security scanner: %s", reason)
@@ -300,7 +303,9 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	}
 
 	// Scan command with Tirith via security orchestrator
-	if t.securityOrch != nil {
+	if t.securityOrch == nil {
+		// Security orchestrator not configured - scanning skipped
+	} else {
 		blocked, _, reason := t.securityOrch.ScanShellCommand(ctx, command)
 		if blocked {
 			return nil, fmt.Errorf("command blocked by security scanner: %s", reason)

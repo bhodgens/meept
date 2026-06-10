@@ -56,7 +56,10 @@ func (s *Store) Create(ctx context.Context, def BotDefinition) error {
 		return fmt.Errorf("insert: %w", err)
 	}
 	state := BotState{DefinitionID: def.ID, Status: BotStatusStopped}
-	stateData, _ := json.Marshal(state)
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO bot_states (definition_id, data) VALUES (?, ?)`,
 		def.ID, string(stateData),

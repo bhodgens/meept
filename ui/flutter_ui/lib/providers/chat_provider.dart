@@ -1,5 +1,7 @@
 import 'dart:async';
 
+/// Timeout for _isSending flag to prevent permanent lockout
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_models.dart';
 import '../services/api_client.dart';
@@ -61,6 +63,12 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   /// Prevents duplicate message sends from rapid button taps
   bool _isSending = false;
+
+  /// Timer to reset _isSending flag if it gets stuck (safety mechanism)
+  Timer? _sendingTimeoutTimer;
+
+  /// Maximum time to wait for send to complete before auto-resetting
+  static const _sendingTimeout = Duration(seconds: 60);
 
   /// Initialize WebSocket connection and subscribe to chat messages
   void _initWebSocket() {
@@ -171,6 +179,13 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
     _isSending = true;
 
+    // Set safety timeout to reset flag if something goes wrong
+    _sendingTimeoutTimer?.cancel();
+    _sendingTimeoutTimer = Timer(_sendingTimeout, () {
+      _isSending = false;
+      _sendingTimeoutTimer = null;
+    });
+
     // Append user message immediately
     final userMessage = ChatMessage(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -222,6 +237,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
         error: e.toString(),
       );
     } finally {
+      _sendingTimeoutTimer?.cancel();
+      _sendingTimeoutTimer = null;
       _isSending = false;
     }
   }
@@ -279,6 +296,8 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   @override
   void dispose() {
+    _sendingTimeoutTimer?.cancel();
+    _sendingTimeoutTimer = null;
     _chatSubscription?.cancel();
     _chatSubscription = null;
     _wsChatSubscription?.cancel();

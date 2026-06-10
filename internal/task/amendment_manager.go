@@ -17,6 +17,9 @@ type AmendmentHandlerFunc func(context.Context, *AmendmentRequest) (*AmendmentRe
 
 // AmendmentManager manages amendment requests and routing.
 type AmendmentManager struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	sub       *bus.Subscriber // bus subscription for cleanup
 	mu        sync.RWMutex
 	bus       *bus.MessageBus
 	logger    *slog.Logger
@@ -31,6 +34,9 @@ func NewAmendmentManager(msgBus *bus.MessageBus, logger *slog.Logger) *Amendment
 		logger = slog.Default()
 	}
 	mgr := &AmendmentManager{
+		ctx:       context.Background(),
+		cancel:    func() {},
+
 		bus:       msgBus,
 		logger:    logger,
 		handlers:  make(map[AmendmentType]AmendmentHandlerFunc),
@@ -60,7 +66,11 @@ func (m *AmendmentManager) Submit(ctx context.Context, req *AmendmentRequest) er
 	m.mu.Unlock()
 
 	// Publish to bus
-	payload, _ := json.Marshal(req)
+	payload, err := json.Marshal(req)
+	if err != nil {
+		m.logger.Error("Failed to marshal amendment request", "error", err)
+		payload = []byte("{}")
+	}
 	msg := &models.BusMessage{
 		ID:        req.ID,
 		Type:      models.MessageTypeRequest,
@@ -162,23 +172,39 @@ func (m *AmendmentManager) CancelPendingForTask(taskID string) {
 }
 
 func (m *AmendmentManager) subscribe() {
+	m.ctx, m.cancel = context.WithCancel(context.Background())
 	sub := m.bus.Subscribe("amendment-manager", "task.amend.request")
-	go func() {
-		for msg := range sub.Channel {
-			var req AmendmentRequest
-			if err := json.Unmarshal(msg.Payload, &req); err != nil {
-				m.logger.Error("Failed to parse amendment request", "error", err)
-				continue
-			}
+	m.sub = sub
 
-			// Auto-process if handler registered
-			m.logger.Debug("Received amendment request", "id", req.ID, "type", req.Type)
+	go func() {
+		defer m.bus.Unsubscribe(sub)
+		for {
+			select {
+			case <-m.ctx.Done():
+				return
+			case msg, ok := <-sub.Channel:
+				if !ok {
+					return
+				}
+				var req AmendmentRequest
+				if err := json.Unmarshal(msg.Payload, &req); err != nil {
+					m.logger.Error("Failed to parse amendment request", "error", err)
+					continue
+				}
+
+				// Auto-process if handler registered
+				m.logger.Debug("Received amendment request", "id", req.ID, "type", req.Type)
+			}
 		}
 	}()
 }
 
 func (m *AmendmentManager) publishEvent(topic string, data any) {
-	payload, _ := json.Marshal(data)
+	payload, err := json.Marshal(data)
+	if err != nil {
+		m.logger.Error("Failed to marshal event data", "error", err)
+		payload = []byte("{}")
+	}
 	msg := &models.BusMessage{
 		ID:        fmt.Sprintf("amend-%d", time.Now().UnixNano()),
 		Type:      models.MessageTypeEvent,
@@ -194,6 +220,11 @@ func (m *AmendmentManager) publishEvent(topic string, data any) {
 func (m *AmendmentManager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Cancel the subscription context to stop the goroutine
+	if m.cancel != nil {
+		m.cancel()
+	}
 
 	// Mark all pending as ignored
 	for _, req := range m.pending {
