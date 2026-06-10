@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -133,18 +132,10 @@ func buildCalendarTokenStore() (*auth.TokenStore, error) {
 
 // loadCalendarConfig loads the meept config and returns the calendar section.
 func loadCalendarConfig() (*config.CalendarConfig, error) {
-	homeDir, err := os.UserHomeDir()
+	cfg, err := config.LoadDefault()
 	if err != nil {
-		return nil, err
-	}
-
-	configPath := filepath.Join(homeDir, ".meept", "meept.toml")
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		// Fall back to defaults
 		def := config.DefaultConfig()
 		return &def.Calendar, nil
 	}
-
 	return &cfg.Calendar, nil
 }

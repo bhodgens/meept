@@ -112,7 +112,11 @@ func runClusterInit(cmd *cobra.Command, clusterName, nodeName, nodeID, gitRemote
 	// --- node ID --------------------------------------------------------
 	nodeID = promptLine(nodeID, "Node ID (leave empty for auto-generated):")
 	if nodeID == "" {
-		nodeID = generateNodeID()
+		var err error
+		nodeID, err = generateNodeID()
+		if err != nil {
+			return fmt.Errorf("failed to generate node ID: %w", err)
+		}
 	}
 	nodeID = sanitizeNodeID(nodeID)
 
@@ -151,11 +155,19 @@ func runClusterInit(cmd *cobra.Command, clusterName, nodeName, nodeID, gitRemote
 	}
 
 	// --- join key --------------------------------------------------------
-	joinKey := generateJoinKey()
+	joinKey, err := generateJoinKey()
+	if err != nil {
+		return fmt.Errorf("failed to generate join key: %w", err)
+	}
 
 	// --- build config ----------------------------------------------------
+	clusterID, err := generateClusterID()
+	if err != nil {
+		return fmt.Errorf("failed to generate cluster ID: %w", err)
+	}
+
 	cfg := &clusterConfigJSON{
-		ClusterID:       generateClusterID(),
+		ClusterID:       clusterID,
 		ClusterName:     clusterName,
 		NodeID:          nodeID,
 		NodeName:        nodeName,
@@ -394,7 +406,16 @@ func newClusterStatusCmd() *cobra.Command {
 				return fmt.Errorf("failed to parse response: %w", err)
 			}
 
-			members := result["members"].([]any)
+			membersRaw, ok := result["members"]
+			if !ok || membersRaw == nil {
+				fmt.Println("  members: (none)")
+				return nil
+			}
+			members, ok := membersRaw.([]any)
+			if !ok {
+				fmt.Println("  members: (unexpected format)")
+				return nil
+			}
 			nodeID := getStringOr(result, "node_id", "unknown")
 
 			fmt.Printf("Cluster Status\n")
@@ -827,24 +848,30 @@ func readStdin() string {
 }
 
 // generateNodeID creates a short random node identifier.
-func generateNodeID() string {
+func generateNodeID() (string, error) {
 	b := make([]byte, 6)
-	rand.Read(b)
-	return fmt.Sprintf("node-%x", b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generateNodeID: %w", err)
+	}
+	return fmt.Sprintf("node-%x", b), nil
 }
 
 // generateClusterID creates a unique cluster identifier.
-func generateClusterID() string {
+func generateClusterID() (string, error) {
 	b := make([]byte, 12)
-	rand.Read(b)
-	return fmt.Sprintf("cluster-%x", b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generateClusterID: %w", err)
+	}
+	return fmt.Sprintf("cluster-%x", b), nil
 }
 
 // generateJoinKey creates a random join key.
-func generateJoinKey() string {
+func generateJoinKey() (string, error) {
 	b := make([]byte, 24)
-	rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generateJoinKey: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // sanitizeNodeID removes invalid characters from a node ID.
