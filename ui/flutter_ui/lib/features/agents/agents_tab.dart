@@ -53,28 +53,34 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           ),
           const SizedBox(height: 16),
           if (agentState.isLoading)
-            const Center(
-              child: CircularProgressIndicator(),
+            const Expanded(
+              child: Center(
+                child: CircularProgressIndicator(),
+              ),
             )
           else if (agentState.error != null)
-            Center(
-              child: Column(
-                children: [
-                  SizedBox(
-                    width: 280,
-                    child: _AgentErrorBanner(message: agentState.error!),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.tonal(
-                    onPressed: () => ref.read(agentProvider.notifier).loadAgents(),
-                    child: const Text('retry', style: CyberpunkTypography.bodySmall),
-                  ),
-                ],
+            Expanded(
+              child: Center(
+                child: Column(
+                  children: [
+                    SizedBox(
+                      width: 280,
+                      child: _AgentErrorBanner(message: agentState.error!),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.tonal(
+                      onPressed: () => ref.read(agentProvider.notifier).loadAgents(),
+                      child: const Text('retry', style: CyberpunkTypography.bodySmall),
+                    ),
+                  ],
+                ),
               ),
             )
           else if (agentState.agents.isEmpty)
-            const Center(
-              child: Text('no agents available'),
+            const Expanded(
+              child: Center(
+                child: Text('no agents available'),
+              ),
             )
           else
             Expanded(

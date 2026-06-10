@@ -21,6 +21,7 @@ class GlitchText extends StatefulWidget {
 class _GlitchTextState extends State<GlitchText>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
+  final _random = math.Random();
   double _offsetX = 0;
   double _offsetY = 0;
 
@@ -32,8 +33,8 @@ class _GlitchTextState extends State<GlitchText>
       vsync: this,
     )..addListener(() {
         setState(() {
-          _offsetX = (math.Random().nextDouble() - 0.5) * widget.glitchIntensity * 4;
-          _offsetY = (math.Random().nextDouble() - 0.5) * widget.glitchIntensity * 2;
+          _offsetX = (_random.nextDouble() - 0.5) * widget.glitchIntensity * 4;
+          _offsetY = (_random.nextDouble() - 0.5) * widget.glitchIntensity * 2;
         });
       });
     _controller.repeat();

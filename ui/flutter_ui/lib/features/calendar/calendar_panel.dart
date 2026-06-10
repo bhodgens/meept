@@ -89,7 +89,6 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
   }
 
   Future<void> _createEvent(String summary, DateTime start, DateTime end, String? description) async {
-    Navigator.pop(context);
     try {
       final client = ref.read(apiClientProvider);
       await client.createCalendarEvent(
@@ -99,6 +98,7 @@ class _CalendarPanelState extends ConsumerState<CalendarPanel> {
         description: description,
       );
       if (mounted) {
+        Navigator.pop(context);
         _loadEvents();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

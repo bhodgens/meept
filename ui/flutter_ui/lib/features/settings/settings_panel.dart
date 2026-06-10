@@ -46,6 +46,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
   bool _isSavingConnection = false;
   String? _error;
   bool _hasChanges = false;
+  bool _programmaticUpdate = false;
 
   bool _apiKeyObscured = true;
   String? _apiKeyStatus;
@@ -115,12 +116,14 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
           content = '';
       }
       if (mounted) {
+        _programmaticUpdate = true;
         setState(() {
           _configContent = content;
           _configController.text = content;
           _isLoading = false;
           _hasChanges = false;
         });
+        _programmaticUpdate = false;
       }
     } catch (e) {
       if (mounted) {
@@ -490,6 +493,7 @@ class _SettingsPanelState extends ConsumerState<SettingsPanel> {
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
                 onChanged: (value) {
+                  if (_programmaticUpdate) return;
                   setState(() {
                     _configContent = value;
                     if (!_hasChanges) _hasChanges = true;
