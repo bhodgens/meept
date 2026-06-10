@@ -176,6 +176,14 @@ func (p *QueuePersister) Flush() {
 }
 
 // flushLockedHeld drains the pending buffer. Caller must hold p.mu.
+// IMPORTANT: This method temporarily releases p.mu to perform I/O (flushPending),
+// then reacquires it before returning. Callers must NOT assume the lock is still
+// held across any code that follows this call without re-checking. The pattern is:
+//
+//	p.mu.Lock()
+//	p.flushLockedHeld() // lock released and reacquired inside
+//	// lock is held again here, but state may have changed while unlocked
+//	p.mu.Unlock()
 func (p *QueuePersister) flushLockedHeld() {
 	if len(p.pending) == 0 {
 		return

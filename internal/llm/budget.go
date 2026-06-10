@@ -681,8 +681,30 @@ func (b *Budget) WaitForRateLimit(ctx context.Context) error {
 
 	select {
 	case <-time.After(waitDuration):
+		// Re-acquire lock, prune expired timestamps, and re-check.
+		// Multiple goroutines may wake at the same time; without this
+		// re-check they could all exceed RPM.
 		b.mu.Lock()
 		b.pruneRPMWindow()
+		if len(b.requestTimestamps) < b.rateLimitRPM {
+			b.mu.Unlock()
+			return nil
+		}
+		// Still over limit — wait for the next window slot
+		if len(b.requestTimestamps) > 0 {
+			oldest = b.requestTimestamps[0]
+			remaining := time.Minute - time.Since(oldest)
+			b.mu.Unlock()
+			if remaining > 0 {
+				select {
+				case <-time.After(remaining):
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return nil
+		}
 		b.mu.Unlock()
 		return nil
 	case <-ctx.Done():

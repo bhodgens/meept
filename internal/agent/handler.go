@@ -3,7 +3,7 @@ package agent
 
 import (
 	"context"
-	"crypto/rand"
+	crypto_rand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1207,6 +1207,10 @@ func generateWorkerID() string {
 // Uses timestamp with nanoseconds plus random suffix to avoid collisions.
 func generateMessageID() string {
 	var randBytes [4]byte
-	rand.Read(randBytes[:])
+	if _, err := crypto_rand.Read(randBytes[:]); err != nil {
+		// Fallback: use nanosecond timestamp uniqueness if crypto/rand fails.
+		return time.Now().Format("20060102150405.000000000") + "-" +
+			fmt.Sprintf("%0d", time.Now().UnixNano())
+	}
 	return time.Now().Format("20060102150405.000000000") + "-" + hex.EncodeToString(randBytes[:])
 }

@@ -151,48 +151,38 @@ func NewTokenCacheCoordinatorWithMetrics(config CacheConfig, metricsStore *metri
 
 // Get retrieves a cached response, checking L1 first, then L2.
 func (c *TokenCacheCoordinator) Get(ctx context.Context, key CacheKey) (*CacheEntry, bool) {
-	c.mu.RLock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if !c.config.Enabled {
-		c.mu.RUnlock()
-		c.mu.Lock()
 		c.stats.Misses++
-		c.mu.Unlock()
 		c.recordMetric("cache.miss", 1, key)
 		return nil, false
 	}
-	c.mu.RUnlock()
 
-	// Check L1 first (read-only path)
+	// Check L1 first
 	if entry, found := c.l1Cache.Get(key); found {
-		c.mu.Lock()
 		c.stats.Hits++
 		c.stats.L1Hits++
-		c.mu.Unlock()
 		c.recordMetric("cache.hit", 1, key)
 		return entry, true
 	}
 
-	// Check L2 if enabled (may promote to L1, needs write lock)
+	// Check L2 if enabled (may promote to L1)
 	if c.l2Cache != nil {
 		if entry, found := c.l2Cache.Get(ctx, key); found {
-			c.mu.Lock()
 			// Promote to L1
 			c.l1Cache.Put(key, entry)
 			c.stats.Hits++
 			c.stats.L2Hits++
-			c.mu.Unlock()
 			c.recordMetric("cache.hit", 1, key)
 			return entry, true
 		}
-		c.mu.Lock()
 		c.stats.L2Misses++
-		c.mu.Unlock()
 	}
 
-	c.mu.Lock()
 	c.stats.L1Misses++
 	c.stats.Misses++
-	c.mu.Unlock()
 	c.recordMetric("cache.miss", 1, key)
 	return nil, false
 }

@@ -208,7 +208,7 @@ func (e *EpisodicMemory) Search(ctx context.Context, query string, limit int) ([
 		rows, err = db.QueryContext(ctx, `
 			SELECT id, content, category, metadata_json, created_at
 			FROM episodic_memories
-			WHERE content LIKE ? OR category LIKE ?
+			WHERE content LIKE ? ESCAPE '\' OR category LIKE ? ESCAPE '\'
 			ORDER BY created_at DESC
 			LIMIT ?
 		`, likePattern, likePattern, limit)

@@ -208,7 +208,7 @@ func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int
 			rows, err = db.QueryContext(ctx, `
 				SELECT id, content, domain, metadata_json, created_at
 				FROM task_memories
-				WHERE (content LIKE ? OR domain LIKE ?) AND domain = ?
+				WHERE (content LIKE ? ESCAPE '\' OR domain LIKE ? ESCAPE '\') AND domain = ?
 				ORDER BY created_at DESC
 				LIMIT ?
 			`, likePattern, likePattern, domain, limit)
@@ -216,7 +216,7 @@ func (t *TaskMemory) Search(ctx context.Context, query, domain string, limit int
 			rows, err = db.QueryContext(ctx, `
 				SELECT id, content, domain, metadata_json, created_at
 				FROM task_memories
-				WHERE content LIKE ? OR domain LIKE ?
+				WHERE content LIKE ? ESCAPE '\' OR domain LIKE ? ESCAPE '\'
 				ORDER BY created_at DESC
 				LIMIT ?
 			`, likePattern, likePattern, limit)

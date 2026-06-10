@@ -411,21 +411,62 @@ func (c *LLMClassifier) parseResponse(content, originalInput string) (*Intent, e
 }
 
 func extractJSONFromLLM(s string) string {
-	start := strings.Index(s, "{")
-	if start == -1 {
-		start = strings.Index(s, "[")
-		if start == -1 {
-			return ""
+	// Find the start of the first JSON object or array.
+	start := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '{' || s[i] == '[' {
+			start = i
+			break
 		}
 	}
-	end := strings.LastIndex(s, "}")
-	if end == -1 {
-		end = strings.LastIndex(s, "]")
-	}
-	if end < start {
+	if start == -1 {
 		return ""
 	}
-	return s[start : end+1]
+
+	// Use bracket counting to find the matching close bracket,
+	// properly tracking string literals and escape sequences.
+	depth := 0
+	inString := false
+	escape := false
+	closeChar := byte('}')
+	if s[start] == '[' {
+		closeChar = ']'
+	}
+
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+
+		if escape {
+			escape = false
+			continue
+		}
+
+		if ch == '\\' && inString {
+			escape = true
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if ch == '{' || ch == '[' {
+			depth++
+		} else if ch == '}' || ch == ']' {
+			depth--
+			if depth == 0 && ch == closeChar {
+				return s[start : i+1]
+			}
+		}
+	}
+
+	// No matching close bracket found
+	return ""
 }
 
 func isValidIntent(intent string) bool {

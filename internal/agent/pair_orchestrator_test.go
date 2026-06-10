@@ -228,14 +228,14 @@ func TestPairOrchestrator_GetSession(t *testing.T) {
 	}
 
 	// Non-existent session
-	if s := po.GetSession("nonexistent"); s != nil {
-		t.Error("Expected nil for non-existent session")
+	if s, ok := po.GetSession("nonexistent"); ok || s != nil {
+		t.Error("Expected (nil, false) for non-existent session")
 	}
 
 	// Add a session
 	po.sessions["test"] = &BusPairSessionState{SessionID: "test"}
-	if s := po.GetSession("test"); s == nil {
-		t.Error("Expected non-nil for existing session")
+	if s, ok := po.GetSession("test"); !ok || s == nil {
+		t.Error("Expected (non-nil, true) for existing session")
 	}
 
 	if po.ActiveSessionCount() != 1 {

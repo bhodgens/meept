@@ -227,6 +227,8 @@ func (s *SQLiteFTSStore) GetDB() *sqlx.DB {
 
 // HasFTS5Public returns whether FTS5 is available.
 func (s *SQLiteFTSStore) HasFTS5Public() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.hasFTS5
 }
 

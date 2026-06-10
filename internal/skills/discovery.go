@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // SkillSource provides skills from a specific source.
@@ -42,6 +43,7 @@ func DefaultTiers() []DiscoveryTier {
 // Discovery orchestrates skill discovery across pluggable sources with priority shadowing.
 type Discovery struct {
 	sources []SkillSource
+	mu      sync.RWMutex
 	skills  map[string]*Skill // name -> skill (shadowed by priority)
 	logger  *slog.Logger
 }
@@ -109,7 +111,8 @@ func (d *Discovery) Discover() ([]*Skill, error) {
 // DiscoverWithContext scans all sources and returns discovered skills.
 // It accepts a context for cancellation support.
 func (d *Discovery) DiscoverWithContext(ctx context.Context) ([]*Skill, error) {
-	d.skills = make(map[string]*Skill)
+	// Build into a local map to avoid holding the lock during I/O.
+	skills := make(map[string]*Skill)
 
 	for _, source := range d.sources {
 		sourceSkills, err := source.Discover(ctx)
@@ -125,7 +128,7 @@ func (d *Discovery) DiscoverWithContext(ctx context.Context) ([]*Skill, error) {
 		// Merge with priority shadowing
 		for _, skill := range sourceSkills {
 			key := normalizeName(skill.Name)
-			existing, exists := d.skills[key]
+			existing, exists := skills[key]
 			if exists {
 				if skill.Priority <= existing.Priority {
 					d.logger.Debug("Skill shadowed by higher priority",
@@ -139,13 +142,18 @@ func (d *Discovery) DiscoverWithContext(ctx context.Context) ([]*Skill, error) {
 					continue
 				}
 			}
-			d.skills[key] = skill
+			skills[key] = skill
 		}
 	}
 
+	// Swap in the new skills map atomically.
+	d.mu.Lock()
+	d.skills = skills
+	d.mu.Unlock()
+
 	// Convert map to sorted slice
-	result := make([]*Skill, 0, len(d.skills))
-	for _, skill := range d.skills {
+	result := make([]*Skill, 0, len(skills))
+	for _, skill := range skills {
 		result = append(result, skill)
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -242,11 +250,15 @@ func (d *Discovery) DiscoverMetadataOnly() ([]*SkillIndexEntry, error) {
 
 // GetSkill returns a skill by name from the last discovery.
 func (d *Discovery) GetSkill(name string) *Skill {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return d.skills[normalizeName(name)]
 }
 
 // ListSkills returns all discovered skill names.
 func (d *Discovery) ListSkills() []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	names := make([]string, 0, len(d.skills))
 	for _, skill := range d.skills {
 		names = append(names, skill.Name)
@@ -257,6 +269,8 @@ func (d *Discovery) ListSkills() []string {
 
 // Count returns the number of discovered skills.
 func (d *Discovery) Count() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return len(d.skills)
 }
 

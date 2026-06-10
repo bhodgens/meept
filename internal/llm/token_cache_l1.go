@@ -84,27 +84,27 @@ func (c *L1Cache) buildKey(key CacheKey) string {
 }
 
 // Get retrieves an entry from the cache.
+// Expired entries are deleted under the write lock to prevent the race where
+// an intervening Put re-inserts a fresh entry that this method would skip.
 func (c *L1Cache) Get(key CacheKey) (*CacheEntry, bool) {
 	cacheKey := c.buildKey(key)
 
-	c.mu.RLock()
+	c.mu.Lock()
 	entry, exists := c.entries[cacheKey]
-	c.mu.RUnlock()
 
 	if !exists {
+		c.mu.Unlock()
 		return nil, false
 	}
 
-	// Check if expired
+	// Check if expired — delete under write lock
 	if entry.Entry.IsExpired() {
-		c.mu.Lock()
 		delete(c.entries, cacheKey)
 		c.mu.Unlock()
 		return nil, false
 	}
 
 	// Increment hit count and update last access time
-	c.mu.Lock()
 	entry.Entry.HitCount++
 	entry.Entry.LastAccessedAt = time.Now()
 	c.stats.L1Hits++

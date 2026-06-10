@@ -23,7 +23,6 @@ var (
 	configPath string
 	socketPath string
 	stateDir   string
-	foreground bool
 	debug      bool
 )
 
@@ -41,7 +40,6 @@ func main() {
 	rootCmd.Flags().StringVarP(&configPath, "config", "c", "", "Config file path (default: ~/.meept/meept.toml)")
 	rootCmd.Flags().StringVarP(&socketPath, "socket", "s", "", "Unix socket path (default: ~/.meept/meept.sock)")
 	rootCmd.Flags().StringVarP(&stateDir, "state-dir", "d", defaultStateDir, "State directory")
-	rootCmd.Flags().BoolVarP(&foreground, "foreground", "f", true, "Run in foreground")
 	rootCmd.Flags().BoolVar(&debug, "debug", false, "Enable debug logging")
 
 	// Version command

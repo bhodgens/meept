@@ -399,12 +399,14 @@ func (f *ContextFirewall) SetCompactor(compactor *ContextCompactor, triggerRatio
 
 // Chat sends a request through context filtering.
 func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatOption) (*Response, error) {
-	// Validate context size before processing
-	if err := f.ValidateContextSize(messages); err != nil {
+	processed := f.processMessages(ctx, messages)
+
+	// Validate context size after reduction (matches ChatWithDeltaCallback pattern).
+	// Pre-reduction validation can reject contexts that would be valid after
+	// compaction, summarization, or chunking.
+	if err := f.ValidateContextSize(processed); err != nil {
 		return nil, err
 	}
-
-	processed := f.processMessages(ctx, messages)
 
 	resp, err := f.inner.Chat(ctx, processed, opts...)
 	if err == nil && f.logger != nil {
@@ -416,12 +418,14 @@ func (f *ContextFirewall) Chat(ctx context.Context, messages []ChatMessage, opts
 
 // ChatWithProgress sends a request with progress reporting through context filtering.
 func (f *ContextFirewall) ChatWithProgress(ctx context.Context, messages []ChatMessage, progress ProgressCallback, opts ...ChatOption) (*Response, error) {
-	// Validate context size before processing
-	if err := f.ValidateContextSize(messages); err != nil {
+	processed := f.processMessages(ctx, messages)
+
+	// Validate context size after reduction (matches ChatWithDeltaCallback pattern).
+	// Pre-reduction validation can reject contexts that would be valid after
+	// compaction, summarization, or chunking.
+	if err := f.ValidateContextSize(processed); err != nil {
 		return nil, err
 	}
-
-	processed := f.processMessages(ctx, messages)
 
 	resp, err := f.inner.ChatWithProgress(ctx, processed, progress, opts...)
 	if err == nil && f.logger != nil {
@@ -747,10 +751,23 @@ func (f *ContextFirewall) greedyChunk(parts []string, maxChars int, sep string) 
 }
 
 // countTokens counts tokens in a message slice using the configured tokenizer.
+// Includes Content, ToolCallID, ToolCalls (function name + arguments), and Name fields.
 func (f *ContextFirewall) countTokens(messages []ChatMessage) int {
 	total := 0
 	for _, msg := range messages {
 		total += f.tokenizer.CountTokens(msg.Content)
+		if msg.ToolCallID != "" {
+			total += f.tokenizer.CountTokens(msg.ToolCallID)
+		}
+		for _, tc := range msg.ToolCalls {
+			total += f.tokenizer.CountTokens(tc.ID)
+			total += f.tokenizer.CountTokens(tc.Type)
+			total += f.tokenizer.CountTokens(tc.Function.Name)
+			total += f.tokenizer.CountTokens(tc.Function.Arguments)
+		}
+		if msg.Name != "" {
+			total += f.tokenizer.CountTokens(msg.Name)
+		}
 	}
 	return total
 }
