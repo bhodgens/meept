@@ -21,7 +21,9 @@ final storageProvider = Provider<StorageService>((ref) => StorageService.instanc
 // API Client provider — loads persisted host/port and API key from storage
 final apiClientProvider = Provider<ApiClient>((ref) {
   final storage = ref.watch(storageProvider);
-  return ApiClient.storage(storage: storage);
+  final client = ApiClient.storage(storage: storage);
+  ref.onDispose(() => client.dispose());
+  return client;
 });
 
 // WebSocket Service provider — reads persisted settings from storage

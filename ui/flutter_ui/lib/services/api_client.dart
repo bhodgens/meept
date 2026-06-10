@@ -96,6 +96,14 @@ class ApiClient {
   /// Expose the underlying Dio instance for advanced usage (e.g. interceptors).
   Dio get dio => _dio;
 
+  /// Dispose the underlying Dio/HttpClient resources.
+  ///
+  /// Must be called when the client is no longer needed to prevent
+  /// resource leaks (open HTTP connections, connection pools, etc.).
+  void dispose() {
+    _dio.close(force: true);
+  }
+
   // ===== Generic CRUD (retained for backward compat) =====
 
   /// Generic GET request

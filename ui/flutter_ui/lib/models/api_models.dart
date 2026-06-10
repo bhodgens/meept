@@ -64,7 +64,7 @@ class ChatMessage with _$ChatMessage {
       'content': json['content'] as String? ?? '',
       'timestamp': isoTimestamp,
       'session_id': json['session_id'] as String?,
-      'tool_calls': (json['tool_calls'] as List?)?.cast<String>(),
+      'tool_calls': (json['tool_calls'] as List?)?.map((e) => e.toString()).toList(),
     });
   }
 

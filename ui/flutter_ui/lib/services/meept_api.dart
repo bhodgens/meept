@@ -31,7 +31,8 @@ class MeeptApi {
     // The caller should construct a separate Dio for this, or we strip the
     // base path.  For simplicity, use the full URL relative to root.
     final rootUrl = _dio.options.baseUrl;
-    final rootBase = rootUrl.substring(0, rootUrl.indexOf('/api/'));
+    final idx = rootUrl.indexOf('/api/');
+    final rootBase = idx >= 0 ? rootUrl.substring(0, idx) : rootUrl;
     final response = await _dio.get('$rootBase/health');
     return response.data as Map<String, dynamic>;
   }
@@ -238,7 +239,7 @@ class MeeptApi {
     final data = response.data as Map<String, dynamic>;
     final raw = data['memories'] as List?;
     if (raw == null) return [];
-    return raw.cast<Map<String, dynamic>>().toList();
+    return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   Future<List<Map<String, dynamic>>> getRecentMemories({int limit = 10}) async {
@@ -248,7 +249,7 @@ class MeeptApi {
     final data = response.data as Map<String, dynamic>;
     final raw = data['memories'] as List?;
     if (raw == null) return [];
-    return raw.cast<Map<String, dynamic>>().toList();
+    return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   // ===== Skills =====
