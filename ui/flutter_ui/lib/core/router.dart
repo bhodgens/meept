@@ -49,6 +49,20 @@ final GoRouter router = GoRouter(
         return const _HomeShell(initialTab: HomeTab.tasks);
       },
     ),
+    GoRoute(
+      path: '/plans',
+      name: 'plans',
+      builder: (context, state) {
+        return const _HomeShell(initialTab: HomeTab.plans);
+      },
+    ),
+    GoRoute(
+      path: '/agents',
+      name: 'agents',
+      builder: (context, state) {
+        return const _HomeShell(initialTab: HomeTab.agents);
+      },
+    ),
 
     // --- Full-screen routes ---
     GoRoute(
@@ -220,6 +234,12 @@ extension AppRouterExtension on BuildContext {
 
   /// Navigate to the tasks tab (replace current entry).
   void goTasks() => go('/tasks');
+
+  /// Navigate to the plans tab (replace current entry).
+  void goPlans() => go('/plans');
+
+  /// Navigate to the agents tab (replace current entry).
+  void goAgents() => go('/agents');
 
   /// Navigate to the settings screen (replace current entry).
   void goSettings() => go('/settings');

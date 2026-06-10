@@ -153,6 +153,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
+  /// Returns true if [toolName] has a dedicated full-screen route.
+  bool _hasRoute(String toolName) {
+    const routedTools = {'search', 'branches', 'skills', 'memory', 'settings'};
+    return routedTools.contains(toolName);
+  }
+
   void _showHelpDialog() {
     showDialog(
       context: context,
@@ -286,12 +292,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           const Spacer(),
                           ToolsDropdown(
                             onToolSelected: (route) {
-                              ref.read(activeToolProvider.notifier).state = route;
-                              if (_selectedTab != HomeTab.chat) {
-                                setState(() => _selectedTab = HomeTab.chat);
+                              if (_hasRoute(route)) {
+                                // Full-screen route — don't set activeTool
+                                // to avoid orphaned state (bug F7).
+                                _navigateTool(route);
+                              } else {
+                                ref.read(activeToolProvider.notifier).state = route;
+                                if (_selectedTab != HomeTab.chat) {
+                                  setState(() => _selectedTab = HomeTab.chat);
+                                }
                               }
-                              // Navigate via go_router for known tool routes.
-                              _navigateTool(route);
                             },
                           ),
                           const SizedBox(width: 12),
