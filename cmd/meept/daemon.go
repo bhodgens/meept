@@ -237,16 +237,19 @@ func isDaemonRunning(pidFile string) (int, bool) {
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
+		os.Remove(pidFile) // Invalid PID file
 		return 0, false
 	}
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
+		os.Remove(pidFile) // Invalid PID — process lookup failed
 		return 0, false
 	}
 
 	// Check if process is actually running
 	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		os.Remove(pidFile) // Stale PID — process is dead
 		return 0, false
 	}
 
