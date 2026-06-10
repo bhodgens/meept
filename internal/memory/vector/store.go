@@ -165,10 +165,19 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]SearchRe
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Fetch all embeddings
+	// Fetch embeddings with a hard cap to avoid loading the entire table.
+	// Preferring recent rows (higher rowid) so that newer memories are
+	// candidates for similarity scoring even when the table is large.
+	maxRows := limit
+	if maxRows <= 0 {
+		maxRows = 500
+	}
+	if maxRows > 5000 {
+		maxRows = 5000
+	}
 	rows, err := s.db.Query(`
-		SELECT id, vector FROM embeddings
-	`)
+		SELECT id, vector FROM embeddings ORDER BY rowid DESC LIMIT ?
+	`, maxRows)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query embeddings: %w", err)
 	}
