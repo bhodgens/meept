@@ -238,3 +238,64 @@ func ListProviders(transport ProviderTransport) []ProviderDef {
 	}
 	return result
 }
+
+// ProvidersFromConfig builds ProviderDef entries from a ProvidersConfig (models.json5).
+// Each key in cfg.Providers that doesn't match a canonical provider ID is treated
+// as a user-defined OpenAI-compatible provider. Canonical providers get their
+// BaseURL/APIKey overridden from config if present.
+func ProvidersFromConfig(cfg *ProvidersConfig) []ProviderDef {
+	if cfg == nil || len(cfg.Providers) == 0 {
+		return nil
+	}
+
+	// Build lookup of canonical providers for override detection
+	canonical := make(map[string]ProviderDef, len(CanonicalProviders))
+	for _, p := range CanonicalProviders {
+		canonical[p.ID] = p
+	}
+
+	// Disabled providers set
+	disabled := make(map[string]bool, len(cfg.DisabledProviders))
+	for _, d := range cfg.DisabledProviders {
+		disabled[d] = true
+	}
+
+	var result []ProviderDef
+	for id, pc := range cfg.Providers {
+		if disabled[id] {
+			continue
+		}
+
+		if c, ok := canonical[id]; ok {
+			// Override base URL / API key from config
+			if pc.Options.BaseURL != "" {
+				c.BaseURL = pc.Options.BaseURL
+			}
+			if pc.Options.APIKey != "" {
+				c.APIKeyEnvVar = "" // clear env var, use direct key
+			}
+			result = append(result, c)
+			continue
+		}
+
+		// User-defined provider — synthesize a ProviderDef
+		def := ProviderDef{
+			ID:        id,
+			Name:      id, // Use the config key as display name
+			Transport: TransportOpenAIChat,
+			AuthType:  AuthEnvVar,
+			BaseURL:   pc.Options.BaseURL,
+			Supports:  []string{CapStreaming},
+		}
+		if pc.Options.APIKey != "" {
+			def.AuthType = AuthAPIKey
+		}
+		// Detect lifecycle (local LLM)
+		if pc.Lifecycle != nil {
+			def.Supports = append(def.Supports, "local")
+		}
+		result = append(result, def)
+	}
+
+	return result
+}

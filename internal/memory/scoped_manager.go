@@ -38,30 +38,58 @@ func (s *ScopedMemoryManager) Store(ctx context.Context, mem Memory) (string, er
 
 // Search finds memories matching the query, filtering to only those
 // belonging to this bot.
+// It fetches a larger batch from the underlying store so that filtering
+// by bot_id does not silently truncate results (e.g. requesting limit=10
+// but all 10 rows belong to a different bot would previously return
+// an empty slice with no indication).
 func (s *ScopedMemoryManager) Search(ctx context.Context, query MemoryQuery) ([]MemoryResult, error) {
-	results, err := s.manager.Search(ctx, query)
+	expandedQuery := query
+	if expandedQuery.Limit < 100 {
+		expandedQuery.Limit = expandedQuery.Limit * 5
+	}
+	results, err := s.manager.Search(ctx, expandedQuery)
 	if err != nil {
 		return nil, err
 	}
-	return s.filterResults(results), nil
+	filtered := s.filterResults(results)
+	if len(filtered) > query.Limit {
+		filtered = filtered[:query.Limit]
+	}
+	return filtered, nil
 }
 
 // GetRecent retrieves the most recent memories belonging to this bot.
 func (s *ScopedMemoryManager) GetRecent(ctx context.Context, limit int) ([]MemoryResult, error) {
-	results, err := s.manager.GetRecent(ctx, limit)
+	expandedLimit := limit * 5
+	if expandedLimit < limit+5 {
+		expandedLimit = limit + 5
+	}
+	results, err := s.manager.GetRecent(ctx, expandedLimit)
 	if err != nil {
 		return nil, err
 	}
-	return s.filterResults(results), nil
+	filtered := s.filterResults(results)
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
 }
 
 // GetRelevantContext retrieves memories relevant to a query, scoped to this bot.
 func (s *ScopedMemoryManager) GetRelevantContext(ctx context.Context, query string, maxItems int) ([]MemoryResult, error) {
-	results, err := s.manager.GetRelevantContext(ctx, query, maxItems)
+	expandedMax := maxItems * 5
+	if expandedMax < maxItems+5 {
+		expandedMax = maxItems + 5
+	}
+	results, err := s.manager.GetRelevantContext(ctx, query, expandedMax)
 	if err != nil {
 		return nil, err
 	}
-	return s.filterResults(results), nil
+	filtered := s.filterResults(results)
+	if len(filtered) > maxItems {
+		filtered = filtered[:maxItems]
+	}
+	return filtered, nil
 }
 
 // GetByID retrieves a memory by ID. It returns the memory only if it
@@ -121,29 +149,53 @@ func (s *ScopedMemoryManager) Delete(ctx context.Context, id string) error {
 
 // SearchSemantic performs vector similarity search, scoped to this bot.
 func (s *ScopedMemoryManager) SearchSemantic(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
-	results, err := s.manager.SearchSemantic(ctx, query, limit)
+	expandedLimit := limit * 5
+	if expandedLimit < limit+5 {
+		expandedLimit = limit + 5
+	}
+	results, err := s.manager.SearchSemantic(ctx, query, expandedLimit)
 	if err != nil {
 		return nil, err
 	}
-	return s.filterResults(results), nil
+	filtered := s.filterResults(results)
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
 }
 
 // SearchHybrid performs hybrid search, scoped to this bot.
 func (s *ScopedMemoryManager) SearchHybrid(ctx context.Context, query string, limit int) ([]MemoryResult, error) {
-	results, err := s.manager.SearchHybrid(ctx, query, limit)
+	expandedLimit := limit * 5
+	if expandedLimit < limit+5 {
+		expandedLimit = limit + 5
+	}
+	results, err := s.manager.SearchHybrid(ctx, query, expandedLimit)
 	if err != nil {
 		return nil, err
 	}
-	return s.filterResults(results), nil
+	filtered := s.filterResults(results)
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
 }
 
 // SearchWithGraph performs graph-aware search, scoped to this bot.
 func (s *ScopedMemoryManager) SearchWithGraph(ctx context.Context, query MemoryQuery, alpha float64) ([]MemoryResult, error) {
-	results, err := s.manager.SearchWithGraph(ctx, query, alpha)
+	expandedQuery := query
+	if expandedQuery.Limit < 100 {
+		expandedQuery.Limit = expandedQuery.Limit * 5
+	}
+	results, err := s.manager.SearchWithGraph(ctx, expandedQuery, alpha)
 	if err != nil {
 		return nil, err
 	}
-	return s.filterResults(results), nil
+	filtered := s.filterResults(results)
+	if len(filtered) > query.Limit {
+		filtered = filtered[:query.Limit]
+	}
+	return filtered, nil
 }
 
 // IsInitialized returns true if the underlying manager is initialized.

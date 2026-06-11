@@ -162,31 +162,26 @@ func (m *ShardManager) GetShard(shardType ShardType) (*VectorShard, error) {
 	m.lru.Access(string(shardType))
 	shard := m.shards[shardType]
 
-	// Evict if over capacity (skip always-loaded shards)
-	if !shardType.IsAlwaysLoaded() {
-		maybeEvict := m.lru.Len() > m.maxRAMShards
-		if maybeEvict {
-			// Find least-recently-used non-always-loaded shard
-			for _, lruKey := range m.lru.Keys() {
-				lruType := ShardType(lruKey)
-				if !lruType.IsAlwaysLoaded() {
-					_ = m.unlockAndUnloadShard(lruType)
-					break
-				}
+	// Collect eviction victim while holding lock
+	var victim ShardType
+	if !shardType.IsAlwaysLoaded() && m.lru.Len() > m.maxRAMShards {
+		for _, lruKey := range m.lru.Keys() {
+			lt := ShardType(lruKey)
+			if !lt.IsAlwaysLoaded() && lt != shardType {
+				victim = lt
+				break
 			}
 		}
 	}
 
 	m.mu.Unlock()
-	return shard, nil
-}
 
-// unlockAndUnloadShard unloads a shard (caller must hold lock).
-func (m *ShardManager) unlockAndUnloadShard(shardType ShardType) error {
-	m.mu.Unlock()
-	err := m.unloadShard(shardType)
-	m.mu.Lock()
-	return err
+	// Evict outside the lock
+	if victim != "" {
+		_ = m.unloadShard(victim)
+	}
+
+	return shard, nil
 }
 
 // GetProjectShard returns a project-specific shard by project ID.
@@ -244,7 +239,15 @@ func (m *ShardManager) Search(ctx context.Context, query string, k int, shardTyp
 			continue
 		}
 
-		results, err := shard.Search(ctx, queryEmb, k/len(shardTypes), 0)
+		perShardK := k / len(shardTypes)
+		if perShardK == 0 {
+			perShardK = k // if fewer shard types than k, use k
+		}
+		efSearch := perShardK * 2 // ef should be >= k for good recall
+		if efSearch < 100 {
+			efSearch = 100
+		}
+		results, err := shard.Search(ctx, queryEmb, perShardK, efSearch)
 		if err != nil {
 			m.logger.Warn("shard search failed", "type", shardType, "error", err)
 			continue

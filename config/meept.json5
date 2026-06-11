@@ -740,6 +740,30 @@
     },
   },
 
+  // Text-to-speech configuration (client-side: TUI and Flutter)
+  "tts": {
+    "enabled": false,
+    "engine": "piper",
+    "voice": "danny-medium",
+    "piper": {
+      "bin_path": "piper",
+      "model_path": "",
+      "config_path": "",
+      "speaker": ""
+    },
+    "playback": {
+      "volume": 1.0,
+      "rate": 1.0,
+      "audio_device": ""
+    },
+    "behavior": {
+      "read_own_messages": false,
+      "interrupt_on_new_msg": true,
+      "queue_messages": false,
+      "max_queue_size": 5
+    }
+  },
+
   // Analytics configuration
   "analytics": {
     "enabled": true,

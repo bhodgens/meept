@@ -348,6 +348,30 @@ func (t *MemoryGetVersionTool) Execute(ctx context.Context, args map[string]any)
 		return nil, fmt.Errorf("memory not found: %s", memoryID)
 	}
 
+	// If a specific version is requested, look it up from version history
+	if versionRaw, ok := args["version"].(float64); ok {
+		version := int(versionRaw)
+		history, err := t.manager.GetVersionHistory(ctx, memoryID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get version history: %w", err)
+		}
+		for _, m := range history {
+			if v, ok := m.Metadata["version"]; ok {
+				if fmt.Sprintf("%v", v) == fmt.Sprintf("%d", version) {
+					return map[string]any{
+						"id":        m.ID,
+						"content":   m.Content,
+						"type":      string(m.Type),
+						"category":  m.Category,
+						"created_at": m.CreatedAt,
+						"version":   version,
+					}, nil
+				}
+			}
+		}
+		return nil, fmt.Errorf("version %d not found", version)
+	}
+
 	// Build result with version metadata
 	result := map[string]any{
 		"id":               mem.ID,
@@ -652,25 +676,37 @@ func (t *MemoryRecallTool) Execute(ctx context.Context, args map[string]any) (an
 
 	domain, _ := args["domain"].(string)
 	minImportance, _ := args["min_importance"].(string)
-	limitRaw, _ := args["limit"].(int)
+	var limitRaw int
+	if v, ok := args["limit"].(float64); ok {
+		limitRaw = int(v)
+	}
 	if limitRaw == 0 {
 		limitRaw = 10
 	}
 
-	// Search memories with hindsight category
+	// Search task memories (hindsight facts are stored as task memories)
 	results, err := t.manager.Search(ctx, memory.MemoryQuery{
-		Query:    query,
-		Type:     memory.MemoryTypeTask,
-		Category: "hindsight",
-		Limit:    limitRaw,
+		Query: query,
+		Type:  memory.MemoryTypeTask,
+		Limit: limitRaw,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to recall memories: %w", err)
 	}
 
-	// Filter and convert results
+	// Filter and convert results — only include retained hindsight facts
 	facts := make([]MemoryFact, 0, len(results))
 	for _, r := range results {
+		// Skip non-hindsight memories: check category prefix or retained metadata flag
+		isHindsight := strings.HasPrefix(r.Memory.Category, "hindsight")
+		if !isHindsight && r.Memory.Metadata != nil {
+			if retained, ok := r.Memory.Metadata["retained"].(bool); ok && retained {
+				isHindsight = true
+			}
+		}
+		if !isHindsight {
+			continue
+		}
 		// Skip if importance filter applies
 		if minImportance != "" && r.Memory.Metadata != nil {
 			if imp, ok := r.Memory.Metadata["importance"].(string); ok {
@@ -783,6 +819,9 @@ type MemoryReflectResult struct {
 func (t *MemoryReflectTool) Execute(ctx context.Context, args map[string]any) (any, error) {
 	if t.manager == nil {
 		return nil, fmt.Errorf("memory manager not configured")
+	}
+	if t.llmClient == nil {
+		return nil, fmt.Errorf("LLM client not configured for memory reflection")
 	}
 
 	prompt, _ := args["prompt"].(string)

@@ -3,6 +3,7 @@ package memory
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -137,6 +138,14 @@ CREATE TABLE IF NOT EXISTS graph_stats (
 )`
 )
 
+// generateEdgeID creates a unique edge ID using full source/target IDs plus a random
+// suffix, avoiding collisions from truncated UUID prefixes.
+func generateEdgeID(sourceID, targetID string, edgeType EdgeType) string {
+	buf := make([]byte, 4)
+	_, _ = rand.Read(buf)
+	return fmt.Sprintf("%s-%s-%s-%x", sourceID, targetID, edgeType, buf)
+}
+
 // NewKnowledgeGraph creates a new knowledge graph instance.
 func NewKnowledgeGraph(cfg KnowledgeGraphConfig) *KnowledgeGraph {
 	if cfg.Logger == nil {
@@ -228,7 +237,7 @@ func (g *KnowledgeGraph) AddEdge(ctx context.Context, edge MemoryEdge) error {
 	g.mu.RUnlock()
 
 	if edge.ID == "" {
-		edge.ID = fmt.Sprintf("%s-%s-%s", edge.SourceID[:min(8, len(edge.SourceID))], edge.TargetID[:min(8, len(edge.TargetID))], edge.EdgeType)
+		edge.ID = generateEdgeID(edge.SourceID, edge.TargetID, edge.EdgeType)
 	}
 	if edge.CreatedAt.IsZero() {
 		edge.CreatedAt = time.Now()
@@ -286,7 +295,7 @@ func (g *KnowledgeGraph) AddEdges(ctx context.Context, edges []MemoryEdge) error
 
 		for _, edge := range edges {
 			if edge.ID == "" {
-				edge.ID = fmt.Sprintf("%s-%s-%s", edge.SourceID[:min(8, len(edge.SourceID))], edge.TargetID[:min(8, len(edge.TargetID))], edge.EdgeType)
+				edge.ID = generateEdgeID(edge.SourceID, edge.TargetID, edge.EdgeType)
 			}
 			if edge.CreatedAt.IsZero() {
 				edge.CreatedAt = time.Now()
@@ -576,14 +585,25 @@ func (g *KnowledgeGraph) GetPageRank(ctx context.Context, memoryID string) (floa
 		return 0, errors.New("knowledge graph not initialized")
 	}
 
-	// Check cache
+	// Check cache first
 	if time.Since(g.cacheLastUpdated) < g.cacheTTL {
 		if score, ok := g.pageRankCache[memoryID]; ok {
 			g.mu.RUnlock()
 			return score, nil
 		}
 	}
+
+	// Cache miss — need write lock to update cache
 	g.mu.RUnlock()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Double-check cache after acquiring write lock
+	if time.Since(g.cacheLastUpdated) < g.cacheTTL {
+		if score, ok := g.pageRankCache[memoryID]; ok {
+			return score, nil
+		}
+	}
 
 	// Fetch from database
 	var score float64
@@ -594,6 +614,9 @@ func (g *KnowledgeGraph) GetPageRank(ctx context.Context, memoryID string) (floa
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
+	}
+	if err == nil {
+		g.pageRankCache[memoryID] = score
 	}
 	return score, err
 }
@@ -776,14 +799,25 @@ func (g *KnowledgeGraph) GetCommunity(ctx context.Context, memoryID string) (str
 		return "", errors.New("knowledge graph not initialized")
 	}
 
-	// Check cache
+	// Check cache first
 	if time.Since(g.cacheLastUpdated) < g.cacheTTL {
 		if community, ok := g.communityCache[memoryID]; ok {
 			g.mu.RUnlock()
 			return community, nil
 		}
 	}
+
+	// Cache miss — need write lock to update cache
 	g.mu.RUnlock()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Double-check cache after acquiring write lock
+	if time.Since(g.cacheLastUpdated) < g.cacheTTL {
+		if community, ok := g.communityCache[memoryID]; ok {
+			return community, nil
+		}
+	}
 
 	// Fetch from database
 	var community string
@@ -794,6 +828,9 @@ func (g *KnowledgeGraph) GetCommunity(ctx context.Context, memoryID string) (str
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
+	}
+	if err == nil {
+		g.communityCache[memoryID] = community
 	}
 	return community, err
 }

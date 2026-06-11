@@ -294,6 +294,17 @@ The HTTP API uses a **service layer pattern** to share business logic between RP
   `CompactionTokensSaved`, and `CompactionFallbacks` so operators can monitor
   context-pressure indicators and compaction effectiveness.
 
+### Text-to-Speech Configuration
+
+TTS is client-side only (TUI and Flutter). Uses Piper TTS or platform-native synthesis:
+- piper: `piper` binary with ONNX voice models at `~/.meept/tts/voices/`
+- platform: macOS `say` command / Windows SAPI (no extra dependencies)
+
+Default voice: `danny-medium` (English US, medium quality)
+
+Config: `meept config tts`
+
+
 ### Speech-to-Text Configuration
 
 STT is client-side only (TUI and Flutter). Requires external tools depending on engine:
@@ -419,6 +430,7 @@ internal/
   security/        # Security engine, sanitizer, tirith
   selfimprove/     # Self-improvement system
   skills/          # Skill discovery and parsing
+  tts/             # Text-to-speech (synthesizer interface, piper, platform)
   stt/             # Speech-to-text (transcriber interface, whisper, parakeet, native)
   tools/           # Tool registry and builtins
   runtime/         # Containerized execution backends (local, Docker)

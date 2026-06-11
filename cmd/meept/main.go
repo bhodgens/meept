@@ -143,6 +143,7 @@ Analytics:
 	rootCmd.AddCommand(newBotsCmd())
 	rootCmd.AddCommand(newInitCmd())
 	rootCmd.AddCommand(newAnalyticsCmd())
+	rootCmd.AddCommand(newTTSCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

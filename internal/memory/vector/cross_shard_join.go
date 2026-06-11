@@ -113,15 +113,13 @@ func (c *CrossShardJoin) QueryAllShards(ctx context.Context, query string, args 
 	var results []SearchResult
 	for rows.Next() {
 		var sr SearchResult
-		if err := rows.Scan(&sr.MemoryID, &sr.Content, &sr.VectorSimilarity, &sr.Metadata); err != nil {
-			// Metadata may be nil from scan; handle gracefully
-			var metaStr string
-			rows.Scan(&sr.MemoryID, &sr.Content, &sr.VectorSimilarity, &metaStr)
-			sr.RelevanceScore = sr.VectorSimilarity
-			sr.Metadata = parseMetadataString(metaStr)
+		var metaStr string
+		if err := rows.Scan(&sr.MemoryID, &sr.Content, &sr.VectorSimilarity, &metaStr); err != nil {
+			// Skip rows with scan errors rather than attempting partial reads
 			continue
 		}
 		sr.RelevanceScore = sr.VectorSimilarity
+		sr.Metadata = parseMetadataString(metaStr)
 		results = append(results, sr)
 	}
 

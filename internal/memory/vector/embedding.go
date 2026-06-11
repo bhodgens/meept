@@ -215,7 +215,7 @@ type ollamaEmbeddingRequest struct {
 
 // ollamaEmbeddingResponse is the response from Ollama embeddings API.
 type ollamaEmbeddingResponse struct {
-	Embedding []float32 `json:"embedding"`
+	Embedding []float64 `json:"embedding"`
 	Error     string    `json:"error"`
 }
 
@@ -264,7 +264,11 @@ func (p *OllamaProvider) GenerateEmbedding(ctx context.Context, text string) ([]
 		return nil, fmt.Errorf("ollama API error: %s", respData.Error)
 	}
 
-	return respData.Embedding, nil
+	embedding := make([]float32, len(respData.Embedding))
+	for i, v := range respData.Embedding {
+		embedding[i] = float32(v)
+	}
+	return embedding, nil
 }
 
 // GenerateEmbeddings generates embeddings for multiple texts.

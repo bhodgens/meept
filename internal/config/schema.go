@@ -46,6 +46,7 @@ type Config struct {
 	Plans             PlansConfig             `json:"plans"               toml:"plans"`
 	Projects          ProjectsConfig          `json:"projects"            toml:"projects"`
 	STT               STTConfig               `json:"stt"                 toml:"stt"`
+	TTS               TTSConfig               `json:"tts"                 toml:"tts"`
 	OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
 	Analytics         AnalyticsConfig         `json:"analytics,omitempty" toml:"analytics"`
 	Notifications     NotificationsConfig     `json:"notifications,omitempty" toml:"notifications"`
@@ -1647,6 +1648,15 @@ func DefaultConfig() *Config {
 			Parakeet:   ParakeetConfig{BinPath: "parakeet-transcribe", ModelPath: ""},
 			Recording:  RecordingConfig{RecorderBin: "ffmpeg", SampleRate: 16000, Channels: 1, Format: "wav"},
 		},
+		TTS: TTSConfig{
+			Enabled:   false,
+			Engine:    "piper",
+			Voice:     "danny-medium",
+			VoicePath: "",
+			Piper:      PiperTTSConfig{BinPath: "piper", ModelPath: "", ConfigPath: "", Speaker: ""},
+			Playback:   TTSPlaybackConfig{Volume: 1.0, Rate: 1.0, AudioDevice: ""},
+			Behavior:   TTSBehaviorConfig{ReadOwnMessages: false, InterruptOnNewMsg: true, QueueMessages: false, MaxQueueSize: 5},
+		},
 	}
 }
 
@@ -1784,4 +1794,44 @@ type PTYConfig struct {
 	MaxTerminalCols int `json:"max_terminal_cols" toml:"max_terminal_cols"`
 	SocketPath   string `json:"socket_path"      toml:"socket_path"`
 	TLSEnabled   bool   `json:"tls_enabled"      toml:"tls_enabled"`
+}
+
+// TTSConfig holds text-to-speech settings for client-side speech synthesis.
+type TTSConfig struct {
+	Enabled   bool              `json:"enabled"   toml:"enabled"`
+	Engine    string            `json:"engine"    toml:"engine"` // "piper" | "platform"
+	Voice     string            `json:"voice"     toml:"voice"`  // voice identifier e.g. "danny-medium"
+	VoicePath string            `json:"voice_path" toml:"voice_path"`
+
+	// Piper-specific settings
+	Piper    PiperTTSConfig    `json:"piper"    toml:"piper"`
+
+	// Playback settings
+	Playback TTSPlaybackConfig `json:"playback" toml:"playback"`
+
+	// Behavior settings
+	Behavior TTSBehaviorConfig `json:"behavior" toml:"behavior"`
+}
+
+// PiperTTSConfig holds Piper TTS engine settings.
+type PiperTTSConfig struct {
+	BinPath    string `json:"bin_path"   toml:"bin_path"`
+	ModelPath  string `json:"model_path" toml:"model_path"`
+	ConfigPath string `json:"config_path" toml:"config_path"`
+	Speaker    string `json:"speaker"    toml:"speaker"` // for multi-speaker models
+}
+
+// TTSPlaybackConfig holds audio playback settings.
+type TTSPlaybackConfig struct {
+	Volume      float64 `json:"volume"       toml:"volume"`        // 0.0 to 1.0
+	Rate        float64 `json:"rate"         toml:"rate"`          // 0.5 to 2.0
+	AudioDevice string  `json:"audio_device" toml:"audio_device"`  // empty = system default
+}
+
+// TTSBehaviorConfig holds TTS behavior settings.
+type TTSBehaviorConfig struct {
+	ReadOwnMessages   bool `json:"read_own_messages"   toml:"read_own_messages"`
+	InterruptOnNewMsg bool `json:"interrupt_on_new_msg" toml:"interrupt_on_new_msg"`
+	QueueMessages     bool `json:"queue_messages"      toml:"queue_messages"`
+	MaxQueueSize      int  `json:"max_queue_size"      toml:"max_queue_size"`
 }

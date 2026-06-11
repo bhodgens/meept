@@ -47,6 +47,7 @@ type ModelPickerConfig struct {
 	AllowCustom       bool
 	PreselectProvider string
 	PreselectModel    string
+	ProvidersConfig   *ProvidersConfig // If set, custom providers from config are merged in
 }
 
 // ModelPicker is the TUI model picker.

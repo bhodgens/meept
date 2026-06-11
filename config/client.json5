@@ -94,4 +94,11 @@
     // Agent progress verbosity: "quiet" (task-only), "normal" (task + tools), "verbose" (everything)
     "verbosity": "normal",
   },
+
+  // Text-to-speech configuration (TTS)
+  "tts": {
+    "enabled": false,
+    "engine": "piper",
+    "voice": "danny-medium",
+  },
 }

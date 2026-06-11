@@ -592,19 +592,17 @@ func (m *Manager) searchViaSQLite(ctx context.Context, query MemoryQuery) ([]Mem
 	if searchEpisodic && m.episodic != nil {
 		episodicResults, err := m.episodic.Search(ctx, query.Query, query.Limit)
 		if err != nil {
-			m.logger.Warn("Episodic search failed", "error", err)
-		} else {
-			results = append(results, episodicResults...)
+			return nil, fmt.Errorf("episodic search failed: %w", err)
 		}
+		results = append(results, episodicResults...)
 	}
 
 	if searchTask && m.task != nil {
 		taskResults, err := m.task.Search(ctx, query.Query, query.Domain, query.Limit)
 		if err != nil {
-			m.logger.Warn("Task search failed", "error", err)
-		} else {
-			results = append(results, taskResults...)
+			return nil, fmt.Errorf("task search failed: %w", err)
 		}
+		results = append(results, taskResults...)
 	}
 
 	// Sort by relevance descending, then by created_at descending
@@ -1238,10 +1236,15 @@ func (m *Manager) GetVersionHistory(ctx context.Context, id string) ([]Memory, e
 		var mem Memory
 		var metaJSON string
 		var lastAccessedStr sql.NullString
+		var createdAtStr string
 
-		err := rows.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &mem.CreatedAt, &lastAccessedStr)
+		err := rows.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &createdAtStr, &lastAccessedStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan memory: %w", err)
+		}
+
+		if t, err := time.Parse(time.RFC3339Nano, createdAtStr); err == nil {
+			mem.CreatedAt = t
 		}
 
 		mem.Metadata = ParseMetadata(metaJSON)
@@ -1279,7 +1282,14 @@ func (m *Manager) GetByID(ctx context.Context, id string) (*Memory, error) {
 	var lastAccessedStr sql.NullString
 	err := row.Scan(&mem.ID, &mem.Content, &mem.Category, &metaJSON, &createdAtStr, &lastAccessedStr)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
+			// Try task memory
+			if m.task != nil {
+				taskMem, taskErr := m.task.GetByID(ctx, id)
+				if taskErr == nil {
+					return &taskMem.Memory, nil
+				}
+			}
 			return nil, ErrNotFound
 		}
 		return nil, err
@@ -1342,7 +1352,8 @@ func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, e
 
 	var memories []Memory
 	for rows.Next() {
-		var id, content, category, metaJSON, createdAtStr, lastAccessedStr string
+		var id, content, category, metaJSON, createdAtStr string
+		var lastAccessedStr sql.NullString
 		err := rows.Scan(&id, &content, &category, &metaJSON, &createdAtStr, &lastAccessedStr)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan memory: %w", err)
@@ -1350,8 +1361,8 @@ func (m *Manager) GetExpiredMemories(ctx context.Context, days int) ([]Memory, e
 
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 		var lastAccessed *time.Time
-		if lastAccessedStr != "" {
-			if t, err := time.Parse(time.RFC3339Nano, lastAccessedStr); err == nil {
+		if lastAccessedStr.Valid && lastAccessedStr.String != "" {
+			if t, err := time.Parse(time.RFC3339Nano, lastAccessedStr.String); err == nil {
 				lastAccessed = &t
 			}
 			// If parse fails, leave lastAccessed as nil rather than zero time
@@ -1397,6 +1408,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		if err == nil {
 			return nil
 		}
+		if !errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("failed to delete from episodic memory: %w", err)
+		}
 	}
 
 	// Try task memory
@@ -1404,6 +1418,9 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		err := m.task.Delete(ctx, id)
 		if err == nil {
 			return nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return fmt.Errorf("failed to delete from task memory: %w", err)
 		}
 	}
 
