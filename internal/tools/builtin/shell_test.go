@@ -12,7 +12,7 @@ import (
 )
 
 func TestShellExecuteTool_Execute(t *testing.T) {
-	tool := NewShellExecuteTool("", time.Second*10)
+	tool := NewShellExecuteTool("", time.Second*10, nil)
 	ctx := context.Background()
 
 	// Test simple echo
@@ -94,7 +94,7 @@ func TestShellExecuteTool_Execute(t *testing.T) {
 }
 
 func TestShellExecuteTool_ClassifyRisk(t *testing.T) {
-	tool := NewShellExecuteTool("", 0)
+	tool := NewShellExecuteTool("", 0, nil)
 
 	tests := []struct {
 		command string
@@ -167,7 +167,7 @@ func TestExtractBaseCommand(t *testing.T) {
 
 func TestShellExecuteTool_WorkingDir(t *testing.T) {
 	dir := t.TempDir()
-	tool := NewShellExecuteTool(dir, 0)
+	tool := NewShellExecuteTool(dir, 0, nil)
 	ctx := context.Background()
 
 	// Test default working directory
@@ -216,7 +216,7 @@ func unwrapShellResult(t *testing.T, result any) ShellResult {
 // classified RiskHigh by default but drops to RiskMedium when added via
 // SetKnownSafeCommands.
 func TestShellRisk_ConfigurableAllowlist(t *testing.T) {
-	tool := NewShellExecuteTool("", time.Second*10)
+	tool := NewShellExecuteTool("", time.Second*10, nil)
 
 	// Default: unknown command is RiskHigh.
 	if got := tool.classifyRisk("mytool --flag"); got != RiskHigh {

@@ -49,6 +49,8 @@ type Config struct {
 	OAuth             OAuthConfig             `json:"oauth"               toml:"oauth"`
 	Analytics         AnalyticsConfig         `json:"analytics,omitempty" toml:"analytics"`
 	Notifications     NotificationsConfig     `json:"notifications,omitempty" toml:"notifications"`
+	Runtime           RuntimeConfig           `json:"runtime"             toml:"runtime"`
+	PTY               PTYConfig               `json:"pty"                  toml:"pty"`
 }
 
 // BotsConfig holds configuration for the persistent bot framework.
@@ -1640,6 +1642,40 @@ type NotificationsConfig struct {
 	Retention int  `json:"retention,omitempty"     toml:"retention"`
 }
 
+// RuntimeConfig holds configuration for execution backends (local, Docker).
+type RuntimeConfig struct {
+	// Enabled controls whether runtime backends are initialized.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// DefaultBackend is "local" or "docker".
+	DefaultBackend string `json:"default_backend" toml:"default_backend"`
+	// Docker holds Docker-specific configuration.
+	Docker DockerRuntimeConfig `json:"docker" toml:"docker"`
+}
+
+// DockerRuntimeConfig holds Docker backend settings.
+type DockerRuntimeConfig struct {
+	// Image is the default container image.
+	Image string `json:"image" toml:"image"`
+	// VolumeBinds maps host paths to container paths.
+	VolumeBinds []string `json:"volume_binds" toml:"volume_binds"`
+	// TimeoutSeconds is the default command timeout.
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+	// AutoCleanup removes containers after use.
+	AutoCleanup bool `json:"auto_cleanup" toml:"auto_cleanup"`
+}
+
+// TestHarnessConfig holds test harness settings.
+type TestHarnessConfig struct {
+	// Enabled controls test harness validation.
+	Enabled bool `json:"enabled" toml:"enabled"`
+	// InstallCommand runs before tests (e.g., "go mod download").
+	InstallCommand string `json:"install_command" toml:"install_command"`
+	// TestCommand runs tests (e.g., "go test ./...").
+	TestCommand string `json:"test_command" toml:"test_command"`
+	// TimeoutSeconds is the test timeout.
+	TimeoutSeconds int `json:"timeout_seconds" toml:"timeout_seconds"`
+}
+
 // STTConfig holds configuration for speech-to-text transcription.
 type STTConfig struct {
 	Enabled  bool              `json:"enabled"       toml:"enabled"`
@@ -1676,4 +1712,14 @@ type RecordingConfig struct {
 	SampleRate  int    `json:"sample_rate"  toml:"sample_rate"`
 	Channels    int    `json:"channels"     toml:"channels"`
 	Format      string `json:"format"       toml:"format"`
+}
+
+// PTYConfig holds pseudo-terminal streaming settings.
+type PTYConfig struct {
+	Enabled      bool   `json:"enabled"          toml:"enabled"`
+	MaxSessions  int    `json:"max_sessions"     toml:"max_sessions"`
+	MaxTerminalRows int `json:"max_terminal_rows" toml:"max_terminal_rows"`
+	MaxTerminalCols int `json:"max_terminal_cols" toml:"max_terminal_cols"`
+	SocketPath   string `json:"socket_path"      toml:"socket_path"`
+	TLSEnabled   bool   `json:"tls_enabled"      toml:"tls_enabled"`
 }

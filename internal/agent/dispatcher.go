@@ -153,6 +153,10 @@ type DispatchResult struct {
 	ClarificationNeeded bool `json:"clarification_needed,omitempty"`
 	// Plan is the created plan if plan routing was triggered.
 	Plan *plan.Plan `json:"plan,omitempty"`
+	// ClassificationNotice is a user-facing notice about classification degradation
+	// (e.g., LLM classifier failed and fallback was used). Empty when classification
+	// succeeded normally.
+	ClassificationNotice string `json:"classification_notice,omitempty"`
 }
 
 // Dispatcher handles intake classification and routing of requests.
@@ -177,6 +181,7 @@ type Dispatcher struct {
 	router            *ReportRouter
 	modelParser       *ModelReassignmentParser
 	planManager       *plan.PlanManager
+	lastClassificationErr error
 }
 
 // IntentClassifier is an interface for classifying intents.
@@ -471,10 +476,18 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 	// Record intent in session tracker
 	d.sessionTracker.RecordIntent(sessionID, intent, intent.AgentType)
 
+	// Attach classification degradation notice if the LLM classifier failed
+	// but fallback succeeded.
+	if d.lastClassificationErr != nil {
+		result.ClassificationNotice = llm.ClassificationUserGuidance(d.lastClassificationErr)
+		d.logger.Debug("Classification used fallback",
+			"failure_kind", llm.ClassifyClassificationFailure(d.lastClassificationErr),
+			"notice", result.ClassificationNotice,
+		)
+	}
+
 	return result, nil
 }
-
-// classifyIntent uses classifiers to determine intent with fallback chain:
 // 1. Short-message guard: brief inputs route directly to chat (Issues 0006, 0029, 0036)
 // 2. Try capability matcher (fast, no LLM) if available and confident
 // 3. Try LLM classifier (if available)
@@ -483,6 +496,7 @@ func (d *Dispatcher) ClassifyAndRoute(ctx context.Context, input, sessionID stri
 // 6. Final fallback to Chat for clarification
 func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *MemoryContext) *Intent {
 	d.recordTotalDispatch()
+	d.lastClassificationErr = nil
 
 	// --- Guard: short/simple messages skip the full classifier chain ---
 	// Tiny models over-classify simple greetings, arithmetic, and short phrases
@@ -553,7 +567,12 @@ func (d *Dispatcher) classifyIntent(ctx context.Context, input string, memCtx *M
 				"threshold", GetThresholdForIntent(intent.Type),
 			)
 		} else if err != nil {
-			d.logger.Warn("LLM classifier failed, trying keyword", "error", err)
+			kind := llm.ClassifyClassificationFailure(err)
+			d.logger.Warn("LLM classifier failed, trying keyword",
+				"error", err,
+				"failure_kind", kind,
+			)
+			d.lastClassificationErr = err
 		}
 	}
 
@@ -1858,6 +1877,13 @@ func (d *Dispatcher) ShouldRouteToCollaborate(result *DispatchResult) bool {
 		return false
 	}
 	return IntentType(result.Intent.Type) == IntentCollaborate
+}
+
+// LastClassificationError returns the most recent classification error from the
+// LLM classifier, if any. Returns nil if classification succeeded or no LLM
+// classifier is configured.
+func (d *Dispatcher) LastClassificationError() error {
+	return d.lastClassificationErr
 }
 
 // RoutingValidation checks if a task was routed correctly.

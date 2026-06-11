@@ -1,0 +1,17 @@
+{
+  // PTY configuration for interactive streaming sessions
+  pty: {
+    // Enable PTY interactive sessions (default: true)
+    enabled: true,
+
+    // Maximum concurrent PTY sessions (0 = unlimited)
+    max_sessions: 10,
+
+    // Default session timeout in seconds (0 = no timeout)
+    default_timeout: 3600,
+
+    // Default terminal dimensions
+    default_rows: 24,
+    default_cols: 80,
+  },
+}

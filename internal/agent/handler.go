@@ -35,6 +35,9 @@ type ChatHandler struct {
 	// Budget tracking for async dispatch pre-check (Issue 0039)
 	budget *llm.Budget
 
+	// CollaborationEngine for starting collaboration sessions from IntentCollaborate
+	collabEngine *CollaborationEngine
+
 	// Synchronous dispatch mode: when true, async-dispatched tasks wait
 	// for completion instead of returning immediately (Issue 0022).
 	syncMode bool
@@ -112,7 +115,10 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 	// Subscribe to pair result events to push results back to chat sessions
 	pairResultSub := h.bus.Subscribe(SourceChatHandler, TopicPairResult)
 
-	h.wg.Add(7)
+	// Subscribe to collaboration result events to push results back to chat sessions
+	collabResultSub := h.bus.Subscribe(SourceChatHandler, TopicCollabResult)
+
+	h.wg.Add(8)
 
 	// Chat request handler
 	go func() {
@@ -229,6 +235,23 @@ func (h *ChatHandler) Start(ctx context.Context) error {
 					return
 				}
 				h.handlePairResult(msg)
+			}
+		}
+	}()
+
+	// Collaboration result handler - push collaboration session results back to chat
+	go func() {
+		defer h.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				h.bus.Unsubscribe(collabResultSub)
+				return
+			case msg, ok := <-collabResultSub.Channel:
+				if !ok {
+					return
+				}
+				h.handleCollabResult(msg)
 			}
 		}
 	}()
@@ -497,14 +520,29 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 
 	var reply string
 	var err error
+	var result *DispatchResult
 
 	if h.dispatcher != nil {
 			// Multi-agent mode: classify and route through dispatcher
-			result, dispatchErr := h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
+			var dispatchErr error
+			result, dispatchErr = h.dispatcher.ClassifyAndRoute(ctx, req.Message, conversationID)
 			switch {
 			case dispatchErr != nil:
 				h.logger.Error("Dispatch failed", "error", dispatchErr)
 				err = dispatchErr
+				// Include classification failure guidance for the user.
+				if classErr := h.dispatcher.LastClassificationError(); classErr != nil {
+					guidance := llm.ClassificationUserGuidance(classErr)
+					kind := llm.ClassifyClassificationFailure(classErr)
+					h.logger.Info("Classification failure details",
+						"kind", kind,
+						"guidance", guidance,
+					)
+					// Attach guidance to the reply so the user sees actionable info.
+					if reply == "" {
+						reply = guidance
+					}
+				}
 			case h.dispatcher.ShouldRouteToPair(result):
 				// Route to pair-channel mode for dual-agent conversation
 				h.logger.Info("Routing to pair-channel mode",
@@ -512,6 +550,13 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 					"actor", result.AgentID,
 				)
 				reply = h.startPairSession(result, conversationID)
+			case h.dispatcher.ShouldRouteToCollaborate(result):
+				// Route to collaboration engine for multi-agent collaboration
+				h.logger.Info("Routing to collaboration engine",
+					"session", conversationID,
+					"agent", result.AgentID,
+				)
+				reply, err = h.startCollaborationSession(ctx, result, conversationID)
 			case h.dispatcher.ShouldDispatchAsync(result) && result.Task != nil:
 				// Issue 0039: budget pre-check before async dispatch.
 				// Block before creating a zombie task that can never complete.
@@ -574,6 +619,15 @@ func (h *ChatHandler) handleRequest(ctx context.Context, msg *models.BusMessage)
 			// Direct mode: send to standalone agent loop
 			reply, err = h.loop.RunOnce(ctx, req.Message, conversationID)
 		}
+
+	// Append classification degradation notice when dispatch used a fallback classifier.
+	if h.dispatcher != nil && result != nil && result.ClassificationNotice != "" && err == nil {
+		if reply != "" {
+			reply += "\n\n" + result.ClassificationNotice
+		} else {
+			reply = result.ClassificationNotice
+		}
+	}
 
 	// Update worker state
 	worker.LastActivity = time.Now()
@@ -1154,6 +1208,122 @@ func (h *ChatHandler) pairReviewerForActor(actorID string) string {
 	default:
 		return "planner"
 	}
+}
+
+// SetCollaborationEngine sets the collaboration engine for starting collaboration sessions.
+func (h *ChatHandler) SetCollaborationEngine(engine *CollaborationEngine) {
+	h.collabEngine = engine
+}
+
+// startCollaborationSession initiates a collaboration session via the CollaborationEngine
+// and returns an acknowledgment. The session runs asynchronously; results are delivered
+// via the collaboration.result bus topic and pushed back to chat by handleCollabResult.
+func (h *ChatHandler) startCollaborationSession(ctx context.Context, result *DispatchResult, conversationID string) (string, error) {
+	if h.collabEngine == nil {
+		return "Collaboration engine is not available. Falling back to single-agent processing.", nil
+	}
+
+	// Determine mode and participants from the dispatch result.
+	mode := "pair_programming"
+	if result.Intent.Summary != "" {
+		summary := strings.ToLower(result.Intent.Summary)
+		if strings.Contains(summary, "differential") || strings.Contains(summary, "a/b") {
+			mode = "differential"
+		}
+	}
+
+	actorID := result.AgentID
+	if actorID == "" {
+		actorID = IntentCollaborate.DefaultAgent()
+	}
+	reviewerID := h.pairReviewerForActor(actorID)
+
+	taskID := ""
+	if result.Task != nil {
+		taskID = result.Task.ID
+	}
+	if taskID == "" {
+		taskID = conversationID
+	}
+
+	participants := []string{actorID, reviewerID}
+	cfg := DefaultSessionConfig()
+
+	sess, err := h.collabEngine.CreateSession(mode, taskID, participants, cfg)
+	if err != nil {
+		h.logger.Error("Failed to create collaboration session", "error", err)
+		return "", fmt.Errorf("failed to create collaboration session: %w", err)
+	}
+
+	// Run the session asynchronously so the chat handler returns immediately.
+	go func() {
+		runCtx, cancel := context.WithTimeout(context.Background(), cfg.TimeBudget)
+		defer cancel()
+
+		collabResult, runErr := h.collabEngine.RunSession(runCtx, sess.ID)
+		if runErr != nil {
+			h.logger.Error("Collaboration session failed",
+				"session_id", sess.ID,
+				"error", runErr,
+			)
+			return
+		}
+
+		h.logger.Info("Collaboration session completed",
+			"session_id", collabResult.SessionID,
+			"state", collabResult.State,
+			"turn_count", collabResult.TurnCount,
+		)
+	}()
+
+	return fmt.Sprintf("## collaboration started\n\n**mode:** %s\n**participants:** %s\n**session:** `%s`\n\nagents are collaborating. you will see updates as the session progresses.", mode, strings.Join(participants, ", "), sess.ID), nil
+}
+
+// handleCollabResult pushes collaboration session results back to chat.
+func (h *ChatHandler) handleCollabResult(msg *models.BusMessage) {
+	var result CollaborationResult
+	if err := json.Unmarshal(msg.Payload, &result); err != nil {
+		h.logger.Error("Failed to parse collaboration result", "error", err)
+		return
+	}
+
+	h.logger.Info("Collaboration session result received",
+		"session_id", result.SessionID,
+		"state", result.State,
+		"turn_count", result.TurnCount,
+	)
+
+	reply := h.formatCollabResult(result)
+
+	response := ChatResponse{
+		Reply: reply,
+	}
+	// Use session_id as conversation ID so the originating chat session receives it.
+	response.ConversationID = result.SessionID
+	h.sendResponse("collab-result-"+result.SessionID, response)
+}
+
+// formatCollabResult builds a human-readable collaboration session result.
+func (h *ChatHandler) formatCollabResult(result CollaborationResult) string {
+	var sb strings.Builder
+	sb.WriteString("## collaboration completed\n\n")
+
+	stateLabel := string(result.State)
+	if stateLabel == "" {
+		stateLabel = "concluded"
+	}
+	fmt.Fprintf(&sb, "**state:** %s\n", stateLabel)
+	fmt.Fprintf(&sb, "**turns:** %d\n", result.TurnCount)
+
+	if result.Duration > 0 {
+		fmt.Fprintf(&sb, "**duration:** %s\n", result.Duration.Round(time.Second))
+	}
+
+	if result.FinalOutput != "" {
+		fmt.Fprintf(&sb, "\n**output:**\n%s\n", truncateString(result.FinalOutput, 500))
+	}
+
+	return sb.String()
 }
 
 // handlePairResult pushes pair session results back to chat.

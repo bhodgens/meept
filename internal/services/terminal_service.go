@@ -63,7 +63,7 @@ func NewTerminalService(workingDir string, bus *bus.MessageBus, logger *slog.Log
 		logger = slog.Default()
 	}
 
-	shellTool := builtin.NewShellExecuteTool(workingDir, builtin.DefaultShellTimeout)
+	shellTool := builtin.NewShellExecuteTool(workingDir, builtin.DefaultShellTimeout, nil)
 
 	return &TerminalService{
 		shellTool:    shellTool,

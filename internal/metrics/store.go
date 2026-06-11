@@ -2,6 +2,7 @@
 package metrics
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -399,6 +401,71 @@ func (s *Store) RecordEvent(eventType, severity, message string, context map[str
 		s.logger.Error("failed to record event", "error", err, "event_type", eventType)
 		return
 	}
+}
+
+// RecordModelPerformance upserts a model performance record.
+// Uses INSERT OR REPLACE against the UNIQUE(model_id, provider, period_start) constraint.
+func (s *Store) RecordModelPerformance(_ context.Context, record ModelPerformanceRecord) error {
+	_, err := s.db.Exec(
+		`INSERT OR REPLACE INTO model_performance
+			(model_id, provider, total_requests, total_errors, avg_latency_ms,
+			 avg_tokens_in, avg_tokens_out, period_start, period_end, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.ModelID, record.Provider, record.TotalRequests, record.TotalErrors,
+		record.AvgLatencyMs, record.AvgTokensIn, record.AvgTokensOut,
+		record.PeriodStart, record.PeriodEnd, time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		s.logger.Error("failed to record model performance", "error", err,
+			"model_id", record.ModelID, "provider", record.Provider)
+	}
+	return err
+}
+
+// RecordError inserts an error record for retry tracking.
+func (s *Store) RecordError(_ context.Context, record ErrorRecord) error {
+	ts := record.Timestamp
+	if ts == "" {
+		ts = time.Now().UTC().Format(time.RFC3339)
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO error_records
+			(timestamp, provider, model_id, error_type, error_message,
+			 limit_type, retry_attempts, final_outcome)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		ts, record.Provider, record.ModelID, record.ErrorType,
+		record.ErrorMessage, record.LimitType, record.RetryAttempts,
+		record.FinalOutcome,
+	)
+	if err != nil {
+		s.logger.Error("failed to record error", "error", err,
+			"provider", record.Provider, "model_id", record.ModelID)
+	}
+	return err
+}
+
+// RecordResponseQuality inserts a response quality analysis result.
+func (s *Store) RecordResponseQuality(_ context.Context, quality ResponseQuality, taskID, agentID, messageID string) error {
+	var parseErrors string
+	if len(quality.ParseErrors) > 0 {
+		parseErrors = strings.Join(quality.ParseErrors, "; ")
+	}
+
+	_, err := s.db.Exec(
+		`INSERT INTO response_quality
+			(task_id, agent_id, message_id, is_well_formed, parse_errors,
+			 has_code_blocks, has_explanations, is_lazy, lazy_reason,
+			 token_count, code_token_pct)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		taskID, agentID, messageID, quality.WellFormed, parseErrors,
+		quality.HasCodeBlocks, quality.HasExplanations, quality.IsLazy,
+		quality.LazyReason, quality.TokenCount, quality.CodeTokenPct,
+	)
+	if err != nil {
+		s.logger.Error("failed to record response quality", "error", err,
+			"task_id", taskID, "agent_id", agentID)
+	}
+	return err
 }
 
 // GetLiveMetrics returns current live metrics snapshot.

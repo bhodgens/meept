@@ -421,7 +421,11 @@ internal/
   skills/          # Skill discovery and parsing
   stt/             # Speech-to-text (transcriber interface, whisper, parakeet, native)
   tools/           # Tool registry and builtins
+  runtime/         # Containerized execution backends (local, Docker)
+  pty/             # Pseudo-terminal sessions for interactive streaming
 config/            # Configuration templates
+  runtime.json5    # Runtime backend config template
+  pty.json5        # PTY streaming config template
   presets.json5    # Model presets (NEW)
 docs/              # MkDocs documentation site
 menubar/           # macOS MenuBar app (NEW)
@@ -477,6 +481,63 @@ Built-in presets for common tasks:
 - `research` (temp: 0.5) - Analytical tasks
 - `fast` - Quick responses
 - `detailed` - Comprehensive answers
+
+## Runtime (Containerized Execution)
+
+The runtime package (`internal/runtime`) provides isolated command execution backends:
+
+```bash
+# Test runtime backends
+go test ./internal/runtime/... -v
+
+# Build with runtime support
+go build -o bin/meept-daemon ./cmd/meept-daemon
+```
+
+**Backends:**
+- `LocalBackend`: Direct shell execution via `exec.Command` (default, always available)
+- `DockerBackend`: Containerized execution with full isolation (requires Docker daemon)
+
+**Configuration:** `config/runtime.json5`, `~/.meept/meept.json5`
+
+**Key types:**
+- `ExecutionBackend` interface: `Execute(ctx, Command) (*CommandResult, error)`
+- `Manager`: Backend lifecycle and lookup
+- `TestHarness`: Optional validation pipeline for verifying changes
+
+See `docs/concepts/runtime.md` for full documentation.
+
+## PTY (Pseudo-Terminal Streaming)
+
+The PTY package (`internal/pty`) provides interactive terminal sessions with real-time output streaming:
+
+```bash
+# Test PTY sessions
+go test ./internal/pty/... -v
+
+# Requires: github.com/creack/pty, github.com/gorilla/websocket
+```
+
+**Features:**
+- Interactive debuggers (gdb, delve, pdb)
+- REPLs (ipython, node, go run)
+- Long-running servers during testing
+- PTY fallback to subprocess pipes when unavailable
+
+**Configuration:** `config/pty.json5`, `~/.meept/meept.json5`
+
+**Key types:**
+- `Session` interface: `Write`, `Read`, `Output()`, `Resize`, `Close`
+- `Manager`: Session lifecycle with concurrency control
+- `SessionInfo`: API response metadata
+
+**HTTP Endpoints** (when wired):
+- `POST /api/v1/pty/sessions` - Create session
+- `GET /api/v1/pty/sessions/{id}` - WebSocket stream
+- `POST /api/v1/pty/sessions/{id}` - Write input
+- `DELETE /api/v1/pty/sessions/{id}` - Close session
+
+See `docs/concepts/pty-streaming.md` for full documentation.
 
 ## Documentation
 

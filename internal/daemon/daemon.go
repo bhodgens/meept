@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/caimlas/meept/internal/agent"
+	"github.com/caimlas/meept/internal/calendar"
 	botpkg "github.com/caimlas/meept/internal/bot"
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/cluster"
@@ -387,6 +388,21 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		components.RuntimeManager.SetMetricsRecorder(&runtimeMetricsAdapter{store: metricsStore})
 	}
 
+	// Wire task collector and response analyzer to agent loop
+	if metricsStore != nil && components != nil && components.AgentLoop != nil {
+		metricsDBPath := filepath.Join(cfg.StateDir, "metrics.db")
+		taskColl, err := metrics.NewTaskCollector(metricsDBPath, logger.With("component", "task-collector"))
+		if err != nil {
+			logger.Warn("Failed to create task collector", "error", err)
+		} else {
+			components.AgentLoop.SetTaskCollector(taskColl)
+			logger.Info("Task collector wired into agent loop")
+		}
+		respAnalyzer := metrics.NewResponseAnalyzer()
+		components.AgentLoop.SetResponseAnalyzer(respAnalyzer)
+		logger.Info("Response analyzer wired into agent loop")
+	}
+
 	// Create metrics collector with getter functions for actual values
 	var coll *metrics.Collector
 	if metricsStore != nil && components != nil {
@@ -469,7 +485,7 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 		TokenCache:       nilSafeTokenCache(components),
 		SecurityChecker:  nilSafeSecurityChecker(components),
 		Scheduler:        nilSafeScheduler(components),
-		CalendarClient:   nil, // Calendar integration requires OAuth setup
+		CalendarClient:   nilSafeCalendarClient(components),
 		RuntimeManager:   nilSafeRuntimeManager(components),
 		WorkingDir:       cfg.WorkingDir,
 		DaemonController: daemonControl,
@@ -576,6 +592,12 @@ func New(cfg *Config) (daemon *Daemon, err error) {
 			if rpcServer != nil {
 				httpOpts = append(httpOpts, http.WithRPCCall(rpcServer.CallMethod))
 				logger.Info("RPC call bridge enabled", "endpoint", "/api/v1/bus/call")
+			}
+
+			// Notification event system for real-time push to clients
+			if components.NotificationEmitter != nil {
+				httpOpts = append(httpOpts, http.WithNotification(components.NotificationEmitter))
+				logger.Info("Notification endpoint enabled")
 			}
 
 			var metricsService interface {
@@ -1248,6 +1270,13 @@ func nilSafeProjectManager(c *Components) *project.ProjectManager {
 		return nil
 	}
 	return c.ProjectManager
+}
+
+func nilSafeCalendarClient(c *Components) *calendar.Client {
+	if c == nil {
+		return nil
+	}
+	return c.CalendarClient
 }
 
 // taskCreatorAdapter adapts task.Registry to implement plan.TaskCreator.

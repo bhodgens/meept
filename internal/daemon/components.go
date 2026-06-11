@@ -29,6 +29,7 @@ import (
 	"github.com/caimlas/meept/internal/lint"
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/memory"
+	"github.com/caimlas/meept/internal/runtime"
 	"github.com/caimlas/meept/internal/memory/memvid"
 	memsync "github.com/caimlas/meept/internal/memory/sync"
 	"github.com/caimlas/meept/internal/memory/vector"
@@ -38,6 +39,7 @@ import (
 	"github.com/caimlas/meept/internal/repomap"
 	"github.com/caimlas/meept/internal/scheduler"
 	intsecurity "github.com/caimlas/meept/internal/security"
+	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/internal/selfimprove"
 	"github.com/caimlas/meept/internal/session"
 	"github.com/caimlas/meept/internal/shadow"
@@ -200,8 +202,14 @@ type Components struct {
 	ClusterEngine  *cluster.GossipEngine
 	ClusterGitSync *cluster.GitSync
 	ClusterQueue   *queue.ClusterQueue
-	ClusterConfig  *cluster.Config
-	ClusterWireGuard *cluster.WireGuardManager
+	ClusterConfig       *cluster.Config
+	ClusterWireGuard    *cluster.WireGuardManager
+
+	// PTY sessions for interactive tool streaming
+	PTYManager *pty.Manager
+
+	// Notification event emitter (shared between agent loop and HTTP server)
+	NotificationEmitter *EventEmitter
 
 	Logger *slog.Logger
 }
@@ -704,15 +712,12 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Wire context firewall settings from LLM config
 	c.AgentLoop.SetContextFirewallConfig(cfg.LLM.ContextFirewall)
 
-	// Wire RepoMap generator for repository context enrichment
-	if c.RepoMapGen != nil {
-		c.AgentLoop.SetRepoMapGenerator(c.RepoMapGen)
-		logger.Info("RepoMap generator wired into agent loop")
-	}
+	// Note: RepoMap generator wiring to AgentLoop is deferred to after
+	// RepoMapGen creation (see below). The scheduler is also wired there.
 
 	// Wire notification event emitter for desktop notifications
-	noteEmitter := NewEventEmitter(100, logger.With("component", "notification-emitter"))
-	c.AgentLoop.SetNotificationPublisher(&notificationAdapter{emitter: noteEmitter})
+	c.NotificationEmitter = NewEventEmitter(100, logger.With("component", "notification-emitter"))
+	c.AgentLoop.SetNotificationPublisher(&notificationAdapter{emitter: c.NotificationEmitter})
 
 	// Start progress synthesizer for tiered agent activity summaries.
 	// Subscribes to all agent events via wildcard and republishes condensed
@@ -1041,12 +1046,33 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 	// Create shared pending changes registry for preview/accept workflow
 	pendingChangesRegistry := builtin.NewPendingChangesRegistry()
 
+	// Create runtime manager for backend-based command execution
+	var runtimeMgr *runtime.Manager
+	if cfg.Runtime.Enabled {
+		runtimeCfg := runtime.Config{
+			DefaultBackend: cfg.Runtime.DefaultBackend,
+			Docker: runtime.DockerConfig{
+				Image:       cfg.Runtime.Docker.Image,
+				VolumeBinds: cfg.Runtime.Docker.VolumeBinds,
+				Timeout:     time.Duration(cfg.Runtime.Docker.TimeoutSeconds) * time.Second,
+			},
+		}
+		var err error
+		runtimeMgr, err = runtime.NewManager(runtimeCfg, logger)
+		if err != nil {
+			logger.Warn("Failed to create runtime manager, commands will use local exec", "error", err)
+			runtimeMgr = nil
+		} else {
+			logger.Info("Runtime manager initialized", "backends", runtimeMgr.ListBackends(), "default", runtimeMgr.DefaultBackend())
+		}
+	}
+
 	// Register builtin tools now that all dependencies are available
 	var taskStore *task.Store
 	if c.TaskRegistry != nil {
 		taskStore = c.TaskRegistry.Store()
 	}
-	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, logger)
+	registerBuiltinTools(c.ToolRegistry, c.SecurityChecker, c.SecurityOrchestrator, c.MemoryManager, taskStore, c.Scheduler, pendingChangesRegistry, runtimeMgr, c.PTYManager, logger)
 
 	// Initialize code intelligence if enabled
 	if cfg.CodeIntel.Enabled {
@@ -1338,6 +1364,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			c.CollaborationEngine = collabEngine
 			logger.Info("Collaboration engine initialized", "modes", "pair_programming,differential,team_parallel")
 
+			// Wire collaboration engine into chat handler for IntentCollaborate routing
+			if c.ChatHandler != nil {
+				c.ChatHandler.SetCollaborationEngine(collabEngine)
+			}
+
 			// Create team orchestrator for N-agent parallel team sessions
 			teamOrch := agent.NewTeamOrchestrator(agent.TeamOrchestratorDeps{
 				CollabEngine: collabEngine,
@@ -1442,6 +1473,11 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 			if c.Orchestrator != nil {
 				c.Orchestrator.SetRepoMapGenerator(c.RepoMapGen)
 			}
+			// Wire into the AgentLoop for repository context enrichment
+			if c.AgentLoop != nil {
+				c.AgentLoop.SetRepoMapGenerator(c.RepoMapGen)
+				logger.Info("RepoMap generator wired into agent loop")
+			}
 			logger.Info("RepoMap generator initialized", "watched_files", len(watchedFiles))
 		}
 	}
@@ -1511,6 +1547,20 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 				"timezone", cfg.Scheduler.Timezone,
 			)
 		}
+	}
+
+	// Register scheduler tools now that scheduler exists (scheduler is nil at
+	// initial registerBuiltinTools call because it is created after tools).
+	if c.Scheduler != nil && c.ToolRegistry != nil {
+		c.ToolRegistry.Register(builtin.NewScheduleCreateTool(c.Scheduler))
+		c.ToolRegistry.Register(builtin.NewScheduleListTool(c.Scheduler))
+		c.ToolRegistry.Register(builtin.NewScheduleGetTool(c.Scheduler))
+		c.ToolRegistry.Register(builtin.NewScheduleDeleteTool(c.Scheduler))
+		c.ToolRegistry.Register(builtin.NewSchedulePauseTool(c.Scheduler))
+		c.ToolRegistry.Register(builtin.NewScheduleResumeTool(c.Scheduler))
+		c.ToolRegistry.Register(builtin.NewScheduleRunNowTool(c.Scheduler))
+		c.ToolRegistry.Register(builtin.NewCronCreateTool(c.Scheduler))
+		logger.Debug("Registered scheduler tools (deferred)")
 	}
 
 	// Create web server if enabled
@@ -2404,6 +2454,8 @@ func registerBuiltinTools(
 	taskStore *task.Store,
 	sched *scheduler.Scheduler,
 	pendingChangesRegistry *builtin.PendingChangesRegistry,
+	runtimeMgr *runtime.Manager,
+	ptyMgr *pty.Manager,
 	logger *slog.Logger,
 ) {
 	// Shared read cache for hashline edit recovery
@@ -2412,25 +2464,41 @@ func registerBuiltinTools(
 	// Filesystem tools
 	registry.Register(builtin.NewReadFileTool(checker, readCache))
 	registry.Register(builtin.NewWriteFileTool(checker))
-	// Pending changes registry for preview/accept workflow
-	pendingChanges := builtin.NewPendingChangesRegistry()
-	
+	// Use the shared pending changes registry passed by the caller so that
+	// file_edit, ast_edit, and lsp_rename all share the same registry.
+	pendingChanges := pendingChangesRegistry
+
 	fileEditTool := builtin.NewFileEditTool(checker, readCache)
-	fileEditTool.SetPendingChangesRegistry(pendingChanges)
+	if pendingChanges != nil {
+		fileEditTool.SetPendingChangesRegistry(pendingChanges)
+	}
 	registry.Register(fileEditTool)
-	
+
 	registry.Register(builtin.NewDeleteFileTool(checker))
-	registry.Register(builtin.NewResolveTool(pendingChanges))
+	if pendingChanges != nil {
+		registry.Register(builtin.NewResolveTool(pendingChanges))
+	} else {
+		// Fallback: create a resolve tool with a local registry
+		localPC := builtin.NewPendingChangesRegistry()
+		registry.Register(builtin.NewResolveTool(localPC))
+	}
 	registry.Register(builtin.NewListDirectoryTool(checker))
 	registry.Register(builtin.NewFileFindTool(checker))
 	registry.Register(builtin.NewFileGrepTool(checker))
 
 	// Shell tool with security orchestrator for Tirith scanning
 	wd, _ := os.Getwd()
-	shellTool := builtin.NewShellExecuteTool(wd, 60*time.Second)
+	shellTool := builtin.NewShellExecuteTool(wd, 60*time.Second, ptyMgr)
 	if secOrch != nil {
 		shellTool.SetSecurityOrchestrator(secOrch)
 		logger.Debug("Shell tool configured with security orchestrator")
+	}
+	if runtimeMgr != nil {
+		shellTool.SetRuntimeManager(runtimeMgr)
+		logger.Info("Shell tool wired to runtime manager", "backend", runtimeMgr.DefaultBackend())
+	}
+	if ptyMgr != nil {
+		logger.Info("Shell tool wired to PTY manager")
 	}
 	registry.Register(shellTool)
 

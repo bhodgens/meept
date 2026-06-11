@@ -8,14 +8,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/caimlas/meept/internal/llm"
+	"github.com/caimlas/meept/internal/runtime"
 	intsecurity "github.com/caimlas/meept/internal/security"
 	"github.com/caimlas/meept/internal/tools"
+	"github.com/caimlas/meept/internal/pty"
 	"github.com/caimlas/meept/pkg/models"
 	"github.com/caimlas/meept/pkg/security"
 )
@@ -77,10 +80,14 @@ type ShellExecuteTool struct {
 	defaultTimeout    time.Duration
 	securityOrch      *intsecurity.Orchestrator
 	knownSafeCommands map[string]struct{}
+	runtimeMgr        *runtime.Manager
+	backend           runtime.ExecutionBackend
+	logger            *slog.Logger
+	ptyMgr            *pty.Manager
 }
 
 // NewShellExecuteTool creates a new shell execution tool.
-func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration) *ShellExecuteTool {
+func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration, ptyMgr *pty.Manager) *ShellExecuteTool {
 	if workingDir == "" {
 		workingDir, _ = resolvePath("~")
 	}
@@ -91,12 +98,25 @@ func NewShellExecuteTool(workingDir string, defaultTimeout time.Duration) *Shell
 		workingDir:        workingDir,
 		defaultTimeout:    defaultTimeout,
 		knownSafeCommands: make(map[string]struct{}),
+		ptyMgr:            ptyMgr,
 	}
 }
 
 // SetSecurityOrchestrator sets the security orchestrator for command scanning.
 func (t *ShellExecuteTool) SetSecurityOrchestrator(orch *intsecurity.Orchestrator) {
 	t.securityOrch = orch
+}
+
+// SetRuntimeManager injects a runtime manager for backend-based execution.
+// When set, commands are routed through the configured backend (local or docker).
+// When nil, the tool falls back to direct exec.Command (original behavior).
+func (t *ShellExecuteTool) SetRuntimeManager(mgr *runtime.Manager) {
+	t.runtimeMgr = mgr
+	if mgr != nil {
+		t.backend = mgr.GetDefaultBackend()
+		// Preserve working dir by running with a Dir shim via env
+		t.logger = slog.Default().With("component", "shell-tool")
+	}
 }
 
 // SetKnownSafeCommands configures a set of base command names that are
@@ -197,43 +217,63 @@ func (t *ShellExecuteTool) Execute(ctx context.Context, args map[string]any) (an
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Execute the command
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	cmd.Dir = workDir
+	// Get the result via backend or direct exec
+	var stdoutStr, stderrStr string
+	var returnCode int
+	var truncated bool
+	var execErr error
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if t.backend != nil {
+		// Route through runtime backend
+		result, err := t.backend.Execute(ctx, runtime.Command{
+			Cmd:     command,
+			Dir:     workDir,
+			Timeout: timeout,
+		})
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("backend execution failed: %w", err)
+		}
+		// Backend returns combined output
+		stdoutStr = result.Output
+		returnCode = result.ExitCode
+	} else {
+		// Direct exec (original behavior)
+		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+		cmd.Dir = workDir
 
-	err := cmd.Run()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
 
-	// Get outputs
-	stdoutStr := stdout.String()
-	stderrStr := stderr.String()
-	truncated := false
+		execErr = cmd.Run()
+
+		stdoutStr = stdout.String()
+		stderrStr = stderr.String()
+
+		if execErr != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				cancel()
+				return nil, fmt.Errorf("command timed out after %v", timeout)
+			}
+			exitErr := &exec.ExitError{}
+			if errors.As(execErr, &exitErr) {
+				returnCode = exitErr.ExitCode()
+			} else {
+				cancel()
+				return nil, fmt.Errorf("failed to execute command: %w", execErr)
+			}
+		}
+	}
 
 	// Truncate if too large
 	if len(stdoutStr) > MaxOutputSize {
-		stdoutStr = stdoutStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stdout.String()))
+		stdoutStr = stdoutStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stdoutStr))
 		truncated = true
 	}
 	if len(stderrStr) > MaxOutputSize {
-		stderrStr = stderrStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stderr.String()))
+		stderrStr = stderrStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stderrStr))
 		truncated = true
-	}
-
-	// Determine return code
-	returnCode := 0
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("command timed out after %v", timeout)
-		}
-		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
-			returnCode = exitErr.ExitCode()
-		} else {
-			return nil, fmt.Errorf("failed to execute command: %w", err)
-		}
 	}
 
 	// Build evidence: exit code and output hash
@@ -322,53 +362,74 @@ func (t *ShellExecuteTool) ExecuteStreaming(ctx context.Context, args map[string
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Execute the command with output streaming
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	cmd.Dir = workDir
+	// Execute the command
+	var stdoutStr, stderrStr string
+	var returnCode int
+	var truncated bool
+	var streamErr error
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if t.backend != nil {
+		// Route through runtime backend
+		onUpdate(tools.ProgressUpdate{
+			Message: fmt.Sprintf("executing %s via %s backend...", extractBaseCommand(command), t.backend.Name()),
+			Percent: 50,
+		})
 
-	// Emit progress at ~50% after starting the command
-	onUpdate(tools.ProgressUpdate{
-		Message: fmt.Sprintf("executing %s...", extractBaseCommand(command)),
-		Percent: 50,
-	})
+		result, err := t.backend.Execute(ctx, runtime.Command{
+			Cmd:     command,
+			Dir:     workDir,
+			Timeout: timeout,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("backend execution failed: %w", err)
+		}
+		// Backend returns combined output
+		stdoutStr = result.Output
+		returnCode = result.ExitCode
+	} else {
+		// Direct exec with streaming
+		onUpdate(tools.ProgressUpdate{
+			Message: fmt.Sprintf("executing %s...", extractBaseCommand(command)),
+			Percent: 50,
+		})
 
-	err := cmd.Run()
+		cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+		cmd.Dir = workDir
 
-	// Get outputs
-	stdoutStr := stdout.String()
-	stderrStr := stderr.String()
-	truncated := false
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		streamErr = cmd.Run()
+
+		stdoutStr = stdout.String()
+		stderrStr = stderr.String()
+
+		if streamErr != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				onUpdate(tools.ProgressUpdate{
+					Message: fmt.Sprintf("command timed out after %v", timeout),
+					Percent: 100,
+				})
+				return nil, fmt.Errorf("command timed out after %v", timeout)
+			}
+			exitErr := &exec.ExitError{}
+			if errors.As(streamErr, &exitErr) {
+				returnCode = exitErr.ExitCode()
+			} else {
+				return nil, fmt.Errorf("failed to execute command: %w", streamErr)
+			}
+		}
+	}
 
 	// Truncate if too large
 	if len(stdoutStr) > MaxOutputSize {
-		stdoutStr = stdoutStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stdout.String()))
+		stdoutStr = stdoutStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stdoutStr))
 		truncated = true
 	}
 	if len(stderrStr) > MaxOutputSize {
-		stderrStr = stderrStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stderr.String()))
+		stderrStr = stderrStr[:MaxOutputSize] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(stderrStr))
 		truncated = true
-	}
-
-	// Determine return code
-	returnCode := 0
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			onUpdate(tools.ProgressUpdate{
-				Message: fmt.Sprintf("command timed out after %v", timeout),
-				Percent: 100,
-			})
-			return nil, fmt.Errorf("command timed out after %v", timeout)
-		}
-		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
-			returnCode = exitErr.ExitCode()
-		} else {
-			return nil, fmt.Errorf("failed to execute command: %w", err)
-		}
 	}
 
 	// Emit completion progress with output summary
@@ -488,8 +549,103 @@ func (t *ShellExecuteTool) GetRiskLevel(command string) security.RiskLevel {
 	}
 }
 
+// PTYTool methods -------------------------------------------------------------
+
+// CreateSession creates a new PTY session.
+func (t *ShellExecuteTool) CreateSession(sessionID string, config tools.PTYSessionConfig) (*tools.PTYSessionInfo, error) {
+	if t.ptyMgr == nil {
+		return nil, fmt.Errorf("PTY manager not available")
+	}
+
+	ptyCfg := pty.SessionConfig{
+		Cmd:  config.Cmd,
+		Args: config.Args,
+		Dir:  config.Dir,
+		Rows: config.Rows,
+		Cols: config.Cols,
+	}
+	if ptyCfg.Rows <= 0 {
+		ptyCfg.Rows = 24
+	}
+	if ptyCfg.Cols <= 0 {
+		ptyCfg.Cols = 80
+	}
+
+	sess, err := t.ptyMgr.CreateSession(sessionID, ptyCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PTY session: %w", err)
+	}
+
+	return &tools.PTYSessionInfo{
+		ID:        sessionID,
+		Cmd:       config.Cmd,
+		Args:      config.Args,
+		Dir:       config.Dir,
+		CreatedAt: time.Now(),
+		Rows:      ptyCfg.Rows,
+		Cols:      ptyCfg.Cols,
+		IsRunning: sess.IsRunning(),
+	}, nil
+}
+
+// WriteToSession sends input to a PTY session.
+func (t *ShellExecuteTool) WriteToSession(sessionID string, input []byte) error {
+	if t.ptyMgr == nil {
+		return fmt.Errorf("PTY manager not available")
+	}
+
+	sess := t.ptyMgr.GetSession(sessionID)
+	if sess == nil {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	_, err := sess.Write(input)
+	return err
+}
+
+// ReadFromSession reads output from a PTY session (context-aware).
+func (t *ShellExecuteTool) ReadFromSession(ctx context.Context, sessionID string) ([]byte, error) {
+	if t.ptyMgr == nil {
+		return nil, fmt.Errorf("PTY manager not available")
+	}
+
+	sess := t.ptyMgr.GetSession(sessionID)
+	if sess == nil {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	buf := make([]byte, 4096)
+	n, err := sess.Read(ctx, buf)
+	if err != nil && n == 0 {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
+// CloseSession terminates a PTY session.
+func (t *ShellExecuteTool) CloseSession(sessionID string) error {
+	if t.ptyMgr == nil {
+		return fmt.Errorf("PTY manager not available")
+	}
+	return t.ptyMgr.DestroySession(sessionID)
+}
+
+// SessionOutput returns a channel for streaming session output.
+func (t *ShellExecuteTool) SessionOutput(sessionID string) (<-chan []byte, error) {
+	if t.ptyMgr == nil {
+		return nil, fmt.Errorf("PTY manager not available")
+	}
+
+	sess := t.ptyMgr.GetSession(sessionID)
+	if sess == nil {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+	return sess.Output(), nil
+}
+
 // Ensure ShellExecuteTool implements the Tool and StreamingTool interfaces
 var (
 	_ tools.Tool          = (*ShellExecuteTool)(nil)
 	_ tools.StreamingTool = (*ShellExecuteTool)(nil)
+	_ tools.PTYTool       = (*ShellExecuteTool)(nil)
 )

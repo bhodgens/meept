@@ -886,9 +886,27 @@ func WithTaskCollector(tc *metrics.TaskCollector) LoopOption {
 	}
 }
 
+// SetTaskCollector sets the task collector after agent loop creation.
+// This is used when the task collector depends on a metrics store
+// created after the agent loop (e.g. in daemon wiring).
+func (l *AgentLoop) SetTaskCollector(tc *metrics.TaskCollector) {
+	if tc != nil {
+		l.taskCollector = tc
+	}
+}
+
 // WithResponseAnalyzer sets the response analyzer for quality metrics.
 func WithResponseAnalyzer(ra *metrics.ResponseAnalyzer) LoopOption {
 	return func(l *AgentLoop) {
+		l.responseAnalyzer = ra
+	}
+}
+
+// SetResponseAnalyzer sets the response analyzer after agent loop creation.
+// This is used when the metrics store (from which the analyzer is created)
+// is created after the agent loop.
+func (l *AgentLoop) SetResponseAnalyzer(ra *metrics.ResponseAnalyzer) {
+	if ra != nil {
 		l.responseAnalyzer = ra
 	}
 }

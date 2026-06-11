@@ -7,6 +7,7 @@ package tools
 
 import (
 	"context"
+	"time"
 
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/pkg/models"
@@ -125,4 +126,48 @@ func GetCategory(t Tool) string {
 		}
 	}
 	return "general"
+}
+
+// PTYTool is a tool that supports interactive PTY sessions for real-time
+// streaming (e.g. gdb, ipython, long-running servers).
+type PTYTool interface {
+	Tool
+
+	// CreateSession creates a new PTY session.
+	CreateSession(sessionID string, config PTYSessionConfig) (*PTYSessionInfo, error)
+
+	// WriteToSession sends input to a PTY session.
+	WriteToSession(sessionID string, input []byte) error
+
+	// ReadFromSession reads output from a PTY session (context-aware).
+	ReadFromSession(ctx context.Context, sessionID string) ([]byte, error)
+
+	// CloseSession terminates a PTY session.
+	CloseSession(sessionID string) error
+
+	// SessionOutput returns a channel for streaming session output.
+	SessionOutput(sessionID string) (<-chan []byte, error)
+}
+
+// PTYSessionConfig holds PTY session configuration.
+type PTYSessionConfig struct {
+	Cmd     string            `json:"cmd"`
+	Args    []string          `json:"args,omitempty"`
+	Dir     string            `json:"dir,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Rows    int               `json:"rows"`
+	Cols    int               `json:"cols"`
+	Timeout time.Duration     `json:"-"`
+}
+
+// PTYSessionInfo holds session metadata returned to clients.
+type PTYSessionInfo struct {
+	ID        string    `json:"id"`
+	Cmd       string    `json:"cmd"`
+	Args      []string  `json:"args,omitempty"`
+	Dir       string    `json:"dir,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	Rows      int       `json:"rows"`
+	Cols      int       `json:"cols"`
+	IsRunning bool      `json:"is_running"`
 }

@@ -8,11 +8,21 @@ import Foundation
 class ConfigService {
     private let baseURL: URL
     private let apiToken: String?
+    private let session: URLSession
 
     init() {
         let config = MenubarConfigService()
         self.baseURL = URL(string: config.daemonBaseURL) ?? URL(string: "https://localhost:8081")!
         self.apiToken = config.apiToken
+
+        // Accept self-signed certs for localhost (same as APIClient)
+        let sessionConfig = URLSessionConfiguration.ephemeral
+        sessionConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
+        self.session = URLSession(
+            configuration: sessionConfig,
+            delegate: LocalhostTrustDelegate(),
+            delegateQueue: nil
+        )
     }
 
     // MARK: - Client Config (async/await)
@@ -157,7 +167,7 @@ class ConfigService {
     }
 
     private func performData(request: URLRequest) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
@@ -172,7 +182,7 @@ class ConfigService {
     }
 
     private func performVoid(request: URLRequest) async throws {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,9 +19,10 @@ import (
 )
 
 const (
-	defaultTimeout   = 120 * time.Second
-	maxRetries       = 3
-	retryBackoffBase = 2.0 // seconds - exponential: 2, 4, 8
+	defaultTimeout       = 120 * time.Second
+	maxRetries           = 3
+	retryBackoffBase     = 2.0 // seconds - exponential: 2, 4, 8
+	retryBackoffMaxDelay = 30 * time.Second
 )
 
 // HTTP status codes that warrant a retry
@@ -125,6 +127,15 @@ func WithTimeout(timeout time.Duration) ClientOption {
 // WithMetricsStore sets the metrics store for the client.
 func WithMetricsStore(store *metrics.Store) ClientOption {
 	return func(c *Client) {
+		c.metricsStore = store
+	}
+}
+
+// SetMetricsStore sets the metrics store after client creation.
+// This is used when the metrics store is created after the client
+// (e.g. in daemon wiring where the store lives in daemon.go).
+func (c *Client) SetMetricsStore(store *metrics.Store) {
+	if store != nil {
 		c.metricsStore = store
 	}
 }
@@ -279,25 +290,43 @@ func (c *Client) Chat(ctx context.Context, messages []ChatMessage, opts ...ChatO
 		resp, err := c.doRequest(ctx, payload)
 		if err != nil {
 			var apiErr *APIError
-			if errors.As(err, &apiErr) && retryableStatusCodes[apiErr.StatusCode] {
-				c.logger.Warn("Retryable error",
-					"status", apiErr.StatusCode,
-					"attempt", attempt,
-					"max_retries", maxRetries,
-				)
-				lastErr = err
-				if attempt < maxRetries {
-					sleepDuration := time.Duration(retryBackoffBase*float64(attempt)) * time.Second
-					select {
-					case <-time.After(sleepDuration):
-						continue
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
-				}
-				continue
+			var rlErr *RateLimitError
+			if errors.As(err, &rlErr) {
+				apiErr = &APIError{StatusCode: http.StatusTooManyRequests}
+				// rlErr already wraps the APIError cause
+			} else if !errors.As(err, &apiErr) || !retryableStatusCodes[apiErr.StatusCode] {
+				return nil, err
 			}
-			return nil, err
+
+			c.logger.Warn("Retryable error",
+				"status", apiErr.StatusCode,
+				"attempt", attempt,
+				"max_retries", maxRetries,
+			)
+			lastErr = err
+			if attempt < maxRetries {
+				// Respect Retry-After from rate limit errors if available.
+				sleepDuration := time.Duration(0)
+				if rlErr != nil && rlErr.RetryAfter > 0 {
+					sleepDuration = rlErr.RetryAfter
+				}
+				// Fall back to exponential backoff with jitter.
+				if sleepDuration == 0 {
+					expDelay := time.Duration(math.Pow(retryBackoffBase, float64(attempt)) * float64(time.Second))
+					sleepDuration = BackoffWithJitter(expDelay, retryBackoffMaxDelay, true)
+				}
+				c.logger.Debug("Retry backoff",
+					"attempt", attempt,
+					"sleep", sleepDuration,
+				)
+				select {
+				case <-time.After(sleepDuration):
+					continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			continue
 		}
 
 		// Record usage
@@ -432,27 +461,42 @@ func (c *Client) ChatWithProgress(ctx context.Context, messages []ChatMessage, p
 		resp, err := c.doRequest(ctx, payload)
 		if err != nil {
 			var apiErr *APIError
-			if errors.As(err, &apiErr) && retryableStatusCodes[apiErr.StatusCode] {
-				c.logger.Warn("Retryable error",
-					"status", apiErr.StatusCode,
-					"attempt", attempt,
-					"max_retries", maxRetries,
-				)
-				lastErr = err
-				if attempt < maxRetries {
-					sleepDuration := time.Duration(retryBackoffBase*float64(attempt)) * time.Second
-					select {
-					case <-time.After(sleepDuration):
-						continue
-					case <-ctx.Done():
-						reportProgress(ProgressStageDone, "Request cancelled")
-						return nil, ctx.Err()
-					}
-				}
-				continue
+			var rlErr *RateLimitError
+			if errors.As(err, &rlErr) {
+				apiErr = &APIError{StatusCode: http.StatusTooManyRequests}
+			} else if !errors.As(err, &apiErr) || !retryableStatusCodes[apiErr.StatusCode] {
+				reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
+				return nil, err
 			}
-			reportProgress(ProgressStageDone, fmt.Sprintf("Error: %v", err))
-			return nil, err
+
+			c.logger.Warn("Retryable error",
+				"status", apiErr.StatusCode,
+				"attempt", attempt,
+				"max_retries", maxRetries,
+			)
+			lastErr = err
+			if attempt < maxRetries {
+				sleepDuration := time.Duration(0)
+				if rlErr != nil && rlErr.RetryAfter > 0 {
+					sleepDuration = rlErr.RetryAfter
+				}
+				if sleepDuration == 0 {
+					expDelay := time.Duration(math.Pow(retryBackoffBase, float64(attempt)) * float64(time.Second))
+					sleepDuration = BackoffWithJitter(expDelay, retryBackoffMaxDelay, true)
+				}
+				c.logger.Debug("Retry backoff",
+					"attempt", attempt,
+					"sleep", sleepDuration,
+				)
+				select {
+				case <-time.After(sleepDuration):
+					continue
+				case <-ctx.Done():
+					reportProgress(ProgressStageDone, "Request cancelled")
+					return nil, ctx.Err()
+				}
+			}
+			continue
 		}
 
 		// Streaming stage - response received

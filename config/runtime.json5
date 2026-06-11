@@ -1,0 +1,30 @@
+{
+  // Runtime configuration for containerized execution backends
+  runtime: {
+    // Enable containerized execution backends (default: true)
+    enabled: true,
+
+    // Default backend: "local" or "docker" (default: "local")
+    // Local backend is always available; Docker requires daemon
+    default_backend: "local",
+
+    docker: {
+      // Container image for Docker backend
+      image: "golang:1.24-alpine",
+
+      // Volume binds: "host_path:container_path"
+      volume_binds: [
+        "~/.meept/workspaces:/workspaces",
+      ],
+
+      // Command timeout in seconds (0 = no timeout)
+      timeout_seconds: 300,
+
+      // Clean up containers after execution
+      auto_cleanup: true,
+
+      // Network mode (optional): "host", "bridge", "none"
+      network_mode: "",
+    },
+  },
+}
