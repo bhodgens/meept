@@ -69,7 +69,7 @@ Test harness runs after code changes and before review approval.
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│ Runtime Manager │
+│ContainerManager │
 └────────┬────────┘
          │
     ┌────┴────┐
@@ -105,7 +105,7 @@ fmt.Printf("Output: %s\n", result.Output)
 ## Graceful Degradation
 
 If Docker backend is enabled but Docker daemon is unavailable:
-- Manager logs warning
+- ContainerManager logs warning
 - Falls back to LocalBackend automatically
 - No failure - continues with local execution
 
