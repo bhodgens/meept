@@ -45,6 +45,7 @@ type FileEditTool struct {
 	lspNotifier             LSPWriteNotifier
 	blockResolver           BlockResolver
 	pendingChangesRegistry  *PendingChangesRegistry
+	fenceChecker            FenceChecker
 	recoveryConfig          RecoveryConfig
 }
 
@@ -76,6 +77,11 @@ func (t *FileEditTool) SetPendingChangesRegistry(registry *PendingChangesRegistr
 // SetRecoveryConfig sets the recovery configuration.
 func (t *FileEditTool) SetRecoveryConfig(cfg RecoveryConfig) {
 	t.recoveryConfig = cfg
+}
+
+// SetFenceChecker sets the fence checker for path-based sandboxing.
+func (t *FileEditTool) SetFenceChecker(fc FenceChecker) {
+	t.fenceChecker = fc
 }
 
 func (t *FileEditTool) Name() string { return "file_edit" }
@@ -130,6 +136,13 @@ func (t *FileEditTool) Execute(ctx context.Context, args map[string]any) (any, e
 
 	if t.checker != nil && !t.checker.CheckPath(resolved) {
 		return nil, fmt.Errorf("access denied: %s", resolved)
+	}
+
+	// Fence check
+	if t.fenceChecker != nil {
+		if err := t.fenceChecker.CheckPath(resolved, "write"); err != nil {
+			return nil, err
+		}
 	}
 
 	// Read current file

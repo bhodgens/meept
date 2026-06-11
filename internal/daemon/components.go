@@ -2510,6 +2510,9 @@ func registerBuiltinTools(
 	if pendingChanges != nil {
 		fileEditTool.SetPendingChangesRegistry(pendingChanges)
 	}
+	if fenceChecker != nil {
+		fileEditTool.SetFenceChecker(fenceChecker)
+	}
 	registry.Register(fileEditTool)
 
 	deleteFileTool := builtin.NewDeleteFileTool(checker)
