@@ -812,6 +812,64 @@ type SecurityConfig struct {
 	// When false (default), uses lenient three-strategy cascade (substring, glob, trimmed substring).
 	// Changing this will affect existing overrides - migrate with caution.
 	StrictOverrideMatching bool `json:"strict_override_matching" toml:"strict_override_matching"`
+
+	// Taint tracking for information flow security
+	Taint TaintConfig `json:"taint" toml:"taint"`
+}
+
+// TaintConfig holds taint tracking configuration for information flow security.
+// Taint tracking implements lattice-based information flow control, tracking
+// data provenance through operations and preventing sensitive data leakage.
+//
+// See docs/workflows/taint-tracking.md for full documentation.
+type TaintConfig struct {
+	// Enabled enables taint tracking for information flow security.
+	// When enabled, data from untrusted sources (user input, external requests,
+	// untrusted agents) is tagged and prevented from flowing into sensitive sinks
+	// (shell execution, network requests with secrets, cross-agent messages).
+	Enabled bool `json:"enabled" toml:"enabled"`
+
+	// TaintDBPath is the path to the taint tracking database.
+	// Currently in-memory only; this field is reserved for future persistence.
+	TaintDBPath string `json:"taint_db_path" toml:"taint_db_path"`
+
+	// Taint label priorities (higher = more restrictive)
+	// These control how taints are joined and subsumed.
+	Labels TaintLabelsConfig `json:"labels" toml:"labels"`
+
+	// Sink configuration for blocking decisions
+	Sinks TaintSinksConfig `json:"sinks" toml:"sinks"`
+
+	// Declassification settings
+	Declassification TaintDeclassificationConfig `json:"declassification" toml:"declassification"`
+}
+
+// TaintLabelsConfig holds taint label priority settings.
+// Higher values indicate more restrictive taint levels.
+type TaintLabelsConfig struct {
+	UserInput  int `json:"user_input"  toml:"user_input"`  // Direct user input
+	Secret     int `json:"secret"      toml:"secret"`      // API keys, tokens, passwords
+	Untrusted  int `json:"untrusted"   toml:"untrusted"`   // From sandboxed/untrusted agents
+	External   int `json:"external"    toml:"external"`    // From external network requests
+	Shell      int `json:"shell"       toml:"shell"`       // Data destined for shell execution
+}
+
+// TaintSinksConfig holds taint sink blocking settings.
+type TaintSinksConfig struct {
+	BlockUserInputShell     bool `json:"block_user_input_shell"      toml:"block_user_input_shell"`      // Block user input in shell commands
+	BlockSecretNetwork      bool `json:"block_secret_network"        toml:"block_secret_network"`        // Block secrets in URLs/network requests
+	BlockUntrustedAgent     bool `json:"block_untrusted_agent"       toml:"block_untrusted_agent"`       // Block untrusted data in cross-agent messages
+	BlockExternalShell      bool `json:"block_external_shell"        toml:"block_external_shell"`        // Block external data in shell commands
+}
+
+// TaintDeclassificationConfig holds declassification settings.
+type TaintDeclassificationConfig struct {
+	// RequireApprovalHigh requires user approval for high-risk declassification.
+	RequireApprovalHigh bool `json:"require_approval_high" toml:"require_approval_high"`
+
+	// SafeOperations lists operations that automatically declassify data.
+	// Examples: "sanitize", "validate", "hash"
+	SafeOperations []string `json:"safe_operations" toml:"safe_operations"`
 }
 
 // SchedulerConfig holds scheduler settings.

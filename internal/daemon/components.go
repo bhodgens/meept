@@ -1067,6 +1067,14 @@ func NewComponents(ctx context.Context, cfg *config.Config, msgBus *bus.MessageB
 		}
 	}
 
+	// Create PTY manager for interactive terminal sessions
+	if cfg.PTY.Enabled {
+		c.PTYManager = pty.NewManager(pty.WithMaxSessions(cfg.PTY.MaxSessions))
+		if c.PTYManager != nil {
+			logger.Info("PTY manager initialized", "max_sessions", cfg.PTY.MaxSessions)
+		}
+	}
+
 	// Register builtin tools now that all dependencies are available
 	var taskStore *task.Store
 	if c.TaskRegistry != nil {
