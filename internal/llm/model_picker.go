@@ -57,6 +57,7 @@ type ModelPicker struct {
 	providerList     list.Model
 	modelList        list.Model
 	providers        []ProviderDef
+	providersCfg     *ProvidersConfig
 	models           []ModelCatalogEntry
 	selectedProvider *ProviderDef
 	selectedModel    *ModelCatalogEntry
@@ -68,9 +69,12 @@ type ModelPicker struct {
 
 // NewModelPicker creates a new model picker.
 func NewModelPicker(config ModelPickerConfig) *ModelPicker {
+	// Merge canonical providers with config-sourced providers
+	allProviders := buildProviderList(config.ProvidersConfig)
+
 	// Build provider items
-	providerItems := make([]list.Item, len(CanonicalProviders))
-	for i, p := range CanonicalProviders {
+	providerItems := make([]list.Item, len(allProviders))
+	for i, p := range allProviders {
 		providerItems[i] = modelProviderItem{def: p}
 	}
 
@@ -92,22 +96,23 @@ func NewModelPicker(config ModelPickerConfig) *ModelPicker {
 	modelList.SetFilteringEnabled(true)
 
 	mp := &ModelPicker{
-		mode:         ModeSelectProvider,
-		config:       config,
-		providerList: providerList,
-		modelList:    modelList,
-		providers:    CanonicalProviders,
+		mode:           ModeSelectProvider,
+		config:         config,
+		providerList:   providerList,
+		modelList:      modelList,
+		providers:      allProviders,
+		providersCfg:   config.ProvidersConfig,
 	}
 
 	// Pre-select provider if specified
 	if config.PreselectProvider != "" {
-		for i, p := range CanonicalProviders {
+		for i, p := range allProviders {
 			if p.ID != config.PreselectProvider {
 				continue
 			}
 			mp.providerList.Select(i)
-			mp.selectedProvider = &CanonicalProviders[i]
-			mp.loadModelsForProvider(&CanonicalProviders[i])
+			mp.selectedProvider = &allProviders[i]
+			mp.loadModelsForProvider(&allProviders[i])
 			mp.mode = ModeSelectModel
 			break
 		}
@@ -117,8 +122,43 @@ func NewModelPicker(config ModelPickerConfig) *ModelPicker {
 }
 
 func (m *ModelPicker) loadModelsForProvider(provider *ProviderDef) {
-	models, ok := ProviderModels[provider.ID]
-	if !ok {
+	var models []ModelCatalogEntry
+
+	// Check static catalog first
+	if catalog, ok := ProviderModels[provider.ID]; ok {
+		models = append(models, catalog...)
+	}
+
+	// Check config-sourced models
+	if m.providersCfg != nil {
+		if pc, ok := m.providersCfg.Providers[provider.ID]; ok {
+			for modelID, md := range pc.Models {
+				// Skip if already in catalog (avoid duplicates)
+				found := false
+				for _, existing := range models {
+					if existing.ModelID == modelID || existing.ModelID == md.Name {
+						found = true
+						break
+					}
+				}
+				if found {
+					continue
+				}
+				models = append(models, ModelCatalogEntry{
+					ModelID:       modelID,
+					Name:          md.Name,
+					ProviderID:    provider.ID,
+					ContextWindow: md.ContextLimit,
+					MaxOutput:     md.MaxOutput,
+					InputCost:     md.InputCost,
+					OutputCost:    md.OutputCost,
+					Capabilities:  md.Capabilities,
+				})
+			}
+		}
+	}
+
+	if len(models) == 0 {
 		m.modelList.SetItems(nil)
 		return
 	}
@@ -129,6 +169,63 @@ func (m *ModelPicker) loadModelsForProvider(provider *ProviderDef) {
 	}
 	m.modelList.SetItems(items)
 	m.models = models
+}
+
+// buildProviderList merges canonical providers with config-sourced providers.
+// Config providers that don't match a canonical ID are appended.
+// Config providers that match a canonical ID override its BaseURL/APIKey.
+func buildProviderList(cfg *ProvidersConfig) []ProviderDef {
+	canonical := make([]ProviderDef, len(CanonicalProviders))
+	copy(canonical, CanonicalProviders)
+
+	if cfg == nil || len(cfg.Providers) == 0 {
+		return canonical
+	}
+
+	// Build lookup for fast override
+	canonicalMap := make(map[string]int, len(canonical))
+	for i, p := range canonical {
+		canonicalMap[p.ID] = i
+	}
+
+	// Disabled providers
+	disabled := make(map[string]bool, len(cfg.DisabledProviders))
+	for _, d := range cfg.DisabledProviders {
+		disabled[d] = true
+	}
+
+	for id, pc := range cfg.Providers {
+		if disabled[id] {
+			continue
+		}
+
+		if idx, ok := canonicalMap[id]; ok {
+			// Override canonical provider settings from config
+			if pc.Options.BaseURL != "" {
+				canonical[idx].BaseURL = pc.Options.BaseURL
+			}
+			continue
+		}
+
+		// User-defined provider
+		def := ProviderDef{
+			ID:        id,
+			Name:      id,
+			Transport: TransportOpenAIChat,
+			AuthType:  AuthEnvVar,
+			BaseURL:   pc.Options.BaseURL,
+			Supports:  []string{CapStreaming},
+		}
+		if pc.Options.APIKey != "" {
+			def.AuthType = AuthAPIKey
+		}
+		if pc.Lifecycle != nil {
+			def.Supports = append(def.Supports, "local")
+		}
+		canonical = append(canonical, def)
+	}
+
+	return canonical
 }
 
 // Init initializes the model picker.
