@@ -184,3 +184,4 @@ final connectionMonitorProvider = Provider<ConnectionMonitor>((ref) {
   });
   return monitor;
 });
+export 'tts_provider.dart';

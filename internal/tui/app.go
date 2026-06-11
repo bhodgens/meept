@@ -13,6 +13,7 @@ import (
 	"github.com/caimlas/meept/internal/bus"
 	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/stt"
+	"github.com/caimlas/meept/internal/tts"
 	"github.com/caimlas/meept/internal/tui/components"
 	"github.com/caimlas/meept/internal/tui/models"
 	"github.com/caimlas/meept/internal/tui/types"
@@ -111,6 +112,9 @@ type App struct {
 
 	// Client configuration
 	clientConfig *ClientConfig
+
+	// Text-to-speech manager
+	ttsManager *tts.Manager
 
 	// Modal state
 	activeModal    ModalType
@@ -272,6 +276,30 @@ func NewApp(socketPath string) *App {
 			true,
 			clientConfig.STT.AutoSend,
 		)
+	}
+
+	// Initialize TTS (text-to-speech) from client config
+	if clientConfig.TTS.Enabled {
+		ttsCfg := tts.Config{
+			Engine:  clientConfig.TTS.Engine,
+			Voice:   clientConfig.TTS.Voice,
+			VoicePath: "",
+		}
+		// Set default voice path
+		voicePath, err := tts.DefaultVoicePath(ttsCfg.Voice)
+		if err == nil {
+			ttsCfg.Piper.ModelPath = voicePath
+			ttsCfg.Piper.ConfigPath = voicePath + ".json"
+		}
+		ttsCfg.Behavior.InterruptOnNewMsg = true
+		ttsCfg.Behavior.MaxQueueSize = 5
+
+		if mgr, err := tts.NewManager(ttsCfg); err == nil {
+			app.ttsManager = mgr
+			app.chat.InitTTS(mgr, true)
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: TTS initialization failed: %v\n", err)
+		}
 	}
 
 	// Initialize verbosity from client config

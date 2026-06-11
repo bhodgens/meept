@@ -21,6 +21,7 @@ import (
 	"github.com/caimlas/meept/internal/llm"
 	"github.com/caimlas/meept/internal/sharedclient"
 	"github.com/caimlas/meept/internal/stt"
+	"github.com/caimlas/meept/internal/tts"
 	"github.com/caimlas/meept/internal/tui/render"
 	"github.com/caimlas/meept/internal/tui/types"
 	"github.com/caimlas/meept/internal/tui/vim"
@@ -200,6 +201,10 @@ type ChatModel struct {
 	sttEnabled     bool   // true if stt is enabled in config
 	sttAutoSend    bool   // true if transcription results should auto-send
 	lastEnterTime  time.Time // tracks double-enter detection for STT activation
+
+	// Text-to-speech state
+	ttsManager     *tts.Manager // nil if TTS disabled or unavailable
+	ttsEnabled     bool         // true if tts is enabled in config
 }
 
 // RPCClient interface for the chat model.
@@ -369,6 +374,14 @@ func (m *ChatModel) InitSTT(cfg stt.Config, enabled, autoSend bool) {
 
 	m.transcriber = t
 	m.sttAvailable = true
+}
+
+// InitTTS initializes text-to-speech support from the given configuration.
+// This must be called after NewChatModelWithConfig if TTS is desired.
+// If enabled is false, TTS features are disabled.
+func (m *ChatModel) InitTTS(mgr *tts.Manager, enabled bool) {
+	m.ttsEnabled = enabled
+	m.ttsManager = mgr
 }
 
 func generateConversationID() string {
@@ -1118,6 +1131,13 @@ func (m *ChatModel) Update(msg tea.Msg) tea.Cmd {
 				m.addMessage(RoleSystem, content)
 			} else {
 				m.addMessage(RoleAssistant, msg.Reply)
+				
+				// Trigger TTS if enabled
+				if m.ttsEnabled && m.ttsManager != nil {
+					if err := m.ttsManager.Speak(msg.Reply); err != nil {
+						slog.Debug("TTS speak failed", "error", err)
+					}
+				}
 			}
 
 			// Track dirty message for persistence
@@ -1941,7 +1961,14 @@ func (m *ChatModel) View() string {
 	b.WriteString(viewportStyle.Render(viewportContent))
 	b.WriteString("\n")
 
-	// Show copy hint when there's an active selection
+	// Show copy hint when there is an active selection
+
+	// TTS speaking indicator
+	ttsIndicator := m.renderTTSIndicator()
+	if ttsIndicator != "" {
+		b.WriteString(ttsIndicator)
+		b.WriteString("\n")
+	}
 	if m.isSelecting && m.hasSelection() {
 		copyHintStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#000000")).
@@ -2830,6 +2857,27 @@ func (m *ChatModel) hasQueueItems() bool {
 	}
 	return m.queueStatus.SteeringDepth > 0 || m.queueStatus.FollowUpDepth > 0
 }
+
+// isTTSSpeaking returns true if TTS is currently speaking.
+func (m *ChatModel) isTTSSpeaking() bool {
+	return m.ttsEnabled && m.ttsManager != nil && m.ttsManager.IsSpeaking()
+}
+
+// renderTTSIndicator renders a speaker icon when TTS is active.
+func (m *ChatModel) renderTTSIndicator() string {
+	if !m.isTTSSpeaking() {
+		return ""
+	}
+
+	// Animated speaker icon with pulse effect
+	indicator := "🔊 speaking..."
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F97316")). // orange
+		Bold(true)
+
+	return style.Render(indicator)
+}
+
 
 // renderQueueIndicator renders a single-line indicator bar showing agent
 // activity, steer mode, and queue depth as styled badges joined horizontally.

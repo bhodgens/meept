@@ -32,6 +32,9 @@ dependencies:
 
   # Speech-to-text
   speech_to_text: ^7.0.0
+  
+  # Text-to-speech
+  flutter_tts: ^4.2.0
 
   # Stream utilities
   rxdart: ^0.28.0
