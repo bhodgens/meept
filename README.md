@@ -254,6 +254,8 @@ For complete feature details, see [Features](./docs/features.md).
 | Self-improvement | 🔄 Partial | Detection works, full cycle in progress |
 | Shadow training | 🔄 Partial | Infrastructure ready, data collection not active |
 | **External integrations** | 🔄 Partial | macOS MenuBar working, Telegram planned, web UI in progress |
+| **Analytics** | Working | Agent performance analytics, model performance tracking, error records |
+| **Notifications** | Working | Desktop notifications via WebSocket and UNUserNotificationCenter |
 
 ## CLI Quick Reference
 
@@ -373,6 +375,9 @@ internal/
   code/               # AST (tree-sitter) + LSP client
   selfimprove/        # Detection, analysis, fixing
   skills/             # Discovery, registry, parser
+  metrics/            # Metrics storage and collection
+  plan/               # Plan lifecycle and progress tracking
+  project/            # Project context: registry, worktrees, fencing
   comm/               # HTTP REST, MenuBar (Telegram planned)
 config/               # Configuration templates
 menubar/              # macOS SwiftUI MenuBar app

@@ -882,6 +882,7 @@ When rate limits hit:
 - `UserMessage()` methods on all error types for human-readable output
 - TUI and CLI use `llm.UserMessage(err)` for consistent error display
 - Classifier alias with model fallback for empty LLM responses
+- **Classification Failure Handling:** When LLM classification fails, the system provides structured error categorization via `ClassificationFailureKind` with five kinds: `empty_response`, `model_unavailable`, `budget_exhausted`, `timeout`, and `unknown`. The `ClassifyClassificationFailure()` function maps errors to kinds, and `ClassificationUserGuidance()` returns user-friendly messages explaining what happened and how to resolve it.
 
 #### Local LLM Runtime Lifecycle
 - Automatic lifecycle management for local LLM runtimes (llama.cpp, MLX)
@@ -1391,7 +1392,7 @@ Bots are defined as JSON documents with prompt, triggers, tools, and constraints
 | **MCP Server** | Expose Meept as an MCP server for external agent platforms with tool discovery and execution |
 | **Meept-Lite TUI** | Minimalistic alternative TUI using termbox-go with shared library (`sharedclient`) for code reuse |
 | **Desktop Notifications** | macOS native notifications via daemon event emitter, WebSocket, and UNUserNotificationCenter |
-| **Analytics System** | Agent performance analytics, response quality analysis, benchmark framework, and CLI analytics commands |
+| **Analytics System** | Agent performance analytics, response quality analysis, benchmark framework, and CLI analytics commands. The `model_performance` aggregation table tracks per-model metrics (requests, errors, latency, tokens) with period-based aggregation. The `error_records` table tracks individual errors with `limit_type`, `retry_attempts`, and `final_outcome` for retry analysis. |
 | **Unified HTTP Server** | Single HTTP server serving REST API, WebSocket, and MCP over HTTP+SSE with functional options |
 
 ### External Integrations
@@ -1492,6 +1493,16 @@ validation_gate_interval = 3
 [validation]
 require_evidence = true
 enable_checkpoints = true
+
+# Analytics
+[analytics]
+enabled = true
+retention_days = 90
+
+# Notifications
+[notifications]
+enabled = true
+retention = 30
 ```
 
 ---

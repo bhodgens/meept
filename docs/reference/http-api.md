@@ -35,12 +35,28 @@ curl -H "Authorization: Bearer YOUR_API_KEY" http://localhost:8081/api/v1/chat
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/v1/chat` | Send a chat message |
+| GET | `/api/v1/chat/stream` | SSE stream of tool/agent progress events |
+| GET | `/api/v1/chat/queue/{id}` | Get queue status for a conversation |
+| POST | `/api/v1/chat/with-agent` | Send a message with agent steering |
 
 **Example:**
 ```bash
 curl -X POST http://localhost:8081/api/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello", "conversation_id": "conv-123"}'
+```
+
+**Chat Stream (SSE):**
+`GET /api/v1/chat/stream` returns a Server-Sent Events stream subscribing to `tool.execution.progress`, `agent.progress`, and `tool.execution.complete` bus topics. Includes a 15-second heartbeat.
+```bash
+curl -N http://localhost:8081/api/v1/chat/stream
+```
+
+**Chat with Agent:**
+```bash
+curl -X POST http://localhost:8081/api/v1/chat/with-agent \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Analyze this code", "conversation_id": "conv-123", "source": "analyst"}'
 ```
 
 ### Memory
@@ -58,6 +74,36 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
   -d '{"query": "project setup", "limit": 10}'
 ```
 
+### Memory Vector
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/memory/vector/search` | Semantic vector search over memories |
+| POST | `/api/v1/memory/vector/store` | Store a memory vector entry |
+| DELETE | `/api/v1/memory/vector/{id}` | Delete a memory vector entry by ID |
+| GET | `/api/v1/memory/vector/stats` | Vector store statistics |
+
+**Search:**
+```bash
+curl -X POST http://localhost:8081/api/v1/memory/vector/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "embedding query text", "limit": 10}'
+```
+Response: `{"results": [...]}`
+
+**Store:**
+```bash
+curl -X POST http://localhost:8081/api/v1/memory/vector/store \
+  -H "Content-Type: application/json" \
+  -d '{"content": "memory text", "metadata": {"key": "value"}}'
+```
+Response: `{"status": "stored"}`
+
+**Stats:**
+```bash
+curl http://localhost:8081/api/v1/memory/vector/stats
+```
+
 ### Tasks
 
 | Method | Path | Description |
@@ -69,6 +115,24 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 | DELETE | `/api/v1/tasks/{id}` | Delete task |
 | POST | `/api/v1/tasks/{id}/cancel` | Cancel task |
 | GET | `/api/v1/tasks/{id}/steps` | Get task steps |
+| POST | `/api/v1/tasks/{id}/link-session` | Link a task to a session |
+| POST | `/api/v1/tasks/{id}/unlink-session` | Unlink a task from a session |
+
+**Link Session:**
+```bash
+curl -X POST http://localhost:8081/api/v1/tasks/task-123/link-session \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "sess-456"}'
+```
+Response: `{"status": "linked"}`
+
+**Unlink Session:**
+```bash
+curl -X POST http://localhost:8081/api/v1/tasks/task-123/unlink-session \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "sess-456"}'
+```
+Response: `{"status": "unlinked"}`
 
 ### Queue
 
@@ -82,6 +146,25 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 | POST | `/api/v1/queue/jobs/{id}/fail` | Fail job |
 | POST | `/api/v1/queue/jobs/{id}/retry` | Retry job |
 | GET | `/api/v1/queue/stats` | Queue statistics |
+| POST | `/api/v1/queue/steer` | Steer a conversation (convenience alias) |
+| POST | `/api/v1/queue/followup` | Send a follow-up message (convenience alias) |
+| GET | `/api/v1/queue/status/{id}` | Get queue status for a conversation (convenience alias) |
+
+**Steer:**
+```bash
+curl -X POST http://localhost:8081/api/v1/queue/steer \
+  -H "Content-Type: application/json" \
+  -d '{"message": "try a different approach", "conversation_id": "conv-123"}'
+```
+Response: `{"status": "queued"}`
+
+**Follow-up:**
+```bash
+curl -X POST http://localhost:8081/api/v1/queue/followup \
+  -H "Content-Type: application/json" \
+  -d '{"message": "what about edge cases?", "conversation_id": "conv-123"}'
+```
+Response: `{"status": "queued"}`
 
 ### Sessions
 
@@ -89,15 +172,60 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 |--------|------|-------------|
 | GET | `/api/v1/sessions` | List sessions |
 | POST | `/api/v1/sessions` | Create session |
+| GET | `/api/v1/sessions/most-recent` | Get the most recent session |
 | GET | `/api/v1/sessions/{id}` | Get session |
 | DELETE | `/api/v1/sessions/{id}` | Delete session |
 | POST | `/api/v1/sessions/{id}/attach` | Attach to session |
 | POST | `/api/v1/sessions/{id}/detach` | Detach from session |
+| POST | `/api/v1/sessions/{id}/resume` | Resume a session |
+| POST | `/api/v1/sessions/{id}/branch` | Branch to a point in the session tree |
+| GET | `/api/v1/sessions/{id}/branches` | List branches for a session |
+| POST | `/api/v1/sessions/{id}/fork` | Fork a session from a specific message |
+| GET | `/api/v1/sessions/{id}/tree` | Get session tree structure |
+| GET | `/api/v1/sessions/{id}/messages` | Get session messages (query params: `offset`, `limit`) |
+| POST | `/api/v1/sessions/{id}/compact` | Trigger compaction on a session |
+
+**Most Recent:**
+```bash
+curl http://localhost:8081/api/v1/sessions/most-recent
+```
+
+**Resume:**
+```bash
+curl -X POST http://localhost:8081/api/v1/sessions/sess-123/resume
+```
+
+**Branch:**
+```bash
+curl -X POST http://localhost:8081/api/v1/sessions/sess-123/branch \
+  -H "Content-Type: application/json" \
+  -d '{"target_message_id": 42}'
+```
+
+**Fork:**
+```bash
+curl -X POST http://localhost:8081/api/v1/sessions/sess-123/fork \
+  -H "Content-Type: application/json" \
+  -d '{"from_message_id": 42, "name": "experiment branch"}'
+```
+Response: `201 Created` with the new session object.
+
+**Messages (paginated):**
+```bash
+curl "http://localhost:8081/api/v1/sessions/sess-123/messages?offset=0&limit=50"
+```
+Response: `{"messages": [...], "total": N}`
+
+**Compact:**
+```bash
+curl -X POST http://localhost:8081/api/v1/sessions/sess-123/compact
+```
 
 ### Workers
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/api/v1/workers` | List workers |
 | GET | `/api/v1/workers/stats` | Worker statistics |
 | POST | `/api/v1/workers` | Add worker |
 | DELETE | `/api/v1/workers/{id}` | Remove worker |
@@ -109,7 +237,14 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 |--------|------|-------------|
 | GET | `/api/v1/skills` | List skills |
 | GET | `/api/v1/skills/{slug}` | Get skill details |
+| GET | `/api/v1/skills/{slug}/ui` | Get skill UI descriptor |
 | POST | `/api/v1/skills/{slug}/execute` | Execute skill |
+
+**UI Descriptor:**
+```bash
+curl http://localhost:8081/api/v1/skills/my-skill/ui
+```
+Returns a UI descriptor object describing the skill's interface for frontend rendering.
 
 ### Self-Improve
 
@@ -129,6 +264,21 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 |--------|------|-------------|
 | GET | `/api/v1/cache/stats` | Cache statistics |
 | POST | `/api/v1/cache/clear` | Clear cache |
+| POST | `/api/v1/cache/invalidate` | Invalidate specific cache entries |
+| GET | `/api/v1/cache/inspect` | Inspect cache entry by hash (query param: `hash`) |
+
+**Invalidate:**
+```bash
+curl -X POST http://localhost:8081/api/v1/cache/invalidate \
+  -H "Content-Type: application/json" \
+  -d '{"keys": ["key1", "key2"]}'
+```
+Response: `{"status": "invalidated"}`
+
+**Inspect:**
+```bash
+curl "http://localhost:8081/api/v1/cache/inspect?hash=abc123"
+```
 
 ### Security
 
@@ -142,13 +292,26 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 |--------|------|-------------|
 | GET | `/api/v1/scheduler/jobs` | List scheduled jobs |
 | POST | `/api/v1/scheduler/jobs` | Add scheduled job |
+| DELETE | `/api/v1/scheduler/jobs/{id}` | Remove scheduled job |
+| POST | `/api/v1/scheduler/jobs/{id}/enable` | Enable a scheduled job |
+| POST | `/api/v1/scheduler/jobs/{id}/pause` | Pause a scheduled job |
+| POST | `/api/v1/scheduler/jobs/{id}/resume` | Resume a paused job |
 
 ### Bus
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/v1/bus/publish` | Publish message |
+| POST | `/api/v1/bus/call` | Call an RPC method via the bus (requires RPC) |
 | GET | `/api/v1/bus/stats` | Bus statistics |
+
+**Bus Call (RPC proxy):**
+```bash
+curl -X POST http://localhost:8081/api/v1/bus/call \
+  -H "Content-Type: application/json" \
+  -d '{"method": "daemon.status", "params": {}}'
+```
+Response: `{"result": ...}` or `{"error": "..."}`
 
 ### Daemon Control
 
@@ -156,14 +319,82 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 |--------|------|-------------|
 | GET | `/api/v1/daemon/status` | Get daemon status |
 | POST | `/api/v1/daemon/restart` | Restart daemon |
+| POST | `/api/v1/daemon/start` | Start daemon |
+| POST | `/api/v1/daemon/stop` | Stop daemon |
+
+### Models
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/models` | List all configured models |
+| GET | `/api/v1/models/providers` | List available model providers |
+| GET | `/api/v1/models/default` | Get default model |
+| POST | `/api/v1/models/default` | Set default model |
+| DELETE | `/api/v1/models/{provider}/{model}` | Remove a model |
+| GET | `/api/v1/models/credentials/{provider}` | Get credentials for a provider |
+| POST | `/api/v1/models/credentials/{provider}` | Set credentials for a provider |
+| DELETE | `/api/v1/models/credentials/{provider}` | Delete credentials for a provider |
+
+**List Models:**
+```bash
+curl http://localhost:8081/api/v1/models
+```
+Response: `{"models": [...], "count": N}`
+
+**Set Default:**
+```bash
+curl -X POST http://localhost:8081/api/v1/models/default \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "openai", "model": "gpt-4"}'
+```
+Response: `{"status": "updated"}`
+
+**Set Credential:**
+```bash
+curl -X POST http://localhost:8081/api/v1/models/credentials/openai \
+  -H "Content-Type: application/json" \
+  -d '{"api_key": "sk-..."}'
+```
+Response: `{"status": "updated"}`
+
+### Runtime
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/runtime/status` | Get status of all runtime providers |
+| GET | `/api/v1/runtime/status/{provider}` | Get status of a specific provider |
+| POST | `/api/v1/runtime/start/{provider}` | Start a runtime provider |
+| POST | `/api/v1/runtime/stop/{provider}` | Stop a runtime provider |
+| POST | `/api/v1/runtime/restart/{provider}` | Restart a runtime provider |
+
+Start, stop, and restart default to the `"local"` provider when not specified in the path.
+
+**Start Provider:**
+```bash
+curl -X POST http://localhost:8081/api/v1/runtime/start/ollama
+```
+Response: `{"status": "started"}`
 
 ### Metrics
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v1/metrics/live` | Live metrics snapshot |
-| GET | `/api/v1/metrics/historical` | Historical metrics |
-| GET | `/api/v1/metrics/stream` | WebSocket metrics stream |
+| GET | `/api/v1/metrics/historical` | Historical metrics (query params: `from`, `to`, `resolution`) |
+| GET | `/api/v1/metrics/stream` | WebSocket/SSE metrics stream |
+| GET | `/api/v1/metrics/rate-limits` | Rate limit summary |
+| GET | `/api/v1/metrics/firewall` | Context firewall stats |
+
+**Rate Limits:**
+```bash
+curl http://localhost:8081/api/v1/metrics/rate-limits
+```
+
+**Firewall Stats:**
+```bash
+curl http://localhost:8081/api/v1/metrics/firewall
+```
+Returns counters for summarization failures, dropped messages, compaction events, and tokens saved.
 
 ### Configuration
 
@@ -173,10 +404,184 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 | POST | `/api/v1/config/client` | Save client config |
 | GET | `/api/v1/config/models` | Get models config |
 | POST | `/api/v1/config/models` | Save models config |
+| GET | `/api/v1/config/menubar` | Get menubar config |
+| POST | `/api/v1/config/menubar` | Save menubar config |
+| POST | `/api/v1/config/normalize` | Normalize JSON5 config content |
 | GET | `/api/v1/config/agents` | List agents |
 | GET | `/api/v1/config/agents/{id}` | Get agent config |
 | POST | `/api/v1/config/agents/{id}` | Save agent |
 | DELETE | `/api/v1/config/agents/{id}` | Delete agent |
+
+**Menubar Config:**
+```bash
+curl http://localhost:8081/api/v1/config/menubar
+```
+Response: `{"content": "{ ... }"}`
+
+**Normalize Config:**
+```bash
+curl -X POST http://localhost:8081/api/v1/config/normalize \
+  -H "Content-Type: application/json" \
+  -d '{"content": "// my config\n{ key: value }"}'
+```
+Response: `{"normalized": "{\n  \"key\": \"value\"\n}"}`
+
+### Calendar
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/calendar/events` | List events (query params: `time_min`, `time_max`, `max_results`) |
+| GET | `/api/v1/calendar/events/{id}` | Get event by ID |
+| POST | `/api/v1/calendar/events` | Create event |
+| PUT | `/api/v1/calendar/events/{id}` | Update event |
+| DELETE | `/api/v1/calendar/events/{id}` | Delete event |
+| GET | `/api/v1/calendar/today` | Get today's events |
+| GET | `/api/v1/calendar/upcoming` | Get upcoming events (query params: `duration`, `max_results`) |
+| POST | `/api/v1/calendar/quickadd` | Quick-add event from natural language text |
+
+**List Events:**
+```bash
+curl "http://localhost:8081/api/v1/calendar/events?time_min=2025-01-01T00:00:00Z&time_max=2025-01-31T23:59:59Z&max_results=20"
+```
+
+**Quick Add:**
+```bash
+curl -X POST http://localhost:8081/api/v1/calendar/quickadd \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Meeting with team tomorrow at 3pm"}'
+```
+Response: `201 Created` with the created event object.
+
+**Upcoming:**
+```bash
+curl "http://localhost:8081/api/v1/calendar/upcoming?duration=48h&max_results=5"
+```
+
+### Terminal
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/terminal/history` | Get command history (query param: `limit`) |
+| POST | `/api/v1/terminal/exec` | Execute a shell command |
+| GET | `/api/v1/terminal/sessions` | List terminal sessions |
+| POST | `/api/v1/terminal/clear` | Clear command history |
+
+**Execute:**
+```bash
+curl -X POST http://localhost:8081/api/v1/terminal/exec \
+  -H "Content-Type: application/json" \
+  -d '{"command": "ls -la", "working_dir": "/tmp"}'
+```
+
+**History:**
+```bash
+curl "http://localhost:8081/api/v1/terminal/history?limit=20"
+```
+Response: `{"history": [...], "count": N}`
+
+### Templates
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/templates` | List templates (query param: `limit`) |
+| GET | `/api/v1/templates/{name}` | Get template by name |
+| POST | `/api/v1/templates/{name}/invoke` | Invoke a template with parameters |
+| DELETE | `/api/v1/templates/{name}` | Delete a template (query param: `conversation_id` for session-scoped) |
+
+**Invoke:**
+```bash
+curl -X POST http://localhost:8081/api/v1/templates/code-review/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"params": {"file": "main.go"}}'
+```
+
+### Projects
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/projects` | List registered projects |
+| GET | `/api/v1/projects/{id}` | Get project by ID |
+| POST | `/api/v1/projects` | Register a project |
+| DELETE | `/api/v1/projects/{id}` | Unregister a project |
+| POST | `/api/v1/projects/{id}/sync` | Pull latest changes for a project |
+| GET | `/api/v1/projects/{id}/status` | Get project git status |
+| GET | `/api/v1/projects/{id}/branches` | List project branches |
+| POST | `/api/v1/projects/{id}/checkout` | Checkout a branch |
+| POST | `/api/v1/projects/detect` | Auto-detect project at a given path |
+
+**Register:**
+```bash
+curl -X POST http://localhost:8081/api/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/path/to/project", "name": "my-project"}'
+```
+Response: `201 Created` with the project object.
+
+**Detect:**
+```bash
+curl -X POST http://localhost:8081/api/v1/projects/detect \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/path/to/repo"}'
+```
+
+**Checkout:**
+```bash
+curl -X POST http://localhost:8081/api/v1/projects/my-project/checkout \
+  -H "Content-Type: application/json" \
+  -d '{"branch": "feature/new-ui"}'
+```
+Response: `{"status": "checked out"}`
+
+### Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/search` | Cross-resource search |
+
+**Search:**
+```bash
+curl -X POST http://localhost:8081/api/v1/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "auth middleware", "types": ["memory", "tasks"], "limit": 20}'
+```
+Response: `{"results": [...], "count": N}`
+
+### Notifications
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/ws/notifications` | WebSocket for real-time notifications |
+| GET | `/api/v1/notifications` | Poll notifications (query param: `since`) |
+
+Notifications are available when a `NotificationEmitter` is configured. The WebSocket endpoint pushes events as they occur; the HTTP endpoint supports polling.
+
+**WebSocket:**
+```bash
+wscat -c ws://localhost:8081/ws/notifications
+```
+
+**Poll (HTTP):**
+```bash
+curl "http://localhost:8081/api/v1/notifications?since=2025-06-10T00:00:00Z"
+```
+Response: `{"events": [...], "count": N}`. Defaults to the last hour when `since` is omitted.
+
+**Notification Event Format:**
+```json
+{
+  "id": "notif-123",
+  "timestamp": "2025-06-10T12:00:00Z",
+  "type": "info",
+  "title": "task completed",
+  "message": "task build-deploy finished successfully",
+  "data": {},
+  "agent_id": "coder",
+  "task_id": "task-456",
+  "session_id": "sess-789"
+}
+```
+
+**Notification Types:** `info`, `success`, `warning`, `error`
 
 ### Plans
 
@@ -196,6 +601,20 @@ curl -X POST http://localhost:8081/api/v1/memory/query \
 curl -X POST http://localhost:8081/api/v1/plans \
   -H "Content-Type: application/json" \
   -d '{"title": "refactor auth module", "description": "break auth into separate services", "project_id": "my-project"}'
+```
+
+### Bot Webhook
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/bot/{botID}/trigger` | Trigger a bot via webhook |
+
+Available when the `WithBotWebhook` server option is configured. The `botID` path parameter identifies the target bot.
+
+```bash
+curl -X POST http://localhost:8081/api/v1/bot/my-bot/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"event": "deployment_complete", "data": {"service": "api"}}'
 ```
 
 ### WebSocket
@@ -279,6 +698,7 @@ All errors return JSON with an `error` field:
 | 400 | Bad Request - Invalid input |
 | 401 | Unauthorized - Missing or invalid API key |
 | 404 | Not Found - Resource doesn't exist |
+| 405 | Method Not Allowed |
 | 500 | Internal Server Error |
 | 501 | Not Implemented - Endpoint not yet implemented |
 | 503 | Service Unavailable - Service not ready |

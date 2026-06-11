@@ -210,6 +210,37 @@ CREATE TABLE IF NOT EXISTS error_records (
     final_outcome  TEXT NOT NULL DEFAULT ''
 );
 
+-- Linting and test metrics (for auto-lint/test reflection loop)
+CREATE TABLE IF NOT EXISTS lint_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    task_id TEXT,
+    agent_id TEXT,
+    language TEXT,
+    files_checked INTEGER,
+    linters_runned INTEGER,
+    errors_found INTEGER,
+    errors_fixed INTEGER,
+    duration_ms INTEGER,
+    reflection_iterations INTEGER,
+    success BOOLEAN
+);
+
+CREATE TABLE IF NOT EXISTS test_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    task_id TEXT,
+    agent_id TEXT,
+    language TEXT,
+    tests_run INTEGER,
+    tests_passed INTEGER,
+    tests_failed INTEGER,
+    tests_skipped INTEGER,
+    duration_ms INTEGER,
+    reflection_iterations INTEGER,
+    success BOOLEAN
+);
+
 -- Indexes for query performance
 CREATE INDEX IF NOT EXISTS idx_metrics_live_ts ON metrics_live(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_metrics_live_name ON metrics_live(metric_name);
@@ -220,6 +251,10 @@ CREATE INDEX IF NOT EXISTS idx_model_performance_period ON model_performance(per
 CREATE INDEX IF NOT EXISTS idx_model_performance_model ON model_performance(model_id);
 CREATE INDEX IF NOT EXISTS idx_error_records_ts ON error_records(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_error_records_model ON error_records(model_id);
+CREATE INDEX IF NOT EXISTS idx_lint_runs_task ON lint_runs(task_id);
+CREATE INDEX IF NOT EXISTS idx_lint_runs_ts ON lint_runs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_test_runs_task ON test_runs(task_id);
+CREATE INDEX IF NOT EXISTS idx_test_runs_ts ON test_runs(timestamp DESC);
 `
 
 	_, err := s.db.Exec(schema)

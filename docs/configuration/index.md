@@ -78,6 +78,20 @@ go build -o bin/meept-daemon ./cmd/meept-daemon
   - `stt.recording.format` - Audio format: `"wav"`, `"flac"`, or `"ogg"` (default: `"wav"`)
   - See [Speech-to-Text](../workflows/speech-to-text.md) for full feature documentation
 
+### Analytics
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `analytics.enabled` | bool | false | Enable analytics collection |
+| `analytics.retention_days` | int | 90 | Days to retain analytics data |
+
+### Notifications
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `notifications.enabled` | bool | false | Enable desktop notifications |
+| `notifications.retention` | int | 30 | Days to retain notification history |
+
 ### Integration Configuration
 
 - **Telegram** - Telegram bot interface

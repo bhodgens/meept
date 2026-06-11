@@ -633,6 +633,28 @@
     },
   },
 
+  // RepoMap - Repository mapping with Personalized PageRank for LLM context enrichment
+  // Provides structural awareness of the codebase without loading every file into context.
+  "repomap": {
+    "enabled": false,               // Enable RepoMap generation (adds ~5-10s to context prep)
+    "max_map_tokens": 1024,         // Target token count for rendered map
+    "map_mul_no_files": 8.0,        // Multiplier when no files in chat (show more context)
+    "cache": {
+      "refresh": "auto",            // "auto" | "manual" | "files" | "always"
+      "dir": "~/.meept/repomap_cache",
+      "max_size_mb": 500,
+    },
+    "pagerank": {
+      "damping": 0.85,              // PageRank damping factor
+      "max_iterations": 100,        // Max PageRank iterations
+      "convergence_tol": 1e-6,      // Convergence tolerance
+    },
+    "rendering": {
+      "max_line_length": 100,       // Max line length before truncation
+      "context_lines": 3,           // Lines of context around each symbol
+    },
+  },
+
   // Tool call serialization sidecar (optional)
   // Dedicated agent/service for tool call JSON encoding/decoding
   "tooling": {

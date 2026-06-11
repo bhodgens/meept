@@ -171,6 +171,7 @@ flowchart TB
 | Memory | `internal/memory` | Multi-tier memory with FTS5 |
 | Skills | `internal/skills` | Skill discovery and execution |
 | Scheduler | `internal/scheduler` | Cron-based job scheduling |
+| Metrics | `internal/metrics` | SQLite time-series storage, model performance aggregation, error records |
 
 ## Data Flow
 
