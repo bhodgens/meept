@@ -23,8 +23,8 @@ func buildTTSFields() []Field {
 		}),
 		NewDrilldownField("tts.playback", "playback", []DrilldownItem{
 			{Name: "playback", Fields: []Field{
-				NewNumberField("tts.playback.volume", "volume", int(pl.Volume*100)),
-				NewNumberField("tts.playback.rate", "rate", int(pl.Rate*100)),
+				NewFloatField("tts.playback.volume", "volume", pl.Volume),
+				NewFloatField("tts.playback.rate", "rate", pl.Rate),
 				NewTextField("tts.playback.audio_device", "audio device", pl.AudioDevice),
 			}},
 		}),
